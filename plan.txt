@@ -1,0 +1,52 @@
+Plan:
+
+In tile interprett im going to add the color map that will translate all the color strings into real tcod colors.
+then it will pass all those colors diectly into whatever.
+
+I'm tryin to figure out what is wrong with using pointers. For some reason, I can't return null.
+
+The most important thing is to figure out how to make the player an actor. And in Drawables put in a print function to the
+root console so that I can call print easily.
+
+take out the magic map numbers 78, 55 (it should be 45 anyways)
+
+
+==to do==
+deal with color map
+(do it soon)
+
+consider switch to fps
+
+make things transparent, or not walkable.
+
+tabbed menus
+
+enemies sketch 1
+
+terrain sketch 2
+
+items sketch 1
+
+**consider tileset**
+
+different levels of dungeon
+
+heightmaps
+
+randomness and seeds
+
+create map  generator.
+
+enemies sketch 2 (AI)
+
+items sketch 2
+
+-Game becomes fun?? :D-
+
+FOV
+
+save files
+
+Game balance
+
+-End Alpha-
