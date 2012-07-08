@@ -9,15 +9,10 @@
 #include "Actor.h"
 
 Actor::Actor(int a,int b, int c): Drawable(a,b,c) {
-    x = a;
-    y = b;
-    z= c;
     
 }
 
 Actor::Actor(int c, TCODColor d,TCODColor e,bool f,bool g) : Drawable (c,d,e,f,g) {
-     x=0;//temp
-     y=8;//temp
 
 }
 
@@ -26,15 +21,12 @@ Actor::Actor(int a,int b,int c,TCODColor d, TCODColor e, bool f, bool g):Drawabl
 }
 
 Actor::Actor(int a,int b, int c, TCODColor d, TCODColor e, bool f, bool g, char* name): Drawable(a,b,c,d,e,f,g) {
-    x = a;
-    y = b;
-    z= c;
     nickname = name;
  
 }
 
 void Actor::draw(){
-    TCODConsole::root->putChar(x,y,z,TCOD_BKGND_SET);
+    TCODConsole::root->putChar(x,y,c,TCOD_BKGND_SET);
 }
 void Actor::addNickname(char* data){
     nickname = data;
@@ -42,8 +34,6 @@ void Actor::addNickname(char* data){
 
 
 char* Actor::returnName(){
-    if (nickname == NULL)
-         nickname = "Doofus";    
     return nickname;
 }
 

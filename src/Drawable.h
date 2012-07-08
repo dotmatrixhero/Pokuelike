@@ -26,8 +26,8 @@ class Drawable {
         Drawable(int x, int y, int c, TCODColor fore, TCODColor back,bool trans ,bool walk);
         virtual ~Drawable();
 
-        void setX(int);
-        void setY(int);
+        void setX(int x);
+        void setY(int y);
 
         // Movement
         bool moveRight();
@@ -49,8 +49,6 @@ class Drawable {
         TCODColor returnback();
         bool returnwalk();
         bool returntrans();
-
-    private:
 };
 
 #endif	/* DRAWABLE_H */

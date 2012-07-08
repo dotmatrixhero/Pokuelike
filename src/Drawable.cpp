@@ -33,10 +33,10 @@ Drawable::Drawable (int c, TCODColor fore, TCODColor back, bool trans, bool walk
 {
 }
 
-Drawable::Drawable(int x, int y, int z) 
+Drawable::Drawable(int x, int y, int c) 
         :x(x),
         y(y),
-        z(z),
+        c(c),
         fore(TCODColor::white),
         back(TCODColor::black),
         trans(false),
@@ -44,14 +44,18 @@ Drawable::Drawable(int x, int y, int z)
 {
 }
 
-void Drawable::setX(int a) 
+Drawable::~Drawable() 
 {
-    x = a;
 }
 
-void Drawable::setY(int b)
+void Drawable::setX(int x) 
 {
-    y = b;
+    this->x = x;
+}
+
+void Drawable::setY(int y)
+{
+    this->y = y;
 }
 
 bool Drawable::moveRight()
@@ -62,6 +66,7 @@ bool Drawable::moveRight()
         x++;
         return true;
     }
+    return false;
 }
 
 bool Drawable::moveDown()
@@ -71,6 +76,7 @@ bool Drawable::moveDown()
         y++;
         return true;   
     }
+    return false;
 }
 
 bool Drawable::moveLeft()
@@ -80,6 +86,7 @@ bool Drawable::moveLeft()
         x--;
         return true;
     } 
+    return false;
 }
 
 bool Drawable::moveUp()
@@ -89,6 +96,7 @@ bool Drawable::moveUp()
         y--;
         return true;
     }
+    return false;
 }
 
 bool Drawable::moveUpLeft()
@@ -99,6 +107,7 @@ bool Drawable::moveUpLeft()
         y--;
         return true;
     } 
+    return false;
 }
 
 bool Drawable::moveDownLeft()
@@ -109,6 +118,7 @@ bool Drawable::moveDownLeft()
         y++;
         return true;
     } 
+    return false;
 }
 
 bool Drawable::moveUpRight()
@@ -119,6 +129,7 @@ bool Drawable::moveUpRight()
         y--;
         return true;
     }
+    return false;
 }
 
 bool Drawable::moveDownRight()
@@ -128,11 +139,12 @@ bool Drawable::moveDownRight()
         y++;
         return true;
     }
+    return false;
 }
 
 void Drawable::draw()
 {
-    TCODConsole::root->putCharEx(x,y,z,fore,back);
+    TCODConsole::root->putCharEx(x, y, c, fore, back);
 }
 
 int Drawable::returnx(){
@@ -144,7 +156,7 @@ int Drawable::returny(){
 }
 
 int Drawable::returnz(){
-   return z;
+   return c;
 }
 
 TCODColor Drawable::returnfore(){
@@ -161,7 +173,5 @@ bool Drawable::returntrans(){
 
 bool Drawable::returnwalk(){
     return walk;
-}
-Drawable::~Drawable() {
 }
 
