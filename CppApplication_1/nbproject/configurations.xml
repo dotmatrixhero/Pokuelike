@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configurationDescriptor version="80">
+  <logicalFolder name="root" displayName="root" projectFiles="true" kind="ROOT">
+    <logicalFolder name="HeaderFiles"
+                   displayName="Header Files"
+                   projectFiles="true">
+    </logicalFolder>
+    <logicalFolder name="ResourceFiles"
+                   displayName="Resource Files"
+                   projectFiles="true">
+    </logicalFolder>
+    <logicalFolder name="SourceFiles"
+                   displayName="Source Files"
+                   projectFiles="true">
+      <itemPath>main.cpp</itemPath>
+      <itemPath>spritetest.cpp</itemPath>
+      <itemPath>spritetest.h</itemPath>
+    </logicalFolder>
+    <logicalFolder name="TestFiles"
+                   displayName="Test Files"
+                   projectFiles="false"
+                   kind="TEST_LOGICAL_FOLDER">
+    </logicalFolder>
+    <logicalFolder name="ExternalFiles"
+                   displayName="Important Files"
+                   projectFiles="false"
+                   kind="IMPORTANT_FILES_FOLDER">
+      <itemPath>Makefile</itemPath>
+    </logicalFolder>
+    <itemPath>Actor.cpp</itemPath>
+    <itemPath>Actor.h</itemPath>
+    <itemPath>Drawable.cpp</itemPath>
+    <itemPath>Drawable.h</itemPath>
+    <itemPath>Effects.cpp</itemPath>
+    <itemPath>Effects.h</itemPath>
+    <itemPath>Gameplay.cpp</itemPath>
+    <itemPath>Gameplay.h</itemPath>
+    <itemPath>Item.cpp</itemPath>
+    <itemPath>Item.h</itemPath>
+    <itemPath>MapManager.cpp</itemPath>
+    <itemPath>MapManager.h</itemPath>
+    <itemPath>Terrain.cpp</itemPath>
+    <itemPath>Terrain.h</itemPath>
+    <itemPath>TileInterpret.cpp</itemPath>
+    <itemPath>TileInterpret.h</itemPath>
+  </logicalFolder>
+  <projectmakefile>Makefile</projectmakefile>
+  <confs>
+    <conf name="Debug" type="1">
+      <toolsSet>
+        <remote-sources-mode>LOCAL_SOURCES</remote-sources-mode>
+        <compilerSet>default</compilerSet>
+      </toolsSet>
+      <compileType>
+        <ccTool>
+          <incDir>
+            <pElem>../libtcod-1.5.0-mingw32</pElem>
+            <pElem>../libtcod-1.5.0-mingw32/libtcod-1.5.0/include</pElem>
+            <pElem>../SDL-1.2.15/include</pElem>
+            <pElem>../SDL-1.2.15</pElem>
+            <pElem>../SDL-1.2.15/lib</pElem>
+          </incDir>
+        </ccTool>
+        <linkerTool>
+          <linkerAddLib>
+            <pElem>../libtcod-1.5.0-mingw32/libtcod-1.5.0/lib</pElem>
+            <pElem>../libtcod-1.5.0-mingw32/libtcod-1.5.0</pElem>
+            <pElem>../SDL-1.2.15/lib</pElem>
+            <pElem>../SDL-1.2.15</pElem>
+          </linkerAddLib>
+          <linkerLibItems>
+            <linkerLibLibItem>tcod-gui-mingw</linkerLibLibItem>
+            <linkerLibLibItem>tcod-mingw</linkerLibLibItem>
+            <linkerLibLibItem>tcod-gui-mingw-debug</linkerLibLibItem>
+            <linkerLibLibItem>tcod-mingw-debug</linkerLibLibItem>
+            <linkerLibLibItem>SDL.dll</linkerLibLibItem>
+            <linkerLibLibItem>SDLmain</linkerLibLibItem>
+          </linkerLibItems>
+        </linkerTool>
+      </compileType>
+      <packaging>
+        <packType>Zip</packType>
+        <packFileList>
+          <packFileListElem type="File"
+                            to="${PACKAGE_TOP_DIR}bin/${OUTPUT_BASENAME}.exe"
+                            from="${OUTPUT_PATH}.exe"
+                            perm="755"
+                            owner="root"
+                            group="bin"/>
+        </packFileList>
+      </packaging>
+    </conf>
+    <conf name="Release" type="1">
+      <toolsSet>
+        <remote-sources-mode>LOCAL_SOURCES</remote-sources-mode>
+        <compilerSet>default</compilerSet>
+      </toolsSet>
+      <compileType>
+        <cTool>
+          <developmentMode>5</developmentMode>
+        </cTool>
+        <ccTool>
+          <developmentMode>5</developmentMode>
+        </ccTool>
+        <fortranCompilerTool>
+          <developmentMode>5</developmentMode>
+        </fortranCompilerTool>
+        <asmTool>
+          <developmentMode>5</developmentMode>
+        </asmTool>
+      </compileType>
+    </conf>
+  </confs>
+</configurationDescriptor>
