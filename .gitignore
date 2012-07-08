@@ -1,7 +1,6 @@
 #################
 ## Eclipse
 #################
-
 *.pydevproject
 .project
 .metadata
@@ -127,6 +126,7 @@ Thumbs.db
 Desktop.ini
 
 *.stackdump
+*.dep.inc
 
 ############
 ## Linux
