@@ -7,16 +7,20 @@
 
 #include "Effects.h"
 
-Effects::Effects(int a, int b, int c, TCODColor d,TCODColor e,bool f,bool g) : Drawable (a,b,c,d,e,f,g) {
+Effects::Effects(int x, int y, int c)
+    : Drawable(x, y, c)
+{
 }
 
-Effects::Effects(int c, TCODColor d,TCODColor e,bool f,bool g) : Drawable (c,d,e,f,g) {
-     x=0;//temp
-     y=8;//temp
-
+Effects::Effects(int c, TCODColor fore,TCODColor back, bool trans, bool walk)
+    : Drawable(c, fore, back, trans, walk)
+{
 }
 
-
+Effects::Effects(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk)
+    : Drawable(x, y, c, fore, back, trans, walk)
+{
+}
 
 Effects::~Effects() {
 }

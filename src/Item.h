@@ -5,24 +5,20 @@
  * Created on June 20, 2012, 1:52 PM
  */
 
-
-
-
 #ifndef ITEMS_H
 #define	ITEMS_H
 
 #include <libtcod/libtcod.hpp>
 #include "Drawable.h"
 
-
 class Item: public Drawable {
-public:
-    Item(int,int,int,TCODColor, TCODColor, bool, bool);
-    Item(int, TCODColor,TCODColor,bool ,bool );
-    Item(const Item& orig);
-    virtual ~Item();
-private:
+    private:
 
+    public:
+        Item(int x, int y, int c);
+        Item(int c, TCODColor fore,TCODColor back, bool trans, bool walk);
+        Item(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk);
+        virtual ~Item();
 };
 
 #endif	/* ITEMS_H */

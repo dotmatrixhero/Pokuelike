@@ -23,7 +23,7 @@ class Drawable {
     public:
         Drawable(int x, int y, int c);
         Drawable(int c, TCODColor fore,TCODColor back, bool trans, bool walk);
-        Drawable(int x, int y, int c, TCODColor fore, TCODColor back,bool trans ,bool walk);
+        Drawable(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk);
         virtual ~Drawable();
 
         void setX(int x);

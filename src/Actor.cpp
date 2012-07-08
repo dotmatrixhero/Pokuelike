@@ -1,5 +1,4 @@
-/* github test
- * second github test
+/*
  * File:   Actor.cpp
  * Author: Brian
  * 
@@ -8,35 +7,43 @@
 
 #include "Actor.h"
 
-Actor::Actor(int a,int b, int c): Drawable(a,b,c) {
-    
+Actor::Actor(int x, int y, int c)
+    : Drawable(x, y, c)
+{
 }
 
-Actor::Actor(int c, TCODColor d,TCODColor e,bool f,bool g) : Drawable (c,d,e,f,g) {
-
+Actor::Actor(int c, TCODColor fore,TCODColor back, bool trans, bool walk)
+    : Drawable(c, fore, back, trans, walk)
+{
 }
 
-Actor::Actor(int a,int b,int c,TCODColor d, TCODColor e, bool f, bool g):Drawable(a,b,c,d,e,f,g){
-    
+Actor::Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk)
+    : Drawable(x, y, c, fore, back, trans, walk)
+{
 }
 
-Actor::Actor(int a,int b, int c, TCODColor d, TCODColor e, bool f, bool g, char* name): Drawable(a,b,c,d,e,f,g) {
-    nickname = name;
- 
+Actor::Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, const std::string& name)
+    : Drawable(x, y, c, fore, back, trans, walk),
+    name(name)
+{
 }
 
-void Actor::draw(){
+Actor::~Actor() 
+{
+}
+
+void Actor::draw()
+{
     TCODConsole::root->putChar(x,y,c,TCOD_BKGND_SET);
 }
-void Actor::addNickname(char* data){
-    nickname = data;
+
+void Actor::setName(const std::string& newname)
+{
+    name = newname;
 }
 
-
-char* Actor::returnName(){
-    return nickname;
-}
-
-Actor::~Actor() {
+const std::string Actor::getName() const
+{
+    return name;
 }
 

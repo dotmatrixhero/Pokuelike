@@ -21,7 +21,7 @@ Drawable::Drawable(int x, int y, int c, TCODColor fore, TCODColor back, bool tra
 {
 }
 
-Drawable::Drawable (int c, TCODColor fore, TCODColor back, bool trans, bool walk) 
+Drawable::Drawable(int c, TCODColor fore, TCODColor back, bool trans, bool walk)
         :
         x(0), // temp
         y(8), // temp

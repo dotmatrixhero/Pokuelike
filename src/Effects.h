@@ -11,13 +11,13 @@
 #include "Drawable.h"
 
 class Effects : public Drawable {
-public:
-    Effects(int,int,int,TCODColor, TCODColor, bool, bool);
-    Effects(int, TCODColor,TCODColor,bool ,bool );
-    Effects(const Effects& orig);
-    virtual ~Effects();
-private:
+    private:
 
+    public:
+        Effects(int x, int y, int c);
+        Effects(int c, TCODColor fore,TCODColor back, bool trans, bool walk);
+        Effects(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk);
+        virtual ~Effects();
 };
 
 #endif	/* EFFECTS_H */
