@@ -126,15 +126,6 @@ Thumbs.db
 # Folder config file
 Desktop.ini
 
-*.stackdump
-
-############
-## Linux
-############
-*.d
-*.o
-linux_build/bin/test32
-linux_build/bin/test64
 
 #############
 ## Python
