@@ -9,27 +9,7 @@
  * File:   TileInterpret.h
  * Author: Exiiile
  *
- * CreateActor.h"
-#include "Effects.h"
-#include "Terrain.h"
-#include "Item.h"
-#include "Gameplay.h"
-#include "TileInterpret.h"
-#include "Drawable.h"
-#include <iostream>
-#include <fstream>
-#include <string.h>
-#include <map>
-#include <vector>
-using namespace std;;
-
-class TileInterpret {
-public:
-    TileInterpret();
-    virtual ~TileInterpret();
-    Terrain* returnTerrVal(string);
-    Item* returnItemVal(string);
-    d on June 20, 2012, 2:27 PM
+ * Created on June 20, 2012, 2:27 PM
  */
 
 #ifndef TILEINTERPRET_H
@@ -41,28 +21,25 @@ public:
 #include <vector>
 
 #include "Actor.h"
-#include "Effects.h"
+#include "Effect.h"
 #include "Terrain.h"
 #include "Item.h"
 
-
-using namespace std;
-
 class TileInterpret {
     private:
-        map<string, Terrain*> interpTerrMap;
-        map<string, Item*> interpItemMap;
-        map<string, Actor*> interpActoMap;
-        map<string, Effects*> interpEffeMap;
+        std::map<std::string, Terrain*> terrainMap;
+        std::map<std::string, Item*>    itemMap;
+        std::map<std::string, Actor*>   actorMap;
+        std::map<std::string, Effect*>  effectMap;
 
     public:
         TileInterpret();
         ~TileInterpret();
 
-        Terrain* returnTerrVal(string);
-        Item* returnItemVal(string);
-        Actor* returnActoVal(string);
-        Effects* returnEffeVal(string);
+        Terrain* getTerrain(const std::string& key);
+        Item*    getItem(const std::string& key);
+        Actor*   getActor(const std::string& key);
+        Effect*  getEffect(const std::string& key);
 };
 
 #endif	/* TILEINTERPRET_H */
