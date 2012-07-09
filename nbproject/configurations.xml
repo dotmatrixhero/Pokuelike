@@ -28,10 +28,6 @@
           </df>
         </df>
       </df>
-      <df name="nbproject">
-        <df name="private">
-        </df>
-      </df>
       <df name="src">
         <in>Actor.cpp</in>
         <in>Actor.h</in>
@@ -67,10 +63,6 @@
             <df name="Debug">
               <df name="Cygwin_4.x-Windows">
               </df>
-            </df>
-          </df>
-          <df name="nbproject">
-            <df name="private">
             </df>
           </df>
         </df>
