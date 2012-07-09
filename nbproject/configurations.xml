@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configurationDescriptor version="80">
+  <logicalFolder name="root" displayName="root" projectFiles="true" kind="ROOT">
+    <df name="linux_build" root=".">
+      <df name="CppApplication_1">
+        <df name="build">
+          <df name="Release">
+            <df name="Cygwin_4.x-Windows">
+            </df>
+          </df>
+        </df>
+        <df name="dist">
+          <df name="Debug">
+            <df name="Cygwin_4.x-Windows">
+              <df name="package">
+              </df>
+            </df>
+          </df>
+        </df>
+      </df>
+      <df name="data">
+      </df>
+      <df name="linux_build">
+        <df name="bin">
+        </df>
+        <df name="obj">
+          <df name="Debug">
+          </df>
+        </df>
+      </df>
+      <df name="src">
+        <in>Actor.cpp</in>
+        <in>Actor.h</in>
+        <in>Drawable.cpp</in>
+        <in>Drawable.h</in>
+        <in>Effect.cpp</in>
+        <in>Effect.h</in>
+        <in>Gameplay.cpp</in>
+        <in>Gameplay.h</in>
+        <in>Item.cpp</in>
+        <in>Item.h</in>
+        <in>MapManager.cpp</in>
+        <in>MapManager.h</in>
+        <in>Terrain.cpp</in>
+        <in>Terrain.h</in>
+        <in>TileInterpret.cpp</in>
+        <in>TileInterpret.h</in>
+        <in>main.cpp</in>
+      </df>
+    </df>
+    <logicalFolder name="src" displayName="src" projectFiles="true" root="../src">
+      <itemPath>../src/Actor.cpp</itemPath>
+      <itemPath>../src/Actor.h</itemPath>
+      <itemPath>../src/Drawable.cpp</itemPath>
+      <itemPath>../src/Drawable.h</itemPath>
+      <itemPath>../src/Effect.cpp</itemPath>
+      <itemPath>../src/Effect.h</itemPath>
+      <itemPath>../src/Gameplay.cpp</itemPath>
+      <itemPath>../src/Gameplay.h</itemPath>
+      <itemPath>../src/Item.cpp</itemPath>
+      <itemPath>../src/Item.h</itemPath>
+      <itemPath>../src/MapManager.cpp</itemPath>
+      <itemPath>../src/MapManager.h</itemPath>
+      <itemPath>../src/Terrain.cpp</itemPath>
+      <itemPath>../src/Terrain.h</itemPath>
+      <itemPath>../src/TileInterpret.cpp</itemPath>
+      <itemPath>../src/TileInterpret.h</itemPath>
+      <itemPath>../src/main.cpp</itemPath>
+    </logicalFolder>
+    <logicalFolder name="ExternalFiles"
+                   displayName="Important Files"
+                   projectFiles="false"
+                   kind="IMPORTANT_FILES_FOLDER">
+      <itemPath>Makefile</itemPath>
+    </logicalFolder>
+  </logicalFolder>
+  <sourceFolderFilter>^(nbproject)$</sourceFolderFilter>
+  <sourceRootList>
+    <Elem>.</Elem>
+  </sourceRootList>
+  <projectmakefile>Makefile</projectmakefile>
+  <confs>
+    <conf name="Default" type="0">
+      <toolsSet>
+        <remote-sources-mode>LOCAL_SOURCES</remote-sources-mode>
+        <compilerSet>default</compilerSet>
+      </toolsSet>
+      <makefileType>
+        <makeTool>
+          <buildCommandWorkingDir>.</buildCommandWorkingDir>
+          <buildCommand>${MAKE} -f Makefile</buildCommand>
+          <cleanCommand>${MAKE} -f Makefile clean</cleanCommand>
+          <executablePath></executablePath>
+          <ccTool>
+            <incDir>
+              <pElem>../src</pElem>
+              <pElem>.</pElem>
+            </incDir>
+          </ccTool>
+        </makeTool>
+      </makefileType>
+      <item path="../src/Actor.cpp" ex="false" tool="1" flavor="4">
+        <ccTool>
+          <incDir>
+            <pElem>../../../../../../cygwin/usr/include/libtcod</pElem>
+          </incDir>
+        </ccTool>
+      </item>
+      <item path="../src/Drawable.cpp" ex="false" tool="1" flavor="4">
+        <ccTool>
+          <incDir>
+            <pElem>../../../../../../cygwin/usr/include/libtcod</pElem>
+          </incDir>
+        </ccTool>
+      </item>
+      <item path="../src/Effect.cpp" ex="false" tool="1" flavor="4">
+        <ccTool>
+          <incDir>
+            <pElem>../../../../../../cygwin/usr/include/libtcod</pElem>
+          </incDir>
+        </ccTool>
+      </item>
+      <item path="../src/Gameplay.cpp" ex="false" tool="1" flavor="4">
+        <ccTool>
+          <incDir>
+            <pElem>../../../../../../cygwin/usr/include/libtcod</pElem>
+          </incDir>
+        </ccTool>
+      </item>
+      <item path="../src/Item.cpp" ex="false" tool="1" flavor="4">
+        <ccTool>
+          <incDir>
+            <pElem>../../../../../../cygwin/usr/include/libtcod</pElem>
+          </incDir>
+        </ccTool>
+      </item>
+      <item path="../src/MapManager.cpp" ex="false" tool="1" flavor="4">
+        <ccTool>
+          <incDir>
+            <pElem>../../../../../../cygwin/usr/include/libtcod</pElem>
+          </incDir>
+        </ccTool>
+      </item>
+      <item path="../src/Terrain.cpp" ex="false" tool="1" flavor="4">
+        <ccTool>
+          <incDir>
+            <pElem>../../../../../../cygwin/usr/include/libtcod</pElem>
+          </incDir>
+        </ccTool>
+      </item>
+      <item path="../src/TileInterpret.cpp" ex="false" tool="1" flavor="4">
+        <ccTool>
+          <incDir>
+            <pElem>../../../../../../cygwin/usr/include/libtcod</pElem>
+          </incDir>
+        </ccTool>
+      </item>
+      <item path="../src/main.cpp" ex="false" tool="1" flavor="4">
+      </item>
+    </conf>
+  </confs>
+</configurationDescriptor>
