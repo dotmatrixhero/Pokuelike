@@ -2,10 +2,12 @@
 <configurationDescriptor version="80">
   <logicalFolder name="root" displayName="root" projectFiles="true" kind="ROOT">
     <df name="linux_build" root=".">
-      <in>Makefile</in>
-      <in>premake4.lua</in>
-      <in>run</in>
-      <in>test.make</in>
+      <df name="bin">
+      </df>
+      <df name="obj">
+        <df name="Debug">
+        </df>
+      </df>
     </df>
     <logicalFolder name="ExternalFiles"
                    displayName="Important Files"
