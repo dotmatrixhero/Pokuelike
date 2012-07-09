@@ -5,22 +5,9 @@
                    displayName="Header Files"
                    projectFiles="true">
     </logicalFolder>
-    <logicalFolder name="Pokuelike" displayName="Pokuelike" projectFiles="true">
-      <logicalFolder name="CppApplication_1"
-                     displayName="CppApplication_1"
-                     projectFiles="true">
-        <logicalFolder name="dist" displayName="dist" projectFiles="true">
-          <logicalFolder name="Debug" displayName="Debug" projectFiles="true">
-            <logicalFolder name="Cygwin_4.x-Windows"
-                           displayName="Cygwin_4.x-Windows"
-                           projectFiles="true">
-              <logicalFolder name="package" displayName="package" projectFiles="true">
-                <itemPath>../../CppApplication_1/dist/Debug/Cygwin_4.x-Windows/package/cppapplication1.zip</itemPath>
-              </logicalFolder>
-            </logicalFolder>
-          </logicalFolder>
-        </logicalFolder>
-      </logicalFolder>
+    <logicalFolder name="ResourceFiles"
+                   displayName="Resource Files"
+                   projectFiles="true">
       <logicalFolder name="data" displayName="data" projectFiles="true">
         <itemPath>../../data/fonts.png</itemPath>
         <itemPath>../../data/itemmaptest.txt</itemPath>
@@ -30,27 +17,10 @@
         <itemPath>../../data/tileinterpret.txt</itemPath>
         <itemPath>../../data/um.png</itemPath>
       </logicalFolder>
-      <logicalFolder name="linux_build" displayName="linux_build" projectFiles="true">
-        <logicalFolder name="bin" displayName="bin" projectFiles="true">
-        </logicalFolder>
-        <logicalFolder name="obj" displayName="obj" projectFiles="true">
-          <logicalFolder name="Debug" displayName="Debug" projectFiles="true">
-            <itemPath>../../linux_build/obj/Debug/Actor.d</itemPath>
-            <itemPath>../../linux_build/obj/Debug/Drawable.d</itemPath>
-            <itemPath>../../linux_build/obj/Debug/Effect.d</itemPath>
-            <itemPath>../../linux_build/obj/Debug/Gameplay.d</itemPath>
-            <itemPath>../../linux_build/obj/Debug/Item.d</itemPath>
-            <itemPath>../../linux_build/obj/Debug/MapManager.d</itemPath>
-            <itemPath>../../linux_build/obj/Debug/Terrain.d</itemPath>
-            <itemPath>../../linux_build/obj/Debug/TileInterpret.d</itemPath>
-            <itemPath>../../linux_build/obj/Debug/main.d</itemPath>
-          </logicalFolder>
-        </logicalFolder>
-        <itemPath>../../linux_build/Makefile</itemPath>
-        <itemPath>../../linux_build/premake4.lua</itemPath>
-        <itemPath>../../linux_build/run</itemPath>
-        <itemPath>../../linux_build/test.make</itemPath>
-      </logicalFolder>
+    </logicalFolder>
+    <logicalFolder name="SourceFiles"
+                   displayName="Source Files"
+                   projectFiles="true">
       <logicalFolder name="src" displayName="src" projectFiles="true">
         <itemPath>../../src/Actor.cpp</itemPath>
         <itemPath>../../src/Actor.h</itemPath>
@@ -70,29 +40,6 @@
         <itemPath>../../src/TileInterpret.h</itemPath>
         <itemPath>../../src/main.cpp</itemPath>
       </logicalFolder>
-      <logicalFolder name="windows_build"
-                     displayName="windows_build"
-                     projectFiles="true">
-        <logicalFolder name="Pokuelike" displayName="Pokuelike" projectFiles="true">
-          <itemPath>Makefile</itemPath>
-        </logicalFolder>
-      </logicalFolder>
-      <itemPath>../../Makefile</itemPath>
-      <itemPath>../../README</itemPath>
-      <itemPath>../../desktop.ini</itemPath>
-      <itemPath>../../plan.txt</itemPath>
-    </logicalFolder>
-    <logicalFolder name="ResourceFiles"
-                   displayName="Resource Files"
-                   projectFiles="true">
-    </logicalFolder>
-    <logicalFolder name="SourceFiles"
-                   displayName="Source Files"
-                   projectFiles="true">
-      <logicalFolder name="Pokuelike" displayName="Pokuelike" projectFiles="true">
-      </logicalFolder>
-      <logicalFolder name="src" displayName="src" projectFiles="true">
-      </logicalFolder>
     </logicalFolder>
     <logicalFolder name="TestFiles"
                    displayName="Test Files"
@@ -107,7 +54,8 @@
     </logicalFolder>
   </logicalFolder>
   <sourceRootList>
-    <Elem>../..</Elem>
+    <Elem>../../src</Elem>
+    <Elem>../../data</Elem>
   </sourceRootList>
   <projectmakefile>Makefile</projectmakefile>
   <confs>

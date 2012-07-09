@@ -28,6 +28,10 @@
           </df>
         </df>
       </df>
+      <df name="nbproject">
+        <df name="private">
+        </df>
+      </df>
       <df name="src">
         <in>Actor.cpp</in>
         <in>Actor.h</in>
@@ -65,6 +69,13 @@
               </df>
             </df>
           </df>
+<<<<<<< HEAD
+=======
+          <df name="nbproject">
+            <df name="private">
+            </df>
+          </df>
+>>>>>>> 67a8f6bef98b54f8217cf9d0de4b13906b978750
         </df>
       </df>
     </df>
