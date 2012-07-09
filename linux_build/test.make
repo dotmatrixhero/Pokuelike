@@ -154,12 +154,12 @@ endif
 OBJECTS := \
 	$(OBJDIR)/Drawable.o \
 	$(OBJDIR)/Terrain.o \
-	$(OBJDIR)/Effects.o \
 	$(OBJDIR)/Gameplay.o \
 	$(OBJDIR)/MapManager.o \
 	$(OBJDIR)/TileInterpret.o \
 	$(OBJDIR)/main.o \
 	$(OBJDIR)/Item.o \
+	$(OBJDIR)/Effect.o \
 	$(OBJDIR)/Actor.o \
 
 RESOURCES := \
@@ -227,9 +227,6 @@ $(OBJDIR)/Drawable.o: ../src/Drawable.cpp
 $(OBJDIR)/Terrain.o: ../src/Terrain.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/Effects.o: ../src/Effects.cpp
-	@echo $(notdir $<)
-	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 $(OBJDIR)/Gameplay.o: ../src/Gameplay.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
@@ -243,6 +240,9 @@ $(OBJDIR)/main.o: ../src/main.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 $(OBJDIR)/Item.o: ../src/Item.cpp
+	@echo $(notdir $<)
+	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
+$(OBJDIR)/Effect.o: ../src/Effect.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 $(OBJDIR)/Actor.o: ../src/Actor.cpp

@@ -5,12 +5,13 @@
  * Created on June 17, 2012, 7:33 PM
  */
 
-#ifndef MAPMANAGER_H
-#define	MAPMANAGER_H
+#ifndef _MAPMANAGER_H
+#define _MAPMANAGER_H
+
 #include "TileInterpret.h"
 #include <libtcod/libtcod.hpp>
 #include "Actor.h"
-#include "Effects.h"
+#include "Effect.h"
 #include "Terrain.h"
 #include "Item.h"
 #include "Gameplay.h"
@@ -18,33 +19,34 @@
 #include <fstream>
 
 class MapManager {
-public:
-    TCODMap *gameMap;
-    void makeNew();
-    void createTerrArray();
-    void createItemArray();
-    void createActoArray();
-    void createEffeArray();
-    void loadMap();
-    void terrToDraw();
-    void actoToDraw();
-    void effeToDraw();
-    void itemToDraw();
-    MapManager();
-    MapManager(const MapManager& orig);
-    virtual ~MapManager();
-private:
-   static const int mapw= 78;
-   static const int maph = 45;
-    TileInterpret tilein;
-    Terrain* arrayTerrain[mapw][maph];
-    Item* arrayItem[mapw][maph];
-    Actor* arrayActors[mapw][maph];
-    Effects* arrayEffects[mapw][maph];
-    bool* arrayTrans[mapw][maph];
-    bool* arrayWalk[mapw][maph];
+    private:
+        static const int mapw= 78;
+        static const int maph = 45;
+        TileInterpret tilein;
+        Terrain* arrayTerrain[mapw][maph];
+        Item* arrayItem[mapw][maph];
+        Actor* arrayActors[mapw][maph];
+        Effect* arrayEffects[mapw][maph];
+        bool* arrayTrans[mapw][maph];
+        bool* arrayWalk[mapw][maph];
 
+    public:
+        MapManager();
+        MapManager(const MapManager& orig);
+        ~MapManager();
+
+        TCODMap *gameMap;
+        void makeNew();
+        void createTerrArray();
+        void createItemArray();
+        void createActoArray();
+        void createEffeArray();
+        void loadMap();
+        void terrToDraw();
+        void actoToDraw();
+        void effeToDraw();
+        void itemToDraw();
 };
 
-#endif	/* MAPMANAGER_H */
+#endif	/* _MAPMANAGER_H */
 

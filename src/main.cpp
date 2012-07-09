@@ -11,7 +11,7 @@
 #include <libtcod/libtcod.hpp>
 #include "Actor.h"
 #include "Item.h"
-#include "Effects.h"
+#include "Effect.h"
 #include "Terrain.h"
 #include "Gameplay.h"
 #include "MapManager.h"
@@ -46,6 +46,7 @@ int main() {
         map->terrToDraw();
     }
 
+    delete map;
     delete hero;
     delete play;
     return 0;
