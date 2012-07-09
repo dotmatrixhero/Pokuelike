@@ -33,6 +33,9 @@ Actor::Actor(int a,int b, int c, TCODColor d, TCODColor e, bool f, bool g, char*
  
 }
 
+void Actor::draw(){
+    TCODConsole::root->putChar(x,y,z,TCOD_BKGND_SET);
+}
 void Actor::addNickname(char* data){
     nickname = data;
 }

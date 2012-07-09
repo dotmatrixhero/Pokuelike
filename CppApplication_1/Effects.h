@@ -7,7 +7,7 @@
 
 #ifndef EFFECTS_H
 #define	EFFECTS_H
-#include "libtcod.hpp"
+#include <libtcod/libtcod.hpp>
 #include "Drawable.h"
 
 class Effects : public Drawable {

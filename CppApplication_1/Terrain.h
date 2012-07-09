@@ -7,7 +7,7 @@
 
 #ifndef TERRAIN_H
 #define	TERRAIN_H
-#include "libtcod.hpp"
+#include <libtcod/libtcod.hpp>
 #include "Drawable.h"
 class Terrain: public Drawable {
 public:

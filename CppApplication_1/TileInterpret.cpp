@@ -5,7 +5,7 @@
  * Created on June 20, 2012, 2:27 PM
  */
 
-#include "libtcod.hpp"
+#include <libtcod/libtcod.hpp>
 #include "Actor.h"
 #include "Effects.h"
 #include "Terrain.h"

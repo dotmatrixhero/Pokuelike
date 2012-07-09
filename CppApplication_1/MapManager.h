@@ -8,7 +8,7 @@
 #ifndef MAPMANAGER_H
 #define	MAPMANAGER_H
 #include "TileInterpret.h"
-#include "libtcod.hpp"
+#include <libtcod/libtcod.hpp>
 #include "Actor.h"
 #include "Effects.h"
 #include "Terrain.h"

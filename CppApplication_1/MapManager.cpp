@@ -84,7 +84,7 @@ void MapManager::createItemArray(){
 
 void MapManager::createTerrArray(){
     ifstream myReadFile;
-    myReadFile.open("terrmaptest.txt");
+    myReadFile.open("maptest2.txt");
     string input;
     int x=0;
     int y=0;

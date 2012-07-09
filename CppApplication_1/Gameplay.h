@@ -7,7 +7,7 @@
 
 #ifndef GAMEPLAY_H
 #define	GAMEPLAY_H
-#include "libtcod.hpp"
+#include <libtcod/libtcod.hpp>
 #include "Drawable.h"
 #include "Actor.h"
 

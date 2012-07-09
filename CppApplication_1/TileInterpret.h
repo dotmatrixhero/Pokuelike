@@ -34,7 +34,7 @@ public:
 
 #ifndef TILEINTERPRET_H
 #define	TILEINTERPRET_H
-#include "libtcod.hpp"
+#include <libtcod/libtcod.hpp>
 #include "Actor.h"
 #include "Effects.h"
 #include "Terrain.h"

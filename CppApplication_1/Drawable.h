@@ -6,7 +6,7 @@
  */
 
 #include <string.h>
-#include "libtcod.hpp"
+#include <libtcod/libtcod.hpp>
 #ifndef DRAWABLE_H
 #define	DRAWABLE_H
 using namespace std;
@@ -17,9 +17,9 @@ protected:
     TCODColor fore, back;
     bool trans, walk;
 public:
-    Drawable(int, int, int);
-    Drawable(int, TCODColor,TCODColor, bool, bool);
-    Drawable(int, int, int, TCODColor,TCODColor,bool,bool);
+    Drawable(int x, int y, int z);
+    Drawable(int z, TCODColor fore,TCODColor back, bool trans, bool walk);
+    Drawable(int x, int y, int z, TCODColor fore, TCODColor back,bool trans ,bool walk);
     void setX(int);
     void setY(int);
     bool moveRight();
@@ -30,7 +30,7 @@ public:
     bool moveDownLeft();
     bool moveUpRight();
     bool moveDownRight();
-    void draw();
+    virtual void draw();
     int returnx();
     int returny();
     int returnz();

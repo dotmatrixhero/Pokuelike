@@ -7,7 +7,7 @@
 
 #ifndef ACTOR_H
 #define	ACTOR_H
-#include "libtcod.hpp"
+#include <libtcod/libtcod.hpp>
 #include "Drawable.h"
 
 
@@ -19,6 +19,7 @@ public:
     Actor(int,int,int,TCODColor, TCODColor, bool, bool);
     Actor(int,int,int,TCODColor, TCODColor, bool, bool, char*);
     Actor(int, TCODColor,TCODColor,bool ,bool );
+    void draw();
     void addNickname(char*);
     char* returnName();
     ~Actor();

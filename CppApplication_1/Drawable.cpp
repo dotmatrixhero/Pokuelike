@@ -10,43 +10,45 @@
 #include <string.h>
 using namespace std;
 
-Drawable::Drawable(int a, int b, int c, TCODColor d, TCODColor e, bool f, bool g) {
-   x = a;
-   y = b;
-   z = c;
-   fore = d;
-   back = e;
-   trans = f;
-   walk = g;
+Drawable::Drawable(int x, int y, int z, TCODColor fore, TCODColor back, bool trans, bool walk)
+        : x(x),
+        y(y),
+        z(z),
+        fore(fore),
+        back(back),
+        trans(trans),
+        walk(walk)
+{
 }
-Drawable::Drawable (int c, TCODColor d, TCODColor e, bool f, bool g) {
+Drawable::Drawable (int z, TCODColor fore, TCODColor back, bool trans, bool walk) 
+
+        :z(z),
+        fore(fore),
+        back(back),
+        trans(trans),
+        walk(walk)
+{
     x=0;//temp
     y=8;//temp
-    z = c;
-   fore = d;
-   back = e;
-   trans = f;
-   walk = g;
 }
 
 
-Drawable::Drawable(int a, int b, int c) {
-   int x = a;
-   int y = b;
-   int z = c;
-}
+Drawable::Drawable(int x, int y, int z) 
+        :x(x),
+        y(y),
+        z(z)
+{}
 
 void Drawable::draw(){
-    TCODConsole::root->putChar(x,y,z);
+    TCODConsole::root->putCharEx(x,y,z,fore,back);
 }
 
 void Drawable::setX(int a){
-    if (a !=NULL)
-       int x=a;
+    x=a;
 }
 
 void Drawable::setY(int b){
-    int y = b;
+    y = b;
 }
 bool Drawable::moveRight(){
     if (x<76){ //implement using gameplay.mapPosx, etc. to define these values

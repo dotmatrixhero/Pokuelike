@@ -8,7 +8,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <fstream>
-#include "libtcod.hpp"
+#include <libtcod/libtcod.hpp>
 #include "SDL/SDL.h"
 #include "Actor.h"
 #include "Item.h"
@@ -34,7 +34,7 @@ int main() {
     //load map
     
     //if new:
-     Actor* hero = new Actor(50,50,64); /*these two lines will have to be switched if i want to implemet*/
+     Actor* hero = new Actor(50,50,64,TCODColor::white, TCODColor::black, false, false); /*these two lines will have to be switched if i want to implemet*/
      Gameplay* play = new Gameplay(hero); /*non-set map values, so i have to rework "hero"*/
      MapManager* map = new MapManager();
      TCODSystem::setFps(40);

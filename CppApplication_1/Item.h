@@ -11,7 +11,7 @@
 #ifndef ITEMS_H
 #define	ITEMS_H
 
-#include "libtcod.hpp"
+#include <libtcod/libtcod.hpp>
 #include "Drawable.h"
 
 

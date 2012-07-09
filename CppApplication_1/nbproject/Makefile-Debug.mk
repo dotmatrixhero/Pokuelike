@@ -60,7 +60,7 @@ FFLAGS=
 ASFLAGS=
 
 # Link Libraries and Options
-LDLIBSOPTIONS=-L../../libtcod-1.5.0-mingw32/libtcod-1.5.0/lib -L../../libtcod-1.5.0-mingw32/libtcod-1.5.0 -L../../SDL-1.2.15/lib -L../../SDL-1.2.15 -ltcod-gui-mingw -ltcod-mingw -ltcod-gui-mingw-debug -ltcod-mingw-debug -lSDL.dll -lSDLmain
+LDLIBSOPTIONS=-lSDL.dll -lSDLmain -ltcod-gui-mingw-debug -ltcod-gui-mingw -ltcod-mingw-debug -ltcod-mingw
 
 # Build Targets
 .build-conf: ${BUILD_SUBPROJECTS}
@@ -73,52 +73,52 @@ ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/cppapplication_1.exe: ${OBJECTFILES}
 ${OBJECTDIR}/Actor.o: Actor.cpp 
 	${MKDIR} -p ${OBJECTDIR}
 	${RM} $@.d
-	$(COMPILE.cc) -g -I../../libtcod-1.5.0-mingw32/libtcod-1.5.0/include -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -I../../libtcod-1.5.0-mingw32 -MMD -MP -MF $@.d -o ${OBJECTDIR}/Actor.o Actor.cpp
+	$(COMPILE.cc) -g -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -MMD -MP -MF $@.d -o ${OBJECTDIR}/Actor.o Actor.cpp
 
 ${OBJECTDIR}/Drawable.o: Drawable.cpp 
 	${MKDIR} -p ${OBJECTDIR}
 	${RM} $@.d
-	$(COMPILE.cc) -g -I../../libtcod-1.5.0-mingw32/libtcod-1.5.0/include -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -I../../libtcod-1.5.0-mingw32 -MMD -MP -MF $@.d -o ${OBJECTDIR}/Drawable.o Drawable.cpp
+	$(COMPILE.cc) -g -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -MMD -MP -MF $@.d -o ${OBJECTDIR}/Drawable.o Drawable.cpp
 
 ${OBJECTDIR}/Terrain.o: Terrain.cpp 
 	${MKDIR} -p ${OBJECTDIR}
 	${RM} $@.d
-	$(COMPILE.cc) -g -I../../libtcod-1.5.0-mingw32/libtcod-1.5.0/include -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -I../../libtcod-1.5.0-mingw32 -MMD -MP -MF $@.d -o ${OBJECTDIR}/Terrain.o Terrain.cpp
+	$(COMPILE.cc) -g -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -MMD -MP -MF $@.d -o ${OBJECTDIR}/Terrain.o Terrain.cpp
 
 ${OBJECTDIR}/Gameplay.o: Gameplay.cpp 
 	${MKDIR} -p ${OBJECTDIR}
 	${RM} $@.d
-	$(COMPILE.cc) -g -I../../libtcod-1.5.0-mingw32/libtcod-1.5.0/include -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -I../../libtcod-1.5.0-mingw32 -MMD -MP -MF $@.d -o ${OBJECTDIR}/Gameplay.o Gameplay.cpp
+	$(COMPILE.cc) -g -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -MMD -MP -MF $@.d -o ${OBJECTDIR}/Gameplay.o Gameplay.cpp
 
 ${OBJECTDIR}/main.o: main.cpp 
 	${MKDIR} -p ${OBJECTDIR}
 	${RM} $@.d
-	$(COMPILE.cc) -g -I../../libtcod-1.5.0-mingw32/libtcod-1.5.0/include -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -I../../libtcod-1.5.0-mingw32 -MMD -MP -MF $@.d -o ${OBJECTDIR}/main.o main.cpp
+	$(COMPILE.cc) -g -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -MMD -MP -MF $@.d -o ${OBJECTDIR}/main.o main.cpp
 
 ${OBJECTDIR}/TileInterpret.o: TileInterpret.cpp 
 	${MKDIR} -p ${OBJECTDIR}
 	${RM} $@.d
-	$(COMPILE.cc) -g -I../../libtcod-1.5.0-mingw32/libtcod-1.5.0/include -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -I../../libtcod-1.5.0-mingw32 -MMD -MP -MF $@.d -o ${OBJECTDIR}/TileInterpret.o TileInterpret.cpp
+	$(COMPILE.cc) -g -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -MMD -MP -MF $@.d -o ${OBJECTDIR}/TileInterpret.o TileInterpret.cpp
 
 ${OBJECTDIR}/spritetest.o: spritetest.cpp 
 	${MKDIR} -p ${OBJECTDIR}
 	${RM} $@.d
-	$(COMPILE.cc) -g -I../../libtcod-1.5.0-mingw32/libtcod-1.5.0/include -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -I../../libtcod-1.5.0-mingw32 -MMD -MP -MF $@.d -o ${OBJECTDIR}/spritetest.o spritetest.cpp
+	$(COMPILE.cc) -g -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -MMD -MP -MF $@.d -o ${OBJECTDIR}/spritetest.o spritetest.cpp
 
 ${OBJECTDIR}/Item.o: Item.cpp 
 	${MKDIR} -p ${OBJECTDIR}
 	${RM} $@.d
-	$(COMPILE.cc) -g -I../../libtcod-1.5.0-mingw32/libtcod-1.5.0/include -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -I../../libtcod-1.5.0-mingw32 -MMD -MP -MF $@.d -o ${OBJECTDIR}/Item.o Item.cpp
+	$(COMPILE.cc) -g -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -MMD -MP -MF $@.d -o ${OBJECTDIR}/Item.o Item.cpp
 
 ${OBJECTDIR}/MapManager.o: MapManager.cpp 
 	${MKDIR} -p ${OBJECTDIR}
 	${RM} $@.d
-	$(COMPILE.cc) -g -I../../libtcod-1.5.0-mingw32/libtcod-1.5.0/include -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -I../../libtcod-1.5.0-mingw32 -MMD -MP -MF $@.d -o ${OBJECTDIR}/MapManager.o MapManager.cpp
+	$(COMPILE.cc) -g -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -MMD -MP -MF $@.d -o ${OBJECTDIR}/MapManager.o MapManager.cpp
 
 ${OBJECTDIR}/Effects.o: Effects.cpp 
 	${MKDIR} -p ${OBJECTDIR}
 	${RM} $@.d
-	$(COMPILE.cc) -g -I../../libtcod-1.5.0-mingw32/libtcod-1.5.0/include -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -I../../libtcod-1.5.0-mingw32 -MMD -MP -MF $@.d -o ${OBJECTDIR}/Effects.o Effects.cpp
+	$(COMPILE.cc) -g -I../../SDL-1.2.15/include -I../../SDL-1.2.15 -I../../SDL-1.2.15/lib -MMD -MP -MF $@.d -o ${OBJECTDIR}/Effects.o Effects.cpp
 
 # Subprojects
 .build-subprojects:

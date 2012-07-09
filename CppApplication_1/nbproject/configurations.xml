@@ -54,27 +54,19 @@
       <compileType>
         <ccTool>
           <incDir>
-            <pElem>../../libtcod-1.5.0-mingw32/libtcod-1.5.0/include</pElem>
             <pElem>../../SDL-1.2.15/include</pElem>
             <pElem>../../SDL-1.2.15</pElem>
             <pElem>../../SDL-1.2.15/lib</pElem>
-            <pElem>../../libtcod-1.5.0-mingw32</pElem>
           </incDir>
         </ccTool>
         <linkerTool>
-          <linkerAddLib>
-            <pElem>../../libtcod-1.5.0-mingw32/libtcod-1.5.0/lib</pElem>
-            <pElem>../../libtcod-1.5.0-mingw32/libtcod-1.5.0</pElem>
-            <pElem>../../SDL-1.2.15/lib</pElem>
-            <pElem>../../SDL-1.2.15</pElem>
-          </linkerAddLib>
           <linkerLibItems>
-            <linkerLibLibItem>tcod-gui-mingw</linkerLibLibItem>
-            <linkerLibLibItem>tcod-mingw</linkerLibLibItem>
-            <linkerLibLibItem>tcod-gui-mingw-debug</linkerLibLibItem>
-            <linkerLibLibItem>tcod-mingw-debug</linkerLibLibItem>
             <linkerLibLibItem>SDL.dll</linkerLibLibItem>
             <linkerLibLibItem>SDLmain</linkerLibLibItem>
+            <linkerLibLibItem>tcod-gui-mingw-debug</linkerLibLibItem>
+            <linkerLibLibItem>tcod-gui-mingw</linkerLibLibItem>
+            <linkerLibLibItem>tcod-mingw-debug</linkerLibLibItem>
+            <linkerLibLibItem>tcod-mingw</linkerLibLibItem>
           </linkerLibItems>
         </linkerTool>
       </compileType>
