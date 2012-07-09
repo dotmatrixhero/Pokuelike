@@ -5,14 +5,13 @@
  * Created on June 20, 2012, 2:27 PM
  */
 
-#include "TileInterpret.h"
-
 #include <libtcod/libtcod.hpp>
 #include "Actor.h"
 #include "Effects.h"
 #include "Terrain.h"
 #include "Item.h"
 #include "Gameplay.h"
+#include "TileInterpret.h"
 #include "MapManager.h"
 #include "Drawable.h"
 #include <iostream>
@@ -71,11 +70,6 @@ TileInterpret::TileInterpret() {
     myReadFile.close();
 }
 
-TileInterpret::~TileInterpret()
-{
-
-}
-
 Terrain* TileInterpret::returnTerrVal(string foo){
       if (interpTerrMap[foo]==NULL)
           return NULL;
@@ -100,3 +94,5 @@ Actor* TileInterpret::returnActoVal(string foo){
     return interpActoMap[foo];//copy
 }
 
+TileInterpret::~TileInterpret() {
+}

@@ -158,6 +158,7 @@ OBJECTS := \
 	$(OBJDIR)/Gameplay.o \
 	$(OBJDIR)/MapManager.o \
 	$(OBJDIR)/TileInterpret.o \
+	$(OBJDIR)/spritetest.o \
 	$(OBJDIR)/main.o \
 	$(OBJDIR)/Item.o \
 	$(OBJDIR)/Actor.o \
@@ -237,6 +238,9 @@ $(OBJDIR)/MapManager.o: ../src/MapManager.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 $(OBJDIR)/TileInterpret.o: ../src/TileInterpret.cpp
+	@echo $(notdir $<)
+	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
+$(OBJDIR)/spritetest.o: ../src/spritetest.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 $(OBJDIR)/main.o: ../src/main.cpp

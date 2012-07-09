@@ -34,35 +34,36 @@ public:
 
 #ifndef TILEINTERPRET_H
 #define	TILEINTERPRET_H
-
-#include <string>
-
-#include <map>
-#include <vector>
-
+#include <libtcod/libtcod.hpp>
 #include "Actor.h"
 #include "Effects.h"
 #include "Terrain.h"
 #include "Item.h"
-
-
-using namespace std;
+#include "Gameplay.h"
+#include "TileInterpret.h"
+#include "Drawable.h"
+#include <iostream>
+#include <fstream>
+#include <string.h>
+#include <map>
+#include <vector>
+using namespace std;;
 
 class TileInterpret {
-    private:
-        map<string, Terrain*> interpTerrMap;
-        map<string, Item*> interpItemMap;
-        map<string, Actor*> interpActoMap;
-        map<string, Effects*> interpEffeMap;
+public:
+    TileInterpret();
+    virtual ~TileInterpret();
+    Terrain* returnTerrVal(string);
+    Item* returnItemVal(string);
+    Actor* returnActoVal(string);
+    Effects* returnEffeVal(string);
+    friend class Gameplay;
+private:
+    map<string, Terrain*> interpTerrMap;
+    map<string, Item*> interpItemMap;
+    map<string, Actor*> interpActoMap;
+    map<string, Effects*> interpEffeMap;
 
-    public:
-        TileInterpret();
-        ~TileInterpret();
-
-        Terrain* returnTerrVal(string);
-        Item* returnItemVal(string);
-        Actor* returnActoVal(string);
-        Effects* returnEffeVal(string);
 };
 
 #endif	/* TILEINTERPRET_H */

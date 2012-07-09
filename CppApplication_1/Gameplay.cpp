@@ -28,24 +28,24 @@ void Gameplay::clear(){
 
 void Gameplay::console(){
     //DRAW MAP
-    const char *thing = player->getName().c_str();
+    const char *thing = player->returnName();
     TCODConsole::root->printFrame(0,63,100,12, true, TCOD_BKGND_DARKEN, NULL);
    // TCODConsole::root->printFrame(mapPosx,mapPosy, mapSizex, mapSizey, true, TCOD_BKGND_DARKEN, NULL); //mapbox test
    
     TCODConsole::setColorControl(TCOD_COLCTRL_1, TCODColor::red, TCODColor::black);
-    //TCODConsole::root->printLeft(82,2,TCOD_BKGND_NONE,"D", TCOD_COLCTRL_1);
+    TCODConsole::root->printLeft(82,2,TCOD_BKGND_NONE,"D", TCOD_COLCTRL_1);
     if (thing !=NULL){
             TCODConsole::root->printFrame(66,55,30,8, true, TCOD_BKGND_DARKEN, NULL);
-            //TCODConsole::root->printLeft(68,56,TCOD_BKGND_NONE, thing, TCOD_COLCTRL_1);      
+            TCODConsole::root->printLeft(68,56,TCOD_BKGND_NONE, thing, TCOD_COLCTRL_1);      
     }
     if (/*player has allies*/ thing != NULL){
             TCODConsole::root->printFrame(35,55,30,8, true, TCOD_BKGND_DARKEN, NULL);
-            //TCODConsole::root->printLeft(37,56,TCOD_BKGND_NONE, "Ally 1", TCOD_COLCTRL_1);
+            TCODConsole::root->printLeft(37,56,TCOD_BKGND_NONE, "Ally 1", TCOD_COLCTRL_1);
             TCODConsole::root->printFrame(4,55,30,8, true, TCOD_BKGND_DARKEN, NULL);
-            //TCODConsole::root->printLeft(6,56,TCOD_BKGND_NONE, "Ally 2", TCOD_COLCTRL_1);
+            TCODConsole::root->printLeft(6,56,TCOD_BKGND_NONE, "Ally 2", TCOD_COLCTRL_1);
     }
     
-    //TCODConsole::root->printLeft(1,1,TCOD_BKGND_NONE,"This is enemy 1 name LV 99", TCOD_COLCTRL_1);
+    TCODConsole::root->printLeft(1,1,TCOD_BKGND_NONE,"This is enemy 1 name LV 99", TCOD_COLCTRL_1);
 
     //Implement toggled sidebars: inventory, party(allies), skills, help, gods, kills, view(enemies wary?), map
     //your status: health, bounty, experience, status effects, hunger, tiredness, running/crouching/stealthed, gold
