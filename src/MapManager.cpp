@@ -43,12 +43,12 @@ void MapManager::createItemArray(){
         //if (y==17){//THIS IS BAD PROGRAMMING, GOTTA FIX
         //    break;
        // }
-        if (tilein.getItem(input) == NULL){ //ON THIS check, something happens...
+        if (tilein.returnItemVal(input) == NULL){ //ON THIS check, something happens...
             cout<< "output empty";
             break;
         }
       
-        Item* copyThis = tilein.getItem(input);//copy
+        Item* copyThis = tilein.returnItemVal(input);//copy
         cout<<copyThis->returnz();
         cout<<"\n";
         arrayItem[x][y] = new Item(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
@@ -97,12 +97,12 @@ void MapManager::createTerrArray(){
                 cout<<input;
                 cout<<"\n";
       
-                 if (tilein.getTerrain(input) == NULL){ //ON THIS check, something happens...
+                 if (tilein.returnTerrVal(input) == NULL){ //ON THIS check, something happens...
                         cout<< "output empty";
                  break;
                 }
       
-                Terrain* copyThis = tilein.getTerrain(input);//copy
+                Terrain* copyThis = tilein.returnTerrVal(input);//copy
                   cout<<copyThis->returnz();
                 cout<<"\n";
              arrayTerrain[x][y] = new Terrain(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
@@ -129,12 +129,12 @@ void MapManager::createActoArray(){
         cout<<input;
         cout<<"\n";
       
-        if (tilein.getActor(input) == NULL){ //ON THIS check, something happens...
+        if (tilein.returnActoVal(input) == NULL){ //ON THIS check, something happens...
             cout<< "output empty";
             break;
         }
       
-        Actor* copyThis = tilein.getActor(input);//copy
+        Actor* copyThis = tilein.returnActoVal(input);//copy
         cout<<copyThis->returnz();
         cout<<"\n";
         arrayActors[x][y] = new Actor(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
@@ -168,15 +168,15 @@ void MapManager::createEffeArray(){
         cout<<input;
         cout<<"\n";
       
-        if (tilein.getEffect(input) == NULL){ //ON THIS check, something happens...
+        if (tilein.returnEffeVal(input) == NULL){ //ON THIS check, something happens...
             cout<< "output empty";
             break;
         }
       
-        Effect* copyThis = tilein.getEffect(input);//copy
+        Effects* copyThis = tilein.returnEffeVal(input);//copy
         cout<<copyThis->returnz();
         cout<<"\n";
-        arrayEffects[x][y] = new Effect(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
+        arrayEffects[x][y] = new Effects(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
           if (x<mapw){
               if (y<maph){
                   y++;
@@ -256,7 +256,7 @@ void MapManager::effeToDraw(){
     for (int x =0; x<mapw; x++){
           for(int y =0 ; y < maph; y++){
               if (arrayEffects[x][y] != NULL){
-                  Effect* a = arrayEffects[x][y]; 
+                  Effects* a = arrayEffects[x][y]; 
                   TCODConsole::root->putCharEx(a->returnx()+1,a->returny()+9,a->returnz(), myColor, myColor2);
     //   if terrain is not walkable, throw coordinates into an array called.....arrayNotWalk
     //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
