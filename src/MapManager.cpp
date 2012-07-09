@@ -84,13 +84,11 @@ void MapManager::createItemArray(){
 
 void MapManager::createTerrArray(){
     ifstream myReadFile;
-    myReadFile.open("maptest2.txt");
+    myReadFile.open("terrmaptest.txt");
     string input;
-    int x=0;
-    int y=0;
     while(myReadFile.good()){
         for (int x =0; x<mapw; x++){
-        for(int y =0 ; y < maph; y++){    
+        for (int y =0 ; y < maph; y++){    
                 getline(myReadFile, input);
                 if (input.empty()){
                         cout<<"input #1 empty"; 
