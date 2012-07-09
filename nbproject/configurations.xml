@@ -28,6 +28,10 @@
           </df>
         </df>
       </df>
+      <df name="nbproject">
+        <df name="private">
+        </df>
+      </df>
       <df name="src">
         <in>Actor.cpp</in>
         <in>Actor.h</in>
@@ -46,6 +50,30 @@
         <in>TileInterpret.cpp</in>
         <in>TileInterpret.h</in>
         <in>main.cpp</in>
+      </df>
+      <df name="windows_build">
+        <df name="Pokuelike">
+          <df name="build">
+            <df name="Debug">
+              <df name="Cygwin_4.x-Windows">
+                <df name="_ext">
+                  <df name="1445274692">
+                  </df>
+                </df>
+              </df>
+            </df>
+          </df>
+          <df name="dist">
+            <df name="Debug">
+              <df name="Cygwin_4.x-Windows">
+              </df>
+            </df>
+          </df>
+          <df name="nbproject">
+            <df name="private">
+            </df>
+          </df>
+        </df>
       </df>
     </df>
     <logicalFolder name="src" displayName="src" projectFiles="true" root="../src">
