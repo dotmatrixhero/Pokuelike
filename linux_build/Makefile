@@ -13,7 +13,7 @@ PROJECTS := test
 all: $(PROJECTS)
 
 test: 
-	@echo "==== Building test ($(config)) ===="
+	//@echo "==== Building test ($(config)) ===="
 	@${MAKE} --no-print-directory -C . -f test.make
 
 clean:
