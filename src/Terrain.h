@@ -7,16 +7,18 @@
 
 #ifndef TERRAIN_H
 #define	TERRAIN_H
+
 #include <libtcod/libtcod.hpp>
 #include "Drawable.h"
-class Terrain: public Drawable {
-public:
-    Terrain(int,int,int,TCODColor, TCODColor, bool, bool);
-    Terrain(int,TCODColor, TCODColor, bool, bool);
-    Terrain(const Terrain& orig);
-    virtual ~Terrain();
-private:
 
+class Terrain: public Drawable {
+    private:
+
+    public:
+        Terrain(int x, int y, int c);
+        Terrain(int c, TCODColor fore,TCODColor back, bool trans, bool walk);
+        Terrain(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk);
+        virtual ~Terrain();
 };
 
 #endif	/* TERRAIN_H */

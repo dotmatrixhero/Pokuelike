@@ -28,7 +28,7 @@ void Gameplay::clear(){
 
 void Gameplay::console(){
     //DRAW MAP
-    const char *thing = player->returnName();
+    const char *thing = player->getName().c_str();
     TCODConsole::root->printFrame(0,63,100,12, true, TCOD_BKGND_DARKEN, NULL);
    // TCODConsole::root->printFrame(mapPosx,mapPosy, mapSizex, mapSizey, true, TCOD_BKGND_DARKEN, NULL); //mapbox test
    

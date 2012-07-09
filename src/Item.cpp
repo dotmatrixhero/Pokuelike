@@ -7,15 +7,19 @@
 
 #include "Item.h"
 
-Item::Item(int a, int b, int c, TCODColor d,TCODColor e,bool f,bool g) : Drawable (a,b,c,d,e,f,g) {
+Item::Item(int x, int y, int c)
+    : Drawable(x, y, c)
+{
 }
 
+Item::Item(int c, TCODColor fore,TCODColor back, bool trans, bool walk)
+    : Drawable(c, fore, back, trans, walk)
+{
+}
 
-
-Item::Item(int c, TCODColor d,TCODColor e,bool f,bool g) : Drawable (c,d,e,f,g) {
-     x=0;//temp
-     y=8;//temp
-
+Item::Item(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk)
+    : Drawable(x, y, c, fore, back, trans, walk)
+{
 }
 
 Item::~Item() {

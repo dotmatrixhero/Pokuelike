@@ -1,4 +1,4 @@
-/* This is a github teset
+/*
  * File:   Actor.h
  * Author: Brian
  *
@@ -7,24 +7,28 @@
 
 #ifndef ACTOR_H
 #define	ACTOR_H
+
+
 #include <libtcod/libtcod.hpp>
+#include <string>
+
 #include "Drawable.h"
 
+class Actor: public Drawable 
+{
+    private:
+        std::string name;
 
-class Actor: public Drawable {
-public:
-    char* nickname;
-    char* name;
-    Actor(int,int,int);
-    Actor(int,int,int,TCODColor, TCODColor, bool, bool);
-    Actor(int,int,int,TCODColor, TCODColor, bool, bool, char*);
-    Actor(int, TCODColor,TCODColor,bool ,bool );
-    void draw();
-    void addNickname(char*);
-    char* returnName();
-    ~Actor();
-private:
+    public:
+        Actor(int x, int y, int c);
+        Actor(int c, TCODColor fore,TCODColor back, bool trans, bool walk);
+        Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk);
+        Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, const std::string& name);
+        ~Actor();
 
+        void draw();
+        void setName(const std::string& newname);
+        const std::string getName() const;
 };
 
 #endif	/* ACTOR_H */
