@@ -5,6 +5,8 @@
  * Created on June 17, 2012, 7:33 PM
  */
 
+#ifndef MAPMANAGER_H
+#define	MAPMANAGER_H
 #include "TileInterpret.h"
 #include "libtcod.hpp"
 #include "Actor.h"
@@ -14,8 +16,6 @@
 #include "Gameplay.h"
 #include <iostream>
 #include <fstream>
-#ifndef MAPMANAGER_H
-#define	MAPMANAGER_H
 
 class MapManager {
 public:
@@ -34,7 +34,8 @@ public:
     MapManager(const MapManager& orig);
     virtual ~MapManager();
 private:
-
+   static const int mapw= 78;
+   static const int maph = 45;
     TileInterpret tilein;
     Terrain* arrayTerrain[mapw][maph];
     Item* arrayItem[mapw][maph];
