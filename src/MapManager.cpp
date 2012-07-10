@@ -8,6 +8,8 @@
 #include "MapManager.h"
 #include <iostream>
 #include <fstream>
+#include <libtcod/libtcod.hpp>
+
 
 using namespace std;
 

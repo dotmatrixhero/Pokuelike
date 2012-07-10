@@ -8,6 +8,8 @@
 #include "Gameplay.h"
 #include <string>
 #include <iostream>
+#include <libtcod/libtcod.hpp>
+
 
 Gameplay::Gameplay(Actor* a) {
     mapPosx = 0;
