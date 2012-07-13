@@ -10,6 +10,7 @@
 #include <libtcod/libtcod.hpp>
 #include "Drawable.h"
 #include "Actor.h"
+#include "MapManager.h"
 
 
 class Gameplay {
@@ -18,14 +19,15 @@ protected:
     int mapPosx, mapPosy;
    static const int mapw= 78;
    static const int maph = 45;
-    
+   bool* arrayWalk[mapw][maph];
 public:
+    MapManager* Map;
     char* gamething;
     void console();
     void clear();
     int playerTurn();
     int tryMove();
-    Gameplay(Actor*);
+    Gameplay(Actor*, MapManager*);
     Gameplay(const Gameplay& orig);
     virtual ~Gameplay();
     friend class MapManager;

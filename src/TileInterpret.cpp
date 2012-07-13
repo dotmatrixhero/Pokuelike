@@ -36,6 +36,10 @@ TileInterpret::TileInterpret() {
         bool trans = (foo == "1");
         std::getline(myReadFile, foo, '\n');    
         bool walk = (foo == "1");
+        if (!walk){
+            cout<<"not walk";
+             cout<<"\n";
+        }
         std::getline(myReadFile, foo, '\n');
         TCODColor myColor(24,64,255);//temp
         TCODColor myColor2(24,64,0);//temp

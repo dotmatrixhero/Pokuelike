@@ -10,33 +10,33 @@
 #include <string.h>
 using namespace std;
 
-Drawable::Drawable(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk)
-        : x(x),
-        y(y),
-        c(c),
-        fore(fore),
-        back(back),
-        trans(trans),
-        walk(walk)
+Drawable::Drawable(int X, int Y, int C, TCODColor FORE, TCODColor BACK, bool TRANS, bool WALK)
+        : x(X),
+        y(Y),
+        c(C),
+        fore(FORE),
+        back(BACK),
+        trans(TRANS),
+        walk(WALK)
 {
 }
 
-Drawable::Drawable(int c, TCODColor fore, TCODColor back, bool trans, bool walk)
+Drawable::Drawable(int C, TCODColor FORE, TCODColor BACK, bool TRANS, bool WALK)
         :
         x(0), // temp
         y(8), // temp
-        c(c),
-        fore(fore),
-        back(back),
-        trans(trans),
-        walk(walk)
+        c(C),
+        fore(FORE),
+        back(BACK),
+        trans(TRANS),
+        walk(WALK)
 {
 }
 
-Drawable::Drawable(int x, int y, int c) 
-        :x(x),
-        y(y),
-        c(c),
+Drawable::Drawable(int X, int Y, int C) 
+        :x(X),
+        y(Y),
+        c(C),
         fore(TCODColor::white),
         back(TCODColor::black),
         trans(false),

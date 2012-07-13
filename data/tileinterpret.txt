@@ -22,5 +22,5 @@ grnd
 46 
 white
 black
-0
-0
+1
+1
