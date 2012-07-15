@@ -8,10 +8,28 @@
 #include "MapManager.h"
 #include <iostream>
 #include <fstream>
+#include <libtcod/libtcod.hpp>
+
 
 using namespace std;
 
 MapManager::MapManager() {
+    
+}
+
+
+bool MapManager::isWalkable(int x, int y){
+    for(int p = 0; p< mapw; p++){ //this checks to see if any are actually walkable, since i seem
+        for (int q = 0; q <maph; q++){ //to have run into the problem where none of them are.
+               if (arrayWalk[x][y]){
+                cout<<"is  walk";
+                cout<<"\n";
+               }
+        }
+    }
+ 
+    
+    return arrayWalk[x][y]; //this actually returns my boolean.
 }
 
 void MapManager::makeNew(){
@@ -43,7 +61,7 @@ void MapManager::createItemArray(){
         //if (y==17){//THIS IS BAD PROGRAMMING, GOTTA FIX
         //    break;
        // }
-        if (tilein.getItem(input) == NULL){ //ON THIS check, something happens...
+        if (tilein.getItem(input) == NULL){ 
             cout<< "output empty";
             break;
         }
@@ -62,29 +80,12 @@ void MapManager::createItemArray(){
               }
        }
     }
-    
-    
-    
-   /*
-    char foo[4];
-    
-    
-    
-    while(myReadFile>>input){
-          
-                   for(int q=0; q < 4; q++){
-                        myReadFile>>foo[q];
-                   }
-                     
-               
-                   cerr << input  << endl;
-        }*/
 }
 
 
 void MapManager::createTerrArray(){
     ifstream myReadFile;
-    myReadFile.open("terrmaptest.txt");
+    myReadFile.open("maptest2.txt");
     string input;
     while(myReadFile.good()){
         for (int x =0; x<mapw; x++){
@@ -92,10 +93,11 @@ void MapManager::createTerrArray(){
                 getline(myReadFile, input);
                 if (input.empty()){
                         cout<<"input #1 empty"; 
+                        cout<<"\n";
                 break; }
                 getline(myReadFile, input);
-                cout<<input;
-                cout<<"\n";
+                //cout<<input;
+                //cout<<"\n";
       
                  if (tilein.getTerrain(input) == NULL){ //ON THIS check, something happens...
                         cout<< "output empty";
@@ -105,6 +107,7 @@ void MapManager::createTerrArray(){
                 Terrain* copyThis = tilein.getTerrain(input);//copy
                   cout<<copyThis->returnz();
                 cout<<"\n";
+
              arrayTerrain[x][y] = new Terrain(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
     
         }}
@@ -138,7 +141,8 @@ void MapManager::createActoArray(){
         cout<<copyThis->returnz();
         cout<<"\n";
         arrayActors[x][y] = new Actor(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
-          if (x<mapw){
+        arrayWalk[x][y] =  arrayActors[x][y]->returnwalk() or arrayWalk[x][y];
+        if (x<mapw){
               if (y<maph){
                   y++;
               }
@@ -200,14 +204,16 @@ void MapManager::terrToDraw(){
               if (arrayTerrain[x][y] != NULL){
                   Terrain* a = arrayTerrain[x][y]; 
                   TCODConsole::root->putCharEx(x+1,y+9,a->returnz(), myColor, myColor2);
+                
                   arrayTrans[x][y] = new bool(a->returntrans());
-                  arrayWalk[x][y] = new bool(a->returnwalk());    
-                  
-    //   if terrain is not walkable, throw coordinates into an array called.....arrayNotWalk
-    //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
-       
-    
-    //(1,1,1, myColor, myColor2, true, true);
+                  arrayWalk[x][y] = (a->returnwalk());
+        //check to see if any in arrayWalk are true... (there are)
+            //      if (arrayWalk[x][y]){
+              //        cout<<"There are some true arrayWalk coordinates";
+              //        cout<<"\n";
+               //       cout<< x;
+              //        cout<<","<<y;
+          //  }
               }
           }
           

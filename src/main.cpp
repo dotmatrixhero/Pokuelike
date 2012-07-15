@@ -28,10 +28,11 @@ int main() {
 
     Actor* hero = new Actor(50,50,64,TCODColor::white, TCODColor::black, false, false); 
     /*these two lines will have to be switched if i want to implemet*/
-    Gameplay* play = new Gameplay(hero); /*non-set map values, so i have to rework "hero"*/
     MapManager* map = new MapManager();
+    Gameplay* play = new Gameplay(hero, map); /*non-set map values, so i have to rework "hero"*/
     map->createTerrArray();
     map->terrToDraw();
+    map->isWalkable(2,2);
     while (!TCODConsole::isWindowClosed()){
         play->console();  //starting a new game
         if(play->playerTurn() == 0){

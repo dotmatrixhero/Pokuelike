@@ -14,7 +14,6 @@
 #include "Effect.h"
 #include "Terrain.h"
 #include "Item.h"
-#include "Gameplay.h"
 #include <iostream>
 #include <fstream>
 
@@ -28,14 +27,16 @@ class MapManager {
         Actor* arrayActors[mapw][maph];
         Effect* arrayEffects[mapw][maph];
         bool* arrayTrans[mapw][maph];
-        bool* arrayWalk[mapw][maph];
 
+        bool arrayWalk[mapw][maph];
     public:
         MapManager();
         MapManager(const MapManager& orig);
         ~MapManager();
 
+
         TCODMap *gameMap;
+        bool isWalkable(int x, int y);
         void makeNew();
         void createTerrArray();
         void createItemArray();
@@ -46,6 +47,7 @@ class MapManager {
         void actoToDraw();
         void effeToDraw();
         void itemToDraw();
+
 };
 
 #endif	/* _MAPMANAGER_H */
