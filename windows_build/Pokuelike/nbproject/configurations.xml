@@ -9,14 +9,14 @@
                    displayName="Resource Files"
                    projectFiles="true">
       <logicalFolder name="data" displayName="data" projectFiles="true">
+        <itemPath>../../data/fonts.png</itemPath>
+        <itemPath>../../data/itemmaptest.txt</itemPath>
+        <itemPath>../../data/maptest2.txt</itemPath>
+        <itemPath>../../data/terminal.png</itemPath>
+        <itemPath>../../data/terrmaptest.txt</itemPath>
+        <itemPath>../../data/tileinterpret.txt</itemPath>
+        <itemPath>../../data/um.png</itemPath>
       </logicalFolder>
-      <itemPath>../../data/fonts.png</itemPath>
-      <itemPath>../../data/itemmaptest.txt</itemPath>
-      <itemPath>../../data/maptest2.txt</itemPath>
-      <itemPath>../../data/terminal.png</itemPath>
-      <itemPath>../../data/terrmaptest.txt</itemPath>
-      <itemPath>../../data/tileinterpret.txt</itemPath>
-      <itemPath>../../data/um.png</itemPath>
     </logicalFolder>
     <logicalFolder name="SourceFiles"
                    displayName="Source Files"
