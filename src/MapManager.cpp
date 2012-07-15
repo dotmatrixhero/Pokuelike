@@ -19,8 +19,8 @@ MapManager::MapManager() {
 
 
 bool MapManager::isWalkable(int x, int y){
-    for(int p = 0; p< mapw; p++){
-        for (int q = 0; q <maph; q++){
+    for(int p = 0; p< mapw; p++){ //this checks to see if any are actually walkable, since i seem
+        for (int q = 0; q <maph; q++){ //to have run into the problem where none of them are.
                if (arrayWalk[x][y]){
                 cout<<"is  walk";
                 cout<<"\n";
@@ -29,7 +29,7 @@ bool MapManager::isWalkable(int x, int y){
     }
  
     
-    return arrayWalk[x][y];
+    return arrayWalk[x][y]; //this actually returns my boolean.
 }
 
 void MapManager::makeNew(){
@@ -61,7 +61,7 @@ void MapManager::createItemArray(){
         //if (y==17){//THIS IS BAD PROGRAMMING, GOTTA FIX
         //    break;
        // }
-        if (tilein.getItem(input) == NULL){ //ON THIS check, something happens...
+        if (tilein.getItem(input) == NULL){ 
             cout<< "output empty";
             break;
         }
@@ -80,23 +80,6 @@ void MapManager::createItemArray(){
               }
        }
     }
-    
-    
-    
-   /*
-    char foo[4];
-    
-    
-    
-    while(myReadFile>>input){
-          
-                   for(int q=0; q < 4; q++){
-                        myReadFile>>foo[q];
-                   }
-                     
-               
-                   cerr << input  << endl;
-        }*/
 }
 
 
@@ -110,6 +93,7 @@ void MapManager::createTerrArray(){
                 getline(myReadFile, input);
                 if (input.empty()){
                         cout<<"input #1 empty"; 
+                        cout<<"\n";
                 break; }
                 getline(myReadFile, input);
                 //cout<<input;
@@ -223,12 +207,13 @@ void MapManager::terrToDraw(){
                 
                   arrayTrans[x][y] = new bool(a->returntrans());
                   arrayWalk[x][y] = (a->returnwalk());
-        
-    //   if terrain is not walkable, throw coordinates into an array called.....arrayNotWalk
-    //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
-       
-    
-    //(1,1,1, myColor, myColor2, true, true);
+        //check to see if any in arrayWalk are true... (there are)
+            //      if (arrayWalk[x][y]){
+              //        cout<<"There are some true arrayWalk coordinates";
+              //        cout<<"\n";
+               //       cout<< x;
+              //        cout<<","<<y;
+          //  }
               }
           }
           
