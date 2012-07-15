@@ -102,7 +102,7 @@ void MapManager::createItemArray(){
 
 void MapManager::createTerrArray(){
     ifstream myReadFile;
-    myReadFile.open("terrmaptest.txt");
+    myReadFile.open("maptest2.txt");
     string input;
     while(myReadFile.good()){
         for (int x =0; x<mapw; x++){
@@ -112,8 +112,8 @@ void MapManager::createTerrArray(){
                         cout<<"input #1 empty"; 
                 break; }
                 getline(myReadFile, input);
-               // cout<<input;
-             //   cout<<"\n";
+                //cout<<input;
+                //cout<<"\n";
       
                  if (tilein.getTerrain(input) == NULL){ //ON THIS check, something happens...
                         cout<< "output empty";
@@ -220,6 +220,7 @@ void MapManager::terrToDraw(){
               if (arrayTerrain[x][y] != NULL){
                   Terrain* a = arrayTerrain[x][y]; 
                   TCODConsole::root->putCharEx(x+1,y+9,a->returnz(), myColor, myColor2);
+                
                   arrayTrans[x][y] = new bool(a->returntrans());
                   arrayWalk[x][y] = (a->returnwalk());
         
