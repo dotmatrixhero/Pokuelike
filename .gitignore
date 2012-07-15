@@ -126,7 +126,10 @@ Thumbs.db
 Desktop.ini
 
 *.stackdump
+<<<<<<< HEAD
 *.dep.inc
+=======
+>>>>>>> stable-for-brian
 
 ############
 ## Linux

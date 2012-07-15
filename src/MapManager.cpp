@@ -8,10 +8,28 @@
 #include "MapManager.h"
 #include <iostream>
 #include <fstream>
+#include <libtcod/libtcod.hpp>
+
 
 using namespace std;
 
 MapManager::MapManager() {
+    
+}
+
+
+bool MapManager::isWalkable(int x, int y){
+    for(int p = 0; p< mapw; p++){
+        for (int q = 0; q <maph; q++){
+               if (arrayWalk[x][y]){
+                cout<<"is  walk";
+                cout<<"\n";
+               }
+        }
+    }
+ 
+    
+    return arrayWalk[x][y];
 }
 
 void MapManager::makeNew(){
@@ -94,8 +112,8 @@ void MapManager::createTerrArray(){
                         cout<<"input #1 empty"; 
                 break; }
                 getline(myReadFile, input);
-                cout<<input;
-                cout<<"\n";
+               // cout<<input;
+             //   cout<<"\n";
       
                  if (tilein.getTerrain(input) == NULL){ //ON THIS check, something happens...
                         cout<< "output empty";
@@ -105,6 +123,7 @@ void MapManager::createTerrArray(){
                 Terrain* copyThis = tilein.getTerrain(input);//copy
                   cout<<copyThis->returnz();
                 cout<<"\n";
+
              arrayTerrain[x][y] = new Terrain(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
     
         }}
@@ -138,7 +157,8 @@ void MapManager::createActoArray(){
         cout<<copyThis->returnz();
         cout<<"\n";
         arrayActors[x][y] = new Actor(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
-          if (x<mapw){
+        arrayWalk[x][y] =  arrayActors[x][y]->returnwalk() or arrayWalk[x][y];
+        if (x<mapw){
               if (y<maph){
                   y++;
               }
@@ -201,8 +221,8 @@ void MapManager::terrToDraw(){
                   Terrain* a = arrayTerrain[x][y]; 
                   TCODConsole::root->putCharEx(x+1,y+9,a->returnz(), myColor, myColor2);
                   arrayTrans[x][y] = new bool(a->returntrans());
-                  arrayWalk[x][y] = new bool(a->returnwalk());    
-                  
+                  arrayWalk[x][y] = (a->returnwalk());
+        
     //   if terrain is not walkable, throw coordinates into an array called.....arrayNotWalk
     //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
        

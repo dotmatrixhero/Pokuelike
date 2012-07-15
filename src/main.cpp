@@ -32,6 +32,12 @@ int main() {
     MapManager* map = new MapManager();
     map->createTerrArray();
     map->terrToDraw();
+    MapManager* map = new MapManager();
+    Gameplay* play = new Gameplay(hero, map); /*non-set map values, so i have to rework "hero"*/
+    map->createTerrArray();
+    map->terrToDraw();
+ 
+    map->isWalkable(2,2);
     while (!TCODConsole::isWindowClosed()){
         play->console();  //starting a new game
         if(play->playerTurn() == 0){

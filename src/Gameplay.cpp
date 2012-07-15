@@ -8,11 +8,14 @@
 #include "Gameplay.h"
 #include <string>
 #include <iostream>
+#include <libtcod/libtcod.hpp>
 
-Gameplay::Gameplay(Actor* a) {
+
+Gameplay::Gameplay(Actor* a, MapManager* map) {
     mapPosx = 0;
     mapPosy = 8;
     player = a;
+    MapManager* Map = map;
 }
 
 int Gameplay::playerTurn(){
@@ -62,13 +65,17 @@ Gameplay::~Gameplay() {
 }
 
 
+
 int Gameplay::tryMove(){
       TCOD_key_t key = TCODConsole::checkForKeypress(1);
       if ( key.vk == TCODK_KP6 || key.c == 'l' || key.vk == TCODK_RIGHT) {
-        player->Actor::moveRight();
+          if (Map->isWalkable(player->returnx()+1,player->returny()))
+                player->Actor::moveRight();
+          //else return a failmove
       }
       if ( key.vk == TCODK_KP4 ||  key.c == 'h' || key.vk == TCODK_LEFT) {
-        player->Actor::moveLeft();
+           if (Map->isWalkable(player->returnx()-1,player->returny()))
+                player->Actor::moveLeft();
       }
       if ( key.vk == TCODK_KP2 ||  key.c == 'j' || key.vk == TCODK_DOWN) {
         player->Actor::moveDown();

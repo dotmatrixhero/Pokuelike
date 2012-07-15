@@ -10,6 +10,7 @@
 #include <string.h>
 using namespace std;
 
+<<<<<<< HEAD
 Drawable::Drawable(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk)
         : x(x),
         y(y),
@@ -37,6 +38,35 @@ Drawable::Drawable(int x, int y, int c)
         :x(x),
         y(y),
         c(c),
+=======
+Drawable::Drawable(int X, int Y, int C, TCODColor FORE, TCODColor BACK, bool TRANS, bool WALK)
+        : x(X),
+        y(Y),
+        c(C),
+        fore(FORE),
+        back(BACK),
+        trans(TRANS),
+        walk(WALK)
+{
+}
+
+Drawable::Drawable(int C, TCODColor FORE, TCODColor BACK, bool TRANS, bool WALK)
+        :
+        x(0), // temp
+        y(8), // temp
+        c(C),
+        fore(FORE),
+        back(BACK),
+        trans(TRANS),
+        walk(WALK)
+{
+}
+
+Drawable::Drawable(int X, int Y, int C) 
+        :x(X),
+        y(Y),
+        c(C),
+>>>>>>> stable-for-brian
         fore(TCODColor::white),
         back(TCODColor::black),
         trans(false),
