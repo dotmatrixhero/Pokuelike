@@ -40,6 +40,7 @@ OBJECTFILES= \
 	${OBJECTDIR}/_ext/1445274692/Gameplay.o \
 	${OBJECTDIR}/_ext/1445274692/Drawable.o \
 	${OBJECTDIR}/_ext/1445274692/Actor.o \
+	${OBJECTDIR}/_ext/1445274692/Pokemon.o \
 	${OBJECTDIR}/_ext/1445274692/MapManager.o \
 	${OBJECTDIR}/_ext/1445274692/Effect.o \
 	${OBJECTDIR}/_ext/1445274692/Terrain.o
@@ -98,6 +99,11 @@ ${OBJECTDIR}/_ext/1445274692/Actor.o: ../../src/Actor.cpp
 	${MKDIR} -p ${OBJECTDIR}/_ext/1445274692
 	${RM} $@.d
 	$(COMPILE.cc) -O2 -MMD -MP -MF $@.d -o ${OBJECTDIR}/_ext/1445274692/Actor.o ../../src/Actor.cpp
+
+${OBJECTDIR}/_ext/1445274692/Pokemon.o: ../../src/Pokemon.cpp 
+	${MKDIR} -p ${OBJECTDIR}/_ext/1445274692
+	${RM} $@.d
+	$(COMPILE.cc) -O2 -MMD -MP -MF $@.d -o ${OBJECTDIR}/_ext/1445274692/Pokemon.o ../../src/Pokemon.cpp
 
 ${OBJECTDIR}/_ext/1445274692/MapManager.o: ../../src/MapManager.cpp 
 	${MKDIR} -p ${OBJECTDIR}/_ext/1445274692
