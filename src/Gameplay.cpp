@@ -69,8 +69,10 @@ Gameplay::~Gameplay() {
 int Gameplay::tryMove(){
       TCOD_key_t key = TCODConsole::checkForKeypress(1);
       if ( key.vk == TCODK_KP6 || key.c == 'l' || key.vk == TCODK_RIGHT) {
-          if (Map->isWalkable(player->returnx()+1,player->returny()))
-                player->Actor::moveRight();
+          
+          //if (Map->isWalkable(44,34))
+          player->Actor::moveRight();
+          std::cout<< "right was pressed";
           //else return a failmove
       }
       if ( key.vk == TCODK_KP4 ||  key.c == 'h' || key.vk == TCODK_LEFT) {

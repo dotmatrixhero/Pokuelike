@@ -34,6 +34,8 @@
         <itemPath>../../src/Item.h</itemPath>
         <itemPath>../../src/MapManager.cpp</itemPath>
         <itemPath>../../src/MapManager.h</itemPath>
+        <itemPath>../../src/Pokemon.cpp</itemPath>
+        <itemPath>../../src/Pokemon.h</itemPath>
         <itemPath>../../src/Terrain.cpp</itemPath>
         <itemPath>../../src/Terrain.h</itemPath>
         <itemPath>../../src/TileInterpret.cpp</itemPath>
