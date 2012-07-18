@@ -21,8 +21,8 @@ MapManager::MapManager() {
 bool MapManager::isWalkable(int x, int y){
     for(int p = 0; p< mapw; p++){ //this checks to see if any are actually walkable, since i seem
         for (int q = 0; q <maph; q++){ //to have run into the problem where none of them are.
-               if (arrayWalk[x][y]){
-                cout<<"is  walk";
+               if (arrayWalk[p][q]){
+                cout<<"is walk";
                 cout<<"\n";
                }
         }
@@ -141,7 +141,7 @@ void MapManager::createActoArray(){
         cout<<copyThis->returnz();
         cout<<"\n";
         arrayActors[x][y] = new Actor(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
-        arrayWalk[x][y] =  arrayActors[x][y]->returnwalk() or arrayWalk[x][y];
+      //  arrayWalk[x][y] =  arrayActors[x][y]->returnwalk() or arrayWalk[x][y];
         if (x<mapw){
               if (y<maph){
                   y++;
@@ -206,14 +206,14 @@ void MapManager::terrToDraw(){
                   TCODConsole::root->putCharEx(x+1,y+9,a->returnz(), myColor, myColor2);
                 
                   arrayTrans[x][y] = new bool(a->returntrans());
-                  arrayWalk[x][y] = (a->returnwalk());
+                  arrayWalk[x][y] = new bool (a->returnwalk());
         //check to see if any in arrayWalk are true... (there are)
-            //      if (arrayWalk[x][y]){
-              //        cout<<"There are some true arrayWalk coordinates";
-              //        cout<<"\n";
-               //       cout<< x;
+      //          if (arrayWalk[x][y]){
+        //              cout<<"There are some true arrayWalk coordinates";
+          //            cout<<"\n";
+            //          cout<< x;
               //        cout<<","<<y;
-          //  }
+           // }
               }
           }
           

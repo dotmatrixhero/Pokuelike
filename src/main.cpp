@@ -26,30 +26,29 @@ int main() {
     //load old map manager
     //load map
 
-    Actor* hero = new Actor(50,50,64,TCODColor::white, TCODColor::black, false, false); 
+    Actor hero = Actor(50,50,64,TCODColor::white, TCODColor::black, false, false); 
     /*these two lines will have to be switched if i want to implemet*/
-    MapManager* map = new MapManager();
-    Gameplay* play = new Gameplay(hero, map); /*non-set map values, so i have to rework "hero"*/
-    map->createTerrArray();
-    map->terrToDraw();
-    map->isWalkable(2,2);
+    MapManager map = MapManager();
+
+    
+    Gameplay play = Gameplay(&hero, &map); /*non-set map values, so i have to rework "hero"*/
+    map.createTerrArray();
+    map.terrToDraw();
+    map.isWalkable(2,2);
     while (!TCODConsole::isWindowClosed()){
-        play->console();  //starting a new game
-        if(play->playerTurn() == 0){
+        play.console();  //starting a new game
+        if(play.playerTurn() == 0){
             //save game
             return 0;
         }
-        if(play->playerTurn() == 2){
+        if(play.playerTurn() == 2){
             //inventory
         }
-        play->clear();
+        play.clear();
         //if play-> playerturn returns something else (when no keys are pressed, just continue to terrmap draw)
-        map->terrToDraw();
+        map.terrToDraw();
     }
 
-    delete map;
-    delete hero;
-    delete play;
     return 0;
 }
 

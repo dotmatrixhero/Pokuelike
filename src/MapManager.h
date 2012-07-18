@@ -28,7 +28,7 @@ class MapManager {
         Effect* arrayEffects[mapw][maph];
         bool* arrayTrans[mapw][maph];
 
-        bool arrayWalk[mapw][maph];
+        bool* arrayWalk[mapw][maph];
     public:
         MapManager();
         MapManager(const MapManager& orig);
