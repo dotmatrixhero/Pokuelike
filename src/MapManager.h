@@ -19,18 +19,18 @@
 
 class MapManager {
     private:
-        static const int mapw= 78;
-        static const int maph = 45;
+        static const int mapw=50;
+        static const int maph = 25;
+        TCODConsole* ConsoleMap;
         TileInterpret tilein;
         Terrain* arrayTerrain[mapw][maph];
         Item* arrayItem[mapw][maph];
         Actor* arrayActors[mapw][maph];
         Effect* arrayEffects[mapw][maph];
         bool* arrayTrans[mapw][maph];
-
-        bool* arrayWalk[mapw][maph];
+        bool arrayWalk[mapw][maph];
     public:
-        MapManager();
+        MapManager(TCODConsole* consolemap);
         MapManager(const MapManager& orig);
         ~MapManager();
 
@@ -47,6 +47,7 @@ class MapManager {
         void actoToDraw();
         void effeToDraw();
         void itemToDraw();
+        TCODConsole* returnConsoleMap();
 
 };
 

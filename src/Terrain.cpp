@@ -10,6 +10,7 @@
 Terrain::Terrain(int x, int y, int c)
     : Drawable(x, y, c)
 {
+    
 }
 
 Terrain::Terrain(int c, TCODColor fore,TCODColor back, bool trans, bool walk)

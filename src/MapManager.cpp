@@ -13,21 +13,13 @@
 
 using namespace std;
 
-MapManager::MapManager() {
+MapManager::MapManager(TCODConsole* consolemap) {
+    ConsoleMap = consolemap;
     
 }
 
 
 bool MapManager::isWalkable(int x, int y){
-    for(int p = 0; p< mapw; p++){ //this checks to see if any are actually walkable, since i seem
-        for (int q = 0; q <maph; q++){ //to have run into the problem where none of them are.
-               if (arrayWalk[p][q]){
-                cout<<"is walk";
-                cout<<"\n";
-               }
-        }
-    }
- 
     
     return arrayWalk[x][y]; //this actually returns my boolean.
 }
@@ -94,7 +86,7 @@ void MapManager::createTerrArray(){
                 if (input.empty()){
                         cout<<"input #1 empty"; 
                         cout<<"\n";
-                break; }
+                return; }
                 getline(myReadFile, input);
                 //cout<<input;
                 //cout<<"\n";
@@ -105,8 +97,6 @@ void MapManager::createTerrArray(){
                 }
       
                 Terrain* copyThis = tilein.getTerrain(input);//copy
-                  cout<<copyThis->returnz();
-                cout<<"\n";
 
              arrayTerrain[x][y] = new Terrain(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
     
@@ -197,23 +187,21 @@ void MapManager::createEffeArray(){
 
 
 void MapManager::terrToDraw(){
-    TCODColor myColor(24,64,255);
-    TCODColor myColor2(24,64,0);
     for (int x =0; x<mapw; x++){
           for(int y =0 ; y < maph; y++){
               if (arrayTerrain[x][y] != NULL){
                   Terrain* a = arrayTerrain[x][y]; 
-                  TCODConsole::root->putCharEx(x+1,y+9,a->returnz(), myColor, myColor2);
-                
+                //  ConsoleMap->putCharEx(x,y,a->returnz(), myColor, myColor2);
+                  a->draw(ConsoleMap);
                   arrayTrans[x][y] = new bool(a->returntrans());
-                  arrayWalk[x][y] = new bool (a->returnwalk());
+                  arrayWalk[x][y] = (a->returnwalk());
         //check to see if any in arrayWalk are true... (there are)
-      //          if (arrayWalk[x][y]){
-        //              cout<<"There are some true arrayWalk coordinates";
-          //            cout<<"\n";
-            //          cout<< x;
-              //        cout<<","<<y;
-           // }
+//                if (!arrayWalk[x][y]){
+  //                    cout<<"There are some untrue arrayWalk coordinates";
+    //                  cout<<"\n";
+      //                cout<< x;
+        //              cout<<","<<y;
+          // }
               }
           }
           
@@ -272,6 +260,9 @@ void MapManager::effeToDraw(){
               }}}    
 }
 
+TCODConsole* MapManager::returnConsoleMap(){
+    return ConsoleMap;
+}
 
 MapManager::MapManager(const MapManager& orig) {
 }

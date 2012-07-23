@@ -20,21 +20,19 @@ int main() {
 
     TCODConsole::initRoot(100,75,"WOO!",false);
     TCODSystem::setFps(40);
+  
     //main menu
     //if loaded game, initalize a new actor taking old stats
     //initialize new gameplay with old stats
     //load old map manager
     //load map
-
-    Actor hero = Actor(50,50,64,TCODColor::white, TCODColor::black, false, false); 
+    TCODConsole* ConsoleMap = new TCODConsole(50,25); //mapw, maph
+    Actor hero = Actor(30,20,64,TCODColor::white, TCODColor::black, false, false); 
     /*these two lines will have to be switched if i want to implemet*/
-    MapManager map = MapManager();
-
+    MapManager map = MapManager(ConsoleMap);
     
     Gameplay play = Gameplay(&hero, &map); /*non-set map values, so i have to rework "hero"*/
-    map.createTerrArray();
-    map.terrToDraw();
-    map.isWalkable(2,2);
+    play.compTurn();
     while (!TCODConsole::isWindowClosed()){
         play.console();  //starting a new game
         if(play.playerTurn() == 0){
@@ -46,7 +44,7 @@ int main() {
         }
         play.clear();
         //if play-> playerturn returns something else (when no keys are pressed, just continue to terrmap draw)
-        map.terrToDraw();
+        play.compTurn();
     }
 
     return 0;

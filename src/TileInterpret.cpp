@@ -66,41 +66,14 @@ TileInterpret::TileInterpret() {
             Effect* a = new Effect(i, myColor, myColor2, trans, walk);
             effectMap[key] = a;//possible that this is not iterating
         }
-
-
     }
     myReadFile.close();
+        
 }
 
 TileInterpret::~TileInterpret()
 {
-    for (std::map<std::string, Terrain*>::iterator iter = terrainMap.begin(); 
-         iter != terrainMap.end(); 
-         ++iter)
-    {
-        delete iter->second;
-    }
-
-    for (std::map<std::string, Item*>::iterator iter = itemMap.begin(); 
-         iter != itemMap.end(); 
-         ++iter)
-    {
-        delete iter->second;
-    }
-
-    for (std::map<std::string, Actor*>::iterator iter = actorMap.begin(); 
-         iter != actorMap.end(); 
-         ++iter)
-    {
-        delete iter->second;
-    }
-
-    for (std::map<std::string, Effect*>::iterator iter = effectMap.begin(); 
-         iter != effectMap.end(); 
-         ++iter)
-    {
-        delete iter->second;
-    }
+    
 }
 
 Terrain* TileInterpret::getTerrain(const std::string& key)

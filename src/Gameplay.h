@@ -17,14 +17,15 @@ class Gameplay {
     Actor* player;
 protected:
     int mapPosx, mapPosy;
-   static const int mapw= 78;
-   static const int maph = 45;
+   static const int mapw=50;
+   static const int maph = 25;
    bool* arrayWalk[mapw][maph];
 public:
     MapManager* Map;
     char* gamething;
     void console();
     void clear();
+    void compTurn();
     int playerTurn();
     int tryMove();
     Gameplay(Actor*, MapManager*);
