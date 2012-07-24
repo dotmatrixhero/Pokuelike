@@ -11,8 +11,8 @@ WALL_TILE(#)
 terr
 wall
 35 
-white
-black
+dktor
+drkor
 0
 0
 
@@ -20,7 +20,7 @@ GROUND_TILE(CAVE.)
 terr
 grnd
 46 
-white
-black
+drkgy
+dktor
 1
 1

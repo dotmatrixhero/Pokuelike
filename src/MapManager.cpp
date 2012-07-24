@@ -196,13 +196,15 @@ void MapManager::terrToDraw(bool wholeMap, vector<int> FOV){
                         if(wholeMap){
                                 a->draw(ConsoleMap);
                         }else{                       
+                                if (arrayExplored[x][y])
+                                    a->drawWashed(ConsoleMap);//store memory.... blit a separate console? should not update..
                                 if (it != FOV.end()){
                                         int p = *it;
                                         it++;
                                         int q = *it;
                                         it++;
                                         if(x==p && y==q){
-                                                a->draw(ConsoleMap);
+                                                a->draw(ConsoleMap);//perhaps this should be drawn on a transparent console?
                                         }else{
                                                 it = it-2;
                                 }
@@ -217,8 +219,6 @@ void MapManager::terrToDraw(bool wholeMap, vector<int> FOV){
 
 
 void MapManager::itemToDraw(){
-    TCODColor myColor(24,64,255);
-    TCODColor myColor2(24,64,0);
     for (int x =0; x<mapw; x++){
           for(int y =0 ; y < maph; y++){
               if (arrayItem[x][y] != NULL){
@@ -228,8 +228,7 @@ void MapManager::itemToDraw(){
     //   if terrain is not walkable, throw coordinates into an array called.....arrayNotWalk
     //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
        
-    
-    //(1,1,1, myColor, myColor2, true, true);
+
               }}}    
 }
 
@@ -245,15 +244,13 @@ void MapManager::actoToDraw(){
     //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
        
     
-    //(1,1,1, myColor, myColor2, true, true);
+  
               }}}    
 }
 
 
 
 void MapManager::effeToDraw(){
-    TCODColor myColor(24,64,255);
-    TCODColor myColor2(24,64,0);
     for (int x =0; x<mapw; x++){
           for(int y =0 ; y < maph; y++){
               if (arrayEffects[x][y] != NULL){
@@ -263,14 +260,12 @@ void MapManager::effeToDraw(){
     //   if terrain is not walkable, throw coordinates into an array called.....arrayNotWalk
     //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
        
-    
-    //(1,1,1, myColor, myColor2, true, true);
+
               }}}    
 }
 
 vector<int> MapManager::FOV(int playerx, int playery){
     gameMap->computeFov(playerx, playery, 5, true, FOV_SHADOW); //max radius depends on player clairvoyance
-    
   //  gameMap->computeFov(20,20,2,true,FOV_PERMISSIVE_3);
     vector<int> FOV;
     for(int A = 0; A<mapw; A++){
@@ -278,6 +273,7 @@ vector<int> MapManager::FOV(int playerx, int playery){
                 if (gameMap->isInFov(A,B)){
                    FOV.push_back(A);
                    FOV.push_back(B);
+                   arrayExplored[A][B] = new bool(true);
                 }
         }
    }

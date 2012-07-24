@@ -11,6 +11,7 @@
 #include "Drawable.h"
 #include "Actor.h"
 #include "MapManager.h"
+#include "MapGenerator.h"
 #include <vector>
 using namespace std;
 

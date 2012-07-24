@@ -18,6 +18,7 @@ Gameplay::Gameplay(Actor* a, MapManager* map) {
     Map = map;
     Map->createTerrArray();//create all arrays
     Map->makeNew();
+    MapGenerator gen = MapGenerator();
 //    TCODConsole::blit(Map->returnConsoleMap(),0,0,mapw,maph,TCODConsole::root,1,9,1.0,1.0);
     //blit map
 }

@@ -43,7 +43,7 @@ class Drawable {
         bool moveDownRight();
 
         virtual void draw(TCODConsole* ConsoleMap);
-
+        virtual void drawWashed(TCODConsole* ConsoleMap);
         // Getters
         int returnx();
         int returny();

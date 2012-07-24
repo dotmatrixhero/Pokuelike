@@ -35,6 +35,7 @@ OBJECTDIR=${CND_BUILDDIR}/${CND_CONF}/${CND_PLATFORM}
 # Object Files
 OBJECTFILES= \
 	${OBJECTDIR}/_ext/1445274692/TileInterpret.o \
+	${OBJECTDIR}/_ext/1445274692/MapGenerator.o \
 	${OBJECTDIR}/_ext/1445274692/Item.o \
 	${OBJECTDIR}/_ext/1445274692/main.o \
 	${OBJECTDIR}/_ext/1445274692/Gameplay.o \
@@ -74,6 +75,11 @@ ${OBJECTDIR}/_ext/1445274692/TileInterpret.o: ../../src/TileInterpret.cpp
 	${MKDIR} -p ${OBJECTDIR}/_ext/1445274692
 	${RM} $@.d
 	$(COMPILE.cc) -g -MMD -MP -MF $@.d -o ${OBJECTDIR}/_ext/1445274692/TileInterpret.o ../../src/TileInterpret.cpp
+
+${OBJECTDIR}/_ext/1445274692/MapGenerator.o: ../../src/MapGenerator.cpp 
+	${MKDIR} -p ${OBJECTDIR}/_ext/1445274692
+	${RM} $@.d
+	$(COMPILE.cc) -g -MMD -MP -MF $@.d -o ${OBJECTDIR}/_ext/1445274692/MapGenerator.o ../../src/MapGenerator.cpp
 
 ${OBJECTDIR}/_ext/1445274692/Item.o: ../../src/Item.cpp 
 	${MKDIR} -p ${OBJECTDIR}/_ext/1445274692

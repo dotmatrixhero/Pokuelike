@@ -53,6 +53,7 @@ Drawable::~Drawable()
 {
 }
 
+
 void Drawable::setX(int x) 
 {
     this->x = x;
@@ -152,6 +153,9 @@ void Drawable::draw(TCODConsole* ConsoleMap)
     ConsoleMap->putCharEx(x, y, c, fore, back);
 }
 
+void Drawable::drawWashed(TCODConsole* ConsoleMap){
+    ConsoleMap->putCharEx(x, y, c, fore*TCODColor::darkGrey, back*TCODColor::darkGrey);
+}
 int Drawable::returnx(){
    return x;
 }

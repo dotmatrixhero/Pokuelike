@@ -19,7 +19,7 @@
 
 #include <map>
 #include <vector>
-
+#include <iostream>
 #include "Actor.h"
 #include "Effect.h"
 #include "Terrain.h"
@@ -31,6 +31,7 @@ class TileInterpret {
         std::map<std::string, Item*>    itemMap;
         std::map<std::string, Actor*>   actorMap;
         std::map<std::string, Effect*>  effectMap;
+        TCODColor returnColor(std::string color);
 
     public:
         TileInterpret();
