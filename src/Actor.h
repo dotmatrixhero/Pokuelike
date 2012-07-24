@@ -26,7 +26,7 @@ class Actor: public Drawable
         Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, const std::string& name);
         ~Actor();
 
-        void draw();
+        void draw(TCODConsole* ConsoleMap);
         void setName(const std::string& newname);
         const std::string getName() const;
 };

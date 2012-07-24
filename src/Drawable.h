@@ -9,6 +9,7 @@
 #define	DRAWABLE_H
 
 #include <libtcod/libtcod.hpp>
+#include <iostream>
 
 class Drawable {
     protected:
@@ -19,6 +20,8 @@ class Drawable {
         TCODColor back;
         bool trans;
         bool walk;
+        static const int mapw = 78;
+        static const int maph = 45;
 
     public:
         Drawable(int x, int y, int c);
@@ -39,8 +42,8 @@ class Drawable {
         bool moveUpRight();
         bool moveDownRight();
 
-        virtual void draw();
-
+        virtual void draw(TCODConsole* ConsoleMap);
+        virtual void drawWashed(TCODConsole* ConsoleMap);
         // Getters
         int returnx();
         int returny();

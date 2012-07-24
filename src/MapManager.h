@@ -14,39 +14,45 @@
 #include "Effect.h"
 #include "Terrain.h"
 #include "Item.h"
+#include <vector>
 #include <iostream>
 #include <fstream>
+using namespace std;
 
 class MapManager {
     private:
         static const int mapw= 78;
         static const int maph = 45;
+        TCODConsole* ConsoleMap;
         TileInterpret tilein;
         Terrain* arrayTerrain[mapw][maph];
         Item* arrayItem[mapw][maph];
         Actor* arrayActors[mapw][maph];
         Effect* arrayEffects[mapw][maph];
-        bool* arrayTrans[mapw][maph];
+        bool* arrayExplored[mapw][maph];
 
-        bool* arrayWalk[mapw][maph];
+        TCODMap *gameMap;
     public:
-        MapManager();
+        MapManager(TCODConsole* consolemap);
         MapManager(const MapManager& orig);
         ~MapManager();
 
 
-        TCODMap *gameMap;
+        
         bool isWalkable(int x, int y);
+        vector<int> FOV(int playerx, int playery);
         void makeNew();
         void createTerrArray();
         void createItemArray();
         void createActoArray();
         void createEffeArray();
         void loadMap();
-        void terrToDraw();
+        void terrToDraw(bool wholeMap, vector<int> FOV);
         void actoToDraw();
         void effeToDraw();
         void itemToDraw();
+        TCODConsole* returnConsoleMap();
+        TCODMap* returnFOVMap();
 
 };
 

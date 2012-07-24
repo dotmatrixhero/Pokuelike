@@ -22,6 +22,8 @@ Drawable::Drawable(int X, int Y, int C, TCODColor FORE, TCODColor BACK, bool TRA
         trans(TRANS),
         walk(WALK)
 {
+    
+//    std::cout<<"hey there delilah"<<std::endl;
 }
 
 Drawable::Drawable(int C, TCODColor FORE, TCODColor BACK, bool TRANS, bool WALK)
@@ -51,6 +53,7 @@ Drawable::~Drawable()
 {
 }
 
+
 void Drawable::setX(int x) 
 {
     this->x = x;
@@ -64,7 +67,7 @@ void Drawable::setY(int y)
 bool Drawable::moveRight()
 {
     //implement using gameplay.mapPosx, etc. to define these values
-    if (x < 76)
+    if (x < mapw-1)
     {
         x++;
         return true;
@@ -74,7 +77,7 @@ bool Drawable::moveRight()
 
 bool Drawable::moveDown()
 {
-    if (y < 53)
+    if (y < maph-1)
     {
         y++;
         return true;   
@@ -84,7 +87,7 @@ bool Drawable::moveDown()
 
 bool Drawable::moveLeft()
 {
-    if (x > 1)
+    if (x > 0)
     {
         x--;
         return true;
@@ -94,7 +97,7 @@ bool Drawable::moveLeft()
 
 bool Drawable::moveUp()
 {
-    if (y > 9)
+    if (y > 0)
     {   
         y--;
         return true;
@@ -104,7 +107,7 @@ bool Drawable::moveUp()
 
 bool Drawable::moveUpLeft()
 {
-    if (x > 1 && y > 9)
+    if (x > 0 && y > 0)
     {
         x--;
         y--;
@@ -115,7 +118,7 @@ bool Drawable::moveUpLeft()
 
 bool Drawable::moveDownLeft()
 {
-    if (x > 1 && y < 53)
+    if (x > 0 && y < maph-1)
     {
         x--;
         y++;
@@ -126,7 +129,7 @@ bool Drawable::moveDownLeft()
 
 bool Drawable::moveUpRight()
 {
-    if (x < 76 && y > 9)
+    if (x < mapw-1 && y > 0)
     { //implement using gameplay.mapPosx, etc. to define these values
         x++;
         y--;
@@ -137,7 +140,7 @@ bool Drawable::moveUpRight()
 
 bool Drawable::moveDownRight()
 {
-    if (x < 76 && y < 53){ //implement using gameplay.mapPosx, etc. to define these values
+    if (x < mapw-1 && y < maph-1){ //implement using gameplay.mapPosx, etc. to define these values
         x++;
         y++;
         return true;
@@ -145,11 +148,14 @@ bool Drawable::moveDownRight()
     return false;
 }
 
-void Drawable::draw()
+void Drawable::draw(TCODConsole* ConsoleMap)
 {
-    TCODConsole::root->putCharEx(x, y, c, fore, back);
+    ConsoleMap->putCharEx(x, y, c, fore, back);
 }
 
+void Drawable::drawWashed(TCODConsole* ConsoleMap){
+    ConsoleMap->putCharEx(x, y, c, fore*TCODColor::darkGrey, back*TCODColor::darkGrey);
+}
 int Drawable::returnx(){
    return x;
 }

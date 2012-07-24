@@ -32,9 +32,9 @@ Actor::~Actor()
 {
 }
 
-void Actor::draw()
+void Actor::draw(TCODConsole* ConsoleMap)
 {
-    TCODConsole::root->putChar(x,y,c,TCOD_BKGND_SET);
+    ConsoleMap->putChar(x,y,c,TCOD_BKGND_SET);
 }
 
 void Actor::setName(const std::string& newname)

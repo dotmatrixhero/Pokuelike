@@ -15,18 +15,28 @@ Gameplay::Gameplay(Actor* a, MapManager* map) {
     mapPosx = 0;
     mapPosy = 8;
     player = a;
-    MapManager* Map = map;
+    Map = map;
+    Map->createTerrArray();//create all arrays
+    Map->makeNew();
+    MapGenerator gen = MapGenerator();
+//    TCODConsole::blit(Map->returnConsoleMap(),0,0,mapw,maph,TCODConsole::root,1,9,1.0,1.0);
+    //blit map
 }
 
 int Gameplay::playerTurn(){
-    player->draw();
+    TCODConsole::blit(Map->returnConsoleMap(),0,0,mapw,maph,TCODConsole::root,1,9,1.0,1.0);
+    player->draw(Map->returnConsoleMap());
     return tryMove();
 }
 
+void Gameplay::compTurn(){
+    Map->terrToDraw(false, Map->FOV(player->returnx(),player->returny()) );
+}
 
 void Gameplay::clear(){
     TCODConsole::flush();
     TCODConsole::root->clear();
+    (Map->returnConsoleMap())->clear();
 }
 
 void Gameplay::console(){
@@ -70,9 +80,9 @@ int Gameplay::tryMove(){
       TCOD_key_t key = TCODConsole::checkForKeypress(1);
       if ( key.vk == TCODK_KP6 || key.c == 'l' || key.vk == TCODK_RIGHT) {
           
-          //if (Map->isWalkable(44,34))
-          player->Actor::moveRight();
-          std::cout<< "right was pressed";
+          if (Map->isWalkable(player->returnx()+1,player->returny()))//check flying
+                player->Actor::moveRight();
+              
           //else return a failmove
       }
       if ( key.vk == TCODK_KP4 ||  key.c == 'h' || key.vk == TCODK_LEFT) {
@@ -80,9 +90,11 @@ int Gameplay::tryMove(){
                 player->Actor::moveLeft();
       }
       if ( key.vk == TCODK_KP2 ||  key.c == 'j' || key.vk == TCODK_DOWN) {
+          if (Map->isWalkable(player->returnx(),player->returny()+1))
         player->Actor::moveDown();
       }
       if ( key.vk == TCODK_KP8 ||  key.c == 'k' || key.vk == TCODK_UP) {
+          if (Map->isWalkable(player->returnx(),player->returny()-1))
         player->Actor::moveUp();
       }
       if ( key.vk == TCODK_KP9 ||  key.c == 'u') {

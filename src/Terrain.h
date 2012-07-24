@@ -10,6 +10,7 @@
 
 #include <libtcod/libtcod.hpp>
 #include "Drawable.h"
+#include <iostream>
 
 class Terrain: public Drawable {
     private:

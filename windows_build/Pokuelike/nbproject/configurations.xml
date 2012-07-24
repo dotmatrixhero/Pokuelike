@@ -32,6 +32,8 @@
         <itemPath>../../src/Gameplay.h</itemPath>
         <itemPath>../../src/Item.cpp</itemPath>
         <itemPath>../../src/Item.h</itemPath>
+        <itemPath>../../src/MapGenerator.cpp</itemPath>
+        <itemPath>../../src/MapGenerator.h</itemPath>
         <itemPath>../../src/MapManager.cpp</itemPath>
         <itemPath>../../src/MapManager.h</itemPath>
         <itemPath>../../src/Pokemon.cpp</itemPath>

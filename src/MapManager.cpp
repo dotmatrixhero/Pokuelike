@@ -13,28 +13,20 @@
 
 using namespace std;
 
-MapManager::MapManager() {
+MapManager::MapManager(TCODConsole* consolemap) {
+    ConsoleMap = consolemap;
     
 }
 
 
 bool MapManager::isWalkable(int x, int y){
-    for(int p = 0; p< mapw; p++){ //this checks to see if any are actually walkable, since i seem
-        for (int q = 0; q <maph; q++){ //to have run into the problem where none of them are.
-               if (arrayWalk[p][q]){
-                cout<<"is walk";
-                cout<<"\n";
-               }
-        }
-    }
- 
     
-    return arrayWalk[x][y]; //this actually returns my boolean.
+    return gameMap->isWalkable(x,y); //this actually returns my boolean.
 }
 
 void MapManager::makeNew(){
-    TCODMap *gameMap = new TCODMap(mapw,maph);
-    gameMap->setProperties(50,45,true,true);
+    gameMap = new TCODMap(mapw,maph);
+    gameMap->setProperties(78,45,true,true);
     //random gen and then write to file?
 }
 
@@ -94,19 +86,17 @@ void MapManager::createTerrArray(){
                 if (input.empty()){
                         cout<<"input #1 empty"; 
                         cout<<"\n";
-                break; }
+                return; }
                 getline(myReadFile, input);
                 //cout<<input;
                 //cout<<"\n";
       
                  if (tilein.getTerrain(input) == NULL){ //ON THIS check, something happens...
                         cout<< "output empty";
-                 break;
+                 return;
                 }
       
                 Terrain* copyThis = tilein.getTerrain(input);//copy
-                  cout<<copyThis->returnz();
-                cout<<"\n";
 
              arrayTerrain[x][y] = new Terrain(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
     
@@ -141,7 +131,6 @@ void MapManager::createActoArray(){
         cout<<copyThis->returnz();
         cout<<"\n";
         arrayActors[x][y] = new Actor(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
-      //  arrayWalk[x][y] =  arrayActors[x][y]->returnwalk() or arrayWalk[x][y];
         if (x<mapw){
               if (y<maph){
                   y++;
@@ -196,82 +185,108 @@ void MapManager::createEffeArray(){
 }
 
 
-void MapManager::terrToDraw(){
-    TCODColor myColor(24,64,255);
-    TCODColor myColor2(24,64,0);
-    for (int x =0; x<mapw; x++){
-          for(int y =0 ; y < maph; y++){
-              if (arrayTerrain[x][y] != NULL){
-                  Terrain* a = arrayTerrain[x][y]; 
-                  TCODConsole::root->putCharEx(x+1,y+9,a->returnz(), myColor, myColor2);
-                
-                  arrayTrans[x][y] = new bool(a->returntrans());
-                  arrayWalk[x][y] = new bool (a->returnwalk());
-        //check to see if any in arrayWalk are true... (there are)
-      //          if (arrayWalk[x][y]){
-        //              cout<<"There are some true arrayWalk coordinates";
-          //            cout<<"\n";
-            //          cout<< x;
-              //        cout<<","<<y;
-           // }
-              }
-          }
-          
+void MapManager::terrToDraw(bool wholeMap, vector<int> FOV){
+    vector<int>::iterator it;
+    it=FOV.begin();
+            for (int x =0; x<mapw; x++){
+                  for(int y =0 ; y < maph; y++){
+                      if (arrayTerrain[x][y] != NULL){
+                        Terrain* a = arrayTerrain[x][y]; 
+                        gameMap->setProperties(x,y,a->returntrans(),a->returnwalk());
+                        if(wholeMap){
+                                a->draw(ConsoleMap);
+                        }else{                       
+                                if (arrayExplored[x][y])
+                                    a->drawWashed(ConsoleMap);//store memory.... blit a separate console? should not update..
+                                if (it != FOV.end()){
+                                        int p = *it;
+                                        it++;
+                                        int q = *it;
+                                        it++;
+                                        if(x==p && y==q){
+                                                a->draw(ConsoleMap);//perhaps this should be drawn on a transparent console?
+                                        }else{
+                                                it = it-2;
+                                }
+                        }
+                      }
+                  }
+            }
+    
+
     }    
 }
 
 
 void MapManager::itemToDraw(){
-    TCODColor myColor(24,64,255);
-    TCODColor myColor2(24,64,0);
     for (int x =0; x<mapw; x++){
           for(int y =0 ; y < maph; y++){
               if (arrayItem[x][y] != NULL){
                   Item* a = arrayItem[x][y]; 
-                  TCODConsole::root->putCharEx(a->returnx()+1,a->returny()+9,a->returnz(), myColor, myColor2);
+                  a->draw(ConsoleMap);
+                  gameMap->setProperties(x,y,a->returntrans(),a->returnwalk());
     //   if terrain is not walkable, throw coordinates into an array called.....arrayNotWalk
     //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
        
-    
-    //(1,1,1, myColor, myColor2, true, true);
+
               }}}    
 }
 
 
 void MapManager::actoToDraw(){
-    TCODColor myColor(24,64,255);
-    TCODColor myColor2(24,64,0);
     for (int x =0; x<mapw; x++){
           for(int y =0 ; y < maph; y++){
               if (arrayActors [x][y] != NULL){
                   Actor* a = arrayActors[x][y]; 
-                  TCODConsole::root->putCharEx(a->returnx()+1,a->returny()+9,a->returnz(), myColor, myColor2);
+                  a->draw(ConsoleMap);
+                  gameMap->setProperties(x,y,a->returntrans(),a->returnwalk());
     //   if terrain is not walkable, throw coordinates into an array called.....arrayNotWalk
     //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
        
     
-    //(1,1,1, myColor, myColor2, true, true);
+  
               }}}    
 }
 
 
 
 void MapManager::effeToDraw(){
-    TCODColor myColor(24,64,255);
-    TCODColor myColor2(24,64,0);
     for (int x =0; x<mapw; x++){
           for(int y =0 ; y < maph; y++){
               if (arrayEffects[x][y] != NULL){
                   Effect* a = arrayEffects[x][y]; 
-                  TCODConsole::root->putCharEx(a->returnx()+1,a->returny()+9,a->returnz(), myColor, myColor2);
+                  a->draw(ConsoleMap);
+                  gameMap->setProperties(x,y,a->returntrans(),a->returnwalk());
     //   if terrain is not walkable, throw coordinates into an array called.....arrayNotWalk
     //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
        
-    
-    //(1,1,1, myColor, myColor2, true, true);
+
               }}}    
 }
 
+vector<int> MapManager::FOV(int playerx, int playery){
+    gameMap->computeFov(playerx, playery, 5, true, FOV_SHADOW); //max radius depends on player clairvoyance
+  //  gameMap->computeFov(20,20,2,true,FOV_PERMISSIVE_3);
+    vector<int> FOV;
+    for(int A = 0; A<mapw; A++){
+        for(int B =0; B<maph; B++){
+                if (gameMap->isInFov(A,B)){
+                   FOV.push_back(A);
+                   FOV.push_back(B);
+                   arrayExplored[A][B] = new bool(true);
+                }
+        }
+   }
+    return FOV;
+}
+
+TCODConsole* MapManager::returnConsoleMap(){
+    return ConsoleMap;
+}
+
+TCODMap* MapManager::returnFOVMap(){
+    return gameMap;
+}
 
 MapManager::MapManager(const MapManager& orig) {
 }
