@@ -26,12 +26,11 @@ int main() {
     //initialize new gameplay with old stats
     //load old map manager
     //load map
-    TCODConsole* ConsoleMap = new TCODConsole(50,25); //mapw, maph
-    Actor hero = Actor(30,20,64,TCODColor::white, TCODColor::black, false, false); 
-    /*these two lines will have to be switched if i want to implemet*/
-    MapManager map = MapManager(ConsoleMap);
     
-    Gameplay play = Gameplay(&hero, &map); /*non-set map values, so i have to rework "hero"*/
+    Actor hero = Actor(20,20,64,TCODColor::white, TCODColor::black, false, false); //figure out how to randomize position of hero
+    MapManager map = MapManager(new TCODConsole(78,45));//mapw, maph //THIS CAUSES A CRASH
+    
+    Gameplay play = Gameplay(&hero, &map); 
     play.compTurn();
     while (!TCODConsole::isWindowClosed()){
         play.console();  //starting a new game

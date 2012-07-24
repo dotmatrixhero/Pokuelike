@@ -23,7 +23,7 @@ Drawable::Drawable(int X, int Y, int C, TCODColor FORE, TCODColor BACK, bool TRA
         walk(WALK)
 {
     
-    std::cout<<"hey there delilah"<<std::endl;
+//    std::cout<<"hey there delilah"<<std::endl;
 }
 
 Drawable::Drawable(int C, TCODColor FORE, TCODColor BACK, bool TRANS, bool WALK)

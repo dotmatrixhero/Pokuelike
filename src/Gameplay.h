@@ -11,14 +11,16 @@
 #include "Drawable.h"
 #include "Actor.h"
 #include "MapManager.h"
+#include <vector>
+using namespace std;
 
 
 class Gameplay {
     Actor* player;
 protected:
     int mapPosx, mapPosy;
-   static const int mapw=50;
-   static const int maph = 25;
+   static const int mapw = 78;
+   static const int maph = 45;
    bool* arrayWalk[mapw][maph];
 public:
     MapManager* Map;

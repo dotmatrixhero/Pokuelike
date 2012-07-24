@@ -17,19 +17,19 @@ Gameplay::Gameplay(Actor* a, MapManager* map) {
     player = a;
     Map = map;
     Map->createTerrArray();//create all arrays
-    TCODConsole::blit(Map->returnConsoleMap(),0,0,78,45,TCODConsole::root,1,9,1.0,1.0);
+    Map->makeNew();
+//    TCODConsole::blit(Map->returnConsoleMap(),0,0,mapw,maph,TCODConsole::root,1,9,1.0,1.0);
     //blit map
 }
 
 int Gameplay::playerTurn(){
-    TCODConsole::blit(Map->returnConsoleMap(),0,0,78,45,TCODConsole::root,1,9,1.0,1.0);
+    TCODConsole::blit(Map->returnConsoleMap(),0,0,mapw,maph,TCODConsole::root,1,9,1.0,1.0);
     player->draw(Map->returnConsoleMap());
     return tryMove();
 }
 
 void Gameplay::compTurn(){
-
-    Map->terrToDraw();
+    Map->terrToDraw(false, Map->FOV(player->returnx(),player->returny()) );
 }
 
 void Gameplay::clear(){
