@@ -139,6 +139,16 @@ TCODColor TileInterpret::returnColor(string color){ //add custom color option
         return TCODColor::darkCyan;
     if (color.compare(0,5,"dktcn")== 0)
         return TCODColor::darkerCyan;
+    if (color.compare(0,5,"dessy")== 0)
+        return TCODColor::desaturatedSky;
+    if (color.compare(0,5,"litsy")== 0)
+        return TCODColor::lightSky;
+    if (color.compare(0,5,"stdsy")== 0)
+        return TCODColor::sky;
+    if (color.compare(0,5,"drksy")== 0)
+        return TCODColor::darkSky;
+    if (color.compare(0,5,"dktsy")== 0)
+        return TCODColor::darkerSky;
     if (color.compare(0,5,"desbl")== 0)
         return TCODColor::desaturatedBlue;
     if (color.compare(0,5,"litbl")== 0)
