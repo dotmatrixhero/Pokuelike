@@ -9,12 +9,27 @@
                    displayName="Resource Files"
                    projectFiles="true">
       <logicalFolder name="data" displayName="data" projectFiles="true">
+        <itemPath>../../data/Sir_Henry's_32x32.png</itemPath>
+        <itemPath>../../data/berry sprites.png</itemPath>
+        <itemPath>../../data/biome sprites unripped.png</itemPath>
+        <itemPath>../../data/building and lake sprites.png</itemPath>
         <itemPath>../../data/fonts.png</itemPath>
+        <itemPath>../../data/hoenn sprites.png</itemPath>
         <itemPath>../../data/itemmaptest.txt</itemPath>
+        <itemPath>../../data/johto sprites.png</itemPath>
+        <itemPath>../../data/kanto sprites so goooooood.png</itemPath>
+        <itemPath>../../data/layer1.txt</itemPath>
+        <itemPath>../../data/mapgen.txt</itemPath>
         <itemPath>../../data/maptest2.txt</itemPath>
+        <itemPath>../../data/more sprites.png</itemPath>
+        <itemPath>../../data/pokuelike.exe.stackdump</itemPath>
+        <itemPath>../../data/special sprites.png</itemPath>
+        <itemPath>../../data/sprites frame 1.png</itemPath>
+        <itemPath>../../data/sprites frame 2.png</itemPath>
         <itemPath>../../data/terminal.png</itemPath>
         <itemPath>../../data/terrmaptest.txt</itemPath>
         <itemPath>../../data/tileinterpret.txt</itemPath>
+        <itemPath>../../data/trainer sprites.png</itemPath>
         <itemPath>../../data/um.png</itemPath>
       </logicalFolder>
     </logicalFolder>
@@ -58,8 +73,8 @@
     </logicalFolder>
   </logicalFolder>
   <sourceRootList>
-    <Elem>../../src</Elem>
     <Elem>../../data</Elem>
+    <Elem>../../src</Elem>
   </sourceRootList>
   <projectmakefile>Makefile</projectmakefile>
   <confs>
@@ -71,10 +86,8 @@
       <compileType>
         <linkerTool>
           <linkerLibItems>
-            <linkerLibLibItem>tcod-gui-mingw-debug</linkerLibLibItem>
-            <linkerLibLibItem>tcod-gui-mingw</linkerLibLibItem>
-            <linkerLibLibItem>tcod-mingw-debug</linkerLibLibItem>
-            <linkerLibLibItem>tcod-mingw</linkerLibLibItem>
+            <linkerLibFileItem>libtcod-gui-mingw.a</linkerLibFileItem>
+            <linkerLibFileItem>libtcod-mingw.a</linkerLibFileItem>
           </linkerLibItems>
         </linkerTool>
       </compileType>
