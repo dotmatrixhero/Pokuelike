@@ -47,7 +47,7 @@ void Gameplay::console(){
    // TCODConsole::root->printFrame(mapPosx,mapPosy, mapSizex, mapSizey, true, TCOD_BKGND_DARKEN, NULL); //mapbox test
    
     TCODConsole::setColorControl(TCOD_COLCTRL_1, TCODColor::red, TCODColor::black);
-    //TCODConsole::root->printLeft(82,2,TCOD_BKGND_NONE,"D", TCOD_COLCTRL_1);
+    TCODConsole::root->printLeft(82,2,TCOD_BKGND_NONE,"D", TCOD_COLCTRL_1);
     if (thing !=NULL){
             TCODConsole::root->printFrame(66,55,30,8, true, TCOD_BKGND_DARKEN, NULL);
             //TCODConsole::root->printLeft(68,56,TCOD_BKGND_NONE, thing, TCOD_COLCTRL_1);      
