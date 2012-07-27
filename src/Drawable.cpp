@@ -1,13 +1,12 @@
-/* 
+/*
  * File:   Drawable.cpp
  * Author: Brian
- * 
+ *
  * Created on June 16, 2012, 9:29 PM
  */
 
 
 #include "Drawable.h"
-#include <string.h>
 using namespace std;
 
 
@@ -22,7 +21,7 @@ Drawable::Drawable(int X, int Y, int C, TCODColor FORE, TCODColor BACK, bool TRA
         trans(TRANS),
         walk(WALK)
 {
-    
+
 //    std::cout<<"hey there delilah"<<std::endl;
 }
 
@@ -38,7 +37,7 @@ Drawable::Drawable(int C, TCODColor FORE, TCODColor BACK, bool TRANS, bool WALK)
 {
 }
 
-Drawable::Drawable(int X, int Y, int C) 
+Drawable::Drawable(int X, int Y, int C)
         :x(X),
         y(Y),
         c(C),
@@ -49,12 +48,12 @@ Drawable::Drawable(int X, int Y, int C)
 {
 }
 
-Drawable::~Drawable() 
+Drawable::~Drawable()
 {
 }
 
 
-void Drawable::setX(int x) 
+void Drawable::setX(int x)
 {
     this->x = x;
 }
@@ -80,7 +79,7 @@ bool Drawable::moveDown()
     if (y < maph-1)
     {
         y++;
-        return true;   
+        return true;
     }
     return false;
 }
@@ -91,14 +90,14 @@ bool Drawable::moveLeft()
     {
         x--;
         return true;
-    } 
+    }
     return false;
 }
 
 bool Drawable::moveUp()
 {
     if (y > 0)
-    {   
+    {
         y--;
         return true;
     }
@@ -112,7 +111,7 @@ bool Drawable::moveUpLeft()
         x--;
         y--;
         return true;
-    } 
+    }
     return false;
 }
 
@@ -123,7 +122,7 @@ bool Drawable::moveDownLeft()
         x--;
         y++;
         return true;
-    } 
+    }
     return false;
 }
 

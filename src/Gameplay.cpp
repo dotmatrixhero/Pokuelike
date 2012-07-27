@@ -15,10 +15,11 @@ Gameplay::Gameplay(Actor* a, MapManager* map) {
     mapPosx = 0;
     mapPosy = 8;
     player = a;
+    MapGenerator gen = MapGenerator();
     Map = map;
     Map->createTerrArray();//create all arrays
     Map->makeNew();
-    MapGenerator gen = MapGenerator();
+  
 //    TCODConsole::blit(Map->returnConsoleMap(),0,0,mapw,maph,TCODConsole::root,1,9,1.0,1.0);
     //blit map
 }
@@ -46,7 +47,7 @@ void Gameplay::console(){
    // TCODConsole::root->printFrame(mapPosx,mapPosy, mapSizex, mapSizey, true, TCOD_BKGND_DARKEN, NULL); //mapbox test
    
     TCODConsole::setColorControl(TCOD_COLCTRL_1, TCODColor::red, TCODColor::black);
-    //TCODConsole::root->printLeft(82,2,TCOD_BKGND_NONE,"D", TCOD_COLCTRL_1);
+   // TCODConsole::root->printLeft(82,2,TCOD_BKGND_NONE,"D", TCOD_COLCTRL_1);
     if (thing !=NULL){
             TCODConsole::root->printFrame(66,55,30,8, true, TCOD_BKGND_DARKEN, NULL);
             //TCODConsole::root->printLeft(68,56,TCOD_BKGND_NONE, thing, TCOD_COLCTRL_1);      
@@ -97,6 +98,7 @@ int Gameplay::tryMove(){
           if (Map->isWalkable(player->returnx(),player->returny()-1))
         player->Actor::moveUp();
       }
+      /*
       if ( key.vk == TCODK_KP9 ||  key.c == 'u') {
         player->Actor::moveUpRight();
       }
@@ -109,6 +111,7 @@ int Gameplay::tryMove(){
       if ( key.vk == TCODK_KP3 ||  key.c == 'n') {
         player->Actor::moveDownRight();
       }
+       */
       if ( key.vk == TCODK_F11 ) {
               TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
       }
