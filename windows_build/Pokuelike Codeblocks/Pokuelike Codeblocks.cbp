@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+	<FileVersion major="1" minor="6" />
+	<Project>
+		<Option title="Pokuelike Codeblocks" />
+		<Option pch_mode="2" />
+		<Option compiler="gcc" />
+		<Build>
+			<Target title="Debug">
+				<Option output="bin\Debug\Pokuelike Codeblocks" prefix_auto="1" extension_auto="1" />
+				<Option object_output="obj\Debug\" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Compiler>
+					<Add option="-g" />
+				</Compiler>
+			</Target>
+			<Target title="Release">
+				<Option output="bin\Release\Pokuelike Codeblocks" prefix_auto="1" extension_auto="1" />
+				<Option object_output="obj\Release\" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Compiler>
+					<Add option="-O2" />
+				</Compiler>
+				<Linker>
+					<Add option="-s" />
+				</Linker>
+			</Target>
+		</Build>
+		<Compiler>
+			<Add option="-Wall" />
+		</Compiler>
+		<Linker>
+			<Add library="..\..\..\libtcod-1.5.1-mingw32\libtcod-1.5.1\lib\libtcod-gui-mingw.a" />
+			<Add library="..\..\..\libtcod-1.5.1-mingw32\libtcod-1.5.1\lib\libtcod-mingw.a" />
+		</Linker>
+		<Unit filename="..\..\data\Sir_Henry&apos;s_32x32.png" />
+		<Unit filename="..\..\data\berry sprites.png" />
+		<Unit filename="..\..\data\biome sprites unripped.png" />
+		<Unit filename="..\..\data\building and lake sprites.png" />
+		<Unit filename="..\..\data\fonts.png" />
+		<Unit filename="..\..\data\hoenn sprites.png" />
+		<Unit filename="..\..\data\itemmaptest.txt" />
+		<Unit filename="..\..\data\johto sprites.png" />
+		<Unit filename="..\..\data\kanto sprites so goooooood.png" />
+		<Unit filename="..\..\data\layer1.txt" />
+		<Unit filename="..\..\data\libtcod-gui-mingw.dll" />
+		<Unit filename="..\..\data\libtcod-mingw.dll" />
+		<Unit filename="..\..\data\mapgen.txt" />
+		<Unit filename="..\..\data\maptest2.txt" />
+		<Unit filename="..\..\data\more sprites.png" />
+		<Unit filename="..\..\data\pokuelike.exe.stackdump" />
+		<Unit filename="..\..\data\special sprites.png" />
+		<Unit filename="..\..\data\sprites frame 1.png" />
+		<Unit filename="..\..\data\sprites frame 2.png" />
+		<Unit filename="..\..\data\terminal.png" />
+		<Unit filename="..\..\data\terrmaptest.txt" />
+		<Unit filename="..\..\data\tileinterpret.txt" />
+		<Unit filename="..\..\data\trainer sprites.png" />
+		<Unit filename="..\..\data\um.png" />
+		<Unit filename="..\..\src\.dep.inc" />
+		<Unit filename="..\..\src\Actor.cpp" />
+		<Unit filename="..\..\src\Actor.h" />
+		<Unit filename="..\..\src\Drawable.cpp" />
+		<Unit filename="..\..\src\Drawable.h" />
+		<Unit filename="..\..\src\Effect.cpp" />
+		<Unit filename="..\..\src\Effect.h" />
+		<Unit filename="..\..\src\Gameplay.cpp" />
+		<Unit filename="..\..\src\Gameplay.h" />
+		<Unit filename="..\..\src\Item.cpp" />
+		<Unit filename="..\..\src\Item.h" />
+		<Unit filename="..\..\src\MapGenerator.cpp" />
+		<Unit filename="..\..\src\MapGenerator.h" />
+		<Unit filename="..\..\src\MapManager.cpp" />
+		<Unit filename="..\..\src\MapManager.h" />
+		<Unit filename="..\..\src\Pokemon.cpp" />
+		<Unit filename="..\..\src\Pokemon.h" />
+		<Unit filename="..\..\src\Terrain.cpp" />
+		<Unit filename="..\..\src\Terrain.h" />
+		<Unit filename="..\..\src\TileInterpret.cpp" />
+		<Unit filename="..\..\src\TileInterpret.h" />
+		<Unit filename="..\..\src\main.cpp" />
+		<Extensions>
+			<code_completion />
+			<debugger />
+		</Extensions>
+	</Project>
+</CodeBlocks_project_file>

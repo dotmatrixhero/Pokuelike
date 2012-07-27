@@ -88,8 +88,8 @@ void MapManager::createTerrArray(){
                         cout<<"\n";
                 return; }
                 getline(myReadFile, input);
-                //cout<<input;
-                //cout<<"\n";
+                cout<<input;
+                cout<<"\n";
       
                  if (tilein.getTerrain(input) == NULL){ //ON THIS check, something happens...
                         cout<< "output empty";

@@ -1,7 +1,7 @@
-/* 
+/*
  * File:   TileInterpret.cpp
  * Author: Exiiile
- * 
+ *
  * Created on June 20, 2012, 2:27 PM
  */
 
@@ -36,16 +36,16 @@ TileInterpret::TileInterpret() {
         TCODColor myColor2 = returnColor(foo);
         std::getline(myReadFile, foo, '\n');
         bool trans = (foo.compare(0,1,"1") == 0);
-        std::getline(myReadFile, foo, '\n');    
+        std::getline(myReadFile, foo, '\n');
         bool walk = (foo.compare(0,1,"1") == 0);
         std::getline(myReadFile, foo, '\n');
         //TCODColor myColor(24,64,255);//temp
         //TCODColor myColor2(24,0,0);//temp
-        if (type.compare(0,4,"terr")== 0){    
+        if (type.compare(0,4,"terr")== 0){
             Terrain* a = new Terrain(i, myColor, myColor2, trans, walk);
             // terrVect.push_back(a);
             terrainMap[key] = a;//possible that this is not iterating
-            //terrVect will eventually become tileVect, and tileinterpret will contain information 
+            //terrVect will eventually become tileVect, and tileinterpret will contain information
             //for all tiles. There will have to be a series of checks at the beginning to determine
             //what type of Drawable the object is, so as to parse the correct data blocks (is destructible,
             //hp, regen, pp, moves, shiny, glowing, does damage, does type damage, is friendable, personality etc.
@@ -65,7 +65,7 @@ TileInterpret::TileInterpret() {
         }
     }
     myReadFile.close();
-        
+
 }
 
 TCODColor TileInterpret::returnColor(string color){ //add custom color option
@@ -139,6 +139,16 @@ TCODColor TileInterpret::returnColor(string color){ //add custom color option
         return TCODColor::darkCyan;
     if (color.compare(0,5,"dktcn")== 0)
         return TCODColor::darkerCyan;
+    if (color.compare(0,5,"dessy")== 0)
+        return TCODColor::desaturatedSky;
+    if (color.compare(0,5,"litsy")== 0)
+        return TCODColor::lightSky;
+    if (color.compare(0,5,"stdsy")== 0)
+        return TCODColor::sky;
+    if (color.compare(0,5,"drksy")== 0)
+        return TCODColor::darkSky;
+    if (color.compare(0,5,"dktsy")== 0)
+        return TCODColor::darkerSky;
     if (color.compare(0,5,"desbl")== 0)
         return TCODColor::desaturatedBlue;
     if (color.compare(0,5,"litbl")== 0)
@@ -200,11 +210,12 @@ TCODColor TileInterpret::returnColor(string color){ //add custom color option
         int B = atoi(std::string(b).c_str());
         return TCODColor(R,G,B);
     }
+    return TCODColor::black;
 }
 
 TileInterpret::~TileInterpret()
 {
-    
+
 }
 
 Terrain* TileInterpret::getTerrain(const std::string& key)

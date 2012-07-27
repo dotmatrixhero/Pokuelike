@@ -23,6 +23,8 @@ public:
     MapGenerator(const MapGenerator& orig);
     virtual ~MapGenerator();
 private:
+    static const int mapw = 78;
+    static const int maph = 45;
 
 };
 
