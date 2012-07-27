@@ -1,7 +1,7 @@
 /*
  * File:   Actor.cpp
  * Author: Brian
- * 
+ *
  * Created on June 17, 2012, 1:50 AM
  */
 
@@ -28,7 +28,7 @@ Actor::Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bo
 {
 }
 
-Actor::~Actor() 
+Actor::~Actor()
 {
 }
 
@@ -46,4 +46,3 @@ const std::string Actor::getName() const
 {
     return name;
 }
-

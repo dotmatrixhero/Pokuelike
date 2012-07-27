@@ -1,4 +1,4 @@
-/* 
+/*
  * File:   main.cpp
  * Author: Brian
  *
@@ -16,24 +16,24 @@
 #include "Gameplay.h"
 #include "MapManager.h"
 
-int main() {
-    //std::cout<<"hello";
+int main(){
+    std::cout<<"hello";
     //TCODConsole::setCustomFont("Sir_Henry's_32x32,bmp",TCOD_FONT_LAYOUT_ASCII_INROW);
     //TCODConsole::initRoot(80,50,"WOO!");
     /*TCODSystem::setFps(40);
-  
+
     //main menu
     //if loaded game, initalize a new actor taking old stats
     //initialize new gameplay with old stats
     //load old map manager
     //load map
-    
+
     Actor hero = Actor(20,20,64,TCODColor::white, TCODColor::black, false, false); //figure out how to randomize position of hero
-    
-     
+
+
     MapManager map = MapManager(new TCODConsole(78,45));//mapw, maph //THIS CAUSES A CRASH
-    
-    Gameplay play = Gameplay(&hero, &map); 
+
+    Gameplay play = Gameplay(&hero, &map);
     play.compTurn();
     while (!TCODConsole::isWindowClosed()){
         play.console();  //starting a new game
@@ -50,6 +50,8 @@ int main() {
     }
 */
     return 0;
+
+
 }
 
 

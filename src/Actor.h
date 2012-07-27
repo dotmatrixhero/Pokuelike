@@ -14,7 +14,7 @@
 
 #include "Drawable.h"
 
-class Actor: public Drawable 
+class Actor: public Drawable
 {
     private:
         std::string name;

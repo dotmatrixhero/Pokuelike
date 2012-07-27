@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_layout_file>
+	<ActiveTarget name="Debug" />
+	<File name="..\..\src\Actor.cpp" open="1" top="0" tabpos="2">
+		<Cursor position="719" topLine="23" />
+	</File>
+	<File name="..\..\src\Actor.h" open="1" top="0" tabpos="4">
+		<Cursor position="0" topLine="6" />
+	</File>
+	<File name="..\..\src\Drawable.cpp" open="1" top="0" tabpos="3">
+		<Cursor position="821" topLine="29" />
+	</File>
+	<File name="..\..\src\MapManager.cpp" open="1" top="0" tabpos="5">
+		<Cursor position="0" topLine="0" />
+	</File>
+	<File name="..\..\src\main.cpp" open="1" top="1" tabpos="1">
+		<Cursor position="1248" topLine="17" />
+	</File>
+</CodeBlocks_layout_file>
