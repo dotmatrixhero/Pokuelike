@@ -1,7 +1,7 @@
-/* 
+/*
  * File:   MapManager.cpp
  * Author: Brian
- * 
+ *
  * Created on June 17, 2012, 7:33 PM
  */
 
@@ -15,12 +15,15 @@ using namespace std;
 
 MapManager::MapManager(TCODConsole* consolemap) {
     ConsoleMap = consolemap;
-    
+    for(int A = 0; A<mapw; A++){
+        for(int B =0; B<maph; B++){
+          arrayExplored[A][B]=false;
+        }}
 }
 
 
 bool MapManager::isWalkable(int x, int y){
-    
+
     return gameMap->isWalkable(x,y); //this actually returns my boolean.
 }
 
@@ -44,24 +47,24 @@ void MapManager::createItemArray(){
     while(myReadFile.good()){
         getline(myReadFile, input);
         if (input.empty()){
-            cout<<"input #1 empty"; 
+            cout<<"input #1 empty";
         break; }
         getline(myReadFile, input);
         cout<<input;
         cout<<"\n";
-       
+
         //if (y==17){//THIS IS BAD PROGRAMMING, GOTTA FIX
         //    break;
        // }
-        if (tilein.getItem(input) == NULL){ 
+        if (tilein.getItem(input) == NULL){
             cout<< "output empty";
             break;
         }
-      
+
         Item* copyThis = tilein.getItem(input);//copy
         cout<<copyThis->returnz();
         cout<<"\n";
-        arrayItem[x][y] = new Item(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
+        arrayItem[x][y] = new Item(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk());
           if (x<mapw){
               if (y<maph){
                   y++;
@@ -81,25 +84,25 @@ void MapManager::createTerrArray(){
     string input;
     while(myReadFile.good()){
         for (int x =0; x<mapw; x++){
-        for (int y =0 ; y < maph; y++){    
+        for (int y =0 ; y < maph; y++){
                 getline(myReadFile, input);
                 if (input.empty()){
-                        cout<<"input #1 empty"; 
+                        cout<<"input #1 empty";
                         cout<<"\n";
                 return; }
                 getline(myReadFile, input);
                 cout<<input;
                 cout<<"\n";
-      
+
                  if (tilein.getTerrain(input) == NULL){ //ON THIS check, something happens...
                         cout<< "output empty";
                  return;
                 }
-      
+
                 Terrain* copyThis = tilein.getTerrain(input);//copy
 
-             arrayTerrain[x][y] = new Terrain(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
-    
+             arrayTerrain[x][y] = new Terrain(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk());
+
         }}
     }
 
@@ -116,21 +119,21 @@ void MapManager::createActoArray(){
     while(myReadFile.good()){
         getline(myReadFile, input);
         if (input.empty()){
-            cout<<"input #1 empty"; 
+            cout<<"input #1 empty";
         break; }
         getline(myReadFile, input);
         cout<<input;
         cout<<"\n";
-      
+
         if (tilein.getActor(input) == NULL){ //ON THIS check, something happens...
             cout<< "output empty";
             break;
         }
-      
+
         Actor* copyThis = tilein.getActor(input);//copy
         cout<<copyThis->returnz();
         cout<<"\n";
-        arrayActors[x][y] = new Actor(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
+        arrayActors[x][y] = new Actor(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk());
         if (x<mapw){
               if (y<maph){
                   y++;
@@ -141,7 +144,7 @@ void MapManager::createActoArray(){
               }
        }
     }
-    
+
 
 }
 
@@ -155,21 +158,21 @@ void MapManager::createEffeArray(){
     while(myReadFile.good()){
         getline(myReadFile, input);
         if (input.empty()){
-            cout<<"input #1 empty"; 
+            cout<<"input #1 empty";
         break; }
         getline(myReadFile, input);
         cout<<input;
         cout<<"\n";
-      
+
         if (tilein.getEffect(input) == NULL){ //ON THIS check, something happens...
             cout<< "output empty";
             break;
         }
-      
+
         Effect* copyThis = tilein.getEffect(input);//copy
         cout<<copyThis->returnz();
         cout<<"\n";
-        arrayEffects[x][y] = new Effect(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk()); 
+        arrayEffects[x][y] = new Effect(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk());
           if (x<mapw){
               if (y<maph){
                   y++;
@@ -180,7 +183,7 @@ void MapManager::createEffeArray(){
               }
        }
     }
-    
+
 
 }
 
@@ -191,11 +194,11 @@ void MapManager::terrToDraw(bool wholeMap, vector<int> FOV){
             for (int x =0; x<mapw; x++){
                   for(int y =0 ; y < maph; y++){
                       if (arrayTerrain[x][y] != NULL){
-                        Terrain* a = arrayTerrain[x][y]; 
+                        Terrain* a = arrayTerrain[x][y];
                         gameMap->setProperties(x,y,a->returntrans(),a->returnwalk());
                         if(wholeMap){
                                 a->draw(ConsoleMap);
-                        }else{                       
+                        }else{
                                 if (arrayExplored[x][y])
                                     a->drawWashed(ConsoleMap);//store memory.... blit a separate console? should not update..
                                 if (it != FOV.end()){
@@ -212,9 +215,9 @@ void MapManager::terrToDraw(bool wholeMap, vector<int> FOV){
                       }
                   }
             }
-    
 
-    }    
+
+    }
 }
 
 
@@ -222,14 +225,14 @@ void MapManager::itemToDraw(){
     for (int x =0; x<mapw; x++){
           for(int y =0 ; y < maph; y++){
               if (arrayItem[x][y] != NULL){
-                  Item* a = arrayItem[x][y]; 
+                  Item* a = arrayItem[x][y];
                   a->draw(ConsoleMap);
                   gameMap->setProperties(x,y,a->returntrans(),a->returnwalk());
     //   if terrain is not walkable, throw coordinates into an array called.....arrayNotWalk
     //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
-       
 
-              }}}    
+
+              }}}
 }
 
 
@@ -237,15 +240,15 @@ void MapManager::actoToDraw(){
     for (int x =0; x<mapw; x++){
           for(int y =0 ; y < maph; y++){
               if (arrayActors [x][y] != NULL){
-                  Actor* a = arrayActors[x][y]; 
+                  Actor* a = arrayActors[x][y];
                   a->draw(ConsoleMap);
                   gameMap->setProperties(x,y,a->returntrans(),a->returnwalk());
     //   if terrain is not walkable, throw coordinates into an array called.....arrayNotWalk
     //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
-       
-    
-  
-              }}}    
+
+
+
+              }}}
 }
 
 
@@ -254,14 +257,14 @@ void MapManager::effeToDraw(){
     for (int x =0; x<mapw; x++){
           for(int y =0 ; y < maph; y++){
               if (arrayEffects[x][y] != NULL){
-                  Effect* a = arrayEffects[x][y]; 
+                  Effect* a = arrayEffects[x][y];
                   a->draw(ConsoleMap);
                   gameMap->setProperties(x,y,a->returntrans(),a->returnwalk());
     //   if terrain is not walkable, throw coordinates into an array called.....arrayNotWalk
     //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
-       
 
-              }}}    
+
+              }}}
 }
 
 vector<int> MapManager::FOV(int playerx, int playery){
@@ -273,7 +276,7 @@ vector<int> MapManager::FOV(int playerx, int playery){
                 if (gameMap->isInFov(A,B)){
                    FOV.push_back(A);
                    FOV.push_back(B);
-                   arrayExplored[A][B] = new bool(true);
+                   arrayExplored[A][B] = (true);
                 }
         }
    }
@@ -281,6 +284,7 @@ vector<int> MapManager::FOV(int playerx, int playery){
 }
 
 TCODConsole* MapManager::returnConsoleMap(){
+
     return ConsoleMap;
 }
 
@@ -288,8 +292,11 @@ TCODMap* MapManager::returnFOVMap(){
     return gameMap;
 }
 
-MapManager::MapManager(const MapManager& orig) {
+Terrain* MapManager::returnTerrain(int posx, int posy){
+    return arrayTerrain[posx][posy];
 }
+
+
 
 MapManager::~MapManager() {
     delete gameMap;

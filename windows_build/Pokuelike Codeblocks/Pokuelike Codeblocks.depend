@@ -2,7 +2,7 @@
 1343298517 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\drawable.cpp
 	"Drawable.h"
 
-1343106831 c:\users\brian\documents\netbeansprojects\pokuelike\src\drawable.h
+1343368057 c:\users\brian\documents\netbeansprojects\pokuelike\src\drawable.h
 	<libtcod/libtcod.hpp>
 	<iostream>
 
@@ -13,13 +13,13 @@
 	<libtcod/libtcod.hpp>
 	"Drawable.h"
 
-1343279676 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\gameplay.cpp
+1343770734 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\gameplay.cpp
 	"Gameplay.h"
 	<string>
 	<iostream>
 	<libtcod/libtcod.hpp>
 
-1343108669 c:\users\brian\documents\netbeansprojects\pokuelike\src\gameplay.h
+1343769709 c:\users\brian\documents\netbeansprojects\pokuelike\src\gameplay.h
 	<libtcod/libtcod.hpp>
 	"Drawable.h"
 	"Actor.h"
@@ -32,7 +32,7 @@
 	<string>
 	"Drawable.h"
 
-1343106479 c:\users\brian\documents\netbeansprojects\pokuelike\src\mapmanager.h
+1343728066 c:\users\brian\documents\netbeansprojects\pokuelike\src\mapmanager.h
 	"TileInterpret.h"
 	<libtcod/libtcod.hpp>
 	"Actor.h"
@@ -62,7 +62,7 @@
 	<libtcod/libtcod.hpp>
 	"Drawable.h"
 
-1343117909 c:\users\brian\documents\netbeansprojects\pokuelike\src\mapgenerator.h
+1343727089 c:\users\brian\documents\netbeansprojects\pokuelike\src\mapgenerator.h
 	"TileInterpret.h"
 	<libtcod/libtcod.hpp>
 	"Actor.h"
@@ -76,10 +76,10 @@
 1342331474 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\item.cpp
 	"Item.h"
 
-1343277772 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\mapgenerator.cpp
+1343727089 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\mapgenerator.cpp
 	"MapGenerator.h"
 
-1343120204 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\mapmanager.cpp
+1343728826 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\mapmanager.cpp
 	"MapManager.h"
 	<iostream>
 	<fstream>
@@ -102,7 +102,7 @@
 	<fstream>
 	<string>
 
-1343346042 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\main.cpp
+1343770750 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\main.cpp
 	<cstdlib>
 	<iostream>
 	<fstream>
@@ -116,4 +116,11 @@
 
 1343346083 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\actor.cpp
 	"Actor.h"
+
+1343425390 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\renderer.cpp
+	"Renderer.h"
+
+1343538520 c:\users\brian\documents\netbeansprojects\pokuelike\src\renderer.h
+	<libtcod/libtcod.hpp>
+	<SDL/SDL.h>
 

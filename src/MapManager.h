@@ -1,4 +1,4 @@
-/* 
+/*
  * File:   MapManager.h
  * Author: Brian
  *
@@ -21,24 +21,24 @@ using namespace std;
 
 class MapManager {
     private:
-        static const int mapw= 78;
-        static const int maph = 45;
+        static const int mapw= 50;
+        static const int maph = 40;
         TCODConsole* ConsoleMap;
         TileInterpret tilein;
         Terrain* arrayTerrain[mapw][maph];
         Item* arrayItem[mapw][maph];
         Actor* arrayActors[mapw][maph];
         Effect* arrayEffects[mapw][maph];
-        bool* arrayExplored[mapw][maph];
+        bool arrayExplored[mapw][maph];
 
         TCODMap *gameMap;
     public:
         MapManager(TCODConsole* consolemap);
-        MapManager(const MapManager& orig);
+
         ~MapManager();
 
 
-        
+
         bool isWalkable(int x, int y);
         vector<int> FOV(int playerx, int playery);
         void makeNew();
@@ -51,6 +51,10 @@ class MapManager {
         void actoToDraw();
         void effeToDraw();
         void itemToDraw();
+        Terrain* returnTerrain(int posx, int posy);
+        Actor* returnActor(int posx, int posy);
+        Effect* returnEffect(int posx, int posy);
+        vector<Item> returnItemVect(int posx, int posy);
         TCODConsole* returnConsoleMap();
         TCODMap* returnFOVMap();
 

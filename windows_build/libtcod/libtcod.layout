@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_layout_file>
+	<ActiveTarget name="Release" />
+	<File name="main.cpp" open="1" top="0" tabpos="14">
+		<Cursor position="636" topLine="6" />
+	</File>
+	<File name="..\..\..\..\..\Downloads\libtcod-1.5.1-mingw32\libtcod-1.5.1\samples\apfviewer.cpp" open="1" top="1" tabpos="15">
+		<Cursor position="20" topLine="0" />
+	</File>
+	<File name="..\..\..\..\..\Downloads\libtcod-1.5.1-mingw32\libtcod-1.5.1\samples\worldgen\main.hpp" open="0" top="0" tabpos="0">
+		<Cursor position="1083" topLine="23" />
+	</File>
+</CodeBlocks_layout_file>

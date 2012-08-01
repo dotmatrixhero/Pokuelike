@@ -1,4 +1,4 @@
-/* 
+/*
  * File:   MapGenerator.h
  * Author: Brian
  *
@@ -19,12 +19,12 @@
 
 class MapGenerator {
 public:
-    MapGenerator();
+    MapGenerator(int numberLayers);
     MapGenerator(const MapGenerator& orig);
     virtual ~MapGenerator();
 private:
-    static const int mapw = 78;
-    static const int maph = 45;
+    static const int mapw = 50;
+    static const int maph = 40;
 
 };
 

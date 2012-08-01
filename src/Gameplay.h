@@ -1,4 +1,4 @@
-/* 
+/*
  * File:   Gameplay.h
  * Author: Brian
  *
@@ -20,19 +20,23 @@ class Gameplay {
     Actor* player;
 protected:
     int mapPosx, mapPosy;
-   static const int mapw = 78;
-   static const int maph = 45;
-   bool* arrayWalk[mapw][maph];
+   static const int mapw = 50;
+   static const int maph = 40;
+   int currentLayer;
+   vector<MapManager*> mapLayers;
 public:
     MapManager* Map;
     char* gamething;
     void console();
     void clear();
     void compTurn();
+    void cycleMapLayer(int newLayer);
     int playerTurn();
-    int tryMove();
-    Gameplay(Actor*, MapManager*);
+    int tryMove(MapManager * map);
+    Gameplay(Actor*);
     Gameplay(const Gameplay& orig);
+    void makeMap(int numberLayers);
+    int playgame();
     virtual ~Gameplay();
     friend class MapManager;
     friend class Drawable;

@@ -43,11 +43,11 @@ dktgn
 0
 1
 
-WATER(~)
+WATER(˜)
 terr
 watr
-126
-dktsy
+247
+drksy
 stdbl
 1
 1

@@ -1,4 +1,4 @@
-/* 
+/*
  * File:   Drawable.h
  * Author: Brian
  *
@@ -20,8 +20,8 @@ class Drawable {
         TCODColor back;
         bool trans;
         bool walk;
-        static const int mapw = 78;
-        static const int maph = 45;
+        static const int mapw = 50;
+        static const int maph = 40;
 
     public:
         Drawable(int x, int y, int c);

@@ -1,19 +1,46 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
 <CodeBlocks_layout_file>
 	<ActiveTarget name="Debug" />
+	<File name="..\..\data\maptest2.txt" open="0" top="0" tabpos="0">
+		<Cursor position="26" topLine="0" />
+	</File>
 	<File name="..\..\src\Actor.cpp" open="1" top="0" tabpos="2">
-		<Cursor position="719" topLine="23" />
+		<Cursor position="719" topLine="26" />
 	</File>
 	<File name="..\..\src\Actor.h" open="1" top="0" tabpos="4">
-		<Cursor position="0" topLine="6" />
+		<Cursor position="0" topLine="13" />
 	</File>
 	<File name="..\..\src\Drawable.cpp" open="1" top="0" tabpos="3">
-		<Cursor position="821" topLine="29" />
+		<Cursor position="821" topLine="50" />
+	</File>
+	<File name="..\..\src\Drawable.h" open="1" top="0" tabpos="8">
+		<Cursor position="401" topLine="6" />
+	</File>
+	<File name="..\..\src\Gameplay.cpp" open="1" top="1" tabpos="6">
+		<Cursor position="827" topLine="34" />
+	</File>
+	<File name="..\..\src\Gameplay.h" open="1" top="0" tabpos="7">
+		<Cursor position="593" topLine="18" />
+	</File>
+	<File name="..\..\src\MapGenerator.cpp" open="1" top="0" tabpos="12">
+		<Cursor position="195" topLine="9" />
+	</File>
+	<File name="..\..\src\MapGenerator.h" open="1" top="0" tabpos="13">
+		<Cursor position="415" topLine="10" />
 	</File>
 	<File name="..\..\src\MapManager.cpp" open="1" top="0" tabpos="5">
-		<Cursor position="0" topLine="0" />
+		<Cursor position="8561" topLine="51" />
 	</File>
-	<File name="..\..\src\main.cpp" open="1" top="1" tabpos="1">
-		<Cursor position="1248" topLine="17" />
+	<File name="..\..\src\MapManager.h" open="1" top="0" tabpos="9">
+		<Cursor position="837" topLine="21" />
+	</File>
+	<File name="..\..\src\Renderer.cpp" open="1" top="0" tabpos="10">
+		<Cursor position="119" topLine="0" />
+	</File>
+	<File name="..\..\src\Renderer.h" open="1" top="0" tabpos="11">
+		<Cursor position="115" topLine="0" />
+	</File>
+	<File name="..\..\src\main.cpp" open="1" top="0" tabpos="1">
+		<Cursor position="1111" topLine="26" />
 	</File>
 </CodeBlocks_layout_file>
