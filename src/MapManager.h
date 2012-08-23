@@ -17,6 +17,8 @@
 #include <vector>
 #include <iostream>
 #include <fstream>
+#include <string>
+
 using namespace std;
 
 class MapManager {
@@ -30,8 +32,9 @@ class MapManager {
         Actor* arrayActors[mapw][maph];
         Effect* arrayEffects[mapw][maph];
         bool arrayExplored[mapw][maph];
-
         TCODMap *gameMap;
+        MapManager* floorBelow;
+        MapManager* floorAbove;
     public:
         MapManager(TCODConsole* consolemap);
 
@@ -51,6 +54,8 @@ class MapManager {
         void actoToDraw();
         void effeToDraw();
         void itemToDraw();
+        void setFloorAbove(MapManager* floorabove);
+        void setFloorBelow(MapManager* floorbelow);
         Terrain* returnTerrain(int posx, int posy);
         Actor* returnActor(int posx, int posy);
         Effect* returnEffect(int posx, int posy);

@@ -1,4 +1,4 @@
-/* 
+/*
  * File:   Terrain.h
  * Author: DAWT
  *
@@ -11,6 +11,8 @@
 #include <libtcod/libtcod.hpp>
 #include "Drawable.h"
 #include <iostream>
+#include <string>
+using namespace std;
 
 class Terrain: public Drawable {
     private:
@@ -18,7 +20,7 @@ class Terrain: public Drawable {
     public:
         Terrain(int x, int y, int c);
         Terrain(int c, TCODColor fore,TCODColor back, bool trans, bool walk);
-        Terrain(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk);
+        Terrain(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, string type);
         virtual ~Terrain();
 };
 

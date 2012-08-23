@@ -13,17 +13,20 @@
 #include "MapManager.h"
 #include "MapGenerator.h"
 #include <vector>
+#include "Pokemon.h"
+
 using namespace std;
 
 
 class Gameplay {
-    Actor* player;
+    Pokemon* player;
 protected:
     int mapPosx, mapPosy;
    static const int mapw = 50;
    static const int maph = 40;
    int currentLayer;
    vector<MapManager*> mapLayers;
+   void attackMode();
 public:
     MapManager* Map;
     char* gamething;
@@ -33,7 +36,7 @@ public:
     void cycleMapLayer(int newLayer);
     int playerTurn();
     int tryMove(MapManager * map);
-    Gameplay(Actor*);
+    Gameplay(Pokemon*);
     Gameplay(const Gameplay& orig);
     void makeMap(int numberLayers);
     int playgame();
@@ -42,7 +45,7 @@ public:
     friend class Drawable;
     friend class TileInterpret;
 private:
-
+    TCODRandom* RNG;
 };
 
 #endif	/* GAMEPLAY_H */

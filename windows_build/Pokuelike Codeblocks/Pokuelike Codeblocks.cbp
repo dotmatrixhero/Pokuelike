@@ -32,8 +32,10 @@
 			</Target>
 		</Build>
 		<Linker>
-			<Add library="..\..\..\libtcod-1.5.1-mingw32\libtcod-1.5.1\lib\libtcod-gui-mingw.a" />
-			<Add library="..\..\..\libtcod-1.5.1-mingw32\libtcod-1.5.1\lib\libtcod-mingw.a" />
+			<Add library="..\..\..\libtcod\lib\libtcod-gui-mingw.a" />
+			<Add library="..\..\..\libtcod\lib\libtcod-gui-mingw-debug.a" />
+			<Add library="..\..\..\libtcod\lib\libtcod-mingw.a" />
+			<Add library="..\..\..\libtcod\lib\libtcod-mingw-debug.a" />
 		</Linker>
 		<Unit filename="..\..\data\Sir_Henry&apos;s_32x32.png" />
 		<Unit filename="..\..\data\berry sprites.png" />
@@ -43,7 +45,7 @@
 		<Unit filename="..\..\data\hoenn sprites.png" />
 		<Unit filename="..\..\data\itemmaptest.txt" />
 		<Unit filename="..\..\data\johto sprites.png" />
-		<Unit filename="..\..\data\kanto sprites so goooooood.png" />
+		<Unit filename="..\..\data\kanto sprites.png" />
 		<Unit filename="..\..\data\layer1.txt" />
 		<Unit filename="..\..\data\libtcod-gui-mingw.dll" />
 		<Unit filename="..\..\data\libtcod-mingw.dll" />

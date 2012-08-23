@@ -43,6 +43,8 @@ TileInterpret::TileInterpret() {
         //TCODColor myColor2(24,0,0);//temp
         if (type.compare(0,4,"terr")== 0){
             Terrain* a = new Terrain(i, myColor, myColor2, trans, walk);
+            a->setKey(key);
+            cout<< key<<"\n";
             // terrVect.push_back(a);
             terrainMap[key] = a;//possible that this is not iterating
             //terrVect will eventually become tileVect, and tileinterpret will contain information
@@ -52,15 +54,19 @@ TileInterpret::TileInterpret() {
         }
         if (type.compare(0,4,"item")== 0){
             Item* a = new Item(i, myColor, myColor2, trans, walk);
+            a->setKey(key);
+
             itemMap[key] = a;//possible that this is not iterating
         }
 
         if (type.compare(0,4,"acto")== 0){
             Actor* a = new Actor(i, myColor, myColor2, trans, walk);
+            a->setKey(key);
             actorMap[key] = a;//possible that this is not iterating
         }
         if (type.compare(0,4,"effe")== 0){
             Effect* a = new Effect(i, myColor, myColor2, trans, walk);
+            a->setKey(key);
             effectMap[key] = a;//possible that this is not iterating
         }
     }

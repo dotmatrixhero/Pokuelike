@@ -17,16 +17,16 @@ Actor::Actor(int c, TCODColor fore,TCODColor back, bool trans, bool walk)
 {
 }
 
-Actor::Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk)
-    : Drawable(x, y, c, fore, back, trans, walk)
+Actor::Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, std::string type)
+    : Drawable(x, y, c, fore, back, trans, walk, type)
 {
 }
 
-Actor::Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, const std::string& name)
-    : Drawable(x, y, c, fore, back, trans, walk),
-    name(name)
-{
-}
+//Actor::Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, const std::string& name)
+ //   : Drawable(x, y, c, fore, back, trans, walk),
+ //   name(name)
+//{
+//}
 
 Actor::~Actor()
 {
@@ -34,7 +34,8 @@ Actor::~Actor()
 
 void Actor::draw(TCODConsole* ConsoleMap)
 {
-    ConsoleMap->putChar(x,y,c,TCOD_BKGND_SET);
+
+    ConsoleMap->putCharEx(x,y,c,fore,ConsoleMap->getCharBackground(x,y));
 }
 
 void Actor::setName(const std::string& newname)

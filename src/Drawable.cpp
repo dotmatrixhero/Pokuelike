@@ -12,14 +12,15 @@ using namespace std;
 
 
 
-Drawable::Drawable(int X, int Y, int C, TCODColor FORE, TCODColor BACK, bool TRANS, bool WALK)
+Drawable::Drawable(int X, int Y, int C, TCODColor FORE, TCODColor BACK, bool TRANS, bool WALK, string TYPE)
         : x(X),
         y(Y),
         c(C),
         fore(FORE),
         back(BACK),
         trans(TRANS),
-        walk(WALK)
+        walk(WALK),
+        key(TYPE)
 {
 
 //    std::cout<<"hey there delilah"<<std::endl;
@@ -52,6 +53,9 @@ Drawable::~Drawable()
 {
 }
 
+void Drawable::setKey(std::string name){
+    (this->key).replace(0,4, name);
+}
 
 void Drawable::setX(int x)
 {
@@ -149,7 +153,9 @@ bool Drawable::moveDownRight()
 
 void Drawable::draw(TCODConsole* ConsoleMap)
 {
+
     ConsoleMap->putCharEx(x, y, c, fore, back);
+   // ConsoleMap->setCharForeground(x,y, TCODColor::white);
 }
 
 void Drawable::drawWashed(TCODConsole* ConsoleMap){
@@ -165,6 +171,9 @@ int Drawable::returny(){
 
 int Drawable::returnz(){
    return c;
+}
+std::string Drawable::returnkey(){
+    return key;
 }
 
 TCODColor Drawable::returnfore(){
@@ -182,4 +191,5 @@ bool Drawable::returntrans(){
 bool Drawable::returnwalk(){
     return walk;
 }
+
 

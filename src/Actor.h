@@ -22,8 +22,8 @@ class Actor: public Drawable
     public:
         Actor(int x, int y, int c);
         Actor(int c, TCODColor fore,TCODColor back, bool trans, bool walk);
-        Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk);
-        Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, const std::string& name);
+        Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, std::string type);
+ //       Actor(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, const std::string& name);
         ~Actor();
 
         void draw(TCODConsole* ConsoleMap);

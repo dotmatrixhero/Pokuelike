@@ -2,45 +2,72 @@
 <CodeBlocks_layout_file>
 	<ActiveTarget name="Debug" />
 	<File name="..\..\data\maptest2.txt" open="0" top="0" tabpos="0">
-		<Cursor position="26" topLine="0" />
+		<Cursor position="23722" topLine="2559" />
 	</File>
 	<File name="..\..\src\Actor.cpp" open="1" top="0" tabpos="2">
-		<Cursor position="719" topLine="26" />
+		<Cursor position="677" topLine="12" />
 	</File>
-	<File name="..\..\src\Actor.h" open="1" top="0" tabpos="4">
-		<Cursor position="0" topLine="13" />
+	<File name="..\..\src\Actor.h" open="1" top="0" tabpos="5">
+		<Cursor position="523" topLine="8" />
 	</File>
 	<File name="..\..\src\Drawable.cpp" open="1" top="0" tabpos="3">
-		<Cursor position="821" topLine="50" />
+		<Cursor position="2597" topLine="158" />
 	</File>
-	<File name="..\..\src\Drawable.h" open="1" top="0" tabpos="8">
-		<Cursor position="401" topLine="6" />
+	<File name="..\..\src\Drawable.h" open="1" top="0" tabpos="4">
+		<Cursor position="739" topLine="23" />
 	</File>
-	<File name="..\..\src\Gameplay.cpp" open="1" top="1" tabpos="6">
-		<Cursor position="827" topLine="34" />
+	<File name="..\..\src\Effect.cpp" open="1" top="0" tabpos="18">
+		<Cursor position="319" topLine="8" />
 	</File>
-	<File name="..\..\src\Gameplay.h" open="1" top="0" tabpos="7">
-		<Cursor position="593" topLine="18" />
+	<File name="..\..\src\Effect.h" open="1" top="0" tabpos="19">
+		<Cursor position="228" topLine="6" />
+	</File>
+	<File name="..\..\src\Gameplay.cpp" open="1" top="0" tabpos="7">
+		<Cursor position="2636" topLine="78" />
+	</File>
+	<File name="..\..\src\Gameplay.h" open="1" top="0" tabpos="8">
+		<Cursor position="1032" topLine="33" />
+	</File>
+	<File name="..\..\src\Item.cpp" open="1" top="0" tabpos="20">
+		<Cursor position="307" topLine="8" />
+	</File>
+	<File name="..\..\src\Item.h" open="1" top="0" tabpos="21">
+		<Cursor position="223" topLine="7" />
 	</File>
 	<File name="..\..\src\MapGenerator.cpp" open="1" top="0" tabpos="12">
-		<Cursor position="195" topLine="9" />
+		<Cursor position="2183" topLine="7" />
 	</File>
 	<File name="..\..\src\MapGenerator.h" open="1" top="0" tabpos="13">
-		<Cursor position="415" topLine="10" />
+		<Cursor position="980" topLine="23" />
 	</File>
-	<File name="..\..\src\MapManager.cpp" open="1" top="0" tabpos="5">
-		<Cursor position="8561" topLine="51" />
+	<File name="..\..\src\MapManager.cpp" open="1" top="0" tabpos="6">
+		<Cursor position="5753" topLine="221" />
 	</File>
 	<File name="..\..\src\MapManager.h" open="1" top="0" tabpos="9">
-		<Cursor position="837" topLine="21" />
+		<Cursor position="365" topLine="20" />
 	</File>
-	<File name="..\..\src\Renderer.cpp" open="1" top="0" tabpos="10">
+	<File name="..\..\src\Pokemon.cpp" open="1" top="0" tabpos="15">
 		<Cursor position="119" topLine="0" />
 	</File>
-	<File name="..\..\src\Renderer.h" open="1" top="0" tabpos="11">
-		<Cursor position="115" topLine="0" />
+	<File name="..\..\src\Pokemon.h" open="1" top="0" tabpos="22">
+		<Cursor position="342" topLine="13" />
+	</File>
+	<File name="..\..\src\Renderer.cpp" open="1" top="0" tabpos="10">
+		<Cursor position="23" topLine="3" />
+	</File>
+	<File name="..\..\src\Renderer.h" open="1" top="1" tabpos="11">
+		<Cursor position="300" topLine="0" />
+	</File>
+	<File name="..\..\src\Terrain.cpp" open="1" top="0" tabpos="16">
+		<Cursor position="426" topLine="10" />
+	</File>
+	<File name="..\..\src\Terrain.h" open="1" top="0" tabpos="17">
+		<Cursor position="247" topLine="9" />
+	</File>
+	<File name="..\..\src\TileInterpret.cpp" open="1" top="0" tabpos="14">
+		<Cursor position="3724" topLine="92" />
 	</File>
 	<File name="..\..\src\main.cpp" open="1" top="0" tabpos="1">
-		<Cursor position="1111" topLine="26" />
+		<Cursor position="506" topLine="11" />
 	</File>
 </CodeBlocks_layout_file>

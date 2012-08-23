@@ -10,6 +10,8 @@
 
 #include <libtcod/libtcod.hpp>
 #include <iostream>
+#include <string>
+using namespace std;
 
 class Drawable {
     protected:
@@ -20,13 +22,14 @@ class Drawable {
         TCODColor back;
         bool trans;
         bool walk;
+        string key;
         static const int mapw = 50;
         static const int maph = 40;
 
     public:
         Drawable(int x, int y, int c);
         Drawable(int c, TCODColor fore,TCODColor back, bool trans, bool walk);
-        Drawable(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk);
+        Drawable(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, string type);
         virtual ~Drawable();
 
         void setX(int x);
@@ -41,7 +44,8 @@ class Drawable {
         bool moveDownLeft();
         bool moveUpRight();
         bool moveDownRight();
-
+        virtual void setKey(string);
+        virtual string returnkey();
         virtual void draw(TCODConsole* ConsoleMap);
         virtual void drawWashed(TCODConsole* ConsoleMap);
         // Getters

@@ -16,15 +16,25 @@
 #include <vector>
 #include <iostream>
 #include <fstream>
+#include <string>
+using namespace std;
 
 class MapGenerator {
 public:
-    MapGenerator(int numberLayers);
+    MapGenerator(int numberLayers, int layerNumber, TCODRandom *Rand);
     MapGenerator(const MapGenerator& orig);
     virtual ~MapGenerator();
 private:
+    TCODRandom* RNG;
     static const int mapw = 50;
     static const int maph = 40;
+    string stringMap[mapw][maph];
+    void write(const char* fileName);
+    void genRandomTest();
+    void genBSP(int numberLayers, int layerNumber);
+    bool isSurrounded(int x,int y,string type);
+    void fillBox(int posx, int posy, int widthx, int heighty, string type);
+    void fillBSP(TCODBsp *root);
 
 };
 

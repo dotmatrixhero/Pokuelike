@@ -1,4 +1,4 @@
-/* 
+/*
  * File:   Pokemon.h
  * Author: Brian
  *
@@ -9,11 +9,11 @@
 #define	POKEMON_H
 #include "Actor.h"
 #include <libtcod/libtcod.hpp>
-
+#include <string>
 
 class Pokemon: public Actor {
 public:
-    Pokemon(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk);
+    Pokemon(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, string key);
     virtual ~Pokemon();
 private:
     int weight;
@@ -34,7 +34,7 @@ private:
     //vector item equipped
     //move
     //mannerism
-    
+
 };
 
 #endif	/* POKEMON_H */

@@ -64,7 +64,7 @@ void MapManager::createItemArray(){
         Item* copyThis = tilein.getItem(input);//copy
         cout<<copyThis->returnz();
         cout<<"\n";
-        arrayItem[x][y] = new Item(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk());
+        arrayItem[x][y] = new Item(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk(), copyThis->returnkey());
           if (x<mapw){
               if (y<maph){
                   y++;
@@ -91,8 +91,7 @@ void MapManager::createTerrArray(){
                         cout<<"\n";
                 return; }
                 getline(myReadFile, input);
-                cout<<input;
-                cout<<"\n";
+
 
                  if (tilein.getTerrain(input) == NULL){ //ON THIS check, something happens...
                         cout<< "output empty";
@@ -101,7 +100,7 @@ void MapManager::createTerrArray(){
 
                 Terrain* copyThis = tilein.getTerrain(input);//copy
 
-             arrayTerrain[x][y] = new Terrain(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk());
+             arrayTerrain[x][y] = new Terrain(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk(), copyThis->returnkey());
 
         }}
     }
@@ -133,7 +132,7 @@ void MapManager::createActoArray(){
         Actor* copyThis = tilein.getActor(input);//copy
         cout<<copyThis->returnz();
         cout<<"\n";
-        arrayActors[x][y] = new Actor(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk());
+        arrayActors[x][y] = new Actor(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk(), copyThis->returnkey());
         if (x<mapw){
               if (y<maph){
                   y++;
@@ -170,9 +169,8 @@ void MapManager::createEffeArray(){
         }
 
         Effect* copyThis = tilein.getEffect(input);//copy
-        cout<<copyThis->returnz();
         cout<<"\n";
-        arrayEffects[x][y] = new Effect(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk());
+        arrayEffects[x][y] = new Effect(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk(),copyThis->returnkey());
           if (x<mapw){
               if (y<maph){
                   y++;
@@ -277,9 +275,13 @@ vector<int> MapManager::FOV(int playerx, int playery){
                    FOV.push_back(A);
                    FOV.push_back(B);
                    arrayExplored[A][B] = (true);
+                //   if((returnTerrain(A,B)->returnkey()).compare("airr")==0)
+
+
                 }
         }
    }
+
     return FOV;
 }
 
@@ -293,12 +295,19 @@ TCODMap* MapManager::returnFOVMap(){
 }
 
 Terrain* MapManager::returnTerrain(int posx, int posy){
+    // cout << arrayTerrain[posx][posy]->returnkey();
     return arrayTerrain[posx][posy];
 }
 
+void MapManager::setFloorAbove(MapManager* floorabove){
+    floorAbove = floorabove;
+}
 
+void MapManager::setFloorBelow(MapManager* floorbelow){
+    floorBelow = floorbelow;
+}
 
 MapManager::~MapManager() {
-    delete gameMap;
+     delete gameMap;
 }
 

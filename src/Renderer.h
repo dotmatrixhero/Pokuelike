@@ -4,7 +4,7 @@
 #include <SDL/SDL.h>
 
 
-class Renderer //:public ITCODSDLRenderer
+class Renderer :public ITCODSDLRenderer
 {
     public:
         Renderer();

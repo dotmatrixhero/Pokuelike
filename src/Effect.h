@@ -1,4 +1,4 @@
-/* 
+/*
  * File:   Effect.h
  * Author: Exiiile
  *
@@ -10,14 +10,15 @@
 
 #include <libtcod/libtcod.hpp>
 #include "Drawable.h"
-
+#include <string>
+using namespace std;
 class Effect : public Drawable {
     private:
 
     public:
         Effect(int x, int y, int c);
         Effect(int c, TCODColor fore, TCODColor back, bool trans, bool walk);
-        Effect(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk);
+        Effect(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, string type);
         virtual ~Effect();
 };
 

@@ -1,4 +1,4 @@
-/* 
+/*
  * File:   Items.h
  * Author: Exiiile
  *
@@ -10,6 +10,8 @@
 
 #include <libtcod/libtcod.hpp>
 #include "Drawable.h"
+#include <string>
+using namespace std;
 
 class Item: public Drawable {
     private:
@@ -17,7 +19,7 @@ class Item: public Drawable {
     public:
         Item(int x, int y, int c);
         Item(int c, TCODColor fore,TCODColor back, bool trans, bool walk);
-        Item(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk);
+        Item(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, string type);
         virtual ~Item();
 };
 
