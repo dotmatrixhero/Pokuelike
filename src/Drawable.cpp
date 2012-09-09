@@ -53,6 +53,9 @@ Drawable::~Drawable()
 {
 }
 
+void Drawable::setCurrentC(int curr){
+        currentc=curr;
+}
 void Drawable::setKey(std::string name){
     (this->key).replace(0,4, name);
 }
@@ -65,6 +68,11 @@ void Drawable::setX(int x)
 void Drawable::setY(int y)
 {
     this->y = y;
+}
+
+void Drawable::setC(int z)
+{
+    c = z;
 }
 
 bool Drawable::moveRight()
@@ -155,7 +163,6 @@ void Drawable::draw(TCODConsole* ConsoleMap)
 {
 
     ConsoleMap->putCharEx(x, y, c, fore, back);
-   // ConsoleMap->setCharForeground(x,y, TCODColor::white);
 }
 
 void Drawable::drawWashed(TCODConsole* ConsoleMap){
@@ -169,7 +176,7 @@ int Drawable::returny(){
    return y;
 }
 
-int Drawable::returnz(){
+int Drawable::returnc(){
    return c;
 }
 std::string Drawable::returnkey(){
@@ -192,4 +199,8 @@ bool Drawable::returnwalk(){
     return walk;
 }
 
+int Drawable::returncurrentc(){
+
+    return currentc;
+}
 

@@ -19,7 +19,7 @@ drkor
 CAVE_GROUND_TILE(.)
 terr
 grnd
-46 
+2560 
 drkgy
 dktor
 1

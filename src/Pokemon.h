@@ -15,7 +15,12 @@ class Pokemon: public Actor {
 public:
     Pokemon(int x, int y, int c, TCODColor fore, TCODColor back, bool trans, bool walk, string key);
     virtual ~Pokemon();
+            bool moveRight();
+        bool moveLeft();
+        bool moveDown();
+        bool moveUp();
 private:
+
     int weight;
     int atk;
     int spatk;

@@ -14,6 +14,8 @@
 #include "MapGenerator.h"
 #include <vector>
 #include "Pokemon.h"
+#include "Renderer.h"
+#include <math.h>
 
 using namespace std;
 
@@ -36,16 +38,20 @@ public:
     void cycleMapLayer(int newLayer);
     int playerTurn();
     int tryMove(MapManager * map);
-    Gameplay(Pokemon*);
+    Gameplay(Pokemon*, Renderer*);
     Gameplay(const Gameplay& orig);
     void makeMap(int numberLayers);
     int playgame();
     virtual ~Gameplay();
-    friend class MapManager;
-    friend class Drawable;
-    friend class TileInterpret;
+
 private:
     TCODRandom* RNG;
+    int timer;
+    void animate();
+    TCODConsole* HUD;
+    vector<TCODConsole*> menuTab;
+    int currentTab;
+    Renderer* HUDRender;
 };
 
 #endif	/* GAMEPLAY_H */

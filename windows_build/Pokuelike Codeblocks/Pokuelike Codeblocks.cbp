@@ -13,7 +13,9 @@
 				<Option object_output="obj\Debug\" />
 				<Option type="1" />
 				<Option compiler="gcc" />
+				<Option use_console_runner="0" />
 				<Compiler>
+					<Add option="-Wall" />
 					<Add option="-g" />
 				</Compiler>
 			</Target>
@@ -32,10 +34,14 @@
 			</Target>
 		</Build>
 		<Linker>
+			<Add option="-lmingw32 -lSDLmain -lSDL" />
+			<Add library="..\..\..\libtcod\dependencies\SDL-1.2.12\lib\mingw\libSDL.a" />
+			<Add library="..\..\..\libtcod\dependencies\SDL-1.2.12\lib\mingw\libSDL.dll.a" />
 			<Add library="..\..\..\libtcod\lib\libtcod-gui-mingw.a" />
 			<Add library="..\..\..\libtcod\lib\libtcod-gui-mingw-debug.a" />
 			<Add library="..\..\..\libtcod\lib\libtcod-mingw.a" />
 			<Add library="..\..\..\libtcod\lib\libtcod-mingw-debug.a" />
+			<Add library="..\..\..\SDL_ttf-2.0.11\lib\x64\libSDL_ttf.a" />
 		</Linker>
 		<Unit filename="..\..\data\Sir_Henry&apos;s_32x32.png" />
 		<Unit filename="..\..\data\berry sprites.png" />

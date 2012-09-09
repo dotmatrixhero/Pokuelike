@@ -32,7 +32,9 @@ private:
     void write(const char* fileName);
     void genRandomTest();
     void genBSP(int numberLayers, int layerNumber);
+    void connectBSP(TCODBsp *root);
     bool isSurrounded(int x,int y,string type);
+    int numberSurrounding(int x, int y, string type);
     void fillBox(int posx, int posy, int widthx, int heighty, string type);
     void fillBSP(TCODBsp *root);
 

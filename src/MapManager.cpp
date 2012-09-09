@@ -62,9 +62,9 @@ void MapManager::createItemArray(){
         }
 
         Item* copyThis = tilein.getItem(input);//copy
-        cout<<copyThis->returnz();
+        cout<<copyThis->returnc();
         cout<<"\n";
-        arrayItem[x][y] = new Item(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk(), copyThis->returnkey());
+        arrayItem[x][y] = new Item(x,y,copyThis->returnc(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk(), copyThis->returnkey());
           if (x<mapw){
               if (y<maph){
                   y++;
@@ -100,8 +100,7 @@ void MapManager::createTerrArray(){
 
                 Terrain* copyThis = tilein.getTerrain(input);//copy
 
-             arrayTerrain[x][y] = new Terrain(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk(), copyThis->returnkey());
-
+             arrayTerrain[x][y] = new Terrain(x,y,copyThis->returnc(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk(), copyThis->returnkey());
         }}
     }
 
@@ -130,9 +129,9 @@ void MapManager::createActoArray(){
         }
 
         Actor* copyThis = tilein.getActor(input);//copy
-        cout<<copyThis->returnz();
+        cout<<copyThis->returnc();
         cout<<"\n";
-        arrayActors[x][y] = new Actor(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk(), copyThis->returnkey());
+        arrayActors[x][y] = new Actor(x,y,copyThis->returnc(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk(), copyThis->returnkey());
         if (x<mapw){
               if (y<maph){
                   y++;
@@ -170,7 +169,7 @@ void MapManager::createEffeArray(){
 
         Effect* copyThis = tilein.getEffect(input);//copy
         cout<<"\n";
-        arrayEffects[x][y] = new Effect(x,y,copyThis->returnz(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk(),copyThis->returnkey());
+        arrayEffects[x][y] = new Effect(x,y,copyThis->returnc(),copyThis->returnfore(),copyThis->returnback(), copyThis->returntrans(),copyThis->returnwalk(),copyThis->returnkey());
           if (x<mapw){
               if (y<maph){
                   y++;
@@ -308,6 +307,6 @@ void MapManager::setFloorBelow(MapManager* floorbelow){
 }
 
 MapManager::~MapManager() {
-     delete gameMap;
+    delete gameMap;
 }
 
