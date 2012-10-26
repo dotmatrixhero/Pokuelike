@@ -42,14 +42,14 @@ Gameplay::Gameplay(Pokemon* a, Renderer* hudrender) {
         menuTab[p]->setKeyColor(TCODColor(255,0,255));
         TCODConsole::blit(menuTab[p],0,0,16,24,HUD,26,0, 1.0, 0);
     }
-    HUDRender->init(&currentTab);
+    HUDRender->init(&currentTab, &timer);
 
 }
 
 int Gameplay::playgame(){
         timer++;
         if (timer == 100){
-        timer =0;
+            timer =0;
         }
 
         console();  //starting a new game
@@ -171,7 +171,7 @@ void Gameplay::compTurn(){
         //layer with a dark blue tint. theoretically, this would be recursive?
 }
 void Gameplay::animate(){
-
+    HUDRender->animateSprite();
     if(timer%25 == 15) {
         player->setCurrentC(player->returncurrentc()+16);
     }
@@ -185,9 +185,11 @@ void Gameplay::clear(){
     TCODConsole::flush();
     TCODConsole::root->clear(); //HUH?
     (Map->returnConsoleMap())->clear();
+     TCODConsole::root->setDirty(26,0,16,18);
 }
 
 void Gameplay::console(){
+
     //DRAW MAP
     const char *thing = player->getName().c_str();
     HUD->setDefaultForeground(TCODColor::white);

@@ -15,7 +15,7 @@
 	"Drawable.h"
 	<string>
 
-1347180934 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\gameplay.cpp
+1349041541 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\gameplay.cpp
 	"Gameplay.h"
 	<string>
 	<iostream>
@@ -112,7 +112,7 @@
 	<fstream>
 	<string>
 
-1347144457 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\main.cpp
+1350771623 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\main.cpp
 	<cstdlib>
 	<iostream>
 	<fstream>
@@ -129,10 +129,11 @@
 1345854029 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\actor.cpp
 	"Actor.h"
 
-1347149988 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\renderer.cpp
+1349041751 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\renderer.cpp
 	"Renderer.h"
+	<iostream>
 
-1347148402 c:\users\brian\documents\netbeansprojects\pokuelike\src\renderer.h
+1349041646 c:\users\brian\documents\netbeansprojects\pokuelike\src\renderer.h
 	<libtcod/libtcod.hpp>
 	<SDL/SDL.h>
 	<iostream>

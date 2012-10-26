@@ -44,7 +44,7 @@ int main(int argc, char *argv[]){
     //load old map manager
     //load map
 
-    Pokemon hero = Pokemon(10,10,1520,TCODColor::white, TCODColor::black, false, false, "dick"); //figure out how to randomize position of hero
+    Pokemon hero = Pokemon(10,10,288,TCODColor::white, TCODColor::black, false, false, "dick"); //figure out how to randomize position of hero
 //49+4
 
     Gameplay play = Gameplay(&hero, HUDRender);
