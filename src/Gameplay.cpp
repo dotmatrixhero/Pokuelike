@@ -38,7 +38,7 @@ Gameplay::Gameplay(Pokemon* a, Renderer* hudrender) {
 
 
         menuTab[p]->printFrame(2,0,13,17, true);
-          menuTab[p]->putCharEx(2,p*2+1,219,TCODColor(121,121,121),TCODColor::black);
+        menuTab[p]->putCharEx(2,p*2+1,219,TCODColor(121,121,121),TCODColor::black);
         menuTab[p]->setKeyColor(TCODColor(255,0,255));
         TCODConsole::blit(menuTab[p],0,0,16,24,HUD,26,0, 1.0, 0);
     }

@@ -66,6 +66,9 @@
 		<Unit filename="..\..\data\tileinterpret.txt" />
 		<Unit filename="..\..\data\trainer sprites.png" />
 		<Unit filename="..\..\data\um.png" />
+		<Unit filename="..\..\include\Parser.h">
+			<Option virtualFolder="src\" />
+		</Unit>
 		<Unit filename="..\..\include\Renderer.h">
 			<Option virtualFolder="src\" />
 		</Unit>
@@ -84,6 +87,7 @@
 		<Unit filename="..\..\src\MapGenerator.h" />
 		<Unit filename="..\..\src\MapManager.cpp" />
 		<Unit filename="..\..\src\MapManager.h" />
+		<Unit filename="..\..\src\Parser.cpp" />
 		<Unit filename="..\..\src\Pokemon.cpp" />
 		<Unit filename="..\..\src\Pokemon.h" />
 		<Unit filename="..\..\src\Renderer.cpp" />

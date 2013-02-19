@@ -13,7 +13,7 @@
 	<File name="..\..\src\Drawable.cpp" open="1" top="0" tabpos="4">
 		<Cursor position="955" topLine="0" />
 	</File>
-	<File name="..\..\src\Drawable.h" open="1" top="1" tabpos="7">
+	<File name="..\..\src\Drawable.h" open="1" top="0" tabpos="7">
 		<Cursor position="1206" topLine="33" />
 	</File>
 	<File name="..\..\src\Effect.cpp" open="1" top="0" tabpos="19">
@@ -23,7 +23,7 @@
 		<Cursor position="228" topLine="0" />
 	</File>
 	<File name="..\..\src\Gameplay.cpp" open="1" top="0" tabpos="5">
-		<Cursor position="6335" topLine="13" />
+		<Cursor position="2565" topLine="84" />
 	</File>
 	<File name="..\..\src\Gameplay.h" open="1" top="0" tabpos="6">
 		<Cursor position="562" topLine="24" />
@@ -35,7 +35,7 @@
 		<Cursor position="223" topLine="0" />
 	</File>
 	<File name="..\..\src\MapGenerator.cpp" open="1" top="0" tabpos="14">
-		<Cursor position="524" topLine="183" />
+		<Cursor position="524" topLine="3" />
 	</File>
 	<File name="..\..\src\MapGenerator.h" open="1" top="0" tabpos="15">
 		<Cursor position="147" topLine="0" />
@@ -43,11 +43,11 @@
 	<File name="..\..\src\MapManager.cpp" open="1" top="0" tabpos="9">
 		<Cursor position="6656" topLine="216" />
 	</File>
-	<File name="..\..\src\MapManager.h" open="1" top="0" tabpos="10">
+	<File name="..\..\src\MapManager.h" open="1" top="1" tabpos="10">
 		<Cursor position="828" topLine="22" />
 	</File>
 	<File name="..\..\src\Pokemon.cpp" open="1" top="0" tabpos="2">
-		<Cursor position="308" topLine="15" />
+		<Cursor position="602" topLine="0" />
 	</File>
 	<File name="..\..\src\Pokemon.h" open="1" top="0" tabpos="13">
 		<Cursor position="200" topLine="1" />
@@ -71,6 +71,6 @@
 		<Cursor position="442" topLine="0" />
 	</File>
 	<File name="..\..\src\main.cpp" open="1" top="0" tabpos="1">
-		<Cursor position="1301" topLine="28" />
+		<Cursor position="1363" topLine="23" />
 	</File>
 </CodeBlocks_layout_file>

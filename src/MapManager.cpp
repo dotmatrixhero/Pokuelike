@@ -225,8 +225,6 @@ void MapManager::itemToDraw(){
                   Item* a = arrayItem[x][y];
                   a->draw(ConsoleMap);
                   gameMap->setProperties(x,y,a->returntrans(),a->returnwalk());
-    //   if terrain is not walkable, throw coordinates into an array called.....arrayNotWalk
-    //   if terrain is not viewable throw coordinates into an array called....arrayNotTrans
 
 
               }}}

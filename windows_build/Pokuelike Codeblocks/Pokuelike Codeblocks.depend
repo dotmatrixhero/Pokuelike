@@ -1,27 +1,27 @@
 # depslib dependency file v1.0
-1345854284 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\drawable.cpp
+1345850684 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\drawable.cpp
 	"Drawable.h"
 
-1345854298 c:\users\brian\documents\netbeansprojects\pokuelike\src\drawable.h
+1345850698 c:\users\brian\documents\netbeansprojects\pokuelike\src\drawable.h
 	<libtcod/libtcod.hpp>
 	<iostream>
 	<string>
 
-1345012678 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\effect.cpp
+1345009078 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\effect.cpp
 	"Effect.h"
 
-1345012702 c:\users\brian\documents\netbeansprojects\pokuelike\src\effect.h
+1345009102 c:\users\brian\documents\netbeansprojects\pokuelike\src\effect.h
 	<libtcod/libtcod.hpp>
 	"Drawable.h"
 	<string>
 
-1349041541 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\gameplay.cpp
+1360795615 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\gameplay.cpp
 	"Gameplay.h"
 	<string>
 	<iostream>
 	<libtcod/libtcod.hpp>
 
-1347144405 c:\users\brian\documents\netbeansprojects\pokuelike\src\gameplay.h
+1347140805 c:\users\brian\documents\netbeansprojects\pokuelike\src\gameplay.h
 	<libtcod/libtcod.hpp>
 	"Drawable.h"
 	"Actor.h"
@@ -32,12 +32,12 @@
 	"Renderer.h"
 	<math.h>
 
-1345845665 c:\users\brian\documents\netbeansprojects\pokuelike\src\actor.h
+1345842065 c:\users\brian\documents\netbeansprojects\pokuelike\src\actor.h
 	<libtcod/libtcod.hpp>
 	<string>
 	"Drawable.h"
 
-1343978005 c:\users\brian\documents\netbeansprojects\pokuelike\src\mapmanager.h
+1343974405 c:\users\brian\documents\netbeansprojects\pokuelike\src\mapmanager.h
 	"TileInterpret.h"
 	<libtcod/libtcod.hpp>
 	"Actor.h"
@@ -49,7 +49,7 @@
 	<fstream>
 	<string>
 
-1343105821 c:\users\brian\documents\netbeansprojects\pokuelike\src\tileinterpret.h
+1343102221 c:\users\brian\documents\netbeansprojects\pokuelike\src\tileinterpret.h
 	<string>
 	<map>
 	<vector>
@@ -59,18 +59,18 @@
 	"Terrain.h"
 	"Item.h"
 
-1345012800 c:\users\brian\documents\netbeansprojects\pokuelike\src\terrain.h
+1345009200 c:\users\brian\documents\netbeansprojects\pokuelike\src\terrain.h
 	<libtcod/libtcod.hpp>
 	"Drawable.h"
 	<iostream>
 	<string>
 
-1345012739 c:\users\brian\documents\netbeansprojects\pokuelike\src\item.h
+1345009139 c:\users\brian\documents\netbeansprojects\pokuelike\src\item.h
 	<libtcod/libtcod.hpp>
 	"Drawable.h"
 	<string>
 
-1345962079 c:\users\brian\documents\netbeansprojects\pokuelike\src\mapgenerator.h
+1345958479 c:\users\brian\documents\netbeansprojects\pokuelike\src\mapgenerator.h
 	"TileInterpret.h"
 	<libtcod/libtcod.hpp>
 	"Actor.h"
@@ -82,37 +82,37 @@
 	<fstream>
 	<string>
 
-1345012720 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\item.cpp
+1345009120 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\item.cpp
 	"Item.h"
 
-1346750996 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\mapgenerator.cpp
+1361310195 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\mapgenerator.cpp
 	"MapGenerator.h"
 
-1345933801 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\mapmanager.cpp
+1355881324 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\mapmanager.cpp
 	"MapManager.h"
 	<iostream>
 	<fstream>
 	<libtcod/libtcod.hpp>
 
-1345854722 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\pokemon.cpp
+1351968173 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\pokemon.cpp
 	"Pokemon.h"
 
-1345854399 c:\users\brian\documents\netbeansprojects\pokuelike\src\pokemon.h
+1345850799 c:\users\brian\documents\netbeansprojects\pokuelike\src\pokemon.h
 	"Actor.h"
 	<libtcod/libtcod.hpp>
 	<string>
 
-1345012912 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\terrain.cpp
+1345009312 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\terrain.cpp
 	"Terrain.h"
 
-1345092876 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\tileinterpret.cpp
+1345089276 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\tileinterpret.cpp
 	"TileInterpret.h"
 	<libtcod/libtcod.hpp>
 	<iostream>
 	<fstream>
 	<string>
 
-1350771623 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\main.cpp
+1360796746 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\main.cpp
 	<cstdlib>
 	<iostream>
 	<fstream>
@@ -126,17 +126,31 @@
 	"Renderer.h"
 	<SDL/SDL.h>
 
-1345854029 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\actor.cpp
+1345850429 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\actor.cpp
 	"Actor.h"
 
-1349041751 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\renderer.cpp
+1349038151 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\renderer.cpp
 	"Renderer.h"
 	<iostream>
 
-1349041646 c:\users\brian\documents\netbeansprojects\pokuelike\src\renderer.h
+1349038046 c:\users\brian\documents\netbeansprojects\pokuelike\src\renderer.h
 	<libtcod/libtcod.hpp>
 	<SDL/SDL.h>
 	<iostream>
 	<string>
 	<SDL/SDL_ttf.h>
+
+1353655511 source:c:\users\brian\documents\netbeansprojects\pokuelike\src\parser.cpp
+	"Parser.h"
+
+1353655270 c:\users\brian\documents\netbeansprojects\pokuelike\src\parser.h
+	<string>
+	<map>
+	<vector>
+	<iostream>
+	"Actor.h"
+	"Effect.h"
+	"Terrain.h"
+	"Item.h"
+	<libtcod/libtcod.hpp>
 

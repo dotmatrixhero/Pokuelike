@@ -117,21 +117,21 @@ void MapGenerator::connectBSP(TCODBsp* root){
         TCODBsp *temp = root;
         bool connectedRight;
         bool connectedLeft;
-        int fuck;
+        int randNumOffset;
         int rightTry;
         int leftTry;
         if(!temp->horizontal){
-            fuck = RNG->getInt(temp->getLeft()->y+1, (temp->getLeft()->y+temp->getLeft()->h)-2);
+            randNumOffset = RNG->getInt(temp->getLeft()->y+1, (temp->getLeft()->y+temp->getLeft()->h)-2);
             rightTry = temp->getLeft()->x+temp->getLeft()->w;
             leftTry = rightTry;
             for(int p = 0; p<((temp->w)/4);p++){
-                stringMap[rightTry][fuck].replace(0,4,"cgrs");//check before replacing in case it fails
-                stringMap[leftTry][fuck].replace(0,4,"cgrs"); //what if it's already in a room, surrounded by not wall? hmm
-                if(numberSurrounding(rightTry, fuck, "wall") < 3){
+                stringMap[rightTry][randNumOffset].replace(0,4,"cgrs");//check before replacing in case it fails
+                stringMap[leftTry][randNumOffset].replace(0,4,"cgrs"); //what if it's already in a room, surrounded by not wall? hmm
+                if(numberSurrounding(rightTry, randNumOffset, "wall") < 3){
                     connectedRight = true;
                     rightTry--;
                 }
-                if(numberSurrounding(leftTry, fuck, "wall") < 3){
+                if(numberSurrounding(leftTry, randNumOffset, "wall") < 3){
                     connectedLeft = true;
                     leftTry++;
                 }
@@ -141,18 +141,18 @@ void MapGenerator::connectBSP(TCODBsp* root){
 
         }
         if(temp->horizontal){
-            fuck = RNG->getInt(temp->getLeft()->x+1, (temp->getLeft()->x+temp->getLeft()->w)-2);
+            randNumOffset = RNG->getInt(temp->getLeft()->x+1, (temp->getLeft()->x+temp->getLeft()->w)-2);
 
             rightTry = temp->getLeft()->y+temp->getLeft()->h;
             leftTry = rightTry;
             for(int p = 0; p<((temp->h)/4);p++){
-                stringMap[fuck][rightTry].replace(0,4,"cgrs");
-                stringMap[fuck][leftTry].replace(0,4,"cgrs"); //what if it's already in a room, surrounded by not wall? hmm
-                if(numberSurrounding(fuck, rightTry, "wall") < 3){
+                stringMap[randNumOffset][rightTry].replace(0,4,"cgrs");
+                stringMap[randNumOffset][leftTry].replace(0,4,"cgrs"); //what if it's already in a room, surrounded by not wall? hmm
+                if(numberSurrounding(randNumOffset, rightTry, "wall") < 3){
                     connectedRight = true;
                     rightTry--;
                 }
-                if(numberSurrounding(fuck, leftTry, "wall") < 3){
+                if(numberSurrounding(randNumOffset, leftTry, "wall") < 3){
                     connectedLeft = true;
                     leftTry++;
                 }
@@ -166,12 +166,12 @@ void MapGenerator::connectBSP(TCODBsp* root){
         if (!connectedRight || !connectedLeft){
             if(temp->horizontal){
                 for(int p = 0; p<((temp->w)/3);p++){
-                    stringMap[fuck][rightTry].replace(0,4,"wtsh ");
-                    stringMap[fuck][leftTry].replace(0,4,"wtsh"); //what if it's already in a room, surrounded by not wall? hmm
-                if(numberSurrounding(fuck, rightTry, "wall") > 3){
+                    stringMap[randNumOffset][rightTry].replace(0,4,"wtsh ");
+                    stringMap[randNumOffset][leftTry].replace(0,4,"wtsh"); //what if it's already in a room, surrounded by not wall? hmm
+                if(numberSurrounding(randNumOffset, rightTry, "wall") > 3){
                     rightTry--;
                 }
-                if(numberSurrounding(fuck, leftTry, "wall") > 3){
+                if(numberSurrounding(randNumOffset, leftTry, "wall") > 3){
                     leftTry++;
                 }
                 rightTry++;
@@ -180,12 +180,12 @@ void MapGenerator::connectBSP(TCODBsp* root){
             }
         if(!temp->horizontal){
             for(int p = 0; p<((temp->h)/3);p++){
-                stringMap[rightTry][fuck].replace(0,4,"wtsh");//check before replacing in case it fails
-                stringMap[leftTry][fuck].replace(0,4,"wtsh"); //what if it's already in a room, surrounded by not wall? hmm
-                if(numberSurrounding(rightTry+1, fuck, "wall") > 3){
+                stringMap[rightTry][randNumOffset].replace(0,4,"wtsh");//check before replacing in case it fails
+                stringMap[leftTry][randNumOffset].replace(0,4,"wtsh"); //what if it's already in a room, surrounded by not wall? hmm
+                if(numberSurrounding(rightTry+1, randNumOffset, "wall") > 3){
                     rightTry--;
                 }
-                if(numberSurrounding(leftTry-1, fuck, "wall") > 3){
+                if(numberSurrounding(leftTry-1, randNumOffset, "wall") > 3){
                     leftTry++;
                 }
                 rightTry++;

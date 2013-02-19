@@ -1,6 +1,15 @@
-Tile-00
-focus band
-Tile-01
-berry
-Tile-02
-Dylan's balls
+item_type "sash" {              //structure's type, name
+	  cost=300            //integer
+	  weight=1.2          //float
+	  deal_damage=false   //boolean
+	  shield="3d6+2"      //dice property
+	  col="#FF0000"       //color property, #
+	  damaged_color="128,96,96" //rrr,ggg,bbb
+	  shield_type="mitigated" //string
+	  description="protects 
+	  against TONS OF DAMAGE"  //multi-line sting
+	  abstract                //a flag (simlpfied bool prop
+	  intList= [ 1,2,3 ]          //list of ints
+	  floatList= [1.0,2.0,3.0 ]       //list of floats
+	  stringList= [ "focus","tanker's",
+	  "dark", "purity" ] //list of string
