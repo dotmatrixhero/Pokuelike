@@ -23,6 +23,7 @@ Gameplay::Gameplay(Pokemon* a, Renderer* hudrender) {
     currentTab = 0;
     menuTab.reserve(8);
     int x =0;
+    //This for loop makes the menu tabs on the right hand side of the screen
     for(int p = 0; p<8;p++){
         if (p%2 ==0){   //this is the worst way to program this ever
               x = 15+x;
@@ -35,8 +36,6 @@ Gameplay::Gameplay(Pokemon* a, Renderer* hudrender) {
             menuTab[p]->setCharBackground(1,z, TCODColor(255,0,255));
         }
         menuTab[p]->putCharEx(1,p*2+1,1461+x,TCODColor::white,TCODColor::black);
-
-
         menuTab[p]->printFrame(2,0,13,17, true);
         menuTab[p]->putCharEx(2,p*2+1,219,TCODColor(121,121,121),TCODColor::black);
         menuTab[p]->setKeyColor(TCODColor(255,0,255));

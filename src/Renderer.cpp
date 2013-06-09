@@ -5,6 +5,8 @@ Renderer::Renderer()
 {
     SDL_Init(SDL_INIT_EVERYTHING);
     TTF_Init();
+//    freopen( "CON", "w", stdout );
+//freopen( "CON", "w", stderr );
     firstRender = true;
     Font = TTF_OpenFont("Pokemon_GB.ttf", 18);
     message = NULL;

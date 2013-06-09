@@ -1,0 +1,18 @@
+pokemon_name "bulbasaur" {              //structure's type, name
+    map_sprite_position= 304
+    animate_sprite_position= [ 0,0 ]
+    dex_number=1
+    type= [ "grass", "poison" ]
+    base_stats= [ 45,49,49,65,65,45 ] //hp, atk, def, sp atk, sp def, speed
+    abilities= [ "overgrow", "chlorophyll" ]
+    height=.7 //meters
+    weight=6.9 //kg
+    base_exp_defeat=64
+    info="For some time after its birth, it grows by gaining nourishment from the seed on its back."
+    starting_moves= [ "Tackle" ]
+    levels_learn_moves= [ 3,7,9,13,13,15,19,21,25,27,31,33,37 ]
+    learned_moves= [ "Growl", "Leech Seed", "Vine Whip", "PoisonPowder", "Sleep Powder", "Take Down", "Razor Leaf", "Sweet Scent", "Growth", "Double-Edge", "Worry Seed", "Synthesis", "Seed Bomb" ]
+    tm_hm_moves= [ "Toxic", "Venoshock", "Hidden Power", "Sunny Day", "Light Screen", "Protect", "Safeguard", "Frustration", "SolarBeam", "Return", "Double Team", "Sludge Bomb", "Facade", "Rest", "Attract", "Round", "Echoed Voice", "Energy Ball", "Flash", "Swords Dance", "Grass Knot", "Swagger", "Substitute", "Rock Smash", "Cut", "Strength" ]
+    breeding_moves= [ "Amnesia", "Charm", "Curse", "Endure", "Giga Drain", "GrassWhistle", "Ingrain", "Leaf Storm", "Magical Leaf", "Nature Power", "Petal Dance", "Power Whip", "Skull Bash", "Sludge" ]
+    tutor_moves= [ "Bind", "Giga Drain", "Grass Pledge", "Knock Off", "Seed Bomb", "Sleep Talk", "Snore", "Synthesis", "Worry Seed" ]
+}

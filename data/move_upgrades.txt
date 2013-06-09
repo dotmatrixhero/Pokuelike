@@ -1,4 +1,15 @@
-item_type "sash" {              //structure's type, name
+move_upgrade_name "dash" {              //structure's type, name
+    upgradeable=2
+    skill_cost=2
+    movement="towards"
+}
+
+move_upgrade_name "damage up" {
+    upgradeable=5
+    skill_cost=1
+    movement="none"
+    damage_up
+}
 /*	  cost=300            //integer
 	  weight=1.2          //float
 	  deal_damage=false   //boolean

@@ -57,6 +57,8 @@
 		<Unit filename="..\..\data\mapgen.txt" />
 		<Unit filename="..\..\data\maptest2.txt" />
 		<Unit filename="..\..\data\more sprites.png" />
+		<Unit filename="..\..\data\move_interpret.txt" />
+		<Unit filename="..\..\data\move_upgrades.txt" />
 		<Unit filename="..\..\data\pokuelike.exe.stackdump" />
 		<Unit filename="..\..\data\special sprites.png" />
 		<Unit filename="..\..\data\sprites frame 1.png" />
@@ -87,7 +89,8 @@
 		<Unit filename="..\..\src\MapGenerator.h" />
 		<Unit filename="..\..\src\MapManager.cpp" />
 		<Unit filename="..\..\src\MapManager.h" />
-		<Unit filename="..\..\src\Parser.cpp" />
+		<Unit filename="..\..\src\ParserListener.cpp" />
+		<Unit filename="..\..\src\ParserListener.h" />
 		<Unit filename="..\..\src\Pokemon.cpp" />
 		<Unit filename="..\..\src\Pokemon.h" />
 		<Unit filename="..\..\src\Renderer.cpp" />

@@ -16,13 +16,18 @@
 #include "Gameplay.h"
 #include "MapManager.h"
 #include "Renderer.h"
+#include "ParserListener.h"
 #include <SDL/SDL.h>
 
 
 int main(int argc, char *argv[]){
+    TCODParser* parse = new TCODParser();
+    TCODParserStruct *itemTypeStruct = parse->newStructure("item_type");
+parse->run("itemmaptest.txt",new ParserListener());
+
     //initialize TCOD console, set font and size
     TCODConsole::setCustomFont("Sir_Henry's_32x32 and sprites.png",TCOD_FONT_LAYOUT_ASCII_INROW,16,161);
-    TCODConsole::initRoot(42,24,"WOO!", false,TCOD_RENDERER_SDL);
+    TCODConsole::initRoot(42,24,"Pokuelike: A Pokemon Adventure!", false,TCOD_RENDERER_SDL);
     int row = 256;
     //map custom symbols to font
     for (int x = 0;x<145;x++){
@@ -50,7 +55,6 @@ int main(int argc, char *argv[]){
    while ( endgame != 0){
         endgame = play.playgame();
     }
-
 
 
 }

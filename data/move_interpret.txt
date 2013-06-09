@@ -1,0 +1,22 @@
+move_name "Pound" {              //structure's type, name
+    power=40
+    accuracy=100
+    pp=35
+    type=normal
+    category=physical
+    makes_contact //boolean
+    // protect boolean
+    // snatch boolean
+    mirror_move
+    kings_rock
+    //take_recoil
+    //hard_code (for dig, hyper beam/solar beam, fly, surf)
+    secondary_effect= [ "" ]
+    secondary_effect_chance= [  ]
+    sprite= [ 0,0 ] //none yet
+    upgradeable= [ "damage up", "pp up", "accuracy up", "knock back", "wall stun", "displace", "dash" ]
+    targeting_style= [ "single", "single splash" ]
+    time_cost=10
+    description="The target is physically pounded with a long tail or a foreleg, etc."
+
+}

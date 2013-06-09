@@ -1,4 +1,10 @@
-item_type "sash" {              //structure's type, name
+tile_name "none" { //structure's type, name
+    ascii=32
+    foreground_color=black
+    background_color=black
+    transparent=0
+    walkable=0
+
 /*	  cost=300            //integer
 	  weight=1.2          //float
 	  deal_damage=false   //boolean
