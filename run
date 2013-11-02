@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 cd bin
 if [[ $(uname -m) == 'i686' ]]; then
