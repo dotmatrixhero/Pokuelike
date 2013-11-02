@@ -21,14 +21,14 @@ endif
 
 ifeq ($(config),debug)
   OBJDIR     = obj/Debug
-  TARGETDIR  = bin
-  TARGET     = $(TARGETDIR)/test64
+  TARGETDIR  = ../bin
+  TARGET     = $(TARGETDIR)/pokuelike64
   DEFINES   += -DDEBUG
-  INCLUDES  += 
+  INCLUDES  += -I../pkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
   CFLAGS    += $(CPPFLAGS) $(ARCH) -g -Wall
   CXXFLAGS  += $(CFLAGS) 
-  LDFLAGS   += 
+  LDFLAGS   += -L../pkg/lib
   LIBS      += -ltcod -ltcodxx
   RESFLAGS  += $(DEFINES) $(INCLUDES) 
   LDDEPS    += 
@@ -43,14 +43,14 @@ endif
 
 ifeq ($(config),release)
   OBJDIR     = obj/Release
-  TARGETDIR  = bin
-  TARGET     = $(TARGETDIR)/test64
+  TARGETDIR  = ../bin
+  TARGET     = $(TARGETDIR)/pokuelike64
   DEFINES   += 
-  INCLUDES  += 
+  INCLUDES  += -I../pkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
   CFLAGS    += $(CPPFLAGS) $(ARCH) -O2 -Wall
   CXXFLAGS  += $(CFLAGS) 
-  LDFLAGS   += -s
+  LDFLAGS   += -s -L../pkg/lib
   LIBS      += -ltcod -ltcodxx
   RESFLAGS  += $(DEFINES) $(INCLUDES) 
   LDDEPS    += 
@@ -65,14 +65,14 @@ endif
 
 ifeq ($(config),debug32)
   OBJDIR     = obj/x32/Debug
-  TARGETDIR  = bin
-  TARGET     = $(TARGETDIR)/test32
+  TARGETDIR  = ../bin
+  TARGET     = $(TARGETDIR)/pokuelike32
   DEFINES   += -DDEBUG
-  INCLUDES  += 
+  INCLUDES  += -I../pkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
   CFLAGS    += $(CPPFLAGS) $(ARCH) -g -Wall -m32
   CXXFLAGS  += $(CFLAGS) 
-  LDFLAGS   += -m32 -L/usr/lib32
+  LDFLAGS   += -m32 -L/usr/lib32 -L../pkg/lib
   LIBS      += -ltcod -ltcodxx
   RESFLAGS  += $(DEFINES) $(INCLUDES) 
   LDDEPS    += 
@@ -87,14 +87,14 @@ endif
 
 ifeq ($(config),release32)
   OBJDIR     = obj/x32/Release
-  TARGETDIR  = bin
-  TARGET     = $(TARGETDIR)/test32
+  TARGETDIR  = ../bin
+  TARGET     = $(TARGETDIR)/pokuelike32
   DEFINES   += 
-  INCLUDES  += 
+  INCLUDES  += -I../pkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
   CFLAGS    += $(CPPFLAGS) $(ARCH) -O2 -Wall -m32
   CXXFLAGS  += $(CFLAGS) 
-  LDFLAGS   += -s -m32 -L/usr/lib32
+  LDFLAGS   += -s -m32 -L/usr/lib32 -L../pkg/lib
   LIBS      += -ltcod -ltcodxx
   RESFLAGS  += $(DEFINES) $(INCLUDES) 
   LDDEPS    += 
@@ -109,14 +109,14 @@ endif
 
 ifeq ($(config),debug64)
   OBJDIR     = obj/x64/Debug
-  TARGETDIR  = bin
-  TARGET     = $(TARGETDIR)/test64
+  TARGETDIR  = ../bin
+  TARGET     = $(TARGETDIR)/pokuelike64
   DEFINES   += -DDEBUG
-  INCLUDES  += 
+  INCLUDES  += -I../pkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
   CFLAGS    += $(CPPFLAGS) $(ARCH) -g -Wall -m64
   CXXFLAGS  += $(CFLAGS) 
-  LDFLAGS   += -m64 -L/usr/lib64
+  LDFLAGS   += -m64 -L/usr/lib64 -L../pkg/lib
   LIBS      += -ltcod -ltcodxx
   RESFLAGS  += $(DEFINES) $(INCLUDES) 
   LDDEPS    += 
@@ -131,14 +131,14 @@ endif
 
 ifeq ($(config),release64)
   OBJDIR     = obj/x64/Release
-  TARGETDIR  = bin
-  TARGET     = $(TARGETDIR)/test64
+  TARGETDIR  = ../bin
+  TARGET     = $(TARGETDIR)/pokuelike64
   DEFINES   += 
-  INCLUDES  += 
+  INCLUDES  += -I../pkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
   CFLAGS    += $(CPPFLAGS) $(ARCH) -O2 -Wall -m64
   CXXFLAGS  += $(CFLAGS) 
-  LDFLAGS   += -s -m64 -L/usr/lib64
+  LDFLAGS   += -s -m64 -L/usr/lib64 -L../pkg/lib
   LIBS      += -ltcod -ltcodxx
   RESFLAGS  += $(DEFINES) $(INCLUDES) 
   LDDEPS    += 
@@ -152,15 +152,7 @@ ifeq ($(config),release64)
 endif
 
 OBJECTS := \
-	$(OBJDIR)/Drawable.o \
-	$(OBJDIR)/Terrain.o \
-	$(OBJDIR)/Gameplay.o \
-	$(OBJDIR)/MapManager.o \
-	$(OBJDIR)/TileInterpret.o \
 	$(OBJDIR)/main.o \
-	$(OBJDIR)/Item.o \
-	$(OBJDIR)/Effect.o \
-	$(OBJDIR)/Actor.o \
 
 RESOURCES := \
 
@@ -221,31 +213,7 @@ $(GCH): $(PCH)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 endif
 
-$(OBJDIR)/Drawable.o: ../src/Drawable.cpp
-	@echo $(notdir $<)
-	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/Terrain.o: ../src/Terrain.cpp
-	@echo $(notdir $<)
-	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/Gameplay.o: ../src/Gameplay.cpp
-	@echo $(notdir $<)
-	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/MapManager.o: ../src/MapManager.cpp
-	@echo $(notdir $<)
-	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/TileInterpret.o: ../src/TileInterpret.cpp
-	@echo $(notdir $<)
-	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/main.o: ../src/main.cpp
-	@echo $(notdir $<)
-	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/Item.o: ../src/Item.cpp
-	@echo $(notdir $<)
-	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/Effect.o: ../src/Effect.cpp
-	@echo $(notdir $<)
-	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/Actor.o: ../src/Actor.cpp
+$(OBJDIR)/main.o: ../code/src/main.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 

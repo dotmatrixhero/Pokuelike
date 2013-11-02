@@ -126,18 +126,13 @@ Thumbs.db
 Desktop.ini
 
 *.stackdump
-<<<<<<< HEAD
-*.dep.inc
-=======
->>>>>>> stable-for-brian
 
 ############
 ## Linux
 ############
 *.d
 *.o
-linux_build/bin/test32
-linux_build/bin/test64
+bin/*
 
 #############
 ## Python

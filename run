@@ -1,0 +1,9 @@
+#!/bin/bash
+
+cd bin
+if [[ $(uname -m) == 'i686' ]]; then
+    LD_LIBRARY_PATH='lib32/' ./pokuelike32
+elif [[ $(uname -m) == 'x86_64' ]]; then
+    LD_LIBRARY_PATH='lib64/' ./pokuelike64
+fi
+cd ..

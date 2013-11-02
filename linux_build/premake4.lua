@@ -7,16 +7,17 @@ solution "Pokuelike"
     project "test"
         language "C++"
 
-        includedirs { }
+        includedirs { "../pkg/include/tcod" }
 
-        files { "../src/**" }
+        files { "../code/src/**" }
 
-        targetdir "bin"
-        targetname "test"
+        targetdir "../bin"
+        targetname "pokuelike"
 
         --------------------------------------- 
         -- Link static libraries and config
-        links { "tcod", "tcodxx" }
+        libdirs { "../pkg/lib" }
+	links { "tcod", "tcodxx" }
 
         configuration "linux"
             --links { "GL", "X11", "Xrandr", "pthread", "m", "glfw" }
