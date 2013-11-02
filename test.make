@@ -21,14 +21,14 @@ endif
 
 ifeq ($(config),debug)
   OBJDIR     = obj/Debug
-  TARGETDIR  = ../bin
+  TARGETDIR  = bin
   TARGET     = $(TARGETDIR)/pokuelike64
   DEFINES   += -DDEBUG
-  INCLUDES  += -I../pkg/include/tcod
+  INCLUDES  += -Ipkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
   CFLAGS    += $(CPPFLAGS) $(ARCH) -g -Wall
   CXXFLAGS  += $(CFLAGS) 
-  LDFLAGS   += -L../pkg/lib
+  LDFLAGS   += -Lpkg/lib
   LIBS      += -ltcod -ltcodxx
   RESFLAGS  += $(DEFINES) $(INCLUDES) 
   LDDEPS    += 
@@ -43,14 +43,14 @@ endif
 
 ifeq ($(config),release)
   OBJDIR     = obj/Release
-  TARGETDIR  = ../bin
+  TARGETDIR  = bin
   TARGET     = $(TARGETDIR)/pokuelike64
   DEFINES   += 
-  INCLUDES  += -I../pkg/include/tcod
+  INCLUDES  += -Ipkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
   CFLAGS    += $(CPPFLAGS) $(ARCH) -O2 -Wall
   CXXFLAGS  += $(CFLAGS) 
-  LDFLAGS   += -s -L../pkg/lib
+  LDFLAGS   += -s -Lpkg/lib
   LIBS      += -ltcod -ltcodxx
   RESFLAGS  += $(DEFINES) $(INCLUDES) 
   LDDEPS    += 
@@ -65,14 +65,14 @@ endif
 
 ifeq ($(config),debug32)
   OBJDIR     = obj/x32/Debug
-  TARGETDIR  = ../bin
+  TARGETDIR  = bin
   TARGET     = $(TARGETDIR)/pokuelike32
   DEFINES   += -DDEBUG
-  INCLUDES  += -I../pkg/include/tcod
+  INCLUDES  += -Ipkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
   CFLAGS    += $(CPPFLAGS) $(ARCH) -g -Wall -m32
   CXXFLAGS  += $(CFLAGS) 
-  LDFLAGS   += -m32 -L/usr/lib32 -L../pkg/lib
+  LDFLAGS   += -m32 -L/usr/lib32 -Lpkg/lib
   LIBS      += -ltcod -ltcodxx
   RESFLAGS  += $(DEFINES) $(INCLUDES) 
   LDDEPS    += 
@@ -87,14 +87,14 @@ endif
 
 ifeq ($(config),release32)
   OBJDIR     = obj/x32/Release
-  TARGETDIR  = ../bin
+  TARGETDIR  = bin
   TARGET     = $(TARGETDIR)/pokuelike32
   DEFINES   += 
-  INCLUDES  += -I../pkg/include/tcod
+  INCLUDES  += -Ipkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
   CFLAGS    += $(CPPFLAGS) $(ARCH) -O2 -Wall -m32
   CXXFLAGS  += $(CFLAGS) 
-  LDFLAGS   += -s -m32 -L/usr/lib32 -L../pkg/lib
+  LDFLAGS   += -s -m32 -L/usr/lib32 -Lpkg/lib
   LIBS      += -ltcod -ltcodxx
   RESFLAGS  += $(DEFINES) $(INCLUDES) 
   LDDEPS    += 
@@ -109,14 +109,14 @@ endif
 
 ifeq ($(config),debug64)
   OBJDIR     = obj/x64/Debug
-  TARGETDIR  = ../bin
+  TARGETDIR  = bin
   TARGET     = $(TARGETDIR)/pokuelike64
   DEFINES   += -DDEBUG
-  INCLUDES  += -I../pkg/include/tcod
+  INCLUDES  += -Ipkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
   CFLAGS    += $(CPPFLAGS) $(ARCH) -g -Wall -m64
   CXXFLAGS  += $(CFLAGS) 
-  LDFLAGS   += -m64 -L/usr/lib64 -L../pkg/lib
+  LDFLAGS   += -m64 -L/usr/lib64 -Lpkg/lib
   LIBS      += -ltcod -ltcodxx
   RESFLAGS  += $(DEFINES) $(INCLUDES) 
   LDDEPS    += 
@@ -131,14 +131,14 @@ endif
 
 ifeq ($(config),release64)
   OBJDIR     = obj/x64/Release
-  TARGETDIR  = ../bin
+  TARGETDIR  = bin
   TARGET     = $(TARGETDIR)/pokuelike64
   DEFINES   += 
-  INCLUDES  += -I../pkg/include/tcod
+  INCLUDES  += -Ipkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
   CFLAGS    += $(CPPFLAGS) $(ARCH) -O2 -Wall -m64
   CXXFLAGS  += $(CFLAGS) 
-  LDFLAGS   += -s -m64 -L/usr/lib64 -L../pkg/lib
+  LDFLAGS   += -s -m64 -L/usr/lib64 -Lpkg/lib
   LIBS      += -ltcod -ltcodxx
   RESFLAGS  += $(DEFINES) $(INCLUDES) 
   LDDEPS    += 
@@ -213,7 +213,7 @@ $(GCH): $(PCH)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 endif
 
-$(OBJDIR)/main.o: ../code/src/main.cpp
+$(OBJDIR)/main.o: code/src/main.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 
