@@ -1,9 +1,32 @@
 #!/bin/sh
 
+arch=$(uname -m)
+
 cd bin
-if [[ $(uname -m) == 'i686' ]]; then
+if [[ "$arch" == 'i686' ]]; then
+    if [[ ! -d "lib32" ]]; then
+        mkdir lib32
+
+        cp ../pkg/lib/libtcod*.so lib32
+
+        cd lib32
+        ln -s libtcod.so libtcod.so.1
+        ln -s libtcodxx.so libtcodxx.so.1
+        cd ..
+    fi
     LD_LIBRARY_PATH='lib32/' ./pokuelike32
-elif [[ $(uname -m) == 'x86_64' ]]; then
+elif [[ "$arch" == 'x86_64' ]]; then
+    if [[ ! -d "lib64" ]]; then
+        mkdir lib64
+
+        cp ../pkg/lib/libtcod*.so lib64
+
+        cd lib64
+        ln -s libtcod.so libtcod.so.1
+        ln -s libtcodxx.so libtcodxx.so.1
+        cd ..
+    fi
     LD_LIBRARY_PATH='lib64/' ./pokuelike64
 fi
 cd ..
+
