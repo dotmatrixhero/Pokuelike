@@ -21,12 +21,13 @@ void Application::run(States::ID initialState)
 
     while (!quit && !TCODConsole::isWindowClosed())
     {
+        TCODConsole::root->clear();
         stateStack.draw();
         TCODConsole::flush();
 
         TCOD_key_t key;
         TCODSystem::waitForEvent(TCOD_EVENT_KEY_PRESS,&key,NULL,true);
-        stateStack.handleInput();
+        stateStack.handleInput(key);
 
         stateStack.update();
 

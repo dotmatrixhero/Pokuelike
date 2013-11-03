@@ -4,6 +4,8 @@
 #include "StateIdentifiers.hpp"
 #include <memory>
 
+#include <libtcod.hpp>
+
 class StateStack;
 
 class State
@@ -17,7 +19,7 @@ class State
 
     virtual bool draw() = 0;
     virtual bool update() = 0;
-    virtual bool handleInput() = 0;
+    virtual bool handleInput(TCOD_key_t key) = 0;
 
     protected:
     void requestStackPush(States::ID stateID);

@@ -2,6 +2,7 @@
 #define _TestState_hpp_
 
 #include "State.hpp"
+#include <libtcod.hpp>
 
 class TestState : public State
 {
@@ -11,7 +12,11 @@ class TestState : public State
 
     bool draw();
     bool update();
-    bool handleInput();
+    bool handleInput(TCOD_key_t key);
+
+    private:
+    int thingx;
+    int thingy;
 };
 
 #endif // _TestState_hpp_

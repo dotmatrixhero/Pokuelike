@@ -8,6 +8,8 @@
 #include <map>
 #include <functional>
 
+#include <libtcod.hpp>
+
 class StateStack
 {
     public:
@@ -15,7 +17,7 @@ class StateStack
 
     void update();
     void draw();
-    void handleInput();
+    void handleInput(TCOD_key_t key);
 
     void pushState(States::ID stateId);
     void popState();

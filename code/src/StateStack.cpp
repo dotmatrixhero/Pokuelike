@@ -31,13 +31,13 @@ void StateStack::draw()
 }
 
 // Works similarly to update()
-void StateStack::handleInput()
+void StateStack::handleInput(TCOD_key_t key)
 {
     for (auto iter = states.rbegin();
          iter != states.rend();
          ++iter)
     {
-        if (!(*iter)->handleInput())
+        if (!(*iter)->handleInput(key))
             break;
     }
 }
