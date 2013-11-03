@@ -6,6 +6,7 @@ solution "Pokuelike"
     -- Static Library
     project "test"
         language "C++"
+        buildoptions { "-std=c++11" }
 
         includedirs { "pkg/include/tcod" }
 
@@ -14,7 +15,7 @@ solution "Pokuelike"
         targetdir "bin"
         targetname "pokuelike"
 
-        --------------------------------------- 
+        ---------------------------------------
         -- Link static libraries and config
         libdirs { "pkg/lib" }
         links { "tcod", "tcodxx" }
@@ -31,14 +32,13 @@ solution "Pokuelike"
         configuration "x32"
             targetsuffix "32"
 
-        --------------------------------------- 
+        ---------------------------------------
         -- Build rules
         configuration "Debug"
-            kind "ConsoleApp" 
+            kind "ConsoleApp"
             defines "DEBUG"
             flags { "Symbols", "ExtraWarnings" }
 
         configuration "Release"
             kind "WindowedApp"
             flags { "Optimize", "ExtraWarnings" }
-

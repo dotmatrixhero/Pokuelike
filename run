@@ -29,4 +29,3 @@ elif [[ "$arch" == 'x86_64' ]]; then
     LD_LIBRARY_PATH='lib64/' ./pokuelike64
 fi
 cd ..
-

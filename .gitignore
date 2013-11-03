@@ -20,3 +20,6 @@ bin/pokuelike64
 
 # Try to ignore backup files
 *~
+
+# Personal Emacs "project" file
+project.el

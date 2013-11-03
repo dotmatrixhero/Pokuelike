@@ -26,7 +26,7 @@ ifeq ($(config),debug)
   DEFINES   += -DDEBUG
   INCLUDES  += -Ipkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
-  CFLAGS    += $(CPPFLAGS) $(ARCH) -g -Wall
+  CFLAGS    += $(CPPFLAGS) $(ARCH) -g -Wall -std=c++11
   CXXFLAGS  += $(CFLAGS) 
   LDFLAGS   += -Lpkg/lib
   LIBS      += -ltcod -ltcodxx
@@ -48,7 +48,7 @@ ifeq ($(config),release)
   DEFINES   += 
   INCLUDES  += -Ipkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
-  CFLAGS    += $(CPPFLAGS) $(ARCH) -O2 -Wall
+  CFLAGS    += $(CPPFLAGS) $(ARCH) -O2 -Wall -std=c++11
   CXXFLAGS  += $(CFLAGS) 
   LDFLAGS   += -s -Lpkg/lib
   LIBS      += -ltcod -ltcodxx
@@ -70,7 +70,7 @@ ifeq ($(config),debug32)
   DEFINES   += -DDEBUG
   INCLUDES  += -Ipkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
-  CFLAGS    += $(CPPFLAGS) $(ARCH) -g -Wall -m32
+  CFLAGS    += $(CPPFLAGS) $(ARCH) -g -Wall -m32 -std=c++11
   CXXFLAGS  += $(CFLAGS) 
   LDFLAGS   += -m32 -L/usr/lib32 -Lpkg/lib
   LIBS      += -ltcod -ltcodxx
@@ -92,7 +92,7 @@ ifeq ($(config),release32)
   DEFINES   += 
   INCLUDES  += -Ipkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
-  CFLAGS    += $(CPPFLAGS) $(ARCH) -O2 -Wall -m32
+  CFLAGS    += $(CPPFLAGS) $(ARCH) -O2 -Wall -m32 -std=c++11
   CXXFLAGS  += $(CFLAGS) 
   LDFLAGS   += -s -m32 -L/usr/lib32 -Lpkg/lib
   LIBS      += -ltcod -ltcodxx
@@ -114,7 +114,7 @@ ifeq ($(config),debug64)
   DEFINES   += -DDEBUG
   INCLUDES  += -Ipkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
-  CFLAGS    += $(CPPFLAGS) $(ARCH) -g -Wall -m64
+  CFLAGS    += $(CPPFLAGS) $(ARCH) -g -Wall -m64 -std=c++11
   CXXFLAGS  += $(CFLAGS) 
   LDFLAGS   += -m64 -L/usr/lib64 -Lpkg/lib
   LIBS      += -ltcod -ltcodxx
@@ -136,7 +136,7 @@ ifeq ($(config),release64)
   DEFINES   += 
   INCLUDES  += -Ipkg/include/tcod
   CPPFLAGS  += -MMD -MP $(DEFINES) $(INCLUDES)
-  CFLAGS    += $(CPPFLAGS) $(ARCH) -O2 -Wall -m64
+  CFLAGS    += $(CPPFLAGS) $(ARCH) -O2 -Wall -m64 -std=c++11
   CXXFLAGS  += $(CFLAGS) 
   LDFLAGS   += -s -m64 -L/usr/lib64 -Lpkg/lib
   LIBS      += -ltcod -ltcodxx
@@ -152,7 +152,11 @@ ifeq ($(config),release64)
 endif
 
 OBJECTS := \
+	$(OBJDIR)/State.o \
+	$(OBJDIR)/StateStack.o \
+	$(OBJDIR)/Application.o \
 	$(OBJDIR)/main.o \
+	$(OBJDIR)/TestState.o \
 
 RESOURCES := \
 
@@ -213,7 +217,19 @@ $(GCH): $(PCH)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 endif
 
+$(OBJDIR)/State.o: code/src/State.cpp
+	@echo $(notdir $<)
+	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
+$(OBJDIR)/StateStack.o: code/src/StateStack.cpp
+	@echo $(notdir $<)
+	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
+$(OBJDIR)/Application.o: code/src/Application.cpp
+	@echo $(notdir $<)
+	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 $(OBJDIR)/main.o: code/src/main.cpp
+	@echo $(notdir $<)
+	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
+$(OBJDIR)/TestState.o: code/src/TestState.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 
