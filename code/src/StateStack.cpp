@@ -86,6 +86,7 @@ void StateStack::applyPendingStateChanges()
 State::Ptr StateStack::createState(States::ID stateId)
 {
     auto index = stateFactory.find(stateId);
+
     assert(index != stateFactory.end());
     return index->second();
 }

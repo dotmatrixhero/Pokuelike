@@ -13,8 +13,16 @@ TestState::~TestState()
 
 bool TestState::draw()
 {
-    TCODConsole::root->print(11, 10, "ELLO WORLD! FINALLY!");
+    TCODConsole::root->print(11, 10, "ELLO LIBTCOD WORLD!");
     TCODConsole::root->print(thingx, thingy, "H");
+
+    int x = 2, y = 15;
+    TCODLine::init(x,y,74,37);
+    do
+    {
+        TCODConsole::root->setChar(x, y, 'o');
+    } while (!TCODLine::step(&x,&y));
+
     return false;
 }
 
