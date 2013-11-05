@@ -157,6 +157,7 @@ OBJECTS := \
 	$(OBJDIR)/Application.o \
 	$(OBJDIR)/main.o \
 	$(OBJDIR)/TestState.o \
+	$(OBJDIR)/test.o \
 
 RESOURCES := \
 
@@ -230,6 +231,9 @@ $(OBJDIR)/main.o: code/src/main.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 $(OBJDIR)/TestState.o: code/src/TestState.cpp
+	@echo $(notdir $<)
+	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
+$(OBJDIR)/test.o: code/src/test.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 

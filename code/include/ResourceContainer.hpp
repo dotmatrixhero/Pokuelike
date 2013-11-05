@@ -11,7 +11,7 @@
 // Possible Usage:
 //
 //     enum class ImageID { Background1, Background2, Background3 };
-//     typedef ResourceContainer <Image, ImageID> ImageHolder;
+//     typedef ResourceContainer<Image, ImageID> ImageHolder;
 //
 //     ImageHolder imageManager;
 //     imageManager.load(ImageID::Background2, "../data/Hello.png");
@@ -20,7 +20,7 @@
 // The "Image" class would need a constructor that takes in a filename.
 // std::string can possibly be used instead of a strongly-typed enum.
 
-templace <typename Resource, typename Identifier>
+template <typename Resource, typename Identifier>
 class ResourceContainer
 {
     public:
