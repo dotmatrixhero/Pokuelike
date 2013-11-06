@@ -7,6 +7,7 @@ namespace States
     {
         None,
         Test,
+        Debug,
         Count
     };
 }

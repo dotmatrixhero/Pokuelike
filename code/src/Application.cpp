@@ -1,5 +1,7 @@
 #include "../include/Application.hpp"
+
 #include "../include/TestState.hpp"
+#include "../include/DebugState.hpp"
 
 Application::Application()
 {
@@ -12,6 +14,7 @@ Application::Application()
 void Application::registerStates()
 {
     stateStack.registerState<TestState>(States::Test);
+    stateStack.registerState<DebugState>(States::Debug);
 }
 
 void Application::run(States::ID initialState)

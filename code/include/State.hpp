@@ -17,7 +17,7 @@ class State
     State(StateStack& stateStack);
     virtual ~State();
 
-    virtual bool draw() = 0;
+    virtual void draw() = 0;
     virtual bool update() = 0;
     virtual bool handleInput(TCOD_key_t key) = 0;
 

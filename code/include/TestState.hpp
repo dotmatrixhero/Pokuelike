@@ -10,7 +10,7 @@ class TestState : public State
     TestState(StateStack& stateStack);
     ~TestState();
 
-    bool draw();
+    void draw();
     bool update();
     bool handleInput(TCOD_key_t key);
 
@@ -20,4 +20,3 @@ class TestState : public State
 };
 
 #endif // _TestState_hpp_
-

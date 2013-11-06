@@ -1,4 +1,5 @@
 #include "../include/TestState.hpp"
+#include "../include/StateIdentifiers.hpp"
 
 TestState::TestState(StateStack& stateStack)
     : State(stateStack)
@@ -11,7 +12,7 @@ TestState::~TestState()
 {
 }
 
-bool TestState::draw()
+void TestState::draw()
 {
     TCODConsole::root->print(11, 10, "ELLO LIBTCOD WORLD!");
     TCODConsole::root->print(thingx, thingy, "H");
@@ -22,8 +23,6 @@ bool TestState::draw()
     {
         TCODConsole::root->setChar(x, y, 'o');
     } while (!TCODLine::step(&x,&y));
-
-    return false;
 }
 
 bool TestState::update()
@@ -41,5 +40,7 @@ bool TestState::handleInput(TCOD_key_t key)
         thingx -= 1;
     else if (key.vk == TCODK_RIGHT)
         thingx += 1;
+    else if (key.c == 'a')
+        requestStackPush(States::Debug);
     return false;
 }

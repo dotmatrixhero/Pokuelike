@@ -156,6 +156,7 @@ OBJECTS := \
 	$(OBJDIR)/StateStack.o \
 	$(OBJDIR)/Application.o \
 	$(OBJDIR)/main.o \
+	$(OBJDIR)/DebugState.o \
 	$(OBJDIR)/TestState.o \
 	$(OBJDIR)/test.o \
 
@@ -228,6 +229,9 @@ $(OBJDIR)/Application.o: code/src/Application.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 $(OBJDIR)/main.o: code/src/main.cpp
+	@echo $(notdir $<)
+	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
+$(OBJDIR)/DebugState.o: code/src/DebugState.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 $(OBJDIR)/TestState.o: code/src/TestState.cpp

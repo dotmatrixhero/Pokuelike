@@ -14,7 +14,7 @@ if [[ "$arch" == 'i686' ]]; then
         ln -s libtcodxx.so libtcodxx.so.1
         cd ..
     fi
-    LD_LIBRARY_PATH='lib32/' ./pokuelike32
+    LD_LIBRARY_PATH='lib32/' ./pokuelike32 "$@"
 elif [[ "$arch" == 'x86_64' ]]; then
     if [[ ! -d "lib64" ]]; then
         mkdir lib64
@@ -26,6 +26,6 @@ elif [[ "$arch" == 'x86_64' ]]; then
         ln -s libtcodxx.so libtcodxx.so.1
         cd ..
     fi
-    LD_LIBRARY_PATH='lib64/' ./pokuelike64
+    LD_LIBRARY_PATH='lib64/' ./pokuelike64 "$@"
 fi
 cd ..
