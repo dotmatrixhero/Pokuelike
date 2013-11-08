@@ -14,14 +14,6 @@ GameState::~GameState()
 
 void GameState::draw()
 {
-    TCODConsole::root->print(11, 10, "ELLO LIBTCOD WORLD!");
-
-    int x = 2, y = 15;
-    TCODLine::init(x,y,74,37);
-    do
-    {
-        TCODConsole::root->setChar(x, y, 'o');
-    } while (!TCODLine::step(&x,&y));
 }
 
 bool GameState::update()

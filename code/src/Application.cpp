@@ -23,7 +23,7 @@ void Application::registerStates()
 
 void Application::run(States::ID initialState)
 {
-    stateStack.pushState(States::Test);
+    stateStack.pushState(initialState);
     stateStack.applyPendingStateChanges();
 
     while (!quit && !TCODConsole::isWindowClosed())
@@ -37,6 +37,5 @@ void Application::run(States::ID initialState)
         stateStack.handleInput(key);
 
         stateStack.update();
-
     }
 }
