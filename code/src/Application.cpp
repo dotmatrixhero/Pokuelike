@@ -2,10 +2,12 @@
 
 #include "../include/TestState.hpp"
 #include "../include/DebugState.hpp"
+#include "../include/TitleState.hpp"
+#include "../include/GameState.hpp"
 
 Application::Application()
 {
-    TCODConsole::initRoot(80, 50, "Main Window", false, TCOD_RENDERER_OPENGL);
+    TCODConsole::initRoot(100, 100, "Main Window", false, TCOD_RENDERER_OPENGL);
     quit = false;
 
     registerStates();
@@ -15,6 +17,8 @@ void Application::registerStates()
 {
     stateStack.registerState<TestState>(States::Test);
     stateStack.registerState<DebugState>(States::Debug);
+    stateStack.registerState<GameState>(States::Game);
+    stateStack.registerState<TitleState>(States::Title);
 }
 
 void Application::run(States::ID initialState)

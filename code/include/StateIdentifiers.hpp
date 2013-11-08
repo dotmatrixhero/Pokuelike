@@ -6,6 +6,8 @@ namespace States
     enum ID
     {
         None,
+	Game,
+	Title,
         Test,
         Debug,
         Count
