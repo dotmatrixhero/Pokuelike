@@ -11,35 +11,40 @@ StateStack::StateStack()
 // fall through to the next state.
 void StateStack::update()
 {
-    for (auto iter = states.rbegin();
-         iter != states.rend();
-         ++iter)
-    {
-        if (!(*iter)->update())
-            break;
-    }
+    // for (auto iter = states.rbegin();
+    //      iter != states.rend();
+    //      ++iter)
+    // {
+    //     if (!(*iter)->update())
+    //         break;
+    // }
+    states.back()->update();
 
     applyPendingStateChanges();
 }
 
 void StateStack::draw()
 {
-    for (State::Ptr& state : states)
-    {
-        state->draw();
-    }
+    // for (State::Ptr& state : states)
+    // {
+    //     state->draw();
+    // }
+
+    states.back()->draw();
 }
 
 // Works similarly to update()
 void StateStack::handleInput(TCOD_key_t key)
 {
-    for (auto iter = states.rbegin();
-         iter != states.rend();
-         ++iter)
-    {
-        if (!(*iter)->handleInput(key))
-            break;
-    }
+    // for (auto iter = states.rbegin();
+    //      iter != states.rend();
+    //      ++iter)
+    // {
+    //     if (!(*iter)->handleInput(key))
+    //         break;
+    // }
+
+    states.back()->handleInput(key);
 }
 
 void StateStack::pushState(States::ID stateId)
