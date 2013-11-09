@@ -7,7 +7,11 @@
 
 Application::Application()
 {
+    // We'll probably use this line soon.
+    // TCODConsole::setCustomFont("terminal8x8_aa_tc.png", TCOD_FONT_LAYOUT_TCOD);
+
     TCODConsole::initRoot(100, 100, "Main Window", false, TCOD_RENDERER_OPENGL);
+    TCODConsole::root->setDefaultBackground(TCODColor::black);
     quit = false;
 
     registerStates();

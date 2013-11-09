@@ -152,15 +152,16 @@ ifeq ($(config),release64)
 endif
 
 OBJECTS := \
-	$(OBJDIR)/TestState.o \
-	$(OBJDIR)/main.o \
+	$(OBJDIR)/State.o \
+	$(OBJDIR)/Menu.o \
+	$(OBJDIR)/StateStack.o \
 	$(OBJDIR)/GameState.o \
 	$(OBJDIR)/Application.o \
+	$(OBJDIR)/main.o \
+	$(OBJDIR)/DebugState.o \
+	$(OBJDIR)/TestState.o \
 	$(OBJDIR)/TitleState.o \
 	$(OBJDIR)/test.o \
-	$(OBJDIR)/DebugState.o \
-	$(OBJDIR)/State.o \
-	$(OBJDIR)/StateStack.o \
 
 RESOURCES := \
 
@@ -221,10 +222,13 @@ $(GCH): $(PCH)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 endif
 
-$(OBJDIR)/TestState.o: code/src/TestState.cpp
+$(OBJDIR)/State.o: code/src/State.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/main.o: code/src/main.cpp
+$(OBJDIR)/Menu.o: code/src/Menu.cpp
+	@echo $(notdir $<)
+	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
+$(OBJDIR)/StateStack.o: code/src/StateStack.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 $(OBJDIR)/GameState.o: code/src/GameState.cpp
@@ -233,19 +237,19 @@ $(OBJDIR)/GameState.o: code/src/GameState.cpp
 $(OBJDIR)/Application.o: code/src/Application.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/TitleState.o: code/src/TitleState.cpp
-	@echo $(notdir $<)
-	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/test.o: code/src/test.cpp
+$(OBJDIR)/main.o: code/src/main.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 $(OBJDIR)/DebugState.o: code/src/DebugState.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/State.o: code/src/State.cpp
+$(OBJDIR)/TestState.o: code/src/TestState.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
-$(OBJDIR)/StateStack.o: code/src/StateStack.cpp
+$(OBJDIR)/TitleState.o: code/src/TitleState.cpp
+	@echo $(notdir $<)
+	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
+$(OBJDIR)/test.o: code/src/test.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(CXXFLAGS) -o "$@" -c "$<"
 

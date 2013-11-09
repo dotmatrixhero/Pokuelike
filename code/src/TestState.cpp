@@ -4,25 +4,19 @@
 TestState::TestState(StateStack& stateStack)
     : State(stateStack)
 {
-    thingx = 10;
-    thingy = 10;
+    menu = new Menu({"One", "Two", "Three", "Four"});
 }
 
 TestState::~TestState()
 {
+    delete menu;
 }
 
 void TestState::draw()
 {
-    TCODConsole::root->print(11, 10, "ELLO LIBTCOD WORLD!");
-    TCODConsole::root->print(thingx, thingy, "H");
+    TCODConsole::root->print(11, 10, "HELLO LIBTCOD WORLD!");
 
-    int x = 2, y = 15;
-    TCODLine::init(x,y,74,37);
-    do
-    {
-        TCODConsole::root->setChar(x, y, 'o');
-    } while (!TCODLine::step(&x,&y));
+    menu->draw();
 }
 
 bool TestState::update()
@@ -32,15 +26,10 @@ bool TestState::update()
 
 bool TestState::handleInput(TCOD_key_t key)
 {
-    if (key.vk == TCODK_UP)
-        thingy -= 1;
-    else if (key.vk == TCODK_DOWN)
-        thingy += 1;
-    else if (key.vk == TCODK_LEFT)
-        thingx -= 1;
-    else if (key.vk == TCODK_RIGHT)
-        thingx += 1;
-    else if (key.c == 'a')
+    if (key.c == 'a')
         requestStackPush(States::Debug);
+
+    menu->handleInput(key);
+
     return false;
 }

@@ -2,6 +2,7 @@
 #define _TestState_hpp_
 
 #include "State.hpp"
+#include "Menu.hpp"
 #include <libtcod.hpp>
 
 class TestState : public State
@@ -15,8 +16,47 @@ class TestState : public State
     bool handleInput(TCOD_key_t key);
 
     private:
-    int thingx;
-    int thingy;
+    Menu* menu;
 };
 
 #endif // _TestState_hpp_
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
