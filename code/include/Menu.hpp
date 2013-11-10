@@ -3,16 +3,33 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 
 #include <libtcod.hpp>
-
-class TCODConsole;
 
 class Menu
 {
     public:
-    Menu(std::vector<std::string> list);
+    struct MenuItem
+    {
+        public:
+        std::string label;
+        bool selectable;
+        std::unique_ptr<Menu> menu;
+    };
+
+    public:
+    Menu();
+    // Menu(std::vector<std::string> list);
     ~Menu();
+
+    void addItem(const std::string& label);
+    void addItems(const std::vector<std::string> items);
+
+    void addLabel(const std::string& label);
+
+    void addMenu(const std::string& label);
+    void finalize();
 
     void draw(int x, int y);
     void update();
@@ -22,8 +39,9 @@ class Menu
     const int getLongest() const;
 
     private:
-    TCODConsole* console;
-    std::vector<std::string> items;
+    std::unique_ptr<TCODConsole> console;
+
+    std::vector<MenuItem> items;
     int selectionId;
 };
 

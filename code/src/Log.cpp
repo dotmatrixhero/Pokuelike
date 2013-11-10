@@ -4,11 +4,11 @@
 #include <cstdarg>
 
 void failedAssert(const std::string& condition,
-                  const std::string message,
+                  const std::string& message,
                   const char* file,
                   int line)
 {
-    logf(" ## Failed Assertion ##");
+    logf("## Failed Assertion ##");
     logf("Condition: (%s)", condition.c_str());
     logf("Assertion: %s", message.c_str());
     logf("At: %s:%d", file, line);
@@ -31,5 +31,5 @@ void logf(const char *format, ...)
 
 void log(const std::string& str)
 {
-    fprintf(stdout, "%s\n", str.c_str() );
+    fprintf(stdout, "%s\n", str.c_str());
 }

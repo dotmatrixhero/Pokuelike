@@ -6,7 +6,7 @@
 #if defined(DEBUG)
 #define pAssert(x,y) if(!(x)){ failedAssert(#x, y, __FILE__, __LINE__); }
 void failedAssert(const std::string& condition,
-                  const std::string message,
+                  const std::string& message,
                   const char* file,
                   int line);
 #else
