@@ -14,9 +14,9 @@ class Menu
     Menu(std::vector<std::string> list);
     ~Menu();
 
-    void draw();
-    bool update();
-    bool handleInput(TCOD_key_t key);
+    void draw(int x, int y);
+    void update();
+    void handleInput(TCOD_key_t key);
 
     private:
     const int getLongest() const;
@@ -24,7 +24,7 @@ class Menu
     private:
     TCODConsole* console;
     std::vector<std::string> items;
-    int selection;
+    int selectionId;
 };
 
 #endif // _Menu_hpp_

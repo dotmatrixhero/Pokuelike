@@ -16,7 +16,7 @@ void TestState::draw()
 {
     TCODConsole::root->print(11, 10, "HELLO LIBTCOD WORLD!");
 
-    menu->draw();
+    menu->draw(20, 20);
 }
 
 bool TestState::update()

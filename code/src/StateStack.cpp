@@ -76,21 +76,12 @@ void StateStack::applyPendingStateChanges()
         {
         case Action::Push:
             states.push_back(createState(change.stateId));
-#if DEBUG
-            printf("%d Push\n", states.size());
-#endif
             break;
         case Action::Pop:
             states.pop_back();
-#if DEBUG
-            printf("%d Pop\n", states.size());
-#endif
             break;
         case Action::Clear:
             states.clear();
-#if DEBUG
-            printf("%d Clear\n", states.size());
-#endif
             break;
         };
     }
@@ -105,29 +96,3 @@ State::Ptr StateStack::createState(States::ID stateId)
     assert(index != stateFactory.end());
     return index->second();
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

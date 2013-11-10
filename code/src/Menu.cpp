@@ -2,7 +2,7 @@
 
 Menu::Menu(std::vector<std::string> list)
 {
-    selection = 0;
+    selectionId = 0;
     items = list;
 
     int width = this->getLongest();
@@ -15,11 +15,11 @@ Menu::~Menu()
     delete console;
 }
 
-void Menu::draw()
+void Menu::draw(int x, int y)
 {
     for (int i = 0; i < (signed)items.size(); ++i)
     {
-        if (i == selection)
+        if (i == selectionId)
         {
             TCODConsole::setColorControl(TCOD_COLCTRL_1,TCODColor::red,TCODColor::black);
             console->print(0, i, "%c%s%c",
@@ -30,30 +30,27 @@ void Menu::draw()
             console->print(0, i, items[i].c_str());
         }
     }
-    TCODConsole::blit(console, 0, 0, 0, 0, TCODConsole::root, 20, 20);
+    TCODConsole::blit(console, 0, 0, 0, 0, TCODConsole::root, x, y);
 }
 
-bool Menu::update()
+void Menu::update()
 {
-    return false;
 }
 
-bool Menu::handleInput(TCOD_key_t key)
+void Menu::handleInput(TCOD_key_t key)
 {
     if (key.vk == TCODK_UP)
     {
-        selection -= 1;
-        if (selection < 0)
-            selection = (signed)items.size() - 1;
+        selectionId -= 1;
+        if (selectionId < 0)
+            selectionId = (signed)items.size() - 1;
     }
     else if (key.vk == TCODK_DOWN)
     {
-        selection += 1;
-        if (selection > (signed)items.size() - 1)
-            selection = 0;
+        selectionId += 1;
+        if (selectionId > (signed)items.size() - 1)
+            selectionId = 0;
     }
-
-    return false;
 }
 
 const int Menu::getLongest() const
