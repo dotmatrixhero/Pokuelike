@@ -16,6 +16,7 @@ class TestState : public State
     bool handleInput(TCOD_key_t key);
 
     private:
+    // Menu menu;
 };
 
 #endif // _TestState_hpp_

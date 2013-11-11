@@ -21,7 +21,8 @@ bool DebugState::update()
 
 bool DebugState::handleInput(TCOD_key_t key)
 {
-    if (key.vk == TCODK_BACKSPACE)
+    if (key.c == 's')
         requestStackPop();
+
     return false;
 }
