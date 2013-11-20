@@ -16,47 +16,7 @@ class TestState : public State
     bool handleInput(TCOD_key_t key);
 
     private:
-    // Menu menu;
+    std::unique_ptr<Menu> menu;
 };
 
 #endif // _TestState_hpp_
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
