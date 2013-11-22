@@ -6,7 +6,9 @@
 TestState::TestState(StateStack& stateStack)
     : State(stateStack)
 {
-    menu = std::unique_ptr<Menu>(new Menu({"Un", "Deux", "Trois", "Quatre", "Cinq", "Six", "Sept", "Huit", "Neuf"}));
+    // menu = std::unique_ptr<Menu>(new Menu({"Un", "Deux", "Trois", "Quatre", "Cinq", "Six", "Sept", "Huit", "Neuf"}));
+    std::vector<std::string> menuStrings = {"Un", "Deux", "Trois", "Quatre", "Cinq", "Six", "Sept", "Huit", "Neuf"};
+    menu = make_unique<Menu>(menuStrings);
 }
 
 TestState::~TestState()
@@ -32,3 +34,28 @@ bool TestState::handleInput(TCOD_key_t key)
 
     return false;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
