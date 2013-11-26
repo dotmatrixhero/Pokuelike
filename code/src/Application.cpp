@@ -10,7 +10,32 @@ Application::Application()
     // We'll probably use this line soon.
     // TCODConsole::setCustomFont("terminal8x8_aa_tc.png", TCOD_FONT_LAYOUT_TCOD);
 
-    TCODConsole::initRoot(100, 100, "Main Window", false, TCOD_RENDERER_OPENGL);
+    TCODConsole::initRoot(DEFAULT_WIDTH, DEFAULT_HEIGHT,
+                          "Main Window",
+                          false,
+                          TCOD_RENDERER_OPENGL);
+    TCODConsole::root->setDefaultBackground(TCODColor::black);
+    quit = false;
+
+    registerStates();
+}
+
+Application::Application(const std::string& filename)
+{
+    TCODParser parser;
+    TCODParserStruct* app = parser.newStructure("Application");
+    app->addProperty("Width",  TCOD_TYPE_INT, true);
+    app->addProperty("Height", TCOD_TYPE_INT, true);
+
+    parser.run(filename.c_str(), nullptr);
+
+    int width = parser.getIntProperty("Width");
+    int height = parser.getIntProperty("Height");
+    TCODConsole::initRoot(width, height,
+                          "Main Window",
+                          false,
+                          TCOD_RENDERER_OPENGL);
+
     TCODConsole::root->setDefaultBackground(TCODColor::black);
     quit = false;
 
@@ -43,3 +68,20 @@ void Application::run(States::ID initialState)
         stateStack.update();
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

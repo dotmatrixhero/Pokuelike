@@ -10,7 +10,7 @@ Menu::Menu(std::vector<std::string> itemlist)
 
     int height = items.size();
     int width  = this->getLongest();
-    console = std::unique_ptr<TCODConsole>(new TCODConsole(width, height));
+    console = make_unique<TCODConsole>(width, height);
 }
 
 Menu::~Menu()

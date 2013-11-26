@@ -1,0 +1,4 @@
+Application "Pokuelike" {
+    Width = 80
+    Height = 40
+}
