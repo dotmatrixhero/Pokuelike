@@ -41,6 +41,8 @@ void Menu::update()
 
 void Menu::handleInput(TCOD_key_t key)
 {
+    action.clear();
+
     if (key.vk == TCODK_UP)
     {
         selectionId -= 1;
@@ -53,12 +55,32 @@ void Menu::handleInput(TCOD_key_t key)
         if (selectionId > (signed)items.size() - 1)
             selectionId = 0;
     }
+    else if (key.vk == TCODK_LEFT)
+    {
+        action.left(selectionId);
+    }
+    else if (key.vk == TCODK_RIGHT)
+    {
+        action.right(selectionId);
+    }
     else if (key.vk == TCODK_ENTER)
     {
+        action.select(selectionId);
     }
     else if (key.vk == TCODK_BACKSPACE)
     {
+        action.cancel();
     }
+}
+
+const bool Menu::isActionTaken()
+{ 
+    return (getAction().type != MenuAction::None); 
+}
+
+const MenuAction& Menu::getAction()
+{ 
+    return action;
 }
 
 const int Menu::getLongest() const
@@ -72,3 +94,4 @@ const int Menu::getLongest() const
 
     return max;
 }
+
