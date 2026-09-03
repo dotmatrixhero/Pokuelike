@@ -141,6 +141,80 @@ Scyther leave an area after a kill (satiation-driven range/wander
 behavior, most likely — not a flee-threshold tweak, which was last run's
 guess and turned out not to be the actual cause). Not built — see TODO.md.
 
+**Retuned** per "food is too long-lived, seedlings should start more
+often": `CONSUME_STOCK_AMOUNT` 0.2 -> 0.5 (a patch now empties in 2
+feedings, not 5) and `SEED_DROP_CHANCE`/`GERMINATION_CHANCE` 0.02/0.3 ->
+0.06/0.5 (roughly 5x more new seedlings per tick of foot traffic).
+
+**Real result, fresh 2000-tick run — both changes worked exactly as
+specified, but the net effect on the population was the opposite of what
+"scarcity" would suggest:** `floraChanged` events went from 30 to 73
+(seedlings really are starting far more often), and per-patch depletion
+is real (stock actually hits 0 now instead of just getting nibbled). But
+because sprouted seedlings never disappear — a food patch that empties
+just waits to regrow, it doesn't revert to floor — more frequent seeding
+means the map accumulates *more total food-carrying tiles* over time, not
+fewer. Total food throughput went up, not down. Population at tick 2000
+went from 247 to **635** — nearly 3x more, not less. Worth being precise
+about: this is the tuning working correctly, producing a result that
+doesn't match what "food should be scarcer" probably intended. If the
+actual goal is scarcity/population pressure rather than just faster
+per-patch churn, the lever that's actually missing is a cap on how many
+food patches can exist on the map at once (or regrowth/seeding rates that
+shrink as more patches are already active) — not built, see TODO.md.
+
+**Rebuilt entirely** per "food still lasts way too long — it should die
+naturally, based on how many units eat from it, an eighth to a tenth of
+the current life cycle, but with a chance to spread to nearby tiles":
+regrowth-in-place is gone. A living food patch now decays a fixed amount
+every tick regardless of eating (`FOOD_LIFESPAN_TICKS = 50`, i.e. ~1/10th
+of the old ~500-tick regrowth-from-empty cycle) *and* is depleted further
+per feeding, and reverts to bare floor (`stage: "died"`) once its stock
+hits zero — dead for good, not just waiting to regrow. A living patch also
+has a per-tick chance (`FOOD_SPREAD_CHANCE`) to seed an adjacent open tile,
+so bushes propagate outward before they die instead of just sitting still.
+
+**This broke the world on the first real run, and it's worth walking
+through exactly how, because the cause wasn't the new mechanic itself:**
+`CONSUME_STOCK_AMOUNT` had been bumped to 0.5 (two feedings empties a
+patch) in the *previous* tuning pass. Stacked with the new natural decay,
+the three starting food patches were fully eaten out within the first 5
+ticks — confirmed directly in the log (`flora died at (21,4)` at tick 5).
+`MATURATION_TICKS` was still 150, so the earliest any replacement food
+could mature was tick 150+. That's a guaranteed ~150-tick famine window
+with *zero* food anywhere on the map. Result: all 9 starting agents
+starved to death by tick ~280, every single one clustered at the water
+hole (they could drink, but there was nothing anywhere to eat). Total
+colony collapse, confirmed via `dump-replay.ts`'s tick-by-tick population
+count going to flat 0.
+
+**Fixed in three moves, each verified against a real run before moving
+on:** `MATURATION_TICKS` 150 -> 20 (new food has to actually arrive before
+old food finishes dying); `CONSUME_STOCK_AMOUNT` 0.5 -> 0.25 (undoing most
+of the earlier bump, since it was compounding with decay rather than
+replacing it); and, per "start with like 20 food tiles, make food spawn
+faster too", the starting map went from 3 food tiles to 20 (three
+5-8-tile clusters plus scattered singles), `SEED_DROP_CHANCE`/
+`GERMINATION_CHANCE` 0.06/0.5 -> 0.1/0.65, and `FOOD_SPREAD_CHANCE`
+0.015 -> 0.035.
+
+**Real result, five separate 2000-tick runs after all three fixes:** no
+more instant collapse — every run now shows real, sustained activity
+(19-34 births, 25-43 starved, `floraChanged` in the 1400-1700 range per
+run, meaning food is now genuinely churning across the map instead of
+sitting static). But population is still net-negative on average across
+those five runs (deaths outpacing births in four of five), and the one run
+inspected tick-by-tick shows why concretely: it grew cleanly from 7 to 26
+agents by tick 750, then collapsed to 0 in under 200 ticks (tick 750 -> 26
+agents, tick 925 -> 0). That's a real boom-bust cycle — sustained growth,
+an overshoot past what the map's food supply can support, then a fast
+cascading die-off — not a bug in the same sense as the total-collapse
+famine above, but not a stable equilibrium either. Worth being clear about
+the difference: this is now a *believable* ecological failure mode
+(overshoot-and-crash is a real thing real ecosystems do) rather than a
+mechanical dead end, but it's still not what "a living ecosystem" means
+long-term. Not fixed — see TODO.md.
+
 ## Mob-fighting, predator risk-assessment, and relocation
 
 **Built:** `packages/engine/src/predation.ts` was substantially rewritten,
@@ -387,6 +461,41 @@ and a reminder that single-run numbers in this doc are one sample of a
 noisy process, not a fixed constant. Artifact with the actual frames:
 ask for the link, or regenerate with `dump-frames.ts` — nothing here is
 staged or touched up after capture.
+
+**Extended to a full continuous replay**, per "I want to watch the whole
+sim, every frame, not screenshots": `packages/runner/src/dump-replay.ts`
+captures *every* tick of a run (not curated snapshots) as compact
+index-encoded data — per-tick agent positions as flat number arrays, plus
+a sparse terrain-kind diff log (terrain rarely changes, so diffing beats
+re-storing the whole grid every tick). The artifact renders it on canvas
+with play/pause, a scrub bar, and speed control, replaying an entire
+2000-tick run in about 90 seconds at 1x.
+
+**Also found and fixed a real rendering bug via that full replay**: the
+renderer drew one glyph per agent, so when the tile-stacking bug (see its
+own section above) put over a hundred agents on one tile, it silently
+looked identical to a single occupant — the replay was hiding the exact
+thing it was built to reveal. Fixed by grouping agents per tile and
+drawing a `×N` badge whenever more than one is actually there.
+
+## Flora variety and map obstacles — cosmetic, not mechanical (yet)
+
+**Built**, per "flora needs variety — some aren't for eating but are
+comfier to sit on, some do better around sunbeams, some spawn different
+berries, make them cute different colors/chars, add obstacles":
+`packages/engine/src/flora.ts` — a maturing seedling now rolls between two
+outcomes instead of always becoming generic "food": edible `FOOD_FLAVORS`
+(real Pokémon berry names — Oran, Sitrus, Pecha, Cheri) or decorative,
+non-edible `FLORA_FLAVORS` (moss, fern, bloom). A seedling maturing within
+3 tiles of a sunbeam is 80% likely to become food (favoring sun-loving
+Sitrus/Cheri) vs. 55% normally — real environmental bias at germination
+time, not a growth-rate effect. Each flavor gets its own glyph and color
+in both the runner's ASCII renderer and the web canvas renderer (e.g.
+Oran = blue `%`, moss = soft green `` ` ``) — purely cosmetic for now, no
+gameplay effect, exactly as asked. The demo map also gained more
+obstacles: a scattered boulder pair and a broken wall line with a
+deliberate one-tile gap (a chokepoint), on top of the existing rock
+outcrop and wall corner.
 
 ## The single-tile stacking bug — a real one, found from watching the full replay
 

@@ -31,7 +31,8 @@ export function setTile(
   x: number,
   y: number,
   terrain: TerrainKind,
-  elevation?: number
+  elevation?: number,
+  flavor?: string
 ): void {
   const tile = tileAt(world, layer, x, y);
   if (!tile) return;
@@ -39,6 +40,7 @@ export function setTile(
   tile.walkable = terrain !== "wall";
   tile.stock = terrain === "food" ? 1 : undefined;
   tile.growth = terrain === "seedling" ? 0 : undefined;
+  tile.flavor = terrain === "food" || terrain === "flora" ? flavor : undefined;
   if (elevation !== undefined) tile.elevation = elevation;
 }
 

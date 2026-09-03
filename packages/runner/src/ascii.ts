@@ -29,6 +29,7 @@ const TERRAIN_GLYPH: Record<TerrainKind, string> = {
   wall: "#",
   water: "~",
   food: '"',
+  flora: "`",
   sunbeam: "o",
   seedling: ",",
 };
@@ -38,6 +39,7 @@ const TERRAIN_BG: Record<TerrainKind, Rgb> = {
   wall: [44, 47, 54],
   water: [12, 45, 74],
   food: [58, 42, 18],
+  flora: [26, 40, 24],
   sunbeam: [74, 63, 12],
   seedling: [28, 58, 22],
 };
@@ -47,8 +49,34 @@ const TERRAIN_FG: Record<TerrainKind, Rgb> = {
   wall: [90, 94, 102],
   water: [90, 150, 200],
   food: [150, 110, 60],
+  flora: [110, 150, 90],
   sunbeam: [220, 190, 80],
   seedling: [110, 180, 100],
+};
+
+/**
+ * Per-flavor overrides for "food"/"flora" tiles (see flora.ts's
+ * FOOD_FLAVORS/FLORA_FLAVORS) — cute, distinct glyph+color per specific
+ * plant instead of every berry bush looking identical.
+ */
+const FLAVOR_GLYPH: Record<string, string> = {
+  oran: "%",
+  sitrus: "&",
+  pecha: "*",
+  cheri: "+",
+  moss: "`",
+  fern: "'",
+  bloom: ";",
+};
+
+const FLAVOR_FG: Record<string, Rgb> = {
+  oran: [90, 140, 255],
+  sitrus: [250, 176, 60],
+  pecha: [255, 140, 190],
+  cheri: [230, 70, 70],
+  moss: [120, 165, 100],
+  fern: [80, 130, 80],
+  bloom: [205, 125, 195],
 };
 
 function shade(rgb: Rgb, elevation: number): Rgb {
@@ -81,9 +109,11 @@ export function captureTerrainGrid(world: World): FrameCell[][] {
     const row: FrameCell[] = [];
     for (let x = 0; x < world.width; x++) {
       const tile = surface[y * world.width + x]!;
+      const flavorGlyph = tile.flavor ? FLAVOR_GLYPH[tile.flavor] : undefined;
+      const flavorFg = tile.flavor ? FLAVOR_FG[tile.flavor] : undefined;
       row.push({
-        char: TERRAIN_GLYPH[tile.terrain],
-        fg: TERRAIN_FG[tile.terrain],
+        char: flavorGlyph ?? TERRAIN_GLYPH[tile.terrain],
+        fg: flavorFg ?? TERRAIN_FG[tile.terrain],
         bg: shade(TERRAIN_BG[tile.terrain], tile.elevation),
       });
     }

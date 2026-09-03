@@ -51,7 +51,9 @@ export type SimEvent =
       tick: number;
       layer: Layer;
       pos: Vec2;
-      stage: "seeded" | "sprouted";
+      stage: "seeded" | "sprouted" | "died";
+      /** Set on "sprouted" only — which specific plant it grew into (see flora.ts). */
+      flavor?: string;
     }
   | {
       kind: "fought";

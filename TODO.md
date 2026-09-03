@@ -134,6 +134,35 @@ produce a real story before player mechanics are worth building further.
       herdmates are on the same or adjacent tile, and (b) idle agents with
       full needs should wander a random walkable tile occasionally instead
       of standing still forever.
+- [x] Flora retuned per "food is too long-lived, seedlings should start
+      more often": `CONSUME_STOCK_AMOUNT` 0.2->0.5, `SEED_DROP_CHANCE`/
+      `GERMINATION_CHANCE` 0.02/0.3 -> 0.06/0.5. Real result: worked
+      exactly as specified (floraChanged 30->73, patches actually empty
+      now) but backfired on population control — 635 alive at tick 2000
+      vs. 247 before, because sprouted patches accumulate (they never
+      revert to floor) so total food-carrying capacity went *up*. See
+      DESIGN.md's Flora section.
+- [x] Flora rebuilt: food now has a real lifespan (`FOOD_LIFESPAN_TICKS =
+      50`, decays every tick regardless of eating) and actually dies
+      (reverts to floor) instead of sitting at low stock forever, plus a
+      chance to spread to an adjacent tile before it does. Superseded the
+      old "no cap on total food patches" item above — patches genuinely
+      disappear now. See DESIGN.md's Flora section for the two real
+      failure modes this went through (total colony collapse from a
+      famine-window mismatch, then rebalancing) before landing here.
+- [ ] **Population is still net-negative on average, just via boom-bust
+      instead of instant collapse.** Five real 2000-tick runs after the
+      flora rebuild: no more total extinction, but a tick-by-tick trace of
+      one run shows clean growth from 7 to 26 agents by tick 750, then a
+      cascading crash to 0 by tick 925 — an overshoot past what the map's
+      food supply actually supports, not a mechanical bug. Candidate
+      levers, not yet tried: raise `FOOD_LIFESPAN_TICKS`/lower
+      `CONSUME_STOCK_AMOUNT` further now that there's a 20-tile starting
+      buffer; cap population growth directly (a carrying-capacity check in
+      `reproduction.ts`, e.g. mate-seeking pauses above some local
+      density); or accept boom-bust as the intended dynamic and build
+      the "sim tells you the story of a die-off" angle on purpose instead
+      of continuing to chase equilibrium.
 - [ ] **Movement/speed is still uniform and unbuilt as a real mechanic.**
       Confirmed by grep: `calculateStats`'s `speed` field is computed but
       never read anywhere — every agent moves exactly 1 tile/tick,

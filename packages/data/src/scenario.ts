@@ -49,10 +49,25 @@ export function createDemoWorld(): World {
   fillRect(world, 1, 1, 3, 2, "water");
   fillRect(world, SCENARIO_WIDTH - 4, 2, SCENARIO_WIDTH - 3, 3, "water");
 
-  // Three separated food patches instead of one.
-  setTile(world, "surface", SCENARIO_WIDTH - 4, SCENARIO_HEIGHT - 3, "food"); // herd's usual patch, southeast
-  setTile(world, "surface", 4, SCENARIO_HEIGHT - 3, "food"); // southwest
-  setTile(world, "surface", SCENARIO_WIDTH - 3, 4, "food"); // Scyther's territory, northeast
+  // ~20 starting food tiles instead of 3 — food now dies off and gets
+  // eaten out fast (see flora.ts), so the population needs a real starting
+  // buffer while natural seeding/spreading catches up. Clustered around
+  // the same three territories as before (herd/southwest/Scyther), plus
+  // scattered singles so no single area is a single point of failure.
+  const FOOD_FLAVOR_CYCLE = ["oran", "pecha", "cheri", "sitrus"] as const;
+  const STARTING_FOOD_TILES: Array<[number, number]> = [
+    // herd's usual patch, southeast (near (20,13), avoiding Diglett's spawn at (21,13))
+    [19, 12], [20, 12], [19, 13], [20, 13],
+    // southwest
+    [4, 12], [5, 12], [4, 13], [5, 13],
+    // Scyther's territory, northeast
+    [21, 4], [22, 4], [21, 5], [22, 5],
+    // scattered singles, spread across the rest of the map
+    [10, 3], [14, 3], [16, 9], [19, 9], [10, 13], [16, 12], [3, 9], [7, 4],
+  ];
+  STARTING_FOOD_TILES.forEach(([x, y], i) => {
+    setTile(world, "surface", x, y, "food", undefined, FOOD_FLAVOR_CYCLE[i % FOOD_FLAVOR_CYCLE.length]);
+  });
 
   setTile(world, "surface", SCENARIO_WIDTH - 5, 2, "sunbeam");
 
@@ -61,13 +76,20 @@ export function createDemoWorld(): World {
   for (let x = 6; x <= 14; x++) setElevation(world, "surface", x, 7, 2);
   for (let x = 9; x <= 11; x++) setElevation(world, "surface", x, 6, 3);
 
-  // Real obstacles: a rocky outcrop plus a small wall corner, breaking up
+  // Real obstacles: a rocky outcrop, a wall corner, a scattered boulder
+  // pair, and a broken wall line with a gap to duck through — breaking up
   // the open floor and giving the tactical combat something to route
   // around instead of every fight happening on a featureless plain.
   fillRect(world, 13, 9, 14, 10, "wall");
   setTile(world, "surface", 17, 4, "wall");
   setTile(world, "surface", 18, 4, "wall");
   setTile(world, "surface", 17, 5, "wall");
+  setTile(world, "surface", 7, 12, "wall");
+  setTile(world, "surface", 8, 12, "wall");
+  setTile(world, "surface", 10, 11, "wall");
+  setTile(world, "surface", 11, 11, "wall");
+  // gap at (12, 11) — a chokepoint, not a wall
+  setTile(world, "surface", 13, 11, "wall");
 
   // Two mated pairs, so reproduction has someone to pair with from the start.
   // No `age` set — undefined is treated as already mature (see reproduction.ts).

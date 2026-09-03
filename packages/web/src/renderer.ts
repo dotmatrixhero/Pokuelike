@@ -7,8 +7,20 @@ const TERRAIN_COLOR: Record<string, string> = {
   wall: "#3a3f4b",
   water: "#2b6cb0",
   food: "#8b5a2b",
+  flora: "#3f6b3a",
   sunbeam: "#e8c547",
   seedling: "#3f6b2a",
+};
+
+/** Per-flavor overrides for "food"/"flora" tiles — see flora.ts's FOOD_FLAVORS/FLORA_FLAVORS. */
+const FLAVOR_COLOR: Record<string, string> = {
+  oran: "#5a8cff",
+  sitrus: "#fab03c",
+  pecha: "#ff8cbe",
+  cheri: "#e64646",
+  moss: "#78a564",
+  fern: "#50825a",
+  bloom: "#cd7dc3",
 };
 
 export const TILE_SIZE = 24;
@@ -43,7 +55,7 @@ export function drawWorld(ctx: CanvasRenderingContext2D, world: World): void {
   for (let y = 0; y < world.height; y++) {
     for (let x = 0; x < world.width; x++) {
       const tile = surface[y * world.width + x]!;
-      let base = TERRAIN_COLOR[tile.terrain] ?? "#000";
+      let base = (tile.flavor && FLAVOR_COLOR[tile.flavor]) || TERRAIN_COLOR[tile.terrain] || "#000";
       // A depleted patch fades toward bare floor instead of staying full-color "food".
       if (tile.terrain === "food" && tile.stock !== undefined) {
         base = mixColor(TERRAIN_COLOR.floor!, base, tile.stock);

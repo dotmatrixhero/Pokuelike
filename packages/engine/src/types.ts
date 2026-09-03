@@ -7,8 +7,12 @@ export interface Vec2 {
   y: number;
 }
 
-/** "seedling" is a planted, not-yet-mature food source — see flora.ts. */
-export type TerrainKind = "floor" | "wall" | "water" | "food" | "sunbeam" | "seedling";
+/**
+ * "seedling" is a planted, not-yet-mature patch — see flora.ts. It matures
+ * into either "food" (edible, has stock) or "flora" (decorative only —
+ * not edible, just a nicer tile to be standing on than bare floor).
+ */
+export type TerrainKind = "floor" | "wall" | "water" | "food" | "flora" | "sunbeam" | "seedling";
 
 /**
  * Three layers share one x,y footprint. A species is native to one layer
@@ -31,8 +35,14 @@ export interface Tile {
   elevation: number;
   /** "food" tiles only: how much is currently available (0-1). Depletes when eaten from, regrows over time — see flora.ts. */
   stock?: number;
-  /** "seedling" tiles only: ticks since it took root. Becomes "food" once mature. */
+  /** "seedling" tiles only: ticks since it took root. Becomes "food" or "flora" once mature — see flora.ts. */
   growth?: number;
+  /**
+   * "food"/"flora" tiles only: which specific plant this is (e.g. an Oran
+   * berry bush vs. a mossy tuft) — purely cosmetic for now (glyph/color in
+   * the renderer), no gameplay effect. See flora.ts's FOOD_FLAVORS/FLORA_FLAVORS.
+   */
+  flavor?: string;
 }
 
 /** Needs decay over time and drive an agent's behavior via simple utility AI. */
