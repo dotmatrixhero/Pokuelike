@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createWorld, setTile } from "../src/world.js";
+import { createWorld, setTile, tileAt } from "../src/world.js";
 import { createNeeds, tickAgent } from "../src/needs.js";
 import type { Agent } from "../src/types.js";
 
@@ -73,5 +73,20 @@ describe("tickAgent", () => {
 
     expect(agent.behavior).toBe("idle");
     expect(agent.layer).toBe("underground");
+  });
+
+  it("eating depletes the food patch's stock, and a depleted patch is skipped as a target", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    const agent = makeAgent({ pos: { x: 2, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
+
+    tickAgent(world, agent);
+    expect(tileAt(world, "surface", 2, 0)!.stock).toBeCloseTo(0.8);
+
+    tileAt(world, "surface", 2, 0)!.stock = 0;
+    const secondAgent = makeAgent({ id: "a2", pos: { x: 2, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
+    tickAgent(world, secondAgent);
+    expect(secondAgent.pos).toEqual({ x: 2, y: 0 }); // no reachable food, so it doesn't just sit "on" the depleted tile pretending to eat
+    expect(secondAgent.behavior).toBe("seekFood");
   });
 });

@@ -3,6 +3,7 @@ import { otherLayers, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
 import { applyPredationInstincts } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
+import { CONSUME_STOCK_AMOUNT } from "./flora.js";
 import type { EventLog } from "./events.js";
 
 const DECAY_PER_TICK = {
@@ -54,7 +55,9 @@ export function findNearestTerrain(
   let bestDist = Infinity;
   for (let y = 0; y < world.height; y++) {
     for (let x = 0; x < world.width; x++) {
-      if (tileAt(world, layer, x, y)?.terrain !== terrain) continue;
+      const tile = tileAt(world, layer, x, y);
+      if (tile?.terrain !== terrain) continue;
+      if (terrain === "food" && (tile.stock ?? 0) <= 0) continue; // depleted patch, keep looking
       const dist = Math.abs(x - from.x) + Math.abs(y - from.y);
       if (dist < bestDist) {
         bestDist = dist;
@@ -129,6 +132,10 @@ export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: Hu
       if (target.x === agent.pos.x && target.y === agent.pos.y) {
         const need = agent.behavior === "seekWater" ? "thirst" : "hunger";
         consume(agent.needs, agent.behavior);
+        if (agent.behavior === "seekFood") {
+          const tile = tileAt(world, agent.layer, target.x, target.y);
+          if (tile?.stock !== undefined) tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
+        }
         log?.record({
           kind: "consumed",
           tick: world.tick,

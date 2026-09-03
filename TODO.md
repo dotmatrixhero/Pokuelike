@@ -32,6 +32,17 @@ produce a real story before player mechanics are worth building further.
       4-tile flee-detection radius may be too wide relative to how far one
       flee-step moves an agent out of range). Worth a hysteresis or a
       "stay fled for N ticks after losing the threat" rule.
+- [ ] **Real bottleneck found after adding reproduction + flora (see
+      DESIGN.md): the predator never leaves.** Herd extinction (0 births,
+      dead by tick 217) survived both a flee-radius theory and a food-
+      scarcity theory — confirmed cause is `flee` unconditionally
+      preempting `seekMate` every tick, forever, because Scyther has no
+      migration/territory/satiation behavior pushing it to leave the
+      herd's range after a kill. This is the next thing to build, and
+      it's predator-side, not prey-side: something like a satiation-driven
+      wander/range mechanic so a fed predator moves on and prey get a
+      window. Try this before touching flee-radius or mate-priority
+      numbers again — two tuning guesses have already been wrong.
 
 ## World layers, elevation, and regions (see DESIGN.md)
 - [x] `Tile`/`World` have a `layer` dimension (Underground/Surface/Canopy,
@@ -59,21 +70,65 @@ produce a real story before player mechanics are worth building further.
 - [ ] Herd cohesion: agents share `herdId` in the type but nothing groups or
       regroups them yet. Flocking forces? A shared "home range" center each
       herd member biases toward? — still open, unrelated to predation below.
-- [ ] `seekMate` / mating behavior not implemented — what does a "mating"
-      outcome even do (spawn a new agent? just a behavior with no mechanical
-      effect yet)?
+- [x] `seekMate`/reproduction built (`packages/engine/src/reproduction.ts`)
+      — mature, opposite-sex, same-species/layer/herd agents pair up and
+      produce offspring on contact. See DESIGN.md for why it produced zero
+      births in the current demo world (predator-pressure bottleneck, not
+      a reproduction-system bug).
 - [x] `hunt`/`flee` are built (`packages/engine/src/predation.ts`,
       `HuntRules`, `SpeciesDef.preysOn` in `packages/data`) — a nearby
       predator triggers flee (overrides everything), a hungry predator with
       prey in range hunts and kills on contact. Currently just Scyther ->
-      Bulbasaur. No birth/reproduction yet, so a herd can only shrink, never
-      recover — that's the next thing that would make multi-run stories
-      (not just single-run ones) interesting.
-- [ ] Resource depletion — water/food tiles are infinite right now. Real DF
-      feel probably wants them to deplete and regenerate, driving migration.
+      Bulbasaur.
+- [x] Resource depletion + regrowth + seed-spread built
+      (`packages/engine/src/flora.ts`) — food tiles have a depletable/
+      regrowing `stock`, agents occasionally seed new patches as they move,
+      a slow seasonal cycle modulates regrowth rate. Confirmed working
+      (seeds sprout on schedule) but didn't fix the extinction problem —
+      see the bottleneck note above. Water is still infinite/undepletable
+      (a lake doesn't run dry at this scale) — food/berries only, per the
+      original ask.
+- [ ] Egg stage instead of instant offspring, with parental guarding
+      behavior — confirmed canon-real and mechanically rich (Seaking pairs
+      guard eggs for a month+, "defends with its life," per research done
+      this session). A guarded, vulnerable incubation period is better
+      story material than an instant birth. Deliberately deferred rather
+      than built alongside plain reproduction, to keep that slice small.
+- [ ] Herd cohesion: agents share `herdId` in the type but nothing groups or
+      regroups them yet. Flocking forces? A shared "home range" center each
+      herd member biases toward? — still open, unrelated to predation.
 - [ ] Performance ceiling for the cheap tier — how many agents before naive
       per-tick nearest-tile search (`findNearestTerrain` is O(width*height)
-      per agent!) needs spatial indexing?
+      per agent!) needs spatial indexing? Also now true of `growFlora`'s
+      full-grid scan every tick.
+
+## Culture, disposition, and roles (pitched, not built — see chat)
+- [ ] Disposition vector per individual (boldness/aggression/sociability at
+      minimum) driving AI decisions, distinct from canon Nature (stat bias
+      only). Herd "culture" (fight-or-flee threshold, etc.) should be a
+      computed aggregate of member dispositions weighted by role/rank, not
+      a stored per-herd flag — same shape as the region-level promotion-
+      boundary aggregate, one level down.
+- [ ] Role field (`leader | guardian | member`) held by individuals, not
+      species — "two Venusaur guard this herd" is two agents holding a
+      role, contested and reassigned over time (e.g. on a guardian's
+      death), not a species-level fact.
+- [ ] Evolution as a dispersal trigger: a Disposition-weighted chance to
+      leave the herd and seek a mate elsewhere on evolving — real biology
+      (natal dispersal/inbreeding avoidance), and the concrete reason the
+      world-graph/region-migration idea above would actually get used.
+- [ ] Pair-bonding as a disposition trait (`monogamous | opportunistic`,
+      or a continuous "fidelity" score): a monogamous agent that
+      successfully mates records a `mateId` and prefers/restricts to that
+      partner afterward; losing a bonded mate could mean never re-bonding
+      (permanent, DF-style) or a grief cooldown. This is what makes
+      individuals distinguishable by story ("bonded at tick 40, widowed at
+      137, never mated again") rather than every agent of a species having
+      the same behavior. Needs individuals to actually survive long enough
+      to mate first — see the predator-pressure bottleneck above.
+- [ ] Individual stats/moveset/level per agent (not just species-level
+      moves) — ties into the still-undesigned combat resolver/promotion
+      boundary, not started.
 
 ## Player / bonding (deprioritized until sim depth lands)
 - [ ] Threat signature model — what exactly feeds it (speed/distance/posture)

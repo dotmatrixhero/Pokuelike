@@ -8,9 +8,20 @@ const TERRAIN_COLOR: Record<string, string> = {
   water: "#2b6cb0",
   food: "#8b5a2b",
   sunbeam: "#e8c547",
+  seedling: "#3f6b2a",
 };
 
 export const TILE_SIZE = 24;
+
+/** Linear-interpolates from `from` to `to` by `amount` (0 = from, 1 = to). Used to fade a depleted food patch. */
+function mixColor(from: string, to: string, amount: number): string {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const a = parseInt(from.slice(i, i + 2), 16);
+    const b = parseInt(to.slice(i, i + 2), 16);
+    return Math.round(a + (b - a) * amount);
+  });
+  return `rgb(${r}, ${g}, ${b})`;
+}
 
 /** Elevation shades the floor lighter — a cheap stand-in until real tile art exists. */
 function shade(color: string, elevation: number): string {
@@ -32,7 +43,11 @@ export function drawWorld(ctx: CanvasRenderingContext2D, world: World): void {
   for (let y = 0; y < world.height; y++) {
     for (let x = 0; x < world.width; x++) {
       const tile = surface[y * world.width + x]!;
-      const base = TERRAIN_COLOR[tile.terrain] ?? "#000";
+      let base = TERRAIN_COLOR[tile.terrain] ?? "#000";
+      // A depleted patch fades toward bare floor instead of staying full-color "food".
+      if (tile.terrain === "food" && tile.stock !== undefined) {
+        base = mixColor(TERRAIN_COLOR.floor!, base, tile.stock);
+      }
       ctx.fillStyle = shade(base, tile.elevation);
       ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
     }

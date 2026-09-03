@@ -45,6 +45,13 @@ export type SimEvent =
       species: string;
       layer: Layer;
       pos: Vec2;
+    }
+  | {
+      kind: "floraChanged";
+      tick: number;
+      layer: Layer;
+      pos: Vec2;
+      stage: "seeded" | "sprouted";
     };
 
 /**

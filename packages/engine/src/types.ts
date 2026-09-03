@@ -3,7 +3,8 @@ export interface Vec2 {
   y: number;
 }
 
-export type TerrainKind = "floor" | "wall" | "water" | "food" | "sunbeam";
+/** "seedling" is a planted, not-yet-mature food source — see flora.ts. */
+export type TerrainKind = "floor" | "wall" | "water" | "food" | "sunbeam" | "seedling";
 
 /**
  * Three layers share one x,y footprint. A species is native to one layer
@@ -24,6 +25,10 @@ export interface Tile {
    * elevation later). Drives FOV and combat accuracy/evasion.
    */
   elevation: number;
+  /** "food" tiles only: how much is currently available (0-1). Depletes when eaten from, regrows over time — see flora.ts. */
+  stock?: number;
+  /** "seedling" tiles only: ticks since it took root. Becomes "food" once mature. */
+  growth?: number;
 }
 
 /** Needs decay over time and drive an agent's behavior via simple utility AI. */

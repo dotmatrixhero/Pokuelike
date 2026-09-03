@@ -1,7 +1,7 @@
 import { LAYER_ORDER, type Layer, type Tile, type TerrainKind, type World } from "./types.js";
 
 export function createTile(terrain: TerrainKind, elevation = 0): Tile {
-  return { terrain, walkable: terrain !== "wall", elevation };
+  return { terrain, walkable: terrain !== "wall", elevation, stock: terrain === "food" ? 1 : undefined };
 }
 
 function createLayerGrid(width: number, height: number): Tile[] {
@@ -37,6 +37,8 @@ export function setTile(
   if (!tile) return;
   tile.terrain = terrain;
   tile.walkable = terrain !== "wall";
+  tile.stock = terrain === "food" ? 1 : undefined;
+  tile.growth = terrain === "seedling" ? 0 : undefined;
   if (elevation !== undefined) tile.elevation = elevation;
 }
 

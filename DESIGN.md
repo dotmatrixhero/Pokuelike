@@ -93,6 +93,54 @@ relative to how far one flee-step actually moves an agent out of range,
 producing twitchy panic/calm flicker instead of a clean "spotted -> ran ->
 safe" arc. Not fixed yet — see TODO.md.
 
+## Reproduction: sex, maturity, mate-seeking
+
+**Built:** `packages/engine/src/reproduction.ts` (`applyMateSeeking`),
+wired into `tickAgent`'s previously-unused `seekMate` `BehaviorKind`. A
+mature agent (`age >= 200` ticks, or no age at all for agents spawned
+directly into a scenario — undefined is treated as "already adult") looks
+for the nearest eligible opposite-sex mate of the same species/layer/herd
+within 5 tiles, closes distance, and produces an offspring on contact. A
+`born` `SimEvent` records it. `Agent.sex` is `"male" | "female" |
+undefined` — undefined agents never mate, which is how solitary/singleton
+species in the demo world (one Scyther, one Diglett, one Pidgey) safely
+coexist with the system without ever pairing.
+
+First run with predation + reproduction together: **zero births, full herd
+extinction by tick 217** (see TODO.md for the earlier version of this run
+without flora — same result). Confirmed why: `flee` (predation.ts) runs
+ahead of `chooseBehavior` unconditionally, so a Bulbasaur under any nearby-
+predator pressure never reaches the mating check at all. Across a full
+1000-tick run, zero Bulbasaur ever entered `seekMate` — not "rarely," zero.
+
+## Flora: depletable/regrowing food, seed-spread, seasons
+
+**Built:** `packages/engine/src/flora.ts`. Food tiles have a `stock` (0-1)
+that depletes ~0.2 per feeding and regrows slowly, modulated by a slow
+sine-wave "season" over `world.tick` (`seasonalMultiplier`). An agent that
+actually moves has a small chance (`SEED_DROP_CHANCE * GERMINATION_CHANCE`
+≈ 0.6%) of turning the open-ground tile it's on into a `"seedling"`, which
+matures into a full `"food"` patch after 150 ticks. `findNearestTerrain`
+skips depleted food (`stock <= 0`) — a hollowed-out patch is invisible to
+need-seeking until it regrows or a new one sprouts elsewhere. Two new
+`SimEvent`s: `floraChanged` with `stage: "seeded" | "sprouted"`.
+
+**Confirmed working** over a 1000-tick run: 7 seeds took root and matured
+on schedule (~149 ticks each, matching `MATURATION_TICKS`). **Did not fix
+the extinction problem**, and this is worth being honest about rather than
+claiming a win: the herd's death spiral was never about food scarcity —
+the static demo food/water tiles were never depleted enough to matter
+before the herd was already dead. The actual bottleneck is upstream of
+anything flora touches: the *predator* has no reason to leave. Nothing
+about Scyther's behavior involves migration, territory, or satiation-driven
+wandering — it just keeps re-hunting the same herd every time its hunger
+dips, because the herd's fixed water hole keeps them clustered in range.
+Flora gives *prey* a reason to move; it doesn't give the *predator* one.
+The next lever, per this finding, is predator-side: something that makes
+Scyther leave an area after a kill (satiation-driven range/wander
+behavior, most likely — not a flee-threshold tweak, which was last run's
+guess and turned out not to be the actual cause). Not built — see TODO.md.
+
 ## Stack
 
 - **pnpm workspace monorepo**, TypeScript everywhere.
