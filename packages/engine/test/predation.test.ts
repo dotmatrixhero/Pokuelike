@@ -105,19 +105,35 @@ describe("predation", () => {
     expect(hunter.pos.x).toBeLessThan(8);
   });
 
-  it("kills prey on contact, restores predator hunger, and prunes the corpse", () => {
+  it("a lethal hit faints prey rather than killing it outright, and a follow-up hit finishes it off", () => {
     const world = createWorld(10, 10);
     // Predator ticks first so it strikes before the prey has a chance to flee this tick.
-    // Prey hp set to 1 so a single fallback-damage hit is fatal — see combat.test.ts
-    // for multi-hit-to-faint coverage with real stats.
+    // Prey hp set to 1 so a single fallback-damage hit (1) would have been fatal under
+    // the old instant-death model — now it only faints (see predation.ts/support.ts).
     world.agents.push(predator({ x: 5, y: 6 }, 0.1), prey({ x: 5, y: 5 }, { hp: 1, maxHp: 1 }));
     const log = new EventLog();
 
     tickWorld(world, log, RULES);
 
-    expect(world.agents).toHaveLength(1);
-    expect(world.agents[0]!.id).toBe("scyther-0");
-    expect(world.agents[0]!.needs.hunger).toBeGreaterThan(0.5);
+    // Still alive (fainted, not dead) — the corpse-pruning length assertion below
+    // would have caught an instant-death regression.
+    expect(world.agents).toHaveLength(2);
+    const fainted = world.agents.find((a) => a.id === "bulbasaur-0")!;
+    expect(fainted.alive).not.toBe(false);
+    expect(fainted.fainted).toBe(true);
+    expect(fainted.finishingPool).toBeCloseTo(0.75); // FINISHING_POOL_FRACTION * maxHp(1)
+    const huntingPredator = world.agents.find((a) => a.id === "scyther-0")!;
+    expect(huntingPredator.needs.hunger).toBeLessThan(0.5); // no meal yet — not truly dead
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fainted", agentId: "bulbasaur-0" }));
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "killed" }));
+
+    // Second hit exhausts the 0.75 finishing pool (1 fallback damage > 0.75 remaining) — true death now.
+    tickWorld(world, log, RULES);
+
+    const corpse = world.agents.find((a) => a.id === "bulbasaur-0")!;
+    expect(corpse.alive).toBe(false); // truly dead, but NOT pruned this same tick (corpse persistence)
+    const fedPredator = world.agents.find((a) => a.id === "scyther-0")!;
+    expect(fedPredator.needs.hunger).toBeGreaterThan(0.5); // hunger only restores on the true-death hit
     expect(log.events).toContainEqual(
       expect.objectContaining({ kind: "killed", predatorId: "scyther-0", preyId: "bulbasaur-0" })
     );
@@ -165,20 +181,24 @@ describe("mob-fighting", () => {
     );
   });
 
-  it("a mob of 3+ can defeat a predator outright", () => {
+  it("a mob of 3+ can finish off a fainted predator within the same tick (faint, then a follow-up hit exhausts the pool)", () => {
     const world = createWorld(10, 10);
     const mobbers = [
       prey({ x: 4, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
       prey({ x: 6, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
       prey({ x: 5, y: 4 }, { id: "bulbasaur-2", herdId: "herd-a" }),
     ];
-    // hp/maxHp set to 3 explicitly so 3 fallback-damage (1 each) hits defeats it in one tick.
-    world.agents.push(...mobbers, predator({ x: 5, y: 5 }, 0.3, { hp: 3, maxHp: 3 }));
+    // hp/maxHp set to 1: the first fallback-damage (1) hit faints it (finishingPool
+    // becomes 0.75*1 = 0.75), and the second mobber's hit that same tick (1 damage)
+    // exceeds the remaining pool — a real multi-hit finishing blow, not one big hit.
+    world.agents.push(...mobbers, predator({ x: 5, y: 5 }, 0.3, { hp: 1, maxHp: 1 }));
     const log = new EventLog();
 
     tickWorld(world, log, RULES);
 
-    expect(world.agents.find((a) => a.id === "scyther-0")).toBeUndefined();
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fainted", agentId: "scyther-0" }));
+    const corpse = world.agents.find((a) => a.id === "scyther-0")!;
+    expect(corpse.alive).toBe(false); // truly dead this same tick, but corpse persists (not pruned yet)
     expect(log.events).toContainEqual(
       expect.objectContaining({ kind: "defeated", loserId: "scyther-0", winnerSpecies: "bulbasaur" })
     );

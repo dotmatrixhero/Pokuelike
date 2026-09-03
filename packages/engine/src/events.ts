@@ -1,4 +1,5 @@
 import type { Agent, BehaviorKind, Layer, Vec2, World } from "./types.js";
+import type { PokemonType } from "./typing.js";
 
 export type SimEvent =
   | {
@@ -64,6 +65,15 @@ export type SimEvent =
       defenderSpecies: string;
       damage: number;
       defenderHpRemaining: number;
+      critical: boolean;
+    }
+  | {
+      kind: "missed";
+      tick: number;
+      attackerId: string;
+      attackerSpecies: string;
+      defenderId: string;
+      defenderSpecies: string;
     }
   | {
       kind: "defeated";
@@ -81,6 +91,86 @@ export type SimEvent =
       species: string;
       pos: Vec2;
       cause: "hunger" | "thirst";
+    }
+  | {
+      kind: "leveledUp";
+      tick: number;
+      agentId: string;
+      species: string;
+      fromLevel: number;
+      toLevel: number;
+      exp: number;
+    }
+  | {
+      kind: "evolved";
+      tick: number;
+      agentId: string;
+      fromSpecies: string;
+      toSpecies: string;
+      level: number;
+    }
+  | {
+      kind: "learnedMove";
+      tick: number;
+      agentId: string;
+      species: string;
+      moveId: string;
+      level: number;
+    }
+  | {
+      kind: "gainedSkillPoint";
+      tick: number;
+      agentId: string;
+      species: string;
+      pointType: PokemonType | "wildcard";
+    }
+  | {
+      kind: "fainted";
+      tick: number;
+      agentId: string;
+      species: string;
+      pos: Vec2;
+    }
+  | {
+      kind: "recovered";
+      tick: number;
+      agentId: string;
+      species: string;
+      hp: number;
+    }
+  | {
+      kind: "looted";
+      tick: number;
+      looterId: string;
+      looterSpecies: string;
+      fromId: string;
+      fromSpecies: string;
+      itemKey: string;
+    }
+  | {
+      kind: "foodDelivered";
+      tick: number;
+      carrierId: string;
+      carrierSpecies: string;
+      receiverId: string;
+      receiverSpecies: string;
+    }
+  | {
+      kind: "carrying";
+      tick: number;
+      carrierId: string;
+      carrierSpecies: string;
+      carriedId: string;
+      carriedSpecies: string;
+    }
+  | {
+      kind: "setDown";
+      tick: number;
+      carrierId: string;
+      carrierSpecies: string;
+      carriedId: string;
+      carriedSpecies: string;
+      reason: "arrived" | "threat";
     };
 
 /**

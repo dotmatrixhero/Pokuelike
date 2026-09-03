@@ -8,6 +8,16 @@ import { tickCooldowns } from "./combat.js";
 import { applyHerdCohesion } from "./herding.js";
 import { migrate } from "./migration.js";
 import type { EventLog } from "./events.js";
+import {
+  EXP_ON_CONSUME,
+  EXP_TRICKLE_PER_TICK,
+  MAX_TRACKED_SPECIES,
+  grantExp,
+  markSectorVisited,
+  markSpeciesEncountered,
+  type LevelingContext,
+} from "./leveling.js";
+import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
 
 const DECAY_PER_TICK = {
   hunger: 0.01,
@@ -95,27 +105,33 @@ function consume(needs: Needs, behavior: "seekWater" | "seekFood"): void {
 }
 
 /**
- * Needs-seeking routinely crosses layers: a Diglett (home: underground)
- * finds its food on the surface and crosses to get it, then drifts back
- * once satisfied. Crossing itself takes a tick (no position change) so it
- * reads as a discrete, loggable event rather than free teleportation.
+ * The part of an agent's tick that happens every world tick regardless of
+ * the Speed-driven action economy (see simulation.ts): aging, cooldown
+ * countdown (real-time, deliberately orthogonal to Speed — see DESIGN.md),
+ * need decay, and the passive exp trickle (tiny, per-tick, for every living
+ * agent — deliberately in this always-runs path rather than the action-
+ * gated one, consistent with the rest of the action-economy split: surviving
+ * doesn't pause because you're slow). `world`/`ctx`/`log` are optional so
+ * callers without a leveling context (bare fixtures, anything that predates
+ * this feature) keep working — no world/ctx means the trickle simply isn't
+ * granted (nothing to log a tick number against).
  *
- * Survival instincts (flee a nearby predator, hunt nearby prey when hungry)
- * take priority over normal need-seeking when `rules` is provided — see
- * predation.ts. Without rules, agents behave exactly as before predation
- * existed.
+ * Heal-over-time and faint-recovery (support.ts) also live here, for the
+ * same reason: a fainted agent still needs-decays and heals every tick even
+ * though it's excluded from the action tick entirely (see `tickAgentAction`
+ * below) — DESIGN.md's "Faint/finish-off, heal over time" section.
  */
-export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: HuntRules): void {
+export function tickAgentNeeds(agent: Agent, world?: World, ctx?: LevelingContext, log?: EventLog): void {
   if (agent.alive === false) return;
-
   if (agent.age !== undefined) agent.age += 1;
   tickCooldowns(agent);
   decayNeeds(agent.needs);
 
-  if (agent.needs.hunger <= 0 || agent.needs.thirst <= 0) {
+  if (world && (agent.needs.hunger <= 0 || agent.needs.thirst <= 0)) {
     agent.starvationTicks = (agent.starvationTicks ?? 0) + 1;
     if (agent.starvationTicks >= STARVATION_GRACE_TICKS) {
       agent.alive = false;
+      agent.diedAtTick = world.tick;
       log?.record({
         kind: "starved",
         tick: world.tick,
@@ -130,7 +146,60 @@ export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: Hu
     agent.starvationTicks = 0;
   }
 
-  if (rules && applyPredationInstincts(world, agent, rules, log)) return;
+  applyHealOverTime(agent);
+  if (world) maybeRecoverFromFaint(agent, world, log);
+  if (world) grantExp(world, agent, EXP_TRICKLE_PER_TICK, ctx, log);
+}
+
+/**
+ * The part of an agent's tick that only runs on an action tick: survival
+ * instincts, behavior choice, movement, mate-seeking, attacks. Needs-seeking
+ * routinely crosses layers: a Diglett (home: underground) finds its food on
+ * the surface and crosses to get it, then drifts back once satisfied.
+ * Crossing itself takes a tick (no position change) so it reads as a
+ * discrete, loggable event rather than free teleportation.
+ *
+ * Survival instincts (flee a nearby predator, hunt nearby prey when hungry)
+ * take priority over normal need-seeking when `rules` is provided — see
+ * predation.ts. Without rules, agents behave exactly as before predation
+ * existed.
+ *
+ * A fainted agent, or one currently being physically carried by a herd-mate
+ * (`beingCarriedBy`), takes NO action-tick behavior at all — no movement,
+ * attack, flee, hunt, mate-seeking, or food delivery — per DESIGN.md; it
+ * still needs-decays and heals via `tickAgentNeeds` above. Everything else
+ * here (carrying an ally, looting, herd food delivery) runs for a normal,
+ * conscious agent, ahead of ordinary needs-driven behavior: an in-progress
+ * carry gets first refusal (so a threat can still make the carrier drop the
+ * ally and flee this same tick, see support.ts's `applyCarrying`), then
+ * survival instincts, then starting a new carry/loot/delivery, then the
+ * original needs-based behavior choice.
+ */
+export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext): void {
+  if (agent.alive === false) return;
+  if (agent.fainted) return;
+  if (agent.beingCarriedBy) return;
+
+  if (applyCarrying(world, agent, rules, log)) return;
+  if (rules && applyPredationInstincts(world, agent, rules, log, ctx)) return;
+  if (maybeStartCarrying(world, agent, log)) return;
+  if (applyLooting(world, agent, log)) return;
+  if (applyHerdSupport(world, agent, log)) return;
+
+  markSectorVisited(agent, world, ctx, log);
+  // Once an agent has racked up a handful of distinct species, it's very likely seen
+  // everything currently in play (the demo roster is ~6 species) — skip the O(agents)
+  // nearby-scan entirely past that point rather than re-scanning forever for a trickle
+  // that will never fire again. Without this cap, this scan alone turns a long run with
+  // an exploding population (see DESIGN.md's Venusaur/Bulbasaur growth findings) into an
+  // O(agents^2)-per-tick cost that made even a 5000-tick run impractically slow.
+  if ((agent.encounteredSpecies?.length ?? 0) < MAX_TRACKED_SPECIES) {
+    for (const other of world.agents) {
+      if (other.id === agent.id || other.alive === false) continue;
+      if (Math.abs(other.pos.x - agent.pos.x) + Math.abs(other.pos.y - agent.pos.y) > 3) continue;
+      markSpeciesEncountered(agent, other.species, world, ctx, log);
+    }
+  }
 
   const previousBehavior = agent.behavior;
   agent.behavior = chooseBehavior(agent.needs);
@@ -147,7 +216,7 @@ export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: Hu
   }
 
   if (agent.behavior === "seekMate") {
-    applyMateSeeking(world, agent, log);
+    applyMateSeeking(world, agent, log, ctx);
     return;
   }
 
@@ -164,6 +233,7 @@ export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: Hu
           const tile = tileAt(world, agent.layer, target.x, target.y);
           if (tile?.stock !== undefined) tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
         }
+        grantExp(world, agent, EXP_ON_CONSUME, ctx, log);
         log?.record({
           kind: "consumed",
           tick: world.tick,
@@ -224,4 +294,18 @@ export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: Hu
   if (agent.behavior === "idle") {
     applyHerdCohesion(world, agent);
   }
+}
+
+/**
+ * Convenience wrapper that runs both halves unconditionally — needs decay
+ * *and* a full action — for callers that don't go through `tickWorld`'s
+ * Speed-gated action economy (direct unit tests, anything that wants "tick
+ * this one agent once, fully" without wiring up actionEnergy/stats). Real
+ * simulation ticking goes through `tickWorld` (simulation.ts), which calls
+ * `tickAgentNeeds` every tick and `tickAgentAction` only on an agent's
+ * action tick.
+ */
+export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext): void {
+  tickAgentNeeds(agent, world, ctx, log);
+  tickAgentAction(world, agent, log, rules, ctx);
 }

@@ -15,11 +15,33 @@ export function formatEvent(event: SimEvent): string {
     case "floraChanged":
       return `[tick ${event.tick}] flora ${event.stage} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
     case "fought":
-      return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) hit ${event.defenderSpecies} (${event.defenderId}) for ${event.damage} (hp left: ${event.defenderHpRemaining})`;
+      return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) hit ${event.defenderSpecies} (${event.defenderId}) for ${event.damage}${event.critical ? " (critical hit!)" : ""} (hp left: ${event.defenderHpRemaining})`;
+    case "missed":
+      return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) attacked ${event.defenderSpecies} (${event.defenderId}) and missed`;
     case "defeated":
       return `[tick ${event.tick}] ${event.winnerSpecies} (${event.winnerId}) defeated ${event.loserSpecies} (${event.loserId}) at (${event.pos.x},${event.pos.y})`;
     case "starved":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) starved to death (${event.cause}) at (${event.pos.x},${event.pos.y})`;
+    case "leveledUp":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) leveled up: ${event.fromLevel} -> ${event.toLevel} (exp ${event.exp})`;
+    case "evolved":
+      return `[tick ${event.tick}] ${event.agentId} evolved: ${event.fromSpecies} -> ${event.toSpecies} at level ${event.level}`;
+    case "learnedMove":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) learned ${event.moveId} at level ${event.level}`;
+    case "gainedSkillPoint":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) gained a ${event.pointType} skill point`;
+    case "fainted":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) fainted at (${event.pos.x},${event.pos.y})`;
+    case "recovered":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) recovered consciousness at ${event.hp} hp`;
+    case "looted":
+      return `[tick ${event.tick}] ${event.looterSpecies} (${event.looterId}) looted ${event.itemKey} from ${event.fromSpecies} (${event.fromId})`;
+    case "foodDelivered":
+      return `[tick ${event.tick}] ${event.carrierSpecies} (${event.carrierId}) delivered food to ${event.receiverSpecies} (${event.receiverId})`;
+    case "carrying":
+      return `[tick ${event.tick}] ${event.carrierSpecies} (${event.carrierId}) picked up fainted ${event.carriedSpecies} (${event.carriedId})`;
+    case "setDown":
+      return `[tick ${event.tick}] ${event.carrierSpecies} (${event.carrierId}) set down ${event.carriedSpecies} (${event.carriedId}) (${event.reason})`;
   }
 }
 
