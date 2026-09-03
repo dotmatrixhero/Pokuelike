@@ -341,6 +341,42 @@ produce a real story before player mechanics are worth building further.
       generation, or give solo predators their own idle-wander behavior —
       each touches predation.ts/needs.ts/herding.ts territory beyond the
       biome-generation feature's scope.
+- [x] Herd-level migration built (`packages/engine/src/herdMigration.ts` —
+      see DESIGN.md's "Herd-level migration" section, "As built") — shared
+      `World.herdMigrations`/`World.herdScarcityTicks` state, resource-aware
+      destination scoring via `resourceIndex.ts`, and `herding.ts`'s
+      `applyHerdCohesion` biasing the whole herd (and guardians) toward the
+      shared target. 224 tests total (11 new), all builds/typechecks clean.
+- [ ] Real tuning gap found by the herd-migration feature, same root cause
+      as the predation one above: confirmed via a real-engine famine
+      simulation that the full trigger -> destination -> event pipeline
+      works correctly, but it essentially never fires in the actual demo
+      scenario (zero events in both a 1,000- and 10,000-tick run) because
+      the map's abundance keeps a mobile herd's local food/water recovering
+      well before the 150-tick sustained-scarcity window elapses (confirmed
+      up to 30,000 ticks via a debug instrument — max observed sustained
+      scarcity was ~21-26 ticks for the surface/underground herds after
+      their initial post-spawn settling period). Lowering the threshold
+      enough to fire organically on this map mostly just measures "time to
+      find the first meal after spawning," not real depletion — a worse
+      signal, so left at the documented values rather than chased down.
+      Same possible fixes as the predation gap apply here too (a real
+      famine/drought mechanic, lower ambient food density, or per-herd
+      eating pressure modeling) — not built, out of scope for this feature.
+- [ ] Real limitation found by the same famine simulation: once a migration
+      *is* triggered under genuine severe scarcity, the herd doesn't
+      reliably arrive — `applyHerdCohesion`'s migration bias only applies
+      to *idle* agents, but a real famine keeps most members hungry/thirsty
+      most of the time, and `seekFood`/`seekWater` (needs.ts) searches the
+      *entire map* for the nearest resource with no awareness of the herd's
+      shared migration target, so individual survival-driven wandering can
+      pull the herd away from the scored destination — observed directly: a
+      test migration timed out (`gaveUp`) nowhere near its target. Possible
+      fix, not built: bias `findNearestTerrain`'s candidate search toward
+      the active migration target (e.g. prefer a resource within some bonus
+      radius of the target over a slightly-nearer one elsewhere) — touches
+      needs.ts territory beyond this feature's stated scope (extend
+      `applyHerdCohesion`).
 
 ## Culture, disposition, and roles (pitched, not built — see chat)
 - [x] Disposition vector per individual (boldness/aggression/sociability)

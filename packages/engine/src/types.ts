@@ -317,4 +317,24 @@ export interface World {
    * lookup. See TODO.md's "Performance ceiling for the cheap tier" note.
    */
   resourceVersion?: number;
+  /**
+   * Per-herd migration state — see herdMigration.ts/DESIGN.md's "Herd-level
+   * migration" section. Keyed by `herdId`, not present on every agent: a
+   * whole herd shares exactly one migration target at a time, so this is
+   * the single source of truth `herding.ts`'s `applyHerdCohesion` reads
+   * from when deciding what every member (and guardian) pulls toward.
+   * Absent, or missing a given herdId, means that herd isn't migrating —
+   * ordinary centroid-based cohesion applies.
+   */
+  herdMigrations?: Record<string, { target: Vec2; reason: string; startedTick: number }>;
+  /**
+   * Per-herd consecutive-tick counter for "was this herd's local food/water
+   * below the scarcity threshold this tick" — see herdMigration.ts. Tracked
+   * separately from `herdMigrations` (rather than folded into it) because it
+   * needs to keep counting *before* a migration exists yet, and gets reset
+   * to 0 whenever a scarcity check comes back fine, or once a migration
+   * actually starts (successful or not) so a single sustained-scarcity
+   * window doesn't retrigger a fresh destination search every tick.
+   */
+  herdScarcityTicks?: Record<string, number>;
 }

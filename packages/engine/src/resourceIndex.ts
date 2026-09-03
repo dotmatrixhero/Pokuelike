@@ -1,6 +1,6 @@
 import type { Layer, Vec2, World } from "./types.js";
 
-type IndexedTerrain = "water" | "food" | "sunbeam";
+export type IndexedTerrain = "water" | "food" | "sunbeam";
 
 interface LayerIndex {
   version: number;
@@ -63,6 +63,45 @@ function getIndex(world: World, layer: Layer): LayerIndex {
  */
 export function invalidateResourceIndex(world: World): void {
   world.resourceVersion = (world.resourceVersion ?? 0) + 1;
+}
+
+function chebyshev(a: Vec2, b: Vec2): number {
+  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+}
+
+/**
+ * Sum of live "food" tile `stock` within Chebyshev `radius` of `from`, via
+ * the cached index rather than a naive full-grid scan — used by
+ * herdMigration.ts to sample local food abundance around a herd's centroid
+ * (scarcity detection) and around candidate migration destinations
+ * (destination scoring). Sums `stock` rather than just counting matching
+ * tiles: a single near-full patch means more food is actually available
+ * than several nearly-drained ones, consistent with what `stock` already
+ * means in flora.ts.
+ */
+export function foodStockNear(world: World, layer: Layer, from: Vec2, radius: number): number {
+  const { positions } = getIndex(world, layer);
+  let total = 0;
+  for (const pos of positions.food) {
+    if (chebyshev(pos, from) > radius) continue;
+    total += Math.max(0, rawTileAt(world, layer, pos.x, pos.y)?.stock ?? 0);
+  }
+  return total;
+}
+
+/**
+ * Count of tiles of `terrain` within Chebyshev `radius` of `from`, via the
+ * cached index — same performance rationale as `foodStockNear` above.
+ * Currently only ever called with "water" (herdMigration.ts), but kept
+ * general since the index already tracks "sunbeam" too.
+ */
+export function countTerrainNear(world: World, layer: Layer, from: Vec2, terrain: IndexedTerrain, radius: number): number {
+  const { positions } = getIndex(world, layer);
+  let count = 0;
+  for (const pos of positions[terrain]) {
+    if (chebyshev(pos, from) <= radius) count++;
+  }
+  return count;
 }
 
 /**

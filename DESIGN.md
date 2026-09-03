@@ -2234,6 +2234,128 @@ area) — it picks one random distant point per agent, independently.
   exact scarcity-detection thresholds/duration, another sim-original tuning
   guess to validate against a real run.
 
+### As built
+
+- `packages/engine/src/herdMigration.ts` is new: `World.herdMigrations`
+  (`Record<herdId, {target, reason, startedTick}>`) and
+  `World.herdScarcityTicks` (`Record<herdId, number>`) are the shared,
+  per-herd state DESIGN.md asked for — not duplicated onto every agent.
+  `updateHerdMigrations(world, log)` is called once per tick from
+  `simulation.ts`'s `tickWorld` (not once per agent) and owns the whole
+  lifecycle: sampling local abundance around each herd's live centroid
+  (`herding.ts`'s `herdCentroid`, reusing its own `COHESION_DISTANCE` as the
+  sampling radius rather than inventing a second number), incrementing/
+  resetting a per-herd sustained-scarcity counter, triggering a migration
+  once that counter crosses `SCARCITY_SUSTAIN_TICKS`, and clearing an active
+  migration on arrival or timeout.
+- **Scarcity score, not a raw tile count**: `resourceIndex.ts` gained two
+  new query functions (`foodStockNear`, `countTerrainNear`) that filter its
+  existing cached index by Chebyshev distance instead of doing a fresh
+  full-grid scan — consistent with why that index exists at all. A herd's
+  local "abundance" is `sum(live food stock within radius) + (water tiles
+  within radius)`; `SCARCITY_SCORE_THRESHOLD = 1.5` and
+  `SCARCITY_SUSTAIN_TICKS = 150` are the sim-original tuning guesses (150
+  ticks specifically chosen to ride out one food patch's natural
+  death-to-regrowth gap — flora.ts's `FOOD_LIFESPAN_TICKS`/
+  `MATURATION_TICKS` — without over-reacting to it).
+- **Destination selection is a direct resource-density scan, not
+  biome-aware**: `pickDestination` samples candidate points at 15/25/40
+  tiles out from the centroid in 8 compass directions, scores each with the
+  same abundance function used for scarcity detection, and picks the best
+  one — provided it beats the herd's *current* score by `MIN_IMPROVEMENT`.
+  A biome-aware version (scoring by `worldgen.ts`'s `BIOMES`/
+  `blendBiomeParams` instead) was considered and explicitly not built: a
+  real per-tile resource scan is simpler and more directly answers "is this
+  actually a better place to live" than reasoning about which biome a
+  candidate statistically blends toward — a Forest-leaning tile can still
+  roll foodless locally, and scanning the real tiles never has that
+  mismatch. The improvement-margin gate has a second, load-bearing effect:
+  the underground/canopy herds (`underground-colony`, `pidgey-flock`) have
+  zero food/water tiles on their layers at all (Surface-only generation),
+  so every candidate scores exactly 0, same as "home" — nothing ever clears
+  the bar, so those herds correctly never migrate instead of wandering
+  toward an equally-barren random point. Confirmed directly: a real run
+  showed `pidgey-flock`'s scarcity counter cycle 0 -> 149 -> (destination
+  search finds nothing) -> reset to 0, repeating, exactly as designed.
+- **Whole herd (and guardians) pull toward the same shared point**:
+  `herding.ts`'s `applyHerdCohesion` now checks `world.herdMigrations` first
+  — if the agent's `herdId` has an active entry, *everyone* (ordinary
+  members and guardians alike) pulls toward `migration.target` instead of
+  the live centroid. A guardian keeps its tighter `GUARDIAN_COHESION_DISTANCE`
+  leash while migrating rather than tracking the exact same tolerance as an
+  ordinary member — the simplest reasonable reading of "guardians should
+  still use their tighter leash," not a separate "vicinity of the target"
+  computation, since nothing in a real run showed that extra complexity
+  earning its keep.
+- **Two new events**: `herdMigrating` (herdId, from, to, reason) fires when
+  a migration starts; `herdSettled` (herdId, pos, outcome: "arrived" |
+  "gaveUp") fires when one ends either way — `ARRIVAL_DISTANCE` reuses
+  `COHESION_DISTANCE` again, `MIGRATION_TIMEOUT_TICKS = 2000` mirrors
+  `migrate()`'s own give-up pattern.
+- 11 new tests in `herdMigration.test.ts`: sustained-vs-brief-dip scarcity
+  detection, destination scoring preferring a richer candidate (and
+  correctly finding nothing on a barren map), arrival/timeout/in-progress
+  clearing, and `applyHerdCohesion` pulling both an ordinary member and a
+  guardian toward the shared target — confirming every member reads the
+  exact same `World.herdMigrations` entry rather than each computing its
+  own. All 213 pre-existing tests plus these 11 pass (224 total);
+  `pnpm -r typecheck`/`build` clean across all 4 packages.
+- **Real-run findings, reported straight** (seed 20260903 demo scenario,
+  `pnpm run run <N>` from `packages/runner`):
+  - **The mechanism works end-to-end when actually exercised**: a scripted
+    real-engine run that artificially wiped every food/water tile within 40
+    tiles of the bulbasaur herd's starting centroid (simulating a real
+    famine, not a synthetic unit-test world) triggered a `herdMigrating`
+    event at exactly tick 150 (the configured sustain window) picking a
+    genuinely resource-richer target 34 tiles east, confirming the full
+    scarcity-detection -> destination-scoring -> event pipeline fires
+    correctly through the real `tickWorld` path, not just in isolation.
+  - **But it never fires in the actual demo scenario** — a straight 1,000-
+    and a 10,000-tick run of the unmodified demo world produced zero
+    `herdMigrating`/`herdSettled` events. Root cause diagnosed directly: a
+    debug instrument tracking each herd's live scarcity counter over a
+    30,000-tick run showed `bulbasaur-herd` and `underground-colony` never
+    exceed roughly 21-26 consecutive scarce ticks (well under the 150
+    needed) after their initial post-spawn settling period — the same map
+    abundance the biome-generation feature already flagged as making
+    predation rare and stochastic (DESIGN.md's prior section, TODO.md) also
+    means a mobile herd's *local* food/water around its centroid recovers
+    long before real depletion could ever sustain. This is the same kind of
+    tuning gap, not silently patched: at this map's default abundance,
+    herd-level migration is a real, working, but essentially unreachable
+    mechanism in ordinary play — it would need either a genuine famine
+    event (a drought mechanic, a much larger local herd eating pressure) or
+    a deliberately lower `SCARCITY_SUSTAIN_TICKS`/`SCARCITY_SCORE_THRESHOLD`
+    to ever fire organically, and lowering those enough to fire on the
+    unmodified map (confirmed via the same debug harness: `sustain = 15`
+    fires immediately at spawn, tick 15) mostly just measures "how long it
+    takes a fresh herd to find its first meal," not real depletion — a
+    worse signal, not a better one. Left at the documented values rather
+    than chasing an artificially-triggerable number.
+  - **A second, real limitation surfaced by the same famine-simulation
+    run**: once triggered, the herd did *not* reliably arrive — it timed
+    out (`herdSettled`/`gaveUp` at tick 2150) and ended up at (2, 6),
+    nowhere near the chosen target (59, 10). Cause understood, not a bug:
+    `applyHerdCohesion`'s migration bias only applies while an agent is
+    *idle* (per DESIGN.md's explicit ask to reuse its existing structure);
+    a hungry/thirsty member's `seekFood`/`seekWater` behavior takes
+    priority and searches the *entire map* for the nearest resource via
+    `findNearestTerrain`, with no awareness of the herd's shared migration
+    target — during an actual famine severe enough to trigger migration in
+    the first place, members are hungry *often*, so individual survival-
+    driven wandering can easily pull the herd somewhere other than the
+    scored destination, undermining the "moves together" story exactly
+    when it matters most (a real famine). A softer, still-open idea worth
+    revisiting: bias `findNearestTerrain`'s candidate search toward the
+    migration target when one is active (e.g. prefer a resource within some
+    bonus radius of the target over a slightly-nearer one elsewhere) rather
+    than leaving it target-agnostic — not built here, flagged in TODO.md
+    since it changes needs.ts territory beyond this feature's stated scope
+    (extend `applyHerdCohesion`).
+  - Performance: no measurable regression from the added once-per-tick
+    `updateHerdMigrations` check — 1,000 ticks in ~1.8s, 10,000 in ~5.1s,
+    matching the biome-generation feature's own numbers.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

@@ -183,6 +183,23 @@ export type SimEvent =
       carriedId: string;
       carriedSpecies: string;
       reason: "arrived" | "threat";
+    }
+  | {
+      kind: "herdMigrating";
+      tick: number;
+      herdId: string;
+      from: Vec2;
+      to: Vec2;
+      /** Why the herd is relocating, e.g. "food scarcity" — see herdMigration.ts. */
+      reason: string;
+    }
+  | {
+      kind: "herdSettled";
+      tick: number;
+      herdId: string;
+      pos: Vec2;
+      /** "arrived" = reached the migration target; "gaveUp" = timed out first — mirrors migration.ts's own give-up pattern. */
+      outcome: "arrived" | "gaveUp";
     };
 
 /**

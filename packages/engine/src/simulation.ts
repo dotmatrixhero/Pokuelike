@@ -2,6 +2,7 @@ import type { Agent, HuntRules, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import { growFlora, maybeDropSeed } from "./flora.js";
+import { updateHerdMigrations } from "./herdMigration.js";
 import type { LevelingContext } from "./leveling.js";
 import { CORPSE_PERSIST_TICKS, effectiveSpeed, movementSpeedFactor } from "./support.js";
 import { tileAt } from "./world.js";
@@ -89,6 +90,11 @@ function isDead(agent: Agent): boolean {
  */
 export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext): void {
   world.tick += 1;
+  // Once per tick, not once per agent — see herdMigration.ts. Runs against
+  // this tick's pre-move positions, which is fine: sustained-scarcity
+  // detection is a slow-moving signal, not something that needs to react to
+  // the exact order agents move in within the same tick.
+  updateHerdMigrations(world, log);
   for (const agent of world.agents) {
     if (isDead(agent)) continue;
 
