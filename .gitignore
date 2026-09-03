@@ -1,25 +1,5 @@
-############
-## Windows
-############
-
-# Windows image file caches
-Thumbs.db
-
-# Folder config file
-Desktop.ini
-
-*.stackdump
-
-############
-## Linux
-############
-*.d
-*.o
-bin/pokuelike32
-bin/pokuelike64
-
-# Try to ignore backup files
-*~
-
-# Personal Emacs "project" file
-project.el
+node_modules/
+dist/
+*.log
+*.tsbuildinfo
+.DS_Store
