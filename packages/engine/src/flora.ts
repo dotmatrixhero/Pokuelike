@@ -67,11 +67,11 @@ export const CONSUME_STOCK_AMOUNT = 0.25;
  * A full patch used to just sit at low stock forever, slowly regrowing in
  * place (`BASE_REGROWTH_RATE`, since removed): it never actually died, so
  * "how long food lasts" was really unbounded. That old regrowth-from-empty
- * cycle took roughly 500 ticks at an average season; this is a tenth of
- * that, so food is a real, short-lived resource that has to be replaced
- * by new growth rather than something that just sits there forever.
+ * cycle took roughly 500 ticks at an average season; 50 (a tenth of that)
+ * turned out a little too short once the one-way-ratchet flora-death bug
+ * was fixed and food could actually be found again — doubled per request.
  */
-const FOOD_LIFESPAN_TICKS = 50;
+const FOOD_LIFESPAN_TICKS = 100;
 const NATURAL_DECAY_PER_TICK = 1 / FOOD_LIFESPAN_TICKS;
 /** Chance, per tick, a living food patch seeds an adjacent open tile — real bushes spread, they don't just sit in one place. */
 const FOOD_SPREAD_CHANCE = 0.035;
