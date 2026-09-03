@@ -150,19 +150,28 @@ produce a real story before player mechanics are worth building further.
       disappear now. See DESIGN.md's Flora section for the two real
       failure modes this went through (total colony collapse from a
       famine-window mismatch, then rebalancing) before landing here.
-- [ ] **Population is still net-negative on average, just via boom-bust
-      instead of instant collapse.** Five real 2000-tick runs after the
-      flora rebuild: no more total extinction, but a tick-by-tick trace of
-      one run shows clean growth from 7 to 26 agents by tick 750, then a
-      cascading crash to 0 by tick 925 — an overshoot past what the map's
-      food supply actually supports, not a mechanical bug. Candidate
-      levers, not yet tried: raise `FOOD_LIFESPAN_TICKS`/lower
-      `CONSUME_STOCK_AMOUNT` further now that there's a 20-tile starting
-      buffer; cap population growth directly (a carrying-capacity check in
+- [x] **Found and fixed a real mechanical dead end, not just an
+      overshoot**: decorative "flora" tiles never died (only edible "food"
+      did), and since a seedling only ever plants on bare floor, flora was
+      a one-way ratchet permanently converting the map's seedable ground
+      away. Confirmed in a real run: 0 food tiles *permanently* by tick
+      800, 248/384 tiles converted to dead-end flora, population starving
+      at the water hole with no possible path back to food ever again.
+      Fixed by giving flora a lifespan too (`FLORA_LIFESPAN_TICKS = 150`).
+      See DESIGN.md's flora section for the full trace.
+- [ ] **Population is still net-negative on average — real boom-bust, now
+      that the structural dead-end above is fixed.** Three fresh 2000-tick
+      runs post-fix: activity roughly tripled (60-134 births vs. 13-34
+      before, 1800-3275 `consumed` events vs. 632-974) and tile composition
+      genuinely cycles now instead of ratcheting, but every run still ends
+      in eventual extinction rather than settling. Candidate levers, not
+      yet tried: raise `FOOD_LIFESPAN_TICKS`/lower `CONSUME_STOCK_AMOUNT`
+      further now that the ratchet's gone and there's more room to tune;
+      cap population growth directly (a carrying-capacity check in
       `reproduction.ts`, e.g. mate-seeking pauses above some local
-      density); or accept boom-bust as the intended dynamic and build
-      the "sim tells you the story of a die-off" angle on purpose instead
-      of continuing to chase equilibrium.
+      density); or accept boom-bust as the intended dynamic and build the
+      "sim tells you the story of a die-off" angle on purpose instead of
+      continuing to chase equilibrium.
 - [ ] **Movement/speed is still uniform and unbuilt as a real mechanic.**
       Confirmed by grep: `calculateStats`'s `speed` field is computed but
       never read anywhere — every agent moves exactly 1 tile/tick,

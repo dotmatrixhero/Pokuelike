@@ -33,7 +33,13 @@ export interface Tile {
    * elevation later). Drives FOV and combat accuracy/evasion.
    */
   elevation: number;
-  /** "food" tiles only: how much is currently available (0-1). Depletes when eaten from, regrows over time — see flora.ts. */
+  /**
+   * "food"/"flora" tiles only: remaining life (0-1). For "food" this is
+   * also how much is currently available to eat — depletes when eaten
+   * from and decays on its own over time; for "flora" (decorative, not
+   * edible) it only decays. Either way it dies (reverts to "floor") at 0
+   * — see flora.ts.
+   */
   stock?: number;
   /** "seedling" tiles only: ticks since it took root. Becomes "food" or "flora" once mature — see flora.ts. */
   growth?: number;

@@ -212,8 +212,45 @@ cascading die-off — not a bug in the same sense as the total-collapse
 famine above, but not a stable equilibrium either. Worth being clear about
 the difference: this is now a *believable* ecological failure mode
 (overshoot-and-crash is a real thing real ecosystems do) rather than a
-mechanical dead end, but it's still not what "a living ecosystem" means
-long-term. Not fixed — see TODO.md.
+mechanical dead end. Turned out to be understating it, though — see below.
+
+**Found the actual mechanical dead end after watching the full replay**,
+per a direct, incredulous "there was plenty of food left, they all just
+sat in a watering hole and died?" It wasn't an overshoot at all.
+`growFlora` gave a living **food** patch a lifespan and a death, but
+never gave decorative **flora** one — it just sat there forever once
+grown. Since a seedling can only ever plant on bare `"floor"`, and flora
+permanently converts floor away without ever reverting, decorative growth
+was a one-way ratchet silently eating the map's entire pool of ground new
+food could ever grow on. Checked directly against the actual run: by tick
+800, **0 food tiles existed anywhere on the map, permanently** — every
+future tick stayed at exactly 0 — while 248 of 384 total tiles had been
+converted to un-reseedable decorative flora and only 113 remained as bare
+floor. The population wasn't overshooting anything; it was sitting at the
+water hole (the one need it could still satisfy) starving of hunger with
+*no possible path back to food ever again*, because there was nowhere
+left on the map for a new seedling to take root as food instead of flora.
+What looked like "plenty of food" on screen was moss/fern/bloom —
+decorative, not edible, and rendered in similarly cheerful colors.
+
+**Fixed** by giving flora the same mortality food already had:
+`FLORA_LIFESPAN_TICKS = 150` (3x food's 50, since it's meant to be a
+longer-standing feature, but it still has to eventually give the tile
+back). `Tile.stock` is now reused as a generic vitality counter for both
+kinds rather than being food-specific.
+
+**Real result, three fresh 2000-tick runs:** floor/food/flora now
+genuinely cycle instead of flora monotonically ratcheting to a ceiling —
+tracked one run's tile composition directly: flora peaked at 182 around
+tick 400, then dropped back to 0 by tick 2000 as patches aged out, with
+floor recovering from a low of 81 back up to 361. Population activity
+roughly tripled: 60-134 births per run (vs. 13-34 before this fix),
+1800-3275 `consumed` events (vs. 632-974), still a boom-and-mostly-bust
+pattern rather than settled equilibrium, but a dramatically higher-
+throughput, more alive one — and, more importantly, one where extinction
+is no longer structurally guaranteed by a bug that quietly locks the map's
+food supply at zero forever. Population equilibrium itself is still open
+— see TODO.md.
 
 ## Mob-fighting, predator risk-assessment, and relocation
 

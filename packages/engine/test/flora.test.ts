@@ -76,7 +76,7 @@ describe("growFlora", () => {
     growFlora(world);
 
     expect(tile.terrain).toBe("flora");
-    expect(tile.stock).toBeUndefined();
+    expect(tile.stock).toBe(1); // vitality, not edible stock — decorative flora is mortal too, see below
     expect(FLORA_FLAVORS as readonly string[]).toContain(tile.flavor);
   });
 
@@ -138,6 +138,28 @@ describe("growFlora", () => {
     ];
     const spread = neighborOffsets.some(([x, y]) => tileAt(world, "surface", x, y)!.terrain === "seedling");
     expect(spread).toBe(true);
+  });
+
+  it("decorative flora also decays and eventually dies back to floor — regression for the one-way ratchet bug", () => {
+    // Real bug: flora never died, and a seedling can only ever plant on
+    // bare "floor" — so decorative flora permanently converted floor away
+    // without ever giving tiles back. A real 2000-tick run hit 0 food and
+    // 248/384 tiles converted to dead-end flora, and the population
+    // starved sitting in the water hole with nowhere left for new food to
+    // grow. This just proves flora is mortal like food is.
+    const world = createWorld(3, 3);
+    setTile(world, "surface", 1, 1, "flora");
+    const tile = tileAt(world, "surface", 1, 1)!;
+    expect(tile.stock).toBe(1); // setTile gives it full vitality, same as food
+
+    tile.stock = 0.001;
+    const log = new EventLog();
+    growFlora(world, log);
+
+    expect(tile.terrain).toBe("floor");
+    expect(tile.stock).toBeUndefined();
+    expect(tile.flavor).toBeUndefined();
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "floraChanged", stage: "died" }));
   });
 });
 

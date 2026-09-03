@@ -75,6 +75,22 @@ const FOOD_LIFESPAN_TICKS = 50;
 const NATURAL_DECAY_PER_TICK = 1 / FOOD_LIFESPAN_TICKS;
 /** Chance, per tick, a living food patch seeds an adjacent open tile — real bushes spread, they don't just sit in one place. */
 const FOOD_SPREAD_CHANCE = 0.035;
+/**
+ * Decorative "flora" needs a lifespan too, on the same principle as food —
+ * without this it never dies, which turned out to be a much worse bug than
+ * it sounds: since a seedling only ever plants on bare "floor", and
+ * "flora" permanently converts floor away without ever giving it back,
+ * decorative growth was a one-way ratchet that steadily ate the map's
+ * entire pool of seedable ground. Confirmed in a real 2000-tick run: by
+ * tick 800, food had hit zero *permanently* (0 food tiles, 248 of 384
+ * total tiles converted to un-reseedable decorative flora, only 113 left
+ * as bare floor) while the population sat starving in the water hole,
+ * with nowhere left for new food to ever grow again. Longer-lived than
+ * food since it's meant to be a longer-standing feature, but it has to
+ * eventually give the tile back.
+ */
+const FLORA_LIFESPAN_TICKS = 150;
+const FLORA_DECAY_PER_TICK = 1 / FLORA_LIFESPAN_TICKS;
 
 const NEIGHBOR_OFFSETS: Vec2[] = [
   { x: 0, y: -1 }, { x: 1, y: -1 }, { x: 1, y: 0 }, { x: 1, y: 1 },
@@ -142,7 +158,7 @@ export function growFlora(world: World, log?: EventLog): void {
           tile.flavor = nearSun ? pickFlavor(SUN_FOOD_FLAVORS) : pickFlavor(FOOD_FLAVORS);
         } else {
           tile.terrain = "flora";
-          tile.stock = undefined;
+          tile.stock = 1; // vitality, not edible stock — decays and dies just like food does, below
           tile.flavor = pickFlavor(FLORA_FLAVORS);
         }
         tile.growth = undefined;
@@ -174,6 +190,18 @@ export function growFlora(world: World, log?: EventLog): void {
 
       if (Math.random() < FOOD_SPREAD_CHANCE * (0.5 + season)) {
         trySpread(world, { x: i % world.width, y: Math.floor(i / world.width) }, log);
+      }
+    }
+
+    if (tile.terrain === "flora" && tile.stock !== undefined) {
+      tile.stock -= FLORA_DECAY_PER_TICK * (1.5 - season);
+
+      if (tile.stock <= 0) {
+        const pos = { x: i % world.width, y: Math.floor(i / world.width) };
+        tile.terrain = "floor";
+        tile.stock = undefined;
+        tile.flavor = undefined;
+        log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos, stage: "died" });
       }
     }
   }

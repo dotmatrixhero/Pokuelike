@@ -38,7 +38,7 @@ export function setTile(
   if (!tile) return;
   tile.terrain = terrain;
   tile.walkable = terrain !== "wall";
-  tile.stock = terrain === "food" ? 1 : undefined;
+  tile.stock = terrain === "food" || terrain === "flora" ? 1 : undefined;
   tile.growth = terrain === "seedling" ? 0 : undefined;
   tile.flavor = terrain === "food" || terrain === "flora" ? flavor : undefined;
   if (elevation !== undefined) tile.elevation = elevation;
