@@ -28,6 +28,23 @@ export function createDemoWorld(): World {
     sex: (i % 2 === 0 ? "male" : "female") as "male" | "female",
   }));
 
+  // Two Venusaur guard the herd — much higher level, so genuinely dangerous to
+  // Scyther despite Grass being quadruply resisted by its Bug/Flying typing
+  // (Vine Whip barely tickles it; Tackle, with no type penalty, is the smarter
+  // pick there — pickBestMove actually gets this right on its own).
+  const guardians = [
+    {
+      ...spawnAgent("venusaur", "venusaur-0", { x: 4, y: 7 }, 20),
+      herdId: "bulbasaur-herd",
+      sex: "male" as const,
+    },
+    {
+      ...spawnAgent("venusaur", "venusaur-1", { x: 9, y: 7 }, 20),
+      herdId: "bulbasaur-herd",
+      sex: "female" as const,
+    },
+  ];
+
   const hunter = {
     ...spawnAgent("scyther", "scyther-0", { x: SCENARIO_WIDTH - 2, y: 1 }, 8),
     needs: createNeeds({ hunger: 0.3 }),
@@ -46,6 +63,6 @@ export function createDemoWorld(): World {
     sex: "female" as const,
   };
 
-  world.agents.push(...herd, hunter, diglett, pidgey);
+  world.agents.push(...herd, ...guardians, hunter, diglett, pidgey);
   return world;
 }

@@ -1,8 +1,12 @@
 import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
+import type { PokemonType } from "./typing.js";
 import type { EventLog } from "./events.js";
 import { stepAway, stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
-import { calculateDamage, pickBestMove, useMove } from "./combat.js";
+import { calculateDamage, pickBestMove, useMove, moveRange } from "./combat.js";
+
+/** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
+const GUARDIAN_DETECT_RADIUS = 6;
 
 const FLEE_DETECT_RADIUS = 4;
 const HUNT_DETECT_RADIUS = 5;
@@ -91,6 +95,31 @@ function isProtectedByMob(world: World, candidate: Agent): boolean {
 function isCriticallyHurt(agent: Agent): boolean {
   if (agent.hp === undefined || agent.maxHp === undefined || agent.maxHp === 0) return false;
   return agent.hp / agent.maxHp <= RETREAT_HP_FRACTION;
+}
+
+/** Can `agent` actually hit something `distance` away right now, given its best move's reach? */
+function canAttackFromHere(agent: Agent, distance: number, defenderTypes: PokemonType[]): boolean {
+  const move = pickBestMove(agent, defenderTypes);
+  return move !== undefined && distance <= moveRange(move);
+}
+
+function isPreyOfAnything(rules: HuntRules, species: string): boolean {
+  return Object.values(rules).some((preyList) => preyList.includes(species));
+}
+
+/** A herd-mate (any species) that's currently fleeing or fighting something, for a guardian to notice. */
+function findHerdmateInDanger(world: World, agent: Agent): Agent | undefined {
+  if (!agent.herdId) return undefined;
+  const inDanger = world.agents.filter(
+    (other) =>
+      other.id !== agent.id &&
+      other.alive !== false &&
+      other.herdId === agent.herdId &&
+      other.layer === agent.layer &&
+      (other.behavior === "flee" || other.behavior === "fight") &&
+      manhattan(other.pos, agent.pos) <= GUARDIAN_DETECT_RADIUS
+  );
+  return nearest(agent, inDanger);
 }
 
 /**
@@ -195,13 +224,21 @@ function relocate(world: World, agent: Agent, log?: EventLog): boolean {
  *
  * 1. A predator critically hurt by a mob flees the fight rather than
  *    continuing to hunt.
- * 2. Prey with a predator too close: mob it (converge and deal chip damage)
+ * 2. A guardian (a species nothing preys on, e.g. Venusaur) whose herd-mate
+ *    is fleeing or fighting something moves to intercept that threat,
+ *    whether or not the guardian itself is in any danger.
+ * 3. Prey with a predator too close: mob it (converge and deal chip damage)
  *    if enough herd-mates are nearby to make that a fight worth having,
  *    otherwise flee as before.
- * 3. A hungry predator hunts the nearest prey that ISN'T protected by a mob
+ * 4. A hungry predator hunts the nearest prey that ISN'T protected by a mob
  *    (it won't walk into a fight it would lose) and kills on contact. If it
  *    can't find a safe meal for too long, it gives up on the area and
  *    relocates instead of camping the same spot forever.
+ *
+ * An attack (steps 2-4) only actually lands when the attacker's best move
+ * can reach — a melee move (shape "point") needs distance 1, but something
+ * like Vine Whip (a "line" of length 2) can hit from two tiles out, so a
+ * ranged attacker doesn't have to close all the way in first.
  *
  * Returns true if this tick was handled here, so the caller should skip its
  * normal needs-driven behavior.
@@ -221,6 +258,28 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
     }
   }
 
+  if (!isPreyOfAnything(rules, agent.species)) {
+    const herdmate = findHerdmateInDanger(world, agent);
+    if (herdmate) {
+      const herdmateThreats = agentsWithin(world, herdmate, FLEE_DETECT_RADIUS).filter((other) =>
+        isPreyOf(rules, other.species, herdmate.species)
+      );
+      const threat = nearest(herdmate, herdmateThreats);
+      if (threat) {
+        const distance = manhattan(agent.pos, threat.pos);
+        logBehaviorChange(log, world, agent, "fight");
+        agent.behavior = "fight";
+        agent.fightTarget = threat.id;
+        if (canAttackFromHere(agent, distance, threat.types ?? [])) {
+          resolveHit(world, agent, threat, log, "defeated");
+        } else {
+          agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
+        }
+        return true;
+      }
+    }
+  }
+
   const threats = agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter((other) =>
     isPreyOf(rules, other.species, agent.species)
   );
@@ -236,7 +295,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
       logBehaviorChange(log, world, agent, "fight");
       agent.behavior = "fight";
       agent.fightTarget = threat.id;
-      if (distance <= 1) {
+      if (canAttackFromHere(agent, distance, threat.types ?? [])) {
         resolveHit(world, agent, threat, log, "defeated");
       } else {
         agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
@@ -264,7 +323,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
       agent.behavior = "hunt";
       agent.huntTarget = target.id;
 
-      if (manhattan(agent.pos, target.pos) <= 1) {
+      if (canAttackFromHere(agent, manhattan(agent.pos, target.pos), target.types ?? [])) {
         // A single hit may not be lethal now — real HP, real damage. The
         // meal (and hunger restore) only happens once the target actually faints;
         // otherwise it's a wounded prey that gets another chance to flee next tick.

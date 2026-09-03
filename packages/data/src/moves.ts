@@ -29,7 +29,7 @@ export const MOVES: Record<string, MoveSpec> = {
   vine_whip: {
     id: "vine_whip",
     name: "Vine Whip",
-    shape: { kind: "point" },
+    shape: { kind: "line", length: 2 },
     type: "grass",
     category: "physical",
     power: 45,

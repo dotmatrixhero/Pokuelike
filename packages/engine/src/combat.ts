@@ -71,3 +71,24 @@ export function useMove(agent: Agent, move: MoveSpec): void {
   agent.moveCooldowns = agent.moveCooldowns ?? {};
   agent.moveCooldowns[move.id] = move.cooldownTicks;
 }
+
+/**
+ * How far a move reaches in a straight line toward its target — used by
+ * predation.ts to decide "attack now" vs. "close distance" instead of
+ * assuming everything is melee. Ring/burst are centered on the caster, not
+ * aimed at a target tile, so they don't have a meaningful "reach" here yet
+ * (no wild agent currently has one) — treated as melee until that's needed.
+ */
+export function moveRange(move: MoveSpec): number {
+  switch (move.shape.kind) {
+    case "point":
+      return 1;
+    case "line":
+      return move.shape.length;
+    case "cone":
+      return move.shape.length;
+    case "ring":
+    case "burst":
+      return 1;
+  }
+}

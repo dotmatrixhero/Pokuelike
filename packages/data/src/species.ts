@@ -59,6 +59,16 @@ export const SPECIES: Record<string, SpeciesDef> = {
     types: ["ground"],
     moves: ["tackle"],
   },
+  venusaur: {
+    id: "venusaur",
+    name: "Venusaur",
+    spriteKey: "venusaur",
+    placeholderColor: "#4a8f3c",
+    homeLayer: "surface",
+    baseStats: { hp: 80, attack: 82, defense: 83, spAttack: 100, spDefense: 100, speed: 80 },
+    types: ["grass", "poison"],
+    moves: ["tackle", "vine_whip"],
+  },
   pidgey: {
     id: "pidgey",
     name: "Pidgey",

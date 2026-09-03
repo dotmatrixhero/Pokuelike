@@ -65,6 +65,29 @@ produce a real story before player mechanics are worth building further.
       fights resolve in 1-2 hits — mainline-accurate, but it means
       cooldowns/tactics rarely get to matter. If longer exchanges are
       wanted, the lever is the level/stat gap, not the formula.
+- [x] Move range wired in (`moveRange` in combat.ts) and guardians built
+      (Venusaur, see DESIGN.md). Real run: the mob-never-assembles finding
+      above still holds (still zero mob-fights), and a new one on top —
+      the one guardian intervention that *did* trigger failed for a
+      concrete geographic reason, not a logic bug (see below).
+- [ ] **Guardian positioning gap**: a guardian's `findHerdmateInDanger`
+      check works, but guardians only ever hang out near their own spawn
+      area (the water hole), while the herd forages clear across the map
+      near the food patch — so by the time a guardian notices a herd-mate
+      fleeing and gives chase, the kill happens before it can cross the
+      distance. Fix target: guardians should patrol nearer the herd's
+      actual grazing range, not just sit at one fixed spot.
+- [ ] **New, unplanned finding: unconstrained reproduction blows up.** Two
+      Venusaur (nothing preys on them) went from 2 to 52 individuals over
+      1000 ticks, and `venusaur-0` (the founding male) fathered most of
+      that growth including with his own daughters/granddaughters — no
+      relatedness/inbreeding check exists in `reproduction.ts`, and
+      nothing caps population for a species with no predator. This is the
+      mirror image of the Bulbasaur extinction: predation-free species
+      need *some* population-limiting force (carrying capacity tied to
+      food availability? territory limits? age-based mortality?) or they
+      grow without bound. Not fixed — worth deciding the mechanism
+      deliberately rather than bolting on a random cap.
 
 ## World layers, elevation, and regions (see DESIGN.md)
 - [x] `Tile`/`World` have a `layer` dimension (Underground/Surface/Canopy,
@@ -135,10 +158,11 @@ produce a real story before player mechanics are worth building further.
       computed aggregate of member dispositions weighted by role/rank, not
       a stored per-herd flag — same shape as the region-level promotion-
       boundary aggregate, one level down.
-- [ ] Role field (`leader | guardian | member`) held by individuals, not
-      species — "two Venusaur guard this herd" is two agents holding a
-      role, contested and reassigned over time (e.g. on a guardian's
-      death), not a species-level fact.
+- [x] Guardian behavior built, derived automatically from HuntRules (a
+      species nothing preys on defends herd-mates) rather than a stored
+      role — see DESIGN.md and the positioning gap above. Still open: a
+      real `role` field for contested leadership/succession, which this
+      isn't (guardians don't compete for the role, there's no succession).
 - [ ] Evolution as a dispersal trigger: a Disposition-weighted chance to
       leave the herd and seek a mate elsewhere on evolving — real biology
       (natal dispersal/inbreeding avoidance), and the concrete reason the
@@ -199,6 +223,16 @@ produce a real story before player mechanics are worth building further.
 - [ ] Sprite pipeline is bring-your-own (`packages/web/public/sprites/`) —
       decide on sprite sheet format/size once real art exists.
 - [ ] Tile art vs. the current flat-color terrain rendering.
+
+## Data import
+- [ ] Bulk species/stats import from a PokeRogue-derived data source
+      (user has a fork, `dotmatrixhero/poke_the_spire`) — blocked this
+      session because this session's GitHub access is locked to just this
+      repo and the `add_repo` tool isn't available to widen it (tried both
+      the user's fork and the canonical `pagefaultgames/pokerogue`, same
+      wall either way). Next attempt: either a session with that repo
+      attached from the start, or the user pastes the relevant data
+      file(s) directly.
 
 ## Infra
 - [ ] No lint/format config yet (eslint/prettier) — add once the codebase

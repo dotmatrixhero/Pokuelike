@@ -24,6 +24,31 @@ const TEST_MOVE: MoveSpec = {
   cooldownTicks: 0,
 };
 
+const RANGED_MOVE: MoveSpec = {
+  id: "ranged-move",
+  name: "Ranged Move",
+  shape: { kind: "line", length: 2 },
+  type: "normal",
+  category: "physical",
+  power: 40,
+  accuracy: 100,
+  cooldownTicks: 0,
+};
+
+function guardian(pos: { x: number; y: number }, overrides: Partial<Agent> = {}): Agent {
+  return {
+    id: "venusaur-0",
+    species: "venusaur",
+    pos,
+    layer: "surface",
+    homeLayer: "surface",
+    needs: createNeeds(),
+    behavior: "idle",
+    moves: [TEST_MOVE],
+    ...overrides,
+  };
+}
+
 function prey(pos: { x: number; y: number }, overrides: Partial<Agent> = {}): Agent {
   return {
     id: "bulbasaur-0",
@@ -225,5 +250,63 @@ describe("mob-fighting", () => {
 
     expect(hungry.behavior).toBe("relocate");
     expect(hungry.relocateTarget).toBeDefined();
+  });
+});
+
+describe("ranged attacks", () => {
+  it("a move with real reach (e.g. Vine Whip) can hit without closing to melee", () => {
+    const world = createWorld(10, 10);
+    const mobber1 = prey({ x: 5, y: 3 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [RANGED_MOVE] });
+    const mobber2 = prey({ x: 4, y: 4 }, { id: "bulbasaur-1", herdId: "herd-a", moves: [RANGED_MOVE] });
+    const mobber3 = prey({ x: 6, y: 4 }, { id: "bulbasaur-2", herdId: "herd-a", moves: [RANGED_MOVE] });
+    // predator at (5,5): mobber1 is exactly 2 tiles away (Ranged Move's reach), mobber2/3 are 2 away too (mob-eligible).
+    world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 5 }));
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    expect(mobber1.pos).toEqual({ x: 5, y: 3 }); // didn't move — attacked from range instead
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
+  });
+
+  it("a melee-only move still requires closing to distance 1", () => {
+    const world = createWorld(10, 10);
+    const mobber1 = prey({ x: 5, y: 3 }, { id: "bulbasaur-0", herdId: "herd-a" }); // TEST_MOVE default: melee only
+    const mobber2 = prey({ x: 4, y: 4 }, { id: "bulbasaur-1", herdId: "herd-a" });
+    const mobber3 = prey({ x: 6, y: 4 }, { id: "bulbasaur-2", herdId: "herd-a" });
+    world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 5 }));
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    expect(mobber1.pos).not.toEqual({ x: 5, y: 3 }); // stepped closer instead of attacking
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
+  });
+});
+
+describe("guardians", () => {
+  it("a non-prey herd-mate (e.g. Venusaur) intervenes when another member is threatened", () => {
+    const world = createWorld(10, 10);
+    const protector = guardian({ x: 8, y: 5 }, { herdId: "herd-a" });
+    const threatened = prey({ x: 5, y: 5 }, { herdId: "herd-a", behavior: "flee" });
+    const threat = predator({ x: 6, y: 5 }, 0.9); // satisfied — isolates the guardian's proactive response
+    world.agents.push(protector, threatened, threat);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    expect(protector.behavior).toBe("fight");
+    expect(protector.fightTarget).toBe("scyther-0");
+    expect(protector.pos.x).toBeLessThan(8); // closing in — TEST_MOVE is melee-only, can't hit from 2 away yet
+  });
+
+  it("a guardian with no herd-mate in danger behaves normally", () => {
+    const world = createWorld(10, 10);
+    const protector = guardian({ x: 8, y: 5 }, { herdId: "herd-a" });
+    world.agents.push(protector);
+
+    tickWorld(world, undefined, RULES);
+
+    expect(protector.behavior).not.toBe("fight");
   });
 });

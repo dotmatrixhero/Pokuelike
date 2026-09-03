@@ -230,6 +230,46 @@ thing"):
   instead of flat damage/instant death — a hit that doesn't faint the
   target leaves a wounded agent that gets another chance to flee before
   the next exchange, which didn't exist before at all.
+- **Move range, not just melee**: `combat.ts`'s `moveRange(move)` derives
+  reach from shape (`point` = 1, `line`/`cone` = their length) — Vine Whip
+  is now `{ kind: "line", length: 2 }`, so a Bulbasaur/Venusaur can hit
+  from two tiles out instead of needing to close to melee first. Every
+  attack site (mob-fight, hunt, guardian) checks `canAttackFromHere`
+  before deciding to swing vs. step closer.
+- **Guardians**: any species nothing preys on (checked directly against
+  `HuntRules` — no new data field needed) that notices a herd-mate
+  `flee`ing or `fight`ing moves to intercept the threat, regardless of
+  whether the guardian itself is in any danger (`findHerdmateInDanger` in
+  `predation.ts`). Two Venusaur (level 20, vs. Scyther's level 8) added to
+  the demo herd on this basis.
+
+**Real run result, 1000 ticks, with guardians — two findings, one expected
+kind and one genuinely surprising:**
+
+1. The Bulbasaur herd died exactly the same way as before (same 4 kills,
+   same two-hit pattern). A guardian *did* trigger once — `venusaur-206-1`
+   switched to `fight` at tick 208 when `bulbasaur-3` started fleeing, and
+   gave chase for 15 ticks. It never arrived: the kill happened at (19,13),
+   clear across the map from where the guardians actually spend their time
+   (near the water hole around x=3-9) — the herd forages far enough from
+   its own protectors that a guardian starting from home can't cross the
+   map in time. The mechanism works exactly as coded; the demo map's
+   geography just doesn't give it a chance. Real finding, not a bug: this
+   points at guardian *positioning* (patrol near the grazing range, not
+   just "the herd") as the next lever, not the intervention logic itself.
+2. **Not asked for, and worth flagging plainly: the Venusaur population
+   exploded from 2 to 52 over 1000 ticks.** Nothing hunts Venusaur, so
+   they never flee/fight for their own survival — they just mate
+   continuously (mature at 200 ticks, no predator ever interrupts them).
+   Worse: there's no relatedness check in `reproduction.ts`, so
+   `venusaur-0` (the original founding male) fathered most of that growth,
+   including with his own daughters and granddaughters once they matured.
+   This is the mirror image of the Bulbasaur extinction problem — a
+   species with *no* population pressure grows unboundedly and
+   incestuously — and it's a direct consequence of reproduction and
+   predation being independent systems with nothing tying them together
+   (no carrying capacity, no inbreeding avoidance). Not fixed — see
+   TODO.md.
 
 **Real run result, 1000 ticks — reporting it straight, not as a win:** the
 herd still went fully extinct. But the *texture* of how is different and
