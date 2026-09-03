@@ -709,6 +709,93 @@ later.
   reproduction/carrying-capacity balancing. Worth flagging as the most
   likely next real lever if someone picks this back up.
 
+## Leveling: exp, move learning, evolution, and typed skill points
+
+Decided, not built yet (implementation tracked next). Today "level" is a
+static number baked into `calculateStats` once at `spawnAgent` time and
+never changes — no exp, no move learning, no evolution, despite the
+imported dex already carrying `growthRate` and `evolutions` per species
+that nothing reads. This closes that gap and is deliberately combat-
+adjacent: kills (already logged as `killed`/`defeated` events) become the
+biggest exp source, feeding a mainline-real exp curve, which is also the
+trigger for move learning and evolution.
+
+- **Exp sources, several, not just kills.** Combat kills (hunt-kills,
+  mob-fight/guardian defeats) grant real mainline-formula exp: `floor(baseExp
+  * defeatedLevel / 7)` — the actual wild-battle exp-yield formula, using the
+  `baseExp` field the importer needs to start pulling (see below). Everything
+  else — surviving (a tiny per-tick trickle), eating/drinking, mating, and
+  "life milestone" events like traveling to a new area or meeting a
+  never-seen-before agent/species — also grants exp, but at small, sim-
+  original tuned amounts with **no canon formula to port**, since mainline
+  doesn't grant exp for any of those; document them plainly as tuning
+  guesses to revisit once a real run shows whether they're sane. "New area"
+  and "new agent encountered" need cheap tracking, not full memory: bucket
+  the map into fixed sectors for "visited," and cap/prune a per-agent
+  "known species" set (not full per-agent-id memory, which would grow
+  unboundedly over a long run) for "encountered."
+- **Real mainline growth-rate curves.** The six mainline growth rates
+  (Erratic/Fast/Medium Fast/Medium Slow/Slow/Fluctuating) have well-known
+  public exp-to-level polynomial formulas (not PokeRogue-proprietary code to
+  scrape — implement them directly, referenced against `poke_the_spire`'s
+  `src/data/exp.ts` as a correctness check since it already has them). A
+  level-up can cross more than one level in a single exp gain (loop it, not
+  a single `if`) — a big kill against a much-higher-level target shouldn't
+  silently cap at +1 level.
+- **Level-up stat recompute, mainline-accurate**: `calculateStats(base,
+  newLevel)` recomputed, and `currentHp` increases by the same delta as
+  `maxHp` (mainline heals by the stat gain on level-up, it doesn't reset to
+  full or leave current HP unchanged).
+- **Evolution: level-based only, for now.** The dex's `evolutions` array
+  already carries level/item/trade/friendship conditions per species
+  (`EvolutionDexEntry.conditions` is a freeform bag for the non-level ones).
+  On a level-up, check for the first evolution whose `level` condition is
+  now met (`newLevel >= condition`, not exact-match, since multi-level jumps
+  can skip past it) and apply it: swap `speciesId`, recompute stats from the
+  new species' base stats at the same level, keep exp/level/known
+  moves/skill points as-is, emit a new `evolved` event. **Item/trade/
+  friendship evolutions are explicitly deferred** — there's no item system,
+  no trading, and no friendship stat, so those `conditions` stay unconsumed
+  data until one of those systems exists; this is a scope call, not an
+  oversight.
+- **Move learning: unbounded, on purpose (explicit direction, a deliberate
+  departure from mainline's 4-move cap).** The importer needs to start
+  pulling each species' `levelMoves: [[level, MoveId], ...]` table (not
+  previously imported). On level-up, learn every move unlocked at
+  `<= newLevel` not already known; after an evolution, keep using the new
+  species' `levelMoves` for anything unlocked above the evolution level.
+  Movesets grow without a cap — `pickBestMove` already iterates whatever
+  moves an agent knows, so this doesn't need combat-side changes, just
+  volume tolerance.
+- **Skill points: a typed currency for the existing move-tree respec system
+  (see the action-economy section above), not a free-form point pool.**
+  Points are typed by `PokemonType` and earned "based on typing of what you
+  use" — landing a hit with a move of a given type has a small chance to
+  grant a skill point of *that* type; leveling up also grants a small
+  guaranteed point of the agent's own (primary) type, plus a *rare* chance
+  of a wildcard point. A typed point can only fund `applyMoveTree` nodes on
+  moves of the matching type (e.g. a Grass point only specs Grass moves); a
+  wildcard point funds any move's tree. This means `applyMoveTree`'s cost
+  check needs to become a real spend against `agent.skillPoints[type]` (+
+  wildcard as a fallback), not just an abstract number, and typed points
+  should be preferred over wildcard when both would cover a cost (don't
+  burn the rare currency first). **Still consistent with the existing scope
+  call** that wild background agents never call `applyMoveTree` — they'll
+  accrue skill points same as anyone (harmless, just currency sitting
+  unused) until something (eventually the player) actually spends them.
+- **New events**: `leveledUp` (old level, new level, exp), `evolved`
+  (from-species, to-species, level), `learnedMove`, `gainedSkillPoint`
+  (type, or `"wildcard"`).
+- **Explicitly still open**: exact tuning constants for the non-combat exp
+  trickle sources (deliberately unguessed here — needs a real run to judge,
+  same as every other tuning number in this project); whether erratic/
+  fluctuating growth rates (the two mainline curves that aren't simple
+  monotonic polynomials) need special-casing or fall out of the same
+  general implementation; what "spending" skill points actually looks like
+  for the player once one exists (a UI, an auto-spend heuristic for AI-
+  controlled partners) — out of scope here, this only builds the earning/
+  data side plus the `applyMoveTree` spend-validation plumbing.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays
