@@ -506,6 +506,20 @@ produce a real story before player mechanics are worth building further.
       bug, but worth noting: an agent's *effective* combat moveset will
       often be much smaller than its `knownMoves` list once status moves
       exist in a species' real levelMoves table (which is most of them).
+      **Design done, not built yet** — requested directly ("we do need
+      status effects too" plus a separate ask for environmental utility
+      moves): see DESIGN.md's "Planned: status effects + environmental
+      utility moves" section for the full write-up — a `StatusKind`/
+      `Agent.status` data model that reuses `applyHealOverTime`'s pattern
+      for burn/poison DOT and the existing fainted/`beingCarriedBy`
+      early-return pattern for paralysis/sleep/freeze, plus a hand-curated
+      `statusKind` field on `MoveSpec` (the generated dex only knows a move
+      *has* a status effect, not which one — same gap egg groups had).
+      Environmental utility moves (Sunny Day, Dig-to-escape, Leech Seed as
+      a resource drain) are designed as a genuinely separate trigger path
+      from combat, not a variant of it, since they target tiles/self
+      rather than an enemy. Recommended build order: Sunny Day, then
+      Dig-to-escape, then Leech Seed.
 - [ ] **Non-combat exp trickle amounts are unguessed tuning** (trickle
       0.02/tick, consume 0.5, mate-attempt 1, birth 3, new-sector 2,
       new-species 2 — see DESIGN.md) — no canon formula exists for any of
