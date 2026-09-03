@@ -530,6 +530,75 @@ scrape:
   engine-tested but currently idle until a lower-accuracy move or a
   stage-changing effect exists.
 
+## Action economy: Speed drives frequency, not turn order; move range as its own axis
+
+Decided, not built yet (implementation tracked next): today `tickWorld` gives
+every agent exactly one action per world tick, full stop — Speed exists as a
+stat (`calculateStats`) but nothing reads it. That's wrong for a roguelike-
+tactics-grid combat model, and it's also the natural place to attach the
+long-pitched move-leveling/respec idea (see the opening pitch and the old
+"move leveling/respec system" TODO), so this locks down one coherent design
+instead of bolting Speed on and rebuilding the respec system against it
+later.
+
+- **Speed → action frequency, via an energy accumulator, not an initiative
+  queue.** Every agent gains an `actionEnergy` counter; each world tick,
+  `actionEnergy += speed`, and once it crosses `ACTION_THRESHOLD` the agent
+  gets exactly one action that tick and the threshold is subtracted (the
+  remainder carries over — no drift, and no agent can bank enough excess to
+  take two actions in the same single tick, capped explicitly). A classic
+  sorted initiative queue would work for 1v1 promoted combat but doesn't fit
+  the cheap tier, which has to stay affordable for dozens-to-hundreds of
+  background agents per tick (the existing promotion-boundary concept) —
+  an energy accumulator is O(1) per agent per tick either way, so the same
+  mechanism serves both tiers without a separate combat-only turn system.
+- **This forces `tickAgent` to split** into "always happens" (need decay —
+  hunger doesn't pause because you're slow) and "only on an action tick"
+  (behavior choice, movement, attacks, cooldown-gated move use). That split
+  doesn't exist today; it's the real architectural surgery here, not the
+  accumulator math itself.
+- **Cooldowns stay real-time**, counting down every world tick regardless of
+  whether the owner acted that tick — deliberately orthogonal to Speed.
+  Speed governs how many chances an agent gets to act; cooldown governs how
+  often one specific move is available regardless of how fast its wielder
+  is. Together these are the sim's actual translation of Pokémon's
+  simultaneous-turn Speed stat into a real-time tactics-grid game, rather
+  than a literal port of turn order from a format this sim isn't using.
+- **Move range becomes its own field**, not just inferred from AoE shape:
+  `MoveSpec` gets explicit `range: { min, max }` (max replaces what
+  `moveRange()` in `combat.ts` currently derives solely from `shape`; min
+  defaults to 0/melee-capable, reserved for a future thrown-only move that
+  can't be used at melee). This separates "how far can I target" from "what
+  does the hit look like once I do," which the shape system alone
+  conflates today — a real tactics-grid distinction (FFT/Into the Breach-
+  style: cast range vs. effect footprint), and a prerequisite for the
+  skill tree below to have range as an independent respec axis rather than
+  something only shape changes can move.
+- **Skill tree / respec, as a small DAG per move, not a linear list.** A
+  `MoveSpec` gains an optional node graph — each node a delta on
+  shape/range/power/accuracy/cooldown/statusChance, gated by a point cost
+  and prerequisite node id(s). Applying a chosen set of nodes is a pure
+  function (`applyMoveTree(base, chosenNodeIds) -> MoveSpec`) — it never
+  mutates the canonical `MOVES`/dex data, it derives a new spec instance.
+  This is what makes "Ember: point -> ring, or stay small and trade for
+  more burn chance and faster cooldown" (the original pitch) concrete
+  rather than aspirational.
+- **Scope call: wild background agents don't get trees.** Every predation/
+  guardian/mob-fight call site keeps using the base `MoveSpec` untouched —
+  trees only matter once something (the player, eventually) actually earns
+  and spends move points. This keeps the cheap tier cheap and avoids
+  designing a build-point economy for a hundred background Bulbasaur that
+  will never see it.
+- **Explicitly still open**: whether `ACTION_THRESHOLD` and species' Speed
+  values (mainline-scale, so this needs tuning against `calculateStats`
+  output) produce a good action-frequency spread without retuning every
+  existing behavior threshold that assumed "one action = one tick"; whether
+  cast range vs. effect footprint needs a real target-tile concept (aim at
+  a tile within range, then the shape resolves from *that* tile) or whether
+  origin-anchored shapes are good enough for now — the min/max range field
+  lands either way, but a true "lob it at range then it bursts there" move
+  needs the target-tile version, not just the field.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays
