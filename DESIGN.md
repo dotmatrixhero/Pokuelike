@@ -978,6 +978,93 @@ trigger for move learning and evolution.
   actual run" (this project's stated bar) wasn't achieved for evolution
   specifically, only for leveling and move-learning.
 
+## Faint/finish-off, heal over time, and herd support (inventory, food delivery, carrying)
+
+Decided, not built yet. Today a hit that brings HP to 0 is permanent —
+`alive = false`, pruned from `World.agents` that tick. This replaces that
+with a downed-but-recoverable state, plus the herd-support mechanics needed
+to make recovery meaningful (a fainted agent can't feed itself).
+
+- **Injury lowers effective Speed.** Effective Speed (as fed into
+  `accumulateActionEnergy`, see the action-economy section above) scales
+  down with current HP fraction — hurt agents act less often, not just
+  weaker when they do. Floor it (don't let a badly hurt agent go fully
+  inert) rather than scaling linearly to zero.
+- **Heal over time, gated on being fed/watered.** A small per-tick HP
+  regen applies only while hunger and thirst are both reasonably satisfied
+  — an agent that isn't getting food/water doesn't recover, which is what
+  makes herd food delivery (below) matter for a downed ally who can't feed
+  itself.
+- **Fainting, not instant death, at 0 HP.** A hit that would bring HP to 0
+  instead sets a new `fainted: true` (agent stays `alive`), HP pinned at 0,
+  and grants the fainted agent a **finishing pool** = 75% of its max HP —
+  a real second bar, sized once at the moment of fainting, not a one-hit
+  threshold check. `fainted` agents drop out of the action tick entirely
+  (no movement/attack/flee) but still get needs-decay and heal-over-time
+  every tick like anyone else.
+- **The finishing pool absorbs damage, it doesn't require one big hit.**
+  Every hit landed on a fainted agent (from anyone, not just whoever
+  fainted them) subtracts its damage from the finishing pool instead of
+  the (already-zero) main HP bar. Multiple weaker follow-up hits add up
+  correctly — three hits at 25% of the pool each finish the job exactly
+  like one hit at 75% would. Pool reaches 0 → true death (`alive = false`,
+  now a corpse — eatable and the trigger for pruning after some corpse-
+  persistence window; see below). This is the "killing takes a long time"
+  ask made concrete: knocking something down and finishing it off are two
+  separate acts, mechanically.
+- **Recovery discards the pool.** If a fainted agent's HP regenerates
+  back above a wake threshold before the finishing pool is exhausted, it
+  regains consciousness (`fainted = false`) at that low HP and resumes
+  acting normally — the finishing pool is discarded, not carried forward;
+  a fresh faint later gets a fresh pool.
+- **Looting vs. eating are different permissions on different states.**
+  A **fainted** agent's inventory (see below) can be looted by anyone
+  nearby — predator, rival, even its own herd-mates aren't special-cased,
+  per direct instruction — but it cannot be eaten (no hunger restore) while
+  merely fainted. Only a **true kill** (finishing pool exhausted) produces
+  something eatable. A killed agent's corpse persists for a short window
+  (loot/scavenge opportunity for agents other than whoever landed the
+  killing blow) before being consumed or decaying/pruned — avoids both
+  "corpse vanishes instantly" and "corpses pile up forever."
+- **Inventory and weight, general item slots.** `Agent.inventory` holds
+  weighted item stacks — both simple food units and the ~30 curated held
+  items already imported (`ITEM_DEX`) — capped by a per-species carry
+  capacity. Held-item *effects* stay reference-only, unconsumed by combat,
+  exactly as scoped when they were first imported — this feature only
+  adds the ability to hold/carry/transfer/loot them, not to use them.
+  Carry capacity needs a real per-species number to scale against; the
+  dex doesn't have body weight imported yet (species height/weight weren't
+  pulled by the original importer) — pull it now, or use a stat-total-based
+  proxy if pulling weight turns out not to be worth a separate importer
+  pass. Document whichever call gets made.
+- **Herd food delivery.** A well-fed, non-threatened herd member with free
+  inventory space can pick up food from a flora tile (converts a small
+  amount of the tile's `stock` into a carried food-item unit, same
+  depletion accounting `flora.ts` already does for direct feeding) and,
+  if it knows of a hungry or fainted-and-hungry herd-mate, travel to them
+  and transfer the item — consumed on arrival to restore the receiver's
+  hunger, same as if they'd eaten it themselves. New `BehaviorKind`
+  (e.g. `deliverFood`) and a `foodDelivered` event.
+- **Literal carrying, fainted allies only.** A herd-mate adjacent to a
+  *fully fainted* ally (not merely injured — injured-but-conscious only
+  gets the Speed-assist above) can pick it up: the carried agent's position
+  mirrors the carrier's, it can't act while carried, and the carrier's own
+  effective carry capacity is reduced by the carried agent's weight on top
+  of whatever items it's already holding. The carrier makes for the herd's
+  home range/safe area and sets the ally down on arrival or if the carrier
+  itself comes under threat (drops the ally and switches to `flee` — being
+  the fainted one's rescuer doesn't override the carrier's own survival
+  instinct). New `carrying`/`setDown` events.
+- **Explicitly still open**: exact tuning numbers (heal-over-time rate,
+  wake threshold, corpse-persistence window, carry-capacity formula) —
+  all sim-original guesses to be judged against a real run, same as every
+  other tuning constant in this project; whether looting should remove
+  items outright or drop them on the ground for a delay (kept simple as
+  direct transfer for now); how carrying interacts with the action economy
+  (does the carrier's own Speed/action frequency slow down while carrying
+  extra weight? — a real question, not yet decided, reasonable default is
+  yes but not required for a first pass).
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays
