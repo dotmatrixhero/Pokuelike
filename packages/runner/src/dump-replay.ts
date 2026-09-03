@@ -25,28 +25,42 @@ function indexOfSpecies(species: string): number {
   return i;
 }
 
+const flavorList: string[] = [];
+const flavorIndex = new Map<string, number>();
+function indexOfFlavor(flavor: string | undefined): number {
+  if (flavor === undefined) return -1;
+  let i = flavorIndex.get(flavor);
+  if (i === undefined) {
+    i = flavorList.length;
+    flavorList.push(flavor);
+    flavorIndex.set(flavor, i);
+  }
+  return i;
+}
+
 const width = world.width;
 const height = world.height;
 
-// Static terrain: kind index + elevation per cell (elevation never
-// changes; kind can, e.g. flora growing/being eaten) plus a sparse diff
-// log of every terrain-kind change, keyed by tick.
-const terrainKindOf = (x: number, y: number) =>
-  TERRAIN_ORDER.indexOf(world.tiles.surface[y * width + x]!.terrain);
+// Static terrain: kind index + elevation + flavor index per cell (elevation
+// never changes; kind/flavor can, e.g. flora growing/dying) plus a sparse
+// diff log of every kind-or-flavor change, keyed by tick.
+const kindOf = (i: number) => TERRAIN_ORDER.indexOf(world.tiles.surface[i]!.terrain);
+const flavorOf = (i: number) => indexOfFlavor(world.tiles.surface[i]!.flavor);
 
 let prevKinds: number[] = [];
-for (let y = 0; y < height; y++) {
-  for (let x = 0; x < width; x++) {
-    prevKinds.push(terrainKindOf(x, y));
-  }
+let prevFlavors: number[] = [];
+for (let i = 0; i < width * height; i++) {
+  prevKinds.push(kindOf(i));
+  prevFlavors.push(flavorOf(i));
 }
 
-const baseTerrain = world.tiles.surface.map((tile) => ({
-  t: TERRAIN_ORDER.indexOf(tile.terrain),
+const baseTerrain = world.tiles.surface.map((tile, i) => ({
+  t: prevKinds[i]!,
   e: tile.elevation,
+  f: prevFlavors[i]!,
 }));
 
-const terrainDiffs: { tick: number; i: number; t: number }[] = [];
+const terrainDiffs: { tick: number; i: number; t: number; f: number }[] = [];
 
 // One flat number array per tick: [x0, y0, species0, x1, y1, species1, ...]
 // for every alive agent on the surface layer.
@@ -66,14 +80,13 @@ agentFrames.push(captureAgents());
 for (let tick = 1; tick <= ticks; tick++) {
   tickWorld(world, log, HUNT_RULES);
 
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const kind = terrainKindOf(x, y);
-      const i = y * width + x;
-      if (kind !== prevKinds[i]) {
-        terrainDiffs.push({ tick, i, t: kind });
-        prevKinds[i] = kind;
-      }
+  for (let i = 0; i < width * height; i++) {
+    const kind = kindOf(i);
+    const flavor = flavorOf(i);
+    if (kind !== prevKinds[i] || flavor !== prevFlavors[i]) {
+      terrainDiffs.push({ tick, i, t: kind, f: flavor });
+      prevKinds[i] = kind;
+      prevFlavors[i] = flavor;
     }
   }
 
@@ -93,6 +106,7 @@ writeFileSync(
     width,
     height,
     terrainOrder: TERRAIN_ORDER,
+    flavorList,
     baseTerrain,
     terrainDiffs,
     speciesList,
@@ -103,4 +117,4 @@ writeFileSync(
   })
 );
 
-console.log("wrote", outPath, "ticks:", agentFrames.length, "species:", speciesList);
+console.log("wrote", outPath, "ticks:", agentFrames.length, "species:", speciesList, "flavors:", flavorList);
