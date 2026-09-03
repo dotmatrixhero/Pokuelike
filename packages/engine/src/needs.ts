@@ -1,13 +1,13 @@
 import type { Agent, BehaviorKind, HuntRules, Layer, Needs, Vec2, World } from "./types.js";
 import { otherLayers, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
-import { applyPredationInstincts } from "./predation.js";
+import { applyPredationInstincts, manhattan } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT } from "./flora.js";
 import { tickCooldowns } from "./combat.js";
 import { applyHerdCohesion } from "./herding.js";
 import { migrate } from "./migration.js";
-import type { EventLog } from "./events.js";
+import { logBehaviorChange, type EventLog } from "./events.js";
 import {
   EXP_ON_CONSUME,
   EXP_TRICKLE_PER_TICK,
@@ -15,6 +15,7 @@ import {
   grantExp,
   markSectorVisited,
   markSpeciesEncountered,
+  sectorId,
   type LevelingContext,
 } from "./leveling.js";
 import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
@@ -57,6 +58,73 @@ export function ageMortalityChance(age: number): number {
 }
 /** Ticks a non-predator can go wanting food/water with none reachable anywhere before it gives up and migrates. */
 const MIGRATE_AFTER_TICKS = 150;
+
+/**
+ * How far a fully-satisfied idle agent will look for a not-yet-visited
+ * sector to wander to — the exp-motivated exploration drive. Deliberately
+ * local (`SECTOR_SIZE` in leveling.ts is 5, so this reaches a handful of
+ * neighboring sectors), not a full migrate()-style jump across the map —
+ * this is idle curiosity, not desperation.
+ */
+const EXPLORE_SEARCH_RADIUS = 8;
+const EXPLORE_SEARCH_ATTEMPTS = 8;
+/**
+ * A newborn doesn't wander off exploring the instant it's born — it settles
+ * in near its birthplace for a few ticks first. Also fixes a real same-tick
+ * interaction: a newborn (age 0) pushed mid-loop by `spawnOffspring` gets
+ * ticked once more in the very same `tickWorld` call (see simulation.ts's
+ * doc comment) — by the time ITS OWN turn runs, `tickAgentNeeds` has
+ * already incremented its age to 1, and without this floor it could
+ * immediately wander a step back onto its mother's own tile, defeating the
+ * "don't spawn stacked on the mother" placement `nearbySpawnTile` exists
+ * for (confirmed: this exact interaction intermittently failed that test).
+ */
+const MIN_EXPLORE_AGE = 10;
+
+/** A random nearby walkable tile that lands in a sector this agent hasn't visited yet, if one can be found in a few tries. */
+function findNearbyUnvisitedTile(world: World, agent: Agent): Vec2 | undefined {
+  for (let i = 0; i < EXPLORE_SEARCH_ATTEMPTS; i++) {
+    const dx = Math.floor(Math.random() * (EXPLORE_SEARCH_RADIUS * 2 + 1)) - EXPLORE_SEARCH_RADIUS;
+    const dy = Math.floor(Math.random() * (EXPLORE_SEARCH_RADIUS * 2 + 1)) - EXPLORE_SEARCH_RADIUS;
+    const candidate = { x: agent.pos.x + dx, y: agent.pos.y + dy };
+    if (!tileAt(world, agent.layer, candidate.x, candidate.y)?.walkable) continue;
+    if (agent.visitedSectors?.includes(sectorId(candidate.x, candidate.y))) continue;
+    return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Called only once an agent is otherwise fully idle (no urgent need, no
+ * herd pull-back needed) — instead of just standing on the last tile it
+ * ate/drank at forever, it wanders toward nearby unexplored territory,
+ * motivated by the exp `markSectorVisited` grants for genuinely new ground
+ * (see leveling.ts). Requested directly: agents should be "somewhat
+ * motivated by gaining exp too," not just gain it as a side effect of
+ * need-seeking. Incidentally also closes the pre-existing "no reason to
+ * leave a resource tile once satisfied" gap noted in TODO.md's tile-
+ * stacking section. A no-op (stays idle) if nothing new is reachable
+ * nearby right now — exploring is optional flavor, not another need that
+ * can starve.
+ */
+function applyExploration(world: World, agent: Agent, log?: EventLog): void {
+  if (agent.age !== undefined && agent.age < MIN_EXPLORE_AGE) return;
+
+  if (!agent.exploreTarget) {
+    agent.exploreTarget = findNearbyUnvisitedTile(world, agent);
+    if (!agent.exploreTarget) return;
+  }
+
+  logBehaviorChange(log, world, agent, "explore");
+  agent.behavior = "explore";
+
+  if (manhattan(agent.pos, agent.exploreTarget) <= 1) {
+    agent.pos = agent.exploreTarget;
+    agent.exploreTarget = undefined;
+  } else {
+    agent.pos = stepToward(world, agent.layer, agent.pos, agent.exploreTarget);
+  }
+}
 
 const CONSUME_RATE = {
   seekWater: { need: "thirst", amount: 0.4 },
@@ -220,6 +288,18 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
   if (applyLooting(world, agent, log)) return;
   if (applyHerdSupport(world, agent, log)) return;
 
+  // Continue an in-progress exploration walk as long as nothing more urgent
+  // has come up since it started (checked fresh, not read from the stale
+  // `agent.behavior` — see applyExploration's doc comment on why an urgent
+  // need always wins).
+  if (agent.exploreTarget) {
+    if (chooseBehavior(agent.needs) === "idle") {
+      applyExploration(world, agent, log);
+      return;
+    }
+    agent.exploreTarget = undefined;
+  }
+
   markSectorVisited(agent, world, ctx, log);
   // Once an agent has racked up a handful of distinct species, it's very likely seen
   // everything currently in play (the demo roster is ~6 species) — skip the O(agents)
@@ -326,7 +406,8 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
   }
 
   if (agent.behavior === "idle") {
-    applyHerdCohesion(world, agent, rules);
+    const drewBack = applyHerdCohesion(world, agent, rules);
+    if (!drewBack) applyExploration(world, agent, log);
   }
 }
 

@@ -8,6 +8,7 @@ import {
   grantExp,
   killExpYield,
   grantKillExp,
+  KILL_EXP_MULTIPLIER,
   type LevelingContext,
   type LevelingProfile,
 } from "../src/leveling.js";
@@ -134,13 +135,16 @@ describe("grantExp / level-up", () => {
     expect(killExpYield(142, 20)).toBe(405);
   });
 
-  it("grantKillExp uses the defender's dex baseExp + level via ctx", () => {
+  it("grantKillExp uses the defender's dex baseExp + level via ctx, scaled by KILL_EXP_MULTIPLIER", () => {
+    // A kill should "give a ton" — the real mainline formula alone assumes a
+    // 6-Pokémon team splitting exp from frequent battles, neither of which
+    // applies to a single wild agent's rare kill in this sim. See leveling.ts.
     const world = createWorld(5, 5);
     const ctx = testCtx();
     const attacker = bulbasaur({ id: "attacker", exp: 0, level: 1 });
     const defender = bulbasaur({ id: "defender", level: 5 });
     grantKillExp(world, attacker, defender, ctx);
-    expect(attacker.exp).toBe(killExpYield(64, 5));
+    expect(attacker.exp).toBe(killExpYield(64, 5) * KILL_EXP_MULTIPLIER);
   });
 
   it("a big exp gain levels up multiple levels in one go and heals HP by the stat delta each level", () => {

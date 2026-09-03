@@ -8,12 +8,16 @@ import type { Agent, HuntRules } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 import type { Disposition } from "../src/nature.js";
 
-const RULES: HuntRules = { scyther: ["bulbasaur"] };
+const RULES: HuntRules = { scyther: true };
 
-// No level/types/stats set on the fixtures below, deliberately: that keeps these
+// No types/stats set on the fixtures below, deliberately: that keeps these
 // tests on predation.ts's FALLBACK_DAMAGE (1 per hit) path, so they're testing
 // flee/fight/hunt/relocate *behavior*, not the damage formula (see combat.test.ts
 // for that). A move is still required or pickBestMove finds nothing to swing.
+// `maxHp` IS set explicitly on each factory below, though — predation eligibility
+// is now power-based (see predation.ts's isPreyOf/PREY_POWER_RATIO), so prey/
+// predator/guardian need a real, deliberate power gap between them or nothing
+// would ever qualify as prey of anything.
 const TEST_MOVE: MoveSpec = {
   id: "test-move",
   name: "Test Move",
@@ -46,6 +50,7 @@ function guardian(pos: { x: number; y: number }, overrides: Partial<Agent> = {})
     needs: createNeeds(),
     behavior: "idle",
     moves: [TEST_MOVE],
+    maxHp: 50, // well above any predator() default * PREY_POWER_RATIO — never eligible prey
     ...overrides,
   };
 }
@@ -60,6 +65,7 @@ function prey(pos: { x: number; y: number }, overrides: Partial<Agent> = {}): Ag
     needs: createNeeds(),
     behavior: "idle",
     moves: [TEST_MOVE],
+    maxHp: 10, // FALLBACK_MAX_HP — small enough for predator()'s default to treat as prey
     ...overrides,
   };
 }
@@ -74,6 +80,7 @@ function predator(pos: { x: number; y: number }, hunger = 0.3, overrides: Partia
     needs: createNeeds({ hunger }),
     behavior: "idle",
     moves: [TEST_MOVE],
+    maxHp: 20, // comfortably above prey()'s default(10) / PREY_POWER_RATIO(0.75) = 13.3
     ...overrides,
   };
 }
@@ -161,6 +168,68 @@ describe("predation", () => {
   });
 });
 
+describe("dynamic (size-based) predation — not a fixed species list", () => {
+  it("a predator hunts a species that was never in any fixed prey list, purely because it's small enough", () => {
+    // "spearow probably goes for bulbasaurs too" — a hunter species isn't
+    // limited to a hardcoded menu; anything sufficiently smaller/weaker
+    // nearby is fair game. "charmander" here stands in for any species this
+    // predator was never explicitly paired with in HUNT_RULES/data.
+    const world = createWorld(10, 10);
+    const smallStranger = prey({ x: 5, y: 5 }, { id: "charmander-0", species: "charmander", maxHp: 8 });
+    world.agents.push(smallStranger, predator({ x: 8, y: 5 }));
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    const hunter = world.agents.find((a) => a.id === "scyther-0")!;
+    expect(hunter.behavior).toBe("hunt");
+    expect(hunter.huntTarget).toBe("charmander-0");
+  });
+
+  it("a predator does NOT hunt something too close to its own size, even of a species it usually preys on", () => {
+    const world = createWorld(10, 10);
+    // maxHp 18 is above predator()'s 20 * PREY_POWER_RATIO (0.75) = 15 — too big to be worth it.
+    const tooBig = prey({ x: 5, y: 5 }, { maxHp: 18 });
+    world.agents.push(tooBig, predator({ x: 8, y: 5 }));
+
+    tickWorld(world, undefined, RULES);
+
+    const hunter = world.agents.find((a) => a.id === "scyther-0")!;
+    expect(hunter.behavior).not.toBe("hunt");
+  });
+
+  it("same species is never prey, regardless of a power gap", () => {
+    const world = createWorld(10, 10);
+    // A second, much weaker scyther — same species as the hungry predator, well within
+    // the power ratio that would make anything else fair game.
+    const weakerKin = predator({ x: 5, y: 5 }, 1, { id: "scyther-1", maxHp: 5 });
+    world.agents.push(weakerKin, predator({ x: 8, y: 5 }));
+
+    tickWorld(world, undefined, RULES);
+
+    const hunter = world.agents.find((a) => a.id === "scyther-0")!;
+    expect(hunter.behavior).not.toBe("hunt");
+  });
+
+  it("a target grown too big (e.g. leveled up) stops being prey to a predator that used to be able to eat it", () => {
+    const world = createWorld(10, 10);
+    const grownUp = prey({ x: 5, y: 5 }, { maxHp: 10 }); // eligible prey at this size
+    const hunter = predator({ x: 8, y: 5 });
+    world.agents.push(grownUp, hunter);
+
+    tickWorld(world, undefined, RULES);
+    expect(world.agents.find((a) => a.id === "scyther-0")!.behavior).toBe("hunt");
+
+    // It grows past the predator's threshold — no longer worth hunting.
+    grownUp.maxHp = 18;
+    hunter.behavior = "idle";
+    hunter.huntTarget = undefined;
+
+    tickWorld(world, undefined, RULES);
+    expect(world.agents.find((a) => a.id === "scyther-0")!.behavior).not.toBe("hunt");
+  });
+});
+
 describe("mob-fighting", () => {
   it("a large enough, close enough herd mobs the predator instead of fleeing", () => {
     const world = createWorld(10, 10);
@@ -173,12 +242,12 @@ describe("mob-fighting", () => {
     tickWorld(world, log, RULES);
 
     // mobber1 is adjacent (distance 1) and lands a fallback-damage (1) hit;
-    // the predator's fallback max hp (no stats/level set) is 10.
+    // the predator()'s explicit maxHp default (see the factory) is 20.
     expect(mobber1.behavior).toBe("fight");
     const hunter = world.agents.find((a) => a.id === "scyther-0")!;
-    expect(hunter.hp).toBe(9);
+    expect(hunter.hp).toBe(19);
     expect(log.events).toContainEqual(
-      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", defenderHpRemaining: 9 })
+      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", defenderHpRemaining: 19 })
     );
   });
 

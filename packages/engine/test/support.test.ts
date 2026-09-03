@@ -197,7 +197,7 @@ describe("herd food delivery", () => {
 });
 
 describe("carrying a fainted ally", () => {
-  const RULES: HuntRules = { scyther: ["bulbasaur"] };
+  const RULES: HuntRules = { scyther: true };
 
   it("picks up an adjacent fainted ally, mirrors its position every tick, and sets it down on arrival at home", () => {
     const world = createWorld(10, 10);
@@ -275,7 +275,7 @@ describe("carrying a fainted ally", () => {
 });
 
 describe("integration: fainting and recovery through tickWorld", () => {
-  const RULES: HuntRules = { scyther: ["bulbasaur"] };
+  const RULES: HuntRules = { scyther: true };
 
   it("a full run: faint -> heal above wake threshold -> recover -> resume acting", () => {
     const world = createWorld(10, 10);

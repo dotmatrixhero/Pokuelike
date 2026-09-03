@@ -207,6 +207,56 @@ describe("old-age mortality", () => {
   });
 });
 
+describe("exp-motivated exploration", () => {
+  it("a fully-satisfied idle agent in a large world wanders toward unexplored territory instead of standing still", () => {
+    const world = createWorld(40, 40);
+    const agent = makeAgent({ pos: { x: 20, y: 20 } });
+
+    tickAgent(world, agent);
+
+    expect(agent.behavior).toBe("explore");
+    expect(agent.pos).not.toEqual({ x: 20, y: 20 });
+  });
+
+  it("keeps walking toward the same exploreTarget across multiple ticks rather than re-rolling every tick", () => {
+    const world = createWorld(40, 40);
+    const agent = makeAgent({ pos: { x: 20, y: 20 } });
+
+    tickAgent(world, agent);
+    const target = agent.exploreTarget;
+    expect(target).toBeDefined();
+
+    tickAgent(world, agent);
+    // Still walking toward the very same target, not a freshly re-rolled one.
+    expect(agent.exploreTarget ?? agent.pos).toEqual(target);
+  });
+
+  it("an urgent need interrupts an in-progress exploration walk", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 0, 0, "water");
+    const agent = makeAgent({ pos: { x: 20, y: 20 } });
+
+    tickAgent(world, agent);
+    expect(agent.behavior).toBe("explore");
+
+    agent.needs.thirst = 0.1; // now urgent
+    tickAgent(world, agent);
+
+    expect(agent.behavior).toBe("seekWater");
+    expect(agent.exploreTarget).toBeUndefined();
+  });
+
+  it("does nothing (stays idle) when the entire reachable world is already one visited sector", () => {
+    const world = createWorld(3, 3); // one sector total (SECTOR_SIZE=5) — markSectorVisited marks it before exploration is even considered
+    const agent = makeAgent({ pos: { x: 1, y: 1 } });
+
+    tickAgent(world, agent);
+
+    expect(agent.behavior).toBe("idle");
+    expect(agent.pos).toEqual({ x: 1, y: 1 });
+  });
+});
+
 describe("migration on unreachable resources", () => {
   it("an agent that can never find food eventually migrates instead of standing still forever", () => {
     const world = createWorld(30, 30); // no food anywhere on any layer

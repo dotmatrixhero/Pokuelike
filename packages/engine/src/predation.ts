@@ -97,8 +97,63 @@ export function manhattan(a: Vec2, b: Vec2): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
-export function isPreyOf(rules: HuntRules, predatorSpecies: string, targetSpecies: string): boolean {
-  return rules[predatorSpecies]?.includes(targetSpecies) ?? false;
+/**
+ * How much smaller a target's power has to be, relative to the predator's,
+ * to be worth hunting — a predator won't bother with something its own size
+ * or bigger. Tuned against this roster's real spawn-level numbers: Scyther
+ * (level 8, power ~29) vs. Bulbasaur (level 5, power ~19) is right at the
+ * edge of a real predator/prey pair (19/29 ≈ 0.66), and Onix (level 10,
+ * power ~27) vs. Sandshrew (level 5, power ~20) is even tighter (~0.74) —
+ * 0.75 keeps both working without also letting a predator take on something
+ * close to its own weight class.
+ */
+const PREY_POWER_RATIO = 0.75;
+
+/**
+ * A rough "how big and capable is this thing" score for predation purposes.
+ * `maxHp` alone already bakes in both level and species size/bulk (it's
+ * `floor(2*baseHp*level/100) + level + 10` — see stats.ts), so it doubles as
+ * a reasonable proxy for "level and size" without this sim needing separate
+ * weight/height data it doesn't import. Falls back to a small constant for
+ * an agent with no combat profile yet (shouldn't happen for a real
+ * predator/prey pair, but keeps this total).
+ */
+function powerOf(agent: Agent): number {
+  return agent.maxHp ?? agent.stats?.maxHp ?? FALLBACK_MAX_HP;
+}
+
+/**
+ * Real predator/prey eligibility is dynamic, not a fixed species list: any
+ * species flagged as a hunter in `rules` will go after ANY sufficiently
+ * smaller/weaker nearby creature, regardless of species — a hungry Spearow
+ * doesn't only eat Pidgey, it'll take a small enough Bulbasaur too if
+ * they're ever on the same layer. Same species is never prey (no
+ * cannibalism modeled) — checked first since two same-species agents can
+ * otherwise have very different power at different levels. The target must
+ * be strictly weaker than `PREY_POWER_RATIO` of the predator's own power,
+ * which also makes this relation acyclic: if A preys on B, B's power is
+ * already too low for B to simultaneously prey on A.
+ */
+export function isPreyOf(rules: HuntRules, predator: Agent, target: Agent): boolean {
+  if (!rules[predator.species]) return false;
+  if (target.species === predator.species) return false;
+  return powerOf(target) <= powerOf(predator) * PREY_POWER_RATIO;
+}
+
+/**
+ * Is `species` a hunter at all, regardless of its current power? Used for a
+ * prey's own flee/mob reaction and a guardian's threat scan — deliberately
+ * NOT power-gated like `isPreyOf` above. Whether something is worth
+ * *hunting* is the predator's own size-aware judgment call, but whether
+ * something is worth *fleeing* is prey's judgment call, and prey doesn't
+ * have detailed knowledge of exactly how strong a given predator currently
+ * is — a wounded or fainted predator is still a predator worth staying away
+ * from or mobbing, not something to casually ignore because its HP is low.
+ * Same-species exclusion mirrors `isPreyOf` for the same reason (no
+ * conspecific "threat").
+ */
+export function isHunterSpecies(rules: HuntRules, hunterCandidateSpecies: string, ownSpecies: string): boolean {
+  return !!rules[hunterCandidateSpecies] && hunterCandidateSpecies !== ownSpecies;
 }
 
 /** Nearby living agents (fainted ones included — a fainted agent is still `alive !== false`, and remains a valid hunt/threat target). */
@@ -163,8 +218,22 @@ function canAttackFromHere(agent: Agent, distance: number, defenderTypes: Pokemo
   return move !== undefined && withinMoveRange(move, distance);
 }
 
-export function isPreyOfAnything(rules: HuntRules, species: string): boolean {
-  return Object.values(rules).some((preyList) => preyList.includes(species));
+/**
+ * Whether ANY currently-alive hunter-flagged agent in the world has enough
+ * power to treat `agent` as prey right now — the dynamic replacement for a
+ * static "this species is never prey" fact. A newly-hatched Bulbasaur is
+ * vulnerable; the same individual once it's leveled up (or evolved into
+ * Venusaur) past every hunter's threshold isn't, without needing a
+ * species-level guardian flag anywhere. Checked against every hunter in the
+ * world, not just ones nearby right now, so a herd correctly keeps treating
+ * its vulnerable members as vulnerable even in the tick before a predator
+ * actually shows up (used for the guardian-vs-ordinary-member leash choice
+ * in herding.ts, and to gate the guardian-intervention behavior below).
+ */
+export function isPreyOfAnything(rules: HuntRules, world: World, agent: Agent): boolean {
+  return world.agents.some(
+    (other) => other.id !== agent.id && other.alive !== false && isPreyOf(rules, other, agent)
+  );
 }
 
 /** A herd-mate (any species) that's currently fleeing or fighting something, for a guardian to notice. */
@@ -373,13 +442,13 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
     }
   }
 
-  if (!isPreyOfAnything(rules, agent.species)) {
+  if (!isPreyOfAnything(rules, world, agent)) {
     const herdmate = findHerdmateInDanger(world, agent);
     if (herdmate) {
       // Deliberately includes a fainted predator: a guardian keeps pressing the
       // fight to finish it off, same reasoning as the general threats filter below.
       const herdmateThreats = agentsWithin(world, herdmate, FLEE_DETECT_RADIUS).filter((other) =>
-        isPreyOf(rules, other.species, herdmate.species)
+        isHunterSpecies(rules, other.species, herdmate.species)
       );
       const threat = nearest(herdmate, herdmateThreats);
       if (threat) {
@@ -402,7 +471,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
   // a mob land the finishing blow across multiple ticks/hits rather than the
   // predator's faint silently ending the encounter — see resolveHit/DESIGN.md.
   const threats = agentsWithin(world, agent, effectiveFleeRadius(agent)).filter((other) =>
-    isPreyOf(rules, other.species, agent.species)
+    isHunterSpecies(rules, other.species, agent.species)
   );
   const threat = nearest(agent, threats);
   if (threat) {
@@ -432,10 +501,9 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
     return true;
   }
 
-  const preySpecies = rules[agent.species];
-  if (preySpecies && preySpecies.length > 0 && agent.needs.hunger < huntHungerThreshold(agent)) {
+  if (rules[agent.species] && agent.needs.hunger < huntHungerThreshold(agent)) {
     const candidates = agentsWithin(world, agent, HUNT_DETECT_RADIUS).filter(
-      (other) => isPreyOf(rules, agent.species, other.species) && !isProtectedByMob(world, other)
+      (other) => isPreyOf(rules, agent, other) && !isProtectedByMob(world, other)
     );
     const target = nearest(agent, candidates);
 

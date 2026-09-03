@@ -50,7 +50,7 @@ export function herdCentroid(world: World, herdId: string, layer: Layer): Vec2 |
 function protectedHerdCentroid(world: World, herdId: string, layer: Layer, rules: HuntRules): Vec2 | undefined {
   const members = world.agents.filter(
     (other) =>
-      other.alive !== false && other.herdId === herdId && other.layer === layer && isPreyOfAnything(rules, other.species)
+      other.alive !== false && other.herdId === herdId && other.layer === layer && isPreyOfAnything(rules, world, other)
   );
   if (members.length === 0) return herdCentroid(world, herdId, layer);
 
@@ -79,7 +79,7 @@ function protectedHerdCentroid(world: World, herdId: string, layer: Layer, rules
 export function applyHerdCohesion(world: World, agent: Agent, rules?: HuntRules): boolean {
   if (!agent.herdId) return false;
 
-  const isGuardian = rules !== undefined && !isPreyOfAnything(rules, agent.species);
+  const isGuardian = rules !== undefined && !isPreyOfAnything(rules, world, agent);
   const centroid = isGuardian
     ? protectedHerdCentroid(world, agent.herdId, agent.layer, rules)
     : herdCentroid(world, agent.herdId, agent.layer);

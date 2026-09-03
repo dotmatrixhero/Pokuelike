@@ -10,8 +10,15 @@ export interface SpeciesDef {
   placeholderColor: string;
   /** The layer this species lives on and returns to once its needs are met. */
   homeLayer: Layer;
-  /** Species ids this one hunts, when hungry and one is nearby. Absent = doesn't hunt. */
-  preysOn?: string[];
+  /**
+   * True if this species hunts at all. Which specific nearby agents it
+   * actually goes after is decided dynamically by relative power (level +
+   * size), not a fixed prey list — see `@pokuelike/engine`'s
+   * predation.ts's `isPreyOf`. Absent/false = doesn't hunt, ever, no matter
+   * how weak something nearby is (an herbivore doesn't opportunistically
+   * hunt just because it out-levels something).
+   */
+  isPredator?: boolean;
   /** Canon base stats (mainline games), fed through calculateStats(base, level) for real HP/Atk/etc. */
   baseStats: BaseStats;
   types: PokemonType[];
@@ -42,7 +49,7 @@ export function speciesFromDex(dexKey: string, sim: SimSpeciesFields): SpeciesDe
     spriteKey: sim.spriteKey,
     placeholderColor: sim.placeholderColor,
     homeLayer: sim.homeLayer,
-    preysOn: sim.preysOn,
+    isPredator: sim.isPredator,
     moves: sim.moves,
   };
 }
@@ -58,7 +65,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "scyther",
     placeholderColor: "#4fbf8c",
     homeLayer: "surface",
-    preysOn: ["bulbasaur"],
+    isPredator: true,
     moves: ["slash"],
   }),
   charmander: speciesFromDex("CHARMANDER", {
@@ -89,11 +96,11 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "spearow",
     placeholderColor: "#8c5028",
     homeLayer: "canopy",
-    // Mirrors the Bulbasaur/Scyther/Venusaur pattern: Spearow only preys on
-    // the base "pidgey" id, never "pidgeotto"/"pidgeot" (species changes on
-    // evolution — see leveling.ts's applyLevelUp), so a Pidgey that evolves
-    // automatically becomes a guardian, no separate guardian mechanic needed.
-    preysOn: ["pidgey"],
+    // Real predator, real appetite — not limited to Pidgey. Actual targets
+    // are decided dynamically by relative power (see predation.ts's
+    // isPreyOf), so a hungry Spearow that's crossed onto the surface layer
+    // to feed will just as happily take a small enough Bulbasaur.
+    isPredator: true,
     moves: ["peck"],
   }),
   sandshrew: speciesFromDex("SANDSHREW", {
@@ -111,7 +118,9 @@ export const SPECIES: Record<string, SpeciesDef> = {
     homeLayer: "underground",
     // Gives the underground layer its own predator/prey drama, mirroring
     // Scyther on the surface — previously Diglett had zero threats at all.
-    preysOn: ["diglett", "sandshrew"],
+    // Actual targets (Diglett, Sandshrew, or opportunistically anything
+    // else small enough on a layer Onix visits) are dynamic — see isPreyOf.
+    isPredator: true,
     moves: ["tackle", "rock_throw"],
   }),
 };

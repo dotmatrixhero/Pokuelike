@@ -1902,6 +1902,78 @@ this pass fixes (leveling-pace tuning is its own scope), but worth
 tracking rather than letting the new species quietly not deliver the
 guardian-via-evolution story they were designed to tell.
 
+## Dynamic (size-based) predation, exp-motivated exploration, and a real exp-rate overhaul
+
+Three requests landed together: predation shouldn't be a fixed species
+list ("it should match by a combo of level and size... spearow probably
+goes for bulbasaurs too"), and exp income needed raising a lot ("getting a
+kill should give a ton... make them somewhat motivated by gaining exp
+too").
+
+**Predation is now power-based, not a fixed prey list.** `HuntRules`
+changed from a species -> prey-list map to a plain "does this species hunt
+at all" flag; actual target eligibility is computed per encounter in
+`predation.ts`'s `isPreyOf(rules, predator, target)`: same species is
+never prey (no cannibalism modeled), and the target's `powerOf` (a
+predator/prey-specific reading of `maxHp`, which already bakes in both
+level and species bulk via `calculateStats`'s formula) must be at most
+`PREY_POWER_RATIO` (0.75) of the predator's own. A hungry Spearow no
+longer only recognizes Pidgey as food — it'll take a small enough
+Bulbasaur too, and a Scyther that's wandered underground will happily eat
+a Diglett. Confirmed for real: a 5000-tick run recorded `spearow killed
+diglett`, `scyther killed sandshrew`, and — the exact scenario predicted —
+`scyther killed bulbasaur (bulbasaur-540-19)` at tick 696, none of which
+existed in any hardcoded pairing.
+
+A real design split fell out of building this: *fleeing/mobbing* (a
+prey's own defensive reaction) stayed purely species-flag-based, not
+power-gated — a wounded or fainted predator is still worth staying away
+from, prey doesn't have detailed knowledge of exactly how weak it
+currently is. Only the *predator's own hunt-target selection* (and the
+"is this agent currently vulnerable to anything" guardian check, since
+that's asking the same question from the prey's side) is power-gated.
+Discovering this distinction fixed a test that seemed to contradict the
+whole feature at first (a fainted, deliberately fragile "just weak enough
+to die in one more hit" test predator stopped registering as a threat
+under an earlier draft that power-gated fleeing too) — see
+`isHunterSpecies` vs. `isPreyOf` in predation.ts.
+
+**Exp income raised substantially across every source** (see leveling.ts's
+"Tuning constants" comment for old -> new values): kills now go through a
+`KILL_EXP_MULTIPLIER` (8x) on top of the real mainline formula, since that
+formula assumes a 6-Pokémon team splitting exp across frequent battles —
+neither applies to one wild agent's rare kill here. Passive
+eat/drink/trickle and the one-time new-sector/new-species bonuses were all
+raised 5-10x. Real before/after: a 10000-tick run pre-change topped out at
+level 8 with zero evolutions anywhere, ever recorded; a 5000-tick run
+post-change produced **3 real evolutions** (`bulbasaur -> ivysaur at level
+16`, the exact real mainline threshold) and levels up to 17. The
+"evolution engine-tested but never observed in a run" gap this project had
+carried since the Leveling feature shipped is closed.
+
+**Agents are now "somewhat motivated by gaining exp too."** A fully-
+satisfied idle agent (no urgent need, no herd pull-back needed) no longer
+just stands on the last tile it ate at forever — `needs.ts`'s
+`applyExploration` picks a nearby not-yet-visited sector and walks there,
+motivated by the same `EXP_ON_NEW_SECTOR` trickle that already existed for
+incidental wandering. An urgent need always interrupts it (checked fresh
+each tick, not read from stale `agent.behavior`). A newborn doesn't
+explore for its first `MIN_EXPLORE_AGE` (10) ticks — settling in near its
+birthplace first, which also fixes a real same-tick interaction (a
+newborn ticked again in the same `tickWorld` call it's born in could
+otherwise wander a step back onto its own mother's tile, intermittently
+breaking the spawn-placement test). This also incidentally closes the
+pre-existing "no reason to leave a resource tile once satisfied" gap from
+TODO.md's tile-stacking notes.
+
+**Two more real, unrelated bugs found and fixed along the way**, both now
+documented in TODO.md's Infra section: a genuine cross-test-file flake
+where a `vi.spyOn(Math, "random")` mock from one test file could leak into
+another under vitest's default thread pool (fixed with `pool: "forks"` in
+a new `vitest.config.ts`, confirmed pre-existing and unrelated to any of
+this session's other changes), and the newborn/exploration same-tick
+interaction above.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

@@ -70,7 +70,8 @@ export type BehaviorKind =
   | "fight"
   | "relocate"
   | "deliverFood"
-  | "carryAlly";
+  | "carryAlly"
+  | "explore";
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
 export interface InventoryItem {
@@ -235,6 +236,16 @@ export interface Agent {
    */
   grandparentIds?: string[];
 
+  /**
+   * Where a fully-satisfied, herd-settled idle agent is wandering to, in
+   * search of a not-yet-visited sector — the "motivated by exp too"
+   * exploration drive (see needs.ts's `applyExploration` and leveling.ts's
+   * `EXP_ON_NEW_SECTOR`). Cleared on arrival, once no unvisited sector can
+   * be found nearby, or the moment any need becomes urgent enough to
+   * interrupt it.
+   */
+  exploreTarget?: Vec2;
+
   // --- Individual variance: Nature and Disposition (see DESIGN.md) ---
 
   /**
@@ -259,8 +270,17 @@ export interface Agent {
   disposition?: Disposition;
 }
 
-/** predator species id -> the species ids it hunts. */
-export type HuntRules = Record<string, string[]>;
+/**
+ * Species ids that hunt at all — presence as a key (value always `true`)
+ * marks a species as a hunter. Deliberately NOT a fixed species -> prey-list
+ * mapping any more: real predators go after whatever's small/weak enough to
+ * be worth it, not an exact enumerated menu (a Spearow that's crossed onto
+ * the surface layer to feed will just as happily take a small enough
+ * Bulbasaur as it would a Pidgey). See predation.ts's `isPreyOf`, which
+ * decides actual eligibility per encounter from each agent's current power
+ * (level + size, via `maxHp`), not from this table.
+ */
+export type HuntRules = Record<string, true>;
 
 export interface World {
   width: number;

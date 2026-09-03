@@ -5,7 +5,7 @@ import { herdCentroid, applyHerdCohesion } from "../src/herding.js";
 import type { Agent, HuntRules } from "../src/types.js";
 
 /** Scyther preys on bulbasaur; venusaur is prey of nothing, so it's a guardian in any herd it shares. */
-const RULES: HuntRules = { scyther: ["bulbasaur"] };
+const RULES: HuntRules = { scyther: true };
 
 function member(id: string, pos: { x: number; y: number }, overrides: Partial<Agent> = {}): Agent {
   return {

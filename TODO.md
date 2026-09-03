@@ -120,19 +120,21 @@ produce a real story before player mechanics are worth building further.
       a hill) — see DESIGN.md's "single-tile stacking bug" section. Real
       result: peak stack dropped 168 -> 113 of a similar population, i.e.
       genuinely better but not close to solved.
-- [ ] **No personal-space/repulsion behavior, and no idle-wander after a
-      need is satisfied — the actual remaining cause of tile-stacking.**
-      Traced after the spawn-position and map fixes above only partially
-      helped: herd cohesion (`herding.ts`) only ever pulls an idle agent
-      *toward* the herd centroid when it's far away; there's no term that
-      pushes agents apart when they're already close together. Worse, once
-      an agent finishes eating/drinking it has no reason to leave that
-      tile — no idle-wander behavior exists — so a resource tile that
-      works becomes a permanent gathering point instead of a stop. Fix
-      target: (a) a mild repulsion force in `applyHerdCohesion` when two
-      herdmates are on the same or adjacent tile, and (b) idle agents with
-      full needs should wander a random walkable tile occasionally instead
-      of standing still forever.
+- [x] **Half fixed: idle-wander after a need is satisfied.** Traced after
+      the spawn-position and map fixes above only partially helped: once an
+      agent finished eating/drinking it had no reason to leave that tile —
+      no idle-wander behavior existed — so a resource tile that works
+      became a permanent gathering point instead of a stop. Built as part
+      of the exp-motivated exploration feature (`needs.ts`'s
+      `applyExploration`, see DESIGN.md): a fully-satisfied idle agent now
+      wanders toward nearby unexplored territory instead of standing still
+      forever, driven by the same new-sector exp trickle. **Still open**:
+      no personal-space/repulsion behavior — herd cohesion (`herding.ts`)
+      only ever pulls an idle agent *toward* the herd centroid when it's
+      far away, nothing pushes herd-mates apart when they're already stacked
+      close together. Fix target: a mild repulsion force in
+      `applyHerdCohesion` when two herd-mates are on the same or adjacent
+      tile.
 - [x] Flora retuned per "food is too long-lived, seedlings should start
       more often": `CONSUME_STOCK_AMOUNT` 0.2->0.5, `SEED_DROP_CHANCE`/
       `GERMINATION_CHANCE` 0.02/0.3 -> 0.06/0.5. Real result: worked
@@ -278,6 +280,18 @@ produce a real story before player mechanics are worth building further.
       predator triggers flee (overrides everything), a hungry predator with
       prey in range hunts and kills on contact. Currently just Scyther ->
       Bulbasaur.
+- [x] **Predation is now dynamic/size-based, not a fixed species list**,
+      requested directly ("it should match by a combo of level and size...
+      spearow probably goes for bulbasaurs too"). `HuntRules` is now just
+      "does this species hunt at all"; `isPreyOf` computes real eligibility
+      per encounter from `powerOf` (a `maxHp` reading, which already bakes
+      in level + species bulk). `SpeciesDef.preysOn: string[]` renamed to
+      `isPredator: boolean` accordingly. Confirmed in a real run: `spearow
+      killed diglett`, `scyther killed sandshrew`, and `scyther killed
+      bulbasaur` — the exact scenario asked for, none of them a hardcoded
+      pairing. See DESIGN.md for the fleeing-vs-hunting distinction this
+      surfaced (fleeing/mobbing stayed species-flag-only, not power-gated
+      — a wounded predator is still worth fleeing).
 - [x] **Species roster expanded to all three layers, not just surface** —
       Spearow now hunts a 2-Pidgey flock in the canopy, Onix hunts a
       4-agent Diglett/Sandshrew colony underground. Real mainline egg
@@ -463,21 +477,20 @@ produce a real story before player mechanics are worth building further.
       sources; level-ups loop multi-level, heal HP by the stat delta, learn
       every unlocked move, grant typed+wildcard skill points, and check for
       a level-gated evolution.
-- [ ] **Evolution mechanism is engine-tested but never observed in a real
-      run** — the honest gap, not a hidden one. Bulbasaur->Ivysaur needs
-      2535 cumulative exp (level 16, Medium Slow); a real run's income rate
-      put that on the order of 25,000-30,000 ticks, and runs past ~3000-5000
-      ticks risk timing out entirely on the sim's pre-existing unbounded
-      population growth (see below) before getting anywhere near that many
-      ticks. Either the non-combat exp trickle amounts need to be
-      meaningfully larger, or evolution needs a dedicated short scenario
-      (spawn one exp point below a threshold, tick once) instead of relying
-      on emergent long-run behavior to actually witness it.
-      **Reconfirmed** while adding the Spearow/Onix expansion above: a
-      10000-tick run (this time actually completing, unlike the timed-out
-      5000-tick attempt referenced elsewhere) still topped out at level 8
-      for every agent across all species/lines — the new lines hit the
-      same ceiling as Bulbasaur, not a species-specific issue.
+- [x] **Evolution finally observed in a real run — exp rates raised
+      substantially, requested directly ("getting a kill should give a
+      ton... passively eating and drinking should give some... moving
+      around to new tiles gives a bunch").** Reconfirmed right before the
+      fix: a 10000-tick run still topped out at level 8 for every agent
+      across every species/line, zero evolutions ever. Raised
+      `EXP_TRICKLE_PER_TICK`/`EXP_ON_CONSUME`/`EXP_ON_MATE_ATTEMPT`/
+      `EXP_ON_BIRTH_PARENT`/`EXP_ON_NEW_SECTOR`/`EXP_ON_NEW_SPECIES_
+      ENCOUNTERED` 5-10x each, and added a `KILL_EXP_MULTIPLIER` (8x) on
+      top of the real mainline kill formula (which assumes a 6-Pokémon
+      team splitting exp across frequent battles — doesn't apply to one
+      wild agent's rare kill here). Real result: a 5000-tick run post-fix
+      produced 3 real `bulbasaur -> ivysaur` evolutions, all at the exact
+      real level-16 threshold, plus levels up to 17. See DESIGN.md.
 - [ ] **Evolved agents can land on a species outside the curated `SPECIES`
       roster** (e.g. `"ivysaur"`, which `packages/data/src/species.ts` never
       hand-curated — only base dex fields are used for evolved stats/types).
@@ -725,3 +738,27 @@ produce a real story before player mechanics are worth building further.
 - [ ] No lint/format config yet (eslint/prettier) — add once the codebase
       is bigger than "does it typecheck."
 - [ ] No CI yet.
+- [x] **Found and fixed a real cross-test-file flakiness bug**: with
+      vitest's default "threads" pool, a `vi.spyOn(Math, "random")` mock
+      from one test file could intermittently leak into another when
+      vitest happened to schedule both onto the same worker thread —
+      confirmed reproducible independent of any of this session's other
+      changes (`flora.test.ts` + `reproduction.test.ts` alone, both
+      untouched, failed ~50% of the time run together; passed 100% of the
+      time run alone). Adding `needs.test.ts`'s new old-age-mortality mocks
+      (also `vi.spyOn(Math, "random")`) just raised the odds of hitting it
+      in a full-suite run enough to surface it. Fixed with a
+      `packages/engine/vitest.config.ts` setting `pool: "forks"` (each test
+      file gets its own OS process, so `Math` genuinely can't be shared) —
+      verified with 5 consecutive full-suite runs, all green, no
+      measurable slowdown (~2.5s either way).
+      **A second, genuinely separate flake surfaced once that one was
+      fixed**: adding exp-motivated exploration (see "Leveling" below)
+      meant a newborn — which gets ticked once more in the very same
+      `tickWorld` call it's spawned in (a documented pre-existing quirk,
+      simulation.ts) — could immediately wander a step back onto its own
+      mother's tile on its first (same-tick) action, intermittently
+      failing the "don't spawn stacked on the mother" test. Fixed with
+      `MIN_EXPLORE_AGE = 10` in `needs.ts` (a newborn settles in for a few
+      ticks before it starts wandering) — verified with 8 consecutive
+      full-suite runs, all green.

@@ -128,12 +128,28 @@ export function canBreed(speciesA: string, speciesB: string, ctx?: LevelingConte
 }
 
 // --- Tuning constants for non-combat exp sources (sim-original, no canon formula exists for these — see DESIGN.md) ---
-export const EXP_TRICKLE_PER_TICK = 0.02;
-export const EXP_ON_CONSUME = 0.5;
-export const EXP_ON_MATE_ATTEMPT = 1;
-export const EXP_ON_BIRTH_PARENT = 3;
-export const EXP_ON_NEW_SECTOR = 2;
-export const EXP_ON_NEW_SPECIES_ENCOUNTERED = 2;
+// Raised substantially from the original values (0.02/0.5/1/3/2/2), requested
+// directly: evolution was engine-tested but never once observed in a real
+// run (max level reached in a 10000-tick run: 8, nowhere near Bulbasaur's
+// level-16 threshold — see TODO.md). Kills should "give a ton," passive
+// eating/drinking "some," and reaching new territory "a bunch" — tuned
+// against real runs (see TODO.md's Leveling section) rather than solved
+// analytically; re-tune again if a longer run still can't reach evolution.
+export const EXP_TRICKLE_PER_TICK = 0.15;
+export const EXP_ON_CONSUME = 6;
+export const EXP_ON_MATE_ATTEMPT = 4;
+export const EXP_ON_BIRTH_PARENT = 15;
+export const EXP_ON_NEW_SECTOR = 20;
+export const EXP_ON_NEW_SPECIES_ENCOUNTERED = 12;
+/**
+ * Multiplies the real mainline kill-exp formula (`killExpYield`) — that
+ * formula assumes a 6-Pokémon team splitting exp from frequent trainer
+ * battles, neither of which applies to a single wild agent in this
+ * ecosystem sim getting a rare kill. "A kill should give a ton" — a kill is
+ * meant to be a genuinely big, level-moving event here, not a small
+ * fraction of one.
+ */
+export const KILL_EXP_MULTIPLIER = 8;
 
 /** Sector size (tiles per side) for the coarse "visited a new area" bucketing. */
 export const SECTOR_SIZE = 5;
@@ -331,6 +347,6 @@ export function grantKillExp(world: World, attacker: Agent, defender: Agent, ctx
   if (!ctx) return;
   const profile = ctx.getProfile(defender.species);
   if (!profile) return;
-  const amount = killExpYield(profile.baseExp, defender.level ?? 1);
+  const amount = killExpYield(profile.baseExp, defender.level ?? 1) * KILL_EXP_MULTIPLIER;
   grantExp(world, attacker, amount, ctx, log);
 }

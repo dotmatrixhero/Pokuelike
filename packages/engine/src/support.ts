@@ -4,7 +4,7 @@ import { logBehaviorChange } from "./events.js";
 import { stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
 import { CONSUME_STOCK_AMOUNT } from "./flora.js";
-import { agentsWithin, isPreyOf, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS } from "./predation.js";
+import { agentsWithin, isHunterSpecies, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS } from "./predation.js";
 
 /**
  * Faint/finish-off, heal-over-time, and herd support (inventory, food
@@ -404,7 +404,7 @@ export function applyCarrying(world: World, agent: Agent, rules: HuntRules | und
 
   if (rules) {
     const threats = agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter(
-      (other) => !other.fainted && isPreyOf(rules, other.species, agent.species)
+      (other) => !other.fainted && isHunterSpecies(rules, other.species, agent.species)
     );
     if (threats.length > 0) {
       dropCarriedAlly(world, agent, "threat", log);
