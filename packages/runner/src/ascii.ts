@@ -69,8 +69,11 @@ export interface Frame {
   cells: FrameCell[][];
 }
 
-/** A Brogue-style snapshot of the surface layer: tile glyph+background, or an agent's species-initial glyph colored by its primary type. */
-export function captureFrame(world: World): Frame {
+/** Canonical terrain-kind order, shared with anything that needs to encode terrain compactly (e.g. dump-replay.ts). */
+export const TERRAIN_ORDER = Object.keys(TERRAIN_GLYPH) as TerrainKind[];
+
+/** The terrain-only grid (no agents overlaid) for the surface layer. */
+export function captureTerrainGrid(world: World): FrameCell[][] {
   const surface = world.tiles.surface;
   const cells: FrameCell[][] = [];
 
@@ -86,6 +89,13 @@ export function captureFrame(world: World): Frame {
     }
     cells.push(row);
   }
+
+  return cells;
+}
+
+/** A Brogue-style snapshot of the surface layer: tile glyph+background, or an agent's species-initial glyph colored by its primary type. */
+export function captureFrame(world: World): Frame {
+  const cells = captureTerrainGrid(world);
 
   for (const agent of world.agents) {
     if (agent.layer !== "surface" || agent.alive === false) continue;
