@@ -3,6 +3,22 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Priority: sim depth + observability (current focus)
+
+Per DESIGN.md's north star — the sim needs to be able to run headless and
+produce a real story before player mechanics are worth building further.
+
+- [ ] Headless sim runner (no renderer, no player) that ticks the world N
+      times and exits — the thing that makes "run it and tell me a story" a
+      real, repeatable request instead of a one-off script.
+- [ ] Event log with semantic content, not state diffs: births, deaths,
+      herd relocations, predation, resource depletion — enough for a
+      narrator (human or Claude) to summarize as a story, not just replay
+      positions.
+- [ ] Once the above exist: actually run it, read the log, and see if
+      anything in it is a story worth telling. If not, that's a sim-depth
+      problem to fix before anything else.
+
 ## Ecosystem sim
 - [ ] Herd cohesion: agents share `herdId` in the type but nothing groups or
       regroups them yet. Flocking forces? A shared "home range" center each
@@ -17,6 +33,17 @@ place to park trains of thought so they don't get lost.
 - [ ] Performance ceiling for the cheap tier — how many agents before naive
       per-tick nearest-tile search (`findNearestTerrain` is O(width*height)
       per agent!) needs spatial indexing?
+
+## Player / bonding (deprioritized until sim depth lands)
+- [ ] Threat signature model — what exactly feeds it (speed/distance/posture)
+      and how it plugs into existing perception/behavior logic.
+- [ ] Concrete verbs for each trust-stage transition, per species — this is
+      still just shaped, not designed as actual player inputs.
+- [ ] Whether species-specific bonding puzzles read as distinct to a player
+      without a tutorial — open playtesting question, see DESIGN.md.
+- [ ] World-state consequences of a botched approach (herd relocation,
+      species-wide wariness) — needs the resource-depletion/migration sim
+      work above to exist first.
 
 ## Combat / moves
 - [ ] The "promotion boundary" transition itself (see DESIGN.md) — not
