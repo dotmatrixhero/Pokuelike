@@ -8,19 +8,23 @@ place to park trains of thought so they don't get lost.
 Per DESIGN.md's north star — the sim needs to be able to run headless and
 produce a real story before player mechanics are worth building further.
 
-- [ ] Headless sim runner (no renderer, no player) that ticks the world N
-      times and exits — the thing that makes "run it and tell me a story" a
-      real, repeatable request instead of a one-off script.
-- [ ] Event log with semantic content, not state diffs: births, deaths,
-      herd relocations, predation, resource depletion — enough for a
-      narrator (human or Claude) to summarize as a story, not just replay
-      positions.
-- [ ] Once the above exist: actually run it, read the log, and see if
-      anything in it is a story worth telling. If not, that's a sim-depth
-      problem to fix before anything else.
-- [ ] Now that layers/elevation (below) are built ahead of this: run the
-      headless runner + event log against the current multi-layer,
-      single-region engine and see if anything in it is worth narrating.
+- [x] Headless sim runner (`packages/runner`, `pnpm run run [ticks]`) that
+      ticks the world N times and prints the event log — no renderer, no
+      player.
+- [x] Event log with semantic content (`packages/engine/src/events.ts`):
+      `crossedLayer`, `consumed`, `behaviorChanged`. Still missing the
+      bigger ones — births, deaths, herd relocations, predation — since
+      those behaviors don't exist yet either (see Ecosystem sim below).
+- [x] Ran it (300 ticks, see DESIGN.md) — it did surface a real, specific
+      finding (Diglett stops going home after ~tick 70), which counts as
+      passing the "worth telling" bar even though it's a tuning gap, not a
+      dramatic story yet. The dramatic stories need predation/death, which
+      aren't built.
+- [ ] Tuning gap found by the first run: an agent whose needs oscillate
+      between just-under and just-over the 0.7 satisfied line (flat +0.4
+      consume vs. 0.3 idle threshold) can permanently stop returning to
+      `homeLayer` because it never registers `idle`. Decide if that's
+      acceptable emergent behavior or needs a hysteresis/threshold fix.
 
 ## World layers, elevation, and regions (see DESIGN.md)
 - [x] `Tile`/`World` have a `layer` dimension (Underground/Surface/Canopy,

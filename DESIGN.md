@@ -43,18 +43,40 @@ This reorders priorities:
   milestones, alongside unit tests passing. A milestone that only passes
   `vitest` but produces no observable story hasn't actually landed.
 
+**Built:** `packages/engine/src/events.ts` (`EventLog`/`SimEvent`:
+`crossedLayer`, `consumed`, `behaviorChanged`) and `packages/runner` (a
+`tsx`-run CLI, `pnpm run run [ticks]`, that builds the shared demo world
+from `@pokuelike/data`'s `createDemoWorld`, ticks it via the engine's
+`tickWorld`, and prints every event plus a summary). `tickWorld` itself is
+new too — it used to be an inline loop duplicated in `packages/web/src/main.ts`;
+now both the browser app and the headless runner call the same function.
+
+First real run (300 ticks) already surfaced something worth reporting
+rather than a flat log: Pidgey commutes canopy<->surface roughly every
+5-40 ticks as designed, but Diglett crosses to the surface once early on
+and then never returns underground for the rest of the run — it oscillates
+between `seekFood` and `seekWater` without ever dropping low enough on both
+to register as `idle`, so the "go home when idle" rule never fires for it.
+Not a bug exactly, but a real tuning gap between decay rate, the flat
++0.4 consume amount, and the 0.3 idle threshold — worth deciding whether
+"a Diglett that abandons its burrow because the surface is more convenient"
+is a feature or something to tune away. See TODO.md.
+
 ## Stack
 
 - **pnpm workspace monorepo**, TypeScript everywhere.
 - `packages/engine` — headless simulation core (world grid, need-driven
   agent AI, move-shape resolution). No rendering, no DOM. Unit-testable in
   isolation (vitest).
-- `packages/data` — species and move definitions (plain data, imports types
-  from `engine`).
+- `packages/data` — species and move definitions, plus the shared demo
+  world (`createDemoWorld`) both other apps use (imports types from `engine`).
 - `packages/web` — Vite browser app. Canvas renderer draws real sprites when
   present (`packages/web/public/sprites/<spriteKey>.png`, not checked in —
   bring your own art) and falls back to a colored square + initial when a
   sprite is missing, so the sim is visible before any art exists.
+- `packages/runner` — headless CLI (`pnpm run run [ticks]`, via `tsx`) that
+  ticks the demo world and prints its event log — no renderer, no player.
+  This is the "run it and tell me a story" tool.
 
 Browser + real sprites was a deliberate choice over an ASCII terminal look —
 easy to share as a link, and the Pokémon-art identity matters more here than

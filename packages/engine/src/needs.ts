@@ -1,5 +1,6 @@
 import type { Agent, BehaviorKind, Layer, Needs, Vec2, World } from "./types.js";
 import { otherLayers, tileAt } from "./world.js";
+import type { EventLog } from "./events.js";
 
 const DECAY_PER_TICK = {
   hunger: 0.01,
@@ -101,9 +102,21 @@ function consume(needs: Needs, behavior: "seekWater" | "seekFood"): void {
  * once satisfied. Crossing itself takes a tick (no position change) so it
  * reads as a discrete, loggable event rather than free teleportation.
  */
-export function tickAgent(world: World, agent: Agent): void {
+export function tickAgent(world: World, agent: Agent, log?: EventLog): void {
+  const previousBehavior = agent.behavior;
   decayNeeds(agent.needs);
   agent.behavior = chooseBehavior(agent.needs);
+
+  if (log && agent.behavior !== previousBehavior) {
+    log.record({
+      kind: "behaviorChanged",
+      tick: world.tick,
+      agentId: agent.id,
+      species: agent.species,
+      from: previousBehavior,
+      to: agent.behavior,
+    });
+  }
 
   if (agent.behavior === "seekWater" || agent.behavior === "seekFood") {
     const terrain = agent.behavior === "seekWater" ? "water" : "food";
@@ -111,7 +124,17 @@ export function tickAgent(world: World, agent: Agent): void {
 
     if (target) {
       if (target.x === agent.pos.x && target.y === agent.pos.y) {
+        const need = agent.behavior === "seekWater" ? "thirst" : "hunger";
         consume(agent.needs, agent.behavior);
+        log?.record({
+          kind: "consumed",
+          tick: world.tick,
+          agentId: agent.id,
+          species: agent.species,
+          layer: agent.layer,
+          pos: agent.pos,
+          need,
+        });
       } else {
         agent.pos = stepToward(world, agent.layer, agent.pos, target);
       }
@@ -119,11 +142,33 @@ export function tickAgent(world: World, agent: Agent): void {
     }
 
     const crossTo = findLayerWithTerrain(world, agent.layer, agent.pos, terrain);
-    if (crossTo) agent.layer = crossTo;
+    if (crossTo) {
+      const from = agent.layer;
+      agent.layer = crossTo;
+      log?.record({
+        kind: "crossedLayer",
+        tick: world.tick,
+        agentId: agent.id,
+        species: agent.species,
+        from,
+        to: crossTo,
+        pos: agent.pos,
+      });
+    }
     return;
   }
 
   if (agent.behavior === "idle" && agent.layer !== agent.homeLayer) {
+    const from = agent.layer;
     agent.layer = agent.homeLayer;
+    log?.record({
+      kind: "crossedLayer",
+      tick: world.tick,
+      agentId: agent.id,
+      species: agent.species,
+      from,
+      to: agent.homeLayer,
+      pos: agent.pos,
+    });
   }
 }
