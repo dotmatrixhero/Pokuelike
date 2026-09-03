@@ -1,6 +1,7 @@
 import type { MoveSpec } from "./moves.js";
 import type { PokemonType } from "./typing.js";
 import type { Stats } from "./stats.js";
+import type { Disposition } from "./nature.js";
 
 export interface Vec2 {
   x: number;
@@ -233,6 +234,29 @@ export interface Agent {
    * offspring (founders have no `parentIds` of their own to combine).
    */
   grandparentIds?: string[];
+
+  // --- Individual variance: Nature and Disposition (see DESIGN.md) ---
+
+  /**
+   * One of the 25 real mainline nature names (nature.ts's `NATURES`).
+   * Assigned uniformly at random at creation (spawnAgent/spawnOffspring),
+   * never inherited from parents — matches mainline absent the Everstone
+   * item, which this sim doesn't have. Also the seed for `disposition`
+   * below, and for `calculateStats`'s per-stat multiplier. Absent only on
+   * bare test fixtures built by hand rather than through a real creation
+   * site; those are treated as neutral everywhere nature is read.
+   */
+  nature?: string;
+  /**
+   * The 3-axis behavioral vector seeded from `nature` via
+   * `dispositionFromNature` (nature.ts) plus a small per-individual random
+   * jitter — two agents sharing a nature aren't behaviorally identical
+   * either. Wired into predation.ts's flee/mob/hunt thresholds and
+   * reproduction.ts's mate-seeking radius; absent is treated as the neutral
+   * 0.5 on every axis, so those thresholds fall back to their original
+   * fixed values for hand-built fixtures.
+   */
+  disposition?: Disposition;
 }
 
 /** predator species id -> the species ids it hunts. */

@@ -1678,6 +1678,161 @@ to make recovery meaningful (a fainted agent can't feed itself).
   frequency, the emergent-scenario gap for looting/carrying, and the
   performance interaction with the population explosion).
 
+## Individual variance: Nature and Disposition, tied together
+
+**Built.** Every agent of a species+level was mechanically identical before
+this — `calculateStats` had no per-individual variance, and the "Disposition
+vector" pitched in TODO.md's Culture section was never built. Both now
+exist, and Nature is genuinely the single seed for both — a deliberate
+departure from mainline, where Nature is stat-only flavor text that never
+touches AI behavior.
+
+- **Nature: the real 25 mainline natures**, each raising one stat 10% /
+  lowering a different one 10% (5 neutral ones raise/lower the same stat,
+  net zero — Hardy, Docile, Serious, Bashful, Quirky). Assigned uniformly
+  at random at spawn/birth, not inherited from parents (mainline doesn't
+  inherit Nature by default either, barring the Everstone item this sim
+  doesn't have). `calculateStats` gets a nature multiplier applied per
+  stat — this is what finally closes the long-standing "no individual
+  stat variance" TODO item.
+- **Disposition: a 3-axis vector — boldness, aggression, sociability**
+  (0-1 each), **seeded deterministically from Nature**, not independently
+  random — that's the actual "tied together" mechanism. Each nature maps
+  to a disposition lean along a loosely stat-correlated axis (documented
+  as an invented mapping, not a canon one, since mainline never does this):
+  natures that boost Attack-family stats lean higher aggression, natures
+  that boost Speed/lower Defense lean higher boldness (reckless), natures
+  that boost Defense/Sp.Def lean lower boldness (cautious); sociability has
+  no stat-correlated analog in mainline, so seed it from the neutral-vs-
+  extreme character of the nature instead (documented as an explicit
+  invented rule) rather than leaving it arbitrary. On top of the nature-
+  seeded baseline, add a small per-individual random jitter (e.g. ±0.15,
+  clamped 0-1) so two agents sharing a nature aren't behaviorally identical
+  either — real individuality, not just 25 discrete personality slots.
+- **Wired into already-built behavior, modestly, not a full culture
+  system.** This is not the full "Culture, disposition, and roles" pitch in
+  TODO.md (herd-wide culture aggregation, pair-bonding, dispersal-on-
+  evolution) — those stay open, this only wires the individual vector into
+  concrete existing systems:
+  - **Boldness** shifts the flee trigger in `predation.ts` (today: any
+    nearby predator unconditionally flees) toward a threshold/radius that
+    scales with boldness — bold agents tolerate a more distant or weaker
+    threat before fleeing; timid agents flee earlier/farther. Keep a hard
+    floor so no boldness value makes an agent suicidally ignore a lethal
+    close threat. Also nudges mob-fight commitment (today: fixed "3+ nearby
+    allies -> fight" headcount) — bolder agents commit with slightly fewer
+    allies, timid ones need more.
+  - **Aggression** shifts a predator's hunt-trigger hunger threshold (today
+    fixed at 0.6) — an aggressive predator hunts before it's as hungry; a
+    passive one waits longer. Also nudges willingness to join a mob-fight
+    from the prey side, alongside boldness.
+  - **Sociability** nudges mate-seeking search radius (today fixed at 5
+    tiles) — more sociable agents search farther/more readily; less
+    sociable ones are choosier about proximity. This is deliberately the
+    *only* sociability hook for now — full herd cohesion (a shared home-
+    range force) is still unbuilt and out of scope here, so don't oversell
+    sociability as solving that.
+- **Offspring get their own random nature** (and thus their own
+  disposition), same as any spawned agent — reproduction.ts's birth path
+  needs the same assignment `spawnAgent` gets.
+- **Narrative surface**: attach nature/disposition to the `born` event (and
+  spawn-time agent creation) so the event log can actually say "born-14
+  (Timid, low boldness)" — this is squarely in the project's "the log needs
+  semantic content" ethos, not just internal state nobody sees.
+- **Explicitly still open**: the exact nature→disposition mapping and
+  jitter range are invented, sim-original calls, not canon — worth
+  revisiting once a real run shows whether the behavioral spread is
+  noticeable or washed out by everything else already driving behavior;
+  full herd culture/pair-bonding/dispersal (TODO.md) remain unbuilt, this
+  is the individual-variance foundation they're blocked on, not those
+  features themselves.
+
+### As built
+
+- `packages/engine/src/nature.ts` is new: the real 25-nature table
+  (`NATURES`, keyed by nature name -> `{ raises?, lowers? }` over the 5
+  non-HP stats), `randomNature(rng)`, `natureMultiplier(nature, stat)`,
+  `dispositionFromNature(nature, rng)`, and `dispositionSummary(disposition)`
+  for the narrative surface. `rng` defaults to `Math.random` but is
+  injectable, matching `combat.ts`'s `rollCritical`/`rollAccuracy`
+  convention — that's what makes `dispositionFromNature` deterministically
+  testable.
+- `calculateStats(base, level, nature?)` gained the optional third
+  parameter: non-HP stats get `floor(rawStat * natureMultiplier)`, same
+  ordering mainline uses (nature applies after the +5 base). HP is never
+  affected, matching mainline. Omitting `nature` (or passing an unknown
+  name) is neutral, so every pre-existing caller is unaffected.
+- `Agent` gained `nature?: string` and `disposition?: Disposition`. Every
+  behavioral hook below treats a *missing* disposition as neutral (0.5 on
+  every axis) rather than requiring it — this is what let all 115
+  pre-existing tests (hand-built fixtures with no disposition field) pass
+  unmodified, since neutral reproduces each original fixed threshold
+  exactly.
+- `spawnAgent` (packages/data/src/spawn.ts) and `spawnOffspring`
+  (reproduction.ts's birth path) both draw a fresh `randomNature()` and
+  derive `dispositionFromNature` from it independently — never inherited,
+  matching the design.
+- The nature->disposition mapping actually implemented: raising an
+  Attack-family stat (Attack or Sp. Attack) leans aggression +0.2; raising
+  Speed leans boldness +0.2 and *separately* lowering Defense leans boldness
+  another +0.2 (so a nature doing both, e.g. Hasty, stacks to +0.4); raising
+  Defense or Sp. Defense leans boldness -0.2. Sociability is seeded at 0.65
+  for the 5 neutral natures and 0.45 for the other 20 (the "neutral reads as
+  more even-tempered/social" invented rule from the design doc). All three
+  axes then get an independent `±0.15` jitter, clamped to `[0,1]`.
+- Wiring, all via small helper functions in `predation.ts`/`reproduction.ts`
+  that read `agent.disposition?.<axis> ?? 0.5` (so absent disposition
+  reproduces the pre-existing fixed constant exactly):
+  - `effectiveFleeRadius(agent)`: boldness shifts the flee-detection radius
+    `±2` tiles from the baseline 4, floored at 2 so a threat that's
+    genuinely adjacent is never invisible to even a maximally bold agent.
+  - `mobThreshold(agent)`: `(boldness + aggression) / 2` shifts the
+    mob-commitment headcount `±1` from the baseline 3 — used both for a
+    prey agent's own fight-or-flee call and for a predator's
+    `isProtectedByMob` read of the *candidate's* disposition.
+  - `huntHungerThreshold(agent)`: aggression shifts a predator's
+    hunt-trigger hunger threshold `±0.2` from the baseline 0.6.
+  - `mateSearchRadius(agent)` (reproduction.ts): sociability shifts the
+    mate-search radius `±2` tiles from the baseline 5.
+- The `born` `SimEvent` gained required `nature: string` and
+  `dispositionSummary: string` fields (always populated — every birth now
+  assigns both), and the runner's `formatEvent` prints them, e.g.:
+  `venusaur (venusaur-1 x venusaur-0) had offspring venusaur-991-20 (Mild,
+  high boldness) at (3,2)`. `dispositionSummary` reports whichever of the
+  3 axes deviates furthest from 0.5, not always boldness.
+- 31 new tests in `packages/engine/test/nature.test.ts`,
+  `predation.test.ts`, and `reproduction.test.ts` (146 total, up from 115):
+  the full 25-nature table shape, several real stat-multiplier spot checks
+  (including all 5 neutral natures being no-ops), `dispositionFromNature`'s
+  determinism/lean-direction/jitter-range/clamping, and — the substantive
+  part — one behavioral test per wiring point proving a bold/aggressive/
+  sociable agent's outcome actually differs from a timid/passive/unsociable
+  one under an otherwise-identical scenario (flee-at-distance, mob-vs-flee,
+  hunt-at-hunger, mate-search-at-distance).
+- **Real-run finding, reported straight**: a 1000-tick run of the demo
+  scenario (`pnpm run run 1000` from `packages/runner`) shows the narrative
+  surface working correctly — birth events genuinely vary
+  ("Hardy, moderate aggression", "Timid, high boldness", "Quiet, high
+  aggression", etc. across 21 births) — but the *behavioral* wiring is
+  currently hard to observe in this scenario specifically because there's
+  only one predator (Scyther) and it dies at tick 93 (two Venusaur guardians
+  gang up on it), after which there's no predation pressure left at all for
+  the remaining ~900 ticks to show hunt/flee/mob disposition spread against.
+  The population-explosion issue already on record elsewhere in this doc
+  (unbounded Venusaur/Bulbasaur breeding once predation pressure is gone)
+  dominates everything else visible in the log past that point. The unit
+  tests prove the wiring changes real outcomes in isolation; a longer or
+  multi-predator run would be needed to see whether the spread reads as
+  meaningfully different at the population level once the population-cap
+  problem is separately addressed — that's a fair "still open" rather than
+  a claimed win. A follow-up 5000-tick attempt didn't even finish in a
+  reasonable time (killed after ~3.5 minutes of pegged CPU) — the same
+  pre-existing population-explosion problem this doc already tracks
+  elsewhere means agent count grows large enough to make a long run
+  impractical well before disposition's effects would have a chance to
+  show up at scale. Not a regression this feature introduced, but a real
+  pre-existing ceiling on how much of this could be validated at range.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

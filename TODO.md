@@ -302,12 +302,17 @@ produce a real story before player mechanics are worth building further.
       full-grid scan every tick.
 
 ## Culture, disposition, and roles (pitched, not built — see chat)
-- [ ] Disposition vector per individual (boldness/aggression/sociability at
-      minimum) driving AI decisions, distinct from canon Nature (stat bias
-      only). Herd "culture" (fight-or-flee threshold, etc.) should be a
-      computed aggregate of member dispositions weighted by role/rank, not
-      a stored per-herd flag — same shape as the region-level promotion-
-      boundary aggregate, one level down.
+- [x] Disposition vector per individual (boldness/aggression/sociability)
+      built, and tied to a real canon-accurate Nature system rather than
+      being independent of it — a deliberate departure from mainline (where
+      Nature never touches behavior), see DESIGN.md's "Individual variance:
+      Nature and Disposition" section. Wired into the flee-detection radius,
+      mob-fight commitment headcount, predator hunt-hunger threshold, and
+      mate-search radius — modest, individual-level hooks only. Herd
+      "culture" as a computed aggregate of member dispositions
+      weighted by role/rank (the rest of this bullet's original pitch) is
+      still unbuilt — this was the individual-variance foundation it needs,
+      not the aggregate itself.
 - [x] Guardian behavior built, derived automatically from HuntRules (a
       species nothing preys on defends herd-mates) rather than a stored
       role — see DESIGN.md and the positioning gap above. Still open: a
@@ -328,10 +333,10 @@ produce a real story before player mechanics are worth building further.
       to mate first — see the predator-pressure bottleneck above.
 - [x] Individual stats/moveset/level per agent built — real mainline-scale
       stats, canon types, typed moves with cooldowns, real damage formula
-      with STAB/type-effectiveness. See DESIGN.md's combat section. Still
-      no *individual* variance within a species (no Disposition, no Nature
-      applied yet — same species+level = identical stats), which is what
-      the rest of this section is about.
+      with STAB/type-effectiveness. See DESIGN.md's combat section.
+      Individual variance within a species is now built too (Nature's
+      1.1x/0.9x stat multiplier, see the bullet above) — same species+level
+      is no longer guaranteed identical stats.
 
 ## Player / bonding (deprioritized until sim depth lands)
 - [ ] Threat signature model — what exactly feeds it (speed/distance/posture)

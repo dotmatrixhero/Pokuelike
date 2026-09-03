@@ -46,6 +46,10 @@ export type SimEvent =
       species: string;
       layer: Layer;
       pos: Vec2;
+      /** The newborn's randomly-assigned Nature (nature.ts) — narrative color, see DESIGN.md. */
+      nature: string;
+      /** A short tag for the newborn's most distinctive Disposition axis, e.g. "high boldness" — see `dispositionSummary`. */
+      dispositionSummary: string;
     }
   | {
       kind: "floraChanged";

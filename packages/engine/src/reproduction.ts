@@ -3,6 +3,7 @@ import type { EventLog } from "./events.js";
 import { stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
 import { EXP_ON_BIRTH_PARENT, EXP_ON_MATE_ATTEMPT, canBreed, ensureCombatProfile, grantExp, type LevelingContext } from "./leveling.js";
+import { dispositionFromNature, dispositionSummary, randomNature } from "./nature.js";
 
 /**
  * Ticks before an agent can mate. A single global constant for now — real
@@ -10,7 +11,22 @@ import { EXP_ON_BIRTH_PARENT, EXP_ON_MATE_ATTEMPT, canBreed, ensureCombatProfile
  * a data-layer refinement for later, not an engine change.
  */
 export const MATURITY_AGE = 200;
+/** Baseline mate-search radius at neutral (0.5) sociability — see `mateSearchRadius`. */
 const MATE_SEARCH_RADIUS = 5;
+/** How far sociability can push the search radius from baseline in either direction. */
+const MATE_SEARCH_SPREAD = 2;
+
+/**
+ * More sociable agents search farther/more readily for a mate; less sociable
+ * ones are choosier about proximity. Deliberately the *only* sociability
+ * hook for now — full herd cohesion is still unbuilt, see DESIGN.md. Absent
+ * disposition (hand-built fixtures) reads as neutral (0.5), reproducing the
+ * original fixed 5-tile radius exactly.
+ */
+function mateSearchRadius(agent: Agent): number {
+  const sociability = agent.disposition?.sociability ?? 0.5;
+  return MATE_SEARCH_RADIUS + (sociability - 0.5) * (2 * MATE_SEARCH_SPREAD);
+}
 
 function manhattan(a: Vec2, b: Vec2): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
@@ -104,6 +120,10 @@ function spawnOffspring(world: World, mother: Agent, father: Agent, ctx?: Leveli
   // Venusaur — Bulbasaur is the "child version," Venusaur just what an adult
   // grows into, not a separately-bred species. See LevelingContext.baseSpeciesOf.
   const species = ctx?.baseSpeciesOf?.(mother.species) ?? mother.species;
+  // Own random nature (and thus its own disposition), same as any spawned
+  // agent — never inherited from either parent, matching spawnAgent.
+  const nature = randomNature();
+  const disposition = dispositionFromNature(nature);
   const child: Agent = {
     id: `${species}-${world.tick}-${offspringSequence}`,
     species,
@@ -129,6 +149,8 @@ function spawnOffspring(world: World, mother: Agent, father: Agent, ctx?: Leveli
     // child matures. Empty for a first-generation child (founders have no
     // parentIds of their own to combine).
     grandparentIds: [...new Set([...(mother.parentIds ?? []), ...(father.parentIds ?? [])])],
+    nature,
+    disposition,
   };
   // Backfills stats/hp/types/moves for the base species at level 1 — without
   // this a newborn had no combat profile at all (couldn't fight, and its
@@ -150,7 +172,7 @@ export function applyMateSeeking(world: World, agent: Agent, log?: EventLog, ctx
   if (!agent.sex || !isMature(agent)) return;
 
   const candidates = world.agents.filter(
-    (other) => isEligibleMate(agent, other, ctx) && manhattan(agent.pos, other.pos) <= MATE_SEARCH_RADIUS
+    (other) => isEligibleMate(agent, other, ctx) && manhattan(agent.pos, other.pos) <= mateSearchRadius(agent)
   );
   const partner = nearestMate(agent, candidates);
   if (!partner) return;
@@ -168,6 +190,10 @@ export function applyMateSeeking(world: World, agent: Agent, log?: EventLog, ctx
         species: child.species,
         layer: child.layer,
         pos: child.pos,
+        // Narrative color per DESIGN.md — e.g. "born-14 (Timid, low boldness)".
+        // Always present since spawnOffspring above always assigns both.
+        nature: child.nature!,
+        dispositionSummary: dispositionSummary(child.disposition!),
       });
       grantExp(world, agent, EXP_ON_BIRTH_PARENT, ctx, log);
       grantExp(world, partner, EXP_ON_BIRTH_PARENT, ctx, log);
