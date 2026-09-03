@@ -213,6 +213,21 @@ produce a real story before player mechanics are worth building further.
       predator = unbounded growth) is still open — carrying capacity tied
       to food availability, territory limits, or age-based mortality is
       still the undecided mechanism.
+- [x] **Age-based mortality built** (`ageMortalityChance` in `needs.ts`) —
+      a gentle per-tick hazard, 0 below `OLD_AGE_ONSET` (1500 ticks), then
+      ramping linearly to a 2% per-tick chance by `OLD_AGE_HAZARD_CAP_AGE`
+      (3000 ticks), deliberately not a hard cutoff age (see DESIGN.md for
+      why). Records a `diedOfAge` event. Real evidence: a 5000-tick run
+      produced 1 old-age death (age 1858); a 10000-tick run produced 10,
+      all in the 1500-2000 age band near onset as the ramp predicts. This
+      is a real but currently *minor* cause of death — most agents die of
+      starvation or predation long before old age becomes likely at this
+      population's typical lifespan — so it does NOT yet solve the
+      predator-free-species-grows-unbounded problem above; a predator-free
+      population would need a faster-acting cap (carrying capacity tied to
+      food, territory limits) to actually plateau. Worth revisiting
+      whether `OLD_AGE_ONSET`/`OLD_AGE_MAX_CHANCE` should be tuned more
+      aggressive once that's decided, rather than guessing now.
 - [ ] **Confirmed this isn't Venusaur-specific**: with the action economy
       (see "Combat / moves" below) making the guardian mechanism reliably
       defeat the Scyther predator around tick 110 in real runs, Bulbasaur

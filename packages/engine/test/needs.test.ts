@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorld, setTile, tileAt } from "../src/world.js";
-import { createNeeds, tickAgent } from "../src/needs.js";
+import { ageMortalityChance, createNeeds, tickAgent } from "../src/needs.js";
 import { CONSUME_STOCK_AMOUNT } from "../src/flora.js";
 import { EventLog } from "../src/events.js";
 import type { Agent } from "../src/types.js";
@@ -132,6 +132,77 @@ describe("starvation", () => {
 
     tickAgent(world, agent); // hunger already >0 from last tick's meal -> clock resets
     expect(agent.starvationTicks).toBe(0);
+    expect(agent.alive).not.toBe(false);
+  });
+});
+
+describe("ageMortalityChance", () => {
+  it("is zero before old age onset", () => {
+    expect(ageMortalityChance(0)).toBe(0);
+    expect(ageMortalityChance(1499)).toBe(0);
+  });
+
+  it("ramps up between onset and the hazard cap age", () => {
+    const early = ageMortalityChance(1600);
+    const late = ageMortalityChance(2900);
+    expect(early).toBeGreaterThan(0);
+    expect(late).toBeGreaterThan(early);
+  });
+
+  it("saturates at the max chance from the cap age onward", () => {
+    const atCap = ageMortalityChance(3000);
+    const wellPast = ageMortalityChance(10000);
+    expect(atCap).toBe(wellPast);
+    expect(atCap).toBeGreaterThan(0);
+  });
+});
+
+describe("old-age mortality", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("a young agent never dies of old age, however the roll lands", () => {
+    const world = createWorld(3, 1);
+    const agent = makeAgent({ age: 500 });
+    vi.spyOn(Math, "random").mockReturnValue(0); // would kill anything with a nonzero hazard
+
+    tickAgent(world, agent);
+
+    expect(agent.alive).not.toBe(false);
+  });
+
+  it("a sufficiently old agent dies of old age when the roll beats its hazard chance", () => {
+    const world = createWorld(3, 1);
+    const agent = makeAgent({ age: 3000 /* OLD_AGE_HAZARD_CAP_AGE, hazard is fully saturated here */ });
+    const log = new EventLog();
+    vi.spyOn(Math, "random").mockReturnValue(0); // 0 always beats a nonzero chance
+
+    tickAgent(world, agent, log);
+
+    expect(agent.alive).toBe(false);
+    expect(log.events).toContainEqual(
+      expect.objectContaining({ kind: "diedOfAge", agentId: "a1", species: "bulbasaur" })
+    );
+  });
+
+  it("an old agent survives the tick when the roll doesn't beat its hazard chance", () => {
+    const world = createWorld(3, 1);
+    const agent = makeAgent({ age: 3000 /* OLD_AGE_HAZARD_CAP_AGE, hazard is fully saturated here */ });
+    vi.spyOn(Math, "random").mockReturnValue(0.999); // beats any chance below 1
+
+    tickAgent(world, agent);
+
+    expect(agent.alive).not.toBe(false);
+  });
+
+  it("an agent with no age (spawned directly into a scenario) is never subject to old-age mortality", () => {
+    const world = createWorld(3, 1);
+    const agent = makeAgent({ age: undefined });
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    tickAgent(world, agent);
+
     expect(agent.alive).not.toBe(false);
   });
 });

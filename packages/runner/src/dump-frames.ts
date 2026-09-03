@@ -50,7 +50,7 @@ const counts = new Map<string, number>();
 for (const e of log.events) counts.set(e.kind, (counts.get(e.kind) ?? 0) + 1);
 
 const notable = log.events.filter((e) =>
-  ["killed", "defeated", "starved", "born", "crossedLayer"].includes(e.kind)
+  ["killed", "defeated", "starved", "diedOfAge", "born", "crossedLayer"].includes(e.kind)
 );
 
 writeFileSync(

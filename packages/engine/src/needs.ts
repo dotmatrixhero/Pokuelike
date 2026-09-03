@@ -28,6 +28,33 @@ const DECAY_PER_TICK = {
 
 /** Ticks an agent can sit at 0 hunger or thirst before it dies of it. */
 const STARVATION_GRACE_TICKS = 100;
+/**
+ * Age (ticks) at which old-age mortality starts being possible at all. A
+ * single global constant for now, same call as `MATURITY_AGE` above — real
+ * per-species lifespans (a Pidgey aging out faster than a Venusaur) are a
+ * data-layer refinement for later.
+ */
+const OLD_AGE_ONSET = 1500;
+/** Age at which the per-tick death chance saturates at `OLD_AGE_MAX_CHANCE`. */
+const OLD_AGE_HAZARD_CAP_AGE = 3000;
+/** The per-tick death chance a sufficiently old agent asymptotically approaches. */
+const OLD_AGE_MAX_CHANCE = 0.02;
+
+/**
+ * A gentle, ramping hazard rather than a hard cutoff age — a species with no
+ * predator and no famine (a guardian Venusaur, say) should still eventually
+ * die of old age instead of living forever once every other cause of death
+ * is dodged, but a sharp "everyone dies at exactly age X" cutoff would read
+ * as an obvious game-of-life rule rather than mortality. 0 before
+ * `OLD_AGE_ONSET`, then rises linearly to `OLD_AGE_MAX_CHANCE` by
+ * `OLD_AGE_HAZARD_CAP_AGE` and stays there for anything older.
+ */
+export function ageMortalityChance(age: number): number {
+  if (age < OLD_AGE_ONSET) return 0;
+  const span = OLD_AGE_HAZARD_CAP_AGE - OLD_AGE_ONSET;
+  const progress = Math.min(1, (age - OLD_AGE_ONSET) / span);
+  return progress * OLD_AGE_MAX_CHANCE;
+}
 /** Ticks a non-predator can go wanting food/water with none reachable anywhere before it gives up and migrates. */
 const MIGRATE_AFTER_TICKS = 150;
 
@@ -126,6 +153,13 @@ export function tickAgentNeeds(agent: Agent, world?: World, ctx?: LevelingContex
   if (agent.age !== undefined) agent.age += 1;
   tickCooldowns(agent);
   decayNeeds(agent.needs);
+
+  if (world && agent.age !== undefined && Math.random() < ageMortalityChance(agent.age)) {
+    agent.alive = false;
+    agent.diedAtTick = world.tick;
+    log?.record({ kind: "diedOfAge", tick: world.tick, agentId: agent.id, species: agent.species, pos: agent.pos, age: agent.age });
+    return;
+  }
 
   if (world && (agent.needs.hunger <= 0 || agent.needs.thirst <= 0)) {
     agent.starvationTicks = (agent.starvationTicks ?? 0) + 1;

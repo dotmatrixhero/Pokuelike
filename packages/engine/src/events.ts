@@ -93,6 +93,14 @@ export type SimEvent =
       cause: "hunger" | "thirst";
     }
   | {
+      kind: "diedOfAge";
+      tick: number;
+      agentId: string;
+      species: string;
+      pos: Vec2;
+      age: number;
+    }
+  | {
       kind: "leveledUp";
       tick: number;
       agentId: string;

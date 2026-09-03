@@ -22,6 +22,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.winnerSpecies} (${event.winnerId}) defeated ${event.loserSpecies} (${event.loserId}) at (${event.pos.x},${event.pos.y})`;
     case "starved":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) starved to death (${event.cause}) at (${event.pos.x},${event.pos.y})`;
+    case "diedOfAge":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) died of old age (${event.age} ticks) at (${event.pos.x},${event.pos.y})`;
     case "leveledUp":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) leveled up: ${event.fromLevel} -> ${event.toLevel} (exp ${event.exp})`;
     case "evolved":

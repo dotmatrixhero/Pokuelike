@@ -97,7 +97,7 @@ const counts = new Map<string, number>();
 for (const e of log.events) counts.set(e.kind, (counts.get(e.kind) ?? 0) + 1);
 
 const notable = log.events.filter((e) =>
-  ["killed", "defeated", "starved", "born"].includes(e.kind)
+  ["killed", "defeated", "starved", "diedOfAge", "born"].includes(e.kind)
 );
 
 writeFileSync(

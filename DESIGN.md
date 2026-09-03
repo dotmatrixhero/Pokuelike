@@ -1384,6 +1384,39 @@ population-explosion problem wearing a different hat. Left as-is per
 explicit instruction, pending a fix to the underlying population-cap
 question — see TODO.md.
 
+## Age-based mortality — a gentle, ramping hazard rather than a hard cutoff
+
+The last of the four things requested together ("guardian spawn point...
+relatedness check... and age based mortality"). This closes the other half
+of the unconstrained-reproduction finding: the relatedness check (above)
+stops a founder fathering its own descendants, but nothing previously made
+an old, well-fed, predator-free individual die of anything but starvation —
+in principle it could live forever.
+
+Deliberately not a hard cutoff age (everyone dies at exactly age X reads as
+an obvious game-of-life rule, not mortality). Instead `ageMortalityChance`
+(`needs.ts`) is 0 below `OLD_AGE_ONSET` (1500 ticks), then rises linearly
+to `OLD_AGE_MAX_CHANCE` (a 2% per-tick chance) by `OLD_AGE_HAZARD_CAP_AGE`
+(3000 ticks) and stays there for anything older — checked once per tick in
+`tickAgentNeeds`, right after aging and before the starvation check, same
+"always runs regardless of the action economy" path starvation already
+uses. A single global curve for now, same call as `MATURITY_AGE` — real
+per-species lifespans are a data-layer refinement for later. Records a new
+`diedOfAge` event (mirrors `starved`'s shape, plus the age at death).
+
+Real run evidence, not just the unit tests (`needs.test.ts`'s "old-age
+mortality" block, which mocks `Math.random` to check both sides of the
+roll deterministically): a 5000-tick run produced exactly 1 `diedOfAge`
+event (`bulbasaur-2915-35`, age 1858); a 10000-tick run produced 10, every
+one in the expected 1500-2000 age range near the hazard's onset (where the
+curve is still low), consistent with a gentle ramp rather than a wall.
+Genuinely rare at this population's typical lifespan — most agents die of
+starvation or predation well before old age becomes likely — which is
+honest: old age is a real but minor cause of death here, not yet the
+dominant population-control mechanism the "unconstrained reproduction"
+TODO item is still asking for (a predator-free species still needs a
+faster-acting cap; see TODO.md).
+
 ## Faint/finish-off, heal over time, and herd support (inventory, food delivery, carrying)
 
 Decided, not built yet. Today a hit that brings HP to 0 is permanent —
