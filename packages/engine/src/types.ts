@@ -89,6 +89,10 @@ export interface Agent {
   ticksSinceMeal?: number;
   /** Where a "relocate" agent is walking to. Cleared on arrival or once it feeds again. */
   relocateTarget?: Vec2;
+  /** Ticks spent with hunger or thirst at 0 — dies once this exceeds a threshold. Resets whenever both recover above 0. */
+  starvationTicks?: number;
+  /** Ticks a non-predator has spent wanting food/water with none reachable anywhere — drives migrating away once too high. */
+  ticksWithoutResource?: number;
 }
 
 /** predator species id -> the species ids it hunts. */

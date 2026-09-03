@@ -327,6 +327,37 @@ it's the same missing piece (no carrying capacity, no population limit for
 an unpredated species) now visible at higher stakes, since a guardian
 succeeding at its job is exactly what triggers it. See TODO.md.
 
+## Starvation and migration — a real (partial) fix for unbounded growth
+
+**Built**, directly in response to "they need to be able to starve to
+death or migrate": `Agent.starvationTicks` counts consecutive ticks at 0
+hunger or thirst; 100 ticks there and the agent dies (`starved` event,
+cause recorded). Separately, `packages/engine/src/migration.ts` (shared
+with the predator relocate logic, which used to duplicate this) — an
+agent whose resource search fails on every layer for 150 ticks
+(`ticksWithoutResource`) gives up and walks to a random distant point.
+
+**Real run result, 2000 ticks:** starvation is doing real work — **564
+Venusaur starved to death** (out of 919 ever born), a genuine population
+check that didn't exist before. But it's a partial fix, not a solved
+problem: 917 births still outpaced 564 deaths, so the population kept
+growing net-positive (roughly 355 alive at tick 2000, up from 2). Boom-
+with-heavy-mortality, not equilibrium.
+
+**Also worth being precise about a negative result**: migration never
+triggered once for any non-predator in this run (checked directly: zero
+`-> relocate` events for Bulbasaur/Venusaur/Diglett/Pidgey). Traced why:
+`ticksWithoutResource` only accumulates when *no food exists anywhere on
+any layer* — but the actual failure mode here is different and more
+realistic: food exists, just not *close enough* before hunger runs out.
+`findNearestTerrain` succeeding resets the counter the instant any food
+tile is found, however far away, so an agent that can see a food patch
+across the map but can't walk there in time never counts as "should
+migrate" — it just starves mid-journey. Migration as built solves "there's
+truly nothing here"; it doesn't solve "there's not enough here for this
+many mouths," which is the actual shape of the Venusaur crash. Not fixed
+— see TODO.md.
+
 ## Stack
 
 - **pnpm workspace monorepo**, TypeScript everywhere.

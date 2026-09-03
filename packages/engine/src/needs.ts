@@ -6,6 +6,7 @@ import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT } from "./flora.js";
 import { tickCooldowns } from "./combat.js";
 import { applyHerdCohesion } from "./herding.js";
+import { migrate } from "./migration.js";
 import type { EventLog } from "./events.js";
 
 const DECAY_PER_TICK = {
@@ -14,6 +15,11 @@ const DECAY_PER_TICK = {
   energy: 0.005,
   mateDrive: 0.01,
 } as const;
+
+/** Ticks an agent can sit at 0 hunger or thirst before it dies of it. */
+const STARVATION_GRACE_TICKS = 100;
+/** Ticks a non-predator can go wanting food/water with none reachable anywhere before it gives up and migrates. */
+const MIGRATE_AFTER_TICKS = 150;
 
 const CONSUME_RATE = {
   seekWater: { need: "thirst", amount: 0.4 },
@@ -106,6 +112,24 @@ export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: Hu
   tickCooldowns(agent);
   decayNeeds(agent.needs);
 
+  if (agent.needs.hunger <= 0 || agent.needs.thirst <= 0) {
+    agent.starvationTicks = (agent.starvationTicks ?? 0) + 1;
+    if (agent.starvationTicks >= STARVATION_GRACE_TICKS) {
+      agent.alive = false;
+      log?.record({
+        kind: "starved",
+        tick: world.tick,
+        agentId: agent.id,
+        species: agent.species,
+        pos: agent.pos,
+        cause: agent.needs.hunger <= 0 ? "hunger" : "thirst",
+      });
+      return;
+    }
+  } else {
+    agent.starvationTicks = 0;
+  }
+
   if (rules && applyPredationInstincts(world, agent, rules, log)) return;
 
   const previousBehavior = agent.behavior;
@@ -132,6 +156,7 @@ export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: Hu
     const target = findNearestTerrain(world, agent.layer, agent.pos, terrain);
 
     if (target) {
+      agent.ticksWithoutResource = 0;
       if (target.x === agent.pos.x && target.y === agent.pos.y) {
         const need = agent.behavior === "seekWater" ? "thirst" : "hunger";
         consume(agent.needs, agent.behavior);
@@ -156,6 +181,7 @@ export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: Hu
 
     const crossTo = findLayerWithTerrain(world, agent.layer, agent.pos, terrain);
     if (crossTo) {
+      agent.ticksWithoutResource = 0;
       const from = agent.layer;
       agent.layer = crossTo;
       log?.record({
@@ -167,6 +193,15 @@ export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: Hu
         to: crossTo,
         pos: agent.pos,
       });
+      return;
+    }
+
+    // No layer has the resource at all — this agent isn't starving-immediately
+    // (that's the check above), but if this drags on, standing in place forever
+    // isn't better than trying somewhere else.
+    agent.ticksWithoutResource = (agent.ticksWithoutResource ?? 0) + 1;
+    if (agent.ticksWithoutResource >= MIGRATE_AFTER_TICKS) {
+      if (migrate(world, agent, log) === "arrived") agent.ticksWithoutResource = 0;
     }
     return;
   }

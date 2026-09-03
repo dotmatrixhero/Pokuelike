@@ -1,4 +1,4 @@
-import type { BehaviorKind, Layer, Vec2 } from "./types.js";
+import type { Agent, BehaviorKind, Layer, Vec2, World } from "./types.js";
 
 export type SimEvent =
   | {
@@ -71,6 +71,14 @@ export type SimEvent =
       loserId: string;
       loserSpecies: string;
       pos: Vec2;
+    }
+  | {
+      kind: "starved";
+      tick: number;
+      agentId: string;
+      species: string;
+      pos: Vec2;
+      cause: "hunger" | "thirst";
     };
 
 /**
@@ -84,4 +92,17 @@ export class EventLog {
   record(event: SimEvent): void {
     this.events.push(event);
   }
+}
+
+/** Shared by anything that changes an agent's behavior and wants it logged only when it actually changes. */
+export function logBehaviorChange(log: EventLog | undefined, world: World, agent: Agent, to: BehaviorKind): void {
+  if (!log || agent.behavior === to) return;
+  log.record({
+    kind: "behaviorChanged",
+    tick: world.tick,
+    agentId: agent.id,
+    species: agent.species,
+    from: agent.behavior,
+    to,
+  });
 }

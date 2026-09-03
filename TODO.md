@@ -90,6 +90,32 @@ produce a real story before player mechanics are worth building further.
       his own descendants) — a separate, smaller fix (track parent/
       offspring or sibling pairs, exclude them as mates) once the bigger
       population-control question is settled.
+- [x] Starvation death + migrate-on-failure built (see DESIGN.md) — real
+      partial fix: 564 Venusaur starved in a 2000-tick run, but 917 births
+      still outpaced that, so population still grows net-positive (boom
+      with heavy mortality, not equilibrium). Population control is still
+      the open question above, just less extreme now.
+- [ ] **Migration doesn't actually help the crowding case it needs to.**
+      Traced directly: `ticksWithoutResource` only counts up when no food
+      exists *anywhere reachable* — but `findNearestTerrain` succeeding
+      resets it regardless of distance, so an agent that can see food
+      across the map but can't reach it before starving never triggers
+      migration; it just starves mid-journey. This is the actual shape of
+      the Venusaur die-off (overcrowding/distance, not true absence). Fix
+      target: factor in whether the nearest resource is reachable before
+      the agent's remaining hunger/thirst buffer runs out, not just
+      whether one exists at all.
+- [ ] **Movement/speed is still uniform and unbuilt as a real mechanic.**
+      Confirmed by grep: `calculateStats`'s `speed` field is computed but
+      never read anywhere — every agent moves exactly 1 tile/tick,
+      unconditionally. Per chat: speed should govern turn order/action
+      frequency (faster acts more/first, mainline-style), while move
+      cooldowns stay a separate, per-move stat — and cooldowns are meant
+      to eventually be spec'able/customizable per the original move-
+      leveling pitch (Ember: point -> ring, etc.), not tied to Speed at
+      all. This is a real architecture change (agents currently get
+      exactly one action per tick, full stop) — deliberately not rushed
+      in alongside other work; needs its own pass.
 
 ## World layers, elevation, and regions (see DESIGN.md)
 - [x] `Tile`/`World` have a `layer` dimension (Underground/Surface/Canopy,

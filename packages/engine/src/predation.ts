@@ -1,9 +1,10 @@
 import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import type { PokemonType } from "./typing.js";
 import type { EventLog } from "./events.js";
+import { logBehaviorChange } from "./events.js";
 import { stepAway, stepToward } from "./movement.js";
-import { tileAt } from "./world.js";
 import { calculateDamage, pickBestMove, useMove, moveRange } from "./combat.js";
+import { migrate } from "./migration.js";
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
@@ -26,8 +27,6 @@ const RETREAT_HP_FRACTION = 0.4;
 
 /** How long a predator can go without a kill while actively hunting before it gives up on the area. */
 const RELOCATE_AFTER_TICKS = 150;
-const MIN_RELOCATE_DISTANCE = 8;
-const RELOCATE_ATTEMPTS = 10;
 
 function manhattan(a: Vec2, b: Vec2): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
@@ -58,18 +57,6 @@ function nearest(agent: Agent, others: Agent[]): Agent | undefined {
     }
   }
   return best;
-}
-
-function logBehaviorChange(log: EventLog | undefined, world: World, agent: Agent, to: Agent["behavior"]): void {
-  if (!log || agent.behavior === to) return;
-  log.record({
-    kind: "behaviorChanged",
-    tick: world.tick,
-    agentId: agent.id,
-    species: agent.species,
-    from: agent.behavior,
-    to,
-  });
 }
 
 /** Same-species, same-herd, living agents near `pos`, excluding `excludeId` itself. */
@@ -190,33 +177,11 @@ function resolveHit(world: World, attacker: Agent, defender: Agent, log: EventLo
   return true;
 }
 
-function findRandomWalkableTile(world: World, layer: Layer, from: Vec2): Vec2 | undefined {
-  for (let i = 0; i < RELOCATE_ATTEMPTS; i++) {
-    const candidate = { x: Math.floor(Math.random() * world.width), y: Math.floor(Math.random() * world.height) };
-    if (manhattan(candidate, from) < MIN_RELOCATE_DISTANCE) continue;
-    if (tileAt(world, layer, candidate.x, candidate.y)?.walkable) return candidate;
-  }
-  return undefined;
-}
-
 /** A predator that keeps failing to find a huntable (un-mobbed) meal gives up on this area and wanders off. */
-function relocate(world: World, agent: Agent, log?: EventLog): boolean {
-  if (!agent.relocateTarget) {
-    agent.relocateTarget = findRandomWalkableTile(world, agent.layer, agent.pos);
-    if (!agent.relocateTarget) return false;
-  }
-
-  logBehaviorChange(log, world, agent, "relocate");
-  agent.behavior = "relocate";
-
-  if (manhattan(agent.pos, agent.relocateTarget) <= 1) {
-    agent.pos = agent.relocateTarget;
-    agent.relocateTarget = undefined;
-    agent.ticksSinceMeal = 0; // fresh start in the new area
-  } else {
-    agent.pos = stepToward(world, agent.layer, agent.pos, agent.relocateTarget);
-  }
-  return true;
+function giveUpAndRelocate(world: World, agent: Agent, log?: EventLog): boolean {
+  const result = migrate(world, agent, log);
+  if (result === "arrived") agent.ticksSinceMeal = 0; // fresh start in the new area
+  return result !== "stuck";
 }
 
 /**
@@ -342,7 +307,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
 
     agent.ticksSinceMeal = (agent.ticksSinceMeal ?? 0) + 1;
     if (agent.ticksSinceMeal >= RELOCATE_AFTER_TICKS) {
-      return relocate(world, agent, log);
+      return giveUpAndRelocate(world, agent, log);
     }
   }
 
