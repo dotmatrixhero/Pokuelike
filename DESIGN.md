@@ -81,6 +81,59 @@ resolver in isolation. The transition is the next real design problem once
 both halves exist: what state actually needs to persist across it, and
 whether "promoted" agents pause the rest of the world or run in parallel.
 
+## World scale: layers, elevation, and regions
+
+Decided, not yet built:
+
+**Three layers per region, sharing one x,y footprint:** Underground /
+Surface / Canopy. A species is native to one layer (Diglett underground,
+Pidgey canopy, most things surface) and moves within it normally. Crossing
+layers is **common, not rare** — Diglett surfaces to forage, Pidgey lands to
+drink, because their food/water is often only available on Surface even
+though they live elsewhere. This is a deliberate choice over rare "risk
+event" crossings: with frequent small exposure windows, story density comes
+from volume (most crossings are uneventful, some aren't) rather than from
+every crossing being a scripted set-piece.
+
+**Elevation is continuous within a layer**, not a fourth layer — a
+heightmap on Surface (and potentially the other layers) for hills/ridges
+that drives:
+- FOV/line-of-sight (can't see over higher terrain; high ground extends
+  sight range),
+- combat accuracy/evasion (elevation delta between attacker and defender
+  tiles as a modifier — classic high-ground tactics).
+
+This is a real engine change, not a config tweak: `Tile` needs an
+`elevation` value per layer, and FOV/LOS needs an elevation-aware
+shadowcasting pass instead of flat 2D visibility. Not built yet.
+
+**World graph, not one big map:** 3–5 regions to start, connected by
+migration edges, each region independently bounded (per the earlier scale
+discussion). This is where the promotion boundary concept turns out to
+apply **one level up**, not just at the agent/combat level:
+
+- A region being observed runs **full sim** — every agent, every tick,
+  across all three layers.
+- An unobserved region runs **abstracted**: aggregate counts per species,
+  average need levels, resource stock — advanced by cheap statistical
+  rules, occasionally emitting an event (boom, die-off, emigration along an
+  edge) without simulating individuals.
+- Crossing the graph edge (or the player/observer's attention moving to a
+  region) is a **region-level promotion/demotion**, symmetric with the
+  agent-level one already named above: full sim seeds the aggregate on
+  demotion, the aggregate seeds a plausible population on promotion.
+
+This is the piece that makes DF-scale time (simulate weeks/months, read a
+history afterward) affordable without simulating every agent in every
+region every tick forever — reuses a concept the design already has rather
+than inventing a second architecture for it.
+
+Open questions, unresolved: how the aggregate model reconciles back into
+individuals on promotion (do specific agents get invented with plausible
+stats, or does something get lost/smoothed over — probably fine for
+background regions, but worth being honest that promotion isn't lossless);
+whether elevation exists on Underground/Canopy too or only Surface.
+
 ## Player character: a fragile human, earning your first partner
 
 Decided: you play a human, not a trainer with starting gear and not a
