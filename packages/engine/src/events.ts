@@ -1,4 +1,4 @@
-import type { Agent, BehaviorKind, Layer, Vec2, World } from "./types.js";
+import type { Agent, BehaviorKind, Layer, MigrationReason, Vec2, World } from "./types.js";
 import type { PokemonType } from "./typing.js";
 
 export type SimEvent =
@@ -190,8 +190,8 @@ export type SimEvent =
       herdId: string;
       from: Vec2;
       to: Vec2;
-      /** Why the herd is relocating, e.g. "food scarcity" — see herdMigration.ts. */
-      reason: string;
+      /** Why the herd is relocating — see `MigrationReason`/herdMigration.ts. */
+      reason: MigrationReason;
     }
   | {
       kind: "herdSettled";

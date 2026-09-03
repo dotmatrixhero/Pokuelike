@@ -1,4 +1,4 @@
-import type { Layer, Vec2, World } from "./types.js";
+import type { Layer, MigrationReason, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { herdCentroid, COHESION_DISTANCE } from "./herding.js";
 import { foodStockNear, countTerrainNear } from "./resourceIndex.js";
@@ -6,17 +6,43 @@ import { findWalkableNear } from "./worldgen.js";
 
 /**
  * Herd-level migration — see DESIGN.md's "Herd-level migration: moving as a
- * group, not wandering individually" section. Deliberately separate from
- * `migration.ts`'s existing single-agent `migrate()` (a predator giving up
- * on a hunting area) — conceptually different triggers and, per DESIGN.md,
- * an explicitly-open question whether they should ever unify. This module
+ * group, not wandering individually" section, and its Phase 1 follow-up
+ * ("Dynamics that move a content herd: extra migration triggers, day/night,
+ * spatial weather") which generalized this from a scarcity-only system to
+ * four trigger reasons (`MigrationReason`, types.ts): `"scarcity"` (the
+ * original trigger, renamed from the old ad hoc `"food scarcity"` string
+ * now that it's a real discriminated value), `"predator_pressure"`,
+ * `"wanderlust"`, and `"territorial"`. All four reuse the exact same
+ * shared-state/destination-selection/cohesion-bias pipeline — this module
+ * is about adding trigger *evaluators* on top of that pipeline, not
+ * building a parallel one. Deliberately separate from `migration.ts`'s
+ * existing single-agent `migrate()` (a predator giving up on a hunting
+ * area) — conceptually different triggers and, per DESIGN.md, an
+ * explicitly-open question whether they should ever unify. This module
  * owns the shared per-herd state (`World.herdMigrations`/
- * `World.herdScarcityTicks`) and the once-per-tick check that maintains it
- * (`updateHerdMigrations`, called from `simulation.ts`'s `tickWorld`); the
- * actual per-agent movement bias lives in `herding.ts`'s `applyHerdCohesion`,
- * which reads `World.herdMigrations` as its single source of truth so every
- * member (and guardian) of a migrating herd pulls toward the same point
- * rather than each rolling its own.
+ * `World.herdScarcityTicks`/`World.herdPredatorPressure`/
+ * `World.herdTerritorialTicks`) and the once-per-tick check that maintains
+ * it (`updateHerdMigrations`, called from `simulation.ts`'s `tickWorld`);
+ * the actual per-agent movement bias lives in `herding.ts`'s
+ * `applyHerdCohesion`, which reads `World.herdMigrations` as its single
+ * source of truth so every member (and guardian) of a migrating herd pulls
+ * toward the same point rather than each rolling its own.
+ *
+ * **Trigger precedence** (documented once, here, rather than re-derived at
+ * each call site): per tick, a herd with no *active* migration is checked
+ * in this order — `scarcity`, then `predator_pressure` (both
+ * survival-critical, so checked first; the relative order between these two
+ * is an arbitrary tie-break, not a meaningful priority claim), then
+ * `territorial`, then `wanderlust` (both "soft" triggers, per DESIGN.md
+ * either order is fine). The first one that fires this tick wins and the
+ * rest are skipped for that herd this tick. A herd that's already actively
+ * migrating never has ANY of these checks run against it at all — see the
+ * early `continue` below — so nothing ever preempts an in-progress
+ * migration, regardless of reason. That's a deliberate, simpler-than-asked
+ * reading of "don't let a new trigger interrupt one in progress unless
+ * clearly higher priority": rather than modeling a priority ordering for
+ * interruption too, Phase 1 just never interrupts, full stop. A migration
+ * always runs to arrival or timeout before the herd can be re-triggered.
  */
 
 /**
@@ -76,16 +102,35 @@ const CANDIDATE_DIRECTIONS: readonly Vec2[] = [
   { x: 1, y: -1 },
 ];
 /**
- * A candidate destination must beat the herd's *current* local abundance by
- * at least this much to be worth the walk — otherwise sustained scarcity
- * would trigger a pointless relocation to an equally-poor spot. This also
- * correctly makes the underground/canopy herds (no food/water tiles exist
+ * A candidate destination must beat the herd's *current* combined score
+ * (abundance, plus `awayBonus` when scoring predator-pressure/territorial)
+ * by at least this much to be worth the walk — otherwise sustained scarcity
+ * would trigger a pointless relocation to an equally-poor spot. For
+ * `scarcity` specifically (no `awayFrom`, so the score is pure abundance),
+ * this correctly makes underground/canopy herds (no food/water tiles exist
  * on those layers at all, per worldgen.ts's Surface-only scope) never
- * migrate: every candidate scores exactly 0, same as "home," so nothing
- * ever clears the improvement bar — the right outcome (nowhere better to
- * walk to), not a bug.
+ * migrate for that reason: every candidate scores exactly 0, same as
+ * "home," so nothing ever clears the improvement bar — the right outcome
+ * (nowhere better to walk to), not a bug. `predator_pressure`/`territorial`
+ * don't share that exemption — `awayBonus` is pure distance, not resources,
+ * so an underground/canopy herd under real predator pressure or territorial
+ * crowding can still relocate purely to get away, even with nothing to
+ * forage at either end. `wanderlust` bypasses this scoring machinery
+ * entirely (see `pickWanderDestination`), so it's unaffected either way.
  */
 const MIN_IMPROVEMENT = 1;
+/**
+ * Weight applied to a candidate's distance from the relevant threat
+ * position (the predator's last known spot for `predator_pressure`, the
+ * rival herd's centroid for `territorial`) when scoring destinations for
+ * those two reasons — see `awayBonus`. Chosen so it's meaningful but doesn't
+ * swamp resource-richness: `abundanceAt` scores rarely exceed the
+ * high single digits (a few nearby full-stock food tiles plus water), while
+ * candidate distances can be 40+ tiles out — at this weight, walking 40
+ * tiles farther from the threat is worth +2, comparable to a couple of
+ * healthy food tiles, not an automatic override of resource scoring.
+ */
+const AWAY_WEIGHT = 0.05;
 
 function manhattan(a: Vec2, b: Vec2): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
@@ -94,6 +139,11 @@ function manhattan(a: Vec2, b: Vec2): number {
 /** Combined food-stock + water-count abundance score around `pos` — the same measure drives both scarcity detection and destination scoring. */
 function abundanceAt(world: World, layer: Layer, pos: Vec2, radius: number): number {
   return foodStockNear(world, layer, pos, radius) + WATER_WEIGHT * countTerrainNear(world, layer, pos, "water", radius);
+}
+
+/** Extra score for being far from `awayFrom` (undefined for scarcity/wanderlust, which have no threat position to flee) — see `AWAY_WEIGHT`. */
+function awayBonus(pos: Vec2, awayFrom: Vec2 | undefined): number {
+  return awayFrom ? AWAY_WEIGHT * manhattan(pos, awayFrom) : 0;
 }
 
 /**
@@ -107,13 +157,27 @@ function herdLayer(world: World, herdId: string): Layer | undefined {
   return world.agents.find((agent) => agent.alive !== false && agent.herdId === herdId)?.homeLayer;
 }
 
+/** The herd's species — same "first living member stands in for the herd" reasoning as `herdLayer`. Every herd in the demo scenario is single-species. */
+function herdSpecies(world: World, herdId: string): string | undefined {
+  return world.agents.find((agent) => agent.alive !== false && agent.herdId === herdId)?.species;
+}
+
+/** Number of living members in the herd — used to decide which of two territorially-clashing herds gets displaced (the smaller one). */
+function herdSize(world: World, herdId: string): number {
+  return world.agents.filter((agent) => agent.alive !== false && agent.herdId === herdId).length;
+}
+
 /**
  * Samples candidate points at increasing distance from `from` (8 compass
  * directions x `CANDIDATE_DISTANCES`), scores each by local resource
- * abundance, and returns the best one — provided it clearly beats `from`'s
- * own score by `MIN_IMPROVEMENT`. This is the "resource-aware, not a blind
- * random point" destination selection DESIGN.md asks for, contrasted with
- * `migration.ts`'s existing single-agent `migrate()`.
+ * abundance plus (when `awayFrom` is given) a bonus for distance from that
+ * point, and returns the best one — provided it clearly beats `from`'s own
+ * score by `MIN_IMPROVEMENT`. This is the "resource-aware, not a blind
+ * random point" destination selection DESIGN.md asks for scarcity, extended
+ * per Phase 1 with an "and ideally away from the threat/rival" term for
+ * `predator_pressure`/`territorial` — contrasted with `migration.ts`'s
+ * existing single-agent `migrate()` and with `pickWanderDestination` below
+ * (wanderlust's destination doesn't need to score better at all).
  *
  * Deliberately a direct resource-density scan via resourceIndex.ts rather
  * than a biome-aware lookup through worldgen.ts's `BIOMES`/`blendBiomeParams`
@@ -125,8 +189,8 @@ function herdLayer(world: World, herdId: string): Layer | undefined {
  * `worldgen.ts`'s `findWalkableNear` (already-solved "land on an actually
  * walkable tile" search) rather than a second implementation.
  */
-export function pickDestination(world: World, layer: Layer, from: Vec2): Vec2 | undefined {
-  const currentScore = abundanceAt(world, layer, from, SAMPLE_RADIUS);
+export function pickDestination(world: World, layer: Layer, from: Vec2, awayFrom?: Vec2): Vec2 | undefined {
+  const currentScore = abundanceAt(world, layer, from, SAMPLE_RADIUS) + awayBonus(from, awayFrom);
   let best: Vec2 | undefined;
   let bestScore = currentScore + MIN_IMPROVEMENT;
 
@@ -136,7 +200,7 @@ export function pickDestination(world: World, layer: Layer, from: Vec2): Vec2 | 
       if (raw.x < 0 || raw.y < 0 || raw.x >= world.width || raw.y >= world.height) continue;
 
       const candidate = findWalkableNear(world, layer, raw.x, raw.y);
-      const score = abundanceAt(world, layer, candidate, SAMPLE_RADIUS);
+      const score = abundanceAt(world, layer, candidate, SAMPLE_RADIUS) + awayBonus(candidate, awayFrom);
       if (score > bestScore) {
         bestScore = score;
         best = candidate;
@@ -147,24 +211,165 @@ export function pickDestination(world: World, layer: Layer, from: Vec2): Vec2 | 
 }
 
 /**
+ * Wanderlust's destination pick — deliberately NOT resource-scored at all,
+ * per DESIGN.md: "doesn't need to be better, just different." Picks one of
+ * the same 8 compass directions at a moderate `CANDIDATE_DISTANCES[1]`
+ * (25 tiles — far enough to read as a real relocation, not a single-step
+ * shuffle) and lands on the nearest walkable tile there. This is also why
+ * wanderlust is the one trigger that still works for underground/canopy
+ * herds even though they have no food/water tiles to score at all (see
+ * `MIN_IMPROVEMENT`'s doc comment) — an occasional aimless wander doesn't
+ * need resources to justify it.
+ */
+function pickWanderDestination(world: World, layer: Layer, from: Vec2, rng: () => number): Vec2 | undefined {
+  const dir = CANDIDATE_DIRECTIONS[Math.floor(rng() * CANDIDATE_DIRECTIONS.length)]!;
+  const dist = CANDIDATE_DISTANCES[1]!;
+  const raw = { x: Math.round(from.x + dir.x * dist), y: Math.round(from.y + dir.y * dist) };
+  if (raw.x < 0 || raw.y < 0 || raw.x >= world.width || raw.y >= world.height) return undefined;
+  return findWalkableNear(world, layer, raw.x, raw.y);
+}
+
+/**
+ * How many ticks of "no qualifying hunt/fight event" before a herd's
+ * predator-pressure window is considered stale and restarts from zero
+ * rather than keeping stacking onto old events — see
+ * `recordPredatorPressure`. Same number as `PREDATOR_PRESSURE_THRESHOLD`'s
+ * doc: a real "last 300 ticks" rolling window, approximated cheaply (see
+ * below) rather than literally maintaining a timestamped event deque.
+ */
+export const PREDATOR_PRESSURE_WINDOW_TICKS = 300;
+/**
+ * Hunt/fight/kill events landed against a herd's members within one
+ * `PREDATOR_PRESSURE_WINDOW_TICKS` window before it's "sustained pressure,"
+ * not a single skirmish. Sim-original tuning guess: a herd being fought
+ * over ~5+ times inside 300 ticks is a real, ongoing predation problem, not
+ * one unlucky encounter (which this threshold is specifically meant not to
+ * fire on — see the "isolated hit" test).
+ */
+export const PREDATOR_PRESSURE_THRESHOLD = 5;
+
+/**
+ * Call from predation.ts at the moment a hunt/fight event actually lands
+ * against `defenderHerdId` (i.e. right where the `fought` event is logged)
+ * — this is the "running counter updated at the event-emission site" this
+ * module uses instead of scanning `EventLog` for hunt/fight/kill events
+ * every tick per herd. A full-log scan would be O(events) per herd per
+ * tick, growing without bound over a long run; this is O(1) per event,
+ * paid only when a fight actually happens.
+ *
+ * Approximates a real "last `PREDATOR_PRESSURE_WINDOW_TICKS` ticks" rolling
+ * window without maintaining a timestamped event deque: if the previous
+ * event in this window was more than `PREDATOR_PRESSURE_WINDOW_TICKS` ticks
+ * ago, the count restarts at 1 (a fresh window) instead of accumulating
+ * across a long-dormant gap; otherwise it just increments. This slightly
+ * over-counts relative to a literal sliding window (a burst of hits at the
+ * very start of a window stays "in window" slightly past
+ * `PREDATOR_PRESSURE_WINDOW_TICKS` ticks after the last of them), which is
+ * fine for a threshold this coarse and much cheaper than exact windowing.
+ */
+export function recordPredatorPressure(world: World, herdId: string | undefined, threatPos: Vec2): void {
+  if (!herdId) return;
+  world.herdPredatorPressure ??= {};
+  const existing = world.herdPredatorPressure[herdId];
+  if (!existing || world.tick - existing.windowStart > PREDATOR_PRESSURE_WINDOW_TICKS) {
+    world.herdPredatorPressure[herdId] = { count: 1, windowStart: world.tick, lastThreatPos: threatPos };
+  } else {
+    existing.count += 1;
+    existing.lastThreatPos = threatPos;
+  }
+}
+
+/**
+ * Base unscaled per-tick-per-herd wanderlust roll — the actual chance a herd
+ * rolls each tick is this times `wanderlustChance`'s disposition multiplier
+ * (never below `WANDERLUST_MIN_MULTIPLIER`, so this is a floor value, not
+ * the typical one). Picked, together with the multiplier below, so a
+ * *neutral* (0.5/0.5) herd's real per-tick chance comes out to
+ * `WANDERLUST_BASE_CHANCE * 1.5` = 1/2000 — "1-in-several-thousand" per
+ * DESIGN.md, reading as occasional restlessness over a multi-thousand-tick
+ * run (roughly 5 times per 10,000 ticks at neutral disposition) rather than
+ * constant churn. See `wanderlustChance` for the full formula.
+ */
+export const WANDERLUST_BASE_CHANCE = 1 / 3000;
+/**
+ * How much a herd's average boldness+sociability (0..1, see
+ * `herdWanderlustFactor`) multiplies `WANDERLUST_BASE_CHANCE` by:
+ * `max(WANDERLUST_MIN_MULTIPLIER, factor * WANDERLUST_DISPOSITION_SCALE)`.
+ * At neutral (factor 0.5) that's 1.5x; at fully bold+social (factor 1.0)
+ * it's 3x; at fully timid+solitary (factor 0.0) the floor
+ * (`WANDERLUST_MIN_MULTIPLIER`) kicks in at 0.25x rather than zero — even a
+ * cautious herd wanders *occasionally*, just markedly less than a
+ * bold/social one. Sim-original tuning guess, not canon.
+ */
+const WANDERLUST_DISPOSITION_SCALE = 3;
+const WANDERLUST_MIN_MULTIPLIER = 0.25;
+
+/**
+ * Average boldness+sociability (each 0..1) across a herd's living members —
+ * the simplest reasonable aggregation for "how restless is this herd as a
+ * whole," rather than e.g. weighting by any one standout individual.
+ * Members without a `disposition` (hand-built fixtures) read as neutral
+ * (0.5/0.5), matching every other disposition-consuming site in this
+ * codebase (predation.ts, reproduction.ts).
+ */
+function herdWanderlustFactor(world: World, herdId: string): number {
+  const members = world.agents.filter((agent) => agent.alive !== false && agent.herdId === herdId);
+  if (members.length === 0) return 0.5;
+  const sum = members.reduce((total, agent) => total + (agent.disposition?.boldness ?? 0.5) + (agent.disposition?.sociability ?? 0.5), 0);
+  return sum / (members.length * 2);
+}
+
+function wanderlustChance(world: World, herdId: string): number {
+  const factor = herdWanderlustFactor(world, herdId); // 0..1
+  const multiplier = Math.max(WANDERLUST_MIN_MULTIPLIER, factor * WANDERLUST_DISPOSITION_SCALE);
+  return WANDERLUST_BASE_CHANCE * multiplier;
+}
+
+/**
+ * Two same-species herds' centroids within this of each other count as
+ * "territorially clashing" this tick — `2x COHESION_DISTANCE`, per
+ * DESIGN.md, wide enough that it's "sharing the same neighborhood," not
+ * literally standing on top of each other.
+ */
+export const TERRITORIAL_DISTANCE = 2 * COHESION_DISTANCE;
+/**
+ * Consecutive ticks two same-species herds must stay within
+ * `TERRITORIAL_DISTANCE` before the smaller one is displaced — mirrors
+ * `SCARCITY_SUSTAIN_TICKS`'s "sustained, not a single overlap" pattern
+ * exactly (same number, same reasoning: rides out ordinary foraging
+ * overlap without over-triggering on a momentary pass-by).
+ */
+export const TERRITORIAL_SUSTAIN_TICKS = 150;
+
+/** Canonical (order-independent) key for a herd pair, so `World.herdTerritorialTicks` counts a pair once regardless of iteration order. */
+function pairKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+/**
  * Once per world tick (not once per agent — a herd-level check computed a
  * single time per herd, called from `simulation.ts`'s `tickWorld`),
- * maintains every herd's migration state:
+ * maintains every herd's migration state. See this module's top-of-file
+ * comment for the full trigger-precedence rule; in short:
  *
  * - An **active** migration clears on arrival (centroid within
  *   `ARRIVAL_DISTANCE` of the target) or timeout (`MIGRATION_TIMEOUT_TICKS`
  *   without arriving), logging a `herdSettled` event either way, and resets
- *   that herd's scarcity counter so a fresh sustained-scarcity window is
- *   needed before migrating again.
- * - A herd with **no** active migration has its local abundance sampled
- *   around its live centroid; consecutive scarce ticks accumulate in
- *   `World.herdScarcityTicks`, and crossing `SCARCITY_SUSTAIN_TICKS`
- *   attempts a destination search. The counter resets either way once that
- *   attempt happens (success or not) — bounding retries to roughly once per
- *   sustain window instead of re-running the (cheap, but not free) search
- *   every single tick while still scarce.
+ *   every trigger's sustained-condition counter for that herd so a fresh
+ *   sustained window is needed before migrating again. A migrating herd
+ *   skips every trigger check below entirely (see the early `continue`) —
+ *   nothing interrupts a migration already in progress.
+ * - A herd with **no** active migration is checked in priority order:
+ *   `scarcity` (local abundance below threshold, sustained
+ *   `SCARCITY_SUSTAIN_TICKS`) → `predator_pressure`
+ *   (`World.herdPredatorPressure` past `PREDATOR_PRESSURE_THRESHOLD` within
+ *   its window) → `territorial` (centroid within `TERRITORIAL_DISTANCE` of
+ *   a same-species herd's, sustained `TERRITORIAL_SUSTAIN_TICKS`, and this
+ *   is the smaller of the two) → `wanderlust` (a flat per-tick chance,
+ *   scaled by disposition, no bad condition required). The first one that
+ *   fires wins; the rest aren't even evaluated that tick for that herd.
  */
-export function updateHerdMigrations(world: World, log?: EventLog): void {
+export function updateHerdMigrations(world: World, log?: EventLog, rng: () => number = Math.random): void {
   const herdIds = new Set<string>();
   for (const agent of world.agents) {
     if (agent.alive !== false && agent.herdId) herdIds.add(agent.herdId);
@@ -183,6 +388,7 @@ export function updateHerdMigrations(world: World, log?: EventLog): void {
       if (arrived || timedOut) {
         delete world.herdMigrations![herdId];
         if (world.herdScarcityTicks) world.herdScarcityTicks[herdId] = 0;
+        if (world.herdPredatorPressure) delete world.herdPredatorPressure[herdId];
         log?.record({
           kind: "herdSettled",
           tick: world.tick,
@@ -191,29 +397,112 @@ export function updateHerdMigrations(world: World, log?: EventLog): void {
           outcome: arrived ? "arrived" : "gaveUp",
         });
       }
-      continue; // an already-migrating herd doesn't also re-run scarcity detection this tick
+      continue; // an already-migrating herd doesn't also re-run trigger detection this tick
     }
 
-    const abundance = abundanceAt(world, layer, centroid, SAMPLE_RADIUS);
-    world.herdScarcityTicks ??= {};
-    if (abundance < SCARCITY_SCORE_THRESHOLD) {
-      world.herdScarcityTicks[herdId] = (world.herdScarcityTicks[herdId] ?? 0) + 1;
-    } else {
-      world.herdScarcityTicks[herdId] = 0;
-    }
+    if (tryScarcityTrigger(world, log, herdId, layer, centroid)) continue;
+    if (tryPredatorPressureTrigger(world, log, herdId, layer, centroid)) continue;
+    if (tryTerritorialTrigger(world, log, herdId, layer, centroid, herdIds)) continue;
+    tryWanderlustTrigger(world, log, herdId, layer, centroid, rng);
+  }
+}
 
-    if (world.herdScarcityTicks[herdId] >= SCARCITY_SUSTAIN_TICKS) {
-      world.herdScarcityTicks[herdId] = 0;
-      const destination = pickDestination(world, layer, centroid);
-      if (destination) {
-        world.herdMigrations ??= {};
-        const reason = "food scarcity";
-        world.herdMigrations[herdId] = { target: destination, reason, startedTick: world.tick };
-        log?.record({ kind: "herdMigrating", tick: world.tick, herdId, from: centroid, to: destination, reason });
-      }
-      // No qualifying candidate found (e.g. an underground/canopy herd with
-      // nothing anywhere to walk toward) — stays put, counter already reset
-      // above, will simply re-accumulate and try again later.
+function startMigration(world: World, log: EventLog | undefined, herdId: string, from: Vec2, to: Vec2, reason: MigrationReason): void {
+  world.herdMigrations ??= {};
+  world.herdMigrations[herdId] = { target: to, reason, startedTick: world.tick };
+  log?.record({ kind: "herdMigrating", tick: world.tick, herdId, from, to, reason });
+}
+
+/** Highest-priority trigger: sustained local food/water scarcity. Unchanged from Phase 0 apart from the `reason` value (`"scarcity"`, not the old ad hoc `"food scarcity"` string). */
+function tryScarcityTrigger(world: World, log: EventLog | undefined, herdId: string, layer: Layer, centroid: Vec2): boolean {
+  const abundance = abundanceAt(world, layer, centroid, SAMPLE_RADIUS);
+  world.herdScarcityTicks ??= {};
+  if (abundance < SCARCITY_SCORE_THRESHOLD) {
+    world.herdScarcityTicks[herdId] = (world.herdScarcityTicks[herdId] ?? 0) + 1;
+  } else {
+    world.herdScarcityTicks[herdId] = 0;
+  }
+
+  if (world.herdScarcityTicks[herdId] < SCARCITY_SUSTAIN_TICKS) return false;
+
+  world.herdScarcityTicks[herdId] = 0;
+  const destination = pickDestination(world, layer, centroid);
+  if (!destination) return false; // e.g. an underground/canopy herd with nothing anywhere to walk toward — stays put, will retry later
+  startMigration(world, log, herdId, centroid, destination, "scarcity");
+  return true;
+}
+
+/** Second-priority trigger: sustained hunt/fight pressure from a predator. */
+function tryPredatorPressureTrigger(world: World, log: EventLog | undefined, herdId: string, layer: Layer, centroid: Vec2): boolean {
+  const pressure = world.herdPredatorPressure?.[herdId];
+  if (!pressure || pressure.count < PREDATOR_PRESSURE_THRESHOLD) return false;
+
+  const destination = pickDestination(world, layer, centroid, pressure.lastThreatPos);
+  delete world.herdPredatorPressure![herdId]; // consumed either way — a fresh window has to build back up before this can trigger again
+  if (!destination) return false;
+  startMigration(world, log, herdId, centroid, destination, "predator_pressure");
+  return true;
+}
+
+/** Third-priority (soft) trigger: another same-species herd crowding this one's territory for too long. */
+function tryTerritorialTrigger(
+  world: World,
+  log: EventLog | undefined,
+  herdId: string,
+  layer: Layer,
+  centroid: Vec2,
+  allHerdIds: Set<string>
+): boolean {
+  const species = herdSpecies(world, herdId);
+  if (!species) return false;
+
+  let rivalId: string | undefined;
+  let rivalCentroid: Vec2 | undefined;
+  for (const otherId of allHerdIds) {
+    if (otherId === herdId) continue;
+    if (herdSpecies(world, otherId) !== species) continue;
+    const otherCentroid = herdCentroid(world, otherId, layer);
+    if (!otherCentroid) continue;
+    if (manhattan(centroid, otherCentroid) <= TERRITORIAL_DISTANCE) {
+      rivalId = otherId;
+      rivalCentroid = otherCentroid;
+      break; // first same-species clash found this tick is enough — herds this close are rare per-tick, no need to pick "the closest"
     }
   }
+
+  world.herdTerritorialTicks ??= {};
+  if (!rivalId || !rivalCentroid) {
+    // Not currently clashing with anyone — clear every pair counter this herd is party to, mirroring scarcity's "reset on recovery."
+    for (const key of Object.keys(world.herdTerritorialTicks)) {
+      if (key.startsWith(`${herdId}|`) || key.endsWith(`|${herdId}`)) delete world.herdTerritorialTicks[key];
+    }
+    return false;
+  }
+
+  const key = pairKey(herdId, rivalId);
+  world.herdTerritorialTicks[key] = (world.herdTerritorialTicks[key] ?? 0) + 1;
+  if (world.herdTerritorialTicks[key] < TERRITORIAL_SUSTAIN_TICKS) return false;
+
+  // Only the smaller herd gets displaced — the larger one holds its ground. Both herds run this
+  // function independently, so only the smaller one's own check should actually start a migration;
+  // a tie (equal size) arbitrarily favors this herd's own id sorting first, same tie-break spirit as `pairKey`.
+  const mySize = herdSize(world, herdId);
+  const rivalSize = herdSize(world, rivalId);
+  const isSmaller = mySize < rivalSize || (mySize === rivalSize && herdId < rivalId);
+  if (!isSmaller) return false;
+
+  delete world.herdTerritorialTicks[key];
+  const destination = pickDestination(world, layer, centroid, rivalCentroid);
+  if (!destination) return false;
+  startMigration(world, log, herdId, centroid, destination, "territorial");
+  return true;
+}
+
+/** Lowest-priority (soft) trigger: unconditioned restlessness. */
+function tryWanderlustTrigger(world: World, log: EventLog | undefined, herdId: string, layer: Layer, centroid: Vec2, rng: () => number): boolean {
+  if (rng() >= wanderlustChance(world, herdId)) return false;
+  const destination = pickWanderDestination(world, layer, centroid, rng);
+  if (!destination) return false;
+  startMigration(world, log, herdId, centroid, destination, "wanderlust");
+  return true;
 }

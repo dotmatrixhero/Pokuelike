@@ -2444,6 +2444,153 @@ generalized trigger system for storm-driven shelter-seeking):
   cold/heat tolerance needs real per-species/per-type data or a flat
   default is fine for a first pass.
 
+### Phase 1 — as built
+
+Only Phase 1 (the four trigger reasons) is built. **Phases 2 (day/night) and
+3 (weather) above are still just decided, not built** — left for a
+follow-up pass, sequenced after this one specifically so it wouldn't
+collide with Phase 1's edits to the same files (`herdMigration.ts`/
+`herding.ts`/`events.ts`).
+
+- **`MigrationReason`** (`types.ts`) is a real discriminated union —
+  `"scarcity" | "predator_pressure" | "wanderlust" | "territorial"` — shared
+  by `World.herdMigrations`' `reason` field and `SimEvent`'s
+  `herdMigrating.reason`, so both always agree. The original scarcity
+  trigger's ad hoc `reason: "food scarcity"` string became `"scarcity"`;
+  the 7 pre-existing tests that asserted the old string were updated to
+  match (a real rename, not a regression to special-case around).
+- **Predator pressure** is a running per-herd counter
+  (`World.herdPredatorPressure: Record<herdId, {count, windowStart,
+  lastThreatPos}>`), incremented once at the exact site `predation.ts`'s
+  `resolveHit` logs a `fought` event against a herd member — not a per-tick
+  `EventLog` scan (would be O(events) per herd per tick, unbounded over a
+  long run; this is O(1) per real hit). The "last 300 ticks" rolling window
+  DESIGN.md asked for is approximated cheaply: if the previous hit in the
+  counter was more than `PREDATOR_PRESSURE_WINDOW_TICKS` (300) ticks ago,
+  the count restarts at 1 instead of a real sliding-window recompute — a
+  documented, deliberate over-approximation (see the doc comment on
+  `recordPredatorPressure`), not an oversight. `PREDATOR_PRESSURE_THRESHOLD
+  = 5` hits within that window triggers a migration; the destination search
+  gets a new `awayFrom` term (see below) biased away from the attacker's
+  last known position (`lastThreatPos`).
+- **Wanderlust** rolls a flat per-tick-per-herd chance
+  (`WANDERLUST_BASE_CHANCE = 1/3000`) scaled by the herd's average
+  boldness+sociability across its living members (`herdWanderlustFactor`,
+  0..1) via `max(0.25, factor * 3)` — 1.5x at neutral disposition (so the
+  *real* per-tick chance for a neutral herd is 1/2000, not 1/3000 — the
+  base constant is a floor, not the typical value), up to 3x at fully
+  bold+social, floored at 0.25x rather than zero for a fully timid/solitary
+  herd (even a cautious herd wanders *occasionally*). The destination
+  (`pickWanderDestination`) is deliberately **not** resource-scored at all,
+  per DESIGN.md's "doesn't need to be better, just different" — one of the
+  8 compass directions at a flat 25-tile distance, landed on the nearest
+  walkable tile. This is also the one trigger that still works for the
+  underground/canopy herds (no food/water tiles to score there at all).
+- **Territorial displacement**: a per-herd-*pair* sustained-proximity
+  counter (`World.herdTerritorialTicks`, keyed by a sorted `"idA|idB"` pair
+  key so it's counted once regardless of iteration order) mirrors
+  scarcity's own "sustained, not instantaneous" pattern exactly — same 150
+  ticks (`TERRITORIAL_SUSTAIN_TICKS`), same reasoning. Two same-species
+  herds' centroids within `TERRITORIAL_DISTANCE` (`2 * COHESION_DISTANCE` =
+  10) for that long triggers the *smaller* (by live member count) herd to
+  migrate away from the other's centroid; a tie goes to whichever herd id
+  sorts first (arbitrary, documented, doesn't matter in practice). Not
+  observable in the actual demo scenario, which has exactly one herd per
+  species (see real-run findings below) — confirmed correct only via unit
+  tests that construct two same-species herds directly.
+- **Destination scoring gained an `awayFrom` term** for `predator_pressure`/
+  `territorial`: `pickDestination(world, layer, from, awayFrom?)` now adds
+  `AWAY_WEIGHT * manhattan(candidate, awayFrom)` (`AWAY_WEIGHT = 0.05`,
+  chosen so 40 tiles of extra distance from the threat is worth about +2 —
+  comparable to a couple of healthy food tiles, not an automatic override
+  of resource-richness) on top of the existing abundance score. This also
+  means an underground/canopy herd, which can never clear the improvement
+  bar on abundance alone, *can* still relocate for predator-pressure or
+  territorial reasons — pure distance from the threat is enough — unlike
+  `scarcity`, which stays correctly unreachable for those herds (see the
+  `MIN_IMPROVEMENT` doc comment in `herdMigration.ts`).
+- **Trigger precedence, decided and documented once** (top of
+  `herdMigration.ts`, not re-derived per call site): per tick, a herd with
+  no active migration is checked `scarcity` → `predator_pressure` →
+  `territorial` → `wanderlust`, in that order; the first to fire wins and
+  the rest aren't evaluated that tick. The two survival-critical triggers
+  are checked first (their relative order is an arbitrary tie-break, not a
+  real priority claim); the two soft triggers are checked after, order
+  irrelevant per DESIGN.md. Simpler than a general interruption-priority
+  scheme: a herd already migrating for any reason skips every trigger
+  check entirely (the existing early `continue`) — nothing ever interrupts
+  an in-progress migration, full stop, rather than modeling which reasons
+  could preempt which.
+- **11 new tests** in `herdMigration.test.ts` (235 total, up from 224):
+  predator-pressure not firing on an isolated hit but firing (and scoring
+  away from the threat) after a sustained pattern, and consuming its
+  counter on trigger; `pickDestination`'s `awayFrom` term in isolation;
+  wanderlust's fire rate matching the documented chance over 200,000
+  simulated ticks with a fixed seeded PRNG (mulberry32 — deterministic,
+  never flaky) and scaling up for a bolder/more social herd vs. a
+  timid/solitary one (same seed on both, isolating the disposition effect);
+  territorial triggering the smaller of two same-species herds and scoring
+  away from the rival, and correctly not triggering for two different-
+  species herds; and precedence — a wanderlust roll never interrupts an
+  active `scarcity` migration, and `scarcity` wins a genuine same-tick tie
+  against `predator_pressure`. All 224 pre-existing tests still pass
+  unmodified apart from the 7 `"food scarcity"` → `"scarcity"` string
+  updates; `pnpm -r typecheck`/`build` clean across all 4 packages.
+- **Real-run findings, reported straight** (seed 20260903 demo scenario,
+  `pnpm run run <N>` from `packages/runner`, several independent runs since
+  the demo world isn't fully deterministic — `Math.random` unseeded for
+  nature/disposition/trigger rolls):
+  - **The population itself is the dominant real-run finding, and it's not
+    new to this feature.** A debug instrument tracking each herd's live
+    member count found `bulbasaur-herd`/`underground-colony`/`pidgey-flock`
+    all frequently boom (reproduction pushes them to 2-3x their starting
+    size within the first ~500-1000 ticks) then bust to full extinction
+    well before 10,000-20,000 ticks — `starved` events in the dozens per
+    run, `killed`/`defeated` at or near zero. This is pre-existing
+    population-balance behavior (starvation/reproduction dynamics, not
+    anything this feature touches) but it directly bounds how much any
+    migration trigger — new or old — can be observed in the unmodified
+    demo scenario: a herd that goes extinct after a few thousand ticks
+    simply stops rolling for anything.
+  - **Wanderlust is the only one of the four triggers that fired at all in
+    ordinary runs**, confirming it does deliver "herds don't just sit there
+    forever" — 0-3 `herdMigrating`/wanderlust events observed per
+    20,000-tick run across the 3 demo herds combined (varies run to run,
+    consistent with a ~1/2000 per-tick-per-herd chance at these herds'
+    actual disposition averages and the population volatility above cutting
+    each herd's effective observation window short). This is genuinely rare
+    in the current demo scenario — closer to "did happen at least once in
+    most runs" than "occasional restlessness clearly visible in every run"
+    — a direct consequence of herds not surviving long enough to accumulate
+    many rolls, not evidence the per-tick chance itself is wrong (isolated
+    from population churn, the statistical test above confirms it fires at
+    the documented rate). Raising `WANDERLUST_BASE_CHANCE` further to
+    compensate for short herd lifespans was considered and not done — it
+    would fix the symptom (visibility in this scenario) by making the
+    *mechanism* less "occasional," which is the wrong lever; the actual
+    lever is herd survival time, out of scope here (see the pre-existing
+    population-balance gap above).
+  - **Predator-pressure and territorial did not fire in any real run** —
+    root-caused, not just observed: `fought` events were at or near zero
+    across every run (the same pre-existing "predators barely land hits"
+    dynamic TODO.md already flags for the biome-generation feature), so
+    `PREDATOR_PRESSURE_THRESHOLD`'s 5-hits-in-300-ticks bar was essentially
+    never approached; and the demo scenario has exactly one herd per
+    species, so no territorial rival ever exists for the trigger to compare
+    against. Both mechanisms are confirmed correct via direct unit tests
+    (predator-pressure fires and scores correctly given synthetic hit
+    events; territorial fires and scores correctly given two constructed
+    same-species herds) — the gap is scenario content, not implementation.
+    Making either observable in the demo world would need scenario changes
+    outside this feature's scope: e.g. a second Bulbasaur herd for
+    territorial, or addressing the predator-hit-rate gap for
+    predator-pressure.
+  - Performance: no measurable regression from the added trigger checks —
+    a 10,000-tick run completes in a few seconds, consistent with the
+    scarcity-only feature's own numbers; the new per-hit
+    `recordPredatorPressure` call is O(1) and the territorial check is
+    O(herds²) per tick, negligible at this scenario's herd count (3).
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

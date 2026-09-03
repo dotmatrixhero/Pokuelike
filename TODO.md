@@ -377,6 +377,45 @@ produce a real story before player mechanics are worth building further.
       radius of the target over a slightly-nearer one elsewhere) — touches
       needs.ts territory beyond this feature's stated scope (extend
       `applyHerdCohesion`).
+- [x] **Herd migration generalized to more trigger reasons — Phase 1 of
+      DESIGN.md's "Dynamics that move a content herd" section, done.**
+      `MigrationReason` (`"scarcity" | "predator_pressure" | "wanderlust" |
+      "territorial"`) is now a real discriminated value on
+      `World.herdMigrations`/`herdMigrating`'s event; predator-pressure is a
+      running per-herd counter incremented at `predation.ts`'s hit-logging
+      site (not a per-tick `EventLog` scan); wanderlust is a flat per-tick
+      chance scaled by herd disposition, destination not resource-scored at
+      all; territorial is a per-herd-pair sustained-proximity counter that
+      displaces the smaller same-species herd. `pickDestination` gained an
+      `awayFrom` scoring term for the two threat-driven reasons. See
+      DESIGN.md's "Dynamics that move a content herd" section, "Phase 1 — as
+      built" for the full design and real-run findings. 235 tests total (11
+      new), all builds/typechecks clean.
+- [ ] **Phases 2 (day/night cycle) and 3 (spatial weather) of the same
+      DESIGN.md section are still just decided, not built** — deliberately
+      left for a follow-up pass sequenced after Phase 1 landed, to avoid
+      colliding with its edits to `herdMigration.ts`/`herding.ts`/
+      `events.ts`. Phase 3 in particular plugs into Phase 1's generalized
+      trigger system (a `"weather"` migration reason for storm-driven
+      shelter-seeking), so it can't start before Phase 1 exists.
+- [ ] Real tuning gap found by the trigger-generalization feature, same
+      root cause as the two gaps just above: `fought` events are at or near
+      zero in every observed real run (the pre-existing "predators barely
+      land hits" dynamic), so the predator-pressure trigger's 5-hits-in-
+      300-ticks bar is essentially never approached in the actual demo
+      scenario; and the demo world has exactly one herd per species, so the
+      territorial trigger never has a rival to compare against. Both are
+      confirmed correct via direct unit tests (synthetic hit events for
+      predator-pressure, two constructed same-species herds for
+      territorial) — this is a scenario-content gap, not an implementation
+      bug. Wanderlust *did* fire in real runs (confirmed at the documented
+      rate, isolated from population effects, by a 200,000-tick statistical
+      test) but is rare to see in the unmodified demo scenario specifically
+      because the existing herd-boom-then-bust population dynamic (see the
+      gap above) usually kills a herd off within a few thousand ticks,
+      cutting short how many chances it gets to roll. Not fixed here — the
+      right lever is herd survival time (a pre-existing, separately-scoped
+      gap), not a higher wanderlust chance.
 
 ## Culture, disposition, and roles (pitched, not built — see chat)
 - [x] Disposition vector per individual (boldness/aggression/sociability)

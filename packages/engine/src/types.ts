@@ -9,6 +9,16 @@ export interface Vec2 {
 }
 
 /**
+ * Why a herd is (or was) migrating — see herdMigration.ts/DESIGN.md's
+ * "Dynamics that move a content herd" Phase 1. `"scarcity"` is the
+ * original (Phase 0) trigger, spelled `"food scarcity"` back then; the
+ * others are Phase 1's generalization. Shared by `World.herdMigrations`
+ * (internal state, also feeds destination scoring) and `SimEvent`'s
+ * `herdMigrating.reason` (external/narrative surface) so both always agree.
+ */
+export type MigrationReason = "scarcity" | "predator_pressure" | "wanderlust" | "territorial";
+
+/**
  * "seedling" is a planted, not-yet-mature patch — see flora.ts. It matures
  * into either "food" (edible, has stock) or "flora" (decorative only —
  * not edible, just a nicer tile to be standing on than bare floor).
@@ -326,7 +336,7 @@ export interface World {
    * Absent, or missing a given herdId, means that herd isn't migrating —
    * ordinary centroid-based cohesion applies.
    */
-  herdMigrations?: Record<string, { target: Vec2; reason: string; startedTick: number }>;
+  herdMigrations?: Record<string, { target: Vec2; reason: MigrationReason; startedTick: number }>;
   /**
    * Per-herd consecutive-tick counter for "was this herd's local food/water
    * below the scarcity threshold this tick" — see herdMigration.ts. Tracked
@@ -337,4 +347,24 @@ export interface World {
    * window doesn't retrigger a fresh destination search every tick.
    */
   herdScarcityTicks?: Record<string, number>;
+  /**
+   * Per-herd rolling predator-pressure tracker — see herdMigration.ts's
+   * `recordPredatorPressure`/`PREDATOR_PRESSURE_*` constants. `count` is
+   * hunt/fight events landed against that herd's members within the current
+   * window (`windowStart`..now); `lastThreatPos` is the attacker's position
+   * at the most recent such event, used to bias migration destinations away
+   * from the threat. A running counter updated at the event-emission site
+   * (predation.ts), not a per-tick `EventLog` scan — cheaper, and the log
+   * isn't indexed by herd/tick anyway.
+   */
+  herdPredatorPressure?: Record<string, { count: number; windowStart: number; lastThreatPos: Vec2 }>;
+  /**
+   * Per-herd-*pair* consecutive-tick counter for "these two same-species
+   * herds' centroids have been within the territorial-displacement distance
+   * this tick" — see herdMigration.ts's territorial trigger. Keyed by a
+   * canonical `"herdIdA|herdIdB"` (sorted) so the pair is counted once
+   * regardless of iteration order. Mirrors `herdScarcityTicks`'s
+   * reset-on-recovery pattern.
+   */
+  herdTerritorialTicks?: Record<string, number>;
 }

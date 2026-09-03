@@ -8,6 +8,7 @@ import { grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./l
 import { FINISHING_POOL_FRACTION } from "./support.js";
 import { isPathClear } from "./fov.js";
 import { tileAt } from "./world.js";
+import { recordPredatorPressure } from "./herdMigration.js";
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
@@ -282,6 +283,14 @@ function resolveHit(
       : FALLBACK_DAMAGE;
 
   if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log);
+
+  // Every real hit against a herd member counts toward that herd's
+  // predator-pressure trigger (herdMigration.ts) — the running-counter
+  // "updated at the event-emission site" this landed on, rather than a
+  // per-tick EventLog scan. Recorded here (once, above both "fought"
+  // log sites below) since both the finishing-blow and normal-hit phases
+  // are equally real pressure on the defender's herd.
+  recordPredatorPressure(world, defender.herdId, attacker.pos);
 
   if (defender.fainted) {
     // Finishing-blow phase: the (already-zero) hp bar is untouched; damage
