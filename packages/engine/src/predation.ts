@@ -10,17 +10,79 @@ import { FINISHING_POOL_FRACTION } from "./support.js";
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
 
-/** Exported so support.ts's `applyCarrying` can reuse the same "is a predator nearby" check when deciding to drop a carried ally and flee. */
+/**
+ * Exported so support.ts's `applyCarrying` can reuse the same "is a predator
+ * nearby" check when deciding to drop a carried ally and flee. This is the
+ * baseline at neutral (0.5) boldness — see `effectiveFleeRadius`, which is
+ * what `applyPredationInstincts`'s own flee check actually uses.
+ */
 export const FLEE_DETECT_RADIUS = 4;
+/** How far boldness can push the flee-detection radius from baseline in either direction. */
+const FLEE_RADIUS_SPREAD = 2;
+/**
+ * No boldness value shrinks the flee radius below this — a threat this close
+ * always registers, so a sufficiently close/lethal threat can't be ignored
+ * into a suicidal non-reaction (DESIGN.md's explicit hard-floor requirement).
+ */
+const FLEE_RADIUS_FLOOR = 2;
 const HUNT_DETECT_RADIUS = 5;
-/** A predator starts hunting below this hunger — more eager than the general seekFood threshold, since prey won't wait. */
+/** A predator starts hunting below this hunger — more eager than the general seekFood threshold, since prey won't wait. Baseline at neutral (0.5) aggression — see `huntHungerThreshold`. */
 const HUNT_HUNGER_THRESHOLD = 0.6;
+/** How far aggression can push the hunt-hunger threshold from baseline in either direction. */
+const HUNT_THRESHOLD_SPREAD = 0.2;
 const KILL_HUNGER_RESTORE = 0.6;
 
 /** How close a threat has to be, and how many herd-mates have to be nearby, before prey mob it instead of fleeing. */
 const MOB_TRIGGER_RADIUS = 2;
 const MOB_MUSTER_RADIUS = 4;
+/** Baseline headcount at neutral (0.5) boldness/aggression — see `mobThreshold`. */
 const MOB_THRESHOLD = 3;
+/** How far the combined boldness+aggression lean can shift the mob-commitment headcount, in either direction. */
+const MOB_THRESHOLD_SPREAD = 1;
+
+/**
+ * How many nearby allies an agent needs before it commits to a mob-fight
+ * instead of fleeing. Bolder and more aggressive agents commit with fewer
+ * allies; timid/passive ones need more — DESIGN.md's mob-fight commitment
+ * point, wired from both axes since a prey animal's willingness to stand and
+ * fight is as much about aggression as nerve. Absent disposition (hand-built
+ * fixtures) reads as neutral (0.5/0.5), reproducing the original fixed
+ * MOB_THRESHOLD of 3 exactly.
+ */
+function mobThreshold(agent: Agent): number {
+  const boldness = agent.disposition?.boldness ?? 0.5;
+  const aggression = agent.disposition?.aggression ?? 0.5;
+  const courage = (boldness + aggression) / 2;
+  const shift = Math.round((courage - 0.5) * 2 * MOB_THRESHOLD_SPREAD);
+  return Math.max(1, MOB_THRESHOLD - shift);
+}
+
+/**
+ * How close a threat has to get before this agent notices it and flees.
+ * Bold agents tolerate a closer/weaker threat before reacting (smaller
+ * radius); timid agents flee earlier/farther (larger radius) — DESIGN.md's
+ * flee-trigger point. Clamped to `FLEE_RADIUS_FLOOR` so no boldness value
+ * makes a threat invisible at point-blank range. Absent disposition (hand-
+ * built fixtures) reads as neutral (0.5), reproducing the original fixed
+ * FLEE_DETECT_RADIUS of 4 exactly.
+ */
+function effectiveFleeRadius(agent: Agent): number {
+  const boldness = agent.disposition?.boldness ?? 0.5;
+  const radius = FLEE_DETECT_RADIUS + (0.5 - boldness) * (2 * FLEE_RADIUS_SPREAD);
+  return Math.max(FLEE_RADIUS_FLOOR, radius);
+}
+
+/**
+ * The hunger level below which this predator switches to `hunt`. Aggressive
+ * predators hunt while less hungry (higher threshold); passive ones wait
+ * until hungrier (lower threshold) — DESIGN.md's hunt-trigger point. Absent
+ * disposition (hand-built fixtures) reads as neutral (0.5), reproducing the
+ * original fixed HUNT_HUNGER_THRESHOLD of 0.6 exactly.
+ */
+function huntHungerThreshold(agent: Agent): number {
+  const aggression = agent.disposition?.aggression ?? 0.5;
+  return HUNT_HUNGER_THRESHOLD + (aggression - 0.5) * (2 * HUNT_THRESHOLD_SPREAD);
+}
 /** Fallback HP for an agent with no real combat profile (stats/level/types) — shouldn't happen for fully-statted species. Exported so support.ts's body-weight proxy can match it. */
 export const FALLBACK_MAX_HP = 10;
 const FALLBACK_DAMAGE = 1;
@@ -100,7 +162,7 @@ function countHerdAllies(world: World, excludeId: string, species: string, herdI
 /** Would hunting this candidate mean walking into a mob? Used by predators to avoid unwinnable fights. */
 function isProtectedByMob(world: World, candidate: Agent): boolean {
   const allies = countHerdAllies(world, candidate.id, candidate.species, candidate.herdId, candidate.layer, candidate.pos, MOB_MUSTER_RADIUS);
-  return allies + 1 >= MOB_THRESHOLD;
+  return allies + 1 >= mobThreshold(candidate);
 }
 
 function isCriticallyHurt(agent: Agent): boolean {
@@ -374,7 +436,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
   // treating it as the threat it was until it's truly dead, which is what lets
   // a mob land the finishing blow across multiple ticks/hits rather than the
   // predator's faint silently ending the encounter — see resolveHit/DESIGN.md.
-  const threats = agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter((other) =>
+  const threats = agentsWithin(world, agent, effectiveFleeRadius(agent)).filter((other) =>
     isPreyOf(rules, other.species, agent.species)
   );
   const threat = nearest(agent, threats);
@@ -385,7 +447,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
     // waiting for backup that's still several tiles away.
     const mobSize = countHerdAllies(world, agent.id, agent.species, agent.herdId, agent.layer, threat.pos, MOB_TRIGGER_RADIUS) + 1;
 
-    if (distance <= MOB_TRIGGER_RADIUS && mobSize >= MOB_THRESHOLD) {
+    if (distance <= MOB_TRIGGER_RADIUS && mobSize >= mobThreshold(agent)) {
       logBehaviorChange(log, world, agent, "fight");
       agent.behavior = "fight";
       agent.fightTarget = threat.id;
@@ -406,7 +468,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
   }
 
   const preySpecies = rules[agent.species];
-  if (preySpecies && preySpecies.length > 0 && agent.needs.hunger < HUNT_HUNGER_THRESHOLD) {
+  if (preySpecies && preySpecies.length > 0 && agent.needs.hunger < huntHungerThreshold(agent)) {
     const candidates = agentsWithin(world, agent, HUNT_DETECT_RADIUS).filter(
       (other) => isPreyOf(rules, agent.species, other.species) && !isProtectedByMob(world, other)
     );

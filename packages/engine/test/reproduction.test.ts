@@ -4,8 +4,9 @@ import { createNeeds } from "../src/needs.js";
 import { tickWorld } from "../src/simulation.js";
 import { EventLog } from "../src/events.js";
 import type { Agent } from "../src/types.js";
+import type { Disposition } from "../src/nature.js";
 
-function parent(id: string, sex: "male" | "female", pos: { x: number; y: number }): Agent {
+function parent(id: string, sex: "male" | "female", pos: { x: number; y: number }, overrides: Partial<Agent> = {}): Agent {
   return {
     id,
     species: "bulbasaur",
@@ -17,6 +18,7 @@ function parent(id: string, sex: "male" | "female", pos: { x: number; y: number 
     herdId: "herd-a",
     sex,
     age: 500,
+    ...overrides,
   };
 }
 
@@ -69,5 +71,76 @@ describe("reproduction", () => {
     tickWorld(world);
 
     expect(world.agents).toHaveLength(2);
+  });
+
+  it("offspring get their own randomly-assigned nature and disposition, not inherited from a parent", () => {
+    const world = createWorld(10, 10);
+    world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
+
+    tickWorld(world);
+
+    const child = world.agents.find((a) => a.id !== "mother" && a.id !== "father")!;
+    expect(typeof child.nature).toBe("string");
+    expect(child.disposition).toBeDefined();
+    expect(child.disposition!.boldness).toBeGreaterThanOrEqual(0);
+    expect(child.disposition!.boldness).toBeLessThanOrEqual(1);
+  });
+
+  it("the born event carries the newborn's nature and a disposition summary for the narrative log", () => {
+    const world = createWorld(10, 10);
+    world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
+    const log = new EventLog();
+
+    tickWorld(world, log);
+
+    const bornEvent = log.events.find((e) => e.kind === "born");
+    expect(bornEvent).toBeDefined();
+    if (bornEvent?.kind === "born") {
+      expect(typeof bornEvent.nature).toBe("string");
+      expect(typeof bornEvent.dispositionSummary).toBe("string");
+      expect(bornEvent.dispositionSummary).toMatch(/^(low|moderate|high) (boldness|aggression|sociability)$/);
+    }
+  });
+});
+
+describe("sociability-driven mate-seeking radius", () => {
+  it("a sociable agent closes distance on a mate a neutral agent wouldn't even detect", () => {
+    const sociable: Disposition = { boldness: 0.5, aggression: 0.5, sociability: 1 };
+    const world = createWorld(20, 20);
+    // Distance 6 — beyond the neutral 5-tile search radius, within a fully sociable agent's ~7-tile radius.
+    world.agents.push(
+      parent("mother", "female", { x: 2, y: 2 }, { disposition: sociable }),
+      parent("father", "male", { x: 8, y: 2 })
+    );
+
+    tickWorld(world);
+
+    const mother = world.agents.find((a) => a.id === "mother")!;
+    expect(mother.pos.x).toBeGreaterThan(2);
+  });
+
+  it("a neutral (no disposition) agent does NOT react to that same distant mate", () => {
+    const world = createWorld(20, 20);
+    world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 8, y: 2 }));
+
+    tickWorld(world);
+
+    const mother = world.agents.find((a) => a.id === "mother")!;
+    expect(mother.pos.x).toBe(2);
+  });
+
+  it("an unsociable agent doesn't close distance on a mate a neutral agent would", () => {
+    const unsociable: Disposition = { boldness: 0.5, aggression: 0.5, sociability: 0 };
+    const world = createWorld(20, 20);
+    // Distance 4 — within the neutral 5-tile radius, beyond an unsociable agent's ~3-tile radius.
+    world.agents.push(
+      parent("mother", "female", { x: 2, y: 2 }, { disposition: unsociable }),
+      parent("father", "male", { x: 6, y: 2 })
+    );
+
+    tickWorld(world);
+
+    const mother = world.agents.find((a) => a.id === "mother")!;
+    expect(mother.pos.x).toBe(2);
   });
 });

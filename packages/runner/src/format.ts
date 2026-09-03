@@ -11,7 +11,7 @@ export function formatEvent(event: SimEvent): string {
     case "killed":
       return `[tick ${event.tick}] ${event.predatorSpecies} (${event.predatorId}) killed ${event.preySpecies} (${event.preyId}) at (${event.pos.x},${event.pos.y})`;
     case "born":
-      return `[tick ${event.tick}] ${event.species} (${event.motherId} x ${event.fatherId}) had offspring (${event.childId}) at (${event.pos.x},${event.pos.y})`;
+      return `[tick ${event.tick}] ${event.species} (${event.motherId} x ${event.fatherId}) had offspring ${event.childId} (${event.nature}, ${event.dispositionSummary}) at (${event.pos.x},${event.pos.y})`;
     case "floraChanged":
       return `[tick ${event.tick}] flora ${event.stage} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
     case "fought":

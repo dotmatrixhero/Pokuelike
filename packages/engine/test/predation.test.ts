@@ -6,6 +6,7 @@ import { applyPredationInstincts } from "../src/predation.js";
 import { EventLog } from "../src/events.js";
 import type { Agent, HuntRules } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
+import type { Disposition } from "../src/nature.js";
 
 const RULES: HuntRules = { scyther: ["bulbasaur"] };
 
@@ -301,6 +302,111 @@ describe("ranged attacks", () => {
 
     expect(mobber1.pos).not.toEqual({ x: 5, y: 3 }); // stepped closer instead of attacking
     expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
+  });
+});
+
+describe("disposition wiring", () => {
+  const TIMID: Disposition = { boldness: 0, aggression: 0.5, sociability: 0.5 };
+  const BOLD: Disposition = { boldness: 1, aggression: 0.5, sociability: 0.5 };
+
+  it("a timid prey flees a predator at a distance a neutral prey would ignore", () => {
+    const world = createWorld(20, 20);
+    // Distance 5 — beyond the neutral FLEE_DETECT_RADIUS (4), within a timid agent's expanded radius.
+    const target = prey({ x: 5, y: 5 }, { disposition: TIMID });
+    world.agents.push(target, predator({ x: 10, y: 5 }));
+
+    tickWorld(world, undefined, RULES);
+
+    expect(target.behavior).toBe("flee");
+  });
+
+  it("a neutral (no disposition) prey does NOT react to that same distant predator", () => {
+    const world = createWorld(20, 20);
+    const target = prey({ x: 5, y: 5 });
+    world.agents.push(target, predator({ x: 10, y: 5 }));
+
+    tickWorld(world, undefined, RULES);
+
+    expect(target.behavior).not.toBe("flee");
+  });
+
+  it("a bold prey tolerates a closer predator that a neutral prey would flee from", () => {
+    const world = createWorld(20, 20);
+    // Distance 3 — within the neutral FLEE_DETECT_RADIUS (4), but beyond a bold agent's shrunk radius.
+    const target = prey({ x: 5, y: 5 }, { disposition: BOLD });
+    world.agents.push(target, predator({ x: 8, y: 5 }));
+
+    tickWorld(world, undefined, RULES);
+
+    expect(target.behavior).not.toBe("flee");
+  });
+
+  it("a bold prey still flees a predator that is genuinely close (hard floor holds)", () => {
+    const world = createWorld(20, 20);
+    const target = prey({ x: 5, y: 5 }, { disposition: BOLD });
+    world.agents.push(target, predator({ x: 6, y: 5 })); // distance 1
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    expect(target.behavior).toBe("flee");
+  });
+
+  it("a bold+aggressive pair mobs a threat that a neutral pair of the same size would flee from", () => {
+    const boldAndAggressive: Disposition = { boldness: 1, aggression: 1, sociability: 0.5 };
+    const world = createWorld(10, 10);
+    const mobber1 = prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", disposition: boldAndAggressive });
+    const mobber2 = prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a", disposition: boldAndAggressive });
+    world.agents.push(mobber1, mobber2, predator({ x: 5, y: 6 }));
+
+    tickWorld(world, undefined, RULES);
+
+    // With only 2 herd-mates in range, the default (neutral) threshold of 3 would flee
+    // (see "a lone or small group still flees rather than fights" above) — bold+aggressive
+    // lowers the effective threshold enough to commit instead.
+    expect(mobber1.behavior).toBe("fight");
+  });
+
+  it("a timid pair flees rather than mobs even where a neutral trio would fight", () => {
+    const timid: Disposition = { boldness: 0, aggression: 0, sociability: 0.5 };
+    const world = createWorld(10, 10);
+    const mobber1 = prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", disposition: timid });
+    const mobber2 = prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a", disposition: timid });
+    const mobber3 = prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a", disposition: timid });
+    world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 6 }));
+
+    tickWorld(world, undefined, RULES);
+
+    // 3 herd-mates would meet the neutral MOB_THRESHOLD (see the "large enough herd" test
+    // above), but timid+passive raises the effective threshold enough that it isn't met.
+    expect(mobber1.behavior).toBe("flee");
+  });
+
+  it("an aggressive predator hunts at a hunger level a neutral predator would ignore", () => {
+    const aggressive: Disposition = { boldness: 0.5, aggression: 1, sociability: 0.5 };
+    const world = createWorld(10, 10);
+    // hunger 0.7 is above the neutral HUNT_HUNGER_THRESHOLD (0.6) — a neutral predator
+    // wouldn't hunt (see "a satisfied predator ignores nearby prey" above), but an
+    // aggressive one's raised threshold (0.8) still triggers it.
+    world.agents.push(prey({ x: 5, y: 5 }), predator({ x: 8, y: 5 }, 0.7, { disposition: aggressive }));
+
+    tickWorld(world, undefined, RULES);
+
+    const hunter = world.agents.find((a) => a.id === "scyther-0")!;
+    expect(hunter.behavior).toBe("hunt");
+  });
+
+  it("a passive predator waits longer than a neutral predator to hunt", () => {
+    const passive: Disposition = { boldness: 0.5, aggression: 0, sociability: 0.5 };
+    const world = createWorld(10, 10);
+    // hunger 0.5 is below the neutral threshold (0.6, would normally hunt) but above
+    // the passive predator's lowered threshold (0.4).
+    world.agents.push(prey({ x: 5, y: 5 }), predator({ x: 8, y: 5 }, 0.5, { disposition: passive }));
+
+    tickWorld(world, undefined, RULES);
+
+    const hunter = world.agents.find((a) => a.id === "scyther-0")!;
+    expect(hunter.behavior).not.toBe("hunt");
   });
 });
 
