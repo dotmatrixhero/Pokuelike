@@ -8,6 +8,8 @@ import {
   rollAccuracy,
   statStageMultiplier,
   accuracyStageMultiplier,
+  moveRange,
+  withinMoveRange,
   CRIT_STAGE_CHANCE,
   CRITICAL_MULTIPLIER,
 } from "../src/combat.js";
@@ -193,6 +195,32 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     ...overrides,
   };
 }
+
+describe("move range", () => {
+  const LINE_2: MoveSpec = { ...TACKLE, id: "line2", shape: { kind: "line", length: 2 }, range: { min: 0, max: 2 } };
+  const NO_RANGE_LINE: MoveSpec = { ...TACKLE, id: "line-no-range", shape: { kind: "line", length: 3 } };
+  const THROWN_ONLY: MoveSpec = { ...TACKLE, id: "thrown", range: { min: 2, max: 4 } };
+
+  it("moveRange reads an explicit range.max when set", () => {
+    expect(moveRange(LINE_2)).toBe(2);
+  });
+
+  it("moveRange falls back to deriving reach from shape when range is absent", () => {
+    expect(moveRange(TACKLE)).toBe(1); // point
+    expect(moveRange(NO_RANGE_LINE)).toBe(3); // line length 3
+  });
+
+  it("withinMoveRange honors both min and max", () => {
+    expect(withinMoveRange(LINE_2, 0)).toBe(true);
+    expect(withinMoveRange(LINE_2, 2)).toBe(true);
+    expect(withinMoveRange(LINE_2, 3)).toBe(false);
+
+    // A thrown-only move can't be used at melee (distance below its min).
+    expect(withinMoveRange(THROWN_ONLY, 1)).toBe(false);
+    expect(withinMoveRange(THROWN_ONLY, 3)).toBe(true);
+    expect(withinMoveRange(THROWN_ONLY, 5)).toBe(false);
+  });
+});
 
 describe("cooldowns", () => {
   it("useMove sets a cooldown that pickBestMove then respects", () => {

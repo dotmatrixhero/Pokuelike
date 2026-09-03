@@ -89,6 +89,17 @@ export interface Agent {
   ticksSinceMeal?: number;
   /** Where a "relocate" agent is walking to. Cleared on arrival or once it feeds again. */
   relocateTarget?: Vec2;
+  /**
+   * Speed-driven action-economy accumulator (see simulation.ts). Gains the
+   * agent's real Speed stat every world tick; once it crosses
+   * `ACTION_THRESHOLD` the agent takes one action and the threshold is
+   * subtracted. Absent/0 is the correct starting value for a freshly spawned
+   * agent. Agents with no computed `stats` (bare test fixtures, newborns —
+   * see reproduction.ts) fall back to acting every tick, matching
+   * pre-action-economy behavior, rather than being silently slowed down by
+   * missing data.
+   */
+  actionEnergy?: number;
 }
 
 /** predator species id -> the species ids it hunts. */

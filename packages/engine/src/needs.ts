@@ -88,22 +88,34 @@ function consume(needs: Needs, behavior: "seekWater" | "seekFood"): void {
 }
 
 /**
- * Needs-seeking routinely crosses layers: a Diglett (home: underground)
- * finds its food on the surface and crosses to get it, then drifts back
- * once satisfied. Crossing itself takes a tick (no position change) so it
- * reads as a discrete, loggable event rather than free teleportation.
+ * The part of an agent's tick that happens every world tick regardless of
+ * the Speed-driven action economy (see simulation.ts): aging, cooldown
+ * countdown (real-time, deliberately orthogonal to Speed — see DESIGN.md),
+ * and need decay. Hunger doesn't pause because an agent is slow; it just
+ * doesn't get to *act* on it as often.
+ */
+export function tickAgentNeeds(agent: Agent): void {
+  if (agent.alive === false) return;
+  if (agent.age !== undefined) agent.age += 1;
+  tickCooldowns(agent);
+  decayNeeds(agent.needs);
+}
+
+/**
+ * The part of an agent's tick that only runs on an action tick: survival
+ * instincts, behavior choice, movement, mate-seeking, attacks. Needs-seeking
+ * routinely crosses layers: a Diglett (home: underground) finds its food on
+ * the surface and crosses to get it, then drifts back once satisfied.
+ * Crossing itself takes a tick (no position change) so it reads as a
+ * discrete, loggable event rather than free teleportation.
  *
  * Survival instincts (flee a nearby predator, hunt nearby prey when hungry)
  * take priority over normal need-seeking when `rules` is provided — see
  * predation.ts. Without rules, agents behave exactly as before predation
  * existed.
  */
-export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: HuntRules): void {
+export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rules?: HuntRules): void {
   if (agent.alive === false) return;
-
-  if (agent.age !== undefined) agent.age += 1;
-  tickCooldowns(agent);
-  decayNeeds(agent.needs);
 
   if (rules && applyPredationInstincts(world, agent, rules, log)) return;
 
@@ -183,4 +195,18 @@ export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: Hu
       pos: agent.pos,
     });
   }
+}
+
+/**
+ * Convenience wrapper that runs both halves unconditionally — needs decay
+ * *and* a full action — for callers that don't go through `tickWorld`'s
+ * Speed-gated action economy (direct unit tests, anything that wants "tick
+ * this one agent once, fully" without wiring up actionEnergy/stats). Real
+ * simulation ticking goes through `tickWorld` (simulation.ts), which calls
+ * `tickAgentNeeds` every tick and `tickAgentAction` only on an agent's
+ * action tick.
+ */
+export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: HuntRules): void {
+  tickAgentNeeds(agent);
+  tickAgentAction(world, agent, log, rules);
 }

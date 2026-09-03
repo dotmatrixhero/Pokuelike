@@ -88,6 +88,16 @@ produce a real story before player mechanics are worth building further.
       food availability? territory limits? age-based mortality?) or they
       grow without bound. Not fixed — worth deciding the mechanism
       deliberately rather than bolting on a random cap.
+- [ ] **Confirmed this isn't Venusaur-specific**: with the action economy
+      (see "Combat / moves" below) making the guardian mechanism reliably
+      defeat the Scyther predator around tick 110 in real runs, Bulbasaur
+      itself now also reproduces unchecked once the threat is gone — 3
+      re-runs of the 1000-tick demo produced 71, 48, and 13 Bulbasaur
+      births respectively (vs. 2 in the first run written up in
+      DESIGN.md). Same root cause as the Venusaur case above (no carrying
+      capacity, nothing ties reproduction to predation pressure) — the
+      Speed work didn't cause this, but it did make the previously-rare
+      "predator dies early" case common enough to matter.
 
 ## World layers, elevation, and regions (see DESIGN.md)
 - [x] `Tile`/`World` have a `layer` dimension (Underground/Surface/Canopy,
@@ -226,11 +236,46 @@ produce a real story before player mechanics are worth building further.
       run: `scyther-0` landed a critical hit on `bulbasaur-1` at tick 59).
       Individual stat *variance* (Nature/IV-equivalent, different from these
       battle-only volatile stages) is still not modeled — see below.
-- [ ] Move leveling/respec system — how builds are earned, spent, reverted.
-      The shape axis (point/line/cone/ring/burst) still isn't connected to
-      predation.ts's single-target-only combat — AoE moves among wild
-      agents (who gets hit by a cone?) is a separate, real feature, not
-      built.
+- [x] **Speed-driven action economy built** (see DESIGN.md's "Action
+      economy" section for the full design and real-run findings):
+      `Agent.actionEnergy` accumulates each world tick's real `stats.speed`,
+      and crossing `ACTION_THRESHOLD` (40, chosen against the demo roster's
+      actual computed speeds — 9 to 37) is what lets an agent act that tick.
+      `tickAgent` split into `tickAgentNeeds` (age/cooldowns/decay, always
+      runs) and `tickAgentAction` (behavior/movement/attacks, gated).
+      Cooldowns stay real-time, independent of the owner's action-tick
+      status, per the locked design. A 1000-tick real run with it produced
+      a genuinely new outcome: a Venusaur guardian, now acting almost every
+      tick (speed 37 vs. threshold 40), actually caught and defeated the
+      Scyther predator at tick 111 — something that never happened in any
+      prior run recorded in DESIGN.md — which let the Bulbasaur herd
+      reproduce for the first time ever recorded (2 births, ticks 476/543,
+      both well after the kill) instead of going extinct. Not tuned
+      further beyond that one constant; see DESIGN.md for what's still open
+      (agents without a computed `stats` block, e.g. reproduction.ts's
+      newborns, fall back to acting every tick rather than getting a real
+      Speed value — a real gap, not fixed here).
+- [x] **Move range is its own field** (`MoveSpec.range: { min, max }`,
+      `combat.ts`'s `moveRange`/new `withinMoveRange`), replacing the old
+      shape-derived-only reach — `range` is optional with a shape-based
+      fallback so pre-existing hand-rolled `MoveSpec` literals (tests) don't
+      need updating. The curated roster in `packages/data/src/moves.ts` now
+      sets it explicitly.
+- [x] **Skill tree / respec mechanism built**: `MoveSpec.tree` (a small DAG
+      of nodes with a cost, optional prerequisites, and a delta on
+      shape/range/power/accuracy/cooldownTicks/statusChance) plus a pure
+      `applyMoveTree(base, chosenNodeIds)` in `packages/engine/src/moves.ts`.
+      Ember has a real 2-node tree proving the "point -> ring, or stay small
+      and trade for burn chance/cooldown" pitch works end to end (see
+      DESIGN.md). **Deliberately not built / still open**: no build-point
+      economy (how points are earned/spent), no UI, and — per the explicit
+      scope call in DESIGN.md — wild background agents never apply a tree;
+      `predation.ts` still only ever uses base `MoveSpec`s. The shape axis
+      also still isn't connected to predation.ts's single-target-only
+      combat — AoE moves among wild agents (who gets hit by a cone?) is a
+      separate, real feature, not built. Target-tile-based ranged casting
+      (aim at a tile within range, then the shape resolves from *that*
+      tile, vs. today's origin-anchored shapes) is also still open.
 - [ ] Status effects (burn, etc.) — `statusChance` exists on move data but
       nothing consumes it.
 - [ ] Turn-based vs. real-time-with-pause for combat — undecided.

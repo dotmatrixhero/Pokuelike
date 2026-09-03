@@ -3,7 +3,7 @@ import type { PokemonType } from "./typing.js";
 import type { EventLog } from "./events.js";
 import { stepAway, stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
-import { calculateDamage, pickBestMove, useMove, moveRange, rollAccuracy, rollCritical } from "./combat.js";
+import { calculateDamage, pickBestMove, useMove, withinMoveRange, rollAccuracy, rollCritical } from "./combat.js";
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
@@ -100,7 +100,7 @@ function isCriticallyHurt(agent: Agent): boolean {
 /** Can `agent` actually hit something `distance` away right now, given its best move's reach? */
 function canAttackFromHere(agent: Agent, distance: number, defenderTypes: PokemonType[]): boolean {
   const move = pickBestMove(agent, defenderTypes);
-  return move !== undefined && distance <= moveRange(move);
+  return move !== undefined && withinMoveRange(move, distance);
 }
 
 function isPreyOfAnything(rules: HuntRules, species: string): boolean {

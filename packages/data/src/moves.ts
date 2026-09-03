@@ -34,6 +34,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "point" },
     ...moveCanon("TACKLE"),
     cooldownTicks: 0,
+    range: { min: 0, max: 1 },
   },
   slash: {
     id: "slash",
@@ -41,6 +42,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "line", length: 1 },
     ...moveCanon("SLASH"),
     cooldownTicks: 0,
+    range: { min: 0, max: 1 },
   },
   vine_whip: {
     id: "vine_whip",
@@ -48,6 +50,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "line", length: 2 },
     ...moveCanon("VINE_WHIP"),
     cooldownTicks: 0,
+    range: { min: 0, max: 2 },
   },
   ember: {
     id: "ember",
@@ -56,6 +59,28 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("EMBER"),
     cooldownTicks: 1,
     statusChance: 0.1,
+    range: { min: 0, max: 1 },
+    // The original pitch, made concrete: grow Ember from a single burning
+    // tile into an expanding ring, or stay small and trade for a much
+    // higher burn chance and a faster cooldown. Wild agents never spend
+    // points here (see predation.ts) — this exists to prove applyMoveTree
+    // works and give the (future) player something real to respec once
+    // move points are earned. See DESIGN.md's "Action economy" section.
+    tree: {
+      wider_burn: {
+        id: "wider_burn",
+        name: "Wider Burn",
+        cost: 1,
+        delta: { statusChance: 0.15, cooldownTicks: -1 },
+      },
+      ring_of_fire: {
+        id: "ring_of_fire",
+        name: "Ring of Fire",
+        cost: 2,
+        prerequisites: ["wider_burn"],
+        delta: { shape: { kind: "ring", radius: 1 }, power: -10, cooldownTicks: 1 },
+      },
+    },
   },
   flamethrower: {
     id: "flamethrower",
@@ -64,5 +89,6 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("FLAMETHROWER"),
     cooldownTicks: 3,
     statusChance: 0.1,
+    range: { min: 0, max: 4 },
   },
 };

@@ -23,6 +23,19 @@ const DIRECTION_VECTORS: Record<Direction, Vec2> = {
   W: { x: -1, y: 0 },
 };
 
+/**
+ * How far a move can be targeted, independent of the shape it resolves once
+ * used — a real tactics-grid distinction (cast range vs. effect footprint)
+ * that the shape system alone conflates. `max` is the farthest tile a move
+ * can be aimed at; `min` (0 for every move today) is reserved for a future
+ * thrown-only move that can't be used at melee. See DESIGN.md's "Action
+ * economy" section.
+ */
+export interface MoveRange {
+  min: number;
+  max: number;
+}
+
 export interface MoveSpec {
   id: string;
   name: string;
@@ -37,6 +50,46 @@ export interface MoveSpec {
   cooldownTicks: number;
   /** e.g. burn chance. Not consumed by anything yet (no status-effect system) — see TODO. */
   statusChance?: number;
+  /**
+   * Explicit cast range. Optional so specs that predate this field (test
+   * fixtures, hand-rolled MoveSpec literals) keep working unchanged —
+   * `moveRange()`/`withinMoveRange()` in combat.ts fall back to deriving the
+   * old shape-based reach (point=1, line/cone=length) when this is absent.
+   * The curated roster in packages/data sets it explicitly.
+   */
+  range?: MoveRange;
+  /**
+   * Optional respec DAG (see `applyMoveTree`). Each node is a delta applied
+   * on top of the base spec, gated by a point cost and prerequisite node
+   * id(s). Absent = this move can't be respec'd (the common case — only
+   * moves with an actual designed tree, like Ember, carry one). Wild
+   * background agents never apply a tree — see predation.ts and DESIGN.md's
+   * explicit scope call.
+   */
+  tree?: Record<string, MoveTreeNode>;
+}
+
+/**
+ * One node in a move's respec tree. `delta` is applied on top of whatever
+ * the spec looks like after all previously-applied nodes (order given to
+ * `applyMoveTree` matters for overwriting fields like `shape`, though
+ * numeric deltas like `power`/`cooldownTicks` are additive regardless of
+ * order). `prerequisites` must all already be in the chosen set for this
+ * node to apply.
+ */
+export interface MoveTreeNode {
+  id: string;
+  name: string;
+  cost: number;
+  prerequisites?: string[];
+  delta: {
+    shape?: MoveShape;
+    range?: Partial<MoveRange>;
+    power?: number;
+    accuracy?: number;
+    cooldownTicks?: number;
+    statusChance?: number;
+  };
 }
 
 /** Resolves the set of tiles (relative to origin, in the given facing) a shape covers. */
@@ -89,4 +142,58 @@ export function resolveShape(shape: MoveShape, origin: Vec2, facing: Direction):
   }
 
   return tiles;
+}
+
+/**
+ * Derives a new `MoveSpec` by applying a chosen set of a move's tree nodes,
+ * in the given order, on top of `base`. Never mutates `base` — every field
+ * (including nested `range`) is copied into a fresh object as it's touched,
+ * so the canonical `MOVES`/dex data stays untouched no matter what a caller
+ * respecs. Throws if `base` has no tree, references an unknown node id, or a
+ * node's prerequisites aren't already satisfied by nodes earlier in
+ * `chosenNodeIds` — an invalid selection is a caller bug, not something to
+ * silently ignore or partially apply.
+ *
+ * Numeric deltas (power/accuracy/cooldownTicks/statusChance) are additive and
+ * order-independent; `shape` and `range` are overwrites, applied in the order
+ * given, so a tree that offers alternative branches (e.g. Ember: "grow into
+ * a ring" vs. "stay a point but hit faster/more often") depends on the caller
+ * choosing one, not both, deltas that touch the same field.
+ */
+export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec {
+  const tree = base.tree;
+  if (!tree) throw new Error(`applyMoveTree: move "${base.id}" has no respec tree`);
+
+  const chosen = new Set<string>();
+  let result: MoveSpec = { ...base, range: base.range ? { ...base.range } : undefined };
+
+  for (const nodeId of chosenNodeIds) {
+    const node = tree[nodeId];
+    if (!node) throw new Error(`applyMoveTree: move "${base.id}" has no tree node "${nodeId}"`);
+
+    const missing = (node.prerequisites ?? []).filter((prereq) => !chosen.has(prereq));
+    if (missing.length > 0) {
+      throw new Error(
+        `applyMoveTree: node "${nodeId}" on move "${base.id}" requires [${missing.join(", ")}] to be chosen first`
+      );
+    }
+    chosen.add(nodeId);
+
+    const { delta } = node;
+    result = {
+      ...result,
+      shape: delta.shape ?? result.shape,
+      power: delta.power !== undefined ? result.power + delta.power : result.power,
+      accuracy: delta.accuracy !== undefined ? result.accuracy + delta.accuracy : result.accuracy,
+      cooldownTicks:
+        delta.cooldownTicks !== undefined ? Math.max(0, result.cooldownTicks + delta.cooldownTicks) : result.cooldownTicks,
+      statusChance:
+        delta.statusChance !== undefined ? (result.statusChance ?? 0) + delta.statusChance : result.statusChance,
+      range: delta.range
+        ? { min: delta.range.min ?? result.range?.min ?? 0, max: delta.range.max ?? result.range?.max ?? 1 }
+        : result.range,
+    };
+  }
+
+  return result;
 }

@@ -599,6 +599,116 @@ later.
   lands either way, but a true "lob it at range then it bursts there" move
   needs the target-tile version, not just the field.
 
+**Built:**
+
+- **`Agent.actionEnergy`** (`types.ts`, optional, defaults to 0). Every
+  world tick, `tickWorld` (`simulation.ts`) adds the agent's real
+  `stats.speed` to it via `accumulateActionEnergy`; crossing
+  `ACTION_THRESHOLD` triggers exactly one action and subtracts the
+  threshold, with the remainder explicitly clamped to at most
+  `ACTION_THRESHOLD` so no agent can bank enough to double-act in one tick.
+  **`ACTION_THRESHOLD = 40`**, chosen against the actual `calculateStats`
+  output for the demo roster at their spawned levels (`packages/data/src/scenario.ts`):
+  Bulbasaur lvl 5 -> 9, Pidgey lvl 5 -> 10, Diglett lvl 5 -> 14, Scyther lvl
+  8 -> 21, Venusaur lvl 20 -> 37. At 40, Venusaur (the fastest spawned
+  agent) acts on nearly every tick (37/40) while Bulbasaur (the slowest)
+  acts roughly every 4-5 ticks (40/9) — a real, visible frequency gradient
+  without retuning every existing need/behavior threshold that assumed "one
+  action = one tick." Not deeply tuned beyond picking that one number
+  against the existing cast; a wider species roster will need it revisited.
+- **`tickAgent` split, as specified**: `tickAgentNeeds` (needs.ts) runs
+  age/`tickCooldowns`/`decayNeeds` for every living agent every tick,
+  unconditionally; `tickAgentAction` runs the old behavior-choice/movement/
+  predation/mating logic, called by `tickWorld` only on an agent's action
+  tick. `tickAgent` itself still exists as a convenience wrapper that runs
+  both unconditionally (used by direct single-agent unit tests and any
+  caller that isn't going through `tickWorld`'s Speed gate).
+- **Agents without a computed `stats` block fall back to acting every
+  tick** (`actionSpeedOf` in `simulation.ts` treats missing `stats.speed`
+  as `ACTION_THRESHOLD` itself). This was a deliberate compatibility call,
+  not an oversight: bare test fixtures and — more importantly —
+  `reproduction.ts`'s newborns (`spawnOffspring` doesn't give a child a
+  stat block at birth) would otherwise be silently and arbitrarily slowed
+  down by data they were never designed to carry. **Real gap this leaves
+  open**: a newborn Bulbasaur or Venusaur acts every tick until something
+  gives it real stats, i.e. faster than its own parents. Not fixed here —
+  `spawnOffspring` doesn't compute a level/stats for children at all yet,
+  which is a pre-existing gap this design didn't create but does make more
+  visible.
+- **Move range**: `MoveSpec.range?: { min, max }` (`moves.ts`), optional
+  with a shape-derived fallback (`deriveRangeFromShape` in `combat.ts`) for
+  any spec that doesn't set it — chosen specifically so the many hand-rolled
+  `MoveSpec` literals in `combat.test.ts`/`predation.test.ts` didn't all
+  need editing. The curated roster (`packages/data/src/moves.ts`) sets it
+  explicitly on every move, matching each move's previous effective reach
+  exactly (Tackle/Slash/Ember: `{0,1}`, Vine Whip: `{0,2}`, Flamethrower:
+  `{0,4}`). New `withinMoveRange(move, distance)` checks both `min` and
+  `max`; `predation.ts`'s `canAttackFromHere` now calls it instead of the
+  old bare `distance <= moveRange(move)` comparison, so a future
+  thrown-only move's `min` would actually be honored — nothing sets `min >
+  0` yet, so this is real but currently idle machinery, same pattern as the
+  accuracy/stat-stage work before it.
+- **Skill tree / respec**: `MoveSpec.tree?: Record<string, MoveTreeNode>`
+  (`moves.ts`) plus a pure `applyMoveTree(base, chosenNodeIds)` that
+  validates prerequisites and derives a new spec without mutating the
+  canonical data (engine-tested, including a purity check comparing the
+  base spec's `shape`/`range` object references before and after). Ember
+  carries a real 2-node tree: `wider_burn` (statusChance +0.15, cooldown
+  -1) and `ring_of_fire` (requires `wider_burn`; shape -> `{ ring, radius:
+  1 }`, power -10, cooldown +1) — a working instance of the original "point
+  -> ring, or stay small and trade for burn chance/cooldown" pitch.
+  **Scope call honored as specified**: `predation.ts` was not touched to
+  consume trees — every wild-agent call site still reads a move's base
+  `MoveSpec` off `Agent.moves` untouched.
+- **Real 1000-tick run result — the most interesting finding of this whole
+  feature, reported straight**: for the first time across every run
+  recorded in this document, the Bulbasaur herd did *not* go extinct.
+  Scyther killed 2 of the 4 Bulbasaur (ticks 60 and 105, same pattern as
+  always) but then, at tick 111, **a Venusaur guardian actually caught and
+  defeated it** (`venusaur (venusaur-1) defeated scyther (scyther-0)`) —
+  something that never happened in any prior run in this document, where
+  the guardian mechanism worked exactly as coded but the herd's geography
+  always kept it too far away or too slow to arrive in time. The
+  action-economy change is very plausibly why: Venusaur's real computed
+  Speed (37) is close enough to `ACTION_THRESHOLD` (40) that it acts almost
+  every tick, while Scyther (21) acts roughly every 1.9 ticks — a
+  persistence gap that didn't exist when every agent got exactly one
+  identical action per tick regardless of Speed. With the predator gone at
+  tick 111, the herd went on to reproduce for the first time ever recorded
+  in this document: 2 Bulbasaur births (ticks 476 and 543), both well after
+  the kill, exactly matching the causal chain the "Reproduction" section
+  above predicted (`flee` blocking `seekMate` while a predator is alive).
+  Total event counts for context: 1522 events, 5 `fought`, 2 `killed`, 1
+  `defeated`, 3 `born` (1 Venusaur, 2 Bulbasaur), 8 `floraChanged`.
+- **Ran it three more times to check this wasn't a fluke — it isn't.** Every
+  one of 3 additional 1000-tick runs (unseeded `Math.random()`, so genuine
+  RNG variance) produced the same qualitative outcome: Scyther gets 1-2
+  kills, then a Venusaur guardian defeats it, consistently around tick
+  109-111 (110, 111, 111 across the three re-runs, vs. 111 in the run
+  written up above) — Scyther's real hunt/relocate/flee timing is
+  apparently deterministic enough given these stats/positions that the
+  guardian's catch-up window barely moves run to run. This *is* now a
+  reliable consequence of the action-economy change, not a one-off roll,
+  which is a stronger and more interesting result than "one lucky run."
+  **But it immediately surfaces the next real problem, and it's worth
+  reporting just as plainly as the win**: with the predator reliably
+  removed early and nothing left to check the herd, Bulbasaur births
+  across those 3 re-runs were 71, 48, and 13 (vs. 3 in the very first
+  run above) — wildly variable, and all far more than the "2 births"
+  written up as the headline result. This is the exact unbounded-growth
+  problem already flagged for Venusaur earlier in this document
+  ("Venusaur population exploded from 2 to 52... no relatedness check in
+  reproduction.ts") now also hitting Bulbasaur, for the same underlying
+  reason: reproduction and predation are still independent systems with no
+  carrying capacity or inbreeding avoidance tying them together. Fixing the
+  extinction problem via the action economy didn't fix that; if anything it
+  makes it more visible, since now *both* sides of this predator/prey pair
+  can independently blow up once the other stops checking it. Not fixed
+  here — this was already a known, named gap (see the Venusaur explosion
+  finding above and TODO.md), and the action-economy work wasn't scoped to
+  reproduction/carrying-capacity balancing. Worth flagging as the most
+  likely next real lever if someone picks this back up.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

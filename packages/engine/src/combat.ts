@@ -165,13 +165,13 @@ export function useMove(agent: Agent, move: MoveSpec): void {
 }
 
 /**
- * How far a move reaches in a straight line toward its target — used by
- * predation.ts to decide "attack now" vs. "close distance" instead of
- * assuming everything is melee. Ring/burst are centered on the caster, not
- * aimed at a target tile, so they don't have a meaningful "reach" here yet
- * (no wild agent currently has one) — treated as melee until that's needed.
+ * Derives the old shape-only reach (point=1, line/cone=their length,
+ * ring/burst=1 since they're centered on the caster, not aimed at a target
+ * tile) — used only as a fallback for a `MoveSpec` that doesn't set `range`
+ * explicitly (older test fixtures, hand-rolled specs). The curated roster in
+ * packages/data sets `range` directly instead of relying on this.
  */
-export function moveRange(move: MoveSpec): number {
+function deriveRangeFromShape(move: MoveSpec): number {
   switch (move.shape.kind) {
     case "point":
       return 1;
@@ -183,4 +183,26 @@ export function moveRange(move: MoveSpec): number {
     case "burst":
       return 1;
   }
+}
+
+/**
+ * How far a move reaches in a straight line toward its target — used by
+ * predation.ts to decide "attack now" vs. "close distance" instead of
+ * assuming everything is melee. Reads `move.range.max` when set (see
+ * moves.ts); falls back to deriving it from `shape` when it isn't.
+ */
+export function moveRange(move: MoveSpec): number {
+  return move.range?.max ?? deriveRangeFromShape(move);
+}
+
+/**
+ * Full range check, including `min` (0 for every curated move today — see
+ * moves.ts — but a future thrown-only move could set it above 0 to mean
+ * "can't be used at melee"). Prefer this over a bare `distance <=
+ * moveRange(move)` comparison wherever the caller has a real distance to a
+ * target, since it's the one that actually honors `min`.
+ */
+export function withinMoveRange(move: MoveSpec, distance: number): boolean {
+  const min = move.range?.min ?? 0;
+  return distance >= min && distance <= moveRange(move);
 }
