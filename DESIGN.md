@@ -2054,16 +2054,19 @@ that was itself the killing blow — no point statusing a corpse.
   finer-grained than mainline turns, so this needs its own tuned range,
   not a literal 1-3 — proposing `SLEEP_TICKS_MIN/MAX` as a tunable, to be
   set from an actual run rather than guessed).
-- Burn/poison being otherwise permanent (no duration) is a real design
-  choice worth flagging, not an oversight: with no cure items in a wild
-  ecosystem, a burned Bulbasaur stays burned until it either dies from the
-  DOT or the story just carries a limping, chip-damaged survivor for the
-  rest of its life — genuinely more dramatic than a mainline battle's
-  clean-slate-after-blackout reset, and very much in the spirit of this
-  project's north star. Tunable if playtesting says it's too harsh:
-  `BURN_DURATION_TICKS`/`POISON_DURATION_TICKS` as a bounded-but-long
-  fallback (e.g. 60-100 ticks) rather than never-clearing, decided from a
-  real run's mortality numbers, not guessed up front.
+- **Decided** (was an open question, resolved directly): burn/poison have
+  no separate duration or cure at all — they simply deal damage every tick
+  until the DOT itself brings the agent to a faint, exactly like getting
+  hit does. The status's job is done at that point: `defender.status` is
+  cleared the moment it faints, same tick, and ordinary recovery takes
+  over from there — `applyHealOverTime`/`maybeRecoverFromFaint`
+  (support.ts) already handle "heal back above the wake threshold, resume
+  acting" with zero new code needed. This is simpler than the
+  bounded-duration idea it replaces, and mechanically identical to how a
+  normal attack already works (damage accumulates, a hit that reaches 0
+  HP faints rather than kills, the agent needs feeding/watering to heal
+  and wake up) — burn/poison are just "damage that lands on its own every
+  tick instead of only when someone's next to you swinging."
 
 **New events**: `statusInflicted` (kind, agentId, species, inflictedBy)
 and `statusCleared` (kind, agentId, reason: `"expired" | "healedFully" |
