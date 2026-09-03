@@ -5,6 +5,7 @@ import { applyPredationInstincts } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT } from "./flora.js";
 import { tickCooldowns } from "./combat.js";
+import { applyHerdCohesion } from "./herding.js";
 import type { EventLog } from "./events.js";
 
 const DECAY_PER_TICK = {
@@ -182,5 +183,10 @@ export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: Hu
       to: agent.homeLayer,
       pos: agent.pos,
     });
+    return;
+  }
+
+  if (agent.behavior === "idle") {
+    applyHerdCohesion(world, agent);
   }
 }

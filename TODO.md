@@ -70,24 +70,26 @@ produce a real story before player mechanics are worth building further.
       above still holds (still zero mob-fights), and a new one on top —
       the one guardian intervention that *did* trigger failed for a
       concrete geographic reason, not a logic bug (see below).
-- [ ] **Guardian positioning gap**: a guardian's `findHerdmateInDanger`
-      check works, but guardians only ever hang out near their own spawn
-      area (the water hole), while the herd forages clear across the map
-      near the food patch — so by the time a guardian notices a herd-mate
-      fleeing and gives chase, the kill happens before it can cross the
-      distance. Fix target: guardians should patrol nearer the herd's
-      actual grazing range, not just sit at one fixed spot.
-- [ ] **New, unplanned finding: unconstrained reproduction blows up.** Two
-      Venusaur (nothing preys on them) went from 2 to 52 individuals over
-      1000 ticks, and `venusaur-0` (the founding male) fathered most of
-      that growth including with his own daughters/granddaughters — no
-      relatedness/inbreeding check exists in `reproduction.ts`, and
-      nothing caps population for a species with no predator. This is the
-      mirror image of the Bulbasaur extinction: predation-free species
-      need *some* population-limiting force (carrying capacity tied to
-      food availability? territory limits? age-based mortality?) or they
-      grow without bound. Not fixed — worth deciding the mechanism
-      deliberately rather than bolting on a random cap.
+- [x] **Guardian positioning gap fixed by herd cohesion** (see DESIGN.md) —
+      cohesion keeps guardians close enough to the herd's live position
+      that one actually engaged and *defeated* Scyther in a real run
+      (first predator defeat this session, tick 170). Real fix, confirmed
+      by rerunning, not assumed.
+- [ ] **Now confirmed at bigger scale: unconstrained reproduction blows up
+      the whole herd, not just a predator-free species.** Killing the
+      sole predator (HuntRules has exactly one entry) removed 100% of
+      population control from this ecosystem — Bulbasaur went 4→40,
+      Venusaur 2→36, zero deaths for the remaining 830 ticks. This is the
+      same missing piece as the earlier Venusaur-only finding, now
+      unavoidable: **this is the next thing to build**, not an edge case.
+      Needs a deliberate mechanism (carrying capacity tied to food
+      availability? territory/space limits? age-based mortality? multiple
+      predator species so no single kill zeroes out all pressure?) —
+      pick one and test it, don't bolt on an arbitrary population cap.
+      Inbreeding is still also unaddressed (the founding male fathering
+      his own descendants) — a separate, smaller fix (track parent/
+      offspring or sibling pairs, exclude them as mates) once the bigger
+      population-control question is settled.
 
 ## World layers, elevation, and regions (see DESIGN.md)
 - [x] `Tile`/`World` have a `layer` dimension (Underground/Surface/Canopy,
@@ -112,9 +114,12 @@ produce a real story before player mechanics are worth building further.
       that's fine for background regions but worth being honest about.
 
 ## Ecosystem sim
-- [ ] Herd cohesion: agents share `herdId` in the type but nothing groups or
-      regroups them yet. Flocking forces? A shared "home range" center each
-      herd member biases toward? — still open, unrelated to predation below.
+- [x] Herd cohesion built (`packages/engine/src/herding.ts`) — idle agents
+      drift toward their herd's live centroid instead of standing still.
+      Confirmed working and consequential in a real run — see DESIGN.md.
+      Still just a simple "drift toward the average" — no real flocking
+      (separation/alignment), no fixed home-range distinct from wherever
+      the herd currently is.
 - [x] `seekMate`/reproduction built (`packages/engine/src/reproduction.ts`)
       — mature, opposite-sex, same-species/layer/herd agents pair up and
       produce offspring on contact. See DESIGN.md for why it produced zero
@@ -143,9 +148,6 @@ produce a real story before player mechanics are worth building further.
       this session). A guarded, vulnerable incubation period is better
       story material than an instant birth. Deliberately deferred rather
       than built alongside plain reproduction, to keep that slice small.
-- [ ] Herd cohesion: agents share `herdId` in the type but nothing groups or
-      regroups them yet. Flocking forces? A shared "home range" center each
-      herd member biases toward? — still open, unrelated to predation.
 - [ ] Performance ceiling for the cheap tier — how many agents before naive
       per-tick nearest-tile search (`findNearestTerrain` is O(width*height)
       per agent!) needs spatial indexing? Also now true of `growFlora`'s

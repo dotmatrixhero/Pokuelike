@@ -289,6 +289,44 @@ level target fast), but it means fights resolve in 1-2 hits and cooldowns
 rarely get to matter. If the goal is longer, more tactical exchanges, the
 lever is the level/stat gap between predator and prey, not the formula.
 
+## Herd cohesion — and the first complete story arc
+
+**Built:** `packages/engine/src/herding.ts`. `herdCentroid(world, herdId,
+layer)` is the *live* average position of every agent sharing a `herdId`
+on a layer (guardians included, since Venusaur share the herd's `herdId`
+too). An idle agent more than 5 tiles from that centroid walks back toward
+it instead of just standing still — wired into `tickAgent`'s `idle`
+branch, after the existing "return to home layer" check.
+
+**Real run result, 1000 ticks — and this is the first time the sim has
+produced a complete beginning-to-end story:**
+
+1. Cohesion pulled the Venusaur guardians close enough to the herd's
+   actual position that the positioning gap from the previous run
+   (guardian starts a chase, never arrives) stopped happening. A guardian
+   engaged Scyther directly at tick 119 (17 damage, Scyther down to 12 hp)
+   and again at tick 170 (19 damage) — **`venusaur-1` defeated `scyther-0`
+   outright.** First predator defeat in any real run this session.
+2. Scyther was the *only* predator in `HuntRules`. With it gone, every
+   remaining threat to the herd disappeared — permanently, for the rest of
+   the 830 remaining ticks.
+3. Both defended species then grew freely: Bulbasaur went from 4 to 40
+   individuals (36 births, confirmed multi-generational — e.g.
+   `bulbasaur-312-4` having its own offspring `bulbasaur-513-11` later),
+   Venusaur from 2 to 36. Zero deaths, zero predation, for the remaining
+   82% of the run.
+
+That's a genuinely complete arc — predator pressure, a real fight, a
+decisive victory, population recovery — the first run this session that
+reads as a finished story rather than a mid-arc data point. But it also
+immediately reproduces last time's population-explosion finding, now at
+the scale of the *entire herd* rather than just the guardians: removing
+the single predator from this ecosystem removes 100% of its population
+control, and nothing else replaces that pressure. This isn't a new bug —
+it's the same missing piece (no carrying capacity, no population limit for
+an unpredated species) now visible at higher stakes, since a guardian
+succeeding at its job is exactly what triggers it. See TODO.md.
+
 ## Stack
 
 - **pnpm workspace monorepo**, TypeScript everywhere.
