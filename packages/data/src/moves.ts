@@ -91,4 +91,28 @@ export const MOVES: Record<string, MoveSpec> = {
     statusChance: 0.1,
     range: { min: 0, max: 4 },
   },
+  peck: {
+    id: "peck",
+    name: "Peck",
+    shape: { kind: "point" },
+    ...moveCanon("PECK"),
+    cooldownTicks: 0,
+    range: { min: 0, max: 1 },
+  },
+  scratch: {
+    id: "scratch",
+    name: "Scratch",
+    shape: { kind: "point" },
+    ...moveCanon("SCRATCH"),
+    cooldownTicks: 0,
+    range: { min: 0, max: 1 },
+  },
+  rock_throw: {
+    id: "rock_throw",
+    name: "Rock Throw",
+    shape: { kind: "line", length: 3 },
+    ...moveCanon("ROCK_THROW"),
+    cooldownTicks: 1,
+    range: { min: 0, max: 3 },
+  },
 };

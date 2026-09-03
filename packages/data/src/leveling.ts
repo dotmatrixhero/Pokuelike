@@ -56,6 +56,17 @@ const EGG_GROUPS_BY_BASE_KEY: Record<string, string[]> = {
   SCYTHER: ["bug"],
   DIGLETT: ["field"],
   PIDGEY: ["flying"],
+  // Real cross-species pair with Pidgey (both Flying group) — verified
+  // against Bulbapedia, same precedent as Bulbasaur/Charmander sharing
+  // Monster.
+  SPEAROW: ["flying"],
+  // Real cross-species pair with Diglett (both Field group) — verified
+  // against Bulbapedia.
+  SANDSHREW: ["field"],
+  // Mineral group — distinct from Diglett's Field group despite both being
+  // "underground" thematically; verified against Bulbapedia, so Onix does
+  // NOT cross-breed with Diglett/Sandshrew, matching the real games.
+  ONIX: ["mineral"],
 };
 
 /**
@@ -76,10 +87,16 @@ function profileFromDexEntry(speciesId: string): LevelingProfile | undefined {
     baseExp: entry.baseExp,
     levelMoves: entry.levelMoves,
     eggGroups: EGG_GROUPS_BY_BASE_KEY[baseSpeciesOf(speciesId).toUpperCase()] ?? [],
-    // Level-gated evolutions only — item/trade/friendship evolutions (no `level`)
-    // are explicitly deferred, see DESIGN.md.
+    // Level-gated evolutions only — item/trade/friendship evolutions are
+    // explicitly deferred, see DESIGN.md. Real bug caught while adding Onix:
+    // `level` alone isn't sufficient — PokeRogue's dex stamps a `level: 1`
+    // placeholder on trade evolutions too (e.g. Onix -> Steelix, which needs
+    // Metal Coat + trade), so a pure `level !== undefined` check would have
+    // "evolved" Onix into Steelix on its very first level-up. `conditions`
+    // being non-empty is the real signal that this isn't a pure level
+    // evolution, so it's excluded here regardless of what `level` says.
     evolutions: entry.evolutions
-      .filter((e): e is typeof e & { level: number } => e.level !== undefined)
+      .filter((e): e is typeof e & { level: number } => e.level !== undefined && Object.keys(e.conditions).length === 0)
       .map((e) => ({ targetSpeciesId: (SPECIES_KEY_BY_ID[e.target] ?? String(e.target)).toLowerCase(), level: e.level })),
   };
 }

@@ -85,4 +85,33 @@ export const SPECIES: Record<string, SpeciesDef> = {
     homeLayer: "canopy",
     moves: ["tackle"],
   }),
+  spearow: speciesFromDex("SPEAROW", {
+    spriteKey: "spearow",
+    placeholderColor: "#8c5028",
+    homeLayer: "canopy",
+    // Mirrors the Bulbasaur/Scyther/Venusaur pattern: Spearow only preys on
+    // the base "pidgey" id, never "pidgeotto"/"pidgeot" (species changes on
+    // evolution — see leveling.ts's applyLevelUp), so a Pidgey that evolves
+    // automatically becomes a guardian, no separate guardian mechanic needed.
+    preysOn: ["pidgey"],
+    moves: ["peck"],
+  }),
+  sandshrew: speciesFromDex("SANDSHREW", {
+    spriteKey: "sandshrew",
+    placeholderColor: "#e0c068",
+    homeLayer: "underground",
+    // Not prey/predator itself — coexists with Diglett underground and
+    // shares its Field egg group (see EGG_GROUPS_BY_BASE_KEY in
+    // leveling.ts), a real cross-species breeding pair.
+    moves: ["scratch"],
+  }),
+  onix: speciesFromDex("ONIX", {
+    spriteKey: "onix",
+    placeholderColor: "#a8a878",
+    homeLayer: "underground",
+    // Gives the underground layer its own predator/prey drama, mirroring
+    // Scyther on the surface — previously Diglett had zero threats at all.
+    preysOn: ["diglett", "sandshrew"],
+    moves: ["tackle", "rock_throw"],
+  }),
 };

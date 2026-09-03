@@ -26,10 +26,16 @@ function fillRect(
 
 /**
  * The one demo world both the browser app and the headless runner show: a
- * Bulbasaur herd near a water hole, a Scyther hunting from its own separate
- * territory, a Diglett (home: underground) and a Pidgey (home: canopy) that
- * both routinely cross to the surface for food/water. Every agent gets real
- * stats/types/moves via spawnAgent — see DESIGN.md's combat section.
+ * Bulbasaur herd near a water hole guarded by Venusaur, a Scyther hunting
+ * from its own separate territory, an underground Diglett/Sandshrew colony
+ * hunted by Onix, and a canopy Pidgey flock hunted by Spearow — the same
+ * predator/prey pattern repeated on all three layers (see DESIGN.md's
+ * species-expansion section). Underground/canopy have no food or water
+ * tiles of their own, so every agent down there or up there routinely
+ * crosses to the surface for both — a deliberate reuse of the existing
+ * cross-layer need-seeking mechanic rather than triplicating the resource
+ * map per layer. Every agent gets real stats/types/moves via spawnAgent —
+ * see DESIGN.md's combat section.
  *
  * The map used to be almost entirely open floor with exactly one food tile
  * and one water tile — every hungry or thirsty agent in the whole
@@ -123,18 +129,64 @@ export function createDemoWorld(): World {
     sex: "female" as const,
   };
 
-  const diglett = {
-    ...spawnAgent("diglett", "diglett-0", { x: SCENARIO_WIDTH - 3, y: SCENARIO_HEIGHT - 3 }, 5),
-    needs: createNeeds({ hunger: 0.2 }),
+  // Underground: a small Diglett/Sandshrew colony (real cross-species
+  // breeding pair, both Field egg group — see leveling.ts) with Onix
+  // hunting both. Previously Diglett had zero threats at all down here;
+  // Onix mirrors the surface's Scyther/Bulbasaur dynamic in a different
+  // layer. Diglett/Sandshrew evolving into Dugtrio/Sandslash escapes
+  // predation automatically — Onix's preysOn only lists the base species
+  // ids, same trick as Venusaur guarding Bulbasaur (see species.ts).
+  const undergroundColony = [
+    {
+      ...spawnAgent("diglett", "diglett-0", { x: SCENARIO_WIDTH - 3, y: SCENARIO_HEIGHT - 3 }, 5),
+      needs: createNeeds({ hunger: 0.2 }),
+      herdId: "underground-colony",
+      sex: "male" as const,
+    },
+    {
+      ...spawnAgent("diglett", "diglett-1", { x: SCENARIO_WIDTH - 4, y: SCENARIO_HEIGHT - 3 }, 5),
+      herdId: "underground-colony",
+      sex: "female" as const,
+    },
+    {
+      ...spawnAgent("sandshrew", "sandshrew-0", { x: SCENARIO_WIDTH - 3, y: SCENARIO_HEIGHT - 4 }, 5),
+      herdId: "underground-colony",
+      sex: "male" as const,
+    },
+    {
+      ...spawnAgent("sandshrew", "sandshrew-1", { x: SCENARIO_WIDTH - 4, y: SCENARIO_HEIGHT - 4 }, 5),
+      herdId: "underground-colony",
+      sex: "female" as const,
+    },
+  ];
+  const onix = {
+    ...spawnAgent("onix", "onix-0", { x: 2, y: SCENARIO_HEIGHT - 2 }, 10),
+    needs: createNeeds({ hunger: 0.3 }),
     sex: "male" as const,
   };
 
-  const pidgey = {
-    ...spawnAgent("pidgey", "pidgey-0", { x: 2, y: 2 }, 5),
-    needs: createNeeds({ thirst: 0.2 }),
+  // Canopy: a small Pidgey flock with Spearow hunting it, mirroring the
+  // same pattern one layer up. Previously Pidgey was a single agent with no
+  // herd and nothing to escape from.
+  const pidgeyFlock = [
+    {
+      ...spawnAgent("pidgey", "pidgey-0", { x: 2, y: 2 }, 5),
+      needs: createNeeds({ thirst: 0.2 }),
+      herdId: "pidgey-flock",
+      sex: "female" as const,
+    },
+    {
+      ...spawnAgent("pidgey", "pidgey-1", { x: 3, y: 2 }, 5),
+      herdId: "pidgey-flock",
+      sex: "male" as const,
+    },
+  ];
+  const spearow = {
+    ...spawnAgent("spearow", "spearow-0", { x: SCENARIO_WIDTH - 2, y: SCENARIO_HEIGHT - 2 }, 10),
+    needs: createNeeds({ hunger: 0.3 }),
     sex: "female" as const,
   };
 
-  world.agents.push(...herd, ...guardians, hunter, diglett, pidgey);
+  world.agents.push(...herd, ...guardians, hunter, ...undergroundColony, onix, ...pidgeyFlock, spearow);
   return world;
 }

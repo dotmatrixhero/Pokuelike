@@ -1833,6 +1833,75 @@ touches AI behavior.
   show up at scale. Not a regression this feature introduced, but a real
   pre-existing ceiling on how much of this could be validated at range.
 
+## Species expansion: repeating the predator/prey pattern on all three layers
+
+Requested directly ("more species... but designed right, not just data
+dumped in"). Previously only the surface layer had any real ecosystem
+drama (Scyther hunting a Bulbasaur herd guarded by Venusaur) — Diglett
+(underground) and Pidgey (canopy) were each a single solitary agent with
+no herd, no predator, and no story. This closes that gap on both other
+layers using the same pattern, not a new one:
+
+- **Canopy**: a 2-Pidgey flock (`pidgey-flock` herd) hunted by a new
+  Spearow. Real mainline data — Spearow is Normal/Flying, Flying egg group
+  (matches Pidgey's own group, verified against Bulbapedia — a real
+  cross-species pair, same precedent as Bulbasaur/Charmander sharing
+  Monster).
+- **Underground**: a 4-agent Diglett/Sandshrew colony (`underground-colony`
+  herd) hunted by a new Onix. Diglett and Sandshrew are both real Field
+  egg group (verified against Bulbapedia) — a real cross-species breeding
+  pair, put in the *same* herd deliberately so this could actually happen
+  in the default demo world instead of only in an isolated unit test (the
+  Bulbasaur/Charmander pair from the breeding section above still isn't
+  observable in a real run — this is the first cross-species pair that
+  is). Onix is Mineral group, confirmed distinct from Field — so Onix does
+  NOT cross-breed with the colony it hunts, matching the real games.
+
+**The elegant reuse, not a new mechanic**: `preysOn` is keyed to a specific
+species id, and species changes on evolution (see the Leveling section).
+So Spearow's `preysOn: ["pidgey"]` only ever matches an un-evolved Pidgey
+— a Pidgeotto or Pidgeot is automatically safe, no separate guardian flag
+needed, exactly the same trick Venusaur already gets for free by being a
+different species than Bulbasaur. Onix's `preysOn: ["diglett", "sandshrew"]`
+gets the same property for both lines at once. Three lines now share one
+underlying idea instead of three separate implementations.
+
+**A real bug found while researching Onix, fixed before it could bite**:
+the evolution filter in `leveling.ts` (`profileFromDexEntry`) only checked
+`entry.level !== undefined` to decide "is this a level evolution." But
+PokeRogue's dex stamps a `level: 1` placeholder on Onix's real evolution
+to Steelix too — which actually requires trading while holding Metal Coat,
+encoded in a separate `conditions: {item: "LINKING_CORD", ...}` field the
+old filter never looked at. Left unfixed, Onix would have "evolved" into
+Steelix on its very first level-up. Fixed by also requiring
+`Object.keys(e.conditions).length === 0`; verified against a fresh dump of
+every currently-used species' evolutions (Bulbasaur/Ivysaur/Pidgey/
+Pidgeotto/Diglett all have empty `conditions` on their real level
+evolutions, so the fix changes nothing for them) and confirmed in two real
+runs (3000 and 10000 ticks) that Onix never evolves and Steelix never
+appears.
+
+**Real run results** (10000 ticks): Spearow killed 3 Pidgey over the run;
+Onix killed a Diglett; the Diglett/Sandshrew colony produced real
+cross-species offspring repeatedly (`diglett-1 x sandshrew-0 -> diglett`,
+`sandshrew-1 x diglett-0 -> sandshrew`, offspring always the mother's
+line per the breeding rules above) — the cross-species breeding path is
+now genuinely observable in the stock demo world, not just in a
+constructed test.
+
+**Real, honest finding, not glossed over**: zero evolutions occurred in
+that same 10000-tick run — for any line, including the pre-existing
+Bulbasaur one, ruling out a bug specific to the new species. Checked
+directly: the highest level any agent reached was 8, far short of even
+the earliest evolution threshold in this roster (Bulbasaur at 16). The
+"evolution escapes predation" design above is real and unit-tested, but
+won't actually show up in a run at current pacing — exp trickle/combat/
+mate-attempt exp gains are too slow relative to how fast agents cycle
+through the population for anyone to level up that far. Not something
+this pass fixes (leveling-pace tuning is its own scope), but worth
+tracking rather than letting the new species quietly not deliver the
+guardian-via-evolution story they were designed to tell.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

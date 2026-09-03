@@ -278,6 +278,21 @@ produce a real story before player mechanics are worth building further.
       predator triggers flee (overrides everything), a hungry predator with
       prey in range hunts and kills on contact. Currently just Scyther ->
       Bulbasaur.
+- [x] **Species roster expanded to all three layers, not just surface** —
+      Spearow now hunts a 2-Pidgey flock in the canopy, Onix hunts a
+      4-agent Diglett/Sandshrew colony underground. Real mainline egg
+      groups verified against Bulbapedia (Spearow/Pidgey both Flying,
+      Diglett/Sandshrew both Field, Onix separately Mineral). See
+      DESIGN.md's "Species expansion" section for the full writeup,
+      including a real evolution-filter bug caught and fixed while
+      researching Onix (PokeRogue's dex stamps a fake `level: 1` on trade
+      evolutions too), and a new honest finding: nobody reaches an
+      evolution-relevant level in a 10000-tick run (max observed: 8) — the
+      "evolution escapes predation" design this expansion leans on is real
+      and unit-tested but doesn't show up in practice yet. That's a
+      pre-existing exp-pacing gap (confirmed on the Bulbasaur line too),
+      not something this pass introduced — see the Leveling section below
+      for where to pick that up.
 - [x] Mob-fighting, predator risk-assessment, and relocate built on top of
       the above — see DESIGN.md's "Mob-fighting" section and the
       coordination-gap item above for the real (not yet fully successful)
@@ -458,6 +473,11 @@ produce a real story before player mechanics are worth building further.
       meaningfully larger, or evolution needs a dedicated short scenario
       (spawn one exp point below a threshold, tick once) instead of relying
       on emergent long-run behavior to actually witness it.
+      **Reconfirmed** while adding the Spearow/Onix expansion above: a
+      10000-tick run (this time actually completing, unlike the timed-out
+      5000-tick attempt referenced elsewhere) still topped out at level 8
+      for every agent across all species/lines — the new lines hit the
+      same ceiling as Bulbasaur, not a species-specific issue.
 - [ ] **Evolved agents can land on a species outside the curated `SPECIES`
       roster** (e.g. `"ivysaur"`, which `packages/data/src/species.ts` never
       hand-curated — only base dex fields are used for evolved stats/types).
