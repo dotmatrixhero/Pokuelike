@@ -7,4 +7,5 @@ export * from "./fov.js";
 export * from "./elevation.js";
 export * from "./events.js";
 export * from "./predation.js";
+export * from "./reproduction.js";
 export * from "./simulation.js";

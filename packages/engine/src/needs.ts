@@ -2,13 +2,14 @@ import type { Agent, BehaviorKind, HuntRules, Layer, Needs, Vec2, World } from "
 import { otherLayers, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
 import { applyPredationInstincts } from "./predation.js";
+import { applyMateSeeking } from "./reproduction.js";
 import type { EventLog } from "./events.js";
 
 const DECAY_PER_TICK = {
   hunger: 0.01,
   thirst: 0.015,
   energy: 0.005,
-  mateDrive: 0.002,
+  mateDrive: 0.01,
 } as const;
 
 const CONSUME_RATE = {
@@ -96,6 +97,7 @@ function consume(needs: Needs, behavior: "seekWater" | "seekFood"): void {
 export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: HuntRules): void {
   if (agent.alive === false) return;
 
+  if (agent.age !== undefined) agent.age += 1;
   decayNeeds(agent.needs);
 
   if (rules && applyPredationInstincts(world, agent, rules, log)) return;
@@ -112,6 +114,11 @@ export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: Hu
       from: previousBehavior,
       to: agent.behavior,
     });
+  }
+
+  if (agent.behavior === "seekMate") {
+    applyMateSeeking(world, agent, log);
+    return;
   }
 
   if (agent.behavior === "seekWater" || agent.behavior === "seekFood") {

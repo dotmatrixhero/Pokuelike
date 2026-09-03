@@ -35,6 +35,16 @@ export type SimEvent =
       preyId: string;
       preySpecies: string;
       pos: Vec2;
+    }
+  | {
+      kind: "born";
+      tick: number;
+      motherId: string;
+      fatherId: string;
+      childId: string;
+      species: string;
+      layer: Layer;
+      pos: Vec2;
     };
 
 /**

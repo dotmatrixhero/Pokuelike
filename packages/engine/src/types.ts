@@ -52,6 +52,10 @@ export interface Agent {
   alive?: boolean;
   /** The agent currently being hunted, if this agent is mid-hunt. Bookkeeping only — re-evaluated each tick. */
   huntTarget?: string;
+  /** Absent = genderless (doesn't seek a mate). */
+  sex?: "male" | "female";
+  /** Ticks alive. Absent is treated as already mature (for agents spawned directly into a scenario). */
+  age?: number;
 }
 
 /** predator species id -> the species ids it hunts. */

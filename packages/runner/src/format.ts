@@ -10,6 +10,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) switched behavior: ${event.from} -> ${event.to}`;
     case "killed":
       return `[tick ${event.tick}] ${event.predatorSpecies} (${event.predatorId}) killed ${event.preySpecies} (${event.preyId}) at (${event.pos.x},${event.pos.y})`;
+    case "born":
+      return `[tick ${event.tick}] ${event.species} (${event.motherId} x ${event.fatherId}) had offspring (${event.childId}) at (${event.pos.x},${event.pos.y})`;
   }
 }
 

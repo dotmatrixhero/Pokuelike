@@ -17,6 +17,8 @@ export function createDemoWorld(): World {
   setTile(world, "surface", SCENARIO_WIDTH - 4, 2, "sunbeam");
   for (let x = 6; x <= 10; x++) setElevation(world, "surface", x, 7, 2);
 
+  // Two mated pairs, so reproduction has someone to pair with from the start.
+  // No `age` set — undefined is treated as already mature (see reproduction.ts).
   const herd: Agent[] = Array.from({ length: 4 }, (_, i) => ({
     id: `bulbasaur-${i}`,
     species: "bulbasaur",
@@ -26,6 +28,7 @@ export function createDemoWorld(): World {
     needs: createNeeds({ thirst: 0.4 + i * 0.1 }),
     behavior: "idle",
     herdId: "bulbasaur-herd",
+    sex: i % 2 === 0 ? "male" : "female",
   }));
 
   const hunter: Agent = {
@@ -36,6 +39,7 @@ export function createDemoWorld(): World {
     homeLayer: "surface",
     needs: createNeeds({ hunger: 0.3 }),
     behavior: "idle",
+    sex: "female",
   };
 
   const diglett: Agent = {
@@ -46,6 +50,7 @@ export function createDemoWorld(): World {
     homeLayer: "underground",
     needs: createNeeds({ hunger: 0.2 }),
     behavior: "idle",
+    sex: "male",
   };
 
   const pidgey: Agent = {
@@ -56,6 +61,7 @@ export function createDemoWorld(): World {
     homeLayer: "canopy",
     needs: createNeeds({ thirst: 0.2 }),
     behavior: "idle",
+    sex: "female",
   };
 
   world.agents.push(...herd, hunter, diglett, pidgey);
