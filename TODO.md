@@ -48,20 +48,23 @@ produce a real story before player mechanics are worth building further.
       the mechanism works (a synchronized mob of 3 can defeat a predator).
       Real 1000-tick run still ended in full extinction, but for a new and
       more specific reason — see next item. Progress, not a fix yet.
-- [ ] **Coordination gap found by the mob-fighting run**: `mobSize` counts
-      how many herd-mates are *somewhere* within the muster radius (4
-      tiles), not how many are actually adjacent and fighting yet. A lone
-      Bulbasaur that reaches the predator first commits to `fight` alone
-      because the headcount check passes on the herd's total nearby
-      population, dies immediately (predator's kill-on-contact isn't
-      interruptible by simultaneous damage), and its real backup — still
-      mid-flee-cycle several tiles away — never arrives in time. Fix
-      target: require some number of allies to *also* be within striking
-      distance (not just the muster radius) before anyone commits to
-      fighting solo, so mobbing only happens when the group has actually
-      converged. Try this before adding anything else predator-side —
-      three tuning guesses in now, worth actually confirming this one
-      before moving on.
+- [x] **Coordination gap fixed**: `mobSize` now counts allies within
+      striking distance of the *threat*, not the agent's own muster
+      radius — regression-tested against the exact tick-97 scenario. No
+      more solo-mob suicides.
+- [ ] **New finding after the fix, and after the full combat overhaul
+      (see DESIGN.md)**: in a fresh 1000-tick run, the herd never mobbed
+      at all — zero fight events, not even one. The fix stopped the bad
+      behavior (dying alone for nothing) but the good behavior (3+ actually
+      converging) still never happened naturally in this run. Worth
+      investigating whether that's a map/spacing issue (the herd doesn't
+      stay clustered enough) or a genuine rarity of the trigger window —
+      don't assume which without checking.
+- [ ] Also flagged plainly in DESIGN.md: Scyther (level 8) vs. Bulbasaur
+      (level 5) is lopsided enough under the real damage formula that
+      fights resolve in 1-2 hits — mainline-accurate, but it means
+      cooldowns/tactics rarely get to matter. If longer exchanges are
+      wanted, the lever is the level/stat gap, not the formula.
 
 ## World layers, elevation, and regions (see DESIGN.md)
 - [x] `Tile`/`World` have a `layer` dimension (Underground/Surface/Canopy,
@@ -149,9 +152,12 @@ produce a real story before player mechanics are worth building further.
       137, never mated again") rather than every agent of a species having
       the same behavior. Needs individuals to actually survive long enough
       to mate first — see the predator-pressure bottleneck above.
-- [ ] Individual stats/moveset/level per agent (not just species-level
-      moves) — ties into the still-undesigned combat resolver/promotion
-      boundary, not started.
+- [x] Individual stats/moveset/level per agent built — real mainline-scale
+      stats, canon types, typed moves with cooldowns, real damage formula
+      with STAB/type-effectiveness. See DESIGN.md's combat section. Still
+      no *individual* variance within a species (no Disposition, no Nature
+      applied yet — same species+level = identical stats), which is what
+      the rest of this section is about.
 
 ## Player / bonding (deprioritized until sim depth lands)
 - [ ] Threat signature model — what exactly feeds it (speed/distance/posture)
@@ -165,13 +171,29 @@ produce a real story before player mechanics are worth building further.
       work above to exist first.
 
 ## Combat / moves
+- [x] Real combat built: mainline-scale stats/HP, canon types + full 18-type
+      chart, typed moves with power/accuracy/category/cooldowns, real
+      damage formula with STAB/type-effectiveness. See DESIGN.md.
 - [ ] The "promotion boundary" transition itself (see DESIGN.md) — not
-      designed yet, just named.
+      designed yet, just named. Wild-agent combat (predation.ts) now uses
+      the real combat system directly rather than going through a
+      promotion step, since there's no player yet — worth revisiting once
+      the player exists and this needs to be a real transition.
+- [ ] Move `accuracy` field exists but isn't consumed — every move
+      currently hits. No miss chance yet.
 - [ ] Move leveling/respec system — how builds are earned, spent, reverted.
-- [ ] Status effects (burn, etc.) — `burnChance` exists in move tuning data
-      but nothing consumes it.
+      The shape axis (point/line/cone/ring/burst) still isn't connected to
+      predation.ts's single-target-only combat — AoE moves among wild
+      agents (who gets hit by a cone?) is a separate, real feature, not
+      built.
+- [ ] Status effects (burn, etc.) — `statusChance` exists on move data but
+      nothing consumes it.
 - [ ] Turn-based vs. real-time-with-pause for combat — undecided.
 - [ ] Facing/direction for the player during combat — how is it chosen?
+- [ ] No individual stat variance yet (no Nature, no IV/EV-equivalent) —
+      same species+level always produces identical stats. See the
+      Disposition/culture section above for the intended individuality
+      layer once this matters.
 
 ## Art / assets
 - [ ] Sprite pipeline is bring-your-own (`packages/web/public/sprites/`) —

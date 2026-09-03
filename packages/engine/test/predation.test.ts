@@ -5,8 +5,24 @@ import { tickWorld } from "../src/simulation.js";
 import { applyPredationInstincts } from "../src/predation.js";
 import { EventLog } from "../src/events.js";
 import type { Agent, HuntRules } from "../src/types.js";
+import type { MoveSpec } from "../src/moves.js";
 
 const RULES: HuntRules = { scyther: ["bulbasaur"] };
+
+// No level/types/stats set on the fixtures below, deliberately: that keeps these
+// tests on predation.ts's FALLBACK_DAMAGE (1 per hit) path, so they're testing
+// flee/fight/hunt/relocate *behavior*, not the damage formula (see combat.test.ts
+// for that). A move is still required or pickBestMove finds nothing to swing.
+const TEST_MOVE: MoveSpec = {
+  id: "test-move",
+  name: "Test Move",
+  shape: { kind: "point" },
+  type: "normal",
+  category: "physical",
+  power: 40,
+  accuracy: 100,
+  cooldownTicks: 0,
+};
 
 function prey(pos: { x: number; y: number }, overrides: Partial<Agent> = {}): Agent {
   return {
@@ -17,11 +33,12 @@ function prey(pos: { x: number; y: number }, overrides: Partial<Agent> = {}): Ag
     homeLayer: "surface",
     needs: createNeeds(),
     behavior: "idle",
+    moves: [TEST_MOVE],
     ...overrides,
   };
 }
 
-function predator(pos: { x: number; y: number }, hunger = 0.3): Agent {
+function predator(pos: { x: number; y: number }, hunger = 0.3, overrides: Partial<Agent> = {}): Agent {
   return {
     id: "scyther-0",
     species: "scyther",
@@ -30,6 +47,8 @@ function predator(pos: { x: number; y: number }, hunger = 0.3): Agent {
     homeLayer: "surface",
     needs: createNeeds({ hunger }),
     behavior: "idle",
+    moves: [TEST_MOVE],
+    ...overrides,
   };
 }
 
@@ -64,7 +83,9 @@ describe("predation", () => {
   it("kills prey on contact, restores predator hunger, and prunes the corpse", () => {
     const world = createWorld(10, 10);
     // Predator ticks first so it strikes before the prey has a chance to flee this tick.
-    world.agents.push(predator({ x: 5, y: 6 }, 0.1), prey({ x: 5, y: 5 }));
+    // Prey hp set to 1 so a single fallback-damage hit is fatal — see combat.test.ts
+    // for multi-hit-to-faint coverage with real stats.
+    world.agents.push(predator({ x: 5, y: 6 }, 0.1), prey({ x: 5, y: 5 }, { hp: 1, maxHp: 1 }));
     const log = new EventLog();
 
     tickWorld(world, log, RULES);
@@ -109,12 +130,13 @@ describe("mob-fighting", () => {
 
     tickWorld(world, log, RULES);
 
-    // mobber1 is adjacent (distance 1) and lands a hit; the predator's default hp is 3.
+    // mobber1 is adjacent (distance 1) and lands a fallback-damage (1) hit;
+    // the predator's fallback max hp (no stats/level set) is 10.
     expect(mobber1.behavior).toBe("fight");
     const hunter = world.agents.find((a) => a.id === "scyther-0")!;
-    expect(hunter.hp).toBe(2);
+    expect(hunter.hp).toBe(9);
     expect(log.events).toContainEqual(
-      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", defenderHpRemaining: 2 })
+      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", defenderHpRemaining: 9 })
     );
   });
 
@@ -125,7 +147,8 @@ describe("mob-fighting", () => {
       prey({ x: 6, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
       prey({ x: 5, y: 4 }, { id: "bulbasaur-2", herdId: "herd-a" }),
     ];
-    world.agents.push(...mobbers, predator({ x: 5, y: 5 }));
+    // hp/maxHp set to 3 explicitly so 3 fallback-damage (1 each) hits defeats it in one tick.
+    world.agents.push(...mobbers, predator({ x: 5, y: 5 }, 0.3, { hp: 3, maxHp: 3 }));
     const log = new EventLog();
 
     tickWorld(world, log, RULES);
@@ -134,6 +157,21 @@ describe("mob-fighting", () => {
     expect(log.events).toContainEqual(
       expect.objectContaining({ kind: "defeated", loserId: "scyther-0", winnerSpecies: "bulbasaur" })
     );
+  });
+
+  it("regression: a lone agent doesn't mob alone just because its herd is big somewhere nearby", () => {
+    // This is the exact tick-97 bug from the 1000-tick run: bulbasaur-0 is right on
+    // top of the predator, but its herd-mates are still several tiles away (mid-flee),
+    // not actually in striking distance. It must flee, not fight alone and die.
+    const world = createWorld(20, 20);
+    const solo = prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" });
+    const farAlly1 = prey({ x: 12, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" });
+    const farAlly2 = prey({ x: 13, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" });
+    world.agents.push(solo, farAlly1, farAlly2, predator({ x: 5, y: 6 }));
+
+    tickWorld(world, undefined, RULES);
+
+    expect(solo.behavior).toBe("flee");
   });
 
   it("a lone or small group still flees rather than fights", () => {

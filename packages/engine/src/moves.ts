@@ -1,4 +1,5 @@
 import type { Vec2 } from "./types.js";
+import type { PokemonType } from "./typing.js";
 
 /**
  * A move's area is described as a shape resolved against an origin + facing
@@ -26,8 +27,16 @@ export interface MoveSpec {
   id: string;
   name: string;
   shape: MoveShape;
-  /** Build/level tuning: e.g. status chance, cooldown, damage. Open-ended on purpose. */
-  tuning: Record<string, number>;
+  type: PokemonType;
+  category: "physical" | "special";
+  /** Mainline-scale base power (Tackle 40, Flamethrower 90, etc.). */
+  power: number;
+  /** 0-100. Not yet consumed by combat.ts — every move currently hits; see TODO. */
+  accuracy: number;
+  /** Ticks before this move can be used again. */
+  cooldownTicks: number;
+  /** e.g. burn chance. Not consumed by anything yet (no status-effect system) — see TODO. */
+  statusChance?: number;
 }
 
 /** Resolves the set of tiles (relative to origin, in the given facing) a shape covers. */

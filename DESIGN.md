@@ -188,6 +188,67 @@ should probably require nearby allies to also be within striking distance
 (not just within a loose muster radius) before anyone commits to fighting
 alone. Not fixed yet, deliberately — see TODO.md.
 
+**Fixed since**: `mobSize` now counts allies within striking distance of
+the *threat*, not just somewhere within the agent's own muster radius
+(`predation.test.ts` has a regression test reproducing the exact tick-97
+scenario above). Verified the fix doesn't break the "3 can defeat a
+predator" or "large herd mobs" cases either.
+
+## Real tactical combat: stats, types, moves, cooldowns
+
+Replaced the flat/instant mechanics entirely, per direct ask ("the hp and
+kill on contact system needs overhaul... we need the roguelike battle
+thing"):
+
+- **`packages/engine/src/typing.ts`**: the real 18-type mainline chart
+  (`typeEffectiveness(attackType, defenderTypes[])`, multipliers stack
+  across dual types — e.g. Grass into Bug/Flying is 0.25x, quadruply
+  resisted).
+- **`packages/engine/src/stats.ts`**: `calculateStats(base, level)` — the
+  real simplified mainline formula (HP: `floor(2*base*level/100) + level +
+  10`; other stats: `floor(2*base*level/100) + 5`), no IV/EV modeling, just
+  mainline-scale numbers. Verified against a real level-5 Bulbasaur's HP.
+- **`packages/engine/src/moves.ts`**: `MoveSpec` now carries `type`,
+  `category` (physical/special), `power`, `accuracy` (not yet consumed —
+  every move currently hits, see TODO), and `cooldownTicks`, replacing the
+  old untyped `tuning` bag.
+- **`packages/engine/src/combat.ts`**: `calculateDamage` is the real
+  mainline formula (`((2*level/5+2) * power * atk/def) / 50 + 2`) with
+  STAB (1.5x), type effectiveness, and an injectable random-variance
+  factor (0.85-1x in the actual sim, fixed in tests) — an immune (0x)
+  matchup deals exactly 0, not the usual floor-of-1 minimum.
+  `pickBestMove`/`useMove`/`tickCooldowns` handle move selection (greedy:
+  highest expected damage against the current defender's types) and
+  per-move cooldown tracking.
+- **`packages/data`**: real canon base stats and types for all 5 species
+  (Bulbasaur Grass/Poison, Scyther Bug/Flying, Charmander Fire, Diglett
+  Ground, Pidgey Normal/Flying), a new Grass move (Vine Whip) so Bulbasaur
+  has a type-advantaged option against something, and `spawnAgent(species,
+  id, pos, level)` — computes real stats/moves/types once at spawn instead
+  of agents carrying ad-hoc placeholder HP.
+- `predation.ts`'s mob-fight and hunt-kill both now call into real combat
+  instead of flat damage/instant death — a hit that doesn't faint the
+  target leaves a wounded agent that gets another chance to flee before
+  the next exchange, which didn't exist before at all.
+
+**Real run result, 1000 ticks — reporting it straight, not as a win:** the
+herd still went fully extinct. But the *texture* of how is different and
+worth recording: two of the four kills took two hits over several ticks
+(a real multi-tick exchange — Scyther hit bulbasaur-1 for 18, it survived
+at 1 hp, then died to a second hit five ticks later), while the other two
+died in a single hit (~18-19 damage against a level-5 Bulbasaur's ~19 max
+HP). Zero mob-fights occurred this entire run — the coordination fix means
+no more suicidal solo engagements, but it also means the herd never
+actually assembled 3-within-striking-distance even once in 1000 ticks;
+getting a real herd defense to occur at all is apparently a harder
+coordination bar to clear than getting individuals to stop dying for
+nothing. Also worth flagging plainly: Scyther (level 8, base Attack 110)
+vs. Bulbasaur (level 5, base Defense 49) is a lopsided matchup by the real
+formula — mainline-accurate (a higher-level predator should crush a lower-
+level target fast), but it means fights resolve in 1-2 hits and cooldowns
+rarely get to matter. If the goal is longer, more tactical exchanges, the
+lever is the level/stat gap between predator and prey, not the formula.
+
 ## Stack
 
 - **pnpm workspace monorepo**, TypeScript everywhere.

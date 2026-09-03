@@ -1,3 +1,7 @@
+import type { MoveSpec } from "./moves.js";
+import type { PokemonType } from "./typing.js";
+import type { Stats } from "./stats.js";
+
 export interface Vec2 {
   x: number;
   y: number;
@@ -69,9 +73,16 @@ export interface Agent {
   sex?: "male" | "female";
   /** Ticks alive. Absent is treated as already mature (for agents spawned directly into a scenario). */
   age?: number;
-  /** Combat hit points — only agents that have ever been in a fight track this. Absent = not (yet) trackable. */
+  /** Current/max HP. Set from `stats.maxHp` at spawn for combat-capable agents. */
   hp?: number;
   maxHp?: number;
+  /** Combat profile, denormalized onto the agent at spawn time (not looked up live from species data). */
+  level?: number;
+  types?: PokemonType[];
+  moves?: MoveSpec[];
+  stats?: Stats;
+  /** Ticks remaining before each move (by id) can be used again. Absent entry = off cooldown. */
+  moveCooldowns?: Record<string, number>;
   /** The agent this one is currently mobbing, if mid-fight. Bookkeeping only — re-evaluated each tick. */
   fightTarget?: string;
   /** Ticks a predator has gone without a successful kill while actively hunting — drives "relocate" once too high. */

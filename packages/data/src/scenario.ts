@@ -1,4 +1,5 @@
-import { createWorld, setTile, setElevation, createNeeds, type Agent, type World } from "@pokuelike/engine";
+import { createWorld, setTile, setElevation, createNeeds, type World } from "@pokuelike/engine";
+import { spawnAgent } from "./spawn.js";
 
 export const SCENARIO_WIDTH = 20;
 export const SCENARIO_HEIGHT = 14;
@@ -7,7 +8,8 @@ export const SCENARIO_HEIGHT = 14;
  * The one demo world both the browser app and the headless runner show: a
  * Bulbasaur herd near a water hole, a Scyther, a Diglett (home:
  * underground) and a Pidgey (home: canopy) that both routinely cross to
- * the surface for food/water.
+ * the surface for food/water. Every agent gets real stats/types/moves via
+ * spawnAgent — see DESIGN.md's combat section.
  */
 export function createDemoWorld(): World {
   const world = createWorld(SCENARIO_WIDTH, SCENARIO_HEIGHT);
@@ -19,51 +21,29 @@ export function createDemoWorld(): World {
 
   // Two mated pairs, so reproduction has someone to pair with from the start.
   // No `age` set — undefined is treated as already mature (see reproduction.ts).
-  const herd: Agent[] = Array.from({ length: 4 }, (_, i) => ({
-    id: `bulbasaur-${i}`,
-    species: "bulbasaur",
-    pos: { x: 5 + i, y: 6 },
-    layer: "surface",
-    homeLayer: "surface",
+  const herd = Array.from({ length: 4 }, (_, i) => ({
+    ...spawnAgent("bulbasaur", `bulbasaur-${i}`, { x: 5 + i, y: 6 }, 5),
     needs: createNeeds({ thirst: 0.4 + i * 0.1 }),
-    behavior: "idle",
     herdId: "bulbasaur-herd",
-    sex: i % 2 === 0 ? "male" : "female",
+    sex: (i % 2 === 0 ? "male" : "female") as "male" | "female",
   }));
 
-  const hunter: Agent = {
-    id: "scyther-0",
-    species: "scyther",
-    pos: { x: SCENARIO_WIDTH - 2, y: 1 },
-    layer: "surface",
-    homeLayer: "surface",
+  const hunter = {
+    ...spawnAgent("scyther", "scyther-0", { x: SCENARIO_WIDTH - 2, y: 1 }, 8),
     needs: createNeeds({ hunger: 0.3 }),
-    behavior: "idle",
-    sex: "female",
-    hp: 3,
-    maxHp: 3,
+    sex: "female" as const,
   };
 
-  const diglett: Agent = {
-    id: "diglett-0",
-    species: "diglett",
-    pos: { x: SCENARIO_WIDTH - 3, y: SCENARIO_HEIGHT - 3 },
-    layer: "underground",
-    homeLayer: "underground",
+  const diglett = {
+    ...spawnAgent("diglett", "diglett-0", { x: SCENARIO_WIDTH - 3, y: SCENARIO_HEIGHT - 3 }, 5),
     needs: createNeeds({ hunger: 0.2 }),
-    behavior: "idle",
-    sex: "male",
+    sex: "male" as const,
   };
 
-  const pidgey: Agent = {
-    id: "pidgey-0",
-    species: "pidgey",
-    pos: { x: 2, y: 2 },
-    layer: "canopy",
-    homeLayer: "canopy",
+  const pidgey = {
+    ...spawnAgent("pidgey", "pidgey-0", { x: 2, y: 2 }, 5),
     needs: createNeeds({ thirst: 0.2 }),
-    behavior: "idle",
-    sex: "female",
+    sex: "female" as const,
   };
 
   world.agents.push(...herd, hunter, diglett, pidgey);

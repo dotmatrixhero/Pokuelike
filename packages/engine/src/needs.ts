@@ -4,6 +4,7 @@ import { stepToward } from "./movement.js";
 import { applyPredationInstincts } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT } from "./flora.js";
+import { tickCooldowns } from "./combat.js";
 import type { EventLog } from "./events.js";
 
 const DECAY_PER_TICK = {
@@ -101,6 +102,7 @@ export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: Hu
   if (agent.alive === false) return;
 
   if (agent.age !== undefined) agent.age += 1;
+  tickCooldowns(agent);
   decayNeeds(agent.needs);
 
   if (rules && applyPredationInstincts(world, agent, rules, log)) return;

@@ -1,4 +1,4 @@
-import type { Layer } from "@pokuelike/engine";
+import type { BaseStats, Layer, PokemonType } from "@pokuelike/engine";
 
 export interface SpeciesDef {
   id: string;
@@ -11,6 +11,9 @@ export interface SpeciesDef {
   homeLayer: Layer;
   /** Species ids this one hunts, when hungry and one is nearby. Absent = doesn't hunt. */
   preysOn?: string[];
+  /** Canon base stats (mainline games), fed through calculateStats(base, level) for real HP/Atk/etc. */
+  baseStats: BaseStats;
+  types: PokemonType[];
   moves: string[];
 }
 
@@ -21,7 +24,9 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "bulbasaur",
     placeholderColor: "#78c850",
     homeLayer: "surface",
-    moves: ["tackle"],
+    baseStats: { hp: 45, attack: 49, defense: 49, spAttack: 65, spDefense: 65, speed: 45 },
+    types: ["grass", "poison"],
+    moves: ["tackle", "vine_whip"],
   },
   scyther: {
     id: "scyther",
@@ -30,6 +35,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     placeholderColor: "#4fbf8c",
     homeLayer: "surface",
     preysOn: ["bulbasaur"],
+    baseStats: { hp: 70, attack: 110, defense: 80, spAttack: 55, spDefense: 80, speed: 105 },
+    types: ["bug", "flying"],
     moves: ["slash"],
   },
   charmander: {
@@ -38,6 +45,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "charmander",
     placeholderColor: "#f08030",
     homeLayer: "surface",
+    baseStats: { hp: 39, attack: 52, defense: 43, spAttack: 60, spDefense: 50, speed: 65 },
+    types: ["fire"],
     moves: ["ember"],
   },
   diglett: {
@@ -46,6 +55,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "diglett",
     placeholderColor: "#966037",
     homeLayer: "underground",
+    baseStats: { hp: 10, attack: 55, defense: 25, spAttack: 35, spDefense: 45, speed: 95 },
+    types: ["ground"],
     moves: ["tackle"],
   },
   pidgey: {
@@ -54,6 +65,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "pidgey",
     placeholderColor: "#a89060",
     homeLayer: "canopy",
+    baseStats: { hp: 40, attack: 45, defense: 40, spAttack: 35, spDefense: 35, speed: 56 },
+    types: ["normal", "flying"],
     moves: ["tackle"],
   },
 };

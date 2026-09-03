@@ -2,6 +2,7 @@ import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { stepAway, stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
+import { calculateDamage, pickBestMove, useMove } from "./combat.js";
 
 const FLEE_DETECT_RADIUS = 4;
 const HUNT_DETECT_RADIUS = 5;
@@ -13,8 +14,9 @@ const KILL_HUNGER_RESTORE = 0.6;
 const MOB_TRIGGER_RADIUS = 2;
 const MOB_MUSTER_RADIUS = 4;
 const MOB_THRESHOLD = 3;
-const FIGHT_DAMAGE = 1;
-const DEFAULT_COMBAT_HP = 3;
+/** Fallback HP for an agent with no real combat profile (stats/level/types) — shouldn't happen for fully-statted species. */
+const FALLBACK_MAX_HP = 10;
+const FALLBACK_DAMAGE = 1;
 /** A predator at or below this fraction of max HP flees a fight instead of continuing it. */
 const RETREAT_HP_FRACTION = 0.4;
 
@@ -91,11 +93,35 @@ function isCriticallyHurt(agent: Agent): boolean {
   return agent.hp / agent.maxHp <= RETREAT_HP_FRACTION;
 }
 
-function dealMobDamage(world: World, attacker: Agent, defender: Agent, log?: EventLog): void {
-  if (defender.alive === false) return;
-  defender.maxHp = defender.maxHp ?? DEFAULT_COMBAT_HP;
+/**
+ * One attack: picks the attacker's best off-cooldown move against the
+ * defender's types, rolls real mainline-formula damage (STAB, type
+ * effectiveness, a 0.85-1x variance roll), applies it, and puts that move
+ * on cooldown. If every move is on cooldown, nothing happens this tick —
+ * the weapon just isn't ready, which is the point of having cooldowns.
+ * Returns true if the defender fainted from this hit.
+ */
+function resolveHit(world: World, attacker: Agent, defender: Agent, log: EventLog | undefined, faintKind: "killed" | "defeated"): boolean {
+  if (defender.alive === false) return false;
+
+  defender.maxHp = defender.maxHp ?? defender.stats?.maxHp ?? FALLBACK_MAX_HP;
   defender.hp = defender.hp ?? defender.maxHp;
-  defender.hp = Math.max(0, defender.hp - FIGHT_DAMAGE);
+
+  const move = pickBestMove(attacker, defender.types ?? []);
+  if (!move) return false; // every move on cooldown this tick
+
+  const damage =
+    attacker.level !== undefined && attacker.types && attacker.stats && defender.stats
+      ? calculateDamage(
+          { level: attacker.level, types: attacker.types, stats: attacker.stats },
+          { types: defender.types ?? [], stats: defender.stats },
+          move,
+          0.85 + Math.random() * 0.15
+        ).damage
+      : FALLBACK_DAMAGE;
+
+  useMove(attacker, move);
+  defender.hp = Math.max(0, defender.hp - damage);
 
   log?.record({
     kind: "fought",
@@ -104,12 +130,24 @@ function dealMobDamage(world: World, attacker: Agent, defender: Agent, log?: Eve
     attackerSpecies: attacker.species,
     defenderId: defender.id,
     defenderSpecies: defender.species,
-    damage: FIGHT_DAMAGE,
+    damage,
     defenderHpRemaining: defender.hp,
   });
 
-  if (defender.hp <= 0) {
-    defender.alive = false;
+  if (defender.hp > 0) return false;
+
+  defender.alive = false;
+  if (faintKind === "killed") {
+    log?.record({
+      kind: "killed",
+      tick: world.tick,
+      predatorId: attacker.id,
+      predatorSpecies: attacker.species,
+      preyId: defender.id,
+      preySpecies: defender.species,
+      pos: defender.pos,
+    });
+  } else {
     log?.record({
       kind: "defeated",
       tick: world.tick,
@@ -120,6 +158,7 @@ function dealMobDamage(world: World, attacker: Agent, defender: Agent, log?: Eve
       pos: defender.pos,
     });
   }
+  return true;
 }
 
 function findRandomWalkableTile(world: World, layer: Layer, from: Vec2): Vec2 | undefined {
@@ -188,14 +227,17 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
   const threat = nearest(agent, threats);
   if (threat) {
     const distance = manhattan(agent.pos, threat.pos);
-    const mobSize = countHerdAllies(world, agent.id, agent.species, agent.herdId, agent.layer, agent.pos, MOB_MUSTER_RADIUS) + 1;
+    // Allies must ALSO be within striking distance of the threat right now — not just
+    // somewhere in the herd's general area — or a lone agent will "mob" alone and die
+    // waiting for backup that's still several tiles away.
+    const mobSize = countHerdAllies(world, agent.id, agent.species, agent.herdId, agent.layer, threat.pos, MOB_TRIGGER_RADIUS) + 1;
 
     if (distance <= MOB_TRIGGER_RADIUS && mobSize >= MOB_THRESHOLD) {
       logBehaviorChange(log, world, agent, "fight");
       agent.behavior = "fight";
       agent.fightTarget = threat.id;
       if (distance <= 1) {
-        dealMobDamage(world, agent, threat, log);
+        resolveHit(world, agent, threat, log, "defeated");
       } else {
         agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
       }
@@ -223,20 +265,16 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
       agent.huntTarget = target.id;
 
       if (manhattan(agent.pos, target.pos) <= 1) {
-        target.alive = false;
-        agent.needs.hunger = Math.min(1, agent.needs.hunger + KILL_HUNGER_RESTORE);
-        agent.huntTarget = undefined;
-        agent.ticksSinceMeal = 0;
-        agent.relocateTarget = undefined;
-        log?.record({
-          kind: "killed",
-          tick: world.tick,
-          predatorId: agent.id,
-          predatorSpecies: agent.species,
-          preyId: target.id,
-          preySpecies: target.species,
-          pos: target.pos,
-        });
+        // A single hit may not be lethal now — real HP, real damage. The
+        // meal (and hunger restore) only happens once the target actually faints;
+        // otherwise it's a wounded prey that gets another chance to flee next tick.
+        const fainted = resolveHit(world, agent, target, log, "killed");
+        if (fainted) {
+          agent.needs.hunger = Math.min(1, agent.needs.hunger + KILL_HUNGER_RESTORE);
+          agent.huntTarget = undefined;
+          agent.ticksSinceMeal = 0;
+          agent.relocateTarget = undefined;
+        }
       } else {
         agent.pos = stepToward(world, agent.layer, agent.pos, target.pos);
       }
