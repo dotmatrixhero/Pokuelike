@@ -101,7 +101,7 @@ function canAttackFromHere(agent: Agent, distance: number, defenderTypes: Pokemo
   return move !== undefined && withinMoveRange(move, distance);
 }
 
-function isPreyOfAnything(rules: HuntRules, species: string): boolean {
+export function isPreyOfAnything(rules: HuntRules, species: string): boolean {
   return Object.values(rules).some((preyList) => preyList.includes(species));
 }
 

@@ -292,7 +292,7 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
   }
 
   if (agent.behavior === "idle") {
-    applyHerdCohesion(world, agent);
+    applyHerdCohesion(world, agent, rules);
   }
 }
 

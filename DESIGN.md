@@ -1319,6 +1319,71 @@ built: Ditto (universal breeding partner), IV/Nature/ability/egg-move
 inheritance — this sim has no IV/Nature/multi-ability system to inherit
 into yet, so those are out of scope until the underlying systems exist.
 
+## Guardian cohesion leash and inbreeding avoidance — two smaller fixes, requested together
+
+Both prompted directly ("guardian spawn point... relatedness check is a
+good idea"), both small in scope, both verified with tests plus a real run.
+
+**Guardian positioning gap.** The long-standing "guardian starts a chase,
+never arrives" finding (see the herd-cohesion section above) turned out to
+have one more layer once actually traced: `applyHerdCohesion`'s pull-back
+target for *every* agent, guardians included, was the whole herd's blended
+centroid. That's fine for an ordinary herd member, but for a guardian it's
+self-undermining — the guardian's own position is part of the average it's
+being pulled toward, so when it wanders off (to drink, say), its own
+displaced position drags the target along with it, and the "am I too far?"
+check can keep reading "close enough" even while the actual herd it
+protects is far away. Fixed with two changes in `herding.ts`: guardians
+(any species nothing preys on, same check `isPreyOfAnything` already used
+elsewhere) get a tighter leash (`GUARDIAN_COHESION_DISTANCE = 3` vs. the
+ordinary `COHESION_DISTANCE = 5`), and track a `protectedHerdCentroid` —
+the average position of only the herd's actual prey members, guardians
+excluded — instead of the whole-herd blend. A constructed regression case
+in `herding.test.ts` proves the old behavior first (a guardian sitting
+exactly at the old 5-tile boundary, with its only prey-member herd-mate 10
+tiles away, does *not* move under the whole-herd-centroid check) and then
+the fix (the same guardian, same positions, *does* move once
+`protectedHerdCentroid` is used). Ordinary herd members are unaffected —
+same wider leash, same whole-herd centroid, confirmed by a second test.
+
+**Inbreeding avoidance.** The unconstrained-reproduction finding
+(`venusaur-0`, the founding guardian with no predator, fathering most of a
+herd's growth including his own daughters and granddaughters) had two
+separable causes: no population cap for predator-free species (still
+open — see the TODO), and literally nothing stopping a mate search from
+matching an agent with its own parent, sibling, or grandparent. Fixed the
+second half. `Agent` gained `parentIds?: [string, string]` and
+`grandparentIds?: string[]`, both set once at birth in `spawnOffspring`
+from information already on hand (the parents' own ids and their own
+`parentIds`) rather than looked up live — a live lookup would be fragile,
+since an ancestor is routinely pruned from `World.agents` well before its
+descendants mature enough to mate (corpses persist only
+`CORPSE_PERSIST_TICKS`). `isRelated(agent, candidate)` in `reproduction.ts`
+checks both directions of parent/offspring, whether the pair shares any
+parent (full or half siblings), and both directions of
+grandparent/grandchild, wired into `isEligibleMate` right alongside the
+existing herd/sex/maturity checks. Founders (spawned directly into a
+scenario, no `parentIds`) are correctly never "related" to anything by
+this check — two founders of the same species really are unrelated
+strangers, so founding-stock breeding is untouched. Six tests in
+`reproduction.test.ts`'s "inbreeding avoidance" block cover each blocked
+relationship plus the newborn's `parentIds`/`grandparentIds` bookkeeping
+itself. A real 3000-tick run with the check active still produced 17
+births (population stayed small, 23 starved) — confirms this is a real
+behavioral gate, not an accidental reproductive shutdown.
+
+**Explained, deliberately not changed yet**: herd food delivery firing far
+more than intended (7212 `foodDelivered` events in a 3000-tick run at a
+ballooned population, vs. 54 over 2000 ticks at a small one) was traced to
+three compounding causes — no per-agent cooldown after a delivery errand,
+no reservation flag so multiple couriers can target the same recipient
+(confirmed live: `bulbasaur-2` delivered to twice, ticks 120 and 152, by
+different couriers), and event count scaling with population rather than
+tick count. Conclusion: not really a broken mechanic in isolation, it's the
+population-explosion problem wearing a different hat. Left as-is per
+explicit instruction, pending a fix to the underlying population-cap
+question — see TODO.md.
+
 ## Faint/finish-off, heal over time, and herd support (inventory, food delivery, carrying)
 
 Decided, not built yet. Today a hit that brings HP to 0 is permanent —

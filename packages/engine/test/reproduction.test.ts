@@ -249,4 +249,80 @@ describe("reproduction", () => {
 
     expect(world.agents).toHaveLength(2);
   });
+
+  describe("inbreeding avoidance", () => {
+    it("a parent and its own offspring don't pair", () => {
+      // Real bug this fixes: a founding Venusaur guardian with no
+      // predator fathered most of a herd's growth over a real run,
+      // including with his own daughters and granddaughters.
+      const world = createWorld(10, 10);
+      const father: Agent = parent("father", "male", { x: 2, y: 2 });
+      const daughter: Agent = { ...parent("daughter", "female", { x: 3, y: 2 }), parentIds: ["some-mother", "father"] };
+      world.agents.push(father, daughter);
+
+      tickWorld(world);
+
+      expect(world.agents).toHaveLength(2); // no offspring
+    });
+
+    it("full siblings (share both parents) don't pair", () => {
+      const world = createWorld(10, 10);
+      const a: Agent = { ...parent("a", "female", { x: 2, y: 2 }), parentIds: ["m", "f"] };
+      const b: Agent = { ...parent("b", "male", { x: 3, y: 2 }), parentIds: ["m", "f"] };
+      world.agents.push(a, b);
+
+      tickWorld(world);
+
+      expect(world.agents).toHaveLength(2);
+    });
+
+    it("half-siblings (share one parent) don't pair", () => {
+      const world = createWorld(10, 10);
+      const a: Agent = { ...parent("a", "female", { x: 2, y: 2 }), parentIds: ["m", "f1"] };
+      const b: Agent = { ...parent("b", "male", { x: 3, y: 2 }), parentIds: ["m", "f2"] };
+      world.agents.push(a, b);
+
+      tickWorld(world);
+
+      expect(world.agents).toHaveLength(2);
+    });
+
+    it("a grandparent and grandchild don't pair", () => {
+      const world = createWorld(10, 10);
+      const grandparent: Agent = parent("grandparent", "male", { x: 2, y: 2 });
+      const grandchild: Agent = {
+        ...parent("grandchild", "female", { x: 3, y: 2 }),
+        grandparentIds: ["grandparent", "grandmother", "other-gp1", "other-gp2"],
+      };
+      world.agents.push(grandparent, grandchild);
+
+      tickWorld(world);
+
+      expect(world.agents).toHaveLength(2);
+    });
+
+    it("unrelated agents (including two founders with no parentIds) still pair normally", () => {
+      const world = createWorld(10, 10);
+      world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
+
+      tickWorld(world);
+
+      expect(world.agents).toHaveLength(3);
+    });
+
+    it("a newborn's parentIds/grandparentIds are recorded correctly", () => {
+      const world = createWorld(10, 10);
+      const mother: Agent = { ...parent("mother", "female", { x: 2, y: 2 }), parentIds: ["gm", "gf"] };
+      const father: Agent = parent("father", "male", { x: 3, y: 2 }); // a founder, no parentIds
+      world.agents.push(mother, father);
+
+      tickWorld(world);
+
+      const child = world.agents.find((a) => a.id !== "mother" && a.id !== "father")!;
+      expect(child.parentIds).toEqual(["mother", "father"]);
+      // Only the mother's side contributes grandparents — the father is a
+      // founder with no parentIds of his own.
+      expect(child.grandparentIds).toEqual(["gm", "gf"]);
+    });
+  });
 });

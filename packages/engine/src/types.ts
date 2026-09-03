@@ -213,6 +213,26 @@ export interface Agent {
    * reasonable stand-in (see DESIGN.md).
    */
   homePos?: Vec2;
+  /**
+   * [motherId, fatherId] — absent for a founder spawned directly into a
+   * scenario, set for anything born via `spawnOffspring` (reproduction.ts).
+   * Drives the inbreeding-avoidance check in `isEligibleMate`: without
+   * this, nothing stopped a long-lived founder with no predator (e.g. a
+   * guardian Venusaur) from fathering its own daughters and
+   * granddaughters, confirmed in a real run. Deliberately just the
+   * immediate parents, not a full pedigree — see `grandparentIds` for how
+   * one more generation is covered without needing a live lookup.
+   */
+  parentIds?: [string, string];
+  /**
+   * The (deduplicated) ids of this agent's up-to-four grandparents,
+   * computed once at birth from the parents' own `parentIds` — not looked
+   * up live, since an ancestor can easily be pruned from `World.agents`
+   * (corpses persist only `CORPSE_PERSIST_TICKS`) long before this agent
+   * matures enough to mate. Absent for a founder or a first-generation
+   * offspring (founders have no `parentIds` of their own to combine).
+   */
+  grandparentIds?: string[];
 }
 
 /** predator species id -> the species ids it hunts. */

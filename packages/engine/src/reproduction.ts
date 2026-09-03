@@ -20,6 +20,26 @@ function isMature(agent: Agent): boolean {
   return agent.age === undefined || agent.age >= MATURITY_AGE;
 }
 
+/**
+ * Inbreeding avoidance: blocks direct parent/offspring, full or half
+ * siblings (share at least one parent), and grandparent/grandchild pairs.
+ * Founders (spawned directly into a scenario, no `parentIds`) are never
+ * "related" to anything by this check — real gap, since two founders of
+ * the same species are conceptually unrelated strangers, which is exactly
+ * right. Confirmed real bug this fixes: a founding Venusaur guardian with
+ * no predator fathered most of a herd's growth over a real run, including
+ * with his own daughters and granddaughters.
+ */
+function isRelated(agent: Agent, candidate: Agent): boolean {
+  const agentParents: string[] = agent.parentIds ?? [];
+  const candidateParents: string[] = candidate.parentIds ?? [];
+  if (agentParents.includes(candidate.id) || candidateParents.includes(agent.id)) return true;
+  if (agentParents.length > 0 && candidateParents.some((id) => agentParents.includes(id))) return true;
+  if ((agent.grandparentIds ?? []).includes(candidate.id)) return true;
+  if ((candidate.grandparentIds ?? []).includes(agent.id)) return true;
+  return false;
+}
+
 function isEligibleMate(agent: Agent, candidate: Agent, ctx?: LevelingContext): boolean {
   if (candidate.id === agent.id || candidate.alive === false) return false;
   if (candidate.fainted || candidate.beingCarriedBy) return false; // downed or being carried — not available to mate
@@ -30,6 +50,7 @@ function isEligibleMate(agent: Agent, candidate: Agent, ctx?: LevelingContext): 
   if (!agent.sex || !candidate.sex || agent.sex === candidate.sex) return false;
   if (!isMature(candidate)) return false;
   if (candidate.behavior === "flee") return false; // don't interrupt a fleeing mate
+  if (isRelated(agent, candidate)) return false;
   // Herd animals pair within their herd; solitary agents (no herdId) aren't restricted.
   if (agent.herdId && agent.herdId !== candidate.herdId) return false;
   return true;
@@ -102,6 +123,12 @@ function spawnOffspring(world: World, mother: Agent, father: Agent, ctx?: Leveli
     age: 0,
     level: 1,
     exp: 0,
+    parentIds: [mother.id, father.id],
+    // Computed from the parents' own parentIds, not looked up live — an
+    // ancestor is easily long pruned from World.agents by the time this
+    // child matures. Empty for a first-generation child (founders have no
+    // parentIds of their own to combine).
+    grandparentIds: [...new Set([...(mother.parentIds ?? []), ...(father.parentIds ?? [])])],
   };
   // Backfills stats/hp/types/moves for the base species at level 1 — without
   // this a newborn had no combat profile at all (couldn't fight, and its

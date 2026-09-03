@@ -96,10 +96,9 @@ produce a real story before player mechanics are worth building further.
       availability? territory/space limits? age-based mortality? multiple
       predator species so no single kill zeroes out all pressure?) —
       pick one and test it, don't bolt on an arbitrary population cap.
-      Inbreeding is still also unaddressed (the founding male fathering
-      his own descendants) — a separate, smaller fix (track parent/
-      offspring or sibling pairs, exclude them as mates) once the bigger
-      population-control question is settled.
+      Inbreeding itself is now fixed (see the relatedness-check item
+      below) — the carrying-capacity/population-cap mechanism is still
+      the open half.
 - [x] Starvation death + migrate-on-failure built (see DESIGN.md) — real
       partial fix: 564 Venusaur starved in a 2000-tick run, but 917 births
       still outpaced that, so population still grows net-positive (boom
@@ -183,24 +182,37 @@ produce a real story before player mechanics are worth building further.
       all. This is a real architecture change (agents currently get
       exactly one action per tick, full stop) — deliberately not rushed
       in alongside other work; needs its own pass.
-- [ ] **Guardian positioning gap**: a guardian's `findHerdmateInDanger`
-      check works, but guardians only ever hang out near their own spawn
-      area (the water hole), while the herd forages clear across the map
-      near the food patch — so by the time a guardian notices a herd-mate
-      fleeing and gives chase, the kill happens before it can cross the
-      distance. Fix target: guardians should patrol nearer the herd's
-      actual grazing range, not just sit at one fixed spot.
-- [ ] **New, unplanned finding: unconstrained reproduction blows up.** Two
+- [x] **Guardian positioning gap fixed**: traced to `applyHerdCohesion`
+      using the *whole* herd's centroid (guardians included) as a
+      guardian's own pull-back target — when a guardian wandered off (e.g.
+      to drink), its own displaced position diluted that average enough
+      that the "am I too far?" check often still read "close enough," so
+      it never corrected back toward the herd it's meant to protect.
+      Fixed with a guardian-specific tighter leash (3 tiles vs. 5) plus a
+      `protectedHerdCentroid` that averages only the herd's actual prey
+      members, excluding guardians (`packages/engine/src/herding.ts`).
+      Confirmed with a constructed regression case: the old whole-herd
+      check does *not* move a guardian sitting exactly at the old
+      boundary while its herd's real prey is 10 tiles away; the new
+      rules-aware check does. See `herding.test.ts`.
+- [x] **Unconstrained reproduction finding — inbreeding half fixed.** Two
       Venusaur (nothing preys on them) went from 2 to 52 individuals over
       1000 ticks, and `venusaur-0` (the founding male) fathered most of
-      that growth including with his own daughters/granddaughters — no
-      relatedness/inbreeding check exists in `reproduction.ts`, and
-      nothing caps population for a species with no predator. This is the
-      mirror image of the Bulbasaur extinction: predation-free species
-      need *some* population-limiting force (carrying capacity tied to
-      food availability? territory limits? age-based mortality?) or they
-      grow without bound. Not fixed — worth deciding the mechanism
-      deliberately rather than bolting on a random cap.
+      that growth including with his own daughters/granddaughters. Fixed
+      the inbreeding half: `Agent.parentIds`/`grandparentIds` are set at
+      birth (`reproduction.ts`'s `spawnOffspring`), and `isEligibleMate`
+      now calls `isRelated` to block direct parent/offspring, full/half
+      siblings, and grandparent/grandchild pairs — see `isRelated`'s doc
+      comment and the "inbreeding avoidance" tests in
+      `reproduction.test.ts` (17 tests total, all passing). Founders
+      (scenario-spawned, no `parentIds`) are correctly treated as
+      unrelated strangers, so founding-stock breeding is unaffected. A
+      3000-tick real run with the check active still produced 17 births
+      (23 starved, population stayed small) — confirms this isn't a
+      reproductive-shutdown regression. The population-*cap* half (no
+      predator = unbounded growth) is still open — carrying capacity tied
+      to food availability, territory limits, or age-based mortality is
+      still the undecided mechanism.
 - [ ] **Confirmed this isn't Venusaur-specific**: with the action economy
       (see "Combat / moves" below) making the guardian mechanism reliably
       defeat the Scyther predator around tick 110 in real runs, Bulbasaur
@@ -567,6 +579,23 @@ produce a real story before player mechanics are worth building further.
       the underlying population-explosion problem has a fix to test
       against — right now it's hard to tell whether 0.4/the lack of a
       cooldown is wrong in isolation or just amplified by an unrelated bug.
+      **Traced further, by request, before touching any code**: three
+      compounding causes, confirmed directly against `support.ts` and a
+      real run, not just theorized — (1) no per-agent cooldown after
+      completing a delivery errand, so a courier immediately re-scans for
+      a new hungry herdmate every idle tick; (2) no "reservation" on a
+      chosen recipient, so multiple couriers can target the same hungry
+      agent at once — observed live in one run: `bulbasaur-2` got
+      delivered to at tick 120, then again at tick 152 by a different
+      courier; (3) the event count scales with population size, not tick
+      count — confirmed by contrast: a small-population run (7-16 agents)
+      produced only 54 `foodDelivered` over 2000 ticks (reasonable), vs.
+      the hundreds-of-agents run above producing 7212 in 3000. Conclusion:
+      this isn't really a broken mechanic in isolation, it's the
+      population-explosion problem wearing a different hat — a real fix
+      (cooldown + reservation) is straightforward but should wait until
+      population equilibrium has its own fix to test against, per the
+      note above. Left unchanged for now, on purpose.
 - [ ] **Looting and literal carrying were never observed in either real run
       (1000 or 3000 ticks), only in direct engine tests.** Two different
       reasons, both worth naming rather than just reporting a null result:
