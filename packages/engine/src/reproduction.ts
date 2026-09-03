@@ -1,6 +1,7 @@
 import type { Agent, Needs, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { stepToward } from "./movement.js";
+import { EXP_ON_BIRTH_PARENT, EXP_ON_MATE_ATTEMPT, grantExp, type LevelingContext } from "./leveling.js";
 
 /**
  * Ticks before an agent can mate. A single global constant for now — real
@@ -62,6 +63,13 @@ function spawnOffspring(world: World, mother: Agent, father: Agent): Agent {
     // 50/50 for now — real per-species gender ratios are a data-layer concern, see TODO.
     sex: Math.random() < 0.5 ? "male" : "female",
     age: 0,
+    level: 1,
+    exp: 0,
+    // Cheap to inherit even though newborns don't get a full stats/moves combat
+    // profile (see the pre-existing TODO on that) — without this, a newborn's
+    // guaranteed per-level-up skill point (typed by primary type, see leveling.ts)
+    // silently never fires, since `grantExp` reads `agent.types?.[0]`.
+    types: mother.types,
   };
 }
 
@@ -73,7 +81,7 @@ function spawnOffspring(world: World, mother: Agent, father: Agent): Agent {
  * tick. Both parents' mateDrive resets afterward, which is the sim's only
  * "cooldown": rebuilding it naturally takes a while (see needs.ts).
  */
-export function applyMateSeeking(world: World, agent: Agent, log?: EventLog): void {
+export function applyMateSeeking(world: World, agent: Agent, log?: EventLog, ctx?: LevelingContext): void {
   if (!agent.sex || !isMature(agent)) return;
 
   const candidates = world.agents.filter(
@@ -96,10 +104,13 @@ export function applyMateSeeking(world: World, agent: Agent, log?: EventLog): vo
         layer: child.layer,
         pos: child.pos,
       });
+      grantExp(world, agent, EXP_ON_BIRTH_PARENT, ctx, log);
+      grantExp(world, partner, EXP_ON_BIRTH_PARENT, ctx, log);
     }
     agent.needs.mateDrive = 0;
     partner.needs.mateDrive = 0;
   } else {
+    grantExp(world, agent, EXP_ON_MATE_ATTEMPT, ctx, log);
     agent.pos = stepToward(world, agent.layer, agent.pos, partner.pos);
   }
 }

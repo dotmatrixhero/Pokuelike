@@ -1,5 +1,5 @@
 import { EventLog, tickWorld } from "@pokuelike/engine";
-import { createDemoWorld, HUNT_RULES } from "@pokuelike/data";
+import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT } from "@pokuelike/data";
 import { formatEvent, summarize } from "./format.js";
 
 const ticks = Number(process.argv[2] ?? 500);
@@ -8,7 +8,7 @@ const world = createDemoWorld();
 const log = new EventLog();
 
 for (let i = 0; i < ticks; i++) {
-  tickWorld(world, log, HUNT_RULES);
+  tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT);
 }
 
 for (const event of log.events) {

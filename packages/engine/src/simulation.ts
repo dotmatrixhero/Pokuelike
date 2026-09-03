@@ -2,6 +2,7 @@ import type { Agent, HuntRules, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import { growFlora, maybeDropSeed } from "./flora.js";
+import type { LevelingContext } from "./leveling.js";
 
 /**
  * Energy an agent needs to accumulate before it gets to act. Chosen against
@@ -69,19 +70,19 @@ function isDead(agent: Agent): boolean {
  * Speed; behavior choice, movement, and attacks (`tickAgentAction`) only run
  * on an agent's action tick, gated by `accumulateActionEnergy`.
  */
-export function tickWorld(world: World, log?: EventLog, rules?: HuntRules): void {
+export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext): void {
   world.tick += 1;
   for (const agent of world.agents) {
     if (isDead(agent)) continue;
 
-    tickAgentNeeds(agent);
+    tickAgentNeeds(agent, world, ctx, log);
 
     const acted = accumulateActionEnergy(agent, actionSpeedOf(agent));
     if (!acted) continue;
 
     const before = { x: agent.pos.x, y: agent.pos.y };
     const beforeLayer = agent.layer;
-    tickAgentAction(world, agent, log, rules);
+    tickAgentAction(world, agent, log, rules, ctx);
     if (!isDead(agent) && agent.layer === beforeLayer && (agent.pos.x !== before.x || agent.pos.y !== before.y)) {
       maybeDropSeed(world, agent.layer, agent.pos, log);
     }

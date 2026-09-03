@@ -4,6 +4,7 @@ import type { EventLog } from "./events.js";
 import { stepAway, stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
 import { calculateDamage, pickBestMove, useMove, withinMoveRange, rollAccuracy, rollCritical } from "./combat.js";
+import { grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
@@ -132,7 +133,14 @@ function findHerdmateInDanger(world: World, agent: Agent): Agent | undefined {
  * is the point of having cooldowns. Returns true if the defender fainted
  * from this hit.
  */
-function resolveHit(world: World, attacker: Agent, defender: Agent, log: EventLog | undefined, faintKind: "killed" | "defeated"): boolean {
+function resolveHit(
+  world: World,
+  attacker: Agent,
+  defender: Agent,
+  log: EventLog | undefined,
+  faintKind: "killed" | "defeated",
+  ctx?: LevelingContext
+): boolean {
   if (defender.alive === false) return false;
 
   defender.maxHp = defender.maxHp ?? defender.stats?.maxHp ?? FALLBACK_MAX_HP;
@@ -168,6 +176,7 @@ function resolveHit(world: World, attacker: Agent, defender: Agent, log: EventLo
       : FALLBACK_DAMAGE;
 
   defender.hp = Math.max(0, defender.hp - damage);
+  if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log);
 
   log?.record({
     kind: "fought",
@@ -184,6 +193,7 @@ function resolveHit(world: World, attacker: Agent, defender: Agent, log: EventLo
   if (defender.hp > 0) return false;
 
   defender.alive = false;
+  grantKillExp(world, attacker, defender, ctx, log);
   if (faintKind === "killed") {
     log?.record({
       kind: "killed",
@@ -261,7 +271,7 @@ function relocate(world: World, agent: Agent, log?: EventLog): boolean {
  * Returns true if this tick was handled here, so the caller should skip its
  * normal needs-driven behavior.
  */
-export function applyPredationInstincts(world: World, agent: Agent, rules: HuntRules, log?: EventLog): boolean {
+export function applyPredationInstincts(world: World, agent: Agent, rules: HuntRules, log?: EventLog, ctx?: LevelingContext): boolean {
   if (isCriticallyHurt(agent)) {
     const attackers = agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter(
       (other) => other.behavior === "fight" && other.fightTarget === agent.id
@@ -289,7 +299,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
         agent.behavior = "fight";
         agent.fightTarget = threat.id;
         if (canAttackFromHere(agent, distance, threat.types ?? [])) {
-          resolveHit(world, agent, threat, log, "defeated");
+          resolveHit(world, agent, threat, log, "defeated", ctx);
         } else {
           agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
         }
@@ -314,7 +324,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
       agent.behavior = "fight";
       agent.fightTarget = threat.id;
       if (canAttackFromHere(agent, distance, threat.types ?? [])) {
-        resolveHit(world, agent, threat, log, "defeated");
+        resolveHit(world, agent, threat, log, "defeated", ctx);
       } else {
         agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
       }
@@ -345,7 +355,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
         // A single hit may not be lethal now — real HP, real damage. The
         // meal (and hunger restore) only happens once the target actually faints;
         // otherwise it's a wounded prey that gets another chance to flee next tick.
-        const fainted = resolveHit(world, agent, target, log, "killed");
+        const fainted = resolveHit(world, agent, target, log, "killed", ctx);
         if (fainted) {
           agent.needs.hunger = Math.min(1, agent.needs.hunger + KILL_HUNGER_RESTORE);
           agent.huntTarget = undefined;

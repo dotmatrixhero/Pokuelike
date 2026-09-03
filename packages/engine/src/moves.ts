@@ -1,4 +1,4 @@
-import type { Vec2 } from "./types.js";
+import type { Agent, Vec2 } from "./types.js";
 import type { PokemonType } from "./typing.js";
 
 /**
@@ -196,4 +196,58 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
   }
 
   return result;
+}
+
+/** Sum of the chosen nodes' own `cost` fields — what `applyMoveTreeWithSpend` actually charges. */
+export function totalTreeCost(base: MoveSpec, chosenNodeIds: string[]): number {
+  const tree = base.tree;
+  if (!tree) throw new Error(`totalTreeCost: move "${base.id}" has no respec tree`);
+  return chosenNodeIds.reduce((sum, id) => {
+    const node = tree[id];
+    if (!node) throw new Error(`totalTreeCost: move "${base.id}" has no tree node "${id}"`);
+    return sum + node.cost;
+  }, 0);
+}
+
+/**
+ * Validates and spends `cost` skill points of `pointType` from `agent`,
+ * preferring typed points over wildcard (don't burn the rarer currency
+ * first — see DESIGN.md). Returns false and mutates nothing if the agent
+ * doesn't have enough (typed + wildcard) to cover `cost`.
+ */
+export function trySpendSkillPoints(agent: Agent, pointType: PokemonType, cost: number): boolean {
+  const typed = agent.skillPoints?.[pointType] ?? 0;
+  const wildcard = agent.wildcardSkillPoints ?? 0;
+  if (typed + wildcard < cost) return false;
+
+  const spendTyped = Math.min(typed, cost);
+  const spendWildcard = cost - spendTyped;
+  agent.skillPoints = agent.skillPoints ?? {};
+  agent.skillPoints[pointType] = typed - spendTyped;
+  agent.wildcardSkillPoints = wildcard - spendWildcard;
+  return true;
+}
+
+/**
+ * The real spend-validation path for `applyMoveTree`: computes the chosen
+ * nodes' total cost, tries to pay it out of `agent`'s typed (matching
+ * `base.type`) + wildcard skill points (typed preferred), and only derives
+ * the respec'd `MoveSpec` — deducting the currency — if that succeeds.
+ * Throws (rather than silently no-op'ing) on insufficient points, same
+ * failure style as `applyMoveTree`'s own prerequisite/unknown-node checks —
+ * an invalid spend attempt is a caller bug to catch, not swallow. Per
+ * DESIGN.md's explicit scope call, wild background agents never call this —
+ * every predation/guardian/mob-fight call site keeps using the base
+ * `MoveSpec` untouched.
+ */
+export function applyMoveTreeWithSpend(base: MoveSpec, chosenNodeIds: string[], agent: Agent): MoveSpec {
+  const cost = totalTreeCost(base, chosenNodeIds);
+  if (!trySpendSkillPoints(agent, base.type, cost)) {
+    const typed = agent.skillPoints?.[base.type] ?? 0;
+    const wildcard = agent.wildcardSkillPoints ?? 0;
+    throw new Error(
+      `applyMoveTreeWithSpend: insufficient skill points for "${base.id}" — need ${cost} (${base.type}), have ${typed} typed + ${wildcard} wildcard`
+    );
+  }
+  return applyMoveTree(base, chosenNodeIds);
 }

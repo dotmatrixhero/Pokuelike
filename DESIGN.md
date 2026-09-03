@@ -796,6 +796,188 @@ trigger for move learning and evolution.
   controlled partners) — out of scope here, this only builds the earning/
   data side plus the `applyMoveTree` spend-validation plumbing.
 
+**Built:**
+
+- **Importer extended**: `parseLevelMoves` (scans a species block's sibling
+  `levelMoves: [[level, MoveId.X], ...]` array, outside the `PokemonSpecies`
+  config object) and a `baseExp` field extraction, both added to
+  `SpeciesDexEntry` and regenerated for all 1083 species. `levelMoves`
+  entries store `[level, dexMoveKey]` (e.g. `[4, "VINE_WHIP"]`) — the same
+  key string as `MoveDexEntry.key` in `moves.generated.ts`, so no separate
+  id-mapping table was needed.
+- **Growth-rate curves, `packages/engine/src/leveling.ts`**: all six mainline
+  curves implemented directly from the public piecewise polynomial formulas
+  (Erratic/Fast/Medium Fast/Medium Slow/Slow/Fluctuating), not scraped from
+  PokeRogue. **Verification result, and it's worth being precise about what
+  was actually checked**: cross-checked against every entry (levels 2-100)
+  of `poke_the_spire/src/data/exp.ts`'s raw per-growth-rate `expLevels`
+  arrays — **zero mismatches across all six curves** (level 1 is a
+  documented special case: the raw formulas alone produce a small nonzero
+  residual there for several curves, and both this implementation and
+  PokeRogue's own table override it to exactly 0, matching real mainline
+  behavior). Deliberately **not** cross-checked against PokeRogue's
+  *exported* `getLevelTotalExp` function, because that function additionally
+  blends every non-Medium-Fast curve 32.5%/67.5% with Medium Fast — a
+  PokeRogue-specific balance house-rule (confirmed by direct calculation:
+  its Medium Slow level-10 total comes out to 857 through that function, not
+  the real mainline value of 560, which is what both the raw table and this
+  implementation agree on) — so matching that function would have meant
+  reproducing PokeRogue's own game-balance tweak instead of real mainline
+  math. All six curves verified with high confidence; none needed
+  special-casing beyond the ordinary piecewise formula each already is.
+- **`LevelingContext`/`LevelingProfile`, the same injected-policy pattern as
+  `HuntRules`**: engine functions that need species-specific data
+  (growth rate, base stats, `baseExp`, `levelMoves`, level-gated evolutions)
+  take an optional `ctx: LevelingContext` parameter rather than importing
+  `packages/data` directly (the engine package doesn't and shouldn't depend
+  on the data package). `packages/data/src/leveling.ts` builds the real
+  `LEVELING_CONTEXT` from the full dex — `getProfile` works for **any** of
+  the 1083 imported species (not just the 6-species curated `SPECIES`
+  roster), since evolution can land an agent on a species that was never
+  hand-curated (bulbasaur -> "ivysaur", which has no `SpeciesDef`). Omitting
+  `ctx` (bare engine tests, anything that predates this feature) means exp
+  still accrues but nothing can level/evolve/learn — same graceful-absence
+  behavior as omitting `rules`.
+- **Move resolution for learned moves**: `resolveMove` in
+  `packages/data/src/leveling.ts` prefers the curated `MOVES` roster (looked
+  up by uppercasing the curated id — every curated id happens to be the
+  lowercased dex key, e.g. `vine_whip` <-> `VINE_WHIP`) and falls back to
+  deriving a `MoveSpec` via `moveCanon` (real type/category/power/accuracy)
+  with a flat default shape/range/cooldown (point, `{0,1}`, 1 tick) for
+  anything not in the curated five. **Scope call, explicit**: a learned
+  *status* move (Growl, Leech Seed, etc. — most of a real levelMoves table)
+  has no shape/power to derive at all, since this sim has no status-effect
+  engine — `resolveMove` returns `undefined` for those, and `grantExp` still
+  records them in `Agent.knownMoves` and emits `learnedMove`, it just adds
+  no combat-usable `MoveSpec`. Confirmed in a real run: a leveled-up
+  Bulbasaur's `knownMoves` includes moves it can never actually swing.
+- **Exp granting, wired into every call site named in the plan**: kills
+  (`predation.ts`'s `resolveHit`, both hunt-kills and mob-fight/guardian
+  defeats) grant `floor(baseExp * defeatedLevel / 7)` via `grantKillExp`;
+  every living agent gets a passive `EXP_TRICKLE_PER_TICK = 0.02` trickle in
+  `tickAgentNeeds` (the always-runs path, not the action-gated one — matches
+  the existing action-economy split); eating/drinking grants
+  `EXP_ON_CONSUME = 0.5`; a mate-seeking step grants `EXP_ON_MATE_ATTEMPT =
+  1` and a successful birth grants `EXP_ON_BIRTH_PARENT = 3` to each parent;
+  entering an unvisited map sector (`SECTOR_SIZE = 5`-tile buckets, capped
+  at `MAX_TRACKED_SECTORS = 40`) grants `EXP_ON_NEW_SECTOR = 2`; meeting a
+  species this agent hasn't seen before (capped at `MAX_TRACKED_SPECIES =
+  20`, and — see the performance finding below — short-circuited entirely
+  once that cap is hit) grants `EXP_ON_NEW_SPECIES_ENCOUNTERED = 2`. All
+  five non-combat numbers are sim-original tuning guesses with no canon
+  formula, exactly as flagged in the "Decided, not built yet" section above
+  — not revisited beyond picking something small and plausible.
+- **Level-up loop, mainline-accurate HP heal**: `grantExp` loops (not a
+  single `if`), so one big kill can cross several level thresholds in one
+  call — engine-tested (5 levels in one `grantExp` call). Each level crossed
+  recomputes `Stats` via `calculateStats` and heals current HP by exactly
+  the max-HP delta (not a full heal, not left unchanged) — also
+  engine-tested directly. **One `leveledUp` event per level gained**, not
+  one summary event for a multi-level jump (a 5-level jump produces 5 log
+  entries) — chosen to keep matching this project's "the event log needs
+  semantic content" north star at the per-level granularity rather than
+  collapsing a multi-level jump into a less legible blob.
+- **Move learning**: every `levelMoves` entry with `level <= newLevel` not
+  already in `Agent.knownMoves` is learned on every level crossed, uncapped,
+  no forgetting — engine-tested. After an evolution mid-loop, the very next
+  loop iteration reads `ctx.getProfile` on the *new* species, so anything
+  the new species can learn above the evolution level keeps coming in
+  correctly within the same `grantExp` call.
+- **Evolution**: checks the current profile's level-gated evolutions
+  (`level` condition only — item/trade/friendship deferred exactly as
+  planned, filtered out before they ever reach the engine) each level
+  crossed; on a match, swaps `Agent.species`, recomputes `Stats`/`maxHp`
+  from the new species' base stats at the current level, and rescales
+  current HP by the *fraction* of max HP it was at (not a delta-add, since
+  the base-stat jump on evolution is usually large and a delta-add could
+  overheal past the old fraction) — engine-tested end to end (Bulbasaur ->
+  Ivysaur at level 16: species/stats/exp/level/moves/skill-points all
+  checked in one test). exp/level/`knownMoves`/skill points all carry over
+  untouched, per the plan. **Known gap, honestly flagged**: an evolved
+  agent's new species id (e.g. `"ivysaur"`) isn't in the curated `SPECIES`
+  roster in `packages/data/src/species.ts` (which only has 6 hand-curated
+  entries), so `packages/web`'s renderer — which looks up `SPECIES[agent.species]`
+  for a sprite key — would break on an evolved agent. Not fixed here; the
+  headless engine/runner path this feature was validated against doesn't
+  touch that lookup at all, but it's a real gap for the browser app.
+- **Typed skill points**: `maybeGrantHitSkillPoint` rolls
+  `SKILLPOINT_ON_HIT_CHANCE = 0.05` on every landed (nonzero-damage) hit in
+  `resolveHit`, granting one point of the *move's* type to the attacker.
+  Leveling up grants one guaranteed point of the agent's own primary type
+  (`Agent.types[0]`) plus a `SKILLPOINT_LEVELUP_WILDCARD_CHANCE = 0.1` roll
+  for a wildcard point. **Real bug caught and fixed during validation, not
+  just claimed working**: the first real run showed almost no typed points
+  despite hundreds of level-ups, because `reproduction.ts`'s newborns don't
+  get a `types` field (a pre-existing gap — newborns don't get a full
+  stats/moves profile either, see the action-economy section above) and
+  `grantExp` reads `agent.types?.[0]` — most level-ups in a real run *are*
+  newborns reaching level 2. Fixed cheaply: `spawnOffspring` now inherits
+  `types` from the mother (this alone, not a full stats/moves promotion,
+  which stays out of scope). Confirmed by re-running: typed-point counts
+  went from 6-of-897 level-ups to 99-of-99 in a comparable run.
+- **`applyMoveTreeWithSpend`, the real spend-validation path**
+  (`packages/engine/src/moves.ts`): `totalTreeCost` sums a chosen node set's
+  costs; `trySpendSkillPoints` validates `typed + wildcard >= cost`,
+  deducts typed first and only spills into wildcard for the remainder
+  (never touches wildcard if typed alone covers it — engine-tested
+  directly), and mutates nothing on a failed attempt (also tested).
+  `applyMoveTreeWithSpend` composes both with the existing pure
+  `applyMoveTree`, throwing (rather than silently no-op'ing) on
+  insufficient points — same failure style as `applyMoveTree`'s own
+  prerequisite checks. Per the existing scope call, no predation/guardian/
+  mob-fight call site was touched — wild agents still only ever use the
+  base `MoveSpec` and never call this.
+- **New events**: `leveledUp`, `evolved`, `learnedMove`, `gainedSkillPoint`
+  — added to the `SimEvent` union and to `packages/runner/src/format.ts`'s
+  formatter (which is an exhaustive switch, so this was required for the
+  runner to typecheck at all, not optional polish).
+- **A real performance bug found and fixed during validation**: the initial
+  "has this agent met a new species" check scanned every other agent in the
+  world, every action tick, for every agent — cheap in isolation, but this
+  sim's pre-existing, previously-documented Venusaur/Bulbasaur population-
+  explosion problem (see the "Real tactical combat" section above) means
+  agent count is *not* bounded, so this turned into a real O(agents²)-per-
+  tick cost on top of an already-unbounded population. A 5000-tick run
+  timed out (>90s) with this in place; a same-length run on the pre-feature
+  base commit (lucky RNG, no population explosion that run) finished in
+  ~1.2s, confirming the regression was this addition, not pre-existing
+  drift. **Fixed**: once an agent has recorded `MAX_TRACKED_SPECIES`
+  distinct species (a handful — the demo roster only has ~6), the scan is
+  skipped entirely for that agent, since it's essentially certain to have
+  already met everything in play. This caps the added cost per agent to a
+  small constant after an early warm-up window rather than fixing it, since
+  it doesn't touch the underlying unbounded-population problem — that's
+  still the same open item from the action-economy section, not something
+  this feature was scoped to solve.
+- **Real run findings, reported straight**: ran the runner repeatedly at
+  1000 and 3000 ticks (unseeded `Math.random()`, so genuine variance run to
+  run). **Leveling is real and observed, not just theoretically wired**: a
+  1000-tick run produced 18 `leveledUp` events (mostly newborns reaching
+  level 2 off passive trickle + consume exp) and 32 `learnedMove` events; a
+  3000-tick run produced up to 897 level-ups (levels 2 through 9 observed
+  across different agents), hundreds of `learnedMove` events, and (post-fix)
+  skill-point counts matching level-up counts almost exactly (99 typed + 7
+  wildcard from 99 level-ups in one run — the ~10% wildcard roll landing
+  almost exactly on rate). **Evolution was never observed, and here's the
+  honest arithmetic on why, rather than just reporting a null result**:
+  Bulbasaur's Medium Slow curve needs 2535 cumulative exp to reach level 16
+  (Ivysaur's threshold); a representative run's income rate (trickle +
+  occasional consume/mate ticks) got an original level-5 Bulbasaur to level
+  6 (179 exp) by roughly tick 2000, i.e. very roughly 0.09 exp/tick — at
+  that rate, reaching 2535 exp would take on the order of 25,000-30,000
+  ticks, well beyond what a run at this population-growth risk profile can
+  complete in reasonable wall-clock time (the runs attempted at 5000+ ticks
+  timed out on an exploding population before getting anywhere near that
+  many ticks anyway). This is a real, specific tuning gap worth flagging
+  plainly for whoever picks this up next: either the passive/consume exp
+  trickle needs to be meaningfully larger for evolution to be observable on
+  a sim timescale, or evolution verification needs a dedicated short
+  scenario (spawn an agent one exp point below an evolution threshold and
+  tick it) rather than relying on an emergent long run — the mechanism
+  itself is engine-tested and believed correct, but "saw it happen in an
+  actual run" (this project's stated bar) wasn't achieved for evolution
+  specifically, only for leveling and move-learning.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

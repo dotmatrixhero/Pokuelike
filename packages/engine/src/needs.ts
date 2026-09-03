@@ -6,6 +6,15 @@ import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT } from "./flora.js";
 import { tickCooldowns } from "./combat.js";
 import type { EventLog } from "./events.js";
+import {
+  EXP_ON_CONSUME,
+  EXP_TRICKLE_PER_TICK,
+  MAX_TRACKED_SPECIES,
+  grantExp,
+  markSectorVisited,
+  markSpeciesEncountered,
+  type LevelingContext,
+} from "./leveling.js";
 
 const DECAY_PER_TICK = {
   hunger: 0.01,
@@ -91,14 +100,20 @@ function consume(needs: Needs, behavior: "seekWater" | "seekFood"): void {
  * The part of an agent's tick that happens every world tick regardless of
  * the Speed-driven action economy (see simulation.ts): aging, cooldown
  * countdown (real-time, deliberately orthogonal to Speed — see DESIGN.md),
- * and need decay. Hunger doesn't pause because an agent is slow; it just
- * doesn't get to *act* on it as often.
+ * need decay, and the passive exp trickle (tiny, per-tick, for every living
+ * agent — deliberately in this always-runs path rather than the action-
+ * gated one, consistent with the rest of the action-economy split: surviving
+ * doesn't pause because you're slow). `world`/`ctx`/`log` are optional so
+ * callers without a leveling context (bare fixtures, anything that predates
+ * this feature) keep working — no world/ctx means the trickle simply isn't
+ * granted (nothing to log a tick number against).
  */
-export function tickAgentNeeds(agent: Agent): void {
+export function tickAgentNeeds(agent: Agent, world?: World, ctx?: LevelingContext, log?: EventLog): void {
   if (agent.alive === false) return;
   if (agent.age !== undefined) agent.age += 1;
   tickCooldowns(agent);
   decayNeeds(agent.needs);
+  if (world) grantExp(world, agent, EXP_TRICKLE_PER_TICK, ctx, log);
 }
 
 /**
@@ -114,10 +129,25 @@ export function tickAgentNeeds(agent: Agent): void {
  * predation.ts. Without rules, agents behave exactly as before predation
  * existed.
  */
-export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rules?: HuntRules): void {
+export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext): void {
   if (agent.alive === false) return;
 
-  if (rules && applyPredationInstincts(world, agent, rules, log)) return;
+  markSectorVisited(agent, world, ctx, log);
+  // Once an agent has racked up a handful of distinct species, it's very likely seen
+  // everything currently in play (the demo roster is ~6 species) — skip the O(agents)
+  // nearby-scan entirely past that point rather than re-scanning forever for a trickle
+  // that will never fire again. Without this cap, this scan alone turns a long run with
+  // an exploding population (see DESIGN.md's Venusaur/Bulbasaur growth findings) into an
+  // O(agents^2)-per-tick cost that made even a 5000-tick run impractically slow.
+  if ((agent.encounteredSpecies?.length ?? 0) < MAX_TRACKED_SPECIES) {
+    for (const other of world.agents) {
+      if (other.id === agent.id || other.alive === false) continue;
+      if (Math.abs(other.pos.x - agent.pos.x) + Math.abs(other.pos.y - agent.pos.y) > 3) continue;
+      markSpeciesEncountered(agent, other.species, world, ctx, log);
+    }
+  }
+
+  if (rules && applyPredationInstincts(world, agent, rules, log, ctx)) return;
 
   const previousBehavior = agent.behavior;
   agent.behavior = chooseBehavior(agent.needs);
@@ -134,7 +164,7 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
   }
 
   if (agent.behavior === "seekMate") {
-    applyMateSeeking(world, agent, log);
+    applyMateSeeking(world, agent, log, ctx);
     return;
   }
 
@@ -150,6 +180,7 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
           const tile = tileAt(world, agent.layer, target.x, target.y);
           if (tile?.stock !== undefined) tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
         }
+        grantExp(world, agent, EXP_ON_CONSUME, ctx, log);
         log?.record({
           kind: "consumed",
           tick: world.tick,
@@ -206,7 +237,7 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
  * `tickAgentNeeds` every tick and `tickAgentAction` only on an agent's
  * action tick.
  */
-export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: HuntRules): void {
-  tickAgentNeeds(agent);
-  tickAgentAction(world, agent, log, rules);
+export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext): void {
+  tickAgentNeeds(agent, world, ctx, log);
+  tickAgentAction(world, agent, log, rules, ctx);
 }

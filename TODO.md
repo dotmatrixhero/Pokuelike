@@ -289,6 +289,84 @@ produce a real story before player mechanics are worth building further.
       below) is reference-only; nothing reads `abilities.primary/secondary/
       hidden` at spawn or during combat.
 
+## Leveling / exp / evolution / skill points
+- [x] **Built: exp, real mainline growth curves, level-up loop, unbounded
+      move learning, level-based evolution, typed skill points.** See
+      DESIGN.md's "Leveling" section for the full write-up (growth-curve
+      verification results, exp sources/amounts, evolution mechanics, the
+      `applyMoveTreeWithSpend` spend-validation path) and real run findings.
+      Short version: importer now pulls `baseExp`/`levelMoves` per species;
+      `packages/engine/src/leveling.ts` has all six mainline growth curves
+      (verified against `poke_the_spire`'s raw exp tables, zero mismatches);
+      `grantExp`/`LevelingContext` wired into kills, passive trickle,
+      eat/drink, mate/birth, new-sector, and new-species-encountered exp
+      sources; level-ups loop multi-level, heal HP by the stat delta, learn
+      every unlocked move, grant typed+wildcard skill points, and check for
+      a level-gated evolution.
+- [ ] **Evolution mechanism is engine-tested but never observed in a real
+      run** — the honest gap, not a hidden one. Bulbasaur->Ivysaur needs
+      2535 cumulative exp (level 16, Medium Slow); a real run's income rate
+      put that on the order of 25,000-30,000 ticks, and runs past ~3000-5000
+      ticks risk timing out entirely on the sim's pre-existing unbounded
+      population growth (see below) before getting anywhere near that many
+      ticks. Either the non-combat exp trickle amounts need to be
+      meaningfully larger, or evolution needs a dedicated short scenario
+      (spawn one exp point below a threshold, tick once) instead of relying
+      on emergent long-run behavior to actually witness it.
+- [ ] **Evolved agents can land on a species outside the curated `SPECIES`
+      roster** (e.g. `"ivysaur"`, which `packages/data/src/species.ts` never
+      hand-curated — only base dex fields are used for evolved stats/types).
+      `packages/web`'s renderer looks up `SPECIES[agent.species]` for a
+      sprite key and would break on such an agent. Not hit by the headless
+      engine/runner path this feature validated against; a real gap for the
+      browser app once evolution is actually reachable in a run (see above).
+- [ ] **Status moves learned via `levelMoves` are recorded but not usable.**
+      Most of a real species' level-up moveset is status moves (Growl, Leech
+      Seed, etc.) that this sim has no engine for — `resolveMove` in
+      `packages/data/src/leveling.ts` returns `undefined` for them, so they
+      sit in `Agent.knownMoves` forever without a usable `MoveSpec`. Not a
+      bug, but worth noting: an agent's *effective* combat moveset will
+      often be much smaller than its `knownMoves` list once status moves
+      exist in a species' real levelMoves table (which is most of them).
+- [ ] **Non-combat exp trickle amounts are unguessed tuning** (trickle
+      0.02/tick, consume 0.5, mate-attempt 1, birth 3, new-sector 2,
+      new-species 2 — see DESIGN.md) — no canon formula exists for any of
+      these since mainline doesn't grant exp for surviving/eating/mating.
+      Revisit once a run shows whether leveling paces sensibly against the
+      sim's actual timescale (see the evolution gap above — current signs
+      point to "too slow for anything past early levels").
+- [ ] **A newborn's guaranteed level-up skill point required a follow-up
+      fix mid-feature** (see DESIGN.md): `spawnOffspring` didn't set
+      `Agent.types`, so `grantExp`'s guaranteed typed skill point (reads
+      `agent.types?.[0]`) silently never fired for the majority of level-ups
+      in a real run (most level-ups are newborns). Fixed by inheriting
+      `types` from the mother — cheap, but newborns still don't get a real
+      stats/moves combat profile at birth (pre-existing gap, see the
+      action-economy section of DESIGN.md) — only `types` was added.
+- [ ] **A real O(agents²) performance regression was found and fixed
+      mid-feature**: the "has this agent met a new species" check originally
+      scanned every other agent every action tick for every agent. Combined
+      with the sim's pre-existing unbounded Venusaur/Bulbasaur population
+      growth (see the "Real tactical combat" section of DESIGN.md), a
+      5000-tick run timed out (>90s) before this fix. Fixed by
+      short-circuiting the scan once an agent has recorded
+      `MAX_TRACKED_SPECIES` distinct species — caps the *added* cost, but
+      doesn't touch the underlying unbounded-population problem, which is
+      still the real, still-open item (see below and the reproduction/
+      predation carrying-capacity gap already tracked elsewhere in this
+      file). A long run is still at real risk of becoming impractically slow
+      independent of anything in this feature.
+- [ ] Item/trade/friendship evolutions are parsed into dex `conditions` but
+      explicitly not consumed (no item system, no trading, no friendship
+      stat exist) — only `level`-gated evolutions are checked. Matches the
+      explicit scope call in DESIGN.md's original design writeup.
+- [ ] Skill-point *spending* by an AI-controlled agent (an auto-spend
+      heuristic, eventually the player's own choice via a UI) doesn't exist
+      — `applyMoveTreeWithSpend` is real, tested plumbing that nothing calls
+      yet outside tests. Wild background agents accrue skill points
+      (harmlessly unused currency) but, per the existing scope call, never
+      call it.
+
 ## Art / assets
 - [ ] Sprite pipeline is bring-your-own (`packages/web/public/sprites/`) —
       decide on sprite sheet format/size once real art exists.

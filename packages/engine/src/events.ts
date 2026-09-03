@@ -1,4 +1,5 @@
 import type { BehaviorKind, Layer, Vec2 } from "./types.js";
+import type { PokemonType } from "./typing.js";
 
 export type SimEvent =
   | {
@@ -80,6 +81,38 @@ export type SimEvent =
       loserId: string;
       loserSpecies: string;
       pos: Vec2;
+    }
+  | {
+      kind: "leveledUp";
+      tick: number;
+      agentId: string;
+      species: string;
+      fromLevel: number;
+      toLevel: number;
+      exp: number;
+    }
+  | {
+      kind: "evolved";
+      tick: number;
+      agentId: string;
+      fromSpecies: string;
+      toSpecies: string;
+      level: number;
+    }
+  | {
+      kind: "learnedMove";
+      tick: number;
+      agentId: string;
+      species: string;
+      moveId: string;
+      level: number;
+    }
+  | {
+      kind: "gainedSkillPoint";
+      tick: number;
+      agentId: string;
+      species: string;
+      pointType: PokemonType | "wildcard";
     };
 
 /**

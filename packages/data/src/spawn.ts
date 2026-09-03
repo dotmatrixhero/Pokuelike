@@ -28,6 +28,12 @@ export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5):
     needs: createNeeds(),
     behavior: "idle",
     level,
+    exp: 0,
+    // Stored uppercase to match the dex move-key convention leveling.ts's
+    // level-move lookups use ("vine_whip" -> "VINE_WHIP") — every curated
+    // MOVES id happens to be the lowercased form of its dex key, so this is
+    // a safe, cheap normalization rather than a real key lookup.
+    knownMoves: species.moves.map((moveId) => moveId.toUpperCase()),
     types: species.types,
     moves,
     stats,

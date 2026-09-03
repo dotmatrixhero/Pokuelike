@@ -13,3 +13,4 @@ export * from "./predation.js";
 export * from "./reproduction.js";
 export * from "./flora.js";
 export * from "./simulation.js";
+export * from "./leveling.js";

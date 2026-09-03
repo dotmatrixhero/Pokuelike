@@ -100,6 +100,44 @@ export interface Agent {
    * missing data.
    */
   actionEnergy?: number;
+
+  /**
+   * Total accumulated exp (cumulative, not "toward next level" — matches the
+   * growth-curve threshold functions in leveling.ts, which are also
+   * cumulative-total functions). Absent/0 for a freshly spawned agent that
+   * hasn't earned any yet; `spawnAgent` sets this to 0 explicitly. See
+   * DESIGN.md's "Leveling" section.
+   */
+  exp?: number;
+  /**
+   * Move ids/keys this agent has ever learned, unbounded (no forgetting, no
+   * 4-move cap — a deliberate departure from mainline, see DESIGN.md). Not
+   * every entry necessarily has a corresponding `MoveSpec` in `moves` — a
+   * learned move that's a status move (no MoveSpec representation in this
+   * sim yet) is still recorded here for bookkeeping/event purposes even
+   * though it can't be selected in combat. `moves` stays the actual
+   * combat-usable subset that `pickBestMove` reads.
+   */
+  knownMoves?: string[];
+  /** Typed skill-point currency for `applyMoveTreeWithSpend` (moves.ts) — see DESIGN.md. */
+  skillPoints?: Partial<Record<PokemonType, number>>;
+  /** Untyped skill points that can fund any move's respec tree, regardless of type. */
+  wildcardSkillPoints?: number;
+  /**
+   * Coarse "have I been here" tracking for the new-area exp trickle — sector
+   * ids (e.g. "3,2" for a fixed-size grid bucket), not raw tiles, and capped
+   * (oldest dropped) so this can't grow unboundedly over a long run. See
+   * leveling.ts's `MAX_TRACKED_SECTORS`.
+   */
+  visitedSectors?: string[];
+  /**
+   * Species ids this agent has personally encountered before, for the
+   * "met a new species" exp trickle — capped for the same unbounded-growth
+   * reason as `visitedSectors`. Deliberately NOT per-agent-id memory (that
+   * really would grow forever); this is coarser, species-level "have I seen
+   * one of these before."
+   */
+  encounteredSpecies?: string[];
 }
 
 /** predator species id -> the species ids it hunts. */

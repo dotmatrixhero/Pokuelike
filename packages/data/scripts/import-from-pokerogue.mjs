@@ -407,6 +407,24 @@ function parseEvolutions(blockText) {
   return evos;
 }
 
+/** `levelMoves: [[level, MoveId.X], ...]` sibling array at the species-block level (not inside the PokemonSpecies config). */
+function parseLevelMoves(blockText) {
+  const marker = "levelMoves:";
+  const markerIdx = blockText.indexOf(marker);
+  if (markerIdx === -1) return [];
+  const bracketStart = blockText.indexOf("[", markerIdx);
+  const bracketEnd = matchBrace(blockText, bracketStart, "[", "]");
+  const arrText = blockText.slice(bracketStart + 1, bracketEnd);
+
+  const entries = [];
+  const entryRe = /\[\s*(-?\d+)\s*,\s*MoveId\.([A-Z0-9_]+)\s*\]/g;
+  let m;
+  while ((m = entryRe.exec(arrText))) {
+    entries.push([Number(m[1]), m[2]]);
+  }
+  return entries;
+}
+
 function parseGenerationFile(genNum) {
   const text = read(`data/balance/species/generation-0${genNum}.ts`);
   const entryRe = /generationOne\w*SpeciesData\[SpeciesId\.([A-Z0-9_]+)\]\s*=\s*\{|generation\w+SpeciesData\[SpeciesId\.([A-Z0-9_]+)\]\s*=\s*\{/g;
@@ -467,9 +485,11 @@ function parseGenerationFile(genNum) {
       catchRate: Number(extractField(baseText, "catchRate")),
       malePercent,
       growthRate: growthRateRaw,
+      baseExp: Number(extractField(baseText, "baseExp")),
       abilities: { primary: ability1, secondary: ability2, hidden: abilityHidden },
       eggTier: eggTierRaw,
       evolutions: parseEvolutions(block),
+      levelMoves: parseLevelMoves(block),
     });
   }
   return species;
@@ -580,7 +600,7 @@ writeGenerated(
 
 writeGenerated(
   "species.generated.ts",
-  `${GENERATED_NOTE("the species dex")}\nimport type { PokemonType } from "@pokuelike/engine";\n\n/**\n * Full species dex imported from PokeRogue: base-form stats/types/abilities/\n * catch data + evolutions, for every species across generations 1-9.\n *\n * SCOPE: base forms only. Alternate forms (regional variants, Mega Evolution,\n * Gigantamax, battle forms like Rotom/Necrozma, cosmetic forms) are NOT\n * imported — PokeRogue nests them inside each species' \`forms: [...]\` array\n * with their own copies of every scalar field, and reconciling "which form is\n * canonical" plus form-change triggers was judged out of scope for a data\n * import (see DESIGN.md). A future pass could add a separate forms table\n * keyed by species id.\n */\nexport interface EvolutionDexEntry {\n  /** Target species id (this dex's numbering, same as PokeRogue's SpeciesId). */\n  target: number;\n  targetName: string;\n  /** Minimum level, if level-based. Undefined for item/trade/friendship/etc. evolutions. */\n  level?: number;\n  /** Freeform key->raw-value bag for every other condition PokeRogue attaches (item, timeOfDay, ...) — not parsed further; see DESIGN.md. */\n  conditions: Record<string, string>;\n}\n\nexport interface SpeciesDexEntry {\n  id: number;\n  key: string;\n  name: string;\n  generation: number;\n  types: PokemonType[];\n  baseStats: { hp: number; attack: number; defense: number; spAttack: number; spDefense: number; speed: number };\n  catchRate: number;\n  /** Percent chance of being male, 0-100. null = genderless. */\n  malePercent: number | null;\n  /** PokeRogue GrowthRate enum key, e.g. "MEDIUM_SLOW". */\n  growthRate: string;\n  abilities: { primary?: string; secondary?: string; hidden?: string };\n  /** PokeRogue EggTier enum key, e.g. "COMMON". */\n  eggTier?: string;\n  evolutions: EvolutionDexEntry[];\n}`,
+  `${GENERATED_NOTE("the species dex")}\nimport type { PokemonType } from "@pokuelike/engine";\n\n/**\n * Full species dex imported from PokeRogue: base-form stats/types/abilities/\n * catch data + evolutions, for every species across generations 1-9.\n *\n * SCOPE: base forms only. Alternate forms (regional variants, Mega Evolution,\n * Gigantamax, battle forms like Rotom/Necrozma, cosmetic forms) are NOT\n * imported — PokeRogue nests them inside each species' \`forms: [...]\` array\n * with their own copies of every scalar field, and reconciling "which form is\n * canonical" plus form-change triggers was judged out of scope for a data\n * import (see DESIGN.md). A future pass could add a separate forms table\n * keyed by species id.\n */\nexport interface EvolutionDexEntry {\n  /** Target species id (this dex's numbering, same as PokeRogue's SpeciesId). */\n  target: number;\n  targetName: string;\n  /** Minimum level, if level-based. Undefined for item/trade/friendship/etc. evolutions. */\n  level?: number;\n  /** Freeform key->raw-value bag for every other condition PokeRogue attaches (item, timeOfDay, ...) — not parsed further; see DESIGN.md. */\n  conditions: Record<string, string>;\n}\n\nexport interface SpeciesDexEntry {\n  id: number;\n  key: string;\n  name: string;\n  generation: number;\n  types: PokemonType[];\n  baseStats: { hp: number; attack: number; defense: number; spAttack: number; spDefense: number; speed: number };\n  catchRate: number;\n  /** Percent chance of being male, 0-100. null = genderless. */\n  malePercent: number | null;\n  /** PokeRogue GrowthRate enum key, e.g. "MEDIUM_SLOW". */\n  growthRate: string;\n  /** Wild-battle base exp yield: floor(baseExp * defeatedLevel / 7) on a kill. */\n  baseExp: number;\n  abilities: { primary?: string; secondary?: string; hidden?: string };\n  /** PokeRogue EggTier enum key, e.g. "COMMON". */\n  eggTier?: string;\n  evolutions: EvolutionDexEntry[];\n  /** [level, MoveId enum key] pairs, e.g. [4, "VINE_WHIP"] -- key matches MoveDexEntry.key in moves.generated.ts. */\n  levelMoves: Array<[number, string]>;\n}`,
   `export const SPECIES_DEX: SpeciesDexEntry[] = ${tsLiteral(allSpecies)};\n\nexport const SPECIES_DEX_BY_KEY: Record<string, SpeciesDexEntry> = Object.fromEntries(\n  SPECIES_DEX.map((s) => [s.key, s])\n);\n`
 );
 

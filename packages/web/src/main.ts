@@ -1,5 +1,5 @@
 import { tickWorld } from "@pokuelike/engine";
-import { createDemoWorld, HUNT_RULES } from "@pokuelike/data";
+import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT } from "@pokuelike/data";
 import { drawWorld, TILE_SIZE } from "./renderer.js";
 
 const TICK_MS = 400;
@@ -16,5 +16,5 @@ function render(): void {
   requestAnimationFrame(render);
 }
 
-setInterval(() => tickWorld(world, undefined, HUNT_RULES), TICK_MS);
+setInterval(() => tickWorld(world, undefined, HUNT_RULES, LEVELING_CONTEXT), TICK_MS);
 render();

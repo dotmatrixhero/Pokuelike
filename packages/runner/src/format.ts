@@ -20,6 +20,14 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) attacked ${event.defenderSpecies} (${event.defenderId}) and missed`;
     case "defeated":
       return `[tick ${event.tick}] ${event.winnerSpecies} (${event.winnerId}) defeated ${event.loserSpecies} (${event.loserId}) at (${event.pos.x},${event.pos.y})`;
+    case "leveledUp":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) leveled up: ${event.fromLevel} -> ${event.toLevel} (exp ${event.exp})`;
+    case "evolved":
+      return `[tick ${event.tick}] ${event.agentId} evolved: ${event.fromSpecies} -> ${event.toSpecies} at level ${event.level}`;
+    case "learnedMove":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) learned ${event.moveId} at level ${event.level}`;
+    case "gainedSkillPoint":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) gained a ${event.pointType} skill point`;
   }
 }
 
