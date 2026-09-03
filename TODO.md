@@ -22,6 +22,16 @@ produce a real story before player mechanics are worth building further.
 - [x] Predation built and run — see "Ecosystem sim" below. First run with
       it produced an actual dramatic story: a Scyther killed 3 of 4
       Bulbasaur in the herd over 300 ticks.
+- [x] ASCII/color snapshot renderer, Brogue-style (`packages/runner/src/ascii.ts`,
+      `dump-frames.ts`) — glyph = species initial colored by primary type,
+      background = terrain shaded by elevation. Wired into the CLI
+      (`pnpm run run <ticks> "<tick,tick,...>"`) and into a JSON dump path
+      for building real-data artifacts. A real 2000-tick capture (kills at
+      58/114, Venusaur guardian killing the Scyther at 167, then Venusaur
+      going 2 -> 213 with zero starvation by tick 2000) is a sharper,
+      faster demonstration of the population-control gap below than the
+      run already written up in DESIGN.md's Starvation section — worth
+      remembering that these are noisy single samples, not fixed numbers.
 - [ ] Tuning gap found by the first run: an agent whose needs oscillate
       between just-under and just-over the 0.7 satisfied line (flat +0.4
       consume vs. 0.3 idle threshold) can permanently stop returning to

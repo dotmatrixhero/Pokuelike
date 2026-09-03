@@ -358,6 +358,36 @@ truly nothing here"; it doesn't solve "there's not enough here for this
 many mouths," which is the actual shape of the Venusaur crash. Not fixed
 — see TODO.md.
 
+## ASCII/color snapshot renderer — seeing the sim, Brogue-style
+
+**Built**, in response to "render an ascii image of snapshots... think
+Brogue": `packages/runner/src/ascii.ts` — `captureFrame(world)` walks the
+surface layer's tiles and alive agents into a `Frame` of `{char, fg, bg}`
+cells (agent glyph = species initial, colored by primary type via an
+18-type RGB table; terrain glyph/color per kind; background shade scales
+with tile elevation, mirroring the web renderer's elevation cue), and
+`frameToAnsi(frame)` renders it as 24-bit ANSI escape codes for the
+terminal. Wired into the runner CLI as an optional third argument —
+`pnpm run run <ticks> "<tick,tick,...>"` prints those snapshots after the
+event log. `dump-frames.ts` is the same capture path aimed at a JSON file
+instead of the terminal (plus per-frame species population counts), used
+to build a real-data HTML artifact.
+
+**Real run, 2000 ticks, snapshots at every kill/defeat plus fixed
+checkpoints:** this run told a *different* story than the one in the
+Starvation section above — same starting world, different dice. Scyther
+killed 2 of the 4 wild Bulbasaur (ticks 58 and 114) before a Venusaur
+guardian caught and killed it at tick 167 (`defeated` event, not just
+`killed` — the first time this project's log has shown the guardians
+actually winning). With the only predator gone, Venusaur went from 2 to
+213 individuals by tick 2000 with **zero recorded starvation events** —
+a cleaner, faster illustration of the "predator-free population has no
+brake yet" problem than the run that produced the 564-starved number,
+and a reminder that single-run numbers in this doc are one sample of a
+noisy process, not a fixed constant. Artifact with the actual frames:
+ask for the link, or regenerate with `dump-frames.ts` — nothing here is
+staged or touched up after capture.
+
 ## Stack
 
 - **pnpm workspace monorepo**, TypeScript everywhere.
