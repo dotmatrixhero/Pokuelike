@@ -448,14 +448,25 @@ produce a real story before player mechanics are worth building further.
       Revisit once a run shows whether leveling paces sensibly against the
       sim's actual timescale (see the evolution gap above — current signs
       point to "too slow for anything past early levels").
-- [ ] **A newborn's guaranteed level-up skill point required a follow-up
+- [x] **A newborn's guaranteed level-up skill point required a follow-up
       fix mid-feature** (see DESIGN.md): `spawnOffspring` didn't set
       `Agent.types`, so `grantExp`'s guaranteed typed skill point (reads
       `agent.types?.[0]`) silently never fired for the majority of level-ups
-      in a real run (most level-ups are newborns). Fixed by inheriting
-      `types` from the mother — cheap, but newborns still don't get a real
-      stats/moves combat profile at birth (pre-existing gap, see the
-      action-economy section of DESIGN.md) — only `types` was added.
+      in a real run (most level-ups are newborns). Initially patched by
+      inheriting `types` from the mother, but newborns still had no real
+      stats/moves combat profile at birth. Fully fixed with
+      `ensureCombatProfile` (`leveling.ts`) — computes real level-1
+      stats/hp/types/moves from the dex, same math `grantExp`'s level-up
+      loop uses, called from `spawnOffspring`.
+- [x] **Bred offspring inherited the mother's current (possibly evolved)
+      species instead of the line's base form** — a bred Venusaur produced
+      another Venusaur, not a Bulbasaur, which is backwards from mainline
+      (breeding always produces the base form; Bulbasaur is the "child
+      version," not a separately-bred species). Fixed with
+      `LevelingContext.baseSpeciesOf`, built from a reverse-evolution map
+      over the full imported dex (`packages/data/src/leveling.ts`).
+      Verified in a real run: `venusaur x venusaur` now consistently
+      produces `bulbasaur` offspring.
 - [ ] **A real O(agents²) performance regression was found and fixed
       mid-feature**: the "has this agent met a new species" check originally
       scanned every other agent every action tick for every agent. Combined

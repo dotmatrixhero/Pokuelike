@@ -6,6 +6,39 @@ import { MOVES, moveCanon } from "./moves.js";
 const SPECIES_KEY_BY_ID: Record<number, string> = Object.fromEntries(SPECIES_DEX.map((s) => [s.id, s.key]));
 
 /**
+ * Reverse of the dex's forward-only `evolutions` links: dex key -> the
+ * species it evolves *from* (its immediate pre-evolution), for walking a
+ * line back down to its base form. The dex only records "X evolves into Y
+ * at level N", never "Y evolves from X", so this is built once by scanning
+ * every species' evolutions and recording the target's prevo.
+ */
+const PREVO_KEY_BY_KEY: Record<string, string> = {};
+for (const species of SPECIES_DEX) {
+  for (const evo of species.evolutions) {
+    const targetKey = SPECIES_KEY_BY_ID[evo.target];
+    if (targetKey) PREVO_KEY_BY_KEY[targetKey] = species.key;
+  }
+}
+
+/**
+ * Walks a species back to the root of its evolutionary line — e.g.
+ * "venusaur" -> "ivysaur" -> "bulbasaur". Breeding always produces the base
+ * form (see `LevelingContext.baseSpeciesOf`'s doc comment in engine).
+ * Species outside the dex (shouldn't happen for a sim species id, but
+ * defensive) just return themselves.
+ */
+function baseSpeciesOf(speciesId: string): string {
+  let key = speciesId.toUpperCase();
+  // A cycle would spin forever; the dex has none, but this is cheap insurance.
+  const seen = new Set<string>();
+  while (PREVO_KEY_BY_KEY[key] && !seen.has(key)) {
+    seen.add(key);
+    key = PREVO_KEY_BY_KEY[key]!;
+  }
+  return key.toLowerCase();
+}
+
+/**
  * A sim species id (`Agent.species`) is always the lowercased dex key
  * (`speciesFromDex` in species.ts) — including for species that aren't part
  * of the curated `SPECIES` roster, since evolution can land an agent on one
@@ -19,6 +52,7 @@ function profileFromDexEntry(speciesId: string): LevelingProfile | undefined {
   return {
     growthRate: entry.growthRate as GrowthRateKey,
     baseStats: entry.baseStats,
+    types: entry.types,
     baseExp: entry.baseExp,
     levelMoves: entry.levelMoves,
     // Level-gated evolutions only — item/trade/friendship evolutions (no `level`)
@@ -76,4 +110,5 @@ function resolveMove(moveKey: string): MoveSpec | undefined {
 export const LEVELING_CONTEXT: LevelingContext = {
   getProfile: profileFromDexEntry,
   resolveMove,
+  baseSpeciesOf,
 };

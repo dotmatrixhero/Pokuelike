@@ -2,7 +2,7 @@ import type { Agent, Layer, Needs, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
-import { EXP_ON_BIRTH_PARENT, EXP_ON_MATE_ATTEMPT, grantExp, type LevelingContext } from "./leveling.js";
+import { EXP_ON_BIRTH_PARENT, EXP_ON_MATE_ATTEMPT, ensureCombatProfile, grantExp, type LevelingContext } from "./leveling.js";
 
 /**
  * Ticks before an agent can mate. A single global constant for now — real
@@ -73,11 +73,16 @@ function nearbySpawnTile(world: World, layer: Layer, origin: Vec2): Vec2 {
 
 let offspringSequence = 0;
 
-function spawnOffspring(world: World, mother: Agent, father: Agent): Agent {
+function spawnOffspring(world: World, mother: Agent, father: Agent, ctx?: LevelingContext): Agent {
   offspringSequence += 1;
-  return {
-    id: `${mother.species}-${world.tick}-${offspringSequence}`,
-    species: mother.species,
+  // Breeding always produces the base (pre-evolution) form, mainline-accurate:
+  // a bred Venusaur's offspring hatches as a Bulbasaur, never another
+  // Venusaur — Bulbasaur is the "child version," Venusaur just what an adult
+  // grows into, not a separately-bred species. See LevelingContext.baseSpeciesOf.
+  const species = ctx?.baseSpeciesOf?.(mother.species) ?? mother.species;
+  const child: Agent = {
+    id: `${species}-${world.tick}-${offspringSequence}`,
+    species,
     pos: nearbySpawnTile(world, mother.layer, mother.pos),
     layer: mother.layer,
     homeLayer: mother.homeLayer,
@@ -94,12 +99,13 @@ function spawnOffspring(world: World, mother: Agent, father: Agent): Agent {
     age: 0,
     level: 1,
     exp: 0,
-    // Cheap to inherit even though newborns don't get a full stats/moves combat
-    // profile (see the pre-existing TODO on that) — without this, a newborn's
-    // guaranteed per-level-up skill point (typed by primary type, see leveling.ts)
-    // silently never fires, since `grantExp` reads `agent.types?.[0]`.
-    types: mother.types,
   };
+  // Backfills stats/hp/types/moves for the base species at level 1 — without
+  // this a newborn had no combat profile at all (couldn't fight, and its
+  // guaranteed per-level-up skill point silently never fired, since
+  // `grantExp` reads `agent.types?.[0]`). No-op without `ctx` (bare tests).
+  ensureCombatProfile(child, ctx);
+  return child;
 }
 
 /**
@@ -121,7 +127,7 @@ export function applyMateSeeking(world: World, agent: Agent, log?: EventLog, ctx
 
   if (manhattan(agent.pos, partner.pos) <= 1) {
     if (agent.sex === "female") {
-      const child = spawnOffspring(world, agent, partner);
+      const child = spawnOffspring(world, agent, partner, ctx);
       world.agents.push(child);
       log?.record({
         kind: "born",

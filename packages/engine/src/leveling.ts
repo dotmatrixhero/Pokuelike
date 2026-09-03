@@ -66,6 +66,8 @@ export function levelForExp(growthRate: GrowthRateKey, exp: number): number {
 export interface LevelingProfile {
   growthRate: GrowthRateKey;
   baseStats: BaseStats;
+  /** Base form's typing — a newborn's starting types (see `baseSpeciesOf` below: breeding produces the base form, not whatever the parent evolved into). */
+  types: PokemonType[];
   /** Wild-battle base exp yield: floor(baseExp * defeatedLevel / 7) on a kill. */
   baseExp: number;
   /** [level, move key] pairs, unsorted-safe — every entry with level <= newLevel is learned. */
@@ -79,6 +81,16 @@ export interface LevelingContext {
   getProfile(speciesId: string): LevelingProfile | undefined;
   /** Resolves a level-move's key to a usable `MoveSpec`. Undefined = can't be represented in combat (e.g. a status move — see DESIGN.md) but is still recorded in `knownMoves` and logged. */
   resolveMove(moveKey: string): MoveSpec | undefined;
+  /**
+   * The root (pre-evolution) species of `speciesId`'s line — e.g.
+   * "venusaur" -> "bulbasaur". Breeding always produces the base form
+   * (mainline-accurate: a bred Venusaur's offspring hatches as a
+   * Bulbasaur, never another Venusaur), so `spawnOffspring` uses this
+   * instead of the mother's own (possibly evolved) species. Optional so
+   * bare-engine tests without dex data keep working — falls back to the
+   * parent's own species when absent.
+   */
+  baseSpeciesOf?(speciesId: string): string;
 }
 
 // --- Tuning constants for non-combat exp sources (sim-original, no canon formula exists for these — see DESIGN.md) ---
@@ -147,6 +159,42 @@ export function maybeGrantHitSkillPoint(
   rng: () => number = Math.random
 ): void {
   if (rng() < SKILLPOINT_ON_HIT_CHANCE) grantSkillPoint(agent, moveType, world, log);
+}
+
+/**
+ * Fills in a combat profile (`stats`/`hp`/`maxHp`/`types`/`moves`/
+ * `knownMoves`) for an agent that doesn't have one yet — currently just
+ * newborns (`spawnOffspring` in reproduction.ts), which used to enter the
+ * world with no stats or moves at all, unable to fight or be targeted by
+ * `pickBestMove` despite being full `Agent` records. Uses the *current*
+ * `agent.level` (1 for a newborn) and `agent.species`, same dex-backed math
+ * `grantExp`'s level-up loop already uses, so a level-5 agent constructed
+ * this way ends up identical to one that leveled there naturally. No-op if
+ * `ctx` or a profile for the species is unavailable, or if the agent
+ * already has stats (never overwrites an existing combat profile).
+ */
+export function ensureCombatProfile(agent: Agent, ctx?: LevelingContext): void {
+  if (agent.stats) return;
+  if (!ctx) return;
+  const profile = ctx.getProfile(agent.species);
+  if (!profile) return;
+
+  const level = agent.level ?? 1;
+  const stats = calculateStats(profile.baseStats, level);
+  agent.stats = stats;
+  agent.maxHp = stats.maxHp;
+  agent.hp = stats.maxHp;
+  agent.types = profile.types;
+
+  agent.knownMoves = agent.knownMoves ?? [];
+  agent.moves = agent.moves ?? [];
+  for (const [unlockLevel, moveKey] of profile.levelMoves) {
+    if (unlockLevel > level) continue;
+    if (agent.knownMoves.includes(moveKey)) continue;
+    agent.knownMoves.push(moveKey);
+    const spec = ctx.resolveMove(moveKey);
+    if (spec && !agent.moves.some((m) => m.id === spec.id)) agent.moves.push(spec);
+  }
 }
 
 /**
