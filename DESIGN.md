@@ -2356,6 +2356,94 @@ area) — it picks one random distant point per agent, independently.
     `updateHerdMigrations` check — 1,000 ticks in ~1.8s, 10,000 in ~5.1s,
     matching the biome-generation feature's own numbers.
 
+## Dynamics that move a content herd: extra migration triggers, day/night, weather
+
+Decided, not built yet. Direct feedback after herd migration landed as
+purely scarcity-driven: fine for scarcity to stay occasional (per the
+honest finding that the new map is abundant enough that it rarely fires),
+but a herd needs reasons to move that **aren't** "we're starving" or it
+just sits there forever. Five dynamics, agreed on together, split into
+three build phases sequenced to avoid three agents colliding on the same
+files (`herdMigration.ts`/`herding.ts`/`events.ts` get touched by more than
+one of these):
+
+**Phase 1 — generalize herd migration to more trigger reasons** (smallest,
+builds first, touches `herdMigration.ts`/`herding.ts` directly so it goes
+before the phases that plug into it):
+- **Predator pressure**: a rolling per-herd count of hunt/fight events
+  involving its members over a real window (e.g. last 300 ticks); crossing
+  a threshold triggers migration with reason `"predator_pressure"`,
+  destination scoring gets a new term biasing away from the threat's last
+  known position on top of the existing resource-richness scoring.
+- **Wanderlust**: a small, constant per-tick-per-herd chance (deliberately
+  low — something like 1-in-several-thousand, tuned so it reads as
+  occasional restlessness, not constant churn) of triggering a migration
+  with no bad condition at all, to a moderately distant point that doesn't
+  need to be *better*, just different. This is the direct, simplest answer
+  to "otherwise they'll just stay there forever." Scale the chance with
+  boldness/sociability (already-built Disposition axes) so bolder/more
+  social herds wander somewhat more.
+- **Territorial displacement**: two herds of the *same species* with
+  centroids within roughly `2x COHESION_DISTANCE` of each other for a
+  sustained duration pushes the smaller one (by member count) to migrate
+  away — destination scoring gets an "away from the other herd" term.
+- All three reuse the exact shared-state/target-selection/cohesion-bias
+  machinery already built for scarcity — this phase is about adding
+  trigger *evaluators*, not new core plumbing. Generalize whatever
+  `herdMigrations` entry shape exists to carry a trigger-reason string if
+  it doesn't already (scarcity's existing entries already need one for
+  the `herdMigrating` event's `reason` field, so this may already be
+  halfway there).
+
+**Phase 2 — day/night cycle** (mostly independent of Phase 1, still
+sequenced after it since both touch `events.ts`):
+- A fast local cycle, independent of the existing 1000-tick season sine
+  wave — something like 200 ticks per full day, a light level 0
+  (midnight) to 1 (noon).
+- Species get an `activityPattern: "diurnal" | "nocturnal" |
+  "crepuscular" | "cathemeral"` field, defaulting to `"cathemeral"`
+  (active any time) for anything unspecified so existing species/tests
+  don't silently change behavior unless explicitly set. Off-hours for an
+  agent's pattern apply a real but partial effective-Speed penalty
+  (composing with the existing injury/elevation modifiers, not
+  replacing them) and shift a predator's hunt-eagerness threshold the
+  way Disposition's aggression already does — a nocturnal predator
+  actually hunts more at night, not just flavor text.
+- Night reduces `computeVisible`'s effective radius for everyone by
+  default (a real, flat penalty — document the magnitude) — this is the
+  natural next consumer of the FOV system now that biomes/elevation
+  already wired it up for something.
+- New `nightfall`/`daybreak` events for the log's narrative surface —
+  cheap, matches the project's "the log needs semantic content" ethos.
+
+**Phase 3 — weather, spatial and moving, not the existing invisible global
+season** (biggest, sequenced last since it plugs into Phase 1's
+generalized trigger system for storm-driven shelter-seeking):
+- A small number (1-3) of active weather systems at once, each with a
+  type (`rain` | `storm` | `drought` | `coldSnap`), a center, a radius,
+  and a lifespan — spawns, drifts slowly in a random direction, dissipates,
+  and a new one spawns periodically. Spawn likelihood per type should be
+  biome-influenced (Wetland/Grassland skew rain, Badlands skew
+  drought/heat, Highland skews storms/cold) — real use of the biome data
+  from the environmental-generation work.
+- Effects, local to a cell's radius: **rain** boosts flora regrowth and
+  slightly eases thirst decay; **drought** suppresses regrowth and raises
+  thirst decay (deliberately composes with/accelerates the existing
+  scarcity trigger rather than needing a separate mechanic — real reuse,
+  not duplication); **storm** meaningfully reduces visibility/accuracy
+  (bigger penalty than night) and builds per-agent "exposure" while caught
+  in it without forest/canopy cover nearby — sustained exposure triggers a
+  herd migration via Phase 1's generalized system, reason `"weather"`,
+  destination scored toward the nearest good-cover biome patch; **cold
+  snap** adds a further Speed penalty (composing with everything else)
+  for species without documented cold tolerance.
+- New `weatherChanged` event (type, area, start/end) for the log.
+- **Explicitly still open**: exact spawn rates/radii/lifespans and the
+  exposure-to-migration threshold are sim-original tuning guesses like
+  everything else in this project, to judge against a real run; whether
+  cold/heat tolerance needs real per-species/per-type data or a flat
+  default is fine for a first pass.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays
