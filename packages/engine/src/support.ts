@@ -1,10 +1,11 @@
-import type { Agent, HuntRules, InventoryItem, Vec2, World } from "./types.js";
+import type { Agent, HuntRules, InventoryItem, TerrainKind, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
 import { CONSUME_STOCK_AMOUNT } from "./flora.js";
 import { agentsWithin, isPreyOf, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS } from "./predation.js";
+import { findNearestIndexed } from "./resourceIndex.js";
 
 /**
  * Faint/finish-off, heal-over-time, and herd support (inventory, food
@@ -125,6 +126,61 @@ export function effectiveSpeed(agent: Agent, baseSpeed: number): number {
   return baseSpeed * fraction;
 }
 
+// --- Elevation/terrain -> effective movement speed (see DESIGN.md's "Environmental generation..." section) ---
+
+/** Sand/mud slow movement; every other terrain kind is neutral. Sim-original magnitudes, not canon. */
+const TERRAIN_SPEED_MULTIPLIER: Partial<Record<TerrainKind, number>> = { sand: 0.75, mud: 0.5 };
+
+/** The flat per-terrain-kind multiplier for whichever tile an agent just moved onto. 1 (neutral) for anything not in the table above. */
+export function terrainSpeedMultiplier(terrain: TerrainKind): number {
+  return TERRAIN_SPEED_MULTIPLIER[terrain] ?? 1;
+}
+
+/** How much effective speed one unit of elevation gain/loss is worth, per step taken. */
+const ELEVATION_SPEED_PER_UNIT = 0.06;
+/** Floors/caps so a single very steep step can't zero out an agent's speed or double it outright. */
+const MIN_ELEVATION_SPEED_MULTIPLIER = 0.4;
+const MAX_ELEVATION_SPEED_MULTIPLIER = 1.5;
+
+/**
+ * Moving to a higher tile than the one an agent just left costs speed (the
+ * multiplier drops below 1); moving to a lower one is a discount (above 1).
+ * Flat ground (delta 0) is neutral. Sim-original magnitude/shape — not
+ * canon, a genuine design call for this feature — clamped at both ends so
+ * neither a cliff nor a chasm is a literal "never acts again"/"acts twice."
+ */
+export function elevationSpeedMultiplier(fromElevation: number, toElevation: number): number {
+  const delta = toElevation - fromElevation;
+  const multiplier = 1 - delta * ELEVATION_SPEED_PER_UNIT;
+  return Math.max(MIN_ELEVATION_SPEED_MULTIPLIER, Math.min(MAX_ELEVATION_SPEED_MULTIPLIER, multiplier));
+}
+
+/**
+ * The combined elevation+terrain multiplier for the step an agent just took,
+ * as one number — called once right after movement (simulation.ts's
+ * `tickWorld`) and stashed on `agent.terrainSpeedFactor` until the agent's
+ * next move overwrites it. Composes **multiplicatively** with the existing
+ * injury-based `effectiveSpeed`, applied in that order: `actionSpeedOf`
+ * (simulation.ts) multiplies base Speed by this factor first, then hands
+ * the result to `effectiveSpeed`'s HP-fraction scaling — i.e.
+ * `finalSpeed = baseSpeed * elevationSpeedMultiplier * terrainSpeedMultiplier * injuryFraction(floored)`.
+ * A badly hurt agent trudging uphill through mud is slower on both axes at
+ * once, not just whichever one is worse.
+ *
+ * Deliberately a *post-move* snapshot rather than gating the move that
+ * produced it: Speed is spent to decide whether an action happens before
+ * that action's movement is even chosen (see simulation.ts's
+ * `accumulateActionEnergy`), so a genuinely predictive "this step will be
+ * slow, don't let it happen yet" isn't available without restructuring that
+ * order — a scope call forced by the existing architecture, not a design
+ * preference. The qualitative effect (climb slows you down, descend speeds
+ * you up, rough ground is generally slower) still shows up in a real run,
+ * just applied to the *next* action rather than the one just taken.
+ */
+export function movementSpeedFactor(fromElevation: number, toElevation: number, toTerrain: TerrainKind): number {
+  return elevationSpeedMultiplier(fromElevation, toElevation) * terrainSpeedMultiplier(toTerrain);
+}
+
 // --- Heal over time + recovery ---
 
 /**
@@ -228,20 +284,7 @@ function findHungryHerdmate(world: World, agent: Agent): Agent | undefined {
 }
 
 function findNearestFoodTile(world: World, agent: Agent): Vec2 | undefined {
-  let best: Vec2 | undefined;
-  let bestDist = Infinity;
-  for (let y = 0; y < world.height; y++) {
-    for (let x = 0; x < world.width; x++) {
-      const tile = tileAt(world, agent.layer, x, y);
-      if (tile?.terrain !== "food" || (tile.stock ?? 0) <= 0) continue;
-      const dist = manhattan(agent.pos, { x, y });
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = { x, y };
-      }
-    }
-  }
-  return best;
+  return findNearestIndexed(world, agent.layer, agent.pos, "food");
 }
 
 function deliverFoodItem(agent: Agent): InventoryItem | undefined {

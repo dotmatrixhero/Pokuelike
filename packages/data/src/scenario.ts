@@ -1,27 +1,68 @@
 import {
-  createWorld,
-  setTile,
-  setElevation,
+  generateWorld,
+  findWalkableNear,
   createNeeds,
-  type TerrainKind,
   type World,
 } from "@pokuelike/engine";
 import { spawnAgent } from "./spawn.js";
 
-export const SCENARIO_WIDTH = 24;
-export const SCENARIO_HEIGHT = 16;
+/**
+ * ~90x60 (up from the old hand-authored 24x16) — DESIGN.md's "something like
+ * 80x60 or bigger" ask. Picked as an exact 3.75x scale-up of the old 24x16
+ * box (90 = 24*3.75, 60 = 16*3.75) purely so the old hand-picked spawn
+ * anchors below scale cleanly onto the new map without re-deriving them from
+ * scratch; the actual terrain is now fully procedural, not a scaled-up copy
+ * of the old layout. Confirmed to run fine at this size in a real 1000-tick
+ * run (see DESIGN.md's findings) with the resourceIndex.ts fix in place —
+ * see that file's doc comment for why the naive O(width*height) nearest-tile
+ * scan needed addressing at this scale.
+ */
+export const SCENARIO_WIDTH = 90;
+export const SCENARIO_HEIGHT = 60;
 
-function fillRect(
-  world: World,
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-  terrain: TerrainKind
-): void {
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) setTile(world, "surface", x, y, terrain);
-  }
+/**
+ * Fixed seed for the one demo world both apps show — deterministic and
+ * reproducible (see worldgen.ts), so a bug reported against "the demo world"
+ * is always the same map. Change it to get a different roll of the same
+ * biome/generation parameters.
+ */
+export const SCENARIO_SEED = 20260903;
+
+/** The old hand-authored map's dimensions — every anchor below is expressed in these coordinates, then scaled. */
+const OLD_WIDTH = 24;
+const OLD_HEIGHT = 16;
+const SCALE_X = SCENARIO_WIDTH / OLD_WIDTH;
+const SCALE_Y = SCENARIO_HEIGHT / OLD_HEIGHT;
+
+/**
+ * Scales one of the old 24x16 hand-authored map's coordinates onto the new
+ * generated map, then finds the nearest actually-walkable tile to it — the
+ * old anchors picked sensible, spread-out *territories* (herd land,
+ * Scyther's hunting ground, etc.), which is still useful structure to keep,
+ * but procedural generation doesn't guarantee the exact scaled tile itself
+ * is walkable (it might land on a boulder, tree, or lake).
+ */
+function anchor(world: World, x: number, y: number) {
+  return findWalkableNear(world, "surface", x * SCALE_X, y * SCALE_Y);
+}
+
+/**
+ * Same scaling, for underground/canopy — those layers are always a plain
+ * flat grid (no obstacles/elevation there, a Surface-only generation pass —
+ * see worldgen.ts), so every tile is walkable and no `findWalkableNear`
+ * search is needed. Was a real bug in an earlier pass of this feature:
+ * these positions used to be computed directly against the *new*
+ * SCENARIO_WIDTH/HEIGHT (e.g. `SCENARIO_WIDTH - 3`) while sharing anchors
+ * with code still written in the old 24x16 frame, which put predator and
+ * prey in opposite corners of the new, much bigger map — far outside
+ * detection range of each other for the entire length of a real run,
+ * confirmed by a 1000-tick run with zero "fought"/"killed" events on either
+ * pair. Scaling from the *old* frame consistently, the same way `anchor`
+ * does for the surface, keeps them exactly as close (relatively) as they
+ * were on the original map.
+ */
+function scaledPos(x: number, y: number) {
+  return { x: Math.round(x * SCALE_X), y: Math.round(y * SCALE_Y) };
 }
 
 /**
@@ -37,70 +78,20 @@ function fillRect(
  * map per layer. Every agent gets real stats/types/moves via spawnAgent —
  * see DESIGN.md's combat section.
  *
- * The map used to be almost entirely open floor with exactly one food tile
- * and one water tile — every hungry or thirsty agent in the whole
- * population funneled onto the same couple of tiles, which (combined with
- * a since-fixed bug where offspring spawned directly on their mother) is
- * why a real run ended with 168 of 264 agents stacked on a single tile.
- * Multiple separated resource clusters plus real obstacles fix the
- * "everyone converges on one point" failure mode at the source instead of
- * just papering over it in the renderer.
+ * The surface layer itself is now procedurally generated (worldgen.ts) —
+ * biomes, obstacles, elevation, all real terrain variety instead of one
+ * hand-authored flat 24x16 box with two water holes and a couple of walls.
+ * See DESIGN.md's "Environmental generation, biomes, obstacles, and
+ * elevation-aware movement/fog" section for the full design and real-run
+ * findings.
  */
-export function createDemoWorld(): World {
-  const world = createWorld(SCENARIO_WIDTH, SCENARIO_HEIGHT);
-
-  // Northwest pond (the herd's water) and a second pool up in the
-  // Scyther's northeast hunting ground, so thirst doesn't force the whole
-  // map to one corner.
-  fillRect(world, 1, 1, 3, 2, "water");
-  fillRect(world, SCENARIO_WIDTH - 4, 2, SCENARIO_WIDTH - 3, 3, "water");
-
-  // ~20 starting food tiles instead of 3 — food now dies off and gets
-  // eaten out fast (see flora.ts), so the population needs a real starting
-  // buffer while natural seeding/spreading catches up. Clustered around
-  // the same three territories as before (herd/southwest/Scyther), plus
-  // scattered singles so no single area is a single point of failure.
-  const FOOD_FLAVOR_CYCLE = ["oran", "pecha", "cheri", "sitrus"] as const;
-  const STARTING_FOOD_TILES: Array<[number, number]> = [
-    // herd's usual patch, southeast (near (20,13), avoiding Diglett's spawn at (21,13))
-    [19, 12], [20, 12], [19, 13], [20, 13],
-    // southwest
-    [4, 12], [5, 12], [4, 13], [5, 13],
-    // Scyther's territory, northeast
-    [21, 4], [22, 4], [21, 5], [22, 5],
-    // scattered singles, spread across the rest of the map
-    [10, 3], [14, 3], [16, 9], [19, 9], [10, 13], [16, 12], [3, 9], [7, 4],
-  ];
-  STARTING_FOOD_TILES.forEach(([x, y], i) => {
-    setTile(world, "surface", x, y, "food", undefined, FOOD_FLAVOR_CYCLE[i % FOOD_FLAVOR_CYCLE.length]);
-  });
-
-  setTile(world, "surface", SCENARIO_WIDTH - 5, 2, "sunbeam");
-
-  // A low ridge with a small peak running through the middle of the map —
-  // elevation the Venusaur guardians hold as high ground.
-  for (let x = 6; x <= 14; x++) setElevation(world, "surface", x, 7, 2);
-  for (let x = 9; x <= 11; x++) setElevation(world, "surface", x, 6, 3);
-
-  // Real obstacles: a rocky outcrop, a wall corner, a scattered boulder
-  // pair, and a broken wall line with a gap to duck through — breaking up
-  // the open floor and giving the tactical combat something to route
-  // around instead of every fight happening on a featureless plain.
-  fillRect(world, 13, 9, 14, 10, "wall");
-  setTile(world, "surface", 17, 4, "wall");
-  setTile(world, "surface", 18, 4, "wall");
-  setTile(world, "surface", 17, 5, "wall");
-  setTile(world, "surface", 7, 12, "wall");
-  setTile(world, "surface", 8, 12, "wall");
-  setTile(world, "surface", 10, 11, "wall");
-  setTile(world, "surface", 11, 11, "wall");
-  // gap at (12, 11) — a chokepoint, not a wall
-  setTile(world, "surface", 13, 11, "wall");
+export function createDemoWorld(seed: number = SCENARIO_SEED): World {
+  const world = generateWorld(SCENARIO_WIDTH, SCENARIO_HEIGHT, seed);
 
   // Two mated pairs, so reproduction has someone to pair with from the start.
   // No `age` set — undefined is treated as already mature (see reproduction.ts).
   const herd = Array.from({ length: 4 }, (_, i) => ({
-    ...spawnAgent("bulbasaur", `bulbasaur-${i}`, { x: 5 + i, y: 6 }, 5),
+    ...spawnAgent("bulbasaur", `bulbasaur-${i}`, anchor(world, 5 + i, 6), 5),
     needs: createNeeds({ thirst: 0.4 + i * 0.1 }),
     herdId: "bulbasaur-herd",
     sex: (i % 2 === 0 ? "male" : "female") as "male" | "female",
@@ -112,19 +103,19 @@ export function createDemoWorld(): World {
   // pick there — pickBestMove actually gets this right on its own).
   const guardians = [
     {
-      ...spawnAgent("venusaur", "venusaur-0", { x: 4, y: 7 }, 20),
+      ...spawnAgent("venusaur", "venusaur-0", anchor(world, 4, 7), 20),
       herdId: "bulbasaur-herd",
       sex: "male" as const,
     },
     {
-      ...spawnAgent("venusaur", "venusaur-1", { x: 9, y: 7 }, 20),
+      ...spawnAgent("venusaur", "venusaur-1", anchor(world, 9, 7), 20),
       herdId: "bulbasaur-herd",
       sex: "female" as const,
     },
   ];
 
   const hunter = {
-    ...spawnAgent("scyther", "scyther-0", { x: SCENARIO_WIDTH - 2, y: 1 }, 8),
+    ...spawnAgent("scyther", "scyther-0", anchor(world, OLD_WIDTH - 2, 1), 8),
     needs: createNeeds({ hunger: 0.3 }),
     sex: "female" as const,
   };
@@ -136,53 +127,55 @@ export function createDemoWorld(): World {
   // layer. Diglett/Sandshrew evolving into Dugtrio/Sandslash escapes
   // predation automatically — Onix's preysOn only lists the base species
   // ids, same trick as Venusaur guarding Bulbasaur (see species.ts).
+  // Underground is still the plain flat grid (no obstacles/elevation there
+  // — a Surface-only pass, see worldgen.ts), so every tile is walkable and
+  // these just need `scaledPos`, not the walkability search `anchor` does.
   const undergroundColony = [
     {
-      ...spawnAgent("diglett", "diglett-0", { x: SCENARIO_WIDTH - 3, y: SCENARIO_HEIGHT - 3 }, 5),
+      ...spawnAgent("diglett", "diglett-0", scaledPos(OLD_WIDTH - 3, OLD_HEIGHT - 3), 5),
       needs: createNeeds({ hunger: 0.2 }),
       herdId: "underground-colony",
       sex: "male" as const,
     },
     {
-      ...spawnAgent("diglett", "diglett-1", { x: SCENARIO_WIDTH - 4, y: SCENARIO_HEIGHT - 3 }, 5),
+      ...spawnAgent("diglett", "diglett-1", scaledPos(OLD_WIDTH - 4, OLD_HEIGHT - 3), 5),
       herdId: "underground-colony",
       sex: "female" as const,
     },
     {
-      ...spawnAgent("sandshrew", "sandshrew-0", { x: SCENARIO_WIDTH - 3, y: SCENARIO_HEIGHT - 4 }, 5),
+      ...spawnAgent("sandshrew", "sandshrew-0", scaledPos(OLD_WIDTH - 3, OLD_HEIGHT - 4), 5),
       herdId: "underground-colony",
       sex: "male" as const,
     },
     {
-      ...spawnAgent("sandshrew", "sandshrew-1", { x: SCENARIO_WIDTH - 4, y: SCENARIO_HEIGHT - 4 }, 5),
+      ...spawnAgent("sandshrew", "sandshrew-1", scaledPos(OLD_WIDTH - 4, OLD_HEIGHT - 4), 5),
       herdId: "underground-colony",
       sex: "female" as const,
     },
   ];
   const onix = {
-    ...spawnAgent("onix", "onix-0", { x: 2, y: SCENARIO_HEIGHT - 2 }, 10),
+    ...spawnAgent("onix", "onix-0", scaledPos(2, OLD_HEIGHT - 2), 10),
     needs: createNeeds({ hunger: 0.3 }),
     sex: "male" as const,
   };
 
   // Canopy: a small Pidgey flock with Spearow hunting it, mirroring the
-  // same pattern one layer up. Previously Pidgey was a single agent with no
-  // herd and nothing to escape from.
+  // same pattern one layer up.
   const pidgeyFlock = [
     {
-      ...spawnAgent("pidgey", "pidgey-0", { x: 2, y: 2 }, 5),
+      ...spawnAgent("pidgey", "pidgey-0", scaledPos(2, 2), 5),
       needs: createNeeds({ thirst: 0.2 }),
       herdId: "pidgey-flock",
       sex: "female" as const,
     },
     {
-      ...spawnAgent("pidgey", "pidgey-1", { x: 3, y: 2 }, 5),
+      ...spawnAgent("pidgey", "pidgey-1", scaledPos(3, 2), 5),
       herdId: "pidgey-flock",
       sex: "male" as const,
     },
   ];
   const spearow = {
-    ...spawnAgent("spearow", "spearow-0", { x: SCENARIO_WIDTH - 2, y: SCENARIO_HEIGHT - 2 }, 10),
+    ...spawnAgent("spearow", "spearow-0", scaledPos(OLD_WIDTH - 2, OLD_HEIGHT - 2), 10),
     needs: createNeeds({ hunger: 0.3 }),
     sex: "female" as const,
   };

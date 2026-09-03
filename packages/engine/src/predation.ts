@@ -1,5 +1,4 @@
 import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
-import type { PokemonType } from "./typing.js";
 import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { stepAway, stepToward } from "./movement.js";
@@ -7,6 +6,8 @@ import { migrate } from "./migration.js";
 import { calculateDamage, pickBestMove, useMove, withinMoveRange, rollAccuracy, rollCritical } from "./combat.js";
 import { grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
+import { isPathClear } from "./fov.js";
+import { tileAt } from "./world.js";
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
@@ -157,10 +158,40 @@ function isCriticallyHurt(agent: Agent): boolean {
   return agent.hp / agent.maxHp <= RETREAT_HP_FRACTION;
 }
 
-/** Can `agent` actually hit something `distance` away right now, given its best move's reach? */
-function canAttackFromHere(agent: Agent, distance: number, defenderTypes: PokemonType[]): boolean {
-  const move = pickBestMove(agent, defenderTypes);
-  return move !== undefined && withinMoveRange(move, distance);
+/**
+ * Can `agent` actually hit `target` (already known to be `distance` tiles
+ * away) right now? Requires both a move whose reach covers `distance` AND an
+ * unobstructed straight-line path to the target — a tree, boulder, or wall
+ * between attacker and target now blocks a line-shaped move's path exactly
+ * like it blocks ambient line of sight (fov.ts's `isPathClear`), not just
+ * cosmetic FOV. Previously this only checked range, so a ranged attacker
+ * could "shoot" straight through an obstacle it couldn't see or walk
+ * through — see DESIGN.md's obstacle-combat section.
+ */
+function canAttackFromHere(world: World, agent: Agent, target: Agent, distance: number): boolean {
+  const move = pickBestMove(agent, target.types ?? []);
+  if (!move || !withinMoveRange(move, distance)) return false;
+  return isPathClear(world, agent.layer, agent.pos, target.pos);
+}
+
+/** True if a "bush" tile is what `agent` is currently standing on — see `Tile.concealment`. */
+function isConcealed(world: World, agent: Agent): boolean {
+  return tileAt(world, agent.layer, agent.pos.x, agent.pos.y)?.concealment === true;
+}
+
+/** How much a bush shrinks the effective radius at which something standing in it gets noticed — real, not cosmetic. Sim-original magnitude, not canon. */
+const BUSH_CONCEALMENT_DETECTION_REDUCTION = 2;
+
+/**
+ * Is `target` within `baseRadius` of `observerPos`, accounting for
+ * concealment? A concealed target effectively needs to be
+ * `BUSH_CONCEALMENT_DETECTION_REDUCTION` tiles *closer* than an exposed one
+ * before it's noticed — floored so concealment can never make a target
+ * fully undetectable at any distance, only harder to spot at range.
+ */
+function isDetectable(world: World, observerPos: Vec2, target: Agent, baseRadius: number): boolean {
+  const radius = isConcealed(world, target) ? Math.max(1, baseRadius - BUSH_CONCEALMENT_DETECTION_REDUCTION) : baseRadius;
+  return manhattan(observerPos, target.pos) <= radius;
 }
 
 export function isPreyOfAnything(rules: HuntRules, species: string): boolean {
@@ -387,7 +418,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
         logBehaviorChange(log, world, agent, "fight");
         agent.behavior = "fight";
         agent.fightTarget = threat.id;
-        if (canAttackFromHere(agent, distance, threat.types ?? [])) {
+        if (canAttackFromHere(world, agent, threat, distance)) {
           resolveHit(world, agent, threat, log, "defeated", ctx);
         } else {
           agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
@@ -401,8 +432,8 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
   // treating it as the threat it was until it's truly dead, which is what lets
   // a mob land the finishing blow across multiple ticks/hits rather than the
   // predator's faint silently ending the encounter — see resolveHit/DESIGN.md.
-  const threats = agentsWithin(world, agent, effectiveFleeRadius(agent)).filter((other) =>
-    isPreyOf(rules, other.species, agent.species)
+  const threats = agentsWithin(world, agent, effectiveFleeRadius(agent)).filter(
+    (other) => isPreyOf(rules, other.species, agent.species) && isDetectable(world, agent.pos, other, effectiveFleeRadius(agent))
   );
   const threat = nearest(agent, threats);
   if (threat) {
@@ -416,7 +447,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
       logBehaviorChange(log, world, agent, "fight");
       agent.behavior = "fight";
       agent.fightTarget = threat.id;
-      if (canAttackFromHere(agent, distance, threat.types ?? [])) {
+      if (canAttackFromHere(world, agent, threat, distance)) {
         resolveHit(world, agent, threat, log, "defeated", ctx);
       } else {
         agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
@@ -435,7 +466,10 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
   const preySpecies = rules[agent.species];
   if (preySpecies && preySpecies.length > 0 && agent.needs.hunger < huntHungerThreshold(agent)) {
     const candidates = agentsWithin(world, agent, HUNT_DETECT_RADIUS).filter(
-      (other) => isPreyOf(rules, agent.species, other.species) && !isProtectedByMob(world, other)
+      (other) =>
+        isPreyOf(rules, agent.species, other.species) &&
+        !isProtectedByMob(world, other) &&
+        isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS)
     );
     const target = nearest(agent, candidates);
 
@@ -444,7 +478,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
       agent.behavior = "hunt";
       agent.huntTarget = target.id;
 
-      if (canAttackFromHere(agent, manhattan(agent.pos, target.pos), target.types ?? [])) {
+      if (canAttackFromHere(world, agent, target, manhattan(agent.pos, target.pos))) {
         // A single hit may not be lethal now — real HP, real damage, and even
         // a lethal hit only FAINTS the target (see resolveHit/DESIGN.md). The
         // meal (and hunger restore) only happens once the target is truly

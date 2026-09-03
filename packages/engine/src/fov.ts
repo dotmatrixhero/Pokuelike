@@ -4,6 +4,38 @@ import { tileAt } from "./world.js";
 /** Extra sight radius per unit of the observer's own elevation above ground level. */
 export const ELEVATION_SIGHT_BONUS = 1.5;
 
+/**
+ * Extra *effective* distance added when the tile being looked at grants
+ * concealment (a "bush" tile — see `Tile.concealment`) — makes a concealed
+ * tile measurably harder to spot from range without blocking sight outright
+ * up close. Sim-original design magnitude, not canon.
+ */
+export const CONCEALMENT_SIGHT_PENALTY = 2;
+
+/**
+ * Extra effective distance per unit of elevation the *target* tile sits
+ * above the observer — and, symmetrically, a `bonus` (reduced effective
+ * distance) per unit it sits below. A second, independent, direction-aware
+ * layer on top of the existing rules (own-elevation radius bonus, ridge
+ * blocking): "fog thickens looking uphill, thins looking downhill," neither
+ * replacing nor duplicating either existing rule. Sim-original design
+ * magnitude, not canon — see DESIGN.md.
+ */
+export const ELEVATION_FOV_ASYMMETRY_PER_UNIT = 0.5;
+/**
+ * Caps how far the elevation-asymmetry adjustment can push effective
+ * distance in either direction, so an extreme height gap isn't an unbounded
+ * "always/never visible" — and, just as importantly, bounds how far the
+ * scan below needs to pad its bounding box to correctly find a
+ * downhill target whose *effective* distance is within radius even though
+ * its *raw* distance is not.
+ */
+const MAX_ELEVATION_FOV_ADJUSTMENT = 4;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 function bresenhamLine(from: Vec2, to: Vec2): Vec2[] {
   const points: Vec2[] = [];
   let x0 = from.x;
@@ -54,24 +86,73 @@ function hasLineOfSight(world: World, layer: Layer, origin: Vec2, target: Vec2, 
   return true;
 }
 
-/** Every tile visible from `origin` within `baseRadius`, extended by the observer's own elevation. */
+/**
+ * Every tile visible from `origin` within `baseRadius`, extended by the
+ * observer's own elevation (`ELEVATION_SIGHT_BONUS`, unchanged) and now also
+ * adjusted per-target by two independent effects layered on top of that
+ * radius/line-of-sight check, neither of which changes it:
+ *  - concealment (`CONCEALMENT_SIGHT_PENALTY`): a bush tile is effectively
+ *    farther away than it is.
+ *  - elevation asymmetry (`ELEVATION_FOV_ASYMMETRY_PER_UNIT`): a target
+ *    tile higher than the observer is effectively farther away; one lower
+ *    is effectively closer.
+ * Both are folded into one `effectiveDistance` compared against `radius`,
+ * ahead of the existing `hasLineOfSight` ridge-blocking check (which still
+ * runs unmodified, using raw elevations) — so a tall ridge between two flat
+ * points still blocks the view over it exactly as before, and standing on
+ * high ground still extends the base radius exactly as before; this only
+ * adds a *third*, independent reason a given tile might or might not make
+ * the cut.
+ */
 export function computeVisible(world: World, layer: Layer, origin: Vec2, baseRadius: number): Vec2[] {
   const observerElevation = tileAt(world, layer, origin.x, origin.y)?.elevation ?? 0;
   const radius = baseRadius + observerElevation * ELEVATION_SIGHT_BONUS;
 
+  // Padded by the max possible downhill *bonus* — a target's raw distance
+  // can be up to MAX_ELEVATION_FOV_ADJUSTMENT past `radius` and still end up
+  // with an effective distance inside it, so the scan window has to reach
+  // that far to find it at all.
+  const scanRadius = radius + MAX_ELEVATION_FOV_ADJUSTMENT;
   const visible: Vec2[] = [];
-  const minY = Math.max(0, Math.floor(origin.y - radius));
-  const maxY = Math.min(world.height - 1, Math.ceil(origin.y + radius));
-  const minX = Math.max(0, Math.floor(origin.x - radius));
-  const maxX = Math.min(world.width - 1, Math.ceil(origin.x + radius));
+  const minY = Math.max(0, Math.floor(origin.y - scanRadius));
+  const maxY = Math.min(world.height - 1, Math.ceil(origin.y + scanRadius));
+  const minX = Math.max(0, Math.floor(origin.x - scanRadius));
+  const maxX = Math.min(world.width - 1, Math.ceil(origin.x + scanRadius));
 
   for (let y = minY; y <= maxY; y++) {
     for (let x = minX; x <= maxX; x++) {
-      if (Math.hypot(x - origin.x, y - origin.y) > radius) continue;
+      const rawDistance = Math.hypot(x - origin.x, y - origin.y);
+      const targetTile = tileAt(world, layer, x, y);
+      const elevationDelta = (targetTile?.elevation ?? 0) - observerElevation;
+      const elevationAdjustment = clamp(
+        elevationDelta * ELEVATION_FOV_ASYMMETRY_PER_UNIT,
+        -MAX_ELEVATION_FOV_ADJUSTMENT,
+        MAX_ELEVATION_FOV_ADJUSTMENT
+      );
+      const effectiveDistance = rawDistance + elevationAdjustment + (targetTile?.concealment ? CONCEALMENT_SIGHT_PENALTY : 0);
+      if (effectiveDistance > radius) continue;
       if (hasLineOfSight(world, layer, origin, { x, y }, observerElevation)) {
         visible.push({ x, y });
       }
     }
   }
   return visible;
+}
+
+/**
+ * Pure walkability check along a straight line between two points — no
+ * elevation gating, unlike `hasLineOfSight`. Used by combat.ts's
+ * line/cone-shaped moves (via predation.ts) so an obstacle (tree, boulder,
+ * wall) blocks a ranged attack's path exactly like it blocks ambient line of
+ * sight, without pulling in `hasLineOfSight`'s elevation-ridge logic, which
+ * doesn't apply to a flat combat range check.
+ */
+export function isPathClear(world: World, layer: Layer, from: Vec2, to: Vec2): boolean {
+  const line = bresenhamLine(from, to);
+  for (const point of line) {
+    if ((point.x === from.x && point.y === from.y) || (point.x === to.x && point.y === to.y)) continue;
+    const tile = tileAt(world, layer, point.x, point.y);
+    if (!tile || !tile.walkable) return false;
+  }
+  return true;
 }

@@ -1991,6 +1991,196 @@ water holes.
   scale" section) stays a separate, bigger, still-unbuilt idea — this
   generates one large varied region, not multiple connected ones.
 
+### As built
+
+- `packages/engine/src/worldgen.ts` is new: `mulberry32(seed)` (a small,
+  well-known 32-bit seeded PRNG, public domain, no new dependency),
+  `makeNoise2D` (2-octave smoothed *value* noise — bilinear + smoothstep
+  interpolation over a random lattice, not true Perlin noise, which this
+  didn't need), `makeDensityField` (see below), 5 `BIOMES` (Grassland,
+  Forest, Wetland, Badlands, Highland — each a `{foodDensity, waterDensity,
+  obstacleDensity, elevationBase, elevationVariance, terrainWeights}`
+  record), `blendBiomeParams` (inverse-distance-squared blend of a tile's 3
+  nearest biome seed points), `generateWorld(width, height, seed)`, and
+  `findWalkableNear` (expanding-ring search, used to place scenario spawns
+  on a map that isn't guaranteed walkable at any specific hand-picked
+  coordinate).
+- **A real bug found and fixed during this pass, worth recording**: a raw
+  `noise(x, y) < density` threshold check badly under-fires for small
+  `density` values, because a multi-octave value-noise field is a weighted
+  average of several independent samples and so clusters toward 0.5 (like
+  averaging dice rolls) rather than spreading evenly across [0, 1]. The
+  first working version of `generateWorld` produced a 90x60 map with only
+  **3** food tiles and next to no obstacles — the opposite of the intended
+  "varied and interactive" world. Fixed with `makeDensityField`: it
+  Monte-Carlo-samples a noise field once (800 samples), sorts them, and
+  `thresholdFor(density)` returns the value at that percentile, so
+  `sample(x, y) < thresholdFor(density)` fires for close to the requested
+  fraction of tiles regardless of the field's actual raw distribution —
+  `worldgen.test.ts` has a dedicated test proving this calibration holds.
+  After the fix, a real generated map (90x60, seed 20260903) comes out to
+  roughly 77% floor, 8.7% water, 3.4% food, and ~11% obstacles split across
+  tree/boulder/bush/sand/mud — visually confirmed varied via an ASCII dump
+  (distinct forest, highland/boulder-field, and lake regions, not a uniform
+  scatter).
+- **Map size: 90x60** (up from 24x16) — an exact 3.75x scale of the old
+  map in both dimensions, chosen specifically so the old hand-picked
+  scenario anchors (herd territory, Scyther's hunting ground, etc.) scale
+  cleanly onto the new map via a single `SCALE_X`/`SCALE_Y` factor rather
+  than being re-derived from scratch. `packages/data/src/scenario.ts`'s
+  `createDemoWorld` now calls `generateWorld` instead of hand-authoring
+  `fillRect`/`setTile` calls; every scenario anchor is scaled from the old
+  24x16 frame and (for the surface layer) passed through
+  `findWalkableNear` so a scaled anchor landing on an obstacle or lake
+  doesn't break agent placement.
+- **A second real bug found during this pass**: underground/canopy spawn
+  anchors (Diglett/Sandshrew/Onix, Pidgey/Spearow) were first computed
+  directly against the *new* `SCENARIO_WIDTH`/`SCENARIO_HEIGHT` (e.g.
+  `{ x: SCENARIO_WIDTH - 3, y: SCENARIO_HEIGHT - 3 }`) while the code
+  reasoning about them was still written in the old 24x16 frame — this put
+  predator and prey in opposite corners of the new, much bigger map,
+  confirmed by a 5000-tick run with zero predation events on either pair
+  even after their `RELOCATE_AFTER_TICKS`-driven relocation kicked in
+  repeatedly. Fixed by scaling every underground/canopy anchor from the old
+  24x16 frame the same way the surface ones are (`scaledPos`, no
+  walkability search needed since those layers are still a plain flat
+  grid).
+- **New `TerrainKind` values**: `"tree"`/`"boulder"` (unwalkable — `world.ts`
+  gained `isWalkableTerrain`, shared by `createTile`/`setTile`, and a test
+  in `fov.test.ts`/`worldgen.test.ts` confirms both block movement and, for
+  free via the existing `hasLineOfSight` walkable check, line of sight —
+  no fov.ts change was needed for that part), `"bush"` (walkable, `Tile`
+  gained a `concealment?: boolean` flag), `"sand"`/`"mud"` (walkable,
+  handled purely as a function of terrain kind in support.ts, no extra
+  `Tile` field — see below).
+- **Elevation/terrain -> effective movement speed**
+  (`support.ts`'s `elevationSpeedMultiplier`, `terrainSpeedMultiplier`,
+  `movementSpeedFactor`): composes **multiplicatively** with the existing
+  injury-based `effectiveSpeed`, in this order —
+  `finalSpeed = baseSpeed * elevationSpeedMultiplier * terrainSpeedMultiplier * injuryFraction(floored)`.
+  A real architectural scope call, documented in both the code and here:
+  Speed is spent (`accumulateActionEnergy`) to decide *whether* an action
+  happens before that action's movement is even chosen, so a literal
+  "climbing this step costs more, decided in advance" isn't available
+  without restructuring that order. Implemented instead as a **post-move
+  snapshot** — `simulation.ts`'s `tickWorld` computes the elevation delta
+  and destination terrain right after a real move happens and stores the
+  combined multiplier on the new `Agent.terrainSpeedFactor` field, which
+  `actionSpeedOf` reads on every subsequent tick until the agent's next
+  move overwrites it. The qualitative effect (climb slows you down, descend
+  speeds you up, sand/mud are generally slower) still shows up in a real
+  run, just applied to the *next* action rather than the one just taken.
+- **Bush concealment, real, on both axes it was asked to touch**:
+  `predation.ts` gained `isConcealed`/`isDetectable`
+  (`BUSH_CONCEALMENT_DETECTION_REDUCTION = 2`, floored at radius 1),
+  applied to *both* the flee-trigger threat filter and the hunt-target
+  filter — concealment protects whichever party (predator or prey) happens
+  to be standing in the bush, not just prey hiding from predators. Rule
+  chosen: concealment applies only while actually **standing on** the
+  bush tile itself, not "in or adjacent" — the simpler of the two options
+  the design doc left open, and consistent with how every other
+  position-based check in this codebase already works (no precedent for an
+  "adjacent-counts" rule anywhere else). `fov.ts`'s `computeVisible` gained
+  the same idea as an effective-distance penalty (`CONCEALMENT_SIGHT_PENALTY
+  = 2`) on the tile being looked *at*. Both are sim-original magnitudes, not
+  canon.
+- **Asymmetric elevation FOV** (`fov.ts`): `ELEVATION_FOV_ASYMMETRY_PER_UNIT
+  = 0.5` effective tiles of distance per unit of elevation the target sits
+  above the observer (and the same amount of *bonus* — reduced effective
+  distance — per unit below), clamped at ±4
+  (`MAX_ELEVATION_FOV_ADJUSTMENT`) so an extreme height gap isn't an
+  unbounded always/never-visible switch. Implementing the downhill bonus
+  correctly required widening `computeVisible`'s scan bounding box by that
+  same cap — a target whose *raw* distance is just past `radius` but whose
+  *effective* distance (after the downhill bonus) is within it would
+  otherwise never even be scanned. `fov.test.ts` keeps the two pre-existing
+  rules (ridge-blocking, own-elevation radius bonus) passing unmodified and
+  adds new tests for the asymmetry specifically, isolating it from the
+  observer's own elevation bonus so each rule is tested independently.
+- **Obstacles block combat move lines**: `fov.ts` gained `isPathClear` (a
+  plain walkability check along a Bresenham line, no elevation gating —
+  irrelevant for a flat combat range check). `predation.ts`'s
+  `canAttackFromHere` was previously range-only (a real pre-existing gap,
+  not something this feature broke) — it now also requires `isPathClear`
+  between attacker and target, at all three call sites (guardian
+  intervention, prey mob-fight, predator hunt). **Bush ambush bonus
+  explicitly deferred** — concealment already gives a lurking predator a
+  real, measurable edge (undetected until the prey is much closer), and
+  DESIGN.md's own text called this optional; adding a separate first-strike
+  bonus on top felt like scope creep for a "some measurable edge" bar this
+  already clears, so it's left as an open idea rather than half-built.
+- **Performance**: `packages/engine/src/resourceIndex.ts` is new — a cached
+  per-(World, layer) coordinate index for `water`/`food`/`sunbeam` tiles,
+  invalidated via a new `World.resourceVersion` counter (bumped by
+  `setTile` always, and by `flora.ts` only on the two transitions that
+  matter: a seedling maturing into food, and a food patch dying back to
+  floor). `needs.ts`'s `findNearestTerrain` and `support.ts`'s internal
+  food-delivery lookup both now delegate to it instead of a naive
+  full-grid scan. **This was a real, necessary fix, not speculative
+  optimization**: the first correctly-populated 90x60 map (after the
+  density-field fix above) made the naive O(width*height) scan a genuine
+  per-tick cost multiplied across every hungry/thirsty agent; with the
+  index in place, a 10,000-tick run of the demo scenario completes in
+  ~5-6 seconds on this machine (1,000 ticks in ~1.5-1.8s), scaling roughly
+  linearly with tick count rather than blowing up as population grows —
+  confirmed by comparing 1,000/5,000/10,000-tick run times. `growFlora`'s
+  own full-grid-per-tick scan (also flagged in TODO.md) was left untouched
+  — it wasn't the bottleneck actually observed, and DESIGN.md's ask was
+  specifically about `findNearestTerrain`.
+- **Underground/canopy untouched**, as scoped: `generateWorld` only ever
+  writes to `world.tiles.surface`; both other layers stay the plain flat
+  grid `createWorld` always produced, confirmed by a dedicated
+  `worldgen.test.ts` test.
+- 30 new tests across `worldgen.test.ts` (new), `fov.test.ts`,
+  `support.test.ts`, and `predation.test.ts` (213 total, up from 183):
+  PRNG/noise determinism, the density-field calibration, biome-blend
+  gradualness across a boundary (a sampled line of tiles confirms a
+  monotonic gradient, not a step), tree/boulder walkability +
+  free LoS-blocking, the two pre-existing FOV rules still holding plus the
+  new asymmetry/concealment rules in isolation, `isPathClear`, the
+  elevation/terrain speed multipliers and their real multiplicative
+  composition through a full `tickWorld` call, and bush concealment
+  measurably defeating both hunt- and flee-detection at a distance that
+  would otherwise trigger them.
+- **Real-run findings, reported straight** (`pnpm run run <N>` from
+  `packages/runner`, seed 20260903 demo scenario):
+  - The generated map genuinely looks and feels varied — an ASCII dump
+    (via `packages/runner`'s existing `ascii.ts`) shows a clear forest
+    region (dense `T` trees), a highland/boulder field (`O`), sandy
+    stretches, a couple of real lakes, and scattered food/flora glyphs
+    threaded through open floor, not a uniform scatter or a repeat of the
+    old two-water-hole box.
+  - Performance is solid at this scale: 1,000 ticks in ~1.5-1.8s, 10,000
+    ticks in ~5-6s, no sign of the O(width*height) ceiling reasserting
+    itself (that's the resourceIndex.ts fix above actually earning its
+    keep, not just theoretical).
+  - Predation *does* happen at this map size — an 1,000-tick run showed 11
+    `fought` events, a `fainted`, a `defeated`, and a `killed`; a separate
+    5,000-tick run showed 7 `fought`/1 `fainted`/1 `killed` — but it's
+    slower to get going and more stochastic run-to-run than on the old tiny
+    map, and a full 10,000-tick run in one attempt showed *zero* combat
+    events at all. Root cause, diagnosed rather than guessed at: on this
+    much bigger map, food/water is abundant enough (by design, so the
+    surface herbivore population doesn't starve across a much larger area)
+    that a solo predator (Scyther, Onix, Spearow — none of them herd
+    members, so they don't even get herding.ts's idle-cohesion wandering)
+    can self-feed from the same generic "food" tiles herbivores eat and
+    rarely drops below `HUNT_HUNGER_THRESHOLD` in the first place. This is
+    a genuine tuning gap this feature surfaced rather than solved — flagged
+    in TODO.md rather than silently patched, since a real fix (predators
+    not self-feeding from berry patches at all, or a lower predator food
+    density, or giving solo predators their own idle-wander behavior)
+    changes predation.ts/needs.ts territory beyond this feature's scope.
+  - The underground Diglett/Sandshrew/Onix colony and canopy Pidgey/Spearow
+    flock are both real users of cross-layer need-seeking at the new scale
+    (`crossedLayer` events show up in every run) — but a 10,000-tick run
+    showed a real amount of Pidgey starvation (132 `starved` events across
+    the whole run, `born: 134`), consistent with a known pre-existing
+    dynamic (canopy has no food/water of its own, so every agent up there
+    depends on successfully timing a cross-layer trip) rather than
+    something this feature changed — noted here because it's visible in
+    the same logs, not because this feature is responsible for it.
+
 ## Herd-level migration: moving as a group, not wandering individually
 
 Decided, not built yet — Phase 2, depends on Phase 1 above landing first

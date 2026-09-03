@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createWorld, setElevation } from "../src/world.js";
-import { computeVisible } from "../src/fov.js";
+import { createWorld, setElevation, setTile } from "../src/world.js";
+import { computeVisible, isPathClear } from "../src/fov.js";
 
 describe("computeVisible", () => {
   it("sees flat ground within the base radius", () => {
@@ -27,5 +27,66 @@ describe("computeVisible", () => {
     const visible = computeVisible(world, "surface", { x: 10, y: 0 }, 3);
 
     expect(visible).toContainEqual({ x: 16, y: 0 });
+  });
+
+  it("a bush tile is effectively harder to see: visible at close range but not at the edge of the base radius", () => {
+    const world = createWorld(21, 1);
+    setTile(world, "surface", 15, 0, "bush");
+
+    const closeUp = computeVisible(world, "surface", { x: 14, y: 0 }, 5);
+    expect(closeUp).toContainEqual({ x: 15, y: 0 }); // distance 1 — well within range even with the penalty
+
+    // Distance 5 (the base radius) with no obstruction would normally be
+    // visible — the concealment penalty alone pushes it out of range.
+    const atEdge = computeVisible(world, "surface", { x: 10, y: 0 }, 5);
+    expect(atEdge).not.toContainEqual({ x: 15, y: 0 });
+    // A non-concealed tile at the same true distance is still visible.
+    expect(atEdge).toContainEqual({ x: 5, y: 0 });
+  });
+
+  it("a target on higher ground is effectively harder to see than the ridge-blocking rule alone accounts for", () => {
+    const world = createWorld(21, 1);
+    setElevation(world, "surface", 15, 0, 4); // elevated, but not tall enough to ridge-block (see hasLineOfSight)
+
+    const fromLevel = computeVisible(world, "surface", { x: 10, y: 0 }, 5);
+    // Raw distance 5 would normally be in range; the higher-ground penalty pushes it out.
+    expect(fromLevel).not.toContainEqual({ x: 15, y: 0 });
+  });
+
+  it("a target on lower ground is effectively easier to see (a visibility bonus, not just neutral)", () => {
+    const world = createWorld(21, 1);
+    // Observer stays at elevation 0 (no ELEVATION_SIGHT_BONUS radius
+    // extension in play) so this isolates the asymmetry effect specifically —
+    // a target below the observer's own elevation.
+    setElevation(world, "surface", 17, 0, -6);
+
+    // Raw distance is 7, past the base radius of 5 — only the lower-ground
+    // bonus (elevationDelta * ELEVATION_FOV_ASYMMETRY_PER_UNIT, negative
+    // here) pulls its effective distance back under 5.
+    const visible = computeVisible(world, "surface", { x: 10, y: 0 }, 5);
+    expect(visible).toContainEqual({ x: 17, y: 0 });
+  });
+});
+
+describe("isPathClear", () => {
+  it("a clear straight line between two open tiles is unobstructed", () => {
+    const world = createWorld(10, 1);
+    expect(isPathClear(world, "surface", { x: 0, y: 0 }, { x: 9, y: 0 })).toBe(true);
+  });
+
+  it("a tree or boulder between the endpoints blocks the path", () => {
+    const world = createWorld(10, 1);
+    setTile(world, "surface", 5, 0, "tree");
+    expect(isPathClear(world, "surface", { x: 0, y: 0 }, { x: 9, y: 0 })).toBe(false);
+
+    const world2 = createWorld(10, 1);
+    setTile(world2, "surface", 5, 0, "boulder");
+    expect(isPathClear(world2, "surface", { x: 0, y: 0 }, { x: 9, y: 0 })).toBe(false);
+  });
+
+  it("an obstacle at either endpoint itself doesn't block (only tiles strictly between do)", () => {
+    const world = createWorld(10, 1);
+    setTile(world, "surface", 9, 0, "tree"); // the target tile itself
+    expect(isPathClear(world, "surface", { x: 0, y: 0 }, { x: 9, y: 0 })).toBe(true);
   });
 });

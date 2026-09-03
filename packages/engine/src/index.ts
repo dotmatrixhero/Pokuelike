@@ -17,3 +17,5 @@ export * from "./migration.js";
 export * from "./simulation.js";
 export * from "./leveling.js";
 export * from "./nature.js";
+export * from "./worldgen.js";
+export * from "./resourceIndex.js";

@@ -1,7 +1,21 @@
 import { LAYER_ORDER, type Layer, type Tile, type TerrainKind, type World } from "./types.js";
+import { invalidateResourceIndex } from "./resourceIndex.js";
+
+const UNWALKABLE_TERRAIN: ReadonlySet<TerrainKind> = new Set(["wall", "tree", "boulder"]);
+
+/** "wall"/"tree"/"boulder" block movement (and, for free via `hasLineOfSight`, sight); everything else is passable. */
+export function isWalkableTerrain(terrain: TerrainKind): boolean {
+  return !UNWALKABLE_TERRAIN.has(terrain);
+}
 
 export function createTile(terrain: TerrainKind, elevation = 0): Tile {
-  return { terrain, walkable: terrain !== "wall", elevation, stock: terrain === "food" ? 1 : undefined };
+  return {
+    terrain,
+    walkable: isWalkableTerrain(terrain),
+    elevation,
+    stock: terrain === "food" ? 1 : undefined,
+    concealment: terrain === "bush" ? true : undefined,
+  };
 }
 
 function createLayerGrid(width: number, height: number): Tile[] {
@@ -37,11 +51,13 @@ export function setTile(
   const tile = tileAt(world, layer, x, y);
   if (!tile) return;
   tile.terrain = terrain;
-  tile.walkable = terrain !== "wall";
+  tile.walkable = isWalkableTerrain(terrain);
   tile.stock = terrain === "food" || terrain === "flora" ? 1 : undefined;
   tile.growth = terrain === "seedling" ? 0 : undefined;
   tile.flavor = terrain === "food" || terrain === "flora" ? flavor : undefined;
+  tile.concealment = terrain === "bush" ? true : undefined;
   if (elevation !== undefined) tile.elevation = elevation;
+  invalidateResourceIndex(world);
 }
 
 export function setElevation(world: World, layer: Layer, x: number, y: number, elevation: number): void {

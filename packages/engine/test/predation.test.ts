@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createWorld } from "../src/world.js";
+import { createWorld, setTile } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
 import { tickWorld } from "../src/simulation.js";
 import { applyPredationInstincts } from "../src/predation.js";
@@ -434,5 +434,83 @@ describe("guardians", () => {
     tickWorld(world, undefined, RULES);
 
     expect(protector.behavior).not.toBe("fight");
+  });
+});
+
+describe("bush concealment", () => {
+  it("a predator that would otherwise detect and hunt prey at this distance fails to when the prey is in a bush", () => {
+    // A bold prey (large enough boldness shrinks its own flee-detection
+    // radius below 4) stays put instead of fleeing the predator this same
+    // tick, which would otherwise change the distance out from under this
+    // test before the predator's own hunt check runs (agents tick in push
+    // order within the same tickWorld call).
+    const bold = { boldness: 1, aggression: 0.5, sociability: 0.5 };
+
+    // Distance 4 is within HUNT_DETECT_RADIUS (5) normally.
+    const openWorld = createWorld(20, 20);
+    openWorld.agents.push(prey({ x: 5, y: 5 }, { disposition: bold }), predator({ x: 9, y: 5 }, 0.1));
+    tickWorld(openWorld, undefined, RULES);
+    const openHunter = openWorld.agents.find((a) => a.id === "scyther-0")!;
+    expect(openHunter.behavior).toBe("hunt"); // sanity: this distance is normally detectable
+
+    const bushWorld = createWorld(20, 20);
+    setTile(bushWorld, "surface", 5, 5, "bush");
+    bushWorld.agents.push(prey({ x: 5, y: 5 }, { disposition: bold }), predator({ x: 9, y: 5 }, 0.1));
+    tickWorld(bushWorld, undefined, RULES);
+    const concealedHunter = bushWorld.agents.find((a) => a.id === "scyther-0")!;
+    expect(concealedHunter.behavior).not.toBe("hunt");
+  });
+
+  it("prey doesn't notice a predator lurking in a bush at a distance it would otherwise flee from", () => {
+    // Distance 3 is within FLEE_DETECT_RADIUS (4) normally.
+    const openWorld = createWorld(20, 20);
+    const openTarget = prey({ x: 5, y: 5 });
+    openWorld.agents.push(openTarget, predator({ x: 8, y: 5 }));
+    tickWorld(openWorld, undefined, RULES);
+    expect(openTarget.behavior).toBe("flee"); // sanity: this distance is normally detectable
+
+    const bushWorld = createWorld(20, 20);
+    setTile(bushWorld, "surface", 8, 5, "bush");
+    const concealedTarget = prey({ x: 5, y: 5 });
+    bushWorld.agents.push(concealedTarget, predator({ x: 8, y: 5 }));
+    tickWorld(bushWorld, undefined, RULES);
+    expect(concealedTarget.behavior).not.toBe("flee");
+  });
+});
+
+describe("obstacles block combat move lines", () => {
+  it("a tree between a mobbing prey and its target blocks the ranged attack — it closes distance instead", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 4, "tree"); // directly between mobber1 (5,3) and the predator (5,5)
+    const mobber1 = prey({ x: 5, y: 3 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [RANGED_MOVE] });
+    const mobber2 = prey({ x: 4, y: 4 }, { id: "bulbasaur-1", herdId: "herd-a", moves: [RANGED_MOVE] });
+    const mobber3 = prey({ x: 6, y: 4 }, { id: "bulbasaur-2", herdId: "herd-a", moves: [RANGED_MOVE] });
+    world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 5 }));
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    // In range (distance 2, RANGED_MOVE's reach) but the tree blocks the
+    // straight-line path between them — must NOT attack through it. (It also
+    // doesn't manage to route around in this exact layout — directly north
+    // of the predator with the tree directly south of itself, there's no
+    // lateral step available either — so it just stays put this tick; the
+    // point of this test is the blocked attack, not stepToward's general
+    // pathing, which is covered elsewhere.)
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
+  });
+
+  it("the same layout with no obstacle DOES let the ranged attack land (control case)", () => {
+    const world = createWorld(10, 10);
+    const mobber1 = prey({ x: 5, y: 3 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [RANGED_MOVE] });
+    const mobber2 = prey({ x: 4, y: 4 }, { id: "bulbasaur-1", herdId: "herd-a", moves: [RANGED_MOVE] });
+    const mobber3 = prey({ x: 6, y: 4 }, { id: "bulbasaur-2", herdId: "herd-a", moves: [RANGED_MOVE] });
+    world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 5 }));
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    expect(mobber1.pos).toEqual({ x: 5, y: 3 });
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
   });
 });

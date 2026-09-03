@@ -1,6 +1,7 @@
 import type { Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { tileAt } from "./world.js";
+import { invalidateResourceIndex } from "./resourceIndex.js";
 
 /**
  * What a seedling can mature into — purely cosmetic flavors of "food"
@@ -156,6 +157,7 @@ export function growFlora(world: World, log?: EventLog): void {
           tile.terrain = "food";
           tile.stock = 1;
           tile.flavor = nearSun ? pickFlavor(SUN_FOOD_FLAVORS) : pickFlavor(FOOD_FLAVORS);
+          invalidateResourceIndex(world); // a new "food" tile — resourceIndex.ts's cache needs rebuilding
         } else {
           tile.terrain = "flora";
           tile.stock = 1; // vitality, not edible stock — decays and dies just like food does, below
@@ -184,6 +186,7 @@ export function growFlora(world: World, log?: EventLog): void {
         tile.terrain = "floor";
         tile.stock = undefined;
         tile.flavor = undefined;
+        invalidateResourceIndex(world); // a "food" tile just reverted to "floor"
         log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos, stage: "died" });
         continue;
       }

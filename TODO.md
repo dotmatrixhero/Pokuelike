@@ -311,10 +311,36 @@ produce a real story before player mechanics are worth building further.
       this session). A guarded, vulnerable incubation period is better
       story material than an instant birth. Deliberately deferred rather
       than built alongside plain reproduction, to keep that slice small.
-- [ ] Performance ceiling for the cheap tier — how many agents before naive
-      per-tick nearest-tile search (`findNearestTerrain` is O(width*height)
-      per agent!) needs spatial indexing? Also now true of `growFlora`'s
-      full-grid scan every tick.
+- [x] Performance ceiling for the cheap tier, partially addressed — the
+      naive `findNearestTerrain` scan (was O(width*height) per agent) hit a
+      real wall once the map grew to 90x60 for the biome-generation feature
+      (see DESIGN.md's "Environmental generation..." section): fixed with
+      `packages/engine/src/resourceIndex.ts`, a cached water/food/sunbeam
+      coordinate index invalidated via `World.resourceVersion`. Confirmed by
+      real timing: 1,000 ticks in ~1.5-1.8s, 10,000 in ~5-6s, no blow-up as
+      population grows. `growFlora`'s own full-grid-per-tick scan is still
+      untouched (not the bottleneck actually observed, and out of this
+      feature's stated ask) — still open if a future feature makes it one.
+- [ ] Bush ambush bonus deliberately deferred (see DESIGN.md's
+      "Environmental generation..." section, "As built") — concealment
+      already gives a lurking predator a real, measurable detection-range
+      edge; a separate first-strike/accuracy bonus on top was judged scope
+      creep for a bar the detection-range reduction already clears.
+- [ ] Real tuning gap found by the biome-generation feature: at the new
+      90x60 map scale, food is abundant enough that solo (non-herd)
+      predators — Scyther, Onix, Spearow — can self-feed from the same
+      generic "food" tiles herbivores eat and rarely drop below
+      `HUNT_HUNGER_THRESHOLD`, so predation becomes rare and stochastic
+      run-to-run (confirmed: an 1,000-tick run showed real combat, a
+      separate 10,000-tick run showed none at all). Compounds with solo
+      predators having no herd-cohesion wandering (`herding.ts`'s
+      `applyHerdCohesion` only fires for `herdId`-having agents), so a
+      predator that starts far from prey mostly just sits and grazes.
+      Possible fixes, none built: predators shouldn't eat generic "food"
+      tiles at all (species-specific diet), lower predator food density in
+      generation, or give solo predators their own idle-wander behavior —
+      each touches predation.ts/needs.ts/herding.ts territory beyond the
+      biome-generation feature's scope.
 
 ## Culture, disposition, and roles (pitched, not built — see chat)
 - [x] Disposition vector per individual (boldness/aggression/sociability)

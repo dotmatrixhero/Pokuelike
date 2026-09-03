@@ -14,6 +14,9 @@ import {
   FED_THRESHOLD,
   WAKE_HP_FRACTION,
   FINISHING_POOL_FRACTION,
+  elevationSpeedMultiplier,
+  terrainSpeedMultiplier,
+  movementSpeedFactor,
 } from "../src/support.js";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
@@ -301,5 +304,54 @@ describe("integration: fainting and recovery through tickWorld", () => {
     expect(recovered).toBe(true);
     expect(agent.finishingPool).toBeUndefined();
     expect(log.events).toContainEqual(expect.objectContaining({ kind: "recovered", agentId: "recoverer" }));
+  });
+});
+
+describe("elevation/terrain movement-speed modifiers", () => {
+  it("moving to higher ground slows (multiplier below 1); to lower ground speeds up (above 1); flat is neutral", () => {
+    expect(elevationSpeedMultiplier(0, 3)).toBeLessThan(1);
+    expect(elevationSpeedMultiplier(3, 0)).toBeGreaterThan(1);
+    expect(elevationSpeedMultiplier(2, 2)).toBe(1);
+  });
+
+  it("clamps so an extreme height gap isn't a literal never-acts/always-double-acts", () => {
+    expect(elevationSpeedMultiplier(0, 100)).toBeGreaterThan(0);
+    expect(elevationSpeedMultiplier(100, 0)).toBeLessThan(2);
+  });
+
+  it("sand and mud slow movement; every other terrain is neutral", () => {
+    expect(terrainSpeedMultiplier("sand")).toBeLessThan(1);
+    expect(terrainSpeedMultiplier("mud")).toBeLessThan(1);
+    expect(terrainSpeedMultiplier("mud")).toBeLessThan(terrainSpeedMultiplier("sand")); // mud is the worse of the two
+    expect(terrainSpeedMultiplier("floor")).toBe(1);
+    expect(terrainSpeedMultiplier("bush")).toBe(1);
+  });
+
+  it("movementSpeedFactor composes elevation and terrain multiplicatively", () => {
+    const elevationOnly = movementSpeedFactor(0, 2, "floor");
+    const terrainOnly = movementSpeedFactor(0, 0, "mud");
+    const both = movementSpeedFactor(0, 2, "mud");
+    expect(both).toBeCloseTo(elevationOnly * terrainOnly, 10);
+  });
+
+  it("a real tick applies the last step's terrain factor to the NEXT action's pace, via ordinary needs-driven movement", () => {
+    const world = createWorld(10, 1);
+    setTile(world, "surface", 5, 0, "mud"); // directly between the agent and the water it's walking toward
+    setTile(world, "surface", 6, 0, "water");
+    const agent = makeAgent({
+      pos: { x: 4, y: 0 },
+      layer: "surface",
+      stats: { maxHp: 10, attack: 5, defense: 5, spAttack: 5, spDefense: 5, speed: 40 },
+      needs: createNeeds({ thirst: 0 }), // seekWater — walks straight toward the water, through the mud tile
+    });
+    world.agents.push(agent);
+
+    tickWorld(world);
+
+    expect(agent.pos).toEqual({ x: 5, y: 0 }); // stepped onto the mud tile on the way
+    // terrainSpeedFactor is now < 1 (mud, flat ground) — applies to next tick's
+    // actionSpeedOf, composed multiplicatively with the (here neutral, full-hp)
+    // injury fraction from effectiveSpeed.
+    expect(agent.terrainSpeedFactor).toBeCloseTo(terrainSpeedMultiplier("mud"), 10);
   });
 });

@@ -32,6 +32,11 @@ const TERRAIN_GLYPH: Record<TerrainKind, string> = {
   flora: "`",
   sunbeam: "o",
   seedling: ",",
+  tree: "T",
+  boulder: "O",
+  bush: "^",
+  sand: ":",
+  mud: "=",
 };
 
 const TERRAIN_BG: Record<TerrainKind, Rgb> = {
@@ -42,6 +47,11 @@ const TERRAIN_BG: Record<TerrainKind, Rgb> = {
   flora: [26, 40, 24],
   sunbeam: [74, 63, 12],
   seedling: [28, 58, 22],
+  tree: [16, 38, 22],
+  boulder: [58, 56, 51],
+  bush: [22, 46, 26],
+  sand: [92, 80, 50],
+  mud: [42, 34, 22],
 };
 
 const TERRAIN_FG: Record<TerrainKind, Rgb> = {
@@ -52,6 +62,11 @@ const TERRAIN_FG: Record<TerrainKind, Rgb> = {
   flora: [110, 150, 90],
   sunbeam: [220, 190, 80],
   seedling: [110, 180, 100],
+  tree: [70, 140, 80],
+  boulder: [180, 176, 166],
+  bush: [110, 190, 110],
+  sand: [214, 194, 140],
+  mud: [110, 90, 60],
 };
 
 /**

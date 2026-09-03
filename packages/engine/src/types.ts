@@ -12,8 +12,28 @@ export interface Vec2 {
  * "seedling" is a planted, not-yet-mature patch — see flora.ts. It matures
  * into either "food" (edible, has stock) or "flora" (decorative only —
  * not edible, just a nicer tile to be standing on than bare floor).
+ *
+ * "tree"/"boulder" are unwalkable obstacles (see world.ts's
+ * `isWalkableTerrain`) — blocking movement gets them line-of-sight blocking
+ * for free too, since `hasLineOfSight` (fov.ts) already treats any
+ * non-walkable tile as opaque. "bush" is walkable but grants concealment
+ * (see `Tile.concealment`). "sand"/"mud" are walkable but slow movement
+ * (see support.ts's `terrainSpeedMultiplier`). All five are placed by
+ * procedural generation — see worldgen.ts.
  */
-export type TerrainKind = "floor" | "wall" | "water" | "food" | "flora" | "sunbeam" | "seedling";
+export type TerrainKind =
+  | "floor"
+  | "wall"
+  | "water"
+  | "food"
+  | "flora"
+  | "sunbeam"
+  | "seedling"
+  | "tree"
+  | "boulder"
+  | "bush"
+  | "sand"
+  | "mud";
 
 /**
  * Three layers share one x,y footprint. A species is native to one layer
@@ -44,6 +64,14 @@ export interface Tile {
   stock?: number;
   /** "seedling" tiles only: ticks since it took root. Becomes "food" or "flora" once mature — see flora.ts. */
   growth?: number;
+  /**
+   * "bush" tiles only: true if standing here makes an agent harder to
+   * detect — a real (not cosmetic) reduction to predation.ts's flee/hunt
+   * detection radius and to fov.ts's `computeVisible` effective visibility.
+   * A plain boolean rather than a graded number: only one terrain kind
+   * grants it today, so there's nothing yet to grade between.
+   */
+  concealment?: boolean;
   /**
    * "food"/"flora" tiles only: which specific plant this is (e.g. an Oran
    * berry bush vs. a mossy tuft) — purely cosmetic for now (glyph/color in
@@ -136,6 +164,18 @@ export interface Agent {
    * missing data.
    */
   actionEnergy?: number;
+  /**
+   * Combined elevation-delta + terrain multiplier from this agent's last
+   * actual step (support.ts's `movementSpeedFactor`), applied to base Speed
+   * on top of injury (`effectiveSpeed`) — see `actionSpeedOf` in
+   * simulation.ts. Absent/1 for an agent that hasn't moved yet. Deliberately
+   * a snapshot of the *last* move's terrain, not the upcoming one: Speed is
+   * consumed to decide *whether* an action happens before that action's
+   * movement is chosen, so this can only affect the next tick's pace, not
+   * gate the current one — a scope call forced by the existing
+   * accumulate-then-act architecture, see DESIGN.md.
+   */
+  terrainSpeedFactor?: number;
 
   /**
    * Total accumulated exp (cumulative, not "toward next level" — matches the
@@ -269,4 +309,12 @@ export interface World {
   tiles: Record<Layer, Tile[]>;
   agents: Agent[];
   tick: number;
+  /**
+   * Bumped whenever a tile's terrain crosses in or out of "water"/"food"/
+   * "sunbeam" (setTile always bumps it; flora.ts bumps it only on the
+   * transitions that matter) — lets resourceIndex.ts's cache know when it
+   * needs rebuilding instead of trusting a naive full-grid rescan every
+   * lookup. See TODO.md's "Performance ceiling for the cheap tier" note.
+   */
+  resourceVersion?: number;
 }

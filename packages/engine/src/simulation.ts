@@ -3,7 +3,8 @@ import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import { growFlora, maybeDropSeed } from "./flora.js";
 import type { LevelingContext } from "./leveling.js";
-import { CORPSE_PERSIST_TICKS, effectiveSpeed } from "./support.js";
+import { CORPSE_PERSIST_TICKS, effectiveSpeed, movementSpeedFactor } from "./support.js";
+import { tileAt } from "./world.js";
 
 /**
  * Energy an agent needs to accumulate before it gets to act. Chosen against
@@ -49,9 +50,16 @@ export function accumulateActionEnergy(agent: Agent, speed: number): boolean {
  * `effectiveSpeed`, floored at `FAINT_SPEED_FLOOR`) — a hurt agent acts less
  * often, not just weaker when it does. See DESIGN.md's "Faint/finish-off,
  * heal over time" section.
+ *
+ * Elevation/terrain from the agent's last real step (`agent.terrainSpeedFactor`,
+ * support.ts's `movementSpeedFactor`) multiplies base Speed *before* the
+ * injury fraction is applied — see `movementSpeedFactor`'s doc comment for
+ * the exact composition and why it's a post-move snapshot rather than a
+ * predictive gate.
  */
 function actionSpeedOf(agent: Agent): number {
-  return effectiveSpeed(agent, agent.stats?.speed ?? ACTION_THRESHOLD);
+  const baseSpeed = (agent.stats?.speed ?? ACTION_THRESHOLD) * (agent.terrainSpeedFactor ?? 1);
+  return effectiveSpeed(agent, baseSpeed);
 }
 
 // A plain function call (rather than an inline `agent.alive === false` check)
@@ -91,8 +99,11 @@ export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?:
 
     const before = { x: agent.pos.x, y: agent.pos.y };
     const beforeLayer = agent.layer;
+    const beforeElevation = tileAt(world, beforeLayer, before.x, before.y)?.elevation ?? 0;
     tickAgentAction(world, agent, log, rules, ctx);
     if (!isDead(agent) && agent.layer === beforeLayer && (agent.pos.x !== before.x || agent.pos.y !== before.y)) {
+      const afterTile = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
+      agent.terrainSpeedFactor = movementSpeedFactor(beforeElevation, afterTile?.elevation ?? 0, afterTile?.terrain ?? "floor");
       maybeDropSeed(world, agent.layer, agent.pos, log);
     }
   }
