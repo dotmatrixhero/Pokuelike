@@ -25,6 +25,10 @@ export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5):
     pos,
     layer: species.homeLayer,
     homeLayer: species.homeLayer,
+    // Spawn position doubles as this agent's "home" anchor for carryAlly's
+    // rescue destination (support.ts) — see DESIGN.md's carry-capacity/home-
+    // range scope call.
+    homePos: { ...pos },
     needs: createNeeds(),
     behavior: "idle",
     level,

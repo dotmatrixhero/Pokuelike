@@ -113,6 +113,54 @@ export type SimEvent =
       agentId: string;
       species: string;
       pointType: PokemonType | "wildcard";
+    }
+  | {
+      kind: "fainted";
+      tick: number;
+      agentId: string;
+      species: string;
+      pos: Vec2;
+    }
+  | {
+      kind: "recovered";
+      tick: number;
+      agentId: string;
+      species: string;
+      hp: number;
+    }
+  | {
+      kind: "looted";
+      tick: number;
+      looterId: string;
+      looterSpecies: string;
+      fromId: string;
+      fromSpecies: string;
+      itemKey: string;
+    }
+  | {
+      kind: "foodDelivered";
+      tick: number;
+      carrierId: string;
+      carrierSpecies: string;
+      receiverId: string;
+      receiverSpecies: string;
+    }
+  | {
+      kind: "carrying";
+      tick: number;
+      carrierId: string;
+      carrierSpecies: string;
+      carriedId: string;
+      carriedSpecies: string;
+    }
+  | {
+      kind: "setDown";
+      tick: number;
+      carrierId: string;
+      carrierSpecies: string;
+      carriedId: string;
+      carriedSpecies: string;
+      reason: "arrived" | "threat";
     };
 
 /**

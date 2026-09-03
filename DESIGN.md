@@ -1065,6 +1065,180 @@ to make recovery meaningful (a fainted agent can't feed itself).
   extra weight? — a real question, not yet decided, reasonable default is
   yes but not required for a first pass).
 
+**Built:**
+
+- **Injury -> effective Speed**: `support.ts`'s `effectiveSpeed(agent,
+  baseSpeed)` scales `agent.stats.speed` by `max(FAINT_SPEED_FLOOR, hp /
+  maxHp)` before it ever reaches `accumulateActionEnergy` — `simulation.ts`'s
+  `actionSpeedOf` calls it instead of reading `stats.speed` raw.
+  **`FAINT_SPEED_FLOOR = 0.35`**: chosen so a fully-fainted agent (hp pinned
+  at 0) still gets over a third of its normal action frequency rather than
+  going fully inert, while a merely-scratched agent (hp close to maxHp)
+  keeps acting at close to full speed. Agents without a computed
+  `stats`/`hp`/`maxHp` (bare fixtures, newborns) are unaffected, same
+  graceful-absence pattern as `actionSpeedOf`'s existing fallback.
+- **Heal over time, fed-gated**: `applyHealOverTime` (`support.ts`), called
+  from `tickAgentNeeds` (needs.ts) — the always-runs path, not the
+  action-gated one, so a fainted agent that can't act still heals. Heals
+  `maxHp * HEAL_PER_TICK_FRACTION` per tick, only while `hunger >=
+  FED_THRESHOLD && thirst >= FED_THRESHOLD`. **`HEAL_PER_TICK_FRACTION =
+  0.01`** (1%/tick — a full heal from 0 takes on the order of 100 ticks).
+  **`FED_THRESHOLD = 0.7`** deliberately reuses `chooseBehavior`'s existing
+  urgency cutoff in needs.ts (a need only drives behavior once `1 - need >
+  0.3`, i.e. the need itself is below 0.7) rather than inventing a second,
+  unrelated "satisfied" concept.
+- **Fainting instead of instant death**: `Agent.fainted`/`Agent.
+  finishingPool` (types.ts); `predation.ts`'s `resolveHit` sets `fainted =
+  true`, pins `hp = 0`, and sets `finishingPool = FINISHING_POOL_FRACTION *
+  maxHp` on a hit that would otherwise zero HP, emitting a new `fainted`
+  event instead of `killed`/`defeated` — `alive` stays true. **
+  `FINISHING_POOL_FRACTION = 0.75`**, exactly as specified. A fainted agent
+  is excluded from `tickAgentAction` entirely via an early `if (agent.
+  fainted) return` (needs.ts) — checked *before* carrying/predation/looting/
+  herd-support, so a fainted agent truly takes zero action-tick behavior,
+  while `tickAgentNeeds` still runs for it every tick (needs-decay,
+  heal-over-time, recovery check).
+- **The finishing pool absorbs follow-up damage from anyone**: still inside
+  `resolveHit`, a hit landed on an already-`fainted` defender subtracts
+  `damage` from `finishingPool` instead of the (already-zero) `hp` bar, and
+  only crossing `<= 0` triggers true death (`alive = false`, `diedAtTick =
+  world.tick`, the `killed`/`defeated` event, and `grantKillExp`) —
+  engine-tested directly with multiple smaller hits summing correctly, not
+  just one big one. `resolveHit` now returns true *only* on this true-death
+  transition, never on a mere faint; the hunt call site's hunger-restore-on-
+  kill was re-gated on that return value (renamed `died` for clarity), so
+  eating only ever happens against a truly dead target (design point 7) —
+  hunting a fainted target across several ticks to land the finishing blow,
+  then eating, is the real two-stage path now. A deliberate choice to keep
+  the general prey/guardian *threat*-detection filters unfiltered on
+  `fainted` (i.e. a fainted predator still counts as "the threat" for
+  mobbing/guarding purposes) — the alternative (excluding it) would silently
+  end the encounter the moment something faints, with nothing left to land
+  the finishing blow; `countHerdAllies`' mob-*muster* count, a different
+  question ("how many allies can actually still fight"), does exclude
+  fainted allies.
+- **Recovery discards the pool**: `maybeRecoverFromFaint` (`support.ts`),
+  called from `tickAgentNeeds`. Once a fainted agent's (now healing) `hp /
+  maxHp` crosses `WAKE_HP_FRACTION`, `fainted` clears, `finishingPool` is
+  set `undefined` (never carried into a future faint), and a `recovered`
+  event fires — engine-tested end to end via a full `tickWorld` loop
+  (faint -> heal -> recover -> resumes acting). **`WAKE_HP_FRACTION =
+  0.18`**, picked mid-range of the "~15-20%" the design called for.
+- **Corpse persistence**: `Agent.diedAtTick` (types.ts, set at the true-death
+  moment); `simulation.ts`'s `tickWorld` no longer prunes `alive === false`
+  agents the same tick — a new `pruneStaleCorpses` only removes one once
+  `world.tick - diedAtTick >= CORPSE_PERSIST_TICKS`. **`CORPSE_PERSIST_TICKS
+  = 40`**. Every existing `alive !== false` filter across predation.ts/
+  reproduction.ts/needs.ts already tolerated a lingering dead entry (none of
+  them assumed dead agents simply vanish), so this needed no other call-site
+  changes — confirmed by the full existing suite passing unmodified except
+  the two tests that explicitly asserted same-tick pruning (see below).
+- **Looting, unrestricted**: `applyLooting` (`support.ts`) — any nearby
+  (adjacent, `LOOT_RADIUS = 1`) agent, regardless of species/herd/
+  relationship, can take one item off a fainted OR dead agent's `inventory`
+  per action tick, provided it has carry headroom for that item's weight.
+  New `looted` event. Engine-tested against both a fainted and a truly dead
+  target, and against a looter at capacity.
+- **Inventory and weight**: `Agent.inventory: InventoryItem[]` (`{itemKey,
+  weight}`, types.ts) plus `carryCapacityOf`/`usedCarryWeight` (support.ts).
+  **Scope call, explicit, per DESIGN.md's own permission to make it**:
+  carry capacity and body weight both use a **maxHp-based proxy**
+  (`carryCapacityOf = maxHp * 1.5`; body weight for a carried ally =
+  `maxHp`, falling back to the same `FALLBACK_MAX_HP = 10` predation.ts
+  already uses for statless agents), not a real imported species
+  height/weight figure or a full six-stat total. Chose this over extending
+  the importer again (like `baseExp`/`levelMoves` before it): maxHp is
+  already computed on every combat-capable agent, needs zero extra data,
+  and correlates with bulk about as well as a stat total would for this
+  sim's purposes (a Venusaur outweighs and outcarries a Diglett under this
+  proxy, which is the actual property that mattered). Held-item effects
+  stay unconsumed by combat, unchanged from their original import scope —
+  this only adds hold/carry/transfer/loot.
+- **Herd food delivery**: new `"deliverFood"` `BehaviorKind` and
+  `Agent.deliverTargetId`; `applyHerdSupport` (`support.ts`) is a two-phase,
+  resumable errand (same pattern as predation.ts's `relocate`) — a well-fed,
+  watered herd-mate with spare carry capacity notices a hungry (`hunger <
+  HUNGRY_HERDMATE_THRESHOLD = 0.4`) same-species/same-herd ally within
+  `HERD_SUPPORT_RADIUS = 8`, walks to the nearest stocked food tile,
+  deducts `CONSUME_STOCK_AMOUNT` from its `stock` exactly like direct
+  self-feeding does (flora.ts), carries a `{itemKey: "food", weight: 1}`
+  unit, walks it to the hungry ally, and restores its hunger by the same
+  `0.4` self-feeding grants on arrival. New `foodDelivered` event.
+  Engine-tested end to end (stock deduction through delivered hunger
+  restore) and **observed in real runs** — see below.
+- **Literal carrying, fainted-only**: new `"carryAlly"` `BehaviorKind`,
+  `Agent.carryingId`/`Agent.beingCarriedBy`, `Agent.homePos` (set at spawn
+  in `spawnAgent`/`spawnOffspring` to the agent's own spawn position — the
+  cheapest available "herd home range" stand-in, since no richer concept
+  exists in the engine yet). `maybeStartCarrying` picks up an adjacent fully
+  fainted, not-already-carried ally if the carrier has spare capacity for
+  its body weight; `applyCarrying` mirrors the carried agent's position onto
+  the carrier's every tick while walking toward `homePos`, sets it down
+  (`setDown` event, `reason: "arrived"`) within `CARRY_ARRIVAL_RADIUS = 1`
+  of home, or drops it immediately (`reason: "threat"`) the instant a real
+  predator threat comes within `FLEE_DETECT_RADIUS` of the carrier — the
+  carrier's own survival instinct isn't overridden by rescuing, per direct
+  instruction, and a dropped carry falls through to normal predation
+  instincts that same tick so the carrier actually flees. A carried agent
+  (`beingCarriedBy` set) is excluded from its own action tick the same way a
+  fainted agent is. Both paths engine-tested directly, including the
+  drop-on-threat case.
+- **Call order in `tickAgentAction`** (needs.ts), since several new
+  behaviors now compete for the same action tick: an in-progress carry gets
+  first refusal (so a threat can make the carrier drop and flee the same
+  tick), then existing survival instincts (`applyPredationInstincts`), then
+  starting a new carry, then looting, then herd food delivery, then the
+  original needs-driven behavior choice — a conscious agent never skips
+  fleeing a real predator to go loot a corpse or start a delivery errand.
+- **104 pre-existing engine tests pass unmodified except two**, both
+  rewritten (not special-cased around) because they directly asserted the
+  old instant-death behavior: "kills prey on contact... prunes the corpse"
+  now asserts fainting on the first hit and true death only after a
+  follow-up hit exhausts the pool; "a mob of 3+ can defeat a predator
+  outright" now uses a 1-HP predator so the first mobber's hit faints it and
+  the second mobber's hit (same tick) exhausts the pool — still a real
+  multi-hit finishing blow, just compressed into fewer, larger hits to fit a
+  single-tick test. 11 new tests added (`support.test.ts`) covering
+  heal-gating, recovery, fainted-agent action-tick exclusion, looting
+  (fainted + dead, capacity-respecting), food delivery, and both carrying
+  paths (arrival and drop-on-threat) — 115 total, all passing. Full
+  typecheck/build across all 4 packages also clean.
+- **Real run findings, reported straight — the most important part of this
+  write-up.** A 1000-tick run: fainting and finishing-off both actually
+  happened (2 Bulbasaur fainted then were killed 2 ticks later each, tick
+  58->60 and 101->103; hunger only restored at the `killed` events, not the
+  earlier `fainted` ones — confirms eating-on-true-death-only is real
+  behavior, not just an assertion), plus 2 `foodDelivered` events. A
+  3000-tick run: **the same two-stage faint-then-finish pattern held (tick
+  58->60, tick 107->109)**, and food delivery fired far more than expected —
+  **7212 `foodDelivered` events**, a direct symptom of this sim's
+  pre-existing unbounded population growth (993 births in the same run; see
+  the action-economy/leveling sections above) rather than the delivery logic
+  itself being wrong in isolation. **The single most important finding**: a
+  solitary (herdless) Scyther fainted at tick 152 and was never finished off
+  or recovered for the rest of the 3000-tick run — its thirst had already
+  decayed to ~0.52 (below `FED_THRESHOLD`) *before* it even fainted, so
+  heal-over-time never started, and nobody wandered back into strike range
+  to land the finishing blow. Worked through the arithmetic on why this
+  isn't a fluke: healing from 0 hp to the 18% wake threshold at 1%/tick
+  takes ~18 ticks, while thirst alone decays through the 0.7 fed gate in
+  ~20 ticks starting from full — even an agent that faints at perfectly full
+  needs has barely any margin to heal past the wake threshold before its own
+  needs decay disqualify it from healing at all, and any agent that faints
+  already below full needs (the overwhelmingly common case, since combat
+  usually follows some activity) has essentially no chance. **Looting and
+  carrying were never observed in either real run**, only in direct engine
+  tests — nothing in the demo scenario puts durable loot in an inventory
+  (a delivery courier's food item is consumed within a tick or two of
+  pickup), and a hunting predator's own follow-up hits land faster than a
+  herd-mate can notice a fainted ally and walk over, so the carry window
+  mostly doesn't open. A 5000-tick run timed out past 300s, consistent with
+  (and plausibly worsened by) the sim's already-documented unbounded-
+  population problem — see TODO.md for the full, itemized list of what's
+  still open here (heal-over-time/fed-gate/limbo tuning, food-delivery
+  frequency, the emergent-scenario gap for looting/carrying, and the
+  performance interaction with the population explosion).
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

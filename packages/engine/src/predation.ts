@@ -5,11 +5,13 @@ import { stepAway, stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
 import { calculateDamage, pickBestMove, useMove, withinMoveRange, rollAccuracy, rollCritical } from "./combat.js";
 import { grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
+import { FINISHING_POOL_FRACTION } from "./support.js";
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
 
-const FLEE_DETECT_RADIUS = 4;
+/** Exported so support.ts's `applyCarrying` can reuse the same "is a predator nearby" check when deciding to drop a carried ally and flee. */
+export const FLEE_DETECT_RADIUS = 4;
 const HUNT_DETECT_RADIUS = 5;
 /** A predator starts hunting below this hunger — more eager than the general seekFood threshold, since prey won't wait. */
 const HUNT_HUNGER_THRESHOLD = 0.6;
@@ -19,8 +21,8 @@ const KILL_HUNGER_RESTORE = 0.6;
 const MOB_TRIGGER_RADIUS = 2;
 const MOB_MUSTER_RADIUS = 4;
 const MOB_THRESHOLD = 3;
-/** Fallback HP for an agent with no real combat profile (stats/level/types) — shouldn't happen for fully-statted species. */
-const FALLBACK_MAX_HP = 10;
+/** Fallback HP for an agent with no real combat profile (stats/level/types) — shouldn't happen for fully-statted species. Exported so support.ts's body-weight proxy can match it. */
+export const FALLBACK_MAX_HP = 10;
 const FALLBACK_DAMAGE = 1;
 /** A predator at or below this fraction of max HP flees a fight instead of continuing it. */
 const RETREAT_HP_FRACTION = 0.4;
@@ -30,15 +32,16 @@ const RELOCATE_AFTER_TICKS = 150;
 const MIN_RELOCATE_DISTANCE = 8;
 const RELOCATE_ATTEMPTS = 10;
 
-function manhattan(a: Vec2, b: Vec2): number {
+export function manhattan(a: Vec2, b: Vec2): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
-function isPreyOf(rules: HuntRules, predatorSpecies: string, targetSpecies: string): boolean {
+export function isPreyOf(rules: HuntRules, predatorSpecies: string, targetSpecies: string): boolean {
   return rules[predatorSpecies]?.includes(targetSpecies) ?? false;
 }
 
-function agentsWithin(world: World, agent: Agent, radius: number): Agent[] {
+/** Nearby living agents (fainted ones included — a fainted agent is still `alive !== false`, and remains a valid hunt/threat target). */
+export function agentsWithin(world: World, agent: Agent, radius: number): Agent[] {
   return world.agents.filter(
     (other) =>
       other.id !== agent.id &&
@@ -48,7 +51,7 @@ function agentsWithin(world: World, agent: Agent, radius: number): Agent[] {
   );
 }
 
-function nearest(agent: Agent, others: Agent[]): Agent | undefined {
+export function nearest(agent: Agent, others: Agent[]): Agent | undefined {
   let best: Agent | undefined;
   let bestDist = Infinity;
   for (const other of others) {
@@ -61,7 +64,7 @@ function nearest(agent: Agent, others: Agent[]): Agent | undefined {
   return best;
 }
 
-function logBehaviorChange(log: EventLog | undefined, world: World, agent: Agent, to: Agent["behavior"]): void {
+export function logBehaviorChange(log: EventLog | undefined, world: World, agent: Agent, to: Agent["behavior"]): void {
   if (!log || agent.behavior === to) return;
   log.record({
     kind: "behaviorChanged",
@@ -73,13 +76,20 @@ function logBehaviorChange(log: EventLog | undefined, world: World, agent: Agent
   });
 }
 
-/** Same-species, same-herd, living agents near `pos`, excluding `excludeId` itself. */
+/**
+ * Same-species, same-herd, living, conscious agents near `pos`, excluding
+ * `excludeId` itself. Fainted allies are excluded on purpose — they're
+ * physically present but can't take an action-tick behavior at all (see
+ * needs.ts), so counting them toward a mob's muster would overstate how much
+ * actual fighting help is nearby.
+ */
 function countHerdAllies(world: World, excludeId: string, species: string, herdId: string | undefined, layer: Layer, pos: Vec2, radius: number): number {
   if (!herdId) return 0;
   return world.agents.filter(
     (other) =>
       other.id !== excludeId &&
       other.alive !== false &&
+      !other.fainted &&
       other.species === species &&
       other.herdId === herdId &&
       other.layer === layer &&
@@ -130,8 +140,24 @@ function findHerdmateInDanger(world: World, agent: Agent): Agent | undefined {
  * (STAB, type effectiveness, a real crit-stage roll, a 0.85-1x variance
  * roll), applies it, and puts that move on cooldown. If every move is on
  * cooldown, nothing happens this tick — the weapon just isn't ready, which
- * is the point of having cooldowns. Returns true if the defender fainted
- * from this hit.
+ * is the point of having cooldowns.
+ *
+ * Two distinct outcomes, per DESIGN.md's "Faint/finish-off" section:
+ *   - A hit that brings a conscious defender's `hp` to 0 FAINTS it
+ *     (`fainted = true`, `hp` pinned at 0, granted a `finishingPool` worth
+ *     `FINISHING_POOL_FRACTION * maxHp`) rather than killing it outright.
+ *   - A hit landed on an already-fainted defender (from anyone, not just
+ *     the original attacker) instead subtracts its damage from
+ *     `finishingPool` — multiple smaller hits add up correctly, it isn't a
+ *     one-hit threshold check. Only once the pool is exhausted does the
+ *     defender actually die (`alive = false`), which is also the moment
+ *     kill-exp is granted and the `killed`/`defeated` event fires.
+ *
+ * Returns true only when this hit caused a TRUE death (`alive` newly
+ * `false`) — never on a mere faint. Callers that restore a predator's
+ * hunger on a "kill" (see the hunt call site below) must gate on this
+ * return value, not on the old hp<=0 check, so eating only ever happens
+ * against a truly dead target (design point 7).
  */
 function resolveHit(
   world: World,
@@ -141,7 +167,7 @@ function resolveHit(
   faintKind: "killed" | "defeated",
   ctx?: LevelingContext
 ): boolean {
-  if (defender.alive === false) return false;
+  if (defender.alive === false) return false; // already a corpse — nothing left to finish off here (looting/scavenging is a separate path, see support.ts)
 
   defender.maxHp = defender.maxHp ?? defender.stats?.maxHp ?? FALLBACK_MAX_HP;
   defender.hp = defender.hp ?? defender.maxHp;
@@ -175,8 +201,37 @@ function resolveHit(
         ).damage
       : FALLBACK_DAMAGE;
 
-  defender.hp = Math.max(0, defender.hp - damage);
   if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log);
+
+  if (defender.fainted) {
+    // Finishing-blow phase: the (already-zero) hp bar is untouched; damage
+    // comes out of the finishing pool instead, and it accumulates across
+    // however many hits it takes.
+    defender.finishingPool = (defender.finishingPool ?? 0) - damage;
+
+    log?.record({
+      kind: "fought",
+      tick: world.tick,
+      attackerId: attacker.id,
+      attackerSpecies: attacker.species,
+      defenderId: defender.id,
+      defenderSpecies: defender.species,
+      damage,
+      defenderHpRemaining: defender.hp ?? 0,
+      critical: isCritical,
+    });
+
+    if (defender.finishingPool > 0) return false; // still down, not finished
+
+    defender.alive = false;
+    defender.finishingPool = 0;
+    defender.diedAtTick = world.tick;
+    grantKillExp(world, attacker, defender, ctx, log);
+    logKillOrDefeat(world, attacker, defender, faintKind, log);
+    return true;
+  }
+
+  defender.hp = Math.max(0, defender.hp - damage);
 
   log?.record({
     kind: "fought",
@@ -192,8 +247,14 @@ function resolveHit(
 
   if (defender.hp > 0) return false;
 
-  defender.alive = false;
-  grantKillExp(world, attacker, defender, ctx, log);
+  // This hit brought hp to 0 — faint, don't kill outright.
+  defender.fainted = true;
+  defender.finishingPool = FINISHING_POOL_FRACTION * defender.maxHp;
+  log?.record({ kind: "fainted", tick: world.tick, agentId: defender.id, species: defender.species, pos: defender.pos });
+  return false; // not a true death yet
+}
+
+function logKillOrDefeat(world: World, attacker: Agent, defender: Agent, faintKind: "killed" | "defeated", log: EventLog | undefined): void {
   if (faintKind === "killed") {
     log?.record({
       kind: "killed",
@@ -215,7 +276,6 @@ function resolveHit(
       pos: defender.pos,
     });
   }
-  return true;
 }
 
 function findRandomWalkableTile(world: World, layer: Layer, from: Vec2): Vec2 | undefined {
@@ -289,6 +349,8 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
   if (!isPreyOfAnything(rules, agent.species)) {
     const herdmate = findHerdmateInDanger(world, agent);
     if (herdmate) {
+      // Deliberately includes a fainted predator: a guardian keeps pressing the
+      // fight to finish it off, same reasoning as the general threats filter below.
       const herdmateThreats = agentsWithin(world, herdmate, FLEE_DETECT_RADIUS).filter((other) =>
         isPreyOf(rules, other.species, herdmate.species)
       );
@@ -308,6 +370,10 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
     }
   }
 
+  // Deliberately includes a fainted predator: prey (mobbing or fleeing) keeps
+  // treating it as the threat it was until it's truly dead, which is what lets
+  // a mob land the finishing blow across multiple ticks/hits rather than the
+  // predator's faint silently ending the encounter — see resolveHit/DESIGN.md.
   const threats = agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter((other) =>
     isPreyOf(rules, other.species, agent.species)
   );
@@ -352,11 +418,14 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
       agent.huntTarget = target.id;
 
       if (canAttackFromHere(agent, manhattan(agent.pos, target.pos), target.types ?? [])) {
-        // A single hit may not be lethal now — real HP, real damage. The
-        // meal (and hunger restore) only happens once the target actually faints;
-        // otherwise it's a wounded prey that gets another chance to flee next tick.
-        const fainted = resolveHit(world, agent, target, log, "killed", ctx);
-        if (fainted) {
+        // A single hit may not be lethal now — real HP, real damage, and even
+        // a lethal hit only FAINTS the target (see resolveHit/DESIGN.md). The
+        // meal (and hunger restore) only happens once the target is truly
+        // dead — resolveHit returns true only at that moment, never on a mere
+        // faint — so hunting a fainted target across several ticks to finish
+        // it off, then eating, is the normal two-stage path here.
+        const died = resolveHit(world, agent, target, log, "killed", ctx);
+        if (died) {
           agent.needs.hunger = Math.min(1, agent.needs.hunger + KILL_HUNGER_RESTORE);
           agent.huntTarget = undefined;
           agent.ticksSinceMeal = 0;

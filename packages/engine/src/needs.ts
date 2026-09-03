@@ -15,6 +15,7 @@ import {
   markSpeciesEncountered,
   type LevelingContext,
 } from "./leveling.js";
+import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
 
 const DECAY_PER_TICK = {
   hunger: 0.01,
@@ -107,12 +108,19 @@ function consume(needs: Needs, behavior: "seekWater" | "seekFood"): void {
  * callers without a leveling context (bare fixtures, anything that predates
  * this feature) keep working — no world/ctx means the trickle simply isn't
  * granted (nothing to log a tick number against).
+ *
+ * Heal-over-time and faint-recovery (support.ts) also live here, for the
+ * same reason: a fainted agent still needs-decays and heals every tick even
+ * though it's excluded from the action tick entirely (see `tickAgentAction`
+ * below) — DESIGN.md's "Faint/finish-off, heal over time" section.
  */
 export function tickAgentNeeds(agent: Agent, world?: World, ctx?: LevelingContext, log?: EventLog): void {
   if (agent.alive === false) return;
   if (agent.age !== undefined) agent.age += 1;
   tickCooldowns(agent);
   decayNeeds(agent.needs);
+  applyHealOverTime(agent);
+  if (world) maybeRecoverFromFaint(agent, world, log);
   if (world) grantExp(world, agent, EXP_TRICKLE_PER_TICK, ctx, log);
 }
 
@@ -128,9 +136,28 @@ export function tickAgentNeeds(agent: Agent, world?: World, ctx?: LevelingContex
  * take priority over normal need-seeking when `rules` is provided — see
  * predation.ts. Without rules, agents behave exactly as before predation
  * existed.
+ *
+ * A fainted agent, or one currently being physically carried by a herd-mate
+ * (`beingCarriedBy`), takes NO action-tick behavior at all — no movement,
+ * attack, flee, hunt, mate-seeking, or food delivery — per DESIGN.md; it
+ * still needs-decays and heals via `tickAgentNeeds` above. Everything else
+ * here (carrying an ally, looting, herd food delivery) runs for a normal,
+ * conscious agent, ahead of ordinary needs-driven behavior: an in-progress
+ * carry gets first refusal (so a threat can still make the carrier drop the
+ * ally and flee this same tick, see support.ts's `applyCarrying`), then
+ * survival instincts, then starting a new carry/loot/delivery, then the
+ * original needs-based behavior choice.
  */
 export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext): void {
   if (agent.alive === false) return;
+  if (agent.fainted) return;
+  if (agent.beingCarriedBy) return;
+
+  if (applyCarrying(world, agent, rules, log)) return;
+  if (rules && applyPredationInstincts(world, agent, rules, log, ctx)) return;
+  if (maybeStartCarrying(world, agent, log)) return;
+  if (applyLooting(world, agent, log)) return;
+  if (applyHerdSupport(world, agent, log)) return;
 
   markSectorVisited(agent, world, ctx, log);
   // Once an agent has racked up a handful of distinct species, it's very likely seen
@@ -146,8 +173,6 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
       markSpeciesEncountered(agent, other.species, world, ctx, log);
     }
   }
-
-  if (rules && applyPredationInstincts(world, agent, rules, log, ctx)) return;
 
   const previousBehavior = agent.behavior;
   agent.behavior = chooseBehavior(agent.needs);

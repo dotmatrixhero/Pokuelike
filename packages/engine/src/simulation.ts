@@ -3,6 +3,7 @@ import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import { growFlora, maybeDropSeed } from "./flora.js";
 import type { LevelingContext } from "./leveling.js";
+import { CORPSE_PERSIST_TICKS, effectiveSpeed } from "./support.js";
 
 /**
  * Energy an agent needs to accumulate before it gets to act. Chosen against
@@ -43,9 +44,14 @@ export function accumulateActionEnergy(agent: Agent, speed: number): boolean {
  * birth yet — see TODO.md) fall back to `ACTION_THRESHOLD` itself, i.e. they
  * act every tick, matching the sim's pre-action-economy behavior rather than
  * being silently slowed down by missing data they were never meant to carry.
+ *
+ * Injury lowers effective Speed on top of that (support.ts's
+ * `effectiveSpeed`, floored at `FAINT_SPEED_FLOOR`) — a hurt agent acts less
+ * often, not just weaker when it does. See DESIGN.md's "Faint/finish-off,
+ * heal over time" section.
  */
 function actionSpeedOf(agent: Agent): number {
-  return agent.stats?.speed ?? ACTION_THRESHOLD;
+  return effectiveSpeed(agent, agent.stats?.speed ?? ACTION_THRESHOLD);
 }
 
 // A plain function call (rather than an inline `agent.alive === false` check)
@@ -58,8 +64,11 @@ function isDead(agent: Agent): boolean {
 
 /**
  * Advances the whole world by one tick. Shared by the browser app and the
- * headless runner. Agents killed this tick (see predation.ts) are pruned
- * from World.agents afterward, so a kill's own tick still sees the victim.
+ * headless runner. A truly-dead agent (see predation.ts's `resolveHit` —
+ * `alive: false`, the finishing pool exhausted) is NOT pruned this tick;
+ * it persists as a corpse for `CORPSE_PERSIST_TICKS` (support.ts) before
+ * `pruneStaleCorpses` removes it, a deliberate change from before this
+ * feature (see that function's doc comment).
  * A newborn (see reproduction.ts) pushed mid-loop may itself get ticked
  * once more in the same call, since array iteration picks up appended
  * elements — harmless, just means a same-tick newborn can already be at
@@ -88,7 +97,27 @@ export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?:
     }
   }
   growFlora(world, log);
-  if (world.agents.some((agent) => agent.alive === false)) {
-    world.agents = world.agents.filter((agent) => agent.alive !== false);
-  }
+  pruneStaleCorpses(world);
+}
+
+/**
+ * A true kill (`alive: false`, set in predation.ts's `resolveHit` once a
+ * fainted agent's finishing pool is exhausted) doesn't vanish the same tick
+ * anymore — it persists as an eatable, lootable corpse for
+ * `CORPSE_PERSIST_TICKS` (support.ts) so agents other than whoever landed
+ * the killing blow get a real scavenge/loot window, then gets pruned. A
+ * real, deliberate behavior change from before this feature ("corpse
+ * vanishes instantly") — anything elsewhere in the engine that iterates
+ * `World.agents` needs to tolerate `alive === false` entries sticking around
+ * for a while (predation.ts/reproduction.ts/needs.ts all already filter on
+ * `alive !== false` rather than assuming dead agents are simply absent).
+ */
+function pruneStaleCorpses(world: World): void {
+  const hasStale = world.agents.some(
+    (agent) => agent.alive === false && world.tick - (agent.diedAtTick ?? world.tick) >= CORPSE_PERSIST_TICKS
+  );
+  if (!hasStale) return;
+  world.agents = world.agents.filter(
+    (agent) => agent.alive !== false || world.tick - (agent.diedAtTick ?? world.tick) < CORPSE_PERSIST_TICKS
+  );
 }

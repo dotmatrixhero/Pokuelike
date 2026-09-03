@@ -367,6 +367,108 @@ produce a real story before player mechanics are worth building further.
       (harmlessly unused currency) but, per the existing scope call, never
       call it.
 
+## Faint/finish-off, heal over time, herd inventory and carrying
+- [x] **Built: fainting instead of instant death, heal-over-time (fed-gated),
+      a finishing pool that absorbs follow-up hits, recovery, corpse
+      persistence, looting, herd food delivery, and literal carrying of a
+      fainted ally.** See DESIGN.md's section of the same name for the full
+      write-up and real run findings. Short version:
+      `packages/engine/src/support.ts` holds every new tuning constant and
+      most of the new logic (heal/recover/loot/deliverFood/carryAlly);
+      `predation.ts`'s `resolveHit` now faints instead of killing on a
+      lethal hit and only actually kills once a 0.75\*maxHp finishing pool
+      is exhausted (by however many follow-up hits, from anyone); kill-exp
+      and hunger-restore-on-kill both moved to that true-death moment.
+      104 pre-existing engine tests still pass (2 rewritten to match the new
+      faint-then-finish semantics, not special-cased); 11 new tests added.
+- [x] **Real run finding, and it's the important one: a fainted agent
+      outside a herd (or one whose needs were already low when it fainted)
+      can get stuck fainted forever, neither recovering nor being finished
+      off.** A 3000-tick run: Scyther (solitary, no herd) fainted at tick
+      152 with thirst already at ~0.52 — below `FED_THRESHOLD` (0.7) — so
+      heal-over-time never even started (its own decay had already crossed
+      the fed gate before the faint). One Venusaur landed a follow-up hit at
+      tick 155 that didn't finish the (unlogged, since `fought` doesn't
+      currently record the remaining pool) finishing pool, and then nobody
+      came back into range for the rest of the 3000-tick run — Scyther just
+      sat there fainted, permanently, contributing to neither the food chain
+      nor the event log for ~2850 ticks straight. The margin is razor-thin
+      even for an agent that faints at full needs: healing to the 18% wake
+      threshold at 1%-of-maxHp/tick takes ~18 ticks, while thirst alone
+      decays through the 0.7 fed gate in ~20 ticks from full — a fainted
+      agent has to already be finished off or rescued (herd food delivery,
+      carrying) well inside that window, or it's stuck. This is a real,
+      specific tuning gap: either heal-over-time needs a faster rate, the
+      fed-gate needs to be more lenient specifically for a fainted agent (a
+      believable in-fiction argument: it's not moving or fighting, its needs
+      shouldn't decay at the normal active rate), or fainted-with-no-herd
+      needs a bounded "die of exposure eventually" fallback so a corpse
+      doesn't sit in `World.agents` forever in spirit even though the
+      literal `alive` flag stays true. Not fixed here — reported straight,
+      exactly the finding this feature was supposed to surface.
+- [x] **Fainting and finishing-off were both observed for real, not just
+      engine-tested**: same 3000-tick run, two Bulbasaur fainted and were
+      killed 2 ticks later each (tick 58->60, tick 107->109) — a real
+      two-stage "knock down, then finish off" sequence, matching the design
+      intent exactly. Hunger only restored on the tick-60/109 `killed`
+      events, not the earlier `fainted` ones — eating-on-true-death-only is
+      real, not just asserted.
+- [ ] **Herd food delivery fired far more than intended: 7212
+      `foodDelivered` events in the same 3000-tick run** (vs. 2 in a
+      1000-tick run on the same demo scenario) — a direct consequence of the
+      sim's pre-existing unbounded population growth (see the "Leveling"
+      TODO item above and DESIGN.md's action-economy section): once the
+      Venusaur/Bulbasaur population balloons into the hundreds, a large
+      fraction of them are well-fed at any given moment, `HUNGRY_HERDMATE_
+      THRESHOLD` (0.4) is common enough to always have a target, and nothing
+      caps how often one agent restarts the errand. Worth tightening once
+      the underlying population-explosion problem has a fix to test
+      against — right now it's hard to tell whether 0.4/the lack of a
+      cooldown is wrong in isolation or just amplified by an unrelated bug.
+- [ ] **Looting and literal carrying were never observed in either real run
+      (1000 or 3000 ticks), only in direct engine tests.** Two different
+      reasons, both worth naming rather than just reporting a null result:
+      (1) nothing in the demo scenario ever puts real loot in an inventory
+      except a `deliverFood` courier's own in-transit food item, which is
+      consumed within a tick or two of being picked up, so there's almost
+      never anything sitng around to loot; (2) a hunting predator's own
+      follow-up hits reliably land faster (every ~2 ticks, see the finding
+      above) than a herd-mate can notice a fainted ally and walk over to
+      pick it up, so the carry window mostly doesn't open before the target
+      either recovers, dies, or (per the finding above) gets stuck in limbo.
+      The mechanism itself is real (support.ts's `applyCarrying`/
+      `maybeStartCarrying` are directly engine-tested, including the
+      drop-on-threat path) — this is an emergent-scenario gap, not a
+      not-implemented one. A dedicated small scenario (a slow predator, a
+      tanky prey that survives several hits before fainting, a herd-mate
+      planted adjacent) would be the way to actually witness it end-to-end
+      outside a unit test.
+- [ ] **5000-tick run timed out (>300s)**, consistent with the pre-existing
+      unbounded-population problem documented in DESIGN.md's action-economy
+      and leveling sections, plausibly worse now: `applyLooting` and
+      `applyHerdSupport` each scan `world.agents` per agent per action tick
+      (same O(agents)-per-agent cost class predation.ts's own `agentsWithin`/
+      `countHerdAllies` already have), so they add roughly proportional
+      constant-factor overhead on top of an already-unbounded agent count
+      rather than a new order of complexity — but "constant factor on top of
+      unbounded" is still enough to turn 3000 ticks (61s) into "5000 ticks
+      doesn't finish in 5 minutes." Not specifically optimized here, per the
+      same scope call every previous feature in this area has made — the
+      real fix is the carrying-capacity/population problem itself.
+- [ ] **Carry-capacity uses a maxHp-based proxy, not real imported species
+      weight** (`carryCapacityOf`/body-weight in support.ts) — an explicit,
+      documented scope call (see DESIGN.md) rather than extending the
+      importer to pull `poke_the_spire`'s height/weight fields for a second
+      time this project. Revisit if held-item effects ever get consumed by
+      combat (the existing out-of-scope item there) and real weight starts
+      mattering for something beyond carry capacity.
+- [ ] `fought` events don't carry the fainted defender's remaining
+      finishing-pool value — tests and the finding above had to infer it
+      from `damage` plus context. A cheap follow-up: add an optional
+      `finishingPoolRemaining` field so the event log itself can narrate a
+      multi-hit finishing blow ("2 hits left in the pool", etc.) without
+      re-deriving it from raw damage numbers.
+
 ## Art / assets
 - [ ] Sprite pipeline is bring-your-own (`packages/web/public/sprites/`) —
       decide on sprite sheet format/size once real art exists.

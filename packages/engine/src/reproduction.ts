@@ -21,6 +21,7 @@ function isMature(agent: Agent): boolean {
 
 function isEligibleMate(agent: Agent, candidate: Agent): boolean {
   if (candidate.id === agent.id || candidate.alive === false) return false;
+  if (candidate.fainted || candidate.beingCarriedBy) return false; // downed or being carried — not available to mate
   if (candidate.species !== agent.species || candidate.layer !== agent.layer) return false;
   if (!agent.sex || !candidate.sex || agent.sex === candidate.sex) return false;
   if (!isMature(candidate)) return false;
@@ -57,6 +58,11 @@ function spawnOffspring(world: World, mother: Agent, father: Agent): Agent {
     pos: { ...mother.pos },
     layer: mother.layer,
     homeLayer: mother.homeLayer,
+    // Cheapest available "home range" stand-in for carryAlly's rescue destination
+    // (support.ts) — there's no richer herd-home-range concept in the engine yet.
+    // A newborn's home is simply where it was born, same as the mother's own
+    // homePos when she has one.
+    homePos: mother.homePos ?? { ...mother.pos },
     needs: freshNeeds(),
     behavior: "idle",
     herdId: mother.herdId,

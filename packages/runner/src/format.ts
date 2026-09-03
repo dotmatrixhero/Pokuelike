@@ -28,6 +28,18 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) learned ${event.moveId} at level ${event.level}`;
     case "gainedSkillPoint":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) gained a ${event.pointType} skill point`;
+    case "fainted":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) fainted at (${event.pos.x},${event.pos.y})`;
+    case "recovered":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) recovered consciousness at ${event.hp} hp`;
+    case "looted":
+      return `[tick ${event.tick}] ${event.looterSpecies} (${event.looterId}) looted ${event.itemKey} from ${event.fromSpecies} (${event.fromId})`;
+    case "foodDelivered":
+      return `[tick ${event.tick}] ${event.carrierSpecies} (${event.carrierId}) delivered food to ${event.receiverSpecies} (${event.receiverId})`;
+    case "carrying":
+      return `[tick ${event.tick}] ${event.carrierSpecies} (${event.carrierId}) picked up fainted ${event.carriedSpecies} (${event.carriedId})`;
+    case "setDown":
+      return `[tick ${event.tick}] ${event.carrierSpecies} (${event.carrierId}) set down ${event.carriedSpecies} (${event.carriedId}) (${event.reason})`;
   }
 }
 

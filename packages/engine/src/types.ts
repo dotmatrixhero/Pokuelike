@@ -51,7 +51,15 @@ export type BehaviorKind =
   | "flee"
   | "hunt"
   | "fight"
-  | "relocate";
+  | "relocate"
+  | "deliverFood"
+  | "carryAlly";
+
+/** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
+export interface InventoryItem {
+  itemKey: string;
+  weight: number;
+}
 
 export interface Agent {
   id: string;
@@ -65,7 +73,14 @@ export interface Agent {
   behavior: BehaviorKind;
   /** Agents in the same herd share a home range and will regroup. */
   herdId?: string;
-  /** Absent/true = alive. Dead agents are pruned from World.agents at the end of the tick they die in. */
+  /**
+   * Absent/true = alive. `false` = truly dead (a corpse — eatable, lootable),
+   * which persists in `World.agents` for `CORPSE_PERSIST_TICKS` (see
+   * simulation.ts/support.ts) before being pruned — not the same tick it
+   * died, a deliberate change from before this feature. See `fainted` below
+   * for the intermediate "downed but not dead" state, which does NOT set
+   * `alive` to false.
+   */
   alive?: boolean;
   /** The agent currently being hunted, if this agent is mid-hunt. Bookkeeping only — re-evaluated each tick. */
   huntTarget?: string;
@@ -138,6 +153,46 @@ export interface Agent {
    * one of these before."
    */
   encounteredSpecies?: string[];
+
+  // --- Faint/finish-off, heal-over-time, and herd support (see DESIGN.md) ---
+
+  /**
+   * True once a hit has brought `hp` to 0 and it hasn't yet recovered or been
+   * finished off. `alive` stays true while merely fainted — a fainted agent
+   * is excluded from the action tick entirely (see `tickAgentAction` in
+   * needs.ts) but still needs-decays and heals. `alive === false` is the
+   * only true-death signal; `fainted` may still read `true` on a corpse
+   * (harmless — every "is this eatable/lootable" check reads `alive`, not
+   * `fainted`, see support.ts's `isTrulyDead`/`isEatable`).
+   */
+  fainted?: boolean;
+  /**
+   * Set to `0.75 * maxHp` at the moment of fainting (support.ts's
+   * `FINISHING_POOL_FRACTION`), a second bar that absorbs every follow-up
+   * hit (from anyone) while fainted instead of `hp`, which stays pinned at
+   * 0. Reaching <= 0 is true death. Discarded (set to `undefined`) on
+   * recovery — a fresh faint later gets a fresh pool, never a carried-over
+   * remainder.
+   */
+  finishingPool?: number;
+  /** World.tick a true kill happened, for the corpse-persistence pruning window in simulation.ts. */
+  diedAtTick?: number;
+  /** General item slots — simple food units and/or ITEM_DEX entries, each carrying its own weight. Capped by `carryCapacityOf` (support.ts). */
+  inventory?: InventoryItem[];
+  /** The id of a fully-fainted ally this agent is currently carrying, if any. Mutually exclusive in practice with `beingCarriedBy` on the same agent. */
+  carryingId?: string;
+  /** The id of the herd-mate currently carrying this agent, if any. While set, this agent takes no action-tick behavior (see needs.ts) regardless of `fainted`. */
+  beingCarriedBy?: string;
+  /** The hungry/fainted herd-mate this agent is currently walking a food item to, mid-`deliverFood`. */
+  deliverTargetId?: string;
+  /**
+   * Anchor position this agent (or its herd) treats as "home" — where a
+   * carrier heads with a fainted ally. Set once at spawn to the agent's
+   * spawn position (`spawnAgent`/`spawnOffspring`); there's no richer
+   * "herd home range" concept in the engine yet, so this is the cheapest
+   * reasonable stand-in (see DESIGN.md).
+   */
+  homePos?: Vec2;
 }
 
 /** predator species id -> the species ids it hunts. */
