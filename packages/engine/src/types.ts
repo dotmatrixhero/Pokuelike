@@ -39,7 +39,15 @@ export interface Needs {
   mateDrive: number; // 0 = none, 1 = urgent
 }
 
-export type BehaviorKind = "idle" | "seekWater" | "seekFood" | "seekMate" | "flee" | "hunt";
+export type BehaviorKind =
+  | "idle"
+  | "seekWater"
+  | "seekFood"
+  | "seekMate"
+  | "flee"
+  | "hunt"
+  | "fight"
+  | "relocate";
 
 export interface Agent {
   id: string;
@@ -61,6 +69,15 @@ export interface Agent {
   sex?: "male" | "female";
   /** Ticks alive. Absent is treated as already mature (for agents spawned directly into a scenario). */
   age?: number;
+  /** Combat hit points — only agents that have ever been in a fight track this. Absent = not (yet) trackable. */
+  hp?: number;
+  maxHp?: number;
+  /** The agent this one is currently mobbing, if mid-fight. Bookkeeping only — re-evaluated each tick. */
+  fightTarget?: string;
+  /** Ticks a predator has gone without a successful kill while actively hunting — drives "relocate" once too high. */
+  ticksSinceMeal?: number;
+  /** Where a "relocate" agent is walking to. Cleared on arrival or once it feeds again. */
+  relocateTarget?: Vec2;
 }
 
 /** predator species id -> the species ids it hunts. */

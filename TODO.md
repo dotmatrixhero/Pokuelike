@@ -43,6 +43,25 @@ produce a real story before player mechanics are worth building further.
       wander/range mechanic so a fed predator moves on and prey get a
       window. Try this before touching flee-radius or mate-priority
       numbers again — two tuning guesses have already been wrong.
+- [x] Predator-side fix built: mob-fighting, risk-aware hunting, and
+      relocate-after-repeated-failure (see DESIGN.md). Unit-tests confirm
+      the mechanism works (a synchronized mob of 3 can defeat a predator).
+      Real 1000-tick run still ended in full extinction, but for a new and
+      more specific reason — see next item. Progress, not a fix yet.
+- [ ] **Coordination gap found by the mob-fighting run**: `mobSize` counts
+      how many herd-mates are *somewhere* within the muster radius (4
+      tiles), not how many are actually adjacent and fighting yet. A lone
+      Bulbasaur that reaches the predator first commits to `fight` alone
+      because the headcount check passes on the herd's total nearby
+      population, dies immediately (predator's kill-on-contact isn't
+      interruptible by simultaneous damage), and its real backup — still
+      mid-flee-cycle several tiles away — never arrives in time. Fix
+      target: require some number of allies to *also* be within striking
+      distance (not just the muster radius) before anyone commits to
+      fighting solo, so mobbing only happens when the group has actually
+      converged. Try this before adding anything else predator-side —
+      three tuning guesses in now, worth actually confirming this one
+      before moving on.
 
 ## World layers, elevation, and regions (see DESIGN.md)
 - [x] `Tile`/`World` have a `layer` dimension (Underground/Surface/Canopy,
@@ -80,6 +99,10 @@ produce a real story before player mechanics are worth building further.
       predator triggers flee (overrides everything), a hungry predator with
       prey in range hunts and kills on contact. Currently just Scyther ->
       Bulbasaur.
+- [x] Mob-fighting, predator risk-assessment, and relocate built on top of
+      the above — see DESIGN.md's "Mob-fighting" section and the
+      coordination-gap item above for the real (not yet fully successful)
+      result.
 - [x] Resource depletion + regrowth + seed-spread built
       (`packages/engine/src/flora.ts`) — food tiles have a depletable/
       regrowing `stock`, agents occasionally seed new patches as they move,

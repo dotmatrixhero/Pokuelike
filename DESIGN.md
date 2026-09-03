@@ -141,6 +141,53 @@ Scyther leave an area after a kill (satiation-driven range/wander
 behavior, most likely — not a flee-threshold tweak, which was last run's
 guess and turned out not to be the actual cause). Not built — see TODO.md.
 
+## Mob-fighting, predator risk-assessment, and relocation
+
+**Built:** `packages/engine/src/predation.ts` was substantially rewritten,
+in priority order:
+
+1. **Self-preservation.** A predator at or below 40% HP flees whoever's
+   currently fighting it instead of continuing to hunt.
+2. **Mob or flee.** Prey with a predator within 2 tiles checks how many
+   same-species/herd allies are within 4 tiles of *itself*. Three or more
+   (self included) and it fights (`BehaviorKind: "fight"`, converges,
+   deals 1 damage on contact) instead of fleeing. `Agent.hp`/`maxHp`
+   default to 3 the first time something takes damage — only agents that
+   ever enter combat carry them at all.
+3. **Risk-aware hunting.** A predator won't select a hunt target that's
+   itself protected by a big-enough nearby herd (`isProtectedByMob`) — it
+   looks for an easier target instead of walking into a fight it would
+   lose.
+4. **Give up and relocate.** A predator that goes 150 ticks of active,
+   hungry hunting without landing a kill (`ticksSinceMeal`) gives up on
+   the area and walks to a random distant point (`BehaviorKind:
+   "relocate"`) instead of camping the same spot forever.
+
+New events: `fought` (one hit, with the defender's remaining HP) and
+`defeated` (HP hit zero). Unit-tested in isolation: a synchronized mob of
+3 *can* drop a predator to 0 HP and defeat it outright (verified in
+`predation.test.ts`) — the mechanism works.
+
+**Real run result, 1000 ticks, and it's a genuine near-miss worth reporting
+straight:** the herd still went fully extinct (same four kills as before,
+now at ticks 53/97/153/208). But this time something new and real
+happened at tick 97 — a Bulbasaur actually landed a hit (Scyther 3hp ->
+2hp) before dying. Looking at the log directly: `mobSize` only checks how
+many herd-mates are *somewhere* within 4 tiles, not how many are actually
+in melee range yet. bulbasaur-0 got close enough alone, the headcount
+check passed because the herd technically had 3+ members alive nearby,
+so it committed to `fight` solo — its actual backup was still several
+tiles away, mid-flee-cycle, not yet adjacent. The predator's kill-on-
+contact isn't interruptible by simultaneous damage, so it ate bulbasaur-0
+the same tick it took the hit. One real hit landed; no mob ever actually
+assembled. The relocate mechanic did fire once too (tick 690-702), but by
+then there was nothing left to give the herd breathing room for.
+
+This is a specific, fixable coordination gap, not a dead end: mobbing
+should probably require nearby allies to also be within striking distance
+(not just within a loose muster radius) before anyone commits to fighting
+alone. Not fixed yet, deliberately — see TODO.md.
+
 ## Stack
 
 - **pnpm workspace monorepo**, TypeScript everywhere.

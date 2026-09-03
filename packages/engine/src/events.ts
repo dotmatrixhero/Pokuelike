@@ -52,6 +52,25 @@ export type SimEvent =
       layer: Layer;
       pos: Vec2;
       stage: "seeded" | "sprouted";
+    }
+  | {
+      kind: "fought";
+      tick: number;
+      attackerId: string;
+      attackerSpecies: string;
+      defenderId: string;
+      defenderSpecies: string;
+      damage: number;
+      defenderHpRemaining: number;
+    }
+  | {
+      kind: "defeated";
+      tick: number;
+      winnerId: string;
+      winnerSpecies: string;
+      loserId: string;
+      loserSpecies: string;
+      pos: Vec2;
     };
 
 /**

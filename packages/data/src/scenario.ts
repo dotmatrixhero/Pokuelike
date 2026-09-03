@@ -40,6 +40,8 @@ export function createDemoWorld(): World {
     needs: createNeeds({ hunger: 0.3 }),
     behavior: "idle",
     sex: "female",
+    hp: 3,
+    maxHp: 3,
   };
 
   const diglett: Agent = {
