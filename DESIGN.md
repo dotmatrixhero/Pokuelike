@@ -1263,6 +1263,62 @@ trigger for move learning and evolution.
   actual run" (this project's stated bar) wasn't achieved for evolution
   specifically, only for leveling and move-learning.
 
+## Breeding: base-form offspring and real cross-species egg groups
+
+Two real bugs, found by direct questioning ("do Venusaur offspring get born
+as Bulbasaur, right? not another Venusaur?" then "some pokemon can cross
+breed"), fixed by actually checking mainline mechanics rather than
+guessing:
+
+1. **Species inheritance was backwards.** `spawnOffspring` originally gave
+   the child the mother's *current* species, so a bred Venusaur produced
+   another Venusaur. Mainline is the opposite: breeding always yields the
+   base (lowest-evolution) form of the mother's line — Bulbasaur is bred,
+   Venusaur is what an adult grows into, not a separately-bred species.
+   Fixed with `LevelingContext.baseSpeciesOf`, built by inverting the
+   dex's forward-only evolution links (it only records "X evolves into Y",
+   never "Y evolves from X") into a prevo map, then walking any species
+   back to its line's root. Verified in a real run: `venusaur x venusaur`
+   now consistently produces `bulbasaur` offspring.
+2. **Mate eligibility required an exact species match**, which is wrong on
+   two counts versus the real games: it wouldn't even let a Bulbasaur and
+   a Venusaur pair (different *current* species), and it had no concept of
+   real cross-species breeding at all. Checked the actual mainline rule:
+   two Pokémon can breed if they share any **Egg Group** (14-15 categories
+   like Monster, Field, Water, Bug, Flying — regardless of evolution
+   stage), need one male and one female (or a Ditto, not modeled — no
+   Ditto in this sim), and `"Undiscovered"`-group species (legendaries,
+   babies) never breed at all. The hatched species is always the
+   **female** parent's line's base form, not a blend of both parents.
+   `canBreed(speciesA, speciesB, ctx)` (`leveling.ts`) implements this
+   exactly, wired into `isEligibleMate`.
+
+**Real data gap, worth being honest about**: the imported PokeRogue dex
+has zero egg-group data — checked directly against a fresh clone of the
+actual PokeRogue source, and its "egg" system is a gacha/hatching-rarity
+mechanic (currency, tiers), completely unrelated to mainline's Day Care
+breeding compatibility. So egg groups can't be pulled from the existing
+import pipeline; `EGG_GROUPS_BY_BASE_KEY` (`packages/data/src/leveling.ts`)
+is a small hand-curated table, scoped to the species actually reachable
+from the current spawn roster and their evolution lines (Bulbasaur line:
+Monster/Grass; Charmander line: Monster/Dragon; Scyther: Bug; Diglett
+line: Field; Pidgey line: Flying) rather than all 1083 imported species.
+An unclassified species (not yet in that table) still breeds with its own
+kind — the safe fallback — just can't cross-breed with anything until
+someone adds it.
+
+Bulbasaur and Charmander share the Monster egg group, so they're a real
+cross-species pair in the actual games — verified with a dedicated test
+(a Charmander mother bred with a Bulbasaur father produces a Charmander,
+never a Bulbasaur, since offspring always follows the mother's line).
+**Not yet observable in an actual run**, though: `createDemoWorld` doesn't
+spawn a Charmander at all, so nothing in the current scenario exercises
+this path live — it's mechanism-verified, not run-verified, until a
+Charmander is added to the scenario or lands there some other way. Not
+built: Ditto (universal breeding partner), IV/Nature/ability/egg-move
+inheritance — this sim has no IV/Nature/multi-ability system to inherit
+into yet, so those are out of scope until the underlying systems exist.
+
 ## Faint/finish-off, heal over time, and herd support (inventory, food delivery, carrying)
 
 Decided, not built yet. Today a hit that brings HP to 0 is permanent —

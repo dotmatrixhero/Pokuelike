@@ -6,7 +6,14 @@ import { EventLog } from "../src/events.js";
 import type { Agent } from "../src/types.js";
 import type { LevelingContext, LevelingProfile } from "../src/leveling.js";
 
-/** A minimal fake dex: venusaur evolves from ivysaur evolves from bulbasaur, matching real Pokemon. */
+/**
+ * A minimal fake dex: venusaur evolves from ivysaur evolves from bulbasaur,
+ * matching real Pokemon. Egg groups matter here too: bulbasaur/charmander
+ * share "monster" (a real cross-species breeding pair in the actual
+ * games), scyther is "bug"-only (no overlap with either), and
+ * "mysteryon" has no eggGroups at all — an unclassified species, which
+ * should still breed with its own kind but nothing else.
+ */
 const FAKE_PROFILES: Record<string, LevelingProfile> = {
   bulbasaur: {
     growthRate: "MEDIUM_SLOW",
@@ -15,6 +22,7 @@ const FAKE_PROFILES: Record<string, LevelingProfile> = {
     baseExp: 64,
     levelMoves: [[1, "TACKLE"]],
     evolutions: [{ targetSpeciesId: "ivysaur", level: 16 }],
+    eggGroups: ["monster", "grass"],
   },
   ivysaur: {
     growthRate: "MEDIUM_SLOW",
@@ -23,6 +31,7 @@ const FAKE_PROFILES: Record<string, LevelingProfile> = {
     baseExp: 142,
     levelMoves: [],
     evolutions: [{ targetSpeciesId: "venusaur", level: 32 }],
+    eggGroups: ["monster", "grass"],
   },
   venusaur: {
     growthRate: "MEDIUM_SLOW",
@@ -31,6 +40,34 @@ const FAKE_PROFILES: Record<string, LevelingProfile> = {
     baseExp: 236,
     levelMoves: [],
     evolutions: [],
+    eggGroups: ["monster", "grass"],
+  },
+  charmander: {
+    growthRate: "MEDIUM_SLOW",
+    baseStats: { hp: 39, attack: 52, defense: 43, spAttack: 60, spDefense: 50, speed: 65 },
+    types: ["fire"],
+    baseExp: 62,
+    levelMoves: [],
+    evolutions: [],
+    eggGroups: ["monster", "dragon"],
+  },
+  scyther: {
+    growthRate: "MEDIUM_FAST",
+    baseStats: { hp: 70, attack: 110, defense: 80, spAttack: 55, spDefense: 80, speed: 105 },
+    types: ["bug", "flying"],
+    baseExp: 100,
+    levelMoves: [],
+    evolutions: [],
+    eggGroups: ["bug"],
+  },
+  mysteryon: {
+    growthRate: "MEDIUM_FAST",
+    baseStats: { hp: 50, attack: 50, defense: 50, spAttack: 50, spDefense: 50, speed: 50 },
+    types: ["normal"],
+    baseExp: 50,
+    levelMoves: [],
+    evolutions: [],
+    // No eggGroups: unclassified.
   },
 };
 
@@ -125,6 +162,56 @@ describe("reproduction", () => {
 
     const child = world.agents.find((a) => a.id !== "mother" && a.id !== "father")!;
     expect(child.species).toBe("bulbasaur");
+  });
+
+  it("a Bulbasaur and a Charmander can breed — real cross-species pair sharing the monster egg group", () => {
+    const world = createWorld(10, 10);
+    const mother: Agent = { ...parent("mother", "female", { x: 2, y: 2 }), species: "charmander", herdId: undefined };
+    const father: Agent = { ...parent("father", "male", { x: 3, y: 2 }), species: "bulbasaur", herdId: undefined };
+    world.agents.push(mother, father);
+
+    tickWorld(world, undefined, undefined, FAKE_CTX);
+
+    // Offspring is always the mother's own line's base form, regardless of
+    // the father's species — a Charmander mother's kid is a Charmander,
+    // never a Bulbasaur, even though the father was a Bulbasaur.
+    const child = world.agents.find((a) => a.id !== "mother" && a.id !== "father")!;
+    expect(child.species).toBe("charmander");
+  });
+
+  it("species that share no egg group can't breed at all — Scyther and Bulbasaur", () => {
+    const world = createWorld(10, 10);
+    const mother: Agent = { ...parent("mother", "female", { x: 2, y: 2 }), species: "scyther", herdId: undefined };
+    const father: Agent = { ...parent("father", "male", { x: 3, y: 2 }), species: "bulbasaur", herdId: undefined };
+    world.agents.push(mother, father);
+
+    tickWorld(world, undefined, undefined, FAKE_CTX);
+
+    expect(world.agents).toHaveLength(2); // no offspring, no cross-species pairing
+  });
+
+  it("an unclassified species (no eggGroups data) still breeds with its own kind", () => {
+    const world = createWorld(10, 10);
+    const mother: Agent = { ...parent("mother", "female", { x: 2, y: 2 }), species: "mysteryon", herdId: undefined };
+    const father: Agent = { ...parent("father", "male", { x: 3, y: 2 }), species: "mysteryon", herdId: undefined };
+    world.agents.push(mother, father);
+
+    tickWorld(world, undefined, undefined, FAKE_CTX);
+
+    expect(world.agents).toHaveLength(3);
+    const child = world.agents.find((a) => a.id !== "mother" && a.id !== "father")!;
+    expect(child.species).toBe("mysteryon");
+  });
+
+  it("an unclassified species can't cross-breed with anything else", () => {
+    const world = createWorld(10, 10);
+    const mother: Agent = { ...parent("mother", "female", { x: 2, y: 2 }), species: "mysteryon", herdId: undefined };
+    const father: Agent = { ...parent("father", "male", { x: 3, y: 2 }), species: "bulbasaur", herdId: undefined };
+    world.agents.push(mother, father);
+
+    tickWorld(world, undefined, undefined, FAKE_CTX);
+
+    expect(world.agents).toHaveLength(2);
   });
 
   it("a newborn gets a real combat profile (stats/types/moves) backfilled, not left empty", () => {

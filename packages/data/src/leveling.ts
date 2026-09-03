@@ -39,6 +39,26 @@ function baseSpeciesOf(speciesId: string): string {
 }
 
 /**
+ * Real mainline egg groups, keyed by the *base* (root) species of the line
+ * — every evolution stage shares its line's groups, so this only needs one
+ * entry per line rather than one per stage. Hand-curated because the
+ * source dex (PokeRogue) doesn't carry egg-group data at all — see
+ * `LevelingProfile.eggGroups`'s doc comment in engine/leveling.ts. Scoped
+ * to species reachable from the current sim roster (`species.ts`) and
+ * their evolution lines; extend this whenever a new base species is added
+ * to the roster. Bulbasaur and Charmander both include "monster" — a real
+ * cross-species breeding pair in the actual games, unlike same-species-only
+ * pairs like Scyther or Pidgey.
+ */
+const EGG_GROUPS_BY_BASE_KEY: Record<string, string[]> = {
+  BULBASAUR: ["monster", "grass"],
+  CHARMANDER: ["monster", "dragon"],
+  SCYTHER: ["bug"],
+  DIGLETT: ["field"],
+  PIDGEY: ["flying"],
+};
+
+/**
  * A sim species id (`Agent.species`) is always the lowercased dex key
  * (`speciesFromDex` in species.ts) — including for species that aren't part
  * of the curated `SPECIES` roster, since evolution can land an agent on one
@@ -55,6 +75,7 @@ function profileFromDexEntry(speciesId: string): LevelingProfile | undefined {
     types: entry.types,
     baseExp: entry.baseExp,
     levelMoves: entry.levelMoves,
+    eggGroups: EGG_GROUPS_BY_BASE_KEY[baseSpeciesOf(speciesId).toUpperCase()] ?? [],
     // Level-gated evolutions only — item/trade/friendship evolutions (no `level`)
     // are explicitly deferred, see DESIGN.md.
     evolutions: entry.evolutions

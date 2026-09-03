@@ -467,6 +467,24 @@ produce a real story before player mechanics are worth building further.
       over the full imported dex (`packages/data/src/leveling.ts`).
       Verified in a real run: `venusaur x venusaur` now consistently
       produces `bulbasaur` offspring.
+- [x] **Mate eligibility required an exact species match — no real
+      cross-species breeding, and real mainline compatibility is Egg
+      Groups, not species identity.** Fixed with `canBreed`
+      (`leveling.ts`) checking real Egg Group overlap; hand-curated
+      `EGG_GROUPS_BY_BASE_KEY` since the imported PokeRogue dex has no
+      egg-group data at all (confirmed directly against a fresh clone —
+      PokeRogue's "egg" system is an unrelated gacha/rarity mechanic).
+      Bulbasaur/Charmander (both Monster) verified as a real cross-species
+      pair by test, but **not observable in an actual run yet** —
+      `createDemoWorld` doesn't spawn a Charmander, so nothing currently
+      exercises this path live. See DESIGN.md's Breeding section.
+- [ ] **Egg-group table only covers the current spawn roster's lines
+      (5 base species).** Extend `EGG_GROUPS_BY_BASE_KEY` whenever a new
+      base species is added to `species.ts`. Ditto (universal breeding
+      partner) and IV/Nature/ability/egg-move inheritance are real
+      mainline mechanics not modeled at all — the latter three need
+      underlying IV/Nature/multi-ability systems this sim doesn't have
+      yet, so they're blocked on that, not just unbuilt.
 - [ ] **A real O(agents²) performance regression was found and fixed
       mid-feature**: the "has this agent met a new species" check originally
       scanned every other agent every action tick for every agent. Combined

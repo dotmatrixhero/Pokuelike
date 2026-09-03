@@ -74,6 +74,18 @@ export interface LevelingProfile {
   levelMoves: Array<[number, string]>;
   /** Level-gated evolutions only (item/trade/friendship deferred — see DESIGN.md). */
   evolutions: Array<{ targetSpeciesId: string; level: number }>;
+  /**
+   * Mainline egg groups (e.g. `["monster", "grass"]`) — real cross-species
+   * breeding compatibility: two species can mate if they share *any* group,
+   * regardless of evolution stage. `["undiscovered"]` means never breeds at
+   * all (legendaries, baby Pokemon). Empty/absent means "not classified" —
+   * treated as compatible only with its own species (a safe fallback, not
+   * "can't breed"), since the source dex this sim imports from (PokeRogue)
+   * doesn't carry egg-group data at all — it's a battler, not the mainline
+   * Day Care sim, so this has to be hand-curated per species as they're
+   * added rather than pulled from the import. See DESIGN.md.
+   */
+  eggGroups?: string[];
 }
 
 export interface LevelingContext {
@@ -91,6 +103,28 @@ export interface LevelingContext {
    * parent's own species when absent.
    */
   baseSpeciesOf?(speciesId: string): string;
+}
+
+/**
+ * Real mainline breeding compatibility: two species can mate if they share
+ * an egg group, regardless of evolution stage — e.g. Bulbasaur and
+ * Charmander both include "monster", so a Bulbasaur/Charmander pair is a
+ * real cross-species breeding pair in the actual games, not a same-species
+ * requirement. A species is always compatible with itself even if
+ * unclassified (`eggGroups` absent/empty) — that's the safe fallback for
+ * the vast majority of the imported dex this sim hasn't hand-curated egg
+ * groups for yet, so an unclassified species can still reproduce with its
+ * own kind, just not cross-breed with anything else until classified.
+ * `"undiscovered"` on either side means never breeds, full stop (legendaries,
+ * baby Pokemon in the mainline games).
+ */
+export function canBreed(speciesA: string, speciesB: string, ctx?: LevelingContext): boolean {
+  if (speciesA === speciesB) return true;
+  const groupsA = ctx?.getProfile(speciesA)?.eggGroups;
+  const groupsB = ctx?.getProfile(speciesB)?.eggGroups;
+  if (!groupsA?.length || !groupsB?.length) return false;
+  if (groupsA.includes("undiscovered") || groupsB.includes("undiscovered")) return false;
+  return groupsA.some((g) => groupsB.includes(g));
 }
 
 // --- Tuning constants for non-combat exp sources (sim-original, no canon formula exists for these — see DESIGN.md) ---

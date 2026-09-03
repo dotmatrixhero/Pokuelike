@@ -2,7 +2,7 @@ import type { Agent, Layer, Needs, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
-import { EXP_ON_BIRTH_PARENT, EXP_ON_MATE_ATTEMPT, ensureCombatProfile, grantExp, type LevelingContext } from "./leveling.js";
+import { EXP_ON_BIRTH_PARENT, EXP_ON_MATE_ATTEMPT, canBreed, ensureCombatProfile, grantExp, type LevelingContext } from "./leveling.js";
 
 /**
  * Ticks before an agent can mate. A single global constant for now — real
@@ -20,10 +20,13 @@ function isMature(agent: Agent): boolean {
   return agent.age === undefined || agent.age >= MATURITY_AGE;
 }
 
-function isEligibleMate(agent: Agent, candidate: Agent): boolean {
+function isEligibleMate(agent: Agent, candidate: Agent, ctx?: LevelingContext): boolean {
   if (candidate.id === agent.id || candidate.alive === false) return false;
   if (candidate.fainted || candidate.beingCarriedBy) return false; // downed or being carried — not available to mate
-  if (candidate.species !== agent.species || candidate.layer !== agent.layer) return false;
+  // Real mainline rule: species mate if they share an egg group, not only
+  // with their own exact species — e.g. Bulbasaur and Charmander (both
+  // "monster") are a real cross-species breeding pair. See canBreed.
+  if (!canBreed(agent.species, candidate.species, ctx) || candidate.layer !== agent.layer) return false;
   if (!agent.sex || !candidate.sex || agent.sex === candidate.sex) return false;
   if (!isMature(candidate)) return false;
   if (candidate.behavior === "flee") return false; // don't interrupt a fleeing mate
@@ -120,7 +123,7 @@ export function applyMateSeeking(world: World, agent: Agent, log?: EventLog, ctx
   if (!agent.sex || !isMature(agent)) return;
 
   const candidates = world.agents.filter(
-    (other) => isEligibleMate(agent, other) && manhattan(agent.pos, other.pos) <= MATE_SEARCH_RADIUS
+    (other) => isEligibleMate(agent, other, ctx) && manhattan(agent.pos, other.pos) <= MATE_SEARCH_RADIUS
   );
   const partner = nearestMate(agent, candidates);
   if (!partner) return;
