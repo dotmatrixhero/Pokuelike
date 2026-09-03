@@ -3,7 +3,7 @@ import type { PokemonType } from "./typing.js";
 import type { EventLog } from "./events.js";
 import { stepAway, stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
-import { calculateDamage, pickBestMove, useMove, moveRange } from "./combat.js";
+import { calculateDamage, pickBestMove, useMove, moveRange, rollAccuracy, rollCritical } from "./combat.js";
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
@@ -124,11 +124,13 @@ function findHerdmateInDanger(world: World, agent: Agent): Agent | undefined {
 
 /**
  * One attack: picks the attacker's best off-cooldown move against the
- * defender's types, rolls real mainline-formula damage (STAB, type
- * effectiveness, a 0.85-1x variance roll), applies it, and puts that move
- * on cooldown. If every move is on cooldown, nothing happens this tick —
- * the weapon just isn't ready, which is the point of having cooldowns.
- * Returns true if the defender fainted from this hit.
+ * defender's types, rolls whether it hits at all (real accuracy, not a
+ * guaranteed connect — see TODO.md), then real mainline-formula damage
+ * (STAB, type effectiveness, a real crit-stage roll, a 0.85-1x variance
+ * roll), applies it, and puts that move on cooldown. If every move is on
+ * cooldown, nothing happens this tick — the weapon just isn't ready, which
+ * is the point of having cooldowns. Returns true if the defender fainted
+ * from this hit.
  */
 function resolveHit(world: World, attacker: Agent, defender: Agent, log: EventLog | undefined, faintKind: "killed" | "defeated"): boolean {
   if (defender.alive === false) return false;
@@ -139,17 +141,32 @@ function resolveHit(world: World, attacker: Agent, defender: Agent, log: EventLo
   const move = pickBestMove(attacker, defender.types ?? []);
   if (!move) return false; // every move on cooldown this tick
 
+  useMove(attacker, move);
+
+  if (!rollAccuracy(move)) {
+    log?.record({
+      kind: "missed",
+      tick: world.tick,
+      attackerId: attacker.id,
+      attackerSpecies: attacker.species,
+      defenderId: defender.id,
+      defenderSpecies: defender.species,
+    });
+    return false;
+  }
+
+  const isCritical = rollCritical();
   const damage =
     attacker.level !== undefined && attacker.types && attacker.stats && defender.stats
       ? calculateDamage(
           { level: attacker.level, types: attacker.types, stats: attacker.stats },
           { types: defender.types ?? [], stats: defender.stats },
           move,
-          0.85 + Math.random() * 0.15
+          0.85 + Math.random() * 0.15,
+          isCritical
         ).damage
       : FALLBACK_DAMAGE;
 
-  useMove(attacker, move);
   defender.hp = Math.max(0, defender.hp - damage);
 
   log?.record({
@@ -161,6 +178,7 @@ function resolveHit(world: World, attacker: Agent, defender: Agent, log: EventLo
     defenderSpecies: defender.species,
     damage,
     defenderHpRemaining: defender.hp,
+    critical: isCritical,
   });
 
   if (defender.hp > 0) return false;

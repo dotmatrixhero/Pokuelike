@@ -203,8 +203,29 @@ produce a real story before player mechanics are worth building further.
       the real combat system directly rather than going through a
       promotion step, since there's no player yet — worth revisiting once
       the player exists and this needs to be a real transition.
-- [ ] Move `accuracy` field exists but isn't consumed — every move
-      currently hits. No miss chance yet.
+- [x] **Real damage math wired in, not just data**: crit chance by stage
+      (mainline 1/24, 1/8, 1/2, always — `CRIT_STAGE_CHANCE`/`rollCritical`
+      in `combat.ts`, ported from PokeRogue's `getCriticalHitResult`),
+      `CRITICAL_MULTIPLIER` (1.5x) actually applied in `calculateDamage`,
+      mainline stat-stage multiplier table (`statStageMultiplier`, ported
+      from `getStatStageMultiplier`) actually changing effective
+      Atk/Def/SpAtk/SpDef when an agent carries `statStages`, and a real
+      accuracy/evasion-stage formula (`accuracyStageMultiplier`, base-3 not
+      base-2 — ported from `getAccuracyMultiplier`). `predation.ts`'s
+      `resolveHit` now rolls `rollAccuracy` before every hit — **a move can
+      genuinely miss now**, closing the old "accuracy not consumed" gap.
+      New `missed` event kind for the log. Engine-tested (`combat.test.ts`):
+      crit multiplier applies correctly, a crit ignores a beneficial
+      Defense stage the way mainline does, a sub-100-accuracy move can miss
+      with a controlled rng, stat stages measurably change damage.
+      **Caveat, honestly**: nothing in the current sim roster ever *sets* a
+      stat stage or uses a sub-100-accuracy move (every curated `MoveSpec` in
+      `packages/data/src/moves.ts` is 100 accuracy), so in the actual demo
+      run this is real, tested machinery sitting mostly idle — crit rolls
+      are the one piece that visibly fires (verified in a real 1000-tick
+      run: `scyther-0` landed a critical hit on `bulbasaur-1` at tick 59).
+      Individual stat *variance* (Nature/IV-equivalent, different from these
+      battle-only volatile stages) is still not modeled — see below.
 - [ ] Move leveling/respec system — how builds are earned, spent, reverted.
       The shape axis (point/line/cone/ring/burst) still isn't connected to
       predation.ts's single-target-only combat — AoE moves among wild
@@ -217,7 +238,11 @@ produce a real story before player mechanics are worth building further.
 - [ ] No individual stat variance yet (no Nature, no IV/EV-equivalent) —
       same species+level always produces identical stats. See the
       Disposition/culture section above for the intended individuality
-      layer once this matters.
+      layer once this matters. (Battle-only stat *stages* now exist in the
+      math, per above — that's a different, temporary-per-fight axis.)
+- [ ] Ability effects are not simulated — `ABILITY_DEX` (see "Data import"
+      below) is reference-only; nothing reads `abilities.primary/secondary/
+      hidden` at spawn or during combat.
 
 ## Art / assets
 - [ ] Sprite pipeline is bring-your-own (`packages/web/public/sprites/`) —
@@ -225,14 +250,40 @@ produce a real story before player mechanics are worth building further.
 - [ ] Tile art vs. the current flat-color terrain rendering.
 
 ## Data import
-- [ ] Bulk species/stats import from a PokeRogue-derived data source
-      (user has a fork, `dotmatrixhero/poke_the_spire`) — blocked this
-      session because this session's GitHub access is locked to just this
-      repo and the `add_repo` tool isn't available to widen it (tried both
-      the user's fork and the canonical `pagefaultgames/pokerogue`, same
-      wall either way). Next attempt: either a session with that repo
-      attached from the start, or the user pastes the relevant data
-      file(s) directly.
+- [x] **Bulk species/move/ability/type import from PokeRogue, done.** Unblocked
+      once a session had `poke_the_spire` checked out locally alongside this
+      repo (the earlier attempt's GitHub-access wall wasn't a problem this
+      time — no `add_repo` needed, just read files off disk). See
+      `packages/data/scripts/import-from-pokerogue.mjs` and DESIGN.md's "Data
+      import" section for what got pulled in and the scope calls made along
+      the way. Re-run the script against a fresh PokeRogue checkout whenever
+      it's worth refreshing the dex.
+- [ ] **Species dex covers only base forms** (see DESIGN.md) — PokeRogue
+      models some alt forms (Alolan/Galarian/Hisuian/Paldean regional forms,
+      Mega Evolutions) as their own top-level `SpeciesId` and they came in
+      for free, but forms nested inside a single species' `forms: [...]`
+      array (Pikachu's cosmetic caps, Deoxys/Rotom/Zygarde/Arceus formes,
+      Gigantamax) did not. A future pass could add a separate forms table
+      keyed by base species id if that's ever needed.
+- [ ] **Move dex captures data, not behavior.** `MOVE_DEX` has real
+      type/category/power/accuracy/pp/priority/target plus a tag list of
+      PokeRogue's `MoveAttr` class names per move (953 moves) — but nobody
+      interprets those tags. Reimplementing what e.g. `LeechSeedAttr` or
+      `MultiHitAttr` actually does is a different, much bigger project.
+- [ ] **Ability dex has no effect text.** `ABILITY_DEX` (319 abilities) has
+      id/name/a tag list of `AbAttr` class names/`ignorable`, but no
+      plain-text descriptions — those live in a separate i18n locale repo
+      that wasn't part of this checkout. Nothing in the engine reads ability
+      data at all yet; wiring abilities into combat is unstarted.
+- [ ] **Curated items (`ITEM_DEX`, ~30 classic held items) are reference data
+      only** — not wired into `combat.ts`. PokeRogue's real item/modifier
+      system (shop economy, stacking rules, hundreds of items) is enormous
+      and deliberately out of scope; if item effects ever get simulated,
+      start from this curated list's numbers rather than the full system.
+- [ ] `packages/data/src/dex/*.generated.ts` are, as the name says, generated
+      — don't hand-edit them; re-run the import script instead. They're
+      checked in (not gitignored) so the sim can be built without a
+      PokeRogue checkout present.
 
 ## Infra
 - [ ] No lint/format config yet (eslint/prettier) — add once the codebase

@@ -1,4 +1,5 @@
 import type { BaseStats, Layer, PokemonType } from "@pokuelike/engine";
+import { SPECIES_DEX_BY_KEY } from "./dex/index.js";
 
 export interface SpeciesDef {
   id: string;
@@ -17,66 +18,71 @@ export interface SpeciesDef {
   moves: string[];
 }
 
+/**
+ * Sim-specific fields only — baseStats/types/name/id are pulled from the full
+ * PokeRogue-derived dex (`dex/species.generated.ts`) by `dexKey` (e.g. "BULBASAUR",
+ * the PokeRogue SpeciesId enum key) instead of being hand-duplicated. This is the
+ * intended way to add a new species to the sim roster: look up its dex key, then
+ * supply only what the sim actually needs (sprite, layer, predation, moveset).
+ */
+export type SimSpeciesFields = Omit<SpeciesDef, "id" | "name" | "baseStats" | "types"> & {
+  /** Override the sim's id/name if they shouldn't just be the lowercased dex key / dex display name. */
+  id?: string;
+  name?: string;
+};
+
+export function speciesFromDex(dexKey: string, sim: SimSpeciesFields): SpeciesDef {
+  const entry = SPECIES_DEX_BY_KEY[dexKey];
+  if (!entry) throw new Error(`speciesFromDex: no dex entry for key "${dexKey}" (packages/data/src/dex/species.generated.ts)`);
+  return {
+    id: sim.id ?? dexKey.toLowerCase(),
+    name: sim.name ?? entry.name,
+    baseStats: entry.baseStats,
+    types: entry.types,
+    spriteKey: sim.spriteKey,
+    placeholderColor: sim.placeholderColor,
+    homeLayer: sim.homeLayer,
+    preysOn: sim.preysOn,
+    moves: sim.moves,
+  };
+}
+
 export const SPECIES: Record<string, SpeciesDef> = {
-  bulbasaur: {
-    id: "bulbasaur",
-    name: "Bulbasaur",
+  bulbasaur: speciesFromDex("BULBASAUR", {
     spriteKey: "bulbasaur",
     placeholderColor: "#78c850",
     homeLayer: "surface",
-    baseStats: { hp: 45, attack: 49, defense: 49, spAttack: 65, spDefense: 65, speed: 45 },
-    types: ["grass", "poison"],
     moves: ["tackle", "vine_whip"],
-  },
-  scyther: {
-    id: "scyther",
-    name: "Scyther",
+  }),
+  scyther: speciesFromDex("SCYTHER", {
     spriteKey: "scyther",
     placeholderColor: "#4fbf8c",
     homeLayer: "surface",
     preysOn: ["bulbasaur"],
-    baseStats: { hp: 70, attack: 110, defense: 80, spAttack: 55, spDefense: 80, speed: 105 },
-    types: ["bug", "flying"],
     moves: ["slash"],
-  },
-  charmander: {
-    id: "charmander",
-    name: "Charmander",
+  }),
+  charmander: speciesFromDex("CHARMANDER", {
     spriteKey: "charmander",
     placeholderColor: "#f08030",
     homeLayer: "surface",
-    baseStats: { hp: 39, attack: 52, defense: 43, spAttack: 60, spDefense: 50, speed: 65 },
-    types: ["fire"],
     moves: ["ember"],
-  },
-  diglett: {
-    id: "diglett",
-    name: "Diglett",
+  }),
+  diglett: speciesFromDex("DIGLETT", {
     spriteKey: "diglett",
     placeholderColor: "#966037",
     homeLayer: "underground",
-    baseStats: { hp: 10, attack: 55, defense: 25, spAttack: 35, spDefense: 45, speed: 95 },
-    types: ["ground"],
     moves: ["tackle"],
-  },
-  venusaur: {
-    id: "venusaur",
-    name: "Venusaur",
+  }),
+  venusaur: speciesFromDex("VENUSAUR", {
     spriteKey: "venusaur",
     placeholderColor: "#4a8f3c",
     homeLayer: "surface",
-    baseStats: { hp: 80, attack: 82, defense: 83, spAttack: 100, spDefense: 100, speed: 80 },
-    types: ["grass", "poison"],
     moves: ["tackle", "vine_whip"],
-  },
-  pidgey: {
-    id: "pidgey",
-    name: "Pidgey",
+  }),
+  pidgey: speciesFromDex("PIDGEY", {
     spriteKey: "pidgey",
     placeholderColor: "#a89060",
     homeLayer: "canopy",
-    baseStats: { hp: 40, attack: 45, defense: 40, spAttack: 35, spDefense: 35, speed: 56 },
-    types: ["normal", "flying"],
     moves: ["tackle"],
-  },
+  }),
 };

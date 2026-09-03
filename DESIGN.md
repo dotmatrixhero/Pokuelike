@@ -449,6 +449,87 @@ Explicitly unresolved: whether species-specific bonding puzzles read as
 distinct puzzles to a player or just as "trial and error until it works" —
 that's a playtesting question this design can't answer on paper.
 
+## Data import: species/moves/abilities/types/damage-math from PokeRogue
+
+The old TODO item ("bulk species/stats import from a PokeRogue-derived data
+source") is done, with a real reusable tool behind it rather than a one-off
+scrape:
+
+- **`packages/data/scripts/import-from-pokerogue.mjs`** parses a local
+  `poke_the_spire` (PokeRogue fork) checkout's `.ts` source *as text*
+  (regex + balanced-bracket scanning) — deliberately not importing/executing
+  its TypeScript, since its `#app/`-style path aliases don't resolve
+  standalone. It regenerates five files under `packages/data/src/dex/`:
+  `species.generated.ts`, `moves.generated.ts`, `abilities.generated.ts`,
+  `type-chart.generated.ts`, `items.generated.ts`. Usage is a one-liner
+  (`node packages/data/scripts/import-from-pokerogue.mjs /path/to/poke_the_spire`)
+  and the generated files are checked in (not gitignored) so the sim builds
+  without a PokeRogue checkout present — re-run it and diff when PokeRogue
+  updates.
+- **Species: 1083 entries**, every `SpeciesId` PokeRogue defines, generations
+  1-9. Base-form scalar fields only (types, base stats, catch rate, gender
+  ratio, growth rate, ability slots, egg tier, evolutions) — verified exactly
+  against six known species (Bulbasaur, Scyther, Charmander, Diglett,
+  Venusaur, Pidgey) whose stats were previously hand-typed into
+  `packages/data/src/species.ts`. **Scope call**: PokeRogue actually models
+  some alt forms (regional variants, Mega Evolution) as their own top-level
+  `SpeciesId` — those came in for free as ordinary dex entries. Forms nested
+  *inside* a single species' `forms: [...]` array (Pikachu's cosmetic caps,
+  Deoxys/Rotom/Zygarde/Arceus battle formes, Gigantamax) did not — reconciling
+  "which nested form is canonical" plus form-change triggers was judged out
+  of scope for a data import. See TODO.md.
+- **Moves: 951 of 953 defined move entries** (2 skipped — they reference
+  `MoveId.G_MAX_WILDFIRE`-family ids that are commented out of PokeRogue's own
+  `MoveId` enum, i.e. dead code in the source itself, not a parser gap).
+  Type/category/power/accuracy/pp/priority/target plus a lightweight tag list
+  (chained `.attr(...)` class names and flag methods like `punchingMove`) —
+  verified exactly against the 5 moves already hand-typed in
+  `packages/data/src/moves.ts` (Tackle, Slash, Vine Whip, Ember, Flamethrower).
+  **Scope call, explicit**: the tag list is a glance-level summary, not
+  implemented logic — reimplementing what `LeechSeedAttr` or `MultiHitAttr`
+  actually does is a different, much bigger project than a data import.
+- **Abilities: 319 entries** (id/name + `AbAttr` tag list + `ignorable`).
+  **No plain-text descriptions**: PokeRogue's ability display strings live in
+  a separate i18n locale repository that wasn't part of this checkout, so
+  there was nothing to extract beyond the attr tags — noted plainly in the
+  generated file's header rather than faked.
+- **Type chart: extracted and cross-checked, not replaced.** The importer
+  parses PokeRogue's `getTypeChartMultiplier` (nested `switch(defType) {
+  switch(attackType) { ... } }`) into the same shape as
+  `packages/engine/src/typing.ts`'s hand-maintained chart. A scripted
+  18x18 diff against the engine's chart came back **zero differences** — the
+  existing chart was already fully correct, so it was left alone, and the
+  imported copy lives in `dex/type-chart.generated.ts` purely as a
+  cross-check for future changes (e.g. if a mainline chart update ever
+  changes an interaction).
+- **Items: ~30 curated, not scraped.** PokeRogue's real item/modifier system
+  (shop economy, held-item stacking rules, hundreds of items) is enormous;
+  pulling numbers for the ~30 classic damage-relevant held items (Choice
+  Band/Specs/Scarf, Life Orb, Eviolite, Leftovers, type-boosting
+  Plates/Gems, etc.) by hand was the actually-useful scope. Reference data
+  only — not wired into `combat.ts`.
+- **`packages/data/src/species.ts` and `moves.ts` now source canon numbers
+  from the dex** instead of hand-duplicating them: `speciesFromDex(dexKey,
+  simFields)` looks up base stats/types/name from `SPECIES_DEX_BY_KEY` and
+  merges in only the sim-specific fields (`spriteKey`, `homeLayer`,
+  `preysOn`, curated `moves` list); `moveCanon(dexKey)` does the same for a
+  move's type/category/power/accuracy, leaving `shape`/`cooldownTicks`/
+  `statusChance` as sim-specific tuning. Adding a new species or move to the
+  sim roster going forward is "look up the dex key, supply the sim-specific
+  fields" rather than retyping numbers.
+- **Damage math ported into real engine behavior, not just data** — see the
+  "Combat / moves" TODO entry for exactly what: crit chance by stage,
+  `CRITICAL_MULTIPLIER`, the mainline stat-stage multiplier table, and a real
+  accuracy/evasion-stage formula, all now actually consumed by
+  `packages/engine/src/combat.ts` and `predation.ts`'s `resolveHit` — a move
+  can genuinely miss now, closing an old TODO gap. Honest caveat: the
+  current curated `MoveSpec` roster is 100-accuracy-everywhere and nothing
+  sets a stat stage yet, so in practice only the crit roll visibly fires in
+  a real run (confirmed: `scyther-0` critically hit `bulbasaur-1` at tick 59
+  of a real 1000-tick run) — the accuracy/stat-stage machinery is real and
+  engine-tested but currently idle until a lower-accuracy move or a
+  stage-changing effect exists.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

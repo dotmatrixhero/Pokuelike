@@ -62,6 +62,15 @@ export type SimEvent =
       defenderSpecies: string;
       damage: number;
       defenderHpRemaining: number;
+      critical: boolean;
+    }
+  | {
+      kind: "missed";
+      tick: number;
+      attackerId: string;
+      attackerSpecies: string;
+      defenderId: string;
+      defenderSpecies: string;
     }
   | {
       kind: "defeated";
