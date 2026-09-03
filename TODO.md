@@ -18,13 +18,20 @@ produce a real story before player mechanics are worth building further.
 - [x] Ran it (300 ticks, see DESIGN.md) — it did surface a real, specific
       finding (Diglett stops going home after ~tick 70), which counts as
       passing the "worth telling" bar even though it's a tuning gap, not a
-      dramatic story yet. The dramatic stories need predation/death, which
-      aren't built.
+      dramatic story yet.
+- [x] Predation built and run — see "Ecosystem sim" below. First run with
+      it produced an actual dramatic story: a Scyther killed 3 of 4
+      Bulbasaur in the herd over 300 ticks.
 - [ ] Tuning gap found by the first run: an agent whose needs oscillate
       between just-under and just-over the 0.7 satisfied line (flat +0.4
       consume vs. 0.3 idle threshold) can permanently stop returning to
       `homeLayer` because it never registers `idle`. Decide if that's
       acceptable emergent behavior or needs a hysteresis/threshold fix.
+- [ ] Tuning gap found by the predation run: fleeing agents flicker between
+      `flee` and normal foraging almost every tick in some stretches (the
+      4-tile flee-detection radius may be too wide relative to how far one
+      flee-step moves an agent out of range). Worth a hysteresis or a
+      "stay fled for N ticks after losing the threat" rule.
 
 ## World layers, elevation, and regions (see DESIGN.md)
 - [x] `Tile`/`World` have a `layer` dimension (Underground/Surface/Canopy,
@@ -51,12 +58,17 @@ produce a real story before player mechanics are worth building further.
 ## Ecosystem sim
 - [ ] Herd cohesion: agents share `herdId` in the type but nothing groups or
       regroups them yet. Flocking forces? A shared "home range" center each
-      herd member biases toward?
+      herd member biases toward? — still open, unrelated to predation below.
 - [ ] `seekMate` / mating behavior not implemented — what does a "mating"
       outcome even do (spawn a new agent? just a behavior with no mechanical
       effect yet)?
-- [ ] `hunt` / `flee` behaviors named but unimplemented — predator/prey
-      relationships need a data source (which species hunt which).
+- [x] `hunt`/`flee` are built (`packages/engine/src/predation.ts`,
+      `HuntRules`, `SpeciesDef.preysOn` in `packages/data`) — a nearby
+      predator triggers flee (overrides everything), a hungry predator with
+      prey in range hunts and kills on contact. Currently just Scyther ->
+      Bulbasaur. No birth/reproduction yet, so a herd can only shrink, never
+      recover — that's the next thing that would make multi-run stories
+      (not just single-run ones) interesting.
 - [ ] Resource depletion — water/food tiles are infinite right now. Real DF
       feel probably wants them to deplete and regenerate, driving migration.
 - [ ] Performance ceiling for the cheap tier — how many agents before naive

@@ -9,6 +9,8 @@ export interface SpeciesDef {
   placeholderColor: string;
   /** The layer this species lives on and returns to once its needs are met. */
   homeLayer: Layer;
+  /** Species ids this one hunts, when hungry and one is nearby. Absent = doesn't hunt. */
+  preysOn?: string[];
   moves: string[];
 }
 
@@ -27,6 +29,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "scyther",
     placeholderColor: "#4fbf8c",
     homeLayer: "surface",
+    preysOn: ["bulbasaur"],
     moves: ["slash"],
   },
   charmander: {

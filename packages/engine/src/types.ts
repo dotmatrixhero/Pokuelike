@@ -48,7 +48,14 @@ export interface Agent {
   behavior: BehaviorKind;
   /** Agents in the same herd share a home range and will regroup. */
   herdId?: string;
+  /** Absent/true = alive. Dead agents are pruned from World.agents at the end of the tick they die in. */
+  alive?: boolean;
+  /** The agent currently being hunted, if this agent is mid-hunt. Bookkeeping only — re-evaluated each tick. */
+  huntTarget?: string;
 }
+
+/** predator species id -> the species ids it hunts. */
+export type HuntRules = Record<string, string[]>;
 
 export interface World {
   width: number;

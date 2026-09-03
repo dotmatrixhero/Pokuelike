@@ -1,14 +1,15 @@
 import type { SimEvent } from "@pokuelike/engine";
 
 export function formatEvent(event: SimEvent): string {
-  const prefix = `[tick ${event.tick}] ${event.species} (${event.agentId})`;
   switch (event.kind) {
     case "crossedLayer":
-      return `${prefix} crossed ${event.from} -> ${event.to} at (${event.pos.x},${event.pos.y})`;
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) crossed ${event.from} -> ${event.to} at (${event.pos.x},${event.pos.y})`;
     case "consumed":
-      return `${prefix} ${event.need === "thirst" ? "drank" : "ate"} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) ${event.need === "thirst" ? "drank" : "ate"} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
     case "behaviorChanged":
-      return `${prefix} switched behavior: ${event.from} -> ${event.to}`;
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) switched behavior: ${event.from} -> ${event.to}`;
+    case "killed":
+      return `[tick ${event.tick}] ${event.predatorSpecies} (${event.predatorId}) killed ${event.preySpecies} (${event.preyId}) at (${event.pos.x},${event.pos.y})`;
   }
 }
 

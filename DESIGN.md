@@ -62,6 +62,37 @@ Not a bug exactly, but a real tuning gap between decay rate, the flat
 "a Diglett that abandons its burrow because the surface is more convenient"
 is a feature or something to tune away. See TODO.md.
 
+## Predation: hunt, flee, kill
+
+**Built:** `packages/engine/src/predation.ts` (`applyPredationInstincts`,
+`HuntRules` = predator species id -> the species ids it hunts) plus a
+`killed` `SimEvent`. It's a survival-instinct layer that runs before normal
+need-seeking in `tickAgent`: a nearby predator always triggers `flee`
+(overrides everything, including hunger/thirst); otherwise a hungry
+predator (hunger below 0.6) with prey within 5 tiles switches to `hunt` and
+closes distance, killing on contact (restores ~0.6 hunger, prey is marked
+`alive: false` and pruned from `World.agents` at the end of that tick).
+Predator/prey pairs are data, not engine logic — `SpeciesDef.preysOn` in
+`packages/data/src/species.ts`, currently just Scyther -> Bulbasaur,
+compiled into `HUNT_RULES`. `tickWorld`/`tickAgent` both take `rules` as an
+optional last argument — omit it and agents behave exactly as they did
+before predation existed (this is what the "does canon support this"
+tangent confirmed: Pokédex entries already have real predator/prey pairs
+like Heatmor/Durant and bird Pokémon hunting bug Pokémon, so this isn't a
+departure from the source material, just made mechanically visible).
+
+First run with it (300 ticks, same demo world): the Scyther killed 3 of the
+4 Bulbasaur in the herd — at ticks 52, 137, and 262 — leaving one survivor
+oscillating between `flee` and resuming `seekWater`/`seekFood` for the rest
+of the run. That's the first genuinely dramatic story the sim has produced,
+not just a tuning curiosity. One more finding worth a look before trusting
+this data: fleeing bulbasaurs flip between `flee` and normal foraging
+almost every tick in some stretches (the whole herd panics in lockstep at
+tick 30, for instance) — the 4-tile flee-detection radius may be too wide
+relative to how far one flee-step actually moves an agent out of range,
+producing twitchy panic/calm flicker instead of a clean "spotted -> ran ->
+safe" arc. Not fixed yet — see TODO.md.
+
 ## Stack
 
 - **pnpm workspace monorepo**, TypeScript everywhere.

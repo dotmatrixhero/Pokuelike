@@ -26,6 +26,15 @@ export type SimEvent =
       species: string;
       from: BehaviorKind;
       to: BehaviorKind;
+    }
+  | {
+      kind: "killed";
+      tick: number;
+      predatorId: string;
+      predatorSpecies: string;
+      preyId: string;
+      preySpecies: string;
+      pos: Vec2;
     };
 
 /**

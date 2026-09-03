@@ -1,5 +1,7 @@
-import type { Agent, BehaviorKind, Layer, Needs, Vec2, World } from "./types.js";
+import type { Agent, BehaviorKind, HuntRules, Layer, Needs, Vec2, World } from "./types.js";
 import { otherLayers, tileAt } from "./world.js";
+import { stepToward } from "./movement.js";
+import { applyPredationInstincts } from "./predation.js";
 import type { EventLog } from "./events.js";
 
 const DECAY_PER_TICK = {
@@ -75,22 +77,6 @@ export function findLayerWithTerrain(
   return undefined;
 }
 
-/** Moves an agent one step toward a target using simple Manhattan stepping. */
-export function stepToward(world: World, layer: Layer, pos: Vec2, target: Vec2): Vec2 {
-  const dx = Math.sign(target.x - pos.x);
-  const dy = Math.sign(target.y - pos.y);
-  const candidates: Vec2[] = [
-    { x: pos.x + dx, y: pos.y + dy },
-    { x: pos.x + dx, y: pos.y },
-    { x: pos.x, y: pos.y + dy },
-  ];
-  for (const candidate of candidates) {
-    if (candidate.x === pos.x && candidate.y === pos.y) continue;
-    if (tileAt(world, layer, candidate.x, candidate.y)?.walkable) return candidate;
-  }
-  return pos;
-}
-
 function consume(needs: Needs, behavior: "seekWater" | "seekFood"): void {
   const { need, amount } = CONSUME_RATE[behavior];
   needs[need] = Math.min(1, needs[need] + amount);
@@ -101,10 +87,20 @@ function consume(needs: Needs, behavior: "seekWater" | "seekFood"): void {
  * finds its food on the surface and crosses to get it, then drifts back
  * once satisfied. Crossing itself takes a tick (no position change) so it
  * reads as a discrete, loggable event rather than free teleportation.
+ *
+ * Survival instincts (flee a nearby predator, hunt nearby prey when hungry)
+ * take priority over normal need-seeking when `rules` is provided — see
+ * predation.ts. Without rules, agents behave exactly as before predation
+ * existed.
  */
-export function tickAgent(world: World, agent: Agent, log?: EventLog): void {
-  const previousBehavior = agent.behavior;
+export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: HuntRules): void {
+  if (agent.alive === false) return;
+
   decayNeeds(agent.needs);
+
+  if (rules && applyPredationInstincts(world, agent, rules, log)) return;
+
+  const previousBehavior = agent.behavior;
   agent.behavior = chooseBehavior(agent.needs);
 
   if (log && agent.behavior !== previousBehavior) {
