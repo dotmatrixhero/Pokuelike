@@ -83,29 +83,39 @@ whether "promoted" agents pause the rest of the world or run in parallel.
 
 ## World scale: layers, elevation, and regions
 
-Decided, not yet built:
+**Layers and elevation are built** (regions/world-graph are not — see
+below). What exists now in `packages/engine`:
 
 **Three layers per region, sharing one x,y footprint:** Underground /
-Surface / Canopy. A species is native to one layer (Diglett underground,
-Pidgey canopy, most things surface) and moves within it normally. Crossing
-layers is **common, not rare** — Diglett surfaces to forage, Pidgey lands to
-drink, because their food/water is often only available on Surface even
-though they live elsewhere. This is a deliberate choice over rare "risk
-event" crossings: with frequent small exposure windows, story density comes
-from volume (most crossings are uneventful, some aren't) rather than from
-every crossing being a scripted set-piece.
+Surface / Canopy (`Layer` in `types.ts`, `World.tiles` is one grid per
+layer). A species is native to one layer (Diglett underground, Pidgey
+canopy, most things surface — see `SPECIES[...].homeLayer` in
+`packages/data`) and moves within it normally. Crossing layers is **common,
+not rare** — `tickAgent` (`needs.ts`) makes an agent whose resource isn't on
+its current layer cross to the nearest layer that has it (`findLayerWithTerrain`),
+then return to `homeLayer` once idle again. Crossing itself takes a tick and
+doesn't move position — it's a discrete, loggable event, not free
+teleportation. This was a deliberate choice over rare "risk event"
+crossings: with frequent small exposure windows, story density comes from
+volume (most crossings are uneventful, some aren't) rather than from every
+crossing being a scripted set-piece. Needs-seeking also now actually
+restores the relevant need on arrival (`consume` in `needs.ts`) — previously
+agents walked toward resources forever without ever being satisfied.
 
 **Elevation is continuous within a layer**, not a fourth layer — a
-heightmap on Surface (and potentially the other layers) for hills/ridges
-that drives:
-- FOV/line-of-sight (can't see over higher terrain; high ground extends
-  sight range),
-- combat accuracy/evasion (elevation delta between attacker and defender
-  tiles as a modifier — classic high-ground tactics).
+heightmap (`Tile.elevation`, currently populated on Surface only) for
+hills/ridges that drives:
+- FOV/line-of-sight (`fov.ts`: `computeVisible` — a ridge strictly taller
+  than both the observer's and the target's elevation blocks the line
+  between them; standing on higher ground extends the sight radius),
+- combat accuracy/evasion (`elevation.ts`: `elevationAccuracyModifier` /
+  `elevationEvasionModifier`, capped so an extreme height gap can't
+  guarantee a hit or a dodge — standalone utilities until a combat resolver
+  exists to call them).
 
-This is a real engine change, not a config tweak: `Tile` needs an
-`elevation` value per layer, and FOV/LOS needs an elevation-aware
-shadowcasting pass instead of flat 2D visibility. Not built yet.
+Open, still unresolved: whether Underground/Canopy get their own elevation
+too, and how a real combat resolver will actually consume the accuracy/
+evasion modifiers once one exists.
 
 **World graph, not one big map:** 3–5 regions to start, connected by
 migration edges, each region independently bounded (per the earlier scale

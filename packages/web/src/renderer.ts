@@ -12,16 +12,35 @@ const TERRAIN_COLOR: Record<string, string> = {
 
 export const TILE_SIZE = 24;
 
+/** Elevation shades the floor lighter — a cheap stand-in until real tile art exists. */
+function shade(color: string, elevation: number): string {
+  if (elevation <= 0) return color;
+  const amount = Math.min(0.4, elevation * 0.08);
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const channel = parseInt(color.slice(i, i + 2), 16);
+    return Math.min(255, Math.round(channel + (255 - channel) * amount));
+  });
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+/**
+ * Only draws the surface layer — agents on underground/canopy simply aren't
+ * drawn, so a Diglett surfacing or a Pidgey landing visibly pops in and out.
+ */
 export function drawWorld(ctx: CanvasRenderingContext2D, world: World): void {
+  const surface = world.tiles.surface;
   for (let y = 0; y < world.height; y++) {
     for (let x = 0; x < world.width; x++) {
-      const tile = world.tiles[y * world.width + x]!;
-      ctx.fillStyle = TERRAIN_COLOR[tile.terrain] ?? "#000";
+      const tile = surface[y * world.width + x]!;
+      const base = TERRAIN_COLOR[tile.terrain] ?? "#000";
+      ctx.fillStyle = shade(base, tile.elevation);
       ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
     }
   }
 
   for (const agent of world.agents) {
+    if (agent.layer !== "surface") continue;
+
     const px = agent.pos.x * TILE_SIZE;
     const py = agent.pos.y * TILE_SIZE;
     const def = SPECIES[agent.species];

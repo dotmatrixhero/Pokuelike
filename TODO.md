@@ -18,23 +18,22 @@ produce a real story before player mechanics are worth building further.
 - [ ] Once the above exist: actually run it, read the log, and see if
       anything in it is a story worth telling. If not, that's a sim-depth
       problem to fix before anything else.
-- [ ] Sequencing note: build/prove the headless runner + event log against
-      the *current* single-layer, single-region engine first — don't build
-      layers/elevation/regions (below) before confirming the basic loop
-      produces anything worth narrating at all.
+- [ ] Now that layers/elevation (below) are built ahead of this: run the
+      headless runner + event log against the current multi-layer,
+      single-region engine and see if anything in it is worth narrating.
 
 ## World layers, elevation, and regions (see DESIGN.md)
-- [ ] `Tile`/`World` need a `layer` dimension (Underground/Surface/Canopy,
+- [x] `Tile`/`World` have a `layer` dimension (Underground/Surface/Canopy,
       shared x,y footprint) — agents native to one layer, movement mostly
       stays within it.
-- [ ] Cross-layer behavior needs to be common: species whose resources
-      (food/water) live on a different layer than their home layer should
-      routinely cross (Diglett surfacing, Pidgey landing) as part of normal
-      need-seeking, not a special rare event.
-- [ ] Elevation: continuous heightmap on top of a layer's tiles (Surface at
-      least — open question whether Underground/Canopy get it too).
-      Requires an elevation-aware FOV/shadowcasting pass (not flat 2D
-      visibility) and elevation-delta combat modifiers (accuracy/evasion).
+- [x] Cross-layer behavior is common: species whose resources (food/water)
+      live on a different layer than their home layer routinely cross
+      (Diglett surfacing, Pidgey landing) as part of normal need-seeking —
+      see `findLayerWithTerrain`/`tickAgent` in `packages/engine/src/needs.ts`.
+- [x] Elevation: continuous heightmap on Surface tiles, elevation-aware FOV
+      (`fov.ts`) and elevation-delta combat modifiers (`elevation.ts`, not
+      yet consumed by any combat resolver since one doesn't exist yet).
+      Open: whether Underground/Canopy get their own elevation too.
 - [ ] World graph of 3–5 regions connected by migration edges, each
       independently bounded.
 - [ ] Region-level promotion/demotion: observed region runs full per-agent
