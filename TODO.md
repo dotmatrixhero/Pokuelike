@@ -115,6 +115,25 @@ produce a real story before player mechanics are worth building further.
       target: factor in whether the nearest resource is reachable before
       the agent's remaining hunger/thirst buffer runs out, not just
       whether one exists at all.
+- [x] Spawn-on-mother stacking bug — fixed (`nearbySpawnTile` in
+      `reproduction.ts`) and map variety upgrade (20×14 single-resource
+      map -> 24×16 with 3 food patches, 2 water sources, wall obstacles,
+      a hill) — see DESIGN.md's "single-tile stacking bug" section. Real
+      result: peak stack dropped 168 -> 113 of a similar population, i.e.
+      genuinely better but not close to solved.
+- [ ] **No personal-space/repulsion behavior, and no idle-wander after a
+      need is satisfied — the actual remaining cause of tile-stacking.**
+      Traced after the spawn-position and map fixes above only partially
+      helped: herd cohesion (`herding.ts`) only ever pulls an idle agent
+      *toward* the herd centroid when it's far away; there's no term that
+      pushes agents apart when they're already close together. Worse, once
+      an agent finishes eating/drinking it has no reason to leave that
+      tile — no idle-wander behavior exists — so a resource tile that
+      works becomes a permanent gathering point instead of a stop. Fix
+      target: (a) a mild repulsion force in `applyHerdCohesion` when two
+      herdmates are on the same or adjacent tile, and (b) idle agents with
+      full needs should wander a random walkable tile occasionally instead
+      of standing still forever.
 - [ ] **Movement/speed is still uniform and unbuilt as a real mechanic.**
       Confirmed by grep: `calculateStats`'s `speed` field is computed but
       never read anywhere — every agent moves exactly 1 tile/tick,

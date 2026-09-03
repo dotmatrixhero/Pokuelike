@@ -388,6 +388,46 @@ noisy process, not a fixed constant. Artifact with the actual frames:
 ask for the link, or regenerate with `dump-frames.ts` — nothing here is
 staged or touched up after capture.
 
+## The single-tile stacking bug — a real one, found from watching the full replay
+
+Building a full tick-by-tick replay (see the ASCII renderer section above)
+surfaced something the curated snapshots had been hiding: **168 of 264
+agents on one tile** by tick 2000 in one run. Two real, distinct causes,
+both traced from actual data rather than guessed at:
+
+1. **`spawnOffspring` placed the child at `{ ...mother.pos }` verbatim.**
+   Combined with herd cohesion pulling the group tight, every new
+   generation was born on exactly the same tile as the last, compounding
+   for hundreds of births. **Fixed**: offspring now spawn on a random open
+   neighbor tile (`nearbySpawnTile` in `reproduction.ts`), falling back to
+   the mother's tile only if she's fully boxed in. Regression test added.
+2. **The map itself was almost entirely open floor with exactly one food
+   tile and one two-tile water hole** (`createDemoWorld`, unchanged since
+   the very first version of this scenario). Every hungry or thirsty agent
+   in the whole population had nowhere else to go.
+   **Fixed**: the demo world grew from 20×14 to 24×16 with three separated
+   food patches, two water sources on opposite sides of the map, a rocky
+   wall obstacle plus a wall corner, and a small hill (two elevation
+   steps) — real terrain variety instead of a featureless plain.
+
+**Real result after both fixes, fresh 2000-tick run:** better, not solved.
+Peak stack dropped from 168 to **113** of 247 agents, and the number of
+distinct tiles agents actually used roughly doubled early in the run. But
+a max stack in the hundreds is still there. Tracing it further: herd
+cohesion has no repulsion term (agents only move *toward* the herd
+centroid, never away from a crowded one), and once an agent finishes
+eating or drinking it has no reason to leave that tile — there's no
+idle-wander behavior, so a successful resource tile becomes a permanent
+gathering point rather than a stop. That's the real remaining cause, not
+map layout — see TODO.md.
+
+The replay's renderer was also fixed regardless of the underlying sim
+behavior: it used to draw one glyph per agent, so a 100-deep stack and a
+single occupant looked identical (arguably why this took a full replay to
+notice instead of the curated stills). It now groups agents by tile and
+draws one glyph plus a `×N` badge, so crowding is visible instead of
+silently overpainted.
+
 ## Stack
 
 - **pnpm workspace monorepo**, TypeScript everywhere.

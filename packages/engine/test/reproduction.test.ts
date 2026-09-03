@@ -52,6 +52,27 @@ describe("reproduction", () => {
     );
   });
 
+  it("spawns the offspring next to the mother, not stacked exactly on her tile", () => {
+    // Regression: spawnOffspring used to place the child at `{ ...mother.pos }`
+    // verbatim. Combined with herd cohesion pulling everyone into a tight
+    // cluster, that meant every new generation landed on the same tile as
+    // the last — a real 2000-tick run ended with 168 of 264 agents stacked
+    // on one tile. No herdId here so cohesion can't move the child either,
+    // isolating the spawn placement itself.
+    const world = createWorld(10, 10);
+    const mother: Agent = { ...parent("mother", "female", { x: 5, y: 5 }), herdId: undefined };
+    const father: Agent = { ...parent("father", "male", { x: 5, y: 6 }), herdId: undefined };
+    world.agents.push(mother, father);
+
+    tickWorld(world);
+
+    const child = world.agents.find((a) => a.id !== "mother" && a.id !== "father")!;
+    const dist = Math.abs(child.pos.x - 5) + Math.abs(child.pos.y - 5);
+    expect(dist).toBeGreaterThan(0);
+    // Diagonal neighbors are Manhattan distance 2, not 1.
+    expect(dist).toBeLessThanOrEqual(2);
+  });
+
   it("an immature agent doesn't seek a mate even with high mateDrive", () => {
     const world = createWorld(10, 10);
     const youngster: Agent = { ...parent("young", "female", { x: 2, y: 2 }), age: 5 };
