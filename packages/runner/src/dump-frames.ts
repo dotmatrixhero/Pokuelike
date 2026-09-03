@@ -1,5 +1,5 @@
 import { EventLog, tickWorld } from "@pokuelike/engine";
-import { createDemoWorld, HUNT_RULES } from "@pokuelike/data";
+import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT } from "@pokuelike/data";
 import { captureFrame, type Frame } from "./ascii.js";
 import { writeFileSync } from "node:fs";
 
@@ -34,7 +34,7 @@ if (fixedSnapshotTicks.has(0)) maybeCapture(0);
 
 for (let i = 0; i < ticks; i++) {
   const before = log.events.length;
-  tickWorld(world, log, HUNT_RULES);
+  tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT);
   if (fixedSnapshotTicks.has(world.tick)) maybeCapture(world.tick);
   for (let j = before; j < log.events.length; j++) {
     if (AUTO_CAPTURE_KINDS.has(log.events[j]!.kind)) {

@@ -15,3 +15,4 @@ export * from "./flora.js";
 export * from "./herding.js";
 export * from "./migration.js";
 export * from "./simulation.js";
+export * from "./leveling.js";

@@ -1,5 +1,5 @@
 import { EventLog, tickWorld } from "@pokuelike/engine";
-import { createDemoWorld, HUNT_RULES } from "@pokuelike/data";
+import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT } from "@pokuelike/data";
 import { formatEvent, summarize } from "./format.js";
 import { captureFrame, frameToAnsi } from "./ascii.js";
 
@@ -21,7 +21,7 @@ if (snapshotTicks.has(0)) {
 }
 
 for (let i = 0; i < ticks; i++) {
-  tickWorld(world, log, HUNT_RULES);
+  tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT);
   if (snapshotTicks.has(world.tick)) {
     frames.push(`--- tick ${world.tick} ---\n${frameToAnsi(captureFrame(world))}`);
   }

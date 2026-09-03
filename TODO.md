@@ -183,6 +183,34 @@ produce a real story before player mechanics are worth building further.
       all. This is a real architecture change (agents currently get
       exactly one action per tick, full stop) — deliberately not rushed
       in alongside other work; needs its own pass.
+- [ ] **Guardian positioning gap**: a guardian's `findHerdmateInDanger`
+      check works, but guardians only ever hang out near their own spawn
+      area (the water hole), while the herd forages clear across the map
+      near the food patch — so by the time a guardian notices a herd-mate
+      fleeing and gives chase, the kill happens before it can cross the
+      distance. Fix target: guardians should patrol nearer the herd's
+      actual grazing range, not just sit at one fixed spot.
+- [ ] **New, unplanned finding: unconstrained reproduction blows up.** Two
+      Venusaur (nothing preys on them) went from 2 to 52 individuals over
+      1000 ticks, and `venusaur-0` (the founding male) fathered most of
+      that growth including with his own daughters/granddaughters — no
+      relatedness/inbreeding check exists in `reproduction.ts`, and
+      nothing caps population for a species with no predator. This is the
+      mirror image of the Bulbasaur extinction: predation-free species
+      need *some* population-limiting force (carrying capacity tied to
+      food availability? territory limits? age-based mortality?) or they
+      grow without bound. Not fixed — worth deciding the mechanism
+      deliberately rather than bolting on a random cap.
+- [ ] **Confirmed this isn't Venusaur-specific**: with the action economy
+      (see "Combat / moves" below) making the guardian mechanism reliably
+      defeat the Scyther predator around tick 110 in real runs, Bulbasaur
+      itself now also reproduces unchecked once the threat is gone — 3
+      re-runs of the 1000-tick demo produced 71, 48, and 13 Bulbasaur
+      births respectively (vs. 2 in the first run written up in
+      DESIGN.md). Same root cause as the Venusaur case above (no carrying
+      capacity, nothing ties reproduction to predation pressure) — the
+      Speed work didn't cause this, but it did make the previously-rare
+      "predator dies early" case common enough to matter.
 
 ## World layers, elevation, and regions (see DESIGN.md)
 - [x] `Tile`/`World` have a `layer` dimension (Underground/Surface/Canopy,
@@ -298,13 +326,69 @@ produce a real story before player mechanics are worth building further.
       the real combat system directly rather than going through a
       promotion step, since there's no player yet — worth revisiting once
       the player exists and this needs to be a real transition.
-- [ ] Move `accuracy` field exists but isn't consumed — every move
-      currently hits. No miss chance yet.
-- [ ] Move leveling/respec system — how builds are earned, spent, reverted.
-      The shape axis (point/line/cone/ring/burst) still isn't connected to
-      predation.ts's single-target-only combat — AoE moves among wild
-      agents (who gets hit by a cone?) is a separate, real feature, not
-      built.
+- [x] **Real damage math wired in, not just data**: crit chance by stage
+      (mainline 1/24, 1/8, 1/2, always — `CRIT_STAGE_CHANCE`/`rollCritical`
+      in `combat.ts`, ported from PokeRogue's `getCriticalHitResult`),
+      `CRITICAL_MULTIPLIER` (1.5x) actually applied in `calculateDamage`,
+      mainline stat-stage multiplier table (`statStageMultiplier`, ported
+      from `getStatStageMultiplier`) actually changing effective
+      Atk/Def/SpAtk/SpDef when an agent carries `statStages`, and a real
+      accuracy/evasion-stage formula (`accuracyStageMultiplier`, base-3 not
+      base-2 — ported from `getAccuracyMultiplier`). `predation.ts`'s
+      `resolveHit` now rolls `rollAccuracy` before every hit — **a move can
+      genuinely miss now**, closing the old "accuracy not consumed" gap.
+      New `missed` event kind for the log. Engine-tested (`combat.test.ts`):
+      crit multiplier applies correctly, a crit ignores a beneficial
+      Defense stage the way mainline does, a sub-100-accuracy move can miss
+      with a controlled rng, stat stages measurably change damage.
+      **Caveat, honestly**: nothing in the current sim roster ever *sets* a
+      stat stage or uses a sub-100-accuracy move (every curated `MoveSpec` in
+      `packages/data/src/moves.ts` is 100 accuracy), so in the actual demo
+      run this is real, tested machinery sitting mostly idle — crit rolls
+      are the one piece that visibly fires (verified in a real 1000-tick
+      run: `scyther-0` landed a critical hit on `bulbasaur-1` at tick 59).
+      Individual stat *variance* (Nature/IV-equivalent, different from these
+      battle-only volatile stages) is still not modeled — see below.
+- [x] **Speed-driven action economy built** (see DESIGN.md's "Action
+      economy" section for the full design and real-run findings):
+      `Agent.actionEnergy` accumulates each world tick's real `stats.speed`,
+      and crossing `ACTION_THRESHOLD` (40, chosen against the demo roster's
+      actual computed speeds — 9 to 37) is what lets an agent act that tick.
+      `tickAgent` split into `tickAgentNeeds` (age/cooldowns/decay, always
+      runs) and `tickAgentAction` (behavior/movement/attacks, gated).
+      Cooldowns stay real-time, independent of the owner's action-tick
+      status, per the locked design. A 1000-tick real run with it produced
+      a genuinely new outcome: a Venusaur guardian, now acting almost every
+      tick (speed 37 vs. threshold 40), actually caught and defeated the
+      Scyther predator at tick 111 — something that never happened in any
+      prior run recorded in DESIGN.md — which let the Bulbasaur herd
+      reproduce for the first time ever recorded (2 births, ticks 476/543,
+      both well after the kill) instead of going extinct. Not tuned
+      further beyond that one constant; see DESIGN.md for what's still open
+      (agents without a computed `stats` block, e.g. reproduction.ts's
+      newborns, fall back to acting every tick rather than getting a real
+      Speed value — a real gap, not fixed here).
+- [x] **Move range is its own field** (`MoveSpec.range: { min, max }`,
+      `combat.ts`'s `moveRange`/new `withinMoveRange`), replacing the old
+      shape-derived-only reach — `range` is optional with a shape-based
+      fallback so pre-existing hand-rolled `MoveSpec` literals (tests) don't
+      need updating. The curated roster in `packages/data/src/moves.ts` now
+      sets it explicitly.
+- [x] **Skill tree / respec mechanism built**: `MoveSpec.tree` (a small DAG
+      of nodes with a cost, optional prerequisites, and a delta on
+      shape/range/power/accuracy/cooldownTicks/statusChance) plus a pure
+      `applyMoveTree(base, chosenNodeIds)` in `packages/engine/src/moves.ts`.
+      Ember has a real 2-node tree proving the "point -> ring, or stay small
+      and trade for burn chance/cooldown" pitch works end to end (see
+      DESIGN.md). **Deliberately not built / still open**: no build-point
+      economy (how points are earned/spent), no UI, and — per the explicit
+      scope call in DESIGN.md — wild background agents never apply a tree;
+      `predation.ts` still only ever uses base `MoveSpec`s. The shape axis
+      also still isn't connected to predation.ts's single-target-only
+      combat — AoE moves among wild agents (who gets hit by a cone?) is a
+      separate, real feature, not built. Target-tile-based ranged casting
+      (aim at a tile within range, then the shape resolves from *that*
+      tile, vs. today's origin-anchored shapes) is also still open.
 - [ ] Status effects (burn, etc.) — `statusChance` exists on move data but
       nothing consumes it.
 - [ ] Turn-based vs. real-time-with-pause for combat — undecided.
@@ -312,7 +396,191 @@ produce a real story before player mechanics are worth building further.
 - [ ] No individual stat variance yet (no Nature, no IV/EV-equivalent) —
       same species+level always produces identical stats. See the
       Disposition/culture section above for the intended individuality
-      layer once this matters.
+      layer once this matters. (Battle-only stat *stages* now exist in the
+      math, per above — that's a different, temporary-per-fight axis.)
+- [ ] Ability effects are not simulated — `ABILITY_DEX` (see "Data import"
+      below) is reference-only; nothing reads `abilities.primary/secondary/
+      hidden` at spawn or during combat.
+
+## Leveling / exp / evolution / skill points
+- [x] **Built: exp, real mainline growth curves, level-up loop, unbounded
+      move learning, level-based evolution, typed skill points.** See
+      DESIGN.md's "Leveling" section for the full write-up (growth-curve
+      verification results, exp sources/amounts, evolution mechanics, the
+      `applyMoveTreeWithSpend` spend-validation path) and real run findings.
+      Short version: importer now pulls `baseExp`/`levelMoves` per species;
+      `packages/engine/src/leveling.ts` has all six mainline growth curves
+      (verified against `poke_the_spire`'s raw exp tables, zero mismatches);
+      `grantExp`/`LevelingContext` wired into kills, passive trickle,
+      eat/drink, mate/birth, new-sector, and new-species-encountered exp
+      sources; level-ups loop multi-level, heal HP by the stat delta, learn
+      every unlocked move, grant typed+wildcard skill points, and check for
+      a level-gated evolution.
+- [ ] **Evolution mechanism is engine-tested but never observed in a real
+      run** — the honest gap, not a hidden one. Bulbasaur->Ivysaur needs
+      2535 cumulative exp (level 16, Medium Slow); a real run's income rate
+      put that on the order of 25,000-30,000 ticks, and runs past ~3000-5000
+      ticks risk timing out entirely on the sim's pre-existing unbounded
+      population growth (see below) before getting anywhere near that many
+      ticks. Either the non-combat exp trickle amounts need to be
+      meaningfully larger, or evolution needs a dedicated short scenario
+      (spawn one exp point below a threshold, tick once) instead of relying
+      on emergent long-run behavior to actually witness it.
+- [ ] **Evolved agents can land on a species outside the curated `SPECIES`
+      roster** (e.g. `"ivysaur"`, which `packages/data/src/species.ts` never
+      hand-curated — only base dex fields are used for evolved stats/types).
+      `packages/web`'s renderer looks up `SPECIES[agent.species]` for a
+      sprite key and would break on such an agent. Not hit by the headless
+      engine/runner path this feature validated against; a real gap for the
+      browser app once evolution is actually reachable in a run (see above).
+- [ ] **Status moves learned via `levelMoves` are recorded but not usable.**
+      Most of a real species' level-up moveset is status moves (Growl, Leech
+      Seed, etc.) that this sim has no engine for — `resolveMove` in
+      `packages/data/src/leveling.ts` returns `undefined` for them, so they
+      sit in `Agent.knownMoves` forever without a usable `MoveSpec`. Not a
+      bug, but worth noting: an agent's *effective* combat moveset will
+      often be much smaller than its `knownMoves` list once status moves
+      exist in a species' real levelMoves table (which is most of them).
+- [ ] **Non-combat exp trickle amounts are unguessed tuning** (trickle
+      0.02/tick, consume 0.5, mate-attempt 1, birth 3, new-sector 2,
+      new-species 2 — see DESIGN.md) — no canon formula exists for any of
+      these since mainline doesn't grant exp for surviving/eating/mating.
+      Revisit once a run shows whether leveling paces sensibly against the
+      sim's actual timescale (see the evolution gap above — current signs
+      point to "too slow for anything past early levels").
+- [ ] **A newborn's guaranteed level-up skill point required a follow-up
+      fix mid-feature** (see DESIGN.md): `spawnOffspring` didn't set
+      `Agent.types`, so `grantExp`'s guaranteed typed skill point (reads
+      `agent.types?.[0]`) silently never fired for the majority of level-ups
+      in a real run (most level-ups are newborns). Fixed by inheriting
+      `types` from the mother — cheap, but newborns still don't get a real
+      stats/moves combat profile at birth (pre-existing gap, see the
+      action-economy section of DESIGN.md) — only `types` was added.
+- [ ] **A real O(agents²) performance regression was found and fixed
+      mid-feature**: the "has this agent met a new species" check originally
+      scanned every other agent every action tick for every agent. Combined
+      with the sim's pre-existing unbounded Venusaur/Bulbasaur population
+      growth (see the "Real tactical combat" section of DESIGN.md), a
+      5000-tick run timed out (>90s) before this fix. Fixed by
+      short-circuiting the scan once an agent has recorded
+      `MAX_TRACKED_SPECIES` distinct species — caps the *added* cost, but
+      doesn't touch the underlying unbounded-population problem, which is
+      still the real, still-open item (see below and the reproduction/
+      predation carrying-capacity gap already tracked elsewhere in this
+      file). A long run is still at real risk of becoming impractically slow
+      independent of anything in this feature.
+- [ ] Item/trade/friendship evolutions are parsed into dex `conditions` but
+      explicitly not consumed (no item system, no trading, no friendship
+      stat exist) — only `level`-gated evolutions are checked. Matches the
+      explicit scope call in DESIGN.md's original design writeup.
+- [ ] Skill-point *spending* by an AI-controlled agent (an auto-spend
+      heuristic, eventually the player's own choice via a UI) doesn't exist
+      — `applyMoveTreeWithSpend` is real, tested plumbing that nothing calls
+      yet outside tests. Wild background agents accrue skill points
+      (harmlessly unused currency) but, per the existing scope call, never
+      call it.
+
+## Faint/finish-off, heal over time, herd inventory and carrying
+- [x] **Built: fainting instead of instant death, heal-over-time (fed-gated),
+      a finishing pool that absorbs follow-up hits, recovery, corpse
+      persistence, looting, herd food delivery, and literal carrying of a
+      fainted ally.** See DESIGN.md's section of the same name for the full
+      write-up and real run findings. Short version:
+      `packages/engine/src/support.ts` holds every new tuning constant and
+      most of the new logic (heal/recover/loot/deliverFood/carryAlly);
+      `predation.ts`'s `resolveHit` now faints instead of killing on a
+      lethal hit and only actually kills once a 0.75\*maxHp finishing pool
+      is exhausted (by however many follow-up hits, from anyone); kill-exp
+      and hunger-restore-on-kill both moved to that true-death moment.
+      104 pre-existing engine tests still pass (2 rewritten to match the new
+      faint-then-finish semantics, not special-cased); 11 new tests added.
+- [x] **Real run finding, and it's the important one: a fainted agent
+      outside a herd (or one whose needs were already low when it fainted)
+      can get stuck fainted forever, neither recovering nor being finished
+      off.** A 3000-tick run: Scyther (solitary, no herd) fainted at tick
+      152 with thirst already at ~0.52 — below `FED_THRESHOLD` (0.7) — so
+      heal-over-time never even started (its own decay had already crossed
+      the fed gate before the faint). One Venusaur landed a follow-up hit at
+      tick 155 that didn't finish the (unlogged, since `fought` doesn't
+      currently record the remaining pool) finishing pool, and then nobody
+      came back into range for the rest of the 3000-tick run — Scyther just
+      sat there fainted, permanently, contributing to neither the food chain
+      nor the event log for ~2850 ticks straight. The margin is razor-thin
+      even for an agent that faints at full needs: healing to the 18% wake
+      threshold at 1%-of-maxHp/tick takes ~18 ticks, while thirst alone
+      decays through the 0.7 fed gate in ~20 ticks from full — a fainted
+      agent has to already be finished off or rescued (herd food delivery,
+      carrying) well inside that window, or it's stuck. This is a real,
+      specific tuning gap: either heal-over-time needs a faster rate, the
+      fed-gate needs to be more lenient specifically for a fainted agent (a
+      believable in-fiction argument: it's not moving or fighting, its needs
+      shouldn't decay at the normal active rate), or fainted-with-no-herd
+      needs a bounded "die of exposure eventually" fallback so a corpse
+      doesn't sit in `World.agents` forever in spirit even though the
+      literal `alive` flag stays true. Not fixed here — reported straight,
+      exactly the finding this feature was supposed to surface.
+- [x] **Fainting and finishing-off were both observed for real, not just
+      engine-tested**: same 3000-tick run, two Bulbasaur fainted and were
+      killed 2 ticks later each (tick 58->60, tick 107->109) — a real
+      two-stage "knock down, then finish off" sequence, matching the design
+      intent exactly. Hunger only restored on the tick-60/109 `killed`
+      events, not the earlier `fainted` ones — eating-on-true-death-only is
+      real, not just asserted.
+- [ ] **Herd food delivery fired far more than intended: 7212
+      `foodDelivered` events in the same 3000-tick run** (vs. 2 in a
+      1000-tick run on the same demo scenario) — a direct consequence of the
+      sim's pre-existing unbounded population growth (see the "Leveling"
+      TODO item above and DESIGN.md's action-economy section): once the
+      Venusaur/Bulbasaur population balloons into the hundreds, a large
+      fraction of them are well-fed at any given moment, `HUNGRY_HERDMATE_
+      THRESHOLD` (0.4) is common enough to always have a target, and nothing
+      caps how often one agent restarts the errand. Worth tightening once
+      the underlying population-explosion problem has a fix to test
+      against — right now it's hard to tell whether 0.4/the lack of a
+      cooldown is wrong in isolation or just amplified by an unrelated bug.
+- [ ] **Looting and literal carrying were never observed in either real run
+      (1000 or 3000 ticks), only in direct engine tests.** Two different
+      reasons, both worth naming rather than just reporting a null result:
+      (1) nothing in the demo scenario ever puts real loot in an inventory
+      except a `deliverFood` courier's own in-transit food item, which is
+      consumed within a tick or two of being picked up, so there's almost
+      never anything sitng around to loot; (2) a hunting predator's own
+      follow-up hits reliably land faster (every ~2 ticks, see the finding
+      above) than a herd-mate can notice a fainted ally and walk over to
+      pick it up, so the carry window mostly doesn't open before the target
+      either recovers, dies, or (per the finding above) gets stuck in limbo.
+      The mechanism itself is real (support.ts's `applyCarrying`/
+      `maybeStartCarrying` are directly engine-tested, including the
+      drop-on-threat path) — this is an emergent-scenario gap, not a
+      not-implemented one. A dedicated small scenario (a slow predator, a
+      tanky prey that survives several hits before fainting, a herd-mate
+      planted adjacent) would be the way to actually witness it end-to-end
+      outside a unit test.
+- [ ] **5000-tick run timed out (>300s)**, consistent with the pre-existing
+      unbounded-population problem documented in DESIGN.md's action-economy
+      and leveling sections, plausibly worse now: `applyLooting` and
+      `applyHerdSupport` each scan `world.agents` per agent per action tick
+      (same O(agents)-per-agent cost class predation.ts's own `agentsWithin`/
+      `countHerdAllies` already have), so they add roughly proportional
+      constant-factor overhead on top of an already-unbounded agent count
+      rather than a new order of complexity — but "constant factor on top of
+      unbounded" is still enough to turn 3000 ticks (61s) into "5000 ticks
+      doesn't finish in 5 minutes." Not specifically optimized here, per the
+      same scope call every previous feature in this area has made — the
+      real fix is the carrying-capacity/population problem itself.
+- [ ] **Carry-capacity uses a maxHp-based proxy, not real imported species
+      weight** (`carryCapacityOf`/body-weight in support.ts) — an explicit,
+      documented scope call (see DESIGN.md) rather than extending the
+      importer to pull `poke_the_spire`'s height/weight fields for a second
+      time this project. Revisit if held-item effects ever get consumed by
+      combat (the existing out-of-scope item there) and real weight starts
+      mattering for something beyond carry capacity.
+- [ ] `fought` events don't carry the fainted defender's remaining
+      finishing-pool value — tests and the finding above had to infer it
+      from `damage` plus context. A cheap follow-up: add an optional
+      `finishingPoolRemaining` field so the event log itself can narrate a
+      multi-hit finishing blow ("2 hits left in the pool", etc.) without
+      re-deriving it from raw damage numbers.
 
 ## Art / assets
 - [ ] Sprite pipeline is bring-your-own (`packages/web/public/sprites/`) —
@@ -320,14 +588,40 @@ produce a real story before player mechanics are worth building further.
 - [ ] Tile art vs. the current flat-color terrain rendering.
 
 ## Data import
-- [ ] Bulk species/stats import from a PokeRogue-derived data source
-      (user has a fork, `dotmatrixhero/poke_the_spire`) — blocked this
-      session because this session's GitHub access is locked to just this
-      repo and the `add_repo` tool isn't available to widen it (tried both
-      the user's fork and the canonical `pagefaultgames/pokerogue`, same
-      wall either way). Next attempt: either a session with that repo
-      attached from the start, or the user pastes the relevant data
-      file(s) directly.
+- [x] **Bulk species/move/ability/type import from PokeRogue, done.** Unblocked
+      once a session had `poke_the_spire` checked out locally alongside this
+      repo (the earlier attempt's GitHub-access wall wasn't a problem this
+      time — no `add_repo` needed, just read files off disk). See
+      `packages/data/scripts/import-from-pokerogue.mjs` and DESIGN.md's "Data
+      import" section for what got pulled in and the scope calls made along
+      the way. Re-run the script against a fresh PokeRogue checkout whenever
+      it's worth refreshing the dex.
+- [ ] **Species dex covers only base forms** (see DESIGN.md) — PokeRogue
+      models some alt forms (Alolan/Galarian/Hisuian/Paldean regional forms,
+      Mega Evolutions) as their own top-level `SpeciesId` and they came in
+      for free, but forms nested inside a single species' `forms: [...]`
+      array (Pikachu's cosmetic caps, Deoxys/Rotom/Zygarde/Arceus formes,
+      Gigantamax) did not. A future pass could add a separate forms table
+      keyed by base species id if that's ever needed.
+- [ ] **Move dex captures data, not behavior.** `MOVE_DEX` has real
+      type/category/power/accuracy/pp/priority/target plus a tag list of
+      PokeRogue's `MoveAttr` class names per move (953 moves) — but nobody
+      interprets those tags. Reimplementing what e.g. `LeechSeedAttr` or
+      `MultiHitAttr` actually does is a different, much bigger project.
+- [ ] **Ability dex has no effect text.** `ABILITY_DEX` (319 abilities) has
+      id/name/a tag list of `AbAttr` class names/`ignorable`, but no
+      plain-text descriptions — those live in a separate i18n locale repo
+      that wasn't part of this checkout. Nothing in the engine reads ability
+      data at all yet; wiring abilities into combat is unstarted.
+- [ ] **Curated items (`ITEM_DEX`, ~30 classic held items) are reference data
+      only** — not wired into `combat.ts`. PokeRogue's real item/modifier
+      system (shop economy, stacking rules, hundreds of items) is enormous
+      and deliberately out of scope; if item effects ever get simulated,
+      start from this curated list's numbers rather than the full system.
+- [ ] `packages/data/src/dex/*.generated.ts` are, as the name says, generated
+      — don't hand-edit them; re-run the import script instead. They're
+      checked in (not gitignored) so the sim can be built without a
+      PokeRogue checkout present.
 
 ## Infra
 - [ ] No lint/format config yet (eslint/prettier) — add once the codebase
