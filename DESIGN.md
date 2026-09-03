@@ -1902,6 +1902,148 @@ this pass fixes (leveling-pace tuning is its own scope), but worth
 tracking rather than letting the new species quietly not deliver the
 guardian-via-evolution story they were designed to tell.
 
+## Environmental generation, biomes, obstacles, and elevation-aware movement/fog
+
+Decided, not built yet. Direct feedback: the world "feels like a small
+trapped box." It is one — `createDemoWorld` (`packages/data/src/scenario.ts`)
+is a single hand-authored 24x16 flat grid with 7 terrain kinds and zero
+obstacles. `elevation.ts` (accuracy/evasion modifiers) and `fov.ts`
+(`computeVisible`) are fully built but **called by nothing** — dead code
+today, confirmed by grep. This is Phase 1 of a two-phase piece of work;
+Phase 2 (herd-level group migration) is the next section and deliberately
+waits on this one, since coordinated migration needs an interesting, varied
+map to actually be observable in a real run, not a 24x16 box with two
+water holes.
+
+- **Real procedural generation, not another hand-authored map.** Generate
+  a substantially larger world (pick a real size, not another cramped box —
+  something like 80x60 or bigger, tune for what stays performant given the
+  existing "naive per-tick nearest-tile search is O(width*height)" ceiling
+  already flagged in TODO.md; this feature may need to address that ceiling
+  directly rather than inherit it silently at a much bigger map size).
+  Deterministic given a seed (reproducible runs for debugging) — a simple
+  seeded PRNG + smoothed value noise is enough, no new dependency needed.
+- **Biome types that bleed into each other, not hard-edged regions.**
+  Assign each biome a small number of seed points scattered across the map;
+  every tile's parameters (food/water base density, obstacle density,
+  elevation base/variance, terrain-kind weights) are a distance-weighted
+  blend of its 2-3 nearest biome seeds, not a single "which region am I
+  in" lookup — this is the actual mechanism for "bleed into each other,"
+  continuous parameter blending rather than painting discrete zones with a
+  border. A handful of biomes to start (data-driven, easy to add more
+  later): **Grassland** (today's default — open, moderate food/water),
+  **Forest** (dense trees, canopy-heavy, more cover, less open food),
+  **Wetland** (lots of water tiles, mud slows movement), **Badlands**
+  (sparse food/water, sandy, more open sightlines), **Rocky/Highland**
+  (elevation-heavy, boulders, ties directly into the elevation-movement
+  work below). Scope call: this pass targets the **Surface** layer only —
+  Underground/Canopy keep their current simpler flat-plus-resource-crossing
+  model, consistent with DESIGN.md's existing "whether Underground/Canopy
+  get their own elevation too" open question, which this doesn't resolve.
+- **New terrain kinds for obstacles and movement variety**, added to
+  `TerrainKind`: `"tree"` (unwalkable, blocks movement and — for free,
+  since `hasLineOfSight` already treats non-walkable tiles as opaque —
+  blocks line of sight, no fov.ts change needed for trees specifically),
+  `"bush"` (walkable but grants **concealment**: a new mechanism, not
+  free like trees — reduces the effective detection range for anything
+  trying to spot an agent standing in/behind one, which needs a real hook
+  into predation.ts's flee-trigger detection and into `computeVisible`,
+  not just a cosmetic tile), `"boulder"` (unwalkable, same LoS-blocking
+  treatment as tree, distinct flavor/rendering), `"sand"`/`"mud"`
+  (walkable, movement-cost penalty — feeds the same effective-speed
+  mechanism elevation is about to use, see below).
+- **Elevation actually affects movement speed, not just combat math sitting
+  idle.** Moving onto a higher-elevation tile than your current one costs
+  more (lowers effective Speed for that action, feeding the same
+  `accumulateActionEnergy`/`effectiveSpeed` mechanism `support.ts` already
+  uses for injury); moving onto a lower tile is faster. This is a second,
+  independent modifier alongside the existing HP-based one in
+  `support.ts` — document how they compose (multiplicative, most likely,
+  consistent with how the injury one is already applied).
+- **Elevation-aware fog of war becomes asymmetric by direction**, not just
+  the existing symmetric "your own elevation extends your radius" and
+  "a tall ridge blocks the view over it" rules (both already built and
+  fine to keep). Add: a target standing on **higher** ground than the
+  observer is harder to make out (reduced effective visibility toward it)
+  than the existing ridge-blocking rule alone accounts for, while a target
+  on **lower** ground (looking down into a valley) is easier to see — a
+  real "fog thickens going uphill, thins going downhill" rule layered on
+  top of `computeVisible`'s existing radius/line-of-sight logic, not a
+  replacement for it.
+- **Obstacles feeding back into behavior and combat**: a bush's
+  concealment should make it a real ambush tool — a predator lurking in
+  one that a prey agent hasn't detected gets some meaningful edge on the
+  opening exchange (a detection-range reduction already covers "prey
+  doesn't notice it's there in time to flee" — decide whether that's
+  sufficient or whether an explicit first-strike/accuracy bonus on the
+  ambush hit is worth adding; document whichever call is made). Move
+  range/line-of-sight for actual combat moves (`combat.ts`'s
+  `moveRange`/`canAttackFromHere`) should respect the new obstacle tiles
+  the same way any other line-of-sight check does — a tree between
+  attacker and target should block a line-shaped move's path, not just
+  ambient FOV.
+- **Explicitly still open**: exact biome parameter tuning (food/water
+  density per biome, obstacle density, elevation variance) — sim-original
+  guesses to judge against a real run like every other tuning constant
+  here; whether the O(width*height) nearest-tile-search ceiling needs a
+  real fix (spatial indexing) at the new map scale or can be deferred a
+  bit further; multi-region/world-graph (DESIGN.md's existing "World
+  scale" section) stays a separate, bigger, still-unbuilt idea — this
+  generates one large varied region, not multiple connected ones.
+
+## Herd-level migration: moving as a group, not wandering individually
+
+Decided, not built yet — Phase 2, depends on Phase 1 above landing first
+(needs a real varied map to be observable, and both phases touch
+`scenario.ts`/`world.ts`, so building them in the same pass invites
+avoidable conflicts). Direct ask: "I want the herd to move if there's no
+food," and for that to read as a genuine group decision, not individually-
+wandering agents that happen to end up near each other. Today's only
+relevant mechanism, `migrate()` in `migration.ts`, is single-agent and
+already used for something different (a predator giving up on a hunting
+area) — it picks one random distant point per agent, independently.
+
+- **A shared per-herd migration decision, not per-agent.** When a herd's
+  local resource situation is bad — sample food-tile `stock` (and water
+  presence) within the herd's existing cohesion radius (`herding.ts`'s
+  `COHESION_DISTANCE`) around its live centroid, sustained below a
+  threshold for a real duration (not a single bad tick — avoid triggering
+  on ordinary depletion/regrowth noise already modeled in `flora.ts`) —
+  the herd (identified by shared `herdId`) picks **one shared destination**
+  for everyone, not each member picking its own. Store this as real shared
+  state (a `herdId -> target` map is enough, doesn't need to live on every
+  agent) so the whole herd actually walks together rather than scattering.
+- **Destination selection is resource-aware, not a blind random point**
+  like the existing single-agent `migrate()` — sample candidate points at
+  some distance from the current centroid and prefer ones with better
+  known food/water density (reuse whatever terrain-sampling the biome-
+  generation work produces, or a simpler direct tile scan if that's not
+  ready/needed) — a herd should be able to plausibly walk toward the
+  Forest biome's denser food if it's starving in a Badlands patch, once
+  Phase 1's biome variety exists to walk toward at all.
+- **Every herd member (and its guardians, per the existing
+  `protectedHerdCentroid` distinction) biases toward the shared migration
+  target instead of the live centroid while one is active** — reuse
+  `applyHerdCohesion`'s existing structure, just swap what it's pulling
+  toward when a migration is in progress, rather than building a second
+  parallel movement system.
+- **Migration ends on arrival** (herd centroid close enough to the target)
+  or on a timeout/give-up condition (mirroring `migrate()`'s existing
+  `"stuck"` case) — clears the shared target, resumes ordinary centroid-
+  based foraging cohesion in the new area.
+- **New `herdMigrating` event** (herdId, from, to, reason — e.g. "food
+  scarcity") for the event log, and an arrival/settle event — this is
+  squarely the kind of thing the project's whole "the log needs semantic
+  content" ethos wants: "the east herd abandoned its depleted range and
+  resettled near the forest's edge" is a real story, not a diff.
+- **Explicitly still open**: whether predator-side relocation
+  (`migrate()`'s existing use in predation.ts) should be unified with this
+  new herd-migration mechanism or stay separate (they're conceptually
+  different — one predator giving up vs. a whole herd relocating — keeping
+  them separate is a reasonable default, revisit if it causes duplication);
+  exact scarcity-detection thresholds/duration, another sim-original tuning
+  guess to validate against a real run.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays
