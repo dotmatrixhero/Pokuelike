@@ -1,8 +1,10 @@
 import { EventLog, tickWorld, randomSeed, type Agent, type World } from "@pokuelike/engine";
 import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
-import { agentAtCanvasPos, drawWorld, TILE_SIZE, type RenderStyle } from "./renderer.js";
+import { agentAtCanvasPos, drawEventPopups, drawWorld, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { EventLogPanel } from "./eventLogPanel.js";
+import { EventPopups } from "./eventPopups.js";
 import { renderInspector } from "./inspector.js";
+import { renderLegend } from "./legend.js";
 
 /**
  * Ticks per real second at speed multiplier 1x. Multiplied by `SPEED_STEPS`
@@ -34,6 +36,8 @@ const clearSelectionBtn = document.getElementById("clear-selection") as HTMLButt
 const hideNoiseCheckbox = document.getElementById("hide-noise") as HTMLInputElement;
 const styleTileBtn = document.getElementById("style-tile") as HTMLButtonElement;
 const styleAsciiBtn = document.getElementById("style-ascii") as HTMLButtonElement;
+const legendEl = document.getElementById("legend") as HTMLElement;
+const toggleLegendBtn = document.getElementById("toggle-legend") as HTMLButtonElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -48,6 +52,7 @@ let inspectorDirty = true;
 let renderStyle: RenderStyle = "ascii";
 
 const eventLogPanel = new EventLogPanel(eventLogEl);
+const eventPopups = new EventPopups();
 
 function currentSeed(): number {
   return world.rngSeed;
@@ -69,6 +74,7 @@ function loadWorld(seed: number): void {
 
   eventLogPanel.reset();
   eventLogPanel.setFilter(undefined);
+  eventPopups.reset();
   renderInspector(inspectorEl, undefined);
   updateStatusLabels();
 }
@@ -76,7 +82,9 @@ function loadWorld(seed: number): void {
 function step(): void {
   tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT);
   // Only the events since the last step are new; EventLog is append-only for the life of a world.
-  eventLogPanel.ingest(log.events.slice(lastLoggedEventCount));
+  const newEvents = log.events.slice(lastLoggedEventCount);
+  eventLogPanel.ingest(newEvents);
+  eventPopups.ingest(newEvents, world);
   lastLoggedEventCount = log.events.length;
   if (selectedAgentId) inspectorDirty = true;
   updateStatusLabels();
@@ -191,6 +199,13 @@ function setRenderStyle(style: RenderStyle): void {
 styleTileBtn.addEventListener("click", () => setRenderStyle("tile"));
 styleAsciiBtn.addEventListener("click", () => setRenderStyle("ascii"));
 
+renderLegend(legendEl);
+toggleLegendBtn.addEventListener("click", () => {
+  const hidden = legendEl.hidden;
+  legendEl.hidden = !hidden;
+  toggleLegendBtn.textContent = hidden ? "Hide" : "Show";
+});
+
 // --- Boot --------------------------------------------------------------------
 
 const seedParam = new URLSearchParams(location.search).get("seed");
@@ -200,6 +215,7 @@ speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
 
 function frame(): void {
   drawWorld(ctx, world, selectedAgentId, renderStyle);
+  drawEventPopups(ctx, eventPopups.active());
   eventLogPanel.render();
   refreshSelection();
   requestAnimationFrame(frame);

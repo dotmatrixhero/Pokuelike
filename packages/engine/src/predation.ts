@@ -4,7 +4,7 @@ import { logBehaviorChange } from "./events.js";
 import { stepAway, stepToward } from "./movement.js";
 import { migrate } from "./migration.js";
 import { calculateDamage, pickBestMove, useMove, withinMoveRange, rollAccuracy, rollCritical } from "./combat.js";
-import { grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
+import { grantKillExp, type LevelingContext } from "./leveling.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
 import { isPathClear } from "./fov.js";
 import { tileAt } from "./world.js";
@@ -404,8 +404,6 @@ function resolveHit(
           isCritical
         ).damage
       : FALLBACK_DAMAGE;
-
-  if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log, rng);
 
   // Every real hit against a herd member counts toward that herd's
   // predator-pressure trigger (herdMigration.ts) — the running-counter

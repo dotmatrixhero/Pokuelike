@@ -335,10 +335,6 @@ export function grantExp(
       log?.record({ kind: "learnedMove", tick: world.tick, agentId: agent.id, species: agent.species, moveId: moveKey, level: agent.level });
     }
 
-    const primaryType = agent.types?.[0];
-    if (primaryType) grantSkillPoint(agent, primaryType, world, log);
-    if (rng() < SKILLPOINT_LEVELUP_WILDCARD_CHANCE) grantSkillPoint(agent, "wildcard", world, log);
-
     const levelAfterUp = agent.level;
     const evo = profile.evolutions.find((e) => levelAfterUp >= e.level);
     if (evo) {

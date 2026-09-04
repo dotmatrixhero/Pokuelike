@@ -109,7 +109,7 @@ export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
  * property reads on an object that's usually not a match) and future-proof
  * against a new event kind adding its own `xId` field later.
  */
-const AGENT_ID_FIELDS = [
+export const AGENT_ID_FIELDS = [
   "agentId",
   "attackerId",
   "defenderId",

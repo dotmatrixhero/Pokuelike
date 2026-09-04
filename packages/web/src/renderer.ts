@@ -1,7 +1,8 @@
-import type { Agent, World } from "@pokuelike/engine";
+import type { Agent, TerrainKind, World } from "@pokuelike/engine";
 import { lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import { getSprite } from "./sprites.js";
+import type { ActivePopup } from "./eventPopups.js";
 import {
   FLAVOR_FG,
   FLAVOR_GLYPH,
@@ -114,29 +115,36 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
     if (agent.layer === "surface") agentAt.set(`${agent.pos.x},${agent.pos.y}`, agent);
   }
 
+  const isPlantLike = (terrain: TerrainKind) => terrain === "food" || terrain === "flora" || terrain === "seedling";
+
   for (let y = 0; y < world.height; y++) {
     for (let x = 0; x < world.width; x++) {
       const tile = surface[y * world.width + x]!;
       const cx = x * TILE_SIZE + TILE_SIZE / 2;
       const cy = y * TILE_SIZE + TILE_SIZE / 2;
+      const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_FG[tile.terrain];
 
-      // A faint, translucent wash of the terrain's own color instead of a
-      // solid fill — Brogue's ground reads as lit stone, not a flat tile.
-      const bg = shade(TERRAIN_BG[tile.terrain], tile.elevation);
-      ctx.fillStyle = rgbaToCss(bg, tile.terrain === "floor" ? 0.25 : 0.55);
-      ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-
-      const agent = agentAt.get(`${x},${y}`);
-      if (agent) {
-        drawAgentGlyph(ctx, agent, cx, cy, agent.id === selectedAgentId);
-        continue;
+      if (isPlantLike(tile.terrain)) {
+        // No solid fill at all — a dense block glyph in the patch's own
+        // color stands in for a "background", so a berry patch or flora
+        // cluster reads as a colored wash made of ASCII, not a filled tile.
+        ctx.fillStyle = rgbaToCss(accent, 0.55);
+        ctx.fillText("█", cx, cy);
+        const flavorGlyph = tile.flavor ? FLAVOR_GLYPH[tile.flavor] : undefined;
+        ctx.fillStyle = "rgba(10, 12, 15, 0.85)";
+        ctx.fillText(flavorGlyph ?? TERRAIN_GLYPH[tile.terrain], cx, cy);
+      } else {
+        // Everything else keeps a faint translucent wash of its own color —
+        // Brogue's ground reads as lit stone, not a flat tile — plus its glyph.
+        const bg = shade(TERRAIN_BG[tile.terrain], tile.elevation);
+        ctx.fillStyle = rgbaToCss(bg, tile.terrain === "floor" ? 0.25 : 0.55);
+        ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+        ctx.fillStyle = rgbaToCss(accent, tile.terrain === "floor" ? 0.45 : 0.9);
+        ctx.fillText(TERRAIN_GLYPH[tile.terrain], cx, cy);
       }
 
-      const flavorGlyph = tile.flavor ? FLAVOR_GLYPH[tile.flavor] : undefined;
-      const glyph = flavorGlyph ?? TERRAIN_GLYPH[tile.terrain];
-      const fg = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_FG[tile.terrain];
-      ctx.fillStyle = rgbaToCss(fg, tile.terrain === "floor" ? 0.45 : 0.9);
-      ctx.fillText(glyph, cx, cy);
+      const agent = agentAt.get(`${x},${y}`);
+      if (agent) drawAgentGlyph(ctx, agent, cx, cy, agent.id === selectedAgentId);
     }
   }
   ctx.restore();
@@ -145,15 +153,34 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
   drawDayNightTint(ctx, world);
 }
 
+/**
+ * Agents need to read as unmistakably "the important thing" against a
+ * busy glyph-covered map: a soft colored halo (a filled circle, well
+ * outside the letter's own footprint) behind a bold, slightly oversized,
+ * outlined letter — brighter and heavier than any terrain glyph, on
+ * purpose, so a Pokemon never gets lost among the ASCII scenery.
+ */
 function drawAgentGlyph(ctx: CanvasRenderingContext2D, agent: Agent, cx: number, cy: number, isSelected: boolean): void {
   const isCorpse = agent.alive === false;
   const primaryType = agent.types?.[0];
-  const color = isCorpse ? ([120, 120, 120] as const) : primaryType ? TYPE_COLOR[primaryType] : ([230, 230, 230] as const);
+  const color: [number, number, number] = isCorpse ? [150, 150, 150] : primaryType ? TYPE_COLOR[primaryType] : [230, 230, 230];
+  const alpha = isCorpse ? 0.5 : agent.fainted ? 0.65 : 1;
 
   ctx.save();
-  ctx.globalAlpha = isCorpse ? 0.5 : agent.fainted ? 0.6 : 1;
+  ctx.globalAlpha = alpha;
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, TILE_SIZE * 0.46, 0, Math.PI * 2);
+  ctx.fillStyle = rgbaToCss(color, 0.28);
+  ctx.fill();
+
+  const letter = agent.species.charAt(0).toUpperCase();
+  ctx.font = `bold ${TILE_SIZE * 0.78}px ui-monospace, "SF Mono", Consolas, monospace`;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(6, 8, 11, 0.9)";
+  ctx.strokeText(letter, cx, cy);
   ctx.fillStyle = rgbToCss(color as [number, number, number]);
-  ctx.fillText(agent.species.charAt(0).toUpperCase(), cx, cy);
+  ctx.fillText(letter, cx, cy);
   ctx.restore();
 
   if (isSelected) {
@@ -196,6 +223,23 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
   ctx.restore();
 
   if (isSelected) drawSelectionRing(ctx, agent);
+}
+
+/** A brief icon floating up and fading out over an event's own tile — see eventPopups.ts. */
+export function drawEventPopups(ctx: CanvasRenderingContext2D, popups: readonly ActivePopup[]): void {
+  if (popups.length === 0) return;
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `${TILE_SIZE * 0.75}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+  for (const popup of popups) {
+    const cx = popup.pos.x * TILE_SIZE + TILE_SIZE / 2;
+    const cy = popup.pos.y * TILE_SIZE + TILE_SIZE / 2 - (1 - popup.fade) * TILE_SIZE * 1.4;
+    ctx.globalAlpha = Math.max(0, popup.fade);
+    ctx.fillStyle = popup.color;
+    ctx.fillText(popup.icon, cx, cy);
+  }
+  ctx.restore();
 }
 
 function drawSelectionRing(ctx: CanvasRenderingContext2D, agent: Agent): void {
