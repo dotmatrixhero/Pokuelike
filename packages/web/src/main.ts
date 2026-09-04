@@ -16,13 +16,21 @@ const BASE_TICKS_PER_SEC = 6;
 const SPEED_STEPS = [0.25, 0.5, 1, 2, 4, 8, 16, 32] as const;
 const DEFAULT_SPEED_INDEX = 2; // 1x
 
-/** The 90x60 demo map renders wider/taller than most viewports at 1x (TILE_SIZE px/tile) — zooming out is the common case. */
-const ZOOM_STEPS = [0.15, 0.25, 0.4, 0.6, 0.8, 1, 1.5] as const;
-const DEFAULT_ZOOM_INDEX = 4; // 0.8x — the whole demo map roughly fits a laptop viewport at this level
+/**
+ * The 90x60 demo map renders wider/taller than most viewports at 1x
+ * (TILE_SIZE px/tile) — zooming out is the common case. Continuous, not
+ * stepped, so a two-finger pinch gesture can drive it smoothly; the +/-
+ * buttons just multiply/divide by a fixed factor.
+ */
+const ZOOM_MIN = 0.1;
+const ZOOM_MAX = 2;
+const ZOOM_BUTTON_FACTOR = 1.25;
+const DEFAULT_ZOOM = 0.8; // the whole demo map roughly fits a laptop viewport at this level
 
 // --- DOM references -------------------------------------------------------
 
 const canvas = document.getElementById("scene") as HTMLCanvasElement;
+const canvasWrap = document.getElementById("canvas-wrap") as HTMLElement;
 const ctx = canvas.getContext("2d")!;
 const seedInput = document.getElementById("seed-input") as HTMLInputElement;
 const loadSeedBtn = document.getElementById("load-seed") as HTMLButtonElement;
@@ -60,7 +68,7 @@ let selectedAgentId: string | undefined;
 let lastLoggedEventCount = 0;
 let inspectorDirty = true;
 let renderStyle: RenderStyle = "ascii";
-let zoomIndex = DEFAULT_ZOOM_INDEX;
+let zoom = DEFAULT_ZOOM;
 
 const eventLogPanel = new EventLogPanel(eventLogEl);
 const eventPopups = new EventPopups();
@@ -87,7 +95,7 @@ function loadWorld(seed: number): void {
   eventLogPanel.reset();
   eventLogPanel.setFilter(undefined);
   eventPopups.reset();
-  renderInspector(inspectorEl, undefined);
+  renderInspector(inspectorEl, undefined, world);
   updateStatusLabels();
 }
 
@@ -98,7 +106,9 @@ function step(): void {
   eventLogPanel.ingest(newEvents);
   eventPopups.ingest(newEvents, world);
   lastLoggedEventCount = log.events.length;
-  if (selectedAgentId) inspectorDirty = true;
+  // Always dirty, not just when something's selected — the no-selection
+  // view is a live population/weather overview, not a static placeholder.
+  inspectorDirty = true;
   updateStatusLabels();
 }
 
@@ -149,7 +159,7 @@ function refreshSelection(): void {
   if (!inspectorDirty) return;
   inspectorDirty = false;
   const agent = selectedAgentId ? world.agents.find((a) => a.id === selectedAgentId) : undefined;
-  renderInspector(inspectorEl, agent);
+  renderInspector(inspectorEl, agent, world);
 }
 
 // --- Wiring ------------------------------------------------------------------
@@ -232,20 +242,55 @@ drawerBackdrop.addEventListener("click", () => setDrawerOpen(false));
 // backing pixel buffer at native TILE_SIZE resolution — agentAtCanvasPos's
 // click math already divides by the element's rendered rect, not a fixed
 // pixel size, so clicking a tile keeps working correctly at any zoom level.
-function applyZoom(): void {
-  const zoom = ZOOM_STEPS[zoomIndex]!;
+function setZoom(next: number): void {
+  zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next));
   canvas.style.width = `${canvas.width * zoom}px`;
   canvas.style.height = `${canvas.height * zoom}px`;
   zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
 }
-zoomOutBtn.addEventListener("click", () => {
-  zoomIndex = Math.max(0, zoomIndex - 1);
-  applyZoom();
-});
-zoomInBtn.addEventListener("click", () => {
-  zoomIndex = Math.min(ZOOM_STEPS.length - 1, zoomIndex + 1);
-  applyZoom();
-});
+function applyZoom(): void {
+  setZoom(zoom);
+}
+zoomOutBtn.addEventListener("click", () => setZoom(zoom / ZOOM_BUTTON_FACTOR));
+zoomInBtn.addEventListener("click", () => setZoom(zoom * ZOOM_BUTTON_FACTOR));
+
+// Two-finger pinch to zoom, touch devices — canvas-wrap still scrolls with
+// a single finger (touch-action: pan-x pan-y in index.html), so pinch only
+// takes over once a second touch point appears.
+let pinchStartDistance: number | undefined;
+let pinchStartZoom = zoom;
+
+function touchDistance(touches: TouchList): number {
+  const [a, b] = [touches[0]!, touches[1]!];
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
+canvasWrap.addEventListener(
+  "touchstart",
+  (event) => {
+    if (event.touches.length === 2) {
+      pinchStartDistance = touchDistance(event.touches);
+      pinchStartZoom = zoom;
+    }
+  },
+  { passive: true }
+);
+canvasWrap.addEventListener(
+  "touchmove",
+  (event) => {
+    if (event.touches.length !== 2 || pinchStartDistance === undefined) return;
+    event.preventDefault();
+    setZoom(pinchStartZoom * (touchDistance(event.touches) / pinchStartDistance));
+  },
+  { passive: false }
+);
+canvasWrap.addEventListener(
+  "touchend",
+  (event) => {
+    if (event.touches.length < 2) pinchStartDistance = undefined;
+  },
+  { passive: true }
+);
 
 // --- Boot --------------------------------------------------------------------
 

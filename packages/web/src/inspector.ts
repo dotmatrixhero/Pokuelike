@@ -1,4 +1,4 @@
-import type { Agent } from "@pokuelike/engine";
+import type { Agent, World } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 
 function row(label: string, value: string): HTMLElement {
@@ -24,15 +24,43 @@ function pct(n: number): string {
   return `${Math.round(n * 100)}%`;
 }
 
-/** Renders the click-to-inspect panel for `agent` (or a placeholder if nothing is selected) into `container`. */
-export function renderInspector(container: HTMLElement, agent: Agent | undefined): void {
+/** With nothing selected, the inspector doubles as a world-overview panel instead of sitting empty. */
+function renderOverview(container: HTMLElement, world: World): void {
+  const title = document.createElement("div");
+  title.className = "inspect-title";
+  title.textContent = "World overview";
+  container.appendChild(title);
+
+  container.appendChild(row("Tick", String(world.tick)));
+
+  const living = world.agents.filter((a) => a.alive !== false);
+  const fainted = living.filter((a) => a.fainted).length;
+  const corpses = world.agents.length - living.length;
+  container.appendChild(row("Population", `${living.length} alive${fainted > 0 ? `, ${fainted} fainted` : ""}${corpses > 0 ? `, ${corpses} corpses` : ""}`));
+
+  const perSpecies = new Map<string, number>();
+  for (const a of living) perSpecies.set(a.species, (perSpecies.get(a.species) ?? 0) + 1);
+  const bySpecies = [...perSpecies.entries()].sort((a, b) => b[1] - a[1]);
+  for (const [species, count] of bySpecies) {
+    container.appendChild(row(SPECIES[species]?.name ?? species, String(count)));
+  }
+
+  if (world.weatherCells && world.weatherCells.length > 0) {
+    container.appendChild(row("Weather", world.weatherCells.map((c) => c.type).join(", ")));
+  }
+
+  const hint = document.createElement("div");
+  hint.className = "inspect-empty";
+  hint.textContent = "Click an agent on the grid to inspect it.";
+  container.appendChild(hint);
+}
+
+/** Renders the click-to-inspect panel for `agent`, or a world-overview summary if nothing is selected, into `container`. */
+export function renderInspector(container: HTMLElement, agent: Agent | undefined, world: World): void {
   container.replaceChildren();
 
   if (!agent) {
-    const empty = document.createElement("div");
-    empty.className = "inspect-empty";
-    empty.textContent = "Click an agent on the grid to inspect it.";
-    container.appendChild(empty);
+    renderOverview(container, world);
     return;
   }
 

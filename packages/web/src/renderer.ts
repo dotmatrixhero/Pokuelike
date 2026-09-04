@@ -188,6 +188,14 @@ function drawAgentGlyph(ctx: CanvasRenderingContext2D, agent: Agent, cx: number,
   ctx.fillStyle = rgbaToCss(color, 0.28);
   ctx.fill();
 
+  // A crisp white ring on top of the colored fill — the actual "unmissable
+  // against busy ASCII" signal; the tinted fill alone read as too subtle.
+  ctx.beginPath();
+  ctx.arc(cx, cy, TILE_SIZE * 0.46, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
   const letter = agent.species.charAt(0).toUpperCase();
   ctx.font = `bold ${TILE_SIZE * 0.78}px ui-monospace, "SF Mono", Consolas, monospace`;
   ctx.fillStyle = rgbToCss(color);
