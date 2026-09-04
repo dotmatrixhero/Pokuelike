@@ -507,6 +507,163 @@ deliberate — closer to a PoE respec economy than a free undo button. Not
 needed for wild agents; noted here so it isn't lost before a player exists
 to use it.
 
+## Move-tree drafts: the sim's actual movepool
+
+Vine Whip proved the v2 template. This applies it to every move actually
+equipped by a spawned agent in `packages/data/src/scenario.ts` — Ember is
+deliberately excluded here even though it already has a (v1, due for a
+rebuild) tree, since Charmander isn't currently spawned in the demo world.
+Tackle is used by six different species (Bulbasaur, Venusaur, Diglett,
+Pidgey, Onix, Squirtle) in six completely different roles — guardian,
+herd prey, burrower, flier, tunneler, starter — so it gets Vine Whip's full
+treatment (3 branches + a crosslink triangle); the same tree, but different
+individuals (via disposition-weighted auto-respec) end up building it
+differently depending on who's wielding it. Everything else gets a scope
+matched to how central it is: Slash (the sim's only predator's only move)
+gets a full Power-archetype build; the four single-species specialty moves
+get lighter 2-branch trees — real content, not padding, but proportionate.
+
+Feasibility tags as before: **live** (existing `delta` fields), **near**
+(rides an existing subsystem), **needs** (blocked on a not-yet-built
+mechanism — status effects, AoE, `excludes`/`prerequisitesAnyOf`, agent
+passives, or one of the newly-introduced levers called out per move below).
+
+### Tackle (Normal, point/melee) — Utility archetype, full treatment
+
+- **Aggression — "Full Charge"**: notable *Weighted Charge* (+power,
+  -accuracy, live) → filler → filler → notable *Bracing Impact* (chance to
+  knock the target back 1 tile on hit, needs) → filler. **Fork**:
+  *Relentless Charge* (2 hits, less power each, live) vs. *Full-Force Slam*
+  (+power, +cooldown, live). **Keystone**: *Unstoppable Momentum* — after a
+  hit, immediately dash toward the next target (needs: action-economy
+  interaction).
+- **Boldness — "Brace for Impact"**: notable *Brace for Impact* (passive
+  damage reduction while known, needs: agent-modifying passive) → filler →
+  filler → notable *Retaliation* (lifesteal %, live) → filler. **Fork**:
+  *Sturdy Stance* (more reduction, -power, needs) vs. *Counter Slam*
+  (+power when used the tick right after being hit, needs: "was just hit"
+  context). **Keystone**: *Immovable* — can't be displaced while off
+  cooldown, and standing still last tick adds power to the next Tackle
+  (needs).
+- **Sociability — "Shared Ground"** (new — Tackle's spread across so many
+  communal species earns it a real support branch): notable *Steadfast
+  Guard* (usable to intercept a threat approaching a herd-mate, near — reuses
+  the guardian/herd concept) → filler → filler. **Fork**: *Bodyblock*
+  (swaps position with a threatened herd-mate, pulling them to safety —
+  needs: a position-swap movement lever, new) vs. *Rally Charge* (grants a
+  nearby herd-mate a small action-energy boost, needs). **Keystone**:
+  *Bulwark* — big power/accuracy bonus while adjacent to a fainted or
+  critically-hurt herd-mate (needs).
+- **Crosslinks** (all needs, all one-node-short-of-the-notable per the
+  fixed rule): *Grounded Fury* (Aggression↔Boldness, needs Weighted Charge +
+  Brace for Impact) — Retaliation's lifesteal also applies to Tackle's plain
+  hit. *Guardian's Stand* (Boldness↔Sociability) — Boldness's damage
+  reduction while actively defending a herd-mate. *Vanguard Charge*
+  (Sociability↔Aggression) — bonus power specifically charging toward a
+  threat menacing a herd-mate (same flavor as Vine Whip's Thornguard).
+
+### Slash (Normal, line-1 melee) — Power archetype, Scyther's only move
+
+Deliberately a different *shape* than Tackle or Vine Whip — proof the
+archetype rule actually changes structure, not just flavor text. Mostly
+linear spine, no crosslinks (a lone ambush predator doesn't need a support
+branch), a couple of real mid-spine notables, one final exclusive fork:
+
+Honed Edge (+power, live) → filler → *Predator's Instinct* (bonus
+power/crit if the user was concealed or striking during its active hours
+before the hit, near — reuses concealment + daynight) → filler → *Feint*
+(lunges 1 tile toward the target as part of the move, needs: forced
+movement) → filler → Serrated Edge (+power, -accuracy, live). **Final
+fork**: *Reaping Slash* (big power spike, locks the user out of its next
+action tick, needs: multi-action lock) vs. *Frenzy Cutter* (3 hits at
+reduced power, still lands partial damage on a fleeing target, live).
+
+### Rock Throw (Rock, line-3, cooldown 1) — Power archetype, Onix
+
+Heavy Stones (+power, -accuracy, live) → filler → *Longer Throw* (range +1,
+live) → filler. **Final fork**: *Boulder Toss* (shape → small burst at the
+impact point, +power, needs: AoE resolution) vs. *Skipping Stone* (line +1,
+pierces everything in the path, -power, needs: AoE resolution for the
+piercing-hits-everyone part, though the plain reach increase is live).
+
+### Peck (Flying, point) — Utility archetype, Spearow, 2 branches
+
+- **Aggression — "Sharp Strike"**: Needle Point (+power, live) → filler →
+  *Frenzied Pecking* (2 hits, live). **Fork**: *Piercing Beak* (+power,
+  ignores some of the target's Defense — needs: a new defense-penetration
+  delta field, not yet in the schema) vs. *Rapid Volley* (3 hits, live).
+  **Keystone**: *Talon Strike* — bonus power/crit against a fleeing target
+  (needs: defender-state-aware scoring, the same gap flagged in DESIGN.md's
+  "Move selection" section).
+- **Boldness — "Dive Strike"**: *Swooping Approach* (bonus power/accuracy
+  if the user moved toward the target this tick before attacking, needs:
+  movement-context-aware) → filler → *Retreat Peck* (retreats 1 tile
+  immediately after landing a hit, needs: forced movement). **Fork**:
+  *Ambush Dive* (bonus vs. a target that hasn't detected the user yet, near
+  — reuses concealment/detection) vs. *Harrying Wings* (-cooldown, -power,
+  live). **Keystone**: *Relentless Harrier* — chains directly into another
+  action without waiting for the normal action-energy threshold (needs:
+  action-economy interaction).
+
+### Scratch (Normal, point) — Utility archetype, Sandshrew, 2 branches
+
+- **Aggression — "Claw Strike"**: Sharpened Claws (+power, live) → filler →
+  *Frenzy Claws* (2 hits, live). **Fork**: Shredding Blow (+power,
+  -accuracy, live) vs. Flurry (3 hits, live). **Keystone**: *Sandstorm
+  Claws* — bonus power/status specifically at night (near — reuses
+  daynight.ts, matches Sandshrew's nocturnal `activityPattern`).
+- **Boldness — "Burrow Strike"**: *Ambush Claws* (bonus power attacking
+  from concealment, near) → filler → *Dig-and-Strike* (briefly reposition
+  to an adjacent tile right after hitting, needs — foreshadows the
+  already-backlogged Dig-to-escape move). **Fork**: *Retreating Slash*
+  (retreats 1 tile after hitting, needs: forced movement) vs. *Cornered
+  Fury* (+power while the user itself is at low HP, needs: self-state-aware
+  scoring). **Keystone**: *Night Hunter* — full power/accuracy bonus during
+  Sandshrew's nocturnal active hours (near — reuses daynight + activityPattern).
+
+### Water Gun (Water, line-2) — Utility archetype, Squirtle, 2 branches
+
+- **Aggression — "Pressurized Blast"**: High Pressure (+power, live) →
+  filler → *Piercing Jet* (line +1, live). **Fork**: Torrent (+power,
+  +cooldown, live) vs. Rapid Jets (2 hits, live). **Keystone**: *Deluge* —
+  bonus power while the user is near a water tile (near — reuses the
+  existing water-resource-tile concept).
+- **Boldness — "Evasive Spray"**: *Knockback Spray* (pushes the target back
+  1 tile on hit, needs: forced movement) → filler → *Retreating Current*
+  (the user may immediately retreat after using this move, needs: forced
+  movement). **Fork**: *Bubble Shield* (brief incoming-damage reduction
+  after use, needs: temporary buff — new concept, nothing in the sim
+  currently expires a stat change on a timer) vs. *Slippery Current* (brief
+  evasion bump after use, needs: same new temporary-buff concept).
+  **Keystone**: *Tidal Retreat* — using this move at low HP triggers a full
+  disengage (long retreat + brief speed boost), a real panic button for the
+  sim's most fragile spawned agent (needs).
+
+### New levers/primitives this pass surfaced, not in the earlier brainstorm
+
+- **Defense-penetration** (Piercing Beak): ignore some of the target's
+  Defense — a new numeric `delta` field, live-tier once added, no new
+  subsystem.
+- **Movement-context-aware bonuses** (Swooping Approach, Bracing Impact's
+  cousin effects): the score/effect depends on what the *agent itself* did
+  the same tick, not just the target's state — needs the move-resolution
+  call site to know the agent's last action, which it doesn't pass down
+  today.
+- **Self-state-aware bonuses** (Cornered Fury): a delta conditioned on the
+  *user's own* HP fraction, not the target's — mechanically simple (the
+  data's already on `Agent`) but needs a call-site plumbing change, same
+  shape as the defender-HP-awareness already flagged as a gap in
+  `pickBestMove`.
+- **Temporary buffs with a real duration** (Bubble Shield, Slippery
+  Current): nothing in the sim today expires a stat modification on a
+  timer — every existing stat effect is either permanent (a tree's
+  `delta`) or instantaneous (one hit's damage roll). A real "for N ticks"
+  buff is a genuinely new piece of state on `Agent`, not just a bigger
+  `MoveTreeNode.delta`.
+- **Position-swap** (Bodyblock): a movement lever distinct from drag/
+  knockback/lunge — both agents' positions exchange in one action, not one
+  agent pulling or pushing the other.
+
 ## Build order recommendation, across everything above
 
 1. **Growl** — highest payoff-to-effort ratio on this entire list; most
