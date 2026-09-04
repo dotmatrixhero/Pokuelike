@@ -28,12 +28,17 @@ import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffec
 
 const DECAY_PER_TICK = {
   /**
-   * Halved again from 0.01 — direct ask: "thirst and hunger need to be even
-   * slower." At 0.005, thirst empties in ~200 ticks (was ~100), on top of
-   * `THIRST_STARVATION_GRACE_TICKS`, without touching thirst's deliberately-
-   * kept-linear curve.
+   * Quartered again from 0.005 — direct ask: "thirst and hunger... much
+   * much much slower... like 1/4 the time it is now." At 0.00125, thirst
+   * empties in ~800 ticks (was ~200), on top of `THIRST_STARVATION_GRACE_TICKS`,
+   * without touching thirst's deliberately-kept-linear curve. Motivated by
+   * the breeding-level gate (agents now need to survive to level 16 or
+   * evolve before they can reproduce at all) — see DESIGN.md's "Breeding
+   * requires a real earned edge" section, whose real-run findings showed
+   * near-zero breeding because agents weren't surviving long enough to
+   * level up; giving needs a much longer runway is the direct fix.
    */
-  thirst: 0.005,
+  thirst: 0.00125,
   energy: 0.005,
   mateDrive: 0.01,
 } as const;
@@ -46,17 +51,19 @@ const DECAY_PER_TICK = {
  * exponential decay of the *remaining* hunger value (a multiplicative term
  * proportional to current hunger, so the absolute drop is largest at full
  * and shrinks as hunger falls) plus a small flat floor so it still reaches
- * true 0 in finite time instead of asymptoting forever. Both terms halved
- * again from an earlier pass (0.012/0.001) — direct ask: "thirst and hunger
- * need to be even slower." From full (1.0), this now reaches the 0.7 "seek
- * food" threshold (`chooseBehavior`'s urgency cutoff) in ~54 ticks (was
- * ~27), and takes ~427 total to fall the rest of the way to 0 (was ~213),
- * where `STARVATION_GRACE_TICKS` (100 more) still has to run out before
- * actual death — sim-original tuning, judge against a real run like
- * everything else here, not a canon formula.
+ * true 0 in finite time instead of asymptoting forever. Both terms
+ * quartered again from an earlier pass (0.006/0.0005) — direct ask: "thirst
+ * and hunger... much much much slower... like 1/4 the time it is now,"
+ * motivated by the breeding-level gate needing agents to actually survive
+ * long enough to reach level 16 or evolve (see DESIGN.md). From full (1.0),
+ * this now reaches the 0.7 "seek food" threshold (`chooseBehavior`'s
+ * urgency cutoff) in ~216 ticks (was ~54), and takes ~1708 total to fall
+ * the rest of the way to 0 (was ~427), where `STARVATION_GRACE_TICKS` (100
+ * more) still has to run out before actual death — sim-original tuning,
+ * judge against a real run like everything else here, not a canon formula.
  */
-const HUNGER_DECAY_RATE = 0.006;
-const HUNGER_DECAY_FLOOR = 0.0005;
+const HUNGER_DECAY_RATE = 0.0015;
+const HUNGER_DECAY_FLOOR = 0.000125;
 
 /** Ticks an agent can sit at 0 hunger before it dies of it. */
 const STARVATION_GRACE_TICKS = 100;

@@ -1436,3 +1436,17 @@ not something this pathfinding pass itself caused or is positioned to fix.
       the intended end state, or whether exp-gain rates (or the level
       threshold) should be revisited alongside it, is a real open design
       question to take back to the user rather than guess at.
+- [x] **Tried: quarter thirst/hunger decay rates, direct ask, on the theory
+      that agents weren't surviving long enough to level up.** Real
+      before/after run (same 3 seeds) shows this **did not fix breeding**:
+      births stayed at 1-4 per run. Root-cause check: starvation deaths
+      were already rare even before this change (0-6 thirst deaths, 0
+      hunger deaths, ~2-4 kills per 3000-tick run, out of a starting
+      population of 17) — agents were already surviving fine. The real
+      bottleneck is leveling *speed*, not survival time: most agents simply
+      never accumulate enough exp to reach level 16 within 3000 ticks
+      regardless of how long they live. Kept the slower decay anyway (a
+      real, independently-requested improvement — starvation was already
+      rare, this makes it rarer still, no downside found), but it does NOT
+      resolve the breeding-rate question above — exp-gain pacing is the
+      actual lever, still unaddressed.
