@@ -1,5 +1,6 @@
 import type { Agent, Layer, Vec2, World } from "./types.js";
 import { tileAt } from "./world.js";
+import { stepToward } from "./movement.js";
 
 /**
  * Fixed neighbor visit order for BFS — deterministic regardless of any
@@ -136,4 +137,138 @@ export function stepAlongPath(world: World, agent: Agent, target: Vec2): Vec2 {
   const remaining = steps.slice(1);
   agent.pathCache = remaining.length > 0 ? { layer: agent.layer, target, steps: remaining } : undefined;
   return next;
+}
+
+/**
+ * How far a pursuit target has to drift from the position the cached route
+ * was aimed at before that route counts as stale and gets recomputed. A
+ * moving hunt/mate target invalidates `stepAlongPath`'s exact-position cache
+ * match almost every tick (the target's `Vec2` is different from one tick to
+ * the next even when it barely moved), which would make a naive swap to
+ * `stepAlongPath` recompute a full BFS every single tick anyway — no
+ * caching benefit at all, the exact problem this function exists to avoid.
+ * Instead the cached route is kept and simply walked one more step as long
+ * as the target hasn't wandered far from where the route was actually
+ * heading. 3 tiles is chosen to sit between this sim's tight
+ * combat-adjacency radii (`MOB_TRIGGER_RADIUS` = 2 in predation.ts — once a
+ * threat/prey is this close, exact positioning starts to matter a lot) and
+ * its wider detection radii (`HUNT_DETECT_RADIUS` = 5, `MATE_SEARCH_RADIUS`
+ * = 5): a route stays valid through a couple of tiles of normal target
+ * drift, which is most of what happens tick to tick since prey/mates move
+ * at the same one-tile-per-tick pace as everything else, but a route aimed
+ * 3+ tiles wide of where the target actually is now would start meaningfully
+ * misdirecting the chase, so that's where a refresh is worth the BFS cost.
+ */
+const PURSUIT_RECOMPUTE_DRIFT_TILES = 3;
+
+/**
+ * Once a pursuer is this close to a moving target, recompute a fresh route
+ * every tick instead of trusting the cache at all — matches
+ * `MOB_TRIGGER_RADIUS`/melee-attack range (predation.ts) plus a one-tile
+ * margin: this is exactly the zone where the last couple of steps decide
+ * whether the chase actually connects (attack range, or mate adjacency at
+ * distance 1), so precision matters more than saving a BFS call, and BFS
+ * from this close is trivially cheap anyway (a handful of tile expansions
+ * at most, not the map-spanning worst case `MAX_EXPANSIONS` guards against).
+ */
+const PURSUIT_CLOSE_RECOMPUTE_RADIUS = 3;
+
+/**
+ * `stepAlongPath`'s counterpart for a MOVING pursuit target (a currently-
+ * visible hunt target in predation.ts, or a mate-seeking partner in
+ * reproduction.ts) — real BFS routing around obstacles instead of
+ * `movement.ts`'s greedy `stepToward`, but with its own staleness/recompute
+ * rules instead of `stepAlongPath`'s exact-position cache match, which would
+ * defeat the whole point of caching against a target that moves most ticks.
+ *
+ * The cached route (still `agent.pathCache`, tagged with `targetId` so it
+ * never collides with a `stepAlongPath` static-target cache or a stale
+ * pursuit of a *different* target — see `Agent.pathCache`'s own doc comment
+ * in types.ts) is kept and walked one more step unless any of:
+ *  - the cache is for a different layer or a different target entirely
+ *    (`targetId` mismatch) — always a hard recompute, same as `stepAlongPath`;
+ *  - the route is exhausted;
+ *  - the target has drifted `PURSUIT_RECOMPUTE_DRIFT_TILES`+ tiles from
+ *    where the cached route was actually aimed (see that constant's own doc
+ *    comment for the reasoning behind the number);
+ *  - the pursuer is now within `PURSUIT_CLOSE_RECOMPUTE_RADIUS` of the
+ *    target, where precision matters more than the caching benefit;
+ *  - the next queued step unexpectedly became unwalkable (same defensive
+ *    case `stepAlongPath` already handles).
+ *
+ * "Give up if can't find [a route]": when `findPath` returns `undefined`
+ * (the target is genuinely unreachable right now — e.g. walled off), this
+ * does NOT freeze the pursuer in place the way `stepAlongPath` does for the
+ * static seekWater/seekFood case (freezing there is fine — a stalled
+ * approach to an unreachable resource just means the outer give-up-and-
+ * relocate timeout fires normally). Freezing a hunt/mate chase would instead
+ * look like the pursuer just standing there doing nothing, indistinguishable
+ * from a bug — so this falls back to plain `stepToward` instead: the exact
+ * greedy behavior this sim already had for hunt/mate approach before this
+ * change, not a new failure mode. That greedy step may not make real
+ * progress around the obstacle, but it's a pre-existing, already-tolerated
+ * outcome (predation.ts's own `RELOCATE_AFTER_TICKS`/`giveUpAndRelocate` and
+ * reproduction.ts's `ticksSinceEligibleMate` both already exist precisely to
+ * eventually route around a hunt/mate attempt that isn't going anywhere), so
+ * this reuses that existing shape rather than inventing a new one.
+ *
+ * A target that dies, faints out of predation's `isPreyOf`, or wanders out
+ * of detection range mid-chase doesn't need any special handling HERE: both
+ * call sites already re-scan for a fresh nearest-candidate every tick
+ * (predation.ts's `candidates`/`nearest`, reproduction.ts's
+ * `candidates`/`nearestMate`), so a target that's no longer a valid pursuit
+ * target simply stops being passed to this function at all the very next
+ * tick — the stale `pathCache` entry is left on the agent but is harmless:
+ * it just won't `targetId`-match whatever (if anything) is pursued next.
+ */
+export function stepTowardMovingTarget(world: World, agent: Agent, target: Agent): Vec2 {
+  const cache = agent.pathCache;
+  const sameTarget = !!cache && cache.layer === agent.layer && cache.targetId === target.id;
+  const drifted = sameTarget && manhattanDistance(cache!.target, target.pos) >= PURSUIT_RECOMPUTE_DRIFT_TILES;
+  const closingIn = manhattanDistance(agent.pos, target.pos) <= PURSUIT_CLOSE_RECOMPUTE_RADIUS;
+
+  let steps = sameTarget && !drifted && !closingIn ? cache!.steps : undefined;
+
+  if (!steps || steps.length === 0) {
+    const fresh = findPath(world, agent.layer, agent.pos, target.pos);
+    if (!fresh) {
+      // Genuinely unreachable right now — give up on routing and fall back
+      // to the pre-existing greedy approach rather than freezing in place.
+      agent.pathCache = undefined;
+      return stepToward(world, agent.layer, agent.pos, target.pos);
+    }
+    if (fresh.length === 0) {
+      // Already standing on the target's own tile (shouldn't normally
+      // happen for a live pursuit target, but matches stepAlongPath's own
+      // handling of the same edge case).
+      agent.pathCache = undefined;
+      return agent.pos;
+    }
+    steps = fresh;
+  }
+
+  let next = steps[0]!;
+  if (!tileAt(world, agent.layer, next.x, next.y)?.walkable) {
+    // Defensive: the cached next step is no longer walkable.
+    const fresh = findPath(world, agent.layer, agent.pos, target.pos);
+    if (!fresh) {
+      agent.pathCache = undefined;
+      return stepToward(world, agent.layer, agent.pos, target.pos);
+    }
+    if (fresh.length === 0) {
+      agent.pathCache = undefined;
+      return agent.pos;
+    }
+    steps = fresh;
+    next = steps[0]!;
+  }
+
+  const remaining = steps.slice(1);
+  agent.pathCache =
+    remaining.length > 0 ? { layer: agent.layer, target: { ...target.pos }, targetId: target.id, steps: remaining } : undefined;
+  return next;
+}
+
+function manhattanDistance(a: Vec2, b: Vec2): number {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }

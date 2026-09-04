@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createWorld } from "../src/world.js";
+import { createWorld, setTile, tileAt } from "../src/world.js";
+import { applyMateSeeking } from "../src/reproduction.js";
 import { createNeeds } from "../src/needs.js";
 import { tickWorld } from "../src/simulation.js";
 import { EventLog } from "../src/events.js";
@@ -443,5 +444,99 @@ describe("herd-status-driven mate preference", () => {
     const mother = world.agents.find((a) => a.id === "mother")!;
     // Moved along x (toward the nearer suitor despite its lower status).
     expect(mother.pos).toEqual({ x: 1, y: 0 });
+  });
+});
+
+/**
+ * pathfinding.ts's `stepTowardMovingTarget`, wired into `applyMateSeeking`'s
+ * approach step (mate-seeking equivalent of predation.test.ts's hunt
+ * pathfinding suite — see that function's own doc comment for the
+ * recompute-trigger reasoning shared by both call sites).
+ */
+describe("mate-seeking approach uses real BFS pathfinding for a MOVING partner (stepTowardMovingTarget)", () => {
+  it("routes around an obstacle cluster while closing on a partner that keeps moving, instead of getting stuck", () => {
+    const world = createWorld(12, 12);
+    // A wall spanning the whole width with a single gap, between the two
+    // mates — kept within `mateSearchRadius`'s neutral 5-tile radius
+    // throughout, since eligibility here is plain Manhattan distance,
+    // oblivious to the wall.
+    for (let x = 0; x <= 11; x++) setTile(world, "surface", x, 5, "tree");
+    setTile(world, "surface", 6, 5, "floor");
+
+    const mother = parent("mother", "female", { x: 5, y: 3 });
+    const father = parent("father", "male", { x: 5, y: 7 });
+    world.agents.push(mother, father);
+
+    let sawCacheUse = false;
+    let born = false;
+
+    for (let tick = 0; tick < 300 && !born; tick++) {
+      world.tick = tick;
+      // Simulate the father shifting every tick within a small range — a
+      // real moving mate-seeking target, not a stationary one.
+      const dx = tick % 2 === 0 ? 1 : -1;
+      const nextX = Math.max(4, Math.min(7, father.pos.x + dx));
+      if (tileAt(world, "surface", nextX, father.pos.y)?.walkable) father.pos = { ...father.pos, x: nextX };
+
+      applyMateSeeking(world, mother);
+      if (mother.pathCache) sawCacheUse = true;
+      born = world.agents.some((a) => a.species === "bulbasaur" && a.id !== "mother" && a.id !== "father");
+    }
+
+    // The approach actually made progress and eventually connected — the
+    // mother crossed the wall via the gap and reached the father closely
+    // enough to breed, rather than getting stuck near the wall the way
+    // plain greedy `stepToward` could.
+    expect(born).toBe(true);
+    expect(sawCacheUse).toBe(true);
+  });
+
+  it("gives up cleanly (falls back to greedy stepping, never throws) when the partner is genuinely unreachable", () => {
+    const world = createWorld(12, 12);
+    // Box the father in on all four sides — no gap anywhere.
+    for (let x = 4; x <= 6; x++) {
+      setTile(world, "surface", x, 4, "tree");
+      setTile(world, "surface", x, 6, "tree");
+    }
+    setTile(world, "surface", 4, 5, "tree");
+    setTile(world, "surface", 6, 5, "tree");
+
+    const mother = parent("mother", "female", { x: 0, y: 0 });
+    const father = parent("father", "male", { x: 5, y: 5 });
+    world.agents.push(mother, father);
+
+    for (let tick = 0; tick < 60; tick++) {
+      world.tick = tick;
+      expect(() => applyMateSeeking(world, mother)).not.toThrow();
+    }
+
+    // Never actually bred (genuinely unreachable), and never left a bogus
+    // cached route behind (findPath correctly reports "unreachable" every
+    // time here, so the cache is never populated).
+    expect(world.agents.length).toBe(2);
+    expect(mother.pathCache).toBeUndefined();
+  });
+
+  it("stops pathfinding toward a partner once it leaves mate-search range mid-approach", () => {
+    const world = createWorld(20, 20);
+    const mother = parent("mother", "female", { x: 5, y: 0 });
+    const father = parent("father", "male", { x: 5, y: 3 }); // within the neutral 5-tile mateSearchRadius
+    world.agents.push(mother, father);
+
+    world.tick = 0;
+    applyMateSeeking(world, mother);
+    expect(mother.pathCache?.targetId).toBe("father");
+    const posAfterFirstApproach = { ...mother.pos };
+
+    // The father wanders far outside mateSearchRadius.
+    father.pos = { x: 19, y: 19 };
+    world.tick = 1;
+    applyMateSeeking(world, mother);
+
+    // No longer an eligible-and-nearby candidate this tick, so
+    // applyMateSeeking's own `if (!partner) return;` short-circuits before
+    // ever calling stepTowardMovingTarget again — the stale pathCache from
+    // the old approach is simply never reused.
+    expect(mother.pos).toEqual(posAfterFirstApproach);
   });
 });

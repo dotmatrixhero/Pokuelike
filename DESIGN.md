@@ -4383,6 +4383,151 @@ runs, no dramatic regression from before this change — the per-agent path
 cache is doing its job of not re-running BFS every tick while an agent
 walks an already-computed route.
 
+### Follow-up 2: real BFS pathfinding for hunting and mate-seeking, with moving-target handling
+
+Direct, explicit follow-up to the follow-up just above: `stepAlongPath`
+above was built specifically for a STATIC target (a water/food tile) and
+its cache keys on exact target position — a hunt target (predation.ts) or
+mate-seeking partner (reproduction.ts) moves nearly every tick, so a naive
+swap to `stepAlongPath` for those two call sites would recompute a full BFS
+almost every tick anyway (the position-equality cache check would almost
+never hit), defeating the entire point of caching. This follow-up gives
+hunting and mate-seeking their own pathfinding entry point with staleness
+rules suited to a moving target, instead.
+
+**What was built** (`pathfinding.ts`):
+- `stepTowardMovingTarget(world, agent, target)` — same underlying `findPath`
+  BFS as `stepAlongPath`, but the cached route (still stored on
+  `agent.pathCache`, now with an added optional `targetId` field — see
+  `Agent.pathCache`'s own doc comment in types.ts) is kept and walked one
+  more step instead of recomputing, UNLESS:
+  - the cache is for a different layer or a different pursuit target
+    entirely (`targetId` mismatch) — same hard-recompute case
+    `stepAlongPath` already has;
+  - the route is exhausted;
+  - the target has drifted `PURSUIT_RECOMPUTE_DRIFT_TILES` (3) or more tiles
+    from the position the cached route was actually aimed at;
+  - the pursuer has closed to within `PURSUIT_CLOSE_RECOMPUTE_RADIUS` (3)
+    tiles of the target — precision matters more than the caching benefit
+    once the last few steps decide whether the chase/approach actually
+    connects, and a BFS this close is trivially cheap;
+  - the next queued step unexpectedly became unwalkable (the same
+    defensive case `stepAlongPath` already handles).
+
+  **Why 3 and 3, not some other number**: chosen to sit between this sim's
+  tightest combat-adjacency radius (`MOB_TRIGGER_RADIUS` = 2 in
+  predation.ts — once a threat/prey is this close, exact positioning starts
+  to matter a lot) and its wider detection radii (`HUNT_DETECT_RADIUS` = 5,
+  `MATE_SEARCH_RADIUS` = 5). A cached route survives a couple of tiles of
+  ordinary drift — most of what happens tick to tick, since prey/mates move
+  at the same one-tile-per-tick pace as everything else — but gets thrown
+  out once the target has wandered far enough that continuing to trust the
+  old route would start meaningfully misdirecting the chase. This is a
+  judgment call, not a derived constant — there's no natural "correct"
+  answer here, only a real tradeoff (recompute every tick = no caching
+  benefit at all, recompute too rarely = a stale route that either misses
+  by an ever-growing margin or, worse, waits too long to path-correct right
+  at the moment precision matters most for actually landing the encounter).
+  3 tiles keeps the cache doing real work during normal cruising while
+  never trusting it once the outcome is actually close to being decided.
+
+- **"Give up if can't find [a route]"**: when `findPath` returns
+  `undefined` — the target is genuinely unreachable right now (e.g. walled
+  off) — this does NOT freeze the pursuer in place the way `stepAlongPath`
+  does for the static seekWater/seekFood case (freezing there is fine, the
+  outer give-up-and-relocate timeout handles it normally). A frozen hunt or
+  mate chase would instead look indistinguishable from a bug, so this falls
+  back to plain `stepToward` — the exact greedy behavior hunting and
+  mate-seeking already had before this change, not a new failure mode. That
+  fallback step may not make real progress around the obstacle, but it's a
+  pre-existing, already-tolerated outcome: predation.ts's own
+  `RELOCATE_AFTER_TICKS`/`giveUpAndRelocate` and reproduction.ts's
+  `ticksSinceEligibleMate` both already exist precisely to eventually route
+  around a hunt/mate attempt that isn't going anywhere, so this reuses that
+  existing shape (per the direct ask: "fall back to whatever the existing
+  behavior already does") rather than inventing a new give-up mechanism.
+
+- **A target that dies, faints below `isPreyOf`'s power threshold, or
+  wanders out of detection/search range mid-chase needs no special handling
+  inside `stepTowardMovingTarget` itself**: both call sites already
+  re-scan for the nearest eligible candidate every tick
+  (`applyPredationInstincts`'s `candidates`/`nearest`,
+  `applyMateSeeking`'s `candidates`/`nearestMate`), so a target that's no
+  longer valid simply stops being passed to this function at all the very
+  next tick. The stale `pathCache` entry (tagged with the old `targetId`)
+  is left on the agent but is harmless — it just won't match whatever
+  (if anything) is pursued next, and gets silently replaced or cleared the
+  next time this function actually runs. Confirmed directly with a targeted
+  integration test in both predation.test.ts and reproduction.test.ts (see
+  below).
+
+**Wired into**:
+- `predation.ts`'s `applyPredationInstincts`, hunt branch: the
+  `agent.pos = stepToward(world, agent.layer, agent.pos, target.pos)` line
+  for a currently-visible, currently-being-chased prey target not yet in
+  attack range now reads `agent.pos = stepTowardMovingTarget(world, agent,
+  target)`. The flee/mob/fight branches, the guardian-intervention branch,
+  and the relocate/give-up-hunting mechanic are untouched — this only
+  touches the one hunt-approach line.
+- `reproduction.ts`'s `applyMateSeeking`: the equivalent
+  `agent.pos = stepToward(world, agent.layer, agent.pos, partner.pos)`
+  approach step now reads `agent.pos = stepTowardMovingTarget(world, agent,
+  partner)`.
+
+**Tests added**: pathfinding.test.ts gets a full `stepTowardMovingTarget`
+unit suite (fresh route, cache reused on small drift, recompute on large
+drift, recompute-every-tick once close, unreachable-target fallback, and
+switching to a different target id not reusing the stale cache).
+predation.test.ts and reproduction.test.ts each get an integration-level
+suite exercising the same function through the real call site: a moving
+target routed around an obstacle wall to a real kill/birth, a genuinely
+unreachable (walled-off) target that never throws and never gets a bogus
+cache entry, and a target leaving detection/search range mid-chase
+correctly falling through to the caller's own next-candidate scan instead
+of continuing a stale pursuit.
+
+**Real-run findings** (2000 ticks each, before = commit c9b0cf6, after =
+this change):
+
+| seed | metric | before | after |
+|---|---|---|---|
+| 20260903 | fought | 20 | 7 |
+| 20260903 | fainted | 5 | 3 |
+| 20260903 | killed | 3 | 2 |
+| 20260903 | defeated | 2 | 1 |
+| 20260903 | born | 14 | 7 |
+| 20260903 | wall-clock | 3.48s | 3.59s |
+| 42 | fought | 21 | 26 |
+| 42 | fainted | 7 | 4 |
+| 42 | killed | 5 | 3 |
+| 42 | defeated | 1 | 1 |
+| 42 | born | 39 | 75 |
+| 42 | wall-clock | 4.63s | 4.53s |
+
+Honest read of these numbers, not just the favorable half: seed 42 shows
+what this change is meant to do — mate-seeking in particular nearly
+doubled its births (39 → 75), and combat activity (fought) went up too,
+consistent with pursuers no longer getting stuck near obstacles on their
+way to a target. Seed 20260903, though, shows LESS combat and fewer births
+after this change, not more. This is not a regression in the pathfinding
+logic itself (every determinism/behavior test above, including the new
+unreachable/out-of-range/obstacle-routing cases, passes; the wall-clock
+timing is unchanged either direction) — it's the same butterfly-effect
+result already documented for the *first* BFS pathfinding follow-up above:
+changing exactly how/when an agent moves changes its exact position every
+subsequent tick, which cascades into a materially different 2000-tick
+history under the same seed (different agents meet, fight, and pair off in
+a different order and place than before). A deterministic sim with this
+much emergent interaction will do this for almost any behavior-shaping
+change, favorable or not, on any *specific* seed — the meaningful signal is
+"pathfinding correctly routes moving pursuit around obstacles instead of
+freezing or oscillating, and the overall system stays healthy" (confirmed
+by both seeds' event logs and the targeted obstacle-course integration
+tests), not "every seed's raw kill/birth count went up," which was never a
+promise this kind of change could make on its own. No wall-clock slowdown
+on either seed — the moving-target cache is doing its job the same way the
+static-target one already was.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

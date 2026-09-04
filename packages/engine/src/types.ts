@@ -667,9 +667,15 @@ export interface Agent {
    * only; every other behavior that moves an agent (flee/hunt/mate-seeking/
    * exploration/dispersal/shelter-travel/herd-migration/relocate) still uses
    * `movement.ts`'s plain greedy `stepToward`/`stepAway` and never touches
-   * this field.
+   * this field. Also reused (with `targetId` set) by `stepTowardMovingTarget`
+   * for hunt/mate-seeking pursuit of a moving target — see that function's
+   * own doc comment in pathfinding.ts for the staleness/recompute rules that
+   * differ from the static seekWater/seekFood case. `targetId` is what tells
+   * the two apart: a static-target cache never sets it, so switching from
+   * one kind of walk to the other (or onto a different pursuit target)
+   * always safely misses the cache instead of reusing a stale route.
    */
-  pathCache?: { layer: Layer; target: Vec2; steps: Vec2[] };
+  pathCache?: { layer: Layer; target: Vec2; targetId?: string; steps: Vec2[] };
 }
 
 /**

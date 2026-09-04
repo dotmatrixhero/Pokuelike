@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createWorld, setElevation, setTile } from "../src/world.js";
+import { createWorld, setElevation, setTile, tileAt } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
 import { tickWorld } from "../src/simulation.js";
 import { applyPredationInstincts } from "../src/predation.js";
@@ -1440,5 +1440,113 @@ describe("new situational conditions wired into real combat", () => {
 
     // targetStatused fires on ANY status (paralysis here), not just burn.
     expect(foughtDamage(paralyzedLog.events)).toBeGreaterThan(foughtDamage(unstatusedLog.events));
+  });
+});
+
+/**
+ * pathfinding.ts's `stepTowardMovingTarget` — see that function's own doc
+ * comment for the recompute-trigger reasoning. These are the integration-
+ * level checks (through `applyPredationInstincts` itself, not just the
+ * pathfinding unit tests in pathfinding.test.ts) called out in this
+ * feature's own task: a moving prey target, an unreachable one, and one
+ * that leaves detection range mid-chase.
+ */
+describe("hunt pursuit of a MOVING target uses real BFS pathfinding (stepTowardMovingTarget)", () => {
+  it("routes around an obstacle cluster while chasing prey that keeps moving, instead of chasing a stale position forever", () => {
+    const world = createWorld(12, 12);
+    // A wall spanning the whole width with a single gap, between the
+    // predator (above) and the prey (below) — the same obstacle shape as
+    // the confirmed seekWater/seekFood death this session's earlier BFS
+    // work fixed, now for a MOVING hunt target instead of a static tile.
+    // Kept within HUNT_DETECT_RADIUS (5) of each other throughout, since
+    // detection here is plain Manhattan distance, oblivious to the wall.
+    for (let x = 0; x <= 11; x++) setTile(world, "surface", x, 5, "tree");
+    setTile(world, "surface", 6, 5, "floor");
+
+    const target = prey({ x: 5, y: 7 });
+    const hunter = predator({ x: 5, y: 3 }, 0.3);
+    world.agents.push(target, hunter);
+    const log = new EventLog();
+
+    let sawCacheUse = false;
+
+    for (let tick = 0; tick < 300 && target.alive !== false; tick++) {
+      world.tick = tick;
+      // Simulate the prey shifting every tick within a small range —  a
+      // real moving hunt target, not a static resource tile — while
+      // staying close enough to remain a detectable/reachable target.
+      const dx = tick % 2 === 0 ? 1 : -1;
+      const nextX = Math.max(4, Math.min(7, target.pos.x + dx));
+      if (tileAt(world, "surface", nextX, target.pos.y)?.walkable) target.pos = { ...target.pos, x: nextX };
+
+      applyPredationInstincts(world, hunter, RULES, log, undefined, SAFE_RNG);
+      if (hunter.pathCache) sawCacheUse = true;
+    }
+
+    // The hunt actually made progress and eventually connected — the
+    // predator crossed the wall via the gap and killed/fainted the prey,
+    // rather than oscillating forever near the wall the way plain greedy
+    // `stepToward` could (this is exactly the failure mode BFS pathfinding
+    // exists to avoid).
+    expect(log.events.some((e) => e.kind === "killed" || e.kind === "fainted")).toBe(true);
+    // And the pursuit genuinely used the path cache along the way (not just
+    // recomputing from scratch and discarding it every single tick).
+    expect(sawCacheUse).toBe(true);
+  });
+
+  it("gives up cleanly on a genuinely unreachable (walled-off) prey target instead of getting stuck", () => {
+    const world = createWorld(12, 12);
+    // Box the prey in on all four sides — no gap anywhere, unreachable by
+    // any route.
+    for (let x = 4; x <= 6; x++) {
+      setTile(world, "surface", x, 4, "tree");
+      setTile(world, "surface", x, 6, "tree");
+    }
+    setTile(world, "surface", 4, 5, "tree");
+    setTile(world, "surface", 6, 5, "tree");
+
+    const target = prey({ x: 5, y: 5 });
+    const hunter = predator({ x: 0, y: 0 }, 0.3);
+    world.agents.push(target, hunter);
+    const log = new EventLog();
+
+    // Many ticks of trying — this must never throw, and the prey must never
+    // actually get killed (it's genuinely unreachable), and the pathfinding
+    // cache must never get populated with a bogus route since `findPath`
+    // always correctly reports "unreachable" here.
+    for (let tick = 0; tick < 100; tick++) {
+      world.tick = tick;
+      expect(() => applyPredationInstincts(world, hunter, RULES, log, undefined, SAFE_RNG)).not.toThrow();
+    }
+
+    expect(target.alive).not.toBe(false);
+    expect(hunter.pathCache).toBeUndefined();
+  });
+
+  it("stops pathfinding toward a hunt target once it leaves detection range mid-chase", () => {
+    const world = createWorld(20, 20);
+    const target = prey({ x: 5, y: 3 }); // within HUNT_DETECT_RADIUS (5) of the hunter below
+    const hunter = predator({ x: 5, y: 0 }, 0.3);
+    world.agents.push(target, hunter);
+    const log = new EventLog();
+
+    world.tick = 0;
+    applyPredationInstincts(world, hunter, RULES, log, undefined, SAFE_RNG);
+    expect(hunter.behavior).toBe("hunt");
+    expect(hunter.pathCache?.targetId).toBe(target.id);
+    const posAfterFirstChase = { ...hunter.pos };
+
+    // The prey darts far outside HUNT_DETECT_RADIUS.
+    target.pos = { x: 19, y: 19 };
+    world.tick = 1;
+    const handled = applyPredationInstincts(world, hunter, RULES, log, undefined, SAFE_RNG);
+
+    // No longer a detectable candidate this tick, so predation's own hunt
+    // branch didn't handle this tick at all (falls through to the caller's
+    // normal needs-driven behavior instead) — the stale pathCache from the
+    // old chase is simply never reused, per stepTowardMovingTarget's own
+    // doc comment on this exact case.
+    expect(handled).toBe(false);
+    expect(hunter.pos).toEqual(posAfterFirstChase); // didn't move via the hunt branch this tick
   });
 });

@@ -1262,18 +1262,43 @@ no measurable slowdown; a shared cache is a possible future optimization
 if per-agent recomputation ever shows up as a real cost in a much larger
 map or population, but wasn't worth its extra invalidation surface now.
 
-**Still open / explicitly out of scope for this pass**: every OTHER
-greedy-stepping behavior — flee, hunt-a-visible-target, mate-seeking,
-exploration, dispersal's long walk, shelter-building's travel, herd-
-migration's relocate walk — still calls `movement.ts`'s plain
-`stepToward`/`stepAway` unchanged, on purpose (flee especially wants "away
-right now," not an optimal route, and none of these were the confirmed
-death-causing case). Worth revisiting as a candidate follow-up, not fixing
-preemptively, if a future real run shows one of THEM getting stuck near an
-obstacle cluster the same way seekWater/seekFood used to — none of the
-runs done while building this fix showed that happening, but the scope of
-testing here was specifically thirst/hunger-seeking, not an exhaustive
-search for every other behavior's obstacle-cluster edge cases.
+**Still open at the time / now built**: hunt-a-visible-target and
+mate-seeking (predation.ts/reproduction.ts) now ALSO get real BFS
+pathfinding — see DESIGN.md's "Follow-up 2: real BFS pathfinding for
+hunting and mate-seeking, with moving-target handling" for the full
+writeup. A moving target needed its own recompute-staleness rules
+(`stepTowardMovingTarget`, a new function alongside `stepAlongPath`) rather
+than the static-target cache, or the caching benefit would have been
+defeated by the target moving nearly every tick. Real re-run findings on
+both the seed that surfaced the original bug (20260903) and seed 42: seed
+42 shows the intended effect clearly (births 39 → 75, fought 21 → 26), but
+seed 20260903 shows LESS combat/reproduction after the change (fought
+20 → 7, born 14 → 7) — not a regression (every test passes, no wall-clock
+slowdown either seed), just the same butterfly-effect divergence a
+behavior-shaping change always produces in a deterministic-but-chaotic sim
+under a fixed seed. See DESIGN.md for the full honest breakdown.
+
+**Still open / explicitly out of scope for this pass**: flee, exploration,
+dispersal's long walk, shelter-building's travel, and herd-migration's
+relocate walk still call `movement.ts`'s plain `stepToward`/`stepAway`
+unchanged, on purpose (flee especially wants "away right now," not an
+optimal route, and none of these were a confirmed death-causing case).
+Worth revisiting as a candidate follow-up, not fixing preemptively, if a
+future real run shows one of THEM getting stuck near an obstacle cluster
+the same way seekWater/seekFood (and, before this pass, hunting/mate-
+seeking) used to.
+
+**Unrelated gap noticed in passing while validating this pass, not fixed
+(out of scope)**: both real 2000-tick runs (seeds 20260903 and 42) still
+show `killed`/`defeated`/`born` counts that are small relative to
+`floraChanged`/`supported`/`leveledUp` — hunting and mating are working
+mechanically (confirmed directly by this pass's own obstacle-course
+integration tests) but remain rare events over a full run relative to
+everything else going on. Might be worth a future look at whether
+`HUNT_HUNGER_THRESHOLD`/`MATE_SEARCH_RADIUS`/herd-density tuning is
+leaving real hunting/mating opportunities on the table, independent of
+pathfinding — not investigated further here since it's a tuning question,
+not something this pathfinding pass itself caused or is positioned to fix.
 
 ## Urgency-based need priority, extended thirst margin, and sleep — built, tuning follow-ups
 

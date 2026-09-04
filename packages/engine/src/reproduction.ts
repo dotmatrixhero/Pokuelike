@@ -1,6 +1,6 @@
 import type { Agent, Layer, Needs, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
-import { stepToward } from "./movement.js";
+import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt } from "./world.js";
 import { EXP_ON_BIRTH_PARENT, EXP_ON_MATE_ATTEMPT, canBreed, ensureCombatProfile, grantExp, type LevelingContext } from "./leveling.js";
 import { dispositionFromNature, dispositionSummary, randomNature } from "./nature.js";
@@ -266,6 +266,10 @@ export function applyMateSeeking(
     partner.needs.mateDrive = 0;
   } else {
     grantExp(world, agent, EXP_ON_MATE_ATTEMPT, ctx, log, rng);
-    agent.pos = stepToward(world, agent.layer, agent.pos, partner.pos);
+    // A mate-seeking partner moves every tick, same as a hunt target — see
+    // `stepTowardMovingTarget`'s own doc comment (pathfinding.ts) for why
+    // this needs its own staleness/recompute handling rather than plain
+    // `stepToward` or `stepAlongPath`'s static-target cache match.
+    agent.pos = stepTowardMovingTarget(world, agent, partner);
   }
 }

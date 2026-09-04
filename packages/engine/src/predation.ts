@@ -10,6 +10,7 @@ import type { MoveSpec } from "./moves.js";
 import { grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
 import { isPathClear } from "./fov.js";
+import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt, setTile } from "./world.js";
 import { recordPredatorPressure } from "./herdMigration.js";
 import { isNight, isTwilight, lightLevel } from "./daynight.js";
@@ -1028,7 +1029,12 @@ export function applyPredationInstincts(
           agent.relocateTarget = undefined;
         }
       } else {
-        agent.pos = stepToward(world, agent.layer, agent.pos, target.pos);
+        // A currently-visible, currently-being-chased prey target moves
+        // every tick, unlike seekWater/seekFood's static resource tile — see
+        // `stepTowardMovingTarget`'s own doc comment (pathfinding.ts) for
+        // why that needs its own staleness/recompute handling rather than
+        // `stepAlongPath`'s exact-position cache match.
+        agent.pos = stepTowardMovingTarget(world, agent, target);
       }
       return true;
     }
