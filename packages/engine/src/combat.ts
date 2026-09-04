@@ -112,8 +112,14 @@ export function calculateDamage(
   randomFactor = 1,
   isCritical = false
 ): DamageResult {
-  const effectiveness = typeEffectiveness(move.type, defender.types);
+  let effectiveness = typeEffectiveness(move.type, defender.types);
   if (effectiveness === 0) return { damage: 0, effectiveness, stab: false, critical: false };
+  // `resistanceBreaker` partially cancels a type-chart resist (0 < eff < 1)
+  // by multiplying it up, capped at neutral (1) — it can never turn a resist
+  // into an actual weakness, only claw it back toward neutral.
+  if (move.resistanceBreaker && effectiveness < 1) {
+    effectiveness = Math.min(1, effectiveness * move.resistanceBreaker.multiplier);
+  }
 
   const isPhysical = move.category === "physical";
   const rawAttackStat = isPhysical ? attacker.stats.attack : attacker.stats.spAttack;
@@ -136,7 +142,8 @@ export function calculateDamage(
   const critMultiplier = isCritical ? CRITICAL_MULTIPLIER : 1;
 
   const base = (((2 * attacker.level) / 5 + 2) * move.power * (attackStat / defenseStat)) / 50 + 2;
-  const damage = Math.max(1, Math.floor(base * (stab ? 1.5 : 1) * effectiveness * critMultiplier * randomFactor));
+  const bonusVsType = move.bonusVsType && defender.types.includes(move.bonusVsType.type) ? move.bonusVsType.multiplier : 1;
+  const damage = Math.max(1, Math.floor(base * (stab ? 1.5 : 1) * effectiveness * critMultiplier * randomFactor * bonusVsType));
 
   return { damage, effectiveness, stab, critical: isCritical };
 }
@@ -181,7 +188,10 @@ export const MOVE_SCORE_TEMPO_WEIGHT = 0.15;
  * first and checking range after.
  */
 export function pickBestMove(attacker: Agent, defenderTypes: PokemonType[], distance?: number): MoveSpec | undefined {
-  const offCooldown = (attacker.moves ?? []).filter((move) => !attacker.moveCooldowns?.[move.id]);
+  // `targetsAlly` moves (support/heal-style) are never a candidate for
+  // hostile move selection — this scans hostile targeting only, an ally-
+  // support move here would just never make sense against `defenderTypes`.
+  const offCooldown = (attacker.moves ?? []).filter((move) => !attacker.moveCooldowns?.[move.id] && !move.targetsAlly);
   const available = distance === undefined ? offCooldown : offCooldown.filter((move) => withinMoveRange(move, distance));
   if (available.length === 0) return undefined;
 
@@ -197,7 +207,10 @@ export function pickBestMove(attacker: Agent, defenderTypes: PokemonType[], dist
     // one-hit move of similar per-hit power.
     const avgHits = move.hits ? (move.hits.min + move.hits.max) / 2 : 1;
     const selfBonus = move.selfStateBonus?.condition === "selfLowHp" && selfLowHp ? move.selfStateBonus.multiplier : 1;
-    const score = move.power * stab * typeEffectiveness(move.type, defenderTypes) * tempo * avgHits * selfBonus;
+    let effectiveness = typeEffectiveness(move.type, defenderTypes);
+    if (move.resistanceBreaker && effectiveness < 1) effectiveness = Math.min(1, effectiveness * move.resistanceBreaker.multiplier);
+    const bonusVsType = move.bonusVsType && defenderTypes.includes(move.bonusVsType.type) ? move.bonusVsType.multiplier : 1;
+    const score = move.power * stab * effectiveness * tempo * avgHits * selfBonus * bonusVsType;
     if (score > bestScore) {
       bestScore = score;
       best = move;

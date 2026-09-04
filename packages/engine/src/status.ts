@@ -4,6 +4,11 @@ import type { StatKey } from "./nature.js";
 import type { EventLog } from "./events.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
 
+/** Chance a burn spreads to another nearby agent when `MoveSpec.statusSpreads` is set — rolled once per successful `maybeInflictStatus` call, not once per tick. Sim-original magnitude, not canon. */
+export const STATUS_SPREAD_CHANCE = 0.3;
+/** How far a spreading status can jump — small on purpose, this is "the fire caught on whatever's standing right next to the target," not a plague. */
+export const STATUS_SPREAD_RADIUS = 1;
+
 /** Fraction of `maxHp` burn deals every tick — mainline value. */
 export const BURN_DAMAGE_FRACTION = 1 / 16;
 /** Fraction of `maxHp` poison deals every tick — mainline value. */
@@ -95,6 +100,40 @@ export function maybeInflictStatus(
 }
 
 /**
+ * When `MoveSpec.statusSpreads` is set and `maybeInflictStatus` just landed a
+ * status on `defender`, rolls a second, independent chance to inflict the
+ * same status on one other living agent within `STATUS_SPREAD_RADIUS` —
+ * "the fire caught on whatever's standing right next to the target too."
+ * Deliberately a plain manhattan-distance scan over `world.agents` rather
+ * than importing predation.ts's `agentsWithin` (which would create a real
+ * import cycle — predation.ts already imports this module). No-op if the
+ * roll fails, no other living agent is in range, or that agent is already
+ * statused/immune (same checks `maybeInflictStatus` itself makes).
+ */
+export function maybeSpreadStatus(
+  defender: Agent,
+  attackerId: string,
+  statusKind: StatusKind,
+  world: World,
+  log?: EventLog,
+  rng: () => number = Math.random
+): void {
+  if (rng() >= STATUS_SPREAD_CHANCE) return;
+
+  const nearby = world.agents.filter(
+    (other) =>
+      other.id !== defender.id &&
+      other.alive !== false &&
+      other.layer === defender.layer &&
+      Math.abs(other.pos.x - defender.pos.x) + Math.abs(other.pos.y - defender.pos.y) <= STATUS_SPREAD_RADIUS
+  );
+  for (const other of nearby) {
+    maybeInflictStatus(other, attackerId, { statusKind, statusChance: 1 }, world, log, rng);
+    if (other.status?.kind === statusKind) return; // spread to the first eligible neighbor only
+  }
+}
+
+/**
  * A landed Fire-type hit thaws a frozen target instantly, mainline-real —
  * called from `resolveHit` alongside `maybeInflictStatus`, independent of
  * whether that hit's own move inflicts anything itself.
@@ -133,6 +172,7 @@ export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rn
   tickStatStages(agent);
   tickActionLock(agent);
   applyRegenPassive(agent);
+  applyHealAuraPassive(agent, world);
 
   if (agent.alive === false || agent.fainted) return;
   const status = agent.status;
@@ -225,4 +265,33 @@ function applyRegenPassive(agent: Agent): void {
   if (agent.alive === false || fraction <= 0) return;
   if (agent.hp === undefined || agent.maxHp === undefined) return;
   agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * fraction);
+}
+
+/** The flat fraction of damage taken the `"thorns"` passive reflects back at the attacker — read by `applySingleDamageInstance` (predation.ts). 0 if the agent has none. */
+export function thornsOf(agent: Agent): number {
+  return Math.max(0, agent.passives?.thorns ?? 0);
+}
+
+/**
+ * Per-tick HP regen from the `"healAura"` passive, applied to every living,
+ * same-herd agent within `HEAL_AURA_RADIUS` of the passive-holder (the
+ * holder itself included — its own `regen`, if any, already covers the
+ * holder-only case, but there's no reason this aura should skip it) —
+ * distinct from `applyRegenPassive` above, which only ever heals the
+ * passive-holder itself. No-op on a corpse, one with no `healAura` passive,
+ * or when `world` isn't available (bare test fixtures calling
+ * `tickStatusEffects` with a world are the norm; this simply skips without
+ * one, same graceful-absence pattern as every other world-dependent check
+ * in this file).
+ */
+const HEAL_AURA_RADIUS = 3;
+function applyHealAuraPassive(agent: Agent, world: World): void {
+  const fraction = agent.passives?.healAura ?? 0;
+  if (agent.alive === false || fraction <= 0 || !agent.herdId) return;
+  for (const other of world.agents) {
+    if (other.alive === false || other.herdId !== agent.herdId || other.layer !== agent.layer) continue;
+    if (Math.abs(other.pos.x - agent.pos.x) + Math.abs(other.pos.y - agent.pos.y) > HEAL_AURA_RADIUS) continue;
+    if (other.hp === undefined || other.maxHp === undefined) continue;
+    other.hp = Math.min(other.maxHp, other.hp + other.maxHp * fraction);
+  }
 }

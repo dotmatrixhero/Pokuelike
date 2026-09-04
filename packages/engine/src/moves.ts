@@ -10,6 +10,32 @@ import type { PokemonType } from "./typing.js";
  */
 export type Direction = "N" | "S" | "E" | "W";
 
+/**
+ * Every battlefield condition `situationalBonus` can key off, evaluated at
+ * the moment of the hit (`situationalMultiplier`, predation.ts) — each one
+ * rides an existing subsystem rather than inventing new world state:
+ * `"targetLowHp"`/`"flanking"`/`"night"` shipped earlier; `"elevation"`
+ * (attacker's tile is higher than the defender's — fov.ts/world.ts's
+ * existing elevation data), `"concealed"` (the attacker itself is standing
+ * in a bush — `Tile.concealment`), `"coldSnap"`/`"storm"`/`"drought"`/
+ * `"rain"` (weather.ts's `activeWeatherAt`), `"targetBurning"` (the specific
+ * status, for a move that only cares about its own signature effect), and
+ * `"targetStatused"` (any of the five `StatusKind`s — a predator finishing
+ * off something already weakened, not fussy about the cause) are all new.
+ */
+export type SituationalCondition =
+  | "targetLowHp"
+  | "flanking"
+  | "night"
+  | "elevation"
+  | "concealed"
+  | "coldSnap"
+  | "storm"
+  | "drought"
+  | "rain"
+  | "targetBurning"
+  | "targetStatused";
+
 export type MoveShape =
   | { kind: "point" }
   | { kind: "line"; length: number }
@@ -113,7 +139,7 @@ export interface MoveSpec {
    * exact check). `"night"`: the world is currently in its night phase
    * (daynight.ts's `isNight`). Absent = no situational bonus, the default.
    */
-  situationalBonus?: { condition: "targetLowHp" | "flanking" | "night"; multiplier: number };
+  situationalBonus?: { condition: SituationalCondition; multiplier: number };
   /**
    * A flat multiplier on this move's *scoring* (not its actual damage) in
    * `pickBestMove` (combat.ts) when `condition` holds against the attacker's
@@ -155,6 +181,58 @@ export interface MoveSpec {
    * for `moveRange`'s reach derivation).
    */
   hitsArea?: boolean;
+  /**
+   * Bonus power scaling with the attacker's own bulk (`agent.maxHp`, the
+   * sim's existing weight proxy — see support.ts's `bodyWeightOf` for the
+   * same proxy used elsewhere), added on top of `power` at the moment of the
+   * hit (`predation.ts`'s `applySingleDamageInstance`) rather than baked
+   * into the respec'd spec — a Venusaur and a Diglett wielding the same
+   * `weightScaling` move hit very differently. `factor` is the fraction of
+   * `maxHp` added as bonus power (e.g. `0.15` on a 200-maxHp attacker adds
+   * 30 power). Absent = no weight scaling, the default.
+   */
+  weightScaling?: { factor: number };
+  /**
+   * Added to the crit-stage passed into `rollCritical` (combat.ts) —
+   * `rollCritical` already supports a stage argument (mainline's 1/24, 1/8,
+   * 1/2, always table), nothing before this move-tree pass ever fed it
+   * anything but the default 0. Absent/0 = no change, the default.
+   */
+  critRateStage?: number;
+  /** Heals the attacker this fraction of the damage a landed hit dealt — applied once per damage instance in `applySingleDamageInstance`, capped at `maxHp`. Absent/0 = no lifesteal, the default. */
+  lifestealFraction?: number;
+  /**
+   * Costs the attacker this fraction of the damage a landed hit dealt, as
+   * self-damage — applied once per damage instance, alongside lifesteal.
+   * Deliberately floored at 1 hp rather than allowed to faint the user: a
+   * true recoil-can-faint-you mechanic needs attacker-side faint plumbing
+   * this pass doesn't build. Absent/0 = no recoil, the default.
+   */
+  recoilFraction?: number;
+  /**
+   * On a landed, non-killing hit, adds this many ticks to every move
+   * currently on cooldown for the defender — a "your last move recovers
+   * slower now" jam, not a fresh cooldown on a move that wasn't already
+   * winding down. Absent/0 = no jam, the default.
+   */
+  jamCooldownTicks?: number;
+  /** A flat multiplier applied on top of the normal type-effectiveness result specifically when the defender is this type — read in `calculateDamage`. Absent = no bonus, the default. */
+  bonusVsType?: { type: PokemonType; multiplier: number };
+  /**
+   * Partially ignores a matchup this move would normally be resisted on:
+   * when the type chart's own effectiveness comes back below 1 (a real
+   * resist, not immune), it's multiplied by this and capped at 1 (a
+   * resisted hit can become neutral, never super-effective, from this alone)
+   * — read in `calculateDamage`, composing with (not replacing)
+   * `bonusVsType`. Absent = the type chart's own number stands, the default.
+   */
+  resistanceBreaker?: { multiplier: number };
+  /** Deducts this fraction of the given need from the attacker once per use (on `useMove`, regardless of whether the hit lands) — a real cost distinct from recoil (which scales with damage dealt). Absent = no cost, the default. */
+  selfCostPerUse?: { need: "energy" | "hunger"; amount: number };
+  /** On a landed hit, reverts a "bush" tile the defender is standing on back to plain floor, stripping its concealment for good — a real terrain interaction, not cosmetic. Absent/false = no terrain effect, the default. */
+  terrainBurn?: boolean;
+  /** A burn this move inflicts has a chance to jump to another nearby agent too — rolled once per successful `maybeInflictStatus` call, see status.ts's `maybeSpreadStatus`. Absent/false = no spread, the default. */
+  statusSpreads?: boolean;
   /**
    * Optional respec DAG (see `applyMoveTree`). Each node is a delta applied
    * on top of the base spec, gated by a point cost and prerequisite node
@@ -235,6 +313,15 @@ export interface MoveTreeNode {
    */
   grantsPassive?: { kind: PassiveKind; value: number };
   /**
+   * Same as `grantsPassive`, plural — for the rare node that grants more
+   * than one passive at once (e.g. a keystone that's both a damage-taking
+   * lightning rod AND takes less damage while it's at it). A node with both
+   * `grantsPassive` and `grantsPassives` grants all of them; the common case
+   * is exactly one or the other, not both. Absent = no extra passives beyond
+   * whatever `grantsPassive` alone specifies.
+   */
+  grantsPassives?: Array<{ kind: PassiveKind; value: number }>;
+  /**
    * Which Disposition axis (nature.ts) this node appeals to, if any — used
    * only by `maybeAutoRespec` (leveling.ts) to weight a wild agent's pick
    * among several currently-affordable/eligible nodes on the same tree.
@@ -253,6 +340,42 @@ export interface MoveTreeNode {
     statusChance?: number;
     /** Overwrite, like `shape` — a move has at most one forced-movement effect at a time, not a stack of them. */
     forcedMovement?: ForcedMovement;
+    /** Additive, like `power`. */
+    defensePenetration?: number;
+    /** Overwrite, like `shape` — a move has at most one multi-hit spec at a time. */
+    hits?: { min: number; max: number };
+    /** Additive, like `power` — a move that's already locking can lock longer. */
+    lockTicks?: number;
+    /** Overwrite, like `shape` — a move has at most one situational condition at a time. */
+    situationalBonus?: { condition: SituationalCondition; multiplier: number };
+    /** Overwrite, like `shape`. */
+    selfStateBonus?: { condition: "selfLowHp"; multiplier: number };
+    /** Overwrite, like `shape` — a move has at most one stat-change-on-hit effect at a time. */
+    statChangeOnHit?: { target: "self" | "defender"; stat: StatKey; stage: number; ticks?: number };
+    /** OR-merge, like a boolean flag being turned on for good once any node sets it. */
+    positionSwap?: boolean;
+    targetsAlly?: boolean;
+    hitsArea?: boolean;
+    terrainBurn?: boolean;
+    statusSpreads?: boolean;
+    /** Overwrite, like `shape`. */
+    allyEffect?: { healFraction?: number; buff?: { stat: StatKey; stage: number; ticks?: number } };
+    /** Overwrite, like `shape`. */
+    weightScaling?: { factor: number };
+    /** Additive, like `power`. */
+    critRateStage?: number;
+    /** Additive, like `power`. */
+    lifestealFraction?: number;
+    /** Additive, like `power`. */
+    recoilFraction?: number;
+    /** Additive, like `power`. */
+    jamCooldownTicks?: number;
+    /** Overwrite, like `shape`. */
+    bonusVsType?: { type: PokemonType; multiplier: number };
+    /** Overwrite, like `shape`. */
+    resistanceBreaker?: { multiplier: number };
+    /** Overwrite, like `shape`. */
+    selfCostPerUse?: { need: "energy" | "hunger"; amount: number };
   };
 }
 
@@ -379,6 +502,29 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
         ? { min: delta.range.min ?? result.range?.min ?? 0, max: delta.range.max ?? result.range?.max ?? 1 }
         : result.range,
       forcedMovement: delta.forcedMovement ?? result.forcedMovement,
+      defensePenetration:
+        delta.defensePenetration !== undefined ? (result.defensePenetration ?? 0) + delta.defensePenetration : result.defensePenetration,
+      hits: delta.hits ?? result.hits,
+      lockTicks: delta.lockTicks !== undefined ? (result.lockTicks ?? 0) + delta.lockTicks : result.lockTicks,
+      situationalBonus: delta.situationalBonus ?? result.situationalBonus,
+      selfStateBonus: delta.selfStateBonus ?? result.selfStateBonus,
+      statChangeOnHit: delta.statChangeOnHit ?? result.statChangeOnHit,
+      positionSwap: delta.positionSwap ?? result.positionSwap,
+      targetsAlly: delta.targetsAlly ?? result.targetsAlly,
+      hitsArea: delta.hitsArea ?? result.hitsArea,
+      terrainBurn: delta.terrainBurn ?? result.terrainBurn,
+      statusSpreads: delta.statusSpreads ?? result.statusSpreads,
+      allyEffect: delta.allyEffect ?? result.allyEffect,
+      weightScaling: delta.weightScaling ?? result.weightScaling,
+      critRateStage: delta.critRateStage !== undefined ? (result.critRateStage ?? 0) + delta.critRateStage : result.critRateStage,
+      lifestealFraction:
+        delta.lifestealFraction !== undefined ? (result.lifestealFraction ?? 0) + delta.lifestealFraction : result.lifestealFraction,
+      recoilFraction: delta.recoilFraction !== undefined ? (result.recoilFraction ?? 0) + delta.recoilFraction : result.recoilFraction,
+      jamCooldownTicks:
+        delta.jamCooldownTicks !== undefined ? (result.jamCooldownTicks ?? 0) + delta.jamCooldownTicks : result.jamCooldownTicks,
+      bonusVsType: delta.bonusVsType ?? result.bonusVsType,
+      resistanceBreaker: delta.resistanceBreaker ?? result.resistanceBreaker,
+      selfCostPerUse: delta.selfCostPerUse ?? result.selfCostPerUse,
     };
   }
 

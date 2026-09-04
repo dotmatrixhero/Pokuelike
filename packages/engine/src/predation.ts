@@ -10,11 +10,21 @@ import type { MoveSpec } from "./moves.js";
 import { grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
 import { isPathClear } from "./fov.js";
-import { tileAt } from "./world.js";
+import { tileAt, setTile } from "./world.js";
 import { recordPredatorPressure } from "./herdMigration.js";
 import { isNight, isTwilight, lightLevel } from "./daynight.js";
-import { stormAccuracyMultiplier } from "./weather.js";
-import { applyStatStage, BURN_ATTACK_STAGE, damageReductionOf, getStatStage, isBurned, maybeInflictStatus, maybeThawOnFireHit } from "./status.js";
+import { activeWeatherAt, isInColdSnap, stormAccuracyMultiplier } from "./weather.js";
+import {
+  applyStatStage,
+  BURN_ATTACK_STAGE,
+  damageReductionOf,
+  getStatStage,
+  isBurned,
+  maybeInflictStatus,
+  maybeSpreadStatus,
+  maybeThawOnFireHit,
+  thornsOf,
+} from "./status.js";
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
@@ -401,6 +411,25 @@ function situationalMultiplier(world: World, attacker: Agent, defender: Agent, m
       return defender.fightTarget !== attacker.id && defender.huntTarget !== attacker.id ? bonus.multiplier : 1;
     case "night":
       return isNight(world.tick) ? bonus.multiplier : 1;
+    case "elevation": {
+      const attackerElevation = tileAt(world, attacker.layer, attacker.pos.x, attacker.pos.y)?.elevation ?? 0;
+      const defenderElevation = tileAt(world, defender.layer, defender.pos.x, defender.pos.y)?.elevation ?? 0;
+      return attackerElevation > defenderElevation ? bonus.multiplier : 1;
+    }
+    case "concealed":
+      return isConcealed(world, attacker) ? bonus.multiplier : 1;
+    case "coldSnap":
+      return isInColdSnap(world, attacker.layer, attacker.pos) ? bonus.multiplier : 1;
+    case "storm":
+      return activeWeatherAt(world, attacker.pos)?.type === "storm" ? bonus.multiplier : 1;
+    case "drought":
+      return activeWeatherAt(world, attacker.pos)?.type === "drought" ? bonus.multiplier : 1;
+    case "rain":
+      return activeWeatherAt(world, attacker.pos)?.type === "rain" ? bonus.multiplier : 1;
+    case "targetBurning":
+      return isBurned(defender) ? bonus.multiplier : 1;
+    case "targetStatused":
+      return defender.status !== undefined ? bonus.multiplier : 1;
   }
 }
 
@@ -414,8 +443,16 @@ function applySingleDamageInstance(
   faintKind: "killed" | "defeated",
   ctx: LevelingContext | undefined
 ): boolean {
-  const isCritical = rollCritical();
+  const isCritical = rollCritical(move.critRateStage ?? 0);
   const situational = situationalMultiplier(world, attacker, defender, move);
+
+  // `weightScaling` adds bonus power proportional to the attacker's own
+  // maxHp (this sim's proxy for size/weight — see `powerOf`'s own doc
+  // comment) — computed into an effective move rather than mutating `move`
+  // itself, since `move` is the live, shared `MoveSpec` on the attacker.
+  const effectiveMove = move.weightScaling
+    ? { ...move, power: move.power + move.weightScaling.factor * (attacker.maxHp ?? attacker.stats?.maxHp ?? FALLBACK_MAX_HP) }
+    : move;
 
   const rawDamage =
     attacker.level !== undefined && attacker.types && attacker.stats && defender.stats
@@ -430,7 +467,7 @@ function applySingleDamageInstance(
             },
           },
           { types: defender.types ?? [], stats: defender.stats, statStages: { defense: getStatStage(defender, "defense"), spDefense: getStatStage(defender, "spDefense") } },
-          move,
+          effectiveMove,
           0.85 + Math.random() * 0.15,
           isCritical
         ).damage
@@ -439,6 +476,22 @@ function applySingleDamageInstance(
   const damage = Math.max(0, Math.floor(rawDamage * situational * (1 - damageReductionOf(defender))));
 
   if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log, ctx);
+
+  // Lifesteal, recoil, and thorns are all attacker/defender HP side-effects
+  // of a landed hit, independent of whether it faints/finishes anyone —
+  // applied against the real damage dealt, before the fainted/finishing-pool
+  // branches below (which only ever touch `defender`'s own hp bookkeeping).
+  if (damage > 0 && move.lifestealFraction) {
+    const attackerMaxHp = attacker.maxHp ?? attacker.stats?.maxHp ?? FALLBACK_MAX_HP;
+    attacker.hp = Math.min(attackerMaxHp, (attacker.hp ?? attackerMaxHp) + Math.floor(damage * move.lifestealFraction));
+  }
+  if (damage > 0 && move.recoilFraction) {
+    attacker.hp = Math.max(1, (attacker.hp ?? attacker.maxHp ?? FALLBACK_MAX_HP) - Math.floor(damage * move.recoilFraction));
+  }
+  const thorns = thornsOf(defender);
+  if (damage > 0 && thorns > 0) {
+    attacker.hp = Math.max(1, (attacker.hp ?? attacker.maxHp ?? FALLBACK_MAX_HP) - Math.floor(damage * thorns));
+  }
 
   // Every real hit against a herd member counts toward that herd's
   // predator-pressure trigger (herdMigration.ts) — the running-counter
@@ -562,6 +615,9 @@ function resolveHitAgainstTarget(
     // defender-side stat change, on-hit forced movement, and a position
     // swap get a chance to apply.
     maybeInflictStatus(defender, attacker.id, move, world, log);
+    if (move.statusSpreads && defender.status) {
+      maybeSpreadStatus(defender, attacker.id, defender.status.kind, world, log);
+    }
     if (move.statChangeOnHit?.target === "defender") {
       applyStatStage(defender, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
     }
@@ -570,6 +626,15 @@ function resolveHitAgainstTarget(
       const attackerPos = { ...attacker.pos };
       attacker.pos = { ...defender.pos };
       defender.pos = attackerPos;
+    }
+    if (move.jamCooldownTicks && defender.moveCooldowns) {
+      for (const moveId of Object.keys(defender.moveCooldowns)) {
+        defender.moveCooldowns[moveId]! += move.jamCooldownTicks;
+      }
+    }
+    if (move.terrainBurn) {
+      const tile = tileAt(world, defender.layer, defender.pos.x, defender.pos.y);
+      if (tile?.terrain === "bush") setTile(world, defender.layer, defender.pos.x, defender.pos.y, "floor");
     }
   }
 
@@ -665,6 +730,10 @@ function resolveHit(
   if (!move) return false; // every move on cooldown, or none reach from here, this tick
 
   useMove(attacker, move);
+
+  if (move.selfCostPerUse) {
+    attacker.needs[move.selfCostPerUse.need] = Math.max(0, attacker.needs[move.selfCostPerUse.need] - move.selfCostPerUse.amount);
+  }
 
   // A lunge resolves before the hit itself — the attacker's range was
   // already validated by canAttackFromHere before resolveHit was ever

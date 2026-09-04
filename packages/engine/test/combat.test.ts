@@ -353,6 +353,60 @@ describe("useMove: lockTicks", () => {
   });
 });
 
+describe("calculateDamage: resistanceBreaker", () => {
+  it("partially cancels a resist, capped at neutral", () => {
+    const attacker = { level: 20, types: ["fire" as const], stats: calculateStats(BASE, 20) };
+    const waterDefender = { types: ["water" as const], stats: calculateStats(BASE, 20) };
+    const resisted = calculateDamage(attacker, waterDefender, EMBER, 1);
+    expect(resisted.effectiveness).toBe(0.5);
+    const breaker: MoveSpec = { ...EMBER, id: "breaker", resistanceBreaker: { multiplier: 2 } };
+    const broken = calculateDamage(attacker, waterDefender, breaker, 1);
+    expect(broken.effectiveness).toBe(1); // 0.5 * 2 = 1, capped at neutral
+    expect(broken.damage).toBeGreaterThan(resisted.damage);
+  });
+
+  it("never turns a resist into an actual weakness", () => {
+    const attacker = { level: 20, types: ["fire" as const], stats: calculateStats(BASE, 20) };
+    const waterDefender = { types: ["water" as const], stats: calculateStats(BASE, 20) };
+    const breaker: MoveSpec = { ...EMBER, id: "overbreaker", resistanceBreaker: { multiplier: 100 } };
+    expect(calculateDamage(attacker, waterDefender, breaker, 1).effectiveness).toBe(1);
+  });
+
+  it("does nothing against a neutral or super-effective matchup", () => {
+    const attacker = { level: 20, types: ["fire" as const], stats: calculateStats(BASE, 20) };
+    const grassDefender = { types: ["grass" as const], stats: calculateStats(BASE, 20) };
+    const breaker: MoveSpec = { ...EMBER, id: "breaker2", resistanceBreaker: { multiplier: 2 } };
+    expect(calculateDamage(attacker, grassDefender, breaker, 1).effectiveness).toBe(2);
+  });
+});
+
+describe("calculateDamage: bonusVsType", () => {
+  it("multiplies damage when the defender has the matching type", () => {
+    const attacker = { level: 20, types: ["normal" as const], stats: calculateStats(BASE, 20) };
+    const grassDefender = { types: ["grass" as const], stats: calculateStats(BASE, 20) };
+    const waterDefender = { types: ["water" as const], stats: calculateStats(BASE, 20) };
+    const move: MoveSpec = { ...TACKLE, id: "grass-slayer", bonusVsType: { type: "grass", multiplier: 2 } };
+    const boosted = calculateDamage(attacker, grassDefender, move, 1);
+    const unboosted = calculateDamage(attacker, waterDefender, move, 1);
+    expect(boosted.damage).toBe(Math.floor(calculateDamage(attacker, grassDefender, TACKLE, 1).damage * 2));
+    expect(unboosted.damage).toBe(calculateDamage(attacker, waterDefender, TACKLE, 1).damage);
+  });
+});
+
+describe("pickBestMove: targetsAlly moves are never selected for hostile targeting", () => {
+  it("skips an ally-support move even if it scores highest on paper", () => {
+    const supportMove: MoveSpec = { ...TACKLE, id: "support", power: 999, targetsAlly: true };
+    const agent = makeAgent({ moves: [TACKLE, supportMove] });
+    expect(pickBestMove(agent, ["normal"])?.id).toBe("tackle");
+  });
+
+  it("returns undefined if every move targets an ally", () => {
+    const supportMove: MoveSpec = { ...TACKLE, id: "support", targetsAlly: true };
+    const agent = makeAgent({ moves: [supportMove] });
+    expect(pickBestMove(agent, ["normal"])).toBeUndefined();
+  });
+});
+
 describe("pickBestMove: multi-hit and self-state scoring", () => {
   it("scores a multi-hit move by its average expected hit count", () => {
     const agent = makeAgent({ moves: [TACKLE, { ...TACKLE, id: "flurry", power: 25, hits: { min: 2, max: 4 } }] });

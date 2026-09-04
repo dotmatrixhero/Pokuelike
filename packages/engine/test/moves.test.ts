@@ -215,3 +215,97 @@ describe("applyMoveTree: forcedMovement delta (overwrite, like shape)", () => {
     expect(LUNGE.forcedMovement).toBeUndefined();
   });
 });
+
+describe("applyMoveTree: newer delta fields", () => {
+  const KITCHEN_SINK: MoveSpec = {
+    id: "kitchen-sink",
+    name: "Kitchen Sink",
+    shape: { kind: "point" },
+    type: "normal",
+    category: "physical",
+    power: 40,
+    accuracy: 100,
+    cooldownTicks: 3,
+    tree: {
+      additive_stack: {
+        id: "additive_stack",
+        name: "Additive Stack",
+        cost: 1,
+        delta: { defensePenetration: 0.1, lockTicks: 1, critRateStage: 1, lifestealFraction: 0.1, recoilFraction: 0.05, jamCooldownTicks: 1 },
+      },
+      additive_stack_2: {
+        id: "additive_stack_2",
+        name: "Additive Stack 2",
+        cost: 1,
+        prerequisites: ["additive_stack"],
+        delta: { defensePenetration: 0.1, lockTicks: 1, critRateStage: 1, lifestealFraction: 0.1, recoilFraction: 0.05, jamCooldownTicks: 1 },
+      },
+      overwrite_stack: {
+        id: "overwrite_stack",
+        name: "Overwrite Stack",
+        cost: 1,
+        delta: {
+          hits: { min: 2, max: 3 },
+          situationalBonus: { condition: "night", multiplier: 1.5 },
+          statChangeOnHit: { target: "defender", stat: "defense", stage: -1 },
+          positionSwap: true,
+          targetsAlly: true,
+          hitsArea: true,
+          terrainBurn: true,
+          statusSpreads: true,
+          weightScaling: { factor: 0.5 },
+          bonusVsType: { type: "grass", multiplier: 1.5 },
+          resistanceBreaker: { multiplier: 2 },
+          selfCostPerUse: { need: "energy", amount: 0.1 },
+        },
+      },
+      overwrite_stack_2: {
+        id: "overwrite_stack_2",
+        name: "Overwrite Stack 2",
+        cost: 1,
+        prerequisites: ["overwrite_stack"],
+        delta: {
+          hits: { min: 3, max: 5 },
+          situationalBonus: { condition: "flanking", multiplier: 2 },
+          weightScaling: { factor: 1 },
+          bonusVsType: { type: "water", multiplier: 2 },
+          resistanceBreaker: { multiplier: 4 },
+          selfCostPerUse: { need: "hunger", amount: 0.2 },
+        },
+      },
+    },
+  };
+
+  it("applies additive fields cumulatively across multiple nodes", () => {
+    const respec = applyMoveTree(KITCHEN_SINK, ["additive_stack", "additive_stack_2"]);
+    expect(respec.defensePenetration).toBeCloseTo(0.2);
+    expect(respec.lockTicks).toBe(2);
+    expect(respec.critRateStage).toBe(2);
+    expect(respec.lifestealFraction).toBeCloseTo(0.2);
+    expect(respec.recoilFraction).toBeCloseTo(0.1);
+    expect(respec.jamCooldownTicks).toBe(2);
+  });
+
+  it("overwrite fields take the latest node's value, never stacking", () => {
+    const respec = applyMoveTree(KITCHEN_SINK, ["overwrite_stack", "overwrite_stack_2"]);
+    expect(respec.hits).toEqual({ min: 3, max: 5 });
+    expect(respec.situationalBonus).toEqual({ condition: "flanking", multiplier: 2 });
+    expect(respec.weightScaling).toEqual({ factor: 1 });
+    expect(respec.bonusVsType).toEqual({ type: "water", multiplier: 2 });
+    expect(respec.resistanceBreaker).toEqual({ multiplier: 4 });
+    expect(respec.selfCostPerUse).toEqual({ need: "hunger", amount: 0.2 });
+    // Fields not touched by the second node keep the first node's value.
+    expect(respec.positionSwap).toBe(true);
+    expect(respec.targetsAlly).toBe(true);
+    expect(respec.hitsArea).toBe(true);
+    expect(respec.terrainBurn).toBe(true);
+    expect(respec.statusSpreads).toBe(true);
+    expect(respec.statChangeOnHit).toEqual({ target: "defender", stat: "defense", stage: -1 });
+  });
+
+  it("is pure: never mutates the base spec", () => {
+    const snapshot = JSON.parse(JSON.stringify(KITCHEN_SINK));
+    applyMoveTree(KITCHEN_SINK, ["additive_stack", "overwrite_stack"]);
+    expect(KITCHEN_SINK).toEqual(snapshot);
+  });
+});

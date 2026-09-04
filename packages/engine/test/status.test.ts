@@ -20,7 +20,9 @@ import {
   isImmuneToStatus,
   isParalyzed,
   maybeInflictStatus,
+  maybeSpreadStatus,
   maybeThawOnFireHit,
+  thornsOf,
   tickStatusEffects,
 } from "../src/status.js";
 
@@ -324,6 +326,76 @@ describe("multi-action lock (Agent.actionLockTicks)", () => {
     const agent = makeAgent({ actionLockTicks: 0 });
     tickStatusEffects(agent, world);
     expect(agent.actionLockTicks).toBe(0);
+  });
+});
+
+describe("thornsOf", () => {
+  it("reads the accumulated thorns passive, defaulting to 0", () => {
+    const agent = makeAgent();
+    expect(thornsOf(agent)).toBe(0);
+    grantPassive(agent, "thorns", 0.2);
+    expect(thornsOf(agent)).toBeCloseTo(0.2);
+  });
+
+  it("never goes negative even if somehow granted a negative value", () => {
+    const agent = makeAgent({ passives: { thorns: -0.5 } });
+    expect(thornsOf(agent)).toBe(0);
+  });
+});
+
+describe("healAura passive", () => {
+  it("heals every living same-herd, same-layer agent within radius, holder included", () => {
+    const world = createWorld(5, 5);
+    const healer = makeAgent({ id: "healer", herdId: "h1", pos: { x: 2, y: 2 }, hp: 10, maxHp: 50 });
+    grantPassive(healer, "healAura", 0.1);
+    const nearbyAlly = makeAgent({ id: "ally", herdId: "h1", pos: { x: 3, y: 2 }, hp: 10, maxHp: 50 });
+    const farAlly = makeAgent({ id: "far", herdId: "h1", pos: { x: 0, y: 0 }, hp: 10, maxHp: 50 });
+    const otherHerd = makeAgent({ id: "other-herd", herdId: "h2", pos: { x: 2, y: 3 }, hp: 10, maxHp: 50 });
+    world.agents.push(healer, nearbyAlly, farAlly, otherHerd);
+
+    tickStatusEffects(healer, world);
+
+    expect(healer.hp).toBeCloseTo(15); // self-heals too
+    expect(nearbyAlly.hp).toBeCloseTo(15);
+    expect(farAlly.hp).toBe(10); // out of radius
+    expect(otherHerd.hp).toBe(10); // different herd
+  });
+
+  it("no-ops without the passive or without a herdId", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ hp: 10, maxHp: 50 });
+    world.agents.push(agent);
+    tickStatusEffects(agent, world);
+    expect(agent.hp).toBe(10);
+  });
+});
+
+describe("maybeSpreadStatus", () => {
+  it("spreads the same status to a nearby living agent on a successful roll", () => {
+    const world = createWorld(5, 5);
+    const source = makeAgent({ id: "source", pos: { x: 2, y: 2 }, status: { kind: "burn" } });
+    const neighbor = makeAgent({ id: "neighbor", pos: { x: 3, y: 2 }, types: ["grass"] });
+    world.agents.push(source, neighbor);
+    maybeSpreadStatus(source, "attacker-1", "burn", world, undefined, () => 0);
+    expect(neighbor.status).toEqual({ kind: "burn", ticksRemaining: undefined });
+  });
+
+  it("does nothing on a failed spread roll", () => {
+    const world = createWorld(5, 5);
+    const source = makeAgent({ id: "source", pos: { x: 2, y: 2 }, status: { kind: "burn" } });
+    const neighbor = makeAgent({ id: "neighbor", pos: { x: 3, y: 2 }, types: ["grass"] });
+    world.agents.push(source, neighbor);
+    maybeSpreadStatus(source, "attacker-1", "burn", world, undefined, () => 0.999);
+    expect(neighbor.status).toBeUndefined();
+  });
+
+  it("doesn't spread to an agent out of radius or on a different layer", () => {
+    const world = createWorld(10, 10);
+    const source = makeAgent({ id: "source", pos: { x: 2, y: 2 }, status: { kind: "burn" } });
+    const farNeighbor = makeAgent({ id: "far", pos: { x: 9, y: 9 }, types: ["grass"] });
+    world.agents.push(source, farNeighbor);
+    maybeSpreadStatus(source, "attacker-1", "burn", world, undefined, () => 0);
+    expect(farNeighbor.status).toBeUndefined();
   });
 });
 

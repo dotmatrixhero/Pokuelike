@@ -27,9 +27,12 @@ export type StatusKind = "burn" | "poison" | "paralysis" | "sleep" | "freeze";
  * `"immovable"` (movement.ts's `applyForcedMovement`, ignores being
  * dragged/knocked back/lunged at as the forced mover), `"regen"` (needs.ts's
  * `tickAgentNeeds`, a fraction of maxHp healed every tick regardless of
- * being fed/watered). See MOVES_DESIGN.md's primitives checklist.
+ * being fed/watered), `"thorns"` (predation.ts's `applySingleDamageInstance`,
+ * reflects a fraction of incoming damage back at the attacker), `"healAura"`
+ * (needs.ts's `tickAgentNeeds`, heals nearby herd-mates every tick, not just
+ * the passive-holder itself). See MOVES_DESIGN.md's primitives checklist.
  */
-export type PassiveKind = "damageReduction" | "immovable" | "regen";
+export type PassiveKind = "damageReduction" | "immovable" | "regen" | "thorns" | "healAura";
 
 /**
  * Why a herd is (or was) migrating — see herdMigration.ts/DESIGN.md's

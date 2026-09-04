@@ -334,6 +334,7 @@ export function maybeAutoRespec(
   if (!trySpendSkillPoints(agent, picked.base.type, picked.node.cost)) return; // already filtered as affordable above; guards against a caller bug rather than a real race
 
   if (picked.node.grantsPassive) grantPassive(agent, picked.node.grantsPassive.kind, picked.node.grantsPassive.value);
+  for (const passive of picked.node.grantsPassives ?? []) grantPassive(agent, passive.kind, passive.value);
 
   const nextChosen = [...picked.chosen, picked.node.id];
   agent.moveTreeChoices = agent.moveTreeChoices ?? {};
