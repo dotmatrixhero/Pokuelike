@@ -131,13 +131,11 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
       const light = 0.65 + tileLight(x, y) * 0.7;
 
       if (isPlantLike(tile.terrain)) {
-        // No solid fill at all — a dense block glyph in the patch's own
-        // color stands in for a "background", so a berry patch or flora
-        // cluster reads as a colored wash made of ASCII, not a filled tile.
-        ctx.fillStyle = rgbaToCss(accent, 0.55 * light);
-        ctx.fillText("█", cx, cy);
+        // No background fill at all, no block-glyph wash — just the
+        // flavor/terrain glyph itself, colored, straight on the bare
+        // ground, same treatment as floor's ".".
         const flavorGlyph = tile.flavor ? FLAVOR_GLYPH[tile.flavor] : undefined;
-        ctx.fillStyle = "rgba(10, 12, 15, 0.85)";
+        ctx.fillStyle = rgbaToCss(accent, 0.85 * light);
         ctx.fillText(flavorGlyph ?? TERRAIN_GLYPH[tile.terrain], cx, cy);
       } else {
         // Everything else keeps a faint translucent wash of its own color —
