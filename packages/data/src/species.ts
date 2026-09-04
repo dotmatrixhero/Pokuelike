@@ -1,4 +1,4 @@
-import type { ActivityPattern, BaseStats, Layer, PokemonType } from "@pokuelike/engine";
+import type { ActivityPattern, BaseStats, Layer, PokemonType, TerrainKind } from "@pokuelike/engine";
 import { SPECIES_DEX_BY_KEY } from "./dex/index.js";
 
 export interface SpeciesDef {
@@ -61,6 +61,26 @@ export interface SpeciesDef {
    * biome sitting above wherever they actually live."
    */
   biomes?: string[];
+  /**
+   * Which literal `TerrainKind`(s) (types.ts — "water" | "flora" | "food" |
+   * "sunbeam" | "bush" | "boulder" | ...) this species gravitates toward
+   * once genuinely idle (needs met, no herd pull-back) — a finer-grained,
+   * tile-level cousin of `biomes` above, NOT derived from it: `biomes` is
+   * "which map region does this species spawn/immigrate into," this is
+   * "once standing on that region's tiles with nothing urgent to do, which
+   * specific tile kind does it drift toward" (e.g. Bulbasaur toward flora
+   * patches, Squirtle toward water) — see DESIGN.md's "Tile preference"
+   * section and `@pokuelike/engine`'s needs.ts `applyExploration`. Same
+   * judged-per-species standard as `biomes`/`buildsShelter`, not universal:
+   * only tagged for species whose home layer (surface) actually has varied
+   * terrain to prefer among — underground/canopy natives live on flat,
+   * terrain-uniform grids (see worldgen.ts's doc comment), so tagging them
+   * would be meaningless and is skipped rather than guessed at. Absent/empty
+   * = no particular tile preference, falls back to ordinary random-wander
+   * exploration exactly as before this feature. Order matters: earlier
+   * entries are tried first when more than one is listed.
+   */
+  preferredTerrain?: TerrainKind[];
 }
 
 /**
@@ -92,6 +112,7 @@ export function speciesFromDex(dexKey: string, sim: SimSpeciesFields): SpeciesDe
     activityPattern: sim.activityPattern,
     buildsShelter: sim.buildsShelter,
     biomes: sim.biomes,
+    preferredTerrain: sim.preferredTerrain,
   };
 }
 
@@ -122,6 +143,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // a secondary (plenty of shade/undergrowth grass-types are also drawn
     // to in mainline flavor text).
     biomes: ["grassland", "forest"],
+    // Direct ask's own named example — "Bulbasaur should strongly prefer
+    // flora tiles." A grass-type grazer settles near the grass patches it
+    // actually grazes, once fed/watered/rested.
+    preferredTerrain: ["flora"],
   }),
   scyther: speciesFromDex("SCYTHER", {
     spriteKey: "scyther",
@@ -137,6 +162,11 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // dense woodland) — forest as primary, grassland as a secondary edge
     // habitat.
     biomes: ["forest", "grassland"],
+    // "Vanishes like a ninja" — an ambush predator that lingers in
+    // concealing undergrowth between strikes, not out in the open. Reuses
+    // "bush" terrain's existing concealment mechanic (`Tile.concealment`)
+    // rather than inventing a new one — idling here is doubly in-character.
+    preferredTerrain: ["bush"],
   }),
   charmander: speciesFromDex("CHARMANDER", {
     spriteKey: "charmander",
@@ -152,6 +182,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // rest of the roster leans toward. See createDemoWorld for its
     // biome-driven placement (the first starting agent placed this way).
     biomes: ["badlands"],
+    // Its flame is said to weaken without warmth (mainline flavor text) — a
+    // sun-loving lizard that idles on the warmest tiles it can find, same
+    // "sunbeam" terrain the sim already uses for basking/warmth mechanics.
+    preferredTerrain: ["sunbeam"],
   }),
   diglett: speciesFromDex("DIGLETT", {
     spriteKey: "diglett",
@@ -170,6 +204,11 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // sit under: loose, diggable ground reads as grassland/badlands, not
     // dense forest or waterlogged wetland.
     biomes: ["grassland", "badlands"],
+    // No `preferredTerrain` tag: underground is a flat, terrain-uniform
+    // floor grid (worldgen.ts never varies it), so there's no meaningful
+    // tile kind to prefer among on its own home layer — and it already has
+    // a real idle-homing pull via `buildsShelter` above (shelter.ts). Same
+    // reasoning applies to sandshrew/pidgey/spearow/onix below.
   }),
   venusaur: speciesFromDex("VENUSAUR", {
     spriteKey: "venusaur",
@@ -181,6 +220,9 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // predation.ts), and a guardian that only watches half the clock isn't
     // much of one. No override needed; omission here IS the design choice.
     biomes: ["grassland", "forest"],
+    // The herd's guardian grazer, same grass-type flora affinity as its
+    // pre-evolution above.
+    preferredTerrain: ["flora"],
   }),
   pidgey: speciesFromDex("PIDGEY", {
     spriteKey: "pidgey",
@@ -263,6 +305,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // The obvious fit — a Water-type drawn to `worldgen.ts`'s highest
     // water-density biome.
     biomes: ["wetland"],
+    // Direct ask's own named example — "Squirtle should prefer water."
+    preferredTerrain: ["water"],
   }),
 
   // --- New species below: badlands/highland residents, closing the
@@ -287,6 +331,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // mountainsides — badlands/highland, both rock-and-boulder-heavy biomes
     // (see worldgen.ts's BIOMES boulder terrainWeights).
     biomes: ["badlands", "highland"],
+    // Literally a living boulder (mainline flavor text) — the roster's most
+    // direct terrain-preference fit of all: it settles among the same rocks
+    // it's made of, not just the biome that happens to contain them.
+    preferredTerrain: ["boulder"],
   }),
   growlithe: speciesFromDex("GROWLITHE", {
     spriteKey: "growlithe",
@@ -304,6 +352,9 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Onix in the existing roster, this species simply never evolves
     // in-sim yet. Not a bug, an accepted existing limitation.
     biomes: ["badlands"],
+    // Fire-type warmth-seeker, same "sunbeam" affinity reasoning as
+    // Charmander above — a dry-terrain dog that suns itself when idle.
+    preferredTerrain: ["sunbeam"],
   }),
   mankey: speciesFromDex("MANKEY", {
     spriteKey: "mankey",
@@ -319,5 +370,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     biomes: ["highland", "badlands"],
     // A real level-only evolution (Primeape at level 28, no conditions) —
     // unlike Growlithe above, this species does evolve in-sim.
+    // A "rocky mountains" primate — settles among the same boulder fields
+    // as Geodude, its badlands/highland neighbor.
+    preferredTerrain: ["boulder"],
   }),
 };

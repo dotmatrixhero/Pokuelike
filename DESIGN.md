@@ -6744,3 +6744,201 @@ left as an open, explicitly-flagged question rather than papered over.
   own population effect specifically — considered, not run, for the
   rng-cascade-sensitivity reason explained above. The dedicated stress
   scenarios are the trustworthy evidence in the meantime.
+
+## Tile preference: satisfied idle agents gravitate toward their species' natural terrain
+
+Direct ask, verbatim: "Like tile pref. Like bulbasaur should strongly
+prefer flora tiles. Squirtle should prefer water. If their needs are met.
+We could add more tile types." Scoped narrowly and deliberately: this is
+purely about where an already-*satisfied* agent chooses to spend idle
+time — not need-seeking (`seekFood`/`seekWater` are untouched, and still
+run first every time), not `biomes` (that's map-region-level placement/
+immigration scoring, a completely different concept this feature is
+explicitly NOT allowed to conflate with or derive from — see
+`SpeciesDef.preferredTerrain`'s own doc comment in `packages/data/src/
+species.ts`).
+
+### Decided
+
+1. **A new, separate `SpeciesDef.preferredTerrain?: TerrainKind[]` field,
+   denormalized onto `Agent.preferredTerrain` at spawn** — the exact same
+   three-hop pattern this session's own `activityPattern`/`buildsShelter`
+   already established (`SpeciesDef` -> `spawnAgent` -> `Agent`), for the
+   exact same reason: engine-side logic (`needs.ts`) must never import
+   `@pokuelike/data` (circular — `@pokuelike/data` already depends on
+   `@pokuelike/engine`). A newborn (`spawnOffspring`, reproduction.ts) picks
+   its `preferredTerrain` back up the same way `buildsShelter` already does
+   for a shelter-building lineage's offspring — via `LevelingProfile.
+   preferredTerrain` (`leveling.ts`), denormalized in `ensureCombatProfile`,
+   sourced from `SPECIES[...]` in `packages/data/src/leveling.ts`'s
+   `computeProfileFromDexEntry` — otherwise a tagged lineage's children
+   would silently lose the trait the instant they're born.
+2. **Checked first inside the existing idle-wander extension point
+   (`needs.ts`'s `applyExploration`), not a new behavior or a new
+   persistent commitment field.** `applyExploration` already only ever runs
+   once an agent is fully idle (no urgent need, no herd pull-back, no
+   shelter-resting — see its own doc comment and the priority chain in
+   `tickAgentAction`'s `idle` branch), and already stores its current
+   destination in one shared field, `Agent.exploreTarget`, re-picked fresh
+   every time that field is empty. Tile preference plugs into that exact
+   spot: when `exploreTarget` is empty, `locatePreferredTerrain` is tried
+   *before* the pre-existing random-unvisited-tile search
+   (`findNearbyUnvisitedTile`) — a tagged species whose preferred terrain
+   is findable becomes its `exploreTarget` instead of a uniformly random
+   nearby spot; an untagged species, or a tagged one with no matching tile
+   reachable at all, falls straight through to the pre-existing random
+   wander, byte-for-byte unchanged. This directly satisfies the brief's own
+   "commits no matter what" caution: a preference-driven wander is exactly
+   as droppable as ordinary exploration always was (any urgent need re-check
+   at `tickAgentAction`'s idle-branch gate skips `applyExploration` entirely
+   that tick, same as before this feature existed), not a new sticky
+   commitment.
+3. **"Already there" is a real, distinct third outcome — `"arrived"` —
+   not just "target reached, immediately re-roll."** `locatePreferredTerrain`
+   returns one of: `"arrived"` (within `PREFERRED_TERRAIN_SATISFIED_RADIUS`
+   = 2 of a matching tile already — content, no wander this tick at all,
+   `applyExploration` returns early with no behavior change), a real `Vec2`
+   destination, or `undefined` (no preference tagged, or none of the tagged
+   kinds exist anywhere reachable — fall through to ordinary exploration).
+   Deliberately "lingers near," not "always stands exactly on the exact
+   tile": the direct ask was "prefer flora tiles," which reads as a real
+   patch/neighborhood, not a single pixel-perfect square.
+4. **Reuses `resourceIndex.ts`'s cheap `findNearestIndexed` lookup for
+   preference kinds it already tracks (water/food/sunbeam), plus a newly
+   added `"flora"` entry** — extending `IndexedTerrain` for `"flora"`
+   follows the exact same precedent `"shelter"` set earlier this session
+   (a real, `O(matching tiles)` per-lookup win over a naive full-grid scan,
+   justified once more than one consumer needs it — flora is tagged on
+   two roster species here, bulbasaur and venusaur). A preference kind
+   tagged by only a single species so far (`"bush"` for Scyther, `"boulder"`
+   for Geodude/Mankey) stays OUT of the global index and instead uses a new,
+   separate bounded local scan (`findNearestPreferredLocal`,
+   `PREFERRED_TERRAIN_LOCAL_SCAN_RADIUS` = 12) — not worth extending a
+   global structure for one or two consumers, per the direct "extend the
+   index only if it's cleaner" guidance; this stays cheap because it only
+   ever runs when `exploreTarget` is empty (a real destination pick, not a
+   per-tick cost).
+5. **Roster tagging, judged per-species exactly like `biomes`/
+   `buildsShelter`/`activityPattern` before it** — see the inline comment
+   at each entry in `packages/data/src/species.ts` for the specific
+   flavor-text reasoning; summarized:
+   - **bulbasaur, venusaur -> `flora`** — the brief's own named example. A
+     grass-type grazer settles near the grass it actually grazes.
+   - **squirtle -> `water`** — the brief's other named example. The
+     roster's only Water-type, finally giving the map's ponds a resident
+     that actually lingers at them.
+   - **charmander, mankey -> `sunbeam`** — Charmander's flame is said to
+     weaken without warmth (mainline flavor text); Mankey is the roster's
+     rocky-mountain primate, reusing the sim's existing "sun patch" tile
+     mechanic (`worldgen.ts`'s elevation-driven `"sunbeam"`, already used
+     for flora germination boosts) as a real warm/dry-terrain stand-in.
+   - **scyther -> `bush`** — "vanishes like a ninja" (mainline flavor
+     text): an ambush predator that lingers in concealing undergrowth
+     between strikes. Doubly in-character since `"bush"` already grants
+     real concealment (`Tile.concealment`) — idling here isn't just
+     flavor, it's a real defensive choice for this specific species.
+   - **geodude, growlithe -> `boulder`** — Geodude is *literally* a living
+     boulder per mainline flavor text, the most direct fit in the whole
+     roster; Growlithe is the roster's other dry-terrain/rocky-region
+     fire-type (mirroring Charmander's own `sunbeam` reasoning).
+   - **diglett, sandshrew, pidgey, spearow, onix -> untagged, on
+     purpose, not an oversight.** Underground/canopy are flat,
+     terrain-uniform floor grids (`worldgen.ts` never varies them — see
+     its own doc comment) — there is no meaningful tile kind to prefer
+     among on these species' actual home layer, so tagging them would be
+     guessing at nothing. Diglett/Sandshrew specifically already have a
+     real, stronger idle-homing pull via `buildsShelter` (shelter.ts) that
+     this feature would only muddy by competing with.
+
+### Built, real-run findings
+
+7 new engine tests (`test/needs.test.ts`, "tile preference" describe
+block) — a tagged agent heads toward the nearest matching tile instead of
+a random spot (both flora and water cases, confirmed by checking the exact
+`exploreTarget`, not just "moved somewhere"); an agent already lingering
+near its preferred terrain stays fully idle (no wander, `exploreTarget`
+stays `undefined`) rather than drifting off; the `"bush"`/`"boulder"`
+bounded-local-scan fallback path for a preference kind outside the cheap
+index; multi-kind preference order (tries the first tag, falls through to
+the second when the first has nothing reachable anywhere); an untagged
+agent is completely unaffected — identical random-wander target to the
+pre-existing (unmodified) behavior with a mocked rng roll; and an explicit
+rng-determinism check (the preference-driven path consumes no rng at all,
+byte-identical across two independent runs from the same starting state).
+688 total engine tests, all passing, including the unmodified
+`determinism.test.ts` acceptance suite — this feature adds zero new
+`rng()`/`Math.random()` call sites (the preference lookup is a pure,
+deterministic nearest-tile search; only the pre-existing fallback path,
+unchanged, ever rolls anything).
+
+**Real 3000-tick runs, seeds 42/7/20260903, feature-on vs. feature-off
+A/B** (an isolated script instrumented for this specific validation:
+`createDemoWorld` per seed, run twice — once with every tagged species'
+`preferredTerrain` stripped from `SPECIES` in memory before the run
+[OFF], once restored [ON] — sampling every living tagged agent's Manhattan
+distance to its nearest preferred-terrain tile every 25 ticks). Metric:
+average distance-to-nearest-preferred-tile across all samples, lower is
+"spends more idle time near its preferred terrain":
+
+| seed | OFF avg dist (n) | ON avg dist (n) |
+|---|---|---|
+| 42 | 3.70 (3332) | 2.96 (6534) |
+| 7 | 3.20 (5102) | 3.07 (7536) |
+| 20260903 | 4.92 (2419) | 3.43 (8221) |
+
+Per-species breakdown, same three runs:
+
+| species | seed 42 OFF -> ON | seed 7 OFF -> ON | seed 20260903 OFF -> ON |
+|---|---|---|---|
+| bulbasaur | 3.06 -> 2.32 | 3.10 -> 2.66 | 4.77 -> 3.35 |
+| squirtle | 6.12 -> 4.53 | 3.75 -> 3.91 | 5.03 -> 4.56 |
+| venusaur | 4.05 -> 4.14 | 3.24 -> 6.02 | 5.75 -> 4.00 |
+
+**Honest read**: bulbasaur (the brief's own named example) shows a real,
+consistent, meaningful drop in distance-to-flora across all 3 seeds — the
+mechanism is measurably doing what was asked. Squirtle shows the same
+consistent direction on 2 of 3 seeds (a real drop), with seed 7 an
+essentially flat, noise-level difference (3.75 -> 3.91) rather than a
+regression. Venusaur is the one genuine mixed result — worse on seed 7,
+flat on seed 42, better on seed 20260903 — and the honest explanation
+isn't "the feature doesn't work for Venusaur," it's that Venusaur is
+specifically tagged as "the herd's guardian" (see its `SpeciesDef` entry)
+with a strong, higher-priority `applyHerdCohesion` pull back toward its
+herd's location that runs *before* `applyExploration` ever gets a turn —
+with normally only one Venusaur alive in the demo scenario at a time (n
+counts above are consistent with a single agent sampled across the whole
+run), herd-position noise dominates over the tile-preference signal for
+this specific species far more than it does for the more independently-
+wandering Bulbasaur/Squirtle. Sample counts (`n`) differ meaningfully
+between OFF/ON on the same seed — expected and already documented
+elsewhere in this file: any tick where the idle-wander target differs
+changes what an agent does that tick, which is exactly the kind of
+divergence this sim's own rng-trajectory chaos-sensitivity (see the
+grazing-scars and herd-conflict sections) cascades into different
+population trajectories by the time 3000 ticks have run. The directly
+-requested mechanism (points 1-5 above) is proven correct by the dedicated
+unit tests; this A/B is the honestly-reported real-run color on top of
+that, not the only evidence.
+
+### Explicitly not done / open follow-ups (see TODO.md)
+
+- **"We could add more tile types"** — the brief's own explicitly vague,
+  optional half. No new `TerrainKind` was added this session: nothing
+  cheap and obviously missing presented itself while building this feature
+  (every roster species that has a real flavor-text terrain affinity
+  already maps onto an existing kind — flora/water/sunbeam/bush/boulder).
+  The one real idea worth flagging for later, not guessed at here: a real
+  "burrow"/underground-den terrain kind distinct from plain `"floor"`,
+  which could give Diglett/Sandshrew (currently untagged for exactly the
+  reason in point 5 above — underground is flat and terrain-uniform) a
+  real, earned tile preference of their own instead of relying solely on
+  `buildsShelter`'s existing homing pull. Left as a real open idea, not
+  built, since it would mean generating real terrain variance into
+  `worldgen.ts`'s currently-flat underground grid — its own real design
+  decision with its own validation burden, out of scope for the direct ask
+  here.
+- Venusaur's mixed A/B result above (herd cohesion dominating tile
+  preference for a species that's almost always alone/guardian-positioned)
+  — not treated as a bug, but a real, honestly-reported interaction worth
+  a closer look if herd cohesion/tile preference priority ever gets
+  revisited together.

@@ -1,4 +1,4 @@
-import type { Agent, World } from "./types.js";
+import type { Agent, TerrainKind, World } from "./types.js";
 import type { PokemonType } from "./typing.js";
 import type { MoveSpec, MoveTreeNode } from "./moves.js";
 import { applyMoveTree, trySpendSkillPoints } from "./moves.js";
@@ -97,6 +97,15 @@ export interface LevelingProfile {
    * at whichever creation site actually built it — see shelter.ts).
    */
   buildsShelter?: boolean;
+  /**
+   * Mirrors `SpeciesDef.preferredTerrain` (packages/data) — same
+   * denormalize-onto-newborn reasoning as `buildsShelter` immediately
+   * above: without this, a tile-preference lineage's offspring would
+   * silently wander with no preference the instant they're born, since an
+   * agent's own `preferredTerrain` is otherwise only ever set once, at
+   * spawn (see needs.ts's `applyExploration`).
+   */
+  preferredTerrain?: TerrainKind[];
 }
 
 export interface LevelingContext {
@@ -438,6 +447,7 @@ export function ensureCombatProfile(agent: Agent, ctx?: LevelingContext): void {
   agent.hp = stats.maxHp;
   agent.types = profile.types;
   agent.buildsShelter = agent.buildsShelter ?? profile.buildsShelter;
+  agent.preferredTerrain = agent.preferredTerrain ?? profile.preferredTerrain;
 
   agent.knownMoves = agent.knownMoves ?? [];
   agent.moves = agent.moves ?? [];

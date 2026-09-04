@@ -6,8 +6,18 @@ import type { Layer, Vec2, World } from "./types.js";
  * agent looking for "my nearest shelter" every idle tick shouldn't fall back
  * to a naive full-grid scan any more than a hungry agent looking for its
  * nearest food patch should.
+ *
+ * "flora" joined this list for needs.ts's `applyExploration` terrain-
+ * preference wander: with two roster species (bulbasaur/venusaur) tagged
+ * `preferredTerrain: ["flora"]` — see DESIGN.md's "Tile preference" section
+ * — an idle satisfied grazer looking for "my nearest flora patch" every
+ * idle tick earns the same indexed-lookup treatment as food/water/shelter
+ * above, rather than a naive scan. Preference kinds tagged by only a single
+ * species (e.g. "bush"/"boulder") stay off this list and fall back to a
+ * bounded local scan instead — see `findPreferredTerrainTarget` in
+ * needs.ts.
  */
-export type IndexedTerrain = "water" | "food" | "sunbeam" | "shelter";
+export type IndexedTerrain = "water" | "food" | "sunbeam" | "shelter" | "flora";
 
 interface LayerIndex {
   version: number;
@@ -27,11 +37,11 @@ function rawTileAt(world: World, layer: Layer, x: number, y: number) {
 }
 
 function buildIndex(world: World, layer: Layer): LayerIndex {
-  const positions: Record<IndexedTerrain, Vec2[]> = { water: [], food: [], sunbeam: [], shelter: [] };
+  const positions: Record<IndexedTerrain, Vec2[]> = { water: [], food: [], sunbeam: [], shelter: [], flora: [] };
   const tiles = world.tiles[layer];
   for (let i = 0; i < tiles.length; i++) {
     const terrain = tiles[i]!.terrain;
-    if (terrain === "water" || terrain === "food" || terrain === "sunbeam" || terrain === "shelter") {
+    if (terrain === "water" || terrain === "food" || terrain === "sunbeam" || terrain === "shelter" || terrain === "flora") {
       positions[terrain].push({ x: i % world.width, y: Math.floor(i / world.width) });
     }
   }

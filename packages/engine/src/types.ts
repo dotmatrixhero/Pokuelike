@@ -594,6 +594,21 @@ export interface Agent {
    */
   exploreTarget?: Vec2;
 
+  /**
+   * Denormalized from `SpeciesDef.preferredTerrain` at spawn time
+   * (packages/data/src/spawn.ts), the same pattern as `activityPattern`/
+   * `buildsShelter` above — engine-side terrain-preference logic
+   * (needs.ts's `applyExploration`) never needs to import `@pokuelike/data`.
+   * Which literal `TerrainKind`(s) this individual gravitates toward once
+   * genuinely idle (needs met, no herd pull-back) — tile-level flavor
+   * ("Bulbasaur lingers near flora, Squirtle near water"), distinct from
+   * `SpeciesDef.biomes`'s map-region-level preference. Absent/empty = no
+   * particular tile preference, falls back to `applyExploration`'s
+   * pre-existing random-unvisited-tile wander exactly as before. Order
+   * matters: earlier entries are tried first when picking a nearby target.
+   */
+  preferredTerrain?: TerrainKind[];
+
   // --- Individual variance: Nature and Disposition (see DESIGN.md) ---
 
   /**

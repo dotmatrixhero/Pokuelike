@@ -1898,3 +1898,58 @@ not something this pathfinding pass itself caused or is positioned to fix.
       `CORPSE_PERSIST_TICKS` window already lets multiple agents feed from
       the same corpse across separate ticks, which was judged enough for the
       direct "alternative to a risky hunt" ask.
+
+## Tile preference: satisfied idle agents drift toward their species' terrain — built, see DESIGN.md
+
+- [x] Direct ask, verbatim: "Like tile pref. Like bulbasaur should strongly
+      prefer flora tiles. Squirtle should prefer water. If their needs are
+      met." A new `SpeciesDef.preferredTerrain?: TerrainKind[]` field
+      (denormalized onto `Agent.preferredTerrain` at spawn/birth, same
+      three-hop pattern as `activityPattern`/`buildsShelter`), consulted
+      inside `needs.ts`'s existing idle-wander extension point
+      (`applyExploration`) ahead of its pre-existing random-unvisited-tile
+      search: a tagged, satisfied agent heads toward its nearest matching
+      terrain instead of a uniformly random nearby spot, and goes fully idle
+      (no wander at all) once already lingering near it. An untagged
+      species, or a tagged one with nothing reachable, falls straight
+      through to the original random-wander behavior, unchanged. Roster
+      tagging: bulbasaur/venusaur -> flora, squirtle -> water, charmander/
+      mankey -> sunbeam, scyther -> bush, geodude/growlithe -> boulder;
+      diglett/sandshrew/pidgey/spearow/onix deliberately left untagged
+      (underground/canopy are flat, terrain-uniform grids — nothing
+      meaningful to prefer among, see DESIGN.md's point 5 for the full
+      per-species reasoning).
+- [x] `resourceIndex.ts`'s `IndexedTerrain` extended with `"flora"`
+      (justified the same way `"shelter"` was — 2+ real consumers); a
+      preference kind tagged by only one species (`"bush"`, `"boulder"`)
+      uses a new bounded local scan instead of extending the global index
+      further. 7 new engine tests, 688 total, all passing including the
+      unmodified determinism acceptance suite — zero new rng call sites
+      added (the preference lookup is a pure deterministic nearest-tile
+      search).
+- [x] Real 3000-tick, 3-seed (42/7/20260903) feature-on/feature-off A/B via
+      an isolated instrumented script: average distance from a tagged
+      agent to its nearest preferred tile dropped on ON vs OFF across all
+      3 seeds overall (3.70->2.96, 3.20->3.07, 4.92->3.43), and
+      consistently for Bulbasaur specifically (the brief's own named
+      example: 3.06->2.32, 3.10->2.66, 4.77->3.35) — see DESIGN.md for the
+      full per-species table and the honest Venusaur-is-mixed caveat (herd
+      cohesion dominates tile preference for the roster's almost-always-
+      solo guardian).
+- [ ] **Real follow-up, not built**: "we could add more tile types" (the
+      brief's own explicitly optional, vague half). Nothing cheap and
+      obviously missing presented itself for the *current* roster — every
+      species with a real flavor-text terrain affinity already maps onto
+      an existing `TerrainKind`. The one real idea worth flagging: a real
+      "burrow"/underground-den terrain kind distinct from plain `"floor"`,
+      giving Diglett/Sandshrew a genuine tile preference of their own
+      instead of relying solely on `buildsShelter`'s homing pull — would
+      require generating real terrain variance into `worldgen.ts`'s
+      currently-flat underground grid, its own real design decision with
+      its own validation burden. Not attempted this session.
+- [ ] **Real follow-up, not built**: Venusaur's mixed A/B result (worse on
+      1 of 3 seeds, essentially flat/better on the other 2) traced to herd
+      cohesion (`applyHerdCohesion`, checked before `applyExploration`)
+      dominating tile preference for a species that's almost always alone
+      in guardian position — not a bug, but worth a closer look if herd
+      cohesion and tile preference priority are ever revisited together.

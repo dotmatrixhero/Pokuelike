@@ -276,10 +276,18 @@ describe("old-age mortality", () => {
   });
 });
 
+// Below `SHELTER_COMFORT_THRESHOLD` (0.85) but well above `chooseBehavior`'s
+// 0.7 urgency cutoff — "idle enough to explore" without also being
+// "comfortable enough to trigger shelter-building" (universal now, per
+// shelter.ts's doc comment, so a plain fully-satisfied `makeAgent` fixture
+// would otherwise nondeterministically divert into building a shelter
+// instead of exploring, depending on `pickBuildSite`'s unseeded rng roll).
+const EXPLORE_NOT_SHELTER_NEEDS = { hunger: 0.8, thirst: 0.8 };
+
 describe("exp-motivated exploration", () => {
   it("a fully-satisfied idle agent in a large world wanders toward unexplored territory instead of standing still", () => {
     const world = createWorld(40, 40);
-    const agent = makeAgent({ pos: { x: 20, y: 20 } });
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
     tickAgent(world, agent);
 
@@ -289,7 +297,7 @@ describe("exp-motivated exploration", () => {
 
   it("keeps walking toward the same exploreTarget across multiple ticks rather than re-rolling every tick", () => {
     const world = createWorld(40, 40);
-    const agent = makeAgent({ pos: { x: 20, y: 20 } });
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
     tickAgent(world, agent);
     const target = agent.exploreTarget;
@@ -303,7 +311,7 @@ describe("exp-motivated exploration", () => {
   it("an urgent need interrupts an in-progress exploration walk", () => {
     const world = createWorld(40, 40);
     setTile(world, "surface", 0, 0, "water");
-    const agent = makeAgent({ pos: { x: 20, y: 20 } });
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
     tickAgent(world, agent);
     expect(agent.behavior).toBe("explore");
@@ -323,6 +331,94 @@ describe("exp-motivated exploration", () => {
 
     expect(agent.behavior).toBe("idle");
     expect(agent.pos).toEqual({ x: 1, y: 1 });
+  });
+});
+
+describe("tile preference (Agent.preferredTerrain, applyExploration)", () => {
+  it("a satisfied agent with a tagged flora preference heads toward the nearest flora tile instead of a random unvisited one", () => {
+    const world = createWorld(40, 40);
+    // Only one flora tile anywhere on the map — deterministic single target,
+    // no reliance on rng at all for this path.
+    setTile(world, "surface", 35, 20, "flora");
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["flora"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
+
+    tickAgent(world, agent);
+
+    expect(agent.behavior).toBe("explore");
+    expect(agent.exploreTarget).toEqual({ x: 35, y: 20 });
+    // Actually moved toward it this tick, not just picked a target and stalled.
+    expect(agent.pos.x).toBeGreaterThan(20);
+  });
+
+  it("a satisfied agent with a tagged water preference heads toward water, not wherever ordinary random exploration would otherwise go", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 5, 20, "water");
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["water"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
+
+    tickAgent(world, agent);
+
+    expect(agent.exploreTarget).toEqual({ x: 5, y: 20 });
+    expect(agent.pos.x).toBeLessThan(20);
+  });
+
+  it("an agent already lingering near its preferred terrain stays idle instead of wandering off to a new spot", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 21, 20, "flora"); // 1 tile away, inside the "already satisfied" radius
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["flora"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
+
+    tickAgent(world, agent);
+
+    expect(agent.behavior).toBe("idle");
+    expect(agent.pos).toEqual({ x: 20, y: 20 });
+    expect(agent.exploreTarget).toBeUndefined();
+  });
+
+  it("falls back to a bounded local scan for a preference kind outside the cheap resource index (e.g. boulder)", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 25, 20, "boulder");
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["boulder"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
+
+    tickAgent(world, agent);
+
+    expect(agent.exploreTarget).toEqual({ x: 25, y: 20 });
+  });
+
+  it("tries preferred terrain kinds in order, falling through to the next when the first has no reachable tile anywhere", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 30, 20, "water"); // no "flora" placed anywhere on this map
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["flora", "water"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
+
+    tickAgent(world, agent);
+
+    expect(agent.exploreTarget).toEqual({ x: 30, y: 20 });
+  });
+
+  it("an agent with no tagged preference is completely unaffected — same random-wander behavior as before this feature", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 35, 20, "flora"); // present on the map, but this agent isn't tagged to care
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) }); // no preferredTerrain
+
+    vi.spyOn(Math, "random").mockReturnValue(0); // deterministic: findNearbyUnvisitedTile's first roll always lands top-left of the search box
+
+    tickAgent(world, agent);
+
+    expect(agent.behavior).toBe("explore");
+    // Never even looks at the flora tile — target is the ordinary
+    // rng-driven unvisited-sector pick, not the flora tile placed above.
+    expect(agent.exploreTarget).not.toEqual({ x: 35, y: 20 });
+  });
+
+  it("rng-determinism: the preference-driven wander consumes no rng and is byte-identical across two independent runs from the same state", () => {
+    function run(): { pos: Agent["pos"]; target: Agent["exploreTarget"] } {
+      const world = createWorld(40, 40);
+      setTile(world, "surface", 35, 20, "flora");
+      const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["flora"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
+      tickAgent(world, agent);
+      return { pos: agent.pos, target: agent.exploreTarget };
+    }
+    const first = run();
+    const second = run();
+    expect(second).toEqual(first);
   });
 });
 

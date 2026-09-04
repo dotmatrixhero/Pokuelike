@@ -226,6 +226,11 @@ function computeProfileFromDexEntry(speciesId: string): LevelingProfile | undefi
     // for `activityPattern` (see `Agent.activityPattern`'s doc comment) —
     // not a new gap, an existing one this feature doesn't attempt to close.
     buildsShelter: SPECIES[speciesId.toLowerCase()]?.buildsShelter,
+    // Same "denormalized at spawn, doesn't follow evolution" scope as
+    // `buildsShelter` immediately above — a newborn's tile preference comes
+    // from its own (base-form) species entry, not whatever it might later
+    // evolve into.
+    preferredTerrain: SPECIES[speciesId.toLowerCase()]?.preferredTerrain,
     // Level-gated evolutions only — item/trade/friendship evolutions are
     // explicitly deferred, see DESIGN.md. Real bug caught while adding Onix:
     // `level` alone isn't sufficient — PokeRogue's dex stamps a `level: 1`

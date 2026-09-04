@@ -1,4 +1,4 @@
-import type { Agent, BehaviorKind, HuntRules, Layer, Needs, Vec2, World } from "./types.js";
+import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Vec2, World } from "./types.js";
 import { otherLayers, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
@@ -31,7 +31,7 @@ import {
   type LevelingContext,
 } from "./leveling.js";
 import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
-import { findNearestIndexed } from "./resourceIndex.js";
+import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
 import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict } from "./herdConflict.js";
 import { thirstDecayMultiplier } from "./weather.js";
@@ -264,6 +264,73 @@ function findNearbyUnvisitedTile(world: World, agent: Agent, rng: () => number):
 }
 
 /**
+ * Terrain kinds resourceIndex.ts's cheap index tracks — a preference in this
+ * set gets the same O(matching tiles) `findNearestIndexed` lookup as an
+ * ordinary food/water search. A preference kind outside this set (currently
+ * "bush"/"boulder", each tagged by only a single roster species so far — see
+ * DESIGN.md's "Tile preference" section) falls back to
+ * `findNearestPreferredLocal`'s bounded scan instead of extending the global
+ * index for one consumer.
+ */
+const INDEXED_PREFERENCE_KINDS: ReadonlySet<TerrainKind> = new Set(["water", "food", "sunbeam", "flora"]);
+
+/**
+ * Bounded local scan for a preferred terrain kind that isn't in
+ * resourceIndex.ts's cheap index. Same shape as `findNearbyUnvisitedTile`'s
+ * "cheap, local, not a full-grid scan" standard, but exhaustive within its
+ * radius (rather than a handful of random tries) since this is a real
+ * destination search, not a curiosity roll.
+ */
+const PREFERRED_TERRAIN_LOCAL_SCAN_RADIUS = 12;
+
+function findNearestPreferredLocal(world: World, agent: Agent, terrain: TerrainKind): Vec2 | undefined {
+  let best: Vec2 | undefined;
+  let bestDist = Infinity;
+  const r = PREFERRED_TERRAIN_LOCAL_SCAN_RADIUS;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const x = agent.pos.x + dx;
+      const y = agent.pos.y + dy;
+      if (tileAt(world, agent.layer, x, y)?.terrain !== terrain) continue;
+      const dist = Math.abs(dx) + Math.abs(dy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = { x, y };
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Close enough to a preferred-terrain tile that lingering here already
+ * satisfies the preference — no need to path the last step or two onto the
+ * exact tile. Small and deliberate: this is "hang out near the flora patch,"
+ * not "always be standing exactly on a flora tile."
+ */
+const PREFERRED_TERRAIN_SATISFIED_RADIUS = 2;
+
+/**
+ * "arrived": the agent is already within `PREFERRED_TERRAIN_SATISFIED_RADIUS`
+ * of a matching tile — content, no wander needed this tick. `Vec2`: a real
+ * destination to head toward. `undefined`: no `preferredTerrain` tagged, or
+ * none of the tagged kinds exist anywhere reachable — caller should fall
+ * back to ordinary exploration.
+ */
+function locatePreferredTerrain(world: World, agent: Agent): "arrived" | Vec2 | undefined {
+  const prefs = agent.preferredTerrain;
+  if (!prefs || prefs.length === 0) return undefined;
+  for (const terrain of prefs) {
+    const pos = INDEXED_PREFERENCE_KINDS.has(terrain)
+      ? findNearestIndexed(world, agent.layer, agent.pos, terrain as IndexedTerrain)
+      : findNearestPreferredLocal(world, agent, terrain);
+    if (!pos) continue;
+    return manhattan(agent.pos, pos) <= PREFERRED_TERRAIN_SATISFIED_RADIUS ? "arrived" : pos;
+  }
+  return undefined;
+}
+
+/**
  * Called only once an agent is otherwise fully idle (no urgent need, no
  * herd pull-back needed) — instead of just standing on the last tile it
  * ate/drank at forever, it wanders toward nearby unexplored territory,
@@ -275,12 +342,28 @@ function findNearbyUnvisitedTile(world: World, agent: Agent, rng: () => number):
  * stacking section. A no-op (stays idle) if nothing new is reachable
  * nearby right now — exploring is optional flavor, not another need that
  * can starve.
+ *
+ * Tile preference (see DESIGN.md's "Tile preference" section) is checked
+ * FIRST, ahead of the unvisited-sector wander: a `preferredTerrain`-tagged
+ * species that's already lingering near its preferred terrain kind is
+ * content and skips wandering entirely this tick (the `"arrived"` case);
+ * one that isn't heads there instead of a uniformly random nearby spot. Only
+ * an untagged species, or a tagged one with no matching tile reachable at
+ * all, falls through to the pre-existing random-wander behavior — so this
+ * is a strict, additive extension, not a replacement: nothing changes for
+ * any species that was never tagged. Deliberately checked fresh every time
+ * `agent.exploreTarget` is empty (same as the unvisited-tile search below),
+ * never persisted as its own separate commitment field — a preference-
+ * driven wander is exactly as droppable by an urgent need as ordinary
+ * exploration already is, since both live in the same `exploreTarget`.
  */
 function applyExploration(world: World, agent: Agent, log: EventLog | undefined, rng: () => number): void {
   if (agent.age !== undefined && agent.age < MIN_EXPLORE_AGE) return;
 
   if (!agent.exploreTarget) {
-    agent.exploreTarget = findNearbyUnvisitedTile(world, agent, rng);
+    const preferred = locatePreferredTerrain(world, agent);
+    if (preferred === "arrived") return;
+    agent.exploreTarget = preferred ?? findNearbyUnvisitedTile(world, agent, rng);
     if (!agent.exploreTarget) return;
   }
 
