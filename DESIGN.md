@@ -3670,7 +3670,131 @@ meaningfully. Report findings honestly either way, per this project's
 standing rule — don't claim a mechanic "works" without a real run showing
 it firing.
 
-## Current state of the code
+### Built, and real-run findings
+
+All three pieces built as specified above, with a couple of implementation
+choices the design left open, resolved here:
+
+- **Dispersal pause**: `needs.ts`'s dispersal block now mirrors
+  shelter-building's exact `if (agent.dispersalTarget) { if
+  (chooseBehavior(agent.needs) === "idle") { applyDispersal(...); return; }
+  }` shape (both the already-in-progress branch and the just-triggered
+  branch this same tick), leaving `agent.dispersalTarget` untouched while
+  paused. `maybeTriggerDispersal`'s own trigger conditions are untouched.
+- **Thirst grace**: `DECAY_PER_TICK.thirst` is `0.010`,
+  `THIRST_STARVATION_GRACE_TICKS = 150` (hunger's `STARVATION_GRACE_TICKS`
+  stays 100). Hunger and thirst now each get their **own** consecutive-
+  zero-ticks counter (`Agent.starvationTicks` for hunger,
+  `Agent.thirstStarvationTicks`, new, for thirst) rather than one shared
+  counter — the original shared counter couldn't correctly judge two
+  different grace thresholds once hunger and thirst can cross 0 at
+  different ticks. A tie (both thresholds crossed the same tick) still
+  reports `cause: "hunger"`, matching the pre-existing tie-breaking
+  convention.
+- **Sleep**: `ENERGY_SLEEP_THRESHOLD = 0.3` (energy decays at 0.005/tick,
+  so ~140 ticks from full rest to the threshold — reachable within a normal
+  run, not vanishingly rare, confirmed below).
+  `SLEEP_NEEDS_DECAY_MULTIPLIER = 0.15`, `SLEEP_ENERGY_RESTORE_RATE = 0.02`
+  (4x the awake drain rate), `SLEEP_HEAL_MULTIPLIER = 3`,
+  `SLEEP_COOLDOWN_TICKS = 2` (double-speed cooldown recovery),
+  `LONG_SLEEP_EXP_TICKS = 200` with `LONG_SLEEP_EXP_BONUS = 25` (same order
+  of magnitude as `EXP_ON_NEW_SECTOR`). The falling-asleep threat check uses
+  the simpler exported primitives (`agentsWithin` + `isHunterSpecies` +
+  `FLEE_DETECT_RADIUS`, wrapped as predation.ts's new `hasNearbyThreat`) —
+  deliberately not the boldness-tuned `effectiveFleeRadius`/concealment-aware
+  `isDetectable`, which stay private — since "is anything dangerous in the
+  area at all" doesn't need that individual nuance the way an active
+  flee/fight decision does. A new `SLEEP_WATCH_RADIUS = 5` (predation.ts)
+  governs the "awake herd-mate close enough to notice and rouse a sleeper"
+  check (`hasAwakeHerdmateNearby`, also newly exported). The long-sleep exp
+  bonus is granted as a direct threshold-crossing check inside
+  `tickAgentNeeds` itself (both the increment and the grant happen in the
+  same function) rather than a separate one-shot flag consumed by another
+  module — `pendingLevelDispersalCheck`'s flag indirection exists because
+  its trigger (leveling.ts) and consumer (dispersal.ts) are different
+  modules; here they're the same call, so the extra field would be pure
+  overhead. `applyPredationInstincts`'s three self-defense branches
+  (critically-hurt flee, general threat flee/mob, hunt-for-food) are each
+  guarded with `!agent.asleep`; the guardian-intervention branch is
+  deliberately unguarded and clears the guardian's own `asleep`/`sleepTicks`
+  the moment it actually fires.
+
+**Real-run findings (seed 42, 2000 ticks via `packages/runner`, same demo
+scenario, compared against the pre-feature code on the same seed/tick
+count — a real A/B, not a guess):**
+
+| Metric | Before (old code) | After (this feature) |
+|---|---|---|
+| Total starvation deaths | 109 | **30** |
+| — of which hunger | 27 | 7 |
+| — of which thirst | 82 | **23** |
+| Completed dispersals (`dispersed` events) | 12 | 3 |
+| Final population (alive at tick 2000) | 365 | 443 |
+
+Thirst deaths dropped ~72% (82 → 23) and total starvation deaths dropped
+~72% (109 → 30) on an identical seed and tick count — the dispersal-pause
+fix plus the longer thirst grace period together deliver exactly the
+"agents dying of thirst standing next to water" fix this section set out to
+make, confirmed with real numbers, not just unit tests. Final population
+rose from 365 to 443 (+21%), consistent with meaningfully fewer deaths.
+`dispersed` (completed dispersals) dropped from 12 to 3 — expected, not a
+regression: a paused dispersal takes real extra wall-clock ticks to
+actually arrive (however many ticks it spends resolving hunger/thirst/mate-
+seeking along the way don't count toward the walk), so within the same
+fixed 2000-tick window, fewer dispersals finish arriving even though the
+*rate* of dispersals starting is unaffected — this is the intended
+trade-off (survival over speed of relocation), not evidence dispersal is
+somehow broken.
+
+Sleep genuinely fires, a lot: **268 `fellAsleep` events, 91 distinct
+individual agents** slept at least once over the 2000-tick run (seed 42) —
+DESIGN.md's flagged worry that `energy` might never realistically reach the
+threshold in a normal run length is **not** a problem in practice.
+Confirmed across four seeds (42, 7, 99, 123): `fellAsleep` fired between 21
+and 268 times depending on the seed's population size, always with 90%+ of
+sleep sessions ending via a `wokeUp` event before the run ended, and the
+average completed sleep session lasted 29-44 ticks (max observed: 183).
+
+**Two things did NOT fire in any of the four real runs tested, reported
+honestly per this project's standing rule rather than papered over:**
+- **`wokeUp` with `reason: "threatSpotted"` never fired** — every single
+  wake (254 of 254 in the seed-42 run, and 100% in the other three seeds
+  too) was `"urgentNeed"`. No sleeping agent was ever woken by a herd-mate
+  noticing a nearby threat.
+- **No predator ever landed a hit on a sleeping agent** (`Hits/Kills landed
+  on prey while it was asleep`, cross-referenced from `fellAsleep`/`wokeUp`
+  interval pairs against `fought`/`killed` event ticks in the same run):
+  zero in all four seeds.
+
+Root cause, investigated rather than assumed: this demo scenario's hunter
+population (`scyther`/`spearow`/`onix`) is small to begin with and dies out
+fast — 3 of the 4 test seeds ended the 2000-tick run with **zero living
+hunter-species agents at all** (the fourth had exactly 1). Predators aren't
+a new problem this feature introduced (their population dynamics are a
+pre-existing, separately-flagged concern — see TODO.md), but it does mean
+the specific window this feature needs (a predator within detection range
+of a *currently sleeping* prey, for the ~30-40 ticks a typical nap lasts)
+essentially never opened during real-run testing: predators are rare, sleep
+sessions are moderate-length, and the two just never lined up. The
+mechanism itself is directly, unit-tested (see sleep.test.ts's wake/sitting-
+duck/guardian tests) — this is an honest "not observed in real-scenario
+testing so far" gap, not a claim that the code path is unreachable or
+broken. A scenario deliberately stocked with a persistent, well-fed
+predator population (so it doesn't die out) alongside a sleep-prone prey
+herd would be the way to actually witness the threat-wakes-a-sleeper and
+predator-catches-a-sleeper paths outside a unit test.
+
+The long-sleep exp bonus (`longSleepBonus`) also never fired in any of the
+four real runs — `LONG_SLEEP_EXP_TICKS` (200) is comfortably above every
+real run's *observed* max sleep-session length (183, seed 99), so this
+reads as "the threshold is tuned a little high relative to how these demo
+agents actually sleep" rather than a broken mechanism (unit-tested directly
+in sleep.test.ts, firing exactly once at the threshold). Flagged in TODO.md
+as a tuning follow-up rather than silently lowered here without more real
+data on what a "typical long sleep" should look like once predator
+population dynamics are healthier.
+
+
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays
   needs, picks the most urgent one via simple utility scoring, and steps the

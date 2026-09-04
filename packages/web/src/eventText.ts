@@ -67,6 +67,12 @@ export function formatEvent(event: SimEvent): string {
       return `${event.species} (${event.agentId}) finished building a shelter at (${event.pos.x},${event.pos.y})`;
     case "shelterAbandoned":
       return `a shelter at (${event.pos.x},${event.pos.y}) was abandoned and fell into disrepair`;
+    case "fellAsleep":
+      return `${event.species} (${event.agentId}) fell asleep`;
+    case "wokeUp":
+      return `${event.species} (${event.agentId}) woke up (${event.reason === "urgentNeed" ? "hunger/thirst/mate drive" : "a threat was spotted"})`;
+    case "longSleepBonus":
+      return `${event.species} (${event.agentId}) got a long-sleep exp bonus (+${event.exp})`;
   }
 }
 
@@ -99,6 +105,8 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
   "weatherChanged",
   "gainedSkillPoint",
   "shelterAbandoned",
+  "fellAsleep",
+  "wokeUp",
 ]);
 
 export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {

@@ -204,7 +204,8 @@ export type BehaviorKind =
   | "carryAlly"
   | "explore"
   | "disperse"
-  | "buildShelter";
+  | "buildShelter"
+  | "sleep";
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
 export interface InventoryItem {
@@ -255,8 +256,25 @@ export interface Agent {
   ticksSinceMeal?: number;
   /** Where a "relocate" agent is walking to. Cleared on arrival or once it feeds again. */
   relocateTarget?: Vec2;
-  /** Ticks spent with hunger or thirst at 0 — dies once this exceeds a threshold. Resets whenever both recover above 0. */
+  /**
+   * Consecutive ticks spent with `hunger` at 0 — dies once this exceeds
+   * `needs.ts`'s `STARVATION_GRACE_TICKS`. Resets to 0 the instant hunger
+   * recovers above 0. Hunger-specific (not shared with thirst) since the two
+   * needs now have different grace periods — see `thirstStarvationTicks`
+   * below and needs.ts's "Extend thirst's survival margin" doc comment.
+   */
   starvationTicks?: number;
+  /**
+   * Thirst's own version of `starvationTicks` above — consecutive ticks
+   * spent with `thirst` at 0, dies once this exceeds `needs.ts`'s
+   * `THIRST_STARVATION_GRACE_TICKS` (longer than hunger's, closing most of
+   * the gap between the two needs' total survival budgets — see DESIGN.md).
+   * Tracked separately from `starvationTicks` precisely because hunger and
+   * thirst can independently cross 0 at different ticks with different
+   * grace windows; a single shared counter can't correctly judge "has THIS
+   * need's own grace period run out" once the two thresholds differ.
+   */
+  thirstStarvationTicks?: number;
   /** Ticks a non-predator has spent wanting food/water with none reachable anywhere — drives migrating away once too high. */
   ticksWithoutResource?: number;
   /**
@@ -509,6 +527,34 @@ export interface Agent {
    * `agent.pos` matches `shelterTarget`; absent/0 while still traveling.
    */
   shelterBuildTicks?: number;
+
+  // --- Sleep (see DESIGN.md's "Sleep" section, needs.ts/predation.ts) ---
+
+  /**
+   * True while this agent is genuinely asleep — a real vulnerable-rest
+   * state, not just an idle animation label (`behavior === "sleep"` gets
+   * overwritten most ticks like every other `behavior` value, so this is
+   * the actual progress/state field, mirroring how `dispersalTarget`/
+   * `shelterTarget` are the real state behind `"disperse"`/`"buildShelter"`).
+   * While true, `applyPredationInstincts` (predation.ts) skips this agent's
+   * own self-defense branches entirely — it will not flee, mob, or hunt on
+   * its own initiative — and needs.ts's `tickAgentAction` skips its normal
+   * behavior for the tick unless a wake condition fires (see needs.ts's
+   * sleep block doc comment). A sleeping agent can still be the *target* of
+   * an attack, a rescue, or a guardian's intervention.
+   */
+  asleep?: boolean;
+  /**
+   * Consecutive ticks spent asleep — increments in `tickAgentNeeds` while
+   * `asleep` is true, resets to 0 the instant the agent wakes (either wake
+   * condition). Crossing `needs.ts`'s `LONG_SLEEP_EXP_TICKS` grants a
+   * one-time exp bonus for that sleep session (detected as a threshold
+   * crossing in the same place it's incremented, so no separate one-shot
+   * flag is needed the way `pendingLevelDispersalCheck` needs one — that
+   * flag exists because its trigger and its consumer live in different
+   * modules; here both happen in the same `tickAgentNeeds` call).
+   */
+  sleepTicks?: number;
 }
 
 /**

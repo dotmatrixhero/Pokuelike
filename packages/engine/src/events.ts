@@ -268,6 +268,30 @@ export type SimEvent =
       tick: number;
       layer: Layer;
       pos: Vec2;
+    }
+  | {
+      kind: "fellAsleep";
+      tick: number;
+      agentId: string;
+      species: string;
+      pos: Vec2;
+    }
+  | {
+      kind: "wokeUp";
+      tick: number;
+      agentId: string;
+      species: string;
+      pos: Vec2;
+      /** Why this agent woke — an urgent need jumping the queue, or a threat noticed by a nearby watcher. See needs.ts's sleep wake check. */
+      reason: "urgentNeed" | "threatSpotted";
+    }
+  | {
+      kind: "longSleepBonus";
+      tick: number;
+      agentId: string;
+      species: string;
+      pos: Vec2;
+      exp: number;
     };
 
 /**

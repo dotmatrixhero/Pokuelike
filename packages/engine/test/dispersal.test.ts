@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createWorld } from "../src/world.js";
-import { createNeeds } from "../src/needs.js";
+import { createNeeds, tickAgentAction } from "../src/needs.js";
 import { tickWorld } from "../src/simulation.js";
 import { EventLog } from "../src/events.js";
 import {
@@ -282,6 +282,55 @@ describe("applyDispersal: real relocation and herd join-or-found", () => {
     expect(a.herdId).toBeDefined();
     expect(b.herdId).toBeDefined();
     expect(a.herdId).not.toBe(b.herdId);
+  });
+});
+
+describe("dispersal pauses for urgent needs (needs.ts's tickAgentAction)", () => {
+  it("does not continue an in-progress dispersal (no movement toward the target) while the agent's needs are urgent, but resumes once satisfied again, without losing dispersalTarget", () => {
+    const world = createWorld(50, 50);
+    const a = agent("thirsty-disperser", {
+      pos: { x: 25, y: 25 },
+      dispersalTarget: { x: 25, y: 40 },
+      dispersalReason: "matured",
+      needs: createNeeds({ thirst: 0.05 }), // urgent — chooseBehavior reads "seekWater", not "idle"
+    });
+    world.agents.push(a);
+    const originalTarget = { ...a.dispersalTarget! };
+
+    tickAgentAction(world, a);
+
+    // Paused: no step toward the dispersal target, target untouched, and the
+    // agent's behavior reflects the urgent need it's actually acting on
+    // instead (there's no water on this bare world, so it can't actually
+    // drink, but it must not be walking the dispersal route either).
+    expect(a.pos).toEqual({ x: 25, y: 25 });
+    expect(a.dispersalTarget).toEqual(originalTarget);
+    expect(a.behavior).not.toBe("disperse");
+
+    // Satisfied again — the walk resumes exactly where it left off.
+    a.needs.thirst = 1;
+    tickAgentAction(world, a);
+
+    expect(a.behavior).toBe("disperse");
+    expect(a.pos.y).toBeGreaterThan(25); // stepped toward the still-intact target
+    expect(a.dispersalTarget).toEqual(originalTarget);
+  });
+
+  it("a fresh trigger this same tick is also paused immediately if the agent is simultaneously urgent (edge case, doesn't crash or lose the new target)", () => {
+    const world = createWorld(200, 200);
+    const a = agent("just-triggered", {
+      age: 500,
+      level: DISPERSAL_MIN_LEVEL,
+      pendingLevelDispersalCheck: true,
+      needs: createNeeds({ hunger: 0.05 }), // urgent
+    });
+    world.agents.push(a);
+    const alwaysZero = () => 0; // guarantees trigger 1's roll succeeds
+
+    tickAgentAction(world, a, undefined, undefined, undefined, alwaysZero);
+
+    expect(a.dispersalTarget).toBeDefined(); // triggered...
+    expect(a.behavior).not.toBe("disperse"); // ...but paused before taking a single step this tick
   });
 });
 

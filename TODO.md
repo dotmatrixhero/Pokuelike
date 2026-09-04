@@ -1150,3 +1150,54 @@ both sides are far enough along that there's something real to reconcile.
       messily-committed branch (34 unique commits, terse/non-descriptive
       messages) — neither looks relevant to reconcile against, flagging
       only so it's not mistaken for something that needs attention later.
+
+## Urgency-based need priority, extended thirst margin, and sleep — built, tuning follow-ups
+
+- [ ] **`LONG_SLEEP_EXP_TICKS` (200) reads a little high relative to real
+      sleep-session lengths** — a real seed-42 (and 3 other seeds') run
+      never saw a completed sleep session longer than 183 ticks, so the
+      long-sleep exp bonus never actually fired in any of the four real
+      runs tested (confirmed firing correctly, exactly once, in
+      sleep.test.ts's unit test). Worth revisiting once predator population
+      dynamics (see the bullet below) are healthier and agents have more
+      reason to sleep longer/more often — lowering the threshold now, with
+      only unit-test data to go on, risks tuning against the wrong signal.
+- [ ] **Sleep's two "danger" paths (a watcher waking a sleeper, a predator
+      catching a sleeper) were never observed in real-run testing** across
+      four seeds (42, 7, 99, 123) at 2000 ticks each — every single wake
+      was the `urgentNeed` path, zero `threatSpotted` wakes, zero hits/kills
+      landed on a sleeping agent. Root cause investigated, not assumed:
+      3 of 4 seeds ended their run with zero living hunter-species agents
+      at all (the pre-existing predator-population problem below), so the
+      "predator within detection range of a currently-sleeping prey" window
+      this needs essentially never opened. Both mechanisms are directly
+      unit-tested (predation.ts's guard placement + needs.ts's wake logic —
+      see sleep.test.ts) and the code path is real, just unconfirmed
+      end-to-end in a real scenario. A dedicated small scenario (a
+      persistent, well-fed predator that doesn't die out, planted near a
+      sleep-prone herd) would be the way to actually witness it, the same
+      "targeted scenario, not just a longer demo run" approach this
+      project has used before (see the carrying/looting gap noted above).
+- [ ] **Predator (hunter-species) populations crash to near-extinction fast
+      in the demo scenario** — confirmed while investigating the bullet
+      above, not new to this feature: 3 of 4 test seeds had zero living
+      `scyther`/`spearow`/`onix` agents by tick 2000, the fourth had
+      exactly 1. Pre-existing population-dynamics territory (see the
+      exploding-Bulbasaur/Venusaur growth findings and the unbounded-
+      population performance notes elsewhere in this file/DESIGN.md), not
+      something this feature caused, but it does mean any future
+      predator-dependent feature (this one included) needs a genuinely
+      sustainable predator population to actually exercise in a real run,
+      not just a longer tick count.
+- [ ] **Dispersal's pause-on-urgent-need fix real-run numbers (seed 42,
+      2000 ticks, A/B against the pre-feature code on the same seed): total
+      starvation deaths dropped 109 -> 30 (thirst deaths 82 -> 23, hunger
+      27 -> 7), final population rose 365 -> 443.** Confirms the diagnosed
+      root cause (dispersal blocking hunger/thirst/mate-seeking for its
+      whole multi-hundred-tick walk) was real and the fix closes most of
+      the gap. One honest side effect worth tracking: completed `dispersed`
+      events dropped 12 -> 3 in the same window — expected (a paused
+      dispersal takes more real ticks to actually arrive, so fewer finish
+      within a fixed window), not a regression, but worth knowing if a
+      later feature wants to reason about "how many dispersals typically
+      complete in N ticks."

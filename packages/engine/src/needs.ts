@@ -1,7 +1,7 @@
 import type { Agent, BehaviorKind, HuntRules, Layer, Needs, Vec2, World } from "./types.js";
 import { otherLayers, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
-import { applyPredationInstincts, manhattan } from "./predation.js";
+import { applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT } from "./flora.js";
 import { tickCooldowns } from "./combat.js";
@@ -25,7 +25,13 @@ import { findNearestIndexed } from "./resourceIndex.js";
 import { thirstDecayMultiplier } from "./weather.js";
 
 const DECAY_PER_TICK = {
-  thirst: 0.015,
+  /**
+   * Extended from the original 0.015 — see "Extend thirst's survival
+   * margin" in DESIGN.md. At 0.010, thirst empties in ~100 ticks (was ~67),
+   * closing most of the gap with hunger's own (much longer, exponential)
+   * budget without touching thirst's deliberately-kept-linear curve.
+   */
+  thirst: 0.01,
   energy: 0.005,
   mateDrive: 0.01,
 } as const;
@@ -49,8 +55,24 @@ const DECAY_PER_TICK = {
 const HUNGER_DECAY_RATE = 0.012;
 const HUNGER_DECAY_FLOOR = 0.001;
 
-/** Ticks an agent can sit at 0 hunger or thirst before it dies of it. */
+/** Ticks an agent can sit at 0 hunger before it dies of it. */
 const STARVATION_GRACE_TICKS = 100;
+/**
+ * Thirst's own, longer, grace period — see "Extend thirst's survival
+ * margin" in DESIGN.md. Hunger's full curve (exponential decay of the
+ * remaining value, see `HUNGER_DECAY_RATE`'s doc comment) takes ~213 ticks
+ * to empty, then 100 more before death — ~313 total. Thirst's flat rate now
+ * empties in ~100 ticks (`DECAY_PER_TICK.thirst`); giving it the same 100
+ * grace period would leave its total survival budget (~200 ticks) at barely
+ * two thirds of hunger's, for no principled reason. 150 brings it to ~250,
+ * closing most of that gap without touching hunger's own curve or thirst's
+ * deliberate linearity. Tracked independently of `STARVATION_GRACE_TICKS`
+ * via `Agent.thirstStarvationTicks` (a separate counter from
+ * `Agent.starvationTicks`) since hunger and thirst can cross 0 at different
+ * ticks — a single shared counter can't correctly judge two different
+ * thresholds.
+ */
+const THIRST_STARVATION_GRACE_TICKS = 150;
 /**
  * Age (ticks) at which old-age mortality starts being possible at all. A
  * single global constant for now, same call as `MATURITY_AGE` above — real
@@ -80,6 +102,61 @@ export function ageMortalityChance(age: number): number {
 }
 /** Ticks a non-predator can go wanting food/water with none reachable anywhere before it gives up and migrates. */
 const MIGRATE_AFTER_TICKS = 150;
+
+/**
+ * Sleep — see DESIGN.md's "Sleep: a real vulnerable-rest state" section.
+ * `Needs.energy` decays at `DECAY_PER_TICK.energy` (0.005/tick), so a fully
+ * rested (1.0) agent that never sleeps takes ~140 ticks to fall below this
+ * threshold — a real, reachable-within-a-normal-run floor (not so low it
+ * almost never fires), while still comfortably below `chooseBehavior`'s
+ * urgency band so falling asleep never looks like an emergency reaction.
+ * Sim-original tuning guess, explicitly flagged in DESIGN.md as unconfirmed
+ * until a real run shows agents actually reaching it — see this feature's
+ * "Built, and real-run findings" writeup.
+ */
+export const ENERGY_SLEEP_THRESHOLD = 0.3;
+
+/**
+ * How much slower hunger/thirst drain while genuinely asleep — real cost to
+ * oversleeping (DESIGN.md's explicit ask: "dramatically reduced," not
+ * paused), not free. 0.15 means an asleep agent's hunger/thirst budget
+ * stretches to roughly 6-7x its awake rate — long enough that a multi-
+ * hundred-tick sleep doesn't quietly kill the sleeper of thirst, short
+ * enough that oversleeping still visibly costs something on a long enough
+ * nap. Sim-original tuning guess, judge against a real run.
+ */
+export const SLEEP_NEEDS_DECAY_MULTIPLIER = 0.15;
+
+/**
+ * How fast `energy` rises while asleep — 4x `DECAY_PER_TICK.energy`'s awake
+ * drain rate, so a full night's sleep is a real, visible recovery (a nap of
+ * a few hundred ticks meaningfully refills energy) without being instant.
+ */
+export const SLEEP_ENERGY_RESTORE_RATE = 0.02;
+
+/**
+ * Heal-over-time multiplier while asleep — support.ts's `applyHealOverTime`
+ * gets this on top of its existing flat rate, per DESIGN.md's "replenishes
+ * hp... more" ask. 3x is a real, noticeable difference from awake healing
+ * without being an instant full-heal nap.
+ */
+export const SLEEP_HEAL_MULTIPLIER = 3;
+
+/** Move-cooldown ticks (combat.ts's `tickCooldowns`) consumed per world tick while asleep — double speed, DESIGN.md's "pp" (cooldown) recovery ask. */
+export const SLEEP_COOLDOWN_TICKS = 2;
+
+/**
+ * Consecutive `sleepTicks` before a long, uninterrupted sleep grants a
+ * one-time exp bonus — DESIGN.md's "long sleep can give xp" ask. Set above
+ * a single ordinary nap's likely length (a sleep session this long means the
+ * agent found genuinely safe, sustained rest) so this reads as a real
+ * milestone, not something every nap trivially grants. Sim-original tuning
+ * guess, judge against a real run.
+ */
+export const LONG_SLEEP_EXP_TICKS = 200;
+
+/** One-time exp bonus granted at `LONG_SLEEP_EXP_TICKS` — same order of magnitude as leveling.ts's `EXP_ON_NEW_SECTOR` (20), a comparable "real milestone" reward. */
+export const LONG_SLEEP_EXP_BONUS = 25;
 
 /**
  * How far a fully-satisfied idle agent will look for a not-yet-visited
@@ -163,11 +240,24 @@ export function createNeeds(overrides: Partial<Needs> = {}): Needs {
  * drought raises it — see weather.ts's `thirstDecayMultiplier`), not a
  * replacement for the base rate. Every pre-existing caller that doesn't pass
  * it keeps decaying at exactly the original flat rate.
+ *
+ * `asleep` (default false) is the sleep mechanic's three needs-decay effects
+ * at once (DESIGN.md's "Sleep" section): while true, hunger and thirst decay
+ * are both further multiplied by `SLEEP_NEEDS_DECAY_MULTIPLIER` (composing
+ * with `thirstMultiplier` for thirst — a sleeping agent caught in a drought
+ * still gets some relief, just less), and `energy` rises
+ * (`SLEEP_ENERGY_RESTORE_RATE`) instead of falling. A single boolean rather
+ * than a third numeric multiplier parameter: sleep doesn't just scale
+ * energy's decay, it inverts its direction entirely, which a multiplier
+ * alone can't express.
  */
-export function decayNeeds(needs: Needs, thirstMultiplier = 1): void {
-  needs.hunger = Math.max(0, needs.hunger - (needs.hunger * HUNGER_DECAY_RATE + HUNGER_DECAY_FLOOR));
-  needs.thirst = Math.max(0, needs.thirst - DECAY_PER_TICK.thirst * thirstMultiplier);
-  needs.energy = Math.max(0, needs.energy - DECAY_PER_TICK.energy);
+export function decayNeeds(needs: Needs, thirstMultiplier = 1, asleep = false): void {
+  const needsMultiplier = asleep ? SLEEP_NEEDS_DECAY_MULTIPLIER : 1;
+  needs.hunger = Math.max(0, needs.hunger - (needs.hunger * HUNGER_DECAY_RATE + HUNGER_DECAY_FLOOR) * needsMultiplier);
+  needs.thirst = Math.max(0, needs.thirst - DECAY_PER_TICK.thirst * thirstMultiplier * needsMultiplier);
+  needs.energy = asleep
+    ? Math.min(1, needs.energy + SLEEP_ENERGY_RESTORE_RATE)
+    : Math.max(0, needs.energy - DECAY_PER_TICK.energy);
   needs.mateDrive = Math.min(1, needs.mateDrive + DECAY_PER_TICK.mateDrive);
 }
 
@@ -298,32 +388,74 @@ export function tickAgentNeeds(
 ): void {
   if (agent.alive === false) return;
   if (agent.age !== undefined) agent.age += 1;
-  tickCooldowns(agent);
+  tickCooldowns(agent, agent.asleep ? SLEEP_COOLDOWN_TICKS : 1);
   const thirstMultiplier = world ? thirstDecayMultiplier(world, agent.layer, agent.pos) : 1;
-  decayNeeds(agent.needs, thirstMultiplier);
+  decayNeeds(agent.needs, thirstMultiplier, agent.asleep === true);
 
-  if (world && (agent.needs.hunger <= 0 || agent.needs.thirst <= 0)) {
+  // Hunger and thirst each get their own consecutive-zero-ticks counter and
+  // their own grace threshold (`STARVATION_GRACE_TICKS` /
+  // `THIRST_STARVATION_GRACE_TICKS`) — a single shared counter can't
+  // correctly judge two different thresholds once hunger and thirst can
+  // independently cross 0 at different ticks (see `Agent.thirstStarvationTicks`'s
+  // doc comment).
+  if (world && agent.needs.hunger <= 0) {
     agent.starvationTicks = (agent.starvationTicks ?? 0) + 1;
-    if (agent.starvationTicks >= STARVATION_GRACE_TICKS) {
-      agent.alive = false;
-      agent.diedAtTick = world.tick;
+  } else {
+    agent.starvationTicks = 0;
+  }
+  if (world && agent.needs.thirst <= 0) {
+    agent.thirstStarvationTicks = (agent.thirstStarvationTicks ?? 0) + 1;
+  } else {
+    agent.thirstStarvationTicks = 0;
+  }
+
+  if (
+    world &&
+    ((agent.starvationTicks ?? 0) >= STARVATION_GRACE_TICKS ||
+      (agent.thirstStarvationTicks ?? 0) >= THIRST_STARVATION_GRACE_TICKS)
+  ) {
+    agent.alive = false;
+    agent.diedAtTick = world.tick;
+    log?.record({
+      kind: "starved",
+      tick: world.tick,
+      agentId: agent.id,
+      species: agent.species,
+      pos: agent.pos,
+      // Ties (both thresholds crossed the same tick) report hunger, matching
+      // this codebase's pre-existing convention for a tied cause.
+      cause: (agent.starvationTicks ?? 0) >= STARVATION_GRACE_TICKS ? "hunger" : "thirst",
+    });
+    return;
+  }
+
+  applyHealOverTime(agent, agent.asleep ? SLEEP_HEAL_MULTIPLIER : 1);
+  if (world) maybeRecoverFromFaint(agent, world, log);
+  if (world) grantExp(world, agent, EXP_TRICKLE_PER_TICK, ctx, log, rng);
+
+  // Long-sleep exp bonus (DESIGN.md's "long sleep can give xp" ask) — granted
+  // exactly once per sleep session, detected as a threshold crossing right
+  // here (both the increment and the grant happen in this same function, so
+  // no separate one-shot flag is needed the way `pendingLevelDispersalCheck`
+  // needs one for a trigger/consumer split across modules). `sleepTicks`
+  // itself resets to 0 on waking (needs.ts's `tickAgentAction` sleep block),
+  // so a later nap gets a fresh shot at the bonus rather than being
+  // permanently spent.
+  if (agent.asleep) {
+    const wasBelowThreshold = (agent.sleepTicks ?? 0) < LONG_SLEEP_EXP_TICKS;
+    agent.sleepTicks = (agent.sleepTicks ?? 0) + 1;
+    if (wasBelowThreshold && agent.sleepTicks >= LONG_SLEEP_EXP_TICKS && world) {
+      grantExp(world, agent, LONG_SLEEP_EXP_BONUS, ctx, log, rng);
       log?.record({
-        kind: "starved",
+        kind: "longSleepBonus",
         tick: world.tick,
         agentId: agent.id,
         species: agent.species,
         pos: agent.pos,
-        cause: agent.needs.hunger <= 0 ? "hunger" : "thirst",
+        exp: LONG_SLEEP_EXP_BONUS,
       });
-      return;
     }
-  } else {
-    agent.starvationTicks = 0;
   }
-
-  applyHealOverTime(agent);
-  if (world) maybeRecoverFromFaint(agent, world, log);
-  if (world) grantExp(world, agent, EXP_TRICKLE_PER_TICK, ctx, log, rng);
 }
 
 /**
@@ -371,20 +503,36 @@ export function tickAgentAction(
   // Natal dispersal (dispersal.ts) — checked once per action tick for every
   // agent not already dispersing, ranked below survival/carrying/looting/
   // herd-support (those get first refusal, same as everything above) but
-  // ahead of ordinary needs-driven behavior: a triggered dispersal runs to
-  // completion rather than getting preempted by hunger/thirst/mate-seeking
-  // mid-walk, real risk-taking (a disperser can starve en route) rather than
-  // a safe background stat change. `maybeTriggerDispersal` itself is a no-op
-  // whenever `agent.dispersalTarget` is already set, so this never
-  // re-triggers a dispersal already in progress.
+  // ahead of ordinary needs-driven behavior. Direct instruction: "needs
+  // should be able to jump queue in priority, definitely based on urgency" —
+  // so an in-progress dispersal is PAUSABLE, the exact same shape
+  // shelter-building's own pause-on-urgent-need logic uses just below: it
+  // only continues (`applyDispersal`) while `chooseBehavior` still reads
+  // `"idle"`, and falls through to ordinary needs-driven behavior for as many
+  // ticks as it takes to resolve otherwise, without touching
+  // `agent.dispersalTarget` — the walk resumes exactly where it left off once
+  // the agent is satisfied again. This replaces an earlier "commits no matter
+  // what" version: a real run confirmed agents dying of thirst standing right
+  // next to water turned out to be exactly this dispersal side effect
+  // (overriding hunger/thirst/mate-seeking for the entire multi-hundred-tick
+  // walk), not a crowding or water-scarcity problem — see DESIGN.md's
+  // "Urgency-based need priority" section. `maybeTriggerDispersal`'s own
+  // trigger conditions (level gate, disposition-weighted roll, no-mates
+  // fallback timer) are untouched by this — it's still a no-op whenever
+  // `agent.dispersalTarget` is already set, so this never re-triggers a
+  // dispersal already in progress.
   if (agent.dispersalTarget) {
-    applyDispersal(world, agent, log);
-    return;
-  }
-  maybeTriggerDispersal(world, agent, log, rng);
-  if (agent.dispersalTarget) {
-    applyDispersal(world, agent, log);
-    return;
+    if (chooseBehavior(agent.needs) === "idle") {
+      applyDispersal(world, agent, log);
+      return;
+    }
+    // Paused, not abandoned — resumes on a later tick once satisfied again.
+  } else {
+    maybeTriggerDispersal(world, agent, log, rng);
+    if (agent.dispersalTarget && chooseBehavior(agent.needs) === "idle") {
+      applyDispersal(world, agent, log);
+      return;
+    }
   }
 
   // Shelter-building (shelter.ts) — deliberately NOT given dispersal's
@@ -418,6 +566,66 @@ export function tickAgentAction(
       applyShelterBuilding(world, agent, log);
       return;
     }
+  }
+
+  // Sleep (needs.ts + predation.ts) — DESIGN.md's "Sleep: a real
+  // vulnerable-rest state" section, verbatim ask: "lets add sleeping. make
+  // it so it replenishes hp and pp more, but you're sitting duck. sometimes
+  // herd protects each other and can wake each other up. hunger and thirst
+  // drain is dramatically reduced while sleeping. long sleep can give xp."
+  // Same tier as shelter-building/exploration: checked here, after
+  // survival/carrying/looting/herd-support/dispersal/shelter all get their
+  // existing first-refusal priority above.
+  //
+  // While asleep, checked fresh every action tick, the same "drop out the
+  // instant something wins priority" shape shelter/dispersal use above: two
+  // things wake the agent and let it fall through to ordinary behavior THIS
+  // SAME tick rather than wasting it — (1) an urgent need
+  // (`chooseBehavior(needs) !== "idle"`), sleep never lets an agent starve in
+  // its sleep, and (2) a threat within detection range AND an awake,
+  // conscious, same-herd watcher close enough to notice and rouse it (the
+  // "herd protects each other" ask) — deliberately not a random roll, same
+  // "chance emergent from real positioning, not an invented dice roll"
+  // approach `applyPredationInstincts`'s own mob-fighting already uses.
+  // (Note: `applyPredationInstincts` above already ran THIS tick with
+  // `agent.asleep` still true and skipped its self-defense branches — see its
+  // doc comment — so a wake here doesn't retroactively grant an in-tick
+  // flee/fight reaction; that begins on this agent's next action tick, now
+  // that `asleep` reads false. "Falls through to ordinary behavior" here
+  // means needs-seeking/exploring resumes immediately, not that the tick is
+  // wasted standing still.) Otherwise (safe, or a threat is near with no one
+  // to notice) the agent stays asleep and does nothing this tick at all — no
+  // movement, no attack, no flee — the "sitting duck" half.
+  if (agent.asleep) {
+    const urgentNeed = chooseBehavior(agent.needs) !== "idle";
+    const threatNearby = rules ? hasNearbyThreat(world, agent, rules) : false;
+    const watcherNearby = threatNearby && hasAwakeHerdmateNearby(world, agent);
+    if (urgentNeed || watcherNearby) {
+      agent.asleep = false;
+      agent.sleepTicks = 0;
+      log?.record({
+        kind: "wokeUp",
+        tick: world.tick,
+        agentId: agent.id,
+        species: agent.species,
+        pos: agent.pos,
+        reason: urgentNeed ? "urgentNeed" : "threatSpotted",
+      });
+      // Falls through to ordinary needs-driven behavior below.
+    } else {
+      return; // Sitting duck: no movement, attack, or flee while genuinely asleep.
+    }
+  } else if (
+    chooseBehavior(agent.needs) === "idle" &&
+    agent.needs.energy < ENERGY_SLEEP_THRESHOLD &&
+    !(rules && hasNearbyThreat(world, agent, rules))
+  ) {
+    agent.asleep = true;
+    agent.sleepTicks = 0;
+    logBehaviorChange(log, world, agent, "sleep");
+    agent.behavior = "sleep";
+    log?.record({ kind: "fellAsleep", tick: world.tick, agentId: agent.id, species: agent.species, pos: agent.pos });
+    return;
   }
 
   // Continue an in-progress exploration walk as long as nothing more urgent

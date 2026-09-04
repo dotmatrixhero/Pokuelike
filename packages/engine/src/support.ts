@@ -252,12 +252,19 @@ export function coldSnapSpeedMultiplier(world: World, layer: Layer, pos: Vec2): 
  * a fainted ally that can't feed itself. Belongs in the always-runs
  * needs-decay tick (needs.ts's `tickAgentNeeds`), not the action-gated one —
  * healing doesn't pause because an agent is too hurt to act.
+ *
+ * `multiplier` (default 1) composes multiplicatively with the flat per-tick
+ * rate — needs.ts's sleep effects pass a larger value ("replenishes hp...
+ * more" while asleep, per DESIGN.md's sleep section), the same optional-
+ * multiplier shape `decayNeeds`'s `thirstMultiplier` already uses. Every
+ * pre-existing caller that doesn't pass it heals at exactly the original
+ * flat rate.
  */
-export function applyHealOverTime(agent: Agent): void {
+export function applyHealOverTime(agent: Agent, multiplier = 1): void {
   if (agent.alive === false) return;
   if (agent.hp === undefined || agent.maxHp === undefined || agent.hp >= agent.maxHp) return;
   if (!isFedAndWatered(agent)) return;
-  agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * HEAL_PER_TICK_FRACTION);
+  agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * HEAL_PER_TICK_FRACTION * multiplier);
 }
 
 /**

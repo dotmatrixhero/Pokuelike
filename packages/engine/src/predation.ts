@@ -16,6 +16,19 @@ import { stormAccuracyMultiplier } from "./weather.js";
 const GUARDIAN_DETECT_RADIUS = 6;
 
 /**
+ * How close an awake, conscious, same-herd agent has to be to a SLEEPING
+ * agent to notice a nearby threat and rouse it — needs.ts's "herd protects
+ * and wakes each other" sleep mechanic. A bit tighter than
+ * `GUARDIAN_DETECT_RADIUS` (noticing your sleeping neighbor is in danger is
+ * a closer-range thing than a guardian actively patrolling for trouble) but
+ * still comfortably wider than `MOB_TRIGGER_RADIUS`, so a herd genuinely
+ * bunched up together (not just coincidentally adjacent) protects its
+ * sleepers. Sim-original tuning guess, judge against a real run like every
+ * other magic number in this codebase.
+ */
+export const SLEEP_WATCH_RADIUS = 5;
+
+/**
  * Exported so support.ts's `applyCarrying` can reuse the same "is a predator
  * nearby" check when deciding to drop a carried ally and flee. This is the
  * baseline at neutral (0.5) boldness — see `effectiveFleeRadius`, which is
@@ -217,6 +230,41 @@ export function agentsWithin(world: World, agent: Agent, radius: number): Agent[
       other.alive !== false &&
       other.layer === agent.layer &&
       manhattan(other.pos, agent.pos) <= radius
+  );
+}
+
+/**
+ * Is any hunter-flagged threat within `FLEE_DETECT_RADIUS` of `agent`? Used
+ * by needs.ts's sleep trigger/wake checks. Deliberately the simpler flat-
+ * radius primitive (`agentsWithin` + `isHunterSpecies` + the fixed
+ * `FLEE_DETECT_RADIUS`), not the boldness-tuned `effectiveFleeRadius` or the
+ * concealment-aware `isDetectable` this file keeps private — sleep's "is
+ * anything dangerous in the area at all" check doesn't need that individual
+ * nuance the way an active flee/fight decision does, so there's no reason to
+ * export those two just for this.
+ */
+export function hasNearbyThreat(world: World, agent: Agent, rules: HuntRules): boolean {
+  return agentsWithin(world, agent, FLEE_DETECT_RADIUS).some((other) => isHunterSpecies(rules, other.species, agent.species));
+}
+
+/**
+ * An awake, conscious, same-herd agent within `SLEEP_WATCH_RADIUS` of `agent`
+ * (the sleeper) — the "herd protects each other, can wake each other up"
+ * half of needs.ts's sleep mechanic. Fainted and already-asleep herd-mates
+ * don't count as watchers: they can't actually notice or act on a threat
+ * themselves right now.
+ */
+export function hasAwakeHerdmateNearby(world: World, agent: Agent): boolean {
+  if (!agent.herdId) return false;
+  return world.agents.some(
+    (other) =>
+      other.id !== agent.id &&
+      other.alive !== false &&
+      !other.fainted &&
+      !other.asleep &&
+      other.herdId === agent.herdId &&
+      other.layer === agent.layer &&
+      manhattan(other.pos, agent.pos) <= SLEEP_WATCH_RADIUS
   );
 }
 
@@ -524,6 +572,18 @@ function giveUpAndRelocate(world: World, agent: Agent, log: EventLog | undefined
  *
  * Returns true if this tick was handled here, so the caller should skip its
  * normal needs-driven behavior.
+ *
+ * `agent.asleep` (needs.ts's sleep mechanic) guards this function's
+ * self-defense branches specifically — the critically-hurt flee check right
+ * below, the general threats flee/mob block, and the hunt-for-food block
+ * near the bottom — since a genuinely sleeping agent is meant to be a
+ * sitting duck that won't flee or fight back on its own (DESIGN.md's "sleep:
+ * a real vulnerable-rest state" section). The guardian-intervention branch
+ * (a non-prey herd-mate defending a *different* endangered herd-mate) is
+ * deliberately NOT guarded: a guardian still notices and intercepts a threat
+ * to someone else even while it happens to be asleep itself, and firing that
+ * branch also clears the guardian's own `asleep` flag below, since actively
+ * moving to fight isn't consistent with still being asleep.
  */
 export function applyPredationInstincts(
   world: World,
@@ -533,7 +593,7 @@ export function applyPredationInstincts(
   ctx?: LevelingContext,
   rng: () => number = Math.random
 ): boolean {
-  if (isCriticallyHurt(agent)) {
+  if (!agent.asleep && isCriticallyHurt(agent)) {
     const attackers = agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter(
       (other) => other.behavior === "fight" && other.fightTarget === agent.id
     );
@@ -558,6 +618,12 @@ export function applyPredationInstincts(
       const threat = nearest(herdmate, herdmateThreats);
       if (threat) {
         const distance = manhattan(agent.pos, threat.pos);
+        // Actively fighting to defend a herd-mate isn't consistent with
+        // still being asleep — clears it even though this guardian branch
+        // fires regardless of `agent.asleep` (see this function's doc
+        // comment above).
+        agent.asleep = false;
+        agent.sleepTicks = 0;
         logBehaviorChange(log, world, agent, "fight");
         agent.behavior = "fight";
         agent.fightTarget = threat.id;
@@ -575,11 +641,15 @@ export function applyPredationInstincts(
   // treating it as the threat it was until it's truly dead, which is what lets
   // a mob land the finishing blow across multiple ticks/hits rather than the
   // predator's faint silently ending the encounter — see resolveHit/DESIGN.md.
-  const threats = agentsWithin(world, agent, effectiveFleeRadius(agent)).filter(
-    (other) =>
-      isHunterSpecies(rules, other.species, agent.species) &&
-      isDetectable(world, agent.pos, other, effectiveFleeRadius(agent))
-  );
+  // Skipped entirely while `agent.asleep` — a sleeping agent doesn't flee or
+  // mob on its own initiative, per this function's doc comment above.
+  const threats = agent.asleep
+    ? []
+    : agentsWithin(world, agent, effectiveFleeRadius(agent)).filter(
+        (other) =>
+          isHunterSpecies(rules, other.species, agent.species) &&
+          isDetectable(world, agent.pos, other, effectiveFleeRadius(agent))
+      );
   const threat = nearest(agent, threats);
   if (threat) {
     const distance = manhattan(agent.pos, threat.pos);
@@ -608,7 +678,9 @@ export function applyPredationInstincts(
     return true;
   }
 
-  if (rules[agent.species] && agent.needs.hunger < huntHungerThreshold(agent, world.tick)) {
+  // Also skipped while asleep — a sleeping predator doesn't hunt on its own
+  // initiative either, same reasoning as the flee/mob block above.
+  if (!agent.asleep && rules[agent.species] && agent.needs.hunger < huntHungerThreshold(agent, world.tick)) {
     const candidates = agentsWithin(world, agent, HUNT_DETECT_RADIUS).filter(
       (other) =>
         isPreyOf(rules, agent, other) &&

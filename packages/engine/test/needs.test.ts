@@ -174,8 +174,11 @@ describe("starvation", () => {
     const agent = makeAgent({ needs: createNeeds({ thirst: 0, hunger: 1 }) });
     const log = new EventLog();
 
-    // Keep hunger topped up so this test isolates thirst as the sole cause of death.
-    for (let i = 0; i < 100 && agent.alive !== false; i++) {
+    // Keep hunger topped up so this test isolates thirst as the sole cause of
+    // death. Thirst's own grace period (THIRST_STARVATION_GRACE_TICKS, 150)
+    // is longer than hunger's (100) — see the dedicated grace-period test
+    // below for the exact boundary.
+    for (let i = 0; i < 150 && agent.alive !== false; i++) {
       tickAgent(world, agent, log);
       agent.needs.hunger = 1;
     }
@@ -183,6 +186,26 @@ describe("starvation", () => {
     expect(log.events).toContainEqual(
       expect.objectContaining({ kind: "starved", agentId: "a1", cause: "thirst" })
     );
+  });
+
+  it("gives thirst its own, longer grace period — survives past the old 100-tick hunger threshold", () => {
+    const world = createWorld(3, 1);
+    // Thirst hits 0 immediately; hunger stays comfortably positive the whole
+    // time (kept topped up each tick) so this isolates thirst's own
+    // THIRST_STARVATION_GRACE_TICKS (150) from hunger's STARVATION_GRACE_TICKS
+    // (100) — confirms thirst does NOT die at the old shared 100-tick
+    // threshold, and DOES die once its own longer window actually runs out.
+    const agent = makeAgent({ needs: createNeeds({ thirst: 0, hunger: 1 }) });
+
+    for (let i = 0; i < 149; i++) {
+      tickAgent(world, agent);
+      agent.needs.hunger = 1;
+    }
+    expect(agent.alive).not.toBe(false); // still alive well past the old 100-tick hunger threshold
+
+    agent.needs.hunger = 1;
+    tickAgent(world, agent);
+    expect(agent.alive).toBe(false);
   });
 
   it("recovering above 0 resets the starvation clock", () => {
@@ -307,23 +330,23 @@ describe("decayNeeds: thirstMultiplier composes with the flat decay rate (Phase 
   it("defaults to the original flat rate when no multiplier is passed", () => {
     const needs = createNeeds();
     decayNeeds(needs);
-    expect(needs.thirst).toBeCloseTo(1 - 0.015, 10);
+    expect(needs.thirst).toBeCloseTo(1 - 0.01, 10);
   });
 
   it("a multiplier below 1 (rain) eases thirst decay relative to the base rate", () => {
     const needs = createNeeds();
     decayNeeds(needs, 0.6);
     const eased = 1 - needs.thirst;
-    expect(eased).toBeCloseTo(0.015 * 0.6, 10);
-    expect(eased).toBeLessThan(0.015);
+    expect(eased).toBeCloseTo(0.01 * 0.6, 10);
+    expect(eased).toBeLessThan(0.01);
   });
 
   it("a multiplier above 1 (drought) raises thirst decay relative to the base rate", () => {
     const needs = createNeeds();
     decayNeeds(needs, 1.8);
     const raised = 1 - needs.thirst;
-    expect(raised).toBeCloseTo(0.015 * 1.8, 10);
-    expect(raised).toBeGreaterThan(0.015);
+    expect(raised).toBeCloseTo(0.01 * 1.8, 10);
+    expect(raised).toBeGreaterThan(0.01);
   });
 
   it("does not touch hunger/energy/mateDrive — only thirst is weather-modulated", () => {
@@ -361,7 +384,7 @@ describe("tickAgentNeeds: local weather composes with thirst decay through a rea
     ];
     const farAgent = makeAgent({ pos: { x: 1, y: 1 } });
     tickAgentNeeds(farAgent, world);
-    expect(farAgent.needs.thirst).toBeCloseTo(1 - 0.015, 10);
+    expect(farAgent.needs.thirst).toBeCloseTo(1 - 0.01, 10);
   });
 });
 

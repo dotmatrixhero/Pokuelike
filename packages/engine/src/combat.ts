@@ -138,10 +138,18 @@ export function calculateDamage(
 }
 
 /** Cooldowns tick down for every agent that has any, regardless of what it does this tick. */
-export function tickCooldowns(agent: Agent): void {
+/**
+ * `ticks` (default 1) is how many cooldown ticks to subtract this call —
+ * needs.ts's sleep effects pass a larger value so cooldowns (this sim's
+ * real stand-in for mainline PP) recover faster while an agent sleeps, the
+ * same optional-multiplier shape `decayNeeds`'s `thirstMultiplier` and
+ * `applyHealOverTime`'s multiplier already use. Every pre-existing caller
+ * that doesn't pass it keeps ticking down at exactly the original rate.
+ */
+export function tickCooldowns(agent: Agent, ticks = 1): void {
   if (!agent.moveCooldowns) return;
   for (const moveId of Object.keys(agent.moveCooldowns)) {
-    const remaining = agent.moveCooldowns[moveId]! - 1;
+    const remaining = agent.moveCooldowns[moveId]! - ticks;
     if (remaining <= 0) delete agent.moveCooldowns[moveId];
     else agent.moveCooldowns[moveId] = remaining;
   }

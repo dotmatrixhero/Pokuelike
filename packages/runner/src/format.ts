@@ -60,6 +60,12 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) finished building a shelter at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
     case "shelterAbandoned":
       return `[tick ${event.tick}] a shelter at (${event.pos.x},${event.pos.y}) on ${event.layer} was abandoned and fell into disrepair`;
+    case "fellAsleep":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) fell asleep at (${event.pos.x},${event.pos.y})`;
+    case "wokeUp":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) woke up at (${event.pos.x},${event.pos.y}) (${event.reason})`;
+    case "longSleepBonus":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) got a long-sleep exp bonus (+${event.exp}) at (${event.pos.x},${event.pos.y})`;
   }
 }
 
