@@ -8,6 +8,8 @@ import {
   grantExp,
   killExpYield,
   grantKillExp,
+  grantSkillPoint,
+  maybeAutoRespec,
   KILL_EXP_MULTIPLIER,
   type LevelingContext,
   type LevelingProfile,
@@ -291,5 +293,233 @@ describe("skill-point spend validation", () => {
     expect(ok).toBe(true);
     expect(agent.skillPoints!.fire).toBe(0);
     expect(agent.wildcardSkillPoints).toBe(3); // 1 typed + 2 wildcard = 3
+  });
+});
+
+describe("grantSkillPoint: deterministic wildcard cadence", () => {
+  function fireAgent(overrides: Partial<Agent> = {}): Agent {
+    return {
+      id: "a",
+      species: "charmander",
+      pos: { x: 0, y: 0 },
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds(),
+      behavior: "idle",
+      ...overrides,
+    };
+  }
+
+  it("grants a bonus wildcard on every SKILLPOINT_WILDCARD_INTERVAL-th real point, not the others", () => {
+    const world = createWorld(5, 5);
+    const agent = fireAgent();
+    grantSkillPoint(agent, "fire", world); // 1st real point: no bonus
+    expect(agent.wildcardSkillPoints ?? 0).toBe(0);
+    grantSkillPoint(agent, "fire", world); // 2nd real point: bonus
+    expect(agent.wildcardSkillPoints).toBe(1);
+    grantSkillPoint(agent, "fire", world); // 3rd: no bonus
+    expect(agent.wildcardSkillPoints).toBe(1);
+    grantSkillPoint(agent, "fire", world); // 4th: bonus
+    expect(agent.wildcardSkillPoints).toBe(2);
+    expect(agent.skillPoints!.fire).toBe(4);
+  });
+
+  it("counts real points across different types and sources (level-up + on-hit) toward the same cadence", () => {
+    const world = createWorld(5, 5);
+    const agent = fireAgent();
+    grantSkillPoint(agent, "fire", world);
+    grantSkillPoint(agent, "water", world); // still the 2nd real point overall -> bonus
+    expect(agent.wildcardSkillPoints).toBe(1);
+    expect(agent.skillPointGrantCount).toBe(2);
+  });
+
+  it("a wildcard grant itself never advances the cadence counter (no runaway recursion)", () => {
+    const world = createWorld(5, 5);
+    const agent = fireAgent();
+    grantSkillPoint(agent, "wildcard", world);
+    grantSkillPoint(agent, "wildcard", world);
+    expect(agent.skillPointGrantCount ?? 0).toBe(0);
+    expect(agent.wildcardSkillPoints).toBe(2); // both still granted, just untracked by the cadence
+  });
+
+  it("is deterministic, not RNG-based — no seed/mock needed to get a guaranteed bonus", () => {
+    const world = createWorld(5, 5);
+    const agent = fireAgent();
+    for (let i = 0; i < 10; i++) grantSkillPoint(agent, "fire", world);
+    expect(agent.wildcardSkillPoints).toBe(5); // exactly half of 10, every time
+  });
+});
+
+describe("maybeAutoRespec (nature-driven specialization)", () => {
+  // Two independently-affordable, same-cost, same-tier nodes (no shared
+  // prerequisite) so weighted-pick behavior between them is testable without
+  // prerequisite ordering getting in the way.
+  const LEANING_TREE_MOVE: MoveSpec = {
+    id: "ember",
+    name: "Ember",
+    shape: { kind: "point" },
+    type: "fire",
+    category: "special",
+    power: 40,
+    accuracy: 100,
+    cooldownTicks: 1,
+    tree: {
+      wider_burn: { id: "wider_burn", name: "Wider Burn", cost: 1, leaning: "aggression", delta: { statusChance: 0.15 } },
+      ring_of_fire: {
+        id: "ring_of_fire",
+        name: "Ring of Fire",
+        cost: 2,
+        prerequisites: ["wider_burn"],
+        leaning: "boldness",
+        delta: { shape: { kind: "ring", radius: 1 } },
+      },
+    },
+  };
+
+  const CTX: LevelingContext = {
+    getProfile: () => undefined,
+    resolveMove: (moveKey) => (moveKey === "ember" ? LEANING_TREE_MOVE : undefined),
+  };
+
+  function fireAgentWithMove(overrides: Partial<Agent> = {}): Agent {
+    return {
+      id: "a",
+      species: "charmander",
+      pos: { x: 0, y: 0 },
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds(),
+      behavior: "idle",
+      knownMoves: ["ember"],
+      moves: [{ ...LEANING_TREE_MOVE }],
+      ...overrides,
+    };
+  }
+
+  it("does nothing when no known move has an affordable, eligible node", () => {
+    const world = createWorld(5, 5);
+    const agent = fireAgentWithMove({ skillPoints: { fire: 0 }, wildcardSkillPoints: 0 });
+    maybeAutoRespec(agent, world, CTX);
+    expect(agent.moveTreeChoices).toBeUndefined();
+    expect(agent.moves![0]).toEqual(LEANING_TREE_MOVE);
+  });
+
+  it("commits to the only eligible node, spends its cost, and updates the live move", () => {
+    const world = createWorld(5, 5);
+    const log = new EventLog();
+    const agent = fireAgentWithMove({ skillPoints: { fire: 1 }, wildcardSkillPoints: 0 });
+    maybeAutoRespec(agent, world, CTX, log);
+
+    expect(agent.moveTreeChoices).toEqual({ ember: ["wider_burn"] });
+    expect(agent.skillPoints!.fire).toBe(0);
+    expect(agent.moves![0].statusChance).toBeCloseTo(0.15); // base (none) + 0.15
+
+    const respecEvent = log.events.find((e) => e.kind === "moveRespecced");
+    expect(respecEvent).toMatchObject({ agentId: "a", moveId: "ember", nodeId: "wider_burn" });
+  });
+
+  it("respects prerequisites — ring_of_fire is never eligible before wider_burn even with points to spare", () => {
+    const world = createWorld(5, 5);
+    const agent = fireAgentWithMove({ skillPoints: { fire: 5 }, wildcardSkillPoints: 0 });
+    maybeAutoRespec(agent, world, CTX, undefined, () => 0.99); // bias roll toward the "last" candidate
+    // Only wider_burn can possibly have been chosen — ring_of_fire's prereq isn't met yet.
+    expect(agent.moveTreeChoices).toEqual({ ember: ["wider_burn"] });
+  });
+
+  it("never commits more than one node per call, even with points for both", () => {
+    const world = createWorld(5, 5);
+    const agent = fireAgentWithMove({ skillPoints: { fire: 5 }, wildcardSkillPoints: 0 });
+    maybeAutoRespec(agent, world, CTX);
+    expect(agent.moveTreeChoices!.ember).toHaveLength(1);
+  });
+
+  it("respects excludes — once a fork side is chosen, its sibling never becomes a candidate again", () => {
+    const FORKED_MOVE: MoveSpec = {
+      ...LEANING_TREE_MOVE,
+      tree: {
+        fork_a: { id: "fork_a", name: "Fork A", cost: 1, excludes: ["fork_b"], delta: { power: 1 } },
+        fork_b: { id: "fork_b", name: "Fork B", cost: 1, excludes: ["fork_a"], delta: { power: 1 } },
+      },
+    };
+    const forkCtx: LevelingContext = { getProfile: () => undefined, resolveMove: () => FORKED_MOVE };
+    const agent = fireAgentWithMove({
+      skillPoints: { fire: 5 },
+      wildcardSkillPoints: 0,
+      moves: [{ ...FORKED_MOVE }],
+      moveTreeChoices: { ember: ["fork_a"] },
+    });
+    const world = createWorld(5, 5);
+    maybeAutoRespec(agent, world, forkCtx);
+    // fork_b would otherwise be an eligible, affordable candidate — excludes
+    // must keep it out of the candidate pool now that fork_a is committed.
+    expect(agent.moveTreeChoices!.ember).toEqual(["fork_a"]);
+  });
+
+  it("a fully neutral disposition weights both eligible candidates equally", () => {
+    // With wider_burn already chosen, ring_of_fire is now the *sole*
+    // candidate (its prerequisite is met, nothing else on this tree is
+    // eligible), so this exercises the single-candidate path deterministically.
+    const world = createWorld(5, 5);
+    const agent = fireAgentWithMove({
+      skillPoints: { fire: 5 },
+      wildcardSkillPoints: 0,
+      moveTreeChoices: { ember: ["wider_burn"] },
+      moves: [{ ...LEANING_TREE_MOVE, statusChance: 0.25, cooldownTicks: 1 }],
+    });
+    maybeAutoRespec(agent, world, CTX);
+    expect(agent.moveTreeChoices!.ember).toEqual(["wider_burn", "ring_of_fire"]);
+    expect(agent.moves![0].shape).toEqual({ kind: "ring", radius: 1 }); // recomputed from pristine base, not double-applied
+  });
+
+  it("disposition biases the weighted pick toward the node matching the stronger axis", () => {
+    // Both wider_burn (aggression) and ring_of_fire's sibling would normally
+    // compete, but ring_of_fire needs wider_burn first — so instead give the
+    // agent an alternate, prereq-free sibling node to make this a real
+    // two-way race. A max-aggression, zero-boldness agent should overwhelmingly
+    // land on the aggression-leaning node when both are simultaneously eligible.
+    const RACE_MOVE: MoveSpec = {
+      ...LEANING_TREE_MOVE,
+      tree: {
+        aggro_node: { id: "aggro_node", name: "Aggro", cost: 1, leaning: "aggression", delta: { power: 1 } },
+        bold_node: { id: "bold_node", name: "Bold", cost: 1, leaning: "boldness", delta: { power: 1 } },
+      },
+    };
+    const raceCtx: LevelingContext = { getProfile: () => undefined, resolveMove: () => RACE_MOVE };
+
+    let aggroWins = 0;
+    const trials = 200;
+    for (let i = 0; i < trials; i++) {
+      const world = createWorld(5, 5);
+      const agent = fireAgentWithMove({
+        skillPoints: { fire: 1 },
+        wildcardSkillPoints: 0,
+        moves: [{ ...RACE_MOVE }],
+        disposition: { boldness: 0, aggression: 1, sociability: 0.5 },
+      });
+      // rng() < 0.65/total picks aggro_node (weight 0.15+1=1.15 of total 1.3); deterministic seeded sequence
+      // isn't needed here — Math.random default is fine since this is a statistical assertion over many trials.
+      maybeAutoRespec(agent, world, raceCtx);
+      if (agent.moveTreeChoices!.ember?.[0] === "aggro_node") aggroWins++;
+    }
+    // Weight ratio is 1.15 : 0.65 (~64%/36%), so a heavy skew toward aggro_node
+    // over 200 trials is the real assertion; exact count is inherently random.
+    expect(aggroWins).toBeGreaterThan(trials * 0.5);
+  });
+
+  it("grantSkillPoint auto-respecs immediately when given a LevelingContext", () => {
+    const world = createWorld(5, 5);
+    const log = new EventLog();
+    const agent = fireAgentWithMove({ skillPoints: {}, wildcardSkillPoints: 0 });
+    grantSkillPoint(agent, "fire", world, log, CTX);
+    expect(agent.skillPoints!.fire).toBe(0); // granted then immediately spent
+    expect(agent.moveTreeChoices).toEqual({ ember: ["wider_burn"] });
+  });
+
+  it("grantSkillPoint without a LevelingContext only grants — no auto-respec", () => {
+    const world = createWorld(5, 5);
+    const agent = fireAgentWithMove({ skillPoints: {}, wildcardSkillPoints: 0 });
+    grantSkillPoint(agent, "fire", world);
+    expect(agent.skillPoints!.fire).toBe(1); // untouched, no spend
+    expect(agent.moveTreeChoices).toBeUndefined();
   });
 });

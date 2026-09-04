@@ -1102,54 +1102,76 @@ produce a real story before player mechanics are worth building further.
       takes an optional seed argument and prints the seed used at the start
       of every run.
 
-## Cross-branch merge notes (parallel session work, not merged yet)
+## Cross-branch merge: status effects/skill-trees branch merged in
 
-A separate parallel Claude session has been working on
-`claude/pokemon-roguelike-sim-5rje5a` (13 commits diverged from this
-branch as of the check, 26 unique commits on their side) — status effects
-(burn/poison/paralysis/**sleep**/freeze), forced-movement moves
-(knockback/drag/lunge/retreat), and a skill-tree/move-primitives
-expansion. Deliberately kept on a separate branch/path from this session's
-work rather than interleaved. Confirmed intent: **merge eventually**, once
-both sides are far enough along that there's something real to reconcile.
+`claude/pokemon-roguelike-sim-5rje5a` (a separate parallel Claude session's
+work — status effects (burn/poison/paralysis/**sleep**/freeze), forced-
+movement moves (knockback/drag/lunge/retreat), and a skill-tree/move-
+primitives expansion) has now been merged into this branch. The real
+file-collision risk flagged below when this note was first written (both
+branches editing `needs.ts`/`predation.ts`/`types.ts`/`support.ts`/
+`simulation.ts`/`combat.ts` around the same time) did materialize —
+conflicts in `DESIGN.md`, `events.ts`, `leveling.ts`, `needs.ts`,
+`predation.ts`, and `runner/format.ts` — but all resolved by hand, not a
+blind `git merge`:
 
-- [ ] **Naming/mechanic collision, already flagged and confirmed intentional
-      by direct request**: this session's new voluntary rest behavior (see
-      DESIGN.md's "Urgency-based need priority, extended thirst margin, and
-      sleep" section — `Agent.asleep`, triggered by low `energy`) and the
-      other branch's combat status effect of the same name (a move that
-      forces a target to sleep, can't act until it wakes) are meant to
-      become **the same underlying mechanic with two different triggers**
-      once merged — not two competing systems needing a rename to coexist.
-      Direct quote: "mechanically i do want them to be the same thing
-      basically. but one is naturally caused by lack of energy and one can
-      be induced by moves." Concretely, once merged: a move-induced sleep
-      should very likely just set the same `agent.asleep` flag (and get the
-      same sitting-duck/no-self-defense treatment already built into
-      `predation.ts`'s `applyPredationInstincts` for the energy-driven
-      case) rather than being a parallel, separately-checked status flag —
-      the actual reconciliation work (does move-induced sleep also restore
-      HP/cooldowns and drain hunger/thirst slower like natural sleep does?
-      does it also get the herd-wake-each-other mechanic? what wakes a
-      status-effect sleep versus a natural one — a fixed duration, a hit,
-      or the same urgency-based conditions?) is real design work for
-      whoever does the merge, not a mechanical rename. Not started — the
-      other branch's status-effects work needs to land first.
-- [ ] **Real file-collision risk when merging**: the other branch's diff
-      touches `needs.ts`, `predation.ts`, `types.ts`, `support.ts`,
-      `simulation.ts`, `combat.ts` — the same files this session's
-      dispersal/thirst/sleep work (see DESIGN.md) is landing on right now.
-      Expect real merge conflicts, not just a clean auto-merge, especially
-      around `BehaviorKind`/`Agent` field additions and
-      `applyPredationInstincts`'s control flow (both branches are adding
-      new early-exit/skip conditions to the same function around the same
-      time). Worth a careful side-by-side read of both diffs before
-      merging, not a blind `git merge`.
-- [ ] `master` is stale relative to both branches (0 commits ahead of this
-      branch, 69 behind) and `Stable-for-Brian` is a heavily diverged,
-      messily-committed branch (34 unique commits, terse/non-descriptive
-      messages) — neither looks relevant to reconcile against, flagging
-      only so it's not mistaken for something that needs attention later.
+- **`predation.ts` needed real reconstruction, not just picking a side.**
+  The other branch's combat refactor (multi-hit moves, AoE via
+  `resolveShape`, stat-stage-aware damage, lifesteal/recoil/thorns,
+  situational multipliers) had **silently dropped this project's rng-
+  threading discipline** — new functions (`applySingleDamageInstance`,
+  `resolveHitAgainstTarget`, `resolveAreaHit`, `resolveHit`) called
+  `Math.random()`/`rollCritical(...)` directly instead of accepting and
+  threading an `rng` parameter, which would have broken the determinism
+  guarantee (DESIGN.md's "Determinism" section, `test/determinism.test.ts`'s
+  same-seed-same-log acceptance test) the moment any of that new code ran.
+  Fixed by adding `rng: () => number = Math.random` to every one of those
+  functions and threading it through every roll (crit, damage variance,
+  accuracy, hit count, status inflict/spread, skill-point/kill-exp grants)
+  — confirmed afterward that the determinism acceptance test still passes
+  with the merged code. This is exactly the kind of gap this project has
+  hit before (see the "missed `rng` passthrough" bug in the Determinism
+  section above) — always re-check new/refactored code for a bare
+  `Math.random()` call before assuming rng-threading survived a merge.
+- **The move-induced vs. natural sleep unification is still NOT done.**
+  This merge only made both mechanisms coexist side by side —
+  `agent.asleep` (this session's energy-driven rest, with its sitting-duck/
+  herd-wake logic in `predation.ts`) and `agent.status?.kind === "sleep"`
+  (the other branch's move-induced status effect, `status.ts`) are two
+  completely independent flags right now; an agent could theoretically be
+  both, or either, with no interaction. The confirmed design intent —
+  direct quote, "mechanically i do want them to be the same thing
+  basically. but one is naturally caused by lack of energy and one can be
+  induced by moves" — still needs real follow-up work: should a
+  move-induced sleep set `agent.asleep` too (getting the same no-self-
+  defense/herd-wake treatment)? Does it get the same reduced hunger/thirst
+  drain and faster heal/cooldown recovery? What wakes each variant — a
+  fixed duration (status.ts's `SLEEP_TICKS_MIN`/`MAX`) vs. the energy/
+  urgent-need/threat-plus-watcher conditions? Not started.
+- Two pre-existing flaky tests were found and fixed while validating the
+  merge (both in `predation.test.ts`, inherited from the other branch,
+  not introduced by the merge itself): "a positive critRateStage can crit
+  on a roll that stage 0 would not" and "statusSpreads inflicts the same
+  status on a nearby agent" both used `vi.spyOn(Math, "random")` to control
+  a roll, which stopped having any effect once `tickWorld`'s real default
+  rng (`world.rng`, not `Math.random`) was actually being consumed by the
+  now-correctly-threaded code above — fixed by passing an explicit rng
+  function straight into `tickWorld` instead of mocking the global. A
+  third, "weightScaling... deals more bonus damage" (real, reproducible
+  flake confirmed via a 30-run loop, ~1/30 rate), had no rng control at all
+  on an unseeded `createWorld` — fixed with the file's existing `SAFE_RNG`
+  convention. **Not fully audited**: this test file has roughly 80 other
+  unseeded `createWorld(10, 10)` calls; a similar low-rate flake
+  ("recoilFraction never faints the attacker outright") was observed once
+  in ~20 full-file runs and not chased down further given how rare it is —
+  worth a real pass converting this whole file to seeded/explicit-rng
+  `createWorld`/`tickWorld` calls throughout if it recurs enough to be
+  annoying in CI once CI exists.
+- `master` is stale relative to both branches (0 commits ahead of this
+  branch, 69 behind) and `Stable-for-Brian` is a heavily diverged,
+  messily-committed branch (34 unique commits, terse/non-descriptive
+  messages) — neither looks relevant to reconcile against, flagging only
+  so it's not mistaken for something that needs attention later.
 
 ## Urgency-based need priority, extended thirst margin, and sleep — built, tuning follow-ups
 

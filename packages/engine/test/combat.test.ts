@@ -6,6 +6,7 @@ import {
   useMove,
   rollCritical,
   rollAccuracy,
+  rollHitCount,
   statStageMultiplier,
   accuracyStageMultiplier,
   moveRange,
@@ -264,5 +265,161 @@ describe("cooldowns", () => {
     const agent = makeAgent({ types: ["fire"], moves: [TACKLE, EMBER] });
     // Against a Grass defender, Ember (Fire, super effective + STAB) clearly beats Tackle (Normal, neutral, no STAB).
     expect(pickBestMove(agent, ["grass"])).toBe(EMBER);
+  });
+});
+
+describe("pickBestMove: range and tempo awareness", () => {
+  const STRONG_SHORT_RANGE: MoveSpec = { ...TACKLE, id: "strong-short", power: 100, range: { min: 0, max: 1 } };
+  const WEAK_LONG_RANGE: MoveSpec = { ...TACKLE, id: "weak-long", power: 20, range: { min: 0, max: 5 } };
+
+  it("without a distance, ignores range and picks purely by score (backward-compatible)", () => {
+    const agent = makeAgent({ moves: [STRONG_SHORT_RANGE, WEAK_LONG_RANGE] });
+    expect(pickBestMove(agent, ["normal"])).toBe(STRONG_SHORT_RANGE);
+  });
+
+  it("with a distance, filters to reachable moves before scoring — the real bug this fixes", () => {
+    const agent = makeAgent({ moves: [STRONG_SHORT_RANGE, WEAK_LONG_RANGE] });
+    // STRONG_SHORT_RANGE can't reach distance 3; WEAK_LONG_RANGE can. Scoring
+    // first and checking range after (the old behavior) would have picked
+    // STRONG_SHORT_RANGE, found it out of range, and reported "no usable
+    // move" even though WEAK_LONG_RANGE was perfectly usable from here.
+    expect(pickBestMove(agent, ["normal"], 3)).toBe(WEAK_LONG_RANGE);
+  });
+
+  it("returns undefined when nothing owned actually reaches that far", () => {
+    const agent = makeAgent({ moves: [STRONG_SHORT_RANGE, WEAK_LONG_RANGE] });
+    expect(pickBestMove(agent, ["normal"], 10)).toBeUndefined();
+  });
+
+  it("tempo-discounts a slow move enough that a faster, weaker one can win", () => {
+    const FAST_WEAK: MoveSpec = { ...TACKLE, id: "fast-weak", power: 30, cooldownTicks: 0 };
+    const SLOW_STRONG: MoveSpec = { ...TACKLE, id: "slow-strong", power: 40, cooldownTicks: 3 };
+    const agent = makeAgent({ moves: [FAST_WEAK, SLOW_STRONG] });
+    // Same type, no STAB either side — isolates the tempo term:
+    // 30 vs. 40 / (1 + 0.15*3) ≈ 27.6, so the weaker-but-faster move wins.
+    expect(pickBestMove(agent, ["normal"])).toBe(FAST_WEAK);
+  });
+});
+
+describe("calculateDamage: defensePenetration", () => {
+  it("ignores a fraction of the defender's relevant Defense stat", () => {
+    const attacker = { level: 20, types: ["normal" as const], stats: calculateStats(BASE, 20) };
+    const defender = { types: ["normal" as const], stats: calculateStats(BASE, 20) };
+    const normalDamage = calculateDamage(attacker, defender, TACKLE, 1).damage;
+    const piercing: MoveSpec = { ...TACKLE, id: "piercing", defensePenetration: 0.5 };
+    const piercingDamage = calculateDamage(attacker, defender, piercing, 1).damage;
+    expect(piercingDamage).toBeGreaterThan(normalDamage);
+  });
+
+  it("absent defensePenetration behaves exactly as before (no change)", () => {
+    const attacker = { level: 20, types: ["normal" as const], stats: calculateStats(BASE, 20) };
+    const defender = { types: ["normal" as const], stats: calculateStats(BASE, 20) };
+    expect(calculateDamage(attacker, defender, { ...TACKLE, defensePenetration: 0 }, 1).damage).toBe(
+      calculateDamage(attacker, defender, TACKLE, 1).damage
+    );
+  });
+});
+
+describe("rollHitCount", () => {
+  it("undefined hits always means exactly 1", () => {
+    expect(rollHitCount(undefined)).toBe(1);
+  });
+
+  it("rolls within the [min, max] range, inclusive", () => {
+    for (let i = 0; i < 20; i++) {
+      const count = rollHitCount({ min: 2, max: 5 }, () => i / 20);
+      expect(count).toBeGreaterThanOrEqual(2);
+      expect(count).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it("a fixed min===max always returns that count", () => {
+    expect(rollHitCount({ min: 3, max: 3 }, () => 0.99)).toBe(3);
+  });
+});
+
+describe("useMove: lockTicks", () => {
+  it("accumulates onto agent.actionLockTicks", () => {
+    const agent = makeAgent({ actionLockTicks: 1 });
+    const LOCKING_MOVE: MoveSpec = { ...TACKLE, id: "locking", lockTicks: 2 };
+    useMove(agent, LOCKING_MOVE);
+    expect(agent.actionLockTicks).toBe(3);
+  });
+
+  it("a move with no lockTicks doesn't touch actionLockTicks", () => {
+    const agent = makeAgent();
+    useMove(agent, TACKLE);
+    expect(agent.actionLockTicks).toBeUndefined();
+  });
+});
+
+describe("calculateDamage: resistanceBreaker", () => {
+  it("partially cancels a resist, capped at neutral", () => {
+    const attacker = { level: 20, types: ["fire" as const], stats: calculateStats(BASE, 20) };
+    const waterDefender = { types: ["water" as const], stats: calculateStats(BASE, 20) };
+    const resisted = calculateDamage(attacker, waterDefender, EMBER, 1);
+    expect(resisted.effectiveness).toBe(0.5);
+    const breaker: MoveSpec = { ...EMBER, id: "breaker", resistanceBreaker: { multiplier: 2 } };
+    const broken = calculateDamage(attacker, waterDefender, breaker, 1);
+    expect(broken.effectiveness).toBe(1); // 0.5 * 2 = 1, capped at neutral
+    expect(broken.damage).toBeGreaterThan(resisted.damage);
+  });
+
+  it("never turns a resist into an actual weakness", () => {
+    const attacker = { level: 20, types: ["fire" as const], stats: calculateStats(BASE, 20) };
+    const waterDefender = { types: ["water" as const], stats: calculateStats(BASE, 20) };
+    const breaker: MoveSpec = { ...EMBER, id: "overbreaker", resistanceBreaker: { multiplier: 100 } };
+    expect(calculateDamage(attacker, waterDefender, breaker, 1).effectiveness).toBe(1);
+  });
+
+  it("does nothing against a neutral or super-effective matchup", () => {
+    const attacker = { level: 20, types: ["fire" as const], stats: calculateStats(BASE, 20) };
+    const grassDefender = { types: ["grass" as const], stats: calculateStats(BASE, 20) };
+    const breaker: MoveSpec = { ...EMBER, id: "breaker2", resistanceBreaker: { multiplier: 2 } };
+    expect(calculateDamage(attacker, grassDefender, breaker, 1).effectiveness).toBe(2);
+  });
+});
+
+describe("calculateDamage: bonusVsType", () => {
+  it("multiplies damage when the defender has the matching type", () => {
+    const attacker = { level: 20, types: ["normal" as const], stats: calculateStats(BASE, 20) };
+    const grassDefender = { types: ["grass" as const], stats: calculateStats(BASE, 20) };
+    const waterDefender = { types: ["water" as const], stats: calculateStats(BASE, 20) };
+    const move: MoveSpec = { ...TACKLE, id: "grass-slayer", bonusVsType: { type: "grass", multiplier: 2 } };
+    const boosted = calculateDamage(attacker, grassDefender, move, 1);
+    const unboosted = calculateDamage(attacker, waterDefender, move, 1);
+    expect(boosted.damage).toBe(Math.floor(calculateDamage(attacker, grassDefender, TACKLE, 1).damage * 2));
+    expect(unboosted.damage).toBe(calculateDamage(attacker, waterDefender, TACKLE, 1).damage);
+  });
+});
+
+describe("pickBestMove: targetsAlly moves are never selected for hostile targeting", () => {
+  it("skips an ally-support move even if it scores highest on paper", () => {
+    const supportMove: MoveSpec = { ...TACKLE, id: "support", power: 999, targetsAlly: true };
+    const agent = makeAgent({ moves: [TACKLE, supportMove] });
+    expect(pickBestMove(agent, ["normal"])?.id).toBe("tackle");
+  });
+
+  it("returns undefined if every move targets an ally", () => {
+    const supportMove: MoveSpec = { ...TACKLE, id: "support", targetsAlly: true };
+    const agent = makeAgent({ moves: [supportMove] });
+    expect(pickBestMove(agent, ["normal"])).toBeUndefined();
+  });
+});
+
+describe("pickBestMove: multi-hit and self-state scoring", () => {
+  it("scores a multi-hit move by its average expected hit count", () => {
+    const agent = makeAgent({ moves: [TACKLE, { ...TACKLE, id: "flurry", power: 25, hits: { min: 2, max: 4 } }] });
+    // flurry: 25 * avg(3 hits) = 75 expected > tackle's flat 40.
+    expect(pickBestMove(agent, ["normal"])?.id).toBe("flurry");
+  });
+
+  it("a selfStateBonus move scores higher only when the attacker itself is at or below half HP", () => {
+    const desperation: MoveSpec = { ...TACKLE, id: "desperation", power: 20, selfStateBonus: { condition: "selfLowHp", multiplier: 3 } };
+    const healthy = makeAgent({ moves: [TACKLE, desperation], hp: 100, maxHp: 100 });
+    expect(pickBestMove(healthy, ["normal"])?.id).toBe("tackle"); // desperation's bonus doesn't apply at full HP
+
+    const hurt = makeAgent({ moves: [TACKLE, desperation], hp: 40, maxHp: 100 });
+    expect(pickBestMove(hurt, ["normal"])?.id).toBe("desperation"); // 20*3=60 > tackle's 40
   });
 });

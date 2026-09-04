@@ -32,6 +32,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) learned ${event.moveId} at level ${event.level}`;
     case "gainedSkillPoint":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) gained a ${event.pointType} skill point`;
+    case "moveRespecced":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) specced ${event.moveId} into ${event.nodeId}`;
     case "fainted":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) fainted at (${event.pos.x},${event.pos.y})`;
     case "recovered":
@@ -66,6 +68,12 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) woke up at (${event.pos.x},${event.pos.y}) (${event.reason})`;
     case "longSleepBonus":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) got a long-sleep exp bonus (+${event.exp}) at (${event.pos.x},${event.pos.y})`;
+    case "statusInflicted":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) was ${event.statusKind === "burn" ? "burned" : event.statusKind === "poison" ? "poisoned" : event.statusKind} by ${event.inflictedBy}`;
+    case "statusCleared":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) ${event.reason} (${event.statusKind})`;
+    case "supported":
+      return `[tick ${event.tick}] ${event.supporterSpecies} (${event.supporterId}) supported ${event.allySpecies} (${event.allyId})${event.healed ? " (healed)" : ""}${event.buffed ? " (buffed)" : ""}`;
   }
 }
 

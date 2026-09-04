@@ -1189,8 +1189,12 @@ trigger for move learning and evolution.
   `SKILLPOINT_ON_HIT_CHANCE = 0.05` on every landed (nonzero-damage) hit in
   `resolveHit`, granting one point of the *move's* type to the attacker.
   Leveling up grants one guaranteed point of the agent's own primary type
-  (`Agent.types[0]`) plus a `SKILLPOINT_LEVELUP_WILDCARD_CHANCE = 0.1` roll
-  for a wildcard point. **Real bug caught and fixed during validation, not
+  (`Agent.types[0]`). Bonus wildcard points are no longer an RNG roll (an
+  earlier `SKILLPOINT_LEVELUP_WILDCARD_CHANCE = 0.1` per level-up, replaced
+  once specialization actually started spending points — see
+  "Specialization" below): every `SKILLPOINT_WILDCARD_INTERVAL`th real point
+  granted, level-up or on-hit alike, deterministically grants a bonus
+  wildcard, tracked via `Agent.skillPointGrantCount`. **Real bug caught and fixed during validation, not
   just claimed working**: the first real run showed almost no typed points
   despite hundreds of level-ups, because `reproduction.ts`'s newborns don't
   get a `types` field (a pre-existing gap — newborns don't get a full
@@ -3794,7 +3798,384 @@ as a tuning follow-up rather than silently lowered here without more real
 data on what a "typical long sleep" should look like once predator
 population dynamics are healthier.
 
+## Specialization: nature-driven skill trees, actually spent
 
+Ember's respec tree (`wider_burn` -> `ring_of_fire`) existed for a while as a
+proof that `applyMoveTree`/`applyMoveTreeWithSpend` worked, but wild agents
+never actually spent the typed/wildcard skill points they were earning —
+that was an explicit, documented scope cut. This closes it: every move that
+carries a `tree` now gets genuinely respec'd by the wild agents that know it,
+and which node they pick is nudged by their individual Nature-derived
+Disposition, not left uniform-random.
+
+- **The trigger is a single choke point.** `grantSkillPoint` (leveling.ts) is
+  the one function that ever adds to `skillPoints`/`wildcardSkillPoints` — a
+  landed hit (`maybeGrantHitSkillPoint`) and the guaranteed-typed-plus-chance-
+  of-wildcard level-up grant both funnel through it. It now takes an optional
+  `LevelingContext` and, when given one, immediately calls `maybeAutoRespec`
+  after granting — a wild agent doesn't sit on points waiting for a player
+  who doesn't exist yet, it commits to a build as it goes, the same tick it
+  earns the point. Calling `grantSkillPoint` without a context (most direct
+  test call sites) still just grants, unchanged from before.
+- **`maybeAutoRespec` scans every known move for one commitment.** For each
+  id in `agent.knownMoves`, it resolves the pristine base `MoveSpec` via
+  `ctx.resolveMove` (never the agent's own possibly-already-respec'd copy —
+  see the bug note below) and, if that move has a `tree`, collects every node
+  whose prerequisites are already satisfied, that isn't already chosen, and
+  that the agent can currently afford (typed-of-the-move's-type + wildcard).
+  Candidates are pooled *across all of the agent's known moves* — a single
+  granted point can only ever fund one new commitment, even if it happens to
+  newly unlock eligible nodes on two different trees at once — and one is
+  picked via a disposition-weighted random draw.
+- **The weighting is a nudge, not a determination.** Each `MoveTreeNode` can
+  carry an optional `leaning: keyof Disposition` (`"boldness" | "aggression"
+  | "sociability"`). A candidate's draw weight is `0.15 + (the agent's value
+  on that axis, or 0.5 if the node has no leaning or the agent has no
+  disposition)` — so an unleaned node always competes at the neutral weight,
+  and a leaned node's odds scale with how strongly the individual actually
+  has that trait, never dropping to zero and never guaranteeing the pick.
+  Two agents with identical species, level, and points can still diverge.
+  Ember's two nodes are tagged as the first real content: `wider_burn`
+  (bigger burn chance, faster cooldown — presses the fight harder) leans
+  `"aggression"`; `ring_of_fire` (ring shape, less power, slower cooldown —
+  trades raw damage to hit several things around you without needing to
+  path in close) leans `"boldness"`.
+- **Commitments are permanent, and cost is paid incrementally.** Once picked,
+  `agent.moveTreeChoices[moveId]` only ever grows (no respec-back — a real
+  build choice, same framing as mainline nature/EV investment). The catch
+  this surfaced: `applyMoveTreeWithSpend` (moves.ts) was designed to be
+  called *once* with a move's *complete* final chosen-node list, charging the
+  sum of every node's cost in one shot — calling it repeatedly as the chosen
+  list grows one node at a time would re-charge the whole cumulative total on
+  every call. `maybeAutoRespec` instead spends only the newly-picked node's
+  own cost directly via `trySpendSkillPoints`, then recomputes the live
+  `MoveSpec` from scratch with the plain (non-spending) `applyMoveTree`
+  against the *pristine* base spec plus the full chosen list — so deltas
+  never stack on top of a stale intermediate respec.
+- **A real bug the integration check caught, not the unit tests.** The first
+  working version updated `agent.moves` by searching for an entry whose `id`
+  matched the `knownMoves` key that resolved to the tree (e.g. the dex key
+  `"EMBER"`), but a `MoveSpec`'s own `id` is frequently a different casing/
+  name entirely (`"ember"`, from `packages/data`'s curated `MOVES` table) —
+  the two are only guaranteed to agree by `LevelingContext.resolveMove`'s
+  lookup, not by string equality. Every unit test used a base spec with
+  `id === "ember"` for both the tree lookup key *and* the move's own id, so
+  they all still passed while the live move silently never actually updated.
+  A one-off script that pushed a real Charmander (via `ensureCombatProfile`)
+  through five `grantSkillPoint` calls and printed `agent.moves` before/after
+  is what actually showed Ember's shape/power/cooldown never changing.
+  Fixed by keying the `agent.moves` replacement off the *respec'd spec's own
+  `id`*, not the `knownMoves` entry that led to it. Lesson kept for later
+  work: a batch of new unit tests that all share the same happy-path fixture
+  naming can pass in lockstep around a real wiring bug; a from-scratch,
+  real-data integration check is what surfaced it here.
+- **Demo-world caveat.** The demo roster (`packages/data/src/scenario.ts`)
+  doesn't currently spawn any Charmander, so a real 5000-tick run of the demo
+  world logs plenty of `gainedSkillPoint` events but zero `moveRespecced`
+  ones — there's simply no agent alive that knows a move with a tree yet.
+  Confirmed working end-to-end via a standalone script instead (see above).
+  Once a species with a real tree-bearing move actually gets spawned into a
+  scenario, `moveRespecced` events should start showing up in the log for
+  free — no additional wiring needed.
+- **Wildcard income made deterministic, not RNG-gated.** With Ember's tree
+  costing only 3 total points (both nodes fire-typed), a mono-fire agent's
+  guaranteed level-up income alone maxes it out by roughly level 4 — the
+  wildcard/on-hit channels barely mattered in practice, and a 10%-per-level
+  RNG roll meant an unlucky agent could go many levels with zero wildcard
+  access, which matters much more once trees are big enough that a full
+  level-up income can't carry them alone, and once an agent needs a wildcard
+  to fund a tree on a move whose type doesn't match its own primary type
+  (the only source of *typed* points for an off-primary-type tree is the 5%
+  on-hit roll for a move of that type actually landing). Replaced the RNG
+  roll with a fixed cadence: `SKILLPOINT_WILDCARD_INTERVAL = 2` — every 2nd
+  real point granted (level-up or on-hit, whichever type) also grants a
+  bonus wildcard, tracked via a new `Agent.skillPointGrantCount` that only
+  advances on real grants (the bonus wildcard grant itself doesn't recount).
+  This is a real rate increase, not just a smoothing of the old one (10% per
+  level-up, only counting the level-up channel -> 50% per real point,
+  counting on-hit points too) — a deliberate choice to make wildcard access
+  reliable enough to actually fund off-primary-type trees once those exist,
+  not just a determinism cleanup.
+
+## Move selection: a real bug fix, plus tempo awareness
+
+Surfaced while designing move trees: `pickBestMove` (combat.ts) scored every
+off-cooldown move by `power * STAB * typeEffectiveness` alone — no notion of
+range or tempo at all.
+
+- **Real bug, not hypothetical**: `canAttackFromHere` called `pickBestMove`
+  to get "the best move," then separately checked whether *that specific
+  move* was in range. If the highest-scoring move happened to be out of
+  range at the attacker's current distance but a *different* known move
+  would have reached, the attacker simply didn't attack that tick — even
+  though it owned a perfectly usable move. Scoring first and checking range
+  after was backwards. Fixed by giving `pickBestMove` an optional `distance`
+  parameter that filters to in-range moves *before* scoring, not after;
+  `canAttackFromHere` now passes it and no longer needs its own separate
+  `withinMoveRange` check. `distance` is optional (omitting it keeps the old
+  range-blind behavior) purely so callers without positional context — bare
+  unit tests — don't need updating.
+- **Tempo awareness**: added a cooldown discount to the score,
+  `1 / (1 + MOVE_SCORE_TEMPO_WEIGHT * move.cooldownTicks)` with
+  `MOVE_SCORE_TEMPO_WEIGHT = 0.15` — a fast, modest move can now beat a
+  slow, only-somewhat-stronger one (real per-tick expected value, not just
+  "biggest number wins this instant"), which matters once move trees offer
+  real cooldown-vs-power tradeoffs (see MOVES_DESIGN.md). Tuned specifically
+  so a genuine type/STAB advantage still wins despite a real cooldown gap —
+  0.15 was picked by checking the exact numbers against the existing
+  Ember-vs-Tackle test fixture (Ember's power=40/cooldown=2 against a Grass
+  defender: STAB×2 type-effectiveness gives it a 3x edge over Tackle's
+  power=40/cooldown=0; at weight 0.15 Ember's discounted score is still
+  ~92 against Tackle's 40 — a much higher weight, e.g. dividing outright by
+  `cooldownTicks + 1`, put these two in an exact tie, which would have
+  flipped the existing test depending on array order rather than which move
+  is actually better here).
+- `resolveHit` (predation.ts) now also takes `distance` (threaded from the
+  same `canAttackFromHere` check each of its three call sites already makes
+  right before calling it) and passes it through to its own internal
+  `pickBestMove` call, so it picks consistently with what was just
+  validated as reachable instead of re-deriving its own answer.
+- Not yet done: any awareness of the *defender's* state (HP fraction, is it
+  fleeing) in the score — that's the next real step once a move tree adds a
+  genuinely situational effect (a finishing-blow bonus, a anti-kiting drag)
+  worth picking *for*, not just a bigger number. Scoped out for now rather
+  than guessed at ahead of any move that would actually use it.
+
+## Status effects: burn, poison, paralysis, sleep, freeze
+
+The first real consumer of `MoveSpec.statusChance`, which had sat inert
+since the type-chart/move-overhaul work. `Agent.status?: { kind:
+StatusKind; ticksRemaining?: number }` — at most one status at a time,
+mainline-real — is set on a landed, damaging, non-killing hit (`resolveHit`
+in predation.ts, right where `maybeGrantHitSkillPoint` already piggybacks
+on the same hit), gated by the move's own `statusKind`/`statusChance`,
+real mainline type immunities (Fire can't burn, Electric can't be
+paralyzed, Poison/Steel can't be poisoned, Ice can't freeze), and "already
+has a status" (no stacking). Lives in a new `status.ts`, kept separate from
+`predation.ts`/`needs.ts` the same way `weather.ts`/`daynight.ts` are their
+own files rather than folded into the systems that consume them.
+
+- **Burn/poison** are damage-over-time: a fixed fraction of `maxHp` (1/16
+  burn, 1/8 poison) every tick, applied in `tickStatusEffects`, called from
+  `tickAgentNeeds`'s always-runs path (same slot as `tickCooldowns`) so a
+  statused agent keeps ticking down even on ticks it doesn't act. Reaching
+  0 HP faints, exactly like a normal attack's own faint/finishing-pool
+  pipeline — DOT never kills outright. No independent duration or cure
+  (no item/ability system exists in this sim to grant one); a status
+  clears the instant its owner faints, for any reason, mainline-real
+  (fainting always cures status) — implemented in both `resolveHit`'s own
+  faint transition and `tickStatusEffects`'s DOT-causes-faint path, so it's
+  consistent regardless of which one actually causes the faint.
+- **Burn additionally halves the burned agent's own physical Attack** when
+  it's the attacker — reuses `calculateDamage`'s existing (previously
+  unconsumed by any real caller) stat-stage machinery rather than inventing
+  a second damage multiplier: `resolveHit` passes `statStages: { attack:
+  isBurned(attacker) ? -2 : 0 }` when building the attacker's
+  `CombatantOffense`, and stage -2 is exactly a 50% multiplier
+  (`statStageMultiplier(-2) === 2/(2+2)`). `calculateDamage` itself needed
+  zero changes.
+- **Paralysis** is modeled as two independent effects, matching mainline's
+  own two independent effects rather than approximating both with one
+  mechanism: a permanent Speed cut (`PARALYSIS_SPEED_MULTIPLIER = 0.5`,
+  composed into `actionSpeedOf` in simulation.ts alongside the existing
+  terrain/off-hours/cold-snap multipliers) plus a separate 25% chance
+  (`PARALYSIS_SKIP_CHANCE`) to skip the action tick outright even when the
+  agent does get one — a new early-return guard in `tickAgentAction`
+  (needs.ts), same shape as the existing `fainted`/`beingCarriedBy` guards.
+- **Sleep/freeze** are the "skip the action tick" shape too (same new
+  guards in `tickAgentAction`), each with its own end condition ticked in
+  `tickStatusEffects`: sleep gets a bounded random duration at onset
+  (`SLEEP_TICKS_MIN/MAX = 10-30` — this sim's ticks are far finer-grained
+  than mainline turns, so "1-3 turns" doesn't transfer directly) and wakes
+  when it runs out; freeze rolls a flat 20% thaw chance every tick
+  (`FREEZE_THAW_CHANCE`), and a landed Fire-type hit thaws it instantly
+  regardless of that roll (`maybeThawOnFireHit`, called in `resolveHit`
+  independent of whether the hit's own move inflicts anything itself).
+- **New events**: `statusInflicted` (kind, agentId, inflictedBy) and
+  `statusCleared` (kind, agentId, reason: `"woke" | "thawed"` — a faint
+  clears status silently, the `fainted` event itself narrates that, no
+  third reason needed).
+- **Hand-curated inflicters, not invented ones**: `MoveSpec.statusKind` is
+  set by hand only where the actual dex backs it — `ember`/`flamethrower`
+  → `"burn"` (both already had `statusChance: 0.1` sitting inert). No new
+  moves added to reach paralysis/poison/sleep/freeze coverage; that's
+  real content for whichever move-tree work adds a move that actually
+  causes one of those (Constrict's designed root effect in
+  MOVES_DESIGN.md's Vine Whip tree is the natural next real inflicter,
+  once a `"root"` kind — not yet one of the five modeled — gets added).
+- **Confirmed working end-to-end**, not just unit-tested: a real
+  Charmander (via `ensureCombatProfile`) fighting a real Bulbasaur through
+  actual `tickWorld` calls showed `statusInflicted` firing on a landed,
+  non-killing Ember hit, the target's HP dropping between fights by more
+  than the hit damage alone (the burn DOT tick), and `status` clearing the
+  moment the target fainted. **Demo-world caveat**, same shape as the
+  specialization/moveRespecced one: Charmander isn't currently spawned in
+  `packages/data/src/scenario.ts`, so a real run of the demo world won't
+  show `statusInflicted` events yet — confirmed via a standalone script
+  instead, same as the earlier `moveRespecced` verification.
+
+## Forced movement: drags, knockback, lunges, and retreats
+
+A move can now move someone as part of resolving — not the ordinary flee/
+hunt/idle stepping every agent already does, a real, move-triggered
+displacement. `MoveSpec.forcedMovement?: ForcedMovement` (moves.ts):
+
+```ts
+interface ForcedMovement {
+  mover: "attacker" | "defender";
+  direction: "closer" | "away"; // relative to whichever party isn't `mover`
+  tiles: number;
+  timing: "beforeHit" | "onHit";
+}
+```
+
+- **`applyForcedMovement`** (movement.ts) displaces `mover` `tiles` times,
+  one obstacle-aware step at a time, reusing the exact same `stepToward`/
+  `stepAway` every agent's own ordinary movement already calls — a blocked
+  step (wall, map edge) just doesn't move that tile, same as any other
+  call to those functions. Never a teleport.
+- **`timing: "beforeHit"`** (a lunge) resolves in `resolveHit`
+  (predation.ts) right after the move is committed to (`useMove`) but
+  before the accuracy/damage roll. This can't change whether *this* hit
+  lands — `canAttackFromHere` already validated range before `resolveHit`
+  was ever called — it only changes where the attacker ends up standing,
+  which matters for follow-up ticks (and, incidentally, feeds a
+  post-lunge position into that same roll's storm-accuracy check, which
+  reads as more correct than less).
+- **`timing: "onHit"`** (drag/knockback/retreat) resolves only on a landed,
+  damaging, non-killing hit — the exact same hook `maybeInflictStatus`
+  (status.ts) already uses. A corpse or a hit that itself causes a faint
+  doesn't trigger it: pushing around something that's either already down
+  or about to be doesn't mean anything.
+- `MoveTreeNode.delta.forcedMovement` is overwrite semantics in
+  `applyMoveTree`, same as `shape` — a move has at most one forced-movement
+  effect active at a time, never a stack of several nodes' effects
+  combined.
+- **First real content, shipped alongside the primitive**: Tackle gained
+  `bracing_impact` (Aggression, prereq `full_force_slam`) — an on-hit
+  knockback that shoves the target back a tile. Slash gained `feint`
+  (Boldness, no prerequisite, now itself the prerequisite for
+  `keen_precision`) — a before-hit lunge that closes to melee as part of
+  the strike rather than over several separate ticks. Both confirmed
+  reached by real agents in an actual run (`bulbasaur-2658-56` speccing
+  into `bracing_impact` at tick 3807 among them), not just unit-tested.
+- **Deliberately out of scope for this pass**: U-turn/Volt Switch's
+  designed "retreat at 2x speed for 2 ticks" effect (MOVES_DESIGN.md's
+  round-five moves) needs a *sustained*, multi-tick movement override, a
+  meaningfully different mechanism from this pass's instant, single-action
+  displacement — noted so it isn't mistaken for already covered by this.
+
+## The rest of the move-primitives checklist: multi-hit, passives, AoE, persistent stat stages, and more
+
+Everything remaining on MOVES_DESIGN.md's "engine primitives needed"
+checklist shipped in one pass — ten primitives, all unit-tested, a subset
+confirmed together in a real multi-agent fight. None has real curated-move
+content yet (see MOVES_DESIGN.md); this section documents the mechanisms.
+
+**Multi-hit** — `MoveSpec.hits?: { min: number; max: number }`. `combat.ts`'s
+`rollHitCount` rolls a count in range once per move use; `predation.ts`'s
+`resolveHitAgainstTarget` loops that many independent damage instances
+(each its own accuracy roll's worth of damage — the accuracy roll to hit at
+all still happens once per move use, only the damage loop repeats), stopping
+early the moment the defender truly dies mid-flurry. `pickBestMove` scores a
+multi-hit move by its average hit count so it isn't undervalued against a
+single stronger hit.
+
+**Defense-penetration** — `MoveSpec.defensePenetration?: number` (0-1).
+`calculateDamage` (combat.ts) shaves that fraction off the defender's
+Defense/SpDefense *before* stat stages apply, composing with (not
+replacing) them.
+
+**Multi-action lock** — `MoveSpec.lockTicks?: number` + `Agent.actionLockTicks`.
+`useMove` (combat.ts) adds `lockTicks` onto the agent's lock counter;
+`tickStatusEffects` (status.ts) counts it down every world tick regardless
+of whether the agent acts that tick; `tickAgentAction` (needs.ts) blocks all
+action while it's positive — the same no-action shape as fainted/asleep/
+frozen, for a move that commits its user past its own single action tick
+(a Reaping Slash-style follow-through).
+
+**Agent-modifying passives** — the one primitive flagged as a real
+structural addition, since everything before it was a `MoveSpec` delta and
+a passive has to modify the *agent* instead. `MoveTreeNode.grantsPassive?:
+{ kind: PassiveKind; value: number }` (moves.ts) sits outside `delta` for
+exactly that reason; `maybeAutoRespec` (leveling.ts) calls `grantPassive`
+(status.ts) into `Agent.passives` the moment such a node is chosen — a
+permanent, accumulating value, not part of the move's own respec'd spec.
+Three kinds, each read at exactly one real call site: `"damageReduction"`
+(a flat fraction off incoming damage, `resolveHit`'s `applySingleDamageInstance`),
+`"immovable"` (blocks being dragged/knocked back/lunged at as the forced
+mover, `applyForcedMovement` in movement.ts — it protects the passive
+holder only, not whoever else a move displaces), `"regen"` (a per-tick heal
+independent of being fed/watered, unlike the existing `applyHealOverTime`).
+
+**Situational and self-state-aware scoring** — two related but distinct
+levers. `MoveSpec.situationalBonus?: { condition; multiplier }` is a real
+damage multiplier evaluated at the moment of the hit (`situationalMultiplier`,
+predation.ts): `"targetLowHp"` (defender at or below half HP), `"flanking"`
+(the defender isn't currently reacting to *this* attacker specifically — a
+rough proxy using `fightTarget`/`huntTarget`, since the sim has no facing/
+awareness model to check against more precisely), `"night"` (daynight.ts's
+`isNight`). `MoveSpec.selfStateBonus?: { condition: "selfLowHp"; multiplier }`
+is different in kind: it only ever affects *scoring* in `pickBestMove`
+(combat.ts), biasing move selection toward a "cornered" move exactly when
+the attacker itself is hurt, without touching the actual damage formula.
+
+**Persistent stat stages and real-duration temporary buffs** — deliberately
+built as one mechanism, not two: `Agent.statStages?: Array<{ stat; stage;
+ticksRemaining? }>` (status.ts's `applyStatStage`/`getStatStage`). An entry
+with `ticksRemaining` is temporary (counted down and dropped once it hits 0,
+in `tickStatusEffects`); one without it is permanent until something else
+removes it. Multiple entries on the same stat stack additively. Fed into
+`calculateDamage`'s existing (previously burn-only) stat-stage machinery for
+both attacker and defender, composing with burn's own -2 Attack. The
+move-level lever is `MoveSpec.statChangeOnHit?: { target: "self" |
+"defender"; stat; stage; ticks? }` — `"self"` applies the instant the move
+is used (even on a miss), `"defender"` only on a landed, non-killing hit.
+
+**Position-swap** — `MoveSpec.positionSwap?: boolean`. Attacker and
+defender trade tiles on a landed, non-killing hit (`resolveHitAgainstTarget`)
+— a Bodyblock-style swap, gated the same way onHit forced movement is.
+
+**Cross-agent effects** — `MoveSpec.targetsAlly?: boolean` +
+`allyEffect?: { healFraction?; buff? }`, resolved by a genuinely separate
+path from `resolveHit`'s hostile resolution: `applySupportMove` (support.ts),
+called from the agent's own idle/support tick (`tickAgentAction`, needs.ts),
+right alongside `applyHerdSupport`. It finds the nearest in-range,
+hurt-preferred herd-mate for an off-cooldown ally-targeting move, heals
+and/or buffs it, and puts the move on cooldown — confirming this doc's own
+earlier prediction (in "Why status effects and environmental moves are two
+different systems") that a cross-agent effect would need its own trigger
+path rather than living inside the hostile hit pipeline.
+
+**Multi-target/AoE resolution** — the biggest single gap on the checklist,
+and Growl's entire premise. `MoveSpec.hitsArea?: boolean` switches
+`resolveHit` (predation.ts) from single-target to `resolveAreaHit`: a
+facing is derived from attacker->primary-target direction
+(`facingToward`), `resolveShape` (moves.ts, already existed for rendering/
+targeting) resolves that facing against the move's `shape` into a tile set,
+and every living agent standing on one of those tiles (attacker excluded)
+takes its own independent hit — each with its own accuracy roll and damage
+instance. Only the one deliberately-picked primary target gets the
+primary-target-only hooks (status infliction, `statChangeOnHit`'s defender
+side, onHit forced movement, position swap); an incidental bystander caught
+in the blast just takes the raw damage. Confirmed in a real fight: a
+ring-shaped move centered on the attacker landed `fought` events against
+both the picked target and an unrelated bystander standing on the same
+ring, and `resolveHit`'s own "did the hunt's target truly die" return value
+only reflects the primary target, not an incidental AoE kill (which still
+fires its own real `killed`/`defeated` + kill-exp events, they just don't
+drive the calling predator's own hunger-restore bookkeeping).
+
+**What's still open**: no shipped move-tree node yet uses any of the ten
+primitives above — they're mechanisms, confirmed via unit tests (and, for
+multi-hit/positionSwap/statChangeOnHit/damageReduction/situational-bonus/
+AoE, a real `tickWorld` fight) but not yet real curated content. Growl
+itself specifically still needs one more thing beyond persistent stat
+stages + AoE (both now shipped): a no-damage/status-move representation,
+since nothing in this sim today can be "used" without going through a
+damage roll — see MOVES_DESIGN.md's checklist for the up-to-date state.
+
+## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays
   needs, picks the most urgent one via simple utility scoring, and steps the
@@ -4080,7 +4461,10 @@ that's its own follow-up.
 - Turn-based vs. real-time-with-pause for combat.
 - How herd cohesion/regrouping actually works (shared home range? leader
   agent? flocking forces?).
-- The move leveling/respec UI and how "build points" are earned and spent.
+- The move leveling/respec UI for a future player character — wild agents'
+  own earn/spend mechanism (skill points, disposition-weighted auto-respec)
+  is now real, see "Specialization" above; a player choosing manually is
+  still undecided.
 - The bonding "puzzle" mechanics per species beyond the shape described
   above (what the actual verbs/inputs are).
 - Save format, map generation, dungeon structure/progression.

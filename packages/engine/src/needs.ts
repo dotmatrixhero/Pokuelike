@@ -20,9 +20,10 @@ import {
   sectorId,
   type LevelingContext,
 } from "./leveling.js";
-import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
+import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
 import { findNearestIndexed } from "./resourceIndex.js";
 import { thirstDecayMultiplier } from "./weather.js";
+import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
 
 const DECAY_PER_TICK = {
   /**
@@ -378,6 +379,12 @@ function yieldsToHigherRankedFeeder(world: World, agent: Agent, tileStock: numbe
  * same reason: a fainted agent still needs-decays and heals every tick even
  * though it's excluded from the action tick entirely (see `tickAgentAction`
  * below) — DESIGN.md's "Faint/finish-off, heal over time" section.
+ *
+ * `tickStatusEffects` (status.ts) lives here too, same reasoning: burn/
+ * poison DOT and sleep/freeze's own duration/thaw all tick down regardless
+ * of whether this is the agent's action tick. Paralysis's speed cut and
+ * skip-the-action-tick roll are the two status effects that *aren't* here —
+ * see `actionSpeedOf` (simulation.ts) and `tickAgentAction` below.
  */
 export function tickAgentNeeds(
   agent: Agent,
@@ -389,6 +396,7 @@ export function tickAgentNeeds(
   if (agent.alive === false) return;
   if (agent.age !== undefined) agent.age += 1;
   tickCooldowns(agent, agent.asleep ? SLEEP_COOLDOWN_TICKS : 1);
+  if (world) tickStatusEffects(agent, world, log);
   const thirstMultiplier = world ? thirstDecayMultiplier(world, agent.layer, agent.pos) : 1;
   decayNeeds(agent.needs, thirstMultiplier, agent.asleep === true);
 
@@ -481,6 +489,17 @@ export function tickAgentNeeds(
  * ally and flee this same tick, see support.ts's `applyCarrying`), then
  * survival instincts, then starting a new carry/loot/delivery, then the
  * original needs-based behavior choice.
+ *
+ * Asleep or frozen is the same shape as fainted/beingCarriedBy — no action
+ * at all while it lasts (status.ts's `tickStatusEffects` handles counting
+ * the affliction itself down, this just blocks acting while it's active).
+ * Paralysis doesn't block acting outright; instead it rolls a real chance
+ * (`PARALYSIS_SKIP_CHANCE`) to skip *this* action tick, on top of the
+ * separate, permanent Speed cut it applies in `actionSpeedOf`
+ * (simulation.ts) — mainline's two independent paralysis effects (fewer
+ * turns overall, plus a full-lockout chance on the turns you do get),
+ * modeled as two independent mechanisms here too rather than one that
+ * approximates both.
  */
 export function tickAgentAction(
   world: World,
@@ -493,11 +512,15 @@ export function tickAgentAction(
   if (agent.alive === false) return;
   if (agent.fainted) return;
   if (agent.beingCarriedBy) return;
+  if (isAsleep(agent) || isFrozen(agent)) return;
+  if (isParalyzed(agent) && rng() < PARALYSIS_SKIP_CHANCE) return;
+  if ((agent.actionLockTicks ?? 0) > 0) return;
 
   if (applyCarrying(world, agent, rules, log)) return;
   if (rules && applyPredationInstincts(world, agent, rules, log, ctx, rng)) return;
   if (maybeStartCarrying(world, agent, log)) return;
   if (applyLooting(world, agent, log)) return;
+  if (applySupportMove(world, agent, log)) return;
   if (applyHerdSupport(world, agent, log)) return;
 
   // Natal dispersal (dispersal.ts) — checked once per action tick for every

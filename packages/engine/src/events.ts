@@ -1,4 +1,4 @@
-import type { Agent, BehaviorKind, DispersalReason, Layer, MigrationReason, Vec2, WeatherType, World } from "./types.js";
+import type { Agent, BehaviorKind, DispersalReason, Layer, MigrationReason, StatusKind, Vec2, WeatherType, World } from "./types.js";
 import type { PokemonType } from "./typing.js";
 
 export type SimEvent =
@@ -143,6 +143,14 @@ export type SimEvent =
       agentId: string;
       species: string;
       pointType: PokemonType | "wildcard";
+    }
+  | {
+      kind: "moveRespecced";
+      tick: number;
+      agentId: string;
+      species: string;
+      moveId: string;
+      nodeId: string;
     }
   | {
       kind: "fainted";
@@ -292,6 +300,36 @@ export type SimEvent =
       species: string;
       pos: Vec2;
       exp: number;
+    }
+  | {
+      kind: "statusInflicted";
+      tick: number;
+      agentId: string;
+      species: string;
+      statusKind: StatusKind;
+      /** The agent whose landed hit caused this — see `maybeInflictStatus` (status.ts). */
+      inflictedBy: string;
+    }
+  | {
+      kind: "supported";
+      tick: number;
+      /** The agent whose ally-targeting move (`MoveSpec.targetsAlly`/`allyEffect`) resolved — see `applySupportMove` (support.ts). */
+      supporterId: string;
+      supporterSpecies: string;
+      allyId: string;
+      allySpecies: string;
+      /** What it actually did — a move can heal, buff, or both, but not neither (see `MoveSpec.allyEffect`). */
+      healed: boolean;
+      buffed: boolean;
+    }
+  | {
+      kind: "statusCleared";
+      tick: number;
+      agentId: string;
+      species: string;
+      statusKind: StatusKind;
+      /** Sleep's duration running out, or freeze's per-tick/fire-hit thaw. A faint (burn/poison DOT or any other cause) clears status silently — the "fainted" event itself narrates that, no separate reason needed here. */
+      reason: "woke" | "thawed";
     };
 
 /**

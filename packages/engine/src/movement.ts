@@ -1,5 +1,7 @@
-import type { Layer, Vec2, World } from "./types.js";
+import type { Agent, Layer, Vec2, World } from "./types.js";
+import type { ForcedMovement } from "./moves.js";
 import { tileAt } from "./world.js";
+import { isImmovable } from "./status.js";
 
 function candidatesToward(pos: Vec2, dx: number, dy: number): Vec2[] {
   return [
@@ -29,4 +31,28 @@ export function stepAway(world: World, layer: Layer, pos: Vec2, threat: Vec2): V
   const dx = Math.sign(pos.x - threat.x) || 1;
   const dy = Math.sign(pos.y - threat.y) || 1;
   return firstWalkable(world, layer, pos, candidatesToward(pos, dx, dy));
+}
+
+/**
+ * Applies a move's `ForcedMovement` effect (moves.ts) — displaces whichever
+ * of `attacker`/`defender` is `forced.mover` by `forced.tiles`, one
+ * obstacle-aware step at a time (`stepToward`/`stepAway`, same as an
+ * agent's own ordinary flee/hunt stepping), toward or away from the other
+ * party. Called from `resolveHit` (predation.ts), both before a hit
+ * resolves (a lunge) and after a landed one (drag/knockback/retreat) — see
+ * `ForcedMovement.timing`'s own doc comment for which is which. A blocked
+ * step (obstacle, edge of map) simply doesn't move that tile, same as any
+ * other stepToward/stepAway call — forced movement never teleports through
+ * something it can't walk through.
+ */
+export function applyForcedMovement(world: World, forced: ForcedMovement, attacker: Agent, defender: Agent): void {
+  const mover = forced.mover === "attacker" ? attacker : defender;
+  const other = forced.mover === "attacker" ? defender : attacker;
+  // The "Immovable" passive (status.ts's `isImmovable`) plants an agent in
+  // place against any drag/knockback/lunge/retreat that would displace it —
+  // it does nothing to stop the *other* party's own forced movement.
+  if (isImmovable(mover)) return;
+  for (let i = 0; i < forced.tiles; i++) {
+    mover.pos = forced.direction === "closer" ? stepToward(world, mover.layer, mover.pos, other.pos) : stepAway(world, mover.layer, mover.pos, other.pos);
+  }
 }

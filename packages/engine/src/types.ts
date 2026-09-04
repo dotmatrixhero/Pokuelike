@@ -1,12 +1,38 @@
 import type { MoveSpec } from "./moves.js";
 import type { PokemonType } from "./typing.js";
 import type { Stats } from "./stats.js";
-import type { Disposition } from "./nature.js";
+import type { Disposition, StatKey } from "./nature.js";
 
 export interface Vec2 {
   x: number;
   y: number;
 }
+
+/**
+ * The five mainline major status conditions this sim actually models.
+ * Mainline-real invariant: an agent carries at most one of these at a time
+ * (inflicting a new one on an already-statused agent is a no-op — see
+ * `maybeInflictStatus` in status.ts). See DESIGN.md's "Status effects"
+ * section.
+ */
+export type StatusKind = "burn" | "poison" | "paralysis" | "sleep" | "freeze";
+
+/**
+ * Agent-modifying passives — a tree node's effect that permanently changes
+ * how the *agent itself* behaves/is calculated, rather than a delta on a
+ * `MoveSpec` (see `MoveTreeNode.grantsPassive` in moves.ts). Deliberately a
+ * short, hand-interpreted enum rather than an open-ended effect DSL — each
+ * kind is read at exactly one real call site: `"damageReduction"`
+ * (predation.ts's `resolveHit`, a flat fraction taken off incoming damage),
+ * `"immovable"` (movement.ts's `applyForcedMovement`, ignores being
+ * dragged/knocked back/lunged at as the forced mover), `"regen"` (needs.ts's
+ * `tickAgentNeeds`, a fraction of maxHp healed every tick regardless of
+ * being fed/watered), `"thorns"` (predation.ts's `applySingleDamageInstance`,
+ * reflects a fraction of incoming damage back at the attacker), `"healAura"`
+ * (needs.ts's `tickAgentNeeds`, heals nearby herd-mates every tick, not just
+ * the passive-holder itself). See MOVES_DESIGN.md's primitives checklist.
+ */
+export type PassiveKind = "damageReduction" | "immovable" | "regen" | "thorns" | "healAura";
 
 /**
  * Why a herd is (or was) migrating — see herdMigration.ts/DESIGN.md's
@@ -324,6 +350,27 @@ export interface Agent {
   /** Untyped skill points that can fund any move's respec tree, regardless of type. */
   wildcardSkillPoints?: number;
   /**
+   * Running count of "real" (non-wildcard) skill points ever granted to this
+   * agent — level-up and on-hit alike — used only by `grantSkillPoint`
+   * (leveling.ts) to know when the next `SKILLPOINT_WILDCARD_INTERVAL`th
+   * bonus wildcard point is due. Never decremented (spending points doesn't
+   * un-grant them) and unrelated to `skillPoints`/`wildcardSkillPoints`
+   * themselves, which do shrink as they're spent.
+   */
+  skillPointGrantCount?: number;
+  /**
+   * Permanent record of which tree nodes this agent has committed to on each
+   * known move, keyed by move id — e.g. `{ ember: ["wider_burn"] }`. Grown
+   * one node at a time by `maybeAutoRespec` (leveling.ts) whenever a skill
+   * point is granted and an eligible, affordable node exists; never
+   * reversed (no respec-back — a real, permanent build choice, same as
+   * mainline EV/nature investment). The move actually used in combat is
+   * recomputed from this list via `applyMoveTree` each time it changes, so
+   * `moves` always reflects the agent's current build, not just the dex
+   * base. See DESIGN.md's "Specialization" section.
+   */
+  moveTreeChoices?: Record<string, string[]>;
+  /**
    * Coarse "have I been here" tracking for the new-area exp trickle — sector
    * ids (e.g. "3,2" for a fixed-size grid bucket), not raw tiles, and capped
    * (oldest dropped) so this can't grow unboundedly over a long run. See
@@ -362,6 +409,48 @@ export interface Agent {
   finishingPool?: number;
   /** World.tick a true kill happened, for the corpse-persistence pruning window in simulation.ts. */
   diedAtTick?: number;
+  /**
+   * The one major status condition this agent currently carries, if any —
+   * see `StatusKind` and status.ts. `ticksRemaining` only matters for
+   * sleep/freeze (bounded duration, decremented in `tickStatusEffects`);
+   * burn/poison/paralysis have no independent duration or cure in this sim
+   * (no item/ability system exists to cure them early) — they persist until
+   * the agent faints, at which point this is cleared unconditionally, same
+   * as every other status kind (mainline-real: fainting always cures
+   * status).
+   */
+  status?: { kind: StatusKind; ticksRemaining?: number };
+  /**
+   * Stacked stat-stage modifiers, each independent of `status`/burn's own
+   * one-off computed halving — see `getStatStage`/`applyStatStage`
+   * (status.ts). An entry with `ticksRemaining` set is a *temporary* buff
+   * (counted down and removed in `tickAgentNeeds`, e.g. Bubble Shield's
+   * self-buff-on-hit); one without it is *permanent* until some other effect
+   * removes it (e.g. Growl's designed Attack-lowering AoE) — the same array
+   * covers both of MOVES_DESIGN.md's "real-duration temporary buffs" and
+   * "persistent stat stages" primitives, distinguished only by whether a
+   * duration is set. Multiple entries on the same `stat` stack additively
+   * (clamped downstream by `statStageMultiplier`'s own [-6,+6] clamp).
+   */
+  statStages?: Array<{ stat: StatKey; stage: number; ticksRemaining?: number }>;
+  /**
+   * Granted permanently by a move-tree node's `grantsPassive` (moves.ts) once
+   * chosen — see `PassiveKind`'s own doc comment for what each key does and
+   * where it's read. Absent/0 for any kind means "no such passive," same as
+   * every other optional agent field in this file.
+   */
+  passives?: Partial<Record<PassiveKind, number>>;
+  /**
+   * Ticks remaining during which this agent cannot act at all — set by a
+   * move with `MoveSpec.lockTicks` (a move committing its user for more than
+   * one action tick, e.g. a Reaping Slash follow-through) via `useMove`
+   * (combat.ts), ticked down every world tick in `tickAgentNeeds` regardless
+   * of whether the agent gets an action tick this tick. Checked as an early
+   * no-action guard in `tickAgentAction` (needs.ts), same shape as
+   * fainted/asleep/frozen. Absent/0 = no lock, the default for every move
+   * that doesn't set `lockTicks`.
+   */
+  actionLockTicks?: number;
   /** General item slots — simple food units and/or ITEM_DEX entries, each carrying its own weight. Capped by `carryCapacityOf` (support.ts). */
   inventory?: InventoryItem[];
   /** The id of a fully-fainted ally this agent is currently carrying, if any. Mutually exclusive in practice with `beingCarriedBy` on the same agent. */

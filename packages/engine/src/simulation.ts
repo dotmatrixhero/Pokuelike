@@ -9,6 +9,7 @@ import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, coldSnapSpeedMultipli
 import { tileAt } from "./world.js";
 import { isNight, lightLevel } from "./daynight.js";
 import { advanceWeather } from "./weather.js";
+import { PARALYSIS_SPEED_MULTIPLIER, isParalyzed } from "./status.js";
 
 /**
  * Energy an agent needs to accumulate before it gets to act. Chosen against
@@ -69,15 +70,23 @@ export function accumulateActionEnergy(agent: Agent, speed: number): boolean {
  * A fourth, same-pattern multiplier: an agent caught in an active cold-snap
  * weather cell (support.ts's `coldSnapSpeedMultiplier`, weather.ts's Phase
  * 3) is slower too, flat across every species — see that function's doc
- * comment for why. Order doesn't matter for a product of multipliers, but
- * for the record: terrain, then off-hours, then cold snap, then injury last.
+ * comment for why.
+ *
+ * A fifth: paralysis (`status.ts`'s `PARALYSIS_SPEED_MULTIPLIER`) — the
+ * *permanent, real-time* half of what paralysis does, independent of its
+ * separate per-action-tick skip-chance roll in `tickAgentAction`
+ * (needs.ts). Order doesn't matter for a product of multipliers, but for
+ * the record: terrain, then off-hours, then cold snap, then paralysis, then
+ * injury last. Exported (like `accumulateActionEnergy`) so it's directly
+ * testable without needing a full `tickWorld` pass.
  */
-function actionSpeedOf(world: World, agent: Agent, tick: number): number {
+export function actionSpeedOf(world: World, agent: Agent, tick: number): number {
   const baseSpeed =
     (agent.stats?.speed ?? ACTION_THRESHOLD) *
     (agent.terrainSpeedFactor ?? 1) *
     activityScheduleMultiplier(agent.activityPattern, tick) *
-    coldSnapSpeedMultiplier(world, agent.layer, agent.pos);
+    coldSnapSpeedMultiplier(world, agent.layer, agent.pos) *
+    (isParalyzed(agent) ? PARALYSIS_SPEED_MULTIPLIER : 1);
   return effectiveSpeed(agent, baseSpeed);
 }
 

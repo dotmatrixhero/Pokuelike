@@ -1,4 +1,5 @@
-import type { Agent, Vec2 } from "./types.js";
+import type { Agent, PassiveKind, StatusKind, Vec2 } from "./types.js";
+import type { Disposition, StatKey } from "./nature.js";
 import type { PokemonType } from "./typing.js";
 
 /**
@@ -8,6 +9,32 @@ import type { PokemonType } from "./typing.js";
  * touching how shapes themselves are resolved.
  */
 export type Direction = "N" | "S" | "E" | "W";
+
+/**
+ * Every battlefield condition `situationalBonus` can key off, evaluated at
+ * the moment of the hit (`situationalMultiplier`, predation.ts) — each one
+ * rides an existing subsystem rather than inventing new world state:
+ * `"targetLowHp"`/`"flanking"`/`"night"` shipped earlier; `"elevation"`
+ * (attacker's tile is higher than the defender's — fov.ts/world.ts's
+ * existing elevation data), `"concealed"` (the attacker itself is standing
+ * in a bush — `Tile.concealment`), `"coldSnap"`/`"storm"`/`"drought"`/
+ * `"rain"` (weather.ts's `activeWeatherAt`), `"targetBurning"` (the specific
+ * status, for a move that only cares about its own signature effect), and
+ * `"targetStatused"` (any of the five `StatusKind`s — a predator finishing
+ * off something already weakened, not fussy about the cause) are all new.
+ */
+export type SituationalCondition =
+  | "targetLowHp"
+  | "flanking"
+  | "night"
+  | "elevation"
+  | "concealed"
+  | "coldSnap"
+  | "storm"
+  | "drought"
+  | "rain"
+  | "targetBurning"
+  | "targetStatused";
 
 export type MoveShape =
   | { kind: "point" }
@@ -48,8 +75,21 @@ export interface MoveSpec {
   accuracy: number;
   /** Ticks before this move can be used again. */
   cooldownTicks: number;
-  /** e.g. burn chance. Not consumed by anything yet (no status-effect system) — see TODO. */
+  /**
+   * Chance (0-1) that a landed, damaging, non-killing hit inflicts
+   * `statusKind` on the defender — rolled in `resolveHit` (predation.ts) via
+   * `maybeInflictStatus` (status.ts), right where skill points already
+   * piggyback on the same hit. Meaningless without `statusKind` set.
+   */
   statusChance?: number;
+  /**
+   * Which status this move can inflict, if `statusChance` rolls. Hand-set
+   * only on the curated roster (`packages/data/src/moves.ts`) — the
+   * generated dex only records *that* a mainline move has a status effect,
+   * not which one (see DESIGN.md's "Status effects" section). Absent =
+   * `statusChance` (if set) is inert, same as before this field existed.
+   */
+  statusKind?: StatusKind;
   /**
    * Explicit cast range. Optional so specs that predate this field (test
    * fixtures, hand-rolled MoveSpec literals) keep working unchanged —
@@ -59,14 +99,172 @@ export interface MoveSpec {
    */
   range?: MoveRange;
   /**
+   * Forces the attacker or defender to move as part of this move — a drag,
+   * knockback, lunge, or retreat, applied via `applyForcedMovement`
+   * (movement.ts) from `resolveHit` (predation.ts). Absent = this move
+   * never moves anyone beyond their own normal steps. See `ForcedMovement`.
+   */
+  forcedMovement?: ForcedMovement;
+  /**
+   * Strikes 2-5 times in one use — mainline multi-hit shape (Fury Attack,
+   * Bullet Seed, etc.). Rolled once per use in `resolveHit`/`resolveAreaHit`
+   * (predation.ts) via `rollHitCount`; each hit gets its own accuracy roll
+   * and damage instance, stopping early the moment the defender faints or
+   * dies. Absent = a normal single-hit move (the default, unchanged).
+   */
+  hits?: { min: number; max: number };
+  /**
+   * Fraction (0-1) of the defender's Defense/SpDefense stat this move
+   * ignores — e.g. `0.5` halves effective Defense before the damage formula
+   * runs (`calculateDamage`, combat.ts). Absent/0 = no penetration, the
+   * default for every move that doesn't set it.
+   */
+  defensePenetration?: number;
+  /**
+   * Locks the user out of acting for this many *additional* ticks after
+   * using the move — set on `agent.actionLockTicks` by `useMove` (combat.ts),
+   * ticked down in `tickAgentNeeds` and checked as a no-action guard in
+   * `tickAgentAction` (needs.ts), same shape as fainted/asleep/frozen.
+   * Absent/0 = no lock (the default) — a normal move never costs the user a
+   * future action tick beyond its own cooldown.
+   */
+  lockTicks?: number;
+  /**
+   * A flat multiplier applied to this move's damage when `condition` holds,
+   * evaluated at the moment of the hit (`situationalMultiplier`, predation.ts)
+   * — real battlefield state, not a tree-time delta. `"targetLowHp"`: the
+   * defender is at or below half HP. `"flanking"`: the attacker isn't the
+   * nearest threat the defender is currently reacting to (a rough "caught it
+   * off guard" proxy — see `situationalMultiplier`'s own doc comment for the
+   * exact check). `"night"`: the world is currently in its night phase
+   * (daynight.ts's `isNight`). Absent = no situational bonus, the default.
+   */
+  situationalBonus?: { condition: SituationalCondition; multiplier: number };
+  /**
+   * A flat multiplier on this move's *scoring* (not its actual damage) in
+   * `pickBestMove` (combat.ts) when `condition` holds against the attacker's
+   * own current state — `"selfLowHp"`: the attacker itself is at or below
+   * half HP, biasing selection toward a move built for exactly that moment
+   * (e.g. a "cornered" desperation move) without needing to touch the actual
+   * damage formula. Absent = no self-state scoring bonus, the default.
+   */
+  selfStateBonus?: { condition: "selfLowHp"; multiplier: number };
+  /**
+   * Applies a stat-stage change via `resolveHit` (predation.ts) —
+   * `target: "self"` applies the moment the move is used (even on a miss or
+   * a killing blow, like a self-hyping windup); `target: "defender"` only on
+   * a landed, non-killing hit, same hook `maybeInflictStatus` uses. `ticks`,
+   * if set, makes it a temporary buff (removed after that many ticks —
+   * status.ts's `tickStatStages`); absent means permanent until some other
+   * effect removes it. See `Agent.statStages`. Absent `statChangeOnHit` =
+   * this move never touches stat stages, the default.
+   */
+  statChangeOnHit?: { target: "self" | "defender"; stat: StatKey; stage: number; ticks?: number };
+  /** Attacker and defender swap tiles on a landed, non-killing hit — a Bodyblock-style position swap. Absent = no swap, the default. */
+  positionSwap?: boolean;
+  /**
+   * This move targets a nearby ally instead of a threat — resolved by
+   * `applySupportMove` (support.ts) from the agent's own idle/support tick,
+   * never from `resolveHit`'s hostile hit-resolution path. Meaningless
+   * without `allyEffect` set. Absent = an ordinary hostile move, the default.
+   */
+  targetsAlly?: boolean;
+  /** What a `targetsAlly` move does to the ally it resolves against — a heal, a buff, or both. */
+  allyEffect?: { healFraction?: number; buff?: { stat: StatKey; stage: number; ticks?: number } };
+  /**
+   * Resolves against every living agent within the move's `shape` (not just
+   * one picked target) via `resolveAreaHit` (predation.ts), which reuses
+   * `resolveShape` (this file) with a facing derived from attacker->primary-
+   * target direction. Absent/false = ordinary single-target resolution, the
+   * default; a move with a non-`"point"` shape but no `hitsArea` still only
+   * ever resolves against the one picked defender (shape then only matters
+   * for `moveRange`'s reach derivation).
+   */
+  hitsArea?: boolean;
+  /**
+   * Bonus power scaling with the attacker's own bulk (`agent.maxHp`, the
+   * sim's existing weight proxy — see support.ts's `bodyWeightOf` for the
+   * same proxy used elsewhere), added on top of `power` at the moment of the
+   * hit (`predation.ts`'s `applySingleDamageInstance`) rather than baked
+   * into the respec'd spec — a Venusaur and a Diglett wielding the same
+   * `weightScaling` move hit very differently. `factor` is the fraction of
+   * `maxHp` added as bonus power (e.g. `0.15` on a 200-maxHp attacker adds
+   * 30 power). Absent = no weight scaling, the default.
+   */
+  weightScaling?: { factor: number };
+  /**
+   * Added to the crit-stage passed into `rollCritical` (combat.ts) —
+   * `rollCritical` already supports a stage argument (mainline's 1/24, 1/8,
+   * 1/2, always table), nothing before this move-tree pass ever fed it
+   * anything but the default 0. Absent/0 = no change, the default.
+   */
+  critRateStage?: number;
+  /** Heals the attacker this fraction of the damage a landed hit dealt — applied once per damage instance in `applySingleDamageInstance`, capped at `maxHp`. Absent/0 = no lifesteal, the default. */
+  lifestealFraction?: number;
+  /**
+   * Costs the attacker this fraction of the damage a landed hit dealt, as
+   * self-damage — applied once per damage instance, alongside lifesteal.
+   * Deliberately floored at 1 hp rather than allowed to faint the user: a
+   * true recoil-can-faint-you mechanic needs attacker-side faint plumbing
+   * this pass doesn't build. Absent/0 = no recoil, the default.
+   */
+  recoilFraction?: number;
+  /**
+   * On a landed, non-killing hit, adds this many ticks to every move
+   * currently on cooldown for the defender — a "your last move recovers
+   * slower now" jam, not a fresh cooldown on a move that wasn't already
+   * winding down. Absent/0 = no jam, the default.
+   */
+  jamCooldownTicks?: number;
+  /** A flat multiplier applied on top of the normal type-effectiveness result specifically when the defender is this type — read in `calculateDamage`. Absent = no bonus, the default. */
+  bonusVsType?: { type: PokemonType; multiplier: number };
+  /**
+   * Partially ignores a matchup this move would normally be resisted on:
+   * when the type chart's own effectiveness comes back below 1 (a real
+   * resist, not immune), it's multiplied by this and capped at 1 (a
+   * resisted hit can become neutral, never super-effective, from this alone)
+   * — read in `calculateDamage`, composing with (not replacing)
+   * `bonusVsType`. Absent = the type chart's own number stands, the default.
+   */
+  resistanceBreaker?: { multiplier: number };
+  /** Deducts this fraction of the given need from the attacker once per use (on `useMove`, regardless of whether the hit lands) — a real cost distinct from recoil (which scales with damage dealt). Absent = no cost, the default. */
+  selfCostPerUse?: { need: "energy" | "hunger"; amount: number };
+  /** On a landed hit, reverts a "bush" tile the defender is standing on back to plain floor, stripping its concealment for good — a real terrain interaction, not cosmetic. Absent/false = no terrain effect, the default. */
+  terrainBurn?: boolean;
+  /** A burn this move inflicts has a chance to jump to another nearby agent too — rolled once per successful `maybeInflictStatus` call, see status.ts's `maybeSpreadStatus`. Absent/false = no spread, the default. */
+  statusSpreads?: boolean;
+  /**
    * Optional respec DAG (see `applyMoveTree`). Each node is a delta applied
    * on top of the base spec, gated by a point cost and prerequisite node
    * id(s). Absent = this move can't be respec'd (the common case — only
-   * moves with an actual designed tree, like Ember, carry one). Wild
-   * background agents never apply a tree — see predation.ts and DESIGN.md's
-   * explicit scope call.
+   * moves with an actual designed tree, like Ember, carry one). Wild agents
+   * auto-respec into an eligible, affordable node whenever they earn a
+   * skill point — see `maybeAutoRespec` (leveling.ts) and DESIGN.md's
+   * "Specialization" section.
    */
   tree?: Record<string, MoveTreeNode>;
+}
+
+/**
+ * Describes a move's forced-movement effect — a drag, knockback, lunge, or
+ * retreat, distinct from an agent's own ordinary flee/hunt/idle stepping.
+ * `mover` is displaced `tiles` steps, one obstacle-aware step at a time
+ * (`movement.ts`'s `stepToward`/`stepAway`), toward or away from whichever
+ * party isn't `mover`. `timing` decides when: `"beforeHit"` resolves right
+ * after the move is committed to but before the accuracy/damage roll (a
+ * lunge that can change the attacker's footing for follow-up ticks, even
+ * though this hit's own range was already validated before `resolveHit`
+ * was called); `"onHit"` resolves only after a landed, damaging,
+ * non-killing hit (drag/knockback/retreat) — the same "landed hit" hook
+ * `maybeInflictStatus` (status.ts) uses.
+ */
+export interface ForcedMovement {
+  /** Which party is displaced. */
+  mover: "attacker" | "defender";
+  /** Relative to the other party: `"closer"` drags/lunges them together, `"away"` pushes/retreats them apart. */
+  direction: "closer" | "away";
+  tiles: number;
+  timing: "beforeHit" | "onHit";
 }
 
 /**
@@ -82,6 +280,57 @@ export interface MoveTreeNode {
   name: string;
   cost: number;
   prerequisites?: string[];
+  /**
+   * Alternative prerequisite sets: the node is eligible if it satisfies its
+   * (possibly absent) `prerequisites` list AND at least one of these inner
+   * arrays is fully satisfied — each inner array is itself AND'd together,
+   * same as `prerequisites`, but only one of the arrays needs to hold. This
+   * is what lets a crosslink node stand in for a branch's own earlier chain
+   * node as an alternate way to reach something downstream (see
+   * MOVES_DESIGN.md's "crosslinks" section) — the same shape also covers a
+   * keystone reachable from either of two forks. The common authoring
+   * pattern is to use this *instead of* `prerequisites`, not alongside it —
+   * a node with both must satisfy both (AND between the two mechanisms).
+   */
+  prerequisitesAnyOf?: string[][];
+  /**
+   * Node ids this one permanently locks out once chosen, and vice versa —
+   * checked in both directions regardless of which side declares it, so a
+   * one-sided declaration still works, though authoring both sides is
+   * clearer to read. This is the real-fork primitive: two nodes that
+   * `excludes` each other are a mutually exclusive, permanent choice (see
+   * MOVES_DESIGN.md's skill-tree template). Absent = no exclusivity.
+   */
+  excludes?: string[];
+  /**
+   * Grants a permanent `Agent`-level passive the moment this node is chosen
+   * (`maybeAutoRespec`, leveling.ts) — deliberately NOT part of `delta`,
+   * since a passive modifies the *agent*, not the `MoveSpec` this tree
+   * respecs. `value` accumulates into `agent.passives[kind]` (e.g. two
+   * separate `damageReduction` nodes on two different moves both stack).
+   * Absent = this node is a pure `MoveSpec` delta, the default. See
+   * `PassiveKind`'s own doc comment (types.ts) for what each kind does.
+   */
+  grantsPassive?: { kind: PassiveKind; value: number };
+  /**
+   * Same as `grantsPassive`, plural — for the rare node that grants more
+   * than one passive at once (e.g. a keystone that's both a damage-taking
+   * lightning rod AND takes less damage while it's at it). A node with both
+   * `grantsPassive` and `grantsPassives` grants all of them; the common case
+   * is exactly one or the other, not both. Absent = no extra passives beyond
+   * whatever `grantsPassive` alone specifies.
+   */
+  grantsPassives?: Array<{ kind: PassiveKind; value: number }>;
+  /**
+   * Which Disposition axis (nature.ts) this node appeals to, if any — used
+   * only by `maybeAutoRespec` (leveling.ts) to weight a wild agent's pick
+   * among several currently-affordable/eligible nodes on the same tree.
+   * Absent means the node has no particular behavioral lean (e.g. a pure
+   * numeric buff nobody would pick "because they're bold") and is weighted
+   * neutrally. This never gates eligibility or cost — it only nudges *which*
+   * eligible node an individual is more likely to grab first.
+   */
+  leaning?: keyof Disposition;
   delta: {
     shape?: MoveShape;
     range?: Partial<MoveRange>;
@@ -89,6 +338,44 @@ export interface MoveTreeNode {
     accuracy?: number;
     cooldownTicks?: number;
     statusChance?: number;
+    /** Overwrite, like `shape` — a move has at most one forced-movement effect at a time, not a stack of them. */
+    forcedMovement?: ForcedMovement;
+    /** Additive, like `power`. */
+    defensePenetration?: number;
+    /** Overwrite, like `shape` — a move has at most one multi-hit spec at a time. */
+    hits?: { min: number; max: number };
+    /** Additive, like `power` — a move that's already locking can lock longer. */
+    lockTicks?: number;
+    /** Overwrite, like `shape` — a move has at most one situational condition at a time. */
+    situationalBonus?: { condition: SituationalCondition; multiplier: number };
+    /** Overwrite, like `shape`. */
+    selfStateBonus?: { condition: "selfLowHp"; multiplier: number };
+    /** Overwrite, like `shape` — a move has at most one stat-change-on-hit effect at a time. */
+    statChangeOnHit?: { target: "self" | "defender"; stat: StatKey; stage: number; ticks?: number };
+    /** OR-merge, like a boolean flag being turned on for good once any node sets it. */
+    positionSwap?: boolean;
+    targetsAlly?: boolean;
+    hitsArea?: boolean;
+    terrainBurn?: boolean;
+    statusSpreads?: boolean;
+    /** Overwrite, like `shape`. */
+    allyEffect?: { healFraction?: number; buff?: { stat: StatKey; stage: number; ticks?: number } };
+    /** Overwrite, like `shape`. */
+    weightScaling?: { factor: number };
+    /** Additive, like `power`. */
+    critRateStage?: number;
+    /** Additive, like `power`. */
+    lifestealFraction?: number;
+    /** Additive, like `power`. */
+    recoilFraction?: number;
+    /** Additive, like `power`. */
+    jamCooldownTicks?: number;
+    /** Overwrite, like `shape`. */
+    bonusVsType?: { type: PokemonType; multiplier: number };
+    /** Overwrite, like `shape`. */
+    resistanceBreaker?: { multiplier: number };
+    /** Overwrite, like `shape`. */
+    selfCostPerUse?: { need: "energy" | "hunger"; amount: number };
   };
 }
 
@@ -158,7 +445,12 @@ export function resolveShape(shape: MoveShape, origin: Vec2, facing: Direction):
  * order-independent; `shape` and `range` are overwrites, applied in the order
  * given, so a tree that offers alternative branches (e.g. Ember: "grow into
  * a ring" vs. "stay a point but hit faster/more often") depends on the caller
- * choosing one, not both, deltas that touch the same field.
+ * choosing one, not both, deltas that touch the same field. Also validates
+ * `prerequisitesAnyOf` (satisfying `prerequisites` alone isn't enough if this
+ * is set — at least one alternative set must also be fully chosen) and
+ * `excludes` (two mutually-exclusive nodes can't both appear in
+ * `chosenNodeIds`, checked in both directions) — see `MoveTreeNode`'s own
+ * doc comments.
  */
 export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec {
   const tree = base.tree;
@@ -177,6 +469,23 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
         `applyMoveTree: node "${nodeId}" on move "${base.id}" requires [${missing.join(", ")}] to be chosen first`
       );
     }
+
+    if (node.prerequisitesAnyOf && node.prerequisitesAnyOf.length > 0) {
+      const satisfied = node.prerequisitesAnyOf.some((set) => set.every((prereq) => chosen.has(prereq)));
+      if (!satisfied) {
+        throw new Error(
+          `applyMoveTree: node "${nodeId}" on move "${base.id}" requires one of its alternative prerequisite sets to already be chosen`
+        );
+      }
+    }
+
+    const conflict = [...chosen].find(
+      (chosenId) => (node.excludes ?? []).includes(chosenId) || (tree[chosenId]?.excludes ?? []).includes(nodeId)
+    );
+    if (conflict) {
+      throw new Error(`applyMoveTree: node "${nodeId}" on move "${base.id}" conflicts with already-chosen node "${conflict}"`);
+    }
+
     chosen.add(nodeId);
 
     const { delta } = node;
@@ -192,6 +501,30 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       range: delta.range
         ? { min: delta.range.min ?? result.range?.min ?? 0, max: delta.range.max ?? result.range?.max ?? 1 }
         : result.range,
+      forcedMovement: delta.forcedMovement ?? result.forcedMovement,
+      defensePenetration:
+        delta.defensePenetration !== undefined ? (result.defensePenetration ?? 0) + delta.defensePenetration : result.defensePenetration,
+      hits: delta.hits ?? result.hits,
+      lockTicks: delta.lockTicks !== undefined ? (result.lockTicks ?? 0) + delta.lockTicks : result.lockTicks,
+      situationalBonus: delta.situationalBonus ?? result.situationalBonus,
+      selfStateBonus: delta.selfStateBonus ?? result.selfStateBonus,
+      statChangeOnHit: delta.statChangeOnHit ?? result.statChangeOnHit,
+      positionSwap: delta.positionSwap ?? result.positionSwap,
+      targetsAlly: delta.targetsAlly ?? result.targetsAlly,
+      hitsArea: delta.hitsArea ?? result.hitsArea,
+      terrainBurn: delta.terrainBurn ?? result.terrainBurn,
+      statusSpreads: delta.statusSpreads ?? result.statusSpreads,
+      allyEffect: delta.allyEffect ?? result.allyEffect,
+      weightScaling: delta.weightScaling ?? result.weightScaling,
+      critRateStage: delta.critRateStage !== undefined ? (result.critRateStage ?? 0) + delta.critRateStage : result.critRateStage,
+      lifestealFraction:
+        delta.lifestealFraction !== undefined ? (result.lifestealFraction ?? 0) + delta.lifestealFraction : result.lifestealFraction,
+      recoilFraction: delta.recoilFraction !== undefined ? (result.recoilFraction ?? 0) + delta.recoilFraction : result.recoilFraction,
+      jamCooldownTicks:
+        delta.jamCooldownTicks !== undefined ? (result.jamCooldownTicks ?? 0) + delta.jamCooldownTicks : result.jamCooldownTicks,
+      bonusVsType: delta.bonusVsType ?? result.bonusVsType,
+      resistanceBreaker: delta.resistanceBreaker ?? result.resistanceBreaker,
+      selfCostPerUse: delta.selfCostPerUse ?? result.selfCostPerUse,
     };
   }
 
@@ -235,10 +568,9 @@ export function trySpendSkillPoints(agent: Agent, pointType: PokemonType, cost: 
  * the respec'd `MoveSpec` — deducting the currency — if that succeeds.
  * Throws (rather than silently no-op'ing) on insufficient points, same
  * failure style as `applyMoveTree`'s own prerequisite/unknown-node checks —
- * an invalid spend attempt is a caller bug to catch, not swallow. Per
- * DESIGN.md's explicit scope call, wild background agents never call this —
- * every predation/guardian/mob-fight call site keeps using the base
- * `MoveSpec` untouched.
+ * an invalid spend attempt is a caller bug to catch, not swallow. Called by
+ * `maybeAutoRespec` (leveling.ts) whenever a wild agent's disposition-weighted
+ * pick turns out to be affordable — see DESIGN.md's "Specialization" section.
  */
 export function applyMoveTreeWithSpend(base: MoveSpec, chosenNodeIds: string[], agent: Agent): MoveSpec {
   const cost = totalTreeCost(base, chosenNodeIds);

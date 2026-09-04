@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createWorld, setTile } from "../src/world.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createWorld, setElevation, setTile } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
 import { tickWorld } from "../src/simulation.js";
 import { applyPredationInstincts } from "../src/predation.js";
@@ -751,5 +751,679 @@ describe("obstacles block combat move lines", () => {
 
     expect(mobber1.pos).toEqual({ x: 5, y: 3 });
     expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
+  });
+});
+
+describe("status effects wired into real combat (resolveHit)", () => {
+  const BURNING_MOVE: MoveSpec = { ...TEST_MOVE, id: "burning-move", statusChance: 1, statusKind: "burn" };
+
+  it("a landed, non-killing hit inflicts the move's status on the defender", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 }); // survives FALLBACK_DAMAGE (1)
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [BURNING_MOVE] });
+    world.agents.push(hunter, target); // predator ticks first, strikes before prey can flee
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    expect(target.status).toEqual({ kind: "burn", ticksRemaining: undefined });
+    expect(log.events).toContainEqual(
+      expect.objectContaining({ kind: "statusInflicted", agentId: "bulbasaur-0", statusKind: "burn", inflictedBy: "scyther-0" })
+    );
+  });
+
+  it("a fire-typed target can't be burned even on a guaranteed roll", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10, types: ["fire"] });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [BURNING_MOVE] });
+    world.agents.push(hunter, target);
+
+    tickWorld(world, undefined, RULES);
+
+    expect(target.status).toBeUndefined();
+  });
+
+  it("burn halves the burned attacker's physical damage output (via calculateDamage's stat stages)", () => {
+    const attackerStats = { maxHp: 100, attack: 50, defense: 30, spAttack: 30, spDefense: 30, speed: 40 }; // speed >= ACTION_THRESHOLD so it acts on the very first tick
+    const defenderStats = { maxHp: 100, attack: 30, defense: 30, spAttack: 30, spDefense: 30, speed: 10 };
+
+    const burnedWorld = createWorld(10, 10);
+    const burnedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [TEST_MOVE] });
+    burnedAttacker.status = { kind: "burn" };
+    const victim1 = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...defenderStats } });
+    burnedWorld.agents.push(burnedAttacker, victim1);
+    const burnedLog = new EventLog();
+    tickWorld(burnedWorld, burnedLog, RULES);
+    const burnedDamage = burnedLog.events.find((e) => e.kind === "fought")! as Extract<(typeof burnedLog.events)[number], { kind: "fought" }>;
+
+    const healthyWorld = createWorld(10, 10);
+    const healthyAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [TEST_MOVE] });
+    const victim2 = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...defenderStats } });
+    healthyWorld.agents.push(healthyAttacker, victim2);
+    const healthyLog = new EventLog();
+    tickWorld(healthyWorld, healthyLog, RULES);
+    const healthyDamage = healthyLog.events.find((e) => e.kind === "fought")! as Extract<(typeof healthyLog.events)[number], { kind: "fought" }>;
+
+    expect(burnedDamage.damage).toBeLessThan(healthyDamage.damage);
+  });
+});
+
+describe("forced movement wired into real combat (resolveHit)", () => {
+  it("a beforeHit lunge closes distance as part of using the move, without affecting whether it lands", () => {
+    const LUNGE_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "lunge-move",
+      range: { min: 0, max: 2 },
+      forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" },
+    };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 7, y: 5 }, undefined, { moves: [LUNGE_MOVE] }); // starts distance 2, within LUNGE_MOVE's range
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    // The lunge moves the attacker 1 tile closer as part of resolving the
+    // hit — it should end up adjacent to where it started 2 tiles out,
+    // not still at its original distance.
+    expect(hunter.pos).toEqual({ x: 6, y: 5 });
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "scyther-0", defenderId: "bulbasaur-0" }));
+  });
+
+  it("an onHit knockback pushes the defender back after a landed, non-killing hit", () => {
+    const KNOCKBACK_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "knockback-move",
+      forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" },
+    };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 }); // survives FALLBACK_DAMAGE (1), so this is a non-killing hit
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [KNOCKBACK_MOVE] });
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    expect(target.pos).not.toEqual({ x: 5, y: 5 }); // pushed away from where it started
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "scyther-0", defenderId: "bulbasaur-0" }));
+  });
+
+  it("no onHit forced movement fires on a killing/finishing hit — only a landed, non-killing one", () => {
+    const KNOCKBACK_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "knockback-move-2",
+      forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" },
+    };
+    const world = createWorld(10, 10);
+    // hp:1, no types/stats -> this fixture's FALLBACK_DAMAGE (1) brings it to
+    // exactly 0, a fainting hit, not a survived one.
+    const target = prey({ x: 5, y: 5 }, { hp: 1, maxHp: 1 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [KNOCKBACK_MOVE] });
+    world.agents.push(hunter, target);
+
+    tickWorld(world, undefined, RULES);
+
+    // Fainted in place — a fainting hit doesn't trigger onHit forced movement.
+    expect(target.pos).toEqual({ x: 5, y: 5 });
+    expect(target.fainted).toBe(true);
+  });
+});
+
+describe("multi-hit wired into real combat (resolveHit)", () => {
+  it("strikes exactly hits.min===max times, each its own 'fought' event, until the hit count is used up or the target dies", () => {
+    const FLURRY_MOVE: MoveSpec = { ...TEST_MOVE, id: "flurry-move", hits: { min: 3, max: 3 } };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100 }); // survives all 3 FALLBACK_DAMAGE (1 each) hits
+    const hunter = predator({ x: 6, y: 5 }, undefined, { maxHp: 200, moves: [FLURRY_MOVE] }); // maxHp raised so a maxHp:100 target still qualifies as prey (see isPreyOf/PREY_POWER_RATIO)
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    const foughtEvents = log.events.filter((e) => e.kind === "fought");
+    expect(foughtEvents).toHaveLength(3);
+    // 100 - 3 (one FALLBACK_DAMAGE hit each) + 1 (prey()'s default needs are
+    // fully fed/watered, so its own later tickAgentNeeds this same tick
+    // applies its normal 1%-of-maxHp heal-over-time) = 98.
+    expect(target.hp).toBe(98);
+  });
+
+  it("stops early once the target truly dies mid-flurry", () => {
+    const FLURRY_MOVE: MoveSpec = { ...TEST_MOVE, id: "flurry-move-2", hits: { min: 5, max: 5 } };
+    const world = createWorld(10, 10);
+    // Already fainted with a tiny finishing pool — the first hit of the
+    // flurry (FALLBACK_DAMAGE=1) exhausts it, killing it outright; the
+    // remaining 4 hits of this same move-use never get a chance to land.
+    const target = prey({ x: 5, y: 5 }, { hp: 0, maxHp: 10, fainted: true, finishingPool: 1 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [FLURRY_MOVE] });
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    expect(target.alive).toBe(false);
+    expect(log.events.filter((e) => e.kind === "fought")).toHaveLength(1);
+  });
+});
+
+describe("positionSwap wired into real combat (resolveHit)", () => {
+  it("attacker and defender trade tiles on a landed, non-killing hit", () => {
+    const SWAP_MOVE: MoveSpec = { ...TEST_MOVE, id: "swap-move", positionSwap: true };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [SWAP_MOVE] });
+    world.agents.push(hunter, target);
+
+    tickWorld(world, undefined, RULES);
+
+    expect(hunter.pos).toEqual({ x: 5, y: 5 });
+    expect(target.pos).toEqual({ x: 6, y: 5 });
+  });
+
+  it("does not swap on a killing/finishing hit", () => {
+    const SWAP_MOVE: MoveSpec = { ...TEST_MOVE, id: "swap-move-2", positionSwap: true };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 1, maxHp: 1 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [SWAP_MOVE] });
+    world.agents.push(hunter, target);
+
+    tickWorld(world, undefined, RULES);
+
+    expect(hunter.pos).toEqual({ x: 6, y: 5 }); // untouched
+    expect(target.fainted).toBe(true);
+  });
+});
+
+describe("statChangeOnHit wired into real combat (resolveHit)", () => {
+  it("a self-side stat change applies the instant the move is used, regardless of whether it lands", () => {
+    const SELF_BUFF_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "self-buff-move",
+      accuracy: 0, // never lands
+      statChangeOnHit: { target: "self", stat: "attack", stage: 1 },
+    };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [SELF_BUFF_MOVE] });
+    world.agents.push(hunter, target);
+
+    tickWorld(world, undefined, RULES);
+
+    expect(hunter.statStages).toEqual([{ stat: "attack", stage: 1, ticksRemaining: undefined }]);
+  });
+
+  it("a defender-side stat change applies only on a landed, non-killing hit", () => {
+    const DEBUFF_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "debuff-move",
+      statChangeOnHit: { target: "defender", stat: "defense", stage: -1, ticks: 10 },
+    };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [DEBUFF_MOVE] });
+    world.agents.push(hunter, target);
+
+    tickWorld(world, undefined, RULES);
+
+    // ticksRemaining is 9, not 10: the debuff is applied during the hunter's
+    // own action tick, then the target's own tickAgentNeeds (later in the
+    // same tickWorld iteration) immediately counts it down by 1 — real,
+    // same-tick behavior, not a bug.
+    expect(target.statStages).toEqual([{ stat: "defense", stage: -1, ticksRemaining: 9 }]);
+  });
+
+  it("no defender-side stat change on a killing/finishing hit", () => {
+    const DEBUFF_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "debuff-move-2",
+      statChangeOnHit: { target: "defender", stat: "defense", stage: -1 },
+    };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 1, maxHp: 1 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [DEBUFF_MOVE] });
+    world.agents.push(hunter, target);
+
+    tickWorld(world, undefined, RULES);
+
+    expect(target.statStages).toBeUndefined();
+  });
+});
+
+describe("damage-reduction passive wired into real combat (resolveHit)", () => {
+  it("a defender with the damageReduction passive takes proportionally less damage", () => {
+    const attackerStats = { maxHp: 100, attack: 50, defense: 30, spAttack: 30, spDefense: 30, speed: 40 };
+    const defenderStats = { maxHp: 100, attack: 30, defense: 30, spAttack: 30, spDefense: 30, speed: 10 };
+
+    const reducedWorld = createWorld(10, 10);
+    const reducedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [TEST_MOVE] });
+    const reducedVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...defenderStats }, passives: { damageReduction: 0.5 } });
+    reducedWorld.agents.push(reducedAttacker, reducedVictim);
+    const reducedLog = new EventLog();
+    tickWorld(reducedWorld, reducedLog, RULES);
+    const reducedDamage = (reducedLog.events.find((e) => e.kind === "fought")! as Extract<(typeof reducedLog.events)[number], { kind: "fought" }>).damage;
+
+    const normalWorld = createWorld(10, 10);
+    const normalAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [TEST_MOVE] });
+    const normalVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...defenderStats } });
+    normalWorld.agents.push(normalAttacker, normalVictim);
+    const normalLog = new EventLog();
+    tickWorld(normalWorld, normalLog, RULES);
+    const normalDamage = (normalLog.events.find((e) => e.kind === "fought")! as Extract<(typeof normalLog.events)[number], { kind: "fought" }>).damage;
+
+    expect(reducedDamage).toBeLessThan(normalDamage);
+  });
+});
+
+describe("situational bonus wired into real combat (resolveHit)", () => {
+  it("targetLowHp multiplies damage only when the defender is at or below half HP", () => {
+    const LOW_HP_MOVE: MoveSpec = { ...TEST_MOVE, id: "low-hp-move", situationalBonus: { condition: "targetLowHp", multiplier: 3 } };
+    const attackerStats = { maxHp: 100, attack: 50, defense: 30, spAttack: 30, spDefense: 30, speed: 40 };
+    const defenderStats = { maxHp: 100, attack: 30, defense: 30, spAttack: 30, spDefense: 30, speed: 10 };
+
+    const lowHpWorld = createWorld(10, 10);
+    const lowHpAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [LOW_HP_MOVE] });
+    const lowHpVictim = prey({ x: 5, y: 5 }, { hp: 40, maxHp: 100, types: ["normal"], stats: { ...defenderStats } });
+    lowHpWorld.agents.push(lowHpAttacker, lowHpVictim);
+    const lowHpLog = new EventLog();
+    tickWorld(lowHpWorld, lowHpLog, RULES);
+    const lowHpDamage = (lowHpLog.events.find((e) => e.kind === "fought")! as Extract<(typeof lowHpLog.events)[number], { kind: "fought" }>).damage;
+
+    const fullHpWorld = createWorld(10, 10);
+    const fullHpAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [LOW_HP_MOVE] });
+    const fullHpVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...defenderStats } });
+    fullHpWorld.agents.push(fullHpAttacker, fullHpVictim);
+    const fullHpLog = new EventLog();
+    tickWorld(fullHpWorld, fullHpLog, RULES);
+    const fullHpDamage = (fullHpLog.events.find((e) => e.kind === "fought")! as Extract<(typeof fullHpLog.events)[number], { kind: "fought" }>).damage;
+
+    expect(lowHpDamage).toBeGreaterThan(fullHpDamage);
+  });
+});
+
+describe("multi-target/AoE resolution wired into real combat (resolveHit)", () => {
+  it("a hitsArea move (Growl-shaped: ring around the attacker) hits every agent in its shape, not just the picked target", () => {
+    const GROWL_LIKE_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "growl-like-move",
+      shape: { kind: "ring", radius: 1 },
+      hitsArea: true,
+    };
+    const world = createWorld(10, 10);
+    const primaryTarget = prey({ x: 6, y: 5 }, { id: "bulbasaur-primary", hp: 10 });
+    // A bystander on the same ring (radius 1 around the attacker at (5,5)) but
+    // not the deliberately-picked target — should still take a hit.
+    const bystander = prey({ x: 5, y: 6 }, { id: "bulbasaur-bystander", hp: 10 });
+    const hunter = predator({ x: 5, y: 5 }, undefined, { moves: [GROWL_LIKE_MOVE] });
+    world.agents.push(hunter, primaryTarget, bystander);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    const foughtDefenders = log.events.filter((e) => e.kind === "fought").map((e) => (e as { defenderId: string }).defenderId);
+    expect(foughtDefenders).toContain("bulbasaur-primary");
+    expect(foughtDefenders).toContain("bulbasaur-bystander");
+  });
+
+  it("onHit forced movement/positionSwap/status only ever apply to the primary target, not incidental AoE bystanders", () => {
+    const BLAST_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "blast-move",
+      shape: { kind: "ring", radius: 1 },
+      hitsArea: true,
+      forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" },
+    };
+    const world = createWorld(10, 10);
+    const primaryTarget = prey({ x: 6, y: 5 }, { id: "bulbasaur-primary", hp: 10 });
+    const bystander = prey({ x: 5, y: 6 }, { id: "bulbasaur-bystander", hp: 10 });
+    const hunter = predator({ x: 5, y: 5 }, undefined, { moves: [BLAST_MOVE] });
+    world.agents.push(hunter, primaryTarget, bystander);
+
+    tickWorld(world, undefined, RULES);
+
+    expect(primaryTarget.pos).not.toEqual({ x: 6, y: 5 }); // knocked back
+    expect(bystander.pos).toEqual({ x: 5, y: 6 }); // untouched — not the primary target
+  });
+
+  it("returns true (a real 'kill') only if the primary target itself truly dies, not an incidental AoE side-kill", () => {
+    const GROWL_LIKE_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "growl-like-move-2",
+      shape: { kind: "ring", radius: 1 },
+      hitsArea: true,
+    };
+    const world = createWorld(10, 10);
+    const primaryTarget = prey({ x: 6, y: 5 }, { id: "bulbasaur-primary", hp: 10 }); // survives
+    const bystander = prey({ x: 5, y: 6 }, { id: "bulbasaur-bystander", hp: 1, maxHp: 1 }); // dies to FALLBACK_DAMAGE
+    const hunter = predator({ x: 5, y: 5 }, 0.9, { moves: [GROWL_LIKE_MOVE] }); // very hungry — restores hunger only on a true "kill" per applyPredationInstincts
+    world.agents.push(hunter, primaryTarget, bystander);
+
+    tickWorld(world, undefined, RULES);
+
+    // The bystander fainted (not truly dead — FALLBACK_DAMAGE=1 exactly zeroes
+    // hp: 1, which faints rather than kills outright), and the primary target
+    // survived — so the hunter's own hunger should only have decayed
+    // naturally (~0.01), never jumped by KILL_HUNGER_RESTORE (0.6).
+    expect(hunter.needs.hunger).toBeLessThan(0.95);
+  });
+});
+
+const ATTACKER_STATS = { maxHp: 100, attack: 50, defense: 30, spAttack: 30, spDefense: 30, speed: 40 };
+const DEFENDER_STATS = { maxHp: 100, attack: 30, defense: 30, spAttack: 30, spDefense: 30, speed: 10 };
+// `effectiveSpeed` (support.ts) discounts action speed by an injured
+// attacker's own hp/maxHp fraction (floored at FAINT_SPEED_FLOOR, 0.35) — a
+// plain speed:40 attacker started below full HP wouldn't reliably cross
+// ACTION_THRESHOLD (40) on the very first tick these tests all rely on, so
+// tests that deliberately start the attacker hurt use this instead.
+const ATTACKER_STATS_FAST = { ...ATTACKER_STATS, speed: 120 };
+
+function foughtDamage(events: EventLog["events"]): number {
+  return (events.find((e) => e.kind === "fought")! as Extract<(typeof events)[number], { kind: "fought" }>).damage;
+}
+
+describe("weightScaling wired into real combat", () => {
+  it("a heavier attacker (higher maxHp) deals more bonus damage than a lighter one", () => {
+    const HEAVY_MOVE: MoveSpec = { ...TEST_MOVE, id: "heavy-move", weightScaling: { factor: 0.5 } };
+
+    const heavyWorld = createWorld(10, 10);
+    const heavyAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 300, moves: [HEAVY_MOVE] });
+    const heavyVictim = prey({ x: 5, y: 5 }, { hp: 20, maxHp: 20, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    heavyWorld.agents.push(heavyAttacker, heavyVictim);
+    const heavyLog = new EventLog();
+    // Explicit rng (not the default world.rng from an unseeded createWorld)
+    // — confirmed via 30 repeated real runs that leaving this on a fresh
+    // random seed each time flakes about 1/30 (the accuracy roll can, on an
+    // unlucky seed, cause no "fought" event this single tick at all).
+    tickWorld(heavyWorld, heavyLog, RULES, undefined, SAFE_RNG);
+
+    const lightWorld = createWorld(10, 10);
+    const lightAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 50, moves: [HEAVY_MOVE] });
+    const lightVictim = prey({ x: 5, y: 5 }, { hp: 20, maxHp: 20, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    lightWorld.agents.push(lightAttacker, lightVictim);
+    const lightLog = new EventLog();
+    tickWorld(lightWorld, lightLog, RULES, undefined, SAFE_RNG);
+
+    expect(foughtDamage(heavyLog.events)).toBeGreaterThan(foughtDamage(lightLog.events));
+  });
+});
+
+describe("critRateStage wired into real combat", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("a positive critRateStage can crit on a roll that stage 0 would not", () => {
+    // 0.1 is >= CRIT_STAGE_CHANCE[0] (1/24 ~= 0.0417) but < CRIT_STAGE_CHANCE[1] (1/8 = 0.125).
+    // Passed as an explicit rng override (not a global Math.random mock) —
+    // predation.ts threads a real rng end-to-end for determinism (see
+    // DESIGN.md's "Determinism" section), so tickWorld's default of
+    // `world.rng` (a seeded PRNG, not Math.random) is what the actual crit
+    // roll consumes; a Math.random mock has no effect on it.
+    const fixedRng = () => 0.1;
+    const CRIT_MOVE: MoveSpec = { ...TEST_MOVE, id: "crit-move", critRateStage: 1 };
+
+    const critWorld = createWorld(10, 10);
+    const critAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [CRIT_MOVE] });
+    const critVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    critWorld.agents.push(critAttacker, critVictim);
+    const critLog = new EventLog();
+    tickWorld(critWorld, critLog, RULES, undefined, fixedRng);
+
+    const noCritWorld = createWorld(10, 10);
+    const noCritAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [TEST_MOVE] });
+    const noCritVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    noCritWorld.agents.push(noCritAttacker, noCritVictim);
+    const noCritLog = new EventLog();
+    tickWorld(noCritWorld, noCritLog, RULES, undefined, fixedRng);
+
+    expect(critLog.events).toContainEqual(expect.objectContaining({ kind: "fought", critical: true }));
+    expect(foughtDamage(critLog.events)).toBeGreaterThan(foughtDamage(noCritLog.events));
+  });
+});
+
+describe("lifesteal/recoil/thorns wired into real combat", () => {
+  it("lifestealFraction heals the attacker by a fraction of the damage it dealt", () => {
+    const LIFESTEAL_MOVE: MoveSpec = { ...TEST_MOVE, id: "lifesteal-move", lifestealFraction: 0.5 };
+    const world = createWorld(10, 10);
+    const hunter = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS_FAST }, hp: 100, maxHp: 200, moves: [LIFESTEAL_MOVE] });
+    const target = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+    tickWorld(world, log, RULES);
+    expect(hunter.hp).toBeGreaterThan(100);
+    expect(hunter.hp).toBeLessThanOrEqual(200);
+  });
+
+  it("recoilFraction damages the attacker by a fraction of the damage it dealt, floored at 1hp", () => {
+    const RECOIL_MOVE: MoveSpec = { ...TEST_MOVE, id: "recoil-move", recoilFraction: 0.5 };
+    const world = createWorld(10, 10);
+    const hunter = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, hp: 200, maxHp: 200, moves: [RECOIL_MOVE] });
+    const target = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    world.agents.push(hunter, target);
+    tickWorld(world, undefined, RULES);
+    expect(hunter.hp).toBeLessThan(200);
+  });
+
+  it("recoilFraction never faints the attacker outright — floors at 1hp", () => {
+    const RECOIL_MOVE: MoveSpec = { ...TEST_MOVE, id: "recoil-move-2", recoilFraction: 50 };
+    const world = createWorld(10, 10);
+    const hunter = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS_FAST }, hp: 5, maxHp: 200, moves: [RECOIL_MOVE] });
+    const target = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    world.agents.push(hunter, target);
+    tickWorld(world, undefined, RULES);
+    expect(hunter.hp).toBe(1);
+  });
+
+  it("a defender's thorns passive reflects a fraction of damage back onto the attacker", () => {
+    const world = createWorld(10, 10);
+    const hunter = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, hp: 200, maxHp: 200, moves: [TEST_MOVE] });
+    const target = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS }, passives: { thorns: 0.5 } });
+    world.agents.push(hunter, target);
+    tickWorld(world, undefined, RULES);
+    expect(hunter.hp).toBeLessThan(200);
+  });
+});
+
+describe("jamCooldownTicks/terrainBurn/statusSpreads wired into real combat", () => {
+  it("bumps every entry in the defender's active moveCooldowns on a landed, non-killing hit", () => {
+    const JAM_MOVE: MoveSpec = { ...TEST_MOVE, id: "jam-move", jamCooldownTicks: 3 };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10, moveCooldowns: { "some-move": 2 } });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [JAM_MOVE] });
+    world.agents.push(hunter, target);
+    tickWorld(world, undefined, RULES);
+    // 2 (start) + 3 (jam, applied during the hunter's own action tick) - 1
+    // (target's own tickAgentNeeds/tickCooldowns, which runs later this same
+    // tickWorld iteration since it's processed after the hunter) = 4.
+    expect(target.moveCooldowns?.["some-move"]).toBe(4);
+  });
+
+  it("terrainBurn reverts a bush tile the defender stands on to floor", () => {
+    const BURN_TERRAIN_MOVE: MoveSpec = { ...TEST_MOVE, id: "burn-terrain-move", terrainBurn: true };
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "bush");
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [BURN_TERRAIN_MOVE] });
+    world.agents.push(hunter, target);
+    tickWorld(world, undefined, RULES);
+    expect(world.tiles.surface[5 * world.width + 5].terrain).toBe("floor");
+  });
+
+  it("statusSpreads inflicts the same status on a nearby agent once the primary status lands", () => {
+    // 0 beats both the status-inflict and spread rolls. Passed as an
+    // explicit rng override, not a global Math.random mock — see the
+    // critRateStage test above's comment for why a Math.random mock has no
+    // effect on a real tickWorld call.
+    const fixedRng = () => 0;
+    // Ranged (line, reach 2) so the hunter can stand 2 tiles from the target
+    // — outside maybeSpreadStatus's own 1-tile spread radius itself, unlike
+    // a melee move that would put it adjacent and eligible to catch its own
+    // spread instead of the intended bystander.
+    const SPREADING_BURN: MoveSpec = { ...RANGED_MOVE, id: "spreading-burn", statusChance: 1, statusKind: "burn", statusSpreads: true };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10, types: ["grass"] });
+    const neighbor = prey({ x: 5, y: 6 }, { id: "bulbasaur-neighbor", hp: 10, types: ["grass"] });
+    const hunter = predator({ x: 5, y: 3 }, undefined, { moves: [SPREADING_BURN] });
+    world.agents.push(hunter, target, neighbor);
+    tickWorld(world, undefined, RULES, undefined, fixedRng);
+    expect(target.status).toEqual({ kind: "burn", ticksRemaining: undefined });
+    expect(neighbor.status).toEqual({ kind: "burn", ticksRemaining: undefined });
+  });
+});
+
+describe("selfCostPerUse wired into real combat", () => {
+  it("deducts the configured need by the configured amount once the move is used", () => {
+    const COSTLY_MOVE: MoveSpec = { ...TEST_MOVE, id: "costly-move", selfCostPerUse: { need: "energy", amount: 0.2 } };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [COSTLY_MOVE] });
+    hunter.needs.energy = 0.8;
+    world.agents.push(hunter, target);
+    tickWorld(world, undefined, RULES);
+    expect(hunter.needs.energy).toBeCloseTo(0.6, 1);
+  });
+
+  it("floors at 0, never goes negative", () => {
+    const COSTLY_MOVE: MoveSpec = { ...TEST_MOVE, id: "costly-move-2", selfCostPerUse: { need: "energy", amount: 5 } };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [COSTLY_MOVE] });
+    world.agents.push(hunter, target);
+    tickWorld(world, undefined, RULES);
+    expect(hunter.needs.energy).toBe(0);
+  });
+});
+
+describe("new situational conditions wired into real combat", () => {
+  // Fixed rng: an unmocked crit roll (~1/24) or the 0.85-1.15 damage-variance
+  // roll can otherwise coincidentally land the same rounded damage on both
+  // sides of a comparison, flaking a test that isn't actually testing crit
+  // variance. 0.5 always misses the crit roll and lands mid-range variance.
+  beforeEach(() => vi.spyOn(Math, "random").mockReturnValue(0.5));
+  afterEach(() => vi.restoreAllMocks());
+
+  it("elevation grants the bonus only when the attacker is higher than the defender", () => {
+    const ELEVATION_MOVE: MoveSpec = { ...TEST_MOVE, id: "elevation-move", situationalBonus: { condition: "elevation", multiplier: 3 } };
+
+    const highWorld = createWorld(10, 10);
+    setElevation(highWorld, "surface", 6, 5, 2);
+    const highAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [ELEVATION_MOVE] });
+    const highVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    highWorld.agents.push(highAttacker, highVictim);
+    const highLog = new EventLog();
+    tickWorld(highWorld, highLog, RULES);
+
+    const flatWorld = createWorld(10, 10);
+    const flatAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [ELEVATION_MOVE] });
+    const flatVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    flatWorld.agents.push(flatAttacker, flatVictim);
+    const flatLog = new EventLog();
+    tickWorld(flatWorld, flatLog, RULES);
+
+    expect(foughtDamage(highLog.events)).toBeGreaterThan(foughtDamage(flatLog.events));
+  });
+
+  it("concealed grants the bonus only when the attacker is standing in a bush", () => {
+    const CONCEALED_MOVE: MoveSpec = { ...TEST_MOVE, id: "concealed-move", situationalBonus: { condition: "concealed", multiplier: 3 } };
+
+    const bushWorld = createWorld(10, 10);
+    setTile(bushWorld, "surface", 6, 5, "bush");
+    const bushAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [CONCEALED_MOVE] });
+    const bushVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    bushWorld.agents.push(bushAttacker, bushVictim);
+    const bushLog = new EventLog();
+    tickWorld(bushWorld, bushLog, RULES);
+
+    const openWorld = createWorld(10, 10);
+    const openAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [CONCEALED_MOVE] });
+    const openVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    openWorld.agents.push(openAttacker, openVictim);
+    const openLog = new EventLog();
+    tickWorld(openWorld, openLog, RULES);
+
+    expect(foughtDamage(bushLog.events)).toBeGreaterThan(foughtDamage(openLog.events));
+  });
+
+  it("storm/drought/rain check the active weather cell at the attacker's position", () => {
+    const RAIN_MOVE: MoveSpec = { ...TEST_MOVE, id: "rain-move", situationalBonus: { condition: "rain", multiplier: 3 } };
+
+    const rainWorld = createWorld(10, 10);
+    rainWorld.weatherCells = [{ id: "r", type: "rain", center: { x: 6, y: 5 }, radius: 5, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } }];
+    const rainAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [RAIN_MOVE] });
+    const rainVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    rainWorld.agents.push(rainAttacker, rainVictim);
+    const rainLog = new EventLog();
+    tickWorld(rainWorld, rainLog, RULES);
+
+    const clearWorld = createWorld(10, 10);
+    const clearAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [RAIN_MOVE] });
+    const clearVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    clearWorld.agents.push(clearAttacker, clearVictim);
+    const clearLog = new EventLog();
+    tickWorld(clearWorld, clearLog, RULES);
+
+    expect(foughtDamage(rainLog.events)).toBeGreaterThan(foughtDamage(clearLog.events));
+  });
+
+  it("coldSnap checks isInColdSnap at the attacker's position", () => {
+    const COLD_MOVE: MoveSpec = { ...TEST_MOVE, id: "cold-move", situationalBonus: { condition: "coldSnap", multiplier: 3 } };
+
+    const coldWorld = createWorld(10, 10);
+    coldWorld.weatherCells = [{ id: "c", type: "coldSnap", center: { x: 6, y: 5 }, radius: 5, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } }];
+    // A cold snap also slows the attacker's own action speed (weather.ts's
+    // COLD_SNAP_SPEED_MULTIPLIER, composed into actionSpeedOf) — a plain
+    // speed:40 wouldn't cross ACTION_THRESHOLD at all this tick under it, so
+    // both sides of this comparison use the faster stat block instead.
+    const coldAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS_FAST }, maxHp: 200, moves: [COLD_MOVE] });
+    const coldVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    coldWorld.agents.push(coldAttacker, coldVictim);
+    const coldLog = new EventLog();
+    tickWorld(coldWorld, coldLog, RULES);
+
+    const warmWorld = createWorld(10, 10);
+    const warmAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS_FAST }, maxHp: 200, moves: [COLD_MOVE] });
+    const warmVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    warmWorld.agents.push(warmAttacker, warmVictim);
+    const warmLog = new EventLog();
+    tickWorld(warmWorld, warmLog, RULES);
+
+    expect(foughtDamage(coldLog.events)).toBeGreaterThan(foughtDamage(warmLog.events));
+  });
+
+  it("targetBurning/targetStatused key off the defender's current status", () => {
+    const BURNING_BONUS_MOVE: MoveSpec = { ...TEST_MOVE, id: "burning-bonus-move", situationalBonus: { condition: "targetBurning", multiplier: 3 } };
+    const STATUSED_BONUS_MOVE: MoveSpec = { ...TEST_MOVE, id: "statused-bonus-move", situationalBonus: { condition: "targetStatused", multiplier: 3 } };
+
+    const burningWorld = createWorld(10, 10);
+    const burningAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [BURNING_BONUS_MOVE] });
+    const burningVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS }, status: { kind: "burn" } });
+    burningWorld.agents.push(burningAttacker, burningVictim);
+    const burningLog = new EventLog();
+    tickWorld(burningWorld, burningLog, RULES);
+
+    const healthyWorld = createWorld(10, 10);
+    const healthyAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [BURNING_BONUS_MOVE] });
+    const healthyVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    healthyWorld.agents.push(healthyAttacker, healthyVictim);
+    const healthyLog = new EventLog();
+    tickWorld(healthyWorld, healthyLog, RULES);
+
+    // targetBurning fires on the burning target but not the healthy one.
+    expect(foughtDamage(burningLog.events)).toBeGreaterThan(foughtDamage(healthyLog.events));
+
+    const paralyzedWorld = createWorld(10, 10);
+    const paralyzedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [STATUSED_BONUS_MOVE] });
+    const paralyzedVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS }, status: { kind: "paralysis" } });
+    paralyzedWorld.agents.push(paralyzedAttacker, paralyzedVictim);
+    const paralyzedLog = new EventLog();
+    tickWorld(paralyzedWorld, paralyzedLog, RULES);
+
+    const unstatusedWorld = createWorld(10, 10);
+    const unstatusedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [STATUSED_BONUS_MOVE] });
+    const unstatusedVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    unstatusedWorld.agents.push(unstatusedAttacker, unstatusedVictim);
+    const unstatusedLog = new EventLog();
+    tickWorld(unstatusedWorld, unstatusedLog, RULES);
+
+    // targetStatused fires on ANY status (paralysis here), not just burn.
+    expect(foughtDamage(paralyzedLog.events)).toBeGreaterThan(foughtDamage(unstatusedLog.events));
   });
 });
