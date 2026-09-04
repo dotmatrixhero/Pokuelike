@@ -3,6 +3,49 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Next up: terrain lifecycle + construction + overworld (one combined design, not started)
+
+Direct feedback: not enough dynamism in the environment — weather changes
+things but the map itself never does. Three systems, decided to build as
+one combined design rather than separately, in this dependency order once
+work resumes:
+
+1. **Terrain lifecycle** — trees grow from saplings and age, storms can
+   fell them (real map consequence for weather, not just FOV/accuracy/
+   migration-triggering), reusing flora.ts's existing stock/growth/seed-
+   spread architecture rather than inventing new machinery. Also: a slow
+   weather-driven biome drift — a biome seed under sustained drought
+   gradually shifts toward Badlands-like parameters over a very long
+   timescale (tens of thousands of ticks, a geological-feeling process
+   distinct from the fast weather-cell overlay), and vice versa for
+   sustained rain. This is the foundation the other two build on.
+2. **Construction/shelter-building** — a real mechanic, not just better use
+   of existing natural cover (direct answer when asked): certain species
+   (nest/den-building temperament — likely tied to high sociability/low
+   boldness) build a persistent structure near their herd's home range,
+   consuming real time/investment, creating a new terrain kind with a real
+   mechanical payoff (concealment and/or reduced storm exposure — ties into
+   the existing storm-exposure-to-migration-trigger and carryAlly's
+   rescue-destination concepts). Decays if abandoned, same lifecycle
+   pattern as (1).
+3. **Overworld: the current map becomes one region in a larger graph** —
+   the "World scale: layers, elevation, and regions" section from early in
+   this project, finally built. Decided: full simulation for the focused/
+   observed region (every agent, every tick, exactly like today), every
+   other region abstracted (aggregate per-species population/need/resource
+   trends advanced by cheap statistical rules, occasional emitted events,
+   no individual agents) — matches the existing "promotion boundary"
+   concept one level up. Promotion (focus arrives) invents plausible
+   individuals from the aggregate; demotion (focus leaves) collapses
+   individuals back to aggregate stats — explicitly lossy, say so plainly
+   rather than pretending otherwise. Migration edges between regions are
+   the natural next home for the just-built individual dispersal mechanic
+   (a disperser could eventually target another region, not just a new
+   herd within the same map) — stretch goal, not required for a first cut.
+   Start with a small region count (3-4), not a large graph.
+
+Not started — the user has something else to try first.
+
 ## Priority: sim depth + observability (current focus)
 
 Per DESIGN.md's north star — the sim needs to be able to run headless and
