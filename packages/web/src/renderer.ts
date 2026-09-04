@@ -10,6 +10,11 @@ const TERRAIN_COLOR: Record<string, string> = {
   flora: "#3f6b3a",
   sunbeam: "#e8c547",
   seedling: "#3f6b2a",
+  tree: "#1f4d2c",
+  boulder: "#5c5a54",
+  bush: "#2f5c33",
+  sand: "#c2a768",
+  mud: "#5a4a32",
 };
 
 /** Per-flavor overrides for "food"/"flora" tiles — see flora.ts's FOOD_FLAVORS/FLORA_FLAVORS. */

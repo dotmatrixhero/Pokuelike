@@ -2,8 +2,12 @@ import type { Agent, HuntRules, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import { growFlora, maybeDropSeed } from "./flora.js";
+import { updateHerdMigrations } from "./herdMigration.js";
 import type { LevelingContext } from "./leveling.js";
-import { CORPSE_PERSIST_TICKS, effectiveSpeed } from "./support.js";
+import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, coldSnapSpeedMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
+import { tileAt } from "./world.js";
+import { isNight, lightLevel } from "./daynight.js";
+import { advanceWeather } from "./weather.js";
 
 /**
  * Energy an agent needs to accumulate before it gets to act. Chosen against
@@ -49,9 +53,31 @@ export function accumulateActionEnergy(agent: Agent, speed: number): boolean {
  * `effectiveSpeed`, floored at `FAINT_SPEED_FLOOR`) — a hurt agent acts less
  * often, not just weaker when it does. See DESIGN.md's "Faint/finish-off,
  * heal over time" section.
+ *
+ * Elevation/terrain from the agent's last real step (`agent.terrainSpeedFactor`,
+ * support.ts's `movementSpeedFactor`) multiplies base Speed *before* the
+ * injury fraction is applied — see `movementSpeedFactor`'s doc comment for
+ * the exact composition and why it's a post-move snapshot rather than a
+ * predictive gate.
+ *
+ * A third, independent multiplier composes the same way: an agent caught
+ * active outside its `activityPattern`'s preferred day/night window
+ * (support.ts's `activityScheduleMultiplier`) is also slower — see
+ * DESIGN.md's "Dynamics that move a content herd" section, Phase 2.
+ *
+ * A fourth, same-pattern multiplier: an agent caught in an active cold-snap
+ * weather cell (support.ts's `coldSnapSpeedMultiplier`, weather.ts's Phase
+ * 3) is slower too, flat across every species — see that function's doc
+ * comment for why. Order doesn't matter for a product of multipliers, but
+ * for the record: terrain, then off-hours, then cold snap, then injury last.
  */
-function actionSpeedOf(agent: Agent): number {
-  return effectiveSpeed(agent, agent.stats?.speed ?? ACTION_THRESHOLD);
+function actionSpeedOf(world: World, agent: Agent, tick: number): number {
+  const baseSpeed =
+    (agent.stats?.speed ?? ACTION_THRESHOLD) *
+    (agent.terrainSpeedFactor ?? 1) *
+    activityScheduleMultiplier(agent.activityPattern, tick) *
+    coldSnapSpeedMultiplier(world, agent.layer, agent.pos);
+  return effectiveSpeed(agent, baseSpeed);
 }
 
 // A plain function call (rather than an inline `agent.alive === false` check)
@@ -80,19 +106,45 @@ function isDead(agent: Agent): boolean {
  * on an agent's action tick, gated by `accumulateActionEnergy`.
  */
 export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext): void {
+  const previousTick = world.tick;
   world.tick += 1;
+  // Once per tick, not once per agent — the day/night cycle is a world-level
+  // clock, not something each agent computes independently. Comparing the
+  // previous tick's phase to this one's is enough to catch the exact tick a
+  // transition happens on without needing any extra persisted world state —
+  // see daynight.ts/DESIGN.md's Phase 2.
+  const wasNight = isNight(previousTick);
+  const nowNight = isNight(world.tick);
+  if (nowNight !== wasNight) {
+    log?.record({ kind: nowNight ? "nightfall" : "daybreak", tick: world.tick, lightLevel: lightLevel(world.tick) });
+  }
+  // Once per tick, not once per agent — a world-level system, the same
+  // "advance the shared clock/weather once, not per-agent" style as the
+  // day/night block above. Runs before `updateHerdMigrations` so this
+  // tick's storm-exposure check (herdMigration.ts's `"weather"` trigger)
+  // sees this tick's weather state, not last tick's stale one — see
+  // weather.ts/DESIGN.md's Phase 3.
+  advanceWeather(world, log);
+  // Once per tick, not once per agent — see herdMigration.ts. Runs against
+  // this tick's pre-move positions, which is fine: sustained-scarcity
+  // detection is a slow-moving signal, not something that needs to react to
+  // the exact order agents move in within the same tick.
+  updateHerdMigrations(world, log);
   for (const agent of world.agents) {
     if (isDead(agent)) continue;
 
     tickAgentNeeds(agent, world, ctx, log);
 
-    const acted = accumulateActionEnergy(agent, actionSpeedOf(agent));
+    const acted = accumulateActionEnergy(agent, actionSpeedOf(world, agent, world.tick));
     if (!acted) continue;
 
     const before = { x: agent.pos.x, y: agent.pos.y };
     const beforeLayer = agent.layer;
+    const beforeElevation = tileAt(world, beforeLayer, before.x, before.y)?.elevation ?? 0;
     tickAgentAction(world, agent, log, rules, ctx);
     if (!isDead(agent) && agent.layer === beforeLayer && (agent.pos.x !== before.x || agent.pos.y !== before.y)) {
+      const afterTile = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
+      agent.terrainSpeedFactor = movementSpeedFactor(beforeElevation, afterTile?.elevation ?? 0, afterTile?.terrain ?? "floor");
       maybeDropSeed(world, agent.layer, agent.pos, log);
     }
   }

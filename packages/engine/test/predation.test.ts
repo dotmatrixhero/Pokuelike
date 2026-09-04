@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { createWorld } from "../src/world.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createWorld, setTile } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
 import { tickWorld } from "../src/simulation.js";
 import { applyPredationInstincts } from "../src/predation.js";
@@ -7,8 +7,11 @@ import { EventLog } from "../src/events.js";
 import type { Agent, HuntRules } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 import type { Disposition } from "../src/nature.js";
+import { DAY_LENGTH_TICKS } from "../src/daynight.js";
 
 const RULES: HuntRules = { scyther: true };
+const MIDNIGHT = 0;
+const NOON = DAY_LENGTH_TICKS / 2;
 
 // No types/stats set on the fixtures below, deliberately: that keeps these
 // tests on predation.ts's FALLBACK_DAMAGE (1 per hit) path, so they're testing
@@ -227,6 +230,47 @@ describe("dynamic (size-based) predation — not a fixed species list", () => {
 
     tickWorld(world, undefined, RULES);
     expect(world.agents.find((a) => a.id === "scyther-0")!.behavior).not.toBe("hunt");
+  });
+});
+
+describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("a roll that would hit in clear weather misses the same fight inside an active storm", () => {
+    // TEST_MOVE has 100 accuracy: with no storm, chance is 100 and 0.7*100=70
+    // always hits (70 < 100). Under a storm, weather.ts's
+    // STORM_ACCURACY_MULTIPLIER (0.6) drops the chance to 60, and that same
+    // roll (70 >= 60) now misses — a real, measurable behavior change, not
+    // just a smaller number nothing reads.
+    vi.spyOn(Math, "random").mockReturnValue(0.7);
+
+    const clearWorld = createWorld(10, 10);
+    clearWorld.agents.push(
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
+      prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
+      predator({ x: 5, y: 6 })
+    );
+    const clearLog = new EventLog();
+    tickWorld(clearWorld, clearLog, RULES);
+    expect(clearLog.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
+
+    const stormWorld = createWorld(10, 10);
+    stormWorld.weatherCells = [
+      { id: "s", type: "storm", center: { x: 5, y: 5 }, radius: 5, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
+    ];
+    stormWorld.agents.push(
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
+      prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
+      predator({ x: 5, y: 6 })
+    );
+    const stormLog = new EventLog();
+    tickWorld(stormWorld, stormLog, RULES);
+    expect(stormLog.events).not.toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
+    expect(stormLog.events).toContainEqual(expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0" }));
   });
 });
 
@@ -479,6 +523,84 @@ describe("disposition wiring", () => {
   });
 });
 
+describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)", () => {
+  it("a nocturnal predator hunts at night at a hunger level a cathemeral predator would ignore", () => {
+    const world = createWorld(10, 10);
+    world.tick = MIDNIGHT;
+    const nocturnalHunter = predator({ x: 8, y: 5 }, 0.65, { activityPattern: "nocturnal" });
+    world.agents.push(prey({ x: 5, y: 5 }), nocturnalHunter);
+
+    applyPredationInstincts(world, nocturnalHunter, RULES);
+
+    expect(nocturnalHunter.behavior).toBe("hunt");
+
+    // Same hunger, same tick, no activityPattern set — the baseline (unshifted) case.
+    const world2 = createWorld(10, 10);
+    world2.tick = MIDNIGHT;
+    const cathemeralHunter = predator({ x: 8, y: 5 }, 0.65);
+    world2.agents.push(prey({ x: 5, y: 5 }), cathemeralHunter);
+
+    applyPredationInstincts(world2, cathemeralHunter, RULES);
+
+    expect(cathemeralHunter.behavior).not.toBe("hunt");
+  });
+
+  it("that same nocturnal predator is LESS eager by day than a cathemeral predator at the same hunger", () => {
+    const world = createWorld(10, 10);
+    world.tick = NOON;
+    const nocturnalHunter = predator({ x: 8, y: 5 }, 0.65, { activityPattern: "nocturnal" });
+    world.agents.push(prey({ x: 5, y: 5 }), nocturnalHunter);
+
+    applyPredationInstincts(world, nocturnalHunter, RULES);
+
+    expect(nocturnalHunter.behavior).not.toBe("hunt");
+  });
+
+  it("a diurnal predator is the exact mirror: eager by day, less eager at night", () => {
+    const dayWorld = createWorld(10, 10);
+    dayWorld.tick = NOON;
+    const dayHunter = predator({ x: 8, y: 5 }, 0.7, { activityPattern: "diurnal" });
+    dayWorld.agents.push(prey({ x: 5, y: 5 }), dayHunter);
+    applyPredationInstincts(dayWorld, dayHunter, RULES);
+    expect(dayHunter.behavior).toBe("hunt");
+
+    const nightWorld = createWorld(10, 10);
+    nightWorld.tick = MIDNIGHT;
+    const nightHunter = predator({ x: 8, y: 5 }, 0.7, { activityPattern: "diurnal" });
+    nightWorld.agents.push(prey({ x: 5, y: 5 }), nightHunter);
+    applyPredationInstincts(nightWorld, nightHunter, RULES);
+    expect(nightHunter.behavior).not.toBe("hunt");
+  });
+
+  it("composes with the existing aggression-based shift rather than replacing it — both stack", () => {
+    // Neutral aggression, nocturnal, at night: threshold 0.6 + 0.15 (activity) = 0.75.
+    const world = createWorld(10, 10);
+    world.tick = MIDNIGHT;
+    const neutralNocturnal = predator({ x: 8, y: 5 }, 0.72, { activityPattern: "nocturnal" });
+    world.agents.push(prey({ x: 5, y: 5 }), neutralNocturnal);
+    applyPredationInstincts(world, neutralNocturnal, RULES);
+    expect(neutralNocturnal.behavior).toBe("hunt"); // 0.72 < 0.75
+
+    // Aggressive AND nocturnal, at night: threshold 0.6 + 0.2 (aggression) + 0.15 (activity) = 0.95 —
+    // hunts at a hunger level neither shift alone would cover.
+    const aggressive: Disposition = { boldness: 0.5, aggression: 1, sociability: 0.5 };
+    const world2 = createWorld(10, 10);
+    world2.tick = MIDNIGHT;
+    const aggressiveNocturnal = predator({ x: 8, y: 5 }, 0.9, { activityPattern: "nocturnal", disposition: aggressive });
+    world2.agents.push(prey({ x: 5, y: 5 }), aggressiveNocturnal);
+    applyPredationInstincts(world2, aggressiveNocturnal, RULES);
+    expect(aggressiveNocturnal.behavior).toBe("hunt"); // 0.9 < 0.95, but not < 0.75 (activity alone) or < 0.8 (aggression alone)
+
+    // Aggression alone (no activityPattern) does NOT reach 0.9 hunger.
+    const world3 = createWorld(10, 10);
+    world3.tick = MIDNIGHT;
+    const aggressiveOnly = predator({ x: 8, y: 5 }, 0.9, { disposition: aggressive });
+    world3.agents.push(prey({ x: 5, y: 5 }), aggressiveOnly);
+    applyPredationInstincts(world3, aggressiveOnly, RULES);
+    expect(aggressiveOnly.behavior).not.toBe("hunt");
+  });
+});
+
 describe("guardians", () => {
   it("a non-prey herd-mate (e.g. Venusaur) intervenes when another member is threatened", () => {
     const world = createWorld(10, 10);
@@ -503,5 +625,94 @@ describe("guardians", () => {
     tickWorld(world, undefined, RULES);
 
     expect(protector.behavior).not.toBe("fight");
+  });
+});
+
+describe("bush concealment", () => {
+  it("a predator that would otherwise detect and hunt prey at this distance fails to when the prey is in a bush", () => {
+    // A bold prey (large enough boldness shrinks its own flee-detection
+    // radius below 4) stays put instead of fleeing the predator this same
+    // tick, which would otherwise change the distance out from under this
+    // test before the predator's own hunt check runs (agents tick in push
+    // order within the same tickWorld call).
+    const bold = { boldness: 1, aggression: 0.5, sociability: 0.5 };
+    // age: 0 keeps both agents below MIN_EXPLORE_AGE (needs.ts) so neither
+    // wanders off on its own idle turn in this large (20x20) world — the
+    // exp-motivated exploration feature otherwise moves the prey before the
+    // predator's own hunt check runs this same tick (agents tick in push
+    // order), corrupting the exact distance this test depends on.
+
+    // Distance 4 is within HUNT_DETECT_RADIUS (5) normally.
+    const openWorld = createWorld(20, 20);
+    openWorld.agents.push(
+      prey({ x: 5, y: 5 }, { disposition: bold, age: 0 }),
+      predator({ x: 9, y: 5 }, 0.1, { age: 0 })
+    );
+    tickWorld(openWorld, undefined, RULES);
+    const openHunter = openWorld.agents.find((a) => a.id === "scyther-0")!;
+    expect(openHunter.behavior).toBe("hunt"); // sanity: this distance is normally detectable
+
+    const bushWorld = createWorld(20, 20);
+    setTile(bushWorld, "surface", 5, 5, "bush");
+    bushWorld.agents.push(
+      prey({ x: 5, y: 5 }, { disposition: bold, age: 0 }),
+      predator({ x: 9, y: 5 }, 0.1, { age: 0 })
+    );
+    tickWorld(bushWorld, undefined, RULES);
+    const concealedHunter = bushWorld.agents.find((a) => a.id === "scyther-0")!;
+    expect(concealedHunter.behavior).not.toBe("hunt");
+  });
+
+  it("prey doesn't notice a predator lurking in a bush at a distance it would otherwise flee from", () => {
+    // Distance 3 is within FLEE_DETECT_RADIUS (4) normally.
+    const openWorld = createWorld(20, 20);
+    const openTarget = prey({ x: 5, y: 5 });
+    openWorld.agents.push(openTarget, predator({ x: 8, y: 5 }));
+    tickWorld(openWorld, undefined, RULES);
+    expect(openTarget.behavior).toBe("flee"); // sanity: this distance is normally detectable
+
+    const bushWorld = createWorld(20, 20);
+    setTile(bushWorld, "surface", 8, 5, "bush");
+    const concealedTarget = prey({ x: 5, y: 5 });
+    bushWorld.agents.push(concealedTarget, predator({ x: 8, y: 5 }));
+    tickWorld(bushWorld, undefined, RULES);
+    expect(concealedTarget.behavior).not.toBe("flee");
+  });
+});
+
+describe("obstacles block combat move lines", () => {
+  it("a tree between a mobbing prey and its target blocks the ranged attack — it closes distance instead", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 4, "tree"); // directly between mobber1 (5,3) and the predator (5,5)
+    const mobber1 = prey({ x: 5, y: 3 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [RANGED_MOVE] });
+    const mobber2 = prey({ x: 4, y: 4 }, { id: "bulbasaur-1", herdId: "herd-a", moves: [RANGED_MOVE] });
+    const mobber3 = prey({ x: 6, y: 4 }, { id: "bulbasaur-2", herdId: "herd-a", moves: [RANGED_MOVE] });
+    world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 5 }));
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    // In range (distance 2, RANGED_MOVE's reach) but the tree blocks the
+    // straight-line path between them — must NOT attack through it. (It also
+    // doesn't manage to route around in this exact layout — directly north
+    // of the predator with the tree directly south of itself, there's no
+    // lateral step available either — so it just stays put this tick; the
+    // point of this test is the blocked attack, not stepToward's general
+    // pathing, which is covered elsewhere.)
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
+  });
+
+  it("the same layout with no obstacle DOES let the ranged attack land (control case)", () => {
+    const world = createWorld(10, 10);
+    const mobber1 = prey({ x: 5, y: 3 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [RANGED_MOVE] });
+    const mobber2 = prey({ x: 4, y: 4 }, { id: "bulbasaur-1", herdId: "herd-a", moves: [RANGED_MOVE] });
+    const mobber3 = prey({ x: 6, y: 4 }, { id: "bulbasaur-2", herdId: "herd-a", moves: [RANGED_MOVE] });
+    world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 5 }));
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    expect(mobber1.pos).toEqual({ x: 5, y: 3 });
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
   });
 });

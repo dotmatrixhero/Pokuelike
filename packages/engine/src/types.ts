@@ -9,11 +9,102 @@ export interface Vec2 {
 }
 
 /**
+ * Why a herd is (or was) migrating — see herdMigration.ts/DESIGN.md's
+ * "Dynamics that move a content herd" Phase 1 and Phase 3. `"scarcity"` is
+ * the original (Phase 0) trigger, spelled `"food scarcity"` back then;
+ * `"predator_pressure"`/`"wanderlust"`/`"territorial"` are Phase 1's
+ * generalization; `"weather"` (Phase 3, weather.ts) is sustained storm
+ * exposure without nearby cover. Shared by `World.herdMigrations` (internal
+ * state, also feeds destination scoring) and `SimEvent`'s
+ * `herdMigrating.reason` (external/narrative surface) so both always agree.
+ */
+export type MigrationReason = "scarcity" | "predator_pressure" | "wanderlust" | "territorial" | "weather";
+
+/**
+ * A minimal, name-only view of a biome seed point (worldgen.ts's `BiomeSeed`
+ * has a full `BiomeDef` with density/terrain-weight tables that weather.ts
+ * has no use for) — just enough for `worldgen.ts`'s `biomeWeightsAt` to
+ * answer "which biome(s), and how strongly, does this point blend toward,"
+ * reused by weather.ts/DESIGN.md's Phase 3 for biome-influenced weather
+ * spawn likelihood and cover-seeking destination scoring. Stored on `World`
+ * (`biomeSeeds` below) rather than recomputed, since the full seed placement
+ * is otherwise private to `generateWorld`'s call.
+ */
+export interface BiomeSeedInfo {
+  x: number;
+  y: number;
+  name: string;
+}
+
+/**
+ * One of the four weather kinds DESIGN.md's Phase 3 asks for — see
+ * weather.ts. `"coldSnap"` (not `"cold_snap"`) matches this codebase's
+ * existing camelCase convention for multi-word string-union members (see
+ * `BehaviorKind`'s `"seekWater"` etc.), unlike `MigrationReason`'s
+ * snake_case members, which predate this feature and aren't worth
+ * retroactively renaming.
+ */
+export type WeatherType = "rain" | "storm" | "drought" | "coldSnap";
+
+/**
+ * One active weather system — see weather.ts/DESIGN.md's Phase 3. `center`
+ * is continuous (not rounded to a tile) so slow drift accumulates smoothly
+ * tick over tick rather than getting stuck at the same integer position for
+ * several ticks in a row; every consumer (flora/needs/fov/combat/support)
+ * reads `center`/`radius` directly rather than needing a materialized set of
+ * covered tiles. Surface-layer only, matching worldgen.ts's existing
+ * Surface-only scope for biome/elevation data — see weather.ts's top-of-file
+ * comment for why every effect function gates on `layer === "surface"`.
+ */
+export interface WeatherCell {
+  id: string;
+  type: WeatherType;
+  center: Vec2;
+  radius: number;
+  startedTick: number;
+  lifespanTicks: number;
+  /** Constant per-tick displacement for the life of the cell — a real but slow drift, not a random walk. */
+  drift: Vec2;
+}
+
+/**
+ * When a species prefers to be active — see daynight.ts/DESIGN.md's "Dynamics
+ * that move a content herd" section, Phase 2. `"cathemeral"` (active any
+ * time) is the default for anything unspecified, both on `SpeciesDef`
+ * (packages/data/src/species.ts) and here on `Agent`, so existing
+ * species/hand-built fixtures don't silently change behavior just because
+ * this feature landed — see support.ts's `activityScheduleMultiplier` and
+ * predation.ts's `huntHungerThreshold` for the two places this actually
+ * changes anything.
+ */
+export type ActivityPattern = "diurnal" | "nocturnal" | "crepuscular" | "cathemeral";
+
+/**
  * "seedling" is a planted, not-yet-mature patch — see flora.ts. It matures
  * into either "food" (edible, has stock) or "flora" (decorative only —
  * not edible, just a nicer tile to be standing on than bare floor).
+ *
+ * "tree"/"boulder" are unwalkable obstacles (see world.ts's
+ * `isWalkableTerrain`) — blocking movement gets them line-of-sight blocking
+ * for free too, since `hasLineOfSight` (fov.ts) already treats any
+ * non-walkable tile as opaque. "bush" is walkable but grants concealment
+ * (see `Tile.concealment`). "sand"/"mud" are walkable but slow movement
+ * (see support.ts's `terrainSpeedMultiplier`). All five are placed by
+ * procedural generation — see worldgen.ts.
  */
-export type TerrainKind = "floor" | "wall" | "water" | "food" | "flora" | "sunbeam" | "seedling";
+export type TerrainKind =
+  | "floor"
+  | "wall"
+  | "water"
+  | "food"
+  | "flora"
+  | "sunbeam"
+  | "seedling"
+  | "tree"
+  | "boulder"
+  | "bush"
+  | "sand"
+  | "mud";
 
 /**
  * Three layers share one x,y footprint. A species is native to one layer
@@ -44,6 +135,14 @@ export interface Tile {
   stock?: number;
   /** "seedling" tiles only: ticks since it took root. Becomes "food" or "flora" once mature — see flora.ts. */
   growth?: number;
+  /**
+   * "bush" tiles only: true if standing here makes an agent harder to
+   * detect — a real (not cosmetic) reduction to predation.ts's flee/hunt
+   * detection radius and to fov.ts's `computeVisible` effective visibility.
+   * A plain boolean rather than a graded number: only one terrain kind
+   * grants it today, so there's nothing yet to grade between.
+   */
+  concealment?: boolean;
   /**
    * "food"/"flora" tiles only: which specific plant this is (e.g. an Oran
    * berry bush vs. a mossy tuft) — purely cosmetic for now (glyph/color in
@@ -137,6 +236,18 @@ export interface Agent {
    * missing data.
    */
   actionEnergy?: number;
+  /**
+   * Combined elevation-delta + terrain multiplier from this agent's last
+   * actual step (support.ts's `movementSpeedFactor`), applied to base Speed
+   * on top of injury (`effectiveSpeed`) — see `actionSpeedOf` in
+   * simulation.ts. Absent/1 for an agent that hasn't moved yet. Deliberately
+   * a snapshot of the *last* move's terrain, not the upcoming one: Speed is
+   * consumed to decide *whether* an action happens before that action's
+   * movement is chosen, so this can only affect the next tick's pace, not
+   * gate the current one — a scope call forced by the existing
+   * accumulate-then-act architecture, see DESIGN.md.
+   */
+  terrainSpeedFactor?: number;
 
   /**
    * Total accumulated exp (cumulative, not "toward next level" — matches the
@@ -268,6 +379,16 @@ export interface Agent {
    * fixed values for hand-built fixtures.
    */
   disposition?: Disposition;
+
+  /**
+   * When this agent's species prefers to be active — denormalized from
+   * `SpeciesDef.activityPattern` at spawn time (packages/data/src/spawn.ts),
+   * the same pattern as `types`/`stats`/`moves` above. Absent (bare
+   * fixtures, anything spawned outside `spawnAgent`) reads as `"cathemeral"`
+   * everywhere it's consulted — no behavior change for hand-built agents
+   * that never set it. See daynight.ts/DESIGN.md's Phase 2.
+   */
+  activityPattern?: ActivityPattern;
 }
 
 /**
@@ -289,4 +410,79 @@ export interface World {
   tiles: Record<Layer, Tile[]>;
   agents: Agent[];
   tick: number;
+  /**
+   * Bumped whenever a tile's terrain crosses in or out of "water"/"food"/
+   * "sunbeam" (setTile always bumps it; flora.ts bumps it only on the
+   * transitions that matter) — lets resourceIndex.ts's cache know when it
+   * needs rebuilding instead of trusting a naive full-grid rescan every
+   * lookup. See TODO.md's "Performance ceiling for the cheap tier" note.
+   */
+  resourceVersion?: number;
+  /**
+   * Per-herd migration state — see herdMigration.ts/DESIGN.md's "Herd-level
+   * migration" section. Keyed by `herdId`, not present on every agent: a
+   * whole herd shares exactly one migration target at a time, so this is
+   * the single source of truth `herding.ts`'s `applyHerdCohesion` reads
+   * from when deciding what every member (and guardian) pulls toward.
+   * Absent, or missing a given herdId, means that herd isn't migrating —
+   * ordinary centroid-based cohesion applies.
+   */
+  herdMigrations?: Record<string, { target: Vec2; reason: MigrationReason; startedTick: number }>;
+  /**
+   * Per-herd consecutive-tick counter for "was this herd's local food/water
+   * below the scarcity threshold this tick" — see herdMigration.ts. Tracked
+   * separately from `herdMigrations` (rather than folded into it) because it
+   * needs to keep counting *before* a migration exists yet, and gets reset
+   * to 0 whenever a scarcity check comes back fine, or once a migration
+   * actually starts (successful or not) so a single sustained-scarcity
+   * window doesn't retrigger a fresh destination search every tick.
+   */
+  herdScarcityTicks?: Record<string, number>;
+  /**
+   * Per-herd rolling predator-pressure tracker — see herdMigration.ts's
+   * `recordPredatorPressure`/`PREDATOR_PRESSURE_*` constants. `count` is
+   * hunt/fight events landed against that herd's members within the current
+   * window (`windowStart`..now); `lastThreatPos` is the attacker's position
+   * at the most recent such event, used to bias migration destinations away
+   * from the threat. A running counter updated at the event-emission site
+   * (predation.ts), not a per-tick `EventLog` scan — cheaper, and the log
+   * isn't indexed by herd/tick anyway.
+   */
+  herdPredatorPressure?: Record<string, { count: number; windowStart: number; lastThreatPos: Vec2 }>;
+  /**
+   * Per-herd-*pair* consecutive-tick counter for "these two same-species
+   * herds' centroids have been within the territorial-displacement distance
+   * this tick" — see herdMigration.ts's territorial trigger. Keyed by a
+   * canonical `"herdIdA|herdIdB"` (sorted) so the pair is counted once
+   * regardless of iteration order. Mirrors `herdScarcityTicks`'s
+   * reset-on-recovery pattern.
+   */
+  herdTerritorialTicks?: Record<string, number>;
+  /**
+   * Per-herd consecutive-tick counter for "this herd's centroid is inside an
+   * active storm cell with no forest/canopy cover nearby this tick" — see
+   * weather.ts/herdMigration.ts's `"weather"` trigger, Phase 3. Mirrors
+   * `herdScarcityTicks`'s exact reset-on-recovery/reset-on-migration
+   * pattern.
+   */
+  herdStormExposureTicks?: Record<string, number>;
+  /**
+   * The biome seed points `generateWorld` (worldgen.ts) scattered for this
+   * world, name-only (see `BiomeSeedInfo`) — populated only by procedurally
+   * generated worlds, absent on a bare `createWorld`/hand-built test world.
+   * Lets weather.ts weight spawn likelihood and cover-seeking destination
+   * scoring by real biome identity (Phase 3) without `generateWorld` having
+   * to export its full internal seed-placement machinery. Absent reads as
+   * "no biome data" everywhere it's consulted — every consumer falls back to
+   * a documented biome-agnostic default rather than crashing or silently
+   * favoring one biome.
+   */
+  biomeSeeds?: BiomeSeedInfo[];
+  /**
+   * 1-3 active weather systems at once — see weather.ts/DESIGN.md's Phase 3.
+   * Absent (or empty) means no weather is active; every effect consumer
+   * (flora.ts/needs.ts/fov.ts/combat.ts/support.ts/herdMigration.ts) treats
+   * that as "no local modifier," not an error.
+   */
+  weatherCells?: WeatherCell[];
 }

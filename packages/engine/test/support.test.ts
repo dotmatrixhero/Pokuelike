@@ -11,10 +11,20 @@ import {
   maybeRecoverFromFaint,
   maybeStartCarrying,
   applyCarrying,
+  effectiveSpeed,
   FED_THRESHOLD,
   WAKE_HP_FRACTION,
   FINISHING_POOL_FRACTION,
+  elevationSpeedMultiplier,
+  terrainSpeedMultiplier,
+  movementSpeedFactor,
+  activityScheduleMultiplier,
+  OFF_HOURS_SPEED_MULTIPLIER,
+  coldSnapSpeedMultiplier,
 } from "../src/support.js";
+import { DAY_LENGTH_TICKS } from "../src/daynight.js";
+import { COLD_SNAP_SPEED_MULTIPLIER } from "../src/weather.js";
+import type { WeatherCell } from "../src/types.js";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -301,5 +311,168 @@ describe("integration: fainting and recovery through tickWorld", () => {
     expect(recovered).toBe(true);
     expect(agent.finishingPool).toBeUndefined();
     expect(log.events).toContainEqual(expect.objectContaining({ kind: "recovered", agentId: "recoverer" }));
+  });
+});
+
+describe("elevation/terrain movement-speed modifiers", () => {
+  it("moving to higher ground slows (multiplier below 1); to lower ground speeds up (above 1); flat is neutral", () => {
+    expect(elevationSpeedMultiplier(0, 3)).toBeLessThan(1);
+    expect(elevationSpeedMultiplier(3, 0)).toBeGreaterThan(1);
+    expect(elevationSpeedMultiplier(2, 2)).toBe(1);
+  });
+
+  it("clamps so an extreme height gap isn't a literal never-acts/always-double-acts", () => {
+    expect(elevationSpeedMultiplier(0, 100)).toBeGreaterThan(0);
+    expect(elevationSpeedMultiplier(100, 0)).toBeLessThan(2);
+  });
+
+  it("sand and mud slow movement; every other terrain is neutral", () => {
+    expect(terrainSpeedMultiplier("sand")).toBeLessThan(1);
+    expect(terrainSpeedMultiplier("mud")).toBeLessThan(1);
+    expect(terrainSpeedMultiplier("mud")).toBeLessThan(terrainSpeedMultiplier("sand")); // mud is the worse of the two
+    expect(terrainSpeedMultiplier("floor")).toBe(1);
+    expect(terrainSpeedMultiplier("bush")).toBe(1);
+  });
+
+  it("movementSpeedFactor composes elevation and terrain multiplicatively", () => {
+    const elevationOnly = movementSpeedFactor(0, 2, "floor");
+    const terrainOnly = movementSpeedFactor(0, 0, "mud");
+    const both = movementSpeedFactor(0, 2, "mud");
+    expect(both).toBeCloseTo(elevationOnly * terrainOnly, 10);
+  });
+
+  it("a real tick applies the last step's terrain factor to the NEXT action's pace, via ordinary needs-driven movement", () => {
+    const world = createWorld(10, 1);
+    setTile(world, "surface", 5, 0, "mud"); // directly between the agent and the water it's walking toward
+    setTile(world, "surface", 6, 0, "water");
+    const agent = makeAgent({
+      pos: { x: 4, y: 0 },
+      layer: "surface",
+      stats: { maxHp: 10, attack: 5, defense: 5, spAttack: 5, spDefense: 5, speed: 40 },
+      needs: createNeeds({ thirst: 0 }), // seekWater — walks straight toward the water, through the mud tile
+    });
+    world.agents.push(agent);
+
+    tickWorld(world);
+
+    expect(agent.pos).toEqual({ x: 5, y: 0 }); // stepped onto the mud tile on the way
+    // terrainSpeedFactor is now < 1 (mud, flat ground) — applies to next tick's
+    // actionSpeedOf, composed multiplicatively with the (here neutral, full-hp)
+    // injury fraction from effectiveSpeed.
+    expect(agent.terrainSpeedFactor).toBeCloseTo(terrainSpeedMultiplier("mud"), 10);
+  });
+});
+
+describe("activityScheduleMultiplier: off-hours Speed penalty (see DESIGN.md's day/night Phase 2)", () => {
+  const MIDNIGHT = 0;
+  const NOON = DAY_LENGTH_TICKS / 2;
+
+  it("cathemeral (and unset) is always full speed, day or night — no behavior change for existing species", () => {
+    expect(activityScheduleMultiplier("cathemeral", MIDNIGHT)).toBe(1);
+    expect(activityScheduleMultiplier("cathemeral", NOON)).toBe(1);
+    expect(activityScheduleMultiplier(undefined, MIDNIGHT)).toBe(1);
+    expect(activityScheduleMultiplier(undefined, NOON)).toBe(1);
+  });
+
+  it("diurnal is full speed by day, penalized at night", () => {
+    expect(activityScheduleMultiplier("diurnal", NOON)).toBe(1);
+    expect(activityScheduleMultiplier("diurnal", MIDNIGHT)).toBe(OFF_HOURS_SPEED_MULTIPLIER);
+  });
+
+  it("nocturnal is full speed at night, penalized by day — the exact mirror of diurnal", () => {
+    expect(activityScheduleMultiplier("nocturnal", MIDNIGHT)).toBe(1);
+    expect(activityScheduleMultiplier("nocturnal", NOON)).toBe(OFF_HOURS_SPEED_MULTIPLIER);
+  });
+
+  it("crepuscular is full speed only near dawn/dusk, penalized at both noon and midnight", () => {
+    expect(activityScheduleMultiplier("crepuscular", NOON)).toBe(OFF_HOURS_SPEED_MULTIPLIER);
+    expect(activityScheduleMultiplier("crepuscular", MIDNIGHT)).toBe(OFF_HOURS_SPEED_MULTIPLIER);
+
+    // Scan for a genuine twilight tick and confirm it's full speed there.
+    let sawFullSpeed = false;
+    for (let tick = 0; tick < DAY_LENGTH_TICKS; tick++) {
+      if (activityScheduleMultiplier("crepuscular", tick) === 1) sawFullSpeed = true;
+    }
+    expect(sawFullSpeed).toBe(true);
+  });
+
+  it("the penalty is real but partial — never full speed, never anywhere close to zero", () => {
+    expect(OFF_HOURS_SPEED_MULTIPLIER).toBeLessThan(1);
+    expect(OFF_HOURS_SPEED_MULTIPLIER).toBeGreaterThan(0.5);
+  });
+
+  it("composes multiplicatively with the existing injury (effectiveSpeed) and elevation/terrain modifiers — not in isolation", () => {
+    // An injured (half HP) nocturnal agent, active during the day (off-hours),
+    // that just climbed uphill through mud: all three penalties should stack
+    // as one product, matching movementSpeedFactor's own documented
+    // composition order (terrain/elevation, then off-hours, then injury).
+    const baseSpeed = 40;
+    const terrainFactor = movementSpeedFactor(0, 3, "mud"); // uphill + mud, both penalize
+    const offHours = activityScheduleMultiplier("nocturnal", NOON); // daytime — off-hours for a nocturnal agent
+    const speedBeforeInjury = baseSpeed * terrainFactor * offHours;
+
+    const injuredAgent = makeAgent({ hp: 5, maxHp: 10 });
+    const finalSpeed = effectiveSpeed(injuredAgent, speedBeforeInjury);
+
+    expect(terrainFactor).toBeLessThan(1);
+    expect(offHours).toBe(OFF_HOURS_SPEED_MULTIPLIER);
+    expect(finalSpeed).toBeCloseTo(baseSpeed * terrainFactor * offHours * 0.5, 10);
+    // All three penalties really did stack — strictly less than any one or two of them applied alone.
+    expect(finalSpeed).toBeLessThan(baseSpeed * terrainFactor);
+    expect(finalSpeed).toBeLessThan(baseSpeed * offHours);
+    expect(finalSpeed).toBeLessThan(effectiveSpeed(injuredAgent, baseSpeed));
+  });
+});
+
+describe("coldSnapSpeedMultiplier: the fourth composable Speed modifier (Phase 3 weather)", () => {
+  function coldSnapCell(overrides: Partial<WeatherCell> = {}): WeatherCell {
+    return {
+      id: "cold",
+      type: "coldSnap",
+      center: { x: 5, y: 5 },
+      radius: 5,
+      startedTick: 0,
+      lifespanTicks: 999,
+      drift: { x: 0, y: 0 },
+      ...overrides,
+    };
+  }
+
+  it("is a real but partial penalty, same order of magnitude as the other terrain-ish penalties", () => {
+    expect(COLD_SNAP_SPEED_MULTIPLIER).toBeLessThan(1);
+    expect(COLD_SNAP_SPEED_MULTIPLIER).toBeGreaterThan(0.5);
+  });
+
+  it("applies flatly inside an active cold snap, regardless of species", () => {
+    const world = createWorld(20, 20);
+    world.weatherCells = [coldSnapCell()];
+    expect(coldSnapSpeedMultiplier(world, "surface", { x: 5, y: 5 })).toBe(COLD_SNAP_SPEED_MULTIPLIER);
+  });
+
+  it("is neutral (1) outside the cold snap's radius, off the surface layer, and with no active weather at all", () => {
+    const world = createWorld(20, 20);
+    world.weatherCells = [coldSnapCell()];
+    expect(coldSnapSpeedMultiplier(world, "surface", { x: 19, y: 19 })).toBe(1);
+    expect(coldSnapSpeedMultiplier(world, "underground", { x: 5, y: 5 })).toBe(1);
+
+    const clearWorld = createWorld(20, 20);
+    expect(coldSnapSpeedMultiplier(clearWorld, "surface", { x: 5, y: 5 })).toBe(1);
+  });
+
+  it("composes multiplicatively as a fourth term alongside terrain/off-hours/injury, not replacing any of them", () => {
+    const baseSpeed = 40;
+    const terrainFactor = movementSpeedFactor(0, 3, "mud");
+    const offHours = activityScheduleMultiplier("nocturnal", DAY_LENGTH_TICKS / 2);
+    const world = createWorld(20, 20);
+    world.weatherCells = [coldSnapCell()];
+    const coldSnap = coldSnapSpeedMultiplier(world, "surface", { x: 5, y: 5 });
+    const speedBeforeInjury = baseSpeed * terrainFactor * offHours * coldSnap;
+
+    const injuredAgent = makeAgent({ hp: 5, maxHp: 10 });
+    const finalSpeed = effectiveSpeed(injuredAgent, speedBeforeInjury);
+
+    expect(coldSnap).toBe(COLD_SNAP_SPEED_MULTIPLIER);
+    // All four penalties really did stack — strictly less than terrain/off-hours alone, without the cold snap.
+    expect(finalSpeed).toBeLessThan(effectiveSpeed(injuredAgent, baseSpeed * terrainFactor * offHours));
   });
 });

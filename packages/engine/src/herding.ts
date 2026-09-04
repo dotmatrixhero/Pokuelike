@@ -2,8 +2,13 @@ import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import { stepToward } from "./movement.js";
 import { isPreyOfAnything } from "./predation.js";
 
-/** How far an idle agent tolerates being from its herd's centroid before drifting back. */
-const COHESION_DISTANCE = 5;
+/**
+ * How far an idle agent tolerates being from its herd's centroid before
+ * drifting back. Exported so herdMigration.ts can reuse the same "how far
+ * counts as local" answer for its own resource-sampling radius, rather than
+ * picking a second, possibly-inconsistent number.
+ */
+export const COHESION_DISTANCE = 5;
 /**
  * A guardian's leash is shorter than an ordinary herd member's. Without
  * this, a guardian's own idle-cohesion target is the *whole* herd's
@@ -75,14 +80,30 @@ function protectedHerdCentroid(world: World, herdId: string, layer: Layer, rules
  * own pull-back signal. Ordinary herd members keep the old wider leash and
  * whole-herd centroid. Without `rules`, everyone uses the ordinary
  * behavior (bare-engine tests keep working unchanged).
+ *
+ * **Herd migration** (see herdMigration.ts/DESIGN.md): when
+ * `world.herdMigrations` has an active entry for this agent's `herdId`,
+ * *everyone* — ordinary members and guardians alike — pulls toward the
+ * shared migration target instead of the live centroid, so the whole herd
+ * actually walks together toward one real destination rather than each
+ * member drifting toward its own idea of "the group." A guardian still
+ * keeps its tighter `GUARDIAN_COHESION_DISTANCE` leash while migrating
+ * (simplest reasonable choice: it tracks the same shared point everyone
+ * else does, just tolerates less drift from it, rather than computing some
+ * separate "vicinity of the target" offset) — a deliberate scope call,
+ * documented here and in DESIGN.md, not a distinction the design doc forced
+ * either way.
  */
 export function applyHerdCohesion(world: World, agent: Agent, rules?: HuntRules): boolean {
   if (!agent.herdId) return false;
 
   const isGuardian = rules !== undefined && !isPreyOfAnything(rules, world, agent);
-  const centroid = isGuardian
-    ? protectedHerdCentroid(world, agent.herdId, agent.layer, rules)
-    : herdCentroid(world, agent.herdId, agent.layer);
+  const migration = world.herdMigrations?.[agent.herdId];
+  const centroid = migration
+    ? migration.target
+    : isGuardian
+      ? protectedHerdCentroid(world, agent.herdId, agent.layer, rules!)
+      : herdCentroid(world, agent.herdId, agent.layer);
   const distance = isGuardian ? GUARDIAN_COHESION_DISTANCE : COHESION_DISTANCE;
   if (!centroid || manhattan(agent.pos, centroid) <= distance) return false;
 

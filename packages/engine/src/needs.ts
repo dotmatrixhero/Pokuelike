@@ -19,6 +19,8 @@ import {
   type LevelingContext,
 } from "./leveling.js";
 import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
+import { findNearestIndexed } from "./resourceIndex.js";
+import { thirstDecayMultiplier } from "./weather.js";
 
 const DECAY_PER_TICK = {
   hunger: 0.01,
@@ -135,9 +137,16 @@ export function createNeeds(overrides: Partial<Needs> = {}): Needs {
   return { hunger: 1, thirst: 1, energy: 1, mateDrive: 0, ...overrides };
 }
 
-export function decayNeeds(needs: Needs): void {
+/**
+ * `thirstMultiplier` (default 1) composes multiplicatively with the flat
+ * per-tick thirst decay rate — a local weather effect (rain eases it,
+ * drought raises it — see weather.ts's `thirstDecayMultiplier`), not a
+ * replacement for the base rate. Every pre-existing caller that doesn't pass
+ * it keeps decaying at exactly the original flat rate.
+ */
+export function decayNeeds(needs: Needs, thirstMultiplier = 1): void {
   needs.hunger = Math.max(0, needs.hunger - DECAY_PER_TICK.hunger);
-  needs.thirst = Math.max(0, needs.thirst - DECAY_PER_TICK.thirst);
+  needs.thirst = Math.max(0, needs.thirst - DECAY_PER_TICK.thirst * thirstMultiplier);
   needs.energy = Math.max(0, needs.energy - DECAY_PER_TICK.energy);
   needs.mateDrive = Math.min(1, needs.mateDrive + DECAY_PER_TICK.mateDrive);
 }
@@ -158,27 +167,21 @@ export function chooseBehavior(needs: Needs): BehaviorKind {
   return score > 0.3 ? behavior : "idle";
 }
 
+/**
+ * Nearest tile of the given terrain kind, if any — delegates to
+ * resourceIndex.ts's cached index rather than a naive full-grid scan (was
+ * O(width*height) *per call*, flagged in TODO.md as the cheap tier's
+ * performance ceiling; became a real bottleneck once the generated map grew
+ * from 24x16 to ~90x60 — see DESIGN.md). Same signature/behavior as before,
+ * so every existing caller/test is unaffected.
+ */
 export function findNearestTerrain(
   world: World,
   layer: Layer,
   from: Vec2,
   terrain: "water" | "food" | "sunbeam"
 ): Vec2 | undefined {
-  let best: Vec2 | undefined;
-  let bestDist = Infinity;
-  for (let y = 0; y < world.height; y++) {
-    for (let x = 0; x < world.width; x++) {
-      const tile = tileAt(world, layer, x, y);
-      if (tile?.terrain !== terrain) continue;
-      if (terrain === "food" && (tile.stock ?? 0) <= 0) continue; // depleted patch, keep looking
-      const dist = Math.abs(x - from.x) + Math.abs(y - from.y);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = { x, y };
-      }
-    }
-  }
-  return best;
+  return findNearestIndexed(world, layer, from, terrain);
 }
 
 /** Finds a layer other than `from` that has the given terrain, nearest (adjacent) layers first. */
@@ -220,7 +223,8 @@ export function tickAgentNeeds(agent: Agent, world?: World, ctx?: LevelingContex
   if (agent.alive === false) return;
   if (agent.age !== undefined) agent.age += 1;
   tickCooldowns(agent);
-  decayNeeds(agent.needs);
+  const thirstMultiplier = world ? thirstDecayMultiplier(world, agent.layer, agent.pos) : 1;
+  decayNeeds(agent.needs, thirstMultiplier);
 
   if (world && agent.age !== undefined && Math.random() < ageMortalityChance(agent.age)) {
     agent.alive = false;

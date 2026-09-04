@@ -181,6 +181,24 @@ describe("accuracy", () => {
     // ...but +1 accuracy stage (50 * 4/3 = 66.7%) turns that same roll into a hit.
     expect(rollAccuracy(move, 1, 0, () => 0.55)).toBe(true);
   });
+
+  it("extraMultiplier (Phase 3's storm accuracy penalty) shifts the effective hit chance the same way stages do", () => {
+    const move = { accuracy: 80 };
+    // At roll 0.5 (50% threshold), a neutral 80-accuracy move hits...
+    expect(rollAccuracy(move, 0, 0, () => 0.5)).toBe(true);
+    // ...but a 0.6x extraMultiplier (80 * 0.6 = 48%) turns that same roll into a miss.
+    expect(rollAccuracy(move, 0, 0, () => 0.5, 0.6)).toBe(false);
+  });
+
+  it("extraMultiplier defaults to 1 — every pre-existing call site unaffected", () => {
+    const move = { accuracy: 70 };
+    expect(rollAccuracy(move, 0, 0, () => 0.65)).toBe(rollAccuracy(move, 0, 0, () => 0.65, 1));
+  });
+
+  it("a negative accuracy ('always hits') still always hits regardless of extraMultiplier", () => {
+    const neverMisses = { accuracy: -1 };
+    expect(rollAccuracy(neverMisses, 0, 0, () => 0.999, 0.1)).toBe(true);
+  });
 });
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {

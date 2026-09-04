@@ -163,6 +163,97 @@ describe("growFlora", () => {
   });
 });
 
+describe("growFlora: weather composes with the season multiplier (Phase 3)", () => {
+  it("rain slows a food patch's decay relative to no weather at the same tick/season", () => {
+    const rainy = createWorld(3, 3);
+    setTile(rainy, "surface", 1, 1, "food");
+    tileAt(rainy, "surface", 1, 1)!.stock = 0.5;
+    rainy.weatherCells = [
+      { id: "r", type: "rain", center: { x: 1, y: 1 }, radius: 3, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
+    ];
+
+    const clear = createWorld(3, 3);
+    setTile(clear, "surface", 1, 1, "food");
+    tileAt(clear, "surface", 1, 1)!.stock = 0.5;
+
+    vi.spyOn(Math, "random").mockReturnValue(0.99); // fails the spread roll on both, isolating decay
+    growFlora(rainy);
+    growFlora(clear);
+
+    const rainyStock = tileAt(rainy, "surface", 1, 1)!.stock!;
+    const clearStock = tileAt(clear, "surface", 1, 1)!.stock!;
+    expect(rainyStock).toBeGreaterThan(clearStock); // decayed less under rain
+    expect(rainyStock).toBeLessThan(0.5); // still decayed some — rain eases decay, doesn't freeze it
+  });
+
+  it("drought speeds up a food patch's decay relative to no weather at the same tick/season", () => {
+    const droughty = createWorld(3, 3);
+    setTile(droughty, "surface", 1, 1, "food");
+    tileAt(droughty, "surface", 1, 1)!.stock = 0.5;
+    droughty.weatherCells = [
+      { id: "d", type: "drought", center: { x: 1, y: 1 }, radius: 3, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
+    ];
+
+    const clear = createWorld(3, 3);
+    setTile(clear, "surface", 1, 1, "food");
+    tileAt(clear, "surface", 1, 1)!.stock = 0.5;
+
+    vi.spyOn(Math, "random").mockReturnValue(0.99);
+    growFlora(droughty);
+    growFlora(clear);
+
+    const droughtyStock = tileAt(droughty, "surface", 1, 1)!.stock!;
+    const clearStock = tileAt(clear, "surface", 1, 1)!.stock!;
+    expect(droughtyStock).toBeLessThan(clearStock); // decayed more under drought
+  });
+
+  it("a food patch outside a weather cell's radius is unaffected by it", () => {
+    const world = createWorld(20, 20);
+    setTile(world, "surface", 1, 1, "food");
+    tileAt(world, "surface", 1, 1)!.stock = 0.5;
+    world.weatherCells = [
+      { id: "d", type: "drought", center: { x: 15, y: 15 }, radius: 2, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
+    ];
+
+    const control = createWorld(20, 20);
+    setTile(control, "surface", 1, 1, "food");
+    tileAt(control, "surface", 1, 1)!.stock = 0.5;
+
+    vi.spyOn(Math, "random").mockReturnValue(0.99);
+    growFlora(world);
+    growFlora(control);
+
+    expect(tileAt(world, "surface", 1, 1)!.stock).toBe(tileAt(control, "surface", 1, 1)!.stock);
+  });
+
+  it("rain raises the spread chance enough to flip a roll that would otherwise fail", () => {
+    const rainy = createWorld(5, 5);
+    setTile(rainy, "surface", 2, 2, "food");
+    tileAt(rainy, "surface", 2, 2)!.stock = 1;
+    rainy.weatherCells = [
+      { id: "r", type: "rain", center: { x: 2, y: 2 }, radius: 3, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
+    ];
+    const clear = createWorld(5, 5);
+    setTile(clear, "surface", 2, 2, "food");
+    tileAt(clear, "surface", 2, 2)!.stock = 1;
+
+    // Base spread chance at tick 0 (season 0.5) is 0.035; rain's divisor
+    // (1.6x) pushes it to 0.056 — 0.04 clears the rainy threshold but not
+    // the clear one.
+    vi.spyOn(Math, "random").mockReturnValue(0.04);
+    growFlora(rainy);
+    growFlora(clear);
+
+    const neighborOffsets = [
+      [1, 1], [1, 2], [1, 3], [2, 1], [2, 3], [3, 1], [3, 2], [3, 3],
+    ];
+    const rainySpread = neighborOffsets.some(([x, y]) => tileAt(rainy, "surface", x, y)!.terrain === "seedling");
+    const clearSpread = neighborOffsets.some(([x, y]) => tileAt(clear, "surface", x, y)!.terrain === "seedling");
+    expect(rainySpread).toBe(true);
+    expect(clearSpread).toBe(false);
+  });
+});
+
 describe("seasonalMultiplier", () => {
   it("stays within 0..1", () => {
     for (let tick = 0; tick < 2000; tick += 137) {

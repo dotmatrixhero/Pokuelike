@@ -1,6 +1,8 @@
 import type { Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { tileAt } from "./world.js";
+import { invalidateResourceIndex } from "./resourceIndex.js";
+import { floraDecayDivisor } from "./weather.js";
 
 /**
  * What a seedling can mature into — purely cosmetic flavors of "food"
@@ -156,6 +158,7 @@ export function growFlora(world: World, log?: EventLog): void {
           tile.terrain = "food";
           tile.stock = 1;
           tile.flavor = nearSun ? pickFlavor(SUN_FOOD_FLAVORS) : pickFlavor(FOOD_FLAVORS);
+          invalidateResourceIndex(world); // a new "food" tile — resourceIndex.ts's cache needs rebuilding
         } else {
           tile.terrain = "flora";
           tile.stock = 1; // vitality, not edible stock — decays and dies just like food does, below
@@ -176,28 +179,37 @@ export function growFlora(world: World, log?: EventLog): void {
 
     if (tile.terrain === "food" && tile.stock !== undefined) {
       // Abundant season (season near 1): decays slower, spreads more often.
-      // Lean season (season near 0): decays faster, spreads less.
-      tile.stock -= NATURAL_DECAY_PER_TICK * (1.5 - season);
+      // Lean season (season near 0): decays faster, spreads less. A local
+      // weather cell (weather.ts's Phase 3) composes with, doesn't replace,
+      // that global season term: `weatherDivisor` divides the decay rate
+      // (rain > 1 slows decay, drought < 1 speeds it up) and directly scales
+      // the spread chance the same direction (rain spreads more, drought
+      // less) — see `floraDecayDivisor`'s doc comment for why decay/spread
+      // modulation, not a direct stock top-up, is this system's closest
+      // equivalent to "boosts/suppresses regrowth."
+      const pos = { x: i % world.width, y: Math.floor(i / world.width) };
+      const weatherDivisor = floraDecayDivisor(world, "surface", pos);
+      tile.stock -= (NATURAL_DECAY_PER_TICK * (1.5 - season)) / weatherDivisor;
 
       if (tile.stock <= 0) {
-        const pos = { x: i % world.width, y: Math.floor(i / world.width) };
         tile.terrain = "floor";
         tile.stock = undefined;
         tile.flavor = undefined;
+        invalidateResourceIndex(world); // a "food" tile just reverted to "floor"
         log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos, stage: "died" });
         continue;
       }
 
-      if (Math.random() < FOOD_SPREAD_CHANCE * (0.5 + season)) {
-        trySpread(world, { x: i % world.width, y: Math.floor(i / world.width) }, log);
+      if (Math.random() < FOOD_SPREAD_CHANCE * (0.5 + season) * weatherDivisor) {
+        trySpread(world, pos, log);
       }
     }
 
     if (tile.terrain === "flora" && tile.stock !== undefined) {
-      tile.stock -= FLORA_DECAY_PER_TICK * (1.5 - season);
+      const pos = { x: i % world.width, y: Math.floor(i / world.width) };
+      tile.stock -= (FLORA_DECAY_PER_TICK * (1.5 - season)) / floraDecayDivisor(world, "surface", pos);
 
       if (tile.stock <= 0) {
-        const pos = { x: i % world.width, y: Math.floor(i / world.width) };
         tile.terrain = "floor";
         tile.stock = undefined;
         tile.flavor = undefined;

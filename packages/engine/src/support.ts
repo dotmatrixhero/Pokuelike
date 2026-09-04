@@ -1,10 +1,13 @@
-import type { Agent, HuntRules, InventoryItem, Vec2, World } from "./types.js";
+import type { ActivityPattern, Agent, HuntRules, InventoryItem, Layer, TerrainKind, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
 import { CONSUME_STOCK_AMOUNT } from "./flora.js";
+import { isNight, isTwilight } from "./daynight.js";
 import { agentsWithin, isHunterSpecies, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS } from "./predation.js";
+import { findNearestIndexed } from "./resourceIndex.js";
+import { COLD_SNAP_SPEED_MULTIPLIER, isInColdSnap } from "./weather.js";
 
 /**
  * Faint/finish-off, heal-over-time, and herd support (inventory, food
@@ -125,6 +128,121 @@ export function effectiveSpeed(agent: Agent, baseSpeed: number): number {
   return baseSpeed * fraction;
 }
 
+// --- Elevation/terrain -> effective movement speed (see DESIGN.md's "Environmental generation..." section) ---
+
+/** Sand/mud slow movement; every other terrain kind is neutral. Sim-original magnitudes, not canon. */
+const TERRAIN_SPEED_MULTIPLIER: Partial<Record<TerrainKind, number>> = { sand: 0.75, mud: 0.5 };
+
+/** The flat per-terrain-kind multiplier for whichever tile an agent just moved onto. 1 (neutral) for anything not in the table above. */
+export function terrainSpeedMultiplier(terrain: TerrainKind): number {
+  return TERRAIN_SPEED_MULTIPLIER[terrain] ?? 1;
+}
+
+/** How much effective speed one unit of elevation gain/loss is worth, per step taken. */
+const ELEVATION_SPEED_PER_UNIT = 0.06;
+/** Floors/caps so a single very steep step can't zero out an agent's speed or double it outright. */
+const MIN_ELEVATION_SPEED_MULTIPLIER = 0.4;
+const MAX_ELEVATION_SPEED_MULTIPLIER = 1.5;
+
+/**
+ * Moving to a higher tile than the one an agent just left costs speed (the
+ * multiplier drops below 1); moving to a lower one is a discount (above 1).
+ * Flat ground (delta 0) is neutral. Sim-original magnitude/shape — not
+ * canon, a genuine design call for this feature — clamped at both ends so
+ * neither a cliff nor a chasm is a literal "never acts again"/"acts twice."
+ */
+export function elevationSpeedMultiplier(fromElevation: number, toElevation: number): number {
+  const delta = toElevation - fromElevation;
+  const multiplier = 1 - delta * ELEVATION_SPEED_PER_UNIT;
+  return Math.max(MIN_ELEVATION_SPEED_MULTIPLIER, Math.min(MAX_ELEVATION_SPEED_MULTIPLIER, multiplier));
+}
+
+/**
+ * The combined elevation+terrain multiplier for the step an agent just took,
+ * as one number — called once right after movement (simulation.ts's
+ * `tickWorld`) and stashed on `agent.terrainSpeedFactor` until the agent's
+ * next move overwrites it. Composes **multiplicatively** with the existing
+ * injury-based `effectiveSpeed`, applied in that order: `actionSpeedOf`
+ * (simulation.ts) multiplies base Speed by this factor first, then hands
+ * the result to `effectiveSpeed`'s HP-fraction scaling — i.e.
+ * `finalSpeed = baseSpeed * elevationSpeedMultiplier * terrainSpeedMultiplier * injuryFraction(floored)`.
+ * A badly hurt agent trudging uphill through mud is slower on both axes at
+ * once, not just whichever one is worse.
+ *
+ * Deliberately a *post-move* snapshot rather than gating the move that
+ * produced it: Speed is spent to decide whether an action happens before
+ * that action's movement is even chosen (see simulation.ts's
+ * `accumulateActionEnergy`), so a genuinely predictive "this step will be
+ * slow, don't let it happen yet" isn't available without restructuring that
+ * order — a scope call forced by the existing architecture, not a design
+ * preference. The qualitative effect (climb slows you down, descend speeds
+ * you up, rough ground is generally slower) still shows up in a real run,
+ * just applied to the *next* action rather than the one just taken.
+ */
+export function movementSpeedFactor(fromElevation: number, toElevation: number, toTerrain: TerrainKind): number {
+  return elevationSpeedMultiplier(fromElevation, toElevation) * terrainSpeedMultiplier(toTerrain);
+}
+
+// --- Day/night activity pattern -> effective Speed (see DESIGN.md's "Dynamics that move a content herd", Phase 2) ---
+
+/**
+ * The partial Speed multiplier applied to an agent caught active outside its
+ * `activityPattern`'s preferred window — a real but not crippling penalty,
+ * the same order of magnitude as `terrainSpeedMultiplier`'s sand/mud
+ * penalties (0.75/0.5) rather than anything close to zero: this is "sluggish
+ * off-hours," not "can't act at all," per DESIGN.md's explicit ask that a
+ * nocturnal predator hunting by day is merely less effective, not disabled.
+ * Sim-original magnitude, not canon.
+ */
+export const OFF_HOURS_SPEED_MULTIPLIER = 0.8;
+
+/**
+ * Composes multiplicatively with `movementSpeedFactor`'s elevation/terrain
+ * modifier and `effectiveSpeed`'s injury fraction, applied third: see
+ * simulation.ts's `actionSpeedOf`, which multiplies all three together (order
+ * doesn't matter for a product, but that's the call site to look at for the
+ * full chain). `"cathemeral"` (active any time — the default for anything
+ * that doesn't set `activityPattern`) is always 1, exactly reproducing
+ * pre-Phase-2 behavior for every existing species/fixture.
+ *
+ * Windows, using daynight.ts's `isNight`/`isTwilight`:
+ *  - `"diurnal"`: full speed by day, penalized at night.
+ *  - `"nocturnal"`: full speed at night, penalized by day.
+ *  - `"crepuscular"`: full speed only during the two dawn/dusk twilight
+ *    windows each cycle, penalized the rest of the time (day AND night) —
+ *    a real, narrower "always somewhat off-schedule" species, matching how
+ *    a genuinely crepuscular animal behaves.
+ */
+export function activityScheduleMultiplier(pattern: ActivityPattern | undefined, tick: number): number {
+  switch (pattern ?? "cathemeral") {
+    case "cathemeral":
+      return 1;
+    case "diurnal":
+      return isNight(tick) ? OFF_HOURS_SPEED_MULTIPLIER : 1;
+    case "nocturnal":
+      return isNight(tick) ? 1 : OFF_HOURS_SPEED_MULTIPLIER;
+    case "crepuscular":
+      return isTwilight(tick) ? 1 : OFF_HOURS_SPEED_MULTIPLIER;
+  }
+}
+
+// --- Cold snap -> effective Speed (see DESIGN.md's "Dynamics that move a content herd", Phase 3) ---
+
+/**
+ * The fourth composable Speed modifier in `simulation.ts`'s `actionSpeedOf`
+ * chain (terrain/elevation, off-hours activity schedule, injury, and now
+ * this — see `movementSpeedFactor`/`activityScheduleMultiplier`/
+ * `effectiveSpeed`'s own doc comments for the first three). A flat penalty
+ * for every agent caught in an active cold-snap weather cell (weather.ts),
+ * regardless of species — see `COLD_SNAP_SPEED_MULTIPLIER`'s doc comment in
+ * weather.ts for why this sim deliberately skips per-species cold-tolerance
+ * data rather than half-building it. `1` (no penalty) outside a cold snap,
+ * off the surface layer, or for an agent with no real position yet.
+ */
+export function coldSnapSpeedMultiplier(world: World, layer: Layer, pos: Vec2): number {
+  return isInColdSnap(world, layer, pos) ? COLD_SNAP_SPEED_MULTIPLIER : 1;
+}
+
 // --- Heal over time + recovery ---
 
 /**
@@ -228,20 +346,7 @@ function findHungryHerdmate(world: World, agent: Agent): Agent | undefined {
 }
 
 function findNearestFoodTile(world: World, agent: Agent): Vec2 | undefined {
-  let best: Vec2 | undefined;
-  let bestDist = Infinity;
-  for (let y = 0; y < world.height; y++) {
-    for (let x = 0; x < world.width; x++) {
-      const tile = tileAt(world, agent.layer, x, y);
-      if (tile?.terrain !== "food" || (tile.stock ?? 0) <= 0) continue;
-      const dist = manhattan(agent.pos, { x, y });
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = { x, y };
-      }
-    }
-  }
-  return best;
+  return findNearestIndexed(world, agent.layer, agent.pos, "food");
 }
 
 function deliverFoodItem(agent: Agent): InventoryItem | undefined {

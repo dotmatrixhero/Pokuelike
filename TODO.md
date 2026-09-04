@@ -335,10 +335,176 @@ produce a real story before player mechanics are worth building further.
       this session). A guarded, vulnerable incubation period is better
       story material than an instant birth. Deliberately deferred rather
       than built alongside plain reproduction, to keep that slice small.
-- [ ] Performance ceiling for the cheap tier — how many agents before naive
-      per-tick nearest-tile search (`findNearestTerrain` is O(width*height)
-      per agent!) needs spatial indexing? Also now true of `growFlora`'s
-      full-grid scan every tick.
+- [x] Performance ceiling for the cheap tier, partially addressed — the
+      naive `findNearestTerrain` scan (was O(width*height) per agent) hit a
+      real wall once the map grew to 90x60 for the biome-generation feature
+      (see DESIGN.md's "Environmental generation..." section): fixed with
+      `packages/engine/src/resourceIndex.ts`, a cached water/food/sunbeam
+      coordinate index invalidated via `World.resourceVersion`. Confirmed by
+      real timing: 1,000 ticks in ~1.5-1.8s, 10,000 in ~5-6s, no blow-up as
+      population grows. `growFlora`'s own full-grid-per-tick scan is still
+      untouched (not the bottleneck actually observed, and out of this
+      feature's stated ask) — still open if a future feature makes it one.
+- [ ] Bush ambush bonus deliberately deferred (see DESIGN.md's
+      "Environmental generation..." section, "As built") — concealment
+      already gives a lurking predator a real, measurable detection-range
+      edge; a separate first-strike/accuracy bonus on top was judged scope
+      creep for a bar the detection-range reduction already clears.
+- [ ] Real tuning gap found by the biome-generation feature: at the new
+      90x60 map scale, food is abundant enough that solo (non-herd)
+      predators — Scyther, Onix, Spearow — can self-feed from the same
+      generic "food" tiles herbivores eat and rarely drop below
+      `HUNT_HUNGER_THRESHOLD`, so predation becomes rare and stochastic
+      run-to-run (confirmed: an 1,000-tick run showed real combat, a
+      separate 10,000-tick run showed none at all). Compounds with solo
+      predators having no herd-cohesion wandering (`herding.ts`'s
+      `applyHerdCohesion` only fires for `herdId`-having agents), so a
+      predator that starts far from prey mostly just sits and grazes.
+      Possible fixes, none built: predators shouldn't eat generic "food"
+      tiles at all (species-specific diet), lower predator food density in
+      generation, or give solo predators their own idle-wander behavior —
+      each touches predation.ts/needs.ts/herding.ts territory beyond the
+      biome-generation feature's scope.
+- [x] Herd-level migration built (`packages/engine/src/herdMigration.ts` —
+      see DESIGN.md's "Herd-level migration" section, "As built") — shared
+      `World.herdMigrations`/`World.herdScarcityTicks` state, resource-aware
+      destination scoring via `resourceIndex.ts`, and `herding.ts`'s
+      `applyHerdCohesion` biasing the whole herd (and guardians) toward the
+      shared target. 224 tests total (11 new), all builds/typechecks clean.
+- [ ] Real tuning gap found by the herd-migration feature, same root cause
+      as the predation one above: confirmed via a real-engine famine
+      simulation that the full trigger -> destination -> event pipeline
+      works correctly, but it essentially never fires in the actual demo
+      scenario (zero events in both a 1,000- and 10,000-tick run) because
+      the map's abundance keeps a mobile herd's local food/water recovering
+      well before the 150-tick sustained-scarcity window elapses (confirmed
+      up to 30,000 ticks via a debug instrument — max observed sustained
+      scarcity was ~21-26 ticks for the surface/underground herds after
+      their initial post-spawn settling period). Lowering the threshold
+      enough to fire organically on this map mostly just measures "time to
+      find the first meal after spawning," not real depletion — a worse
+      signal, so left at the documented values rather than chased down.
+      Same possible fixes as the predation gap apply here too (a real
+      famine/drought mechanic, lower ambient food density, or per-herd
+      eating pressure modeling) — not built, out of scope for this feature.
+- [ ] Real limitation found by the same famine simulation: once a migration
+      *is* triggered under genuine severe scarcity, the herd doesn't
+      reliably arrive — `applyHerdCohesion`'s migration bias only applies
+      to *idle* agents, but a real famine keeps most members hungry/thirsty
+      most of the time, and `seekFood`/`seekWater` (needs.ts) searches the
+      *entire map* for the nearest resource with no awareness of the herd's
+      shared migration target, so individual survival-driven wandering can
+      pull the herd away from the scored destination — observed directly: a
+      test migration timed out (`gaveUp`) nowhere near its target. Possible
+      fix, not built: bias `findNearestTerrain`'s candidate search toward
+      the active migration target (e.g. prefer a resource within some bonus
+      radius of the target over a slightly-nearer one elsewhere) — touches
+      needs.ts territory beyond this feature's stated scope (extend
+      `applyHerdCohesion`).
+- [x] **Herd migration generalized to more trigger reasons — Phase 1 of
+      DESIGN.md's "Dynamics that move a content herd" section, done.**
+      `MigrationReason` (`"scarcity" | "predator_pressure" | "wanderlust" |
+      "territorial"`) is now a real discriminated value on
+      `World.herdMigrations`/`herdMigrating`'s event; predator-pressure is a
+      running per-herd counter incremented at `predation.ts`'s hit-logging
+      site (not a per-tick `EventLog` scan); wanderlust is a flat per-tick
+      chance scaled by herd disposition, destination not resource-scored at
+      all; territorial is a per-herd-pair sustained-proximity counter that
+      displaces the smaller same-species herd. `pickDestination` gained an
+      `awayFrom` scoring term for the two threat-driven reasons. See
+      DESIGN.md's "Dynamics that move a content herd" section, "Phase 1 — as
+      built" for the full design and real-run findings. 235 tests total (11
+      new), all builds/typechecks clean.
+- [x] **Day/night cycle — Phase 2 of DESIGN.md's "Dynamics that move a
+      content herd" section, done.** A fast, independent 200-tick
+      light-level cycle (`daynight.ts`, its own tiny module — separate from
+      flora.ts's existing 1000-tick season); `activityPattern` (`"diurnal" |
+      "nocturnal" | "crepuscular" | "cathemeral"`, default `"cathemeral"`) on
+      `SpeciesDef`/`Agent`, assigned with real reasoning to all 9 curated
+      species; a real but partial (20%) off-hours Speed penalty composing
+      multiplicatively with the existing injury/terrain modifiers
+      (`support.ts`); a nocturnal/diurnal hunt-eagerness shift
+      (`predation.ts`) composing additively with the existing
+      aggression-based shift; a flat night-time FOV radius reduction
+      (`fov.ts`, defaulting to full daylight so every pre-existing caller/
+      test is unaffected); and `nightfall`/`daybreak` events. See
+      DESIGN.md's "Phase 2 — as built" for the full design and real-run
+      findings — the honest gap: hunting never occurred in any real run at
+      all (same pre-existing sparse-encounter issue Phase 1 already
+      flagged), so the hunt-eagerness shift is unit-tested but unconfirmed
+      in an actual run. 259 tests total (24 new), all builds/typechecks
+      clean.
+- [x] **Spatial, moving weather — Phase 3 of DESIGN.md's "Dynamics that move
+      a content herd" section, done. All three phases of that section are
+      now complete.** `weather.ts` (new module) maintains 1-3 active
+      `World.weatherCells` (`rain | storm | drought | coldSnap`, each with a
+      center/radius/lifespan/drift), spawning, drifting, and dissipating
+      once per tick; spawn type is weighted by real biome data
+      (`worldgen.ts`'s new `biomeWeightsAt`, reusing the environmental-
+      generation feature's seed-blending math) per a documented affinity
+      table (Wetland/Grassland skew rain, Badlands skew drought, Highland
+      skews storm/coldSnap). Rain/drought divide `flora.ts`'s decay-rate
+      term and multiply `needs.ts`'s thirst-decay rate, composing with the
+      existing season multiplier; storm adds a real accuracy penalty
+      (`combat.ts`'s `rollAccuracy` gained a general `extraMultiplier`
+      parameter) and a real FOV penalty bigger than night's own
+      (`fov.ts`'s `computeVisible` gained an additive `stormPenalty`
+      parameter, deliberately kept independent of the existing `lightLevel`
+      term rather than combined into it) plus a per-herd sustained-exposure
+      counter feeding a new `"weather"` `MigrationReason` through Phase 1's
+      generalized trigger system, destination-scored toward real
+      forest-biome cover (`pickDestination`'s new `preferCover` term); cold
+      snap adds a flat fourth composable Speed penalty
+      (`support.ts`'s `coldSnapSpeedMultiplier`), deliberately skipping
+      per-species cold-tolerance data per DESIGN.md's own explicit
+      "still open, flat default is fine" note. New `weatherChanged` event.
+      See DESIGN.md's "Phase 3 — as built" for the full design and real-run
+      findings — the one genuinely good-news finding across all three
+      phases: unlike predator-pressure/territorial (Phase 1), the new
+      `"weather"` migration trigger actually fires regularly in the
+      unmodified demo scenario (observed in roughly a third of trial runs),
+      because it doesn't depend on a fight landing or a second same-species
+      herd existing — just a storm cell (large, common) overlapping ground
+      with no tree/bush cover (also common on this map). Drought's
+      acceleration of the scarcity trigger is proven directly (flora decays
+      measurably faster under it) but was never observed actually crossing
+      the 150-tick scarcity threshold in ~25 trial runs — it got as close as
+      one tick short — the same "map's too abundant for scarcity to fire
+      often" gap Phase 1 already found, now confirmed to persist even with
+      drought's real assist. 317 tests total (58 new), all builds/typechecks
+      clean; one pre-existing test in `herdMigration.test.ts` was found to
+      already be flaky (~7% failure rate) from using unseeded `Math.random`
+      for a trigger unrelated to this feature — confirmed pre-existing, not
+      introduced by this work, left as a follow-up below.
+- [ ] Small, low-risk test-hygiene fix found while validating the Phase 3
+      weather feature, unrelated to it: `herdMigration.test.ts`'s "triggers
+      once scarcity has been sustained for the full window..." test calls
+      `updateHerdMigrations` with the default unseeded `Math.random` instead
+      of the file's own `NEVER_WANDER` helper (which every other
+      non-wanderlust-focused test in that file already uses) — over its
+      150-tick loop there's a real (~7%) chance a genuine wanderlust roll
+      fires first and changes the migration's `reason` out from under the
+      assertion. Reproduces on the pre-Phase-3 commit too, so it predates
+      this feature; a one-line fix (pass `NEVER_WANDER`) whenever someone's
+      next in that file.
+- [ ] Real tuning gap found by the trigger-generalization feature, same
+      root cause as the two gaps just above: `fought` events are at or near
+      zero in every observed real run (the pre-existing "predators barely
+      land hits" dynamic), so the predator-pressure trigger's 5-hits-in-
+      300-ticks bar is essentially never approached in the actual demo
+      scenario; and the demo world has exactly one herd per species, so the
+      territorial trigger never has a rival to compare against. Both are
+      confirmed correct via direct unit tests (synthetic hit events for
+      predator-pressure, two constructed same-species herds for
+      territorial) — this is a scenario-content gap, not an implementation
+      bug. Wanderlust *did* fire in real runs (confirmed at the documented
+      rate, isolated from population effects, by a 200,000-tick statistical
+      test) but is rare to see in the unmodified demo scenario specifically
+      because the existing herd-boom-then-bust population dynamic (see the
+      gap above) usually kills a herd off within a few thousand ticks,
+      cutting short how many chances it gets to roll. Not fixed here — the
+      right lever is herd survival time (a pre-existing, separately-scoped
+      gap), not a higher wanderlust chance.
 
 ## Culture, disposition, and roles (pitched, not built — see chat)
 - [x] Disposition vector per individual (boldness/aggression/sociability)

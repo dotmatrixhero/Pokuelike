@@ -44,6 +44,16 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.carrierSpecies} (${event.carrierId}) picked up fainted ${event.carriedSpecies} (${event.carriedId})`;
     case "setDown":
       return `[tick ${event.tick}] ${event.carrierSpecies} (${event.carrierId}) set down ${event.carriedSpecies} (${event.carriedId}) (${event.reason})`;
+    case "herdMigrating":
+      return `[tick ${event.tick}] herd ${event.herdId} is migrating from (${event.from.x},${event.from.y}) to (${event.to.x},${event.to.y}) — ${event.reason}`;
+    case "herdSettled":
+      return `[tick ${event.tick}] herd ${event.herdId} ${event.outcome === "arrived" ? "settled" : "gave up migrating"} near (${event.pos.x},${event.pos.y})`;
+    case "nightfall":
+      return `[tick ${event.tick}] night falls (light ${event.lightLevel.toFixed(2)})`;
+    case "daybreak":
+      return `[tick ${event.tick}] day breaks (light ${event.lightLevel.toFixed(2)})`;
+    case "weatherChanged":
+      return `[tick ${event.tick}] ${event.weatherType} ${event.phase === "began" ? "moves in" : "clears"} near (${event.center.x},${event.center.y}), radius ${event.radius}`;
   }
 }
 

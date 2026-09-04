@@ -54,19 +54,30 @@ export function accuracyStageMultiplier(accuracyStage: number, evasionStage: num
 
 /**
  * Rolls whether a move hits. `move.accuracy` of -1 (or any negative value,
- * PokeRogue's convention for "can't miss") always hits. Stages default to 0
- * (no agent in the sim currently has accuracy/evasion stages), so this is a
- * no-op multiplier until something changes them — but the roll itself is
- * real: a move with `accuracy < 100` can now actually miss. See TODO.md.
+ * PokeRogue's convention for "can't miss") always hits regardless of
+ * stages/`extraMultiplier` — a guaranteed-hit move stays guaranteed even
+ * mid-storm, matching how it already ignores accuracy/evasion stages.
+ * Stages default to 0 (no agent in the sim currently has accuracy/evasion
+ * stages), so `accuracyStageMultiplier` is a no-op multiplier until
+ * something changes them — but the roll itself is real: a move with
+ * `accuracy < 100` can now actually miss. See TODO.md.
+ *
+ * `extraMultiplier` (default 1) is a second, independent multiplier on top
+ * of the stage-based one — currently weather.ts's Phase 3 storm accuracy
+ * penalty (`stormAccuracyMultiplier`) is the only real caller, but it's a
+ * plain multiplier rather than a storm-specific parameter so any future
+ * accuracy-affecting effect composes the same way rather than needing its
+ * own bespoke parameter.
  */
 export function rollAccuracy(
   move: Pick<MoveSpec, "accuracy">,
   accuracyStage = 0,
   evasionStage = 0,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  extraMultiplier = 1
 ): boolean {
   if (move.accuracy < 0) return true;
-  const chance = move.accuracy * accuracyStageMultiplier(accuracyStage, evasionStage);
+  const chance = move.accuracy * accuracyStageMultiplier(accuracyStage, evasionStage) * extraMultiplier;
   return rng() * 100 < chance;
 }
 

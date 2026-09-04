@@ -2036,6 +2036,1117 @@ here since it's a real mechanical rule, not just a backlog entry: burn
 and poison have no independent duration or cure — they deal damage every
 tick until the DOT itself causes a faint, exactly like a normal hit does,
 and ordinary recovery (already built) takes it from there.
+## Environmental generation, biomes, obstacles, and elevation-aware movement/fog
+
+Decided, not built yet. Direct feedback: the world "feels like a small
+trapped box." It is one — `createDemoWorld` (`packages/data/src/scenario.ts`)
+is a single hand-authored 24x16 flat grid with 7 terrain kinds and zero
+obstacles. `elevation.ts` (accuracy/evasion modifiers) and `fov.ts`
+(`computeVisible`) are fully built but **called by nothing** — dead code
+today, confirmed by grep. This is Phase 1 of a two-phase piece of work;
+Phase 2 (herd-level group migration) is the next section and deliberately
+waits on this one, since coordinated migration needs an interesting, varied
+map to actually be observable in a real run, not a 24x16 box with two
+water holes.
+
+- **Real procedural generation, not another hand-authored map.** Generate
+  a substantially larger world (pick a real size, not another cramped box —
+  something like 80x60 or bigger, tune for what stays performant given the
+  existing "naive per-tick nearest-tile search is O(width*height)" ceiling
+  already flagged in TODO.md; this feature may need to address that ceiling
+  directly rather than inherit it silently at a much bigger map size).
+  Deterministic given a seed (reproducible runs for debugging) — a simple
+  seeded PRNG + smoothed value noise is enough, no new dependency needed.
+- **Biome types that bleed into each other, not hard-edged regions.**
+  Assign each biome a small number of seed points scattered across the map;
+  every tile's parameters (food/water base density, obstacle density,
+  elevation base/variance, terrain-kind weights) are a distance-weighted
+  blend of its 2-3 nearest biome seeds, not a single "which region am I
+  in" lookup — this is the actual mechanism for "bleed into each other,"
+  continuous parameter blending rather than painting discrete zones with a
+  border. A handful of biomes to start (data-driven, easy to add more
+  later): **Grassland** (today's default — open, moderate food/water),
+  **Forest** (dense trees, canopy-heavy, more cover, less open food),
+  **Wetland** (lots of water tiles, mud slows movement), **Badlands**
+  (sparse food/water, sandy, more open sightlines), **Rocky/Highland**
+  (elevation-heavy, boulders, ties directly into the elevation-movement
+  work below). Scope call: this pass targets the **Surface** layer only —
+  Underground/Canopy keep their current simpler flat-plus-resource-crossing
+  model, consistent with DESIGN.md's existing "whether Underground/Canopy
+  get their own elevation too" open question, which this doesn't resolve.
+- **New terrain kinds for obstacles and movement variety**, added to
+  `TerrainKind`: `"tree"` (unwalkable, blocks movement and — for free,
+  since `hasLineOfSight` already treats non-walkable tiles as opaque —
+  blocks line of sight, no fov.ts change needed for trees specifically),
+  `"bush"` (walkable but grants **concealment**: a new mechanism, not
+  free like trees — reduces the effective detection range for anything
+  trying to spot an agent standing in/behind one, which needs a real hook
+  into predation.ts's flee-trigger detection and into `computeVisible`,
+  not just a cosmetic tile), `"boulder"` (unwalkable, same LoS-blocking
+  treatment as tree, distinct flavor/rendering), `"sand"`/`"mud"`
+  (walkable, movement-cost penalty — feeds the same effective-speed
+  mechanism elevation is about to use, see below).
+- **Elevation actually affects movement speed, not just combat math sitting
+  idle.** Moving onto a higher-elevation tile than your current one costs
+  more (lowers effective Speed for that action, feeding the same
+  `accumulateActionEnergy`/`effectiveSpeed` mechanism `support.ts` already
+  uses for injury); moving onto a lower tile is faster. This is a second,
+  independent modifier alongside the existing HP-based one in
+  `support.ts` — document how they compose (multiplicative, most likely,
+  consistent with how the injury one is already applied).
+- **Elevation-aware fog of war becomes asymmetric by direction**, not just
+  the existing symmetric "your own elevation extends your radius" and
+  "a tall ridge blocks the view over it" rules (both already built and
+  fine to keep). Add: a target standing on **higher** ground than the
+  observer is harder to make out (reduced effective visibility toward it)
+  than the existing ridge-blocking rule alone accounts for, while a target
+  on **lower** ground (looking down into a valley) is easier to see — a
+  real "fog thickens going uphill, thins going downhill" rule layered on
+  top of `computeVisible`'s existing radius/line-of-sight logic, not a
+  replacement for it.
+- **Obstacles feeding back into behavior and combat**: a bush's
+  concealment should make it a real ambush tool — a predator lurking in
+  one that a prey agent hasn't detected gets some meaningful edge on the
+  opening exchange (a detection-range reduction already covers "prey
+  doesn't notice it's there in time to flee" — decide whether that's
+  sufficient or whether an explicit first-strike/accuracy bonus on the
+  ambush hit is worth adding; document whichever call is made). Move
+  range/line-of-sight for actual combat moves (`combat.ts`'s
+  `moveRange`/`canAttackFromHere`) should respect the new obstacle tiles
+  the same way any other line-of-sight check does — a tree between
+  attacker and target should block a line-shaped move's path, not just
+  ambient FOV.
+- **Explicitly still open**: exact biome parameter tuning (food/water
+  density per biome, obstacle density, elevation variance) — sim-original
+  guesses to judge against a real run like every other tuning constant
+  here; whether the O(width*height) nearest-tile-search ceiling needs a
+  real fix (spatial indexing) at the new map scale or can be deferred a
+  bit further; multi-region/world-graph (DESIGN.md's existing "World
+  scale" section) stays a separate, bigger, still-unbuilt idea — this
+  generates one large varied region, not multiple connected ones.
+
+### As built
+
+- `packages/engine/src/worldgen.ts` is new: `mulberry32(seed)` (a small,
+  well-known 32-bit seeded PRNG, public domain, no new dependency),
+  `makeNoise2D` (2-octave smoothed *value* noise — bilinear + smoothstep
+  interpolation over a random lattice, not true Perlin noise, which this
+  didn't need), `makeDensityField` (see below), 5 `BIOMES` (Grassland,
+  Forest, Wetland, Badlands, Highland — each a `{foodDensity, waterDensity,
+  obstacleDensity, elevationBase, elevationVariance, terrainWeights}`
+  record), `blendBiomeParams` (inverse-distance-squared blend of a tile's 3
+  nearest biome seed points), `generateWorld(width, height, seed)`, and
+  `findWalkableNear` (expanding-ring search, used to place scenario spawns
+  on a map that isn't guaranteed walkable at any specific hand-picked
+  coordinate).
+- **A real bug found and fixed during this pass, worth recording**: a raw
+  `noise(x, y) < density` threshold check badly under-fires for small
+  `density` values, because a multi-octave value-noise field is a weighted
+  average of several independent samples and so clusters toward 0.5 (like
+  averaging dice rolls) rather than spreading evenly across [0, 1]. The
+  first working version of `generateWorld` produced a 90x60 map with only
+  **3** food tiles and next to no obstacles — the opposite of the intended
+  "varied and interactive" world. Fixed with `makeDensityField`: it
+  Monte-Carlo-samples a noise field once (800 samples), sorts them, and
+  `thresholdFor(density)` returns the value at that percentile, so
+  `sample(x, y) < thresholdFor(density)` fires for close to the requested
+  fraction of tiles regardless of the field's actual raw distribution —
+  `worldgen.test.ts` has a dedicated test proving this calibration holds.
+  After the fix, a real generated map (90x60, seed 20260903) comes out to
+  roughly 77% floor, 8.7% water, 3.4% food, and ~11% obstacles split across
+  tree/boulder/bush/sand/mud — visually confirmed varied via an ASCII dump
+  (distinct forest, highland/boulder-field, and lake regions, not a uniform
+  scatter).
+- **Map size: 90x60** (up from 24x16) — an exact 3.75x scale of the old
+  map in both dimensions, chosen specifically so the old hand-picked
+  scenario anchors (herd territory, Scyther's hunting ground, etc.) scale
+  cleanly onto the new map via a single `SCALE_X`/`SCALE_Y` factor rather
+  than being re-derived from scratch. `packages/data/src/scenario.ts`'s
+  `createDemoWorld` now calls `generateWorld` instead of hand-authoring
+  `fillRect`/`setTile` calls; every scenario anchor is scaled from the old
+  24x16 frame and (for the surface layer) passed through
+  `findWalkableNear` so a scaled anchor landing on an obstacle or lake
+  doesn't break agent placement.
+- **A second real bug found during this pass**: underground/canopy spawn
+  anchors (Diglett/Sandshrew/Onix, Pidgey/Spearow) were first computed
+  directly against the *new* `SCENARIO_WIDTH`/`SCENARIO_HEIGHT` (e.g.
+  `{ x: SCENARIO_WIDTH - 3, y: SCENARIO_HEIGHT - 3 }`) while the code
+  reasoning about them was still written in the old 24x16 frame — this put
+  predator and prey in opposite corners of the new, much bigger map,
+  confirmed by a 5000-tick run with zero predation events on either pair
+  even after their `RELOCATE_AFTER_TICKS`-driven relocation kicked in
+  repeatedly. Fixed by scaling every underground/canopy anchor from the old
+  24x16 frame the same way the surface ones are (`scaledPos`, no
+  walkability search needed since those layers are still a plain flat
+  grid).
+- **New `TerrainKind` values**: `"tree"`/`"boulder"` (unwalkable — `world.ts`
+  gained `isWalkableTerrain`, shared by `createTile`/`setTile`, and a test
+  in `fov.test.ts`/`worldgen.test.ts` confirms both block movement and, for
+  free via the existing `hasLineOfSight` walkable check, line of sight —
+  no fov.ts change was needed for that part), `"bush"` (walkable, `Tile`
+  gained a `concealment?: boolean` flag), `"sand"`/`"mud"` (walkable,
+  handled purely as a function of terrain kind in support.ts, no extra
+  `Tile` field — see below).
+- **Elevation/terrain -> effective movement speed**
+  (`support.ts`'s `elevationSpeedMultiplier`, `terrainSpeedMultiplier`,
+  `movementSpeedFactor`): composes **multiplicatively** with the existing
+  injury-based `effectiveSpeed`, in this order —
+  `finalSpeed = baseSpeed * elevationSpeedMultiplier * terrainSpeedMultiplier * injuryFraction(floored)`.
+  A real architectural scope call, documented in both the code and here:
+  Speed is spent (`accumulateActionEnergy`) to decide *whether* an action
+  happens before that action's movement is even chosen, so a literal
+  "climbing this step costs more, decided in advance" isn't available
+  without restructuring that order. Implemented instead as a **post-move
+  snapshot** — `simulation.ts`'s `tickWorld` computes the elevation delta
+  and destination terrain right after a real move happens and stores the
+  combined multiplier on the new `Agent.terrainSpeedFactor` field, which
+  `actionSpeedOf` reads on every subsequent tick until the agent's next
+  move overwrites it. The qualitative effect (climb slows you down, descend
+  speeds you up, sand/mud are generally slower) still shows up in a real
+  run, just applied to the *next* action rather than the one just taken.
+- **Bush concealment, real, on both axes it was asked to touch**:
+  `predation.ts` gained `isConcealed`/`isDetectable`
+  (`BUSH_CONCEALMENT_DETECTION_REDUCTION = 2`, floored at radius 1),
+  applied to *both* the flee-trigger threat filter and the hunt-target
+  filter — concealment protects whichever party (predator or prey) happens
+  to be standing in the bush, not just prey hiding from predators. Rule
+  chosen: concealment applies only while actually **standing on** the
+  bush tile itself, not "in or adjacent" — the simpler of the two options
+  the design doc left open, and consistent with how every other
+  position-based check in this codebase already works (no precedent for an
+  "adjacent-counts" rule anywhere else). `fov.ts`'s `computeVisible` gained
+  the same idea as an effective-distance penalty (`CONCEALMENT_SIGHT_PENALTY
+  = 2`) on the tile being looked *at*. Both are sim-original magnitudes, not
+  canon.
+- **Asymmetric elevation FOV** (`fov.ts`): `ELEVATION_FOV_ASYMMETRY_PER_UNIT
+  = 0.5` effective tiles of distance per unit of elevation the target sits
+  above the observer (and the same amount of *bonus* — reduced effective
+  distance — per unit below), clamped at ±4
+  (`MAX_ELEVATION_FOV_ADJUSTMENT`) so an extreme height gap isn't an
+  unbounded always/never-visible switch. Implementing the downhill bonus
+  correctly required widening `computeVisible`'s scan bounding box by that
+  same cap — a target whose *raw* distance is just past `radius` but whose
+  *effective* distance (after the downhill bonus) is within it would
+  otherwise never even be scanned. `fov.test.ts` keeps the two pre-existing
+  rules (ridge-blocking, own-elevation radius bonus) passing unmodified and
+  adds new tests for the asymmetry specifically, isolating it from the
+  observer's own elevation bonus so each rule is tested independently.
+- **Obstacles block combat move lines**: `fov.ts` gained `isPathClear` (a
+  plain walkability check along a Bresenham line, no elevation gating —
+  irrelevant for a flat combat range check). `predation.ts`'s
+  `canAttackFromHere` was previously range-only (a real pre-existing gap,
+  not something this feature broke) — it now also requires `isPathClear`
+  between attacker and target, at all three call sites (guardian
+  intervention, prey mob-fight, predator hunt). **Bush ambush bonus
+  explicitly deferred** — concealment already gives a lurking predator a
+  real, measurable edge (undetected until the prey is much closer), and
+  DESIGN.md's own text called this optional; adding a separate first-strike
+  bonus on top felt like scope creep for a "some measurable edge" bar this
+  already clears, so it's left as an open idea rather than half-built.
+- **Performance**: `packages/engine/src/resourceIndex.ts` is new — a cached
+  per-(World, layer) coordinate index for `water`/`food`/`sunbeam` tiles,
+  invalidated via a new `World.resourceVersion` counter (bumped by
+  `setTile` always, and by `flora.ts` only on the two transitions that
+  matter: a seedling maturing into food, and a food patch dying back to
+  floor). `needs.ts`'s `findNearestTerrain` and `support.ts`'s internal
+  food-delivery lookup both now delegate to it instead of a naive
+  full-grid scan. **This was a real, necessary fix, not speculative
+  optimization**: the first correctly-populated 90x60 map (after the
+  density-field fix above) made the naive O(width*height) scan a genuine
+  per-tick cost multiplied across every hungry/thirsty agent; with the
+  index in place, a 10,000-tick run of the demo scenario completes in
+  ~5-6 seconds on this machine (1,000 ticks in ~1.5-1.8s), scaling roughly
+  linearly with tick count rather than blowing up as population grows —
+  confirmed by comparing 1,000/5,000/10,000-tick run times. `growFlora`'s
+  own full-grid-per-tick scan (also flagged in TODO.md) was left untouched
+  — it wasn't the bottleneck actually observed, and DESIGN.md's ask was
+  specifically about `findNearestTerrain`.
+- **Underground/canopy untouched**, as scoped: `generateWorld` only ever
+  writes to `world.tiles.surface`; both other layers stay the plain flat
+  grid `createWorld` always produced, confirmed by a dedicated
+  `worldgen.test.ts` test.
+- 30 new tests across `worldgen.test.ts` (new), `fov.test.ts`,
+  `support.test.ts`, and `predation.test.ts` (213 total, up from 183):
+  PRNG/noise determinism, the density-field calibration, biome-blend
+  gradualness across a boundary (a sampled line of tiles confirms a
+  monotonic gradient, not a step), tree/boulder walkability +
+  free LoS-blocking, the two pre-existing FOV rules still holding plus the
+  new asymmetry/concealment rules in isolation, `isPathClear`, the
+  elevation/terrain speed multipliers and their real multiplicative
+  composition through a full `tickWorld` call, and bush concealment
+  measurably defeating both hunt- and flee-detection at a distance that
+  would otherwise trigger them.
+- **Real-run findings, reported straight** (`pnpm run run <N>` from
+  `packages/runner`, seed 20260903 demo scenario):
+  - The generated map genuinely looks and feels varied — an ASCII dump
+    (via `packages/runner`'s existing `ascii.ts`) shows a clear forest
+    region (dense `T` trees), a highland/boulder field (`O`), sandy
+    stretches, a couple of real lakes, and scattered food/flora glyphs
+    threaded through open floor, not a uniform scatter or a repeat of the
+    old two-water-hole box.
+  - Performance is solid at this scale: 1,000 ticks in ~1.5-1.8s, 10,000
+    ticks in ~5-6s, no sign of the O(width*height) ceiling reasserting
+    itself (that's the resourceIndex.ts fix above actually earning its
+    keep, not just theoretical).
+  - Predation *does* happen at this map size — an 1,000-tick run showed 11
+    `fought` events, a `fainted`, a `defeated`, and a `killed`; a separate
+    5,000-tick run showed 7 `fought`/1 `fainted`/1 `killed` — but it's
+    slower to get going and more stochastic run-to-run than on the old tiny
+    map, and a full 10,000-tick run in one attempt showed *zero* combat
+    events at all. Root cause, diagnosed rather than guessed at: on this
+    much bigger map, food/water is abundant enough (by design, so the
+    surface herbivore population doesn't starve across a much larger area)
+    that a solo predator (Scyther, Onix, Spearow — none of them herd
+    members, so they don't even get herding.ts's idle-cohesion wandering)
+    can self-feed from the same generic "food" tiles herbivores eat and
+    rarely drops below `HUNT_HUNGER_THRESHOLD` in the first place. This is
+    a genuine tuning gap this feature surfaced rather than solved — flagged
+    in TODO.md rather than silently patched, since a real fix (predators
+    not self-feeding from berry patches at all, or a lower predator food
+    density, or giving solo predators their own idle-wander behavior)
+    changes predation.ts/needs.ts territory beyond this feature's scope.
+  - The underground Diglett/Sandshrew/Onix colony and canopy Pidgey/Spearow
+    flock are both real users of cross-layer need-seeking at the new scale
+    (`crossedLayer` events show up in every run) — but a 10,000-tick run
+    showed a real amount of Pidgey starvation (132 `starved` events across
+    the whole run, `born: 134`), consistent with a known pre-existing
+    dynamic (canopy has no food/water of its own, so every agent up there
+    depends on successfully timing a cross-layer trip) rather than
+    something this feature changed — noted here because it's visible in
+    the same logs, not because this feature is responsible for it.
+
+## Herd-level migration: moving as a group, not wandering individually
+
+Decided, not built yet — Phase 2, depends on Phase 1 above landing first
+(needs a real varied map to be observable, and both phases touch
+`scenario.ts`/`world.ts`, so building them in the same pass invites
+avoidable conflicts). Direct ask: "I want the herd to move if there's no
+food," and for that to read as a genuine group decision, not individually-
+wandering agents that happen to end up near each other. Today's only
+relevant mechanism, `migrate()` in `migration.ts`, is single-agent and
+already used for something different (a predator giving up on a hunting
+area) — it picks one random distant point per agent, independently.
+
+- **A shared per-herd migration decision, not per-agent.** When a herd's
+  local resource situation is bad — sample food-tile `stock` (and water
+  presence) within the herd's existing cohesion radius (`herding.ts`'s
+  `COHESION_DISTANCE`) around its live centroid, sustained below a
+  threshold for a real duration (not a single bad tick — avoid triggering
+  on ordinary depletion/regrowth noise already modeled in `flora.ts`) —
+  the herd (identified by shared `herdId`) picks **one shared destination**
+  for everyone, not each member picking its own. Store this as real shared
+  state (a `herdId -> target` map is enough, doesn't need to live on every
+  agent) so the whole herd actually walks together rather than scattering.
+- **Destination selection is resource-aware, not a blind random point**
+  like the existing single-agent `migrate()` — sample candidate points at
+  some distance from the current centroid and prefer ones with better
+  known food/water density (reuse whatever terrain-sampling the biome-
+  generation work produces, or a simpler direct tile scan if that's not
+  ready/needed) — a herd should be able to plausibly walk toward the
+  Forest biome's denser food if it's starving in a Badlands patch, once
+  Phase 1's biome variety exists to walk toward at all.
+- **Every herd member (and its guardians, per the existing
+  `protectedHerdCentroid` distinction) biases toward the shared migration
+  target instead of the live centroid while one is active** — reuse
+  `applyHerdCohesion`'s existing structure, just swap what it's pulling
+  toward when a migration is in progress, rather than building a second
+  parallel movement system.
+- **Migration ends on arrival** (herd centroid close enough to the target)
+  or on a timeout/give-up condition (mirroring `migrate()`'s existing
+  `"stuck"` case) — clears the shared target, resumes ordinary centroid-
+  based foraging cohesion in the new area.
+- **New `herdMigrating` event** (herdId, from, to, reason — e.g. "food
+  scarcity") for the event log, and an arrival/settle event — this is
+  squarely the kind of thing the project's whole "the log needs semantic
+  content" ethos wants: "the east herd abandoned its depleted range and
+  resettled near the forest's edge" is a real story, not a diff.
+- **Explicitly still open**: whether predator-side relocation
+  (`migrate()`'s existing use in predation.ts) should be unified with this
+  new herd-migration mechanism or stay separate (they're conceptually
+  different — one predator giving up vs. a whole herd relocating — keeping
+  them separate is a reasonable default, revisit if it causes duplication);
+  exact scarcity-detection thresholds/duration, another sim-original tuning
+  guess to validate against a real run.
+
+### As built
+
+- `packages/engine/src/herdMigration.ts` is new: `World.herdMigrations`
+  (`Record<herdId, {target, reason, startedTick}>`) and
+  `World.herdScarcityTicks` (`Record<herdId, number>`) are the shared,
+  per-herd state DESIGN.md asked for — not duplicated onto every agent.
+  `updateHerdMigrations(world, log)` is called once per tick from
+  `simulation.ts`'s `tickWorld` (not once per agent) and owns the whole
+  lifecycle: sampling local abundance around each herd's live centroid
+  (`herding.ts`'s `herdCentroid`, reusing its own `COHESION_DISTANCE` as the
+  sampling radius rather than inventing a second number), incrementing/
+  resetting a per-herd sustained-scarcity counter, triggering a migration
+  once that counter crosses `SCARCITY_SUSTAIN_TICKS`, and clearing an active
+  migration on arrival or timeout.
+- **Scarcity score, not a raw tile count**: `resourceIndex.ts` gained two
+  new query functions (`foodStockNear`, `countTerrainNear`) that filter its
+  existing cached index by Chebyshev distance instead of doing a fresh
+  full-grid scan — consistent with why that index exists at all. A herd's
+  local "abundance" is `sum(live food stock within radius) + (water tiles
+  within radius)`; `SCARCITY_SCORE_THRESHOLD = 1.5` and
+  `SCARCITY_SUSTAIN_TICKS = 150` are the sim-original tuning guesses (150
+  ticks specifically chosen to ride out one food patch's natural
+  death-to-regrowth gap — flora.ts's `FOOD_LIFESPAN_TICKS`/
+  `MATURATION_TICKS` — without over-reacting to it).
+- **Destination selection is a direct resource-density scan, not
+  biome-aware**: `pickDestination` samples candidate points at 15/25/40
+  tiles out from the centroid in 8 compass directions, scores each with the
+  same abundance function used for scarcity detection, and picks the best
+  one — provided it beats the herd's *current* score by `MIN_IMPROVEMENT`.
+  A biome-aware version (scoring by `worldgen.ts`'s `BIOMES`/
+  `blendBiomeParams` instead) was considered and explicitly not built: a
+  real per-tile resource scan is simpler and more directly answers "is this
+  actually a better place to live" than reasoning about which biome a
+  candidate statistically blends toward — a Forest-leaning tile can still
+  roll foodless locally, and scanning the real tiles never has that
+  mismatch. The improvement-margin gate has a second, load-bearing effect:
+  the underground/canopy herds (`underground-colony`, `pidgey-flock`) have
+  zero food/water tiles on their layers at all (Surface-only generation),
+  so every candidate scores exactly 0, same as "home" — nothing ever clears
+  the bar, so those herds correctly never migrate instead of wandering
+  toward an equally-barren random point. Confirmed directly: a real run
+  showed `pidgey-flock`'s scarcity counter cycle 0 -> 149 -> (destination
+  search finds nothing) -> reset to 0, repeating, exactly as designed.
+- **Whole herd (and guardians) pull toward the same shared point**:
+  `herding.ts`'s `applyHerdCohesion` now checks `world.herdMigrations` first
+  — if the agent's `herdId` has an active entry, *everyone* (ordinary
+  members and guardians alike) pulls toward `migration.target` instead of
+  the live centroid. A guardian keeps its tighter `GUARDIAN_COHESION_DISTANCE`
+  leash while migrating rather than tracking the exact same tolerance as an
+  ordinary member — the simplest reasonable reading of "guardians should
+  still use their tighter leash," not a separate "vicinity of the target"
+  computation, since nothing in a real run showed that extra complexity
+  earning its keep.
+- **Two new events**: `herdMigrating` (herdId, from, to, reason) fires when
+  a migration starts; `herdSettled` (herdId, pos, outcome: "arrived" |
+  "gaveUp") fires when one ends either way — `ARRIVAL_DISTANCE` reuses
+  `COHESION_DISTANCE` again, `MIGRATION_TIMEOUT_TICKS = 2000` mirrors
+  `migrate()`'s own give-up pattern.
+- 11 new tests in `herdMigration.test.ts`: sustained-vs-brief-dip scarcity
+  detection, destination scoring preferring a richer candidate (and
+  correctly finding nothing on a barren map), arrival/timeout/in-progress
+  clearing, and `applyHerdCohesion` pulling both an ordinary member and a
+  guardian toward the shared target — confirming every member reads the
+  exact same `World.herdMigrations` entry rather than each computing its
+  own. All 213 pre-existing tests plus these 11 pass (224 total);
+  `pnpm -r typecheck`/`build` clean across all 4 packages.
+- **Real-run findings, reported straight** (seed 20260903 demo scenario,
+  `pnpm run run <N>` from `packages/runner`):
+  - **The mechanism works end-to-end when actually exercised**: a scripted
+    real-engine run that artificially wiped every food/water tile within 40
+    tiles of the bulbasaur herd's starting centroid (simulating a real
+    famine, not a synthetic unit-test world) triggered a `herdMigrating`
+    event at exactly tick 150 (the configured sustain window) picking a
+    genuinely resource-richer target 34 tiles east, confirming the full
+    scarcity-detection -> destination-scoring -> event pipeline fires
+    correctly through the real `tickWorld` path, not just in isolation.
+  - **But it never fires in the actual demo scenario** — a straight 1,000-
+    and a 10,000-tick run of the unmodified demo world produced zero
+    `herdMigrating`/`herdSettled` events. Root cause diagnosed directly: a
+    debug instrument tracking each herd's live scarcity counter over a
+    30,000-tick run showed `bulbasaur-herd` and `underground-colony` never
+    exceed roughly 21-26 consecutive scarce ticks (well under the 150
+    needed) after their initial post-spawn settling period — the same map
+    abundance the biome-generation feature already flagged as making
+    predation rare and stochastic (DESIGN.md's prior section, TODO.md) also
+    means a mobile herd's *local* food/water around its centroid recovers
+    long before real depletion could ever sustain. This is the same kind of
+    tuning gap, not silently patched: at this map's default abundance,
+    herd-level migration is a real, working, but essentially unreachable
+    mechanism in ordinary play — it would need either a genuine famine
+    event (a drought mechanic, a much larger local herd eating pressure) or
+    a deliberately lower `SCARCITY_SUSTAIN_TICKS`/`SCARCITY_SCORE_THRESHOLD`
+    to ever fire organically, and lowering those enough to fire on the
+    unmodified map (confirmed via the same debug harness: `sustain = 15`
+    fires immediately at spawn, tick 15) mostly just measures "how long it
+    takes a fresh herd to find its first meal," not real depletion — a
+    worse signal, not a better one. Left at the documented values rather
+    than chasing an artificially-triggerable number.
+  - **A second, real limitation surfaced by the same famine-simulation
+    run**: once triggered, the herd did *not* reliably arrive — it timed
+    out (`herdSettled`/`gaveUp` at tick 2150) and ended up at (2, 6),
+    nowhere near the chosen target (59, 10). Cause understood, not a bug:
+    `applyHerdCohesion`'s migration bias only applies while an agent is
+    *idle* (per DESIGN.md's explicit ask to reuse its existing structure);
+    a hungry/thirsty member's `seekFood`/`seekWater` behavior takes
+    priority and searches the *entire map* for the nearest resource via
+    `findNearestTerrain`, with no awareness of the herd's shared migration
+    target — during an actual famine severe enough to trigger migration in
+    the first place, members are hungry *often*, so individual survival-
+    driven wandering can easily pull the herd somewhere other than the
+    scored destination, undermining the "moves together" story exactly
+    when it matters most (a real famine). A softer, still-open idea worth
+    revisiting: bias `findNearestTerrain`'s candidate search toward the
+    migration target when one is active (e.g. prefer a resource within some
+    bonus radius of the target over a slightly-nearer one elsewhere) rather
+    than leaving it target-agnostic — not built here, flagged in TODO.md
+    since it changes needs.ts territory beyond this feature's stated scope
+    (extend `applyHerdCohesion`).
+  - Performance: no measurable regression from the added once-per-tick
+    `updateHerdMigrations` check — 1,000 ticks in ~1.8s, 10,000 in ~5.1s,
+    matching the biome-generation feature's own numbers.
+
+## Dynamics that move a content herd: extra migration triggers, day/night, weather
+
+Decided, not built yet. Direct feedback after herd migration landed as
+purely scarcity-driven: fine for scarcity to stay occasional (per the
+honest finding that the new map is abundant enough that it rarely fires),
+but a herd needs reasons to move that **aren't** "we're starving" or it
+just sits there forever. Five dynamics, agreed on together, split into
+three build phases sequenced to avoid three agents colliding on the same
+files (`herdMigration.ts`/`herding.ts`/`events.ts` get touched by more than
+one of these):
+
+**Phase 1 — generalize herd migration to more trigger reasons** (smallest,
+builds first, touches `herdMigration.ts`/`herding.ts` directly so it goes
+before the phases that plug into it):
+- **Predator pressure**: a rolling per-herd count of hunt/fight events
+  involving its members over a real window (e.g. last 300 ticks); crossing
+  a threshold triggers migration with reason `"predator_pressure"`,
+  destination scoring gets a new term biasing away from the threat's last
+  known position on top of the existing resource-richness scoring.
+- **Wanderlust**: a small, constant per-tick-per-herd chance (deliberately
+  low — something like 1-in-several-thousand, tuned so it reads as
+  occasional restlessness, not constant churn) of triggering a migration
+  with no bad condition at all, to a moderately distant point that doesn't
+  need to be *better*, just different. This is the direct, simplest answer
+  to "otherwise they'll just stay there forever." Scale the chance with
+  boldness/sociability (already-built Disposition axes) so bolder/more
+  social herds wander somewhat more.
+- **Territorial displacement**: two herds of the *same species* with
+  centroids within roughly `2x COHESION_DISTANCE` of each other for a
+  sustained duration pushes the smaller one (by member count) to migrate
+  away — destination scoring gets an "away from the other herd" term.
+- All three reuse the exact shared-state/target-selection/cohesion-bias
+  machinery already built for scarcity — this phase is about adding
+  trigger *evaluators*, not new core plumbing. Generalize whatever
+  `herdMigrations` entry shape exists to carry a trigger-reason string if
+  it doesn't already (scarcity's existing entries already need one for
+  the `herdMigrating` event's `reason` field, so this may already be
+  halfway there).
+
+**Phase 2 — day/night cycle** (mostly independent of Phase 1, still
+sequenced after it since both touch `events.ts`):
+- A fast local cycle, independent of the existing 1000-tick season sine
+  wave — something like 200 ticks per full day, a light level 0
+  (midnight) to 1 (noon).
+- Species get an `activityPattern: "diurnal" | "nocturnal" |
+  "crepuscular" | "cathemeral"` field, defaulting to `"cathemeral"`
+  (active any time) for anything unspecified so existing species/tests
+  don't silently change behavior unless explicitly set. Off-hours for an
+  agent's pattern apply a real but partial effective-Speed penalty
+  (composing with the existing injury/elevation modifiers, not
+  replacing them) and shift a predator's hunt-eagerness threshold the
+  way Disposition's aggression already does — a nocturnal predator
+  actually hunts more at night, not just flavor text.
+- Night reduces `computeVisible`'s effective radius for everyone by
+  default (a real, flat penalty — document the magnitude) — this is the
+  natural next consumer of the FOV system now that biomes/elevation
+  already wired it up for something.
+- New `nightfall`/`daybreak` events for the log's narrative surface —
+  cheap, matches the project's "the log needs semantic content" ethos.
+
+**Phase 3 — weather, spatial and moving, not the existing invisible global
+season** (biggest, sequenced last since it plugs into Phase 1's
+generalized trigger system for storm-driven shelter-seeking):
+- A small number (1-3) of active weather systems at once, each with a
+  type (`rain` | `storm` | `drought` | `coldSnap`), a center, a radius,
+  and a lifespan — spawns, drifts slowly in a random direction, dissipates,
+  and a new one spawns periodically. Spawn likelihood per type should be
+  biome-influenced (Wetland/Grassland skew rain, Badlands skew
+  drought/heat, Highland skews storms/cold) — real use of the biome data
+  from the environmental-generation work.
+- Effects, local to a cell's radius: **rain** boosts flora regrowth and
+  slightly eases thirst decay; **drought** suppresses regrowth and raises
+  thirst decay (deliberately composes with/accelerates the existing
+  scarcity trigger rather than needing a separate mechanic — real reuse,
+  not duplication); **storm** meaningfully reduces visibility/accuracy
+  (bigger penalty than night) and builds per-agent "exposure" while caught
+  in it without forest/canopy cover nearby — sustained exposure triggers a
+  herd migration via Phase 1's generalized system, reason `"weather"`,
+  destination scored toward the nearest good-cover biome patch; **cold
+  snap** adds a further Speed penalty (composing with everything else)
+  for species without documented cold tolerance.
+- New `weatherChanged` event (type, area, start/end) for the log.
+- **Explicitly still open**: exact spawn rates/radii/lifespans and the
+  exposure-to-migration threshold are sim-original tuning guesses like
+  everything else in this project, to judge against a real run; whether
+  cold/heat tolerance needs real per-species/per-type data or a flat
+  default is fine for a first pass.
+
+### Phase 1 — as built
+
+Only Phase 1 (the four trigger reasons) is built. **Phases 2 (day/night) and
+3 (weather) above are still just decided, not built** — left for a
+follow-up pass, sequenced after this one specifically so it wouldn't
+collide with Phase 1's edits to the same files (`herdMigration.ts`/
+`herding.ts`/`events.ts`).
+
+- **`MigrationReason`** (`types.ts`) is a real discriminated union —
+  `"scarcity" | "predator_pressure" | "wanderlust" | "territorial"` — shared
+  by `World.herdMigrations`' `reason` field and `SimEvent`'s
+  `herdMigrating.reason`, so both always agree. The original scarcity
+  trigger's ad hoc `reason: "food scarcity"` string became `"scarcity"`;
+  the 7 pre-existing tests that asserted the old string were updated to
+  match (a real rename, not a regression to special-case around).
+- **Predator pressure** is a running per-herd counter
+  (`World.herdPredatorPressure: Record<herdId, {count, windowStart,
+  lastThreatPos}>`), incremented once at the exact site `predation.ts`'s
+  `resolveHit` logs a `fought` event against a herd member — not a per-tick
+  `EventLog` scan (would be O(events) per herd per tick, unbounded over a
+  long run; this is O(1) per real hit). The "last 300 ticks" rolling window
+  DESIGN.md asked for is approximated cheaply: if the previous hit in the
+  counter was more than `PREDATOR_PRESSURE_WINDOW_TICKS` (300) ticks ago,
+  the count restarts at 1 instead of a real sliding-window recompute — a
+  documented, deliberate over-approximation (see the doc comment on
+  `recordPredatorPressure`), not an oversight. `PREDATOR_PRESSURE_THRESHOLD
+  = 5` hits within that window triggers a migration; the destination search
+  gets a new `awayFrom` term (see below) biased away from the attacker's
+  last known position (`lastThreatPos`).
+- **Wanderlust** rolls a flat per-tick-per-herd chance
+  (`WANDERLUST_BASE_CHANCE = 1/3000`) scaled by the herd's average
+  boldness+sociability across its living members (`herdWanderlustFactor`,
+  0..1) via `max(0.25, factor * 3)` — 1.5x at neutral disposition (so the
+  *real* per-tick chance for a neutral herd is 1/2000, not 1/3000 — the
+  base constant is a floor, not the typical value), up to 3x at fully
+  bold+social, floored at 0.25x rather than zero for a fully timid/solitary
+  herd (even a cautious herd wanders *occasionally*). The destination
+  (`pickWanderDestination`) is deliberately **not** resource-scored at all,
+  per DESIGN.md's "doesn't need to be better, just different" — one of the
+  8 compass directions at a flat 25-tile distance, landed on the nearest
+  walkable tile. This is also the one trigger that still works for the
+  underground/canopy herds (no food/water tiles to score there at all).
+- **Territorial displacement**: a per-herd-*pair* sustained-proximity
+  counter (`World.herdTerritorialTicks`, keyed by a sorted `"idA|idB"` pair
+  key so it's counted once regardless of iteration order) mirrors
+  scarcity's own "sustained, not instantaneous" pattern exactly — same 150
+  ticks (`TERRITORIAL_SUSTAIN_TICKS`), same reasoning. Two same-species
+  herds' centroids within `TERRITORIAL_DISTANCE` (`2 * COHESION_DISTANCE` =
+  10) for that long triggers the *smaller* (by live member count) herd to
+  migrate away from the other's centroid; a tie goes to whichever herd id
+  sorts first (arbitrary, documented, doesn't matter in practice). Not
+  observable in the actual demo scenario, which has exactly one herd per
+  species (see real-run findings below) — confirmed correct only via unit
+  tests that construct two same-species herds directly.
+- **Destination scoring gained an `awayFrom` term** for `predator_pressure`/
+  `territorial`: `pickDestination(world, layer, from, awayFrom?)` now adds
+  `AWAY_WEIGHT * manhattan(candidate, awayFrom)` (`AWAY_WEIGHT = 0.05`,
+  chosen so 40 tiles of extra distance from the threat is worth about +2 —
+  comparable to a couple of healthy food tiles, not an automatic override
+  of resource-richness) on top of the existing abundance score. This also
+  means an underground/canopy herd, which can never clear the improvement
+  bar on abundance alone, *can* still relocate for predator-pressure or
+  territorial reasons — pure distance from the threat is enough — unlike
+  `scarcity`, which stays correctly unreachable for those herds (see the
+  `MIN_IMPROVEMENT` doc comment in `herdMigration.ts`).
+- **Trigger precedence, decided and documented once** (top of
+  `herdMigration.ts`, not re-derived per call site): per tick, a herd with
+  no active migration is checked `scarcity` → `predator_pressure` →
+  `territorial` → `wanderlust`, in that order; the first to fire wins and
+  the rest aren't evaluated that tick. The two survival-critical triggers
+  are checked first (their relative order is an arbitrary tie-break, not a
+  real priority claim); the two soft triggers are checked after, order
+  irrelevant per DESIGN.md. Simpler than a general interruption-priority
+  scheme: a herd already migrating for any reason skips every trigger
+  check entirely (the existing early `continue`) — nothing ever interrupts
+  an in-progress migration, full stop, rather than modeling which reasons
+  could preempt which.
+- **11 new tests** in `herdMigration.test.ts` (235 total, up from 224):
+  predator-pressure not firing on an isolated hit but firing (and scoring
+  away from the threat) after a sustained pattern, and consuming its
+  counter on trigger; `pickDestination`'s `awayFrom` term in isolation;
+  wanderlust's fire rate matching the documented chance over 200,000
+  simulated ticks with a fixed seeded PRNG (mulberry32 — deterministic,
+  never flaky) and scaling up for a bolder/more social herd vs. a
+  timid/solitary one (same seed on both, isolating the disposition effect);
+  territorial triggering the smaller of two same-species herds and scoring
+  away from the rival, and correctly not triggering for two different-
+  species herds; and precedence — a wanderlust roll never interrupts an
+  active `scarcity` migration, and `scarcity` wins a genuine same-tick tie
+  against `predator_pressure`. All 224 pre-existing tests still pass
+  unmodified apart from the 7 `"food scarcity"` → `"scarcity"` string
+  updates; `pnpm -r typecheck`/`build` clean across all 4 packages.
+- **Real-run findings, reported straight** (seed 20260903 demo scenario,
+  `pnpm run run <N>` from `packages/runner`, several independent runs since
+  the demo world isn't fully deterministic — `Math.random` unseeded for
+  nature/disposition/trigger rolls):
+  - **The population itself is the dominant real-run finding, and it's not
+    new to this feature.** A debug instrument tracking each herd's live
+    member count found `bulbasaur-herd`/`underground-colony`/`pidgey-flock`
+    all frequently boom (reproduction pushes them to 2-3x their starting
+    size within the first ~500-1000 ticks) then bust to full extinction
+    well before 10,000-20,000 ticks — `starved` events in the dozens per
+    run, `killed`/`defeated` at or near zero. This is pre-existing
+    population-balance behavior (starvation/reproduction dynamics, not
+    anything this feature touches) but it directly bounds how much any
+    migration trigger — new or old — can be observed in the unmodified
+    demo scenario: a herd that goes extinct after a few thousand ticks
+    simply stops rolling for anything.
+  - **Wanderlust is the only one of the four triggers that fired at all in
+    ordinary runs**, confirming it does deliver "herds don't just sit there
+    forever" — 0-3 `herdMigrating`/wanderlust events observed per
+    20,000-tick run across the 3 demo herds combined (varies run to run,
+    consistent with a ~1/2000 per-tick-per-herd chance at these herds'
+    actual disposition averages and the population volatility above cutting
+    each herd's effective observation window short). This is genuinely rare
+    in the current demo scenario — closer to "did happen at least once in
+    most runs" than "occasional restlessness clearly visible in every run"
+    — a direct consequence of herds not surviving long enough to accumulate
+    many rolls, not evidence the per-tick chance itself is wrong (isolated
+    from population churn, the statistical test above confirms it fires at
+    the documented rate). Raising `WANDERLUST_BASE_CHANCE` further to
+    compensate for short herd lifespans was considered and not done — it
+    would fix the symptom (visibility in this scenario) by making the
+    *mechanism* less "occasional," which is the wrong lever; the actual
+    lever is herd survival time, out of scope here (see the pre-existing
+    population-balance gap above).
+  - **Predator-pressure and territorial did not fire in any real run** —
+    root-caused, not just observed: `fought` events were at or near zero
+    across every run (the same pre-existing "predators barely land hits"
+    dynamic TODO.md already flags for the biome-generation feature), so
+    `PREDATOR_PRESSURE_THRESHOLD`'s 5-hits-in-300-ticks bar was essentially
+    never approached; and the demo scenario has exactly one herd per
+    species, so no territorial rival ever exists for the trigger to compare
+    against. Both mechanisms are confirmed correct via direct unit tests
+    (predator-pressure fires and scores correctly given synthetic hit
+    events; territorial fires and scores correctly given two constructed
+    same-species herds) — the gap is scenario content, not implementation.
+    Making either observable in the demo world would need scenario changes
+    outside this feature's scope: e.g. a second Bulbasaur herd for
+    territorial, or addressing the predator-hit-rate gap for
+    predator-pressure.
+  - Performance: no measurable regression from the added trigger checks —
+    a 10,000-tick run completes in a few seconds, consistent with the
+    scarcity-only feature's own numbers; the new per-hit
+    `recordPredatorPressure` call is O(1) and the territorial check is
+    O(herds²) per tick, negligible at this scenario's herd count (3).
+
+### Phase 2 — as built
+
+Built. **Phase 3 (weather) above is still just decided, not built** — left
+for its own follow-up pass, sequenced after this one specifically so it
+wouldn't collide with Phase 2's edits to `events.ts` (and so weather's
+visibility/Speed effects, which explicitly compose with day/night's light
+level, land on top of a finished light-level function rather than a moving
+target).
+
+- **The cycle itself** (`daynight.ts`, a new small module — deliberately not
+  folded into flora.ts's existing seasonal code, since the two cycles share
+  nothing but "cheap deterministic function of `world.tick`", see that
+  file's doc comment): `DAY_LENGTH_TICKS = 200` (DESIGN.md's own suggestion),
+  `lightLevel(tick)` a `0.5 - 0.5*cos(2π·tick/200)` wave — 0 at midnight
+  (tick 0), 1 at noon (tick 100), same sine-wave style as
+  `seasonalMultiplier` just phase-shifted so tick 0 lands exactly on
+  midnight rather than mid-rise. `NIGHT_THRESHOLD = 0.5` splits every cycle
+  into an exactly-even day half and night half (so a diurnal and nocturnal
+  species each get an equal-length active window by default, no favoritism
+  baked in); `isTwilight` is a `±0.15` light-level band around that
+  threshold, which — since light crosses 0.5 exactly twice per cycle —
+  produces exactly two real dawn/dusk windows per day for crepuscular
+  species, not a continuous "sort of always twilight" state.
+- **`activityPattern`** landed exactly as scoped: a 4-value union
+  (`"diurnal" | "nocturnal" | "crepuscular" | "cathemeral"`) on both
+  `SpeciesDef` (`packages/data/src/species.ts`) and `Agent` (`types.ts`),
+  denormalized onto the agent at spawn (`spawn.ts`) the same way
+  `types`/`stats`/`moves` already are. Absent reads as `"cathemeral"`
+  everywhere it's consulted (support.ts/predation.ts), so every hand-built
+  test fixture and every species that doesn't set it is provably unaffected
+  — confirmed by the full pre-existing 235-test suite passing unmodified.
+  Assigned to the curated roster with real (if not strictly canon-cited)
+  reasoning, documented inline at each entry: Bulbasaur/Charmander/Pidgey
+  diurnal (sun-loving bulb, sun-loving flame, ordinary daytime bird);
+  Diglett/Sandshrew nocturnal (burrowing mole, desert-heat-avoider);
+  Scyther/Spearow crepuscular (ambush predators, dawn/dusk hunters — and
+  deliberately mismatched with Pidgey's diurnal window, so Spearow is most
+  dangerous exactly when its prey is running an off-hours Speed penalty);
+  Venusaur/Onix left at the `cathemeral` default on purpose, documented as a
+  design choice rather than an oversight (a guardian that only watches half
+  the clock isn't much of one; a rock snake tunneling underground has no
+  real "daylight" to have an opinion about).
+- **Off-hours Speed penalty** (`support.ts`'s `activityScheduleMultiplier`,
+  `OFF_HOURS_SPEED_MULTIPLIER = 0.8`): a flat 20% Speed cut while active
+  outside the pattern's window — deliberately the same order of magnitude as
+  the existing sand/mud terrain penalties (0.75/0.5), "sluggish off-hours,"
+  not "can't act." Composes multiplicatively as documented: `actionSpeedOf`
+  (simulation.ts) now multiplies base Speed by terrain factor, then this
+  activity factor, then hands the product to `effectiveSpeed`'s injury
+  fraction — an injured nocturnal agent slogging through mud by day stacks
+  all three real penalties on one action, not just whichever is worst
+  (proven by a composition test in `support.test.ts`, not just each
+  modifier tested in isolation).
+- **Hunt-eagerness shift** (`predation.ts`'s `activityHuntShift`,
+  `NOCTURNAL_HUNT_THRESHOLD_SPREAD = 0.15`, deliberately smaller than
+  aggression's own `HUNT_THRESHOLD_SPREAD = 0.2` so an individual's
+  Disposition still matters at least as much as its species' activity
+  pattern): a nocturnal predator's hunt-hunger threshold shifts up (hunts
+  even when not very hungry) as darkness increases, and down (needs to be
+  hungrier) by day; diurnal is the exact mirror; crepuscular gets a smaller
+  flat eagerness bump during the two twilight windows only, since it keys
+  off a specific window rather than a continuous light gradient. This is a
+  genuinely additive term on top of the existing aggression-based shift, not
+  a replacement — `huntHungerThreshold` sums both, confirmed by a
+  composition test showing an aggressive nocturnal predator at midnight
+  hunts at a hunger level neither shift alone reaches.
+- **Night FOV reduction** (`fov.ts`'s `NIGHT_FOV_PENALTY = 2.5`): a new
+  `lightLevel` parameter on `computeVisible`, **defaulting to `1` (full
+  daylight)** rather than reading `world.tick` automatically — the
+  deliberate design choice that keeps every pre-existing caller/test exactly
+  as it was (world.tick starts at 0, i.e. midnight, so an automatic read
+  would have silently broken every unmodified FOV test). The penalty shrinks
+  the *radius* itself (same treatment `ELEVATION_SIGHT_BONUS` gives it, just
+  the other direction) before concealment/elevation-asymmetry per-target
+  adjustments and before the ridge-blocking line-of-sight check — a fourth,
+  independent term layered on, not replacing, the three that already
+  existed. New tests confirm both halves explicitly: the exact same
+  elevation-extends-radius and ridge-blocks-over-the-top assertions from the
+  original FOV tests still hold bit-for-bit at `lightLevel: 1`, and a
+  measurable, real radius shrink at `lightLevel: 0`.
+- **`nightfall`/`daybreak` events**: emitted from `simulation.ts`'s
+  `tickWorld`, once per actual phase transition — computed by comparing
+  `isNight` at the tick before vs. after the increment, so no extra
+  persisted world state is needed just to catch the boundary. Each event
+  carries the exact `lightLevel` at that tick for narrative flavor.
+  `packages/runner/src/format.ts`'s exhaustive `SimEvent` switch needed the
+  two new cases (confirmed: TS's exhaustiveness check caught the gap
+  immediately at compile time, the same class of break a recent feature
+  flagged for this exact file) — added and rendered as plain "night
+  falls"/"day breaks" lines with the light level to two decimal places.
+- **24 new tests** across 5 files (`daynight.test.ts` new; `fov.test.ts`,
+  `support.test.ts`, `predation.test.ts`, `simulation.test.ts` extended) —
+  259 total, up from 235. Covers the light-level function's shape/period/
+  determinism; `isNight`/`isTwilight`'s exact boundary behavior; the
+  off-hours penalty per pattern *and* its multiplicative composition with
+  injury/terrain (not just each modifier alone); the nocturnal/diurnal hunt
+  threshold shifts *and* their composition with the pre-existing
+  aggression-based shift; the night FOV reduction *and* an explicit
+  regression check that the pre-existing elevation/ridge FOV tests still
+  pass unmodified at full daylight; and `nightfall`/`daybreak` firing
+  exactly once per real phase transition (not every tick) at the tick the
+  phase actually flips. All 235 pre-existing tests still pass completely
+  unmodified — no test needed updating for this feature, unlike Phase 1's 7
+  string-rename updates. `pnpm -r build`/`test` clean across all 4 packages.
+- **Real-run findings, reported straight** (`pnpm run run <N>` from
+  `packages/runner`, several independent runs plus a 6-trial batch
+  comparison against the pre-Phase-2 commit, since the demo world isn't
+  seeded):
+  - **`nightfall`/`daybreak` fire at exactly the right rate and nowhere
+    else**: a 10,000-tick run produced exactly 50 of each (10,000 / 200 —
+    the math checks out exactly, not approximately), and a dedicated test
+    walks a full 200-tick cycle confirming each event's own tick is the
+    real light-level crossing, not off-by-one in either direction.
+  - **Hunting never happened in any real run — at all, in either
+    direction.** Zero `fought`/`killed`/`hunt`-behaviorChanged events across
+    every run tried (1,000 and 10,000 ticks). This makes the nocturnal/
+    diurnal hunt-eagerness shift **unconfirmed in an actual run** — not
+    because it's wrong (it's directly, thoroughly unit-tested, including the
+    composition case) but because the pre-existing "predators barely
+    encounter prey" gap Phase 1's writeup above already root-caused
+    (scenario map too sparse/large relative to agent count and detection
+    radii) means the mechanism this feature extends never actually fires in
+    the unmodified demo scenario, day or night. Same honest gap as Phase 1's
+    predator-pressure/territorial triggers, for the same underlying reason.
+  - **The off-hours Speed penalty and night FOV reduction are real and
+    active every run** (they don't depend on a rare encounter to trigger —
+    every agent is either in its window or not, every tick), but aren't
+    independently visible in the event log by design: neither produces its
+    own event, only a smaller number/radius fed into existing systems.
+    Confirmed working the honest way instead — direct composition tests
+    above, plus manually sampling `activityScheduleMultiplier`/
+    `computeVisible` at real in-run tick values.
+  - **Population collapse (documented as pre-existing in Phase 1's own
+    findings above) is not obviously worse under Phase 2, within the noise
+    of an unseeded sim**: a 6-trial batch of 10,000-tick runs on this
+    branch ended with a mean of 2.8 agents alive (range 0-11, 1/6 runs fully
+    extinct); the same 6-trial batch on the pre-Phase-2 commit ended with a
+    mean of 1.5 (range 0-3, also 1/6 extinct). Six trials is too small a
+    sample to claim Phase 2 *improves* survival, but it rules out the
+    obvious worry — that stacking a third Speed penalty onto injury/terrain,
+    or a real FOV cut, would visibly accelerate the existing collapse. It
+    doesn't, at least not at a magnitude six trials would catch. The
+    underlying collapse itself remains exactly the pre-existing,
+    out-of-scope population-balance gap Phase 1 already flagged, not
+    something this feature introduces or is responsible for fixing.
+  - **No stacked-penalty deadlock**: nothing in this feature can drive an
+    agent's effective Speed to zero or its huntable radius to nothing —
+    `OFF_HOURS_SPEED_MULTIPLIER` (0.8) floors well above
+    `FAINT_SPEED_FLOOR` (0.35) even multiplied together with the worst
+    terrain penalty (mud, 0.5): `0.5 * 0.8 * 0.35 ≈ 0.14`, a genuinely slow
+    but nonzero action rate, not an effective freeze. `computeVisible`'s
+    radius is explicitly floored at 0 (`Math.max(0, ...)`), so a tiny
+    `baseRadius` at full darkness degrades to "can only see your own tile"
+    rather than crashing or going negative.
+
+### Phase 3 — as built
+
+Built — this closes out all three phases of "Dynamics that move a content
+herd." Sequenced last, per the plan, so it could plug into Phase 1's
+generalized trigger system and Phase 2's finished `lightLevel` function
+without either being a moving target.
+
+- **Weather cells** (`weather.ts`, a new module matching `daynight.ts`'s
+  precedent — its own small state + query functions other files' existing
+  systems call into, not a parallel weather-specific code path):
+  `World.weatherCells` holds 1-3 active `WeatherCell`s (`type`, `center`,
+  `radius`, `startedTick`, `lifespanTicks`, a constant per-tick `drift`
+  vector). `advanceWeather` (called once per tick from `simulation.ts`'s
+  `tickWorld`, before `updateHerdMigrations` so the same tick's exposure
+  check sees fresh weather) ages out and dissipates expired cells (logging
+  `weatherChanged`'s `"ended"` phase), drifts survivors by their fixed
+  vector (clamped to the map edges, not sailing off), then rolls
+  `WEATHER_SPAWN_CHANCE_PER_TICK` (1/150) for a fresh cell whenever there's
+  room under the cap — radius 8-18, lifespan 200-500 ticks, drift speed
+  0.15 tiles/tick in a random direction fixed at spawn. All sim-original
+  tuning guesses, judged against the real-run findings below like
+  everything else in this codebase.
+- **Biome-influenced spawn likelihood**, real reuse of the
+  environmental-generation biome data, not a second invented concept:
+  `generateWorld` (`worldgen.ts`) now also persists `World.biomeSeeds` —
+  a name-only projection of its internal seed placement (`BiomeSeedInfo`,
+  types.ts) — and a new exported `biomeWeightsAt` answers "which biome(s),
+  and how strongly, does this point blend toward" using the exact same
+  distance-weighted-nearest-seeds math `blendBiomeParams` already uses for
+  generation, just classifying by name instead of blending the full
+  density/terrain-weight table. `weather.ts`'s `pickWeatherType` combines
+  every biome contributing to a candidate spawn point's blend against a
+  documented affinity table (`BIOME_WEATHER_AFFINITY`) — Wetland skews
+  rain hardest (weight 3 of a 4.8 total, ~62.5%), Grassland skews rain more
+  mildly (2 of 4, 50%), Badlands skews drought hardest (3 of 4, 75%),
+  Highland skews storm and coldSnap about equally (2.5 each of 5.8, ~43%
+  each) — a world with no biome data at all (a hand-built `createWorld`
+  test fixture) falls back to a uniform 25%-each roll rather than guessing.
+  Confirmed by a fixed-seed statistical test (`weather.test.ts`, 5000
+  trials per biome) rather than eyeballing it.
+- **Rain** divides `flora.ts`'s existing decay-rate term by
+  `RAIN_FLORA_DECAY_DIVISOR` (1.6, slower decay) and multiplies its
+  spread-chance term the same direction — composing with, not replacing,
+  the existing global `seasonalMultiplier`. This is the closest this
+  codebase's stock/decay/spread flora model gets to "boosts regrowth,"
+  since there's no direct "add stock back" mechanic to instead scale up
+  (documented explicitly in `floraDecayDivisor`'s doc comment — a real
+  scope call, not an oversight). It also eases `needs.ts`'s flat per-tick
+  thirst decay via a new `thirstMultiplier` parameter on `decayNeeds`
+  (`RAIN_THIRST_DECAY_MULTIPLIER = 0.6`), computed once per agent per tick
+  in `tickAgentNeeds` from its own position.
+- **Drought** does the exact mirror: `DROUGHT_FLORA_DECAY_DIVISOR` (0.45,
+  faster decay, less spread) and `DROUGHT_THIRST_DECAY_MULTIPLIER` (1.8,
+  faster thirst decay). Deliberately meant to compose with the existing
+  scarcity migration trigger rather than needing a separate mechanic — and
+  it does, mechanically: `tryScarcityTrigger` reads `abundanceAt`, which
+  sums live food-tile `stock`, which now decays faster under an overlapping
+  drought cell, so a drought-covered herd's local abundance score drops
+  measurably sooner than an identical herd outside one. Confirmed
+  numerically in `flora.test.ts` (same tick/season, drought vs. no weather,
+  a real stock gap) — see real-run findings below for whether this ever
+  actually pushes a herd's scarcity counter over its threshold in practice
+  (the honest answer: it gets close but the demo scenario's abundant map
+  means it still doesn't, same story as Phase 1's own scarcity finding).
+- **Storm**: a real accuracy penalty (`combat.ts`'s `rollAccuracy` gained a
+  5th `extraMultiplier` parameter, defaulting to 1 so every pre-existing
+  call site is unaffected; `predation.ts`'s `resolveHit` — the sim's one
+  live accuracy-roll call site — passes `weather.ts`'s
+  `stormAccuracyMultiplier`, `STORM_ACCURACY_MULTIPLIER = 0.6`, a 40% cut).
+  This is the sim's first-ever *real* accuracy debuff — there was no
+  existing "elevation-accuracy-modifier" pattern to match (accuracy/evasion
+  stages exist in `combat.ts` but nothing has ever set one), so
+  `extraMultiplier` was added as a second, independent, general-purpose
+  multiplier rather than inventing a storm-specific parameter. A real FOV
+  penalty too: `fov.ts`'s `computeVisible` gained a 5th `stormPenalty`
+  parameter (default 0), subtracted from the radius *alongside*
+  `lightLevel`'s existing night penalty rather than folded into the same
+  scalar — a deliberate choice, documented in both `computeVisible` and
+  `weather.ts`: night-darkness and storm-darkness are independently
+  controllable (a storm can happen by day) and describe physically
+  different things, so two additive terms (both floored at 0 by the same
+  `Math.max(0, ...)`, i.e. "additive severity, capped at a floor of zero
+  visibility" — the simplest of the composition options DESIGN.md left
+  open) beat reconstructing one combined darkness number at every call
+  site. `STORM_FOV_PENALTY = 4` is bigger than `NIGHT_FOV_PENALTY` (2.5),
+  per the design ask. Like Phase 2's own FOV work, `computeVisible` still
+  isn't wired into any live gameplay detection (`predation.ts`'s flee/hunt
+  radius is a separate manhattan-distance/concealment check, not this
+  function) — confirmed directly via `fov.test.ts`, the same honest
+  pattern Phase 2 already established for this same function.
+- **Storm exposure -> `"weather"` migration**: a per-*herd* aggregate
+  (`World.herdStormExposureTicks`, mirroring `herdScarcityTicks`'s exact
+  reset-on-recovery shape) rather than a per-agent tally — DESIGN.md left
+  the choice open and explicitly asked for whatever's cleanest to feed the
+  shared herd-migration trigger; reusing the sustained-counter pattern
+  already built twice (scarcity, territorial) was simpler than inventing a
+  per-agent scheme that would need aggregating back up to the herd level
+  anyway. `tryWeatherTrigger` (`herdMigration.ts`, third in trigger
+  precedence — after `scarcity`/`predator_pressure`, before
+  `territorial`/`wanderlust`, see the module's updated top-of-file
+  precedence doc) checks the herd centroid against `weather.ts`'s
+  `activeWeatherAt` (real Euclidean-radius lookup, deliberately circular
+  unlike the Chebyshev-box tile scans elsewhere) and `hasCoverNearby` (a
+  literal small local tree/bush tile scan, `COVER_SCAN_RADIUS = 3`) —
+  exposed and uncovered for `STORM_EXPOSURE_SUSTAIN_TICKS` (100) consecutive
+  ticks triggers reason `"weather"`. Destination scoring gained a
+  `preferCover` term on `pickDestination` (a boolean, not a reference point
+  like `awayFrom` — "toward better shelter in general" has no single
+  threat position to flee): `coverBonus` adds `COVER_WEIGHT * ` a
+  candidate's real forest-biome blend weight (`worldgen.ts`'s
+  `biomeWeightsAt` again — a deliberate, documented split from
+  `hasCoverNearby`'s tile-level exposure check: picking a destination
+  *region* is a "which neighborhood is this" question biome blending
+  answers well, while "am I sheltered right here, right now" is a literal
+  tile fact). `COVER_WEIGHT = 6`, same tuning philosophy as Phase 1's
+  `AWAY_WEIGHT` — a real pull toward cover, not an automatic override of
+  resource-richness.
+- **Cold snap**: a flat `COLD_SNAP_SPEED_MULTIPLIER` (0.7) for every agent
+  caught in one, regardless of species — `support.ts`'s
+  `coldSnapSpeedMultiplier`, the fourth composable term in
+  `simulation.ts`'s `actionSpeedOf` chain (terrain/elevation, off-hours
+  activity schedule, cold snap, injury). DESIGN.md's own "still open"
+  note said a flat default is fine for a first pass rather than real
+  per-species cold-tolerance data — this sim takes that offer directly:
+  no new species-data field was added, since DESIGN.md's phrasing reads as
+  an explicit deferral, not a gap to quietly half-close.
+- **`weatherChanged` event** (`type`, `phase: "began" | "ended"`, rounded
+  `center`, `radius`) fires at spawn and dissipation — no separate
+  per-agent "entered/left a cell" event: a herd's exposure is already
+  narrated indirectly via the `"weather"` `herdMigrating` reason when it
+  matters enough to actually move a herd, and a per-tick per-agent
+  in/out event for up to 3 slowly-drifting cells was judged a lot of
+  low-value log volume for something with no other consumer yet (a
+  documented scope call, not an oversight). `packages/runner/src/format.ts`'s
+  exhaustive `SimEvent` switch needed the new case — caught immediately by
+  TS at compile time, the same class of gap this exact file has now
+  flagged three features running.
+- **58 new tests** across a new `weather.test.ts` (29 tests: cell
+  spawn/drift/clamp-at-edge/dissipation lifecycle; the biome-weighted
+  spawn statistical tests above; every effect query in isolation, surface-
+  layer gating, and the "no active weather" neutral case) plus extensions
+  to `flora.test.ts`, `needs.test.ts`, `fov.test.ts`, `combat.test.ts`,
+  `support.test.ts`, `predation.test.ts` (a real end-to-end test: the exact
+  same mocked-roll fight hits in clear weather and misses inside an active
+  storm, not just the multiplier tested in isolation), and `herdMigration.test.ts`
+  (the weather trigger's sustain/reset/cover-recovery behavior, and
+  `pickDestination`'s `preferCover` term in isolation). 317 tests total, up
+  from 259. All pre-existing tests pass **completely unmodified** — no
+  string-rename or behavior-assumption update needed this time, unlike
+  Phase 1's 7. `pnpm -r build`/`typecheck` clean across all 4 packages.
+  One pre-existing test (`herdMigration.test.ts`'s "triggers once scarcity
+  has been sustained..." test) was found to be already flaky *before* this
+  feature touched anything — it calls `updateHerdMigrations` with the
+  default unseeded `Math.random` rather than `NEVER_WANDER`, so roughly a
+  7% chance per run that a real wanderlust roll fires during its 150-tick
+  scarcity-sustain loop and changes the migration's `reason` out from under
+  the assertion. Confirmed pre-existing (not touched by this feature's
+  diff, reproduces on the pre-Phase-3 commit too) rather than something
+  this work introduced — left alone per this feature's scope, but worth a
+  future five-minute fix (pass `NEVER_WANDER` like every other
+  non-wanderlust-focused test in that file already does).
+- **Real-run findings, reported straight** (`pnpm run run <N>` from
+  `packages/runner`, plus several standalone diagnostic runs instrumenting
+  `World.herdScarcityTicks`/`herdStormExposureTicks` directly, since the
+  demo world isn't seeded):
+  - **Weather cells genuinely spawn, drift, and dissipate on schedule in
+    every real run.** A 10,000-tick run logged 102 `weatherChanged` events
+    (51 began/51 ended) across all four types, lifespans consistently
+    landing inside the documented 200-500 range (e.g. a rain cell spawned
+    at tick 88 dissipated at tick 337, a 249-tick life), and drifting
+    cells were observed clamped exactly at the map edge (center `(0,0)`)
+    rather than sailing off it. This is the one part of Phase 3 that reads
+    as unambiguously "just works" every single run, no rare-encounter
+    caveat needed.
+  - **The `"weather"` migration trigger is the real, honest good-news
+    finding of this feature — unlike predator-pressure and territorial in
+    Phase 1, this one actually fires in the unmodified demo scenario, more
+    than once in a while.** Across 10 independent 20,000-tick runs, a
+    `"weather"`-reason `herdMigrating` event fired in 3 of them (and, in a
+    separate batch of 15 shorter 10,000-tick diagnostic runs, in about a
+    third of them, sometimes more than once per run) — genuinely
+    comparable in observed frequency to wanderlust, the one Phase 1 trigger
+    that reliably fired. Root cause for why this one, specifically, beats
+    predator-pressure/territorial's "never observed" and even beats
+    scarcity's "essentially never": storm cells are large (radius 8-18 on
+    an ~90x60 map) and the demo scenario's open ground routinely lacks
+    nearby tree/bush cover, so a herd sitting in its usual range has a
+    real, non-rare chance of landing inside a storm with nothing to shelter
+    under — no dependence on a fight actually connecting (which, per every
+    prior phase's finding, it essentially never does) or on a second herd
+    of the same species existing at all. One observed migration's
+    destination went from `(38,22)` all the way to `(78,22)` — a real,
+    substantial relocation toward the map's forest-heavy side, not a
+    token nudge.
+  - **Drought measurably accelerates local flora decay (confirmed
+    directly), but was never observed pushing a herd's scarcity counter
+    over its 150-tick threshold in a real run — it got close.** Direct
+    instrumentation of `World.herdScarcityTicks` across the same 10,000-
+    and 20,000-tick trial batches found the counter twice reaching 149
+    (one tick short of triggering) but never crossing 150, and `scarcity`
+    never appeared as a `herdMigrating` reason in any of the ~25 total
+    trial runs across both batches. This mirrors Phase 1's own honest
+    scarcity finding exactly (the demo map is abundant enough that
+    scarcity rarely fires at all, drought or not) — drought clearly speeds
+    up the *local* decay math (proven directly, not assumed, in
+    `flora.test.ts`), but whether a drought cell happens to overlap a
+    herd's actual foraging range for a sustained-enough window, on a map
+    this abundant, is itself a rare coincidence on top of an already-rare
+    trigger. Not a bug in the composition — a genuine "the mechanism is
+    real, the real-run conditions to observe it stacking are rarer than
+    hoped" finding, the same honest category as three separate findings
+    across Phases 1-2.
+  - **Storm's accuracy/FOV penalties are real, tested, and wired into the
+    one live accuracy-roll call site — but, like Phase 2's hunt-eagerness
+    shift before them, never independently observed firing in a real run,
+    because there was no combat to apply them to.** Every 1,000- and
+    10,000-tick run tried had zero `fought`/`missed` events, the same
+    "predators barely encounter prey" root cause Phase 1 diagnosed and
+    Phase 2 re-confirmed. A dedicated `predation.test.ts` test proves the
+    real wiring works end-to-end (the identical mocked dice roll hits in
+    clear weather and misses inside a storm, through the actual
+    `tickWorld` -> `resolveHit` -> `rollAccuracy` path, not a bypassed
+    unit call), so this is confirmed correct, just — like combat itself —
+    unconfirmed as *observed* in an unscripted run.
+  - **Cold snap's Speed penalty is real and active every tick an agent
+    spends inside one** (it doesn't depend on a rare encounter — every
+    agent in a cold-snap cell is simply slower, every tick), but like
+    Phase 2's own off-hours penalty, produces no event of its own to grep
+    for in a log; confirmed the same honest way Phase 2's writeup did —
+    direct composition tests, not log-watching.
+  - **Population collapse remains exactly the pre-existing, out-of-scope
+    gap Phases 1-2 already flagged, and still dominates what's observable
+    in any single run.** Across the diagnostic batches, `pidgey-flock`
+    routinely goes fully extinct within the first ~2,000 ticks and the two
+    surviving herds frequently bottleneck to a single member each well
+    before 10,000 ticks — a genuinely different mechanism than any
+    migration trigger (herd cohesion/migration logic all still runs
+    correctly against a 1-member "herd," it's just not a meaningful group
+    dynamic anymore at that point). This bounds every trigger's real-run
+    observability the same way it did in Phases 1-2, and remains something
+    this feature doesn't touch or attempt to fix.
+  - Performance: no measurable regression — the added `advanceWeather` call
+    (O(active cells) ≤ 3, trivial) and the per-tile `floraDecayDivisor`
+    lookup inside `growFlora`'s existing O(tiles) loop (each lookup itself
+    O(active cells)) add negligible cost; a 10,000-tick run completed in
+    ~8 seconds, consistent with every prior phase's own numbers.
+
+**Closing out the three-phase section, honestly**: DESIGN.md's original ask
+was "a herd needs reasons to move besides starving." Across all three
+phases, the real-run answer is a genuine but partial yes. Wanderlust
+(Phase 1) and now weather-driven shelter-seeking (Phase 3) both reliably
+fire in the unmodified demo scenario and are the two triggers that actually
+deliver on "herds don't just sit there forever" in practice — a real,
+observable improvement over the pre-Phase-1 scarcity-only baseline.
+Predator-pressure, territorial, and scarcity itself (even with drought's
+real acceleration) remain confirmed-correct-but-rarely/never-observed in
+this specific scenario, root-caused every time to the same two pre-existing,
+out-of-scope facts: predators essentially never land a hit, and the demo
+map is abundant enough (and now has population collapse cutting herd
+lifetimes short on top of that) that scarcity almost never sustains long
+enough to fire. So: yes, a content herd now has real reasons to move beyond
+starving — just fewer of the five *mechanisms* actually exercise that in a
+given run than the design doc's five bullet points might suggest, and the
+gap is consistently scenario/population content, not anything wrong with
+the trigger logic itself (every trigger, including the never-observed ones,
+is directly confirmed correct via unit tests that don't depend on the
+scenario's luck).
 
 ## Current state of the code
 
