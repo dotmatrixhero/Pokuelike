@@ -83,6 +83,7 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
   "nightfall",
   "daybreak",
   "weatherChanged",
+  "gainedSkillPoint",
 ]);
 
 export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {

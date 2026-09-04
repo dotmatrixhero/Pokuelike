@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Pokuelike</title>
     <style>
       :root {
@@ -66,6 +67,7 @@
       main {
         flex: 1;
         display: flex;
+        flex-direction: column;
         gap: 10px;
         min-height: 0;
       }
@@ -79,16 +81,45 @@
         align-items: flex-start;
         justify-content: flex-start;
         padding: 8px;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-x pan-y;
       }
       canvas { image-rendering: pixelated; cursor: pointer; border-radius: 3px; }
 
+      #inspector-panel { flex: 0 0 auto; max-height: 38vh; overflow-y: auto; }
+
+      /* The legend + event log live in a drawer that floats over the canvas
+         from the right and slides off-screen when closed — makes narrow/
+         mobile viewports usable without permanently eating canvas width. */
+      #drawer-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(4, 6, 10, 0.5);
+        z-index: 39;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+      #drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+
       #sidebar {
-        width: 380px;
+        position: fixed;
+        top: 0;
+        right: 0;
+        height: 100%;
+        width: min(380px, 88vw);
+        z-index: 40;
         display: flex;
         flex-direction: column;
         gap: 10px;
-        min-height: 0;
+        padding: 10px;
+        background: var(--bg);
+        border-left: 1px solid var(--panel-border);
+        box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
+        transform: translateX(100%);
+        transition: transform 0.22s ease;
       }
+      #sidebar.open { transform: translateX(0); }
       .panel {
         background: var(--panel);
         border: 1px solid var(--panel-border);
@@ -183,6 +214,9 @@
         <div class="divider"></div>
         <span id="tick-label"></span>
         <span id="clock-label"></span>
+
+        <div class="divider"></div>
+        <button id="toggle-drawer" title="Legend and event log">☰ Log</button>
       </header>
 
       <main>
@@ -190,35 +224,36 @@
           <canvas id="scene"></canvas>
         </div>
 
-        <div id="sidebar">
-          <div class="panel" id="legend-panel">
-            <div class="panel-header">
-              <span>Legend</span>
-              <button id="toggle-legend" title="Show/hide">Hide</button>
-            </div>
-            <div id="legend"></div>
+        <div class="panel" id="inspector-panel">
+          <div class="panel-header">
+            <span>Inspector</span>
+            <button id="clear-selection" title="Clear selection">Clear</button>
           </div>
+          <div id="inspector"></div>
+        </div>
+      </main>
 
-          <div class="panel" id="inspector-panel">
-            <div class="panel-header">
-              <span>Inspector</span>
-              <button id="clear-selection" title="Clear selection">Clear</button>
-            </div>
-            <div id="inspector"></div>
+      <div id="drawer-backdrop"></div>
+      <div id="sidebar">
+        <div class="panel" id="legend-panel">
+          <div class="panel-header">
+            <span>Legend</span>
+            <button id="toggle-legend" title="Show/hide">Hide</button>
           </div>
+          <div id="legend"></div>
+        </div>
 
-          <div class="panel" id="event-log-panel">
-            <div class="panel-header">
+        <div class="panel" id="event-log-panel">
+          <div class="panel-header">
             <span>Event log</span>
             <label class="inspect-label" style="display: flex; align-items: center; gap: 5px; font-size: 12px; text-transform: none; letter-spacing: normal; font-weight: 400;">
               <input id="hide-noise" type="checkbox" checked style="width: auto; padding: 0;" />
               Pokémon events only
             </label>
           </div>
-            <div id="event-log"></div>
-          </div>
+          <div id="event-log"></div>
         </div>
-      </main>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

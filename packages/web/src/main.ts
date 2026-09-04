@@ -38,6 +38,9 @@ const styleTileBtn = document.getElementById("style-tile") as HTMLButtonElement;
 const styleAsciiBtn = document.getElementById("style-ascii") as HTMLButtonElement;
 const legendEl = document.getElementById("legend") as HTMLElement;
 const toggleLegendBtn = document.getElementById("toggle-legend") as HTMLButtonElement;
+const sidebarEl = document.getElementById("sidebar") as HTMLElement;
+const drawerBackdrop = document.getElementById("drawer-backdrop") as HTMLElement;
+const toggleDrawerBtn = document.getElementById("toggle-drawer") as HTMLButtonElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -205,6 +208,16 @@ toggleLegendBtn.addEventListener("click", () => {
   legendEl.hidden = !hidden;
   toggleLegendBtn.textContent = hidden ? "Hide" : "Show";
 });
+
+// Legend + event log live in a drawer that floats over the canvas from the
+// right (see index.html/#sidebar) — closed by default so a narrow/mobile
+// viewport isn't permanently missing canvas width to a docked sidebar.
+function setDrawerOpen(open: boolean): void {
+  sidebarEl.classList.toggle("open", open);
+  drawerBackdrop.classList.toggle("open", open);
+}
+toggleDrawerBtn.addEventListener("click", () => setDrawerOpen(!sidebarEl.classList.contains("open")));
+drawerBackdrop.addEventListener("click", () => setDrawerOpen(false));
 
 // --- Boot --------------------------------------------------------------------
 
