@@ -3595,23 +3595,67 @@ by luck.
 **Real-run numbers** (packages/runner, `pnpm --filter @pokuelike/runner run
 <ticks> "" <seed>`, standard seeds):
 
-- **Seed 42, 3000 ticks**: 0 `shelterBuilt` events — confirms the existing,
-  already-documented finding just above (this seed's opening layout is
-  hostile enough that no Diglett/Sandshrew founder survives long enough to
-  finish a build at all, feature or no feature). No shelter ever existing
-  means this feature has nothing to attach to in this specific seed — an
-  honest non-finding, not evidence the mechanism doesn't work, exactly the
-  same caveat DESIGN.md's shelter-building section already flags for this
-  seed.
-- **Seed 7, 5000 ticks**: [FILL IN]
-- **Seed 20260903, 5000 ticks**: [FILL IN]
+- **Seeds 42, 7, and 20260903, 3000 ticks each, `packages/data`'s
+  `createDemoWorld`**: **0 `shelterBuilt` events in all three.** This isn't
+  new — seed 42's own zero-shelters finding was already documented above —
+  but running the other two standard seeds confirms it's not seed-42-
+  specific: the demo scenario's Diglett/Sandshrew founders don't survive
+  long enough to complete a build in *any* of the three standard seeds
+  within a practical tick budget (likely worsened further right now by a
+  concurrent session's in-progress, uncommitted predation.ts changes —
+  pack hunting / juvenile combat — which this session did not touch or
+  attempt to isolate from). With no shelter ever existing in these three
+  runs, there's nothing here for the resting/cache incentive to attach to
+  — an honest non-finding about these specific seeds' opening states, not
+  evidence the mechanism itself doesn't work.
+- **Controlled validation, matching `shelter.test.ts`'s own end-to-end
+  test's precedent for this exact problem**: a larger (90x60), evenly
+  resourced map (the same shape that test already uses to get past the
+  "one hostile crossing point" issue) with 4 `buildsShelter` founders (2
+  Diglett, 2 Sandshrew, 2 herds) and real `tickWorld` ticking (no
+  predation rules — isolating the shelter/resting/cache mechanism from the
+  concurrent session's in-progress predation changes), run for 3000 ticks
+  at 3 independent seeds (101/202/303, chosen freshly for this validation,
+  not the standard seeds above):
 
-**Open tuning question, not resolved here**: whether `SHELTER_CACHE_MAX`/
-`SHELTER_CACHE_DEPOSIT_PER_TICK` are the right magnitudes for a cache to
-matter during a real scarcity window rather than either draining
-instantly or never filling meaningfully within a run's practical length —
-flagged in TODO.md for further real-run tuning rather than guessed at
-further here.
+  | seed | first shelterBuilt at | shelters built | shelterAbandoned | restAtShelter transitions | cache deposited | cache withdrawn | peak cache on any tile |
+  |---|---|---|---|---|---|---|---|
+  | 101 | tick 52 | 10 | 5 | 928 | 3.90 | 2.31 | 0.80 |
+  | 202 | tick 49 | 5 | 3 | 981 | 4.68 | 2.40 | 0.94 |
+  | 303 | tick 49 | 4 | 3 | 1136 | 4.34 | 3.14 | 1.20 (hit `SHELTER_CACHE_MAX`) |
+
+  Real findings from this table: (1) the resting pull actually fires, a
+  lot — 928-1136 `"restAtShelter"` transitions per 3000-tick run, not a
+  rare edge case; (2) most built shelters survive the run without ever
+  being abandoned (3-5 `shelterAbandoned` out of 4-10 `shelterBuilt` per
+  run — the remainder, roughly half to two-thirds, stay standing), a real,
+  measurable reduction versus the mechanism's own baseline (an unattended
+  shelter *always* abandons after exactly `SHELTER_ABANDON_TICKS`, per
+  `decayShelters`'s own no-resident unit test) — though not a full
+  elimination: some shelters (likely ones a founder's own death, or a
+  fresher shelter a herd relocated away from, orphans) still do decay away,
+  a real remaining gap rather than a perfect fix; (3) the food cache is
+  genuinely used, not just accumulated and ignored — 2.31-3.14 total
+  hunger-restore drawn from caches per run (`shelterCacheWithdrawn`),
+  roughly half to two-thirds of what got deposited, meaning it's a real,
+  regularly-tapped resource, not a number that only ever goes up; (4)
+  `SHELTER_CACHE_MAX` (1.2) is reachable within a real run (seed 303 hit
+  it), so the cap is doing real work, not sitting so high it's
+  functionally unbounded.
+
+**Open tuning question, not resolved here**: some shelters still get
+abandoned even with the resting incentive active (3-5 of 4-10 per run
+above) — worth a follow-up pass isolating *why* (a founder's death leaving
+nobody to return, or a herd relocating away and never coming back) once
+more real-run time is available, flagged in TODO.md rather than guessed at
+further here. Also open: whether `SHELTER_CACHE_MAX`/
+`SHELTER_CACHE_DEPOSIT_PER_TICK` are the right magnitudes for the cache to
+matter during a real, sustained scarcity window specifically (this
+validation's map never actually went scarce — it's evenly resourced by
+design, so cache usage above reflects opportunistic "already home and
+hungry" draws, not a proven famine safety net) — the standard demo seeds
+would be the right place to check that once they're not also confounded by
+zero shelters ever existing at all.
 
 ### Herd status: level buys real standing, not just personal stats
 

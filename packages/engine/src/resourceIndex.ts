@@ -1,6 +1,13 @@
 import type { Layer, Vec2, World } from "./types.js";
 
-export type IndexedTerrain = "water" | "food" | "sunbeam";
+/**
+ * "shelter" joined this list for `shelter.ts`'s `applyShelterResting`/
+ * `maybeFeedFromShelterCache` — same reasoning as `food`: a `buildsShelter`
+ * agent looking for "my nearest shelter" every idle tick shouldn't fall back
+ * to a naive full-grid scan any more than a hungry agent looking for its
+ * nearest food patch should.
+ */
+export type IndexedTerrain = "water" | "food" | "sunbeam" | "shelter";
 
 interface LayerIndex {
   version: number;
@@ -20,11 +27,11 @@ function rawTileAt(world: World, layer: Layer, x: number, y: number) {
 }
 
 function buildIndex(world: World, layer: Layer): LayerIndex {
-  const positions: Record<IndexedTerrain, Vec2[]> = { water: [], food: [], sunbeam: [] };
+  const positions: Record<IndexedTerrain, Vec2[]> = { water: [], food: [], sunbeam: [], shelter: [] };
   const tiles = world.tiles[layer];
   for (let i = 0; i < tiles.length; i++) {
     const terrain = tiles[i]!.terrain;
-    if (terrain === "water" || terrain === "food" || terrain === "sunbeam") {
+    if (terrain === "water" || terrain === "food" || terrain === "sunbeam" || terrain === "shelter") {
       positions[terrain].push({ x: i % world.width, y: Math.floor(i / world.width) });
     }
   }

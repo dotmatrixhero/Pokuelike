@@ -5,6 +5,7 @@ import { stepToward } from "./movement.js";
 import { manhattan } from "./predation.js";
 import { tileAt, setTile } from "./world.js";
 import { herdCentroid } from "./herding.js";
+import { findNearestIndexed } from "./resourceIndex.js";
 
 /**
  * Shelter-building — see DESIGN.md's "Shelter-building" section. A real
@@ -59,6 +60,34 @@ import { herdCentroid } from "./herding.js";
  * value does, so `pickDestination`'s abundance-sampling scoring would be
  * scoring the wrong signal here — a plain "far enough, and still bare
  * floor" search is the actual fit, not a shortcut around a harder problem.
+ *
+ * **Incentive to actually stay** (direct follow-up ask: "shelter should
+ * also like give other buff too. Something that incentivizes the Pokémon
+ * to stay in it. Maybe food cache and stuff") — two more real, composable
+ * pieces on top of the three above, both gated the same `agent.buildsShelter`
+ * way everything else here is:
+ * 1. `applyShelterResting` — once idle (needs.ts's very last idle-tier
+ *    check, after herd cohesion, replacing pure exploration for this
+ *    species), a `buildsShelter` agent with a known shelter walks home to it
+ *    instead of wandering, then genuinely lingers there: `tickAgentNeeds`
+ *    applies `SHELTER_HEAL_MULTIPLIER`/`SHELTER_NEEDS_DECAY_MULTIPLIER`
+ *    while within `SHELTER_REST_RADIUS` of any shelter tile — composing
+ *    multiplicatively with sleep's own multipliers, the exact same
+ *    `applyHealOverTime`/`decayNeeds` multiplier hooks sleep already
+ *    established, just a real (smaller) bonus for being merely *home*
+ *    rather than asleep.
+ * 2. `Tile.cache` — the user's own named idea, a real food stockpile. Each
+ *    tick spent actually resting there (not just passing through) deposits
+ *    `SHELTER_CACHE_DEPOSIT_PER_TICK`, capped at `SHELTER_CACHE_MAX`; a
+ *    genuinely hungry `buildsShelter` agent back home draws
+ *    `SHELTER_CACHE_FEED_AMOUNT` from it before ever walking to a live food
+ *    patch (`maybeFeedFromShelterCache`, called from needs.ts's `seekFood`
+ *    branch). An empty cache is never a trap — it's checked and, if bare,
+ *    falls straight through to the existing live-foraging path the same
+ *    tick, so a hungry agent with nothing stored still breaks off to eat
+ *    elsewhere exactly like every other "commits no matter what" fix this
+ *    session already had to make for dispersal/shelter-building/food
+ *    delivery.
  */
 
 /**
@@ -135,8 +164,14 @@ export const SHELTER_ABANDON_RADIUS = 6;
  */
 export const SHELTER_ABANDON_TICKS = 600;
 
-/** True if a "shelter" tile exists within `radius` (Chebyshev) of `pos` on `layer` — same bounded-box scan style as `weather.ts`'s `hasCoverNearby`/flora.ts's `isNearSunbeam`. */
-function hasNearbyShelter(world: World, layer: Layer, pos: Vec2, radius: number): boolean {
+/**
+ * True if a "shelter" tile exists within `radius` (Chebyshev) of `pos` on
+ * `layer` — same bounded-box scan style as `weather.ts`'s `hasCoverNearby`/
+ * flora.ts's `isNearSunbeam`. Exported (previously module-private) so
+ * `tickAgentNeeds` (needs.ts) can gate the resting-at-home heal/needs-decay
+ * bonus on it every tick, not just at trigger time.
+ */
+export function hasNearbyShelter(world: World, layer: Layer, pos: Vec2, radius: number): boolean {
   for (let dy = -radius; dy <= radius; dy++) {
     for (let dx = -radius; dx <= radius; dx++) {
       if (tileAt(world, layer, pos.x + dx, pos.y + dy)?.terrain === "shelter") return true;
@@ -258,4 +293,155 @@ export function decayShelters(world: World, log?: EventLog): void {
       log?.record({ kind: "shelterAbandoned", tick: world.tick, layer, pos });
     }
   }
+}
+
+// --- Incentive to stay: resting-at-home buffs + food cache ---
+// See this file's top-of-file doc comment ("Incentive to actually stay")
+// for the full design; everything below is the implementation of that.
+
+/**
+ * How close (Chebyshev, matching `SHELTER_ABANDON_RADIUS`'s own convention)
+ * counts as "home" for the resting bonus/cache deposit/cache withdrawal —
+ * deliberately much tighter than `SHELTER_ABANDON_RADIUS` (6) or
+ * `SHELTER_SEARCH_RADIUS` (15): those answer "is a shelter part of this
+ * herd's home range at all," this answers "is this agent standing right
+ * there, actually resting" — the whole point of a *proximity* buff.
+ */
+export const SHELTER_REST_RADIUS = 2;
+
+/**
+ * Per-tick HP heal multiplier while within `SHELTER_REST_RADIUS` of any
+ * shelter tile — composes multiplicatively with `needs.ts`'s
+ * `SLEEP_HEAL_MULTIPLIER` via `applyHealOverTime`'s existing multiplier
+ * parameter (an agent asleep at its own shelter heals fastest of all,
+ * exactly as it should). Picked below sleep's own 3x: this is a passive
+ * "you're safe and comfortable" bonus for merely being home, not the much
+ * bigger commitment/vulnerability trade sleep represents — a real,
+ * noticeable difference from the flat 1x baseline without eclipsing why
+ * sleep is worth the "sitting duck" risk. Sim-original tuning guess, judge
+ * against a real run like every other constant in this file.
+ */
+export const SHELTER_HEAL_MULTIPLIER = 2;
+
+/**
+ * Hunger/thirst decay multiplier while within `SHELTER_REST_RADIUS` of any
+ * shelter tile — composes multiplicatively with sleep's own
+ * `SLEEP_NEEDS_DECAY_MULTIPLIER` inside `decayNeeds` (needs.ts). Deliberately
+ * a much smaller reduction than sleep's 0.15: this fires for a merely-idle,
+ * fully-awake agent (no "sitting duck" vulnerability traded away for it),
+ * so it should read as "a real perk of home," not sleep's "dramatically
+ * reduced, real cost to oversleeping" territory duplicated for free.
+ */
+export const SHELTER_NEEDS_DECAY_MULTIPLIER = 0.6;
+
+/** Ceiling on `Tile.cache` — roughly `SHELTER_CACHE_FEED_AMOUNT`'s own 3 feedings' worth, the same "a patch has about 3 feedings in it" order of magnitude flora.ts's `CONSUME_STOCK_AMOUNT` establishes for live food. */
+export const SHELTER_CACHE_MAX = 1.2;
+
+/**
+ * How much `Tile.cache` grows per tick of genuine resting (not just
+ * traveling home) — same order of magnitude as `support.ts`'s
+ * `HEAL_PER_TICK_FRACTION` (0.01): a slow, real accumulation, not
+ * instant — filling the cache from empty to `SHELTER_CACHE_MAX` takes on
+ * the order of 120 ticks of actual continuous resting, comparable to
+ * `SHELTER_BUILD_TICKS` (40) itself, so it reads as a genuine second
+ * investment on top of the build, not something that fills itself
+ * overnight.
+ */
+export const SHELTER_CACHE_DEPOSIT_PER_TICK = 0.01;
+
+/**
+ * How much hunger a single cache withdrawal restores — deliberately
+ * identical to needs.ts's own `CONSUME_RATE.seekFood.amount` (0.4), same
+ * "delivered/stored food restores exactly what self-feeding would"
+ * precedent support.ts's `DELIVERED_FOOD_HUNGER_RESTORE` already
+ * established for herd food delivery. A withdrawal that's smaller than the
+ * remaining cache still restores the full amount; one bigger than what's
+ * left restores only what's actually there (see
+ * `maybeFeedFromShelterCache`) — no free hunger from an empty or
+ * near-empty cache.
+ */
+export const SHELTER_CACHE_FEED_AMOUNT = 0.4;
+
+/**
+ * Once genuinely idle (needs.ts's very last idle-tier check, after herd
+ * cohesion gets first refusal — a herd pulling an agent back together still
+ * wins over going home specifically), a `buildsShelter` agent with a known
+ * shelter walks to it instead of wandering off exploring, then genuinely
+ * lingers there once arrived — logged as `"restAtShelter"`
+ * (`BehaviorKind`), the real, legible-in-the-log signal that this agent
+ * chose to go home rather than just happening to be standing near a
+ * shelter for some other reason. Returns false (letting the caller fall
+ * back to ordinary exploration) only when this agent's herd genuinely has
+ * no shelter anywhere findable yet — never once one exists, so from that
+ * point on a `buildsShelter` agent's idle time is spent at home rather than
+ * wandering, which is the actual "incentivize... to stay in it" ask.
+ *
+ * Only ever called from needs.ts's idle tier (`chooseBehavior` already
+ * reads "idle"), so an agent reaching here is already fed/watered above
+ * `FED_THRESHOLD` by construction — no separate "well-fed enough to
+ * contribute to the cache" gate is needed the way `applyHerdSupport`'s own
+ * `isFedAndWatered` check needs one (that function can be reached from
+ * behaviors other than pure idle).
+ */
+export function applyShelterResting(world: World, agent: Agent, log?: EventLog): boolean {
+  const home = findNearestIndexed(world, agent.layer, agent.pos, "shelter");
+  if (!home) return false; // no shelter built yet anywhere nearby -- nothing to go home to
+
+  logBehaviorChange(log, world, agent, "restAtShelter");
+  agent.behavior = "restAtShelter";
+
+  if (manhattan(agent.pos, home) > SHELTER_REST_RADIUS) {
+    agent.pos = stepToward(world, agent.layer, agent.pos, home);
+    return true;
+  }
+
+  // Arrived (or already close by) -- genuinely resting, not just passing
+  // through. Deposits into the cache every tick spent here, capped at
+  // SHELTER_CACHE_MAX; the heal/needs-decay bonus itself is applied
+  // separately, every tick, by tickAgentNeeds's own hasNearbyShelter check
+  // (not gated on this specific behavior label, so it still applies on the
+  // rarer tick an agent happens to be home for some other reason).
+  const tile = tileAt(world, agent.layer, home.x, home.y);
+  if (tile?.cache !== undefined && tile.cache < SHELTER_CACHE_MAX) {
+    const deposit = Math.min(SHELTER_CACHE_DEPOSIT_PER_TICK, SHELTER_CACHE_MAX - tile.cache);
+    tile.cache += deposit;
+    world.shelterCacheDeposited = (world.shelterCacheDeposited ?? 0) + deposit;
+  }
+  return true;
+}
+
+/**
+ * The food-cache safety net itself — called from needs.ts's `seekFood`
+ * branch, ahead of the ordinary live-food search, only for a
+ * `buildsShelter` agent whose `chooseBehavior` already picked `"seekFood"`
+ * (i.e. genuinely hungry, per `chooseBehavior`'s own 0.3 urgency cutoff).
+ * Deliberately NOT gated on the agent already being mid-`"restAtShelter"` —
+ * a hungry agent that happens to already be standing within
+ * `SHELTER_REST_RADIUS` of its shelter (having just walked home, or simply
+ * gotten hungry while resting there) should eat from the stockpile before
+ * setting off across the map, which is exactly the "safety net during a
+ * real lean period" the cache exists for.
+ *
+ * Returns false (never touching `needs.hunger`) whenever there's nothing to
+ * draw on — no shelter within range, or one with an empty/undefined
+ * `cache` — so the caller falls straight through to the existing
+ * live-foraging path the same tick. This is the load-bearing "not a trap"
+ * guarantee: an agent is never made to wait on, or prefer, an empty cache
+ * over breaking off to actually eat.
+ */
+export function maybeFeedFromShelterCache(world: World, agent: Agent, log?: EventLog): boolean {
+  const home = findNearestIndexed(world, agent.layer, agent.pos, "shelter");
+  if (!home || manhattan(agent.pos, home) > SHELTER_REST_RADIUS) return false;
+
+  const tile = tileAt(world, agent.layer, home.x, home.y);
+  if (!tile?.cache) return false; // 0 or undefined -- nothing stored, forage normally instead
+
+  const restore = Math.min(SHELTER_CACHE_FEED_AMOUNT, tile.cache);
+  tile.cache -= restore;
+  agent.needs.hunger = Math.min(1, agent.needs.hunger + restore);
+  world.shelterCacheWithdrawn = (world.shelterCacheWithdrawn ?? 0) + restore;
+
+  logBehaviorChange(log, world, agent, "restAtShelter");
+  agent.behavior = "restAtShelter";
+  return true;
 }

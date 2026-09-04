@@ -31,6 +31,7 @@ export function createTile(terrain: TerrainKind, elevation = 0): Tile {
     stock: terrain === "food" ? 1 : undefined,
     concealment: terrain === "bush" || terrain === "shelter" ? true : undefined,
     vacantTicks: terrain === "shelter" ? 0 : undefined,
+    cache: terrain === "shelter" ? 0 : undefined,
   };
 }
 
@@ -86,6 +87,11 @@ export function setTile(
   tile.flavor = terrain === "food" || terrain === "flora" ? flavor : undefined;
   tile.concealment = terrain === "bush" || terrain === "shelter" ? true : undefined;
   tile.vacantTicks = terrain === "shelter" ? 0 : undefined;
+  // Reverting away from "shelter" (abandonment, or something else claiming
+  // the tile) loses whatever was stockpiled — same "stopped maintaining it"
+  // consequence as vacantTicks resetting; a freshly built shelter starts
+  // with an empty cache, filled only by real resting time afterward.
+  tile.cache = terrain === "shelter" ? 0 : undefined;
   if (elevation !== undefined) tile.elevation = elevation;
   invalidateResourceIndex(world);
 }

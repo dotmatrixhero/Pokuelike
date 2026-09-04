@@ -131,11 +131,22 @@ work resumes:
      candidate for a future pass rather than a scope-creep addition to this
      one.
    - **Tune `SHELTER_CACHE_MAX`/`SHELTER_CACHE_DEPOSIT_PER_TICK` against a
-     seed where a shelter actually survives long enough to matter** — this
-     pass's real-run validation was constrained by seed 42's own
-     already-documented "shelter never gets built here" finding; seeds 7/
-     20260903 (DESIGN.md's real-run numbers) are the first real look at
-     cache accumulation/drawdown in practice, not an exhaustive tuning pass.
+     seed where a shelter actually survives long enough to matter** — all
+     three standard seeds (42/7/20260903) produced zero `shelterBuilt`
+     events at 3000 ticks (DESIGN.md's real-run numbers), so this pass's
+     real validation had to fall back to a controlled larger-map scenario
+     (same fix `shelter.test.ts`'s own end-to-end test already needed for
+     the identical problem) — the standard seeds still owe a real look at
+     cache accumulation/drawdown once the underlying build-site-scoring gap
+     above is addressed.
+   - **Some shelters still get abandoned even with the resting pull
+     active** (3-5 of 4-10 built per 3000-tick run in the controlled
+     validation above — a real reduction versus the mechanism's own
+     always-abandons-if-unattended baseline, not a full elimination). Not
+     isolated further here: candidate causes worth checking are a
+     founder's death leaving nobody to return to a specific shelter, or a
+     herd relocating away (`herdMigration.ts`) and never coming back to an
+     older one while a newer one gets built closer to the new range.
 3. **Overworld: the current map becomes one region in a larger graph** —
    the "World scale: layers, elevation, and regions" section from early in
    this project, finally built. Decided: full simulation for the focused/
