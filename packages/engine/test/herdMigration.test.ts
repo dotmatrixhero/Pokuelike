@@ -61,7 +61,7 @@ describe("updateHerdMigrations: scarcity detection", () => {
     const world = createWorld(80, 80);
     world.agents.push(member("a", { x: 30, y: 30 }), member("b", { x: 30, y: 30 }));
 
-    updateHerdMigrations(world);
+    updateHerdMigrations(world, undefined, NEVER_WANDER);
 
     expect(world.herdMigrations?.["herd-a"]).toBeUndefined();
     expect(world.herdScarcityTicks?.["herd-a"]).toBe(1);
@@ -74,14 +74,14 @@ describe("updateHerdMigrations: scarcity detection", () => {
     // Scarce for a while, but well under the sustain threshold...
     for (let i = 0; i < SCARCITY_SUSTAIN_TICKS - 5; i++) {
       world.tick += 1;
-      updateHerdMigrations(world);
+      updateHerdMigrations(world, undefined, NEVER_WANDER);
     }
     expect(world.herdMigrations?.["herd-a"]).toBeUndefined();
 
     // ...then food shows up nearby, resetting the counter...
     placeFoodCluster(world, 30, 30, 5);
     world.tick += 1;
-    updateHerdMigrations(world);
+    updateHerdMigrations(world, undefined, NEVER_WANDER);
     expect(world.herdScarcityTicks?.["herd-a"]).toBe(0);
 
     // ...so even continuing to be scarce afterward (food removed again) for
@@ -91,7 +91,7 @@ describe("updateHerdMigrations: scarcity detection", () => {
     }
     for (let i = 0; i < SCARCITY_SUSTAIN_TICKS - 5; i++) {
       world.tick += 1;
-      updateHerdMigrations(world);
+      updateHerdMigrations(world, undefined, NEVER_WANDER);
     }
     expect(world.herdMigrations?.["herd-a"]).toBeUndefined();
   });
@@ -105,7 +105,7 @@ describe("updateHerdMigrations: scarcity detection", () => {
     let migration;
     for (let i = 0; i < SCARCITY_SUSTAIN_TICKS; i++) {
       world.tick += 1;
-      updateHerdMigrations(world);
+      updateHerdMigrations(world, undefined, NEVER_WANDER);
       migration = world.herdMigrations?.["herd-a"];
       if (migration) break;
     }
