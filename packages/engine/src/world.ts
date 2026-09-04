@@ -92,6 +92,12 @@ export function setTile(
   // consequence as vacantTicks resetting; a freshly built shelter starts
   // with an empty cache, filled only by real resting time afterward.
   tile.cache = terrain === "shelter" ? 0 : undefined;
+  // Reverting away from "shelter" also drops the cosmetic per-species owner
+  // hint — a fresh build (shelter.ts's `applyShelterBuilding`, which sets
+  // this right after calling `setTile`) starts unowned until its builder's
+  // species stamps it, same "stopped maintaining it, starts over" shape as
+  // `cache`/`vacantTicks` just above.
+  if (terrain !== "shelter") tile.shelterOwnerSpecies = undefined;
   if (elevation !== undefined) tile.elevation = elevation;
   invalidateResourceIndex(world);
 }

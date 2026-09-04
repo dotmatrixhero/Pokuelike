@@ -130,6 +130,16 @@ const SHELTER_SITE_ATTEMPTS = 10;
 const SHELTER_COMFORT_THRESHOLD = 0.85;
 
 /**
+ * How much `SHELTER_COMFORT_THRESHOLD` drops for a bonded, shelterless
+ * agent — see `maybeTriggerShelterBuilding`'s doc comment. Sim-original
+ * tuning guess, same "judge against a real run" convention as every other
+ * constant in this file: big enough to be a real, measurable difference
+ * (0.15 is nearly a fifth of the 0.0-1.0 needs range) without dropping the
+ * bar so far a bonded pair starts building while still genuinely needy.
+ */
+const BOND_COMFORT_DISCOUNT = 0.15;
+
+/**
  * Real multi-tick time investment once standing at the build site, before
  * the tile actually completes — sim-original tuning guess, same order of
  * magnitude as `flora.ts`'s `MATURATION_TICKS` (20): long enough to read as
@@ -205,8 +215,23 @@ function pickBuildSite(world: World, layer: Layer, from: Vec2, rng: () => number
  */
 export function maybeTriggerShelterBuilding(world: World, agent: Agent, rng: () => number): void {
   if (agent.shelterTarget) return;
-  if (!agent.buildsShelter) return;
-  if (agent.needs.hunger < SHELTER_COMFORT_THRESHOLD || agent.needs.thirst < SHELTER_COMFORT_THRESHOLD) return;
+  // Universal shelter (direct instruction: shelter is no longer species-tied
+  // — "all units have it, it just looks different for each type") reverses
+  // the earlier `agent.buildsShelter`-gated design: every species can now
+  // build/use a shelter. `Agent.buildsShelter` still exists (denormalized
+  // from data) but is no longer read here at all — see DESIGN.md's
+  // "Universal shelter and capacity" section.
+  //
+  // A bonded, shelterless pair (reproduction.ts's `applyMateSeeking`) gets a
+  // real, testable comfort discount, not just "now eligible": direct
+  // instruction was that mating before shelter exists should "increase need
+  // for shelter." `BOND_COMFORT_DISCOUNT` lowers the bar at which this
+  // agent's own hunger/thirst counts as "comfortable enough to build,"
+  // biasing a bonded agent toward starting a build measurably sooner (in
+  // expectation, across many idle ticks where hunger/thirst are still
+  // climbing back up) than an unbonded one would at the exact same needs.
+  const threshold = agent.bondedPartnerId ? SHELTER_COMFORT_THRESHOLD - BOND_COMFORT_DISCOUNT : SHELTER_COMFORT_THRESHOLD;
+  if (agent.needs.hunger < threshold || agent.needs.thirst < threshold) return;
 
   const anchor = agent.herdId ? (herdCentroid(world, agent.herdId, agent.layer) ?? agent.pos) : agent.pos;
   if (hasNearbyShelter(world, agent.layer, anchor, SHELTER_SEARCH_RADIUS)) return;
@@ -250,6 +275,10 @@ export function applyShelterBuilding(world: World, agent: Agent, log?: EventLog)
   if (agent.shelterBuildTicks < SHELTER_BUILD_TICKS) return;
 
   setTile(world, agent.layer, agent.pos.x, agent.pos.y, "shelter");
+  // Cosmetic-only rendering hint (point 1: universal mechanics, per-species
+  // look) — see `Tile.shelterOwnerSpecies`'s doc comment.
+  const tileNow = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
+  if (tileNow) tileNow.shelterOwnerSpecies = agent.species;
   log?.record({
     kind: "shelterBuilt",
     tick: world.tick,

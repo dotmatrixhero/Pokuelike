@@ -267,6 +267,20 @@ export interface Tile {
    * this" consequence).
    */
   cache?: number;
+  /**
+   * "shelter" tiles only: which species most recently finished building
+   * (part of) this shelter — purely a rendering hint (packages/web's
+   * renderer.ts/palette.ts tint a shelter tile per owner species) with no
+   * gameplay effect of its own, per the direct instruction that universal
+   * shelter should still "look different for each type." Set every time
+   * `applyShelterBuilding` (shelter.ts) completes a tile, so an
+   * already-standing shelter a second builder happens to extend/rebuild near
+   * simply repaints to the newer builder's species — there's no real
+   * "ownership" concept here beyond that, deliberately: mechanical access
+   * (who may live/lay eggs there) is universal and unrelated to this field.
+   * `undefined` once the tile reverts away from "shelter".
+   */
+  shelterOwnerSpecies?: string;
 }
 
 /** Needs decay over time and drive an agent's behavior via simple utility AI. */
@@ -728,6 +742,53 @@ export interface Agent {
    */
   shelterBuildTicks?: number;
 
+  // --- Bonding and eggs (see reproduction.ts/eggs.ts, DESIGN.md's "Bonding,
+  // shelter, and eggs" section) — direct instruction: mating no longer
+  // spawns offspring instantly. A first contact between eligible mates
+  // "bonds" the pair (this field, on both agents); a bonded, shelterless
+  // pair is measurably more likely to start building (shelter.ts's
+  // `maybeTriggerShelterBuilding`); only once the pair has real shelter
+  // access does mating produce a real egg (`isEgg` below) instead. ---
+
+  /**
+   * The id of this agent's bonded mate, once formed — set on both agents at
+   * once by `reproduction.ts`'s `applyMateSeeking` the first time an
+   * eligible pair makes contact (adjacent), mirroring how
+   * `Agent.deliverTargetId`/`carryingId` already track a paired relationship
+   * elsewhere in this codebase. Persists once set — there's no "unbonding"
+   * mechanic (a bonded partner's death simply leaves this pointing at a
+   * since-pruned id, harmless: every reader already treats "partner not
+   * found among living agents" as "no longer bonded" rather than crashing on
+   * a stale id, the same tolerance-for-pruned-references convention
+   * `parentIds`/`grandparentIds` already rely on).
+   */
+  bondedPartnerId?: string;
+
+  /**
+   * True for an egg, not a normal agent — a real spawned entity at its
+   * shelter tile's position (reusing `Agent` for position/hp/predation-
+   * targeting/rendering almost for free, per direct instruction), stationary
+   * and behavior-less: `simulation.ts`'s `tickWorld` routes an egg straight
+   * to `eggs.ts`'s `tickEgg` and skips the ordinary `tickAgentNeeds`/
+   * `tickAgentAction` pipeline entirely for it (no hunger/thirst decay, no
+   * movement, no action-economy participation). Every herd/threat/mate/prey
+   * scan elsewhere in the engine (`predation.ts`'s `agentsWithin`,
+   * `herding.ts`'s herd-stat functions, `reproduction.ts`'s
+   * `isEligibleMate`) explicitly excludes `isEgg` agents, so an egg never
+   * gets swept up in ordinary fleeing/hunting/herd-cohesion/mate-seeking
+   * logic — it's only ever touched by `eggs.ts`'s own hatch/defend/eat
+   * functions.
+   */
+  isEgg?: boolean;
+  /**
+   * Ticks since this egg was laid — incremented once per world tick by
+   * `eggs.ts`'s `tickEgg` (a world-level pass, not gated on the egg's own
+   * nonexistent action economy). Hatches into the real newborn once this
+   * crosses `EGG_INCUBATION_TICKS` — see that constant's doc comment for the
+   * real-run-scale reasoning. `undefined`/absent for a non-egg agent.
+   */
+  eggTicks?: number;
+
   // --- Sleep (see DESIGN.md's "Sleep" section, needs.ts/predation.ts) ---
 
   /**
@@ -996,4 +1057,19 @@ export interface World {
    * `shelterCacheDeposited`'s reasoning exactly.
    */
   shelterCacheWithdrawn?: number;
+  // --- Bonding/eggs (see reproduction.ts/eggs.ts, DESIGN.md's "Bonding, shelter,
+  // and eggs" section) — lifetime counters, same observational,
+  // non-`SimEvent` shape as `shelterCacheDeposited`/`shelterCacheWithdrawn`
+  // above: real-run validation signals, never read back by the engine
+  // itself. Real `SimEvent`s (`bonded`/`eggLaid`/`eggHatched`/`eggEaten`)
+  // exist for narration; these are just the cheap running totals a
+  // validation script wants without re-scanning the whole event log. ---
+  /** Lifetime pairs that formed a `bondedPartnerId` link — see `reproduction.ts`'s `applyMateSeeking`. */
+  bondsFormed?: number;
+  /** Lifetime eggs laid (a bonded pair with real shelter access producing an egg instead of an instant newborn). */
+  eggsLaid?: number;
+  /** Lifetime eggs that survived incubation and hatched into a real newborn — see `eggs.ts`'s `tickEgg`. */
+  eggsHatched?: number;
+  /** Lifetime eggs eaten by a non-egg-group-compatible agent before hatching — see `eggs.ts`'s `applyEggEating`. */
+  eggsEaten?: number;
 }

@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { createWorld } from "../src/world.js";
+import { createWorld, setTile } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
-import { canEnterTile, FLAT_TILE_HEADCOUNT_CAP, TILE_WEIGHT_CAPACITY, tileOccupantCount, tileOccupantWeight } from "../src/occupancy.js";
+import {
+  canEnterShelter,
+  canEnterTile,
+  canLayEggAt,
+  FLAT_TILE_HEADCOUNT_CAP,
+  SHELTER_TILE_ADULT_CAP,
+  SHELTER_TILE_EGG_CAP,
+  shelterCluster,
+  TILE_WEIGHT_CAPACITY,
+  tileOccupantCount,
+  tileOccupantWeight,
+} from "../src/occupancy.js";
 import type { Agent } from "../src/types.js";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
@@ -127,5 +138,77 @@ describe("occupancy: per-tick cache", () => {
     world.agents.push(makeAgent({ id: "b", pos, maxHp: 20 }));
     world.tick += 1;
     expect(tileOccupantCount(world, "surface", pos)).toBe(2);
+  });
+});
+
+describe("occupancy: shelter capacity (2 adults + 1 egg per tile, adjacency-extended)", () => {
+  it("a single shelter tile admits exactly 2 adults, then blocks a 3rd", () => {
+    const world = createWorld(10, 10);
+    const pos = { x: 5, y: 5 };
+    setTile(world, "surface", 5, 5, "shelter");
+    world.agents = [makeAgent({ id: "a", pos, maxHp: 9999 }), makeAgent({ id: "b", pos, maxHp: 9999 })];
+    expect(canEnterShelter(world, "surface", pos)).toBe(false);
+    expect(canEnterTile(world, makeAgent({ id: "c", maxHp: 9999 }), "surface", pos)).toBe(false);
+  });
+
+  it("a shelter tile with only 1 adult still admits a 2nd (weight is irrelevant on shelter terrain)", () => {
+    const world = createWorld(10, 10);
+    const pos = { x: 5, y: 5 };
+    setTile(world, "surface", 5, 5, "shelter");
+    // Heavier than the whole surface weight cap — would fail the ordinary
+    // weight rule, but shelter terrain uses the headcount rule instead.
+    world.agents = [makeAgent({ id: "a", pos, maxHp: TILE_WEIGHT_CAPACITY * 5 })];
+    expect(canEnterTile(world, makeAgent({ id: "b", maxHp: TILE_WEIGHT_CAPACITY * 5 }), "surface", pos)).toBe(true);
+  });
+
+  it("a lone shelter tile admits exactly 1 egg, then blocks a 2nd", () => {
+    const world = createWorld(10, 10);
+    const pos = { x: 5, y: 5 };
+    setTile(world, "surface", 5, 5, "shelter");
+    expect(canLayEggAt(world, "surface", pos)).toBe(true);
+    world.agents = [makeAgent({ id: "egg-1", pos, isEgg: true })];
+    expect(canLayEggAt(world, "surface", pos)).toBe(false);
+  });
+
+  it("adjacent shelter tiles form one cluster whose capacity is the sum of each tile's own cap", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "shelter");
+    setTile(world, "surface", 6, 5, "shelter"); // adjacent — same cluster
+    setTile(world, "surface", 8, 5, "shelter"); // NOT adjacent (gap at x=7) — a separate cluster
+
+    const cluster = shelterCluster(world, "surface", { x: 5, y: 5 });
+    expect(cluster).toHaveLength(2);
+    expect(cluster.map((p) => `${p.x},${p.y}`).sort()).toEqual(["5,5", "6,5"]);
+
+    // Fill tile (5,5) to its own 2-adult cap — the cluster as a whole still
+    // has room (the (6,5) tile's own 2 slots), so a 3rd adult can still
+    // enter the CLUSTER even though the specific tile it started at is full.
+    world.agents = [
+      makeAgent({ id: "a", pos: { x: 5, y: 5 }, maxHp: 10 }),
+      makeAgent({ id: "b", pos: { x: 5, y: 5 }, maxHp: 10 }),
+    ];
+    expect(canEnterShelter(world, "surface", { x: 5, y: 5 })).toBe(true); // 2 < 2*2 cluster cap
+    expect(canEnterShelter(world, "surface", { x: 6, y: 5 })).toBe(true); // same cluster, same answer
+
+    // Fill the whole 2-tile cluster (4 adults) — now genuinely full.
+    world.agents.push(
+      makeAgent({ id: "c", pos: { x: 6, y: 5 }, maxHp: 10 }),
+      makeAgent({ id: "d", pos: { x: 6, y: 5 }, maxHp: 10 })
+    );
+    expect(canEnterShelter(world, "surface", { x: 5, y: 5 })).toBe(false);
+
+    // The isolated 3rd shelter tile is its own cluster, unaffected by the
+    // first cluster being full.
+    expect(canEnterShelter(world, "surface", { x: 8, y: 5 })).toBe(true);
+  });
+
+  it("a non-shelter tile trivially 'clusters' with only itself", () => {
+    const world = createWorld(10, 10);
+    expect(shelterCluster(world, "surface", { x: 2, y: 2 })).toEqual([{ x: 2, y: 2 }]);
+  });
+
+  it("SHELTER_TILE_ADULT_CAP/SHELTER_TILE_EGG_CAP are the real per-tile numbers from the direct instruction (2 adults + 1 egg)", () => {
+    expect(SHELTER_TILE_ADULT_CAP).toBe(2);
+    expect(SHELTER_TILE_EGG_CAP).toBe(1);
   });
 });

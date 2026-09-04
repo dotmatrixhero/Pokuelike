@@ -1,4 +1,5 @@
 import type { Agent, Layer, Vec2, World } from "./types.js";
+import { tileAt } from "./world.js";
 
 /**
  * Per-tile occupancy/crowding — direct ask: "a weight limit for how many
@@ -129,6 +130,90 @@ export function tileOccupantWeight(world: World, layer: Layer, pos: Vec2): numbe
 export function canEnterTile(world: World, agent: Agent, layer: Layer, pos: Vec2): boolean {
   const count = tileOccupantCount(world, layer, pos);
   if (count === 0) return true;
+  if (tileAt(world, layer, pos.x, pos.y)?.terrain === "shelter") return canEnterShelter(world, layer, pos);
   if (isFlatCapacityLayer(layer)) return count < FLAT_TILE_HEADCOUNT_CAP;
   return tileOccupantWeight(world, layer, pos) + bodyWeight(agent) <= TILE_WEIGHT_CAPACITY;
+}
+
+// --- Shelter capacity (direct instruction: "only 2 units and an egg can
+// share a single tile of shelter, though multiple adjacent shelter can
+// increase the number who can live in it") — a shelter-specific headcount
+// cap layered ON TOP OF the general capacity model above, not a variant of
+// it: a shelter tile's terrain kind ("shelter") short-circuits the ordinary
+// weight rule entirely in `canEnterTile` above, since 2 real adults (any
+// species — universal shelter, point 1) is a headcount question, not a
+// weight one. See DESIGN.md's "Universal shelter and capacity" section. ---
+
+/** Adults (non-egg occupants) a single shelter tile holds on its own. */
+export const SHELTER_TILE_ADULT_CAP = 2;
+/** Eggs a single shelter tile holds on its own. */
+export const SHELTER_TILE_EGG_CAP = 1;
+
+/** Cap on how large a connected shelter cluster's BFS is allowed to grow before giving up — a real map should never approach this; it's a defensive bound against a pathological all-shelter map, not a tuning constant. */
+const SHELTER_CLUSTER_SCAN_CAP = 200;
+
+/**
+ * Every "shelter" tile reachable from `pos` via 4-directional adjacency
+ * (including `pos` itself, which must already be shelter terrain — returns
+ * just `[pos]` otherwise, so a non-shelter tile trivially "clusters" with
+ * only itself and every capacity check below degrades to the single-tile
+ * case). This is the "household" a bonded pair's egg-laying/hatching and a
+ * resting agent's movement range within its home range — adjacent shelter
+ * tiles pool their capacity rather than each capping independently, per
+ * direct instruction ("multiple adjacent shelter can increase the number
+ * who can live in it").
+ */
+export function shelterCluster(world: World, layer: Layer, pos: Vec2): Vec2[] {
+  if (tileAt(world, layer, pos.x, pos.y)?.terrain !== "shelter") return [pos];
+  const seen = new Set<string>();
+  const tiles: Vec2[] = [];
+  const stack: Vec2[] = [pos];
+  while (stack.length > 0 && tiles.length < SHELTER_CLUSTER_SCAN_CAP) {
+    const p = stack.pop()!;
+    const key = `${p.x},${p.y}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (tileAt(world, layer, p.x, p.y)?.terrain !== "shelter") continue;
+    tiles.push(p);
+    stack.push({ x: p.x + 1, y: p.y }, { x: p.x - 1, y: p.y }, { x: p.x, y: p.y + 1 }, { x: p.x, y: p.y - 1 });
+  }
+  return tiles;
+}
+
+/**
+ * Real occupant headcount of `pos`'s whole shelter cluster — adults (living,
+ * not-currently-carried, non-egg agents) and eggs (`Agent.isEgg`) counted
+ * separately, since they have separate caps (`SHELTER_TILE_ADULT_CAP`/
+ * `SHELTER_TILE_EGG_CAP`, both scaled by cluster size). A direct
+ * `world.agents` scan restricted to the (small) cluster's tile set, not the
+ * cached weight/count index above — that index doesn't distinguish eggs from
+ * adults and is keyed per-tile, not per-cluster, so reusing it here would
+ * need its own cluster-aware cache; shelters are sparse enough on a real map
+ * that a plain scan per call is cheap in practice. Exported for tests/diagnostics.
+ */
+export function shelterOccupants(world: World, layer: Layer, pos: Vec2): { tiles: Vec2[]; adults: number; eggs: number } {
+  const tiles = shelterCluster(world, layer, pos);
+  const tileSet = new Set(tiles.map((t) => `${t.x},${t.y}`));
+  let adults = 0;
+  let eggs = 0;
+  for (const agent of world.agents) {
+    if (agent.alive === false || agent.beingCarriedBy) continue;
+    if (agent.layer !== layer) continue;
+    if (!tileSet.has(`${agent.pos.x},${agent.pos.y}`)) continue;
+    if (agent.isEgg) eggs += 1;
+    else adults += 1;
+  }
+  return { tiles, adults, eggs };
+}
+
+/** Can one more adult (non-egg) agent move onto/stand at `pos`'s shelter cluster right now? */
+export function canEnterShelter(world: World, layer: Layer, pos: Vec2): boolean {
+  const { tiles, adults } = shelterOccupants(world, layer, pos);
+  return adults < tiles.length * SHELTER_TILE_ADULT_CAP;
+}
+
+/** Is there room for one more egg somewhere in `pos`'s shelter cluster right now? */
+export function canLayEggAt(world: World, layer: Layer, pos: Vec2): boolean {
+  const { tiles, eggs } = shelterOccupants(world, layer, pos);
+  return eggs < tiles.length * SHELTER_TILE_EGG_CAP;
 }

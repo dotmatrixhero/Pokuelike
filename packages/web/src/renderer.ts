@@ -15,6 +15,7 @@ import {
   rgbToCss,
   rgbaToCss,
   shade,
+  shelterOwnerTint,
   tileLight,
 } from "./palette.js";
 
@@ -63,7 +64,7 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
         continue;
       }
 
-      let bg = shade(TERRAIN_BG[tile.terrain], tile.elevation);
+      let bg = shade(tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies) : TERRAIN_BG[tile.terrain], tile.elevation);
       // A depleted food/flora patch fades from its flavor accent back toward plain floor as stock runs out —
       // same idea as the original renderer's mixColor, now mixing ascii.ts's actual FLAVOR_FG/TERRAIN_BG tables.
       const isPlant = tile.terrain === "food" || tile.terrain === "flora" || tile.terrain === "seedling";
@@ -136,7 +137,9 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
       const tile = surface[y * world.width + x]!;
       const cx = x * TILE_SIZE + TILE_SIZE / 2;
       const cy = y * TILE_SIZE + TILE_SIZE / 2;
-      const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_FG[tile.terrain];
+      const accent =
+        (tile.flavor && FLAVOR_FG[tile.flavor]) ||
+        (tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_FG.shelter, tile.shelterOwnerSpecies) : TERRAIN_FG[tile.terrain]);
       // Faux ambient light: a static per-tile factor (0.65-1.35) so the
       // ground reads as unevenly lit stone instead of a flat repeated color
       // — the actual thing that makes Brogue's ASCII look alive rather than
@@ -164,7 +167,7 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
       } else {
         // Everything else keeps a faint translucent wash of its own color —
         // Brogue's ground reads as lit stone, not a flat tile — plus its glyph.
-        const bg = shade(TERRAIN_BG[tile.terrain], tile.elevation);
+        const bg = shade(tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies) : TERRAIN_BG[tile.terrain], tile.elevation);
         ctx.fillStyle = rgbaToCss(bg, (tile.terrain === "floor" ? 0.25 : 0.55) * light);
         ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
         ctx.fillStyle = rgbaToCss(accent, (tile.terrain === "floor" ? 0.45 : 0.9) * light);

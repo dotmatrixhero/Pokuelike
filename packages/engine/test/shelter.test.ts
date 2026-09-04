@@ -59,14 +59,18 @@ function manhattan(a: { x: number; y: number }, b: { x: number; y: number }): nu
 }
 
 describe("maybeTriggerShelterBuilding", () => {
-  it("a non-buildsShelter species never attempts it, no matter how idle/settled", () => {
+  it("universal shelter: any species (not just buildsShelter-flagged ones) attempts it once comfortable — direct instruction reversing the earlier species-tied design", () => {
     const world = createWorld(100, 100);
+    // `buildsShelter: false` on a bulbasaur — the field is a legacy/cosmetic
+    // leftover (still denormalized from data for now) but no longer gates
+    // anything in shelter.ts, so this should behave identically to any
+    // other comfortable idle agent.
     const a = agent("non-builder", { species: "bulbasaur", buildsShelter: false });
     world.agents.push(a);
 
-    for (let i = 0; i < 20; i++) maybeTriggerShelterBuilding(world, a, seededRng(i + 1));
+    maybeTriggerShelterBuilding(world, a, seededRng(3));
 
-    expect(a.shelterTarget).toBeUndefined();
+    expect(a.shelterTarget).toBeDefined();
   });
 
   it("an eligible species with no nearby shelter picks a real distant build site, not build-on-the-spot", () => {
@@ -92,6 +96,26 @@ describe("maybeTriggerShelterBuilding", () => {
     maybeTriggerShelterBuilding(world, a, seededRng(3));
 
     expect(a.shelterTarget).toBeUndefined();
+  });
+
+  it("a bonded, shelterless pair triggers at a lower comfort level than an unbonded agent (real, testable bias toward building)", () => {
+    // Direct instruction: mating before shelter "increases need for
+    // shelter" — real, measurable bias, not just "now eligible." Needs sit
+    // between the bonded-discounted threshold (0.85 - 0.15 = 0.70) and the
+    // ordinary threshold (0.85): an unbonded agent at these needs does NOT
+    // trigger, a bonded one DOES.
+    const needs = { hunger: 0.8, thirst: 0.8, energy: 1, mateDrive: 0 };
+    const world1 = createWorld(100, 100);
+    const unbonded = agent("unbonded", { pos: { x: 50, y: 50 }, needs: { ...needs } });
+    world1.agents.push(unbonded);
+    maybeTriggerShelterBuilding(world1, unbonded, seededRng(3));
+    expect(unbonded.shelterTarget).toBeUndefined();
+
+    const world2 = createWorld(100, 100);
+    const bonded = agent("bonded", { pos: { x: 50, y: 50 }, needs: { ...needs }, bondedPartnerId: "someone" });
+    world2.agents.push(bonded);
+    maybeTriggerShelterBuilding(world2, bonded, seededRng(3));
+    expect(bonded.shelterTarget).toBeDefined();
   });
 
   it("does not trigger (or re-pick) while a shelter task is already in progress", () => {
