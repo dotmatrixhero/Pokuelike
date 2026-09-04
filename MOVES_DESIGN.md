@@ -328,28 +328,41 @@ proved you'd invested in both branches and then did nothing further,
 which reads as a toll booth, not a choice. A crosslink needs two things to
 actually work:
 
-1. **Its own real effect** — it costs a point like everything else, so it
-   should do something on its own (Crossroots: a small taste of each
-   flanking branch's core lever — +power and +range together — rather than
-   pure connective tissue).
-2. **A shortcut *out* the other side** — taking it should let you continue
-   into *both* neighboring branches' later content, skipping the filler you
-   didn't walk to get there. This needs a second new primitive:
-   `MoveTreeNode.prerequisitesAnyOf?: string[][]` — a list of alternative
-   prerequisite sets, where satisfying *any one* (each inner array is still
-   AND'd together) makes the node eligible. A branch's deeper notable then
-   declares two ways in: `prerequisites: [its own earlier chain node]` OR,
-   via `prerequisitesAnyOf`, `[the crosslink]`. This is the same shape as
-   the still-open "keystone reachable from either fork tip" problem two
+1. **Its own real, flavorful effect** — it costs a point like everything
+   else, so it should do something distinctive on its own. First draft used
+   a generic "a bit of both branches' stats" filler (+power and +range
+   together) for every crosslink in a tree, which reads as filler wearing a
+   notable's costume, not an actual ability. Give each one real character
+   instead, ideally foreshadowing or riffing on the branches it connects —
+   Vine Whip's Aggression↔Boldness crosslink (Snapback Lash) grants range
+   +1 *and* a chance to drag the target closer on hit, a small taste of
+   Aggression's own eventual keystone.
+2. **A shortcut *out* the other side, capped at one notable — never a fork
+   or keystone.** Taking it should let you continue into *both* neighboring
+   branches' *next notable*, skipping the filler in between. Second draft
+   let two of three crosslinks shortcut all the way to a fork/keystone,
+   which was a real balance mistake, not just a rough edge: three crosslinks
+   at that depth make every keystone in the tree cheaply reachable from a
+   single opener each, which guts the entire point of a keystone being a
+   real per-branch commitment. Capping every shortcut at "one notable early,
+   never further" keeps the mesh genuinely explorable while keeping forks
+   and keystones gated behind actually walking a branch. This needs a new
+   primitive: `MoveTreeNode.prerequisitesAnyOf?: string[][]` — a list of
+   alternative prerequisite sets, where satisfying *any one* (each inner
+   array still AND'd together) makes the node eligible. A branch's second
+   notable then declares two ways in: `prerequisites: [its own filler node]`
+   OR, via `prerequisitesAnyOf`, `[the crosslink]`. This is the same shape
+   as the still-open "keystone reachable from either fork tip" problem two
    sections up — one primitive solves both.
 
 Put one crosslink between each adjacent pair of branches (a triangle, for a
-3-branch tree), each granting a small standalone bonus and shortcutting
-into both flanking branches' next real notable. This is what actually
-delivers "customizability": an agent can end up with Aggression's opener
-plus Boldness's *fork*, having walked past Boldness's own filler entirely —
-a genuine hybrid route through the mesh, not three lanes with a decorative
-gate between them.
+3-branch tree), each granting its own real ability and shortcutting into
+both flanking branches' *next notable only*. This is what actually
+delivers "customizability" without cheapening every keystone: an agent can
+end up with Aggression's opener plus Boldness's *second notable*, having
+walked past Boldness's own filler to get there — a genuine hybrid route
+through the mesh — but still has to walk each branch's own fork and
+keystone in full if that's the payoff they're after.
 
 **Put a notable early, not just at the end of a long chain.** A tree that
 saves every named effect for deep investment makes the *only* real choice
