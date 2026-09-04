@@ -180,9 +180,21 @@
 
       #inspector { padding: 8px 12px; font-size: 12.5px; }
       .inspect-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+      /* Label and value sit close together on the left, not spread across
+         the panel's full width — on a wide desktop inspector, space-between
+         put a lot of empty space between e.g. "Bulbasaur" and its count.
+         A fixed label width keeps every row's value lined up in a loose
+         column without needing the label to stretch to fill the row.
+         Scoped to #inspector specifically — .inspect-label/.inspect-row
+         are also reused (for text-color/spacing only) by the header's
+         Seed/Speed controls, which shouldn't get this fixed-width/left-
+         aligned treatment. */
       .inspect-row { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; border-bottom: 1px dashed #232a34; }
       .inspect-label { color: var(--text-dim); }
       .inspect-value { text-align: right; }
+      #inspector .inspect-row { justify-content: flex-start; }
+      #inspector .inspect-label { flex: 0 0 auto; min-width: 130px; }
+      #inspector .inspect-value { text-align: left; }
     </style>
   </head>
   <body>
