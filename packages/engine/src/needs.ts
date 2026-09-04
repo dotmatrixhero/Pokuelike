@@ -25,11 +25,29 @@ import { findNearestIndexed } from "./resourceIndex.js";
 import { thirstDecayMultiplier } from "./weather.js";
 
 const DECAY_PER_TICK = {
-  hunger: 0.01,
   thirst: 0.015,
   energy: 0.005,
   mateDrive: 0.01,
 } as const;
+
+/**
+ * Hunger decay is no longer a flat per-tick subtraction — direct feedback
+ * that a flat rate reads as too punishing. Real appetite doesn't work that
+ * way: you get hungry fairly fast right after a meal, but once genuinely
+ * hungry you can go a long while before it's actually dangerous. Modeled as
+ * exponential decay of the *remaining* hunger value (a multiplicative term
+ * proportional to current hunger, so the absolute drop is largest at full
+ * and shrinks as hunger falls) plus a small flat floor so it still reaches
+ * true 0 in finite time instead of asymptoting forever — from full (1.0),
+ * this reaches the 0.7 "seek food" threshold (`chooseBehavior`'s urgency
+ * cutoff) in ~27 ticks, but takes ~213 total to fall the rest of the way to
+ * 0 (more than double the old flat rate's 100), where `STARVATION_GRACE_TICKS`
+ * (100 more) still has
+ * to run out before actual death — sim-original tuning, judge against a
+ * real run like everything else here, not a canon formula.
+ */
+const HUNGER_DECAY_RATE = 0.012;
+const HUNGER_DECAY_FLOOR = 0.001;
 
 /** Ticks an agent can sit at 0 hunger or thirst before it dies of it. */
 const STARVATION_GRACE_TICKS = 100;
@@ -147,7 +165,7 @@ export function createNeeds(overrides: Partial<Needs> = {}): Needs {
  * it keeps decaying at exactly the original flat rate.
  */
 export function decayNeeds(needs: Needs, thirstMultiplier = 1): void {
-  needs.hunger = Math.max(0, needs.hunger - DECAY_PER_TICK.hunger);
+  needs.hunger = Math.max(0, needs.hunger - (needs.hunger * HUNGER_DECAY_RATE + HUNGER_DECAY_FLOOR));
   needs.thirst = Math.max(0, needs.thirst - DECAY_PER_TICK.thirst * thirstMultiplier);
   needs.energy = Math.max(0, needs.energy - DECAY_PER_TICK.energy);
   needs.mateDrive = Math.min(1, needs.mateDrive + DECAY_PER_TICK.mateDrive);
