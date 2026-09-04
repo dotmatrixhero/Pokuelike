@@ -58,8 +58,22 @@ const FLEE_RADIUS_SPREAD = 2;
  */
 const FLEE_RADIUS_FLOOR = 2;
 const HUNT_DETECT_RADIUS = 5;
-/** A predator starts hunting below this hunger — more eager than the general seekFood threshold, since prey won't wait. Baseline at neutral (0.5) aggression — see `huntHungerThreshold`. */
-const HUNT_HUNGER_THRESHOLD = 0.6;
+/**
+ * A predator starts hunting below this hunger — deliberately well above the
+ * general seekFood threshold (chooseBehavior's own 0.7 cutoff in needs.ts),
+ * per direct ask: hunting should be tried "a lot more," valued over grazing,
+ * not just an emergency fallback once truly starving. Since
+ * `applyPredationInstincts`'s hunt check runs (and returns, short-circuiting
+ * ordinary needs-seeking) before `tickAgentAction` ever gets to plant
+ * foraging, a predator this eager to hunt only ever falls back to eating
+ * plants once genuinely hungry AND no huntable prey is currently
+ * detectable — exactly "can still eat plants, but a kill is valued higher."
+ * Baseline at neutral (0.5) aggression — see `huntHungerThreshold`. Raised
+ * from the original 0.6 (was barely above chooseBehavior's own 0.7 seekFood
+ * cutoff, meaning a predator often wasn't even hunt-eligible until it was
+ * already plant-food-hungry too).
+ */
+const HUNT_HUNGER_THRESHOLD = 0.85;
 /** How far aggression can push the hunt-hunger threshold from baseline in either direction. */
 const HUNT_THRESHOLD_SPREAD = 0.2;
 /**
@@ -73,7 +87,15 @@ const HUNT_THRESHOLD_SPREAD = 0.2;
  * species-level activity pattern. Sim-original magnitude, not canon.
  */
 const NOCTURNAL_HUNT_THRESHOLD_SPREAD = 0.15;
-const KILL_HUNGER_RESTORE = 0.6;
+/**
+ * How long a kill's post-meal "digesting" hunger-decay slowdown lasts —
+ * see needs.ts's `KILL_SATIATION_HUNGER_DECAY_MULTIPLIER` for the actual
+ * decay effect this window applies. Sim-original magnitude: long enough
+ * that a fed predator genuinely stops needing to hunt/forage for a real
+ * stretch (not just a few dozen ticks), judged against a real run like
+ * every other tuning constant here.
+ */
+const KILL_SATIATION_TICKS = 300;
 
 /** How close a threat has to be, and how many herd-mates have to be nearby, before prey mob it instead of fleeing. */
 const MOB_TRIGGER_RADIUS = 2;
@@ -149,8 +171,8 @@ function activityHuntShift(agent: Agent, tick: number): number {
  * The hunger level below which this predator switches to `hunt`. Aggressive
  * predators hunt while less hungry (higher threshold); passive ones wait
  * until hungrier (lower threshold) — DESIGN.md's hunt-trigger point. Absent
- * disposition (hand-built fixtures) reads as neutral (0.5), reproducing the
- * original fixed HUNT_HUNGER_THRESHOLD of 0.6 exactly. Composes additively
+ * disposition (hand-built fixtures) reads as neutral (0.5), reducing to
+ * `HUNT_HUNGER_THRESHOLD` exactly. Composes additively
  * with `activityHuntShift`'s day/night-and-activity-pattern term — an
  * aggressive nocturnal predator at midnight stacks both shifts, hunting
  * while barely hungry at all; absent both disposition and activityPattern
@@ -979,7 +1001,12 @@ export function applyPredationInstincts(
         // it off, then eating, is the normal two-stage path here.
         const died = resolveHit(world, agent, target, log, "killed", ctx, huntDistance, rng);
         if (died) {
-          agent.needs.hunger = Math.min(1, agent.needs.hunger + KILL_HUNGER_RESTORE);
+          // A real kill is a much bigger deal than grazing — full restore
+          // plus an extended "digesting" slowdown on top (needs.ts's
+          // `KILL_SATIATION_HUNGER_DECAY_MULTIPLIER`), not just a flat
+          // instant bump back toward normal hunger-seeking.
+          agent.needs.hunger = 1;
+          agent.digestingTicksRemaining = KILL_SATIATION_TICKS;
           agent.huntTarget = undefined;
           agent.ticksSinceMeal = 0;
           agent.relocateTarget = undefined;

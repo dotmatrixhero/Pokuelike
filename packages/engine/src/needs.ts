@@ -160,6 +160,21 @@ export const LONG_SLEEP_EXP_TICKS = 200;
 export const LONG_SLEEP_EXP_BONUS = 25;
 
 /**
+ * A real kill should be a much bigger deal than grazing — direct ask: "a
+ * kill is just a lot more incentive for them, keeps em sated." A predator
+ * still eats plants (this doesn't touch generic foraging at all), but a
+ * kill fully restores hunger to 1.0 and starts a `digestingTicksRemaining`
+ * countdown (`Agent`'s own field, set by predation.ts's hunt branch — see
+ * `KILL_SATIATION_TICKS` there for the tick count) during which hunger
+ * decays at this multiplier instead of its normal rate — a big meal
+ * actually lasts, rather than being back to normal hunger-seeking within
+ * the next few dozen ticks like an ordinary plant meal. 0.1 means roughly
+ * 10x the normal post-meal runway. Thirst is deliberately untouched —
+ * eating doesn't quench thirst.
+ */
+export const KILL_SATIATION_HUNGER_DECAY_MULTIPLIER = 0.1;
+
+/**
  * How far a fully-satisfied idle agent will look for a not-yet-visited
  * sector to wander to — the exp-motivated exploration drive. Deliberately
  * local (`SECTOR_SIZE` in leveling.ts is 5, so this reaches a handful of
@@ -251,10 +266,18 @@ export function createNeeds(overrides: Partial<Needs> = {}): Needs {
  * than a third numeric multiplier parameter: sleep doesn't just scale
  * energy's decay, it inverts its direction entirely, which a multiplier
  * alone can't express.
+ *
+ * `hungerMultiplier` (default 1) composes multiplicatively with the base
+ * hunger-decay term only (never thirst) — the post-kill "digesting"
+ * slowdown (`KILL_SATIATION_HUNGER_DECAY_MULTIPLIER`, set via
+ * `Agent.digestingTicksRemaining` in `tickAgentNeeds`). Kept as its own
+ * parameter rather than folded into `asleep`'s combined multiplier since an
+ * agent can be digesting without being asleep (or vice versa), and a kill
+ * deliberately doesn't touch thirst the way sleep does.
  */
-export function decayNeeds(needs: Needs, thirstMultiplier = 1, asleep = false): void {
+export function decayNeeds(needs: Needs, thirstMultiplier = 1, asleep = false, hungerMultiplier = 1): void {
   const needsMultiplier = asleep ? SLEEP_NEEDS_DECAY_MULTIPLIER : 1;
-  needs.hunger = Math.max(0, needs.hunger - (needs.hunger * HUNGER_DECAY_RATE + HUNGER_DECAY_FLOOR) * needsMultiplier);
+  needs.hunger = Math.max(0, needs.hunger - (needs.hunger * HUNGER_DECAY_RATE + HUNGER_DECAY_FLOOR) * needsMultiplier * hungerMultiplier);
   needs.thirst = Math.max(0, needs.thirst - DECAY_PER_TICK.thirst * thirstMultiplier * needsMultiplier);
   needs.energy = asleep
     ? Math.min(1, needs.energy + SLEEP_ENERGY_RESTORE_RATE)
@@ -398,7 +421,13 @@ export function tickAgentNeeds(
   tickCooldowns(agent, agent.asleep ? SLEEP_COOLDOWN_TICKS : 1);
   if (world) tickStatusEffects(agent, world, log, rng);
   const thirstMultiplier = world ? thirstDecayMultiplier(world, agent.layer, agent.pos) : 1;
-  decayNeeds(agent.needs, thirstMultiplier, agent.asleep === true);
+  // Post-kill "digesting" slowdown (see KILL_SATIATION_TICKS's doc comment)
+  // — checked and ticked down here rather than gated behind `world` like
+  // the trickle/starvation logic below, since it's pure needs bookkeeping
+  // that should still count down even for a bare-fixture caller.
+  const digesting = (agent.digestingTicksRemaining ?? 0) > 0;
+  if (digesting) agent.digestingTicksRemaining = (agent.digestingTicksRemaining ?? 0) - 1;
+  decayNeeds(agent.needs, thirstMultiplier, agent.asleep === true, digesting ? KILL_SATIATION_HUNGER_DECAY_MULTIPLIER : 1);
 
   // Hunger and thirst each get their own consecutive-zero-ticks counter and
   // their own grace threshold (`STARVATION_GRACE_TICKS` /

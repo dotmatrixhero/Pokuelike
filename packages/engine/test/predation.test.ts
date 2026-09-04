@@ -535,9 +535,13 @@ describe("disposition wiring", () => {
   it("an aggressive predator hunts at a hunger level a neutral predator would ignore", () => {
     const aggressive: Disposition = { boldness: 0.5, aggression: 1, sociability: 0.5 };
     const world = createWorld(10, 10);
-    // hunger 0.7 is above the neutral HUNT_HUNGER_THRESHOLD (0.6) — a neutral predator
-    // wouldn't hunt (see "a satisfied predator ignores nearby prey" above), but an
-    // aggressive one's raised threshold (0.8) still triggers it.
+    // hunger 0.7 is below both the neutral baseline (0.85) and an aggressive
+    // predator's raised threshold (0.85 + 0.2 = 1.05), so this alone doesn't
+    // isolate the aggression effect the way it did against the old, lower
+    // baseline — kept as a straightforward "an aggressive predator hunts"
+    // check; see the passive-predator test below and the composition test
+    // in the day/night describe block for cases that actually isolate one
+    // shift from another.
     world.agents.push(prey({ x: 5, y: 5 }), predator({ x: 8, y: 5 }, 0.7, { disposition: aggressive }));
 
     tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
@@ -549,9 +553,10 @@ describe("disposition wiring", () => {
   it("a passive predator waits longer than a neutral predator to hunt", () => {
     const passive: Disposition = { boldness: 0.5, aggression: 0, sociability: 0.5 };
     const world = createWorld(10, 10);
-    // hunger 0.5 is below the neutral threshold (0.6, would normally hunt) but above
-    // the passive predator's lowered threshold (0.4).
-    world.agents.push(prey({ x: 5, y: 5 }), predator({ x: 8, y: 5 }, 0.5, { disposition: passive }));
+    // hunger 0.75 is below the neutral threshold (0.85 baseline, would
+    // normally hunt) but above the passive predator's lowered threshold
+    // (0.85 - 0.2 = 0.65).
+    world.agents.push(prey({ x: 5, y: 5 }), predator({ x: 8, y: 5 }, 0.75, { disposition: passive }));
 
     tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 
@@ -564,7 +569,11 @@ describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)",
   it("a nocturnal predator hunts at night at a hunger level a cathemeral predator would ignore", () => {
     const world = createWorld(10, 10);
     world.tick = MIDNIGHT;
-    const nocturnalHunter = predator({ x: 8, y: 5 }, 0.65, { activityPattern: "nocturnal" });
+    // 0.9: below the nocturnal-at-midnight threshold (baseline 0.85 + 0.15
+    // activity shift = 1.0) but above the plain baseline (0.85) — recalibrated
+    // against HUNT_HUNGER_THRESHOLD's raised baseline, see needs.ts/
+    // predation.ts's "predators should be much more incentivized to hunt" ask.
+    const nocturnalHunter = predator({ x: 8, y: 5 }, 0.9, { activityPattern: "nocturnal" });
     world.agents.push(prey({ x: 5, y: 5 }), nocturnalHunter);
 
     applyPredationInstincts(world, nocturnalHunter, RULES);
@@ -574,7 +583,7 @@ describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)",
     // Same hunger, same tick, no activityPattern set — the baseline (unshifted) case.
     const world2 = createWorld(10, 10);
     world2.tick = MIDNIGHT;
-    const cathemeralHunter = predator({ x: 8, y: 5 }, 0.65);
+    const cathemeralHunter = predator({ x: 8, y: 5 }, 0.9);
     world2.agents.push(prey({ x: 5, y: 5 }), cathemeralHunter);
 
     applyPredationInstincts(world2, cathemeralHunter, RULES);
@@ -585,7 +594,9 @@ describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)",
   it("that same nocturnal predator is LESS eager by day than a cathemeral predator at the same hunger", () => {
     const world = createWorld(10, 10);
     world.tick = NOON;
-    const nocturnalHunter = predator({ x: 8, y: 5 }, 0.65, { activityPattern: "nocturnal" });
+    // 0.9 is above the day-nocturnal threshold (0.85 - 0.15 = 0.7), so this
+    // hunter should NOT hunt by day despite being quite hungry.
+    const nocturnalHunter = predator({ x: 8, y: 5 }, 0.9, { activityPattern: "nocturnal" });
     world.agents.push(prey({ x: 5, y: 5 }), nocturnalHunter);
 
     applyPredationInstincts(world, nocturnalHunter, RULES);
@@ -610,28 +621,32 @@ describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)",
   });
 
   it("composes with the existing aggression-based shift rather than replacing it — both stack", () => {
-    // Neutral aggression, nocturnal, at night: threshold 0.6 + 0.15 (activity) = 0.75.
+    // Neutral aggression, nocturnal, at night: threshold 0.85 (baseline) + 0.15 (activity) = 1.0.
     const world = createWorld(10, 10);
     world.tick = MIDNIGHT;
     const neutralNocturnal = predator({ x: 8, y: 5 }, 0.72, { activityPattern: "nocturnal" });
     world.agents.push(prey({ x: 5, y: 5 }), neutralNocturnal);
     applyPredationInstincts(world, neutralNocturnal, RULES);
-    expect(neutralNocturnal.behavior).toBe("hunt"); // 0.72 < 0.75
+    expect(neutralNocturnal.behavior).toBe("hunt"); // 0.72 < 1.0
 
-    // Aggressive AND nocturnal, at night: threshold 0.6 + 0.2 (aggression) + 0.15 (activity) = 0.95 —
-    // hunts at a hunger level neither shift alone would cover.
-    const aggressive: Disposition = { boldness: 0.5, aggression: 1, sociability: 0.5 };
+    // Aggressive (0.6, not maxed — the raised baseline leaves less headroom
+    // before a threshold saturates past hunger's own 0-1 range than the
+    // original 0.6 baseline did) AND nocturnal, at night: threshold
+    // 0.85 (baseline) + 0.04 (aggression) + 0.15 (activity) = 1.04 — hunts at
+    // a hunger level neither shift alone would cover.
+    const aggressive: Disposition = { boldness: 0.5, aggression: 0.6, sociability: 0.5 };
     const world2 = createWorld(10, 10);
     world2.tick = MIDNIGHT;
-    const aggressiveNocturnal = predator({ x: 8, y: 5 }, 0.9, { activityPattern: "nocturnal", disposition: aggressive });
+    const aggressiveNocturnal = predator({ x: 8, y: 5 }, 0.92, { activityPattern: "nocturnal", disposition: aggressive });
     world2.agents.push(prey({ x: 5, y: 5 }), aggressiveNocturnal);
     applyPredationInstincts(world2, aggressiveNocturnal, RULES);
-    expect(aggressiveNocturnal.behavior).toBe("hunt"); // 0.9 < 0.95, but not < 0.75 (activity alone) or < 0.8 (aggression alone)
+    expect(aggressiveNocturnal.behavior).toBe("hunt"); // 0.92 < 1.04, but not < 1.0 (activity alone) or < 0.89 (aggression alone)
 
-    // Aggression alone (no activityPattern) does NOT reach 0.9 hunger.
+    // Aggression alone (no activityPattern) does NOT reach 0.92 hunger — its
+    // own threshold is 0.85 + 0.04 = 0.89.
     const world3 = createWorld(10, 10);
     world3.tick = MIDNIGHT;
-    const aggressiveOnly = predator({ x: 8, y: 5 }, 0.9, { disposition: aggressive });
+    const aggressiveOnly = predator({ x: 8, y: 5 }, 0.92, { disposition: aggressive });
     world3.agents.push(prey({ x: 5, y: 5 }), aggressiveOnly);
     applyPredationInstincts(world3, aggressiveOnly, RULES);
     expect(aggressiveOnly.behavior).not.toBe("hunt");
@@ -1103,7 +1118,7 @@ describe("multi-target/AoE resolution wired into real combat (resolveHit)", () =
     // The bystander fainted (not truly dead — FALLBACK_DAMAGE=1 exactly zeroes
     // hp: 1, which faints rather than kills outright), and the primary target
     // survived — so the hunter's own hunger should only have decayed
-    // naturally (~0.01), never jumped by KILL_HUNGER_RESTORE (0.6).
+    // naturally (~0.01), never jumped to a full-restore-on-kill.
     expect(hunter.needs.hunger).toBeLessThan(0.95);
   });
 });

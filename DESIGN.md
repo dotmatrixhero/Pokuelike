@@ -4175,6 +4175,61 @@ stages + AoE (both now shipped): a no-damage/status-move representation,
 since nothing in this sim today can be "used" without going through a
 damage roll — see MOVES_DESIGN.md's checklist for the up-to-date state.
 
+## Predators valued hunting too little relative to grazing
+
+Direct diagnosis from a real seed-42 run: a Squirtle boom (self-reinforcing
+cross-species-breeding snowball, see the "Breeding" section) went
+unchecked while Bulbasaur's own line shrank, and the underlying reason
+population dynamics like this go unchecked at all is the same pre-existing
+gap TODO.md already flagged: solo predators can self-feed on generic
+"food" tiles, so they rarely get hungry enough to bother hunting —
+predation stays rare and stochastic rather than a real population check.
+Direct ask, refined during discussion: predators should still be able to
+eat plants (no diet restriction), but a kill should be "a lot more
+incentive... keeps em sated... valued higher than eating plants."
+
+**Built**: two changes, both in `predation.ts`/`needs.ts`, no diet
+restriction added.
+
+1. `HUNT_HUNGER_THRESHOLD` raised from 0.6 to 0.85 (baseline, before
+   disposition/activity-pattern shifts) — well above `chooseBehavior`'s own
+   0.7 generic-seekFood cutoff. Since `applyPredationInstincts`'s hunt check
+   runs (and short-circuits) before ordinary needs-driven foraging ever gets
+   a turn, a predator this eager to hunt only ever falls back to plants once
+   genuinely hungry AND no huntable prey is currently detectable — exactly
+   "can still eat plants, but a kill is valued higher," with no separate
+   priority-ordering logic needed beyond the existing structure.
+2. A real kill now fully restores hunger to 1.0 and starts a
+   `digestingTicksRemaining` countdown (`Agent`'s own field,
+   `KILL_SATIATION_TICKS = 300`) during which hunger decays at only
+   `KILL_SATIATION_HUNGER_DECAY_MULTIPLIER` (0.1x) instead of its normal
+   rate — a real, lasting meal instead of a flat instant bump that wears off
+   like an ordinary graze. `decayNeeds` (needs.ts) gained a fourth
+   `hungerMultiplier` parameter for this, kept independent of the existing
+   `asleep` multiplier (an agent can digest without sleeping or vice versa)
+   and deliberately never touching thirst (eating doesn't quench thirst).
+
+**Confirmed in a real run** (seed 42, 2000 ticks): after `spearow-0` killed
+`diglett-0` at tick 84, it went straight to drinking water and then
+mate-seeking — no hunger-driven behavior at all for 159+ ticks before its
+next `hunt` transition — a genuinely extended post-kill quiet period, not
+just an instant number bump. Existing test suite's disposition/activity-
+pattern hunt-eagerness tests needed their hard-coded hunger values
+recalibrated against the new 0.85 baseline (several combinations of
+aggression+activity-pattern shifts now saturate near/above hunger's 0-1
+range at full aggression, where they had headroom under the old 0.6
+baseline) — expected fallout of a deliberate constant change, not a
+regression; see the updated comments in `predation.test.ts` for the new
+threshold arithmetic.
+
+**Not yet touched, deliberately**: migration. Herd-level scarcity/
+predator-pressure migration already exists (`herdMigration.ts`) but is
+documented as essentially never firing in the demo scenario because
+nothing creates real scarcity or real pressure. The plan is to check
+whether real hunting pressure (this fix) plus real population booms
+naturally starts triggering it before building anything new — not
+confirmed yet, a real run at larger scale is the next step.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

@@ -644,6 +644,15 @@ export interface Agent {
    * modules; here both happen in the same `tickAgentNeeds` call).
    */
   sleepTicks?: number;
+  /**
+   * Ticks remaining on a post-kill "digesting" hunger-decay slowdown — set
+   * by `predation.ts` on a real (not merely fainted) kill, ticked down and
+   * cleared in `tickAgentNeeds` (needs.ts). A big meal should actually last:
+   * see `KILL_SATIATION_TICKS`/`KILL_SATIATION_HUNGER_DECAY_MULTIPLIER` in
+   * needs.ts for the exact effect. Absent/0 = not currently digesting, the
+   * default.
+   */
+  digestingTicksRemaining?: number;
 }
 
 /**
