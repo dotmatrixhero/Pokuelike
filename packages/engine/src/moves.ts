@@ -1,4 +1,5 @@
 import type { Agent, Vec2 } from "./types.js";
+import type { Disposition } from "./nature.js";
 import type { PokemonType } from "./typing.js";
 
 /**
@@ -62,9 +63,10 @@ export interface MoveSpec {
    * Optional respec DAG (see `applyMoveTree`). Each node is a delta applied
    * on top of the base spec, gated by a point cost and prerequisite node
    * id(s). Absent = this move can't be respec'd (the common case — only
-   * moves with an actual designed tree, like Ember, carry one). Wild
-   * background agents never apply a tree — see predation.ts and DESIGN.md's
-   * explicit scope call.
+   * moves with an actual designed tree, like Ember, carry one). Wild agents
+   * auto-respec into an eligible, affordable node whenever they earn a
+   * skill point — see `maybeAutoRespec` (leveling.ts) and DESIGN.md's
+   * "Specialization" section.
    */
   tree?: Record<string, MoveTreeNode>;
 }
@@ -82,6 +84,16 @@ export interface MoveTreeNode {
   name: string;
   cost: number;
   prerequisites?: string[];
+  /**
+   * Which Disposition axis (nature.ts) this node appeals to, if any — used
+   * only by `maybeAutoRespec` (leveling.ts) to weight a wild agent's pick
+   * among several currently-affordable/eligible nodes on the same tree.
+   * Absent means the node has no particular behavioral lean (e.g. a pure
+   * numeric buff nobody would pick "because they're bold") and is weighted
+   * neutrally. This never gates eligibility or cost — it only nudges *which*
+   * eligible node an individual is more likely to grab first.
+   */
+  leaning?: keyof Disposition;
   delta: {
     shape?: MoveShape;
     range?: Partial<MoveRange>;
@@ -235,10 +247,9 @@ export function trySpendSkillPoints(agent: Agent, pointType: PokemonType, cost: 
  * the respec'd `MoveSpec` — deducting the currency — if that succeeds.
  * Throws (rather than silently no-op'ing) on insufficient points, same
  * failure style as `applyMoveTree`'s own prerequisite/unknown-node checks —
- * an invalid spend attempt is a caller bug to catch, not swallow. Per
- * DESIGN.md's explicit scope call, wild background agents never call this —
- * every predation/guardian/mob-fight call site keeps using the base
- * `MoveSpec` untouched.
+ * an invalid spend attempt is a caller bug to catch, not swallow. Called by
+ * `maybeAutoRespec` (leveling.ts) whenever a wild agent's disposition-weighted
+ * pick turns out to be affordable — see DESIGN.md's "Specialization" section.
  */
 export function applyMoveTreeWithSpend(base: MoveSpec, chosenNodeIds: string[], agent: Agent): MoveSpec {
   const cost = totalTreeCost(base, chosenNodeIds);

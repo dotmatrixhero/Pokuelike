@@ -32,6 +32,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) learned ${event.moveId} at level ${event.level}`;
     case "gainedSkillPoint":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) gained a ${event.pointType} skill point`;
+    case "moveRespecced":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) specced ${event.moveId} into ${event.nodeId}`;
     case "fainted":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) fainted at (${event.pos.x},${event.pos.y})`;
     case "recovered":

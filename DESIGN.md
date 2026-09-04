@@ -3148,6 +3148,86 @@ the trigger logic itself (every trigger, including the never-observed ones,
 is directly confirmed correct via unit tests that don't depend on the
 scenario's luck).
 
+## Specialization: nature-driven skill trees, actually spent
+
+Ember's respec tree (`wider_burn` -> `ring_of_fire`) existed for a while as a
+proof that `applyMoveTree`/`applyMoveTreeWithSpend` worked, but wild agents
+never actually spent the typed/wildcard skill points they were earning —
+that was an explicit, documented scope cut. This closes it: every move that
+carries a `tree` now gets genuinely respec'd by the wild agents that know it,
+and which node they pick is nudged by their individual Nature-derived
+Disposition, not left uniform-random.
+
+- **The trigger is a single choke point.** `grantSkillPoint` (leveling.ts) is
+  the one function that ever adds to `skillPoints`/`wildcardSkillPoints` — a
+  landed hit (`maybeGrantHitSkillPoint`) and the guaranteed-typed-plus-chance-
+  of-wildcard level-up grant both funnel through it. It now takes an optional
+  `LevelingContext` and, when given one, immediately calls `maybeAutoRespec`
+  after granting — a wild agent doesn't sit on points waiting for a player
+  who doesn't exist yet, it commits to a build as it goes, the same tick it
+  earns the point. Calling `grantSkillPoint` without a context (most direct
+  test call sites) still just grants, unchanged from before.
+- **`maybeAutoRespec` scans every known move for one commitment.** For each
+  id in `agent.knownMoves`, it resolves the pristine base `MoveSpec` via
+  `ctx.resolveMove` (never the agent's own possibly-already-respec'd copy —
+  see the bug note below) and, if that move has a `tree`, collects every node
+  whose prerequisites are already satisfied, that isn't already chosen, and
+  that the agent can currently afford (typed-of-the-move's-type + wildcard).
+  Candidates are pooled *across all of the agent's known moves* — a single
+  granted point can only ever fund one new commitment, even if it happens to
+  newly unlock eligible nodes on two different trees at once — and one is
+  picked via a disposition-weighted random draw.
+- **The weighting is a nudge, not a determination.** Each `MoveTreeNode` can
+  carry an optional `leaning: keyof Disposition` (`"boldness" | "aggression"
+  | "sociability"`). A candidate's draw weight is `0.15 + (the agent's value
+  on that axis, or 0.5 if the node has no leaning or the agent has no
+  disposition)` — so an unleaned node always competes at the neutral weight,
+  and a leaned node's odds scale with how strongly the individual actually
+  has that trait, never dropping to zero and never guaranteeing the pick.
+  Two agents with identical species, level, and points can still diverge.
+  Ember's two nodes are tagged as the first real content: `wider_burn`
+  (bigger burn chance, faster cooldown — presses the fight harder) leans
+  `"aggression"`; `ring_of_fire` (ring shape, less power, slower cooldown —
+  trades raw damage to hit several things around you without needing to
+  path in close) leans `"boldness"`.
+- **Commitments are permanent, and cost is paid incrementally.** Once picked,
+  `agent.moveTreeChoices[moveId]` only ever grows (no respec-back — a real
+  build choice, same framing as mainline nature/EV investment). The catch
+  this surfaced: `applyMoveTreeWithSpend` (moves.ts) was designed to be
+  called *once* with a move's *complete* final chosen-node list, charging the
+  sum of every node's cost in one shot — calling it repeatedly as the chosen
+  list grows one node at a time would re-charge the whole cumulative total on
+  every call. `maybeAutoRespec` instead spends only the newly-picked node's
+  own cost directly via `trySpendSkillPoints`, then recomputes the live
+  `MoveSpec` from scratch with the plain (non-spending) `applyMoveTree`
+  against the *pristine* base spec plus the full chosen list — so deltas
+  never stack on top of a stale intermediate respec.
+- **A real bug the integration check caught, not the unit tests.** The first
+  working version updated `agent.moves` by searching for an entry whose `id`
+  matched the `knownMoves` key that resolved to the tree (e.g. the dex key
+  `"EMBER"`), but a `MoveSpec`'s own `id` is frequently a different casing/
+  name entirely (`"ember"`, from `packages/data`'s curated `MOVES` table) —
+  the two are only guaranteed to agree by `LevelingContext.resolveMove`'s
+  lookup, not by string equality. Every unit test used a base spec with
+  `id === "ember"` for both the tree lookup key *and* the move's own id, so
+  they all still passed while the live move silently never actually updated.
+  A one-off script that pushed a real Charmander (via `ensureCombatProfile`)
+  through five `grantSkillPoint` calls and printed `agent.moves` before/after
+  is what actually showed Ember's shape/power/cooldown never changing.
+  Fixed by keying the `agent.moves` replacement off the *respec'd spec's own
+  `id`*, not the `knownMoves` entry that led to it. Lesson kept for later
+  work: a batch of new unit tests that all share the same happy-path fixture
+  naming can pass in lockstep around a real wiring bug; a from-scratch,
+  real-data integration check is what surfaced it here.
+- **Demo-world caveat.** The demo roster (`packages/data/src/scenario.ts`)
+  doesn't currently spawn any Charmander, so a real 5000-tick run of the demo
+  world logs plenty of `gainedSkillPoint` events but zero `moveRespecced`
+  ones — there's simply no agent alive that knows a move with a tree yet.
+  Confirmed working end-to-end via a standalone script instead (see above).
+  Once a species with a real tree-bearing move actually gets spawned into a
+  scenario, `moveRespecced` events should start showing up in the log for
+  free — no additional wiring needed.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays
@@ -3168,7 +3248,10 @@ scenario's luck).
 - Turn-based vs. real-time-with-pause for combat.
 - How herd cohesion/regrouping actually works (shared home range? leader
   agent? flocking forces?).
-- The move leveling/respec UI and how "build points" are earned and spent.
+- The move leveling/respec UI for a future player character — wild agents'
+  own earn/spend mechanism (skill points, disposition-weighted auto-respec)
+  is now real, see "Specialization" above; a player choosing manually is
+  still undecided.
 - The bonding "puzzle" mechanics per species beyond the shape described
   above (what the actual verbs/inputs are).
 - Save format, map generation, dungeon structure/progression.

@@ -402,7 +402,7 @@ function resolveHit(
         ).damage
       : FALLBACK_DAMAGE;
 
-  if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log);
+  if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log, ctx);
 
   // Every real hit against a herd member counts toward that herd's
   // predator-pressure trigger (herdMigration.ts) — the running-counter

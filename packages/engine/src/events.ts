@@ -137,6 +137,14 @@ export type SimEvent =
       pointType: PokemonType | "wildcard";
     }
   | {
+      kind: "moveRespecced";
+      tick: number;
+      agentId: string;
+      species: string;
+      moveId: string;
+      nodeId: string;
+    }
+  | {
       kind: "fainted";
       tick: number;
       agentId: string;

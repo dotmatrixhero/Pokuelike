@@ -272,6 +272,18 @@ export interface Agent {
   /** Untyped skill points that can fund any move's respec tree, regardless of type. */
   wildcardSkillPoints?: number;
   /**
+   * Permanent record of which tree nodes this agent has committed to on each
+   * known move, keyed by move id — e.g. `{ ember: ["wider_burn"] }`. Grown
+   * one node at a time by `maybeAutoRespec` (leveling.ts) whenever a skill
+   * point is granted and an eligible, affordable node exists; never
+   * reversed (no respec-back — a real, permanent build choice, same as
+   * mainline EV/nature investment). The move actually used in combat is
+   * recomputed from this list via `applyMoveTree` each time it changes, so
+   * `moves` always reflects the agent's current build, not just the dex
+   * base. See DESIGN.md's "Specialization" section.
+   */
+  moveTreeChoices?: Record<string, string[]>;
+  /**
    * Coarse "have I been here" tracking for the new-area exp trickle — sector
    * ids (e.g. "3,2" for a fixed-size grid bucket), not raw tiles, and capped
    * (oldest dropped) so this can't grow unboundedly over a long run. See

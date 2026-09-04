@@ -1,6 +1,7 @@
 import type { Agent, World } from "./types.js";
 import type { PokemonType } from "./typing.js";
-import type { MoveSpec } from "./moves.js";
+import type { MoveSpec, MoveTreeNode } from "./moves.js";
+import { applyMoveTree, trySpendSkillPoints } from "./moves.js";
 import type { BaseStats } from "./stats.js";
 import { calculateStats } from "./stats.js";
 import type { EventLog } from "./events.js";
@@ -189,8 +190,22 @@ export function markSpeciesEncountered(agent: Agent, species: string, world: Wor
   grantExp(world, agent, EXP_ON_NEW_SPECIES_ENCOUNTERED, ctx, log);
 }
 
-/** Grants one skill point (typed or wildcard) and logs it. */
-export function grantSkillPoint(agent: Agent, pointType: PokemonType | "wildcard", world: World, log?: EventLog): void {
+/**
+ * Grants one skill point (typed or wildcard) and logs it. When `ctx` is
+ * given (it needs `resolveMove` to get at pristine base `MoveSpec`s),
+ * immediately follows up with `maybeAutoRespec` — a wild agent doesn't
+ * hoard points waiting for a player to spend them, it commits to a build as
+ * it goes. Without `ctx` (most direct/test call sites), the point is
+ * granted but nothing is auto-spent, same as before this existed.
+ */
+export function grantSkillPoint(
+  agent: Agent,
+  pointType: PokemonType | "wildcard",
+  world: World,
+  log?: EventLog,
+  ctx?: LevelingContext,
+  rng: () => number = Math.random
+): void {
   if (pointType === "wildcard") {
     agent.wildcardSkillPoints = (agent.wildcardSkillPoints ?? 0) + 1;
   } else {
@@ -198,6 +213,7 @@ export function grantSkillPoint(agent: Agent, pointType: PokemonType | "wildcard
     agent.skillPoints[pointType] = (agent.skillPoints[pointType] ?? 0) + 1;
   }
   log?.record({ kind: "gainedSkillPoint", tick: world.tick, agentId: agent.id, species: agent.species, pointType });
+  if (ctx) maybeAutoRespec(agent, world, ctx, log, rng);
 }
 
 /** Rolls `SKILLPOINT_ON_HIT_CHANCE` for a landed hit of type `moveType` — call from combat/predation on a successful hit. */
@@ -206,9 +222,107 @@ export function maybeGrantHitSkillPoint(
   moveType: PokemonType,
   world: World,
   log?: EventLog,
+  ctx?: LevelingContext,
   rng: () => number = Math.random
 ): void {
-  if (rng() < SKILLPOINT_ON_HIT_CHANCE) grantSkillPoint(agent, moveType, world, log);
+  if (rng() < SKILLPOINT_ON_HIT_CHANCE) grantSkillPoint(agent, moveType, world, log, ctx, rng);
+}
+
+/**
+ * Called whenever `grantSkillPoint` fires with a `LevelingContext` in hand:
+ * scans every move this agent knows for a respec tree with at least one
+ * eligible (prerequisites already chosen, not itself already chosen) node
+ * it can currently afford, and — if any exist, possibly across several of
+ * the agent's known moves at once — commits to exactly one, spending its
+ * cost. Never more than one new commitment per call, even if the point that
+ * triggered this happened to newly unlock candidates on multiple trees.
+ *
+ * The pick is disposition-weighted, not disposition-determined: each
+ * candidate's weight is `0.15 + (agent.disposition's value on the node's
+ * `leaning` axis, or 0.5 if the node has no leaning or the agent has no
+ * disposition)`. A highly aggressive individual is *more likely*, not
+ * guaranteed, to grab an aggression-leaning node over one competing for the
+ * same point — two agents with identical species/level/points can still
+ * diverge, same as mainline nature never fully determining a build. See
+ * DESIGN.md's "Specialization" section.
+ *
+ * A commitment is permanent — this only ever appends to
+ * `agent.moveTreeChoices[moveId]`, never removes from it (no respec-back).
+ * The move's live `MoveSpec` in `agent.moves` is recomputed from
+ * `ctx.resolveMove`'s pristine base plus the *full* chosen list every time
+ * (via `applyMoveTree`, not the total-cost-charging `applyMoveTreeWithSpend`
+ * — the cost here is paid incrementally, one node at a time, via
+ * `trySpendSkillPoints` directly), so deltas never stack on top of deltas
+ * from a stale intermediate spec.
+ */
+export function maybeAutoRespec(
+  agent: Agent,
+  world: World,
+  ctx: LevelingContext,
+  log?: EventLog,
+  rng: () => number = Math.random
+): void {
+  interface Candidate {
+    moveId: string;
+    base: MoveSpec;
+    node: MoveTreeNode;
+    chosen: string[];
+  }
+  const candidates: Candidate[] = [];
+
+  for (const moveId of agent.knownMoves ?? []) {
+    const base = ctx.resolveMove(moveId);
+    if (!base?.tree) continue;
+    const chosen = agent.moveTreeChoices?.[moveId] ?? [];
+    const chosenSet = new Set(chosen);
+    const typed = agent.skillPoints?.[base.type] ?? 0;
+    const wildcard = agent.wildcardSkillPoints ?? 0;
+    for (const node of Object.values(base.tree)) {
+      if (chosenSet.has(node.id)) continue;
+      if (!(node.prerequisites ?? []).every((prereq) => chosenSet.has(prereq))) continue;
+      if (node.cost > typed + wildcard) continue;
+      candidates.push({ moveId, base, node, chosen });
+    }
+  }
+  if (candidates.length === 0) return;
+
+  const weights = candidates.map((c) => 0.15 + (c.node.leaning ? agent.disposition?.[c.node.leaning] ?? 0.5 : 0.5));
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  let roll = rng() * total;
+  let picked = candidates[candidates.length - 1];
+  for (let i = 0; i < candidates.length; i++) {
+    roll -= weights[i];
+    if (roll <= 0) {
+      picked = candidates[i];
+      break;
+    }
+  }
+
+  if (!trySpendSkillPoints(agent, picked.base.type, picked.node.cost)) return; // already filtered as affordable above; guards against a caller bug rather than a real race
+
+  const nextChosen = [...picked.chosen, picked.node.id];
+  agent.moveTreeChoices = agent.moveTreeChoices ?? {};
+  agent.moveTreeChoices[picked.moveId] = nextChosen;
+
+  const respecced = applyMoveTree(picked.base, nextChosen);
+  agent.moves = agent.moves ?? [];
+  // Keyed by `respecced.id` (the `MoveSpec`'s own id, e.g. "ember"), not
+  // `picked.moveId` (the `knownMoves` entry that resolved to this base spec,
+  // e.g. the dex key "EMBER") — those two are frequently different casings/
+  // names for the same move (see `LevelingContext.resolveMove`), and
+  // `agent.moves` is always keyed by the former.
+  const idx = agent.moves.findIndex((m) => m.id === respecced.id);
+  if (idx >= 0) agent.moves[idx] = respecced;
+  else agent.moves.push(respecced);
+
+  log?.record({
+    kind: "moveRespecced",
+    tick: world.tick,
+    agentId: agent.id,
+    species: agent.species,
+    moveId: picked.moveId,
+    nodeId: picked.node.id,
+  });
 }
 
 /**
@@ -316,8 +430,8 @@ export function grantExp(world: World, agent: Agent, amount: number, ctx?: Level
     }
 
     const primaryType = agent.types?.[0];
-    if (primaryType) grantSkillPoint(agent, primaryType, world, log);
-    if (Math.random() < SKILLPOINT_LEVELUP_WILDCARD_CHANCE) grantSkillPoint(agent, "wildcard", world, log);
+    if (primaryType) grantSkillPoint(agent, primaryType, world, log, ctx);
+    if (Math.random() < SKILLPOINT_LEVELUP_WILDCARD_CHANCE) grantSkillPoint(agent, "wildcard", world, log, ctx);
 
     const levelAfterUp = agent.level;
     const evo = profile.evolutions.find((e) => levelAfterUp >= e.level);
