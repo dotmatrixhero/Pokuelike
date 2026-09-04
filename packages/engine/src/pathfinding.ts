@@ -1,6 +1,7 @@
 import type { Agent, Layer, Vec2, World } from "./types.js";
 import { tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
+import { canEnterTile } from "./occupancy.js";
 
 /**
  * Fixed neighbor visit order for BFS — deterministic regardless of any
@@ -41,10 +42,25 @@ function key(pos: Vec2): string {
  * this function — safe to call from anywhere without touching `world.rng`
  * or otherwise affecting the seeded-replay guarantee (see DESIGN.md's
  * "Determinism" section).
+ *
+ * `mover`, when given, treats a tile at capacity (`occupancy.ts`'s
+ * `canEnterTile`) as impassable for this search too — a full tile "routes
+ * around, same as an obstacle" per direct instruction, applied uniformly to
+ * every tile BFS would step onto, `to` included. That last part is a
+ * deliberate scope call: if `to` itself is currently at capacity, this
+ * returns `undefined` (unreachable right now) rather than finding a route to
+ * some tile adjacent to it — needs.ts's blocked-resource handling treats
+ * that `undefined` as "can't make progress toward this target right now"
+ * and reacts (waits out a grace period, then tries a different resource
+ * tile), which in practice still reads as "stopped near the resource" for
+ * the common case (an agent that had been closing in over many prior ticks,
+ * only blocked in the final stretch once other agents got there first) —
+ * see DESIGN.md's "Tile capacity" section for the real-run read on this.
  */
-export function findPath(world: World, layer: Layer, from: Vec2, to: Vec2): Vec2[] | undefined {
+export function findPath(world: World, layer: Layer, from: Vec2, to: Vec2, mover?: Agent): Vec2[] | undefined {
   if (from.x === to.x && from.y === to.y) return [];
   if (!tileAt(world, layer, to.x, to.y)?.walkable) return undefined;
+  if (mover && !canEnterTile(world, mover, layer, to)) return undefined;
 
   const startKey = key(from);
   const cameFrom = new Map<string, Vec2>();
@@ -63,6 +79,10 @@ export function findPath(world: World, layer: Layer, from: Vec2, to: Vec2): Vec2
       const nextKey = key(next);
       if (visited.has(nextKey)) continue;
       if (!tileAt(world, layer, next.x, next.y)?.walkable) continue;
+      // `to` was already capacity-checked above (the early-return guard);
+      // re-checking it here would be redundant, not wrong, but this keeps
+      // the capacity check scoped to intermediate tiles being expanded.
+      if (mover && !(next.x === to.x && next.y === to.y) && !canEnterTile(world, mover, layer, next)) continue;
       visited.add(nextKey);
       cameFrom.set(nextKey, current);
       if (next.x === to.x && next.y === to.y) {
@@ -114,7 +134,7 @@ export function stepAlongPath(world: World, agent: Agent, target: Vec2): Vec2 {
 
   let steps = targetMatches ? cache!.steps : undefined;
   if (!steps || steps.length === 0) {
-    steps = findPath(world, agent.layer, agent.pos, target);
+    steps = findPath(world, agent.layer, agent.pos, target, agent);
     if (!steps || steps.length === 0) {
       agent.pathCache = undefined;
       return agent.pos;
@@ -122,10 +142,11 @@ export function stepAlongPath(world: World, agent: Agent, target: Vec2): Vec2 {
   }
 
   let next = steps[0]!;
-  if (!tileAt(world, agent.layer, next.x, next.y)?.walkable) {
-    // Defensive: the cached next step is no longer walkable (a tile changed
-    // state mid-walk). Recompute fresh rather than walking into a wall.
-    const fresh = findPath(world, agent.layer, agent.pos, target);
+  if (!tileAt(world, agent.layer, next.x, next.y)?.walkable || !canEnterTile(world, agent, agent.layer, next)) {
+    // Defensive: the cached next step is no longer walkable, OR (far more
+    // common now — crowding shifts tick to tick) no longer has room.
+    // Recompute fresh rather than walking into a wall or a full tile.
+    const fresh = findPath(world, agent.layer, agent.pos, target, agent);
     if (!fresh || fresh.length === 0) {
       agent.pathCache = undefined;
       return agent.pos;
@@ -222,6 +243,20 @@ const PURSUIT_CLOSE_RECOMPUTE_RADIUS = 3;
  * it just won't `targetId`-match whatever (if anything) is pursued next.
  */
 export function stepTowardMovingTarget(world: World, agent: Agent, target: Agent): Vec2 {
+  // Deliberately capacity-BLIND (no `mover` threaded to `findPath`/
+  // `stepToward` here), unlike `stepAlongPath` above — real-run finding
+  // (see DESIGN.md's "Tile capacity" section): a hunt/mate pursuit only
+  // ever needs to reach *adjacency* to its target, never to physically
+  // stand on the target's own tile, so gating this on tile capacity gained
+  // nothing but a real, measured cost — a pursuer's route to a target
+  // standing amid a normal herd cluster (a live-agent tile easily at or
+  // near capacity just from the herd itself) would go through `findPath`'s
+  // early "`to` is blocked" check and come back `undefined`, misreading
+  // ordinary herd density as "unreachable." A 3000-tick real run showed
+  // this tanking births by up to ~90% on one seed (225 -> 21) with the gate
+  // on; reverting just this function back to its pre-feature capacity-blind
+  // behavior restored normal hunt/mate-seeking while `stepAlongPath`'s
+  // consumption-gate (the part the feature is actually about) stays intact.
   const cache = agent.pathCache;
   const sameTarget = !!cache && cache.layer === agent.layer && cache.targetId === target.id;
   const drifted = sameTarget && manhattanDistance(cache!.target, target.pos) >= PURSUIT_RECOMPUTE_DRIFT_TILES;

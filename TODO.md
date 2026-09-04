@@ -1643,3 +1643,55 @@ not something this pathfinding pass itself caused or is positioned to fix.
       is addressed, so a real long-run validation (and a real check of
       whether the residual water-body edge case above ever actually bites)
       becomes practical.
+
+## Tile capacity (weight/headcount limit per tile)
+
+- [x] Hard per-tile capacity, direct ask: surface uses a weight-based rule
+      (`TILE_WEIGHT_CAPACITY = 90`, ~3 real average-weight agents, reusing
+      `support.ts`'s `bodyWeightOf` convention), underground/canopy use a
+      flat `FLAT_TILE_HEADCOUNT_CAP = 5` headcount instead (mid-implementation
+      clarification), both with an "empty tile always admits at least one"
+      floor. New `packages/engine/src/occupancy.ts`, following
+      `herdIndex.ts`'s exact per-tick cache shape.
+- [x] Capacity composes with movement/pathfinding — a full tile "routes
+      around, same as an obstacle" — but SCOPED to seekWater/seekFood
+      (`stepAlongPath`) and exploration wandering only, not hunt/mate
+      pursuit, herding, dispersal, migration, herd support, or forced
+      movement. See DESIGN.md's "real-run finding that narrowed this scope"
+      — capacity-gating those too caused a real, measured population
+      regression (up to ~83% on one seed) with zero starvation deaths,
+      traced to hunt/mate pursuit misreading ordinary herd density as
+      "unreachable."
+- [x] Blocked-resource AI: waits `BLOCKED_RESOURCE_GRACE_TICKS` (25) ticks
+      near a crowded target, then excludes it and tries the next-nearest
+      tile of the same terrain, with a fast-track safety valve into the
+      existing `migrate()` escape hatch once every nearby known tile is
+      excluded — prevents infinite oscillation between mutually-crowded
+      tiles (tested directly). Along the way, fixed a real, initially-missed
+      bug: `findLayerWithTerrain` (the underground<->surface water-sharing
+      cross-layer check) wasn't threading the exclusion list, letting an
+      agent ping-pong layers forever re-discovering the very tile it just
+      excluded — caught by the oscillation test, not theorized in advance.
+- [x] Real 3000-tick, 3-seed validation (42/7/20260903): zero starvation
+      deaths on all three, real contention (max 7-9 simultaneous occupants
+      on one seed's tiles, up to ~2 avg per occupied tile), and real
+      waiting confirmed (`resourceWaitTicks`:`resourceBlockedFallbackCount`
+      ratios of ~48:1 to ~105:1 — agents mostly wait out contention rather
+      than instantly relocating).
+- [ ] **Honestly-flagged, not chased down further this pass:** seed
+      20260903's population dropped much more (249 -> 42, -83%) than its
+      own contention numbers would predict (that seed had the LOWEST
+      contention of the three: only 3 blocked-fallback events, max 2
+      simultaneous occupants). Zero deaths, healthy sampled hunger/thirst
+      throughout — this reads as this sim's already-documented chaotic
+      seed-sensitivity (a small deterministic tick-order change cascading
+      into a large population difference on a seed already flagged
+      elsewhere in this file as stubborn/low-growth-prone), not a
+      capacity-crowding bug, but pinning that down for certain would need
+      its own dedicated event-by-event A/B isolation pass.
+- [ ] Underground/canopy's flat headcount cap is unit-tested directly but
+      never actually exercised by a real run — neither layer's current
+      world generation places its own water/food terrain there (underground
+      shares the surface's via the existing redirect; canopy has none at
+      all), so real contention on those two layers stays unobserved until
+      that changes.

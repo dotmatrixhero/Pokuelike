@@ -388,6 +388,102 @@ describe("tickAgentNeeds: local weather composes with thirst decay through a rea
   });
 });
 
+describe("tile-capacity: blocked-resource fallback", () => {
+  // 3 rows tall (not 1) in every test below — a real route around a crowded
+  // tile needs to actually exist. A single-row world would force every path
+  // straight through the crowded tile, which is a dead end, not the "blocked
+  // resource with a way around" scenario this feature targets.
+
+  it("waits near a crowded target rather than instantly bailing on it", () => {
+    const world = createWorld(10, 3);
+    setTile(world, "surface", 2, 1, "water");
+    setTile(world, "surface", 8, 1, "water");
+    // Crowd the nearer tile (x=2,y=1) to capacity — three 30-weight
+    // occupants at the 90 capacity ceiling.
+    world.agents = [
+      makeAgent({ id: "c1", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c2", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c3", pos: { x: 2, y: 1 }, maxHp: 30 }),
+    ];
+    const agent = makeAgent({ id: "thirsty", pos: { x: 0, y: 1 }, maxHp: 30, needs: createNeeds({ thirst: 0.1 }) });
+    world.agents.push(agent);
+
+    for (let i = 0; i < 10; i++) tickAgentAction(world, agent);
+
+    // Still hasn't drunk (never got a slot on the crowded tile) and hasn't
+    // given up on it yet either (grace period not exhausted).
+    expect(agent.needs.thirst).toBeCloseTo(0.1, 5);
+    expect(agent.blockedResourceTiles ?? []).toHaveLength(0);
+    expect(world.resourceBlockedFallbackCount ?? 0).toBe(0);
+  });
+
+  it("gives up on a persistently crowded tile after its grace period and tries a different one", () => {
+    const world = createWorld(10, 3);
+    setTile(world, "surface", 2, 1, "water");
+    setTile(world, "surface", 8, 1, "water");
+    world.agents = [
+      makeAgent({ id: "c1", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c2", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c3", pos: { x: 2, y: 1 }, maxHp: 30 }),
+    ];
+    const agent = makeAgent({ id: "thirsty", pos: { x: 0, y: 1 }, maxHp: 30, needs: createNeeds({ thirst: 0.1 }) });
+    world.agents.push(agent);
+
+    // Run exactly past the grace period (25 ticks) — one tick past where the
+    // fallback should have just fired, before it's had time to also walk all
+    // the way to and drink from the alternate.
+    for (let i = 0; i < 25; i++) {
+      tickAgentAction(world, agent);
+      if (agent.needs.thirst < 0.1) agent.needs.thirst = 0.1;
+    }
+
+    expect(world.resourceBlockedFallbackCount ?? 0).toBeGreaterThanOrEqual(1);
+    expect(agent.blockedResourceTiles?.some((p) => p.x === 2 && p.y === 1)).toBe(true);
+
+    // Now let it actually walk to and drink from the alternate (x=8,y=1),
+    // which isn't crowded — confirms the fallback produces a real, working
+    // target, not just a memory entry.
+    for (let i = 0; i < 30; i++) {
+      tickAgentAction(world, agent);
+      if (agent.needs.thirst < 0.1) agent.needs.thirst = 0.1;
+      if (agent.needs.thirst > 0.1) break;
+    }
+    expect(agent.needs.thirst).toBeGreaterThan(0.1);
+  });
+
+  it("does not infinite-loop between two mutually-crowded tiles — eventually relocates instead of oscillating forever", () => {
+    const world = createWorld(10, 3);
+    setTile(world, "surface", 2, 1, "water");
+    setTile(world, "surface", 8, 1, "water");
+    // Crowd BOTH tiles to capacity.
+    world.agents = [
+      makeAgent({ id: "c1", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c2", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c3", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c4", pos: { x: 8, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c5", pos: { x: 8, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c6", pos: { x: 8, y: 1 }, maxHp: 30 }),
+    ];
+    const agent = makeAgent({ id: "thirsty", pos: { x: 0, y: 1 }, maxHp: 30, needs: createNeeds({ thirst: 0.1 }) });
+    world.agents.push(agent);
+
+    let sawRelocate = false;
+    for (let i = 0; i < 300; i++) {
+      tickAgentAction(world, agent);
+      agent.needs.thirst = Math.max(agent.needs.thirst, 0.1); // isolate from starvation/death
+      if (agent.behavior === "relocate") {
+        sawRelocate = true;
+        break;
+      }
+    }
+
+    // With both known water tiles perpetually full, the agent must eventually
+    // fall through to the existing, already-tested relocate/migrate escape
+    // valve rather than bouncing between the two forever.
+    expect(sawRelocate).toBe(true);
+  });
+});
+
 describe("migration on unreachable resources", () => {
   it("an agent that can never find food eventually migrates instead of standing still forever", () => {
     const world = createWorld(30, 30); // no food anywhere on any layer

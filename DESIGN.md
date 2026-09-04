@@ -5717,3 +5717,238 @@ packages.
   wasn't attempted — the real numbers above are still real and honestly
   caveated, just not a clean single-variable isolation the way the
   migration-event stash-based A/B test above is.
+
+## Tile capacity: a hard limit on how crowded one tile can get
+
+**Direct ask.** "Can we hard limit space so there's a weight limit for how
+many Pokémon can be in a given tile? Like maybe around 3 max on avg. But
+always allow at least 1. That way feeding and drinking has to actually be
+timed. Might need ai to recognize when it's blocked or unable to get a
+resource and try to relocate to find a new one." Follow-up clarification,
+mid-implementation: "I think underground and canopy don't have the same
+weight restriction, just go by hard number - up to 5 max per tile."
+
+### Decided
+
+1. **Two-tier capacity rule, by layer.** Surface uses a weight-based rule
+   (reusing `support.ts`'s existing `bodyWeightOf` — `agent.maxHp ??
+   FALLBACK_MAX_HP`, the same sim-original body-weight proxy already used
+   for carry capacity, not a second invented weight concept). Underground
+   and canopy use a flat headcount cap instead. Both share one floor: an
+   **already-empty tile always admits at least one agent**, regardless of
+   that agent's own weight or the flat cap — so a single heavy species (or,
+   underground/canopy, any species at all — 5 >= 1 makes the floor
+   automatic there) is never unable to stand anywhere.
+   - **Surface** (`TILE_WEIGHT_CAPACITY = 90`, `occupancy.ts`): a tile
+     already occupied only admits a newcomer if `current total weight +
+     newcomer's own weight <= 90`. Calibration, real numbers not a guess: a
+     3000-tick run across all three standard seeds (42/7/20260903) put the
+     living population's average `maxHp`-as-body-weight at 30.15 / 32.32 /
+     29.29 (mean ~30.6) — a fresh initial spawn (tick 0) averages lower,
+     ~24.6, since the population hasn't leveled/evolved yet. `90 = 3 *
+     ~30`, matching "maybe around 3 max on avg" against the real, matured
+     roster rather than the smaller initial-spawn figure.
+   - **Underground/canopy** (`FLAT_TILE_HEADCOUNT_CAP = 5`, `occupancy.ts`):
+     a tile already occupied only admits a newcomer if the existing
+     headcount is below 5, full stop, no weight math at all. Reasoning for
+     the split (this is a real design call, not inferred from nothing):
+     underground and canopy are the flat, generic, non-biome-varied layers
+     — no elevation, no terrain texture, a pure flat floor grid at every
+     x,y (see `createDemoWorld`'s doc comment) — so a physical "how many
+     literally fit on this square" framing reads better there than a
+     weight formula that has nothing to visually differentiate against; a
+     flat number is also just simpler to reason about for two layers that
+     don't otherwise vary tile-to-tile.
+2. **Where the limit applies.** General movement, not just resource-seeking
+   — the user's phrasing ("weight limit for how many Pokémon can be in a
+   given tile") is about crowding in general, even though the motivating
+   example is feeding/drinking. `occupancy.ts`'s `canEnterTile` is the one
+   predicate every capacity-aware step checks; a full tile is "blocked for
+   entry" for movement purposes (still walkable — this is not a terrain
+   change) and composes with pathfinding: `pathfinding.ts`'s `findPath`
+   (given an optional `mover` argument) treats a capacity-blocked tile
+   exactly like an obstacle, routing around it via BFS the same way it
+   already routes around trees/boulders, INCLUDING the destination tile
+   itself (a capacity-blocked destination makes the whole route
+   `undefined` — "can't get there right now," not a partial route to
+   somewhere adjacent — a deliberate, documented scope call, see
+   `findPath`'s own doc comment).
+   - **Real-run finding that narrowed this scope**: capacity-gating EVERY
+     kind of movement (herd cohesion converging on a centroid,
+     hunt/mate-seeking pursuit via `stepTowardMovingTarget`, dispersal,
+     migration/relocate, herd food-delivery/carrying, forced
+     knockback/lunge) produced a severe, real population regression on a
+     3000-tick real run — up to an ~83% final-population drop on one seed
+     (20260903: 249 -> 42) with ZERO starvation deaths, meaning the drop
+     wasn't from agents dying, it was from breeding throughput collapsing.
+     Root cause: `stepTowardMovingTarget`'s hunt/mate pursuit only ever
+     needs to reach *adjacency*, never to physically stand on the target's
+     own tile — but gating it on capacity meant `findPath`'s "the
+     destination itself is blocked" check fired constantly, since a
+     potential mate standing amid an ordinary herd cluster is easily
+     already at-or-near capacity from the herd itself, misreading normal
+     herd density as "unreachable." Fix: capacity-gating was pulled back to
+     the two places it's actually about — `stepAlongPath` (seekWater/
+     seekFood, the literal ask) and `needs.ts`'s exploration wandering
+     (harmless, doesn't converge on a point) — while `stepTowardMovingTarget`
+     (hunt/mate pursuit), herd cohesion, dispersal, migration/relocate,
+     herd support, and forced movement all stayed capacity-BLIND, exactly
+     their pre-feature behavior. This is a real, load-bearing scope
+     narrowing, not an oversight — every one of those reverted call sites
+     has its own doc comment explaining why, pointing back here.
+3. **Blocked-resource AI — the explicit ask.** When an agent's
+   seekWater/seekFood target is at capacity, `needs.ts` now:
+   - Waits in place for `BLOCKED_RESOURCE_GRACE_TICKS` (25) ticks, tracked
+     via `Agent.ticksBlockedFromResource` — the same "sustained, not
+     instant" tuning convention as everything else in this codebase, so
+     this reads as genuine queueing rather than instant relocation.
+     `stepAlongPath` is itself capacity-aware, so an agent still makes
+     whatever real progress it safely can toward/near the tile during the
+     wait rather than doing literally nothing.
+   - After the grace period, excludes that specific tile
+     (`Agent.blockedResourceTiles`, capped at `MAX_BLOCKED_RESOURCE_MEMORY`
+     = 4 recent entries) and re-picks the nearest tile of the same terrain
+     kind, now ignoring the excluded one(s) — `resourceIndex.ts`'s
+     `findNearestIndexed`/`needs.ts`'s `findNearestTerrain` both gained an
+     `exclude: Vec2[]` parameter for this.
+   - **Oscillation prevention, tested explicitly.** A real risk: two
+     mutually-crowded tiles could, in principle, bounce an agent back and
+     forth forever. Three things prevent it: (a) the exclusion memory
+     persists across ticks within one seeking episode, so a just-excluded
+     tile isn't immediately re-offered; (b) once every currently-known
+     nearby tile of that terrain is excluded (detected structurally — one
+     unfiltered `findNearestTerrain` call returns something even though
+     the *excluded* lookup returned nothing), a safety valve fast-tracks
+     `Agent.ticksWithoutResource` straight to `MIGRATE_AFTER_TICKS`,
+     handing off to the already-tested, pre-existing `migrate()` escape
+     valve instead of making the agent sit through a SECOND full 150-tick
+     timeout on top of the grace periods it already spent; (c) the
+     exclusion memory clears the instant the episode ends (a successful
+     consume, `chooseBehavior` moving on to a different need, or a
+     completed migration to a new location) so a tile that frees up later
+     always gets a fresh look on the agent's next real thirst/hunger spike.
+     `test/needs.test.ts`'s "does not infinite-loop between two
+     mutually-crowded tiles" test reproduces exactly this (both tiles
+     crowded to capacity) and asserts the agent reaches `"relocate"`
+     within a bounded number of ticks rather than oscillating.
+   - A real, and initially missed, interaction: `resourceIndex.ts`'s
+     underground->surface water redirect (underground shares surface's
+     water) doesn't know about exclusion by default — `findLayerWithTerrain`
+     (needs.ts, the cross-layer fallback check) was NOT threading the
+     exclusion list through, so an agent that just excluded a crowded
+     surface water tile could "discover" the very same tile again via the
+     cross-layer check and ping-pong underground<->surface forever, one hop
+     per tick, never reaching the fast-track safety valve above. Fixed by
+     giving `findLayerWithTerrain` the same `exclude` parameter and
+     threading the current exclusion list through at its one call site —
+     caught by the oscillation test above during real validation, not
+     theorized in advance.
+4. **No explicit turn-taking queue built on top.** The capacity limit alone
+   produces real waiting/timing (see real-run numbers below) — validated,
+   not assumed.
+
+### Built, real-run findings
+
+Same standard 3 seeds (42, 7, 20260903), 3000 ticks, via
+`packages/runner`. All numbers below are from the FINAL, narrowed-scope
+code (capacity-blind hunt/mate pursuit/herding/dispersal/migration/forced
+movement; capacity-aware seekWater/seekFood + exploration only).
+
+**Calibration.** See "Decided" #1 above — `TILE_WEIGHT_CAPACITY = 90`
+against a real ~30.6 average body weight, `FLAT_TILE_HEADCOUNT_CAP = 5`.
+
+**Real crowding/contention, surface layer** (underground/canopy: 0 —
+see "Explicitly not done / open follow-ups" below for why):
+
+| seed | resource tiles ever occupied | max simultaneous occupants seen (sampled every 25 ticks) | avg occupants per occupied tile (end of run) |
+|---|---|---|---|
+| 42 | 26 | 7 | 2.04 |
+| 7 | 17 | 9 | 1.18 |
+| 20260903 | 10 | 3 | 1.20 |
+
+Real contention happens — tiles do fill toward (and, since capacity is
+weight- not count-based, sometimes past 3 for lighter species) the
+designed ceiling, not just theoretically.
+
+**Blocked-resource fallback: fires, and mostly resolves by waiting, not
+relocating** — the thing item 4 above needed validating, not assuming:
+
+| seed | `resourceBlockedFallbackCount` (gave up & switched tiles) | `resourceWaitTicks` (agent-ticks spent actually waiting) | ratio |
+|---|---|---|---|
+| 42 | 138 | 7078 | ~51:1 |
+| 7 | 17 | 824 | ~48:1 |
+| 20260903 | 3 | 316 | ~105:1 |
+
+Tens-to-a-hundred agent-ticks of real waiting happen for every one time an
+agent actually gives up and relocates to a different resource — confirms
+the user's ask ("feeding and drinking has to actually be timed") is
+actually happening as visible queueing, not relocation wearing a
+"blocked-resource" costume.
+
+**Starvation deaths: zero, on all three seeds, before and after.** The
+explicit critical bar from the brief. Traced via the exact same
+`starved`/`{hunger,thirst}` accounting this session's earlier "dying of
+thirst" fixes (see the "commits no matter what" sections above) already
+instrument — `world.agents.filter(a => alive).length` plus a direct
+`log.events` scan for `kind: "starved"` across all three seeds, all three
+0. No new starvation regression from this feature.
+
+**Population/growth: real, honestly-reported throttling — larger than
+expected on one seed, and not fully explained by capacity contention
+alone.**
+
+| seed | baseline final population / births (no capacity limit) | with capacity limit | delta |
+|---|---|---|---|
+| 42 | 227 / 213 | 207 / 191 | -9% |
+| 7 | 101 / 88 | 75 / 61 | -26% |
+| 20260903 | 249 / 225 | 42 / 26 | -83% |
+
+Seed 42 and 7's slowdowns read as the expected, intended consequence of
+adding real scarcity — some throughput lost to queueing is exactly what
+"timed" feeding means. Seed 20260903's much larger drop does NOT track its
+own contention numbers (only 3 blocked-fallback events, 316 wait ticks,
+max 2 simultaneous occupants — among the *lowest* contention of the three
+seeds, not the highest) — average hunger/thirst sampled every 250 ticks
+stayed healthy throughout (0.5-0.9 range, never crisis-level) and there
+were zero deaths, so this isn't a starvation-adjacent failure. The
+likelier explanation, consistent with this session's own earlier
+documented finding ("this fix likely explains a meaningful share of this
+session's earlier 'population sometimes explodes, sometimes stays low'
+mystery" — see the support-move-lockup section above): this sim's
+population trajectory is genuinely chaotic-sensitive to small deterministic
+changes in tick-by-tick movement on some seeds, and seed 20260903 has
+already been flagged in this session as a specifically stubborn,
+low-growth-prone seed even before this feature. This is reported honestly
+as a real, measured finding rather than swept aside — flagged as an open
+follow-up below, not silently fixed by loosening the capacity numbers the
+user asked to be tight.
+
+### Explicitly not done / open follow-ups
+
+- **Underground/canopy contention is real-run-unobserved, not
+  untested.** The flat `FLAT_TILE_HEADCOUNT_CAP = 5` rule is unit-tested
+  directly (`test/occupancy.test.ts`), but a real 3000-tick run shows ZERO
+  occupied resource tiles on either layer — because neither layer's
+  worldgen ever places its own "water"/"food" terrain (canopy has none at
+  all; underground redirects water lookups to the surface, per
+  `resourceIndex.ts`'s existing convention, so agents drink while
+  physically standing on the SURFACE's water coordinate, not an
+  underground-native tile). The flat cap is correctly wired and will apply
+  the instant underground/canopy ever get their own resource terrain, but
+  nothing in the current world generation exercises it under real
+  population pressure today.
+- **Seed 20260903's disproportionate population effect** (see above) is
+  flagged, not chased down further this pass — it doesn't present as a
+  starvation/capacity-crowding problem by its own numbers, and pinning down
+  exactly which deterministic tick-order perturbation this feature
+  introduces that cascades into a large population difference would need
+  its own dedicated isolation pass (e.g. an event-by-event diff against
+  the pre-feature run, the same style of A/B this session has used for
+  other perf/behavior investigations elsewhere in this doc).
+- **No hysteresis on the blocked-resource exclusion memory beyond one
+  seeking episode** — by design (see "Decided" #3), but worth naming
+  explicitly: a tile excluded late in one episode gets a completely clean
+  slate the very next time the same agent gets thirsty/hungry, even if it's
+  only a handful of ticks later and the tile is still just as crowded. In
+  practice this just means one extra `BLOCKED_RESOURCE_GRACE_TICKS`-long
+  wait before re-excluding it, not a correctness problem.

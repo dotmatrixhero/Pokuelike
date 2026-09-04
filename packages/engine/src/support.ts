@@ -86,7 +86,15 @@ function isFedAndWatered(agent: Agent): boolean {
   return agent.needs.hunger >= FED_THRESHOLD && agent.needs.thirst >= FED_THRESHOLD;
 }
 
-function bodyWeightOf(agent: Agent): number {
+/**
+ * Exported (previously module-private) so `occupancy.ts`'s tile-capacity
+ * rule can point back to this as the canonical "how much does this agent
+ * weigh" convention in its own doc comments — see that module's writeup for
+ * why it keeps a small local duplicate of this exact formula instead of
+ * importing it directly (a real import would close a circular-dependency
+ * loop through movement.ts).
+ */
+export function bodyWeightOf(agent: Agent): number {
   return agent.maxHp ?? FALLBACK_MAX_HP;
 }
 

@@ -95,6 +95,57 @@ describe("findPath", () => {
     const second = findPath(world, "surface", from, to);
     expect(second).toEqual(first);
   });
+
+  describe("capacity-aware (mover argument)", () => {
+    it("without a mover, a tile at capacity is still treated as passable (pre-existing, capacity-blind behavior)", () => {
+      const world = createWorld(10, 10);
+      const target = { x: 5, y: 0 };
+      world.agents = [
+        makeAgent({ id: "x", pos: target, maxHp: 30 }),
+        makeAgent({ id: "y", pos: target, maxHp: 30 }),
+        makeAgent({ id: "z", pos: target, maxHp: 30 }),
+      ];
+      expect(findPath(world, "surface", { x: 0, y: 0 }, target)).toBeDefined();
+    });
+
+    it("with a mover, returns undefined when the target tile itself is at capacity", () => {
+      const world = createWorld(10, 10);
+      const target = { x: 5, y: 0 };
+      world.agents = [
+        makeAgent({ id: "x", pos: target, maxHp: 30 }),
+        makeAgent({ id: "y", pos: target, maxHp: 30 }),
+        makeAgent({ id: "z", pos: target, maxHp: 30 }),
+      ];
+      const mover = makeAgent({ id: "mover", pos: { x: 0, y: 0 }, maxHp: 30 });
+      expect(findPath(world, "surface", mover.pos, target, mover)).toBeUndefined();
+    });
+
+    it("routes AROUND a full tile blocking the only straight route, same as a real obstacle", () => {
+      const world = createWorld(12, 12);
+      buildWallRow(world, 5, 0, 11);
+      setTile(world, "surface", 6, 5, "floor"); // the one gap in the wall
+      // Crowd the gap tile to capacity — a full tile should be routed around
+      // exactly like a wall, not treated as passable.
+      world.agents = [
+        makeAgent({ id: "x", pos: { x: 6, y: 5 }, maxHp: 30 }),
+        makeAgent({ id: "y", pos: { x: 6, y: 5 }, maxHp: 30 }),
+        makeAgent({ id: "z", pos: { x: 6, y: 5 }, maxHp: 30 }),
+      ];
+      const mover = makeAgent({ id: "mover", pos: { x: 5, y: 2 }, maxHp: 30 });
+      const to = { x: 5, y: 9 };
+
+      expect(findPath(world, "surface", mover.pos, to, mover)).toBeUndefined(); // the gap was the only route, and it's full
+    });
+
+    it("still admits the mover onto an EMPTY tile even if the mover alone would exceed weight capacity", () => {
+      const world = createWorld(10, 10);
+      const target = { x: 3, y: 0 };
+      const mover = makeAgent({ id: "mover", pos: { x: 0, y: 0 }, maxHp: 99999 });
+      const path = findPath(world, "surface", mover.pos, target, mover);
+      expect(path).toBeDefined();
+      expect(path![path!.length - 1]).toEqual(target);
+    });
+  });
 });
 
 describe("stepAlongPath", () => {

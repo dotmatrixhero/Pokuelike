@@ -317,6 +317,31 @@ export interface Agent {
   /** Ticks a non-predator has spent wanting food/water with none reachable anywhere — drives migrating away once too high. */
   ticksWithoutResource?: number;
   /**
+   * Consecutive ticks the current seekWater/seekFood target tile has been
+   * at tile capacity (occupancy.ts) and therefore unreachable — see
+   * needs.ts's blocked-resource handling. Resets to 0 the instant the
+   * tracked target has room again, is reached, or a new target is picked.
+   * Distinct from `ticksWithoutResource` (that one fires when NO resource
+   * tile exists/is reachable anywhere; this one fires when a real resource
+   * tile exists nearby but is currently too crowded to stand on).
+   */
+  ticksBlockedFromResource?: number;
+  /**
+   * Rolling memory of resource tiles (same terrain kind as the current
+   * seekWater/seekFood target) found crowded during the current seeking
+   * episode — excluded from the next nearest-tile pick once
+   * `ticksBlockedFromResource` crosses its grace period, so the agent tries
+   * a genuinely different tile instead of immediately re-targeting the one
+   * it just gave up on. Cleared whenever the episode ends (a successful
+   * consume, or `chooseBehavior` moves on to something else) so a tile's
+   * crowding is never remembered longer than the attempt that found it
+   * crowded — a tile that frees up later gets a clean fresh chance next
+   * time thirst/hunger drives an agent back to it. See needs.ts's
+   * "Blocked-resource fallback" section in DESIGN.md for the full
+   * oscillation-prevention reasoning.
+   */
+  blockedResourceTiles?: Vec2[];
+  /**
    * Speed-driven action-economy accumulator (see simulation.ts). Gains the
    * agent's real Speed stat every world tick; once it crosses
    * `ACTION_THRESHOLD` the agent takes one action and the threshold is
@@ -778,6 +803,30 @@ export interface World {
    * lookup. See TODO.md's "Performance ceiling for the cheap tier" note.
    */
   resourceVersion?: number;
+  /**
+   * Lifetime count of tile-capacity blocked-resource fallback firings (an
+   * agent's seekWater/seekFood target sat at capacity past its grace period
+   * and it switched to a different tile of the same terrain — see
+   * needs.ts's `BLOCKED_RESOURCE_GRACE_TICKS` handling). A plain counter
+   * rather than a `SimEvent`, deliberately: see needs.ts's own doc comment
+   * at the increment site for why (packages/web's exhaustive event-kind
+   * switch is off-limits this session). Purely observational — nothing in
+   * the engine reads this back, so it can't affect simulation behavior or
+   * determinism. Absent/0 = never fired.
+   */
+  resourceBlockedFallbackCount?: number;
+  /**
+   * Lifetime count of agent-ticks spent actually waiting on a crowded
+   * seekWater/seekFood target (whether or not that particular tick is the
+   * one where `BLOCKED_RESOURCE_GRACE_TICKS` runs out) — a much bigger
+   * number than `resourceBlockedFallbackCount` is the real-run signal that
+   * agents genuinely queue/wait near a contested resource rather than just
+   * instantly relocating to an alternate every time (see DESIGN.md's "Tile
+   * capacity" section). Same observational, non-`SimEvent` shape and
+   * reasoning as `resourceBlockedFallbackCount` — see needs.ts's increment
+   * site.
+   */
+  resourceWaitTicks?: number;
   /**
    * Per-herd migration state — see herdMigration.ts/DESIGN.md's "Herd-level
    * migration" section. Keyed by `herdId`, not present on every agent: a

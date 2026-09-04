@@ -23,6 +23,7 @@ import {
 } from "./leveling.js";
 import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
 import { findNearestIndexed } from "./resourceIndex.js";
+import { canEnterTile } from "./occupancy.js";
 import { thirstDecayMultiplier } from "./weather.js";
 import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
 
@@ -111,6 +112,41 @@ export function ageMortalityChance(age: number): number {
 }
 /** Ticks a non-predator can go wanting food/water with none reachable anywhere before it gives up and migrates. */
 const MIGRATE_AFTER_TICKS = 150;
+
+/**
+ * Tile capacity's "blocked-resource AI" — direct ask: "Might need ai to
+ * recognize when it's blocked or unable to get a resource and try to
+ * relocate to find a new one." How long an agent tolerates its current
+ * seekWater/seekFood target being at capacity (`occupancy.ts`) before
+ * giving up on THIS specific tile and trying a different one of the same
+ * terrain kind. Deliberately much shorter than `MIGRATE_AFTER_TICKS` (150,
+ * "no resource of this kind exists/is reachable ANYWHERE") — this is a much
+ * narrower, more common situation (a real resource sits right there,
+ * several tiles away or one hop away, just currently full), and per this
+ * codebase's established "sustained, not instant" tuning convention, a real
+ * short wait should read as genuine queueing/turn-taking (the user's
+ * explicit ask: "feeding and drinking has to actually be timed") before an
+ * agent gives up and looks elsewhere — instant switching would produce
+ * relocation-with-a-guise instead of visible contention. 25 ticks sits
+ * comfortably below the scale of a real multi-hundred-tick errand
+ * (dispersal/shelter-building/food-delivery) while still being a genuine
+ * wait, not a single-tick flicker. See DESIGN.md's "Tile capacity" section
+ * for the real-run read on whether agents actually wait vs. just relocate.
+ */
+const BLOCKED_RESOURCE_GRACE_TICKS = 25;
+
+/**
+ * How many recently-crowded tiles of the same terrain kind one seeking
+ * episode remembers to exclude from the next nearest-tile pick — bounds the
+ * "try a different resource tile" fallback so it doesn't immediately
+ * re-offer a tile it just gave up on. Small on purpose — a real local
+ * water/food supply rarely has more than a couple of genuinely nearby
+ * alternatives; this isn't meant to remember a map-spanning list. Real
+ * exhaustion (every currently-known nearby tile of this terrain excluded)
+ * is detected structurally, not by hitting this exact count — see
+ * `somethingExistsNearby`'s use below.
+ */
+const MAX_BLOCKED_RESOURCE_MEMORY = 4;
 
 /**
  * Sleep — see DESIGN.md's "Sleep: a real vulnerable-rest state" section.
@@ -245,7 +281,7 @@ function applyExploration(world: World, agent: Agent, log: EventLog | undefined,
     agent.pos = agent.exploreTarget;
     agent.exploreTarget = undefined;
   } else {
-    agent.pos = stepToward(world, agent.layer, agent.pos, agent.exploreTarget);
+    agent.pos = stepToward(world, agent.layer, agent.pos, agent.exploreTarget, agent);
   }
 }
 
@@ -321,9 +357,10 @@ export function findNearestTerrain(
   world: World,
   layer: Layer,
   from: Vec2,
-  terrain: "water" | "food" | "sunbeam"
+  terrain: "water" | "food" | "sunbeam",
+  exclude: readonly Vec2[] = []
 ): Vec2 | undefined {
-  return findNearestIndexed(world, layer, from, terrain);
+  return findNearestIndexed(world, layer, from, terrain, exclude);
 }
 
 /** Finds a layer other than `from` that has the given terrain, nearest (adjacent) layers first. */
@@ -331,10 +368,11 @@ export function findLayerWithTerrain(
   world: World,
   from: Layer,
   origin: Vec2,
-  terrain: "water" | "food" | "sunbeam"
+  terrain: "water" | "food" | "sunbeam",
+  exclude: readonly Vec2[] = []
 ): Layer | undefined {
   for (const layer of otherLayers(from)) {
-    if (findNearestTerrain(world, layer, origin, terrain)) return layer;
+    if (findNearestTerrain(world, layer, origin, terrain, exclude)) return layer;
   }
   return undefined;
 }
@@ -758,6 +796,16 @@ export function tickAgentAction(
     });
   }
 
+  if (agent.behavior !== previousBehavior && agent.behavior !== "seekWater" && agent.behavior !== "seekFood") {
+    // A different, more urgent need (or none) took over — this
+    // seekWater/seekFood episode is over, so its crowded-tile memory
+    // shouldn't carry into whatever comes next (or a later, fresh episode
+    // of the same behavior). Same "episode ends -> forget" boundary as
+    // `deliverTargetId` clearing on arrival/give-up elsewhere in this file.
+    agent.blockedResourceTiles = undefined;
+    agent.ticksBlockedFromResource = 0;
+  }
+
   if (agent.behavior === "seekMate") {
     applyMateSeeking(world, agent, log, ctx, rng);
     return;
@@ -765,7 +813,8 @@ export function tickAgentAction(
 
   if (agent.behavior === "seekWater" || agent.behavior === "seekFood") {
     const terrain = agent.behavior === "seekWater" ? "water" : "food";
-    const target = findNearestTerrain(world, agent.layer, agent.pos, terrain);
+    const excluded = agent.blockedResourceTiles ?? [];
+    const target = findNearestTerrain(world, agent.layer, agent.pos, terrain, excluded);
 
     if (target) {
       agent.ticksWithoutResource = 0;
@@ -777,6 +826,12 @@ export function tickAgentAction(
           // consume; re-checked fresh next tick.
           return;
         }
+        // Standing exactly on the target tile means this agent already got
+        // a valid slot (capacity was checked on the step that got it here)
+        // — a fresh consume always clears the "this specific tile is
+        // crowded" memory for this episode, same as arriving cleanly.
+        agent.blockedResourceTiles = undefined;
+        agent.ticksBlockedFromResource = 0;
         const need = agent.behavior === "seekWater" ? "thirst" : "hunger";
         consume(agent.needs, agent.behavior);
         if (agent.behavior === "seekFood") {
@@ -793,18 +848,80 @@ export function tickAgentAction(
           pos: agent.pos,
           need,
         });
+      } else if (!canEnterTile(world, agent, agent.layer, target)) {
+        // Direct ask: "ai to recognize when it's blocked or unable to get a
+        // resource and try to relocate to find a new one." The nearest
+        // matching tile exists but is currently at tile capacity
+        // (occupancy.ts) — wait nearby for a bounded grace period (real
+        // queueing, matching "feeding and drinking has to actually be
+        // timed"), rather than instantly bailing on a tile that might free
+        // up in a few ticks. `stepAlongPath` is itself capacity-aware, so
+        // this still makes whatever progress it safely can toward/near the
+        // tile instead of doing nothing during the wait.
+        // Same lightweight-counter reasoning as `resourceBlockedFallbackCount`
+        // just below: one agent-tick spent actually waiting on a crowded
+        // tile (whether or not this is the tick the grace period runs out) —
+        // lets real-run validation compare "how much waiting happens" against
+        // "how often that waiting actually ends in giving up," per DESIGN.md's
+        // "Tile capacity" section (does queueing actually happen, or does
+        // everyone just instantly relocate?).
+        world.resourceWaitTicks = (world.resourceWaitTicks ?? 0) + 1;
+        agent.ticksBlockedFromResource = (agent.ticksBlockedFromResource ?? 0) + 1;
+        if (agent.ticksBlockedFromResource >= BLOCKED_RESOURCE_GRACE_TICKS) {
+          agent.ticksBlockedFromResource = 0;
+          const nextExcluded = [...excluded, target].slice(-MAX_BLOCKED_RESOURCE_MEMORY);
+          agent.blockedResourceTiles = nextExcluded;
+          // Not a SimEvent: packages/web's `eventText.ts` switches
+          // exhaustively over every `SimEvent.kind` and is off-limits this
+          // session (a concurrent redesign is in progress there), so a new
+          // discriminated event variant here would break its build. A
+          // plain counter on `World` (same shape as `resourceVersion`) is
+          // the lightweight substitute — real-run validation reads it
+          // directly rather than grepping the event log. See DESIGN.md's
+          // "Tile capacity" section.
+          world.resourceBlockedFallbackCount = (world.resourceBlockedFallbackCount ?? 0) + 1;
+        }
+        agent.pos = stepAlongPath(world, agent, target);
       } else {
         // Real BFS-backed pathing (pathfinding.ts), not greedy stepToward —
         // this is the confirmed real death case (an Onix got stuck
         // oscillating near a boulder cluster on the way to reachable water,
         // see DESIGN.md/TODO.md), so seekWater/seekFood specifically get
         // routed around obstacle clusters instead of single-step-greedy.
+        agent.ticksBlockedFromResource = 0;
         agent.pos = stepAlongPath(world, agent, target);
       }
       return;
     }
 
-    const crossTo = findLayerWithTerrain(world, agent.layer, agent.pos, terrain);
+    // No un-excluded candidate this tick — either this terrain genuinely
+    // doesn't exist/isn't reachable at all, or every nearby tile of it is
+    // currently remembered as crowded. Tell those two apart with one
+    // unfiltered lookup: if something of this terrain exists at all, KEEP
+    // the exclusion memory (don't immediately re-offer a tile just excluded
+    // for being crowded — that would turn the grace period into a
+    // same-tick round trip) and let the pre-existing
+    // `ticksWithoutResource`/`migrate` escape valve below run its own
+    // course, exactly as it already does for "nothing reachable at all" —
+    // reused rather than inventing a second timeout, so a genuinely urgent
+    // need still can't get stuck forever bouncing between a small set of
+    // mutually-crowded tiles: it eventually relocates away instead. Only
+    // actually forget the exclusion memory once nothing of this terrain
+    // exists anywhere nearby at all — that memory would otherwise never get
+    // a reason to clear on its own.
+    const somethingExistsNearby = findNearestTerrain(world, agent.layer, agent.pos, terrain) !== undefined;
+    if (!somethingExistsNearby) {
+      agent.blockedResourceTiles = undefined;
+    }
+
+    // Threads the same exclusion list a same-layer lookup uses: without
+    // this, a crowded surface water tile that's also reachable from
+    // underground via `resourceIndex.ts`'s underground->surface water
+    // redirect would keep being "found" via the cross-layer check even
+    // after the same-layer check just excluded it for being crowded — an
+    // agent could ping-pong underground<->surface forever, each hop
+    // "discovering" the very tile it just gave up on, without this.
+    const crossTo = findLayerWithTerrain(world, agent.layer, agent.pos, terrain, excluded);
     if (crossTo) {
       agent.ticksWithoutResource = 0;
       const from = agent.layer;
@@ -821,12 +938,32 @@ export function tickAgentAction(
       return;
     }
 
+    // Safety valve on top of the one below: reaching this branch AT ALL
+    // while `somethingExistsNearby` is true already means every real,
+    // currently-known candidate of this terrain is in the exclusion list
+    // (otherwise `findNearestTerrain` above would have returned one) — the
+    // agent has already spent one real grace period per excluded tile
+    // failing to get a slot anywhere nearby, so don't also make it sit
+    // through the FULL separate `MIGRATE_AFTER_TICKS` "nothing reachable at
+    // all" timeout on top of that before finally relocating. This is what
+    // actually prevents the worst case named in DESIGN.md's real-run
+    // findings: a small, mutually-crowded local water/food supply
+    // shouldn't be able to hold an agent in a wait/exclude loop right up
+    // against its own starvation grace period.
+    if (somethingExistsNearby) {
+      agent.ticksWithoutResource = MIGRATE_AFTER_TICKS;
+    }
+
     // No layer has the resource at all — this agent isn't starving-immediately
     // (that's the check above), but if this drags on, standing in place forever
     // isn't better than trying somewhere else.
     agent.ticksWithoutResource = (agent.ticksWithoutResource ?? 0) + 1;
     if (agent.ticksWithoutResource >= MIGRATE_AFTER_TICKS) {
-      if (migrate(world, agent, log, rng) === "arrived") agent.ticksWithoutResource = 0;
+      if (migrate(world, agent, log, rng) === "arrived") {
+        agent.ticksWithoutResource = 0;
+        agent.blockedResourceTiles = undefined; // fresh location, fresh look at what's crowded there
+        agent.ticksBlockedFromResource = 0;
+      }
     }
     return;
   }

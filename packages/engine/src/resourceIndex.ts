@@ -131,13 +131,28 @@ export function countTerrainNear(world: World, layer: Layer, from: Vec2, terrain
  * without the terrain kind itself changing) — so a depleted patch is
  * correctly skipped even though it's still present in the index until it
  * reverts to "floor".
+ *
+ * `exclude` (default none) skips any candidate whose coordinates exactly
+ * match an entry in the list — needs.ts's blocked-resource fallback uses
+ * this to ask "nearest tile of this terrain, NOT counting the one(s) I
+ * already know are crowded right now" once its grace period on the current
+ * target runs out, without needing a second index or a live capacity check
+ * baked into this module (occupancy.ts's tile-capacity concept is a
+ * movement-time concern; this stays a pure terrain lookup).
  */
-export function findNearestIndexed(world: World, layer: Layer, from: Vec2, terrain: IndexedTerrain): Vec2 | undefined {
+export function findNearestIndexed(
+  world: World,
+  layer: Layer,
+  from: Vec2,
+  terrain: IndexedTerrain,
+  exclude: readonly Vec2[] = []
+): Vec2 | undefined {
   const lookupLayer = effectiveLookupLayer(layer, terrain);
   const { positions } = getIndex(world, lookupLayer);
   let best: Vec2 | undefined;
   let bestDist = Infinity;
   for (const pos of positions[terrain]) {
+    if (exclude.some((e) => e.x === pos.x && e.y === pos.y)) continue;
     if (terrain === "food") {
       const tile = rawTileAt(world, lookupLayer, pos.x, pos.y);
       if ((tile?.stock ?? 0) <= 0) continue;
