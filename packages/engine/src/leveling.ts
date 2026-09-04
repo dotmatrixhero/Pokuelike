@@ -5,6 +5,7 @@ import { applyMoveTree, trySpendSkillPoints } from "./moves.js";
 import type { BaseStats } from "./stats.js";
 import { calculateStats } from "./stats.js";
 import type { EventLog } from "./events.js";
+import { grantPassive } from "./status.js";
 
 /** PokeRogue's `GrowthRate` enum keys, e.g. as imported onto `SpeciesDexEntry.growthRate`. */
 export type GrowthRateKey = "ERRATIC" | "FAST" | "MEDIUM_FAST" | "MEDIUM_SLOW" | "SLOW" | "FLUCTUATING";
@@ -331,6 +332,8 @@ export function maybeAutoRespec(
   }
 
   if (!trySpendSkillPoints(agent, picked.base.type, picked.node.cost)) return; // already filtered as affordable above; guards against a caller bug rather than a real race
+
+  if (picked.node.grantsPassive) grantPassive(agent, picked.node.grantsPassive.kind, picked.node.grantsPassive.value);
 
   const nextChosen = [...picked.chosen, picked.node.id];
   agent.moveTreeChoices = agent.moveTreeChoices ?? {};

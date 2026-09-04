@@ -18,7 +18,7 @@ import {
   sectorId,
   type LevelingContext,
 } from "./leveling.js";
-import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
+import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
 import { findNearestIndexed } from "./resourceIndex.js";
 import { thirstDecayMultiplier } from "./weather.js";
 import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
@@ -306,11 +306,13 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
   if (agent.beingCarriedBy) return;
   if (isAsleep(agent) || isFrozen(agent)) return;
   if (isParalyzed(agent) && rng() < PARALYSIS_SKIP_CHANCE) return;
+  if ((agent.actionLockTicks ?? 0) > 0) return;
 
   if (applyCarrying(world, agent, rules, log)) return;
   if (rules && applyPredationInstincts(world, agent, rules, log, ctx)) return;
   if (maybeStartCarrying(world, agent, log)) return;
   if (applyLooting(world, agent, log)) return;
+  if (applySupportMove(world, agent, log)) return;
   if (applyHerdSupport(world, agent, log)) return;
 
   // Continue an in-progress exploration walk as long as nothing more urgent

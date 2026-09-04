@@ -9,9 +9,14 @@ import {
   POISON_DAMAGE_FRACTION,
   SLEEP_TICKS_MAX,
   SLEEP_TICKS_MIN,
+  applyStatStage,
+  damageReductionOf,
+  getStatStage,
+  grantPassive,
   isAsleep,
   isBurned,
   isFrozen,
+  isImmovable,
   isImmuneToStatus,
   isParalyzed,
   maybeInflictStatus,
@@ -220,6 +225,105 @@ describe("tickStatusEffects: paralysis has no per-tick effect here", () => {
     tickStatusEffects(agent, world);
     expect(agent.status).toEqual({ kind: "paralysis" });
     expect(agent.hp).toBe(50);
+  });
+});
+
+describe("applyStatStage / getStatStage", () => {
+  it("stacks multiple entries on the same stat additively", () => {
+    const agent = makeAgent();
+    applyStatStage(agent, "attack", -1);
+    applyStatStage(agent, "attack", -1);
+    expect(getStatStage(agent, "attack")).toBe(-2);
+    expect(getStatStage(agent, "defense")).toBe(0); // untouched
+  });
+
+  it("a permanent entry (no ticksRemaining) survives tickStatusEffects indefinitely", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent();
+    applyStatStage(agent, "defense", 1);
+    tickStatusEffects(agent, world);
+    tickStatusEffects(agent, world);
+    expect(getStatStage(agent, "defense")).toBe(1);
+  });
+
+  it("a temporary entry (ticksRemaining set) counts down and is removed on expiry", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent();
+    applyStatStage(agent, "speed", 2, 2);
+    tickStatusEffects(agent, world);
+    expect(getStatStage(agent, "speed")).toBe(2); // 1 tick left, still active
+    tickStatusEffects(agent, world);
+    expect(getStatStage(agent, "speed")).toBe(0); // expired
+    expect(agent.statStages).toBeUndefined();
+  });
+
+  it("a temporary and a permanent entry on the same stat coexist until the temporary one expires", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent();
+    applyStatStage(agent, "attack", 1); // permanent
+    applyStatStage(agent, "attack", 3, 1); // temporary, 1 tick
+    expect(getStatStage(agent, "attack")).toBe(4);
+    tickStatusEffects(agent, world);
+    expect(getStatStage(agent, "attack")).toBe(1); // only the permanent one remains
+  });
+
+  it("tickStatusEffects on a corpse leaves stat stages untouched", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ alive: false });
+    applyStatStage(agent, "speed", 1, 1);
+    tickStatusEffects(agent, world);
+    expect(getStatStage(agent, "speed")).toBe(1); // not ticked down
+  });
+});
+
+describe("agent-modifying passives (grantPassive/damageReductionOf/isImmovable)", () => {
+  it("grantPassive accumulates into agent.passives", () => {
+    const agent = makeAgent();
+    grantPassive(agent, "damageReduction", 0.1);
+    grantPassive(agent, "damageReduction", 0.15);
+    expect(agent.passives?.damageReduction).toBeCloseTo(0.25);
+  });
+
+  it("damageReductionOf reads the accumulated fraction, capped at 1", () => {
+    const agent = makeAgent();
+    expect(damageReductionOf(agent)).toBe(0);
+    grantPassive(agent, "damageReduction", 0.5);
+    expect(damageReductionOf(agent)).toBe(0.5);
+    grantPassive(agent, "damageReduction", 5); // way over 1
+    expect(damageReductionOf(agent)).toBe(1);
+  });
+
+  it("isImmovable reflects whether the passive was granted at all", () => {
+    const agent = makeAgent();
+    expect(isImmovable(agent)).toBe(false);
+    grantPassive(agent, "immovable", 1);
+    expect(isImmovable(agent)).toBe(true);
+  });
+
+  it("the regen passive heals a fraction of maxHp every tick, independent of being fed/watered", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ hp: 10, maxHp: 50, needs: createNeeds({ hunger: 0, thirst: 0 }) });
+    grantPassive(agent, "regen", 0.1);
+    tickStatusEffects(agent, world);
+    expect(agent.hp).toBeCloseTo(15);
+  });
+});
+
+describe("multi-action lock (Agent.actionLockTicks)", () => {
+  it("tickStatusEffects counts an action lock down to 0", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ actionLockTicks: 2 });
+    tickStatusEffects(agent, world);
+    expect(agent.actionLockTicks).toBe(1);
+    tickStatusEffects(agent, world);
+    expect(agent.actionLockTicks).toBe(0);
+  });
+
+  it("does not go negative once already at 0", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ actionLockTicks: 0 });
+    tickStatusEffects(agent, world);
+    expect(agent.actionLockTicks).toBe(0);
   });
 });
 

@@ -250,6 +250,18 @@ export type SimEvent =
       inflictedBy: string;
     }
   | {
+      kind: "supported";
+      tick: number;
+      /** The agent whose ally-targeting move (`MoveSpec.targetsAlly`/`allyEffect`) resolved — see `applySupportMove` (support.ts). */
+      supporterId: string;
+      supporterSpecies: string;
+      allyId: string;
+      allySpecies: string;
+      /** What it actually did — a move can heal, buff, or both, but not neither (see `MoveSpec.allyEffect`). */
+      healed: boolean;
+      buffed: boolean;
+    }
+  | {
       kind: "statusCleared";
       tick: number;
       agentId: string;

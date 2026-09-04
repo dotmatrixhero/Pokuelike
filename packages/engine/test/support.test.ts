@@ -21,7 +21,9 @@ import {
   activityScheduleMultiplier,
   OFF_HOURS_SPEED_MULTIPLIER,
   coldSnapSpeedMultiplier,
+  applySupportMove,
 } from "../src/support.js";
+import type { MoveSpec } from "../src/moves.js";
 import { DAY_LENGTH_TICKS } from "../src/daynight.js";
 import { COLD_SNAP_SPEED_MULTIPLIER } from "../src/weather.js";
 import type { WeatherCell } from "../src/types.js";
@@ -474,5 +476,77 @@ describe("coldSnapSpeedMultiplier: the fourth composable Speed modifier (Phase 3
     expect(coldSnap).toBe(COLD_SNAP_SPEED_MULTIPLIER);
     // All four penalties really did stack — strictly less than terrain/off-hours alone, without the cold snap.
     expect(finalSpeed).toBeLessThan(effectiveSpeed(injuredAgent, baseSpeed * terrainFactor * offHours));
+  });
+});
+
+describe("applySupportMove: ally-targeting effects", () => {
+  const HEAL_ALLY: MoveSpec = {
+    id: "nurture",
+    name: "Nurture",
+    shape: { kind: "point" },
+    type: "grass",
+    category: "special",
+    power: 0,
+    accuracy: 100,
+    cooldownTicks: 3,
+    range: { min: 0, max: 3 },
+    targetsAlly: true,
+    allyEffect: { healFraction: 0.2 },
+  };
+
+  const BUFF_ALLY: MoveSpec = {
+    ...HEAL_ALLY,
+    id: "rally",
+    allyEffect: { buff: { stat: "attack", stage: 1, ticks: 5 } },
+  };
+
+  it("heals the nearest hurt herd-mate in range and puts the move on cooldown", () => {
+    const world = createWorld(10, 10);
+    const supporter = makeAgent({ id: "s1", pos: { x: 5, y: 5 }, herdId: "h1", moves: [HEAL_ALLY] });
+    const ally = makeAgent({ id: "a2", pos: { x: 6, y: 5 }, herdId: "h1", hp: 40, maxHp: 100 });
+    world.agents.push(supporter, ally);
+    const log = new EventLog();
+
+    expect(applySupportMove(world, supporter, log)).toBe(true);
+
+    expect(ally.hp).toBeCloseTo(60); // 40 + 0.2*100
+    expect(supporter.moveCooldowns?.nurture).toBe(3);
+    expect(log.events).toContainEqual(
+      expect.objectContaining({ kind: "supported", supporterId: "s1", allyId: "a2", healed: true, buffed: false })
+    );
+  });
+
+  it("applies a buff (with duration) instead of/in addition to healing", () => {
+    const world = createWorld(10, 10);
+    const supporter = makeAgent({ id: "s1", pos: { x: 5, y: 5 }, herdId: "h1", moves: [BUFF_ALLY] });
+    const ally = makeAgent({ id: "a2", pos: { x: 6, y: 5 }, herdId: "h1", hp: 100, maxHp: 100 });
+    world.agents.push(supporter, ally);
+
+    expect(applySupportMove(world, supporter, undefined)).toBe(true);
+
+    expect(ally.statStages).toEqual([{ stat: "attack", stage: 1, ticksRemaining: 5 }]);
+  });
+
+  it("does nothing without a herd, an in-range ally, or an off-cooldown support move", () => {
+    const world = createWorld(10, 10);
+    const lonely = makeAgent({ id: "s1", pos: { x: 5, y: 5 }, moves: [HEAL_ALLY] }); // no herdId
+    world.agents.push(lonely);
+    expect(applySupportMove(world, lonely, undefined)).toBe(false);
+
+    const supporter = makeAgent({ id: "s2", pos: { x: 5, y: 5 }, herdId: "h1", moves: [HEAL_ALLY] });
+    const farAlly = makeAgent({ id: "a3", pos: { x: 9, y: 9 }, herdId: "h1", hp: 10, maxHp: 100 });
+    world.agents.push(supporter, farAlly);
+    expect(applySupportMove(world, supporter, undefined)).toBe(false);
+
+    const onCooldown = makeAgent({
+      id: "s3",
+      pos: { x: 0, y: 0 },
+      herdId: "h2",
+      moves: [HEAL_ALLY],
+      moveCooldowns: { nurture: 2 },
+    });
+    const nearAlly = makeAgent({ id: "a4", pos: { x: 1, y: 0 }, herdId: "h2", hp: 10, maxHp: 100 });
+    world.agents.push(onCooldown, nearAlly);
+    expect(applySupportMove(world, onCooldown, undefined)).toBe(false);
   });
 });

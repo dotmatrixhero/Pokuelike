@@ -1,5 +1,6 @@
-import type { Agent, StatusKind, World } from "./types.js";
+import type { Agent, PassiveKind, StatusKind, World } from "./types.js";
 import type { PokemonType } from "./typing.js";
+import type { StatKey } from "./nature.js";
 import type { EventLog } from "./events.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
 
@@ -129,6 +130,10 @@ function faintFromStatus(agent: Agent, world: World, log?: EventLog): void {
  * No-ops on a corpse or an agent already fainted (nothing left to tick).
  */
 export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rng: () => number = Math.random): void {
+  tickStatStages(agent);
+  tickActionLock(agent);
+  applyRegenPassive(agent);
+
   if (agent.alive === false || agent.fainted) return;
   const status = agent.status;
   if (!status) return;
@@ -156,4 +161,68 @@ export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rn
     agent.status = undefined;
     log?.record({ kind: "statusCleared", tick: world.tick, agentId: agent.id, species: agent.species, statusKind: "freeze", reason: "thawed" });
   }
+}
+
+// --- Persistent/temporary stat stages (Agent.statStages) ---
+
+/**
+ * Adds one stat-stage entry — a permanent one (no `ticksRemaining`, e.g.
+ * Growl's designed Attack-lowering AoE) or a temporary one (counted down and
+ * removed by `tickStatStages`, e.g. Bubble Shield's self-buff-on-hit). Never
+ * merges with an existing entry on the same `stat` — multiple entries stack
+ * additively, read back by `getStatStage`.
+ */
+export function applyStatStage(agent: Agent, stat: StatKey, stage: number, ticksRemaining?: number): void {
+  agent.statStages = agent.statStages ?? [];
+  agent.statStages.push({ stat, stage, ticksRemaining });
+}
+
+/** Sum of every stacked entry's `stage` for `stat` — what `calculateDamage`/`actionSpeedOf` feed into `statStageMultiplier`. 0 if none. */
+export function getStatStage(agent: Agent, stat: StatKey): number {
+  return (agent.statStages ?? []).filter((s) => s.stat === stat).reduce((sum, s) => sum + s.stage, 0);
+}
+
+/** Ticks down every temporary (has `ticksRemaining`) stat-stage entry, dropping it once it expires. Permanent entries (no `ticksRemaining`) are untouched. No-op on a corpse. */
+function tickStatStages(agent: Agent): void {
+  if (agent.alive === false || !agent.statStages) return;
+  agent.statStages = agent.statStages.filter((s) => {
+    if (s.ticksRemaining === undefined) return true;
+    s.ticksRemaining -= 1;
+    return s.ticksRemaining > 0;
+  });
+  if (agent.statStages.length === 0) agent.statStages = undefined;
+}
+
+// --- Multi-action lock (Agent.actionLockTicks) ---
+
+/** Ticks down a move-imposed action lock (`MoveSpec.lockTicks`, set via `useMove` in combat.ts). No-op on a corpse. */
+function tickActionLock(agent: Agent): void {
+  if (agent.alive === false || !agent.actionLockTicks) return;
+  agent.actionLockTicks = Math.max(0, agent.actionLockTicks - 1);
+}
+
+// --- Agent-modifying passives (Agent.passives) ---
+
+/** Grants (accumulates into) a permanent passive — called from `maybeAutoRespec` (leveling.ts) when a node with `grantsPassive` is chosen. */
+export function grantPassive(agent: Agent, kind: PassiveKind, value: number): void {
+  agent.passives = agent.passives ?? {};
+  agent.passives[kind] = (agent.passives[kind] ?? 0) + value;
+}
+
+/** The flat fraction of incoming damage the `"damageReduction"` passive takes off — read by `resolveHit` (predation.ts). 0 if the agent has none. */
+export function damageReductionOf(agent: Agent): number {
+  return Math.min(1, agent.passives?.damageReduction ?? 0);
+}
+
+/** True if the `"immovable"` passive should block this agent from being forced-moved — read by `applyForcedMovement` (movement.ts). */
+export function isImmovable(agent: Agent): boolean {
+  return (agent.passives?.immovable ?? 0) > 0;
+}
+
+/** Per-tick HP regen from the `"regen"` passive, on top of (independent of) the fed/watered `applyHealOverTime` (support.ts) — a regen agent heals even while starving. No-op on a corpse or one with no regen passive. */
+function applyRegenPassive(agent: Agent): void {
+  const fraction = agent.passives?.regen ?? 0;
+  if (agent.alive === false || fraction <= 0) return;
+  if (agent.hp === undefined || agent.maxHp === undefined) return;
+  agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * fraction);
 }

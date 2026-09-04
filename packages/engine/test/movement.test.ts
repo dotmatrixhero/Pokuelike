@@ -98,6 +98,28 @@ describe("applyForcedMovement", () => {
     expect(defender.pos.x).toBeLessThanOrEqual(9);
   });
 
+  it("the Immovable passive blocks the mover from being dragged/pushed at all", () => {
+    const world = createWorld(10, 10);
+    const attacker = makeAgent({ id: "attacker", pos: { x: 5, y: 5 } });
+    const defender = makeAgent({ id: "defender", pos: { x: 6, y: 5 }, passives: { immovable: 1 } });
+    const forced: ForcedMovement = { mover: "defender", direction: "away", tiles: 1, timing: "onHit" };
+
+    applyForcedMovement(world, forced, attacker, defender);
+
+    expect(defender.pos).toEqual({ x: 6, y: 5 }); // untouched
+  });
+
+  it("Immovable only protects the passive-holder, not whoever else the move displaces", () => {
+    const world = createWorld(10, 10);
+    const attacker = makeAgent({ id: "attacker", pos: { x: 5, y: 5 }, passives: { immovable: 1 } });
+    const defender = makeAgent({ id: "defender", pos: { x: 8, y: 5 } });
+    const forced: ForcedMovement = { mover: "defender", direction: "closer", tiles: 1, timing: "onHit" };
+
+    applyForcedMovement(world, forced, attacker, defender);
+
+    expect(defender.pos).toEqual({ x: 7, y: 5 }); // still dragged — immovable attacker is irrelevant here
+  });
+
   it("a blocked path leaves the mover exactly where it was, never teleporting", () => {
     const world = createWorld(10, 10);
     setTile(world, "surface", 6, 5, "tree");

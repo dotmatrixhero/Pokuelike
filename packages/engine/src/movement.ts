@@ -1,6 +1,7 @@
 import type { Agent, Layer, Vec2, World } from "./types.js";
 import type { ForcedMovement } from "./moves.js";
 import { tileAt } from "./world.js";
+import { isImmovable } from "./status.js";
 
 function candidatesToward(pos: Vec2, dx: number, dy: number): Vec2[] {
   return [
@@ -47,6 +48,10 @@ export function stepAway(world: World, layer: Layer, pos: Vec2, threat: Vec2): V
 export function applyForcedMovement(world: World, forced: ForcedMovement, attacker: Agent, defender: Agent): void {
   const mover = forced.mover === "attacker" ? attacker : defender;
   const other = forced.mover === "attacker" ? defender : attacker;
+  // The "Immovable" passive (status.ts's `isImmovable`) plants an agent in
+  // place against any drag/knockback/lunge/retreat that would displace it —
+  // it does nothing to stop the *other* party's own forced movement.
+  if (isImmovable(mover)) return;
   for (let i = 0; i < forced.tiles; i++) {
     mover.pos = forced.direction === "closer" ? stepToward(world, mover.layer, mover.pos, other.pos) : stepAway(world, mover.layer, mover.pos, other.pos);
   }

@@ -3419,6 +3419,116 @@ interface ForcedMovement {
   meaningfully different mechanism from this pass's instant, single-action
   displacement — noted so it isn't mistaken for already covered by this.
 
+## The rest of the move-primitives checklist: multi-hit, passives, AoE, persistent stat stages, and more
+
+Everything remaining on MOVES_DESIGN.md's "engine primitives needed"
+checklist shipped in one pass — ten primitives, all unit-tested, a subset
+confirmed together in a real multi-agent fight. None has real curated-move
+content yet (see MOVES_DESIGN.md); this section documents the mechanisms.
+
+**Multi-hit** — `MoveSpec.hits?: { min: number; max: number }`. `combat.ts`'s
+`rollHitCount` rolls a count in range once per move use; `predation.ts`'s
+`resolveHitAgainstTarget` loops that many independent damage instances
+(each its own accuracy roll's worth of damage — the accuracy roll to hit at
+all still happens once per move use, only the damage loop repeats), stopping
+early the moment the defender truly dies mid-flurry. `pickBestMove` scores a
+multi-hit move by its average hit count so it isn't undervalued against a
+single stronger hit.
+
+**Defense-penetration** — `MoveSpec.defensePenetration?: number` (0-1).
+`calculateDamage` (combat.ts) shaves that fraction off the defender's
+Defense/SpDefense *before* stat stages apply, composing with (not
+replacing) them.
+
+**Multi-action lock** — `MoveSpec.lockTicks?: number` + `Agent.actionLockTicks`.
+`useMove` (combat.ts) adds `lockTicks` onto the agent's lock counter;
+`tickStatusEffects` (status.ts) counts it down every world tick regardless
+of whether the agent acts that tick; `tickAgentAction` (needs.ts) blocks all
+action while it's positive — the same no-action shape as fainted/asleep/
+frozen, for a move that commits its user past its own single action tick
+(a Reaping Slash-style follow-through).
+
+**Agent-modifying passives** — the one primitive flagged as a real
+structural addition, since everything before it was a `MoveSpec` delta and
+a passive has to modify the *agent* instead. `MoveTreeNode.grantsPassive?:
+{ kind: PassiveKind; value: number }` (moves.ts) sits outside `delta` for
+exactly that reason; `maybeAutoRespec` (leveling.ts) calls `grantPassive`
+(status.ts) into `Agent.passives` the moment such a node is chosen — a
+permanent, accumulating value, not part of the move's own respec'd spec.
+Three kinds, each read at exactly one real call site: `"damageReduction"`
+(a flat fraction off incoming damage, `resolveHit`'s `applySingleDamageInstance`),
+`"immovable"` (blocks being dragged/knocked back/lunged at as the forced
+mover, `applyForcedMovement` in movement.ts — it protects the passive
+holder only, not whoever else a move displaces), `"regen"` (a per-tick heal
+independent of being fed/watered, unlike the existing `applyHealOverTime`).
+
+**Situational and self-state-aware scoring** — two related but distinct
+levers. `MoveSpec.situationalBonus?: { condition; multiplier }` is a real
+damage multiplier evaluated at the moment of the hit (`situationalMultiplier`,
+predation.ts): `"targetLowHp"` (defender at or below half HP), `"flanking"`
+(the defender isn't currently reacting to *this* attacker specifically — a
+rough proxy using `fightTarget`/`huntTarget`, since the sim has no facing/
+awareness model to check against more precisely), `"night"` (daynight.ts's
+`isNight`). `MoveSpec.selfStateBonus?: { condition: "selfLowHp"; multiplier }`
+is different in kind: it only ever affects *scoring* in `pickBestMove`
+(combat.ts), biasing move selection toward a "cornered" move exactly when
+the attacker itself is hurt, without touching the actual damage formula.
+
+**Persistent stat stages and real-duration temporary buffs** — deliberately
+built as one mechanism, not two: `Agent.statStages?: Array<{ stat; stage;
+ticksRemaining? }>` (status.ts's `applyStatStage`/`getStatStage`). An entry
+with `ticksRemaining` is temporary (counted down and dropped once it hits 0,
+in `tickStatusEffects`); one without it is permanent until something else
+removes it. Multiple entries on the same stat stack additively. Fed into
+`calculateDamage`'s existing (previously burn-only) stat-stage machinery for
+both attacker and defender, composing with burn's own -2 Attack. The
+move-level lever is `MoveSpec.statChangeOnHit?: { target: "self" |
+"defender"; stat; stage; ticks? }` — `"self"` applies the instant the move
+is used (even on a miss), `"defender"` only on a landed, non-killing hit.
+
+**Position-swap** — `MoveSpec.positionSwap?: boolean`. Attacker and
+defender trade tiles on a landed, non-killing hit (`resolveHitAgainstTarget`)
+— a Bodyblock-style swap, gated the same way onHit forced movement is.
+
+**Cross-agent effects** — `MoveSpec.targetsAlly?: boolean` +
+`allyEffect?: { healFraction?; buff? }`, resolved by a genuinely separate
+path from `resolveHit`'s hostile resolution: `applySupportMove` (support.ts),
+called from the agent's own idle/support tick (`tickAgentAction`, needs.ts),
+right alongside `applyHerdSupport`. It finds the nearest in-range,
+hurt-preferred herd-mate for an off-cooldown ally-targeting move, heals
+and/or buffs it, and puts the move on cooldown — confirming this doc's own
+earlier prediction (in "Why status effects and environmental moves are two
+different systems") that a cross-agent effect would need its own trigger
+path rather than living inside the hostile hit pipeline.
+
+**Multi-target/AoE resolution** — the biggest single gap on the checklist,
+and Growl's entire premise. `MoveSpec.hitsArea?: boolean` switches
+`resolveHit` (predation.ts) from single-target to `resolveAreaHit`: a
+facing is derived from attacker->primary-target direction
+(`facingToward`), `resolveShape` (moves.ts, already existed for rendering/
+targeting) resolves that facing against the move's `shape` into a tile set,
+and every living agent standing on one of those tiles (attacker excluded)
+takes its own independent hit — each with its own accuracy roll and damage
+instance. Only the one deliberately-picked primary target gets the
+primary-target-only hooks (status infliction, `statChangeOnHit`'s defender
+side, onHit forced movement, position swap); an incidental bystander caught
+in the blast just takes the raw damage. Confirmed in a real fight: a
+ring-shaped move centered on the attacker landed `fought` events against
+both the picked target and an unrelated bystander standing on the same
+ring, and `resolveHit`'s own "did the hunt's target truly die" return value
+only reflects the primary target, not an incidental AoE kill (which still
+fires its own real `killed`/`defeated` + kill-exp events, they just don't
+drive the calling predator's own hunger-restore bookkeeping).
+
+**What's still open**: no shipped move-tree node yet uses any of the ten
+primitives above — they're mechanisms, confirmed via unit tests (and, for
+multi-hit/positionSwap/statChangeOnHit/damageReduction/situational-bonus/
+AoE, a real `tickWorld` fight) but not yet real curated content. Growl
+itself specifically still needs one more thing beyond persistent stat
+stages + AoE (both now shipped): a no-damage/status-move representation,
+since nothing in this sim today can be "used" without going through a
+damage roll — see MOVES_DESIGN.md's checklist for the up-to-date state.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

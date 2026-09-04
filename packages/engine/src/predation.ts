@@ -3,15 +3,18 @@ import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { applyForcedMovement, stepAway, stepToward } from "./movement.js";
 import { migrate } from "./migration.js";
-import { calculateDamage, pickBestMove, useMove, rollAccuracy, rollCritical } from "./combat.js";
+import { calculateDamage, pickBestMove, useMove, rollAccuracy, rollCritical, rollHitCount } from "./combat.js";
+import type { Direction } from "./moves.js";
+import { resolveShape } from "./moves.js";
+import type { MoveSpec } from "./moves.js";
 import { grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
 import { isPathClear } from "./fov.js";
 import { tileAt } from "./world.js";
 import { recordPredatorPressure } from "./herdMigration.js";
-import { isTwilight, lightLevel } from "./daynight.js";
+import { isNight, isTwilight, lightLevel } from "./daynight.js";
 import { stormAccuracyMultiplier } from "./weather.js";
-import { BURN_ATTACK_STAGE, isBurned, maybeInflictStatus, maybeThawOnFireHit } from "./status.js";
+import { applyStatStage, BURN_ATTACK_STAGE, damageReductionOf, getStatStage, isBurned, maybeInflictStatus, maybeThawOnFireHit } from "./status.js";
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
@@ -149,6 +152,14 @@ const RELOCATE_AFTER_TICKS = 150;
 
 export function manhattan(a: Vec2, b: Vec2): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
+// A plain function call (rather than an inline `agent.alive === false` check)
+// so TS's control-flow narrowing doesn't lock `alive`'s type down across a
+// loop that calls out to a function (`applySingleDamageInstance`) that can
+// mutate it — same reasoning as simulation.ts's own `isDead` helper.
+function isDead(agent: Agent): boolean {
+  return agent.alive === false;
 }
 
 /**
@@ -366,62 +377,66 @@ function findHerdmateInDanger(world: World, agent: Agent): Agent | undefined {
  * return value, not on the old hp<=0 check, so eating only ever happens
  * against a truly dead target (design point 7).
  */
-function resolveHit(
+/**
+ * A move's damage-formula-independent situational multiplier
+ * (`MoveSpec.situationalBonus`), evaluated at the moment of the hit —
+ * real battlefield state, not a tree-time delta. `"targetLowHp"`: the
+ * defender is at or below half HP. `"flanking"`: the defender isn't
+ * currently reacting to *this* attacker specifically (its `fightTarget`/
+ * `huntTarget` points elsewhere or is unset) — a rough "caught it off
+ * guard" proxy, since the sim has no richer facing/awareness model to check
+ * against. `"night"`: the world is currently in its night phase
+ * (daynight.ts's `isNight`). 1 (no change) if the move sets no
+ * `situationalBonus`, or its condition doesn't currently hold.
+ */
+function situationalMultiplier(world: World, attacker: Agent, defender: Agent, move: MoveSpec): number {
+  const bonus = move.situationalBonus;
+  if (!bonus) return 1;
+  switch (bonus.condition) {
+    case "targetLowHp":
+      return defender.hp !== undefined && defender.maxHp !== undefined && defender.maxHp > 0 && defender.hp / defender.maxHp <= 0.5
+        ? bonus.multiplier
+        : 1;
+    case "flanking":
+      return defender.fightTarget !== attacker.id && defender.huntTarget !== attacker.id ? bonus.multiplier : 1;
+    case "night":
+      return isNight(world.tick) ? bonus.multiplier : 1;
+  }
+}
+
+/** One damage instance against `defender` — the shared core of a single hit, reused for every hit of a multi-hit move and for every target of an AoE move. Returns true only on a true death (see `resolveHit`'s own doc comment). */
+function applySingleDamageInstance(
   world: World,
   attacker: Agent,
   defender: Agent,
+  move: MoveSpec,
   log: EventLog | undefined,
   faintKind: "killed" | "defeated",
-  ctx: LevelingContext | undefined,
-  distance: number
+  ctx: LevelingContext | undefined
 ): boolean {
-  if (defender.alive === false) return false; // already a corpse — nothing left to finish off here (looting/scavenging is a separate path, see support.ts)
-
-  defender.maxHp = defender.maxHp ?? defender.stats?.maxHp ?? FALLBACK_MAX_HP;
-  defender.hp = defender.hp ?? defender.maxHp;
-
-  // `distance` is passed by every call site's own `canAttackFromHere` check
-  // right above it, so this picks consistently with what was just validated
-  // as reachable, rather than re-deriving its own (possibly different, now
-  // that scoring is tempo-weighted too) answer independently.
-  const move = pickBestMove(attacker, defender.types ?? [], distance);
-  if (!move) return false; // every move on cooldown, or none reach from here, this tick
-
-  useMove(attacker, move);
-
-  // A lunge resolves before the hit itself — the attacker's range was
-  // already validated by canAttackFromHere before resolveHit was ever
-  // called, so this doesn't change whether THIS hit lands, only where the
-  // attacker ends up standing for whatever comes next.
-  if (move.forcedMovement?.timing === "beforeHit") applyForcedMovement(world, move.forcedMovement, attacker, defender);
-
-  if (!rollAccuracy(move, 0, 0, Math.random, stormAccuracyMultiplier(world, attacker.layer, attacker.pos))) {
-    log?.record({
-      kind: "missed",
-      tick: world.tick,
-      attackerId: attacker.id,
-      attackerSpecies: attacker.species,
-      defenderId: defender.id,
-      defenderSpecies: defender.species,
-    });
-    return false;
-  }
-
-  // A landed Fire hit thaws a frozen defender instantly, independent of
-  // whether this move itself inflicts anything — real mainline behavior.
-  maybeThawOnFireHit(defender, move.type, world, log);
-
   const isCritical = rollCritical();
-  const damage =
+  const situational = situationalMultiplier(world, attacker, defender, move);
+
+  const rawDamage =
     attacker.level !== undefined && attacker.types && attacker.stats && defender.stats
       ? calculateDamage(
-          { level: attacker.level, types: attacker.types, stats: attacker.stats, statStages: { attack: isBurned(attacker) ? BURN_ATTACK_STAGE : 0 } },
-          { types: defender.types ?? [], stats: defender.stats },
+          {
+            level: attacker.level,
+            types: attacker.types,
+            stats: attacker.stats,
+            statStages: {
+              attack: (isBurned(attacker) ? BURN_ATTACK_STAGE : 0) + getStatStage(attacker, "attack"),
+              spAttack: getStatStage(attacker, "spAttack"),
+            },
+          },
+          { types: defender.types ?? [], stats: defender.stats, statStages: { defense: getStatStage(defender, "defense"), spDefense: getStatStage(defender, "spDefense") } },
           move,
           0.85 + Math.random() * 0.15,
           isCritical
         ).damage
       : FALLBACK_DAMAGE;
+
+  const damage = Math.max(0, Math.floor(rawDamage * situational * (1 - damageReductionOf(defender))));
 
   if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log, ctx);
 
@@ -461,7 +476,7 @@ function resolveHit(
     return true;
   }
 
-  defender.hp = Math.max(0, defender.hp - damage);
+  defender.hp = Math.max(0, (defender.hp ?? defender.maxHp ?? FALLBACK_MAX_HP) - damage);
 
   log?.record({
     kind: "fought",
@@ -475,23 +490,196 @@ function resolveHit(
     critical: isCritical,
   });
 
-  if (defender.hp > 0) {
-    // A landed, damaging, non-killing hit — the one place status and
-    // on-hit forced movement (drag/knockback/retreat) get a chance to
-    // apply. A corpse or a freshly-fainted target doesn't need either.
-    maybeInflictStatus(defender, attacker.id, move, world, log);
-    if (move.forcedMovement?.timing === "onHit") applyForcedMovement(world, move.forcedMovement, attacker, defender);
-    return false;
-  }
+  if (defender.hp > 0) return false;
 
   // This hit brought hp to 0 — faint, don't kill outright. Fainting always
   // cures status, mainline-real (same as the DOT-causes-faint path in
   // status.ts's tickStatusEffects).
   defender.fainted = true;
-  defender.finishingPool = FINISHING_POOL_FRACTION * defender.maxHp;
+  defender.finishingPool = FINISHING_POOL_FRACTION * (defender.maxHp ?? FALLBACK_MAX_HP);
   defender.status = undefined;
   log?.record({ kind: "fainted", tick: world.tick, agentId: defender.id, species: defender.species, pos: defender.pos });
   return false; // not a true death yet
+}
+
+/**
+ * Resolves an already-picked, already-`useMove`'d move against one
+ * `defender`: an accuracy roll, `move.hits`' multi-hit loop (each hit its
+ * own damage instance via `applySingleDamageInstance`, stopping early on a
+ * true death), then — only when `isPrimaryTarget` and the defender wasn't
+ * already fainted going in and ends this resolution alive/conscious/hp>0 —
+ * the "landed, damaging, non-killing hit" hooks: status infliction,
+ * `statChangeOnHit`'s defender-side effect, onHit forced movement, and
+ * `positionSwap`. `isPrimaryTarget` is false for an AoE move's incidental
+ * targets (`resolveAreaHit`) — a knockback/position-swap/status effect only
+ * ever targets the one deliberately-picked defender, not everyone caught in
+ * a Growl-style blast. Returns true only on a true death.
+ */
+function resolveHitAgainstTarget(
+  world: World,
+  attacker: Agent,
+  defender: Agent,
+  move: MoveSpec,
+  log: EventLog | undefined,
+  faintKind: "killed" | "defeated",
+  ctx: LevelingContext | undefined,
+  isPrimaryTarget: boolean
+): boolean {
+  if (defender.alive === false) return false; // already a corpse — nothing left to finish off here (looting/scavenging is a separate path, see support.ts)
+
+  defender.maxHp = defender.maxHp ?? defender.stats?.maxHp ?? FALLBACK_MAX_HP;
+  defender.hp = defender.hp ?? defender.maxHp;
+  const wasFaintedBefore = defender.fainted === true;
+
+  if (!rollAccuracy(move, 0, 0, Math.random, stormAccuracyMultiplier(world, attacker.layer, attacker.pos))) {
+    log?.record({
+      kind: "missed",
+      tick: world.tick,
+      attackerId: attacker.id,
+      attackerSpecies: attacker.species,
+      defenderId: defender.id,
+      defenderSpecies: defender.species,
+    });
+    return false;
+  }
+
+  // A landed Fire hit thaws a frozen defender instantly, independent of
+  // whether this move itself inflicts anything — real mainline behavior.
+  maybeThawOnFireHit(defender, move.type, world, log);
+
+  let diedTrue = false;
+  const hitCount = rollHitCount(move.hits);
+  for (let i = 0; i < hitCount; i++) {
+    if (isDead(defender)) break; // died mid-flurry — nothing left for later hits of this same move to land on
+    if (applySingleDamageInstance(world, attacker, defender, move, log, faintKind, ctx)) {
+      diedTrue = true;
+      break;
+    }
+  }
+
+  if (isPrimaryTarget && !diedTrue && !wasFaintedBefore && !isDead(defender) && !defender.fainted && (defender.hp ?? 0) > 0) {
+    // A landed, damaging, non-killing hit — the one place status, the
+    // defender-side stat change, on-hit forced movement, and a position
+    // swap get a chance to apply.
+    maybeInflictStatus(defender, attacker.id, move, world, log);
+    if (move.statChangeOnHit?.target === "defender") {
+      applyStatStage(defender, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
+    }
+    if (move.forcedMovement?.timing === "onHit") applyForcedMovement(world, move.forcedMovement, attacker, defender);
+    if (move.positionSwap) {
+      const attackerPos = { ...attacker.pos };
+      attacker.pos = { ...defender.pos };
+      defender.pos = attackerPos;
+    }
+  }
+
+  return diedTrue;
+}
+
+/** Derives a facing (moves.ts's `Direction`) from `from` toward `to` — whichever axis has the larger displacement wins; ties resolve toward south, an arbitrary but harmless default (only reachable when `to === from`). */
+function facingToward(from: Vec2, to: Vec2): Direction {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "E" : "W";
+  return dy > 0 ? "S" : "N";
+}
+
+/**
+ * Resolves a `MoveSpec.hitsArea` move: every living agent standing on a
+ * tile the move's `shape` covers (facing derived from attacker toward
+ * `primaryTarget` via `facingToward`), attacker itself excluded — a
+ * Growl/Ring-of-Fire-style blast, not just the one deliberately-picked
+ * target. `primaryTarget` still gets the primary-target-only hooks (status,
+ * `statChangeOnHit`'s defender side, forced movement, position swap);
+ * everyone else caught in the blast only takes the raw hit-count/damage
+ * loop. Returns true only if `primaryTarget` itself was truly killed by
+ * this resolution — matches `resolveHit`'s existing "did the hunt's own
+ * target die" contract; incidental AoE kills still fire their own
+ * `killed`/`defeated` + kill-exp events inside `applySingleDamageInstance`,
+ * they just don't drive the calling predator's own hunger-restore/hunt-
+ * cleared bookkeeping in `applyPredationInstincts`.
+ */
+function resolveAreaHit(
+  world: World,
+  attacker: Agent,
+  primaryTarget: Agent,
+  move: MoveSpec,
+  log: EventLog | undefined,
+  faintKind: "killed" | "defeated",
+  ctx: LevelingContext | undefined
+): boolean {
+  const facing = facingToward(attacker.pos, primaryTarget.pos);
+  const tiles = resolveShape(move.shape, attacker.pos, facing);
+  const tileSet = new Set(tiles.map((t) => `${t.x},${t.y}`));
+  const targets = world.agents.filter(
+    (other) => other.id !== attacker.id && other.alive !== false && other.layer === attacker.layer && tileSet.has(`${other.pos.x},${other.pos.y}`)
+  );
+
+  let primaryDied = false;
+  for (const target of targets) {
+    const isPrimary = target.id === primaryTarget.id;
+    const died = resolveHitAgainstTarget(world, attacker, target, move, log, faintKind, ctx, isPrimary);
+    if (died && isPrimary) primaryDied = true;
+  }
+  return primaryDied;
+}
+
+/**
+ * One attack: picks the attacker's best off-cooldown, in-range move against
+ * the defender (see `pickBestMove`), commits to it (`useMove` — cooldown,
+ * and any `lockTicks`), resolves its `beforeHit` forced movement and
+ * `statChangeOnHit`'s self-side effect (both apply the instant the move is
+ * used, independent of whether it goes on to hit anything), then resolves
+ * the actual hit(s) — either against just `defender` or, for a
+ * `hitsArea` move, against every agent caught in its resolved shape
+ * (`resolveAreaHit`). See `resolveHitAgainstTarget`/`applySingleDamageInstance`
+ * for the real accuracy/damage/faint machinery, and DESIGN.md's "Faint/
+ * finish-off" section for the two-stage faint/true-death model.
+ *
+ * Returns true only when `defender` itself suffered a TRUE death (`alive`
+ * newly `false`) this call — never on a mere faint, and never for an
+ * incidental AoE side-target's own death. Callers that restore a predator's
+ * hunger on a "kill" (see the hunt call site below) must gate on this
+ * return value, not on the old hp<=0 check, so eating only ever happens
+ * against a truly dead target (design point 7).
+ */
+function resolveHit(
+  world: World,
+  attacker: Agent,
+  defender: Agent,
+  log: EventLog | undefined,
+  faintKind: "killed" | "defeated",
+  ctx: LevelingContext | undefined,
+  distance: number
+): boolean {
+  if (defender.alive === false) return false; // already a corpse — nothing left to finish off here (looting/scavenging is a separate path, see support.ts)
+
+  defender.maxHp = defender.maxHp ?? defender.stats?.maxHp ?? FALLBACK_MAX_HP;
+  defender.hp = defender.hp ?? defender.maxHp;
+
+  // `distance` is passed by every call site's own `canAttackFromHere` check
+  // right above it, so this picks consistently with what was just validated
+  // as reachable, rather than re-deriving its own (possibly different, now
+  // that scoring is tempo-weighted too) answer independently.
+  const move = pickBestMove(attacker, defender.types ?? [], distance);
+  if (!move) return false; // every move on cooldown, or none reach from here, this tick
+
+  useMove(attacker, move);
+
+  // A lunge resolves before the hit itself — the attacker's range was
+  // already validated by canAttackFromHere before resolveHit was ever
+  // called, so this doesn't change whether THIS hit lands, only where the
+  // attacker ends up standing for whatever comes next.
+  if (move.forcedMovement?.timing === "beforeHit") applyForcedMovement(world, move.forcedMovement, attacker, defender);
+
+  // A self-side stat change (e.g. a windup buff) always applies the moment
+  // the move is used — see `MoveSpec.statChangeOnHit`'s own doc comment.
+  if (move.statChangeOnHit?.target === "self") {
+    applyStatStage(attacker, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
+  }
+
+  if (move.hitsArea) return resolveAreaHit(world, attacker, defender, move, log, faintKind, ctx);
+  return resolveHitAgainstTarget(world, attacker, defender, move, log, faintKind, ctx, true);
 }
 
 function logKillOrDefeat(world: World, attacker: Agent, defender: Agent, faintKind: "killed" | "defeated", log: EventLog | undefined): void {

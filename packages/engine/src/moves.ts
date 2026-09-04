@@ -1,5 +1,5 @@
-import type { Agent, StatusKind, Vec2 } from "./types.js";
-import type { Disposition } from "./nature.js";
+import type { Agent, PassiveKind, StatusKind, Vec2 } from "./types.js";
+import type { Disposition, StatKey } from "./nature.js";
 import type { PokemonType } from "./typing.js";
 
 /**
@@ -80,6 +80,82 @@ export interface MoveSpec {
    */
   forcedMovement?: ForcedMovement;
   /**
+   * Strikes 2-5 times in one use — mainline multi-hit shape (Fury Attack,
+   * Bullet Seed, etc.). Rolled once per use in `resolveHit`/`resolveAreaHit`
+   * (predation.ts) via `rollHitCount`; each hit gets its own accuracy roll
+   * and damage instance, stopping early the moment the defender faints or
+   * dies. Absent = a normal single-hit move (the default, unchanged).
+   */
+  hits?: { min: number; max: number };
+  /**
+   * Fraction (0-1) of the defender's Defense/SpDefense stat this move
+   * ignores — e.g. `0.5` halves effective Defense before the damage formula
+   * runs (`calculateDamage`, combat.ts). Absent/0 = no penetration, the
+   * default for every move that doesn't set it.
+   */
+  defensePenetration?: number;
+  /**
+   * Locks the user out of acting for this many *additional* ticks after
+   * using the move — set on `agent.actionLockTicks` by `useMove` (combat.ts),
+   * ticked down in `tickAgentNeeds` and checked as a no-action guard in
+   * `tickAgentAction` (needs.ts), same shape as fainted/asleep/frozen.
+   * Absent/0 = no lock (the default) — a normal move never costs the user a
+   * future action tick beyond its own cooldown.
+   */
+  lockTicks?: number;
+  /**
+   * A flat multiplier applied to this move's damage when `condition` holds,
+   * evaluated at the moment of the hit (`situationalMultiplier`, predation.ts)
+   * — real battlefield state, not a tree-time delta. `"targetLowHp"`: the
+   * defender is at or below half HP. `"flanking"`: the attacker isn't the
+   * nearest threat the defender is currently reacting to (a rough "caught it
+   * off guard" proxy — see `situationalMultiplier`'s own doc comment for the
+   * exact check). `"night"`: the world is currently in its night phase
+   * (daynight.ts's `isNight`). Absent = no situational bonus, the default.
+   */
+  situationalBonus?: { condition: "targetLowHp" | "flanking" | "night"; multiplier: number };
+  /**
+   * A flat multiplier on this move's *scoring* (not its actual damage) in
+   * `pickBestMove` (combat.ts) when `condition` holds against the attacker's
+   * own current state — `"selfLowHp"`: the attacker itself is at or below
+   * half HP, biasing selection toward a move built for exactly that moment
+   * (e.g. a "cornered" desperation move) without needing to touch the actual
+   * damage formula. Absent = no self-state scoring bonus, the default.
+   */
+  selfStateBonus?: { condition: "selfLowHp"; multiplier: number };
+  /**
+   * Applies a stat-stage change via `resolveHit` (predation.ts) —
+   * `target: "self"` applies the moment the move is used (even on a miss or
+   * a killing blow, like a self-hyping windup); `target: "defender"` only on
+   * a landed, non-killing hit, same hook `maybeInflictStatus` uses. `ticks`,
+   * if set, makes it a temporary buff (removed after that many ticks —
+   * status.ts's `tickStatStages`); absent means permanent until some other
+   * effect removes it. See `Agent.statStages`. Absent `statChangeOnHit` =
+   * this move never touches stat stages, the default.
+   */
+  statChangeOnHit?: { target: "self" | "defender"; stat: StatKey; stage: number; ticks?: number };
+  /** Attacker and defender swap tiles on a landed, non-killing hit — a Bodyblock-style position swap. Absent = no swap, the default. */
+  positionSwap?: boolean;
+  /**
+   * This move targets a nearby ally instead of a threat — resolved by
+   * `applySupportMove` (support.ts) from the agent's own idle/support tick,
+   * never from `resolveHit`'s hostile hit-resolution path. Meaningless
+   * without `allyEffect` set. Absent = an ordinary hostile move, the default.
+   */
+  targetsAlly?: boolean;
+  /** What a `targetsAlly` move does to the ally it resolves against — a heal, a buff, or both. */
+  allyEffect?: { healFraction?: number; buff?: { stat: StatKey; stage: number; ticks?: number } };
+  /**
+   * Resolves against every living agent within the move's `shape` (not just
+   * one picked target) via `resolveAreaHit` (predation.ts), which reuses
+   * `resolveShape` (this file) with a facing derived from attacker->primary-
+   * target direction. Absent/false = ordinary single-target resolution, the
+   * default; a move with a non-`"point"` shape but no `hitsArea` still only
+   * ever resolves against the one picked defender (shape then only matters
+   * for `moveRange`'s reach derivation).
+   */
+  hitsArea?: boolean;
+  /**
    * Optional respec DAG (see `applyMoveTree`). Each node is a delta applied
    * on top of the base spec, gated by a point cost and prerequisite node
    * id(s). Absent = this move can't be respec'd (the common case — only
@@ -148,6 +224,16 @@ export interface MoveTreeNode {
    * MOVES_DESIGN.md's skill-tree template). Absent = no exclusivity.
    */
   excludes?: string[];
+  /**
+   * Grants a permanent `Agent`-level passive the moment this node is chosen
+   * (`maybeAutoRespec`, leveling.ts) — deliberately NOT part of `delta`,
+   * since a passive modifies the *agent*, not the `MoveSpec` this tree
+   * respecs. `value` accumulates into `agent.passives[kind]` (e.g. two
+   * separate `damageReduction` nodes on two different moves both stack).
+   * Absent = this node is a pure `MoveSpec` delta, the default. See
+   * `PassiveKind`'s own doc comment (types.ts) for what each kind does.
+   */
+  grantsPassive?: { kind: PassiveKind; value: number };
   /**
    * Which Disposition axis (nature.ts) this node appeals to, if any — used
    * only by `maybeAutoRespec` (leveling.ts) to weight a wild agent's pick

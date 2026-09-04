@@ -126,7 +126,11 @@ export function calculateDamage(
     defenseStage = Math.min(defenseStage, 0);
   }
   const attackStat = rawAttackStat * statStageMultiplier(attackStage);
-  const defenseStat = rawDefenseStat * statStageMultiplier(defenseStage);
+  // `defensePenetration` (0-1) shaves a flat fraction off the defender's
+  // Defense/SpDefense before stages even apply — a Piercing Beak-style
+  // "ignores some of the target's bulk," independent of (and composing
+  // with) stat stages rather than replacing them.
+  const defenseStat = rawDefenseStat * (1 - (move.defensePenetration ?? 0)) * statStageMultiplier(defenseStage);
 
   const stab = attacker.types.includes(move.type);
   const critMultiplier = isCritical ? CRITICAL_MULTIPLIER : 1;
@@ -181,12 +185,19 @@ export function pickBestMove(attacker: Agent, defenderTypes: PokemonType[], dist
   const available = distance === undefined ? offCooldown : offCooldown.filter((move) => withinMoveRange(move, distance));
   if (available.length === 0) return undefined;
 
+  const selfLowHp = attacker.hp !== undefined && attacker.maxHp !== undefined && attacker.maxHp > 0 && attacker.hp / attacker.maxHp <= 0.5;
+
   let best: MoveSpec | undefined;
   let bestScore = -Infinity;
   for (const move of available) {
     const stab = attacker.types?.includes(move.type) ? 1.5 : 1;
     const tempo = 1 / (1 + MOVE_SCORE_TEMPO_WEIGHT * move.cooldownTicks);
-    const score = move.power * stab * typeEffectiveness(move.type, defenderTypes) * tempo;
+    // A multi-hit move's expected damage scales with its average hit count —
+    // scoring by single-hit power alone would undervalue it against a
+    // one-hit move of similar per-hit power.
+    const avgHits = move.hits ? (move.hits.min + move.hits.max) / 2 : 1;
+    const selfBonus = move.selfStateBonus?.condition === "selfLowHp" && selfLowHp ? move.selfStateBonus.multiplier : 1;
+    const score = move.power * stab * typeEffectiveness(move.type, defenderTypes) * tempo * avgHits * selfBonus;
     if (score > bestScore) {
       bestScore = score;
       best = move;
@@ -198,6 +209,13 @@ export function pickBestMove(attacker: Agent, defenderTypes: PokemonType[], dist
 export function useMove(agent: Agent, move: MoveSpec): void {
   agent.moveCooldowns = agent.moveCooldowns ?? {};
   agent.moveCooldowns[move.id] = move.cooldownTicks;
+  if (move.lockTicks) agent.actionLockTicks = (agent.actionLockTicks ?? 0) + move.lockTicks;
+}
+
+/** Rolls a random hit count within `hits`' [min, max] range (inclusive) — undefined `hits` always means exactly 1 hit. */
+export function rollHitCount(hits: { min: number; max: number } | undefined, rng: () => number = Math.random): number {
+  if (!hits) return 1;
+  return hits.min + Math.floor(rng() * (hits.max - hits.min + 1));
 }
 
 /**

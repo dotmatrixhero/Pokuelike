@@ -6,6 +6,7 @@ import {
   useMove,
   rollCritical,
   rollAccuracy,
+  rollHitCount,
   statStageMultiplier,
   accuracyStageMultiplier,
   moveRange,
@@ -297,5 +298,74 @@ describe("pickBestMove: range and tempo awareness", () => {
     // Same type, no STAB either side — isolates the tempo term:
     // 30 vs. 40 / (1 + 0.15*3) ≈ 27.6, so the weaker-but-faster move wins.
     expect(pickBestMove(agent, ["normal"])).toBe(FAST_WEAK);
+  });
+});
+
+describe("calculateDamage: defensePenetration", () => {
+  it("ignores a fraction of the defender's relevant Defense stat", () => {
+    const attacker = { level: 20, types: ["normal" as const], stats: calculateStats(BASE, 20) };
+    const defender = { types: ["normal" as const], stats: calculateStats(BASE, 20) };
+    const normalDamage = calculateDamage(attacker, defender, TACKLE, 1).damage;
+    const piercing: MoveSpec = { ...TACKLE, id: "piercing", defensePenetration: 0.5 };
+    const piercingDamage = calculateDamage(attacker, defender, piercing, 1).damage;
+    expect(piercingDamage).toBeGreaterThan(normalDamage);
+  });
+
+  it("absent defensePenetration behaves exactly as before (no change)", () => {
+    const attacker = { level: 20, types: ["normal" as const], stats: calculateStats(BASE, 20) };
+    const defender = { types: ["normal" as const], stats: calculateStats(BASE, 20) };
+    expect(calculateDamage(attacker, defender, { ...TACKLE, defensePenetration: 0 }, 1).damage).toBe(
+      calculateDamage(attacker, defender, TACKLE, 1).damage
+    );
+  });
+});
+
+describe("rollHitCount", () => {
+  it("undefined hits always means exactly 1", () => {
+    expect(rollHitCount(undefined)).toBe(1);
+  });
+
+  it("rolls within the [min, max] range, inclusive", () => {
+    for (let i = 0; i < 20; i++) {
+      const count = rollHitCount({ min: 2, max: 5 }, () => i / 20);
+      expect(count).toBeGreaterThanOrEqual(2);
+      expect(count).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it("a fixed min===max always returns that count", () => {
+    expect(rollHitCount({ min: 3, max: 3 }, () => 0.99)).toBe(3);
+  });
+});
+
+describe("useMove: lockTicks", () => {
+  it("accumulates onto agent.actionLockTicks", () => {
+    const agent = makeAgent({ actionLockTicks: 1 });
+    const LOCKING_MOVE: MoveSpec = { ...TACKLE, id: "locking", lockTicks: 2 };
+    useMove(agent, LOCKING_MOVE);
+    expect(agent.actionLockTicks).toBe(3);
+  });
+
+  it("a move with no lockTicks doesn't touch actionLockTicks", () => {
+    const agent = makeAgent();
+    useMove(agent, TACKLE);
+    expect(agent.actionLockTicks).toBeUndefined();
+  });
+});
+
+describe("pickBestMove: multi-hit and self-state scoring", () => {
+  it("scores a multi-hit move by its average expected hit count", () => {
+    const agent = makeAgent({ moves: [TACKLE, { ...TACKLE, id: "flurry", power: 25, hits: { min: 2, max: 4 } }] });
+    // flurry: 25 * avg(3 hits) = 75 expected > tackle's flat 40.
+    expect(pickBestMove(agent, ["normal"])?.id).toBe("flurry");
+  });
+
+  it("a selfStateBonus move scores higher only when the attacker itself is at or below half HP", () => {
+    const desperation: MoveSpec = { ...TACKLE, id: "desperation", power: 20, selfStateBonus: { condition: "selfLowHp", multiplier: 3 } };
+    const healthy = makeAgent({ moves: [TACKLE, desperation], hp: 100, maxHp: 100 });
+    expect(pickBestMove(healthy, ["normal"])?.id).toBe("tackle"); // desperation's bonus doesn't apply at full HP
+
+    const hurt = makeAgent({ moves: [TACKLE, desperation], hp: 40, maxHp: 100 });
+    expect(pickBestMove(hurt, ["normal"])?.id).toBe("desperation"); // 20*3=60 > tackle's 40
   });
 });

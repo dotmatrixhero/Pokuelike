@@ -1,7 +1,7 @@
 import type { MoveSpec } from "./moves.js";
 import type { PokemonType } from "./typing.js";
 import type { Stats } from "./stats.js";
-import type { Disposition } from "./nature.js";
+import type { Disposition, StatKey } from "./nature.js";
 
 export interface Vec2 {
   x: number;
@@ -16,6 +16,20 @@ export interface Vec2 {
  * section.
  */
 export type StatusKind = "burn" | "poison" | "paralysis" | "sleep" | "freeze";
+
+/**
+ * Agent-modifying passives — a tree node's effect that permanently changes
+ * how the *agent itself* behaves/is calculated, rather than a delta on a
+ * `MoveSpec` (see `MoveTreeNode.grantsPassive` in moves.ts). Deliberately a
+ * short, hand-interpreted enum rather than an open-ended effect DSL — each
+ * kind is read at exactly one real call site: `"damageReduction"`
+ * (predation.ts's `resolveHit`, a flat fraction taken off incoming damage),
+ * `"immovable"` (movement.ts's `applyForcedMovement`, ignores being
+ * dragged/knocked back/lunged at as the forced mover), `"regen"` (needs.ts's
+ * `tickAgentNeeds`, a fraction of maxHp healed every tick regardless of
+ * being fed/watered). See MOVES_DESIGN.md's primitives checklist.
+ */
+export type PassiveKind = "damageReduction" | "immovable" | "regen";
 
 /**
  * Why a herd is (or was) migrating — see herdMigration.ts/DESIGN.md's
@@ -351,6 +365,37 @@ export interface Agent {
    * status).
    */
   status?: { kind: StatusKind; ticksRemaining?: number };
+  /**
+   * Stacked stat-stage modifiers, each independent of `status`/burn's own
+   * one-off computed halving — see `getStatStage`/`applyStatStage`
+   * (status.ts). An entry with `ticksRemaining` set is a *temporary* buff
+   * (counted down and removed in `tickAgentNeeds`, e.g. Bubble Shield's
+   * self-buff-on-hit); one without it is *permanent* until some other effect
+   * removes it (e.g. Growl's designed Attack-lowering AoE) — the same array
+   * covers both of MOVES_DESIGN.md's "real-duration temporary buffs" and
+   * "persistent stat stages" primitives, distinguished only by whether a
+   * duration is set. Multiple entries on the same `stat` stack additively
+   * (clamped downstream by `statStageMultiplier`'s own [-6,+6] clamp).
+   */
+  statStages?: Array<{ stat: StatKey; stage: number; ticksRemaining?: number }>;
+  /**
+   * Granted permanently by a move-tree node's `grantsPassive` (moves.ts) once
+   * chosen — see `PassiveKind`'s own doc comment for what each key does and
+   * where it's read. Absent/0 for any kind means "no such passive," same as
+   * every other optional agent field in this file.
+   */
+  passives?: Partial<Record<PassiveKind, number>>;
+  /**
+   * Ticks remaining during which this agent cannot act at all — set by a
+   * move with `MoveSpec.lockTicks` (a move committing its user for more than
+   * one action tick, e.g. a Reaping Slash follow-through) via `useMove`
+   * (combat.ts), ticked down every world tick in `tickAgentNeeds` regardless
+   * of whether the agent gets an action tick this tick. Checked as an early
+   * no-action guard in `tickAgentAction` (needs.ts), same shape as
+   * fainted/asleep/frozen. Absent/0 = no lock, the default for every move
+   * that doesn't set `lockTicks`.
+   */
+  actionLockTicks?: number;
   /** General item slots — simple food units and/or ITEM_DEX entries, each carrying its own weight. Capped by `carryCapacityOf` (support.ts). */
   inventory?: InventoryItem[];
   /** The id of a fully-fainted ally this agent is currently carrying, if any. Mutually exclusive in practice with `beingCarriedBy` on the same agent. */

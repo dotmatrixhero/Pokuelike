@@ -364,4 +364,12 @@ describe("tickAgentAction: status-effect action-tick guards", () => {
     tickAgentAction(world, acted, undefined, undefined, undefined, () => 0.99); // not < PARALYSIS_SKIP_CHANCE
     expect(acted.pos).not.toEqual({ x: 0, y: 0 });
   });
+
+  it("a move-locked agent (MoveSpec.lockTicks, set via useMove) takes no action at all", () => {
+    const world = createWorld(5, 5);
+    setTile(world, "surface", 4, 0, "water");
+    const agent = makeAgent({ pos: { x: 0, y: 0 }, actionLockTicks: 2, needs: createNeeds({ thirst: 0.1 }) });
+    tickAgentAction(world, agent);
+    expect(agent.pos).toEqual({ x: 0, y: 0 });
+  });
 });
