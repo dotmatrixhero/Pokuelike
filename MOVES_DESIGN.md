@@ -316,19 +316,40 @@ interesting enough to bother with. A single strong node at the end of a
 branch (what Ember's v1 tree already does) is capstone enough. Power moves
 get a couple of these strung along the spine, not just one at the very end.
 
-**Branches aren't isolated spokes — add crosslinks, and it costs nothing
-new.** Three independent chains meeting only at the hub reads as three tiny
-trees wearing one move's name, not one tree — and it means the only real
-decision is "which one branch." A crosslink is a small node whose
-`prerequisites` names one node from each of two *different* branches (e.g.
-Vine Whip's "Crossroots" needs one node from Aggression AND one from
-Boldness) — since branches are purely an authoring grouping, not something
-the engine's flat `Record<string, MoveTreeNode>` + `prerequisites` model
-knows about, this needs zero schema changes, unlike `excludes`. Put one
-crosslink between each adjacent pair of branches (a triangle, for a 3-branch
-tree) at a radius/tier where each side already has a foothold. This is what
-actually delivers "customizability" — a real hybrid route through the mesh,
-not just picking one lane.
+**Branches aren't isolated spokes — add crosslinks that are real shortcuts,
+not just checkpoints.** Three independent chains meeting only at the hub
+reads as three tiny trees wearing one move's name, not one tree — and it
+means the only real decision is "which one branch." First draft of a
+crosslink (a small node gated on one prerequisite from each of two
+*different* branches, using nothing but the existing `prerequisites` field
+— free, since branches are purely an authoring grouping the engine's flat
+node graph doesn't know about) turned out to be a dead end, literally: it
+proved you'd invested in both branches and then did nothing further,
+which reads as a toll booth, not a choice. A crosslink needs two things to
+actually work:
+
+1. **Its own real effect** — it costs a point like everything else, so it
+   should do something on its own (Crossroots: a small taste of each
+   flanking branch's core lever — +power and +range together — rather than
+   pure connective tissue).
+2. **A shortcut *out* the other side** — taking it should let you continue
+   into *both* neighboring branches' later content, skipping the filler you
+   didn't walk to get there. This needs a second new primitive:
+   `MoveTreeNode.prerequisitesAnyOf?: string[][]` — a list of alternative
+   prerequisite sets, where satisfying *any one* (each inner array is still
+   AND'd together) makes the node eligible. A branch's deeper notable then
+   declares two ways in: `prerequisites: [its own earlier chain node]` OR,
+   via `prerequisitesAnyOf`, `[the crosslink]`. This is the same shape as
+   the still-open "keystone reachable from either fork tip" problem two
+   sections up — one primitive solves both.
+
+Put one crosslink between each adjacent pair of branches (a triangle, for a
+3-branch tree), each granting a small standalone bonus and shortcutting
+into both flanking branches' next real notable. This is what actually
+delivers "customizability": an agent can end up with Aggression's opener
+plus Boldness's *fork*, having walked past Boldness's own filler entirely —
+a genuine hybrid route through the mesh, not three lanes with a decorative
+gate between them.
 
 **Put a notable early, not just at the end of a long chain.** A tree that
 saves every named effect for deep investment makes the *only* real choice

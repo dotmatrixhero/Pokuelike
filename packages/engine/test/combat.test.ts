@@ -266,3 +266,36 @@ describe("cooldowns", () => {
     expect(pickBestMove(agent, ["grass"])).toBe(EMBER);
   });
 });
+
+describe("pickBestMove: range and tempo awareness", () => {
+  const STRONG_SHORT_RANGE: MoveSpec = { ...TACKLE, id: "strong-short", power: 100, range: { min: 0, max: 1 } };
+  const WEAK_LONG_RANGE: MoveSpec = { ...TACKLE, id: "weak-long", power: 20, range: { min: 0, max: 5 } };
+
+  it("without a distance, ignores range and picks purely by score (backward-compatible)", () => {
+    const agent = makeAgent({ moves: [STRONG_SHORT_RANGE, WEAK_LONG_RANGE] });
+    expect(pickBestMove(agent, ["normal"])).toBe(STRONG_SHORT_RANGE);
+  });
+
+  it("with a distance, filters to reachable moves before scoring — the real bug this fixes", () => {
+    const agent = makeAgent({ moves: [STRONG_SHORT_RANGE, WEAK_LONG_RANGE] });
+    // STRONG_SHORT_RANGE can't reach distance 3; WEAK_LONG_RANGE can. Scoring
+    // first and checking range after (the old behavior) would have picked
+    // STRONG_SHORT_RANGE, found it out of range, and reported "no usable
+    // move" even though WEAK_LONG_RANGE was perfectly usable from here.
+    expect(pickBestMove(agent, ["normal"], 3)).toBe(WEAK_LONG_RANGE);
+  });
+
+  it("returns undefined when nothing owned actually reaches that far", () => {
+    const agent = makeAgent({ moves: [STRONG_SHORT_RANGE, WEAK_LONG_RANGE] });
+    expect(pickBestMove(agent, ["normal"], 10)).toBeUndefined();
+  });
+
+  it("tempo-discounts a slow move enough that a faster, weaker one can win", () => {
+    const FAST_WEAK: MoveSpec = { ...TACKLE, id: "fast-weak", power: 30, cooldownTicks: 0 };
+    const SLOW_STRONG: MoveSpec = { ...TACKLE, id: "slow-strong", power: 40, cooldownTicks: 3 };
+    const agent = makeAgent({ moves: [FAST_WEAK, SLOW_STRONG] });
+    // Same type, no STAB either side — isolates the tempo term:
+    // 30 vs. 40 / (1 + 0.15*3) ≈ 27.6, so the weaker-but-faster move wins.
+    expect(pickBestMove(agent, ["normal"])).toBe(FAST_WEAK);
+  });
+});

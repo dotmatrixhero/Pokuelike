@@ -3,7 +3,7 @@ import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { stepAway, stepToward } from "./movement.js";
 import { migrate } from "./migration.js";
-import { calculateDamage, pickBestMove, useMove, withinMoveRange, rollAccuracy, rollCritical } from "./combat.js";
+import { calculateDamage, pickBestMove, useMove, rollAccuracy, rollCritical } from "./combat.js";
 import { grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
 import { isPathClear } from "./fov.js";
@@ -276,8 +276,13 @@ function isCriticallyHurt(agent: Agent): boolean {
  * through — see DESIGN.md's obstacle-combat section.
  */
 function canAttackFromHere(world: World, agent: Agent, target: Agent, distance: number): boolean {
-  const move = pickBestMove(agent, target.types ?? []);
-  if (!move || !withinMoveRange(move, distance)) return false;
+  // Passing `distance` here (not just checking it after the fact) is the
+  // fix for a real bug: picking "the best move on paper" and only then
+  // checking whether it happens to reach would reject an attack even when a
+  // different, in-range move was available the whole time. See
+  // pickBestMove's own doc comment and DESIGN.md's "Move selection" section.
+  const move = pickBestMove(agent, target.types ?? [], distance);
+  if (!move) return false;
   return isPathClear(world, agent.layer, agent.pos, target.pos);
 }
 
@@ -366,15 +371,20 @@ function resolveHit(
   defender: Agent,
   log: EventLog | undefined,
   faintKind: "killed" | "defeated",
-  ctx?: LevelingContext
+  ctx: LevelingContext | undefined,
+  distance: number
 ): boolean {
   if (defender.alive === false) return false; // already a corpse — nothing left to finish off here (looting/scavenging is a separate path, see support.ts)
 
   defender.maxHp = defender.maxHp ?? defender.stats?.maxHp ?? FALLBACK_MAX_HP;
   defender.hp = defender.hp ?? defender.maxHp;
 
-  const move = pickBestMove(attacker, defender.types ?? []);
-  if (!move) return false; // every move on cooldown this tick
+  // `distance` is passed by every call site's own `canAttackFromHere` check
+  // right above it, so this picks consistently with what was just validated
+  // as reachable, rather than re-deriving its own (possibly different, now
+  // that scoring is tempo-weighted too) answer independently.
+  const move = pickBestMove(attacker, defender.types ?? [], distance);
+  if (!move) return false; // every move on cooldown, or none reach from here, this tick
 
   useMove(attacker, move);
 
@@ -548,7 +558,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
         agent.behavior = "fight";
         agent.fightTarget = threat.id;
         if (canAttackFromHere(world, agent, threat, distance)) {
-          resolveHit(world, agent, threat, log, "defeated", ctx);
+          resolveHit(world, agent, threat, log, "defeated", ctx, distance);
         } else {
           agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
         }
@@ -579,7 +589,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
       agent.behavior = "fight";
       agent.fightTarget = threat.id;
       if (canAttackFromHere(world, agent, threat, distance)) {
-        resolveHit(world, agent, threat, log, "defeated", ctx);
+        resolveHit(world, agent, threat, log, "defeated", ctx, distance);
       } else {
         agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
       }
@@ -608,14 +618,15 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
       agent.behavior = "hunt";
       agent.huntTarget = target.id;
 
-      if (canAttackFromHere(world, agent, target, manhattan(agent.pos, target.pos))) {
+      const huntDistance = manhattan(agent.pos, target.pos);
+      if (canAttackFromHere(world, agent, target, huntDistance)) {
         // A single hit may not be lethal now — real HP, real damage, and even
         // a lethal hit only FAINTS the target (see resolveHit/DESIGN.md). The
         // meal (and hunger restore) only happens once the target is truly
         // dead — resolveHit returns true only at that moment, never on a mere
         // faint — so hunting a fainted target across several ticks to finish
         // it off, then eating, is the normal two-stage path here.
-        const died = resolveHit(world, agent, target, log, "killed", ctx);
+        const died = resolveHit(world, agent, target, log, "killed", ctx, huntDistance);
         if (died) {
           agent.needs.hunger = Math.min(1, agent.needs.hunger + KILL_HUNGER_RESTORE);
           agent.huntTarget = undefined;

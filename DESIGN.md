@@ -3251,6 +3251,50 @@ Disposition, not left uniform-random.
   reliable enough to actually fund off-primary-type trees once those exist,
   not just a determinism cleanup.
 
+## Move selection: a real bug fix, plus tempo awareness
+
+Surfaced while designing move trees: `pickBestMove` (combat.ts) scored every
+off-cooldown move by `power * STAB * typeEffectiveness` alone — no notion of
+range or tempo at all.
+
+- **Real bug, not hypothetical**: `canAttackFromHere` called `pickBestMove`
+  to get "the best move," then separately checked whether *that specific
+  move* was in range. If the highest-scoring move happened to be out of
+  range at the attacker's current distance but a *different* known move
+  would have reached, the attacker simply didn't attack that tick — even
+  though it owned a perfectly usable move. Scoring first and checking range
+  after was backwards. Fixed by giving `pickBestMove` an optional `distance`
+  parameter that filters to in-range moves *before* scoring, not after;
+  `canAttackFromHere` now passes it and no longer needs its own separate
+  `withinMoveRange` check. `distance` is optional (omitting it keeps the old
+  range-blind behavior) purely so callers without positional context — bare
+  unit tests — don't need updating.
+- **Tempo awareness**: added a cooldown discount to the score,
+  `1 / (1 + MOVE_SCORE_TEMPO_WEIGHT * move.cooldownTicks)` with
+  `MOVE_SCORE_TEMPO_WEIGHT = 0.15` — a fast, modest move can now beat a
+  slow, only-somewhat-stronger one (real per-tick expected value, not just
+  "biggest number wins this instant"), which matters once move trees offer
+  real cooldown-vs-power tradeoffs (see MOVES_DESIGN.md). Tuned specifically
+  so a genuine type/STAB advantage still wins despite a real cooldown gap —
+  0.15 was picked by checking the exact numbers against the existing
+  Ember-vs-Tackle test fixture (Ember's power=40/cooldown=2 against a Grass
+  defender: STAB×2 type-effectiveness gives it a 3x edge over Tackle's
+  power=40/cooldown=0; at weight 0.15 Ember's discounted score is still
+  ~92 against Tackle's 40 — a much higher weight, e.g. dividing outright by
+  `cooldownTicks + 1`, put these two in an exact tie, which would have
+  flipped the existing test depending on array order rather than which move
+  is actually better here).
+- `resolveHit` (predation.ts) now also takes `distance` (threaded from the
+  same `canAttackFromHere` check each of its three call sites already makes
+  right before calling it) and passes it through to its own internal
+  `pickBestMove` call, so it picks consistently with what was just
+  validated as reachable instead of re-deriving its own answer.
+- Not yet done: any awareness of the *defender's* state (HP fraction, is it
+  fleeing) in the score — that's the next real step once a move tree adds a
+  genuinely situational effect (a finishing-blow bonus, a anti-kiting drag)
+  worth picking *for*, not just a bigger number. Scoped out for now rather
+  than guessed at ahead of any move that would actually use it.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

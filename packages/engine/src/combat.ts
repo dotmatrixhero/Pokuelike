@@ -148,20 +148,45 @@ export function tickCooldowns(agent: Agent): void {
 }
 
 /**
- * Picks the off-cooldown move that does the most expected damage against
- * `defenderTypes` — a simple greedy heuristic, not full tactical planning.
- * Undefined means every move is on cooldown (the attacker still closes
- * distance, it just can't land a hit this tick).
+ * How much a move's own `cooldownTicks` discounts its score in
+ * `pickBestMove` — small on purpose. At 0.15, a 3-tick cooldown discounts a
+ * move to ~69% of its raw power/STAB/effectiveness score: enough that a
+ * fast, modest move can beat a slow, only-somewhat-stronger one (real tempo
+ * awareness), but not enough to override a genuine type/STAB advantage on
+ * its own (a 3x-effective move stays clearly ahead of a same-power neutral
+ * one even at a real cooldown gap) — see DESIGN.md's "Move selection"
+ * section for the worked-through numbers that picked this constant.
  */
-export function pickBestMove(attacker: Agent, defenderTypes: PokemonType[]): MoveSpec | undefined {
-  const available = (attacker.moves ?? []).filter((move) => !attacker.moveCooldowns?.[move.id]);
+export const MOVE_SCORE_TEMPO_WEIGHT = 0.15;
+
+/**
+ * Picks the off-cooldown, in-range (when `distance` is given) move that does
+ * the most expected damage per tick against `defenderTypes` — a simple
+ * greedy heuristic, not full tactical planning. Undefined means nothing
+ * usable: every move is on cooldown, or (when `distance` is given) none of
+ * the off-cooldown moves actually reach that far.
+ *
+ * `distance` is optional and, when omitted, this ignores range entirely —
+ * kept for the handful of callers (bare unit tests among them) that only
+ * want a raw damage comparison with no positional context. Every real
+ * combat call site should pass it: without it, this used to happily return
+ * a move that scores highest on paper but can't actually be used from here,
+ * which `canAttackFromHere` would then reject outright even when a
+ * different owned move *was* in range — a real bug, not a hypothetical one,
+ * fixed by filtering to reachable moves before scoring instead of scoring
+ * first and checking range after.
+ */
+export function pickBestMove(attacker: Agent, defenderTypes: PokemonType[], distance?: number): MoveSpec | undefined {
+  const offCooldown = (attacker.moves ?? []).filter((move) => !attacker.moveCooldowns?.[move.id]);
+  const available = distance === undefined ? offCooldown : offCooldown.filter((move) => withinMoveRange(move, distance));
   if (available.length === 0) return undefined;
 
   let best: MoveSpec | undefined;
   let bestScore = -Infinity;
   for (const move of available) {
     const stab = attacker.types?.includes(move.type) ? 1.5 : 1;
-    const score = move.power * stab * typeEffectiveness(move.type, defenderTypes);
+    const tempo = 1 / (1 + MOVE_SCORE_TEMPO_WEIGHT * move.cooldownTicks);
+    const score = move.power * stab * typeEffectiveness(move.type, defenderTypes) * tempo;
     if (score > bestScore) {
       bestScore = score;
       best = move;
