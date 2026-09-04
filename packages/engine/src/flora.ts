@@ -35,6 +35,18 @@ function isNearSunbeam(world: World, pos: Vec2): boolean {
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// Tuning constants — the knobs to hand-edit. Every food/flora durability and
+// regrowth rate the sim actually uses lives here, grouped in one place on
+// purpose (direct ask: "parametrize things like food durability and
+// regrowth stuff... so I can tune it") rather than scattered as inline magic
+// numbers through `growFlora`/`trySpread`/`maybeDropSeed` below. Each one
+// still carries its own doc comment with what a real headless run showed
+// when it was last changed — read those before nudging a number, the same
+// "judge against a real run, not vibes" standard every other tuning constant
+// in this codebase is held to.
+// ---------------------------------------------------------------------------
+
 /** Chance, per tick, that an agent moving across open ground drops a seed there. */
 const SEED_DROP_CHANCE = 0.1;
 /** Chance a dropped seed actually takes root instead of doing nothing. */
@@ -47,22 +59,35 @@ const GERMINATION_CHANCE = 0.65;
  * wouldn't mature until tick 150, guaranteeing a ~100-tick famine window
  * with zero food anywhere. All 9 starting agents starved by tick ~200 in
  * that run. Shortened so new food reliably arrives before old food dies.
+ * Left unchanged by this pass — the faster-depleting/shorter-lived patches
+ * below don't shrink this famine-window math, they just make an existing
+ * patch run out and die sooner, which is the point (real pressure to move
+ * on), not a reason to also slow down replacement.
  */
 export const MATURATION_TICKS = 20;
 /** Ticks per full season cycle — a slow abundant/lean rhythm on decay and spread. */
 const SEASON_LENGTH = 1000;
 /**
  * How much a single feeding depletes a food patch's stock. Was 0.2, then
- * briefly 0.5 — reverted most of the way back after a real run showed why:
- * 0.5 (two feedings to empty a patch) stacks with natural decay/death
- * below and wipes out the *starting* food supply in the first handful of
- * ticks, before any replacement can mature, causing total colony collapse
- * (confirmed: all 3 initial patches dead by tick 42, every agent starved
- * by tick ~280). 0.25 still runs out meaningfully faster than the
- * original 0.2, without also being the dominant killer on top of natural
- * decay.
+ * briefly 0.5 (reverted — a real run showed 0.5 stacks with natural decay
+ * below and wipes out the *starting* food supply before any replacement can
+ * mature, total colony collapse by tick ~280), then 0.25 for a long stretch
+ * of this session while starvation itself was still a real, common cause of
+ * death.
+ *
+ * Raised again to 0.35 here — direct ask ("Maybe we make food less durable
+ * now? Make it die easier to force migration now that starving is less
+ * likely"), now that this session's earlier fixes (see DESIGN.md's "Real
+ * confirmed bug: dying of thirst standing on water" and the breeding-gate
+ * tuning before it) made starvation deaths collapse to zero across every
+ * real seed tested. That headroom is exactly what makes 0.35 safe to try
+ * where 0.5 wasn't: at 0.35, under 3 feedings empty a patch (was 4 at 0.25),
+ * a real, meaningfully faster depletion, without repeating the earlier
+ * total-collapse failure mode this constant already has a documented scar
+ * from. See this file's own "Built, real-run findings" entry in DESIGN.md
+ * for the actual before/after migration-event counts this produced.
  */
-export const CONSUME_STOCK_AMOUNT = 0.25;
+export const CONSUME_STOCK_AMOUNT = 0.35;
 /**
  * A living food patch's natural lifespan in ticks, before it dies (reverts
  * to bare floor) on its own — on top of, not instead of, being eaten out.
@@ -71,12 +96,27 @@ export const CONSUME_STOCK_AMOUNT = 0.25;
  * "how long food lasts" was really unbounded. That old regrowth-from-empty
  * cycle took roughly 500 ticks at an average season; 50 (a tenth of that)
  * turned out a little too short once the one-way-ratchet flora-death bug
- * was fixed and food could actually be found again — doubled per request.
+ * was fixed and food could actually be found again — doubled to 100 per
+ * that earlier request.
+ *
+ * Shortened to 70 here, the same "less durable, force migration" direct ask
+ * as `CONSUME_STOCK_AMOUNT` above — a patch now dies of old age 30% sooner
+ * even if agents never fully eat it out, so a herd camped on a locally
+ * abundant patch still sees it disappear on a real, visible clock rather
+ * than lingering indefinitely between feedings.
  */
-const FOOD_LIFESPAN_TICKS = 100;
+const FOOD_LIFESPAN_TICKS = 70;
 const NATURAL_DECAY_PER_TICK = 1 / FOOD_LIFESPAN_TICKS;
-/** Chance, per tick, a living food patch seeds an adjacent open tile — real bushes spread, they don't just sit in one place. */
-const FOOD_SPREAD_CHANCE = 0.035;
+/**
+ * Chance, per tick, a living food patch seeds an adjacent open tile — real
+ * bushes spread, they don't just sit in one place. Lowered from 0.035 to
+ * 0.025 alongside the two durability cuts above: less compensating
+ * replacement growth right next to a dying patch means a herd that exhausts
+ * its local food is more likely to actually need to walk somewhere else for
+ * more, rather than a new patch reliably sprouting in-place at the same
+ * spot — the whole point of this pass (direct ask: "force migration").
+ */
+const FOOD_SPREAD_CHANCE = 0.025;
 /**
  * Decorative "flora" needs a lifespan too, on the same principle as food —
  * without this it never dies, which turned out to be a much worse bug than
@@ -89,7 +129,8 @@ const FOOD_SPREAD_CHANCE = 0.035;
  * as bare floor) while the population sat starving in the water hole,
  * with nowhere left for new food to ever grow again. Longer-lived than
  * food since it's meant to be a longer-standing feature, but it has to
- * eventually give the tile back.
+ * eventually give the tile back. Left unchanged by this pass — it's
+ * decorative, not edible, so it isn't part of the "food durability" ask.
  */
 const FLORA_LIFESPAN_TICKS = 150;
 const FLORA_DECAY_PER_TICK = 1 / FLORA_LIFESPAN_TICKS;

@@ -269,4 +269,84 @@ describe("CONSUME_STOCK_AMOUNT", () => {
     expect(CONSUME_STOCK_AMOUNT).toBeGreaterThan(0);
     expect(CONSUME_STOCK_AMOUNT).toBeLessThan(1);
   });
+
+  it("empties a full patch in 3 feedings, not 4 — direct ask to make food less durable", () => {
+    // Real-run tuning ask: "make food less durable... force migration."
+    // CONSUME_STOCK_AMOUNT went 0.25 -> 0.35 specifically so 3 feedings
+    // empty a patch instead of 4 — check the actual arithmetic, not just
+    // the constant's raw value, so a future edit that quietly drifts this
+    // back toward "4 feedings" gets caught here.
+    let stock = 1;
+    let feedings = 0;
+    while (stock > 0) {
+      stock = Math.max(0, stock - CONSUME_STOCK_AMOUNT);
+      feedings++;
+    }
+    expect(feedings).toBe(3);
+  });
+});
+
+describe("food/flora durability tuning (direct ask: less durable food to force migration)", () => {
+  it("a full-stock food patch dies of natural decay meaningfully sooner than the old ~100-tick lifespan", () => {
+    // tick 0 -> seasonalMultiplier(0) = 0.5, a fixed, reproducible decay
+    // rate rather than depending on which tick within the season cycle the
+    // test happens to run at.
+    const world = createWorld(5, 5);
+    setTile(world, "surface", 2, 2, "food");
+    const tile = tileAt(world, "surface", 2, 2)!;
+    tile.stock = 1;
+    world.tick = 0;
+
+    // rng() always returns 1 so the spread roll (which would otherwise
+    // plant a fresh neighboring seedling and complicate this specific
+    // "how long does THIS patch last" measurement) never fires.
+    let deathTick: number | undefined;
+    for (let t = 1; t <= 120; t++) {
+      world.tick = t;
+      growFlora(world, undefined, () => 1);
+      if (tileAt(world, "surface", 2, 2)!.terrain === "floor") {
+        deathTick = t;
+        break;
+      }
+    }
+
+    expect(deathTick).toBeDefined();
+    // Old FOOD_LIFESPAN_TICKS (100) would die around tick ~100 under this
+    // same fixed decay rate; the new, shorter lifespan should die
+    // noticeably earlier — comfortably under 90, with real margin below
+    // the old value rather than right at the boundary.
+    expect(deathTick!).toBeLessThan(90);
+    // Sanity floor: not so short it's dying almost instantly either.
+    expect(deathTick!).toBeGreaterThan(50);
+  });
+
+  it("food spreads less readily than before — a roll that would have beaten the old 0.035 rate no longer beats the new lower rate", () => {
+    // At tick 0, seasonalMultiplier(0) = 0.5, so the spread check is
+    // `rng() < FOOD_SPREAD_CHANCE * (0.5 + 0.5) = FOOD_SPREAD_CHANCE * 1`
+    // with no active weather (weatherDivisor 1). A roll of exactly 0.03
+    // would have beaten the old rate (0.035) but must now fail against the
+    // new, lower rate (0.025) — a real behavior difference, not just a
+    // constant-value check.
+    const world = createWorld(5, 5);
+    setTile(world, "surface", 2, 2, "food");
+    tileAt(world, "surface", 2, 2)!.stock = 1;
+    world.tick = 0;
+    const log = new EventLog();
+
+    growFlora(world, log, () => 0.03);
+
+    expect(log.events.some((e) => e.kind === "floraChanged" && e.stage === "seeded")).toBe(false);
+
+    // Confirm the same setup DOES spread at a roll that beats the new,
+    // lower rate — the check above isn't just "nothing ever spreads."
+    const world2 = createWorld(5, 5);
+    setTile(world2, "surface", 2, 2, "food");
+    tileAt(world2, "surface", 2, 2)!.stock = 1;
+    world2.tick = 0;
+    const log2 = new EventLog();
+
+    growFlora(world2, log2, () => 0.01);
+
+    expect(log2.events.some((e) => e.kind === "floraChanged" && e.stage === "seeded")).toBe(true);
+  });
 });

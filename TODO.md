@@ -1570,3 +1570,76 @@ not something this pathfinding pass itself caused or is positioned to fix.
       native `title` attribute — functional but not discoverable on touch
       devices with no hover. A real click-to-expand detail popover would be
       nicer if this becomes a frequently-used feature.
+
+## Food durability + real water-body terrain transformation — built, see DESIGN.md
+
+- [x] Direct asks ("make food less durable... force migration" / "water
+      sources dry out and refill more during droughts and rain... bigger
+      lake/spring bodies might shrink but never run out") both built.
+      `CONSUME_STOCK_AMOUNT` 0.25->0.35, `FOOD_LIFESPAN_TICKS` 100->70,
+      `FOOD_SPREAD_CHANCE` 0.035->0.025 (flora.ts). New `waterBody.ts`
+      (4-connected flood-fill component sizing, cached via
+      `World.resourceVersion`) backs a tiered `advanceWaterCycle`: small
+      bodies dry at a much faster `1/150` (was a flat `1/500`) and can fully
+      vanish; bodies at/above `LARGE_WATER_BODY_MIN_SIZE` (12, picked from a
+      real measured size distribution — see DESIGN.md) dry at a much slower
+      `1/3000` and are floored at exactly that same threshold so they can
+      never run out. `RAIN_WATER_FORM_CHANCE_PER_TICK` settled at `1/1800`
+      (lower than the pre-existing `1/1500`) after a first attempt at
+      `1/1000` was checked against a real 10,000-tick terrain-only run and
+      found to cause worse runaway water growth than before (+20-47%,
+      root-caused to ~89% of a real map's water now sitting in the
+      slow-drying large-body tier) — `1/1800` brought that back to near
+      equilibrium (-2% to +8% over the same window).
+- [x] Real correctness bug found and fixed *before* shipping, not after: an
+      earlier floor value (6, below the 12-tile large-body threshold) let a
+      shrinking lake silently reclassify as "small" once it crossed under
+      12 tiles, then dry the rest of the way to 0 at the fast rate — a
+      synthetic worst-case unit test (permanent drought, no dissipation)
+      caught a 25-tile lake reaching 0 tiles by tick ~2000. Fixed by setting
+      the floor equal to the large-body threshold itself, closing the gap
+      by construction. See `weather.test.ts`'s dedicated large-vs-small test
+      and DESIGN.md's full writeup.
+- [x] Real-run validation (stash-based A/B isolating just this feature's two
+      files, 3000 ticks, seeds 42/7/20260903): migration-start events rose
+      2->10, 2->9, 1->3 across the three seeds — a real, meaningful increase
+      in scarcity-driven relocation, this feature's actual goal. Final
+      population/births moved in both directions per-seed (butterfly-effect
+      sensitivity, not a systematic direction) and zero starvation deaths in
+      every run, before and after.
+- [x] The user's own direct "keep an eye on it" ask about idle/sated agents
+      answered with real sampled numbers (ticks 1000/2000/3000, all 3
+      seeds): idle-and-both-needs-above-0.7 fraction of living agents never
+      exceeded 11%, mostly well under 5%. See DESIGN.md for the full table
+      and two honestly-flagged caveats (not fully isolated from a concurrent
+      unrelated tile-occupancy feature also landing in `needs.ts` this same
+      session; doesn't itself prove causation vs. the migration-count
+      evidence above).
+- [ ] **Residual, honestly-flagged edge case, distinct from the bug already
+      fixed above:** water-body "large" classification is a stateless,
+      current-size-only check with no memory of a body's own history. The
+      floor-equals-threshold fix guarantees a large body can't be
+      immediately reclassified-then-drained in one continuous exposure, but
+      a border-line-sized lake (just above the 12-tile threshold) that
+      survives many *repeated* separate droughts over a very long run could
+      still, in principle, eventually cross the threshold for good and then
+      dry at the fast small-body rate with no more protection. Real
+      generated maps' actual major lakes sit well above the threshold
+      (34-183 tiles per DESIGN.md's measured distribution), so this mainly
+      matters for the handful of borderline 12-30-tile bodies specifically,
+      over run lengths well beyond what the performance-ceiling item below
+      currently allows a real agent-population run to reach anyway. Real
+      persistent per-body hysteresis tracking (not just a per-tick size
+      check) would close this fully if it's ever worth the complexity.
+- [ ] **A real 8000-tick, 3-seed validation run (this task's own suggested
+      upper end) could not be completed** — killed after several minutes
+      without finishing, and a follow-up single-seed 5000-tick attempt was
+      also killed. Confirmed this is the pre-existing population-driven
+      performance ceiling noted elsewhere in this file, not something this
+      feature caused (a terrain-only water-cycle run with zero agents
+      completed a full 10,000 ticks in ~6 seconds). 3000 ticks per seed
+      (~7-10 seconds) is this feature's actual validated range — worth
+      revisiting once the underlying population-growth performance ceiling
+      is addressed, so a real long-run validation (and a real check of
+      whether the residual water-body edge case above ever actually bites)
+      becomes practical.

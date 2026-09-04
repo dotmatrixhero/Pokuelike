@@ -2,6 +2,7 @@ import type { Layer, TerrainKind, Vec2, WeatherCell, WeatherType, World } from "
 import type { EventLog } from "./events.js";
 import { setElevation, setTile, tileAt } from "./world.js";
 import { biomeWeightsAt } from "./worldgen.js";
+import { LARGE_WATER_BODY_MIN_SIZE, isLargeWaterBody, waterBodySizeAt } from "./waterBody.js";
 
 /**
  * Spatial, moving weather — see DESIGN.md's "Dynamics that move a content
@@ -415,8 +416,121 @@ export function isInColdSnap(world: World, layer: Layer, pos: Vec2): boolean {
  * (long-run drift still tracks whichever weather type a given seed happens
  * to roll more of, rather than converging to a stable equilibrium).
  */
-export const DROUGHT_WATER_DRY_CHANCE_PER_TICK = 1 / 500;
-export const RAIN_WATER_FORM_CHANCE_PER_TICK = 1 / 1500;
+// ---------------------------------------------------------------------------
+// Water-cycle tuning constants — grouped here on purpose (direct ask:
+// "parametrize things like food durability and regrowth stuff... so I can
+// tune it"), same rationale as flora.ts's own tuning-constants section: one
+// place to find and hand-edit every water-durability/formation rate, each
+// with a doc comment carrying what a real headless run actually showed.
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-tick drying chance for a water tile belonging to a *small* body (below
+ * `LARGE_WATER_BODY_MIN_SIZE` tiles — waterBody.ts) sitting inside an active
+ * drought cell. Was a single flat `1/500` for every water tile regardless of
+ * size; direct ask ("Make certain water sources dry out and refill more
+ * during droughts and rain... Bigger 'lake' or 'spring' water bodies might
+ * shrink but never run out") wants a real size-aware split, and specifically
+ * wants MORE visible terrain transformation than before, not less. Raised
+ * to `1/150` for small bodies specifically — over a full drought-cell
+ * lifespan (500 ticks) that's `1 - (1 - 1/150)^500 ≈ 0.96`, i.e. a small,
+ * isolated puddle sitting continuously inside one sustained drought is very
+ * likely to fully dry out, exactly the "dry out and refill" dynamism asked
+ * for. Large bodies get their own, much lower rate — see
+ * `LARGE_WATER_BODY_DRY_CHANCE_PER_TICK` below — so this number is no
+ * longer a single global compromise between "small puddles should be able
+ * to vanish" and "lakes shouldn't." See DESIGN.md's "Built, real-run
+ * findings" for this feature for the actual before/after water-tile counts
+ * and dried/formed event counts a real multi-thousand-tick run produced.
+ */
+export const DROUGHT_WATER_DRY_CHANCE_PER_TICK = 1 / 150;
+/**
+ * Per-tick drying chance for a water tile belonging to a *large* body (a
+ * "lake"/"spring", `LARGE_WATER_BODY_MIN_SIZE`+ tiles) under drought — much
+ * lower than the small-body rate above by direct request ("Bigger 'lake' or
+ * 'spring' water bodies might shrink but never run out"). Over a full
+ * 500-tick drought lifespan that's `1 - (1 - 1/3000)^500 ≈ 0.15` per tile —
+ * real, visible edge-shrinkage of a big lake over a sustained drought
+ * without threatening to empty it, especially combined with
+ * `LARGE_WATER_BODY_FLOOR_SIZE`'s hard floor below.
+ */
+export const LARGE_WATER_BODY_DRY_CHANCE_PER_TICK = 1 / 3000;
+/**
+ * Once a large water body's *current* size (recomputed once per
+ * `advanceWaterCycle` call, before any of that tick's mutations — see the
+ * function body) has shrunk down to this many tiles, it stops drying
+ * further for the rest of that tick, regardless of roll outcome — the
+ * literal "never run out" half of the direct ask.
+ *
+ * Deliberately set equal to `LARGE_WATER_BODY_MIN_SIZE` (12), not lower.
+ * An earlier version of this feature used a lower floor (6) to give a
+ * shrinking lake more visible room to recede before stopping — but that
+ * left a real, confirmed gap: a body between the floor and
+ * `LARGE_WATER_BODY_MIN_SIZE` no longer reads as "large" (`isLargeWaterBody`
+ * is a simple current-size check, with no memory of a body's own history),
+ * so it silently fell back to the much faster *small*-body drying rate with
+ * no floor protection at all — a synthetic worst-case unit test (a lake
+ * pinned under one permanently-active drought cell, no dissipation) showed
+ * exactly this: a 25-tile lake reached 0 tiles by tick ~2000 instead of
+ * stopping at the intended floor. Setting the floor equal to the large-body
+ * threshold itself closes that gap by construction: `isLargeWaterBody`
+ * reads `>= LARGE_WATER_BODY_MIN_SIZE`, so a body can only ever be skipped
+ * by this floor check (`bodySize <= floor`) at exactly `bodySize ===
+ * LARGE_WATER_BODY_MIN_SIZE` — the instant before it *would* cross out of
+ * "large" territory, never after. A body that started well above the
+ * threshold still gets real, substantial, visible shrinkage room (down to
+ * 12 tiles, however large it started); a genuinely small body was never
+ * "large" to begin with and is unaffected by this floor at all — same
+ * "small bodies can fully dry out" behavior as before this feature. See
+ * DESIGN.md's "Built, real-run findings" for this feature for the
+ * before/after numbers from both the original (gapped) version and this fix.
+ */
+export const LARGE_WATER_BODY_FLOOR_SIZE = LARGE_WATER_BODY_MIN_SIZE;
+/**
+ * Per-tick chance an eligible tile (`RAIN_CONVERTIBLE_TERRAIN`, adjacent to
+ * existing water) becomes water under an active rain cell. Was `1/1500` —
+ * deliberately much lower per-roll than the (then-single) drought-dry rate,
+ * to counteract forming water's own structural growth advantage (each new
+ * water tile immediately becomes a new adjacency source for its own
+ * neighbors next tick — see this section's older doc comment, preserved
+ * below, for the full "one-way ratchet" story a real 10,000-tick run
+ * surfaced at a naively-matched 1/500-vs-1/600 pair of rates).
+ *
+ * Tried raising this to `1/1000` first — direct ask for MORE dynamism
+ * ("increasing it... more dynamic") — on the theory that this pass's tiered
+ * drying rates change the runaway-growth risk calculus that motivated the
+ * original steep discount (newly rain-formed tiles are small, isolated
+ * additions, themselves subject to the much-stronger small-body drought-dry
+ * rate above). **A real terrain-only 10,000-tick run (no agents — isolates
+ * the water cycle itself from the unrelated population-performance ceiling
+ * noted in TODO.md) showed that theory was incomplete**: net water tiles
+ * grew from 494 to 593 (seed 42, +20%), 495 to 728 (seed 7, +47%), and 472
+ * to 598 (seed 20260903, +27%) — worse runaway growth than the original
+ * 1/500-vs-1/600 pair's +17% finding, not better. Root cause, found by
+ * checking rather than assuming: `LARGE_WATER_BODY_FLOOR_SIZE`'s protection
+ * (this feature's main point) means the large majority of a real generated
+ * map's water tiles — a real check on seed 42's own water-body distribution
+ * found roughly 89% of its water tiles belong to bodies at/above
+ * `LARGE_WATER_BODY_MIN_SIZE` — now dry at the *much* slower
+ * `LARGE_WATER_BODY_DRY_CHANCE_PER_TICK`, not the old flat rate; raising
+ * the forming rate on top of that newly-stronger protection compounded
+ * rather than balanced.
+ *
+ * Settled on `1/1800` instead (lower than even the original `1/1500`) once
+ * that root cause was in hand: the same terrain-only 10,000-tick run at
+ * this rate landed at 503/531/510 tiles respectively (-2% to +8%) — real
+ * near-equilibrium, not a wipeout and not a runaway, closing most of the
+ * gap the original version's own TODO.md entry flagged as unresolved (see
+ * that entry — still not a mathematically guaranteed long-run
+ * equilibrium, just a real, checked, much-improved one). This still reads
+ * as "more dynamic" than the pre-this-pass system overall: small puddles
+ * now form and fully evaporate on a real, visible cycle (the small-body
+ * drying-rate increase above), it's specifically large-lake permanence that
+ * got the protection the direct ask wanted, not a wholesale rate hike on
+ * top of it. See DESIGN.md's "Built, real-run findings" for this feature
+ * for the full before/after numbers, including both attempts.
+ */
+export const RAIN_WATER_FORM_CHANCE_PER_TICK = 1 / 1800;
 
 /** What a dried-out water tile becomes — see this section's doc comment. */
 const DRIED_WATER_TERRAIN: TerrainKind = "mud";
@@ -451,6 +565,23 @@ function isAdjacentToWater(world: World, pos: Vec2): boolean {
  */
 export function advanceWaterCycle(world: World, log?: EventLog, rng: () => number = Math.random): void {
   const tiles = world.tiles.surface;
+
+  // A snapshot of every water tile's connected-body size, taken once up
+  // front before this tick's mutations start — see waterBody.ts's own doc
+  // comment for why this is a single-pass, checked-once-per-tick read
+  // (mirrors this codebase's established "commits/checks once, doesn't
+  // re-derive mid-loop" convention, e.g. needs.ts's `needsAreUrgent`): every
+  // water tile still standing at the start of this tick is scored against
+  // the map's water-body layout as it existed at the *start* of the tick,
+  // not against a partially-dried-this-tick intermediate state, which would
+  // make results depend on iteration order over the tile array.
+  const bodySizeByIndex = new Int32Array(tiles.length);
+  for (let i = 0; i < tiles.length; i++) {
+    if (tiles[i]!.terrain !== "water") continue;
+    const pos = { x: i % world.width, y: Math.floor(i / world.width) };
+    bodySizeByIndex[i] = waterBodySizeAt(world, pos);
+  }
+
   for (let i = 0; i < tiles.length; i++) {
     const tile = tiles[i]!;
     const pos = { x: i % world.width, y: Math.floor(i / world.width) };
@@ -458,7 +589,13 @@ export function advanceWaterCycle(world: World, log?: EventLog, rng: () => numbe
     if (!cell) continue;
 
     if (tile.terrain === "water" && cell.type === "drought") {
-      if (rng() < DROUGHT_WATER_DRY_CHANCE_PER_TICK) {
+      const bodySize = bodySizeByIndex[i]!;
+      const large = isLargeWaterBody(bodySize);
+      // The "never run out" hard floor — a large body already at or below
+      // this size doesn't dry any further this tick, regardless of roll.
+      if (large && bodySize <= LARGE_WATER_BODY_FLOOR_SIZE) continue;
+      const dryChance = large ? LARGE_WATER_BODY_DRY_CHANCE_PER_TICK : DROUGHT_WATER_DRY_CHANCE_PER_TICK;
+      if (rng() < dryChance) {
         setTile(world, "surface", pos.x, pos.y, DRIED_WATER_TERRAIN);
         log?.record({ kind: "terrainChanged", tick: world.tick, layer: "surface", pos, from: "water", to: DRIED_WATER_TERRAIN, cause: "drought" });
       }

@@ -21,7 +21,10 @@ import {
   MAX_ACTIVE_WEATHER_CELLS,
   DROUGHT_WATER_DRY_CHANCE_PER_TICK,
   RAIN_WATER_FORM_CHANCE_PER_TICK,
+  LARGE_WATER_BODY_DRY_CHANCE_PER_TICK,
+  LARGE_WATER_BODY_FLOOR_SIZE,
 } from "../src/weather.js";
+import { LARGE_WATER_BODY_MIN_SIZE } from "../src/waterBody.js";
 import type { WeatherCell } from "../src/types.js";
 
 /** Deterministic seeded PRNG (mulberry32) — for statistical tests that must never flake. */
@@ -402,23 +405,82 @@ describe("advanceWaterCycle: sustained drought/rain mutate real terrain", () => 
     expect(tileAt(world, "surface", 6, 5)!.terrain).toBe("floor");
   });
 
-  it("magnitudes: a full weather-cell lifespan (500 ticks) dries/forms a meaningful minority of tiles, not all or none", () => {
-    // Sanity-checks the doc comment's own math rather than re-deriving it by
+  it("magnitudes: a full weather-cell lifespan (500 ticks) dries a small body almost completely, a large one only modestly, and forms a meaningful minority of new water", () => {
+    // Sanity-checks the doc comments' own math rather than re-deriving it by
     // hand here: with a per-tick chance p over N independent rolls, the
     // chance of at least one success is 1 - (1-p)^N.
     const N = 500;
-    const dryFraction = 1 - Math.pow(1 - DROUGHT_WATER_DRY_CHANCE_PER_TICK, N);
+    const smallDryFraction = 1 - Math.pow(1 - DROUGHT_WATER_DRY_CHANCE_PER_TICK, N);
+    const largeDryFraction = 1 - Math.pow(1 - LARGE_WATER_BODY_DRY_CHANCE_PER_TICK, N);
     const formFraction = 1 - Math.pow(1 - RAIN_WATER_FORM_CHANCE_PER_TICK, N);
-    expect(dryFraction).toBeGreaterThan(0.1);
-    expect(dryFraction).toBeLessThan(0.7);
-    expect(formFraction).toBeGreaterThan(0.05);
+    // A small (below-threshold) body under a full sustained drought is very
+    // likely to fully dry out — the direct "puddles can vanish" ask.
+    expect(smallDryFraction).toBeGreaterThan(0.85);
+    // A large body's per-tile drying is real but much more modest over the
+    // same window — visible edge-shrinkage, not a wipeout.
+    expect(largeDryFraction).toBeGreaterThan(0.05);
+    expect(largeDryFraction).toBeLessThan(0.3);
+    expect(formFraction).toBeGreaterThan(0.1);
     expect(formFraction).toBeLessThan(0.6);
-    // Rain forms new water noticeably more slowly per-roll than drought dries
-    // it — a deliberate asymmetry to counteract forming's own structural
+    // Rain forms new water noticeably more slowly per-roll than a small body
+    // dries — a deliberate asymmetry to counteract forming's own structural
     // growth advantage (each new water tile becomes a new adjacency source
-    // for its neighbors) — see this file's own doc comment above the two
-    // exported constants for the full reasoning and the real run that found it.
+    // for its neighbors) — see this file's own doc comment above the
+    // exported constants for the full reasoning and the real run that found
+    // it. A large body's drying rate is lower still, by direct design.
     expect(RAIN_WATER_FORM_CHANCE_PER_TICK).toBeLessThan(DROUGHT_WATER_DRY_CHANCE_PER_TICK);
+    expect(LARGE_WATER_BODY_DRY_CHANCE_PER_TICK).toBeLessThan(DROUGHT_WATER_DRY_CHANCE_PER_TICK);
+  });
+
+  it("large water bodies dry much more slowly than small ones, and never dry below the floor size", () => {
+    // Build one small (below-threshold) puddle and one large lake, both
+    // fully exposed to the same sustained drought, then run many ticks
+    // with a real seeded rng (not a fixed 0/1 roll) so both the "large
+    // bodies shrink far slower" and "large bodies never fully vanish"
+    // claims are exercised against realistic roll variance, not a
+    // best-case single roll.
+    const width = 30, height = 30;
+    const world = createWorld(width, height);
+
+    // Small puddle: a single isolated water tile (size 1) — always below
+    // LARGE_WATER_BODY_MIN_SIZE, so it dries at the small-body rate and can
+    // vanish completely.
+    setTile(world, "surface", 3, 3, "water");
+
+    // Large lake: a solid square block of water comfortably at/above
+    // LARGE_WATER_BODY_MIN_SIZE tiles (a 5x5 = 25-tile block).
+    const lakeOriginX = 15, lakeOriginY = 15, lakeSide = 5;
+    for (let dy = 0; dy < lakeSide; dy++) {
+      for (let dx = 0; dx < lakeSide; dx++) {
+        setTile(world, "surface", lakeOriginX + dx, lakeOriginY + dy, "water");
+      }
+    }
+    expect(lakeSide * lakeSide).toBeGreaterThanOrEqual(LARGE_WATER_BODY_MIN_SIZE);
+
+    world.weatherCells = [cell({ type: "drought", center: { x: 15, y: 15 }, radius: 25 })];
+    const rng = seededRng(2026);
+    for (let t = 0; t < 4000; t++) {
+      world.tick = t;
+      advanceWaterCycle(world, undefined, rng);
+    }
+
+    // The small puddle, unprotected, is expected to have dried by now.
+    expect(tileAt(world, "surface", 3, 3)!.terrain).toBe("mud");
+
+    // The lake shrank but never disappeared, and never dropped below the
+    // documented floor — even under 4000 ticks of continuous, never-ending
+    // drought exposure (a harsher, more adversarial test than any real
+    // weather cell, which always dissipates within a few hundred ticks).
+    let lakeWaterTilesRemaining = 0;
+    for (let dy = 0; dy < lakeSide; dy++) {
+      for (let dx = 0; dx < lakeSide; dx++) {
+        if (tileAt(world, "surface", lakeOriginX + dx, lakeOriginY + dy)!.terrain === "water") lakeWaterTilesRemaining++;
+      }
+    }
+    expect(lakeWaterTilesRemaining).toBeGreaterThan(0);
+    expect(lakeWaterTilesRemaining).toBeGreaterThanOrEqual(LARGE_WATER_BODY_FLOOR_SIZE);
+    // A real, visible effect, not a no-op — some tiles did dry.
+    expect(lakeWaterTilesRemaining).toBeLessThan(lakeSide * lakeSide);
   });
 
   it("determinism: the same rng sequence produces the exact same terrain outcome twice", () => {

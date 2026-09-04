@@ -5452,3 +5452,268 @@ clicking Ember's row toggles the tree open (verified via a simulated
 (no tree) never gets a clickable header. All assertions passed. This
 confirms the DOM construction and click-toggle logic are correct; it does
 not confirm real-browser CSS layout/rendering, which remains unverified.
+
+## Real replacement population pressure: less durable food, and real water-body terrain transformation
+
+**Decided.** Direct follow-up to this session's earlier fixes (the
+support-move lockup bug, slower hunger/thirst decay, the lower breeding-
+level gate, the cross-herd mate-lock fix — see this file's earlier entries)
+collapsing starvation deaths to zero and populations up into the
+dozens-to-low-hundreds. The user's own words: "So now we'll need some other
+pop control means... I see a lot of Pokémon just sorta sated doing nothing.
+Waiting around. And now breeding a lot. We should keep an eye on it." Two
+concrete asks, both about building real resource-scarcity pressure to
+replace what starvation used to do (badly, but for free): (1) "Maybe we
+make food less durable now? Make it die easier to force migration"; (2)
+"Make certain water sources dry out and refill more during droughts and
+rain. Bigger 'lake' or 'spring' water bodies might shrink but never run
+out." A third, mid-flight ask landed while this was underway: "parametrize
+things like food durability and regrowth stuff... so I can tune it" — see
+each file's own "Tuning constants" banner section below for how that was
+addressed structurally, not just per-constant.
+
+### 1. Food durability — three constants tuned together, one left alone
+
+All three tuning constants for food live together in `flora.ts`'s own
+"Tuning constants" banner section now (direct ask — see above), each with
+a doc comment carrying its own before/after reasoning, not just its number:
+
+- **`CONSUME_STOCK_AMOUNT`: 0.25 -> 0.35.** A full patch now empties in 3
+  feedings instead of 4. This constant has a real documented scar from
+  earlier this session (0.5 caused total colony collapse when starvation
+  was still common) — 0.35 is judged safe specifically because that
+  earlier failure mode's root cause (starvation stacking with natural
+  decay to outrun food replacement) no longer applies now that starvation
+  itself is at zero across every real seed tested.
+- **`FOOD_LIFESPAN_TICKS`: 100 -> 70.** A food patch now dies of old age
+  30% sooner even if never fully eaten out, so a herd camping on
+  abundant-looking food still sees it disappear on a visible clock.
+- **`FOOD_SPREAD_CHANCE`: 0.035 -> 0.025.** Less compensating replacement
+  growth right next to a dying patch — a real test now confirms a roll
+  that used to beat the old rate (a fixed 0.03 vs. the old 0.035 cutoff)
+  no longer beats the new one (0.025).
+- **`MATURATION_TICKS` (20) and `FLORA_LIFESPAN_TICKS` (150, decorative
+  flora) left unchanged** — the first because the famine-window math its
+  own doc comment already covers only gets safer as patches die faster
+  (more room before the next seedling needs to be ready, not less); the
+  second because decorative flora isn't edible and isn't part of the
+  "food durability" ask at all.
+
+### 2. Water bodies — a real connected-component concept, and a tiered water cycle
+
+**New `waterBody.ts`.** Before this feature, `weather.ts`'s
+`advanceWaterCycle` (added earlier this session) treated every "water" tile
+identically regardless of whether it was part of a 183-tile lake or a
+1-tile puddle. `waterBodySizeAt(world, pos)` answers "how big is the
+connected body of water this tile belongs to" via a flood fill, cached
+per-`World` exactly like `resourceIndex.ts`'s established idiom (a
+`WeakMap<World, ...>`, invalidated lazily) — reusing `World.resourceVersion`
+itself as the cache key rather than minting a second, parallel version
+field, since every water-terrain mutation already goes through `setTile`,
+which already bumps it unconditionally; a water body's membership can only
+change on exactly the writes that already invalidate the resource index.
+
+**4-connected, not 8-connected** — a deliberate choice, not an oversight:
+two water tiles that only touch diagonally read, visually and
+hydrologically, as separate pools that happen to corner-touch, not one
+contiguous lake. `worldgen.ts`'s moisture-field generation produces plenty
+of these near-miss diagonal adjacencies at biome boundaries, and
+8-connecting them would silently inflate how much of the map counts as one
+protected "lake." (Flora's spread and weather's rain-formation adjacency
+checks stay 8-connected, unchanged — those answer a different question,
+"can new growth start here," where diagonal adjacency is the right call;
+see `waterBody.ts`'s own doc comment for the full reasoning.)
+
+**A real distribution check, not a guessed threshold.** Before picking
+`LARGE_WATER_BODY_MIN_SIZE`, the actual connected-component size
+distribution of a real generated 90x60 map was measured directly (all
+three seeds):
+
+| seed | total water tiles | components | top sizes | 1-tile | 2-5 | 6-11 | 12-30 | 30+ |
+|---|---|---|---|---|---|---|---|---|
+| 42 | 494 | 19 | 183, 51, 34, 31, 31, ... | 1 | 4 | 4 | 5 | 5 |
+| 7 | 495 | 16 | 122, 107, 86, 57, 44, ... | 1 | 5 | 3 | 2 | 5 |
+| 20260903 | 472 | 20 | 179, 80, 40, 29, 25, ... | 2 | 6 | 2 | 7 | 3 |
+
+A real, clearly bimodal shape — a handful of large lakes (dozens to nearly
+200 tiles) alongside a long tail of small puddles (1-11 tiles), with a
+genuine gap around the low teens. `LARGE_WATER_BODY_MIN_SIZE = 12` sits
+right in that gap: comfortably above "a few puddled tiles that happened to
+touch," comfortably below "a real lake."
+
+**Tiered `advanceWaterCycle`, and a real correctness gap found and fixed
+before shipping.** `weather.ts` now snapshots every water tile's body size
+once per tick (before that tick's own mutations — checked once, not
+re-derived mid-loop, matching this codebase's established
+`needsAreUrgent`-style convention) and applies:
+
+- **Small bodies** (below the threshold): `DROUGHT_WATER_DRY_CHANCE_PER_TICK`
+  raised `1/500 -> 1/150` — over one full 500-tick drought lifespan that's
+  `1-(1-1/150)^500 ≈ 96%`, i.e. an isolated puddle sitting in a sustained
+  drought is very likely to fully dry out. The direct "dry out... more" ask.
+- **Large bodies** (`LARGE_WATER_BODY_MIN_SIZE`+): a much lower
+  `LARGE_WATER_BODY_DRY_CHANCE_PER_TICK = 1/3000` (`≈15%` over the same
+  500-tick window) — real, visible shrinkage without threatening to empty a
+  major map feature.
+- **A hard floor, `LARGE_WATER_BODY_FLOOR_SIZE`, is set EQUAL to
+  `LARGE_WATER_BODY_MIN_SIZE`, not lower.** An earlier version of this
+  feature used a lower floor (6) to give a shrinking lake more visible room
+  to recede — but a synthetic worst-case unit test (one lake, one
+  permanently-active drought cell that never dissipates, 4000+ ticks)
+  caught a real bug this created: once a shrinking lake's size dropped
+  below `LARGE_WATER_BODY_MIN_SIZE`, `isLargeWaterBody` (a stateless,
+  current-size-only check) reclassified it as "small" — with no memory of
+  its own history — so it silently fell back to the fast small-body rate
+  with *no* floor protection at all. That test showed a 25-tile lake
+  reaching **0 tiles** by tick ~2000 under continuous exposure — the exact
+  "never run out" guarantee failing by construction. Setting the floor
+  equal to the large-body threshold closes the gap structurally: a large
+  body can only ever be skipped by the floor check at exactly the instant
+  before it would cross out of "large" territory, never after. This is a
+  real, checked property now (`weather.test.ts`'s dedicated large-vs-small
+  test), not just a documented intention — though it's still a per-tick,
+  stateless classification, so a border-line-sized lake (just above 12
+  tiles) that survives many *repeated* droughts over a very long run could
+  in principle still eventually cross the threshold and then dry at the
+  fast rate; see TODO.md for this flagged honestly as a residual edge case,
+  distinct from the bug that's now fixed.
+
+**Rain-forming: a real runaway-growth check, root-caused, and re-tuned.**
+Direct ask for more dynamism ("increasing it... more dynamic") justified a
+first attempt at raising `RAIN_WATER_FORM_CHANCE_PER_TICK` from `1/1500` to
+`1/1000`. **A real terrain-only 10,000-tick run (no agents — isolating the
+water cycle from the unrelated population-performance ceiling, see
+TODO.md) showed this was wrong**: net water tiles grew 494->593 (seed 42,
++20%), 495->728 (seed 7, +47%), 472->598 (seed 20260903, +27%) — worse
+runaway growth than this session's earlier +17% finding at the original
+flat rates, not better. Root cause, checked rather than assumed: a direct
+count on seed 42's own water-body distribution found **roughly 89% of its
+water tiles belong to bodies at/above the large-body threshold** — so this
+feature's own floor protection means the large majority of the map's water
+now dries at the much-slower large-body rate; raising the forming rate on
+top of that newly-strengthened protection compounded instead of balancing.
+Settled on `1/1800` (lower than even the pre-this-feature `1/1500`) once
+that was understood: the same terrain-only run at this rate landed at
+503/531/510 tiles (-2% to +8%) — real near-equilibrium, closing most of the
+gap this session's own earlier "does this converge?" open question flagged
+(see TODO.md — still not a mathematically airtight guarantee, just a real,
+measured, much-improved one). This still reads as more dynamic than before
+this feature overall: small puddles now form and fully evaporate on a real,
+visible cycle; it's specifically large-lake permanence that got the
+protection the direct ask wanted, not a wholesale rate hike alongside it.
+
+### 3. Real-run findings — population, migration, and the "sated and idle" question
+
+**Isolating this feature's own effect.** Because other engine work landed
+concurrently this session on files this feature doesn't own, a clean
+before/after specifically for flora.ts/weather.ts was taken by stashing
+just those two files (reverting only this feature) and re-running the
+identical 3000-tick/3-seed scenario with everything else in the tree held
+constant, then restoring:
+
+| seed | | final pop | births | migration starts (by reason) | water dried | water formed |
+|---|---|---|---|---|---|---|
+| 42 | before | 170 | 151 | scarcity:1, wanderlust:1 (2 total) | 63 | 9 |
+| 42 | after | 166 | 148 | scarcity:5, wanderlust:4, territorial:1 (10 total) | 45 | 4 |
+| 7 | before | 67 | 51 | wanderlust:1, scarcity:1 (2 total) | 26 | 10 |
+| 7 | after | 185 | 170 | scarcity:5, wanderlust:3, weather:1 (9 total) | 53 | 20 |
+| 20260903 | before | 60 | 41 | weather:1 (1 total) | 36 | 15 |
+| 20260903 | after | 33 | 21 | wanderlust:2, weather:1 (3 total) | 28 | 12 |
+
+**Migration events roughly quintupled to tripled across all three seeds**
+(2->10, 2->9, 1->3) — a real, meaningful increase in herds actually
+relocating due to scarcity/resource pressure, the direct goal of this
+feature, checked rather than assumed. Final population and birth counts
+moved in both directions across seeds (down slightly for 42, up sharply
+for 7, down for 20260903) — consistent with this codebase's well-documented
+butterfly-effect sensitivity to any behavior-shaping change under a fixed
+seed (see the pathfinding section's own honest example of the same
+pattern), not a systematic population effect in either direction. Zero
+starvation deaths in every run, before and after — this feature adds
+migration pressure without reopening the starvation-death problem this
+session's earlier fixes closed.
+
+**The "sated and idle" question, answered with real numbers.** Sampled at
+ticks 1000/2000/3000 across all three seeds (living agents with
+`behavior === "idle"` AND both hunger and thirst above 0.7):
+
+| seed | tick 1000 | tick 2000 | tick 3000 |
+|---|---|---|---|
+| 42 | 3/29 (10.3%) | 1/52 (1.9%) | 11/166 (6.6%) |
+| 7 | 0/25 (0%) | 3/70 (4.3%) | 3/185 (1.6%) |
+| 20260903 | 0/26 (0%) | 1/27 (3.7%) | 0/33 (0%) |
+
+Every sample lands under 11%, most well under 5% — a real, concrete answer
+to "I see a lot of Pokémon just sorta sated doing nothing": at these
+sampled points, that's a small minority of the living population, not the
+majority impression the user's real-time observation described. Two honest
+caveats, not papered over: (1) this doesn't fully isolate this feature's
+own contribution to the idle fraction specifically, since other concurrent
+engine work (a tile-occupancy/capacity feature landing in `needs.ts` this
+same session, outside this feature's scope) also changes behavior
+distribution over the same window; (2) a low idle-and-both-needs-satisfied
+fraction doesn't by itself prove agents are idle *because of* scarcity
+pressure rather than some other busy-ness (mating, fighting, herd cohesion)
+— the migration-event increase above is the more direct, load-bearing
+evidence that scarcity pressure specifically increased.
+
+**A pre-existing performance ceiling, confirmed again, not caused here.**
+An attempt at an 8000-tick, 3-seed run (per this task's own suggested
+range) and a follow-up 5000-tick single-seed run both had to be killed
+after several minutes without finishing — population growth driving a
+real, already-documented (TODO.md) performance ceiling, unrelated to this
+feature's own code (confirmed by the terrain-only water-drift script above
+running the full 10,000-tick water cycle with zero agents in ~6 seconds).
+3000 ticks (this feature's actual validation baseline, at the low end of
+the requested 3000-8000 range) completes in ~7-10 seconds per seed; this is
+a real, current practical ceiling on how long a full agent-population
+headless run can go, not something this feature introduced or is
+positioned to fix — see TODO.md.
+
+### Tests
+
+`packages/engine/test/waterBody.test.ts` (new, 11 tests): flood-fill
+correctness (isolated single tile, straight line, diagonal-NOT-connected,
+an irregular L-shape, two independent bodies, cache invalidation on both
+tile-addition and tile-removal/splitting, independent caches per `World`
+instance) plus `isLargeWaterBody`'s threshold boundary. `flora.test.ts`
+gained real durability-tuning tests (3-feedings-to-empty at the new
+`CONSUME_STOCK_AMOUNT`, a full patch dying meaningfully sooner than the old
+~100-tick lifespan under a fixed decay rate, and a real roll that beat the
+old spread rate but not the new lower one). `weather.test.ts`'s magnitude
+test was rewritten for the tiered rates (small-body dry fraction >85%,
+large-body dry fraction in a real 5-30% band, rain-form fraction in a real
+10-60% band) and gained a dedicated large-vs-small-body integration test
+(a hand-built 5x5 lake vs. an isolated puddle under the same sustained
+drought, confirming the lake shrinks far more slowly and never drops below
+the floor even under 4000 ticks of continuous exposure). No new rng source
+was introduced (`waterBodySizeAt`'s flood fill is pure grid geometry, no
+randomness) — `advanceWaterCycle`'s existing determinism test (same rng
+sequence, same terrain outcome twice) continues to pass unchanged, and the
+full engine suite's acceptance-level `determinism.test.ts` passes
+unaffected. `pnpm -r typecheck`/`pnpm -r build` clean across all four
+packages.
+
+### Explicitly not done here
+
+- No hysteresis/persistent-history tracking for water bodies (e.g.
+  remembering "this was once a 40-tile lake" across many ticks) — the
+  floor-equals-threshold fix above closes the *immediate* reclassification
+  bug this feature's own testing found, but a border-line lake that
+  survives many repeated droughts over a very long run could still, in
+  principle, eventually cross the threshold for good and then dry at the
+  fast small-body rate. Judged out of scope for this pass — real generated
+  maps' actual large lakes run well above the threshold (34-183 tiles per
+  the distribution table above), so this mainly matters for the handful of
+  borderline 12-30-tile bodies over run lengths well beyond what this
+  session's own headless-run performance ceiling currently allows anyway.
+  See TODO.md.
+- No fix for the pre-existing population-driven performance ceiling that
+  blocked a full 8000-tick agent-population validation run — confirmed
+  again here (not caused by this feature, see the terrain-only isolation
+  test above), already tracked elsewhere in TODO.md.
+- Idle-fraction isolation from concurrent, unrelated engine work (the
+  tile-occupancy/capacity feature landing in `needs.ts` this same session)
+  wasn't attempted — the real numbers above are still real and honestly
+  caveated, just not a clean single-variable isolation the way the
+  migration-event stash-based A/B test above is.
