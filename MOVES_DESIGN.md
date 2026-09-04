@@ -151,6 +151,50 @@ that already exists):
 on the tile it's on when it's finally pruned — decomposition enriching
 soil, real ecology, zero new move needed, just a tweak to corpse pruning.
 
+### Round four — HMs, and the real finding underneath them
+
+Prompted by naming Whirlpool/Flash/Will-o-Wisp directly: HMs are the
+actual real-game precedent for "a non-combat move that changes the map,"
+which is exactly what this whole brainstorm has been reaching for.
+
+| Move (real) | Effect | What it touches |
+|---|---|---|
+| Flash | **Dual effect, both real mainline**: expands the caster's own FOV radius (a defensive use of `computeVisible`, the mirror image of Leer's offensive one) *and* lowers a target's accuracy in combat | Confirmed: both halves stay in, not just the FOV one |
+| Surf | Temporarily treats `water` tiles as walkable for the caster | Needs a Water-type to make any sense — see the roster gap below |
+| Whirlpool | Field: crosses deep water. Battle: a multi-turn bind, same family as String Shot/Sand Tomb | Needs Water |
+| Waterfall | Instantly scales a steep `elevation` delta that would otherwise slow/block movement | Direct reuse of `elevation.ts`'s existing delta math, inverted from "combat modifier" to "movement enabler" |
+| Strength | Pushes a boulder — a `wall` tile becomes permanently passable rubble | Distinct from Rock Smash/Bulldoze: those are combat-triggered instant clears, this is a deliberate, permanent, non-combat map edit |
+| Rock Smash | Single-tile version of Bulldoze/Magnitude from round two | Same slot, smaller footprint |
+| Will-o-Wisp | Pure status move — little/no direct damage, very high burn chance | A genuinely different design point from Ember (damaging move with a status side effect): a move whose entire job is inflicting the condition. Doesn't strictly need a Ghost-type learner |
+
+**The real finding underneath this round**: the current roster (Grass/
+Poison, Fire, Bug/Flying, Normal/Flying, Ground, Rock) has **zero**
+representation for Water, Electric, Ghost, Ice, Psychic, Dark, Steel,
+Fairy, or Dragon. Most of the moves above are inert without a species of
+the right type to learn them — same shape as the Spearow/Onix expansion
+earlier, where two new species unlocked the underground/canopy layers for
+free. **Confirmed for real addition** (not just brainstormed — explicitly
+approved): a short list of real, well-known, early-game candidates, each
+chosen because it unlocks a cluster of the moves above at once rather
+than just one:
+
+- **Water** (Squirtle, Poliwag, or Magikarp) — unlocks Surf/Whirlpool/
+  Waterfall/Water Gun (round one) all at once, and finally gives the
+  ponds already sitting on the map a resident.
+- **Electric** (Pikachu, Magnemite) — unlocks Thunder Wave (paralysis,
+  already in the status design) plus Discharge (AoE paralysis chance) and
+  Magnet Rise (temporary immunity to ground-based hazards like Spikes).
+- **Psychic** (Abra, Drowzee) — Hypnosis is Will-o-Wisp's sleep-status
+  equivalent (pure status, no damage); Psychic is also the *actual*
+  canonical type for Teleport (round two filed it under Ground/generic).
+- **Ghost or Dark** (a real home for Will-o-Wisp, or Taunt — forces a
+  target into aggressive-only behavior for a duration, overriding its
+  normal flee/idle logic, a nasty and funny debuff).
+
+Build order for the species themselves: Water first (existing pond
+infrastructure means it needs zero new terrain, just a new resident —
+same reasoning that put Sunny Day/Growl at the top of the move list).
+
 **Declined**: Bug Bite / Pluck (priority looting rights on a corpse) —
 explicitly cut per feedback, not worth the complexity for what it adds.
 
