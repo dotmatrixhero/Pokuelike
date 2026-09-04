@@ -1,9 +1,9 @@
 import type { Agent, World } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 
-function row(label: string, value: string): HTMLElement {
+function row(label: string, value: string, compact = false): HTMLElement {
   const el = document.createElement("div");
-  el.className = "inspect-row";
+  el.className = compact ? "inspect-row inspect-row-compact" : "inspect-row";
   const l = document.createElement("span");
   l.className = "inspect-label";
   l.textContent = label;
@@ -42,7 +42,11 @@ function renderOverview(container: HTMLElement, world: World): void {
   for (const a of living) perSpecies.set(a.species, (perSpecies.get(a.species) ?? 0) + 1);
   const bySpecies = [...perSpecies.entries()].sort((a, b) => b[1] - a[1]);
   for (const [species, count] of bySpecies) {
-    container.appendChild(row(SPECIES[species]?.name ?? species, String(count)));
+    // Compact: the general #inspector row layout's fixed 130px label column
+    // (tuned for longer per-agent field names like "Activity pattern") left
+    // a huge gap between a short species name and its count on desktop —
+    // direct ask: "the label of pokemon to number is super far apart."
+    container.appendChild(row(SPECIES[species]?.name ?? species, String(count), true));
   }
 
   if (world.weatherCells && world.weatherCells.length > 0) {

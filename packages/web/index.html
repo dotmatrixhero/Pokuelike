@@ -195,6 +195,11 @@
       #inspector .inspect-row { justify-content: flex-start; }
       #inspector .inspect-label { flex: 0 0 auto; min-width: 130px; }
       #inspector .inspect-value { text-align: left; }
+      /* Population/species-count rows in the world-overview panel: short
+         label, short number — the general 130px label column (sized for
+         longer per-agent field names) left a big gap between them. */
+      #inspector .inspect-row.inspect-row-compact { gap: 6px; }
+      #inspector .inspect-row.inspect-row-compact .inspect-label { min-width: 0; }
     </style>
   </head>
   <body>
