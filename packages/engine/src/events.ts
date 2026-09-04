@@ -200,6 +200,18 @@ export type SimEvent =
       pos: Vec2;
       /** "arrived" = reached the migration target; "gaveUp" = timed out first — mirrors migration.ts's own give-up pattern. */
       outcome: "arrived" | "gaveUp";
+    }
+  | {
+      kind: "nightfall";
+      tick: number;
+      /** The light level (daynight.ts's `lightLevel`) at the exact tick this fired. Always just under `NIGHT_THRESHOLD`. */
+      lightLevel: number;
+    }
+  | {
+      kind: "daybreak";
+      tick: number;
+      /** The light level (daynight.ts's `lightLevel`) at the exact tick this fired. Always just at/over `NIGHT_THRESHOLD`. */
+      lightLevel: number;
     };
 
 /**

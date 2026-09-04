@@ -1,9 +1,10 @@
-import type { Agent, HuntRules, InventoryItem, TerrainKind, Vec2, World } from "./types.js";
+import type { ActivityPattern, Agent, HuntRules, InventoryItem, TerrainKind, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
 import { CONSUME_STOCK_AMOUNT } from "./flora.js";
+import { isNight, isTwilight } from "./daynight.js";
 import { agentsWithin, isPreyOf, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS } from "./predation.js";
 import { findNearestIndexed } from "./resourceIndex.js";
 
@@ -179,6 +180,49 @@ export function elevationSpeedMultiplier(fromElevation: number, toElevation: num
  */
 export function movementSpeedFactor(fromElevation: number, toElevation: number, toTerrain: TerrainKind): number {
   return elevationSpeedMultiplier(fromElevation, toElevation) * terrainSpeedMultiplier(toTerrain);
+}
+
+// --- Day/night activity pattern -> effective Speed (see DESIGN.md's "Dynamics that move a content herd", Phase 2) ---
+
+/**
+ * The partial Speed multiplier applied to an agent caught active outside its
+ * `activityPattern`'s preferred window — a real but not crippling penalty,
+ * the same order of magnitude as `terrainSpeedMultiplier`'s sand/mud
+ * penalties (0.75/0.5) rather than anything close to zero: this is "sluggish
+ * off-hours," not "can't act at all," per DESIGN.md's explicit ask that a
+ * nocturnal predator hunting by day is merely less effective, not disabled.
+ * Sim-original magnitude, not canon.
+ */
+export const OFF_HOURS_SPEED_MULTIPLIER = 0.8;
+
+/**
+ * Composes multiplicatively with `movementSpeedFactor`'s elevation/terrain
+ * modifier and `effectiveSpeed`'s injury fraction, applied third: see
+ * simulation.ts's `actionSpeedOf`, which multiplies all three together (order
+ * doesn't matter for a product, but that's the call site to look at for the
+ * full chain). `"cathemeral"` (active any time — the default for anything
+ * that doesn't set `activityPattern`) is always 1, exactly reproducing
+ * pre-Phase-2 behavior for every existing species/fixture.
+ *
+ * Windows, using daynight.ts's `isNight`/`isTwilight`:
+ *  - `"diurnal"`: full speed by day, penalized at night.
+ *  - `"nocturnal"`: full speed at night, penalized by day.
+ *  - `"crepuscular"`: full speed only during the two dawn/dusk twilight
+ *    windows each cycle, penalized the rest of the time (day AND night) —
+ *    a real, narrower "always somewhat off-schedule" species, matching how
+ *    a genuinely crepuscular animal behaves.
+ */
+export function activityScheduleMultiplier(pattern: ActivityPattern | undefined, tick: number): number {
+  switch (pattern ?? "cathemeral") {
+    case "cathemeral":
+      return 1;
+    case "diurnal":
+      return isNight(tick) ? OFF_HOURS_SPEED_MULTIPLIER : 1;
+    case "nocturnal":
+      return isNight(tick) ? 1 : OFF_HOURS_SPEED_MULTIPLIER;
+    case "crepuscular":
+      return isTwilight(tick) ? 1 : OFF_HOURS_SPEED_MULTIPLIER;
+  }
 }
 
 // --- Heal over time + recovery ---

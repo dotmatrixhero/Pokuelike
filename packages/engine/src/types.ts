@@ -19,6 +19,18 @@ export interface Vec2 {
 export type MigrationReason = "scarcity" | "predator_pressure" | "wanderlust" | "territorial";
 
 /**
+ * When a species prefers to be active — see daynight.ts/DESIGN.md's "Dynamics
+ * that move a content herd" section, Phase 2. `"cathemeral"` (active any
+ * time) is the default for anything unspecified, both on `SpeciesDef`
+ * (packages/data/src/species.ts) and here on `Agent`, so existing
+ * species/hand-built fixtures don't silently change behavior just because
+ * this feature landed — see support.ts's `activityScheduleMultiplier` and
+ * predation.ts's `huntHungerThreshold` for the two places this actually
+ * changes anything.
+ */
+export type ActivityPattern = "diurnal" | "nocturnal" | "crepuscular" | "cathemeral";
+
+/**
  * "seedling" is a planted, not-yet-mature patch — see flora.ts. It matures
  * into either "food" (edible, has stock) or "flora" (decorative only —
  * not edible, just a nicer tile to be standing on than bare floor).
@@ -307,6 +319,16 @@ export interface Agent {
    * fixed values for hand-built fixtures.
    */
   disposition?: Disposition;
+
+  /**
+   * When this agent's species prefers to be active — denormalized from
+   * `SpeciesDef.activityPattern` at spawn time (packages/data/src/spawn.ts),
+   * the same pattern as `types`/`stats`/`moves` above. Absent (bare
+   * fixtures, anything spawned outside `spawnAgent`) reads as `"cathemeral"`
+   * everywhere it's consulted — no behavior change for hand-built agents
+   * that never set it. See daynight.ts/DESIGN.md's Phase 2.
+   */
+  activityPattern?: ActivityPattern;
 }
 
 /** predator species id -> the species ids it hunts. */

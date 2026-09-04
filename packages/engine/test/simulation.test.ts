@@ -3,6 +3,8 @@ import { createWorld, setTile } from "../src/world.js";
 import { createNeeds, tickAgentNeeds } from "../src/needs.js";
 import { tickWorld, accumulateActionEnergy, ACTION_THRESHOLD } from "../src/simulation.js";
 import { useMove, tickCooldowns } from "../src/combat.js";
+import { EventLog } from "../src/events.js";
+import { DAY_LENGTH_TICKS, isNight, lightLevel } from "../src/daynight.js";
 import type { Agent } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 
@@ -144,5 +146,42 @@ describe("action economy via tickWorld", () => {
     }
 
     expect(fast.agent.pos.x).toBeGreaterThan(slow.agent.pos.x);
+  });
+});
+
+describe("day/night events (see DESIGN.md's Phase 2)", () => {
+  it("fires exactly one nightfall and one daybreak per full cycle, each at the real tick the phase actually flips", () => {
+    const world = createWorld(3, 3);
+    const log = new EventLog();
+
+    for (let i = 0; i < DAY_LENGTH_TICKS; i++) {
+      tickWorld(world, log);
+    }
+
+    const nightfalls = log.events.filter((e) => e.kind === "nightfall");
+    const daybreaks = log.events.filter((e) => e.kind === "daybreak");
+    expect(nightfalls).toHaveLength(1);
+    expect(daybreaks).toHaveLength(1);
+
+    // Each event's own tick is exactly where isNight actually flips value —
+    // not fired early/late, and not fired on every tick.
+    for (const event of [...nightfalls, ...daybreaks]) {
+      if (event.kind !== "nightfall" && event.kind !== "daybreak") continue;
+      expect(isNight(event.tick)).toBe(event.kind === "nightfall");
+      expect(isNight(event.tick - 1)).toBe(event.kind === "daybreak");
+      expect(event.lightLevel).toBeCloseTo(lightLevel(event.tick), 10);
+    }
+  });
+
+  it("does not fire on every tick — most ticks produce neither event", () => {
+    const world = createWorld(3, 3);
+    const log = new EventLog();
+
+    for (let i = 0; i < DAY_LENGTH_TICKS; i++) {
+      tickWorld(world, log);
+    }
+
+    const dayNightEvents = log.events.filter((e) => e.kind === "nightfall" || e.kind === "daybreak");
+    expect(dayNightEvents.length).toBeLessThan(DAY_LENGTH_TICKS / 4);
   });
 });

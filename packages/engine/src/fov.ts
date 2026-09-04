@@ -32,6 +32,21 @@ export const ELEVATION_FOV_ASYMMETRY_PER_UNIT = 0.5;
  */
 const MAX_ELEVATION_FOV_ADJUSTMENT = 4;
 
+/**
+ * Flat sight-radius reduction at full darkness (`lightLevel` 0), scaled
+ * linearly down to 0 at full daylight (`lightLevel` 1) — see
+ * daynight.ts/DESIGN.md's Phase 2. A fourth, independent term layered onto
+ * `computeVisible`'s radius calculation exactly like concealment and
+ * elevation-asymmetry already are: it shrinks the *radius* itself (same
+ * treatment as `ELEVATION_SIGHT_BONUS` extending it), rather than adjusting
+ * any one target's effective distance, since darkness makes everything
+ * harder to see, not just specific tiles. Sim-original magnitude, not
+ * canon: 2.5 tiles at midnight is a real, noticeable bite out of the
+ * baseline radii used elsewhere in the sim (3-5), without zeroing FOV out
+ * entirely for a stationary, non-elevated observer.
+ */
+export const NIGHT_FOV_PENALTY = 2.5;
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -103,10 +118,20 @@ function hasLineOfSight(world: World, layer: Layer, origin: Vec2, target: Vec2, 
  * high ground still extends the base radius exactly as before; this only
  * adds a *third*, independent reason a given tile might or might not make
  * the cut.
+ *
+ * `lightLevel` (daynight.ts's 0..1, defaulting to 1 — full daylight) is a
+ * *fourth* independent effect, folded straight into `radius` before any of
+ * the above: darkness shrinks the radius itself by up to `NIGHT_FOV_PENALTY`
+ * tiles at full darkness, scaling down to no reduction at all at full
+ * daylight. Defaulting to 1 (rather than reading a world day/night state
+ * automatically) is deliberate — every existing caller/test that doesn't
+ * pass this argument keeps seeing exactly the pre-Phase-2 elevation/
+ * concealment/ridge behavior, unchanged.
  */
-export function computeVisible(world: World, layer: Layer, origin: Vec2, baseRadius: number): Vec2[] {
+export function computeVisible(world: World, layer: Layer, origin: Vec2, baseRadius: number, lightLevel = 1): Vec2[] {
   const observerElevation = tileAt(world, layer, origin.x, origin.y)?.elevation ?? 0;
-  const radius = baseRadius + observerElevation * ELEVATION_SIGHT_BONUS;
+  const nightPenalty = NIGHT_FOV_PENALTY * (1 - clamp(lightLevel, 0, 1));
+  const radius = Math.max(0, baseRadius + observerElevation * ELEVATION_SIGHT_BONUS - nightPenalty);
 
   // Padded by the max possible downhill *bonus* — a target's raw distance
   // can be up to MAX_ELEVATION_FOV_ADJUSTMENT past `radius` and still end up

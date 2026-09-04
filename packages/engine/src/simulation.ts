@@ -4,8 +4,9 @@ import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import { growFlora, maybeDropSeed } from "./flora.js";
 import { updateHerdMigrations } from "./herdMigration.js";
 import type { LevelingContext } from "./leveling.js";
-import { CORPSE_PERSIST_TICKS, effectiveSpeed, movementSpeedFactor } from "./support.js";
+import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
 import { tileAt } from "./world.js";
+import { isNight, lightLevel } from "./daynight.js";
 
 /**
  * Energy an agent needs to accumulate before it gets to act. Chosen against
@@ -57,9 +58,19 @@ export function accumulateActionEnergy(agent: Agent, speed: number): boolean {
  * injury fraction is applied — see `movementSpeedFactor`'s doc comment for
  * the exact composition and why it's a post-move snapshot rather than a
  * predictive gate.
+ *
+ * A third, independent multiplier composes the same way: an agent caught
+ * active outside its `activityPattern`'s preferred day/night window
+ * (support.ts's `activityScheduleMultiplier`) is also slower — see
+ * DESIGN.md's "Dynamics that move a content herd" section, Phase 2. Order
+ * doesn't matter for a product of multipliers, but for the record: terrain
+ * first, then off-hours, then injury last.
  */
-function actionSpeedOf(agent: Agent): number {
-  const baseSpeed = (agent.stats?.speed ?? ACTION_THRESHOLD) * (agent.terrainSpeedFactor ?? 1);
+function actionSpeedOf(agent: Agent, tick: number): number {
+  const baseSpeed =
+    (agent.stats?.speed ?? ACTION_THRESHOLD) *
+    (agent.terrainSpeedFactor ?? 1) *
+    activityScheduleMultiplier(agent.activityPattern, tick);
   return effectiveSpeed(agent, baseSpeed);
 }
 
@@ -89,7 +100,18 @@ function isDead(agent: Agent): boolean {
  * on an agent's action tick, gated by `accumulateActionEnergy`.
  */
 export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext): void {
+  const previousTick = world.tick;
   world.tick += 1;
+  // Once per tick, not once per agent — the day/night cycle is a world-level
+  // clock, not something each agent computes independently. Comparing the
+  // previous tick's phase to this one's is enough to catch the exact tick a
+  // transition happens on without needing any extra persisted world state —
+  // see daynight.ts/DESIGN.md's Phase 2.
+  const wasNight = isNight(previousTick);
+  const nowNight = isNight(world.tick);
+  if (nowNight !== wasNight) {
+    log?.record({ kind: nowNight ? "nightfall" : "daybreak", tick: world.tick, lightLevel: lightLevel(world.tick) });
+  }
   // Once per tick, not once per agent — see herdMigration.ts. Runs against
   // this tick's pre-move positions, which is fine: sustained-scarcity
   // detection is a slow-moving signal, not something that needs to react to
@@ -100,7 +122,7 @@ export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?:
 
     tickAgentNeeds(agent, world, ctx, log);
 
-    const acted = accumulateActionEnergy(agent, actionSpeedOf(agent));
+    const acted = accumulateActionEnergy(agent, actionSpeedOf(agent, world.tick));
     if (!acted) continue;
 
     const before = { x: agent.pos.x, y: agent.pos.y };

@@ -9,6 +9,7 @@ import { FINISHING_POOL_FRACTION } from "./support.js";
 import { isPathClear } from "./fov.js";
 import { tileAt } from "./world.js";
 import { recordPredatorPressure } from "./herdMigration.js";
+import { isTwilight, lightLevel } from "./daynight.js";
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
@@ -33,6 +34,17 @@ const HUNT_DETECT_RADIUS = 5;
 const HUNT_HUNGER_THRESHOLD = 0.6;
 /** How far aggression can push the hunt-hunger threshold from baseline in either direction. */
 const HUNT_THRESHOLD_SPREAD = 0.2;
+/**
+ * How far activityPattern+darkness can push the hunt-hunger threshold from
+ * baseline in either direction, on top of (composing with, not replacing)
+ * the aggression-based shift above — a nocturnal predator at full darkness
+ * shifts by this much toward "hunts even when not very hungry"; a diurnal
+ * one shifts the opposite way at night (needs to be hungrier before it
+ * bothers). Deliberately a bit smaller than `HUNT_THRESHOLD_SPREAD` so
+ * Disposition (an individual trait) still matters at least as much as
+ * species-level activity pattern. Sim-original magnitude, not canon.
+ */
+const NOCTURNAL_HUNT_THRESHOLD_SPREAD = 0.15;
 const KILL_HUNGER_RESTORE = 0.6;
 
 /** How close a threat has to be, and how many herd-mates have to be nearby, before prey mob it instead of fleeing. */
@@ -76,15 +88,53 @@ function effectiveFleeRadius(agent: Agent): number {
 }
 
 /**
+ * The activityPattern+darkness term of `huntHungerThreshold`, independent of
+ * (and additive with) the aggression-based term above — see
+ * DESIGN.md's "Dynamics that move a content herd", Phase 2. `darkness` is 0
+ * at full daylight, 1 at full darkness (`1 - lightLevel`):
+ *  - `"nocturnal"`: shifts *up* (more eager to hunt) as it gets darker, down
+ *    (less eager, needs to be hungrier) by day — a nocturnal predator
+ *    genuinely hunts more at night, not just flavor text.
+ *  - `"diurnal"`: the exact mirror — more eager by day, less at night.
+ *  - `"crepuscular"`: a smaller, flat eagerness bump during the two dawn/dusk
+ *    twilight windows only (daynight.ts's `isTwilight`), neutral otherwise —
+ *    crepuscular hunters key off a specific window, not a continuous
+ *    light-level gradient the way strictly diurnal/nocturnal ones do.
+ *  - `"cathemeral"` (default): no shift at all.
+ */
+function activityHuntShift(agent: Agent, tick: number): number {
+  const darkness = 1 - lightLevel(tick);
+  switch (agent.activityPattern ?? "cathemeral") {
+    case "nocturnal":
+      return (darkness - 0.5) * (2 * NOCTURNAL_HUNT_THRESHOLD_SPREAD);
+    case "diurnal":
+      return -(darkness - 0.5) * (2 * NOCTURNAL_HUNT_THRESHOLD_SPREAD);
+    case "crepuscular":
+      return isTwilight(tick) ? NOCTURNAL_HUNT_THRESHOLD_SPREAD * 0.5 : 0;
+    case "cathemeral":
+    default:
+      return 0;
+  }
+}
+
+/**
  * The hunger level below which this predator switches to `hunt`. Aggressive
  * predators hunt while less hungry (higher threshold); passive ones wait
  * until hungrier (lower threshold) — DESIGN.md's hunt-trigger point. Absent
  * disposition (hand-built fixtures) reads as neutral (0.5), reproducing the
- * original fixed HUNT_HUNGER_THRESHOLD of 0.6 exactly.
+ * original fixed HUNT_HUNGER_THRESHOLD of 0.6 exactly. Composes additively
+ * with `activityHuntShift`'s day/night-and-activity-pattern term — an
+ * aggressive nocturnal predator at midnight stacks both shifts, hunting
+ * while barely hungry at all; absent both disposition and activityPattern
+ * (bare fixtures), this reduces exactly to the original fixed threshold.
  */
-function huntHungerThreshold(agent: Agent): number {
+function huntHungerThreshold(agent: Agent, tick: number): number {
   const aggression = agent.disposition?.aggression ?? 0.5;
-  return HUNT_HUNGER_THRESHOLD + (aggression - 0.5) * (2 * HUNT_THRESHOLD_SPREAD);
+  return (
+    HUNT_HUNGER_THRESHOLD +
+    (aggression - 0.5) * (2 * HUNT_THRESHOLD_SPREAD) +
+    activityHuntShift(agent, tick)
+  );
 }
 /** Fallback HP for an agent with no real combat profile (stats/level/types) — shouldn't happen for fully-statted species. Exported so support.ts's body-weight proxy can match it. */
 export const FALLBACK_MAX_HP = 10;
@@ -473,7 +523,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
   }
 
   const preySpecies = rules[agent.species];
-  if (preySpecies && preySpecies.length > 0 && agent.needs.hunger < huntHungerThreshold(agent)) {
+  if (preySpecies && preySpecies.length > 0 && agent.needs.hunger < huntHungerThreshold(agent, world.tick)) {
     const candidates = agentsWithin(world, agent, HUNT_DETECT_RADIUS).filter(
       (other) =>
         isPreyOf(rules, agent.species, other.species) &&

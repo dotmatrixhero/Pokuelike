@@ -57,5 +57,6 @@ export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5):
     maxHp: stats.maxHp,
     nature,
     disposition,
+    activityPattern: species.activityPattern,
   };
 }

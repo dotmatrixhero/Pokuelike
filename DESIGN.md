@@ -2591,6 +2591,161 @@ collide with Phase 1's edits to the same files (`herdMigration.ts`/
     `recordPredatorPressure` call is O(1) and the territorial check is
     O(herds²) per tick, negligible at this scenario's herd count (3).
 
+### Phase 2 — as built
+
+Built. **Phase 3 (weather) above is still just decided, not built** — left
+for its own follow-up pass, sequenced after this one specifically so it
+wouldn't collide with Phase 2's edits to `events.ts` (and so weather's
+visibility/Speed effects, which explicitly compose with day/night's light
+level, land on top of a finished light-level function rather than a moving
+target).
+
+- **The cycle itself** (`daynight.ts`, a new small module — deliberately not
+  folded into flora.ts's existing seasonal code, since the two cycles share
+  nothing but "cheap deterministic function of `world.tick`", see that
+  file's doc comment): `DAY_LENGTH_TICKS = 200` (DESIGN.md's own suggestion),
+  `lightLevel(tick)` a `0.5 - 0.5*cos(2π·tick/200)` wave — 0 at midnight
+  (tick 0), 1 at noon (tick 100), same sine-wave style as
+  `seasonalMultiplier` just phase-shifted so tick 0 lands exactly on
+  midnight rather than mid-rise. `NIGHT_THRESHOLD = 0.5` splits every cycle
+  into an exactly-even day half and night half (so a diurnal and nocturnal
+  species each get an equal-length active window by default, no favoritism
+  baked in); `isTwilight` is a `±0.15` light-level band around that
+  threshold, which — since light crosses 0.5 exactly twice per cycle —
+  produces exactly two real dawn/dusk windows per day for crepuscular
+  species, not a continuous "sort of always twilight" state.
+- **`activityPattern`** landed exactly as scoped: a 4-value union
+  (`"diurnal" | "nocturnal" | "crepuscular" | "cathemeral"`) on both
+  `SpeciesDef` (`packages/data/src/species.ts`) and `Agent` (`types.ts`),
+  denormalized onto the agent at spawn (`spawn.ts`) the same way
+  `types`/`stats`/`moves` already are. Absent reads as `"cathemeral"`
+  everywhere it's consulted (support.ts/predation.ts), so every hand-built
+  test fixture and every species that doesn't set it is provably unaffected
+  — confirmed by the full pre-existing 235-test suite passing unmodified.
+  Assigned to the curated roster with real (if not strictly canon-cited)
+  reasoning, documented inline at each entry: Bulbasaur/Charmander/Pidgey
+  diurnal (sun-loving bulb, sun-loving flame, ordinary daytime bird);
+  Diglett/Sandshrew nocturnal (burrowing mole, desert-heat-avoider);
+  Scyther/Spearow crepuscular (ambush predators, dawn/dusk hunters — and
+  deliberately mismatched with Pidgey's diurnal window, so Spearow is most
+  dangerous exactly when its prey is running an off-hours Speed penalty);
+  Venusaur/Onix left at the `cathemeral` default on purpose, documented as a
+  design choice rather than an oversight (a guardian that only watches half
+  the clock isn't much of one; a rock snake tunneling underground has no
+  real "daylight" to have an opinion about).
+- **Off-hours Speed penalty** (`support.ts`'s `activityScheduleMultiplier`,
+  `OFF_HOURS_SPEED_MULTIPLIER = 0.8`): a flat 20% Speed cut while active
+  outside the pattern's window — deliberately the same order of magnitude as
+  the existing sand/mud terrain penalties (0.75/0.5), "sluggish off-hours,"
+  not "can't act." Composes multiplicatively as documented: `actionSpeedOf`
+  (simulation.ts) now multiplies base Speed by terrain factor, then this
+  activity factor, then hands the product to `effectiveSpeed`'s injury
+  fraction — an injured nocturnal agent slogging through mud by day stacks
+  all three real penalties on one action, not just whichever is worst
+  (proven by a composition test in `support.test.ts`, not just each
+  modifier tested in isolation).
+- **Hunt-eagerness shift** (`predation.ts`'s `activityHuntShift`,
+  `NOCTURNAL_HUNT_THRESHOLD_SPREAD = 0.15`, deliberately smaller than
+  aggression's own `HUNT_THRESHOLD_SPREAD = 0.2` so an individual's
+  Disposition still matters at least as much as its species' activity
+  pattern): a nocturnal predator's hunt-hunger threshold shifts up (hunts
+  even when not very hungry) as darkness increases, and down (needs to be
+  hungrier) by day; diurnal is the exact mirror; crepuscular gets a smaller
+  flat eagerness bump during the two twilight windows only, since it keys
+  off a specific window rather than a continuous light gradient. This is a
+  genuinely additive term on top of the existing aggression-based shift, not
+  a replacement — `huntHungerThreshold` sums both, confirmed by a
+  composition test showing an aggressive nocturnal predator at midnight
+  hunts at a hunger level neither shift alone reaches.
+- **Night FOV reduction** (`fov.ts`'s `NIGHT_FOV_PENALTY = 2.5`): a new
+  `lightLevel` parameter on `computeVisible`, **defaulting to `1` (full
+  daylight)** rather than reading `world.tick` automatically — the
+  deliberate design choice that keeps every pre-existing caller/test exactly
+  as it was (world.tick starts at 0, i.e. midnight, so an automatic read
+  would have silently broken every unmodified FOV test). The penalty shrinks
+  the *radius* itself (same treatment `ELEVATION_SIGHT_BONUS` gives it, just
+  the other direction) before concealment/elevation-asymmetry per-target
+  adjustments and before the ridge-blocking line-of-sight check — a fourth,
+  independent term layered on, not replacing, the three that already
+  existed. New tests confirm both halves explicitly: the exact same
+  elevation-extends-radius and ridge-blocks-over-the-top assertions from the
+  original FOV tests still hold bit-for-bit at `lightLevel: 1`, and a
+  measurable, real radius shrink at `lightLevel: 0`.
+- **`nightfall`/`daybreak` events**: emitted from `simulation.ts`'s
+  `tickWorld`, once per actual phase transition — computed by comparing
+  `isNight` at the tick before vs. after the increment, so no extra
+  persisted world state is needed just to catch the boundary. Each event
+  carries the exact `lightLevel` at that tick for narrative flavor.
+  `packages/runner/src/format.ts`'s exhaustive `SimEvent` switch needed the
+  two new cases (confirmed: TS's exhaustiveness check caught the gap
+  immediately at compile time, the same class of break a recent feature
+  flagged for this exact file) — added and rendered as plain "night
+  falls"/"day breaks" lines with the light level to two decimal places.
+- **24 new tests** across 5 files (`daynight.test.ts` new; `fov.test.ts`,
+  `support.test.ts`, `predation.test.ts`, `simulation.test.ts` extended) —
+  259 total, up from 235. Covers the light-level function's shape/period/
+  determinism; `isNight`/`isTwilight`'s exact boundary behavior; the
+  off-hours penalty per pattern *and* its multiplicative composition with
+  injury/terrain (not just each modifier alone); the nocturnal/diurnal hunt
+  threshold shifts *and* their composition with the pre-existing
+  aggression-based shift; the night FOV reduction *and* an explicit
+  regression check that the pre-existing elevation/ridge FOV tests still
+  pass unmodified at full daylight; and `nightfall`/`daybreak` firing
+  exactly once per real phase transition (not every tick) at the tick the
+  phase actually flips. All 235 pre-existing tests still pass completely
+  unmodified — no test needed updating for this feature, unlike Phase 1's 7
+  string-rename updates. `pnpm -r build`/`test` clean across all 4 packages.
+- **Real-run findings, reported straight** (`pnpm run run <N>` from
+  `packages/runner`, several independent runs plus a 6-trial batch
+  comparison against the pre-Phase-2 commit, since the demo world isn't
+  seeded):
+  - **`nightfall`/`daybreak` fire at exactly the right rate and nowhere
+    else**: a 10,000-tick run produced exactly 50 of each (10,000 / 200 —
+    the math checks out exactly, not approximately), and a dedicated test
+    walks a full 200-tick cycle confirming each event's own tick is the
+    real light-level crossing, not off-by-one in either direction.
+  - **Hunting never happened in any real run — at all, in either
+    direction.** Zero `fought`/`killed`/`hunt`-behaviorChanged events across
+    every run tried (1,000 and 10,000 ticks). This makes the nocturnal/
+    diurnal hunt-eagerness shift **unconfirmed in an actual run** — not
+    because it's wrong (it's directly, thoroughly unit-tested, including the
+    composition case) but because the pre-existing "predators barely
+    encounter prey" gap Phase 1's writeup above already root-caused
+    (scenario map too sparse/large relative to agent count and detection
+    radii) means the mechanism this feature extends never actually fires in
+    the unmodified demo scenario, day or night. Same honest gap as Phase 1's
+    predator-pressure/territorial triggers, for the same underlying reason.
+  - **The off-hours Speed penalty and night FOV reduction are real and
+    active every run** (they don't depend on a rare encounter to trigger —
+    every agent is either in its window or not, every tick), but aren't
+    independently visible in the event log by design: neither produces its
+    own event, only a smaller number/radius fed into existing systems.
+    Confirmed working the honest way instead — direct composition tests
+    above, plus manually sampling `activityScheduleMultiplier`/
+    `computeVisible` at real in-run tick values.
+  - **Population collapse (documented as pre-existing in Phase 1's own
+    findings above) is not obviously worse under Phase 2, within the noise
+    of an unseeded sim**: a 6-trial batch of 10,000-tick runs on this
+    branch ended with a mean of 2.8 agents alive (range 0-11, 1/6 runs fully
+    extinct); the same 6-trial batch on the pre-Phase-2 commit ended with a
+    mean of 1.5 (range 0-3, also 1/6 extinct). Six trials is too small a
+    sample to claim Phase 2 *improves* survival, but it rules out the
+    obvious worry — that stacking a third Speed penalty onto injury/terrain,
+    or a real FOV cut, would visibly accelerate the existing collapse. It
+    doesn't, at least not at a magnitude six trials would catch. The
+    underlying collapse itself remains exactly the pre-existing,
+    out-of-scope population-balance gap Phase 1 already flagged, not
+    something this feature introduces or is responsible for fixing.
+  - **No stacked-penalty deadlock**: nothing in this feature can drive an
+    agent's effective Speed to zero or its huntable radius to nothing —
+    `OFF_HOURS_SPEED_MULTIPLIER` (0.8) floors well above
+    `FAINT_SPEED_FLOOR` (0.35) even multiplied together with the worst
+    terrain penalty (mud, 0.5): `0.5 * 0.8 * 0.35 ≈ 0.14`, a genuinely slow
+    but nonzero action rate, not an effective freeze. `computeVisible`'s
+    radius is explicitly floored at 0 (`Math.max(0, ...)`), so a tiny
+    `baseRadius` at full darkness degrades to "can only see your own tile"
+    rather than crashing or going negative.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

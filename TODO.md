@@ -391,13 +391,32 @@ produce a real story before player mechanics are worth building further.
       DESIGN.md's "Dynamics that move a content herd" section, "Phase 1 — as
       built" for the full design and real-run findings. 235 tests total (11
       new), all builds/typechecks clean.
-- [ ] **Phases 2 (day/night cycle) and 3 (spatial weather) of the same
-      DESIGN.md section are still just decided, not built** — deliberately
-      left for a follow-up pass sequenced after Phase 1 landed, to avoid
-      colliding with its edits to `herdMigration.ts`/`herding.ts`/
-      `events.ts`. Phase 3 in particular plugs into Phase 1's generalized
-      trigger system (a `"weather"` migration reason for storm-driven
-      shelter-seeking), so it can't start before Phase 1 exists.
+- [x] **Day/night cycle — Phase 2 of DESIGN.md's "Dynamics that move a
+      content herd" section, done.** A fast, independent 200-tick
+      light-level cycle (`daynight.ts`, its own tiny module — separate from
+      flora.ts's existing 1000-tick season); `activityPattern` (`"diurnal" |
+      "nocturnal" | "crepuscular" | "cathemeral"`, default `"cathemeral"`) on
+      `SpeciesDef`/`Agent`, assigned with real reasoning to all 9 curated
+      species; a real but partial (20%) off-hours Speed penalty composing
+      multiplicatively with the existing injury/terrain modifiers
+      (`support.ts`); a nocturnal/diurnal hunt-eagerness shift
+      (`predation.ts`) composing additively with the existing
+      aggression-based shift; a flat night-time FOV radius reduction
+      (`fov.ts`, defaulting to full daylight so every pre-existing caller/
+      test is unaffected); and `nightfall`/`daybreak` events. See
+      DESIGN.md's "Phase 2 — as built" for the full design and real-run
+      findings — the honest gap: hunting never occurred in any real run at
+      all (same pre-existing sparse-encounter issue Phase 1 already
+      flagged), so the hunt-eagerness shift is unit-tested but unconfirmed
+      in an actual run. 259 tests total (24 new), all builds/typechecks
+      clean.
+- [ ] **Phase 3 (spatial weather) of the same DESIGN.md section is still
+      just decided, not built** — deliberately left for its own follow-up
+      pass sequenced after Phase 2 landed, to avoid colliding with its edits
+      to `events.ts` and so weather's visibility/Speed effects (which
+      explicitly compose with day/night's light level) land on a finished
+      `lightLevel` function. Plugs into Phase 1's generalized trigger system
+      too (a `"weather"` migration reason for storm-driven shelter-seeking).
 - [ ] Real tuning gap found by the trigger-generalization feature, same
       root cause as the two gaps just above: `fought` events are at or near
       zero in every observed real run (the pre-existing "predators barely

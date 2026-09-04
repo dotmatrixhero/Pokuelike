@@ -11,13 +11,17 @@ import {
   maybeRecoverFromFaint,
   maybeStartCarrying,
   applyCarrying,
+  effectiveSpeed,
   FED_THRESHOLD,
   WAKE_HP_FRACTION,
   FINISHING_POOL_FRACTION,
   elevationSpeedMultiplier,
   terrainSpeedMultiplier,
   movementSpeedFactor,
+  activityScheduleMultiplier,
+  OFF_HOURS_SPEED_MULTIPLIER,
 } from "../src/support.js";
+import { DAY_LENGTH_TICKS } from "../src/daynight.js";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -353,5 +357,66 @@ describe("elevation/terrain movement-speed modifiers", () => {
     // actionSpeedOf, composed multiplicatively with the (here neutral, full-hp)
     // injury fraction from effectiveSpeed.
     expect(agent.terrainSpeedFactor).toBeCloseTo(terrainSpeedMultiplier("mud"), 10);
+  });
+});
+
+describe("activityScheduleMultiplier: off-hours Speed penalty (see DESIGN.md's day/night Phase 2)", () => {
+  const MIDNIGHT = 0;
+  const NOON = DAY_LENGTH_TICKS / 2;
+
+  it("cathemeral (and unset) is always full speed, day or night — no behavior change for existing species", () => {
+    expect(activityScheduleMultiplier("cathemeral", MIDNIGHT)).toBe(1);
+    expect(activityScheduleMultiplier("cathemeral", NOON)).toBe(1);
+    expect(activityScheduleMultiplier(undefined, MIDNIGHT)).toBe(1);
+    expect(activityScheduleMultiplier(undefined, NOON)).toBe(1);
+  });
+
+  it("diurnal is full speed by day, penalized at night", () => {
+    expect(activityScheduleMultiplier("diurnal", NOON)).toBe(1);
+    expect(activityScheduleMultiplier("diurnal", MIDNIGHT)).toBe(OFF_HOURS_SPEED_MULTIPLIER);
+  });
+
+  it("nocturnal is full speed at night, penalized by day — the exact mirror of diurnal", () => {
+    expect(activityScheduleMultiplier("nocturnal", MIDNIGHT)).toBe(1);
+    expect(activityScheduleMultiplier("nocturnal", NOON)).toBe(OFF_HOURS_SPEED_MULTIPLIER);
+  });
+
+  it("crepuscular is full speed only near dawn/dusk, penalized at both noon and midnight", () => {
+    expect(activityScheduleMultiplier("crepuscular", NOON)).toBe(OFF_HOURS_SPEED_MULTIPLIER);
+    expect(activityScheduleMultiplier("crepuscular", MIDNIGHT)).toBe(OFF_HOURS_SPEED_MULTIPLIER);
+
+    // Scan for a genuine twilight tick and confirm it's full speed there.
+    let sawFullSpeed = false;
+    for (let tick = 0; tick < DAY_LENGTH_TICKS; tick++) {
+      if (activityScheduleMultiplier("crepuscular", tick) === 1) sawFullSpeed = true;
+    }
+    expect(sawFullSpeed).toBe(true);
+  });
+
+  it("the penalty is real but partial — never full speed, never anywhere close to zero", () => {
+    expect(OFF_HOURS_SPEED_MULTIPLIER).toBeLessThan(1);
+    expect(OFF_HOURS_SPEED_MULTIPLIER).toBeGreaterThan(0.5);
+  });
+
+  it("composes multiplicatively with the existing injury (effectiveSpeed) and elevation/terrain modifiers — not in isolation", () => {
+    // An injured (half HP) nocturnal agent, active during the day (off-hours),
+    // that just climbed uphill through mud: all three penalties should stack
+    // as one product, matching movementSpeedFactor's own documented
+    // composition order (terrain/elevation, then off-hours, then injury).
+    const baseSpeed = 40;
+    const terrainFactor = movementSpeedFactor(0, 3, "mud"); // uphill + mud, both penalize
+    const offHours = activityScheduleMultiplier("nocturnal", NOON); // daytime — off-hours for a nocturnal agent
+    const speedBeforeInjury = baseSpeed * terrainFactor * offHours;
+
+    const injuredAgent = makeAgent({ hp: 5, maxHp: 10 });
+    const finalSpeed = effectiveSpeed(injuredAgent, speedBeforeInjury);
+
+    expect(terrainFactor).toBeLessThan(1);
+    expect(offHours).toBe(OFF_HOURS_SPEED_MULTIPLIER);
+    expect(finalSpeed).toBeCloseTo(baseSpeed * terrainFactor * offHours * 0.5, 10);
+    // All three penalties really did stack — strictly less than any one or two of them applied alone.
+    expect(finalSpeed).toBeLessThan(baseSpeed * terrainFactor);
+    expect(finalSpeed).toBeLessThan(baseSpeed * offHours);
+    expect(finalSpeed).toBeLessThan(effectiveSpeed(injuredAgent, baseSpeed));
   });
 });

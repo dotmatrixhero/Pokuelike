@@ -7,8 +7,11 @@ import { EventLog } from "../src/events.js";
 import type { Agent, HuntRules } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 import type { Disposition } from "../src/nature.js";
+import { DAY_LENGTH_TICKS } from "../src/daynight.js";
 
 const RULES: HuntRules = { scyther: ["bulbasaur"] };
+const MIDNIGHT = 0;
+const NOON = DAY_LENGTH_TICKS / 2;
 
 // No level/types/stats set on the fixtures below, deliberately: that keeps these
 // tests on predation.ts's FALLBACK_DAMAGE (1 per hit) path, so they're testing
@@ -407,6 +410,84 @@ describe("disposition wiring", () => {
 
     const hunter = world.agents.find((a) => a.id === "scyther-0")!;
     expect(hunter.behavior).not.toBe("hunt");
+  });
+});
+
+describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)", () => {
+  it("a nocturnal predator hunts at night at a hunger level a cathemeral predator would ignore", () => {
+    const world = createWorld(10, 10);
+    world.tick = MIDNIGHT;
+    const nocturnalHunter = predator({ x: 8, y: 5 }, 0.65, { activityPattern: "nocturnal" });
+    world.agents.push(prey({ x: 5, y: 5 }), nocturnalHunter);
+
+    applyPredationInstincts(world, nocturnalHunter, RULES);
+
+    expect(nocturnalHunter.behavior).toBe("hunt");
+
+    // Same hunger, same tick, no activityPattern set — the baseline (unshifted) case.
+    const world2 = createWorld(10, 10);
+    world2.tick = MIDNIGHT;
+    const cathemeralHunter = predator({ x: 8, y: 5 }, 0.65);
+    world2.agents.push(prey({ x: 5, y: 5 }), cathemeralHunter);
+
+    applyPredationInstincts(world2, cathemeralHunter, RULES);
+
+    expect(cathemeralHunter.behavior).not.toBe("hunt");
+  });
+
+  it("that same nocturnal predator is LESS eager by day than a cathemeral predator at the same hunger", () => {
+    const world = createWorld(10, 10);
+    world.tick = NOON;
+    const nocturnalHunter = predator({ x: 8, y: 5 }, 0.65, { activityPattern: "nocturnal" });
+    world.agents.push(prey({ x: 5, y: 5 }), nocturnalHunter);
+
+    applyPredationInstincts(world, nocturnalHunter, RULES);
+
+    expect(nocturnalHunter.behavior).not.toBe("hunt");
+  });
+
+  it("a diurnal predator is the exact mirror: eager by day, less eager at night", () => {
+    const dayWorld = createWorld(10, 10);
+    dayWorld.tick = NOON;
+    const dayHunter = predator({ x: 8, y: 5 }, 0.7, { activityPattern: "diurnal" });
+    dayWorld.agents.push(prey({ x: 5, y: 5 }), dayHunter);
+    applyPredationInstincts(dayWorld, dayHunter, RULES);
+    expect(dayHunter.behavior).toBe("hunt");
+
+    const nightWorld = createWorld(10, 10);
+    nightWorld.tick = MIDNIGHT;
+    const nightHunter = predator({ x: 8, y: 5 }, 0.7, { activityPattern: "diurnal" });
+    nightWorld.agents.push(prey({ x: 5, y: 5 }), nightHunter);
+    applyPredationInstincts(nightWorld, nightHunter, RULES);
+    expect(nightHunter.behavior).not.toBe("hunt");
+  });
+
+  it("composes with the existing aggression-based shift rather than replacing it — both stack", () => {
+    // Neutral aggression, nocturnal, at night: threshold 0.6 + 0.15 (activity) = 0.75.
+    const world = createWorld(10, 10);
+    world.tick = MIDNIGHT;
+    const neutralNocturnal = predator({ x: 8, y: 5 }, 0.72, { activityPattern: "nocturnal" });
+    world.agents.push(prey({ x: 5, y: 5 }), neutralNocturnal);
+    applyPredationInstincts(world, neutralNocturnal, RULES);
+    expect(neutralNocturnal.behavior).toBe("hunt"); // 0.72 < 0.75
+
+    // Aggressive AND nocturnal, at night: threshold 0.6 + 0.2 (aggression) + 0.15 (activity) = 0.95 —
+    // hunts at a hunger level neither shift alone would cover.
+    const aggressive: Disposition = { boldness: 0.5, aggression: 1, sociability: 0.5 };
+    const world2 = createWorld(10, 10);
+    world2.tick = MIDNIGHT;
+    const aggressiveNocturnal = predator({ x: 8, y: 5 }, 0.9, { activityPattern: "nocturnal", disposition: aggressive });
+    world2.agents.push(prey({ x: 5, y: 5 }), aggressiveNocturnal);
+    applyPredationInstincts(world2, aggressiveNocturnal, RULES);
+    expect(aggressiveNocturnal.behavior).toBe("hunt"); // 0.9 < 0.95, but not < 0.75 (activity alone) or < 0.8 (aggression alone)
+
+    // Aggression alone (no activityPattern) does NOT reach 0.9 hunger.
+    const world3 = createWorld(10, 10);
+    world3.tick = MIDNIGHT;
+    const aggressiveOnly = predator({ x: 8, y: 5 }, 0.9, { disposition: aggressive });
+    world3.agents.push(prey({ x: 5, y: 5 }), aggressiveOnly);
+    applyPredationInstincts(world3, aggressiveOnly, RULES);
+    expect(aggressiveOnly.behavior).not.toBe("hunt");
   });
 });
 
