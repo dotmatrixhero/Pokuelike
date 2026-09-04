@@ -951,3 +951,20 @@ produce a real story before player mechanics are worth building further.
       `MIN_EXPLORE_AGE = 10` in `needs.ts` (a newborn settles in for a few
       ticks before it starts wandering) — verified with 8 consecutive
       full-suite runs, all green.
+- [x] **Full-engine determinism: every `Math.random()` call site now threads
+      the shared seeded `World.rng` instead** — see DESIGN.md's "Determinism:
+      a seeded PRNG threaded through the whole engine" section for the full
+      converted-call-site list (flora/leveling/migration/needs/predation/
+      reproduction, plus combat/nature/weather/herdMigration which already
+      had `rng` params from earlier features but weren't yet reaching
+      `world.rng` in production) and the concrete two-runs-diffed proof
+      (same seed, 1000 ticks via `packages/runner`, byte-identical md5).
+      Also fixed a real hidden-global bug this surfaced:
+      `reproduction.ts`'s newborn-id counter was a module-level `let`
+      (moved onto `World.offspringSequence`), and one missed `rng`
+      passthrough in `needs.ts`'s eat/drink exp grant (silently fell back
+      to its own `Math.random` default, invisible to `world.rng`
+      draw-counting but a real source of run-to-run divergence — caught by
+      the diffed-logs acceptance test, not by inspection). `packages/runner`
+      takes an optional seed argument and prints the seed used at the start
+      of every run.

@@ -1,4 +1,5 @@
 export * from "./types.js";
+export * from "./rng.js";
 export * from "./world.js";
 export * from "./movement.js";
 export * from "./typing.js";

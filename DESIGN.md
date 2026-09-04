@@ -3163,6 +3163,166 @@ scenario's luck).
   near a sunbeam patch, ticks the world on an interval, and renders it to
   canvas every frame.
 
+## Determinism: a seeded PRNG threaded through the whole engine
+
+Before this feature, `worldgen.ts`'s `mulberry32(seed)` made *map generation*
+reproducible, but every other random roll in the engine — agent behavior,
+flora growth, combat variance, reproduction, migration — called raw
+`Math.random()`. Two runs from the same seed produced the same map but a
+different *story*: not useful for reproducing/replaying a specific bug or
+run, and the explicit prerequisite for Part 2 (a real live browser viewer
+that replays a run from a seed).
+
+**What changed**:
+- `mulberry32` moved from `worldgen.ts` to its own dependency-free
+  `engine/src/rng.ts` (still re-exported from `worldgen.ts` for every
+  existing import site) so `world.ts` could import it too without a
+  `world.ts` <-> `worldgen.ts` cycle. `rng.ts` also gained `randomSeed()` —
+  a real (non-reproducible) seed, preferring `crypto.getRandomValues`,
+  falling back to `Date.now()` — for when no seed is supplied.
+- `World` gained two new required fields: `rngSeed: number` (the seed that
+  produced `rng`, always readable back off the world for printing/logging)
+  and `rng: () => number` (one live `mulberry32(rngSeed)` generator).
+  `createWorld(width, height, seed?)` sets both; `seed` defaults to
+  `randomSeed()`. `generateWorld` (worldgen.ts) seeds `world.rng` from
+  `seed ^ BEHAVIOR_RNG_SEED_XOR` — a distinct derived sub-stream from its
+  own terrain-placement rngs (same "xor a constant per sub-stream" pattern
+  it already used for elevation/moisture/obstacle/food/flavor noise), not
+  because it needs to be secret, just so `world.rng`'s first roll isn't a
+  textually-identical replay of `placementRng`'s first roll.
+- **Threading convention chosen**: an optional trailing `rng: () => number`
+  parameter on every function that rolls randomness, defaulting to
+  `Math.random` — the exact same shape this codebase already used for
+  `log`/`rules`/`ctx` (see `tickAgentAction`, `applyPredationInstincts`,
+  etc.), and the shape several functions (`rollAccuracy`, `rollCritical`,
+  `dispositionFromNature`, `advanceWeather`, `updateHerdMigrations`) already
+  had from earlier features. The one exception, deliberately: `tickWorld`
+  itself defaults its `rng` param to `world.rng`, not `Math.random` — this
+  is the one call every real simulation run goes through, so this default
+  is what actually makes a run reproducible from its seed without every
+  caller remembering to pass `world.rng` explicitly, while every other
+  function's `Math.random` default keeps direct-call unit tests (that mock
+  `Math.random` the old way) working unchanged. `World.rng` is *also* stored
+  live on `World` (accepted per this feature's own requirements as one more
+  reason `World` isn't purely serializable data — it already holds live
+  `Agent` objects) so any function already holding `world` can reach
+  `world.rng` directly, but the explicit parameter is still threaded
+  everywhere production code runs, per point 3 below — never a hidden
+  global.
+- **Not a hidden global**: no module-level singleton generator anywhere.
+  Two `World`s ticked in the same process (every test file does this, and
+  so does the determinism check below) each carry their own independent
+  `rng` instance and never interfere. Building this surfaced one *actual*
+  hidden-global bug, unrelated to `Math.random` itself: `reproduction.ts`'s
+  newborn-id counter (`offspringSequence`) was a module-level `let`, so two
+  separate worlds ticked in the same process produced different newborn ids
+  (and therefore different event-log bytes) purely from process-shared
+  state — moved onto `World.offspringSequence`.
+
+### Full sweep: every converted call site
+
+Grepping fresh (`grep -rn "Math.random" packages/engine/src`) turned up more
+than the original floor list — every one below now threads `rng` instead:
+
+- `flora.ts` (6): `pickFlavor`'s flavor pick, `trySpread`'s neighbor-offset
+  shuffle, `maybeDropSeed`'s seed-drop + germination chance, `growFlora`'s
+  food-vs-flora chance and spread chance.
+- `leveling.ts` (1 call site, but touched every caller): `grantExp`'s
+  wildcard skill-point roll — required adding `rng` to `grantExp`,
+  `grantKillExp`, `markSectorVisited`, `markSpeciesEncountered`, and every
+  one of their callers in `needs.ts`/`reproduction.ts`/`predation.ts`.
+- `migration.ts` (1): `findRandomWalkableTile`'s random relocate-target
+  tile (feeds `migrate`).
+- `needs.ts` (3): `findNearbyUnvisitedTile`'s exploration dx/dy (feeds
+  `applyExploration`), old-age mortality roll in `tickAgentNeeds`.
+- `predation.ts` (2, beyond the maintainer's floor list of 1): `resolveHit`'s
+  accuracy roll (was already calling `rollAccuracy` but with a hardcoded
+  `Math.random` instead of the threaded `rng`), crit roll, and damage
+  variance roll (0.85-1.15x) — plus its downstream `maybeGrantHitSkillPoint`
+  and `grantKillExp` calls, which previously used their own `Math.random`
+  defaults unnoticed.
+- `reproduction.ts` (2): `nearbySpawnTile`'s spawn-offset shuffle,
+  `spawnOffspring`'s newborn sex roll — plus its own nature/disposition
+  draws and every `grantExp` call in `applyMateSeeking`.
+- **Beyond the floor list, already `rng`-parameterized from earlier features
+  but not yet reaching `world.rng` in production** (found by the sweep,
+  fixed by threading `rng` through their callers instead of their own
+  defaults): `combat.ts`'s `rollCritical`/`rollAccuracy`/`calculateDamage`'s
+  `randomFactor`, `nature.ts`'s `randomNature`/`dispositionFromNature`,
+  `weather.ts`'s `advanceWeather` (weather-cell spawn roll, type pick,
+  radius/lifespan/drift-angle rolls), `herdMigration.ts`'s
+  `updateHerdMigrations` (wanderlust roll + wander-direction pick).
+  `daynight.ts` and `support.ts` have no randomness at all — confirmed by
+  the sweep, nothing to convert there.
+- `packages/data/src/spawn.ts`'s `spawnAgent` (nature + disposition draws)
+  and `packages/data/src/scenario.ts`'s `createDemoWorld` (threads
+  `world.rng` into every `spawnAgent` call for the demo roster).
+
+One real bug the sweep caught mid-way through: `needs.ts`'s `grantExp(world,
+agent, EXP_ON_CONSUME, ctx, log)` call (on eating/drinking) was missing its
+`rng` argument entirely, silently falling back to `grantExp`'s own
+`Math.random` default — invisible to `world.rng` draw-counting but a real
+source of run-to-run divergence, caught by the two-runs-diffed acceptance
+test below, not by inspection.
+
+### Runner seed support
+
+`packages/runner`'s CLI (`src/index.ts`) takes an optional 4th positional
+argument, a seed: `pnpm --filter @pokuelike/runner run <ticks> <snapshotTicks> <seed>`.
+Omitted, a fresh seed is minted via `randomSeed()` (prefers
+`crypto.getRandomValues`, falls back to `Date.now()`). Either way the seed
+used is printed at the start of every run (`Seed: <n>`) so it's always
+visible and copyable for an exact rerun. `dump-frames.ts`/`dump-replay.ts`
+got the same treatment (5th/4th positional argument respectively);
+`dump-replay.ts` also stamps the seed into its output JSON. `packages/web`
+reads an optional `?seed=` query param (falling back to the demo's fixed
+`SCENARIO_SEED`) — the one bit of seed-threading Part 2 (a separate
+follow-up, a real live browser viewer) will build on directly; everything
+else in `main.ts` already gets deterministic rng for free from `tickWorld`'s
+`world.rng` default, no further change needed there.
+
+### The determinism proof (concrete, not claimed)
+
+Same seed, run twice, 1000 ticks, via the real CLI:
+
+```
+$ pnpm --filter @pokuelike/runner run 1000 "" 20260904 > run1.txt
+$ pnpm --filter @pokuelike/runner run 1000 "" 20260904 > run2.txt
+$ diff run1.txt run2.txt; echo "exit: $?"
+exit: 0
+$ md5sum run1.txt run2.txt
+b49b4c3824acb67dab9d217b9e96caba  run1.txt
+b49b4c3824acb67dab9d217b9e96caba  run2.txt
+```
+
+Byte-identical: 46,292 lines, 46,204 events, zero diff. A different seed
+(`1` instead of `20260904`) produces a different md5
+(`de6c526f0007ddd294cd9e8098fc20ad`) — confirming the match above isn't a
+degenerate "always identical regardless of seed" bug.
+
+Unit-level determinism tests live in `engine/test/determinism.test.ts`:
+`World.rng` wiring (same seed -> same draw sequence, different seed ->
+different sequence), a 500-tick `tickWorld` run compared byte-for-byte
+between two same-seeded worlds, and per-call-site checks for
+`flora.ts`/`migration.ts`/`leveling.ts`/`reproduction.ts`.
+
+### A note on test flakiness this surfaced
+
+`predation.test.ts` had 30+ tests calling `tickWorld` on a bare
+`createWorld()` (no explicit seed, so a fresh random seed each run) with no
+rng override — this was *already* exactly as flaky before this feature
+(same exposure via raw `Math.random`), just latent. It surfaced for real
+during this work: `weather.ts`'s Phase 3 spawn roll (1/150 per tick)
+coincidentally fired inside a single-tick test, and the resulting storm's
+accuracy modifier flipped a "would hit" into a "misses," failing an
+unrelated flee/fight assertion. Fixed the same way the maintainer's own
+guidance calls for: threaded a single shared `mulberry32` generator
+(`SAFE_RNG`, a real varied sequence — a *constant* rng broke
+`findRandomWalkableTile`'s retry loop and shuffle-based candidate picks,
+which need genuinely different successive draws) through every bare
+`tickWorld` call in that file. Verified flake-free across 10 consecutive
+full-suite runs.
+
 ## Explicitly not decided yet
 
 - Turn-based vs. real-time-with-pause for combat.

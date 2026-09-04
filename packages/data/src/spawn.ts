@@ -18,12 +18,12 @@ import { MOVES } from "./moves.js";
  * Callers override whatever else they need (herdId, sex, needs, non-default
  * layer).
  */
-export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5): Agent {
+export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5, rng: () => number = Math.random): Agent {
   const species = SPECIES[speciesId];
   if (!species) throw new Error(`Unknown species: ${speciesId}`);
 
-  const nature = randomNature();
-  const disposition = dispositionFromNature(nature);
+  const nature = randomNature(rng);
+  const disposition = dispositionFromNature(nature, rng);
   const stats = calculateStats(species.baseStats, level, nature);
   const moves = species.moves.map((moveId) => {
     const move = MOVES[moveId];

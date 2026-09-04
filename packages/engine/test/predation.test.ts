@@ -4,6 +4,7 @@ import { createNeeds } from "../src/needs.js";
 import { tickWorld } from "../src/simulation.js";
 import { applyPredationInstincts } from "../src/predation.js";
 import { EventLog } from "../src/events.js";
+import { mulberry32 } from "../src/rng.js";
 import type { Agent, HuntRules } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 import type { Disposition } from "../src/nature.js";
@@ -12,6 +13,32 @@ import { DAY_LENGTH_TICKS } from "../src/daynight.js";
 const RULES: HuntRules = { scyther: true };
 const MIDNIGHT = 0;
 const NOON = DAY_LENGTH_TICKS / 2;
+
+/**
+ * `createWorld`'s default (no explicit seed) mints a fresh, non-reproducible
+ * seed each call (see rng.ts's `randomSeed()`) — before this feature, every
+ * bare `tickWorld(world, ...)` call below relied on `Math.random` the same
+ * way, so this isn't new: it's the exact same latent flakiness this suite
+ * always had, just now routed through a seeded-but-randomly-seeded
+ * generator instead of `Math.random` directly. It surfaced for real during
+ * this feature's own testing (weather.ts's Phase 3 spawn roll,
+ * `WEATHER_SPAWN_CHANCE_PER_TICK` = 1/150, coincidentally firing on a single
+ * `tickWorld` call and pulling in a storm's accuracy/speed modifiers that
+ * this file's flee/fight/hunt assertions never accounted for). A single
+ * shared `mulberry32` generator (a real, varied sequence, not a constant —
+ * a constant broke anything needing multiple distinct draws in one call,
+ * e.g. `findRandomWalkableTile`'s retry loop or a spawn-offset shuffle,
+ * confirmed by a real failure here), passed explicitly to every bare
+ * `tickWorld` call in this file and left running across the whole file
+ * (same "one persistent generator threaded through many ticks" shape as a
+ * real `World.rng`), keeps this suite deterministic without changing any of
+ * its actual intent, matching the "thread a seeded generator into it" fix
+ * DESIGN.md's determinism section calls for on a test whose behavior
+ * implicitly depended on Math.random's statistics. Tests that need a
+ * specific, meaningfully different roll (e.g. the storm-accuracy test
+ * below) still pass their own explicit rng.
+ */
+const SAFE_RNG = mulberry32(20260904);
 
 // No types/stats set on the fixtures below, deliberately: that keeps these
 // tests on predation.ts's FALLBACK_DAMAGE (1 per hit) path, so they're testing
@@ -95,7 +122,7 @@ describe("predation", () => {
     world.agents.push(target, predator({ x: 6, y: 5 }));
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     expect(target.behavior).toBe("flee");
     expect(target.pos.x).toBeLessThan(5);
@@ -109,7 +136,7 @@ describe("predation", () => {
     world.agents.push(prey({ x: 5, y: 5 }), predator({ x: 8, y: 5 }));
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     const hunter = world.agents.find((a) => a.id === "scyther-0")!;
     expect(hunter.behavior).toBe("hunt");
@@ -124,7 +151,7 @@ describe("predation", () => {
     world.agents.push(predator({ x: 5, y: 6 }, 0.1), prey({ x: 5, y: 5 }, { hp: 1, maxHp: 1 }));
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     // Still alive (fainted, not dead) — the corpse-pruning length assertion below
     // would have caught an instant-death regression.
@@ -139,7 +166,7 @@ describe("predation", () => {
     expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "killed" }));
 
     // Second hit exhausts the 0.75 finishing pool (1 fallback damage > 0.75 remaining) — true death now.
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     const corpse = world.agents.find((a) => a.id === "bulbasaur-0")!;
     expect(corpse.alive).toBe(false); // truly dead, but NOT pruned this same tick (corpse persistence)
@@ -155,7 +182,7 @@ describe("predation", () => {
     world.agents.push(prey({ x: 5, y: 5 }), predator({ x: 6, y: 5 }, 0.9));
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     const hunter = world.agents.find((a) => a.id === "scyther-0")!;
     expect(hunter.behavior).not.toBe("hunt");
@@ -165,7 +192,7 @@ describe("predation", () => {
     const world = createWorld(10, 10);
     world.agents.push(prey({ x: 5, y: 5 }), predator({ x: 6, y: 5 }, 0.1));
 
-    tickWorld(world);
+    tickWorld(world, undefined, undefined, undefined, SAFE_RNG);
 
     expect(world.agents).toHaveLength(2);
   });
@@ -182,7 +209,7 @@ describe("dynamic (size-based) predation — not a fixed species list", () => {
     world.agents.push(smallStranger, predator({ x: 8, y: 5 }));
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     const hunter = world.agents.find((a) => a.id === "scyther-0")!;
     expect(hunter.behavior).toBe("hunt");
@@ -195,7 +222,7 @@ describe("dynamic (size-based) predation — not a fixed species list", () => {
     const tooBig = prey({ x: 5, y: 5 }, { maxHp: 18 });
     world.agents.push(tooBig, predator({ x: 8, y: 5 }));
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 
     const hunter = world.agents.find((a) => a.id === "scyther-0")!;
     expect(hunter.behavior).not.toBe("hunt");
@@ -208,7 +235,7 @@ describe("dynamic (size-based) predation — not a fixed species list", () => {
     const weakerKin = predator({ x: 5, y: 5 }, 1, { id: "scyther-1", maxHp: 5 });
     world.agents.push(weakerKin, predator({ x: 8, y: 5 }));
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 
     const hunter = world.agents.find((a) => a.id === "scyther-0")!;
     expect(hunter.behavior).not.toBe("hunt");
@@ -220,7 +247,7 @@ describe("dynamic (size-based) predation — not a fixed species list", () => {
     const hunter = predator({ x: 8, y: 5 });
     world.agents.push(grownUp, hunter);
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
     expect(world.agents.find((a) => a.id === "scyther-0")!.behavior).toBe("hunt");
 
     // It grows past the predator's threshold — no longer worth hunting.
@@ -228,7 +255,7 @@ describe("dynamic (size-based) predation — not a fixed species list", () => {
     hunter.behavior = "idle";
     hunter.huntTarget = undefined;
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
     expect(world.agents.find((a) => a.id === "scyther-0")!.behavior).not.toBe("hunt");
   });
 });
@@ -244,7 +271,13 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     // STORM_ACCURACY_MULTIPLIER (0.6) drops the chance to 60, and that same
     // roll (70 >= 60) now misses — a real, measurable behavior change, not
     // just a smaller number nothing reads.
-    vi.spyOn(Math, "random").mockReturnValue(0.7);
+    //
+    // A fixed-output rng passed explicitly to `tickWorld`, not a
+    // `vi.spyOn(Math, "random")` mock — `tickWorld` now defaults its `rng`
+    // parameter to `world.rng` (the engine's one shared seeded generator,
+    // see DESIGN.md's determinism section), not `Math.random`, so mocking
+    // the latter no longer reaches any roll made through a real tick.
+    const fixedRng = () => 0.7;
 
     const clearWorld = createWorld(10, 10);
     clearWorld.agents.push(
@@ -254,7 +287,7 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
       predator({ x: 5, y: 6 })
     );
     const clearLog = new EventLog();
-    tickWorld(clearWorld, clearLog, RULES);
+    tickWorld(clearWorld, clearLog, RULES, undefined, fixedRng);
     expect(clearLog.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
 
     const stormWorld = createWorld(10, 10);
@@ -268,7 +301,7 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
       predator({ x: 5, y: 6 })
     );
     const stormLog = new EventLog();
-    tickWorld(stormWorld, stormLog, RULES);
+    tickWorld(stormWorld, stormLog, RULES, undefined, fixedRng);
     expect(stormLog.events).not.toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
     expect(stormLog.events).toContainEqual(expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0" }));
   });
@@ -283,7 +316,7 @@ describe("mob-fighting", () => {
     world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 6 }));
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     // mobber1 is adjacent (distance 1) and lands a fallback-damage (1) hit;
     // the predator()'s explicit maxHp default (see the factory) is 20.
@@ -308,7 +341,7 @@ describe("mob-fighting", () => {
     world.agents.push(...mobbers, predator({ x: 5, y: 5 }, 0.3, { hp: 1, maxHp: 1 }));
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     expect(log.events).toContainEqual(expect.objectContaining({ kind: "fainted", agentId: "scyther-0" }));
     const corpse = world.agents.find((a) => a.id === "scyther-0")!;
@@ -328,7 +361,7 @@ describe("mob-fighting", () => {
     const farAlly2 = prey({ x: 13, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" });
     world.agents.push(solo, farAlly1, farAlly2, predator({ x: 5, y: 6 }));
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 
     expect(solo.behavior).toBe("flee");
   });
@@ -340,7 +373,7 @@ describe("mob-fighting", () => {
     world.agents.push(mobber1, mobber2, predator({ x: 5, y: 6 }));
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     expect(mobber1.behavior).toBe("flee");
   });
@@ -351,7 +384,7 @@ describe("mob-fighting", () => {
     const group = [0, 1, 2].map((i) => prey({ x: 5 + i, y: 5 }, { id: `bulbasaur-${i}`, herdId: "herd-a" }));
     world.agents.push(hungry, ...group);
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 
     expect(hungry.behavior).not.toBe("hunt");
     expect(hungry.ticksSinceMeal).toBe(1);
@@ -380,7 +413,7 @@ describe("mob-fighting", () => {
     world.agents.push(hungry);
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     expect(hungry.behavior).toBe("relocate");
     expect(hungry.relocateTarget).toBeDefined();
@@ -397,7 +430,7 @@ describe("ranged attacks", () => {
     world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 5 }));
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     expect(mobber1.pos).toEqual({ x: 5, y: 3 }); // didn't move — attacked from range instead
     expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
@@ -411,7 +444,7 @@ describe("ranged attacks", () => {
     world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 5 }));
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     expect(mobber1.pos).not.toEqual({ x: 5, y: 3 }); // stepped closer instead of attacking
     expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
@@ -428,7 +461,7 @@ describe("disposition wiring", () => {
     const target = prey({ x: 5, y: 5 }, { disposition: TIMID });
     world.agents.push(target, predator({ x: 10, y: 5 }));
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 
     expect(target.behavior).toBe("flee");
   });
@@ -438,7 +471,7 @@ describe("disposition wiring", () => {
     const target = prey({ x: 5, y: 5 });
     world.agents.push(target, predator({ x: 10, y: 5 }));
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 
     expect(target.behavior).not.toBe("flee");
   });
@@ -449,7 +482,7 @@ describe("disposition wiring", () => {
     const target = prey({ x: 5, y: 5 }, { disposition: BOLD });
     world.agents.push(target, predator({ x: 8, y: 5 }));
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 
     expect(target.behavior).not.toBe("flee");
   });
@@ -460,7 +493,7 @@ describe("disposition wiring", () => {
     world.agents.push(target, predator({ x: 6, y: 5 })); // distance 1
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     expect(target.behavior).toBe("flee");
   });
@@ -472,7 +505,7 @@ describe("disposition wiring", () => {
     const mobber2 = prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a", disposition: boldAndAggressive });
     world.agents.push(mobber1, mobber2, predator({ x: 5, y: 6 }));
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 
     // With only 2 herd-mates in range, the default (neutral) threshold of 3 would flee
     // (see "a lone or small group still flees rather than fights" above) — bold+aggressive
@@ -488,7 +521,7 @@ describe("disposition wiring", () => {
     const mobber3 = prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a", disposition: timid });
     world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 6 }));
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 
     // 3 herd-mates would meet the neutral MOB_THRESHOLD (see the "large enough herd" test
     // above), but timid+passive raises the effective threshold enough that it isn't met.
@@ -503,7 +536,7 @@ describe("disposition wiring", () => {
     // aggressive one's raised threshold (0.8) still triggers it.
     world.agents.push(prey({ x: 5, y: 5 }), predator({ x: 8, y: 5 }, 0.7, { disposition: aggressive }));
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 
     const hunter = world.agents.find((a) => a.id === "scyther-0")!;
     expect(hunter.behavior).toBe("hunt");
@@ -516,7 +549,7 @@ describe("disposition wiring", () => {
     // the passive predator's lowered threshold (0.4).
     world.agents.push(prey({ x: 5, y: 5 }), predator({ x: 8, y: 5 }, 0.5, { disposition: passive }));
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 
     const hunter = world.agents.find((a) => a.id === "scyther-0")!;
     expect(hunter.behavior).not.toBe("hunt");
@@ -610,7 +643,7 @@ describe("guardians", () => {
     world.agents.push(protector, threatened, threat);
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     expect(protector.behavior).toBe("fight");
     expect(protector.fightTarget).toBe("scyther-0");
@@ -622,7 +655,7 @@ describe("guardians", () => {
     const protector = guardian({ x: 8, y: 5 }, { herdId: "herd-a" });
     world.agents.push(protector);
 
-    tickWorld(world, undefined, RULES);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 
     expect(protector.behavior).not.toBe("fight");
   });
@@ -648,7 +681,7 @@ describe("bush concealment", () => {
       prey({ x: 5, y: 5 }, { disposition: bold, age: 0 }),
       predator({ x: 9, y: 5 }, 0.1, { age: 0 })
     );
-    tickWorld(openWorld, undefined, RULES);
+    tickWorld(openWorld, undefined, RULES, undefined, SAFE_RNG);
     const openHunter = openWorld.agents.find((a) => a.id === "scyther-0")!;
     expect(openHunter.behavior).toBe("hunt"); // sanity: this distance is normally detectable
 
@@ -658,7 +691,7 @@ describe("bush concealment", () => {
       prey({ x: 5, y: 5 }, { disposition: bold, age: 0 }),
       predator({ x: 9, y: 5 }, 0.1, { age: 0 })
     );
-    tickWorld(bushWorld, undefined, RULES);
+    tickWorld(bushWorld, undefined, RULES, undefined, SAFE_RNG);
     const concealedHunter = bushWorld.agents.find((a) => a.id === "scyther-0")!;
     expect(concealedHunter.behavior).not.toBe("hunt");
   });
@@ -668,14 +701,14 @@ describe("bush concealment", () => {
     const openWorld = createWorld(20, 20);
     const openTarget = prey({ x: 5, y: 5 });
     openWorld.agents.push(openTarget, predator({ x: 8, y: 5 }));
-    tickWorld(openWorld, undefined, RULES);
+    tickWorld(openWorld, undefined, RULES, undefined, SAFE_RNG);
     expect(openTarget.behavior).toBe("flee"); // sanity: this distance is normally detectable
 
     const bushWorld = createWorld(20, 20);
     setTile(bushWorld, "surface", 8, 5, "bush");
     const concealedTarget = prey({ x: 5, y: 5 });
     bushWorld.agents.push(concealedTarget, predator({ x: 8, y: 5 }));
-    tickWorld(bushWorld, undefined, RULES);
+    tickWorld(bushWorld, undefined, RULES, undefined, SAFE_RNG);
     expect(concealedTarget.behavior).not.toBe("flee");
   });
 });
@@ -690,7 +723,7 @@ describe("obstacles block combat move lines", () => {
     world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 5 }));
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     // In range (distance 2, RANGED_MOVE's reach) but the tree blocks the
     // straight-line path between them — must NOT attack through it. (It also
@@ -710,7 +743,7 @@ describe("obstacles block combat move lines", () => {
     world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 5 }));
     const log = new EventLog();
 
-    tickWorld(world, log, RULES);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
     expect(mobber1.pos).toEqual({ x: 5, y: 3 });
     expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));

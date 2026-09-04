@@ -22,8 +22,8 @@ const FOOD_CHANCE = 0.55;
 /** Same, but boosted near a sunbeam — sun-loving berries do better in the light. */
 const FOOD_CHANCE_NEAR_SUNBEAM = 0.8;
 
-function pickFlavor<T extends readonly string[]>(flavors: T): T[number] {
-  return flavors[Math.floor(Math.random() * flavors.length)]!;
+function pickFlavor<T extends readonly string[]>(flavors: T, rng: () => number): T[number] {
+  return flavors[Math.floor(rng() * flavors.length)]!;
 }
 
 function isNearSunbeam(world: World, pos: Vec2): boolean {
@@ -105,8 +105,8 @@ export function seasonalMultiplier(tick: number): number {
 }
 
 /** Tries to seed one open neighbor of a living food patch — how it proliferates. */
-function trySpread(world: World, pos: Vec2, log?: EventLog): void {
-  const shuffled = [...NEIGHBOR_OFFSETS].sort(() => Math.random() - 0.5);
+function trySpread(world: World, pos: Vec2, log: EventLog | undefined, rng: () => number): void {
+  const shuffled = [...NEIGHBOR_OFFSETS].sort(() => rng() - 0.5);
   for (const offset of shuffled) {
     const nx = pos.x + offset.x, ny = pos.y + offset.y;
     const tile = tileAt(world, "surface", nx, ny);
@@ -126,13 +126,13 @@ function trySpread(world: World, pos: Vec2, log?: EventLog): void {
  * outcome: Pokémon traveling through an area occasionally start new growth
  * there.
  */
-export function maybeDropSeed(world: World, layer: Layer, pos: Vec2, log?: EventLog): void {
+export function maybeDropSeed(world: World, layer: Layer, pos: Vec2, log?: EventLog, rng: () => number = Math.random): void {
   if (layer !== "surface") return; // flora is a surface-layer thing for now
-  if (Math.random() >= SEED_DROP_CHANCE) return;
+  if (rng() >= SEED_DROP_CHANCE) return;
 
   const tile = tileAt(world, layer, pos.x, pos.y);
   if (!tile || tile.terrain !== "floor") return;
-  if (Math.random() >= GERMINATION_CHANCE) return;
+  if (rng() >= GERMINATION_CHANCE) return;
 
   tile.terrain = "seedling";
   tile.growth = 0;
@@ -140,7 +140,7 @@ export function maybeDropSeed(world: World, layer: Layer, pos: Vec2, log?: Event
 }
 
 /** Advances every seedling toward maturity and regrows every food patch's stock. Call once per tick. */
-export function growFlora(world: World, log?: EventLog): void {
+export function growFlora(world: World, log?: EventLog, rng: () => number = Math.random): void {
   const season = seasonalMultiplier(world.tick);
   const tiles = world.tiles.surface;
 
@@ -152,17 +152,17 @@ export function growFlora(world: World, log?: EventLog): void {
       if (tile.growth >= MATURATION_TICKS) {
         const pos = { x: i % world.width, y: Math.floor(i / world.width) };
         const nearSun = isNearSunbeam(world, pos);
-        const becomesFood = Math.random() < (nearSun ? FOOD_CHANCE_NEAR_SUNBEAM : FOOD_CHANCE);
+        const becomesFood = rng() < (nearSun ? FOOD_CHANCE_NEAR_SUNBEAM : FOOD_CHANCE);
 
         if (becomesFood) {
           tile.terrain = "food";
           tile.stock = 1;
-          tile.flavor = nearSun ? pickFlavor(SUN_FOOD_FLAVORS) : pickFlavor(FOOD_FLAVORS);
+          tile.flavor = nearSun ? pickFlavor(SUN_FOOD_FLAVORS, rng) : pickFlavor(FOOD_FLAVORS, rng);
           invalidateResourceIndex(world); // a new "food" tile — resourceIndex.ts's cache needs rebuilding
         } else {
           tile.terrain = "flora";
           tile.stock = 1; // vitality, not edible stock — decays and dies just like food does, below
-          tile.flavor = pickFlavor(FLORA_FLAVORS);
+          tile.flavor = pickFlavor(FLORA_FLAVORS, rng);
         }
         tile.growth = undefined;
         log?.record({
@@ -200,8 +200,8 @@ export function growFlora(world: World, log?: EventLog): void {
         continue;
       }
 
-      if (Math.random() < FOOD_SPREAD_CHANCE * (0.5 + season) * weatherDivisor) {
-        trySpread(world, pos, log);
+      if (rng() < FOOD_SPREAD_CHANCE * (0.5 + season) * weatherDivisor) {
+        trySpread(world, pos, log, rng);
       }
     }
 

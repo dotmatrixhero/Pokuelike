@@ -11,9 +11,9 @@ function manhattan(a: Vec2, b: Vec2): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
-export function findRandomWalkableTile(world: World, layer: Layer, from: Vec2): Vec2 | undefined {
+export function findRandomWalkableTile(world: World, layer: Layer, from: Vec2, rng: () => number = Math.random): Vec2 | undefined {
   for (let i = 0; i < RELOCATE_ATTEMPTS; i++) {
-    const candidate = { x: Math.floor(Math.random() * world.width), y: Math.floor(Math.random() * world.height) };
+    const candidate = { x: Math.floor(rng() * world.width), y: Math.floor(rng() * world.height) };
     if (manhattan(candidate, from) < MIN_RELOCATE_DISTANCE) continue;
     if (tileAt(world, layer, candidate.x, candidate.y)?.walkable) return candidate;
   }
@@ -28,9 +28,9 @@ export function findRandomWalkableTile(world: World, layer: Layer, from: Vec2): 
  * "arrived" means for its own bookkeeping (resetting a failure counter,
  * etc).
  */
-export function migrate(world: World, agent: Agent, log?: EventLog): "arrived" | "traveling" | "stuck" {
+export function migrate(world: World, agent: Agent, log?: EventLog, rng: () => number = Math.random): "arrived" | "traveling" | "stuck" {
   if (!agent.relocateTarget) {
-    agent.relocateTarget = findRandomWalkableTile(world, agent.layer, agent.pos);
+    agent.relocateTarget = findRandomWalkableTile(world, agent.layer, agent.pos, rng);
     if (!agent.relocateTarget) return "stuck";
   }
 

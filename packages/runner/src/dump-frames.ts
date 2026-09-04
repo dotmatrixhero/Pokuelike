@@ -1,4 +1,4 @@
-import { EventLog, tickWorld } from "@pokuelike/engine";
+import { EventLog, tickWorld, randomSeed } from "@pokuelike/engine";
 import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT } from "@pokuelike/data";
 import { captureFrame, type Frame } from "./ascii.js";
 import { writeFileSync } from "node:fs";
@@ -8,13 +8,18 @@ const fixedSnapshotTicks = new Set(
   (process.argv[3] ?? "0,2000").split(",").map((s) => Number(s.trim()))
 );
 const outPath = process.argv[4] ?? "./frames.json";
+// Optional 5th positional argument: an explicit seed — see index.ts's
+// determinism doc comment for the full reasoning (same pattern here).
+const seedArg = process.argv[5];
+const seed = seedArg !== undefined && seedArg !== "" ? Number(seedArg) : randomSeed();
+console.log(`Seed: ${seed}`);
 const AUTO_CAPTURE_KINDS = new Set(["killed", "defeated"]);
 
 interface PopulatedFrame extends Frame {
   population: Record<string, number>;
 }
 
-const world = createDemoWorld();
+const world = createDemoWorld(seed);
 const log = new EventLog();
 const frames: PopulatedFrame[] = [];
 const capturedTicks = new Set<number>();

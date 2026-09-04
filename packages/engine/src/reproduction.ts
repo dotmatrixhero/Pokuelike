@@ -102,8 +102,8 @@ const SPAWN_OFFSETS: Vec2[] = [
  * ticks (confirmed in a real run: 168 of 264 agents on one tile by tick
  * 2000). Falls back to the mother's own tile only if she's fully boxed in.
  */
-function nearbySpawnTile(world: World, layer: Layer, origin: Vec2): Vec2 {
-  const shuffled = [...SPAWN_OFFSETS].sort(() => Math.random() - 0.5);
+function nearbySpawnTile(world: World, layer: Layer, origin: Vec2, rng: () => number): Vec2 {
+  const shuffled = [...SPAWN_OFFSETS].sort(() => rng() - 0.5);
   for (const offset of shuffled) {
     const candidate = { x: origin.x + offset.x, y: origin.y + offset.y };
     if (tileAt(world, layer, candidate.x, candidate.y)?.walkable) return candidate;
@@ -111,10 +111,20 @@ function nearbySpawnTile(world: World, layer: Layer, origin: Vec2): Vec2 {
   return origin;
 }
 
-let offspringSequence = 0;
-
-function spawnOffspring(world: World, mother: Agent, father: Agent, ctx?: LevelingContext): Agent {
-  offspringSequence += 1;
+function spawnOffspring(world: World, mother: Agent, father: Agent, ctx?: LevelingContext, rng: () => number = Math.random): Agent {
+  // Was a module-level `let offspringSequence = 0` — a hidden global that
+  // leaked across separate `World` instances ticked in the same process
+  // (tests do this constantly, and so does any determinism check that runs
+  // the same seed twice in one process — confirmed a real bug this way: two
+  // fresh worlds seeded identically produced byte-different event logs
+  // purely because the second world's first newborn inherited whatever
+  // count the first world's run had already reached). Tracked on `World`
+  // instead — see `World.offspringSequence` — so it resets per world like
+  // every other piece of `World` state, matching this feature's own "no
+  // hidden global, thread everything through/on the World" requirement even
+  // though this particular piece of state isn't rng-derived at all.
+  world.offspringSequence = (world.offspringSequence ?? 0) + 1;
+  const offspringSequence = world.offspringSequence;
   // Breeding always produces the base (pre-evolution) form, mainline-accurate:
   // a bred Venusaur's offspring hatches as a Bulbasaur, never another
   // Venusaur — Bulbasaur is the "child version," Venusaur just what an adult
@@ -122,12 +132,12 @@ function spawnOffspring(world: World, mother: Agent, father: Agent, ctx?: Leveli
   const species = ctx?.baseSpeciesOf?.(mother.species) ?? mother.species;
   // Own random nature (and thus its own disposition), same as any spawned
   // agent — never inherited from either parent, matching spawnAgent.
-  const nature = randomNature();
-  const disposition = dispositionFromNature(nature);
+  const nature = randomNature(rng);
+  const disposition = dispositionFromNature(nature, rng);
   const child: Agent = {
     id: `${species}-${world.tick}-${offspringSequence}`,
     species,
-    pos: nearbySpawnTile(world, mother.layer, mother.pos),
+    pos: nearbySpawnTile(world, mother.layer, mother.pos, rng),
     layer: mother.layer,
     homeLayer: mother.homeLayer,
     // Cheapest available "home range" stand-in for carryAlly's rescue destination
@@ -139,7 +149,7 @@ function spawnOffspring(world: World, mother: Agent, father: Agent, ctx?: Leveli
     behavior: "idle",
     herdId: mother.herdId,
     // 50/50 for now — real per-species gender ratios are a data-layer concern, see TODO.
-    sex: Math.random() < 0.5 ? "male" : "female",
+    sex: rng() < 0.5 ? "male" : "female",
     age: 0,
     level: 1,
     exp: 0,
@@ -168,7 +178,13 @@ function spawnOffspring(world: World, mother: Agent, father: Agent, ctx?: Leveli
  * tick. Both parents' mateDrive resets afterward, which is the sim's only
  * "cooldown": rebuilding it naturally takes a while (see needs.ts).
  */
-export function applyMateSeeking(world: World, agent: Agent, log?: EventLog, ctx?: LevelingContext): void {
+export function applyMateSeeking(
+  world: World,
+  agent: Agent,
+  log?: EventLog,
+  ctx?: LevelingContext,
+  rng: () => number = Math.random
+): void {
   if (!agent.sex || !isMature(agent)) return;
 
   const candidates = world.agents.filter(
@@ -179,7 +195,7 @@ export function applyMateSeeking(world: World, agent: Agent, log?: EventLog, ctx
 
   if (manhattan(agent.pos, partner.pos) <= 1) {
     if (agent.sex === "female") {
-      const child = spawnOffspring(world, agent, partner, ctx);
+      const child = spawnOffspring(world, agent, partner, ctx, rng);
       world.agents.push(child);
       log?.record({
         kind: "born",
@@ -195,13 +211,13 @@ export function applyMateSeeking(world: World, agent: Agent, log?: EventLog, ctx
         nature: child.nature!,
         dispositionSummary: dispositionSummary(child.disposition!),
       });
-      grantExp(world, agent, EXP_ON_BIRTH_PARENT, ctx, log);
-      grantExp(world, partner, EXP_ON_BIRTH_PARENT, ctx, log);
+      grantExp(world, agent, EXP_ON_BIRTH_PARENT, ctx, log, rng);
+      grantExp(world, partner, EXP_ON_BIRTH_PARENT, ctx, log, rng);
     }
     agent.needs.mateDrive = 0;
     partner.needs.mateDrive = 0;
   } else {
-    grantExp(world, agent, EXP_ON_MATE_ATTEMPT, ctx, log);
+    grantExp(world, agent, EXP_ON_MATE_ATTEMPT, ctx, log, rng);
     agent.pos = stepToward(world, agent.layer, agent.pos, partner.pos);
   }
 }

@@ -1,6 +1,14 @@
 import type { BiomeSeedInfo, Layer, Vec2, World } from "./types.js";
 import { createWorld, setElevation, setTile, tileAt } from "./world.js";
 import { FOOD_FLAVORS } from "./flora.js";
+import { mulberry32 } from "./rng.js";
+
+// Re-exported for backward compatibility — this used to be defined here
+// (every existing import site, e.g. worldgen.test.ts, still does
+// `import { mulberry32 } from "./worldgen.js"`) before it moved to its own
+// dependency-free rng.ts so world.ts could import it too without a
+// world.ts <-> worldgen.ts cycle. See rng.ts's doc comment.
+export { mulberry32 };
 
 /**
  * Procedural surface-layer generation — see DESIGN.md's "Environmental
@@ -12,25 +20,8 @@ import { FOOD_FLAVORS } from "./flora.js";
  */
 
 // ---------------------------------------------------------------------------
-// Seeded PRNG + smoothed value noise
+// Smoothed value noise (mulberry32 itself now lives in rng.ts, re-exported above)
 // ---------------------------------------------------------------------------
-
-/**
- * mulberry32 — a small, fast, well-known 32-bit seeded PRNG (public domain).
- * Deterministic: the same seed always produces the same sequence, which is
- * the whole point (reproducible generated worlds for debugging a specific
- * run). No new dependency needed for this or the noise below.
- */
-export function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return function random() {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 function smoothstep(t: number): number {
   return t * t * (3 - 2 * t);
@@ -334,8 +325,25 @@ const SUNBEAM_CHANCE = 0.03;
  * not a single deterministic "biome X always means terrain Y"). Fully
  * deterministic for a given (width, height, seed) — see worldgen.test.ts.
  */
+/**
+ * `world.rng` (the behavior generator every other engine subsystem draws
+ * from — see types.ts's `World.rng` doc comment) is seeded from `seed ^
+ * BEHAVIOR_RNG_SEED_XOR`, not bare `seed` — deliberately a different derived
+ * stream from the one this function's own terrain-placement rngs below (all
+ * seeded from `seed` or `seed ^ <some other constant>`) consume, on the same
+ * "derive a distinct sub-stream per xor constant" pattern this function
+ * already uses for elevation/moisture/obstacle/food/flavor/sunbeam noise.
+ * Without this, `world.rng`'s very first roll would exactly replay
+ * `placementRng`'s first roll (both `mulberry32(seed)`, just two separate,
+ * uncorrelated-in-effect-but-textually-identical instances) — harmless
+ * either way since both are already fully deterministic, but a needless and
+ * confusing coincidence to leave in place when every other sub-stream here
+ * already gets its own distinct xor'd seed.
+ */
+const BEHAVIOR_RNG_SEED_XOR = 0x632be5ab;
+
 export function generateWorld(width: number, height: number, seed: number): World {
-  const world = createWorld(width, height);
+  const world = createWorld(width, height, seed ^ BEHAVIOR_RNG_SEED_XOR);
   const placementRng = mulberry32(seed);
   const seeds = placeBiomeSeeds(placementRng, width, height);
   // Name-only projection persisted on the World — see types.ts's

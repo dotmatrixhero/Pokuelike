@@ -105,7 +105,18 @@ function isDead(agent: Agent): boolean {
  * Speed; behavior choice, movement, and attacks (`tickAgentAction`) only run
  * on an agent's action tick, gated by `accumulateActionEnergy`.
  */
-export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext): void {
+/**
+ * `rng` defaults to `world.rng` (the seeded generator `createWorld`/
+ * `generateWorld` always attach — see types.ts's `World.rng` doc comment),
+ * not `Math.random` — this is the one place that matters most: every real
+ * simulation run goes through here, so this default is what actually makes
+ * a run reproducible from its seed without every caller needing to remember
+ * to pass `world.rng` explicitly. A caller can still override it (tests
+ * that want a different/fixed generator without touching `world.rng`
+ * itself), matching the existing `log`/`rules`/`ctx` optional-override
+ * convention.
+ */
+export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext, rng: () => number = world.rng): void {
   const previousTick = world.tick;
   world.tick += 1;
   // Once per tick, not once per agent — the day/night cycle is a world-level
@@ -124,16 +135,16 @@ export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?:
   // tick's storm-exposure check (herdMigration.ts's `"weather"` trigger)
   // sees this tick's weather state, not last tick's stale one — see
   // weather.ts/DESIGN.md's Phase 3.
-  advanceWeather(world, log);
+  advanceWeather(world, log, rng);
   // Once per tick, not once per agent — see herdMigration.ts. Runs against
   // this tick's pre-move positions, which is fine: sustained-scarcity
   // detection is a slow-moving signal, not something that needs to react to
   // the exact order agents move in within the same tick.
-  updateHerdMigrations(world, log);
+  updateHerdMigrations(world, log, rng);
   for (const agent of world.agents) {
     if (isDead(agent)) continue;
 
-    tickAgentNeeds(agent, world, ctx, log);
+    tickAgentNeeds(agent, world, ctx, log, rng);
 
     const acted = accumulateActionEnergy(agent, actionSpeedOf(world, agent, world.tick));
     if (!acted) continue;
@@ -141,14 +152,14 @@ export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?:
     const before = { x: agent.pos.x, y: agent.pos.y };
     const beforeLayer = agent.layer;
     const beforeElevation = tileAt(world, beforeLayer, before.x, before.y)?.elevation ?? 0;
-    tickAgentAction(world, agent, log, rules, ctx);
+    tickAgentAction(world, agent, log, rules, ctx, rng);
     if (!isDead(agent) && agent.layer === beforeLayer && (agent.pos.x !== before.x || agent.pos.y !== before.y)) {
       const afterTile = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
       agent.terrainSpeedFactor = movementSpeedFactor(beforeElevation, afterTile?.elevation ?? 0, afterTile?.terrain ?? "floor");
-      maybeDropSeed(world, agent.layer, agent.pos, log);
+      maybeDropSeed(world, agent.layer, agent.pos, log, rng);
     }
   }
-  growFlora(world, log);
+  growFlora(world, log, rng);
   pruneStaleCorpses(world);
 }
 

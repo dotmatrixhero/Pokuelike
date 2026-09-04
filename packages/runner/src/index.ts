@@ -1,4 +1,4 @@
-import { EventLog, tickWorld } from "@pokuelike/engine";
+import { EventLog, tickWorld, randomSeed } from "@pokuelike/engine";
 import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT } from "@pokuelike/data";
 import { formatEvent, summarize } from "./format.js";
 import { captureFrame, frameToAnsi } from "./ascii.js";
@@ -11,8 +11,20 @@ const snapshotTicks = new Set(
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isFinite(n))
 );
+// Optional 4th positional argument: an explicit seed to reproduce an exact
+// earlier run — see DESIGN.md's determinism section. Omitted, a fresh
+// (non-reproducible) seed is minted via `randomSeed()` (engine/src/rng.ts —
+// prefers `crypto.getRandomValues`, falls back to `Date.now()`), same as
+// `createWorld`'s own default. Printed below either way so every run's seed
+// is always visible and copyable, whether it was chosen or randomly minted:
+// `pnpm --filter @pokuelike/runner run <ticks> <snapshotTicks> <seed>`
+// reruns the exact same run byte-for-byte (same event log — see DESIGN.md's
+// determinism section for the concrete two-runs-diffed proof).
+const seedArg = process.argv[4];
+const seed = seedArg !== undefined && seedArg !== "" ? Number(seedArg) : randomSeed();
+console.log(`Seed: ${seed}`);
 
-const world = createDemoWorld();
+const world = createDemoWorld(seed);
 const log = new EventLog();
 const frames: string[] = [];
 

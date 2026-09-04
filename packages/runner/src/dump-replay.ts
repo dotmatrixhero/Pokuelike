@@ -1,4 +1,4 @@
-import { EventLog, tickWorld } from "@pokuelike/engine";
+import { EventLog, tickWorld, randomSeed } from "@pokuelike/engine";
 import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT } from "@pokuelike/data";
 import { TERRAIN_ORDER } from "./ascii.js";
 import { writeFileSync } from "node:fs";
@@ -9,8 +9,16 @@ import { writeFileSync } from "node:fs";
 
 const ticks = Number(process.argv[2] ?? 2000);
 const outPath = process.argv[3] ?? "./replay.json";
+// Optional 4th positional argument: an explicit seed — see index.ts's
+// determinism doc comment for the full reasoning (same pattern here). The
+// seed is also stamped into the output file below so a saved replay always
+// records exactly which run produced it — this is the "seed as a replay
+// input" Part 2 (a separate follow-up) will build on.
+const seedArg = process.argv[4];
+const seed = seedArg !== undefined && seedArg !== "" ? Number(seedArg) : randomSeed();
+console.log(`Seed: ${seed}`);
 
-const world = createDemoWorld();
+const world = createDemoWorld(seed);
 const log = new EventLog();
 
 const speciesList: string[] = [];
@@ -103,6 +111,7 @@ const notable = log.events.filter((e) =>
 writeFileSync(
   outPath,
   JSON.stringify({
+    seed,
     width,
     height,
     terrainOrder: TERRAIN_ORDER,

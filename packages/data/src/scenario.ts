@@ -92,7 +92,7 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
   // Two mated pairs, so reproduction has someone to pair with from the start.
   // No `age` set — undefined is treated as already mature (see reproduction.ts).
   const herd = Array.from({ length: 4 }, (_, i) => ({
-    ...spawnAgent("bulbasaur", `bulbasaur-${i}`, anchor(world, 5 + i, 6), 5),
+    ...spawnAgent("bulbasaur", `bulbasaur-${i}`, anchor(world, 5 + i, 6), 5, world.rng),
     needs: createNeeds({ thirst: 0.4 + i * 0.1 }),
     herdId: "bulbasaur-herd",
     sex: (i % 2 === 0 ? "male" : "female") as "male" | "female",
@@ -104,19 +104,19 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
   // pick there — pickBestMove actually gets this right on its own).
   const guardians = [
     {
-      ...spawnAgent("venusaur", "venusaur-0", anchor(world, 4, 7), 20),
+      ...spawnAgent("venusaur", "venusaur-0", anchor(world, 4, 7), 20, world.rng),
       herdId: "bulbasaur-herd",
       sex: "male" as const,
     },
     {
-      ...spawnAgent("venusaur", "venusaur-1", anchor(world, 9, 7), 20),
+      ...spawnAgent("venusaur", "venusaur-1", anchor(world, 9, 7), 20, world.rng),
       herdId: "bulbasaur-herd",
       sex: "female" as const,
     },
   ];
 
   const hunter = {
-    ...spawnAgent("scyther", "scyther-0", anchor(world, OLD_WIDTH - 2, 1), 8),
+    ...spawnAgent("scyther", "scyther-0", anchor(world, OLD_WIDTH - 2, 1), 8, world.rng),
     needs: createNeeds({ hunger: 0.3 }),
     sex: "female" as const,
   };
@@ -133,29 +133,29 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
   // these just need `scaledPos`, not the walkability search `anchor` does.
   const undergroundColony = [
     {
-      ...spawnAgent("diglett", "diglett-0", scaledPos(OLD_WIDTH - 3, OLD_HEIGHT - 3), 5),
+      ...spawnAgent("diglett", "diglett-0", scaledPos(OLD_WIDTH - 3, OLD_HEIGHT - 3), 5, world.rng),
       needs: createNeeds({ hunger: 0.2 }),
       herdId: "underground-colony",
       sex: "male" as const,
     },
     {
-      ...spawnAgent("diglett", "diglett-1", scaledPos(OLD_WIDTH - 4, OLD_HEIGHT - 3), 5),
+      ...spawnAgent("diglett", "diglett-1", scaledPos(OLD_WIDTH - 4, OLD_HEIGHT - 3), 5, world.rng),
       herdId: "underground-colony",
       sex: "female" as const,
     },
     {
-      ...spawnAgent("sandshrew", "sandshrew-0", scaledPos(OLD_WIDTH - 3, OLD_HEIGHT - 4), 5),
+      ...spawnAgent("sandshrew", "sandshrew-0", scaledPos(OLD_WIDTH - 3, OLD_HEIGHT - 4), 5, world.rng),
       herdId: "underground-colony",
       sex: "male" as const,
     },
     {
-      ...spawnAgent("sandshrew", "sandshrew-1", scaledPos(OLD_WIDTH - 4, OLD_HEIGHT - 4), 5),
+      ...spawnAgent("sandshrew", "sandshrew-1", scaledPos(OLD_WIDTH - 4, OLD_HEIGHT - 4), 5, world.rng),
       herdId: "underground-colony",
       sex: "female" as const,
     },
   ];
   const onix = {
-    ...spawnAgent("onix", "onix-0", scaledPos(2, OLD_HEIGHT - 2), 10),
+    ...spawnAgent("onix", "onix-0", scaledPos(2, OLD_HEIGHT - 2), 10, world.rng),
     needs: createNeeds({ hunger: 0.3 }),
     sex: "male" as const,
   };
@@ -164,19 +164,19 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
   // same pattern one layer up.
   const pidgeyFlock = [
     {
-      ...spawnAgent("pidgey", "pidgey-0", scaledPos(2, 2), 5),
+      ...spawnAgent("pidgey", "pidgey-0", scaledPos(2, 2), 5, world.rng),
       needs: createNeeds({ thirst: 0.2 }),
       herdId: "pidgey-flock",
       sex: "female" as const,
     },
     {
-      ...spawnAgent("pidgey", "pidgey-1", scaledPos(3, 2), 5),
+      ...spawnAgent("pidgey", "pidgey-1", scaledPos(3, 2), 5, world.rng),
       herdId: "pidgey-flock",
       sex: "male" as const,
     },
   ];
   const spearow = {
-    ...spawnAgent("spearow", "spearow-0", scaledPos(OLD_WIDTH - 2, OLD_HEIGHT - 2), 10),
+    ...spawnAgent("spearow", "spearow-0", scaledPos(OLD_WIDTH - 2, OLD_HEIGHT - 2), 10, world.rng),
     needs: createNeeds({ hunger: 0.3 }),
     sex: "female" as const,
   };
@@ -189,11 +189,11 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
   // enough relative to them, same as any other species.
   const squirtlePair = [
     {
-      ...spawnAgent("squirtle", "squirtle-0", { x: 1, y: 4 }, 5),
+      ...spawnAgent("squirtle", "squirtle-0", { x: 1, y: 4 }, 5, world.rng),
       sex: "male" as const,
     },
     {
-      ...spawnAgent("squirtle", "squirtle-1", { x: 2, y: 4 }, 5),
+      ...spawnAgent("squirtle", "squirtle-1", { x: 2, y: 4 }, 5, world.rng),
       sex: "female" as const,
     },
   ];

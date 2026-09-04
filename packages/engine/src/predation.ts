@@ -366,7 +366,8 @@ function resolveHit(
   defender: Agent,
   log: EventLog | undefined,
   faintKind: "killed" | "defeated",
-  ctx?: LevelingContext
+  ctx?: LevelingContext,
+  rng: () => number = Math.random
 ): boolean {
   if (defender.alive === false) return false; // already a corpse — nothing left to finish off here (looting/scavenging is a separate path, see support.ts)
 
@@ -378,7 +379,7 @@ function resolveHit(
 
   useMove(attacker, move);
 
-  if (!rollAccuracy(move, 0, 0, Math.random, stormAccuracyMultiplier(world, attacker.layer, attacker.pos))) {
+  if (!rollAccuracy(move, 0, 0, rng, stormAccuracyMultiplier(world, attacker.layer, attacker.pos))) {
     log?.record({
       kind: "missed",
       tick: world.tick,
@@ -390,19 +391,19 @@ function resolveHit(
     return false;
   }
 
-  const isCritical = rollCritical();
+  const isCritical = rollCritical(0, rng);
   const damage =
     attacker.level !== undefined && attacker.types && attacker.stats && defender.stats
       ? calculateDamage(
           { level: attacker.level, types: attacker.types, stats: attacker.stats },
           { types: defender.types ?? [], stats: defender.stats },
           move,
-          0.85 + Math.random() * 0.15,
+          0.85 + rng() * 0.15,
           isCritical
         ).damage
       : FALLBACK_DAMAGE;
 
-  if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log);
+  if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log, rng);
 
   // Every real hit against a herd member counts toward that herd's
   // predator-pressure trigger (herdMigration.ts) — the running-counter
@@ -435,7 +436,7 @@ function resolveHit(
     defender.alive = false;
     defender.finishingPool = 0;
     defender.diedAtTick = world.tick;
-    grantKillExp(world, attacker, defender, ctx, log);
+    grantKillExp(world, attacker, defender, ctx, log, rng);
     logKillOrDefeat(world, attacker, defender, faintKind, log);
     return true;
   }
@@ -488,8 +489,8 @@ function logKillOrDefeat(world: World, attacker: Agent, defender: Agent, faintKi
 }
 
 /** A predator that keeps failing to find a huntable (un-mobbed) meal gives up on this area and wanders off. */
-function giveUpAndRelocate(world: World, agent: Agent, log?: EventLog): boolean {
-  const result = migrate(world, agent, log);
+function giveUpAndRelocate(world: World, agent: Agent, log: EventLog | undefined, rng: () => number): boolean {
+  const result = migrate(world, agent, log, rng);
   if (result === "arrived") agent.ticksSinceMeal = 0; // fresh start in the new area
   return result !== "stuck";
 }
@@ -518,7 +519,14 @@ function giveUpAndRelocate(world: World, agent: Agent, log?: EventLog): boolean 
  * Returns true if this tick was handled here, so the caller should skip its
  * normal needs-driven behavior.
  */
-export function applyPredationInstincts(world: World, agent: Agent, rules: HuntRules, log?: EventLog, ctx?: LevelingContext): boolean {
+export function applyPredationInstincts(
+  world: World,
+  agent: Agent,
+  rules: HuntRules,
+  log?: EventLog,
+  ctx?: LevelingContext,
+  rng: () => number = Math.random
+): boolean {
   if (isCriticallyHurt(agent)) {
     const attackers = agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter(
       (other) => other.behavior === "fight" && other.fightTarget === agent.id
@@ -548,7 +556,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
         agent.behavior = "fight";
         agent.fightTarget = threat.id;
         if (canAttackFromHere(world, agent, threat, distance)) {
-          resolveHit(world, agent, threat, log, "defeated", ctx);
+          resolveHit(world, agent, threat, log, "defeated", ctx, rng);
         } else {
           agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
         }
@@ -579,7 +587,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
       agent.behavior = "fight";
       agent.fightTarget = threat.id;
       if (canAttackFromHere(world, agent, threat, distance)) {
-        resolveHit(world, agent, threat, log, "defeated", ctx);
+        resolveHit(world, agent, threat, log, "defeated", ctx, rng);
       } else {
         agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
       }
@@ -615,7 +623,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
         // dead — resolveHit returns true only at that moment, never on a mere
         // faint — so hunting a fainted target across several ticks to finish
         // it off, then eating, is the normal two-stage path here.
-        const died = resolveHit(world, agent, target, log, "killed", ctx);
+        const died = resolveHit(world, agent, target, log, "killed", ctx, rng);
         if (died) {
           agent.needs.hunger = Math.min(1, agent.needs.hunger + KILL_HUNGER_RESTORE);
           agent.huntTarget = undefined;
@@ -630,7 +638,7 @@ export function applyPredationInstincts(world: World, agent: Agent, rules: HuntR
 
     agent.ticksSinceMeal = (agent.ticksSinceMeal ?? 0) + 1;
     if (agent.ticksSinceMeal >= RELOCATE_AFTER_TICKS) {
-      return giveUpAndRelocate(world, agent, log);
+      return giveUpAndRelocate(world, agent, log, rng);
     }
   }
 

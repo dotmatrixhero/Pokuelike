@@ -84,10 +84,10 @@ const EXPLORE_SEARCH_ATTEMPTS = 8;
 const MIN_EXPLORE_AGE = 10;
 
 /** A random nearby walkable tile that lands in a sector this agent hasn't visited yet, if one can be found in a few tries. */
-function findNearbyUnvisitedTile(world: World, agent: Agent): Vec2 | undefined {
+function findNearbyUnvisitedTile(world: World, agent: Agent, rng: () => number): Vec2 | undefined {
   for (let i = 0; i < EXPLORE_SEARCH_ATTEMPTS; i++) {
-    const dx = Math.floor(Math.random() * (EXPLORE_SEARCH_RADIUS * 2 + 1)) - EXPLORE_SEARCH_RADIUS;
-    const dy = Math.floor(Math.random() * (EXPLORE_SEARCH_RADIUS * 2 + 1)) - EXPLORE_SEARCH_RADIUS;
+    const dx = Math.floor(rng() * (EXPLORE_SEARCH_RADIUS * 2 + 1)) - EXPLORE_SEARCH_RADIUS;
+    const dy = Math.floor(rng() * (EXPLORE_SEARCH_RADIUS * 2 + 1)) - EXPLORE_SEARCH_RADIUS;
     const candidate = { x: agent.pos.x + dx, y: agent.pos.y + dy };
     if (!tileAt(world, agent.layer, candidate.x, candidate.y)?.walkable) continue;
     if (agent.visitedSectors?.includes(sectorId(candidate.x, candidate.y))) continue;
@@ -109,11 +109,11 @@ function findNearbyUnvisitedTile(world: World, agent: Agent): Vec2 | undefined {
  * nearby right now — exploring is optional flavor, not another need that
  * can starve.
  */
-function applyExploration(world: World, agent: Agent, log?: EventLog): void {
+function applyExploration(world: World, agent: Agent, log: EventLog | undefined, rng: () => number): void {
   if (agent.age !== undefined && agent.age < MIN_EXPLORE_AGE) return;
 
   if (!agent.exploreTarget) {
-    agent.exploreTarget = findNearbyUnvisitedTile(world, agent);
+    agent.exploreTarget = findNearbyUnvisitedTile(world, agent, rng);
     if (!agent.exploreTarget) return;
   }
 
@@ -219,14 +219,20 @@ function consume(needs: Needs, behavior: "seekWater" | "seekFood"): void {
  * though it's excluded from the action tick entirely (see `tickAgentAction`
  * below) — DESIGN.md's "Faint/finish-off, heal over time" section.
  */
-export function tickAgentNeeds(agent: Agent, world?: World, ctx?: LevelingContext, log?: EventLog): void {
+export function tickAgentNeeds(
+  agent: Agent,
+  world?: World,
+  ctx?: LevelingContext,
+  log?: EventLog,
+  rng: () => number = Math.random
+): void {
   if (agent.alive === false) return;
   if (agent.age !== undefined) agent.age += 1;
   tickCooldowns(agent);
   const thirstMultiplier = world ? thirstDecayMultiplier(world, agent.layer, agent.pos) : 1;
   decayNeeds(agent.needs, thirstMultiplier);
 
-  if (world && agent.age !== undefined && Math.random() < ageMortalityChance(agent.age)) {
+  if (world && agent.age !== undefined && rng() < ageMortalityChance(agent.age)) {
     agent.alive = false;
     agent.diedAtTick = world.tick;
     log?.record({ kind: "diedOfAge", tick: world.tick, agentId: agent.id, species: agent.species, pos: agent.pos, age: agent.age });
@@ -254,7 +260,7 @@ export function tickAgentNeeds(agent: Agent, world?: World, ctx?: LevelingContex
 
   applyHealOverTime(agent);
   if (world) maybeRecoverFromFaint(agent, world, log);
-  if (world) grantExp(world, agent, EXP_TRICKLE_PER_TICK, ctx, log);
+  if (world) grantExp(world, agent, EXP_TRICKLE_PER_TICK, ctx, log, rng);
 }
 
 /**
@@ -281,13 +287,20 @@ export function tickAgentNeeds(agent: Agent, world?: World, ctx?: LevelingContex
  * survival instincts, then starting a new carry/loot/delivery, then the
  * original needs-based behavior choice.
  */
-export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext): void {
+export function tickAgentAction(
+  world: World,
+  agent: Agent,
+  log?: EventLog,
+  rules?: HuntRules,
+  ctx?: LevelingContext,
+  rng: () => number = Math.random
+): void {
   if (agent.alive === false) return;
   if (agent.fainted) return;
   if (agent.beingCarriedBy) return;
 
   if (applyCarrying(world, agent, rules, log)) return;
-  if (rules && applyPredationInstincts(world, agent, rules, log, ctx)) return;
+  if (rules && applyPredationInstincts(world, agent, rules, log, ctx, rng)) return;
   if (maybeStartCarrying(world, agent, log)) return;
   if (applyLooting(world, agent, log)) return;
   if (applyHerdSupport(world, agent, log)) return;
@@ -298,13 +311,13 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
   // need always wins).
   if (agent.exploreTarget) {
     if (chooseBehavior(agent.needs) === "idle") {
-      applyExploration(world, agent, log);
+      applyExploration(world, agent, log, rng);
       return;
     }
     agent.exploreTarget = undefined;
   }
 
-  markSectorVisited(agent, world, ctx, log);
+  markSectorVisited(agent, world, ctx, log, rng);
   // Once an agent has racked up a handful of distinct species, it's very likely seen
   // everything currently in play (the demo roster is ~6 species) — skip the O(agents)
   // nearby-scan entirely past that point rather than re-scanning forever for a trickle
@@ -315,7 +328,7 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
     for (const other of world.agents) {
       if (other.id === agent.id || other.alive === false) continue;
       if (Math.abs(other.pos.x - agent.pos.x) + Math.abs(other.pos.y - agent.pos.y) > 3) continue;
-      markSpeciesEncountered(agent, other.species, world, ctx, log);
+      markSpeciesEncountered(agent, other.species, world, ctx, log, rng);
     }
   }
 
@@ -334,7 +347,7 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
   }
 
   if (agent.behavior === "seekMate") {
-    applyMateSeeking(world, agent, log, ctx);
+    applyMateSeeking(world, agent, log, ctx, rng);
     return;
   }
 
@@ -351,7 +364,7 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
           const tile = tileAt(world, agent.layer, target.x, target.y);
           if (tile?.stock !== undefined) tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
         }
-        grantExp(world, agent, EXP_ON_CONSUME, ctx, log);
+        grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
         log?.record({
           kind: "consumed",
           tick: world.tick,
@@ -389,7 +402,7 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
     // isn't better than trying somewhere else.
     agent.ticksWithoutResource = (agent.ticksWithoutResource ?? 0) + 1;
     if (agent.ticksWithoutResource >= MIGRATE_AFTER_TICKS) {
-      if (migrate(world, agent, log) === "arrived") agent.ticksWithoutResource = 0;
+      if (migrate(world, agent, log, rng) === "arrived") agent.ticksWithoutResource = 0;
     }
     return;
   }
@@ -411,7 +424,7 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
 
   if (agent.behavior === "idle") {
     const drewBack = applyHerdCohesion(world, agent, rules);
-    if (!drewBack) applyExploration(world, agent, log);
+    if (!drewBack) applyExploration(world, agent, log, rng);
   }
 }
 
@@ -424,7 +437,14 @@ export function tickAgentAction(world: World, agent: Agent, log?: EventLog, rule
  * `tickAgentNeeds` every tick and `tickAgentAction` only on an agent's
  * action tick.
  */
-export function tickAgent(world: World, agent: Agent, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext): void {
-  tickAgentNeeds(agent, world, ctx, log);
-  tickAgentAction(world, agent, log, rules, ctx);
+export function tickAgent(
+  world: World,
+  agent: Agent,
+  log?: EventLog,
+  rules?: HuntRules,
+  ctx?: LevelingContext,
+  rng: () => number = Math.random
+): void {
+  tickAgentNeeds(agent, world, ctx, log, rng);
+  tickAgentAction(world, agent, log, rules, ctx, rng);
 }

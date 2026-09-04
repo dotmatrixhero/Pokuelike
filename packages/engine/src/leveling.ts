@@ -175,18 +175,31 @@ function rememberCapped(list: string[] | undefined, value: string, cap: number):
 }
 
 /** Records a newly-entered map sector; grants a small exp trickle the first time this agent visits it. */
-export function markSectorVisited(agent: Agent, world: World, ctx?: LevelingContext, log?: EventLog): void {
+export function markSectorVisited(
+  agent: Agent,
+  world: World,
+  ctx?: LevelingContext,
+  log?: EventLog,
+  rng: () => number = Math.random
+): void {
   const id = sectorId(agent.pos.x, agent.pos.y);
   if (agent.visitedSectors?.includes(id)) return;
   agent.visitedSectors = rememberCapped(agent.visitedSectors, id, MAX_TRACKED_SECTORS);
-  grantExp(world, agent, EXP_ON_NEW_SECTOR, ctx, log);
+  grantExp(world, agent, EXP_ON_NEW_SECTOR, ctx, log, rng);
 }
 
 /** Records a newly-encountered species (an agent within `radius` of `others`); grants a small exp trickle the first time. */
-export function markSpeciesEncountered(agent: Agent, species: string, world: World, ctx?: LevelingContext, log?: EventLog): void {
+export function markSpeciesEncountered(
+  agent: Agent,
+  species: string,
+  world: World,
+  ctx?: LevelingContext,
+  log?: EventLog,
+  rng: () => number = Math.random
+): void {
   if (species === agent.species || agent.encounteredSpecies?.includes(species)) return;
   agent.encounteredSpecies = rememberCapped(agent.encounteredSpecies, species, MAX_TRACKED_SPECIES);
-  grantExp(world, agent, EXP_ON_NEW_SPECIES_ENCOUNTERED, ctx, log);
+  grantExp(world, agent, EXP_ON_NEW_SPECIES_ENCOUNTERED, ctx, log, rng);
 }
 
 /** Grants one skill point (typed or wildcard) and logs it. */
@@ -269,7 +282,14 @@ export function ensureCombatProfile(agent: Agent, ctx?: LevelingContext): void {
  * same "optional injected policy" pattern as `HuntRules`, so callers that
  * don't have dex data on hand (bare engine tests) keep working unchanged.
  */
-export function grantExp(world: World, agent: Agent, amount: number, ctx?: LevelingContext, log?: EventLog): void {
+export function grantExp(
+  world: World,
+  agent: Agent,
+  amount: number,
+  ctx?: LevelingContext,
+  log?: EventLog,
+  rng: () => number = Math.random
+): void {
   if (agent.alive === false || amount <= 0) return;
   agent.exp = (agent.exp ?? 0) + amount;
   agent.level = agent.level ?? 1;
@@ -317,7 +337,7 @@ export function grantExp(world: World, agent: Agent, amount: number, ctx?: Level
 
     const primaryType = agent.types?.[0];
     if (primaryType) grantSkillPoint(agent, primaryType, world, log);
-    if (Math.random() < SKILLPOINT_LEVELUP_WILDCARD_CHANCE) grantSkillPoint(agent, "wildcard", world, log);
+    if (rng() < SKILLPOINT_LEVELUP_WILDCARD_CHANCE) grantSkillPoint(agent, "wildcard", world, log);
 
     const levelAfterUp = agent.level;
     const evo = profile.evolutions.find((e) => levelAfterUp >= e.level);
@@ -343,10 +363,17 @@ export function killExpYield(baseExp: number, defeatedLevel: number): number {
 }
 
 /** Grants a kill's exp to the attacker, using the defender's dex `baseExp` and level (via `ctx`). No-op if `ctx` or the defender's profile is unavailable. */
-export function grantKillExp(world: World, attacker: Agent, defender: Agent, ctx?: LevelingContext, log?: EventLog): void {
+export function grantKillExp(
+  world: World,
+  attacker: Agent,
+  defender: Agent,
+  ctx?: LevelingContext,
+  log?: EventLog,
+  rng: () => number = Math.random
+): void {
   if (!ctx) return;
   const profile = ctx.getProfile(defender.species);
   if (!profile) return;
   const amount = killExpYield(profile.baseExp, defender.level ?? 1) * KILL_EXP_MULTIPLIER;
-  grantExp(world, attacker, amount, ctx, log);
+  grantExp(world, attacker, amount, ctx, log, rng);
 }

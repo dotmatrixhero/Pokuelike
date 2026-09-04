@@ -411,6 +411,53 @@ export interface World {
   agents: Agent[];
   tick: number;
   /**
+   * The seed `rng` below was constructed from — always set by `createWorld`
+   * (world.ts), explicit or freshly minted via `rng.ts`'s `randomSeed()`.
+   * Recorded on `World` (not just passed around and discarded) so a caller
+   * that only has a `World` in hand — `packages/runner`'s CLI, a bug report,
+   * a saved run — can still read back and print/log exactly which seed
+   * produced it, the whole point of seeding in the first place: reproducing
+   * a specific run, not just a specific *map* (worldgen.ts's seed already
+   * did that half; this is the other half — deterministic *behavior*, see
+   * DESIGN.md's determinism section).
+   */
+  rngSeed: number;
+  /**
+   * The ONE shared seeded generator (`rng.ts`'s `mulberry32(rngSeed)`) every
+   * random roll anywhere in the engine must be threaded from — flora growth,
+   * migration targets, combat variance, reproduction, leveling's wildcard
+   * roll, and every other former raw `Math.random()` call site (see
+   * DESIGN.md's determinism section for the full converted-call-site list).
+   * Stored live on `World` (a function, not serializable data) rather than
+   * only threading a bare generator function through every tick call by
+   * itself — this codebase's `World` already isn't purely serializable data
+   * either way (it holds live `Agent` objects), and keeping the live
+   * generator reachable from the `World` it belongs to means any function
+   * that already receives `world` can reach `world.rng` directly without
+   * every intermediate caller needing its own separate `rng` parameter JUST
+   * to pass one further down — though the tick functions below still thread
+   * an explicit optional `rng` parameter too (matching the existing
+   * `log`/`rules`/`ctx` convention), so a test can substitute a different
+   * generator (or a fixed-output stub) without needing to mutate `world.rng`
+   * out from under a shared fixture. Two worlds ticked in the same process
+   * (tests do this constantly) each carry their own independent generator —
+   * never a hidden module-level global.
+   */
+  rng: () => number;
+  /**
+   * Counter behind each newborn's id suffix (reproduction.ts's
+   * `spawnOffspring`, `${species}-${tick}-${offspringSequence}`) — used to be
+   * a module-level global, which meant two separate `World`s ticked in the
+   * same process (every test file, and any determinism check that runs the
+   * same seed twice in-process) could produce agent ids — and therefore
+   * event-log content — that differed purely by which world happened to
+   * spawn first in that process, not by anything about the world itself. Now
+   * per-`World`, like `rngSeed`/`rng` above, for the same reason: reproduce a
+   * specific run, not "whatever this process's shared counters happened to
+   * be at the time." Absent/0 for a freshly created world.
+   */
+  offspringSequence?: number;
+  /**
    * Bumped whenever a tile's terrain crosses in or out of "water"/"food"/
    * "sunbeam" (setTile always bumps it; flora.ts bumps it only on the
    * transitions that matter) — lets resourceIndex.ts's cache know when it
