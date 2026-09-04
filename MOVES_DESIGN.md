@@ -504,97 +504,125 @@ to use it.
 
 ## Move-tree drafts: the sim's actual movepool
 
-Vine Whip proved the v2 template. This applies it to every move actually
-equipped by a spawned agent in `packages/data/src/scenario.ts` — Ember is
-deliberately excluded here even though it already has a (v1, due for a
-rebuild) tree, since Charmander isn't currently spawned in the demo world.
-Tackle is used by six different species (Bulbasaur, Venusaur, Diglett,
-Pidgey, Onix, Squirtle) in six completely different roles — guardian,
-herd prey, burrower, flier, tunneler, starter — so it gets Vine Whip's full
-treatment (3 branches + a crosslink triangle); the same tree, but different
-individuals (via disposition-weighted auto-respec) end up building it
-differently depending on who's wielding it. Everything else gets a scope
-matched to how central it is: Slash (the sim's only predator's only move)
-gets a full Power-archetype build; the four single-species specialty moves
-get lighter 2-branch trees — real content, not padding, but proportionate.
+Vine Whip proved the v2 template. **Tackle, Slash, and Ember have all now
+shipped their full v2 trees** (`packages/data/src/moves.ts`) — three
+branches (Aggression/Boldness/Sociability) plus a crosslink triangle each,
+33/36/35 nodes respectively, every lever real and unit-tested (see the
+primitives checklist above). Tackle is used by six different species
+(Bulbasaur, Venusaur, Diglett, Pidgey, Onix, Squirtle) in six completely
+different roles — guardian, herd prey, burrower, flier, tunneler, starter —
+so the same tree produces very different builds depending on who's
+wielding it (disposition-weighted auto-respec, `maybeAutoRespec`). Confirmed
+in a real ~8000-tick run: a live Diglett auto-respec'd five real Tackle v2
+nodes (`weighted_charge`, `momentum_grip`, `hardened_knuckles`, `iron_hide`,
+`steadfast_guard`), spanning two of the three branches.
 
-Feasibility tags as before: **live** (existing `delta` fields), **near**
-(rides an existing subsystem), **needs** (blocked on a not-yet-built
-mechanism — status effects, AoE, `excludes`/`prerequisitesAnyOf`, agent
-passives, or one of the newly-introduced levers called out per move below).
+Two things from the original paper draft are deliberately NOT in the
+shipped data, both called out in each tree's own code comment:
+- **Max PP** (`maxPPBonus`/`ppCost`) — a whole new resource axis, its own
+  follow-up project, not a `MoveSpec`/`MoveTreeNode` delta field like
+  everything else. Every "+1 Max PP" filler node became a real, already-
+  used filler instead (`+5 Power`/`+10 Accuracy`/`-1 Cooldown`/`+5% status
+  chance`), so node counts and costs match the original draft exactly.
+- **`aggroRedirect`** (a taunt-style passive drawing hostile targeting to
+  the holder) — never actually built; real AI-targeting changes are a
+  bigger, riskier lift than the other passives this pass added. The three
+  nodes that wanted it (Tackle's *Bulwark*, Slash's *Alpha Strike*, Ember's
+  *Eternal Flame*) grant an extra `damageReduction`/`regen` instead — a
+  real, already-shipped stat, and in Alpha Strike's case exactly the fix
+  the user originally asked for ("maybe needs to give damage reduction
+  too") independent of the taunt idea.
 
 ### Tackle (Normal, point/melee) — Utility archetype, full treatment
 
-**Shipped as v1** (`packages/data/src/moves.ts`) — two branches (Aggression,
-Boldness), now 9 nodes (`bracing_impact` added once `forcedMovement`
-shipped — see DESIGN.md), both forks real via `excludes`, confirmed working
-in a live run. What follows is the fuller v2 vision this doc still aims at;
-the v1 code still doesn't have a Sociability branch or crosslinks, since
-those need a herd-mate position-swap and agent-modifying passives, neither
-built yet:
+**Shipped as v2** — three branches plus a crosslink triangle:
 
-- **Aggression — "Full Charge"**: notable *Weighted Charge* (+power,
-  -accuracy, live) → filler → filler → notable *Bracing Impact* (knocks the
-  target back 1 tile on a landed, non-killing hit — **shipped**, prereq
-  `full_force_slam` in the real tree, not gated behind the fork the way
-  this paragraph's shape implies) → filler. **Fork**:
-  *Relentless Charge* (2 hits, less power each, live) vs. *Full-Force Slam*
-  (+power, +cooldown, live). **Keystone**: *Unstoppable Momentum* — after a
-  hit, immediately dash toward the next target (needs: action-economy
-  interaction).
-- **Boldness — "Brace for Impact"**: notable *Brace for Impact* (passive
-  damage reduction while known, needs: agent-modifying passive) → filler →
-  filler → notable *Retaliation* (lifesteal %, live) → filler. **Fork**:
-  *Sturdy Stance* (more reduction, -power, needs) vs. *Counter Slam*
-  (+power when used the tick right after being hit, needs: "was just hit"
-  context). **Keystone**: *Immovable* — can't be displaced while off
-  cooldown, and standing still last tick adds power to the next Tackle
-  (needs).
-- **Sociability — "Shared Ground"** (new — Tackle's spread across so many
-  communal species earns it a real support branch): notable *Steadfast
-  Guard* (usable to intercept a threat approaching a herd-mate, near — reuses
-  the guardian/herd concept) → filler → filler. **Fork**: *Bodyblock*
-  (swaps position with a threatened herd-mate, pulling them to safety —
-  needs: a position-swap movement lever, new) vs. *Rally Charge* (grants a
-  nearby herd-mate a small action-energy boost, needs). **Keystone**:
-  *Bulwark* — big power/accuracy bonus while adjacent to a fainted or
-  critically-hurt herd-mate (needs).
-- **Crosslinks** (all needs, all one-node-short-of-the-notable per the
-  fixed rule): *Grounded Fury* (Aggression↔Boldness, needs Weighted Charge +
-  Brace for Impact) — Retaliation's lifesteal also applies to Tackle's plain
-  hit. *Guardian's Stand* (Boldness↔Sociability) — Boldness's damage
-  reduction while actively defending a herd-mate. *Vanguard Charge*
-  (Sociability↔Aggression) — bonus power specifically charging toward a
-  threat menacing a herd-mate (same flavor as Vine Whip's Thornguard).
+- **Aggression — "Full Charge"**: opener *Weighted Charge* (bonus power
+  scales with the user's own `maxHp` — `weightScaling`, a Venusaur and a
+  Diglett throwing the same move hit very differently) → filler → filler →
+  notable *Bracing Impact* (knocks the target back 2 tiles on a landed,
+  non-killing hit) → filler → **fork**: *Full-Force Slam* (+power,
+  +cooldown, `recoilFraction`) vs. *Relentless Charge* (2 hits, less power
+  each, `critRateStage`) → notable *Unstoppable Momentum* (lunges 3 tiles
+  toward the next target after a landed hit) → filler → **keystone**
+  *Tremor Break* (`hitsArea` ring, knocks back everyone in it).
+- **Boldness — "Brace for Impact"**: opener *Iron Hide* (`damageReduction`
+  passive) → filler → filler → notable *Second Wind* (`regen` passive,
+  -accuracy) → filler → **fork**: *Counter Slam* (+power vs. a flanking
+  target) vs. *Steady Guard* (`lifestealFraction`) → notable *Immovable*
+  (`immovable` passive) → filler → **keystone** *Thornguard* (`thorns`
+  passive).
+- **Sociability — "Shared Ground"**: opener *Steadfast Guard*
+  (`targetsAlly`/`allyEffect` defense buff) → filler → filler → notable
+  *Rally Cry* (ally attack buff) → filler → **fork**: *Bulwark Stance*
+  (`damageReduction`, -power) vs. *Front Line* (+power, `jamCooldownTicks`)
+  → notable *Bulwark* (more `damageReduction`) → filler → **keystone**
+  *Guardian's Aura* (`healAura` passive — heals nearby herd-mates, not just
+  the holder).
+- **Crosslinks**: *Grounded Fury* (Aggression↔Boldness, `statChangeOnHit`
+  self-buff off a braced hit) · *Guardian's Stand* (Boldness↔Sociability,
+  shares `damageReduction`) · *Vanguard Charge* (Sociability↔Aggression,
+  bonus damage vs. a flanking threat menacing the herd).
 
 ### Slash (Normal, line-1 melee) — Power archetype, Scyther's only move
 
-**Shipped as v1** (`packages/data/src/moves.ts`) — two short spines
-(`serrated_edge` → `reaping_slash`, `feint` → `keen_precision` →
-`fleetfoot_slash`) converging on one real exclusive fork via `excludes`.
-`feint` is real now (`forcedMovement`, shipped — see DESIGN.md); the
-concealment/day-night bonus and the multi-action lock below are still v2,
-blocked on conditional-effect resolution and the multi-action-lock
-primitive, neither built yet — the shipped fork is a live-only "reliable,
-accurate strike vs. heavier, riskier one" instead.
+**Shipped as v2** — scaled to the same triangle as Tackle: Ferocity
+(Aggression), Precision (Boldness), and a slimmer Pack Instinct
+(Sociability) — even a mostly-solo hunter coordinates around a kill often
+enough to earn a real, lighter support branch.
 
-Deliberately a different *shape* than Tackle or Vine Whip — proof the
-archetype rule actually changes structure, not just flavor text. Mostly
-linear spine, no crosslinks (a lone ambush predator doesn't need a support
-branch), a couple of real mid-spine notables, one final exclusive fork:
+- **Ferocity**: opener *Honed Edge* (`defensePenetration`) → filler →
+  filler → *Predator's Instinct* (bonus damage at night) → filler →
+  *Coup de Grace* (double damage vs. any already-statused target — burned,
+  poisoned, paralyzed, asleep, or frozen, not just burn) → **3-way fork**:
+  *Reaping Slash* (`lockTicks`, `critRateStage`) vs. *Frenzy Cutter*
+  (`hits`, `recoilFraction`) vs. *Cleaving Slash* (`hitsArea` cone) →
+  notable *Apex Predator* → filler → **keystone** *Merciless*
+  (`resistanceBreaker`).
+- **Precision**: opener *Keen Eye* (+accuracy) → filler → filler → *Feint*
+  (lunges into melee before the hit) → filler → **fork**: *Opportunist's
+  Strike* (bonus vs. a flanking target) vs. *Calculated Retreat* (steps
+  back after hitting) → notable *Flawless Form* (`lifestealFraction`) →
+  filler → **keystone** *Perfect Strike* (+power, +accuracy).
+- **Pack Instinct**: opener *Shared Scent* (ally attack buff) → filler →
+  filler → *Coordinated Strike* (`statChangeOnHit` self-buff) → filler →
+  **fork**: *Opportunist Scavenger* (`regen`, -power) vs. *Territorial
+  Snarl* (bonus vs. a low-HP target) → notable *Alpha Strike*
+  (`damageReduction`) → filler → **keystone** *United Front* (ally heal +
+  buff in one move).
+- **Crosslinks**: *Brutal Efficiency* (Ferocity↔Precision,
+  `jamCooldownTicks`) · *Watchful Pack* (Precision↔Pack Instinct,
+  `damageReduction`) · *Ambush Pack* (Pack Instinct↔Ferocity, bonus vs. a
+  flanking target).
 
-Honed Edge (+power, live) → filler → *Predator's Instinct* (bonus
-power/crit if the user was concealed or striking during its active hours
-before the hit, near — reuses concealment + daynight) → filler → *Feint*
-(lunges 1 tile toward the target as part of the move — **shipped**, though
-in the real tree it's the boldness spine's own opener rather than mid-spine
-on the aggression side the way this paragraph's shape implies) → filler →
-Serrated Edge (+power, -accuracy, live). **Final fork**: *Reaping Slash*
-(big power spike, locks the user out of its next action tick, needs:
-multi-action lock) vs. *Frenzy Cutter* (3 hits at
-reduced power, still lands partial damage on a fleeing target, needs:
-multi-hit field — this is why the shipped v1 fork below uses different,
-live-only alternatives instead of this pair).
+### Ember (Fire, point, cooldown 1) — Utility archetype, full treatment
+
+**Shipped as v2** — scaled to the full triangle: Wildfire (Aggression),
+Ring of Fire (Boldness), and a new Hearthfire (Sociability, sharing warmth
+and healing — a genuinely different support flavor than Tackle's/Slash's
+own "brace and shield" branches).
+
+- **Wildfire**: opener *Wider Burn* (+status chance, -cooldown) → filler →
+  filler → *Roaring Blaze* (+power, -accuracy) → filler → *Fan the Flames*
+  (double damage vs. an already-burning target) → **fork**: *Inferno*
+  (reach 2) vs. *Wildfire Burst* (`hitsArea` burst around the caster) →
+  notable *Pyroclasm* (`recoilFraction`) → filler → **keystone**
+  *Spreading Blaze* (`statusSpreads` — the burn can jump to a nearby agent).
+- **Ring of Fire**: opener *Ring of Fire* (shape → ring, -power,
+  +cooldown) → filler → filler → *Wide Ring* (radius 2) → filler →
+  **fork**: *Lingering Ring* (-cooldown, +status chance) vs. *Searing Wall*
+  (`damageReduction`) → notable *Unquenchable* (`regen`) → filler →
+  **keystone** *Everlasting Ring* (`resistanceBreaker`).
+- **Hearthfire**: opener *Shared Warmth* (ally heal) → filler → filler →
+  *Kindled Spirits* (ally SpAttack buff) → filler → **fork**: *Hearthkeeper*
+  (`regen`, -power) vs. *Wildfire Call* (`statChangeOnHit` self-buff) →
+  notable *Eternal Flame* (extra `regen`) → filler → **keystone** *Communal
+  Hearth* (ally heal + buff in one move).
+- **Crosslinks**: *Smoldering Ring* (Wildfire↔Ring of Fire,
+  `statChangeOnHit` defender SpDefense debuff — the one node in this tree
+  that touches the target, not the caster) · *Banked Embers* (Ring of
+  Fire↔Hearthfire, `damageReduction`) · *Kindled Fury*
+  (Hearthfire↔Wildfire, `critRateStage`).
 
 ### Rock Throw (Rock, line-3, cooldown 1) — Power archetype, Onix
 
