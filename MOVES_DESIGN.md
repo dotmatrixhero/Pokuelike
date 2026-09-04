@@ -337,32 +337,39 @@ actually work:
    Vine Whip's Aggression↔Boldness crosslink (Snapback Lash) grants range
    +1 *and* a chance to drag the target closer on hit, a small taste of
    Aggression's own eventual keystone.
-2. **A shortcut *out* the other side, capped at one notable — never a fork
-   or keystone.** Taking it should let you continue into *both* neighboring
-   branches' *next notable*, skipping the filler in between. Second draft
-   let two of three crosslinks shortcut all the way to a fork/keystone,
-   which was a real balance mistake, not just a rough edge: three crosslinks
-   at that depth make every keystone in the tree cheaply reachable from a
-   single opener each, which guts the entire point of a keystone being a
-   real per-branch commitment. Capping every shortcut at "one notable early,
-   never further" keeps the mesh genuinely explorable while keeping forks
-   and keystones gated behind actually walking a branch. This needs a new
-   primitive: `MoveTreeNode.prerequisitesAnyOf?: string[][]` — a list of
-   alternative prerequisite sets, where satisfying *any one* (each inner
-   array still AND'd together) makes the node eligible. A branch's second
-   notable then declares two ways in: `prerequisites: [its own filler node]`
-   OR, via `prerequisitesAnyOf`, `[the crosslink]`. This is the same shape
-   as the still-open "keystone reachable from either fork tip" problem two
-   sections up — one primitive solves both.
+2. **A shortcut *out* the other side, landing one filler node SHORT of a
+   notable — never on the notable itself, and never at a fork or keystone.**
+   Two mistakes here, both caught by actually looking at the diagram, not
+   just reasoning about it in the abstract. Second draft let two of three
+   crosslinks shortcut all the way to a fork/keystone — three crosslinks at
+   that depth make every keystone in the tree cheaply reachable from a
+   single opener each, gutting the point of a keystone being a real
+   per-branch commitment. Capped at the next notable instead — but even
+   landing *on* that notable directly turned out too generous: it made the
+   notable itself free the instant both openers were taken, no different in
+   practice from the notable having no real cost of its own. Landing one
+   filler node short means the crosslink still buys you real ground (skips
+   the filler you'd have walked to get there) without handing over the
+   notable's own point cost for free — reaching it after the shortcut is
+   still a deliberate, separate spend. This needs a new primitive:
+   `MoveTreeNode.prerequisitesAnyOf?: string[][]` — a list of alternative
+   prerequisite sets, where satisfying *any one* (each inner array still
+   AND'd together) makes a node eligible. The filler node a shortcut lands
+   on declares two ways in: `prerequisites: [its own earlier chain node]` OR,
+   via `prerequisitesAnyOf`, `[the crosslink]` — and the notable past it
+   still just needs that filler node, same as always, no special-casing.
+   This is the same shape as the still-open "keystone reachable from either
+   fork tip" problem two sections up — one primitive solves both.
 
 Put one crosslink between each adjacent pair of branches (a triangle, for a
-3-branch tree), each granting its own real ability and shortcutting into
-both flanking branches' *next notable only*. This is what actually
-delivers "customizability" without cheapening every keystone: an agent can
-end up with Aggression's opener plus Boldness's *second notable*, having
-walked past Boldness's own filler to get there — a genuine hybrid route
-through the mesh — but still has to walk each branch's own fork and
-keystone in full if that's the payoff they're after.
+3-branch tree), each granting its own real ability and shortcutting to one
+filler node short of both flanking branches' next notable. This is what
+actually delivers "customizability" without cheapening anything: an agent
+can end up with Aggression's opener, the crosslink's own ability, and — for
+one more point, same cost it always was — Boldness's second notable, having
+skipped only the filler in between, not the notable's own price. A genuine
+hybrid route through the mesh, but every notable, fork, and keystone still
+costs exactly what it always did.
 
 **Put a notable early, not just at the end of a long chain.** A tree that
 saves every named effect for deep investment makes the *only* real choice
