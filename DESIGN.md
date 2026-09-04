@@ -5952,3 +5952,28 @@ user asked to be tight.
   only a handful of ticks later and the tile is still just as crowded. In
   practice this just means one extra `BLOCKED_RESOURCE_GRACE_TICKS`-long
   wait before re-excluding it, not a correctness problem.
+
+### Follow-up: tightened to 2.5x average weight (direct ask)
+
+Direct follow-up once the 3x cap (90) was confirmed producing zero
+starvation deaths and healthy populations on all three seeds: "can probably
+further reduce weight I think to avg 2.5 agents?" `TILE_WEIGHT_CAPACITY`
+90 -> 75 (2.5 * ~30.6).
+
+**Real-run findings, honestly counterintuitive.** Same 3000-tick, 3-seed
+real run: zero starvation deaths on all three seeds, unchanged from the 3x
+cap — the safety bar holds. But final population went *up* on every seed
+(seed 42: 62->80, seed 7: 61->114, seed 20260903: 63->128), the opposite of
+the naive "tighter cap -> more blocking -> lower population" expectation.
+Not read as a real causal effect of tighter capacity specifically — this
+sim is repeatedly documented elsewhere in this file as rng-chaos-sensitive
+to any change that perturbs candidate/occupancy decision order from tick 1
+onward (a capacity-threshold change alters which agent gets to enter a
+contested tile on any given tick, which cascades into a completely
+different rng-consumption trajectory for the rest of the run). The
+directionally-relevant, causally-trustworthy number is the unchanged
+zero-starvation result; the population deltas are presented as real
+observed numbers, not attributed to "tighter capacity grows the
+population," which would need a dedicated event-by-event isolation pass
+(as the note above already flags as unresolved for the *previous* tuning
+pass too) to actually confirm one way or the other.

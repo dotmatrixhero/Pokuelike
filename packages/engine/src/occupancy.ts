@@ -79,12 +79,16 @@ function getIndex(world: World): OccupancyIndex {
 
 /**
  * Surface tiles are weight-limited: calibrated (see DESIGN.md's "Tile
- * capacity" section for the real-run arithmetic) so roughly 3 average-weight
+ * capacity" section for the real-run arithmetic) so roughly N average-weight
  * agents from a real, matured population fit on one tile — a real 3000-tick
  * run across seeds 42/7/20260903 put the living population's average
- * `maxHp`-as-body-weight at ~29-32 (mean ~30.6), so 3 * ~30 = 90.
+ * `maxHp`-as-body-weight at ~29-32 (mean ~30.6). Tightened from 3x (90) to
+ * 2.5x (~76.5, rounded to 75) — direct follow-up ask after confirming the
+ * 3x cap was already producing zero starvation deaths and healthy
+ * populations across all three seeds: tighter crowding pressure, still with
+ * headroom above 2x so a single-tile drink/feed isn't over-restrictive.
  */
-export const TILE_WEIGHT_CAPACITY = 90;
+export const TILE_WEIGHT_CAPACITY = 75;
 
 /**
  * Underground and canopy are flat, generic, non-biome-varied layers (no
