@@ -653,6 +653,23 @@ export interface Agent {
    * default.
    */
   digestingTicksRemaining?: number;
+
+  /**
+   * Cached BFS route (pathfinding.ts's `findPath`) for the current
+   * `seekWater`/`seekFood` walk, so a multi-tile walk doesn't recompute a
+   * full BFS every tick — only when the target moves, the layer changes, the
+   * route is exhausted, or the next queued step is unexpectedly no longer
+   * walkable. `steps` excludes the agent's current position; the array
+   * shrinks by one each tick as `stepAlongPath` consumes it, and the whole
+   * field is cleared (`undefined`) once exhausted or invalidated. Deliberately
+   * per-agent rather than a shared per-(layer, target) cache — see
+   * `stepAlongPath`'s doc comment for why. Scoped to `seekWater`/`seekFood`
+   * only; every other behavior that moves an agent (flee/hunt/mate-seeking/
+   * exploration/dispersal/shelter-travel/herd-migration/relocate) still uses
+   * `movement.ts`'s plain greedy `stepToward`/`stepAway` and never touches
+   * this field.
+   */
+  pathCache?: { layer: Layer; target: Vec2; steps: Vec2[] };
 }
 
 /**

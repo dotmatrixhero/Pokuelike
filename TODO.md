@@ -1246,23 +1246,34 @@ blind `git merge`:
   future seeded-rng test-hygiene pass rather than fixing file-by-file as
   each one happens to get noticed.
 
-## Real pathfinding: `stepToward`/`stepAway` are greedy, not real paths
+## Real pathfinding for `seekWater`/`seekFood` — built; other behaviors still greedy
 
-Found while diagnosing why the real `SCENARIO_SEED` (20260903) demo world
-still loses agents to thirst even after the underground-water-sharing and
-predator-relocate fixes above (see DESIGN.md's "Diagnosing 'everything
-dies'..." section): Onix got stuck oscillating in `seekWater` behavior for
-248 ticks near a boulder cluster and died of thirst without ever reaching
-a real, existing water tile. `movement.ts`'s `stepToward`/`stepAway` pick
-one best single step toward/away from a target each tick
-(`candidatesToward`/`firstWalkable`) — real, working local avoidance for a
-single obstacle tile, but no lookahead or real routing around a
-moderately-sized cluster of blocked tiles, so an agent can end up stuck
-oscillating right next to one instead of walking around it. Not touched in
-this pass — a real fix (even simple flow-field/BFS pathfinding per layer,
-recomputed lazily like `resourceIndex.ts`'s terrain index) is a bigger
-scope call than the seed-diagnosis work that surfaced it. Worth prioritizing
-if thirst deaths near real, reachable water keep showing up in future runs.
+**Built**: a new `pathfinding.ts` (BFS, `findPath`/`stepAlongPath`, cached
+per-agent on `Agent.pathCache`) now backs `needs.ts`'s `seekWater`/
+`seekFood` stepping specifically — see DESIGN.md's "Follow-up: real BFS
+pathfinding for `seekWater`/`seekFood`" section for the full writeup. Real
+re-run of the exact seed that surfaced this (20260903): thirst-starvation
+deaths 20 → 13, and the specific stuck-oscillating Onix from the original
+diagnosis no longer dies of thirst at all (it now dies later, in combat,
+instead). Chose per-agent path caching over a shared per-(layer, target)
+flow-field cache (the `resourceIndex.ts`/`herdIndex.ts` pattern) — the map
+is small enough that per-agent BFS is already cheap and a real run showed
+no measurable slowdown; a shared cache is a possible future optimization
+if per-agent recomputation ever shows up as a real cost in a much larger
+map or population, but wasn't worth its extra invalidation surface now.
+
+**Still open / explicitly out of scope for this pass**: every OTHER
+greedy-stepping behavior — flee, hunt-a-visible-target, mate-seeking,
+exploration, dispersal's long walk, shelter-building's travel, herd-
+migration's relocate walk — still calls `movement.ts`'s plain
+`stepToward`/`stepAway` unchanged, on purpose (flee especially wants "away
+right now," not an optimal route, and none of these were the confirmed
+death-causing case). Worth revisiting as a candidate follow-up, not fixing
+preemptively, if a future real run shows one of THEM getting stuck near an
+obstacle cluster the same way seekWater/seekFood used to — none of the
+runs done while building this fix showed that happening, but the scope of
+testing here was specifically thirst/hunger-seeking, not an exhaustive
+search for every other behavior's obstacle-cluster edge cases.
 
 ## Urgency-based need priority, extended thirst margin, and sleep — built, tuning follow-ups
 

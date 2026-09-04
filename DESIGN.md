@@ -4311,6 +4311,78 @@ around a moderately-sized obstacle cluster between an agent and its
 target. This is a distinct, deeper, pre-existing limitation from the two
 fixed above — not touched here, flagged in TODO.md.
 
+### Follow-up: real BFS pathfinding for `seekWater`/`seekFood`
+
+Direct, explicit follow-up to the gap just above. Scoped narrowly on
+purpose: only `needs.ts`'s `seekWater`/`seekFood` branch of
+`tickAgentAction` got real pathfinding — every other greedy-stepping
+behavior (flee, hunt-a-visible-target, mate-seeking, exploration,
+dispersal's long walk, shelter-building's travel, herd-migration's
+relocate walk) still calls `movement.ts`'s plain `stepToward`/`stepAway`
+unchanged. Flee especially wants "move away, right now," not an optimal
+route, and none of the others were the confirmed death-causing case — no
+reason to touch a working, cheaper mechanism just because a fancier one
+now exists elsewhere.
+
+**What was built**:
+- A new `pathfinding.ts` with `findPath(world, layer, from, to)` — an
+  unweighted-grid BFS (sufficient and simpler than A* here; there's no
+  per-tile movement cost to weigh, just walkable/not) that returns the
+  ordered steps from `from` to `to` (excluding `from`, including `to`), or
+  `undefined` if `to` is unreachable or itself unwalkable. Respects
+  `tileAt(...)?.walkable` exactly like `stepToward` already does. Neighbor
+  expansion order is a fixed constant (`NEIGHBOR_OFFSETS`, orthogonal
+  first, then diagonals) — no randomness anywhere in the function, so it
+  can never touch `world.rng` or affect the seeded-replay guarantee (see
+  "Determinism" above); `determinism.test.ts`'s same-seed-twice test
+  passes unchanged.
+- `stepAlongPath(world, agent, target)` — the actual thing `needs.ts`
+  calls, wrapping `findPath` with a cache so a multi-tile walk doesn't
+  re-run BFS every tick. The cache lives on the agent itself
+  (`Agent.pathCache?: { layer, target, steps }`, types.ts), recomputed
+  only when the target or layer changes, the cached route is exhausted, or
+  the next queued step is unexpectedly no longer walkable (rare —
+  defensive, not expected to fire in normal play).
+- **Per-agent caching, not a shared per-(layer, target) cache**, a
+  deliberate call against the task's suggested alternative: many agents
+  converging on the same nearest water tile *could* share one flow-field
+  and dedupe the BFS work, but this map is small enough (~90x60, ~5400
+  tiles) that a single BFS is already cheap — worst case a few thousand
+  tile expansions, and the real run below showed no measurable slowdown.
+  A shared cache also needs its own invalidation story (a shared route
+  can go stale from a tile change or an agent's target shifting slightly
+  differently from its herd-mates') that per-agent caching sidesteps for
+  free. Worth revisiting only if a real run ever shows per-agent BFS
+  actually costing something — see TODO.md.
+- Wired into `needs.ts`'s `tickAgentAction`: the one line that used to
+  read `agent.pos = stepToward(world, agent.layer, agent.pos, target)`
+  inside the `seekWater`/`seekFood` branch (when a target exists on the
+  current layer but the agent isn't standing on it yet) now reads
+  `agent.pos = stepAlongPath(world, agent, target)` instead. Everything
+  around it — the comfort/priority-yield check, the layer-crossing
+  fallback, the `MIGRATE_AFTER_TICKS` give-up-and-migrate fallback — is
+  untouched. The underground-water-sharing interaction (an underground
+  agent's water target resolving to the surface layer's water index while
+  the agent itself stays on `underground`) just works: `findPath` runs on
+  whatever `agent.layer` actually is, and underground is a full flat
+  walkable grid by design, so there's nothing to route around there
+  anyway.
+
+**Confirmed in a real re-run of the exact same seed (20260903, 2000
+ticks)**: total thirst-starvation deaths dropped from 20 to 13. Onix-0
+specifically — the confirmed stuck-oscillating death from the diagnosis
+above — no longer dies of thirst at all: it keeps drinking successfully
+past its old death point (30 total drinks, last one at tick 1323, versus
+starving at tick 1139 before this fix), and its life eventually ends a
+different way entirely — killed in real combat by `venusaur-0` at tick
+1367 (`fainted` at 1366, `defeated` the next tick). That is the pathing
+fix working exactly as intended: the agent survives the specific failure
+mode this session set out to fix and dies of something else instead.
+Performance sanity check (seed 42, 2000 ticks): ~2.8-3.4s across several
+runs, no dramatic regression from before this change — the per-agent path
+cache is doing its job of not re-running BFS every tick while an agent
+walks an already-computed route.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

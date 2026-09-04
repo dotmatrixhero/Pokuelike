@@ -1,6 +1,7 @@
 import type { Agent, BehaviorKind, HuntRules, Layer, Needs, Vec2, World } from "./types.js";
 import { otherLayers, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
+import { stepAlongPath } from "./pathfinding.js";
 import { applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT } from "./flora.js";
@@ -770,7 +771,12 @@ export function tickAgentAction(
           need,
         });
       } else {
-        agent.pos = stepToward(world, agent.layer, agent.pos, target);
+        // Real BFS-backed pathing (pathfinding.ts), not greedy stepToward —
+        // this is the confirmed real death case (an Onix got stuck
+        // oscillating near a boulder cluster on the way to reachable water,
+        // see DESIGN.md/TODO.md), so seekWater/seekFood specifically get
+        // routed around obstacle clusters instead of single-step-greedy.
+        agent.pos = stepAlongPath(world, agent, target);
       }
       return;
     }
