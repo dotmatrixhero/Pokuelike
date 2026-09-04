@@ -1189,8 +1189,12 @@ trigger for move learning and evolution.
   `SKILLPOINT_ON_HIT_CHANCE = 0.05` on every landed (nonzero-damage) hit in
   `resolveHit`, granting one point of the *move's* type to the attacker.
   Leveling up grants one guaranteed point of the agent's own primary type
-  (`Agent.types[0]`) plus a `SKILLPOINT_LEVELUP_WILDCARD_CHANCE = 0.1` roll
-  for a wildcard point. **Real bug caught and fixed during validation, not
+  (`Agent.types[0]`). Bonus wildcard points are no longer an RNG roll (an
+  earlier `SKILLPOINT_LEVELUP_WILDCARD_CHANCE = 0.1` per level-up, replaced
+  once specialization actually started spending points — see
+  "Specialization" below): every `SKILLPOINT_WILDCARD_INTERVAL`th real point
+  granted, level-up or on-hit alike, deterministically grants a bonus
+  wildcard, tracked via `Agent.skillPointGrantCount`. **Real bug caught and fixed during validation, not
   just claimed working**: the first real run showed almost no typed points
   despite hundreds of level-ups, because `reproduction.ts`'s newborns don't
   get a `types` field (a pre-existing gap — newborns don't get a full
@@ -3227,6 +3231,25 @@ Disposition, not left uniform-random.
   Once a species with a real tree-bearing move actually gets spawned into a
   scenario, `moveRespecced` events should start showing up in the log for
   free — no additional wiring needed.
+- **Wildcard income made deterministic, not RNG-gated.** With Ember's tree
+  costing only 3 total points (both nodes fire-typed), a mono-fire agent's
+  guaranteed level-up income alone maxes it out by roughly level 4 — the
+  wildcard/on-hit channels barely mattered in practice, and a 10%-per-level
+  RNG roll meant an unlucky agent could go many levels with zero wildcard
+  access, which matters much more once trees are big enough that a full
+  level-up income can't carry them alone, and once an agent needs a wildcard
+  to fund a tree on a move whose type doesn't match its own primary type
+  (the only source of *typed* points for an off-primary-type tree is the 5%
+  on-hit roll for a move of that type actually landing). Replaced the RNG
+  roll with a fixed cadence: `SKILLPOINT_WILDCARD_INTERVAL = 2` — every 2nd
+  real point granted (level-up or on-hit, whichever type) also grants a
+  bonus wildcard, tracked via a new `Agent.skillPointGrantCount` that only
+  advances on real grants (the bonus wildcard grant itself doesn't recount).
+  This is a real rate increase, not just a smoothing of the old one (10% per
+  level-up, only counting the level-up channel -> 50% per real point,
+  counting on-hit points too) — a deliberate choice to make wildcard access
+  reliable enough to actually fund off-primary-type trees once those exist,
+  not just a determinism cleanup.
 
 ## Current state of the code
 

@@ -272,6 +272,15 @@ export interface Agent {
   /** Untyped skill points that can fund any move's respec tree, regardless of type. */
   wildcardSkillPoints?: number;
   /**
+   * Running count of "real" (non-wildcard) skill points ever granted to this
+   * agent — level-up and on-hit alike — used only by `grantSkillPoint`
+   * (leveling.ts) to know when the next `SKILLPOINT_WILDCARD_INTERVAL`th
+   * bonus wildcard point is due. Never decremented (spending points doesn't
+   * un-grant them) and unrelated to `skillPoints`/`wildcardSkillPoints`
+   * themselves, which do shrink as they're spent.
+   */
+  skillPointGrantCount?: number;
+  /**
    * Permanent record of which tree nodes this agent has committed to on each
    * known move, keyed by move id — e.g. `{ ember: ["wider_burn"] }`. Grown
    * one node at a time by `maybeAutoRespec` (leveling.ts) whenever a skill

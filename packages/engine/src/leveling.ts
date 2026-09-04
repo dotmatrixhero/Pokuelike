@@ -159,8 +159,18 @@ export const MAX_TRACKED_SPECIES = 20;
 
 /** Chance a landed hit grants the attacker one skill point of the move's own type. */
 export const SKILLPOINT_ON_HIT_CHANCE = 0.05;
-/** Chance a level-up additionally grants one wildcard skill point (on top of the guaranteed typed one). */
-export const SKILLPOINT_LEVELUP_WILDCARD_CHANCE = 0.1;
+/**
+ * Every Nth "real" (typed) skill point granted — level-up or on-hit alike —
+ * also grants a bonus wildcard point, deterministically (tracked via
+ * `Agent.skillPointGrantCount`), not by a per-grant RNG roll. Replaces an
+ * earlier 10%-chance-per-level-up roll: that made wildcard income a coin
+ * flip an unlucky agent could go many levels without, starving any tree
+ * whose type doesn't match the agent's primary type (typed income only
+ * flows in that primary type — see `grantExp`'s level-up loop). A fixed
+ * cadence guarantees every agent the same long-run wildcard rate regardless
+ * of luck. See DESIGN.md's "Specialization" section.
+ */
+export const SKILLPOINT_WILDCARD_INTERVAL = 2;
 
 export function sectorId(x: number, y: number): string {
   return `${Math.floor(x / SECTOR_SIZE)},${Math.floor(y / SECTOR_SIZE)}`;
@@ -197,6 +207,13 @@ export function markSpeciesEncountered(agent: Agent, species: string, world: Wor
  * hoard points waiting for a player to spend them, it commits to a build as
  * it goes. Without `ctx` (most direct/test call sites), the point is
  * granted but nothing is auto-spent, same as before this existed.
+ *
+ * Every real (non-wildcard) grant also counts toward
+ * `Agent.skillPointGrantCount`; every `SKILLPOINT_WILDCARD_INTERVAL`th one
+ * recursively grants a bonus wildcard point too (itself logged, itself
+ * triggering `maybeAutoRespec` again — a fresh wildcard can immediately
+ * unlock a node that was one point short a moment ago). The wildcard grant
+ * doesn't advance its own counter, so this can't runaway-recurse.
  */
 export function grantSkillPoint(
   agent: Agent,
@@ -214,6 +231,13 @@ export function grantSkillPoint(
   }
   log?.record({ kind: "gainedSkillPoint", tick: world.tick, agentId: agent.id, species: agent.species, pointType });
   if (ctx) maybeAutoRespec(agent, world, ctx, log, rng);
+
+  if (pointType !== "wildcard") {
+    agent.skillPointGrantCount = (agent.skillPointGrantCount ?? 0) + 1;
+    if (agent.skillPointGrantCount % SKILLPOINT_WILDCARD_INTERVAL === 0) {
+      grantSkillPoint(agent, "wildcard", world, log, ctx, rng);
+    }
+  }
 }
 
 /** Rolls `SKILLPOINT_ON_HIT_CHANCE` for a landed hit of type `moveType` — call from combat/predation on a successful hit. */
@@ -430,8 +454,9 @@ export function grantExp(world: World, agent: Agent, amount: number, ctx?: Level
     }
 
     const primaryType = agent.types?.[0];
+    // The bonus wildcard (every SKILLPOINT_WILDCARD_INTERVAL-th real point,
+    // level-up or on-hit alike) is handled inside grantSkillPoint itself.
     if (primaryType) grantSkillPoint(agent, primaryType, world, log, ctx);
-    if (Math.random() < SKILLPOINT_LEVELUP_WILDCARD_CHANCE) grantSkillPoint(agent, "wildcard", world, log, ctx);
 
     const levelAfterUp = agent.level;
     const evo = profile.evolutions.find((e) => levelAfterUp >= e.level);

@@ -296,6 +296,60 @@ describe("skill-point spend validation", () => {
   });
 });
 
+describe("grantSkillPoint: deterministic wildcard cadence", () => {
+  function fireAgent(overrides: Partial<Agent> = {}): Agent {
+    return {
+      id: "a",
+      species: "charmander",
+      pos: { x: 0, y: 0 },
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds(),
+      behavior: "idle",
+      ...overrides,
+    };
+  }
+
+  it("grants a bonus wildcard on every SKILLPOINT_WILDCARD_INTERVAL-th real point, not the others", () => {
+    const world = createWorld(5, 5);
+    const agent = fireAgent();
+    grantSkillPoint(agent, "fire", world); // 1st real point: no bonus
+    expect(agent.wildcardSkillPoints ?? 0).toBe(0);
+    grantSkillPoint(agent, "fire", world); // 2nd real point: bonus
+    expect(agent.wildcardSkillPoints).toBe(1);
+    grantSkillPoint(agent, "fire", world); // 3rd: no bonus
+    expect(agent.wildcardSkillPoints).toBe(1);
+    grantSkillPoint(agent, "fire", world); // 4th: bonus
+    expect(agent.wildcardSkillPoints).toBe(2);
+    expect(agent.skillPoints!.fire).toBe(4);
+  });
+
+  it("counts real points across different types and sources (level-up + on-hit) toward the same cadence", () => {
+    const world = createWorld(5, 5);
+    const agent = fireAgent();
+    grantSkillPoint(agent, "fire", world);
+    grantSkillPoint(agent, "water", world); // still the 2nd real point overall -> bonus
+    expect(agent.wildcardSkillPoints).toBe(1);
+    expect(agent.skillPointGrantCount).toBe(2);
+  });
+
+  it("a wildcard grant itself never advances the cadence counter (no runaway recursion)", () => {
+    const world = createWorld(5, 5);
+    const agent = fireAgent();
+    grantSkillPoint(agent, "wildcard", world);
+    grantSkillPoint(agent, "wildcard", world);
+    expect(agent.skillPointGrantCount ?? 0).toBe(0);
+    expect(agent.wildcardSkillPoints).toBe(2); // both still granted, just untracked by the cadence
+  });
+
+  it("is deterministic, not RNG-based — no seed/mock needed to get a guaranteed bonus", () => {
+    const world = createWorld(5, 5);
+    const agent = fireAgent();
+    for (let i = 0; i < 10; i++) grantSkillPoint(agent, "fire", world);
+    expect(agent.wildcardSkillPoints).toBe(5); // exactly half of 10, every time
+  });
+});
+
 describe("maybeAutoRespec (nature-driven specialization)", () => {
   // Two independently-affordable, same-cost, same-tier nodes (no shared
   // prerequisite) so weighted-pick behavior between them is testable without

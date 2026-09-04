@@ -261,6 +261,37 @@ overlap and because tunnel shortcuts probably want to interact with
 whatever "biome" boundaries that work introduces. Revisit once migration/
 biomes ship.
 
+## Skill-tree template for new moves
+
+Every move built from here on should get a real respec tree, not just a
+combat spec — see DESIGN.md's "Specialization" section for the mechanism
+(wild agents auto-respec as they earn skill points, weighted by
+Disposition). Ember's tree (`packages/data/src/moves.ts`) is the reference
+shape to copy:
+
+- **Two independent branches, not one chain.** Each branch is a complete,
+  self-contained build (no cross-branch prerequisite) so an agent can
+  commit to either, both, or neither — a real choice, not a fixed order.
+  Ember's are Aggression ("Wildfire" — hit harder, more often) and Boldness
+  ("Ring of Fire" — less power, more area, safer to hold ground with).
+  Sociability doesn't have an obvious combat-move analogue yet; a support/
+  utility move (Growl? a future cry/rally move?) is a more natural home for
+  a sociability-leaning branch than trying to force one onto every attack.
+- **Three tiers per branch, costs 1/2/3 (6 per branch, 12 total).** Cheap
+  enough that a single point already does something, expensive enough that
+  fully clearing both branches is a real mid-game commitment rather than
+  resolved by level 4 — see the "Specialization" section's writeup of why
+  Ember's original 2-node/cost-3 tree was too fast against a 100-level
+  curve. Adjust the total up for a move meant to matter later in a run, down
+  for an early/common move — 12 is a starting reference, not a hard rule.
+- **Every node has a `leaning`.** Unleaned nodes still work (weighted
+  neutrally) but a tree that's all unleaned wastes the whole point of tying
+  this to Disposition — tag deliberately.
+- **Real tradeoffs, not strictly-better stat sticks.** Roaring Blaze
+  (+power) costs accuracy; Ring of Fire (+area) costs power and adds
+  cooldown. A tier that's just "more of everything for a point" isn't a
+  choice, it's a formality.
+
 ## Build order recommendation, across everything above
 
 1. **Growl** — highest payoff-to-effort ratio on this entire list; most
