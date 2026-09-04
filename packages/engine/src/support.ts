@@ -1,4 +1,4 @@
-import type { ActivityPattern, Agent, HuntRules, InventoryItem, TerrainKind, Vec2, World } from "./types.js";
+import type { ActivityPattern, Agent, HuntRules, InventoryItem, Layer, TerrainKind, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { stepToward } from "./movement.js";
@@ -7,6 +7,7 @@ import { CONSUME_STOCK_AMOUNT } from "./flora.js";
 import { isNight, isTwilight } from "./daynight.js";
 import { agentsWithin, isPreyOf, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS } from "./predation.js";
 import { findNearestIndexed } from "./resourceIndex.js";
+import { COLD_SNAP_SPEED_MULTIPLIER, isInColdSnap } from "./weather.js";
 
 /**
  * Faint/finish-off, heal-over-time, and herd support (inventory, food
@@ -223,6 +224,23 @@ export function activityScheduleMultiplier(pattern: ActivityPattern | undefined,
     case "crepuscular":
       return isTwilight(tick) ? 1 : OFF_HOURS_SPEED_MULTIPLIER;
   }
+}
+
+// --- Cold snap -> effective Speed (see DESIGN.md's "Dynamics that move a content herd", Phase 3) ---
+
+/**
+ * The fourth composable Speed modifier in `simulation.ts`'s `actionSpeedOf`
+ * chain (terrain/elevation, off-hours activity schedule, injury, and now
+ * this — see `movementSpeedFactor`/`activityScheduleMultiplier`/
+ * `effectiveSpeed`'s own doc comments for the first three). A flat penalty
+ * for every agent caught in an active cold-snap weather cell (weather.ts),
+ * regardless of species — see `COLD_SNAP_SPEED_MULTIPLIER`'s doc comment in
+ * weather.ts for why this sim deliberately skips per-species cold-tolerance
+ * data rather than half-building it. `1` (no penalty) outside a cold snap,
+ * off the surface layer, or for an agent with no real position yet.
+ */
+export function coldSnapSpeedMultiplier(world: World, layer: Layer, pos: Vec2): number {
+  return isInColdSnap(world, layer, pos) ? COLD_SNAP_SPEED_MULTIPLIER : 1;
 }
 
 // --- Heal over time + recovery ---

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorld, setTile, tileAt } from "../src/world.js";
-import { ageMortalityChance, createNeeds, tickAgent } from "../src/needs.js";
+import { ageMortalityChance, createNeeds, decayNeeds, tickAgent, tickAgentNeeds } from "../src/needs.js";
 import { CONSUME_STOCK_AMOUNT } from "../src/flora.js";
 import { EventLog } from "../src/events.js";
 import type { Agent } from "../src/types.js";
@@ -204,6 +204,68 @@ describe("old-age mortality", () => {
     tickAgent(world, agent);
 
     expect(agent.alive).not.toBe(false);
+  });
+});
+
+describe("decayNeeds: thirstMultiplier composes with the flat decay rate (Phase 3 weather)", () => {
+  it("defaults to the original flat rate when no multiplier is passed", () => {
+    const needs = createNeeds();
+    decayNeeds(needs);
+    expect(needs.thirst).toBeCloseTo(1 - 0.015, 10);
+  });
+
+  it("a multiplier below 1 (rain) eases thirst decay relative to the base rate", () => {
+    const needs = createNeeds();
+    decayNeeds(needs, 0.6);
+    const eased = 1 - needs.thirst;
+    expect(eased).toBeCloseTo(0.015 * 0.6, 10);
+    expect(eased).toBeLessThan(0.015);
+  });
+
+  it("a multiplier above 1 (drought) raises thirst decay relative to the base rate", () => {
+    const needs = createNeeds();
+    decayNeeds(needs, 1.8);
+    const raised = 1 - needs.thirst;
+    expect(raised).toBeCloseTo(0.015 * 1.8, 10);
+    expect(raised).toBeGreaterThan(0.015);
+  });
+
+  it("does not touch hunger/energy/mateDrive — only thirst is weather-modulated", () => {
+    const eased = createNeeds();
+    const base = createNeeds();
+    decayNeeds(eased, 0.6);
+    decayNeeds(base);
+    expect(eased.hunger).toBe(base.hunger);
+    expect(eased.energy).toBe(base.energy);
+    expect(eased.mateDrive).toBe(base.mateDrive);
+  });
+});
+
+describe("tickAgentNeeds: local weather composes with thirst decay through a real World", () => {
+  it("an agent standing in an active drought cell loses thirst faster than one on a clear tile", () => {
+    const droughtWorld = createWorld(10, 10);
+    droughtWorld.weatherCells = [
+      { id: "d", type: "drought", center: { x: 5, y: 5 }, radius: 3, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
+    ];
+    const droughtAgent = makeAgent({ pos: { x: 5, y: 5 } });
+
+    const clearWorld = createWorld(10, 10);
+    const clearAgent = makeAgent({ pos: { x: 5, y: 5 } });
+
+    tickAgentNeeds(droughtAgent, droughtWorld);
+    tickAgentNeeds(clearAgent, clearWorld);
+
+    expect(droughtAgent.needs.thirst).toBeLessThan(clearAgent.needs.thirst);
+  });
+
+  it("an agent outside the drought cell's radius decays at the ordinary rate", () => {
+    const world = createWorld(30, 30);
+    world.weatherCells = [
+      { id: "d", type: "drought", center: { x: 25, y: 25 }, radius: 2, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
+    ];
+    const farAgent = makeAgent({ pos: { x: 1, y: 1 } });
+    tickAgentNeeds(farAgent, world);
+    expect(farAgent.needs.thirst).toBeCloseTo(1 - 0.015, 10);
   });
 });
 

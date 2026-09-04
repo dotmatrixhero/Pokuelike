@@ -1,4 +1,4 @@
-import type { Agent, BehaviorKind, Layer, MigrationReason, Vec2, World } from "./types.js";
+import type { Agent, BehaviorKind, Layer, MigrationReason, Vec2, WeatherType, World } from "./types.js";
 import type { PokemonType } from "./typing.js";
 
 export type SimEvent =
@@ -212,6 +212,25 @@ export type SimEvent =
       tick: number;
       /** The light level (daynight.ts's `lightLevel`) at the exact tick this fired. Always just at/over `NIGHT_THRESHOLD`. */
       lightLevel: number;
+    }
+  | {
+      kind: "weatherChanged";
+      tick: number;
+      weatherType: WeatherType;
+      /**
+       * "began" fires once at spawn, "ended" once at dissipation (age-out,
+       * not a real-time interrupt — weather.ts's `advanceWeather`) — no
+       * separate per-agent "entered/left this cell" event: a herd's actual
+       * exposure is already narrated indirectly via the `"weather"`
+       * `herdMigrating` reason when it matters enough to move a herd, and a
+       * per-tick per-agent in/out event for up to 3 slowly-drifting cells
+       * would be a lot of low-value log volume for something with no other
+       * consumer yet — a deliberate scope call, not an oversight.
+       */
+      phase: "began" | "ended";
+      /** Rounded cell center at the moment this fired — narrative color, not a precise hitbox. */
+      center: Vec2;
+      radius: number;
     };
 
 /**

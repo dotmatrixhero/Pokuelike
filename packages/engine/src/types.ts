@@ -10,13 +10,62 @@ export interface Vec2 {
 
 /**
  * Why a herd is (or was) migrating — see herdMigration.ts/DESIGN.md's
- * "Dynamics that move a content herd" Phase 1. `"scarcity"` is the
- * original (Phase 0) trigger, spelled `"food scarcity"` back then; the
- * others are Phase 1's generalization. Shared by `World.herdMigrations`
- * (internal state, also feeds destination scoring) and `SimEvent`'s
+ * "Dynamics that move a content herd" Phase 1 and Phase 3. `"scarcity"` is
+ * the original (Phase 0) trigger, spelled `"food scarcity"` back then;
+ * `"predator_pressure"`/`"wanderlust"`/`"territorial"` are Phase 1's
+ * generalization; `"weather"` (Phase 3, weather.ts) is sustained storm
+ * exposure without nearby cover. Shared by `World.herdMigrations` (internal
+ * state, also feeds destination scoring) and `SimEvent`'s
  * `herdMigrating.reason` (external/narrative surface) so both always agree.
  */
-export type MigrationReason = "scarcity" | "predator_pressure" | "wanderlust" | "territorial";
+export type MigrationReason = "scarcity" | "predator_pressure" | "wanderlust" | "territorial" | "weather";
+
+/**
+ * A minimal, name-only view of a biome seed point (worldgen.ts's `BiomeSeed`
+ * has a full `BiomeDef` with density/terrain-weight tables that weather.ts
+ * has no use for) — just enough for `worldgen.ts`'s `biomeWeightsAt` to
+ * answer "which biome(s), and how strongly, does this point blend toward,"
+ * reused by weather.ts/DESIGN.md's Phase 3 for biome-influenced weather
+ * spawn likelihood and cover-seeking destination scoring. Stored on `World`
+ * (`biomeSeeds` below) rather than recomputed, since the full seed placement
+ * is otherwise private to `generateWorld`'s call.
+ */
+export interface BiomeSeedInfo {
+  x: number;
+  y: number;
+  name: string;
+}
+
+/**
+ * One of the four weather kinds DESIGN.md's Phase 3 asks for — see
+ * weather.ts. `"coldSnap"` (not `"cold_snap"`) matches this codebase's
+ * existing camelCase convention for multi-word string-union members (see
+ * `BehaviorKind`'s `"seekWater"` etc.), unlike `MigrationReason`'s
+ * snake_case members, which predate this feature and aren't worth
+ * retroactively renaming.
+ */
+export type WeatherType = "rain" | "storm" | "drought" | "coldSnap";
+
+/**
+ * One active weather system — see weather.ts/DESIGN.md's Phase 3. `center`
+ * is continuous (not rounded to a tile) so slow drift accumulates smoothly
+ * tick over tick rather than getting stuck at the same integer position for
+ * several ticks in a row; every consumer (flora/needs/fov/combat/support)
+ * reads `center`/`radius` directly rather than needing a materialized set of
+ * covered tiles. Surface-layer only, matching worldgen.ts's existing
+ * Surface-only scope for biome/elevation data — see weather.ts's top-of-file
+ * comment for why every effect function gates on `layer === "surface"`.
+ */
+export interface WeatherCell {
+  id: string;
+  type: WeatherType;
+  center: Vec2;
+  radius: number;
+  startedTick: number;
+  lifespanTicks: number;
+  /** Constant per-tick displacement for the life of the cell — a real but slow drift, not a random walk. */
+  drift: Vec2;
+}
 
 /**
  * When a species prefers to be active — see daynight.ts/DESIGN.md's "Dynamics
@@ -389,4 +438,31 @@ export interface World {
    * reset-on-recovery pattern.
    */
   herdTerritorialTicks?: Record<string, number>;
+  /**
+   * Per-herd consecutive-tick counter for "this herd's centroid is inside an
+   * active storm cell with no forest/canopy cover nearby this tick" — see
+   * weather.ts/herdMigration.ts's `"weather"` trigger, Phase 3. Mirrors
+   * `herdScarcityTicks`'s exact reset-on-recovery/reset-on-migration
+   * pattern.
+   */
+  herdStormExposureTicks?: Record<string, number>;
+  /**
+   * The biome seed points `generateWorld` (worldgen.ts) scattered for this
+   * world, name-only (see `BiomeSeedInfo`) — populated only by procedurally
+   * generated worlds, absent on a bare `createWorld`/hand-built test world.
+   * Lets weather.ts weight spawn likelihood and cover-seeking destination
+   * scoring by real biome identity (Phase 3) without `generateWorld` having
+   * to export its full internal seed-placement machinery. Absent reads as
+   * "no biome data" everywhere it's consulted — every consumer falls back to
+   * a documented biome-agnostic default rather than crashing or silently
+   * favoring one biome.
+   */
+  biomeSeeds?: BiomeSeedInfo[];
+  /**
+   * 1-3 active weather systems at once — see weather.ts/DESIGN.md's Phase 3.
+   * Absent (or empty) means no weather is active; every effect consumer
+   * (flora.ts/needs.ts/fov.ts/combat.ts/support.ts/herdMigration.ts) treats
+   * that as "no local modifier," not an error.
+   */
+  weatherCells?: WeatherCell[];
 }

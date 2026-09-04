@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createWorld, setElevation, setTile } from "../src/world.js";
 import { computeVisible, isPathClear, NIGHT_FOV_PENALTY } from "../src/fov.js";
+import { STORM_FOV_PENALTY } from "../src/weather.js";
 
 describe("computeVisible", () => {
   it("sees flat ground within the base radius", () => {
@@ -125,6 +126,46 @@ describe("computeVisible: night reduces FOV (see daynight.ts/DESIGN.md Phase 2)"
     const tinyRadius = computeVisible(world, "surface", { x: 2, y: 2 }, 1, 0);
     expect(tinyRadius).toContainEqual({ x: 2, y: 2 });
     expect(NIGHT_FOV_PENALTY).toBeGreaterThan(0);
+  });
+});
+
+describe("computeVisible: stormPenalty (Phase 3 weather) composes with night's lightLevel penalty", () => {
+  it("defaults to no storm penalty when the parameter is omitted — every pre-existing caller/test unaffected", () => {
+    const world = createWorld(21, 1);
+    const origin = { x: 10, y: 0 };
+    const withDefault = computeVisible(world, "surface", origin, 5, 1);
+    const withExplicitZero = computeVisible(world, "surface", origin, 5, 1, 0);
+    expect(withDefault).toEqual(withExplicitZero);
+  });
+
+  it("shrinks the radius further than night alone, since STORM_FOV_PENALTY > NIGHT_FOV_PENALTY", () => {
+    expect(STORM_FOV_PENALTY).toBeGreaterThan(NIGHT_FOV_PENALTY);
+
+    const world = createWorld(21, 1);
+    const origin = { x: 10, y: 0 };
+    const baseRadius = 6;
+
+    const dayNoStorm = computeVisible(world, "surface", origin, baseRadius, 1, 0);
+    const dayStorm = computeVisible(world, "surface", origin, baseRadius, 1, STORM_FOV_PENALTY);
+    const nightNoStorm = computeVisible(world, "surface", origin, baseRadius, 0, 0);
+
+    // A storm by day cuts the radius by more than night alone does.
+    expect(dayStorm.length).toBeLessThan(nightNoStorm.length);
+    expect(dayStorm.length).toBeLessThan(dayNoStorm.length);
+  });
+
+  it("composes additively with night — a storm at midnight is darker than either alone, floored at 0 visibility, not negative", () => {
+    const world = createWorld(5, 5);
+    const origin = { x: 2, y: 2 };
+
+    const nightOnly = computeVisible(world, "surface", origin, 3, 0, 0);
+    const stormOnly = computeVisible(world, "surface", origin, 3, 1, STORM_FOV_PENALTY);
+    const stormAtNight = computeVisible(world, "surface", origin, 3, 0, STORM_FOV_PENALTY);
+
+    expect(stormAtNight.length).toBeLessThanOrEqual(nightOnly.length);
+    expect(stormAtNight.length).toBeLessThanOrEqual(stormOnly.length);
+    // Still sees its own tile at minimum — floored at 0, not a crash.
+    expect(stormAtNight).toContainEqual(origin);
   });
 });
 

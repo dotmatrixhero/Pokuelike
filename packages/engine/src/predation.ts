@@ -10,6 +10,7 @@ import { isPathClear } from "./fov.js";
 import { tileAt } from "./world.js";
 import { recordPredatorPressure } from "./herdMigration.js";
 import { isTwilight, lightLevel } from "./daynight.js";
+import { stormAccuracyMultiplier } from "./weather.js";
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
@@ -308,7 +309,7 @@ function resolveHit(
 
   useMove(attacker, move);
 
-  if (!rollAccuracy(move)) {
+  if (!rollAccuracy(move, 0, 0, Math.random, stormAccuracyMultiplier(world, attacker.layer, attacker.pos))) {
     log?.record({
       kind: "missed",
       tick: world.tick,

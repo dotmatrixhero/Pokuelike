@@ -21,3 +21,4 @@ export * from "./nature.js";
 export * from "./worldgen.js";
 export * from "./resourceIndex.js";
 export * from "./daynight.js";
+export * from "./weather.js";

@@ -12,8 +12,9 @@ import {
   WANDERLUST_BASE_CHANCE,
   TERRITORIAL_SUSTAIN_TICKS,
   TERRITORIAL_DISTANCE,
+  STORM_EXPOSURE_SUSTAIN_TICKS,
 } from "../src/herdMigration.js";
-import type { Agent } from "../src/types.js";
+import type { Agent, WeatherCell } from "../src/types.js";
 
 /** Never rolls true for wanderlust (always returns 1, above any real chance) — for tests isolating a different trigger. */
 const NEVER_WANDER = () => 1;
@@ -410,6 +411,145 @@ describe("updateHerdMigrations: territorial trigger", () => {
 
     expect(world.herdMigrations?.["herd-a"]).toBeUndefined();
     expect(world.herdMigrations?.["herd-b"]).toBeUndefined();
+  });
+});
+
+function stormCell(overrides: Partial<WeatherCell> = {}): WeatherCell {
+  return {
+    id: "storm",
+    type: "storm",
+    center: { x: 30, y: 30 },
+    radius: 20,
+    startedTick: 0,
+    lifespanTicks: 100_000,
+    drift: { x: 0, y: 0 },
+    ...overrides,
+  };
+}
+
+describe("updateHerdMigrations: weather trigger (Phase 3)", () => {
+  it("does not trigger on a single exposed tick", () => {
+    const world = createWorld(80, 80);
+    world.agents.push(member("a", { x: 30, y: 30 }), member("b", { x: 30, y: 30 }));
+    world.weatherCells = [stormCell()];
+
+    world.tick += 1;
+    updateHerdMigrations(world, undefined, NEVER_WANDER);
+
+    expect(world.herdMigrations?.["herd-a"]).toBeUndefined();
+    expect(world.herdStormExposureTicks?.["herd-a"]).toBe(1);
+  });
+
+  it("does not trigger when the herd has forest/canopy cover nearby, even sustained", () => {
+    const world = createWorld(80, 80);
+    world.agents.push(member("a", { x: 30, y: 30 }), member("b", { x: 30, y: 30 }));
+    world.weatherCells = [stormCell()];
+    setTile(world, "surface", 31, 30, "tree"); // real cover within hasCoverNearby's scan radius
+
+    for (let i = 0; i < STORM_EXPOSURE_SUSTAIN_TICKS + 10; i++) {
+      world.tick += 1;
+      updateHerdMigrations(world, undefined, NEVER_WANDER);
+    }
+
+    expect(world.herdMigrations?.["herd-a"]).toBeUndefined();
+  });
+
+  it("does not trigger once the storm has passed, even if the herd stayed in the same (now clear) spot", () => {
+    const world = createWorld(80, 80);
+    world.agents.push(member("a", { x: 30, y: 30 }), member("b", { x: 30, y: 30 }));
+    // No active weather at all — should behave exactly like Phase 1/2 (no weather feature).
+    for (let i = 0; i < STORM_EXPOSURE_SUSTAIN_TICKS + 10; i++) {
+      world.tick += 1;
+      updateHerdMigrations(world, undefined, NEVER_WANDER);
+    }
+    expect(world.herdMigrations?.["herd-a"]).toBeUndefined();
+  });
+
+  it("triggers a 'weather' migration once storm exposure without cover is sustained for the full window", () => {
+    const world = createWorld(80, 80);
+    world.agents.push(member("a", { x: 30, y: 30 }), member("b", { x: 30, y: 30 }));
+    world.weatherCells = [stormCell()];
+    // Some biome data so preferCover's destination scoring has something real to work with.
+    world.biomeSeeds = [
+      { x: 30, y: 30, name: "highland" }, // exposed here
+      { x: 70, y: 30, name: "forest" }, // real cover, far to the east
+    ];
+
+    let migration;
+    for (let i = 0; i < STORM_EXPOSURE_SUSTAIN_TICKS; i++) {
+      world.tick += 1;
+      updateHerdMigrations(world, undefined, NEVER_WANDER);
+      migration = world.herdMigrations?.["herd-a"];
+      if (migration) break;
+    }
+
+    expect(migration).toBeDefined();
+    expect(migration!.reason).toBe("weather");
+  });
+
+  it("resets the exposure counter once cover is regained, so a brief sheltered dip doesn't count toward sustain", () => {
+    const world = createWorld(80, 80);
+    world.agents.push(member("a", { x: 30, y: 30 }), member("b", { x: 30, y: 30 }));
+    world.weatherCells = [stormCell()];
+    // Enough food nearby that scarcity's own (much longer, 150-tick) sustain
+    // window never has a chance to fire and confound this test, which runs
+    // long enough (2 * (STORM_EXPOSURE_SUSTAIN_TICKS - 5) + 1) to otherwise
+    // cross it.
+    placeFoodCluster(world, 30, 30, 5);
+
+    for (let i = 0; i < STORM_EXPOSURE_SUSTAIN_TICKS - 5; i++) {
+      world.tick += 1;
+      updateHerdMigrations(world, undefined, NEVER_WANDER);
+    }
+    expect(world.herdMigrations?.["herd-a"]).toBeUndefined();
+
+    // Cover shows up right at the herd's position, resetting the counter...
+    setTile(world, "surface", 30, 30, "bush");
+    world.tick += 1;
+    updateHerdMigrations(world, undefined, NEVER_WANDER);
+    expect(world.herdStormExposureTicks?.["herd-a"]).toBe(0);
+
+    // ...cover is removed again, but fewer than the full window remain.
+    setTile(world, "surface", 30, 30, "floor");
+    for (let i = 0; i < STORM_EXPOSURE_SUSTAIN_TICKS - 5; i++) {
+      world.tick += 1;
+      updateHerdMigrations(world, undefined, NEVER_WANDER);
+    }
+    expect(world.herdMigrations?.["herd-a"]).toBeUndefined();
+  });
+});
+
+describe("pickDestination: preferCover scoring (Phase 3 weather)", () => {
+  it("prefers a candidate blending toward a Forest-dominant biome seed over a resource-tied but cover-poor one", () => {
+    const world = createWorld(80, 80);
+    const from = { x: 40, y: 30 };
+    // Two seeds: a non-forest one right at the herd's own position (so its
+    // own forest-blend weight starts low) and a Forest one far to the east —
+    // a single lone seed would trivially blend to "100% forest everywhere"
+    // (biomeWeightsAt normalizes by whichever seeds are nearest), which
+    // wouldn't actually test that a *closer* candidate scores higher.
+    // Nothing else on the map (no resources anywhere), so any improvement
+    // can only come from cover.
+    world.biomeSeeds = [
+      { x: 40, y: 30, name: "grassland" },
+      { x: 75, y: 30, name: "forest" },
+    ];
+
+    const destination = pickDestination(world, "surface", from, undefined, true);
+
+    expect(destination).toBeDefined();
+    expect(destination!.x).toBeGreaterThan(from.x); // toward the forest seed (east)
+  });
+
+  it("without preferCover, the same barren map yields no destination at all (cover alone doesn't count otherwise)", () => {
+    const world = createWorld(80, 80);
+    world.biomeSeeds = [{ x: 75, y: 30, name: "forest" }];
+    expect(pickDestination(world, "surface", { x: 40, y: 30 })).toBeUndefined();
+  });
+
+  it("preferCover contributes nothing on a world with no biome data — never crashes, never guesses", () => {
+    const world = createWorld(80, 80);
+    expect(pickDestination(world, "surface", { x: 40, y: 30 }, undefined, true)).toBeUndefined();
   });
 });
 

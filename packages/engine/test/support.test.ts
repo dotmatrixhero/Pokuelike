@@ -20,8 +20,11 @@ import {
   movementSpeedFactor,
   activityScheduleMultiplier,
   OFF_HOURS_SPEED_MULTIPLIER,
+  coldSnapSpeedMultiplier,
 } from "../src/support.js";
 import { DAY_LENGTH_TICKS } from "../src/daynight.js";
+import { COLD_SNAP_SPEED_MULTIPLIER } from "../src/weather.js";
+import type { WeatherCell } from "../src/types.js";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -418,5 +421,58 @@ describe("activityScheduleMultiplier: off-hours Speed penalty (see DESIGN.md's d
     expect(finalSpeed).toBeLessThan(baseSpeed * terrainFactor);
     expect(finalSpeed).toBeLessThan(baseSpeed * offHours);
     expect(finalSpeed).toBeLessThan(effectiveSpeed(injuredAgent, baseSpeed));
+  });
+});
+
+describe("coldSnapSpeedMultiplier: the fourth composable Speed modifier (Phase 3 weather)", () => {
+  function coldSnapCell(overrides: Partial<WeatherCell> = {}): WeatherCell {
+    return {
+      id: "cold",
+      type: "coldSnap",
+      center: { x: 5, y: 5 },
+      radius: 5,
+      startedTick: 0,
+      lifespanTicks: 999,
+      drift: { x: 0, y: 0 },
+      ...overrides,
+    };
+  }
+
+  it("is a real but partial penalty, same order of magnitude as the other terrain-ish penalties", () => {
+    expect(COLD_SNAP_SPEED_MULTIPLIER).toBeLessThan(1);
+    expect(COLD_SNAP_SPEED_MULTIPLIER).toBeGreaterThan(0.5);
+  });
+
+  it("applies flatly inside an active cold snap, regardless of species", () => {
+    const world = createWorld(20, 20);
+    world.weatherCells = [coldSnapCell()];
+    expect(coldSnapSpeedMultiplier(world, "surface", { x: 5, y: 5 })).toBe(COLD_SNAP_SPEED_MULTIPLIER);
+  });
+
+  it("is neutral (1) outside the cold snap's radius, off the surface layer, and with no active weather at all", () => {
+    const world = createWorld(20, 20);
+    world.weatherCells = [coldSnapCell()];
+    expect(coldSnapSpeedMultiplier(world, "surface", { x: 19, y: 19 })).toBe(1);
+    expect(coldSnapSpeedMultiplier(world, "underground", { x: 5, y: 5 })).toBe(1);
+
+    const clearWorld = createWorld(20, 20);
+    expect(coldSnapSpeedMultiplier(clearWorld, "surface", { x: 5, y: 5 })).toBe(1);
+  });
+
+  it("composes multiplicatively as a fourth term alongside terrain/off-hours/injury, not replacing any of them", () => {
+    const baseSpeed = 40;
+    const terrainFactor = movementSpeedFactor(0, 3, "mud");
+    const offHours = activityScheduleMultiplier("nocturnal", DAY_LENGTH_TICKS / 2);
+    const world = createWorld(20, 20);
+    world.weatherCells = [coldSnapCell()];
+    const coldSnap = coldSnapSpeedMultiplier(world, "surface", { x: 5, y: 5 });
+    const speedBeforeInjury = baseSpeed * terrainFactor * offHours * coldSnap;
+
+    const injuredAgent = makeAgent({ hp: 5, maxHp: 10 });
+    const finalSpeed = effectiveSpeed(injuredAgent, speedBeforeInjury);
+
+    expect(coldSnap).toBe(COLD_SNAP_SPEED_MULTIPLIER);
+    // All four penalties really did stack — strictly less than terrain/off-hours alone, without the cold snap.
+    expect(finalSpeed).toBeLessThan(effectiveSpeed(injuredAgent, baseSpeed * terrainFactor * offHours));
   });
 });

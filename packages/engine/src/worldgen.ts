@@ -1,4 +1,4 @@
-import type { Layer, Vec2, World } from "./types.js";
+import type { BiomeSeedInfo, Layer, Vec2, World } from "./types.js";
 import { createWorld, setElevation, setTile, tileAt } from "./world.js";
 import { FOOD_FLAVORS } from "./flora.js";
 
@@ -282,6 +282,41 @@ export function blendBiomeParams(seeds: readonly BiomeSeed[], x: number, y: numb
   return blended;
 }
 
+/**
+ * Same distance-weighted-nearest-seeds machinery as `blendBiomeParams`, but
+ * classifying by biome *name* rather than blending the full `BiomeDef`
+ * parameter set — this is what weather.ts (Phase 3) needs: "how strongly
+ * does this point read as Wetland vs. Badlands vs. ...", not a
+ * food/water/obstacle density blend. Takes `World.biomeSeeds`'s name-only
+ * `BiomeSeedInfo[]` (see types.ts) rather than the full internal
+ * `BiomeSeed[]` this module builds for generation, so it works from what a
+ * generated `World` actually persists. Returns a `{biomeName: weight}` map
+ * whose values sum to ~1 across whichever named biomes are among the
+ * nearest `NEAREST_BIOME_SEEDS` seeds (two seeds of the same name — this map
+ * blends by *name*, not by seed — contribute to one combined entry); an
+ * absent or empty `seeds` (a bare `createWorld` world, or any hand-built
+ * test fixture that never set `biomeSeeds`) returns `{}` rather than
+ * throwing or guessing — every consumer documents its own biome-agnostic
+ * fallback for that case.
+ */
+export function biomeWeightsAt(seeds: readonly BiomeSeedInfo[] | undefined, x: number, y: number): Record<string, number> {
+  if (!seeds || seeds.length === 0) return {};
+
+  const nearest = seeds
+    .map((seed) => ({ seed, distSq: (seed.x - x) ** 2 + (seed.y - y) ** 2 }))
+    .sort((a, b) => a.distSq - b.distSq)
+    .slice(0, NEAREST_BIOME_SEEDS);
+
+  const weights = nearest.map(({ distSq }) => 1 / (distSq + 1));
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+
+  const result: Record<string, number> = {};
+  nearest.forEach(({ seed }, i) => {
+    result[seed.name] = (result[seed.name] ?? 0) + weights[i]! / totalWeight;
+  });
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Generation
 // ---------------------------------------------------------------------------
@@ -303,6 +338,11 @@ export function generateWorld(width: number, height: number, seed: number): Worl
   const world = createWorld(width, height);
   const placementRng = mulberry32(seed);
   const seeds = placeBiomeSeeds(placementRng, width, height);
+  // Name-only projection persisted on the World — see types.ts's
+  // `BiomeSeedInfo` doc comment for why weather.ts needs this and can't just
+  // reuse the full internal `BiomeSeed[]` (private to this module's own
+  // generation params).
+  world.biomeSeeds = seeds.map((s) => ({ x: s.x, y: s.y, name: s.biome.name }));
 
   const noiseScale = Math.max(width, height);
   const elevationNoise = makeNoise2D(mulberry32(seed ^ 0x9e3779b9), width, height, noiseScale / 6);

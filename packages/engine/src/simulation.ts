@@ -4,9 +4,10 @@ import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import { growFlora, maybeDropSeed } from "./flora.js";
 import { updateHerdMigrations } from "./herdMigration.js";
 import type { LevelingContext } from "./leveling.js";
-import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
+import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, coldSnapSpeedMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
 import { tileAt } from "./world.js";
 import { isNight, lightLevel } from "./daynight.js";
+import { advanceWeather } from "./weather.js";
 
 /**
  * Energy an agent needs to accumulate before it gets to act. Chosen against
@@ -62,15 +63,20 @@ export function accumulateActionEnergy(agent: Agent, speed: number): boolean {
  * A third, independent multiplier composes the same way: an agent caught
  * active outside its `activityPattern`'s preferred day/night window
  * (support.ts's `activityScheduleMultiplier`) is also slower — see
- * DESIGN.md's "Dynamics that move a content herd" section, Phase 2. Order
- * doesn't matter for a product of multipliers, but for the record: terrain
- * first, then off-hours, then injury last.
+ * DESIGN.md's "Dynamics that move a content herd" section, Phase 2.
+ *
+ * A fourth, same-pattern multiplier: an agent caught in an active cold-snap
+ * weather cell (support.ts's `coldSnapSpeedMultiplier`, weather.ts's Phase
+ * 3) is slower too, flat across every species — see that function's doc
+ * comment for why. Order doesn't matter for a product of multipliers, but
+ * for the record: terrain, then off-hours, then cold snap, then injury last.
  */
-function actionSpeedOf(agent: Agent, tick: number): number {
+function actionSpeedOf(world: World, agent: Agent, tick: number): number {
   const baseSpeed =
     (agent.stats?.speed ?? ACTION_THRESHOLD) *
     (agent.terrainSpeedFactor ?? 1) *
-    activityScheduleMultiplier(agent.activityPattern, tick);
+    activityScheduleMultiplier(agent.activityPattern, tick) *
+    coldSnapSpeedMultiplier(world, agent.layer, agent.pos);
   return effectiveSpeed(agent, baseSpeed);
 }
 
@@ -112,6 +118,13 @@ export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?:
   if (nowNight !== wasNight) {
     log?.record({ kind: nowNight ? "nightfall" : "daybreak", tick: world.tick, lightLevel: lightLevel(world.tick) });
   }
+  // Once per tick, not once per agent — a world-level system, the same
+  // "advance the shared clock/weather once, not per-agent" style as the
+  // day/night block above. Runs before `updateHerdMigrations` so this
+  // tick's storm-exposure check (herdMigration.ts's `"weather"` trigger)
+  // sees this tick's weather state, not last tick's stale one — see
+  // weather.ts/DESIGN.md's Phase 3.
+  advanceWeather(world, log);
   // Once per tick, not once per agent — see herdMigration.ts. Runs against
   // this tick's pre-move positions, which is fine: sustained-scarcity
   // detection is a slow-moving signal, not something that needs to react to
@@ -122,7 +135,7 @@ export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?:
 
     tickAgentNeeds(agent, world, ctx, log);
 
-    const acted = accumulateActionEnergy(agent, actionSpeedOf(agent, world.tick));
+    const acted = accumulateActionEnergy(agent, actionSpeedOf(world, agent, world.tick));
     if (!acted) continue;
 
     const before = { x: agent.pos.x, y: agent.pos.y };

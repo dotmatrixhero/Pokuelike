@@ -19,6 +19,7 @@ import {
 } from "./leveling.js";
 import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
 import { findNearestIndexed } from "./resourceIndex.js";
+import { thirstDecayMultiplier } from "./weather.js";
 
 const DECAY_PER_TICK = {
   hunger: 0.01,
@@ -68,9 +69,16 @@ export function createNeeds(overrides: Partial<Needs> = {}): Needs {
   return { hunger: 1, thirst: 1, energy: 1, mateDrive: 0, ...overrides };
 }
 
-export function decayNeeds(needs: Needs): void {
+/**
+ * `thirstMultiplier` (default 1) composes multiplicatively with the flat
+ * per-tick thirst decay rate — a local weather effect (rain eases it,
+ * drought raises it — see weather.ts's `thirstDecayMultiplier`), not a
+ * replacement for the base rate. Every pre-existing caller that doesn't pass
+ * it keeps decaying at exactly the original flat rate.
+ */
+export function decayNeeds(needs: Needs, thirstMultiplier = 1): void {
   needs.hunger = Math.max(0, needs.hunger - DECAY_PER_TICK.hunger);
-  needs.thirst = Math.max(0, needs.thirst - DECAY_PER_TICK.thirst);
+  needs.thirst = Math.max(0, needs.thirst - DECAY_PER_TICK.thirst * thirstMultiplier);
   needs.energy = Math.max(0, needs.energy - DECAY_PER_TICK.energy);
   needs.mateDrive = Math.min(1, needs.mateDrive + DECAY_PER_TICK.mateDrive);
 }
@@ -147,7 +155,8 @@ export function tickAgentNeeds(agent: Agent, world?: World, ctx?: LevelingContex
   if (agent.alive === false) return;
   if (agent.age !== undefined) agent.age += 1;
   tickCooldowns(agent);
-  decayNeeds(agent.needs);
+  const thirstMultiplier = world ? thirstDecayMultiplier(world, agent.layer, agent.pos) : 1;
+  decayNeeds(agent.needs, thirstMultiplier);
 
   if (world && agent.age !== undefined && Math.random() < ageMortalityChance(agent.age)) {
     agent.alive = false;

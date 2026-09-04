@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorld, setTile } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
 import { tickWorld } from "../src/simulation.js";
@@ -161,6 +161,47 @@ describe("predation", () => {
     tickWorld(world);
 
     expect(world.agents).toHaveLength(2);
+  });
+});
+
+describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("a roll that would hit in clear weather misses the same fight inside an active storm", () => {
+    // TEST_MOVE has 100 accuracy: with no storm, chance is 100 and 0.7*100=70
+    // always hits (70 < 100). Under a storm, weather.ts's
+    // STORM_ACCURACY_MULTIPLIER (0.6) drops the chance to 60, and that same
+    // roll (70 >= 60) now misses — a real, measurable behavior change, not
+    // just a smaller number nothing reads.
+    vi.spyOn(Math, "random").mockReturnValue(0.7);
+
+    const clearWorld = createWorld(10, 10);
+    clearWorld.agents.push(
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
+      prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
+      predator({ x: 5, y: 6 })
+    );
+    const clearLog = new EventLog();
+    tickWorld(clearWorld, clearLog, RULES);
+    expect(clearLog.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
+
+    const stormWorld = createWorld(10, 10);
+    stormWorld.weatherCells = [
+      { id: "s", type: "storm", center: { x: 5, y: 5 }, radius: 5, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
+    ];
+    stormWorld.agents.push(
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
+      prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
+      predator({ x: 5, y: 6 })
+    );
+    const stormLog = new EventLog();
+    tickWorld(stormWorld, stormLog, RULES);
+    expect(stormLog.events).not.toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
+    expect(stormLog.events).toContainEqual(expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0" }));
   });
 });
 

@@ -127,11 +127,21 @@ function hasLineOfSight(world: World, layer: Layer, origin: Vec2, target: Vec2, 
  * automatically) is deliberate — every existing caller/test that doesn't
  * pass this argument keeps seeing exactly the pre-Phase-2 elevation/
  * concealment/ridge behavior, unchanged.
+ *
+ * `stormPenalty` (weather.ts's Phase 3, defaulting to 0 — no storm) is a
+ * *fifth* independent effect, subtracted from `radius` alongside
+ * `nightPenalty` rather than folded into the same `lightLevel` scalar — see
+ * weather.ts's `stormFovPenalty` doc comment for why night-darkness and
+ * storm-darkness are kept as two separate, additive terms rather than one
+ * combined "how dark is it" number. Both terms hit the same
+ * `Math.max(0, ...)` floor below, so a storm at midnight is darker than
+ * either alone but never goes negative — "additive severity, capped at a
+ * floor of zero visibility."
  */
-export function computeVisible(world: World, layer: Layer, origin: Vec2, baseRadius: number, lightLevel = 1): Vec2[] {
+export function computeVisible(world: World, layer: Layer, origin: Vec2, baseRadius: number, lightLevel = 1, stormPenalty = 0): Vec2[] {
   const observerElevation = tileAt(world, layer, origin.x, origin.y)?.elevation ?? 0;
   const nightPenalty = NIGHT_FOV_PENALTY * (1 - clamp(lightLevel, 0, 1));
-  const radius = Math.max(0, baseRadius + observerElevation * ELEVATION_SIGHT_BONUS - nightPenalty);
+  const radius = Math.max(0, baseRadius + observerElevation * ELEVATION_SIGHT_BONUS - nightPenalty - Math.max(0, stormPenalty));
 
   // Padded by the max possible downhill *bonus* — a target's raw distance
   // can be up to MAX_ELEVATION_FOV_ADJUSTMENT past `radius` and still end up

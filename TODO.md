@@ -410,13 +410,59 @@ produce a real story before player mechanics are worth building further.
       flagged), so the hunt-eagerness shift is unit-tested but unconfirmed
       in an actual run. 259 tests total (24 new), all builds/typechecks
       clean.
-- [ ] **Phase 3 (spatial weather) of the same DESIGN.md section is still
-      just decided, not built** — deliberately left for its own follow-up
-      pass sequenced after Phase 2 landed, to avoid colliding with its edits
-      to `events.ts` and so weather's visibility/Speed effects (which
-      explicitly compose with day/night's light level) land on a finished
-      `lightLevel` function. Plugs into Phase 1's generalized trigger system
-      too (a `"weather"` migration reason for storm-driven shelter-seeking).
+- [x] **Spatial, moving weather — Phase 3 of DESIGN.md's "Dynamics that move
+      a content herd" section, done. All three phases of that section are
+      now complete.** `weather.ts` (new module) maintains 1-3 active
+      `World.weatherCells` (`rain | storm | drought | coldSnap`, each with a
+      center/radius/lifespan/drift), spawning, drifting, and dissipating
+      once per tick; spawn type is weighted by real biome data
+      (`worldgen.ts`'s new `biomeWeightsAt`, reusing the environmental-
+      generation feature's seed-blending math) per a documented affinity
+      table (Wetland/Grassland skew rain, Badlands skew drought, Highland
+      skews storm/coldSnap). Rain/drought divide `flora.ts`'s decay-rate
+      term and multiply `needs.ts`'s thirst-decay rate, composing with the
+      existing season multiplier; storm adds a real accuracy penalty
+      (`combat.ts`'s `rollAccuracy` gained a general `extraMultiplier`
+      parameter) and a real FOV penalty bigger than night's own
+      (`fov.ts`'s `computeVisible` gained an additive `stormPenalty`
+      parameter, deliberately kept independent of the existing `lightLevel`
+      term rather than combined into it) plus a per-herd sustained-exposure
+      counter feeding a new `"weather"` `MigrationReason` through Phase 1's
+      generalized trigger system, destination-scored toward real
+      forest-biome cover (`pickDestination`'s new `preferCover` term); cold
+      snap adds a flat fourth composable Speed penalty
+      (`support.ts`'s `coldSnapSpeedMultiplier`), deliberately skipping
+      per-species cold-tolerance data per DESIGN.md's own explicit
+      "still open, flat default is fine" note. New `weatherChanged` event.
+      See DESIGN.md's "Phase 3 — as built" for the full design and real-run
+      findings — the one genuinely good-news finding across all three
+      phases: unlike predator-pressure/territorial (Phase 1), the new
+      `"weather"` migration trigger actually fires regularly in the
+      unmodified demo scenario (observed in roughly a third of trial runs),
+      because it doesn't depend on a fight landing or a second same-species
+      herd existing — just a storm cell (large, common) overlapping ground
+      with no tree/bush cover (also common on this map). Drought's
+      acceleration of the scarcity trigger is proven directly (flora decays
+      measurably faster under it) but was never observed actually crossing
+      the 150-tick scarcity threshold in ~25 trial runs — it got as close as
+      one tick short — the same "map's too abundant for scarcity to fire
+      often" gap Phase 1 already found, now confirmed to persist even with
+      drought's real assist. 317 tests total (58 new), all builds/typechecks
+      clean; one pre-existing test in `herdMigration.test.ts` was found to
+      already be flaky (~7% failure rate) from using unseeded `Math.random`
+      for a trigger unrelated to this feature — confirmed pre-existing, not
+      introduced by this work, left as a follow-up below.
+- [ ] Small, low-risk test-hygiene fix found while validating the Phase 3
+      weather feature, unrelated to it: `herdMigration.test.ts`'s "triggers
+      once scarcity has been sustained for the full window..." test calls
+      `updateHerdMigrations` with the default unseeded `Math.random` instead
+      of the file's own `NEVER_WANDER` helper (which every other
+      non-wanderlust-focused test in that file already uses) — over its
+      150-tick loop there's a real (~7%) chance a genuine wanderlust roll
+      fires first and changes the migration's `reason` out from under the
+      assertion. Reproduces on the pre-Phase-3 commit too, so it predates
+      this feature; a one-line fix (pass `NEVER_WANDER`) whenever someone's
+      next in that file.
 - [ ] Real tuning gap found by the trigger-generalization feature, same
       root cause as the two gaps just above: `fought` events are at or near
       zero in every observed real run (the pre-existing "predators barely

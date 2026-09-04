@@ -52,6 +52,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] night falls (light ${event.lightLevel.toFixed(2)})`;
     case "daybreak":
       return `[tick ${event.tick}] day breaks (light ${event.lightLevel.toFixed(2)})`;
+    case "weatherChanged":
+      return `[tick ${event.tick}] ${event.weatherType} ${event.phase === "began" ? "moves in" : "clears"} near (${event.center.x},${event.center.y}), radius ${event.radius}`;
   }
 }
 

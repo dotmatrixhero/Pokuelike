@@ -2,7 +2,8 @@ import type { Layer, MigrationReason, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { herdCentroid, COHESION_DISTANCE } from "./herding.js";
 import { foodStockNear, countTerrainNear } from "./resourceIndex.js";
-import { findWalkableNear } from "./worldgen.js";
+import { findWalkableNear, biomeWeightsAt } from "./worldgen.js";
+import { activeWeatherAt, hasCoverNearby } from "./weather.js";
 
 /**
  * Herd-level migration — see DESIGN.md's "Herd-level migration: moving as a
@@ -33,16 +34,20 @@ import { findWalkableNear } from "./worldgen.js";
  * in this order — `scarcity`, then `predator_pressure` (both
  * survival-critical, so checked first; the relative order between these two
  * is an arbitrary tie-break, not a meaningful priority claim), then
- * `territorial`, then `wanderlust` (both "soft" triggers, per DESIGN.md
- * either order is fine). The first one that fires this tick wins and the
- * rest are skipped for that herd this tick. A herd that's already actively
- * migrating never has ANY of these checks run against it at all — see the
- * early `continue` below — so nothing ever preempts an in-progress
- * migration, regardless of reason. That's a deliberate, simpler-than-asked
- * reading of "don't let a new trigger interrupt one in progress unless
- * clearly higher priority": rather than modeling a priority ordering for
- * interruption too, Phase 1 just never interrupts, full stop. A migration
- * always runs to arrival or timeout before the herd can be re-triggered.
+ * `weather` (Phase 3 — also survival-relevant, sustained storm exposure
+ * without cover, but slotted after the two original survival triggers
+ * rather than reordering them, since DESIGN.md never asked for a real
+ * priority claim between the three), then `territorial`, then `wanderlust`
+ * (both "soft" triggers, per DESIGN.md either order is fine). The first one
+ * that fires this tick wins and the rest are skipped for that herd this
+ * tick. A herd that's already actively migrating never has ANY of these
+ * checks run against it at all — see the early `continue` below — so
+ * nothing ever preempts an in-progress migration, regardless of reason.
+ * That's a deliberate, simpler-than-asked reading of "don't let a new
+ * trigger interrupt one in progress unless clearly higher priority": rather
+ * than modeling a priority ordering for interruption too, Phase 1 just
+ * never interrupts, full stop. A migration always runs to arrival or
+ * timeout before the herd can be re-triggered.
  */
 
 /**
@@ -132,6 +137,22 @@ const MIN_IMPROVEMENT = 1;
  */
 const AWAY_WEIGHT = 0.05;
 
+/**
+ * Weight applied to a candidate's forest-biome blend weight (0..1, from
+ * worldgen.ts's `biomeWeightsAt`) when scoring destinations for the
+ * `"weather"` trigger — see `pickDestination`'s `preferCover` parameter.
+ * Picked so a candidate sitting squarely in a Forest-dominant blend (weight
+ * near 1) is worth about +6, comparable to several healthy food tiles
+ * (`abundanceAt` scores rarely exceed the high single digits) — a real pull
+ * toward good cover, not an automatic override of resource-richness, same
+ * tuning philosophy as `AWAY_WEIGHT`. A world with no `World.biomeSeeds`
+ * (hand-built test worlds, a bare `createWorld`) scores every candidate's
+ * forest weight at 0 — see worldgen.ts's `biomeWeightsAt` — so this term
+ * simply doesn't contribute anywhere biome data doesn't exist, rather than
+ * guessing.
+ */
+const COVER_WEIGHT = 6;
+
 function manhattan(a: Vec2, b: Vec2): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
@@ -144,6 +165,23 @@ function abundanceAt(world: World, layer: Layer, pos: Vec2, radius: number): num
 /** Extra score for being far from `awayFrom` (undefined for scarcity/wanderlust, which have no threat position to flee) — see `AWAY_WEIGHT`. */
 function awayBonus(pos: Vec2, awayFrom: Vec2 | undefined): number {
   return awayFrom ? AWAY_WEIGHT * manhattan(pos, awayFrom) : 0;
+}
+
+/**
+ * Extra score for a candidate's forest-biome blend strength, only when
+ * `preferCover` is set (the `"weather"` trigger — see `tryWeatherTrigger`).
+ * Deliberately reads real biome data (`worldgen.ts`'s `biomeWeightsAt`)
+ * rather than a tile-level tree/bush scan the way `hasCoverNearby`
+ * (weather.ts) does for the *exposure check* — picking a destination
+ * *region* is exactly the kind of "which neighborhood is this" question
+ * biome blending answers well, whereas "am I sheltered right here, right
+ * now" is a literal tile-level fact. Two different questions, two
+ * deliberately different (documented) data sources — see weather.ts's
+ * `hasCoverNearby` doc comment for the other half of this distinction.
+ */
+function coverBonus(world: World, pos: Vec2, preferCover: boolean): number {
+  if (!preferCover) return 0;
+  return COVER_WEIGHT * (biomeWeightsAt(world.biomeSeeds, pos.x, pos.y).forest ?? 0);
 }
 
 /**
@@ -188,9 +226,18 @@ function herdSize(world: World, herdId: string): number {
  * foodless; scanning the real tiles avoids that mismatch entirely). Reuses
  * `worldgen.ts`'s `findWalkableNear` (already-solved "land on an actually
  * walkable tile" search) rather than a second implementation.
+ *
+ * `preferCover` (Phase 3's `"weather"` trigger — see `tryWeatherTrigger`)
+ * adds `coverBonus`'s forest-biome-blend term on top of the same abundance
+ * score, the same "additional scoring term, not a parallel scoring
+ * function" pattern `awayFrom` already established for
+ * `predator_pressure`/`territorial`. Unlike `awayFrom`, `preferCover`
+ * doesn't need a reference point — it's "toward good cover in general," not
+ * "away from one specific place" — so candidates are scored purely on
+ * abundance + cover strength, no distance-from-anything term.
  */
-export function pickDestination(world: World, layer: Layer, from: Vec2, awayFrom?: Vec2): Vec2 | undefined {
-  const currentScore = abundanceAt(world, layer, from, SAMPLE_RADIUS) + awayBonus(from, awayFrom);
+export function pickDestination(world: World, layer: Layer, from: Vec2, awayFrom?: Vec2, preferCover = false): Vec2 | undefined {
+  const currentScore = abundanceAt(world, layer, from, SAMPLE_RADIUS) + awayBonus(from, awayFrom) + coverBonus(world, from, preferCover);
   let best: Vec2 | undefined;
   let bestScore = currentScore + MIN_IMPROVEMENT;
 
@@ -200,7 +247,8 @@ export function pickDestination(world: World, layer: Layer, from: Vec2, awayFrom
       if (raw.x < 0 || raw.y < 0 || raw.x >= world.width || raw.y >= world.height) continue;
 
       const candidate = findWalkableNear(world, layer, raw.x, raw.y);
-      const score = abundanceAt(world, layer, candidate, SAMPLE_RADIUS) + awayBonus(candidate, awayFrom);
+      const score =
+        abundanceAt(world, layer, candidate, SAMPLE_RADIUS) + awayBonus(candidate, awayFrom) + coverBonus(world, candidate, preferCover);
       if (score > bestScore) {
         bestScore = score;
         best = candidate;
@@ -363,11 +411,13 @@ function pairKey(a: string, b: string): string {
  *   `scarcity` (local abundance below threshold, sustained
  *   `SCARCITY_SUSTAIN_TICKS`) → `predator_pressure`
  *   (`World.herdPredatorPressure` past `PREDATOR_PRESSURE_THRESHOLD` within
- *   its window) → `territorial` (centroid within `TERRITORIAL_DISTANCE` of
- *   a same-species herd's, sustained `TERRITORIAL_SUSTAIN_TICKS`, and this
- *   is the smaller of the two) → `wanderlust` (a flat per-tick chance,
- *   scaled by disposition, no bad condition required). The first one that
- *   fires wins; the rest aren't even evaluated that tick for that herd.
+ *   its window) → `weather` (Phase 3 — centroid inside an active storm cell
+ *   with no cover nearby, sustained `STORM_EXPOSURE_SUSTAIN_TICKS`) →
+ *   `territorial` (centroid within `TERRITORIAL_DISTANCE` of a
+ *   same-species herd's, sustained `TERRITORIAL_SUSTAIN_TICKS`, and this is
+ *   the smaller of the two) → `wanderlust` (a flat per-tick chance, scaled
+ *   by disposition, no bad condition required). The first one that fires
+ *   wins; the rest aren't even evaluated that tick for that herd.
  */
 export function updateHerdMigrations(world: World, log?: EventLog, rng: () => number = Math.random): void {
   const herdIds = new Set<string>();
@@ -389,6 +439,7 @@ export function updateHerdMigrations(world: World, log?: EventLog, rng: () => nu
         delete world.herdMigrations![herdId];
         if (world.herdScarcityTicks) world.herdScarcityTicks[herdId] = 0;
         if (world.herdPredatorPressure) delete world.herdPredatorPressure[herdId];
+        if (world.herdStormExposureTicks) world.herdStormExposureTicks[herdId] = 0;
         log?.record({
           kind: "herdSettled",
           tick: world.tick,
@@ -402,6 +453,7 @@ export function updateHerdMigrations(world: World, log?: EventLog, rng: () => nu
 
     if (tryScarcityTrigger(world, log, herdId, layer, centroid)) continue;
     if (tryPredatorPressureTrigger(world, log, herdId, layer, centroid)) continue;
+    if (tryWeatherTrigger(world, log, herdId, layer, centroid)) continue;
     if (tryTerritorialTrigger(world, log, herdId, layer, centroid, herdIds)) continue;
     tryWanderlustTrigger(world, log, herdId, layer, centroid, rng);
   }
@@ -444,7 +496,59 @@ function tryPredatorPressureTrigger(world: World, log: EventLog | undefined, her
   return true;
 }
 
-/** Third-priority (soft) trigger: another same-species herd crowding this one's territory for too long. */
+/**
+ * Consecutive ticks a herd's centroid must sit inside an active storm cell
+ * with no forest/canopy cover nearby before it migrates — same "sustained,
+ * not a single bad tick" reasoning as `SCARCITY_SUSTAIN_TICKS`, picked
+ * somewhat shorter (100 vs. 150) since being caught exposed in a storm reads
+ * as more urgent than ordinary food scarcity. Sim-original tuning guess,
+ * judge against a real run like everything else here.
+ */
+export const STORM_EXPOSURE_SUSTAIN_TICKS = 100;
+
+/**
+ * Third-priority trigger (Phase 3): the herd's centroid is inside an active
+ * storm cell (weather.ts) with no forest/canopy cover within
+ * `hasCoverNearby`'s local scan radius, sustained for
+ * `STORM_EXPOSURE_SUSTAIN_TICKS`. A single herd-centroid check, not a
+ * per-member exposure tally — DESIGN.md left "per-herd or per-agent" open
+ * and explicitly asked for whatever's cleanest to feed the shared
+ * herd-migration trigger; a per-herd aggregate reuses the exact same
+ * sustained-counter/reset-on-recovery shape as `tryScarcityTrigger` and
+ * `tryTerritorialTrigger` rather than inventing a second bookkeeping
+ * pattern for per-agent tallies that would need aggregating back up to the
+ * herd level anyway. `World.herdStormExposureTicks` mirrors
+ * `herdScarcityTicks` exactly, resets are conservative — losing cover, the
+ * storm moving off, or an already-settled/timed-out migration (see
+ * `updateHerdMigrations`) all zero it, so a herd doesn't migrate on stale
+ * exposure from an earlier storm. Destination scoring uses `preferCover`
+ * (see `pickDestination`) instead of `awayFrom` — there's no single "threat
+ * position" to flee, just a general pull toward better shelter.
+ */
+function tryWeatherTrigger(world: World, log: EventLog | undefined, herdId: string, layer: Layer, centroid: Vec2): boolean {
+  world.herdStormExposureTicks ??= {};
+  if (layer !== "surface") {
+    // Weather is a Surface-only system (see weather.ts's top-of-file
+    // comment) — an underground/canopy herd is never exposed, so its
+    // counter never even starts accumulating.
+    world.herdStormExposureTicks[herdId] = 0;
+    return false;
+  }
+
+  const cell = activeWeatherAt(world, centroid);
+  const exposed = cell?.type === "storm" && !hasCoverNearby(world, layer, centroid);
+  world.herdStormExposureTicks[herdId] = exposed ? (world.herdStormExposureTicks[herdId] ?? 0) + 1 : 0;
+
+  if (world.herdStormExposureTicks[herdId] < STORM_EXPOSURE_SUSTAIN_TICKS) return false;
+
+  world.herdStormExposureTicks[herdId] = 0;
+  const destination = pickDestination(world, layer, centroid, undefined, true);
+  if (!destination) return false;
+  startMigration(world, log, herdId, centroid, destination, "weather");
+  return true;
+}
+
+/** Fourth-priority (soft) trigger: another same-species herd crowding this one's territory for too long. */
 function tryTerritorialTrigger(
   world: World,
   log: EventLog | undefined,
