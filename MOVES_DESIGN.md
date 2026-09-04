@@ -174,6 +174,20 @@ Camouflage would do the opposite). Leer (round two, above) is the
 smallest possible first step — a single move that actually respects FOV —
 without committing to the whole system.
 
+## Confirmed for later: Diglett tunnel networks
+
+**Decision, not just a brainstormed idea — explicitly confirmed
+("tunnel networks are cool as fuck we're gonna do it, but just not
+now").** Repeated Dig usage at two different underground points links
+them as a fast-travel shortcut, letting Diglett/Dugtrio traverse the
+underground layer unusually fast between marked points. Deliberately not
+scoped or speced further here: it reads as map-connectivity/
+infrastructure, which sits close enough to the migration/biome work
+happening in parallel that it should wait until that lands, both to avoid
+overlap and because tunnel shortcuts probably want to interact with
+whatever "biome" boundaries that work introduces. Revisit once migration/
+biomes ship.
+
 ## Build order recommendation, across everything above
 
 1. **Growl** — highest payoff-to-effort ratio on this entire list; most
