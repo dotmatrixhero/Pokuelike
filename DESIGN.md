@@ -3290,6 +3290,99 @@ not the last word on tuning it — flagged, like the base chance/threshold
 themselves, as sim-original and open to future revision against more runs,
 ideally averaged over several seeds rather than judged off any one.
 
+## More individual-agent incentive systems: shelter-building and herd status
+
+Decided, not built yet. Direct ask: give individual agents more
+self-directed goals beyond survive/reproduce, the same pattern the needs
+system already uses for hunger/thirst/mating, extended into deliberate
+agency — an agent picks a goal, invests real time/movement toward it, gets
+a real payoff. Shelter-building and herd status are the first two, built
+as separate features (not bundled) in that order. Food cultivation,
+cross-species courtship attempts, and deliberate training/sparring for exp
+are real, captured as backlog in TODO.md, not designed here yet.
+
+### Shelter-building
+
+Deliberately **decoupled from the "terrain lifecycle + construction +
+overworld" combined design** noted earlier in TODO.md — that pitch assumed
+shelter needed tree growth/decay machinery first; it doesn't, it just needs
+a new persistent terrain kind and a construction behavior. The fancier
+growth/decay/storm-interaction layer can attach later once terrain
+lifecycle actually lands, without this feature waiting on it.
+
+- **Species-tied**, per direct instruction, not universal: a new
+  `SpeciesDef` flag (e.g. `buildsShelter: boolean`), assigned to species
+  where it's thematically real (burrowing/nesting temperament — e.g.
+  Diglett/Sandshrew are the obvious fits in the current roster; judge the
+  rest by the same standard rather than flipping it on for everything).
+- **A real spatial task, not build-on-the-spot** — direct instruction
+  ("reasons to move around spatially"). Three real steps: (1) an eligible,
+  otherwise-idle agent whose herd has no shelter within a real radius picks
+  a build site some minimum distance from its current position (forces
+  actual travel — reuse a resource/cover-aware scoring approach similar in
+  spirit to `herdMigration.ts`'s `pickDestination`, or a simpler distance-
+  floor if that's cleaner, document whichever), (2) travels there (reuse
+  the existing step-toward-target pattern every other relocation behavior
+  already uses — `migrate()`/`applyDispersal()`), (3) once arrived, spends
+  a real time investment standing there (a new `BehaviorKind`, e.g.
+  `"buildShelter"`) before the structure actually completes — not instant.
+- **Real mechanical payoff, immediately** — per direct instruction, not
+  deferred: a new terrain kind (e.g. `"shelter"`), walkable, that reduces
+  detection radius the way `bush` concealment already does, **and** reduces
+  the per-herd storm-exposure accumulation that currently drives weather.ts's
+  shelter-seeking migration trigger — an agent near a real shelter should
+  measurably need to migrate away from storms less often. Reuse both
+  existing mechanisms rather than inventing new ones.
+- **Decay if abandoned** — no agent within a real radius for a long
+  sustained stretch reverts it to floor, same lifecycle shape flora/weather
+  systems already use, so shelters don't accumulate on the map forever.
+- New `shelterBuilt`/`shelterAbandoned` events for the log.
+- **Explicitly still open**: exact build-site scoring, build-time duration,
+  and abandonment threshold are sim-original tuning guesses like everything
+  else here, to judge against a real run.
+
+### Herd status: level buys real standing, not just personal stats
+
+Direct ask: "being higher level gives you respect or something. Something
+to earn." A real status/rank system, derived live rather than stored
+persistently — consistent with how every other herd-aware system in this
+codebase already works (no registry, scan `world.agents` on demand,
+matching `herdCentroid`/`herdMigration.ts`'s existing convention): an
+agent's rank within its herd is simply its position among living herd-mates
+sorted by level, computed wherever it's needed, not a field maintained
+forever.
+
+- **Payoff 1 — feeding priority.** When multiple herd-mates would consume
+  from the same tile's dwindling `stock` in the same window, higher-rank
+  members' consumption resolves first (full amount), lower-rank members get
+  whatever's left (possibly nothing if it depletes) — a real, earnable edge
+  during scarcity, not just a flavor label.
+- **Payoff 2 — mate preference.** `reproduction.ts`'s candidate selection
+  (currently purely nearest-eligible) gets a rank-aware bias: among
+  eligible candidates within search radius, a higher-status one is
+  preferred over a merely-nearer lower-status one, within a real but not
+  absolute weighting (distance still matters, status tips close calls, it
+  doesn't override a huge distance gap).
+- **Explicitly still open**: whether a third payoff (deference in contested
+  movement/tile disputes, or an eventual real leadership/succession role —
+  TODO.md's long-open "real role field for contested leadership" item) is
+  worth adding now or later; exact rank-to-preference-weight mapping is
+  sim-original tuning, to judge against a real run.
+
+### Backlog, not designed yet (captured so it isn't lost)
+
+- **Food cultivation** — an agent actively planting/tending a food source
+  rather than only foraging existing patches (a farming-flavored extension
+  of `flora.ts`'s existing seed-spread mechanic, deliberate rather than
+  incidental).
+- **Cross-species courtship attempts** — a real behavior/story beat for
+  attempted (and failed) interspecies pairing, distinct from `canBreed`'s
+  existing egg-group compatibility check — even a doomed attempt is a real
+  event worth logging.
+- **Deliberate training/sparring for exp** — agents seeking out non-lethal
+  combat/practice specifically to gain exp/skill points, distinct from
+  predation's existing lethal combat.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays
