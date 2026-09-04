@@ -5,7 +5,7 @@ import { applyPredationInstincts, manhattan } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT } from "./flora.js";
 import { tickCooldowns } from "./combat.js";
-import { applyHerdCohesion } from "./herding.js";
+import { applyHerdCohesion, herdRank } from "./herding.js";
 import { migrate } from "./migration.js";
 import { applyDispersal, maybeTriggerDispersal } from "./dispersal.js";
 import { applyShelterBuilding, maybeTriggerShelterBuilding } from "./shelter.js";
@@ -223,6 +223,56 @@ function consume(needs: Needs, behavior: "seekWater" | "seekFood"): void {
 }
 
 /**
+ * DESIGN.md's "Herd status" payoff 1 — feeding priority. **Real contention
+ * finding**: same-tick, same-tile contention over a food patch's dwindling
+ * `stock` genuinely happens in this codebase's model — `tickWorld`'s
+ * per-agent loop (simulation.ts) runs every agent's action tick within one
+ * call, and `resourceIndex.ts`'s `findNearestIndexed` re-checks a food
+ * tile's live `stock` on every lookup (only reverting to unindexed "floor"
+ * once `growFlora` runs, once per tick, *after* the whole per-agent loop) —
+ * so two herd-mates who both converge on the same nearest food tile
+ * routinely both reach and target it inside the same `tickWorld` call, with
+ * whichever one's turn came first in `world.agents`' iteration order
+ * (arbitrary spawn order, nothing to do with status) draining the stock
+ * first. This is that real mechanism, not an invented analog.
+ *
+ * What wasn't already real: consuming never actually depended on how much
+ * `stock` was left — `consume()` always grants the full flat need-restore
+ * amount regardless, `stock` was purely bookkeeping for when a patch reverts
+ * to floor. So "getting whatever's left, possibly nothing" needed an actual
+ * gate to attach to, added here: once a tile's `stock` is already low enough
+ * that it can't obviously feed a second herd-mate too
+ * (`FEEDING_PRIORITY_STOCK_THRESHOLD`), a lower-ranked agent that finds a
+ * *higher-ranked, also-currently-hungry* herd-mate standing on the exact
+ * same tile yields its turn (does nothing this tick, stays `seekFood`, tries
+ * again next tick) instead of eating — so the higher-rank member's next
+ * action tick (same tick or shortly after, whichever its own Speed-gated
+ * turn allows) drains the tile first, and the lower-rank member only gets
+ * "whatever's left" once the higher-rank one is no longer contesting it
+ * (satisfied, or has moved on). Above the threshold, stock isn't actually
+ * dwindling yet — both eat freely, no reason to make either wait.
+ */
+const FEEDING_PRIORITY_STOCK_THRESHOLD = 2 * CONSUME_STOCK_AMOUNT;
+
+function yieldsToHigherRankedFeeder(world: World, agent: Agent, tileStock: number | undefined): boolean {
+  if (!agent.herdId) return false;
+  if (tileStock === undefined || tileStock >= FEEDING_PRIORITY_STOCK_THRESHOLD) return false;
+
+  const myRank = herdRank(world, agent);
+  return world.agents.some(
+    (other) =>
+      other.id !== agent.id &&
+      other.alive !== false &&
+      other.herdId === agent.herdId &&
+      other.pos.x === agent.pos.x &&
+      other.pos.y === agent.pos.y &&
+      other.layer === agent.layer &&
+      chooseBehavior(other.needs) === "seekFood" &&
+      herdRank(world, other) < myRank
+  );
+}
+
+/**
  * The part of an agent's tick that happens every world tick regardless of
  * the Speed-driven action economy (see simulation.ts): aging, cooldown
  * countdown (real-time, deliberately orthogonal to Speed — see DESIGN.md),
@@ -423,6 +473,13 @@ export function tickAgentAction(
     if (target) {
       agent.ticksWithoutResource = 0;
       if (target.x === agent.pos.x && target.y === agent.pos.y) {
+        if (agent.behavior === "seekFood" && yieldsToHigherRankedFeeder(world, agent, tileAt(world, agent.layer, target.x, target.y)?.stock)) {
+          // Defers to a higher-ranked, also-hungry herd-mate on this exact
+          // tile while the patch is running low — see
+          // `yieldsToHigherRankedFeeder`'s doc comment. Stays put, doesn't
+          // consume; re-checked fresh next tick.
+          return;
+        }
         const need = agent.behavior === "seekWater" ? "thirst" : "hunger";
         consume(agent.needs, agent.behavior);
         if (agent.behavior === "seekFood") {

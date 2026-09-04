@@ -26,6 +26,46 @@ function manhattan(a: Vec2, b: Vec2): number {
 }
 
 /**
+ * An agent's standing within its herd, per DESIGN.md's "Herd status: level
+ * buys real standing" section: 1 = highest-ranked (highest level) living
+ * herd-mate, counting up from there. Deliberately derived live every call,
+ * the same "no registry, scan `world.agents` on demand" convention every
+ * other herd-aware system here already follows (`herdCentroid` above,
+ * `herdMigration.ts`'s herd-list derivation, `dispersal.ts`'s
+ * `findNearbyOtherHerd`) — nothing is cached or stored on `Agent`, so a
+ * level-up, a death, or a birth changes every affected agent's rank the very
+ * next time this is called, never a stale snapshot.
+ *
+ * Membership is herd-wide, not restricted to the caller's current `layer`
+ * (unlike `herdCentroid`/cohesion, which are inherently spatial) — status is
+ * a social fact about the herd, not a local one; a Diglett foraging on the
+ * surface doesn't lose or gain rank relative to underground herd-mates it
+ * isn't currently standing near. Solitary agents (no `herdId`) are trivially
+ * rank 1 of 1 — nothing to outrank.
+ *
+ * Ties (equal `level`) are broken by `id` (ascending string comparison) —
+ * arbitrary but deterministic, so two same-level herd-mates get a stable,
+ * reproducible order across calls/ticks instead of one that depends on
+ * `Array.prototype.sort`'s stability guarantees interacting with insertion
+ * order in some indirect way.
+ */
+export function herdRank(world: World, agent: Agent): number {
+  if (!agent.herdId) return 1;
+
+  const members = world.agents
+    .filter((other) => other.alive !== false && other.herdId === agent.herdId)
+    .sort((a, b) => (b.level ?? 1) - (a.level ?? 1) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  const index = members.findIndex((member) => member.id === agent.id);
+  return index === -1 ? members.length + 1 : index + 1;
+}
+
+/** Herd size backing `herdRank`'s denominator — living members sharing `herdId`, any layer. */
+export function herdSize(world: World, herdId: string): number {
+  return world.agents.filter((other) => other.alive !== false && other.herdId === herdId).length;
+}
+
+/**
  * The live average position of every agent sharing `herdId` on `layer` —
  * not a fixed anchor, so the herd's "center" naturally drifts with it over
  * time (e.g. toward wherever most members ended up after foraging).

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createWorld } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
-import { herdCentroid, applyHerdCohesion } from "../src/herding.js";
+import { herdCentroid, applyHerdCohesion, herdRank } from "../src/herding.js";
 import type { Agent, HuntRules } from "../src/types.js";
 
 /** Scyther preys on bulbasaur; venusaur is prey of nothing, so it's a guardian in any herd it shares. */
@@ -113,5 +113,75 @@ describe("applyHerdCohesion", () => {
 
     expect(moved).toBe(false);
     expect(nearby.pos).toEqual({ x: 5, y: 5 });
+  });
+});
+
+describe("herdRank", () => {
+  it("orders living herd-mates by level descending, rank 1 = highest level", () => {
+    const world = createWorld(20, 20);
+    const low = member("low", { x: 0, y: 0 }, { level: 3 });
+    const mid = member("mid", { x: 0, y: 0 }, { level: 7 });
+    const high = member("high", { x: 0, y: 0 }, { level: 12 });
+    world.agents.push(low, mid, high);
+
+    expect(herdRank(world, high)).toBe(1);
+    expect(herdRank(world, mid)).toBe(2);
+    expect(herdRank(world, low)).toBe(3);
+  });
+
+  it("breaks a level tie by ascending id, deterministically", () => {
+    const world = createWorld(20, 20);
+    const b = member("b-agent", { x: 0, y: 0 }, { level: 5 });
+    const a = member("a-agent", { x: 0, y: 0 }, { level: 5 });
+    world.agents.push(b, a);
+
+    // "a-agent" < "b-agent" lexicographically, so it wins the tie for rank 1.
+    expect(herdRank(world, a)).toBe(1);
+    expect(herdRank(world, b)).toBe(2);
+  });
+
+  it("treats a missing level as 1, same as everywhere else in the engine", () => {
+    const world = createWorld(20, 20);
+    const leveled = member("leveled", { x: 0, y: 0 }, { level: 4 });
+    const unleveled = member("unleveled", { x: 0, y: 0 }, { level: undefined });
+    world.agents.push(leveled, unleveled);
+
+    expect(herdRank(world, leveled)).toBe(1);
+    expect(herdRank(world, unleveled)).toBe(2);
+  });
+
+  it("a solitary agent (no herdId) is trivially rank 1", () => {
+    const world = createWorld(20, 20);
+    const loner = member("loner", { x: 0, y: 0 }, { herdId: undefined, level: 1 });
+    world.agents.push(loner);
+
+    expect(herdRank(world, loner)).toBe(1);
+  });
+
+  it("is derived fresh every call: a level-up promotes an agent's rank immediately, not on some stored snapshot", () => {
+    const world = createWorld(20, 20);
+    const climber = member("climber", { x: 0, y: 0 }, { level: 2 });
+    const veteran = member("veteran", { x: 0, y: 0 }, { level: 10 });
+    world.agents.push(climber, veteran);
+
+    expect(herdRank(world, climber)).toBe(2);
+
+    climber.level = 20; // leveled up past the veteran
+    expect(herdRank(world, climber)).toBe(1);
+    expect(herdRank(world, veteran)).toBe(2);
+  });
+
+  it("is derived fresh every call: a herd-mate's death changes everyone else's rank immediately, not on some stored snapshot", () => {
+    const world = createWorld(20, 20);
+    const top = member("top", { x: 0, y: 0 }, { level: 10 });
+    const middle = member("middle", { x: 0, y: 0 }, { level: 5 });
+    const bottom = member("bottom", { x: 0, y: 0 }, { level: 1 });
+    world.agents.push(top, middle, bottom);
+
+    expect(herdRank(world, middle)).toBe(2);
+
+    top.alive = false; // top-ranked member dies
+    expect(herdRank(world, middle)).toBe(1);
+    expect(herdRank(world, bottom)).toBe(2);
   });
 });

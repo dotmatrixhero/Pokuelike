@@ -3454,6 +3454,93 @@ forever.
   worth adding now or later; exact rank-to-preference-weight mapping is
   sim-original tuning, to judge against a real run.
 
+#### Built — implementation notes and real-run findings
+
+Built as `herdRank`/`herdSize` in `packages/engine/src/herding.ts`, plus the
+two payoffs wired into `reproduction.ts` and `needs.ts`. Concrete scope
+calls, the real contention mechanism this actually attaches to, and what a
+real seed-42 run showed:
+
+- **Rank derivation**: `herdRank(world, agent)` — 1 = highest level among
+  living herd-mates sharing `herdId`, counting up from there; a solitary
+  agent (no `herdId`) is trivially rank 1 of 1. Deliberately herd-wide, not
+  restricted to the caller's current `layer` the way `herdCentroid`/cohesion
+  are — status is a social fact about the herd, not a spatial one, so a
+  Diglett foraging on the surface doesn't gain or lose rank relative to
+  underground herd-mates it isn't currently near. Level ties are broken by
+  ascending `id` — arbitrary but deterministic. Confirmed live/non-stale by
+  a direct test: a level-up or a herd-mate's death changes every affected
+  agent's rank the very next call, no stored field anywhere.
+- **Payoff 1 — feeding priority, real contention finding.** The direct ask
+  assumed same-tick, same-tile contention over a food patch's dwindling
+  `stock` was already real in this codebase — checked, and it is: a food
+  tile only reverts to `"floor"` once `growFlora` runs (once per tick,
+  *after* the whole per-agent loop — see `simulation.ts`'s `tickWorld`), and
+  `resourceIndex.ts`'s `findNearestIndexed` re-checks a food tile's live
+  `stock` on every lookup rather than trusting the cached terrain kind. So
+  two herd-mates who both converge on the same nearest food tile routinely
+  both reach and target it within one `tickWorld` call, and whichever one's
+  turn came first in `world.agents`' iteration order (arbitrary spawn order,
+  nothing to do with status) used to drain the shared stock first — this is
+  the real mechanism the feature attaches to, not an invented analog.
+  What *wasn't* already real: consuming never actually depended on how much
+  `stock` was left — `consume()` always granted the full flat need-restore
+  amount regardless, `stock` was purely bookkeeping for when a patch reverts
+  to floor, so "getting whatever's left, possibly nothing" had no real gate
+  to attach to. Added one: once a tile's `stock` drops below
+  `FEEDING_PRIORITY_STOCK_THRESHOLD` (`2 * CONSUME_STOCK_AMOUNT`, i.e. it can
+  no longer obviously feed a second herd-mate too), a lower-ranked agent that
+  finds a higher-ranked, *also currently hungry* herd-mate standing on the
+  exact same tile yields its turn — does nothing that tick, stays
+  `seekFood`, re-checked fresh next tick — instead of eating, so the
+  higher-rank member's own action tick drains the tile first. Above the
+  threshold, nothing yields: stock isn't actually dwindling yet, no reason to
+  make either wait.
+- **Payoff 2 — mate preference.** `nearestMate` (reproduction.ts) now scores
+  each eligible candidate as `distance - statusAdvantage * STATUS_DISTANCE_BONUS`
+  (lower wins, same sense as the old pure-distance comparison it replaces).
+  `statusAdvantage` is 0 (lowest-ranked herd-mate) to 1 (rank 1), linearly
+  scaled by `(herdSize - rank) / (herdSize - 1)`; `STATUS_DISTANCE_BONUS = 2`
+  is deliberately small next to `mateSearchRadius`'s ~3-7 tile range, so it
+  can only ever tip a close call (candidates within a couple of tiles of each
+  other) and a candidate that's merely nearer by more than that always still
+  wins — confirmed by two direct tests, one proving the tip, one proving the
+  bound isn't accidentally absolute.
+- **Real seed-42 (3000-tick) run finding, feeding priority**: genuinely
+  active, not a dead code path — 2117 real yield events (a lower-rank
+  herd-mate deferring to a higher-rank one on a contested tile) over the run,
+  against 1352 in a same-seed comparison run with the status bonus zeroed
+  out (a smaller but still-real baseline count, since feeding priority is
+  independent of the mate-preference constant) — so the mechanism fires
+  often enough to matter, not just in the synthetic unit tests.
+- **Real seed-42 run finding, mate preference — honest, not a clean
+  isolated A/B.** With status-aware mate preference enabled, the run's
+  clearest herd (`bulbasaur-herd`, containing both the Bulbasaur lineage and
+  its two Venusaur guardians) shows a stark disparity: `venusaur-0`
+  (level 20, rank 1 of its herd for the entire run) sired 71 of the herd's
+  offspring, more than double the next-most-prolific father (`bulbasaur-2`,
+  rank 6, 28 offspring) — directionally exactly what "a real, earnable
+  reproductive edge" should look like. But a same-seed run with
+  `STATUS_DISTANCE_BONUS` zeroed out is **not** a clean isolated baseline:
+  because `nearestMate`'s pick changes which candidate a seeker walks
+  toward, it changes the exact sequence of `rng()` calls from tick one
+  (spawn-tile shuffling, offspring nature rolls, etc.), and this sim is
+  already documented (see the determinism section) as sensitive to exactly
+  that kind of perturbation — the two runs' populations diverge into
+  genuinely different founders, herds, and even which species survive, well
+  before status preference could plausibly be the sole cause. So the 71-vs-28
+  gap is real and directionally consistent with the feature working, but
+  "how much of it is the status bonus specifically, versus which chaotic
+  branch the run happened to take" isn't separable with a single-seed A/B —
+  flagged honestly rather than overclaimed. A controlled, non-chaotic
+  comparison (fixed candidate pool, fixed rng) is what the unit tests above
+  are for instead.
+- **Still open, flagged rather than tuned further here**: whether
+  `STATUS_DISTANCE_BONUS`/`FEEDING_PRIORITY_STOCK_THRESHOLD` are the right
+  magnitudes, and the deference third-payoff/leadership-role question the
+  original design left open. Judge against further real runs, per this
+  project's standing practice.
+
 ### Backlog, not designed yet (captured so it isn't lost)
 
 - **Food cultivation** — an agent actively planting/tending a food source

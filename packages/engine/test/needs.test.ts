@@ -93,6 +93,70 @@ describe("tickAgent", () => {
   });
 });
 
+describe("herd-status feeding priority", () => {
+  // Real contention mechanism (see needs.ts's `yieldsToHigherRankedFeeder`
+  // doc comment): `tickWorld`'s per-agent loop lets multiple herd-mates
+  // reach and target the very same food tile within one call, since
+  // `findNearestIndexed` only drops a tile once its `stock` actually hits 0
+  // (a tile doesn't revert to "floor" until `growFlora` runs once, after the
+  // whole loop) — this exercises that real mechanism directly via
+  // `tickAgent`, calling each herd-mate's turn in an explicit order to prove
+  // rank decides who eats first regardless of which one's turn came first.
+
+  it("a lower-ranked herd-mate yields to a higher-ranked, equally-hungry one on the same dwindling-stock tile, even when its own turn comes first", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    tileAt(world, "surface", 2, 0)!.stock = 0.4; // below the 0.5 dwindling threshold
+
+    const low = makeAgent({ id: "low", pos: { x: 2, y: 0 }, herdId: "h", level: 1, needs: createNeeds({ hunger: 0.5 }) });
+    const high = makeAgent({ id: "high", pos: { x: 2, y: 0 }, herdId: "h", level: 10, needs: createNeeds({ hunger: 0.5 }) });
+    world.agents.push(low, high);
+
+    // Low-rank's turn happens first — without rank-awareness it would simply
+    // eat, since it's the first (and currently only-considered) claimant.
+    tickAgent(world, low);
+    // Yielded: hunger only moved by this tick's ordinary decay, not the 0.4
+    // consume() restore — nowhere near what a successful feeding would give.
+    expect(low.needs.hunger).toBeLessThan(0.5);
+    expect(low.needs.hunger).toBeGreaterThan(0.49);
+    expect(low.pos).toEqual({ x: 2, y: 0 });
+
+    // High-rank's turn: nothing stops it, it eats normally.
+    tickAgent(world, high);
+    expect(high.needs.hunger).toBeGreaterThan(0.85);
+
+    // High-rank is now satisfied (no longer reads as seekFood), so low-rank
+    // no longer has anyone to yield to and gets its turn — "whatever's left."
+    tickAgent(world, low);
+    expect(low.needs.hunger).toBeGreaterThan(0.85);
+  });
+
+  it("does not make an agent yield to a herd-mate that isn't also hungry", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    tileAt(world, "surface", 2, 0)!.stock = 0.4;
+
+    const low = makeAgent({ id: "low", pos: { x: 2, y: 0 }, herdId: "h", level: 1, needs: createNeeds({ hunger: 0.5 }) });
+    const high = makeAgent({ id: "high", pos: { x: 2, y: 0 }, herdId: "h", level: 10, needs: createNeeds({ hunger: 1 }) });
+    world.agents.push(low, high);
+
+    tickAgent(world, low);
+    expect(low.needs.hunger).toBeGreaterThan(0.85); // eats freely: the higher-rank mate isn't contesting the tile
+  });
+
+  it("does not make anyone yield while the tile's stock isn't actually dwindling yet", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food"); // default full stock (1), well above the threshold
+
+    const low = makeAgent({ id: "low", pos: { x: 2, y: 0 }, herdId: "h", level: 1, needs: createNeeds({ hunger: 0.5 }) });
+    const high = makeAgent({ id: "high", pos: { x: 2, y: 0 }, herdId: "h", level: 10, needs: createNeeds({ hunger: 0.5 }) });
+    world.agents.push(low, high);
+
+    tickAgent(world, low);
+    expect(low.needs.hunger).toBeGreaterThan(0.85); // plenty for both — no reason to make it wait
+  });
+});
+
 describe("starvation", () => {
   it("survives a while at 0 hunger, then dies once the grace period runs out", () => {
     const world = createWorld(3, 1);

@@ -4,6 +4,7 @@ import { stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
 import { EXP_ON_BIRTH_PARENT, EXP_ON_MATE_ATTEMPT, canBreed, ensureCombatProfile, grantExp, type LevelingContext } from "./leveling.js";
 import { dispositionFromNature, dispositionSummary, randomNature } from "./nature.js";
+import { herdRank, herdSize } from "./herding.js";
 
 /**
  * Ticks before an agent can mate. A single global constant for now — real
@@ -72,13 +73,54 @@ function isEligibleMate(agent: Agent, candidate: Agent, ctx?: LevelingContext): 
   return true;
 }
 
-function nearestMate(agent: Agent, candidates: Agent[]): Agent | undefined {
+/**
+ * Rank-aware mate preference — DESIGN.md's "Herd status" payoff 2. A
+ * higher-status candidate (lower `herdRank`, i.e. higher level relative to
+ * its herd-mates) is worth walking a little farther for, but distance still
+ * dominates a real gap: this awards a top-ranked candidate a "discount" of
+ * at most `STATUS_DISTANCE_BONUS` tiles off its effective distance, scaled
+ * down toward 0 for a lower-ranked one. That bonus can only ever tip a close
+ * call (candidates within ~`STATUS_DISTANCE_BONUS` tiles of each other) —
+ * it's small next to `mateSearchRadius`'s ~3-7 tile range, so a candidate
+ * that's merely nearer by more than the bonus always still wins, matching
+ * the direct instruction ("distance still matters, status tips close calls,
+ * it doesn't override a huge distance gap").
+ */
+const STATUS_DISTANCE_BONUS = 2;
+
+/**
+ * 0 (lowest-ranked herd-mate) .. 1 (highest-ranked, rank 1) — how much of
+ * `STATUS_DISTANCE_BONUS` a candidate earns. A solitary candidate (herd size
+ * 1, e.g. no herdId) is trivially top-ranked but there's no one to outrank,
+ * so it still resolves to 1 rather than being penalized for having no herd —
+ * harmless either way since `nearestMate` only compares candidates that are
+ * already otherwise eligible.
+ */
+function statusAdvantage(world: World, candidate: Agent): number {
+  const size = candidate.herdId ? herdSize(world, candidate.herdId) : 1;
+  if (size <= 1) return 1;
+  const rank = herdRank(world, candidate);
+  return (size - rank) / (size - 1);
+}
+
+/**
+ * Effective distance used to rank candidates: real Manhattan distance minus
+ * a status-scaled discount (see `statusAdvantage`/`STATUS_DISTANCE_BONUS`
+ * above). Lower is more attractive, same sense as the old pure-distance
+ * comparison this replaces.
+ */
+function mateScore(world: World, candidate: Agent, distance: number): number {
+  return distance - statusAdvantage(world, candidate) * STATUS_DISTANCE_BONUS;
+}
+
+function nearestMate(world: World, agent: Agent, candidates: Agent[]): Agent | undefined {
   let best: Agent | undefined;
-  let bestDist = Infinity;
+  let bestScore = Infinity;
   for (const candidate of candidates) {
     const dist = manhattan(agent.pos, candidate.pos);
-    if (dist < bestDist) {
-      bestDist = dist;
+    const score = mateScore(world, candidate, dist);
+    if (score < bestScore) {
+      bestScore = score;
       best = candidate;
     }
   }
@@ -196,7 +238,7 @@ export function applyMateSeeking(
   // own. Reset to 0 the moment even one candidate is visible, regardless of
   // whether a partner ends up close enough to actually breed with this tick.
   agent.ticksSinceEligibleMate = candidates.length > 0 ? 0 : (agent.ticksSinceEligibleMate ?? 0) + 1;
-  const partner = nearestMate(agent, candidates);
+  const partner = nearestMate(world, agent, candidates);
   if (!partner) return;
 
   if (manhattan(agent.pos, partner.pos) <= 1) {

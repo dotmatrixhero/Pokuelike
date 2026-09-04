@@ -399,3 +399,49 @@ describe("sociability-driven mate-seeking radius", () => {
     expect(mother.pos.x).toBe(2);
   });
 });
+
+describe("herd-status-driven mate preference", () => {
+  // All three fixtures below share one herd (herd-a, from `parent`'s default),
+  // which is exactly what makes the level spread on the two suitors resolve
+  // to a real top-vs-bottom herdRank rather than an arbitrary one: with the
+  // seeker herself in the mix, a herd of 3 sorted by level puts the level-20
+  // suitor at rank 1 (full STATUS_DISTANCE_BONUS) and the level-1 suitor at
+  // rank 3 (none).
+
+  it("prefers a higher-status suitor over a merely-nearer lower-status one at a comparable distance", () => {
+    const world = createWorld(20, 20);
+    // Distance 3 (moves in x) vs distance 4 (moves in y) — a 1-tile gap, well
+    // inside STATUS_DISTANCE_BONUS (2), so status should flip the pick.
+    world.agents.push(
+      parent("mother", "female", { x: 0, y: 0 }, { level: 5 }),
+      parent("nearer-lowrank", "male", { x: 3, y: 0 }, { level: 1 }),
+      parent("farther-highrank", "male", { x: 0, y: 4 }, { level: 20 })
+    );
+
+    tickWorld(world);
+
+    const mother = world.agents.find((a) => a.id === "mother")!;
+    // Moved along y (toward the higher-status, farther suitor), not x.
+    expect(mother.pos).toEqual({ x: 0, y: 1 });
+  });
+
+  it("distance still dominates a large gap — a much-farther higher-status suitor does NOT beat a much-nearer lower-status one", () => {
+    const world = createWorld(20, 20);
+    // Distance 2 (moves in x) vs distance 5 (moves in y, still within the
+    // neutral 5-tile search radius so both are real candidates) — a 3-tile
+    // gap, exceeding STATUS_DISTANCE_BONUS (2), so the nearer suitor must
+    // still win the effective-distance comparison even though the farther
+    // one is top-ranked.
+    world.agents.push(
+      parent("mother", "female", { x: 0, y: 0 }, { level: 5 }),
+      parent("nearer-lowrank", "male", { x: 2, y: 0 }, { level: 1 }),
+      parent("farther-highrank", "male", { x: 0, y: 5 }, { level: 20 })
+    );
+
+    tickWorld(world);
+
+    const mother = world.agents.find((a) => a.id === "mother")!;
+    // Moved along x (toward the nearer suitor despite its lower status).
+    expect(mother.pos).toEqual({ x: 1, y: 0 });
+  });
+});
