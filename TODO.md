@@ -1172,6 +1172,29 @@ blind `git merge`:
   messily-committed branch (34 unique commits, terse/non-descriptive
   messages) — neither looks relevant to reconcile against, flagging only
   so it's not mistaken for something that needs attention later.
+- [x] **Real O(agents²) perf regression found and half-fixed**: real timing
+  (500/1000/2000-tick pure-compute benchmarks, no per-event I/O) showed
+  clearly superlinear scaling after this merge — 0.9s/1.2s/6.1s. Traced one
+  real cause: `status.ts`'s `applyHealAuraPassive` ran on every agent's
+  every tick and, for anyone actually carrying the `healAura` passive,
+  scanned all of `world.agents` for same-herd neighbors instead of a bounded
+  lookup — same class of bug as the pre-existing species-encounter-tracking
+  one. Fixed with a new `herdIndex.ts` (per-tick cached herd membership,
+  same pattern as `resourceIndex.ts`). **Not the whole story**: the same
+  benchmark still shows superlinear growth after this fix, so at least one
+  more O(agents) hot path from the merged skill-tree/status-effects work is
+  still unidentified — the huge `moveRespecced`/`gainedSkillPoint` event
+  counts (14,237/4,574 in one 3000-tick run) point toward the auto-respec
+  path (`maybeAutoRespec`, leveling.ts) as the next place to look, not
+  confirmed yet.
+- [ ] **A second pre-existing flaky test surfaced outside `predation.test.ts`**:
+  `reproduction.test.ts`'s cross-species-types assertion failed once in a
+  full-suite run, passed 1/1 in isolation immediately after — same unseeded-
+  `createWorld`-plus-real-rng shape as the `predation.test.ts` flakes
+  documented above, just in a different file. Not chased down individually
+  (same "not fully audited" caveat applies) — worth folding into that same
+  future seeded-rng test-hygiene pass rather than fixing file-by-file as
+  each one happens to get noticed.
 
 ## Urgency-based need priority, extended thirst margin, and sleep — built, tuning follow-ups
 
