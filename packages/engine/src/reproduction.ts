@@ -32,7 +32,7 @@ function manhattan(a: Vec2, b: Vec2): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
-function isMature(agent: Agent): boolean {
+export function isMature(agent: Agent): boolean {
   return agent.age === undefined || agent.age >= MATURITY_AGE;
 }
 
@@ -190,6 +190,12 @@ export function applyMateSeeking(
   const candidates = world.agents.filter(
     (other) => isEligibleMate(agent, other, ctx) && manhattan(agent.pos, other.pos) <= mateSearchRadius(agent)
   );
+  // Feeds dispersal.ts's guaranteed "sustained zero eligible mates" fallback
+  // trigger — piggybacks on this scan (already paid for every time this
+  // function runs) rather than dispersal.ts paying for a second one of its
+  // own. Reset to 0 the moment even one candidate is visible, regardless of
+  // whether a partner ends up close enough to actually breed with this tick.
+  agent.ticksSinceEligibleMate = candidates.length > 0 ? 0 : (agent.ticksSinceEligibleMate ?? 0) + 1;
   const partner = nearestMate(agent, candidates);
   if (!partner) return;
 

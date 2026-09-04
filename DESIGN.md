@@ -3204,6 +3204,92 @@ version of it, triggered by more than just evolving.
   sex more than the other) is a reasonable future refinement, not required
   for this pass — an unbiased chance is a fine first cut.
 
+### Built, and what a real run actually showed
+
+Built as designed above, in `engine/src/dispersal.ts`: both triggers
+(`maybeTriggerDispersal`), relocation reusing `migration.ts`'s
+`findRandomWalkableTile` (confirmed the right call over `herdMigration.ts`'s
+`pickDestination` — that machinery scores a whole herd's shared
+centroid/abundance, which a lone disperser leaving its herd behind has none
+of left to score against), and join-or-found on arrival
+(`finishDispersal`), scanning `world.agents` directly for a nearby
+same-species herd rather than any registry — confirmed this needs no
+pre-registration anywhere, exactly as expected. A new `Agent.herdId` this
+function assigns just works: `herdCentroid`/`applyHerdCohesion`/
+`herdMigration.ts`'s per-herd trackers all derive their herd list by
+scanning `world.agents`, so a freshly-founded herd is a normal herd from its
+very first tick.
+
+Two scope calls beyond the spec's literal text, both documented in code:
+`dispersed`'s event gained an `outcome: "joined" | "founded"` field (spec
+only asked for `agentId`/`species`/`fromHerd`/`toHerd`/`reason`) — cheap to
+add and immediately useful for judging the feature's real effect (see
+below); and the maturity trigger needed a one-shot `maturityDispersalRolled`
+flag rather than the spec's literal "at maturity (age crosses
+`MATURITY_AGE`)" exact-tick reading, because the Speed-driven action economy
+means an agent's action tick (where the roll runs) doesn't reliably land on
+the exact tick its age crosses the threshold — see `dispersal.ts`'s
+`MATURITY_CROSSING_WINDOW_TICKS` doc comment.
+
+**Tuning, and a real bug this surfaced in the process**: the first cut used
+`NO_MATES_DISPERSAL_TICKS = 300` (this codebase's usual "sustained, not one
+bad tick" order of magnitude). On seed 42/3000 ticks that produced 25
+dispersals and a bulbasaur-line population of 27 — *worse* than the 65
+baseline, not better. Root cause, confirmed by inspecting the actual
+`dispersed` log: with a small early population (2 founding pairs), an
+individual can easily go a few hundred ticks without another eligible
+opposite-sex agent happening to be within `mateSearchRadius` just from
+ordinary movement/herd-cohesion noise, with nothing actually wrong — herd
+cohesion would have reunited them soon enough. 300 ticks was short enough
+that the fallback was firing on exactly the individuals the early
+population most needed to keep breeding in place, sending them off to
+(usually) permanent solitude instead — of that seed's 25 dispersals, 18
+founded a brand-new herd of one and only 7 found an existing herd to join,
+and the 90x60 map is large enough, and `findRandomWalkableTile`'s picks
+uncoordinated enough, that two independent lone dispersers rarely land near
+each other. Raised to `NO_MATES_DISPERSAL_TICKS = 1000` — long enough that
+it only fires on genuinely, persistently mate-starved individuals rather
+than ordinary short gaps.
+
+**The real seed-42 comparison, run twice (3000 ticks, and again at 8000)**:
+
+| | 3000 ticks, all species | 3000 ticks, bulbasaur-line | 8000 ticks, bulbasaur-line | distinct bulbasaur-line herds at 8000 |
+|---|---|---|---|---|
+| Baseline (no dispersal) | 102 | 66 | 180 | 1 |
+| With dispersal | 54 | 22 | 263 | 13 |
+
+At the specific 3000-tick mark asked for, dispersal reads as *worse*, not
+better — but that single-seed number is misleading on its own, and reporting
+it without the rest below would be dishonest. Every `rng()` call dispersal
+adds (the disposition roll, the relocation-target search) shifts every
+*subsequent* draw in that world's one shared `mulberry32` stream — a
+deterministic-PRNG system is chaotic-sensitive to that: adding or removing
+any draw reshuffles the entire rest of the run's outcomes, unrelated to
+whether the feature itself helps or hurts. Confirmed by averaging 20 seeds
+(0-19) at 3000 ticks: baseline mean bulbasaur-line population 34.5, with
+dispersal 33.2 — statistically indistinguishable given per-seed variance
+that ranges from 0 to 162 individuals on that same species. At 3000 ticks,
+dispersal is real-but-neutral, not a regression and not yet a fix.
+
+Running seed 42 out to 8000 ticks (enough time for founded herds to mature
+and actually reconverge, the payoff DESIGN.md's original pitch described)
+tells the more honest story: bulbasaur-line population 263 vs. baseline
+180 (+46%), spread across 13 independently founded/joined herds instead of
+one. `dispersed` events did fire for real (63 of them by tick 8000: 42
+founded, 21 joined) and founding a new herd is confirmed actually
+happening, not just theoretically supported. The mechanism is real and
+does what DESIGN.md describes — it just needs several thousand more ticks
+than a 3000-tick run gives it to pay off, matching real biology's own
+timescale for dispersal-driven gene flow (a multi-generation process, not
+an instant fix). **Honest bottom line**: this pass doesn't move the needle
+at the specific 3000-tick checkpoint the motivating A/B test used, and
+shouldn't be read as a fix "confirmed" at that timescale the way the
+inbreeding-avoidance regression was; it's a real, working mechanism whose
+benefit shows up on a longer horizon, and 1000 ticks is very possibly still
+not the last word on tuning it — flagged, like the base chance/threshold
+themselves, as sim-original and open to future revision against more runs,
+ideally averaged over several seeds rather than judged off any one.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

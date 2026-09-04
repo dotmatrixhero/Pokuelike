@@ -61,11 +61,13 @@ export function formatEvent(event: SimEvent): string {
       return `day breaks (light ${event.lightLevel.toFixed(2)})`;
     case "weatherChanged":
       return `${event.weatherType} ${event.phase === "began" ? "moves in" : "clears"} near (${event.center.x},${event.center.y})`;
+    case "dispersed":
+      return `${event.species} (${event.agentId}) left ${event.fromHerd} and ${event.outcome === "joined" ? `joined ${event.toHerd}` : `founded ${event.toHerd}`} (${event.reason})`;
   }
 }
 
 /** The event kinds that make a story, per the maintainer's ask — get distinct icon/color/size treatment in the log panel. Everything else renders minimal. */
-export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge"]);
+export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge", "dispersed"]);
 
 /**
  * Routine environment/upkeep chatter — real events, just not "the Pokemon
@@ -93,6 +95,7 @@ export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   fainted: "\u{1F4AB}", // dizzy
   evolved: "✨", // sparkles
   diedOfAge: "\u{1F480}", // skull
+  dispersed: "\u{1F9ED}", // compass
 };
 
 export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
@@ -102,6 +105,7 @@ export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
   fainted: "#f5d76e",
   evolved: "#c792ea",
   diedOfAge: "#9aa0ab",
+  dispersed: "#6ec6ff",
 };
 
 /**

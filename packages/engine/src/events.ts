@@ -1,4 +1,4 @@
-import type { Agent, BehaviorKind, Layer, MigrationReason, Vec2, WeatherType, World } from "./types.js";
+import type { Agent, BehaviorKind, DispersalReason, Layer, MigrationReason, Vec2, WeatherType, World } from "./types.js";
 import type { PokemonType } from "./typing.js";
 
 export type SimEvent =
@@ -239,6 +239,18 @@ export type SimEvent =
       /** Rounded cell center at the moment this fired — narrative color, not a precise hitbox. */
       center: Vec2;
       radius: number;
+    }
+  | {
+      kind: "dispersed";
+      tick: number;
+      agentId: string;
+      species: string;
+      /** `"none"` for an agent that had no herdId to leave (a solitary agent — see reproduction.ts's isEligibleMate). */
+      fromHerd: string;
+      toHerd: string;
+      /** Whether `toHerd` was an existing herd the agent joined or a fresh one it founded — see dispersal.ts's `finishDispersal`. */
+      outcome: "joined" | "founded";
+      reason: DispersalReason;
     };
 
 /**

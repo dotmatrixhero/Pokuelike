@@ -21,6 +21,19 @@ export interface Vec2 {
 export type MigrationReason = "scarcity" | "predator_pressure" | "wanderlust" | "territorial" | "weather";
 
 /**
+ * Why an agent dispersed — see dispersal.ts/DESIGN.md's "Natal dispersal"
+ * section. `"matured"` covers BOTH of that feature's trigger (1) occasions
+ * (crossing `MATURITY_AGE`, or evolving) — the design only distinguishes
+ * "the flavorful disposition-weighted trigger" from "the guaranteed
+ * mechanical fallback," not which specific occasion of the former fired.
+ * `"no_eligible_mates"` is that guaranteed fallback: a sustained stretch
+ * mature with zero eligible mate candidates found nearby. Shared by
+ * `Agent.dispersalReason` (internal, set the moment dispersal triggers) and
+ * `SimEvent`'s `dispersed.reason` (external/narrative surface).
+ */
+export type DispersalReason = "matured" | "no_eligible_mates";
+
+/**
  * A minimal, name-only view of a biome seed point (worldgen.ts's `BiomeSeed`
  * has a full `BiomeDef` with density/terrain-weight tables that weather.ts
  * has no use for) — just enough for `worldgen.ts`'s `biomeWeightsAt` to
@@ -170,7 +183,8 @@ export type BehaviorKind =
   | "relocate"
   | "deliverFood"
   | "carryAlly"
-  | "explore";
+  | "explore"
+  | "disperse";
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
 export interface InventoryItem {
@@ -379,6 +393,59 @@ export interface Agent {
    * fixed values for hand-built fixtures.
    */
   disposition?: Disposition;
+
+  // --- Natal dispersal (see DESIGN.md's "Natal dispersal" section, dispersal.ts) ---
+
+  /**
+   * Ticks since a mature, sexed agent last had at least one eligible mate
+   * candidate found nearby — updated by reproduction.ts's `applyMateSeeking`
+   * (which already computes the candidate list every time it runs, so this
+   * piggybacks on that scan rather than paying for a second one) and read by
+   * dispersal.ts's guaranteed fallback trigger. Absent/0 for an immature
+   * agent, or one that's never yet gone a tick without a candidate.
+   */
+  ticksSinceEligibleMate?: number;
+  /**
+   * True once this agent's one-shot "just crossed MATURITY_AGE" dispersal
+   * roll has been made (win or lose) — see dispersal.ts's
+   * `maybeTriggerDispersal`. Without this, an agent that stays above
+   * MATURITY_AGE forever would otherwise need an exact-tick equality check
+   * against age (fragile under the Speed-gated action economy, where an
+   * agent's action tick doesn't necessarily land on the exact tick its age
+   * crosses the threshold) instead of a simple "have I rolled yet" flag.
+   * Absent for an immature agent or one built without `age` tracked at all
+   * (a founder — see `isMature`'s doc comment on absent age); those never
+   * get a maturity-crossing roll (there's no real "crossing" to detect for
+   * them), only the guaranteed no-mates fallback and the on-evolve trigger
+   * below remain available.
+   */
+  maturityDispersalRolled?: boolean;
+  /**
+   * Set for exactly one tick by leveling.ts's `grantExp` the instant this
+   * agent evolves — dispersal.ts's `maybeTriggerDispersal` reads and clears
+   * it on its very next check (whether or not the roll it triggers
+   * succeeds), so an evolution always gets exactly one dispersal roll, never
+   * zero (missed) or more than one (double-counted).
+   */
+  pendingEvolutionDispersalCheck?: boolean;
+  /**
+   * Where a dispersing agent (`"disperse"` behavior) is walking to — see
+   * dispersal.ts. Deliberately a separate field from `relocateTarget`
+   * (migration.ts's own "give up on this area and walk to a random distant
+   * point" utility, which dispersal.ts's relocation step reuses the *logic*
+   * of via `findRandomWalkableTile`, not the field): the two are
+   * conceptually different triggers (giving up on a foraging area vs.
+   * leaving the natal group to find mates) that could, in principle, both
+   * want to be "in flight" independently, even though the current trigger
+   * ordering never actually lets that happen. Cleared on arrival.
+   */
+  dispersalTarget?: Vec2;
+  /**
+   * Which of dispersal.ts's two triggers is driving the current/most recent
+   * dispersal — set the moment dispersal starts, read (and cleared) when the
+   * `dispersed` event is logged on arrival. See `DispersalReason`.
+   */
+  dispersalReason?: DispersalReason;
 
   /**
    * When this agent's species prefers to be active — denormalized from

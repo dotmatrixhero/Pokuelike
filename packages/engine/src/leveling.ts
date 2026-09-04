@@ -353,6 +353,14 @@ export function grantExp(
         agent.hp = Math.max(1, Math.round(evoStats.maxHp * hpFraction));
       }
       log?.record({ kind: "evolved", tick: world.tick, agentId: agent.id, fromSpecies, toSpecies: agent.species, level: agent.level });
+      // Consumed by dispersal.ts's maybeTriggerDispersal on this agent's very
+      // next check — one of natal dispersal's two triggers (DESIGN.md's
+      // "Natal dispersal" section) is "a disposition-weighted chance to
+      // disperse ... on evolving." A transient flag rather than rolling the
+      // chance right here: dispersal.ts owns that roll/relocation logic
+      // entirely, this is just the hook telling it "an evolution just
+      // happened, check now."
+      agent.pendingEvolutionDispersalCheck = true;
     }
   }
 }

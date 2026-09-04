@@ -556,10 +556,24 @@ produce a real story before player mechanics are worth building further.
       role — see DESIGN.md and the positioning gap above. Still open: a
       real `role` field for contested leadership/succession, which this
       isn't (guardians don't compete for the role, there's no succession).
-- [ ] Evolution as a dispersal trigger: a Disposition-weighted chance to
-      leave the herd and seek a mate elsewhere on evolving — real biology
-      (natal dispersal/inbreeding avoidance), and the concrete reason the
-      world-graph/region-migration idea above would actually get used.
+- [x] Natal dispersal built — supersedes this bullet's original pitch with a
+      more complete version (two triggers, not just evolving: a
+      Disposition-weighted chance at maturity or on evolving, plus a
+      guaranteed fallback after a sustained stretch mature with zero
+      eligible mates found nearby) — see DESIGN.md's "Natal dispersal: real
+      biology's actual fix for the inbreeding bottleneck" section, including
+      its "Built, and what a real run actually showed" subsection for the
+      honest result: real and working (dispersed events fire, new herds get
+      founded, seed 42 at 8000 ticks shows +46% bulbasaur-line population
+      across 13 herds vs. one), but at the specific 3000-tick checkpoint the
+      motivating inbreeding-bottleneck A/B test used, it reads as
+      statistically neutral (confirmed via a 20-seed average, not a
+      single-seed fluke) rather than a clear win — the mechanism needs more
+      ticks than 3000 to pay off, same as real multi-generation gene flow
+      does. Tuning (`DISPERSAL_BASE_CHANCE`, `NO_MATES_DISPERSAL_TICKS`) is
+      still open for revision against future runs. Sex-biased dispersal
+      (many real species disperse one sex more than the other) remains a
+      reasonable future refinement, not built here.
 - [ ] Pair-bonding as a disposition trait (`monogamous | opportunistic`,
       or a continuous "fidelity" score): a monogamous agent that
       successfully mates records a `mateId` and prefers/restricts to that

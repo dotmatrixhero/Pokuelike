@@ -7,6 +7,7 @@ import { CONSUME_STOCK_AMOUNT } from "./flora.js";
 import { tickCooldowns } from "./combat.js";
 import { applyHerdCohesion } from "./herding.js";
 import { migrate } from "./migration.js";
+import { applyDispersal, maybeTriggerDispersal } from "./dispersal.js";
 import { logBehaviorChange, type EventLog } from "./events.js";
 import {
   EXP_ON_CONSUME,
@@ -297,6 +298,25 @@ export function tickAgentAction(
   if (maybeStartCarrying(world, agent, log)) return;
   if (applyLooting(world, agent, log)) return;
   if (applyHerdSupport(world, agent, log)) return;
+
+  // Natal dispersal (dispersal.ts) — checked once per action tick for every
+  // agent not already dispersing, ranked below survival/carrying/looting/
+  // herd-support (those get first refusal, same as everything above) but
+  // ahead of ordinary needs-driven behavior: a triggered dispersal runs to
+  // completion rather than getting preempted by hunger/thirst/mate-seeking
+  // mid-walk, real risk-taking (a disperser can starve en route) rather than
+  // a safe background stat change. `maybeTriggerDispersal` itself is a no-op
+  // whenever `agent.dispersalTarget` is already set, so this never
+  // re-triggers a dispersal already in progress.
+  if (agent.dispersalTarget) {
+    applyDispersal(world, agent, log);
+    return;
+  }
+  maybeTriggerDispersal(world, agent, log, rng);
+  if (agent.dispersalTarget) {
+    applyDispersal(world, agent, log);
+    return;
+  }
 
   // Continue an in-progress exploration walk as long as nothing more urgent
   // has come up since it started (checked fresh, not read from the stale
