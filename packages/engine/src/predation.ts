@@ -11,6 +11,7 @@ import { tileAt } from "./world.js";
 import { recordPredatorPressure } from "./herdMigration.js";
 import { isTwilight, lightLevel } from "./daynight.js";
 import { stormAccuracyMultiplier } from "./weather.js";
+import { BURN_ATTACK_STAGE, isBurned, maybeInflictStatus, maybeThawOnFireHit } from "./status.js";
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
@@ -400,11 +401,15 @@ function resolveHit(
     return false;
   }
 
+  // A landed Fire hit thaws a frozen defender instantly, independent of
+  // whether this move itself inflicts anything — real mainline behavior.
+  maybeThawOnFireHit(defender, move.type, world, log);
+
   const isCritical = rollCritical();
   const damage =
     attacker.level !== undefined && attacker.types && attacker.stats && defender.stats
       ? calculateDamage(
-          { level: attacker.level, types: attacker.types, stats: attacker.stats },
+          { level: attacker.level, types: attacker.types, stats: attacker.stats, statStages: { attack: isBurned(attacker) ? BURN_ATTACK_STAGE : 0 } },
           { types: defender.types ?? [], stats: defender.stats },
           move,
           0.85 + Math.random() * 0.15,
@@ -464,11 +469,19 @@ function resolveHit(
     critical: isCritical,
   });
 
-  if (defender.hp > 0) return false;
+  if (defender.hp > 0) {
+    // A landed, damaging, non-killing hit — the one place status gets a
+    // chance to apply (a corpse or a freshly-fainted target doesn't need one).
+    maybeInflictStatus(defender, attacker.id, move, world, log);
+    return false;
+  }
 
-  // This hit brought hp to 0 — faint, don't kill outright.
+  // This hit brought hp to 0 — faint, don't kill outright. Fainting always
+  // cures status, mainline-real (same as the DOT-causes-faint path in
+  // status.ts's tickStatusEffects).
   defender.fainted = true;
   defender.finishingPool = FINISHING_POOL_FRACTION * defender.maxHp;
+  defender.status = undefined;
   log?.record({ kind: "fainted", tick: world.tick, agentId: defender.id, species: defender.species, pos: defender.pos });
   return false; // not a true death yet
 }

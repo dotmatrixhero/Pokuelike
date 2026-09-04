@@ -35,8 +35,8 @@ grepping for "needs" across the whole file.
 | Position-swap (two agents exchange tiles in one action) | Bodyblock | Not started |
 | Cross-agent effects (a move's hit affects an ally, not just the target) | Vine Link, Nurturing Vines, Rally Charge, Warning Lash | Not started |
 | Multi-target/AoE resolution (apply a move to every agent within its resolved shape, not one target) | Growl (its entire premise), Firestorm, Ring of Fire's full fantasy, Boulder Toss/Skipping Stone | Not started — the biggest single gap; see "The sim/combat boundary" in DESIGN.md |
-| Persistent stat stages (`Agent`-level Attack/Defense/etc. modifiers, wired into `calculateDamage`) | Growl specifically (`statStageMultiplier` already exists in combat.ts as a pure function — nothing calls it against persistent agent state yet) | Not started |
-| Status-effect system (burn/poison DOT, root/paralysis actually doing something) | Every `statusChance` field shipped so far (Ember's burn, Constrict, etc.) — all currently idle numbers | Not started — see "Status effects" section below |
+| Persistent stat stages (`Agent`-level Attack/Defense/etc. modifiers, settable by a move, lasting until cured — distinct from burn's one-off computed halving, which just derives a stage from `agent.status` fresh at each `calculateDamage` call rather than storing one) | Growl specifically (`statStageMultiplier` already exists in combat.ts as a pure function; burn now calls it, but from a computed value, not a stored `Agent.statStages` field) | Not started |
+| Status-effect system (burn/poison DOT, paralysis/sleep/freeze) | Ember's/Flamethrower's burn chance, previously idle | **Shipped** — see DESIGN.md's "Status effects" section. Constrict's designed root effect still needs a sixth `StatusKind` (`"root"`), not modeled yet |
 
 ## Why status effects and environmental moves are two different systems
 
@@ -57,65 +57,7 @@ trigger paths, not one unified "use a move" abstraction:
 
 ## Status effects
 
-**Data model.** `Agent.status?: { kind: StatusKind; ticksRemaining?:
-number }`, where `StatusKind` is `"burn" | "poison" | "paralysis" |
-"sleep" | "freeze"`. Mainline-real invariant: an agent carries at most one
-major status at a time. `ticksRemaining` only matters for sleep/freeze
-(bounded duration); burn/poison/paralysis persist until their own clear
-condition (see below) — no item/ability system exists in this sim to cure
-them early.
-
-**Which move causes which status** needs hand-curation, the same way
-`EGG_GROUPS_BY_BASE_KEY` was: the *generated* move dex only captured that
-a move has a `"StatusEffectAttr"` tag, not which status it inflicts (that
-argument lived in a PokeRogue constructor call the importer didn't
-parse). So `MoveSpec` gains one more optional field, `statusKind?:
-StatusKind`, set by hand only on the curated roster in
-`packages/data/src/moves.ts` — e.g. `ember`/`flamethrower` → `"burn"`.
-Round out real coverage with one or two more real inflicters (Thunder
-Wave → `"paralysis"`, Poison Sting → `"poison"`) rather than inventing
-anything not backed by the actual dex.
-
-**Application**: in `resolveHit`, right where `maybeGrantHitSkillPoint`
-already piggybacks on a landed, damaging hit — if `move.statusChance`
-rolls, `defender` has no `status` yet, and `defender.types` don't grant
-real mainline immunity for that kind (Fire can't be burned, Electric
-can't be paralyzed, Poison/Steel can't be poisoned, Ice can't be frozen —
-free, since `defender.types` is already right there), set
-`defender.status`. Skip on a hit that was itself the killing blow — no
-point statusing a corpse.
-
-**Resolution reuses two patterns that already exist, not new ones:**
-- *Damage-over-time* (burn, poison) mirrors `applyHealOverTime` in
-  reverse — a fixed fraction of `maxHp` (mainline-scale: 1/16 burn, 1/8
-  poison) taken every tick in `tickAgentNeeds` (the always-runs path).
-  Burn additionally halves effective Attack for the duration. Status
-  damage that brings HP to 0 **faints, it does not kill outright** — same
-  fainted/`finishingPool` pipeline `resolveHit` already uses.
-- *Skip-the-action-tick* (paralysis, sleep, freeze) is the same shape as
-  the existing `if (agent.fainted) return;` / `if (agent.beingCarriedBy)
-  return;` early returns already at the top of `tickAgentAction` — three
-  more entries in that list. Paralysis rolls a chance (mainline: 25%) to
-  skip on top of a genuine speed cut for the duration, stacking with
-  `effectiveSpeed`'s existing injury-based multiplier (support.ts), not
-  replacing it. Freeze rolls a per-tick thaw chance (mainline: ~20%); a
-  Fire-type hit connecting while frozen thaws it instantly. Sleep gets a
-  random bounded duration decided at onset — needs its own tuned
-  `SLEEP_TICKS_MIN/MAX` (this sim's ticks are finer-grained than mainline
-  turns, so a literal "1-3 turns" doesn't transfer directly).
-- **Decided directly, not left open**: burn/poison have no separate
-  duration or cure — they deal damage every tick until the DOT itself
-  causes a faint, exactly like getting hit does. `defender.status` clears
-  the instant it faints, same tick, and ordinary recovery
-  (`applyHealOverTime`/`maybeRecoverFromFaint` in support.ts) takes over
-  from there with zero new code. Mechanically identical to how a normal
-  attack already works — burn/poison are just "damage that lands on its
-  own every tick instead of only when someone's swinging at you."
-
-**New events**: `statusInflicted` (kind, agentId, species, inflictedBy)
-and `statusCleared` (kind, agentId, reason: `"woke" | "thawed" | "died"`
-— no `"expired"`/`"healedFully"` needed now that burn/poison have no
-independent duration).
+**Shipped** — see DESIGN.md's "Status effects: burn, poison, paralysis, sleep, freeze" section for the full writeup (data model, application, resolution, confirmed working end-to-end). Kept here only as a pointer: the roster currently has real inflicters for burn only (Ember/Flamethrower); paralysis/poison/sleep/freeze coverage is real content for whichever future move actually causes one — Vine Whip's designed Constrict node (a `"root"` effect, not one of the five kinds modeled yet) is the natural next case, not Thunder Wave/Poison Sting (inventing moves not yet in the curated roster, which the original draft here suggested — narrowed to "a move already being built" instead).
 
 ## Environmental utility moves
 
@@ -733,7 +675,7 @@ piercing-hits-everyone part, though the plain reach increase is live).
    general) can reuse.
 4. **Dig-to-escape** — meaningfully changes prey survival odds, easy to
    verify with a before/after real-run comparison.
-5. Burn/poison (the DOT half of status effects) — reuses
-   `applyHealOverTime`'s shape almost exactly, and unlocks Aromatherapy/
-   Safeguard's counterplay once it exists.
+5. ~~Burn/poison (the DOT half of status effects)~~ — **done**, see
+   DESIGN.md's "Status effects" section; unlocks Aromatherapy/Safeguard's
+   counterplay whenever those get built.
 6. Everything else, roughly in the order listed above within each round.

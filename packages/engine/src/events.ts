@@ -1,4 +1,4 @@
-import type { Agent, BehaviorKind, Layer, MigrationReason, Vec2, WeatherType, World } from "./types.js";
+import type { Agent, BehaviorKind, Layer, MigrationReason, StatusKind, Vec2, WeatherType, World } from "./types.js";
 import type { PokemonType } from "./typing.js";
 
 export type SimEvent =
@@ -239,6 +239,24 @@ export type SimEvent =
       /** Rounded cell center at the moment this fired — narrative color, not a precise hitbox. */
       center: Vec2;
       radius: number;
+    }
+  | {
+      kind: "statusInflicted";
+      tick: number;
+      agentId: string;
+      species: string;
+      statusKind: StatusKind;
+      /** The agent whose landed hit caused this — see `maybeInflictStatus` (status.ts). */
+      inflictedBy: string;
+    }
+  | {
+      kind: "statusCleared";
+      tick: number;
+      agentId: string;
+      species: string;
+      statusKind: StatusKind;
+      /** Sleep's duration running out, or freeze's per-tick/fire-hit thaw. A faint (burn/poison DOT or any other cause) clears status silently — the "fainted" event itself narrates that, no separate reason needed here. */
+      reason: "woke" | "thawed";
     };
 
 /**

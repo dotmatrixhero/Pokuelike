@@ -3295,6 +3295,79 @@ range or tempo at all.
   worth picking *for*, not just a bigger number. Scoped out for now rather
   than guessed at ahead of any move that would actually use it.
 
+## Status effects: burn, poison, paralysis, sleep, freeze
+
+The first real consumer of `MoveSpec.statusChance`, which had sat inert
+since the type-chart/move-overhaul work. `Agent.status?: { kind:
+StatusKind; ticksRemaining?: number }` — at most one status at a time,
+mainline-real — is set on a landed, damaging, non-killing hit (`resolveHit`
+in predation.ts, right where `maybeGrantHitSkillPoint` already piggybacks
+on the same hit), gated by the move's own `statusKind`/`statusChance`,
+real mainline type immunities (Fire can't burn, Electric can't be
+paralyzed, Poison/Steel can't be poisoned, Ice can't freeze), and "already
+has a status" (no stacking). Lives in a new `status.ts`, kept separate from
+`predation.ts`/`needs.ts` the same way `weather.ts`/`daynight.ts` are their
+own files rather than folded into the systems that consume them.
+
+- **Burn/poison** are damage-over-time: a fixed fraction of `maxHp` (1/16
+  burn, 1/8 poison) every tick, applied in `tickStatusEffects`, called from
+  `tickAgentNeeds`'s always-runs path (same slot as `tickCooldowns`) so a
+  statused agent keeps ticking down even on ticks it doesn't act. Reaching
+  0 HP faints, exactly like a normal attack's own faint/finishing-pool
+  pipeline — DOT never kills outright. No independent duration or cure
+  (no item/ability system exists in this sim to grant one); a status
+  clears the instant its owner faints, for any reason, mainline-real
+  (fainting always cures status) — implemented in both `resolveHit`'s own
+  faint transition and `tickStatusEffects`'s DOT-causes-faint path, so it's
+  consistent regardless of which one actually causes the faint.
+- **Burn additionally halves the burned agent's own physical Attack** when
+  it's the attacker — reuses `calculateDamage`'s existing (previously
+  unconsumed by any real caller) stat-stage machinery rather than inventing
+  a second damage multiplier: `resolveHit` passes `statStages: { attack:
+  isBurned(attacker) ? -2 : 0 }` when building the attacker's
+  `CombatantOffense`, and stage -2 is exactly a 50% multiplier
+  (`statStageMultiplier(-2) === 2/(2+2)`). `calculateDamage` itself needed
+  zero changes.
+- **Paralysis** is modeled as two independent effects, matching mainline's
+  own two independent effects rather than approximating both with one
+  mechanism: a permanent Speed cut (`PARALYSIS_SPEED_MULTIPLIER = 0.5`,
+  composed into `actionSpeedOf` in simulation.ts alongside the existing
+  terrain/off-hours/cold-snap multipliers) plus a separate 25% chance
+  (`PARALYSIS_SKIP_CHANCE`) to skip the action tick outright even when the
+  agent does get one — a new early-return guard in `tickAgentAction`
+  (needs.ts), same shape as the existing `fainted`/`beingCarriedBy` guards.
+- **Sleep/freeze** are the "skip the action tick" shape too (same new
+  guards in `tickAgentAction`), each with its own end condition ticked in
+  `tickStatusEffects`: sleep gets a bounded random duration at onset
+  (`SLEEP_TICKS_MIN/MAX = 10-30` — this sim's ticks are far finer-grained
+  than mainline turns, so "1-3 turns" doesn't transfer directly) and wakes
+  when it runs out; freeze rolls a flat 20% thaw chance every tick
+  (`FREEZE_THAW_CHANCE`), and a landed Fire-type hit thaws it instantly
+  regardless of that roll (`maybeThawOnFireHit`, called in `resolveHit`
+  independent of whether the hit's own move inflicts anything itself).
+- **New events**: `statusInflicted` (kind, agentId, inflictedBy) and
+  `statusCleared` (kind, agentId, reason: `"woke" | "thawed"` — a faint
+  clears status silently, the `fainted` event itself narrates that, no
+  third reason needed).
+- **Hand-curated inflicters, not invented ones**: `MoveSpec.statusKind` is
+  set by hand only where the actual dex backs it — `ember`/`flamethrower`
+  → `"burn"` (both already had `statusChance: 0.1` sitting inert). No new
+  moves added to reach paralysis/poison/sleep/freeze coverage; that's
+  real content for whichever move-tree work adds a move that actually
+  causes one of those (Constrict's designed root effect in
+  MOVES_DESIGN.md's Vine Whip tree is the natural next real inflicter,
+  once a `"root"` kind — not yet one of the five modeled — gets added).
+- **Confirmed working end-to-end**, not just unit-tested: a real
+  Charmander (via `ensureCombatProfile`) fighting a real Bulbasaur through
+  actual `tickWorld` calls showed `statusInflicted` firing on a landed,
+  non-killing Ember hit, the target's HP dropping between fights by more
+  than the hit damage alone (the burn DOT tick), and `status` clearing the
+  moment the target fainted. **Demo-world caveat**, same shape as the
+  specialization/moveRespecced one: Charmander isn't currently spawned in
+  `packages/data/src/scenario.ts`, so a real run of the demo world won't
+  show `statusInflicted` events yet — confirmed via a standalone script
+  instead, same as the earlier `moveRespecced` verification.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

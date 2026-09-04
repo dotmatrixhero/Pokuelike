@@ -180,6 +180,7 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("EMBER"),
     cooldownTicks: 1,
     statusChance: 0.1,
+    statusKind: "burn",
     range: { min: 0, max: 1 },
     // Two real, independent 3-tier branches (no cross-branch prerequisite —
     // each is a complete build on its own) rather than one 2-node chain: the
@@ -255,6 +256,7 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("FLAMETHROWER"),
     cooldownTicks: 3,
     statusChance: 0.1,
+    statusKind: "burn",
     range: { min: 0, max: 4 },
   },
   peck: {

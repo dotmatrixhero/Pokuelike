@@ -56,6 +56,10 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] day breaks (light ${event.lightLevel.toFixed(2)})`;
     case "weatherChanged":
       return `[tick ${event.tick}] ${event.weatherType} ${event.phase === "began" ? "moves in" : "clears"} near (${event.center.x},${event.center.y}), radius ${event.radius}`;
+    case "statusInflicted":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) was ${event.statusKind === "burn" ? "burned" : event.statusKind === "poison" ? "poisoned" : event.statusKind} by ${event.inflictedBy}`;
+    case "statusCleared":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) ${event.reason} (${event.statusKind})`;
   }
 }
 

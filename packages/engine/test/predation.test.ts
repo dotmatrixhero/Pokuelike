@@ -716,3 +716,57 @@ describe("obstacles block combat move lines", () => {
     expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
   });
 });
+
+describe("status effects wired into real combat (resolveHit)", () => {
+  const BURNING_MOVE: MoveSpec = { ...TEST_MOVE, id: "burning-move", statusChance: 1, statusKind: "burn" };
+
+  it("a landed, non-killing hit inflicts the move's status on the defender", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 }); // survives FALLBACK_DAMAGE (1)
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [BURNING_MOVE] });
+    world.agents.push(hunter, target); // predator ticks first, strikes before prey can flee
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    expect(target.status).toEqual({ kind: "burn", ticksRemaining: undefined });
+    expect(log.events).toContainEqual(
+      expect.objectContaining({ kind: "statusInflicted", agentId: "bulbasaur-0", statusKind: "burn", inflictedBy: "scyther-0" })
+    );
+  });
+
+  it("a fire-typed target can't be burned even on a guaranteed roll", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10, types: ["fire"] });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [BURNING_MOVE] });
+    world.agents.push(hunter, target);
+
+    tickWorld(world, undefined, RULES);
+
+    expect(target.status).toBeUndefined();
+  });
+
+  it("burn halves the burned attacker's physical damage output (via calculateDamage's stat stages)", () => {
+    const attackerStats = { maxHp: 100, attack: 50, defense: 30, spAttack: 30, spDefense: 30, speed: 40 }; // speed >= ACTION_THRESHOLD so it acts on the very first tick
+    const defenderStats = { maxHp: 100, attack: 30, defense: 30, spAttack: 30, spDefense: 30, speed: 10 };
+
+    const burnedWorld = createWorld(10, 10);
+    const burnedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [TEST_MOVE] });
+    burnedAttacker.status = { kind: "burn" };
+    const victim1 = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...defenderStats } });
+    burnedWorld.agents.push(burnedAttacker, victim1);
+    const burnedLog = new EventLog();
+    tickWorld(burnedWorld, burnedLog, RULES);
+    const burnedDamage = burnedLog.events.find((e) => e.kind === "fought")! as Extract<(typeof burnedLog.events)[number], { kind: "fought" }>;
+
+    const healthyWorld = createWorld(10, 10);
+    const healthyAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [TEST_MOVE] });
+    const victim2 = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...defenderStats } });
+    healthyWorld.agents.push(healthyAttacker, victim2);
+    const healthyLog = new EventLog();
+    tickWorld(healthyWorld, healthyLog, RULES);
+    const healthyDamage = healthyLog.events.find((e) => e.kind === "fought")! as Extract<(typeof healthyLog.events)[number], { kind: "fought" }>;
+
+    expect(burnedDamage.damage).toBeLessThan(healthyDamage.damage);
+  });
+});

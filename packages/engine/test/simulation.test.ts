@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createWorld, setTile } from "../src/world.js";
 import { createNeeds, tickAgentNeeds } from "../src/needs.js";
-import { tickWorld, accumulateActionEnergy, ACTION_THRESHOLD } from "../src/simulation.js";
+import { tickWorld, accumulateActionEnergy, actionSpeedOf, ACTION_THRESHOLD } from "../src/simulation.js";
 import { useMove, tickCooldowns } from "../src/combat.js";
 import { EventLog } from "../src/events.js";
 import { DAY_LENGTH_TICKS, isNight, lightLevel } from "../src/daynight.js";
@@ -63,6 +63,20 @@ describe("accumulateActionEnergy", () => {
     world.agents.push(agent);
     tickWorld(world);
     expect(agent.actionEnergy).toBe(0); // crossed exactly once, remainder is 0
+  });
+});
+
+describe("actionSpeedOf: paralysis halves effective Speed", () => {
+  it("a paralyzed agent's action speed is half of the same agent unparalyzed", () => {
+    const world = createWorld(5, 1);
+    const healthy = makeAgent({ stats: { maxHp: 50, attack: 10, defense: 10, spAttack: 10, spDefense: 10, speed: 20 }, hp: 50, maxHp: 50 });
+    const paralyzed = makeAgent({
+      stats: { maxHp: 50, attack: 10, defense: 10, spAttack: 10, spDefense: 10, speed: 20 },
+      hp: 50,
+      maxHp: 50,
+      status: { kind: "paralysis" },
+    });
+    expect(actionSpeedOf(world, paralyzed, 0)).toBeCloseTo(actionSpeedOf(world, healthy, 0) / 2);
   });
 });
 

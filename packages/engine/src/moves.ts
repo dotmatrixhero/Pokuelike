@@ -1,4 +1,4 @@
-import type { Agent, Vec2 } from "./types.js";
+import type { Agent, StatusKind, Vec2 } from "./types.js";
 import type { Disposition } from "./nature.js";
 import type { PokemonType } from "./typing.js";
 
@@ -49,8 +49,21 @@ export interface MoveSpec {
   accuracy: number;
   /** Ticks before this move can be used again. */
   cooldownTicks: number;
-  /** e.g. burn chance. Not consumed by anything yet (no status-effect system) — see TODO. */
+  /**
+   * Chance (0-1) that a landed, damaging, non-killing hit inflicts
+   * `statusKind` on the defender — rolled in `resolveHit` (predation.ts) via
+   * `maybeInflictStatus` (status.ts), right where skill points already
+   * piggyback on the same hit. Meaningless without `statusKind` set.
+   */
   statusChance?: number;
+  /**
+   * Which status this move can inflict, if `statusChance` rolls. Hand-set
+   * only on the curated roster (`packages/data/src/moves.ts`) — the
+   * generated dex only records *that* a mainline move has a status effect,
+   * not which one (see DESIGN.md's "Status effects" section). Absent =
+   * `statusChance` (if set) is inert, same as before this field existed.
+   */
+  statusKind?: StatusKind;
   /**
    * Explicit cast range. Optional so specs that predate this field (test
    * fixtures, hand-rolled MoveSpec literals) keep working unchanged —

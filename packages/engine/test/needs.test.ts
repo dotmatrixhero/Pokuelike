@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorld, setTile, tileAt } from "../src/world.js";
-import { ageMortalityChance, createNeeds, decayNeeds, tickAgent, tickAgentNeeds } from "../src/needs.js";
+import { ageMortalityChance, createNeeds, decayNeeds, tickAgent, tickAgentAction, tickAgentNeeds } from "../src/needs.js";
 import { CONSUME_STOCK_AMOUNT } from "../src/flora.js";
 import { EventLog } from "../src/events.js";
 import type { Agent } from "../src/types.js";
@@ -333,5 +333,35 @@ describe("migration on unreachable resources", () => {
 
     expect(agent.behavior).toBe("relocate");
     expect(agent.relocateTarget).toBeDefined();
+  });
+});
+
+describe("tickAgentAction: status-effect action-tick guards", () => {
+  it("an asleep agent takes no action at all", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ pos: { x: 0, y: 0 }, status: { kind: "sleep", ticksRemaining: 5 }, needs: createNeeds({ thirst: 0.1 }) });
+    setTile(world, "surface", 4, 0, "water");
+    tickAgentAction(world, agent);
+    expect(agent.pos).toEqual({ x: 0, y: 0 }); // never moved toward water
+  });
+
+  it("a frozen agent takes no action at all", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ pos: { x: 0, y: 0 }, status: { kind: "freeze" }, needs: createNeeds({ thirst: 0.1 }) });
+    setTile(world, "surface", 4, 0, "water");
+    tickAgentAction(world, agent);
+    expect(agent.pos).toEqual({ x: 0, y: 0 });
+  });
+
+  it("a paralyzed agent skips this action tick on a failed roll, acts normally on a passed one", () => {
+    const world = createWorld(5, 5);
+    setTile(world, "surface", 4, 0, "water");
+    const skipped = makeAgent({ pos: { x: 0, y: 0 }, status: { kind: "paralysis" }, needs: createNeeds({ thirst: 0.1 }) });
+    tickAgentAction(world, skipped, undefined, undefined, undefined, () => 0); // 0 < PARALYSIS_SKIP_CHANCE
+    expect(skipped.pos).toEqual({ x: 0, y: 0 });
+
+    const acted = makeAgent({ pos: { x: 0, y: 0 }, status: { kind: "paralysis" }, needs: createNeeds({ thirst: 0.1 }) });
+    tickAgentAction(world, acted, undefined, undefined, undefined, () => 0.99); // not < PARALYSIS_SKIP_CHANCE
+    expect(acted.pos).not.toEqual({ x: 0, y: 0 });
   });
 });

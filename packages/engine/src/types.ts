@@ -9,6 +9,15 @@ export interface Vec2 {
 }
 
 /**
+ * The five mainline major status conditions this sim actually models.
+ * Mainline-real invariant: an agent carries at most one of these at a time
+ * (inflicting a new one on an already-statused agent is a no-op — see
+ * `maybeInflictStatus` in status.ts). See DESIGN.md's "Status effects"
+ * section.
+ */
+export type StatusKind = "burn" | "poison" | "paralysis" | "sleep" | "freeze";
+
+/**
  * Why a herd is (or was) migrating — see herdMigration.ts/DESIGN.md's
  * "Dynamics that move a content herd" Phase 1 and Phase 3. `"scarcity"` is
  * the original (Phase 0) trigger, spelled `"food scarcity"` back then;
@@ -331,6 +340,17 @@ export interface Agent {
   finishingPool?: number;
   /** World.tick a true kill happened, for the corpse-persistence pruning window in simulation.ts. */
   diedAtTick?: number;
+  /**
+   * The one major status condition this agent currently carries, if any —
+   * see `StatusKind` and status.ts. `ticksRemaining` only matters for
+   * sleep/freeze (bounded duration, decremented in `tickStatusEffects`);
+   * burn/poison/paralysis have no independent duration or cure in this sim
+   * (no item/ability system exists to cure them early) — they persist until
+   * the agent faints, at which point this is cleared unconditionally, same
+   * as every other status kind (mainline-real: fainting always cures
+   * status).
+   */
+  status?: { kind: StatusKind; ticksRemaining?: number };
   /** General item slots — simple food units and/or ITEM_DEX entries, each carrying its own weight. Capped by `carryCapacityOf` (support.ts). */
   inventory?: InventoryItem[];
   /** The id of a fully-fainted ally this agent is currently carrying, if any. Mutually exclusive in practice with `beingCarriedBy` on the same agent. */
