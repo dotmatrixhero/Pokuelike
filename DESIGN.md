@@ -3148,6 +3148,62 @@ the trigger logic itself (every trigger, including the never-observed ones,
 is directly confirmed correct via unit tests that don't depend on the
 scenario's luck).
 
+## Natal dispersal: real biology's actual fix for the inbreeding bottleneck
+
+Decided, not built yet. Confirmed by direct A/B test on seed 42 (same seed,
+3000 ticks, only difference: `isRelated` disabled): the bulbasaur population
+reached 65 with inbreeding avoidance active vs. 98 without it, and the gap
+is worse early — 9 vs. 40 by tick 1800. With only 2 founding pairs, the
+relatedness check (parent/offspring, siblings, grandparent/grandchild)
+genuinely starves the mate pool for the first ~1800 ticks of a 3000-tick
+run, which is most of why a fresh run reads as uneventful for a long time.
+
+The instinct to just add more founders was rejected in favor of the
+actually-correct fix, confirmed against how real biology handles this: real
+animals don't do genealogical bookkeeping — they avoid inbreeding
+behaviorally (kin recognition, not finding natal-group-mates attractive),
+and the real mechanism that keeps gene pools mixed is **natal dispersal**:
+a maturing individual leaves its birth group and finds mates elsewhere,
+rather than every individual doing a stricter mate-search within a fixed
+population. This was already pitched, unbuilt, in TODO.md's Culture
+section ("Evolution as a dispersal trigger") — this locks a concrete
+version of it, triggered by more than just evolving.
+
+- **Two triggers, not one.** (1) A disposition-weighted chance to disperse
+  at maturity (age crosses `MATURITY_AGE`) or on evolving — bolder/less
+  sociable individuals disperse more readily, reusing the existing
+  Disposition axes, matching the original TODO pitch's flavor. (2) A
+  **guaranteed fallback**: an agent that's been mature for a long sustained
+  stretch with zero eligible mates found nearby (no unrelated, opposite-
+  sex, mature candidate within its search radius) disperses regardless of
+  the disposition roll. (1) is the biologically-flavored trait; (2) is what
+  actually guarantees the mechanical bottleneck gets solved even for a
+  disposition roll that never favors it — don't ship only the flavorful
+  version and call the real problem fixed by luck.
+- **Dispersal is a real relocation, not a stat change.** A dispersing agent
+  walks to a distant point (reusing `migrate()`/`findRandomWalkableTile`'s
+  existing "walk to a random distant point" utility, or resource-aware
+  scoring from `herdMigration.ts` if that's a clean fit) and, on arrival:
+  joins an existing other herd of its species if one is found nearby, or
+  **founds a brand new herd** (a fresh, unique `herdId`) if none is. This
+  is what actually pays off the mechanic: over a long run, a single
+  founding herd can seed multiple independent lineages across the map,
+  which can later reconverge (their descendants are unrelated by the
+  existing `isRelated` check, since it only tracks direct genealogy, not
+  herd membership) or trigger the already-built territorial-displacement
+  migration trigger if two same-species herds end up too close. Real
+  systemic reuse, not a new parallel mechanic.
+- **New `dispersed` event** (agentId, species, fromHerd, toHerd, reason:
+  `"matured"` | `"no_eligible_mates"`) — another real narrative beat for
+  the log ("bulbasaur-14 left the herd and founded a new lineage near the
+  forest's edge").
+- **Explicitly still open**: exact disposition-to-dispersal-chance mapping
+  and the "sustained no mates found" duration are sim-original tuning
+  guesses like everything else here, to validate against a real run;
+  whether dispersal should be sex-biased (many real species disperse one
+  sex more than the other) is a reasonable future refinement, not required
+  for this pass — an unbiased chance is a fine first cut.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays
