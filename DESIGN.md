@@ -3555,6 +3555,121 @@ real seed-42 run showed:
   combat/practice specifically to gain exp/skill points, distinct from
   predation's existing lethal combat.
 
+## Urgency-based need priority, extended thirst margin, and sleep
+
+Decided, not built yet. Three related asks, tackled together since they
+all touch the same `needs.ts`/`predation.ts` priority machinery.
+
+### 1. Dispersal should pause for urgent needs, like shelter-building does
+
+Direct diagnosis, confirmed by reading the last-committed `needs.ts`
+directly (not a guess): agents observed dying of thirst standing right
+next to water turned out to be a dispersal side effect, not a crowding or
+water-scarcity problem — natal dispersal (`dispersal.ts`) is explicitly
+documented today as "commits no matter what," overriding hunger/thirst/
+mate-seeking for the full multi-hundred-tick relocation walk, by design
+(see the "Natal dispersal" section above — that unconditional commitment
+was itself a deliberate fix for shelter-building's own earlier failure
+mode). Direct instruction: **"needs should be able to jump queue in
+priority, definitely based on urgency."** Fix: give dispersal the exact
+pausable shape `tickAgentAction` already uses for shelter-building —
+checked fresh every tick via `chooseBehavior(agent.needs)`, continuing the
+walk (`applyDispersal`) only while `"idle"`, otherwise falling through to
+ordinary needs-driven behavior for as many ticks as it takes to resolve,
+with `agent.dispersalTarget` left untouched so the walk resumes exactly
+where it left off once the agent is safe again. Doesn't touch
+`maybeTriggerDispersal`'s own trigger conditions (level gate, chance rolls,
+fallback timer) — only what happens once a dispersal is already underway.
+
+### 2. Extend thirst's survival margin, kept linear
+
+Separate, smaller ask on top of the fix above: even after dispersal stops
+starving agents mid-walk, thirst's own budget is much tighter than
+hunger's. Hunger's curve (see its section above) takes ~213 ticks to fall
+from full to 0, then `STARVATION_GRACE_TICKS` (100) before death — ~313
+ticks total. Thirst, still flat/linear per direct instruction ("thirst,
+maybe can be closer to linear... it stays linear"), currently empties in
+~67 ticks (`DECAY_PER_TICK.thirst = 0.015`) then the same 100-tick grace —
+only ~167 ticks total, roughly half of hunger's budget for no particular
+reason. Fix: slow the flat rate to `0.010` (full-to-empty ~100 ticks) and
+give thirst its own grace period, `THIRST_STARVATION_GRACE_TICKS = 150`
+(hunger keeps the existing 100) — ~250 ticks total, closing most of the
+gap without touching hunger's curve or thirst's linearity.
+
+### 3. Sleep: a real vulnerable-rest state, not just an idle animation
+
+Direct ask, verbatim: *"lets add sleeping. make it so it replenishes hp and
+pp more, but you're sitting duck. sometimes herd protects each other and
+can wake each other up. hunger and thirst drain is dramatically reduced
+while sleeping. long sleep can give xp."* ("pp" reads here as move
+cooldowns, this sim's actual stand-in for mainline PP — there's no PP
+resource to restore.)
+
+This finally gives `Needs.energy` (`0 = exhausted, 1 = rested`) a real
+purpose — it's existed on every agent since day one, decays every tick
+(`DECAY_PER_TICK.energy = 0.005`), and until now nothing ever restored it
+or read it for a decision. New `"sleep"` `BehaviorKind`, new `Agent` fields
+`asleep?: boolean` and `sleepTicks?: number` (mirrors the
+`dispersalTarget`/`shelterTarget` in-progress-task pattern — existence of
+real progress state, not just a behavior label, since `behavior` itself
+gets recomputed and overwritten most ticks).
+
+**Falling asleep**: an otherwise-idle agent (`chooseBehavior(needs) ===
+"idle"` — not hungry, thirsty, or mate-driven, same gate shelter-building's
+trigger already uses) whose `energy` has dropped below a threshold, with no
+threat currently detectable nearby (don't fall asleep in a predator's face),
+sets `asleep = true` and does nothing else that tick. Checked in the same
+tier as shelter-building/exploration in `tickAgentAction` — after survival
+instincts, carrying, looting, herd-support, dispersal, and shelter all get
+their existing first-refusal priority.
+
+**While asleep** (checked fresh each action tick, same "drop out the
+instant something wins priority" shape as shelter/dispersal above):
+- Two conditions wake the agent and let it act normally the same tick,
+  falling through to ordinary behavior rather than wasting a tick:
+  1. `chooseBehavior(needs) !== "idle"` — hunger, thirst, or mate-drive
+     became urgent. Sleep never lets an agent starve in its sleep.
+  2. A threat is within detection range **and** an awake, conscious
+     herd-mate is close enough to notice and rouse it — the "herd protects
+     each other, can wake each other up" ask. Deliberately not a random
+     roll: whether a watcher happens to be nearby is already emergent from
+     herd cohesion's real positioning, the same "chance without an
+     invented dice roll" approach `applyPredationInstincts`'s own
+     mob-fighting already uses.
+- Otherwise (safe, or a threat is near with no one to notice) the agent
+  stays asleep and does nothing — no movement, no attack, no flee. This is
+  the "sitting duck" half: `applyPredationInstincts`'s own self-defense
+  branches (critically-hurt flee, general threat flee/mob, hunting for
+  food) are skipped entirely while `agent.asleep` is true, so a sleeping
+  agent that IS attacked will not flee or fight back on its own. Its
+  existing guardian-intervention branch (defending a *different*,
+  endangered herd-mate) is untouched and still fires even while the
+  guardian itself is asleep — but firing it also clears the guardian's own
+  `asleep` flag, since actively fighting isn't consistent with being
+  asleep.
+- Needs-decay (`tickAgentNeeds`, runs every world tick regardless of the
+  Speed-gated action economy, same as hunger/thirst/heal already do) gets
+  three sleep-specific effects while `asleep` is true: hunger/thirst decay
+  multiplied by `SLEEP_NEEDS_DECAY_MULTIPLIER` (dramatically reduced, not
+  paused entirely — still real cost to oversleeping); `energy` rises
+  instead of falling; heal-over-time (`applyHealOverTime`, support.ts) gets
+  a multiplier on top of its existing rate; move cooldowns
+  (`tickCooldowns`, combat.ts) tick down faster.
+- `sleepTicks` counts consecutive asleep ticks; once it crosses a
+  long-sleep threshold, grant a one-time exp bonus (same one-shot-flag
+  shape leveling.ts already uses elsewhere, e.g.
+  `pendingLevelDispersalCheck`) rather than a repeating per-tick trickle.
+- New `fellAsleep`/`wokeUp` event kinds for the log, matching every other
+  behavior-transition event's shape.
+
+Real run validation still needed once built: does sleep actually get used
+in practice (an agent needs to reach the energy threshold at all — nothing
+currently drains `energy` fast enough for that to be confirmed), and does
+letting predators find easy sleeping meals change population dynamics
+meaningfully. Report findings honestly either way, per this project's
+standing rule — don't claim a mechanic "works" without a real run showing
+it firing.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays
