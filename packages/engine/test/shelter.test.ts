@@ -71,6 +71,19 @@ describe("maybeTriggerShelterBuilding", () => {
     expect(manhattan(a.pos, a.shelterTarget!)).toBeGreaterThanOrEqual(SHELTER_MIN_BUILD_DISTANCE);
   });
 
+  it("does not trigger for a merely-idle agent that isn't genuinely comfortable yet (direct feedback: shelter is a nice-to-have)", () => {
+    const world = createWorld(100, 100);
+    // Above chooseBehavior's 0.7 "idle" cutoff (so needs.ts would call this
+    // at all) but below SHELTER_COMFORT_THRESHOLD (0.85) -- exactly the gap
+    // this gate exists to close.
+    const a = agent("barely-idle", { pos: { x: 50, y: 50 }, needs: { hunger: 0.75, thirst: 0.75, energy: 1, mateDrive: 0 } });
+    world.agents.push(a);
+
+    maybeTriggerShelterBuilding(world, a, seededRng(3));
+
+    expect(a.shelterTarget).toBeUndefined();
+  });
+
   it("does not trigger (or re-pick) while a shelter task is already in progress", () => {
     const world = createWorld(100, 100);
     const a = agent("mid-task", { pos: { x: 50, y: 50 }, shelterTarget: { x: 10, y: 10 } });

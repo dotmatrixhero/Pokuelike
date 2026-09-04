@@ -18,9 +18,10 @@ import { herdCentroid } from "./herding.js";
  * instruction — "reuse both existing mechanisms rather than inventing new
  * ones" applies just as much to the travel/investment shape as to the
  * concealment/storm-exposure payoffs):
- * 1. `maybeTriggerShelterBuilding` — an eligible, otherwise-idle agent whose
- *    herd has no shelter tile within `SHELTER_SEARCH_RADIUS` picks a build
- *    site at least `SHELTER_MIN_BUILD_DISTANCE` away from its *own* current
+ * 1. `maybeTriggerShelterBuilding` — an eligible, genuinely comfortable
+ *    agent (`SHELTER_COMFORT_THRESHOLD`, well past merely-idle) whose herd
+ *    has no shelter tile within `SHELTER_SEARCH_RADIUS` picks a build site
+ *    at least `SHELTER_MIN_BUILD_DISTANCE` away from its *own* current
  *    position (not the herd centroid) so this specific agent actually has
  *    to travel, not just "the herd already has one nearby."
  * 2. `applyShelterBuilding`'s travel phase — steps toward `shelterTarget`
@@ -82,6 +83,22 @@ export const SHELTER_MIN_BUILD_DISTANCE = 8;
 
 /** How many random candidate sites to try before giving up for this tick — mirrors `migration.ts`'s `RELOCATE_ATTEMPTS`. */
 const SHELTER_SITE_ATTEMPTS = 10;
+
+/**
+ * Hunger/thirst floor for *triggering* a new build — direct feedback:
+ * shelter-building is "sorta a nice-to-have," so it should only be
+ * something a genuinely comfortable agent takes on, not merely one that
+ * isn't in active crisis. `needs.ts`'s ordinary "idle" behavior (the state
+ * `maybeTriggerShelterBuilding` is only ever called from) already requires
+ * hunger/thirst above `chooseBehavior`'s 0.7 urgency cutoff — this raises
+ * the bar well past that, so an agent with real but modest slack in its
+ * needs (comfortable, not starving) still waits rather than committing real
+ * travel time to something optional. Deliberately not applied to
+ * *continuing* an already-started build (`applyShelterBuilding`/needs.ts's
+ * pause-on-urgent-need logic already handles bailing out mid-build if
+ * things turn bad) — this constant only gates whether a new one starts.
+ */
+const SHELTER_COMFORT_THRESHOLD = 0.85;
 
 /**
  * Real multi-tick time investment once standing at the build site, before
@@ -154,6 +171,7 @@ function pickBuildSite(world: World, layer: Layer, from: Vec2, rng: () => number
 export function maybeTriggerShelterBuilding(world: World, agent: Agent, rng: () => number): void {
   if (agent.shelterTarget) return;
   if (!agent.buildsShelter) return;
+  if (agent.needs.hunger < SHELTER_COMFORT_THRESHOLD || agent.needs.thirst < SHELTER_COMFORT_THRESHOLD) return;
 
   const anchor = agent.herdId ? (herdCentroid(world, agent.herdId, agent.layer) ?? agent.pos) : agent.pos;
   if (hasNearbyShelter(world, agent.layer, anchor, SHELTER_SEARCH_RADIUS)) return;
