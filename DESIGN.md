@@ -5298,3 +5298,58 @@ zero behavior change to anything that doesn't opt in.
 - The population-cap's scaled-down middle zone (`POP_SOFT_CAP` to
   `POP_HARD_CAP`) is unit-tested but not yet exercised by a real multi-
   thousand-tick run that actually reaches it — see TODO.md.
+
+## Real confirmed bug: dying of thirst standing on water, fourth instance of "commits no matter what"
+
+Direct report: "I just watched bulbasaurs die of thirst while in water." Not
+a guess — traced with a real seed 20260903 run down to the exact tick,
+agent, and mechanism.
+
+**Root cause.** `applySupportMove` (support.ts, ally-targeting buff/heal
+moves) had no urgent-need escape valve of its own — unlike
+`applyPredationInstincts`'s `thirstIsUrgent` gate and dispersal/shelter-
+building's `chooseBehavior === "idle"` pause checks, it would return `true`
+(claiming the whole action tick) any time an off-cooldown support move had
+an in-range ally, full stop. Two things combined to turn this into a real
+death: (1) the skill tree lets a move reach `cooldownTicks: 0` (e.g. Tackle
+respecced through `steadfast_guard` + `herd_instinct`'s -1 cooldown, turning
+an attack move into a permanently-off-cooldown ally-buff), and (2) a
+herd-mate standing permanently adjacent (a mated pair, in the traced case).
+Once both align, `applySupportMove` returns `true` on literally every
+action tick, forever — `tickAgentAction` never reaches `chooseBehavior`,
+so the agent never re-evaluates its own hunger/thirst again. Traced agent
+(`bulbasaur-0`, evolved to Ivysaur) sat at the exact same tile for 843
+ticks rebuffing its mate's defense stat over and over while its own thirst
+ran to 0 and through the full 150-tick starvation grace period — standing
+the entire time on an actual "water" tile (confirmed via `tileAt`), exactly
+matching the report. `applyHerdSupport`'s multi-tick food-delivery errand
+had the same real gap, just less severe: it checked the deliverer's own
+needs once, when the errand started (`isFedAndWatered`), but never again
+during the walk — this is the fourth confirmed instance of this session's
+established "commits no matter what" bug class (after dispersal, shelter-
+building, and predation's relocate).
+
+**Fix.** `tickAgentAction` (needs.ts) now computes
+`needsAreUrgent = chooseBehavior(agent.needs) !== "idle"` once and passes it
+to both call sites: `applySupportMove` is skipped entirely while urgent
+(general urgency, not just thirst — neither support behavior exists to
+resolve the agent's own needs, unlike predation's hunt/relocate, so there's
+no reason to let hunger-urgency through either); `applyHerdSupport` gained
+a `needsAreUrgent` parameter that pauses an in-progress delivery errand
+(`deliverTargetId` left untouched, resumes later) the same way
+dispersal/shelter already do. `applySupportMove` itself is unchanged — the
+gate lives at the caller, matching `thirstIsUrgent`'s existing pattern.
+
+**Real-run confirmation — a large effect, not a minor one.** Same 3 seeds,
+3000 ticks, before vs. after this fix alone (on top of everything already
+in this section): seed 20260903 (this session's stubborn low-growth seed)
+went from final population 13 / 2 births / 5 near-water thirst deaths to
+final population **40 / 28 births / zero starvation deaths of any kind**;
+seed 7 went from 21 to **164**; seed 42 from 19 to 34. All three seeds:
+zero hunger deaths, zero thirst deaths. This fix likely explains a
+meaningful share of this session's earlier "population sometimes explodes,
+sometimes stays low" mystery — more than the cross-herd mate-lock fix
+alone did. New regression test in `support.test.ts` reproduces the exact
+mechanism (a zero-cooldown ally-buff move + permanently-adjacent ally +
+critical thirst) via `tickAgentAction` directly. All 594 engine tests pass,
+determinism unaffected.

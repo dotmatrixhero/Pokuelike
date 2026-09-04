@@ -404,11 +404,22 @@ function deliverFoodItem(agent: Agent): InventoryItem | undefined {
  * food item, the same "resumable multi-tick errand" pattern as `relocate` in
  * predation.ts. Returns true if this tick was spent on delivery (so the
  * caller should skip normal needs-driven behavior).
+ *
+ * `needsAreUrgent` (default false, from `chooseBehavior(agent.needs) !==
+ * "idle"` in needs.ts's `tickAgentAction`) pauses an in-progress errand
+ * exactly like dispersal/shelter-building's own pause-on-urgent-need fix —
+ * `deliverTargetId` is left untouched so the errand resumes once the
+ * deliverer is satisfied again. Before this, an errand only checked the
+ * deliverer's own needs once, at the moment it started (`isFedAndWatered`
+ * below) — never again during the walk, letting a real multi-hundred-tick
+ * delivery run straight through the deliverer's own hunger/thirst the same
+ * way the pre-fix versions of dispersal/shelter-building used to.
  */
-export function applyHerdSupport(world: World, agent: Agent, log?: EventLog): boolean {
+export function applyHerdSupport(world: World, agent: Agent, log?: EventLog, needsAreUrgent = false): boolean {
   if (!agent.herdId) return false;
 
   if (agent.deliverTargetId) {
+    if (needsAreUrgent) return false; // paused, not abandoned — deliverTargetId untouched, resumes later
     const target = world.agents.find((a) => a.id === agent.deliverTargetId);
     const targetGone = !target || target.alive === false || !isSameHerd(agent, target);
 
@@ -467,7 +478,7 @@ export function applyHerdSupport(world: World, agent: Agent, log?: EventLog): bo
   if (!hungryMate) return false;
 
   agent.deliverTargetId = hungryMate.id;
-  return applyHerdSupport(world, agent, log);
+  return applyHerdSupport(world, agent, log, needsAreUrgent);
 }
 
 // --- Ally-targeting support moves (MoveSpec.targetsAlly/allyEffect) ---

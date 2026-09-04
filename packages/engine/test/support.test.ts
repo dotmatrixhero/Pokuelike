@@ -554,4 +554,36 @@ describe("applySupportMove: ally-targeting effects", () => {
     world.agents.push(onCooldown, nearAlly);
     expect(applySupportMove(world, onCooldown, undefined)).toBe(false);
   });
+
+  it("a real confirmed death case: a zero-cooldown ally-buff move must NOT let a thirsty agent skip drinking forever", () => {
+    // Real bug found via a real seed-20260903 run: Tackle respecced into the
+    // skill tree's `steadfast_guard` node (support.ts) gains `targetsAlly`
+    // and, via `herd_instinct`'s -1 cooldown, can end up at cooldownTicks: 0
+    // — with a permanently-adjacent herd-mate, `applySupportMove` used to
+    // return true on literally every action tick forever (no urgent-need
+    // check of its own), so `tickAgentAction` never reached `chooseBehavior`
+    // — two agents were confirmed dying of thirst standing exactly on a
+    // water tile, having spent hundreds of ticks only ever rebuffing each
+    // other. This is `tickAgentAction`'s own gate (needs.ts), not
+    // `applySupportMove` itself — see the `!needsAreUrgent &&` check there.
+    const ZERO_COOLDOWN_BUFF: MoveSpec = { ...BUFF_ALLY, id: "steadfast_tackle", cooldownTicks: 0 };
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    const thirsty = makeAgent({
+      id: "thirsty",
+      pos: { x: 5, y: 5 },
+      herdId: "h1",
+      needs: createNeeds({ thirst: 0.05, hunger: 1, mateDrive: 0 }),
+      moves: [ZERO_COOLDOWN_BUFF],
+    });
+    const ally = makeAgent({ id: "ally", pos: { x: 6, y: 5 }, herdId: "h1", hp: 100, maxHp: 100 });
+    world.agents.push(thirsty, ally);
+    const log = new EventLog();
+
+    tickAgentAction(world, thirsty, log);
+
+    expect(thirsty.behavior).toBe("seekWater");
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "consumed", agentId: "thirsty", need: "thirst" }));
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "supported", supporterId: "thirsty" }));
+  });
 });

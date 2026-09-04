@@ -1526,3 +1526,23 @@ not something this pathfinding pass itself caused or is positioned to fix.
       20260903 stayed stubbornly low (2 births, was 1, final pop 13). A
       real, substantial improvement, not a full solve — worth a longer run
       or more seeds if the user wants every seed to recover, not just most.
+
+## Real bug fix: "died of thirst while in water" — see DESIGN.md
+
+- [x] Direct report, traced to a real mechanism: `applySupportMove` had no
+      urgent-need escape valve, so a zero-cooldown ally-buff move (reachable
+      via the skill tree) plus a permanently-adjacent herd-mate let it claim
+      every action tick forever — `tickAgentAction` never reached
+      `chooseBehavior` again. Fixed via a `needsAreUrgent` gate at the
+      caller (needs.ts), same pattern as dispersal/shelter's existing pause
+      fix; `applyHerdSupport`'s food-delivery errand got the same fix (only
+      checked the deliverer's own needs once, at errand start). This
+      resolves the seed-20260903 low-growth mystery noted in the entry just
+      above far more than the exp/level tuning did: real before/after same
+      3 seeds, this fix alone — seed 20260903: final pop 13->40, births
+      2->28, zero starvation deaths (was 5 near/on water); seed 7: 21->164;
+      seed 42: 19->34. Every prior "population stays low on some seeds"
+      finding this session should probably be re-read in light of this —
+      it may have been the dominant cause all along, not herd-lock or exp
+      pacing. New regression test in support.test.ts. All 594 engine tests
+      pass, determinism unaffected.

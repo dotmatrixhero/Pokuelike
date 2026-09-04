@@ -570,8 +570,24 @@ export function tickAgentAction(
   if (rules && applyPredationInstincts(world, agent, rules, log, ctx, rng, thirstIsUrgent)) return;
   if (maybeStartCarrying(world, agent, log)) return;
   if (applyLooting(world, agent, log)) return;
-  if (applySupportMove(world, agent, log)) return;
-  if (applyHerdSupport(world, agent, log)) return;
+  // Real confirmed death case: a zero-cooldown ally-buff move (reachable via
+  // the skill tree — e.g. Tackle respecced into `steadfast_guard`) plus an
+  // adjacent, permanently-in-range herd-mate let `applySupportMove` return
+  // true on literally every action tick forever, since it had no urgent-need
+  // escape valve of its own — an agent could stand on a water tile rebuffing
+  // its neighbor nonstop while its own thirst ran to 0 and then through the
+  // full starvation grace period, never once reaching `chooseBehavior` below.
+  // Same for `applyHerdSupport`'s multi-tick food-delivery errand: it only
+  // checked the deliverer's own needs once, at the moment the errand started,
+  // never again during the walk — the exact "commits no matter what" shape
+  // dispersal/shelter-building already had to be fixed for. General urgency
+  // (not just thirst, unlike `thirstIsUrgent` above) is the right gate here:
+  // unlike predation's hunt/relocate, neither of these behaviors exists to
+  // resolve the agent's own hunger/thirst, so there's no reason to let either
+  // one through just because hunger specifically is what's urgent.
+  const needsAreUrgent = chooseBehavior(agent.needs) !== "idle";
+  if (!needsAreUrgent && applySupportMove(world, agent, log)) return;
+  if (applyHerdSupport(world, agent, log, needsAreUrgent)) return;
 
   // Natal dispersal (dispersal.ts) — checked once per action tick for every
   // agent not already dispersing, ranked below survival/carrying/looting/
