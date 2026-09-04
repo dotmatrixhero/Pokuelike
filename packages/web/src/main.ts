@@ -46,6 +46,7 @@ const eventLogEl = document.getElementById("event-log") as HTMLElement;
 const inspectorEl = document.getElementById("inspector") as HTMLElement;
 const clearSelectionBtn = document.getElementById("clear-selection") as HTMLButtonElement;
 const hideNoiseCheckbox = document.getElementById("hide-noise") as HTMLInputElement;
+const hideLevelUpsCheckbox = document.getElementById("hide-levelups") as HTMLInputElement;
 const styleTileBtn = document.getElementById("style-tile") as HTMLButtonElement;
 const styleAsciiBtn = document.getElementById("style-ascii") as HTMLButtonElement;
 const legendEl = document.getElementById("legend") as HTMLElement;
@@ -210,6 +211,11 @@ clearSelectionBtn.addEventListener("click", () => selectAgent(undefined));
 
 hideNoiseCheckbox.addEventListener("change", () => {
   eventLogPanel.setHideNoise(hideNoiseCheckbox.checked);
+  eventLogPanel.render();
+});
+
+hideLevelUpsCheckbox.addEventListener("change", () => {
+  eventLogPanel.setHideLevelUps(hideLevelUpsCheckbox.checked);
   eventLogPanel.render();
 });
 

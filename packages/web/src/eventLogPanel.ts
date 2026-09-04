@@ -20,6 +20,14 @@ export class EventLogPanel {
   private filterAgentId: string | undefined;
   /** On by default — most people watching the log want "the Pokemon stuff," not flora/weather/migration/behavior-switch chatter. */
   private hideNoise = true;
+  /**
+   * A separate, independently-toggleable filter from hideNoise —
+   * leveledUp is a real Pokemon event (unlike NOISE_KINDS), just an
+   * extremely high-volume one (990 of them in one 3000-tick run), so it
+   * gets its own opt-in/out rather than being lumped into "noise" or
+   * always shown. Off by default given that volume.
+   */
+  private hideLevelUps = true;
   private dirty = false;
 
   constructor(private readonly container: HTMLElement) {}
@@ -44,6 +52,12 @@ export class EventLogPanel {
     this.dirty = true;
   }
 
+  setHideLevelUps(hide: boolean): void {
+    if (this.hideLevelUps === hide) return;
+    this.hideLevelUps = hide;
+    this.dirty = true;
+  }
+
   reset(): void {
     this.buffer = [];
     this.filterAgentId = undefined;
@@ -62,6 +76,7 @@ export class EventLogPanel {
 
     let source = this.filterAgentId ? this.eventsForAgent(this.filterAgentId) : this.buffer;
     if (this.hideNoise) source = source.filter((event) => !NOISE_KINDS.has(event.kind));
+    if (this.hideLevelUps) source = source.filter((event) => event.kind !== "leveledUp");
     const shown = source.slice(-EventLogPanel.MAX_RENDERED).reverse(); // newest first
 
     this.container.replaceChildren();
