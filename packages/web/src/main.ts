@@ -104,7 +104,7 @@ function step(): void {
   tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT);
   // Only the events since the last step are new; EventLog is append-only for the life of a world.
   const newEvents = log.events.slice(lastLoggedEventCount);
-  eventLogPanel.ingest(newEvents);
+  eventLogPanel.ingest(newEvents, world);
   eventPopups.ingest(newEvents, world);
   lastLoggedEventCount = log.events.length;
   // Always dirty, not just when something's selected — the no-selection

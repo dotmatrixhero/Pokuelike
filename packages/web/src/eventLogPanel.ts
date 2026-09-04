@@ -1,4 +1,4 @@
-import type { SimEvent } from "@pokuelike/engine";
+import type { SimEvent, World } from "@pokuelike/engine";
 import { NOISE_KINDS, STORY_COLOR, STORY_ICON, STORY_KINDS, eventNamesAgent, formatEvent } from "./eventText.js";
 
 /**
@@ -17,6 +17,16 @@ export class EventLogPanel {
   private static readonly MAX_RENDERED = 250;
 
   private buffer: SimEvent[] = [];
+  /**
+   * The most recently ticked world — used so a `fought`/`missed` row can
+   * show the attacker's currently-built move (see `formatEvent`'s `world`
+   * param). Always the live reference, not a per-event snapshot: rows show
+   * "the move as currently built," which can drift from what it looked
+   * like at the exact moment of an old event if the agent's since
+   * respec'd — an accepted tradeoff for a live-observer panel, not a
+   * historical record.
+   */
+  private world: World | undefined;
   private filterAgentId: string | undefined;
   /** On by default — most people watching the log want "the Pokemon stuff," not flora/weather/migration/behavior-switch chatter. */
   private hideNoise = true;
@@ -32,7 +42,8 @@ export class EventLogPanel {
 
   constructor(private readonly container: HTMLElement) {}
 
-  ingest(events: readonly SimEvent[]): void {
+  ingest(events: readonly SimEvent[], world?: World): void {
+    if (world) this.world = world;
     if (events.length === 0) return;
     this.buffer.push(...events);
     const overflow = this.buffer.length - EventLogPanel.MAX_BUFFER;
@@ -120,7 +131,7 @@ export class EventLogPanel {
 
     const text = document.createElement("span");
     text.className = "log-text";
-    text.textContent = formatEvent(event);
+    text.textContent = formatEvent(event, this.world);
 
     row.append(icon, tick, text);
     return row;

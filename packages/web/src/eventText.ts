@@ -1,13 +1,65 @@
-import type { SimEvent } from "@pokuelike/engine";
+import type { MoveSpec, SimEvent, World } from "@pokuelike/engine";
+
+/**
+ * The attacker's own live copy of the move it just used, if `world` still
+ * has that agent around — reflects any skill-tree respec already baked into
+ * `Agent.moves` (see `applyMoveTreeWithSpend`), not just the move's base
+ * data. Only meaningful for `fought`/`missed`, the two event kinds that
+ * carry both an `attackerId` and a `moveId`. Best-effort: the attacker may
+ * since have died/been pruned, or its moveset changed since this exact hit
+ * (a later respec) — this is read at log-render time, not snapshotted at
+ * the moment the event fired, so it's "the move as currently built," which
+ * is what the ask ("show what was used and all its build modifiers") is
+ * really after rather than a strict historical record.
+ */
+function findMoveUsed(event: { attackerId: string; moveId: string }, world: World): MoveSpec | undefined {
+  const attacker = world.agents.find((a) => a.id === event.attackerId);
+  return attacker?.moves?.find((m) => m.id === event.moveId);
+}
+
+/**
+ * Every optional `MoveSpec` field that represents a real build/skill-tree
+ * modifier away from a plain vanilla attack, rendered only when actually
+ * set (a move with none of these reads as empty, not padded with "no
+ * lifesteal" noise). Deliberately generic over the whole field list rather
+ * than special-cased per curated move, so a new modifier field added to
+ * moves.ts shows up here without another edit.
+ */
+function describeMoveModifiers(move: MoveSpec): string {
+  const parts: string[] = [];
+  if (move.critRateStage) parts.push(`crit+${move.critRateStage}`);
+  if (move.hits) parts.push(`${move.hits.min}-${move.hits.max} hits`);
+  if (move.weightScaling) parts.push(`weight x${move.weightScaling.factor}`);
+  if (move.lifestealFraction) parts.push(`lifesteal ${Math.round(move.lifestealFraction * 100)}%`);
+  if (move.recoilFraction) parts.push(`recoil ${Math.round(move.recoilFraction * 100)}%`);
+  if (move.defensePenetration) parts.push(`pen ${Math.round(move.defensePenetration * 100)}%`);
+  if (move.jamCooldownTicks) parts.push(`jam +${move.jamCooldownTicks}`);
+  if (move.lockTicks) parts.push(`lock +${move.lockTicks}`);
+  if (move.statusChance && move.statusKind) parts.push(`${Math.round(move.statusChance * 100)}% ${move.statusKind}${move.statusSpreads ? " (spreads)" : ""}`);
+  if (move.situationalBonus) parts.push(`${move.situationalBonus.condition} x${move.situationalBonus.multiplier}`);
+  if (move.selfStateBonus) parts.push(`${move.selfStateBonus.condition} scoring x${move.selfStateBonus.multiplier}`);
+  if (move.statChangeOnHit) parts.push(`${move.statChangeOnHit.target} ${move.statChangeOnHit.stat} ${move.statChangeOnHit.stage > 0 ? "+" : ""}${move.statChangeOnHit.stage}`);
+  if (move.positionSwap) parts.push("swap");
+  if (move.hitsArea) parts.push("area");
+  if (move.forcedMovement) parts.push(`${move.forcedMovement.mover} ${move.forcedMovement.tiles} tiles`);
+  if (move.bonusVsType) parts.push(`vs ${move.bonusVsType.type} x${move.bonusVsType.multiplier}`);
+  if (move.resistanceBreaker) parts.push(`resist-break x${move.resistanceBreaker.multiplier}`);
+  if (move.selfCostPerUse) parts.push(`costs ${Math.round(move.selfCostPerUse.amount * 100)}% ${move.selfCostPerUse.need}`);
+  if (move.terrainBurn) parts.push("burns terrain");
+  return parts.length > 0 ? ` [${parts.join(", ")}]` : "";
+}
 
 /**
  * A short human-readable line per event kind — the browser-side equivalent
  * of `packages/runner/src/format.ts`'s `formatEvent`. Not literally shared
  * (this app has no dependency on `@pokuelike/runner`, a CLI-only package),
  * but intentionally the same shape/tone; keep them in sync by hand if an
- * event's fields change.
+ * event's fields change. `world`, when given, additionally resolves the
+ * attacker's live move for `fought`/`missed` so their line can show its
+ * current build modifiers — omit it (or pass none) to get the same plain
+ * text as before this existed.
  */
-export function formatEvent(event: SimEvent): string {
+export function formatEvent(event: SimEvent, world?: World): string {
   switch (event.kind) {
     case "crossedLayer":
       return `${event.species} (${event.agentId}) crossed ${event.from} -> ${event.to}`;
@@ -21,10 +73,14 @@ export function formatEvent(event: SimEvent): string {
       return `${event.species} (${event.motherId} x ${event.fatherId}) had offspring ${event.childId} (${event.nature}, ${event.dispositionSummary})`;
     case "floraChanged":
       return `flora ${event.stage} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
-    case "fought":
-      return `${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) for ${event.damage}${event.critical ? " (crit!)" : ""} (hp left: ${event.defenderHpRemaining})`;
-    case "missed":
-      return `${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) and missed`;
+    case "fought": {
+      const move = world ? findMoveUsed(event, world) : undefined;
+      return `${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) for ${event.damage}${event.critical ? " (crit!)" : ""} (hp left: ${event.defenderHpRemaining})${move ? describeMoveModifiers(move) : ""}`;
+    }
+    case "missed": {
+      const move = world ? findMoveUsed(event, world) : undefined;
+      return `${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) and missed${move ? describeMoveModifiers(move) : ""}`;
+    }
     case "defeated":
       return `${event.winnerSpecies} (${event.winnerId}) defeated ${event.loserSpecies} (${event.loserId})`;
     case "starved":
@@ -91,9 +147,15 @@ export function formatEvent(event: SimEvent): string {
  * real milestone completing a multi-tick agent-driven task, not routine
  * environment upkeep. `shelterAbandoned`, by contrast, reads more like
  * `floraChanged`'s "died" stage — ambient world bookkeeping, not a story
- * beat — so it goes to `NOISE_KINDS` below instead.
+ * beat — so it goes to `NOISE_KINDS` below instead. `fought` earns a spot
+ * too, per direct ask ("want more of an animation... when a user uses a
+ * move. want to see it") — a landed, damaging hit is the moment worth a
+ * pop on the map; `missed` deliberately stays out of both this set and
+ * `NOISE_KINDS` (plain/small in the log, no popup) since a miss is real
+ * information but not a moment worth the same visual weight as a
+ * connecting hit.
  */
-export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge", "dispersed", "shelterBuilt"]);
+export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge", "dispersed", "shelterBuilt", "fought"]);
 
 /**
  * Routine environment/upkeep chatter — real events, just not "the Pokemon
@@ -126,6 +188,7 @@ export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   diedOfAge: "\u{1F480}", // skull
   dispersed: "\u{1F9ED}", // compass
   shelterBuilt: "\u{1F3E0}", // house
+  fought: "\u{1F4A5}", // boom
 };
 
 export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
@@ -137,6 +200,7 @@ export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
   diedOfAge: "#9aa0ab",
   dispersed: "#6ec6ff",
   shelterBuilt: "#c9a876",
+  fought: "#ff9d3c",
 };
 
 /**
