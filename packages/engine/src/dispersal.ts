@@ -3,8 +3,9 @@ import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { stepToward } from "./movement.js";
 import { findRandomWalkableTile } from "./migration.js";
-import { isMature, MATURITY_AGE } from "./reproduction.js";
+import { isMature } from "./reproduction.js";
 import { COHESION_DISTANCE } from "./herding.js";
+import { DISPERSAL_MIN_LEVEL } from "./leveling.js";
 
 /**
  * Natal dispersal — see DESIGN.md's "Natal dispersal: real biology's actual
@@ -109,37 +110,20 @@ export const NO_MATES_DISPERSAL_TICKS = 1000;
 const JOIN_HERD_RADIUS = 3 * COHESION_DISTANCE;
 
 /**
- * How many ticks past `MATURITY_AGE` still count as "just crossed it," for
- * `maybeTriggerDispersal`'s one-shot maturity check. Needed because an
- * agent's action tick (where this check runs) doesn't necessarily land on
- * the exact tick its age crosses the threshold — `tickAgentNeeds` ages every
- * agent every world tick regardless of Speed, but `tickAgentAction` (and
- * this check with it) only runs on that agent's own action tick, which for
- * a slower agent can trail several ticks behind. Generously larger than any
- * real action-tick gap in the demo roster (`simulation.ts`'s
- * `ACTION_THRESHOLD` doc comment: the slowest demo species acts roughly
- * every 4-5 ticks) so a real, organically-aged agent is never missed, while
- * still excluding a hand-built fixture given a large fixed `age` (500, say,
- * a common test convenience for "already mature") purely to skip past
- * `isMature`'s check — that agent didn't just cross anything, it started
- * mature, so it correctly gets no maturity-crossing roll at all (only the
- * on-evolve occasion and the guaranteed no-mates fallback remain available
- * to it).
- */
-const MATURITY_CROSSING_WINDOW_TICKS = 30;
-
-/**
  * Checked once per action tick for every living, sexed agent not already
  * dispersing (see needs.ts's `tickAgentAction`) — never re-rolls or
  * re-triggers while `Agent.dispersalTarget` is already set, so an
  * in-progress dispersal is never double-triggered. Genderless agents
  * (`!agent.sex`) are skipped entirely — dispersal exists to solve a
  * mate-finding problem, so it has nothing to do for an agent that never
- * seeks a mate at all.
+ * seeks a mate at all. Gated on `DISPERSAL_MIN_LEVEL` (leveling.ts) below
+ * that level, an agent just waits, same as it would have before this
+ * feature existed.
  */
 export function maybeTriggerDispersal(world: World, agent: Agent, log: EventLog | undefined, rng: () => number): void {
   if (agent.dispersalTarget) return;
   if (!agent.sex) return;
+  if (agent.level === undefined || agent.level < DISPERSAL_MIN_LEVEL) return;
 
   // Trigger 1's evolution occasion — a one-tick flag set by leveling.ts's
   // grantExp the instant an evolution happens, consumed here (win or lose)
@@ -147,23 +131,21 @@ export function maybeTriggerDispersal(world: World, agent: Agent, log: EventLog 
   const justEvolved = agent.pendingEvolutionDispersalCheck === true;
   agent.pendingEvolutionDispersalCheck = undefined;
 
-  // Trigger 1's maturity occasion — a one-shot flag rather than an exact
-  // `agent.age === MATURITY_AGE` equality check: under the Speed-driven
-  // action economy (simulation.ts), an agent's action tick doesn't
-  // necessarily land on the exact tick its age crosses the threshold (needs
-  // decay/aging happen every tick regardless of Speed), so equality could
-  // silently miss the window forever for a slower agent. `age === undefined`
-  // agents (founders spawned directly into a scenario — see `isMature`'s doc
-  // comment) never set this: there's no real "crossing" to detect for an
-  // agent that was already mature from the moment it existed, so they rely
-  // on the on-evolve occasion and the guaranteed fallback below instead.
-  let crossedMaturity = false;
-  if (agent.age !== undefined && agent.age >= MATURITY_AGE && !agent.maturityDispersalRolled) {
-    if (agent.age <= MATURITY_AGE + MATURITY_CROSSING_WINDOW_TICKS) crossedMaturity = true;
-    agent.maturityDispersalRolled = true; // consumed either way — a fixture that started already well past maturity never gets a maturity-crossing roll, only the on-evolve/no-mates triggers remain
-  }
+  // Trigger 1's other occasion — the tick this agent's level crosses
+  // DISPERSAL_MIN_LEVEL, a one-tick flag set by leveling.ts's `grantExp`
+  // (mirrors the evolution flag exactly, including why a flag rather than
+  // an exact equality check: a single `grantExp` call can jump several
+  // levels at once, so "level === DISPERSAL_MIN_LEVEL" could skip right
+  // past it). Originally this occasion fired on crossing MATURITY_AGE
+  // instead — replaced because gating the whole feature on level made that
+  // moot: MATURITY_AGE (200 ticks) is reached long before DISPERSAL_MIN_LEVEL
+  // (thousands of ticks, see leveling.ts's EXP_TRICKLE_PER_TICK doc comment)
+  // in practice, so an age-crossing check would almost never coincide with
+  // being level-eligible.
+  const justReachedDispersalLevel = agent.pendingLevelDispersalCheck === true;
+  agent.pendingLevelDispersalCheck = undefined;
 
-  if ((crossedMaturity || justEvolved) && rng() < dispersalChance(agent)) {
+  if ((justReachedDispersalLevel || justEvolved) && rng() < dispersalChance(agent)) {
     startDispersal(world, agent, "matured", rng);
     return;
   }

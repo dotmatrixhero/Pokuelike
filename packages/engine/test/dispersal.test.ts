@@ -9,6 +9,7 @@ import {
   maybeTriggerDispersal,
   NO_MATES_DISPERSAL_TICKS,
 } from "../src/dispersal.js";
+import { DISPERSAL_MIN_LEVEL } from "../src/leveling.js";
 import { MATURITY_AGE } from "../src/reproduction.js";
 import type { Agent } from "../src/types.js";
 import type { Disposition } from "../src/nature.js";
@@ -46,14 +47,16 @@ function agent(id: string, overrides: Partial<Agent> = {}): Agent {
  * search per trial: each trial resets the one-shot bookkeeping fields by
  * hand and only counts whether `dispersalTarget` got set, exactly mirroring
  * `herdMigration.test.ts`'s wanderlust statistical tests (reuse one small
- * world across many trials, not a fresh one per trial).
+ * world across many trials, not a fresh one per trial). Simulates "just
+ * crossed DISPERSAL_MIN_LEVEL" via the same `pendingLevelDispersalCheck`
+ * flag leveling.ts's `grantExp` sets, since that (not age) is what gates
+ * trigger 1's occasion now.
  */
-function countMaturityRollFires(world: ReturnType<typeof createWorld>, a: Agent, trials: number, rng: () => number): number {
+function countLevelCrossingRollFires(world: ReturnType<typeof createWorld>, a: Agent, trials: number, rng: () => number): number {
   let fires = 0;
   for (let i = 0; i < trials; i++) {
     a.dispersalTarget = undefined;
-    a.maturityDispersalRolled = false;
-    a.age = MATURITY_AGE;
+    a.pendingLevelDispersalCheck = true;
     maybeTriggerDispersal(world, a, undefined, rng);
     if (a.dispersalTarget) fires++;
   }
@@ -63,13 +66,13 @@ function countMaturityRollFires(world: ReturnType<typeof createWorld>, a: Agent,
 describe("maybeTriggerDispersal: disposition-weighted maturity/evolution trigger", () => {
   it("fires more often for a bolder/less sociable agent than a timid/social one (fixed seed, not flaky)", () => {
     const world = createWorld(30, 30);
-    const bold = agent("bold", { age: MATURITY_AGE, disposition: { boldness: 1, aggression: 0.5, sociability: 0 } });
-    const timid = agent("timid", { age: MATURITY_AGE, disposition: { boldness: 0, aggression: 0.5, sociability: 1 } });
+    const bold = agent("bold", { age: MATURITY_AGE, level: DISPERSAL_MIN_LEVEL, disposition: { boldness: 1, aggression: 0.5, sociability: 0 } });
+    const timid = agent("timid", { age: MATURITY_AGE, level: DISPERSAL_MIN_LEVEL, disposition: { boldness: 0, aggression: 0.5, sociability: 1 } });
     world.agents.push(bold, timid);
 
     const TRIALS = 20_000;
-    const boldFires = countMaturityRollFires(world, bold, TRIALS, seededRng(42));
-    const timidFires = countMaturityRollFires(world, timid, TRIALS, seededRng(42)); // same seed on both — isolates the disposition effect, not the rng stream
+    const boldFires = countLevelCrossingRollFires(world, bold, TRIALS, seededRng(42));
+    const timidFires = countLevelCrossingRollFires(world, timid, TRIALS, seededRng(42)); // same seed on both — isolates the disposition effect, not the rng stream
 
     // Bold+solitary should roll at 2x DISPERSAL_BASE_CHANCE, timid+social at 0 (see dispersalChance's doc comment).
     expect(timidFires).toBe(0);
@@ -79,26 +82,38 @@ describe("maybeTriggerDispersal: disposition-weighted maturity/evolution trigger
     expect(boldFires).toBeLessThan(expected * 1.2);
   });
 
-  it("a neutral-disposition agent's maturity crossing fires at roughly the documented base chance", () => {
+  it("a neutral-disposition agent's level crossing fires at roughly the documented base chance", () => {
     const world = createWorld(30, 30);
-    const a = agent("neutral", { age: MATURITY_AGE });
+    const a = agent("neutral", { age: MATURITY_AGE, level: DISPERSAL_MIN_LEVEL });
     world.agents.push(a);
 
     const TRIALS = 20_000;
-    const fires = countMaturityRollFires(world, a, TRIALS, seededRng(7));
+    const fires = countLevelCrossingRollFires(world, a, TRIALS, seededRng(7));
 
     const expected = TRIALS * DISPERSAL_BASE_CHANCE;
     expect(fires).toBeGreaterThan(expected * 0.8);
     expect(fires).toBeLessThan(expected * 1.2);
   });
 
-  it("does not fire the maturity trigger for a fixture that started already long past maturity (no real crossing happened)", () => {
-    // A hand-built fixture given age: 500 purely as a "definitely mature" test
-    // convenience never actually crossed MATURITY_AGE during this test — see
-    // MATURITY_CROSSING_WINDOW_TICKS's doc comment.
-    const ALWAYS_DISPERSE = () => 0; // would trigger unconditionally if the maturity check fired at all
+  it("does not fire below DISPERSAL_MIN_LEVEL even with the level-crossing flag set", () => {
+    const ALWAYS_DISPERSE = () => 0; // would trigger unconditionally if the level gate didn't block it
     const world = createWorld(200, 200);
-    const a = agent("old", { age: 500 });
+    const a = agent("underleveled", { age: 500, level: DISPERSAL_MIN_LEVEL - 1, pendingLevelDispersalCheck: true });
+    world.agents.push(a);
+
+    maybeTriggerDispersal(world, a, undefined, ALWAYS_DISPERSE);
+
+    expect(a.dispersalTarget).toBeUndefined();
+  });
+
+  it("does not fire the level-crossing occasion for a fixture that's simply at a high level, with no actual crossing flagged", () => {
+    // A hand-built fixture given level: DISPERSAL_MIN_LEVEL purely as a
+    // "definitely eligible" test convenience never actually crossed the
+    // threshold during this test — pendingLevelDispersalCheck is the one-shot
+    // flag that means "a crossing just happened," not the level value itself.
+    const ALWAYS_DISPERSE = () => 0;
+    const world = createWorld(200, 200);
+    const a = agent("old", { age: 500, level: DISPERSAL_MIN_LEVEL });
     world.agents.push(a);
 
     maybeTriggerDispersal(world, a, undefined, ALWAYS_DISPERSE);
@@ -109,7 +124,7 @@ describe("maybeTriggerDispersal: disposition-weighted maturity/evolution trigger
   it("evolving triggers exactly one roll via pendingEvolutionDispersalCheck, consumed either way", () => {
     const ALWAYS_DISPERSE = () => 0;
     const world = createWorld(200, 200);
-    const a = agent("evo", { age: 500, pendingEvolutionDispersalCheck: true });
+    const a = agent("evo", { age: 500, level: DISPERSAL_MIN_LEVEL, pendingEvolutionDispersalCheck: true });
     world.agents.push(a);
 
     maybeTriggerDispersal(world, a, undefined, ALWAYS_DISPERSE);
@@ -128,7 +143,7 @@ describe("maybeTriggerDispersal: guaranteed no-eligible-mates fallback", () => {
   it("does not fire before the sustained threshold", () => {
     const NEVER_DISPERSE_VIA_TRIGGER1 = () => 1; // never wins the disposition roll
     const world = createWorld(200, 200);
-    const a = agent("lonely", { age: 500, ticksSinceEligibleMate: NO_MATES_DISPERSAL_TICKS - 1 });
+    const a = agent("lonely", { age: 500, level: DISPERSAL_MIN_LEVEL, ticksSinceEligibleMate: NO_MATES_DISPERSAL_TICKS - 1 });
     world.agents.push(a);
 
     maybeTriggerDispersal(world, a, undefined, NEVER_DISPERSE_VIA_TRIGGER1);
@@ -137,12 +152,11 @@ describe("maybeTriggerDispersal: guaranteed no-eligible-mates fallback", () => {
   });
 
   it("fires once the sustained no-eligible-mates threshold is crossed, regardless of the disposition roll", () => {
-    // age: 500 is already well past MATURITY_CROSSING_WINDOW_TICKS, so
-    // trigger 1's maturity occasion can't fire here at all (see the "does
-    // not fire the maturity trigger" test above) — this rng is only ever
-    // consulted by the fallback's own relocation-target search below.
+    // No pendingLevelDispersalCheck/pendingEvolutionDispersalCheck set, so
+    // trigger 1 can't fire here at all — this rng is only ever consulted by
+    // the fallback's own relocation-target search below.
     const world = createWorld(200, 200);
-    const a = agent("lonely", { age: 500, ticksSinceEligibleMate: NO_MATES_DISPERSAL_TICKS });
+    const a = agent("lonely", { age: 500, level: DISPERSAL_MIN_LEVEL, ticksSinceEligibleMate: NO_MATES_DISPERSAL_TICKS });
     world.agents.push(a);
 
     maybeTriggerDispersal(world, a, undefined, seededRng(1));
@@ -154,7 +168,18 @@ describe("maybeTriggerDispersal: guaranteed no-eligible-mates fallback", () => {
   it("an immature agent never triggers the fallback no matter how long ticksSinceEligibleMate has run", () => {
     const ALWAYS_DISPERSE = () => 0;
     const world = createWorld(200, 200);
-    const a = agent("young", { age: 5, ticksSinceEligibleMate: NO_MATES_DISPERSAL_TICKS * 2 });
+    const a = agent("young", { age: 5, level: DISPERSAL_MIN_LEVEL, ticksSinceEligibleMate: NO_MATES_DISPERSAL_TICKS * 2 });
+    world.agents.push(a);
+
+    maybeTriggerDispersal(world, a, undefined, ALWAYS_DISPERSE);
+
+    expect(a.dispersalTarget).toBeUndefined();
+  });
+
+  it("a high-level but under-leveled-at-threshold agent never triggers the fallback below DISPERSAL_MIN_LEVEL", () => {
+    const ALWAYS_DISPERSE = () => 0;
+    const world = createWorld(200, 200);
+    const a = agent("underleveled", { age: 500, level: DISPERSAL_MIN_LEVEL - 1, ticksSinceEligibleMate: NO_MATES_DISPERSAL_TICKS * 2 });
     world.agents.push(a);
 
     maybeTriggerDispersal(world, a, undefined, ALWAYS_DISPERSE);

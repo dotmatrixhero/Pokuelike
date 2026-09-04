@@ -135,7 +135,28 @@ export function canBreed(speciesA: string, speciesB: string, ctx?: LevelingConte
 // eating/drinking "some," and reaching new territory "a bunch" — tuned
 // against real runs (see TODO.md's Leveling section) rather than solved
 // analytically; re-tune again if a longer run still can't reach evolution.
-export const EXP_TRICKLE_PER_TICK = 0.15;
+//
+// Raised again (0.15 -> 0.8), paired with gating natal dispersal
+// (dispersal.ts) behind DISPERSAL_MIN_LEVEL: a Medium Slow species (e.g.
+// Bulbasaur) needs 2035 total exp for level 15, ~13,567 ticks at the old
+// trickle rate alone — far longer than any run this project has actually
+// exercised. At 0.8/tick, trickle alone reaches it by ~2,545 ticks, with
+// consume/mate/birth/kill exp on top of that in practice — comfortably
+// inside the run lengths (3,000-8,000 ticks) already used to validate
+// dispersal, instead of the level gate making dispersal fire even more
+// rarely than before this change.
+export const EXP_TRICKLE_PER_TICK = 0.8;
+/**
+ * Minimum level before natal dispersal (dispersal.ts) can trigger at all —
+ * direct instruction: dispersal should read as something an older/more
+ * experienced individual does, not any agent the instant it's biologically
+ * mature (`reproduction.ts`'s `MATURITY_AGE`, a mere 200 ticks). Gates both
+ * of dispersal.ts's triggers identically, including the guaranteed
+ * no-eligible-mates fallback — a young, low-level agent with zero mates
+ * nearby still just waits, same as it would have before this feature
+ * existed.
+ */
+export const DISPERSAL_MIN_LEVEL = 15;
 export const EXP_ON_CONSUME = 6;
 export const EXP_ON_MATE_ATTEMPT = 4;
 export const EXP_ON_BIRTH_PARENT = 15;
@@ -304,6 +325,13 @@ export function grantExp(
 
     const fromLevel = agent.level;
     agent.level += 1;
+
+    // See Agent.pendingLevelDispersalCheck's doc comment — a flag, not an
+    // exact equality check, since this loop can jump several levels in one
+    // grantExp call and skip right past DISPERSAL_MIN_LEVEL otherwise.
+    if (fromLevel < DISPERSAL_MIN_LEVEL && agent.level >= DISPERSAL_MIN_LEVEL) {
+      agent.pendingLevelDispersalCheck = true;
+    }
 
     const newStats = calculateStats(profile.baseStats, agent.level);
     const oldMaxHp = agent.stats?.maxHp ?? agent.maxHp ?? newStats.maxHp;

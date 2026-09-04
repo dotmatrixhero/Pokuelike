@@ -406,20 +406,20 @@ export interface Agent {
    */
   ticksSinceEligibleMate?: number;
   /**
-   * True once this agent's one-shot "just crossed MATURITY_AGE" dispersal
-   * roll has been made (win or lose) — see dispersal.ts's
-   * `maybeTriggerDispersal`. Without this, an agent that stays above
-   * MATURITY_AGE forever would otherwise need an exact-tick equality check
-   * against age (fragile under the Speed-gated action economy, where an
-   * agent's action tick doesn't necessarily land on the exact tick its age
-   * crosses the threshold) instead of a simple "have I rolled yet" flag.
-   * Absent for an immature agent or one built without `age` tracked at all
-   * (a founder — see `isMature`'s doc comment on absent age); those never
-   * get a maturity-crossing roll (there's no real "crossing" to detect for
-   * them), only the guaranteed no-mates fallback and the on-evolve trigger
-   * below remain available.
+   * Set for exactly one tick by leveling.ts's `grantExp` the instant this
+   * agent's level crosses `dispersal.ts`'s `DISPERSAL_MIN_LEVEL` (dispersal
+   * is gated to older/more-experienced individuals, not any agent the
+   * instant it's biologically mature — see DISPERSAL_MIN_LEVEL's doc
+   * comment) — dispersal.ts's `maybeTriggerDispersal` reads and clears it on
+   * its very next check, so the crossing always gets exactly one dispersal
+   * roll, never zero (missed, since level jumps can skip past an exact
+   * equality check in one `grantExp` call) or more than one. Replaced an
+   * earlier "just crossed MATURITY_AGE" version of this same flag — gating
+   * on level made the age-based crossing moot, since reaching
+   * DISPERSAL_MIN_LEVEL now takes far longer than reaching MATURITY_AGE in
+   * practice (see leveling.ts's EXP_TRICKLE_PER_TICK doc comment).
    */
-  maturityDispersalRolled?: boolean;
+  pendingLevelDispersalCheck?: boolean;
   /**
    * Set for exactly one tick by leveling.ts's `grantExp` the instant this
    * agent evolves — dispersal.ts's `maybeTriggerDispersal` reads and clears
