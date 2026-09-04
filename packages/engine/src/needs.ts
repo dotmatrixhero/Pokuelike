@@ -232,13 +232,6 @@ export function tickAgentNeeds(
   const thirstMultiplier = world ? thirstDecayMultiplier(world, agent.layer, agent.pos) : 1;
   decayNeeds(agent.needs, thirstMultiplier);
 
-  if (world && agent.age !== undefined && rng() < ageMortalityChance(agent.age)) {
-    agent.alive = false;
-    agent.diedAtTick = world.tick;
-    log?.record({ kind: "diedOfAge", tick: world.tick, agentId: agent.id, species: agent.species, pos: agent.pos, age: agent.age });
-    return;
-  }
-
   if (world && (agent.needs.hunger <= 0 || agent.needs.thirst <= 0)) {
     agent.starvationTicks = (agent.starvationTicks ?? 0) + 1;
     if (agent.starvationTicks >= STARVATION_GRACE_TICKS) {

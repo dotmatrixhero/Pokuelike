@@ -162,41 +162,23 @@ describe("old-age mortality", () => {
     vi.restoreAllMocks();
   });
 
-  it("a young agent never dies of old age, however the roll lands", () => {
+  // Disabled per direct instruction ("dying of old age is kinda dumb") —
+  // tickAgent no longer calls ageMortalityChance at all. The function
+  // itself is left in place, unused, same call as the skill-point removal:
+  // easy to re-wire later if wanted, harmless sitting idle in the meantime.
+  it("no agent dies of old age regardless of age or roll, even at a fully-saturated hazard", () => {
     const world = createWorld(3, 1);
-    const agent = makeAgent({ age: 500 });
-    vi.spyOn(Math, "random").mockReturnValue(0); // would kill anything with a nonzero hazard
-
-    tickAgent(world, agent);
-
-    expect(agent.alive).not.toBe(false);
-  });
-
-  it("a sufficiently old agent dies of old age when the roll beats its hazard chance", () => {
-    const world = createWorld(3, 1);
-    const agent = makeAgent({ age: 3000 /* OLD_AGE_HAZARD_CAP_AGE, hazard is fully saturated here */ });
+    const agent = makeAgent({ age: 3000 /* OLD_AGE_HAZARD_CAP_AGE, hazard would be fully saturated */ });
     const log = new EventLog();
-    vi.spyOn(Math, "random").mockReturnValue(0); // 0 always beats a nonzero chance
+    vi.spyOn(Math, "random").mockReturnValue(0); // would have killed anything with a nonzero hazard
 
     tickAgent(world, agent, log);
 
-    expect(agent.alive).toBe(false);
-    expect(log.events).toContainEqual(
-      expect.objectContaining({ kind: "diedOfAge", agentId: "a1", species: "bulbasaur" })
-    );
-  });
-
-  it("an old agent survives the tick when the roll doesn't beat its hazard chance", () => {
-    const world = createWorld(3, 1);
-    const agent = makeAgent({ age: 3000 /* OLD_AGE_HAZARD_CAP_AGE, hazard is fully saturated here */ });
-    vi.spyOn(Math, "random").mockReturnValue(0.999); // beats any chance below 1
-
-    tickAgent(world, agent);
-
     expect(agent.alive).not.toBe(false);
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "diedOfAge" }));
   });
 
-  it("an agent with no age (spawned directly into a scenario) is never subject to old-age mortality", () => {
+  it("an agent with no age (spawned directly into a scenario) is unaffected either way", () => {
     const world = createWorld(3, 1);
     const agent = makeAgent({ age: undefined });
     vi.spyOn(Math, "random").mockReturnValue(0);
