@@ -72,6 +72,94 @@ const EGG_GROUPS_BY_BASE_KEY: Record<string, string[]> = {
   // starters share Monster in the real games) as well as with anything
   // else in Water 1 — verified against Bulbapedia.
   SQUIRTLE: ["monster", "water1"],
+
+  // --- Gen 1 batch below: recalled from training knowledge (Bulbapedia's
+  // canon Egg Group data), not scraped/machine-verified — this sandbox's
+  // network egress is locked to an allowlist that excludes PokeAPI/
+  // Bulbapedia, so a real fetch-and-generate script wasn't possible (see
+  // chat). Spot-check against Bulbapedia if a cross-species pairing here
+  // ever looks wrong in a real run. None of these are in the current spawn
+  // roster yet — this is headroom for whenever the roster grows, same as
+  // the entries above were before their species were added.
+  // Known simplification: a few lines have a real per-stage breeding
+  // exception in the actual games (e.g. Nidorina/Nidoqueen and Nidorino/
+  // Nidoking can't breed at all, only their unevolved Nidoran forms can) —
+  // not modeled here, since this table (like the ones above) is keyed by
+  // base species and applies line-wide, matching this file's existing
+  // baseSpeciesOf-driven convention.
+  CATERPIE: ["bug"],
+  WEEDLE: ["bug"],
+  RATTATA: ["field"],
+  EKANS: ["field", "dragon"],
+  PIKACHU: ["field", "fairy"],
+  NIDORAN_F: ["field", "fairy"],
+  NIDORAN_M: ["field", "fairy"],
+  CLEFAIRY: ["fairy"],
+  VULPIX: ["field"],
+  JIGGLYPUFF: ["fairy"],
+  ZUBAT: ["flying"],
+  ODDISH: ["grass"],
+  PARAS: ["bug", "grass"],
+  VENONAT: ["bug"],
+  MEOWTH: ["field"],
+  PSYDUCK: ["water1"],
+  MANKEY: ["field"],
+  GROWLITHE: ["field"],
+  POLIWAG: ["water1"],
+  ABRA: ["human-like"],
+  MACHOP: ["human-like"],
+  BELLSPROUT: ["grass"],
+  TENTACOOL: ["water3"],
+  GEODUDE: ["mineral"],
+  PONYTA: ["field"],
+  SLOWPOKE: ["monster", "water1"],
+  MAGNEMITE: ["mineral"],
+  FARFETCHD: ["flying", "field"],
+  DODUO: ["flying", "field"],
+  SEEL: ["water1", "field"],
+  GRIMER: ["amorphous"],
+  SHELLDER: ["water1", "water3"],
+  GASTLY: ["amorphous"],
+  DROWZEE: ["human-like"],
+  KRABBY: ["water3"],
+  VOLTORB: ["mineral"],
+  EXEGGCUTE: ["grass"],
+  CUBONE: ["monster", "field"],
+  HITMONLEE: ["human-like"],
+  HITMONCHAN: ["human-like"],
+  LICKITUNG: ["monster"],
+  KOFFING: ["amorphous"],
+  RHYHORN: ["monster", "field"],
+  CHANSEY: ["fairy"],
+  TANGELA: ["grass"],
+  KANGASKHAN: ["monster"],
+  HORSEA: ["water1", "dragon"],
+  GOLDEEN: ["water2"],
+  STARYU: ["water3"],
+  MR_MIME: ["fairy", "human-like"],
+  JYNX: ["human-like"],
+  ELECTABUZZ: ["human-like"],
+  MAGMAR: ["human-like"],
+  PINSIR: ["bug"],
+  TAUROS: ["field"],
+  MAGIKARP: ["water2", "dragon"],
+  LAPRAS: ["monster", "water1"],
+  // Ditto's real "breeds with anything but Ditto/Undiscovered" wildcard
+  // rule isn't modeled by `canBreed` yet (see TODO.md) — this entry alone
+  // does nothing useful until that wildcard logic exists, added now so it's
+  // not forgotten when it does.
+  DITTO: ["ditto"],
+  EEVEE: ["field"],
+  PORYGON: ["mineral"],
+  OMANYTE: ["water3", "water1"],
+  KABUTO: ["water3", "water1"],
+  AERODACTYL: ["flying"],
+  SNORLAX: ["monster"],
+  DRATINI: ["water1", "dragon"],
+  // Articuno/Zapdos/Moltres/Mewtwo/Mew deliberately omitted: real
+  // Undiscovered-group legendaries, can't breed at all — same effect as an
+  // explicit empty array via this map's `?? []` fallback, just without a
+  // redundant entry.
 };
 
 /**
