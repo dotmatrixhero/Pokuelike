@@ -29,3 +29,4 @@ export * from "./shelter.js";
 export * from "./pathfinding.js";
 export * from "./immigration.js";
 export * from "./occupancy.js";
+export * from "./herdConflict.js";

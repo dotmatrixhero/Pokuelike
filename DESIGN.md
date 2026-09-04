@@ -5977,3 +5977,195 @@ observed numbers, not attributed to "tighter capacity grows the
 population," which would need a dedicated event-by-event isolation pass
 (as the note above already flags as unresolved for the *previous* tuning
 pass too) to actually confirm one way or the other.
+
+## Herd conflict: fighting over resources
+
+Direct feedback, in two messages: "I think I want like.. Hm.. More emergent
+behavior that can actually cause conflict and stuff. Do we have interesting
+herd behavior? I kinda want like more fighting," then, after being walked
+through the existing territorial-rivalry relocation mechanic (herdMigration.ts)
+and asked whether it should escalate to real combat: "I think escalated
+rivalry, even between species or same species, having them fight over
+resources would be cool."
+
+**The overriding constraint, stated up front because it shaped every design
+choice below**: this sim's predator populations are already fragile and
+crash toward near-extinction easily in real runs — documented repeatedly
+elsewhere in this file and in TODO.md. Any new source of combat/death risk
+needed real validation that it doesn't make that worse. "More fighting"
+could not mean "more extinction."
+
+### Decided
+
+1. **Trigger: real resource contention, not an extension of territorial
+   rivalry.** Two real candidates existed going in: extending
+   herdMigration.ts's existing same-species territorial trigger (today it
+   always resolves by the smaller herd relocating away, never fighting), or
+   a new trigger off real tile-capacity contention (occupancy.ts, shipped
+   earlier this session) — two herds repeatedly blocked from the same
+   crowded water/food tile by each other. The user's own phrasing ("fight
+   over resources") points at the second, and it's the more concrete,
+   already-instrumented condition: needs.ts already tracks
+   `Agent.ticksBlockedFromResource` (a real per-agent counter, added for the
+   tile-capacity feature's own "wait, then relocate" behavior) every time
+   `canEnterTile` says a seekWater/seekFood target is full. That's the exact
+   "the two of them both physically want THIS tile right now" signal a
+   fight-over-resources mechanic needs, and it's individual-level (whoever's
+   actually standing there) and cross-species-capable (any two non-predator
+   species can contest a tile) in a way herdMigration's herd-centroid-level,
+   same-species-only territorial trigger isn't. Built only the
+   resource-contention trigger; extending territorial rivalry to escalate
+   into combat is a real, separate follow-up (see TODO.md), not attempted
+   here — the two triggers don't share enough machinery (one is
+   per-tile-block bookkeeping in needs.ts, the other is per-herd-centroid
+   bookkeeping in herdMigration.ts) that skipping one meaningfully saved
+   scope, and resource contention alone already satisfies the "even between
+   species or same species" ask.
+2. **Scope: no predator species, either side, full stop.** Rather than
+   trying to carefully tune a mechanism that's provably safe for an
+   already-fragile predator roster too, predators are excluded from this
+   trigger entirely — both the acting agent and the candidate rival must be
+   non-predator species (`!rules[species]` on both sides) or
+   `applyHerdRivalryConflict` never even looks for a rival. A predator herd
+   squabbling with another predator herd, or a predator muscling a
+   herbivore off a water hole, are real follow-up ideas, not built here (see
+   TODO.md). This single decision is most of the population-safety case:
+   this mechanic cannot, by construction, ever touch the roster this
+   session's predator-fragility findings are actually about.
+3. **Lethality model: cannot faint or kill, by construction, not by tuning.**
+   Real animal conflicts over a resource are almost always about who backs
+   off, not who dies — and given (2), "more fighting" specifically must not
+   become a new unbounded death channel. Rather than reusing predation.ts's
+   faint/finishing-pool machinery (which can genuinely kill) and trying to
+   tune around it, the new `herdConflict.ts` module writes its own
+   resolution: it reuses the exact same accuracy/crit/damage pipeline
+   predator/prey combat uses (`rollAccuracy`/`rollCritical`/`calculateDamage`
+   from combat.ts — real stats, real types, real STAB/effectiveness, not a
+   simplified toy formula), but clamps the defender's hp at
+   `HERD_CONFLICT_HP_FLOOR_FRACTION * maxHp` (15%) — this mechanic can never
+   bring an agent to 0 hp, never sets `fainted`, never sets `alive: false`,
+   no matter how many times it fires against the same agent. The defender
+   physically retreats (steps away from the contested tile, gets a real
+   cooldown) once it crosses `HERD_CONFLICT_RETREAT_HP_FRACTION` (60% of max
+   hp) — a real, felt cost (meaningfully hurt, walks away, takes longer to
+   heal, loses the contested tile) without ever being a death mechanism.
+   Proven directly by a unit test that fires 50 consecutive hits at a
+   100%-power move against the same target and confirms hp never drops
+   below the floor and neither `fainted` nor `alive` ever flips.
+4. **Gating: a real disposition-weighted roll plus real relative strength,
+   not a flat chance** — matching this codebase's established convention
+   (herdMigration.ts's `wanderlustChance`, predation.ts's `mobThreshold`/
+   flee-radius/hunt-threshold, all disposition-driven rather than invented
+   dice rolls). `herdConflictChance` is `HERD_CONFLICT_BASE_CHANCE +
+   courage * HERD_CONFLICT_DISPOSITION_SCALE` where courage is the same
+   boldness+aggression average predation.ts's `mobThreshold` already uses —
+   a bold/aggressive agent is meaningfully more likely to pick a fight than
+   a timid one, so low-aggression herds keep doing exactly what they already
+   did before this feature (wait out the grace period, then relocate to a
+   different resource tile per the pre-existing tile-capacity behavior).
+   `HERD_CONFLICT_MIN_POWER_RATIO` (0.6, symmetric) additionally refuses a
+   fight that's badly mismatched either direction — a real, comparably-matched,
+   confident pair fights; a hopeless mismatch still just avoids/relocates,
+   whichever side is asking.
+5. **Only the two individuals actually contesting the tile fight** — not a
+   herd-level mass event. This falls out naturally from where the trigger
+   lives (an individual agent's own action tick, inside the existing
+   seekWater/seekFood blocked-tile branch), not something that needed extra
+   machinery to prevent: `findRivalOccupant` looks for a rival within one
+   tile of the contested target, so it's always "whoever's actually standing
+   there" on each side, never a mob.
+6. **A new, distinct `herdClash` `SimEvent`**, not a reuse of predation's
+   `fought`/`defeated`/`killed` — those kinds carry semantics (a `killed`/
+   `defeated` outcome, hunger-restore on the predator's side) this mechanic
+   deliberately never produces, and conflating them would make the event log
+   lie about which mechanic caused what. `herdClash` carries both
+   participants' `herdId` (so a UI/narrator can tell "different herds, same
+   species" apart from "different species entirely") and an `outcome` of
+   `"missed" | "hit" | "retreated"` — deliberately never `"fainted"`/
+   `"killed"`, which is the log-level proof this can't produce those
+   outcomes, not just an internal one. Display support added to
+   `packages/web/src/eventText.ts` (a new `STORY_KINDS` entry, its own icon/
+   color, distinct from `fought`'s) and `packages/runner/src/format.ts`,
+   following the exact template `terrainChanged`/`immigrated` set when they
+   were added earlier this session. Not added to `HEADLINE_KINDS` — same
+   reasoning as `fought` itself already not being there: a real moment, but
+   not a population-shaping one (birth/true-death/evolution), so it doesn't
+   belong in the long-run "quiet mode" filter.
+
+### Built, real-run findings
+
+`packages/engine/src/herdConflict.ts` (new module) plus small hooks: a new
+`Agent.herdConflictCooldownTicks` field (ticked down in `tickAgentNeeds`,
+same shape as `digestingTicksRemaining`), and the trigger call site itself
+inside needs.ts's existing seekWater/seekFood blocked-tile branch — once an
+agent has been blocked from a specific crowded tile for
+`HERD_CONFLICT_MIN_BLOCKED_TICKS` (8) consecutive ticks (a real, sustained
+standoff, not a fresh block), `applyHerdRivalryConflict` gets a chance to
+fire; when it doesn't (no eligible rival, on cooldown, a predator's
+involved, or the roll just misses), the tick falls straight through to the
+pre-existing wait/relocate behavior, unchanged. 10 new engine tests
+(`herdConflict.test.ts`) cover: no rival present, herd-mates never counted
+as rivals, predators excluded on either side, a bold comparably-matched
+agent actually engaging a cross-species rival, same-species conflict working
+too, a timid agent's disposition gate holding under a rigged always-succeed
+accuracy/crit roll, a badly mismatched pair refusing to fight, the cooldown
+gate, the non-lethal hp floor holding under 50 repeated worst-case hits, and
+a defender that crosses the retreat threshold physically stepping away with
+a real cooldown on both sides. All 652 engine tests pass (642 pre-existing +
+10 new), including the unmodified determinism acceptance test
+(`determinism.test.ts`) — the same-seed-twice byte-identical-log check still
+holds with `herdConflict.ts`'s new rng draws threaded through `world.rng`
+like every other random source in the engine.
+
+**Real 3000-tick runs, 9 seeds (42, 7, 20260903, and 1-6), feature on**:
+`herdClash` fired a real, non-trivial number of times per run — 19 to 90
+across the 9 seeds, split across `"hit"` (real damage landed, defender not
+yet at retreat threshold), `"retreated"` (the mechanic's actual resolution —
+defender crossed 60% hp and backed off), and an occasional `"missed"`. Zero
+`"killed"`/`"defeated"`/`"fainted"` events were ever produced by this
+mechanic across any of the 9 runs — expected, since `herdConflict.ts` never
+calls into predation.ts's faint/kill machinery at all, but confirmed in real
+run output too, not just by the unit test's clamp check.
+
+**Predator population, the number that actually mattered here**: across all
+9 runs, predator species (scyther/spearow/onix, per `HUNT_RULES`) stayed at
+the same fragile-but-not-always-zero level this session's TODO.md already
+documents as the sim's pre-existing baseline — 0 to 2 living individuals per
+species per run, several runs ending with the same 0-across-the-board result
+this codebase already treats as expected/known, a few with 1-2 survivors.
+Nothing in these 9 runs reads as a *new* predator die-off pattern, and by
+construction (decision #2 above) this mechanic structurally cannot be the
+cause of one — predators never appear on either side of a `herdClash`.
+
+**Single-seed before/after comparison was attempted and explicitly
+discarded as unreliable**, not glossed over: disabling the feature's call
+site and re-running the same 3 seeds (42/7/20260903) produced wildly
+different total-population deltas per seed — seed 42 dropped (126 -> 108),
+seed 20260903 rose modestly (65 -> 79), and seed 7 swung enormously (43 ->
+241). That last number is not a real effect of this feature; it's this
+sim's own repeatedly-documented rng-chaos-sensitivity (see the "Tile
+capacity" section's own "Follow-up: tightened to 2.5x" subsection for the
+exact same phenomenon on a completely different feature) — `herdConflict.ts`
+consumes `world.rng()` draws at new points in the tick sequence the moment
+it's eligible to fire, which desyncs every subsequent random decision for
+the rest of that run from the very first tick that difference shows up.
+Paired single-seed A/B is not a trustworthy signal here, and this section
+doesn't lean on it — the trustworthy evidence is the structural guarantees
+(decisions #2/#3, proven by code + unit test, true regardless of any seed's
+rng trajectory) and the 9-seed feature-on distribution above, which is
+directionally consistent with the pre-existing documented baseline rather
+than showing a new predator-specific regression.
+
+### Explicitly not done here (see TODO.md)
+
+- Extending herdMigration.ts's territorial trigger to escalate into combat
+  instead of always relocating — the other real candidate trigger mechanism
+  from the original design brief, deliberately not built (see decision #1).
+- Predator involvement of any kind (predator-vs-predator rivalry, or a
+  predator contesting a resource with a non-predator) — deliberately scoped
+  out entirely (decision #2), not a partial/softer version of it.
+- A herd-level (not just individual-level) version of this mechanic — e.g.
+  several members from each side converging, closer to predation.ts's
+  existing mob-fighting shape. Deliberately not attempted: mob-scale herd
+  conflict is a much bigger new death-risk surface to validate safely, and
+  the individual-pair version already satisfies the direct ask.

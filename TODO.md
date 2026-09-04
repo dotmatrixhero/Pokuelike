@@ -714,6 +714,50 @@ produce a real story before player mechanics are worth building further.
       cutting short how many chances it gets to roll. Not fixed here — the
       right lever is herd survival time (a pre-existing, separately-scoped
       gap), not a higher wanderlust chance.
+- [x] **Herd conflict: fighting over resources — built, see DESIGN.md.**
+      Direct ask ("I think escalated rivalry, even between species or same
+      species, having them fight over resources would be cool"). New
+      `herdConflict.ts`, triggered off real tile-capacity contention
+      (occupancy.ts) via needs.ts's existing `ticksBlockedFromResource`
+      counter, not an extension of herdMigration.ts's territorial trigger
+      (see below for that as an explicit follow-up). Scoped to non-predator
+      species on both sides, disposition-weighted (not a flat chance,
+      matching `wanderlustChance`'s convention) and relative-strength-gated,
+      and structurally non-lethal — the defender's hp is clamped at 15% of
+      max, it can never faint or die from this mechanic, only retreat once
+      hurt past 60% hp. New `herdClash` `SimEvent`, display support in
+      `packages/web/src/eventText.ts`/`packages/runner/src/format.ts`. 10 new
+      engine tests, 652 total, all passing including the unmodified
+      determinism acceptance test. Real 9-seed 3000-tick validation: fires
+      19-90 times per run, real hit/retreat/miss distribution, zero
+      kill/faint events ever produced by it, and predator populations
+      (scyther/spearow/onix) stayed at the same fragile-but-nonzero baseline
+      level this file already documents elsewhere — no new predator-specific
+      regression observed, and by construction (predators excluded from the
+      trigger entirely) this mechanic cannot be the cause of one.
+- [ ] **Real follow-up, deliberately not built this pass**: extending
+      herdMigration.ts's existing same-species territorial-rivalry trigger
+      (today it always resolves by the smaller herd relocating away) to
+      sometimes escalate into a real fight instead, using the same
+      non-lethal `herdConflict.ts` resolution machinery. This was the other
+      real candidate trigger from the original design brief — resource
+      contention (built) was judged the more concrete, better-motivated
+      mechanism given the user's own "fight over resources" phrasing and
+      occupancy.ts's real, frequent tile-capacity contention, but territorial
+      escalation is a real, reasonable second half worth a future pass.
+- [ ] **Real follow-up, deliberately scoped out for predator-fragility
+      safety**: herd conflict currently excludes predator species entirely,
+      on both sides of a potential fight (no predator-vs-predator rivalry,
+      no predator muscling a herbivore off a resource). If predator
+      populations are ever judged healthy/stable enough to safely absorb a
+      new (even non-lethal) stress source, extending this mechanic to
+      predators is a real next step — not attempted here given this
+      session's repeatedly-documented predator-fragility findings.
+- [ ] **Real follow-up, not built**: a herd-level (multiple members per
+      side, closer to predation.ts's existing mob-fighting shape) version of
+      herd conflict, rather than the current individual-pair version. Judged
+      a materially bigger new death-risk surface to validate safely; the
+      individual-pair version already satisfies the direct ask.
 
 ## Culture, disposition, and roles (pitched, not built — see chat)
 - [x] Disposition vector per individual (boldness/aggression/sociability)

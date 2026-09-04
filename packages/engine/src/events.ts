@@ -56,7 +56,7 @@ export type SimEvent =
       tick: number;
       layer: Layer;
       pos: Vec2;
-      stage: "seeded" | "sprouted" | "died";
+      stage: "seeded" | "sprouted" | "died" | "overgrazed" | "recovered";
       /** Set on "sprouted" only — which specific plant it grew into (see flora.ts). */
       flavor?: string;
     }
@@ -343,6 +343,33 @@ export type SimEvent =
       to: TerrainKind;
       /** Which sustained weather condition caused it — see weather.ts's `advanceWaterCycle`, currently the only producer of this event. */
       cause: "drought" | "rain";
+    }
+  | {
+      kind: "herdClash";
+      tick: number;
+      attackerId: string;
+      attackerSpecies: string;
+      /** Absent for a solitary (herdless) participant — same-or-different-species conflict doesn't require either side to actually have a herd. */
+      attackerHerdId?: string;
+      defenderId: string;
+      defenderSpecies: string;
+      defenderHerdId?: string;
+      /** Absent on a "missed" outcome (see below) — no damage was dealt. */
+      damage?: number;
+      /** Absent on a "missed" outcome. */
+      defenderHpRemaining?: number;
+      critical?: boolean;
+      pos: Vec2;
+      /**
+       * "missed": the accuracy roll failed, nothing happened. "hit": a real
+       * hit landed but the defender wasn't hurt enough to back off yet.
+       * "retreated": the defender crossed `herdConflict.ts`'s
+       * `HERD_CONFLICT_RETREAT_HP_FRACTION` and stepped away — this
+       * mechanic's actual resolution; see herdConflict.ts's doc comment for
+       * why this can never be "fainted"/"killed" the way predation's
+       * `fought`/`defeated` can.
+       */
+      outcome: "missed" | "hit" | "retreated";
     }
   | {
       kind: "statusCleared";

@@ -4,7 +4,7 @@ import { stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
 import { applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
-import { CONSUME_STOCK_AMOUNT } from "./flora.js";
+import { CONSUME_STOCK_AMOUNT, recordGrazing } from "./flora.js";
 import { tickCooldowns } from "./combat.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
 import { migrate } from "./migration.js";
@@ -24,6 +24,7 @@ import {
 import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
 import { findNearestIndexed } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
+import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict } from "./herdConflict.js";
 import { thirstDecayMultiplier } from "./weather.js";
 import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
 
@@ -473,6 +474,9 @@ export function tickAgentNeeds(
   // that should still count down even for a bare-fixture caller.
   const digesting = (agent.digestingTicksRemaining ?? 0) > 0;
   if (digesting) agent.digestingTicksRemaining = (agent.digestingTicksRemaining ?? 0) - 1;
+  // Herd-conflict rivalry cooldown (herdConflict.ts) — same "plain bookkeeping,
+  // ticks down regardless of `world`" shape as `digestingTicksRemaining` above.
+  if ((agent.herdConflictCooldownTicks ?? 0) > 0) agent.herdConflictCooldownTicks = (agent.herdConflictCooldownTicks ?? 0) - 1;
   decayNeeds(agent.needs, thirstMultiplier, agent.asleep === true, digesting ? KILL_SATIATION_HUNGER_DECAY_MULTIPLIER : 1);
 
   // Hunger and thirst each get their own consecutive-zero-ticks counter and
@@ -836,7 +840,10 @@ export function tickAgentAction(
         consume(agent.needs, agent.behavior);
         if (agent.behavior === "seekFood") {
           const tile = tileAt(world, agent.layer, target.x, target.y);
-          if (tile?.stock !== undefined) tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
+          if (tile?.stock !== undefined) {
+            tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
+            recordGrazing(tile); // real self-feeding grazing event — see flora.ts's "Grazing scars"
+          }
         }
         grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
         log?.record({
@@ -849,6 +856,23 @@ export function tickAgentAction(
           need,
         });
       } else if (!canEnterTile(world, agent, agent.layer, target)) {
+        // Herd conflict (herdConflict.ts) — a real, sustained standoff over
+        // this exact crowded tile (not a fresh block, see
+        // `HERD_CONFLICT_MIN_BLOCKED_TICKS`) gets a disposition-weighted
+        // chance to escalate into a rivalry fight against whoever's actually
+        // occupying it, instead of only ever waiting/relocating. When it
+        // fires this tick counts as spent on the fight, same as the ordinary
+        // wait/path branches below it's an alternative to; when it doesn't
+        // (no eligible rival, on cooldown, predator involved, or the roll
+        // just misses), falls straight through to the existing behavior,
+        // unchanged.
+        if (
+          rules &&
+          (agent.ticksBlockedFromResource ?? 0) >= HERD_CONFLICT_MIN_BLOCKED_TICKS &&
+          applyHerdRivalryConflict(world, agent, rules, target, log, rng)
+        ) {
+          return;
+        }
         // Direct ask: "ai to recognize when it's blocked or unable to get a
         // resource and try to relocate to find a new one." The nearest
         // matching tile exists but is currently at tile capacity

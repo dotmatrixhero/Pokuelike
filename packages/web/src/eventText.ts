@@ -141,6 +141,12 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `${event.species} (${event.agentId}) ${event.reason} (${event.statusKind})`;
     case "supported":
       return `${event.supporterSpecies} (${event.supporterId}) supported ${event.allySpecies} (${event.allyId})${event.healed ? " (healed)" : ""}${event.buffed ? " (buffed)" : ""}`;
+    case "herdClash": {
+      const rival = event.attackerHerdId && event.defenderHerdId && event.attackerHerdId !== event.defenderHerdId ? ` (herd ${event.attackerHerdId} vs ${event.defenderHerdId})` : "";
+      if (event.outcome === "missed") return `${event.attackerSpecies} (${event.attackerId}) clashed with ${event.defenderSpecies} (${event.defenderId}) over a resource and missed${rival}`;
+      const retreat = event.outcome === "retreated" ? `, ${event.defenderSpecies} (${event.defenderId}) backs off` : "";
+      return `${event.attackerSpecies} (${event.attackerId}) clashed with ${event.defenderSpecies} (${event.defenderId}) over a resource for ${event.damage}${event.critical ? " (crit!)" : ""}${retreat}${rival}`;
+    }
   }
 }
 
@@ -159,7 +165,7 @@ export function formatEvent(event: SimEvent, world?: World): string {
  * information but not a moment worth the same visual weight as a
  * connecting hit.
  */
-export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge", "dispersed", "shelterBuilt", "fought", "immigrated"]);
+export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge", "dispersed", "shelterBuilt", "fought", "immigrated", "herdClash"]);
 
 /**
  * Routine environment/upkeep chatter — real events, just not "the Pokemon
@@ -211,6 +217,7 @@ export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   shelterBuilt: "\u{1F3E0}", // house
   fought: "\u{1F4A5}", // boom
   immigrated: "\u{1F6F6}", // canoe
+  herdClash: "\u{1F93C}", // wrestlers — rivalry, not a hunt
 };
 
 export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
@@ -224,6 +231,7 @@ export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
   shelterBuilt: "#c9a876",
   fought: "#ff9d3c",
   immigrated: "#5ee6c4",
+  herdClash: "#e0c341",
 };
 
 /**

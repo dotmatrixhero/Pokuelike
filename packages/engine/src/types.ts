@@ -220,6 +220,35 @@ export interface Tile {
    * much life left." Set to 0 at construction, `undefined` once reverted.
    */
   vacantTicks?: number;
+  /**
+   * Any terrain kind — cumulative grazing pressure, independent of what the
+   * tile's terrain currently is (a food patch eaten out and reverted to
+   * "floor" keeps its pressure, which is the whole point: the SCAR outlives
+   * the patch's own life-cycle). Incremented on every real consumption event
+   * at this tile's coordinates (self-feeding via needs.ts's `consume()`, or
+   * herd food-delivery pickup via support.ts — both call flora.ts's
+   * `recordGrazing`), and decayed a little every tick in `growFlora`
+   * regardless of terrain, the same "single per-tick scan, not per-agent"
+   * shape as `stock`/`vacantTicks` above. Crossing
+   * `OVERGRAZED_ENTER_PRESSURE` flips `overgrazed` on; decaying back below
+   * `OVERGRAZED_EXIT_PRESSURE` flips it off — see flora.ts's "Grazing scars"
+   * section for the hysteresis reasoning and the real suppression this
+   * drives. `undefined` until the first grazing event ever touches this
+   * tile (never reset to `undefined` afterward — decays asymptotically
+   * toward, but only ever reaches exactly, 0).
+   */
+  grazingPressure?: number;
+  /**
+   * True while `grazingPressure` is at/above the "overgrazed" threshold —
+   * see `grazingPressure`'s doc comment above. While true, flora.ts's
+   * `growFlora` measurably suppresses new growth onto or from this specific
+   * tile (germination chance, spread eligibility, seedling maturation rate)
+   * without touching decay of whatever's already grown elsewhere — a
+   * temporary "this ground needs to rest" state, not a permanent dead zone:
+   * it clears itself once grazing pressure decays back down, the same
+   * self-recovering shape as `vacantTicks`-driven shelter abandonment.
+   */
+  overgrazed?: boolean;
 }
 
 /** Needs decay over time and drive an agent's behavior via simple utility AI. */
@@ -326,6 +355,15 @@ export interface Agent {
    * tile exists nearby but is currently too crowded to stand on).
    */
   ticksBlockedFromResource?: number;
+  /**
+   * Ticks remaining before this agent can start or be drawn into another
+   * herd-conflict rivalry fight (herdConflict.ts) — set on both participants
+   * once one of them retreats, so the same pair doesn't immediately grind on
+   * each other again the very next eligible tick. Ticked down every world
+   * tick in `tickAgentNeeds`, same shape as `actionLockTicks`. Absent/0 = no
+   * cooldown, the default.
+   */
+  herdConflictCooldownTicks?: number;
   /**
    * Rolling memory of resource tiles (same terrain kind as the current
    * seekWater/seekFood target) found crowded during the current seeking
