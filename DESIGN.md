@@ -1974,173 +1974,25 @@ a new `vitest.config.ts`, confirmed pre-existing and unrelated to any of
 this session's other changes), and the newborn/exploration same-tick
 interaction above.
 
-## Planned: status effects + environmental utility moves (design only, not built yet)
+## Planned: status effects + environmental/utility moves
 
 Requested directly, in two parts: real status effects (burn/poison/
 paralysis/sleep/freeze), and making non-combat moves "sick as fuck" by
-having them interact with the environment instead of sitting unused.
-Neither is implemented yet — this section is the design to build against,
-written down before touching code per request.
-
-**The good news: half the plumbing already exists and has never been
-connected to anything.** `MoveSpec.statusChance` has existed since the
-Action Economy feature shipped, Ember/Flamethrower already carry
-`statusChance: 0.1`, and Ember's respec tree literally has a `"wider_burn"`
-node that raises it further — its own doc comment says it "exists to
-prove `applyMoveTree` works and give the (future) player something real
-to respec once move points are earned." Status effects were always the
-intended consumer. Nothing has ever read the field in combat.
-
-### Status effects
-
-**Data model.** One new field, `Agent.status?: { kind: StatusKind;
-ticksRemaining?: number }`, where `StatusKind` is `"burn" | "poison" |
-"paralysis" | "sleep" | "freeze"`. Mainline-real invariant: an agent
-carries at most one major status at a time — landing Ember on something
-already paralyzed does nothing. `ticksRemaining` is only meaningful for
-sleep/freeze (bounded duration); burn/poison/paralysis persist until an
-explicit clear condition (see below) — there's no item/ability system in
-this sim to cure them early, matching the "wild ecosystem, no trainer
-items" scope.
-
-**Which move causes which status** needs hand-curation, the same way
-`EGG_GROUPS_BY_BASE_KEY` was: the *generated* move dex only captured that
-a move has a `"StatusEffectAttr"` tag, not which status it inflicts (that
-argument lived in a PokeRogue constructor call the importer didn't parse).
-So `MoveSpec` gains one more optional field, `statusKind?: StatusKind`,
-set by hand only on the small curated roster in `packages/data/src/moves.ts`
-— e.g. `ember`/`flamethrower` → `"burn"`. Rounding out real coverage means
-curating one or two more real inflicters onto species that would
-plausibly know them (Thunder Wave → `"paralysis"`, Poison Sting →
-`"poison"`), rather than inventing anything not backed by the actual dex.
-
-**Application** rides entirely inside the existing hit-resolution
-pipeline — no new targeting logic needed, since it's a side effect of a
-landed attack, not a separate move. In `predation.ts`'s `resolveHit`,
-right where `maybeGrantHitSkillPoint` already piggybacks on a successful,
-damaging hit: if `move.statusChance` rolls, `defender` has no `status`
-yet, and `defender.types` don't grant real mainline immunity for that kind
-(Fire can't be burned, Electric can't be paralyzed, Poison/Steel can't be
-poisoned, Ice can't be frozen — cheap and authentic since `defender.types`
-is already right there), set `defender.status`. Skip entirely on a hit
-that was itself the killing blow — no point statusing a corpse.
-
-**Resolution reuses two patterns you already have, not new ones:**
-- *Damage-over-time* (burn, poison) is the mirror image of
-  `applyHealOverTime` — a fixed fraction of `maxHp` (mainline-scale:
-  1/16 for burn, 1/8 for poison) taken off every tick in `tickAgentNeeds`
-  (the always-runs path, same reasoning as heal-over-time: DOT doesn't
-  pause because an agent is too slow to act this tick). Burn additionally
-  halves effective Attack for the duration — a one-line read where
-  `calculateDamage` already looks up the attacker's stats. Critically,
-  status damage that brings HP to 0 **faints, it does not kill outright**
-  — it must route through the same fainted/`finishingPool` pipeline
-  `resolveHit` already uses, not a separate instant-death branch, or it'd
-  violate the project's own no-instant-death invariant (see the
-  Faint/finish-off section above).
-- *Skip-the-action-tick* (paralysis, sleep, freeze) is the same shape as
-  the existing `if (agent.fainted) return;` / `if (agent.beingCarriedBy)
-  return;` early returns already at the top of `tickAgentAction` — three
-  more entries in that exact list, still needs-decaying and healing via
-  `tickAgentNeeds` regardless. Paralysis additionally rolls a chance
-  (mainline: 25%) to skip on top of a genuine permanent speed cut for the
-  duration — a second multiplier alongside `effectiveSpeed`'s existing
-  injury-based one (support.ts), not a replacement for it, so a badly hurt
-  *and* paralyzed agent stacks both penalties realistically. Freeze rolls
-  a per-tick thaw chance (mainline: ~20%); a Fire-type hit connecting
-  while frozen thaws it instantly, a fun, cheap rule since hit resolution
-  already knows the attacking move's type. Sleep gets a random bounded
-  duration decided at onset (mainline: 1-3 turns; this sim's ticks are
-  finer-grained than mainline turns, so this needs its own tuned range,
-  not a literal 1-3 — proposing `SLEEP_TICKS_MIN/MAX` as a tunable, to be
-  set from an actual run rather than guessed).
-- **Decided** (was an open question, resolved directly): burn/poison have
-  no separate duration or cure at all — they simply deal damage every tick
-  until the DOT itself brings the agent to a faint, exactly like getting
-  hit does. The status's job is done at that point: `defender.status` is
-  cleared the moment it faints, same tick, and ordinary recovery takes
-  over from there — `applyHealOverTime`/`maybeRecoverFromFaint`
-  (support.ts) already handle "heal back above the wake threshold, resume
-  acting" with zero new code needed. This is simpler than the
-  bounded-duration idea it replaces, and mechanically identical to how a
-  normal attack already works (damage accumulates, a hit that reaches 0
-  HP faints rather than kills, the agent needs feeding/watering to heal
-  and wake up) — burn/poison are just "damage that lands on its own every
-  tick instead of only when someone's next to you swinging."
-
-**New events**: `statusInflicted` (kind, agentId, species, inflictedBy)
-and `statusCleared` (kind, agentId, reason: `"expired" | "healedFully" |
-"woke" | "thawed" | "died"`) — same shape as every other semantic event in
-this log, narratable ("bulbasaur-12 was burned by scyther-0 at tick 400,
-and finally succumbed to it at tick 511").
-
-### Environmental utility moves
-
-These are a genuinely different mechanic from status effects, not a
-variation of the same one — worth being explicit about why, since the
-brainstorm bundled them together. A damaging move's status chance is a
-side effect of an existing "attack this specific enemy" action; an
-environmental move (Sunny Day, Dig-to-escape, Growth) doesn't target an
-enemy at all — it targets a tile, the caster itself, or nothing in
-particular. Bolting that onto `pickBestMove`'s "pick the best attack
-against this defender's types" logic would be forcing a square peg into
-the combat system's targeting model. They need their own, separate
-trigger path instead — cheap to add precisely because it doesn't touch
-combat at all:
-
-- **Idle/opportunistic utility** (Sunny Day, Growth, self-buffs) checks
-  during an otherwise-idle tick, the same architectural slot
-  `applyExploration` already occupies (needs.ts) — a new
-  `applyEnvironmentalMoveUse(world, agent, ctx, log)` tried alongside it:
-  does this agent know a curated environmental move, is a relevant nearby
-  condition true (a `seedling` in range for Growth, no `sunbeam` already
-  nearby for Sunny Day), and does a cooldown/chance roll succeed. This
-  reuses `agent.knownMoves` (already populated by the leveling system,
-  already includes true status moves that combat has no use for today —
-  this finally gives them one) rather than inventing new agent state.
-- **Reactive utility** (Dig-to-escape when fleeing, Leech Seed used
-  mid-hunt to drain instead of damage) hooks into `predation.ts`'s
-  existing flee/hunt branches as an alternative to the default
-  step-away/attack action, gated the same way canAttackFromHere already
-  gates a normal attack.
-
-A hand-curated `ENVIRONMENTAL_EFFECT_BY_MOVE` table (packages/data, same
-pattern as `STATUS_BY_MOVE`) maps a handful of real moves to one of:
-
-| Move (real, curated) | Effect | What it touches |
-|---|---|---|
-| Sunny Day | Plants a temporary `sunbeam` tile at the caster's position | flora.ts's `isNearSunbeam`/`FOOD_CHANCE_NEAR_SUNBEAM` — already-existing mechanics, zero new terrain code |
-| Ember (opportunistic, not on-hit) | Burns an adjacent `flora`/`food` tile back to `floor` | Real terraforming, double-edged (clears a blocker, destroys a resource) |
-| Growth | Force-matures a nearby `seedling` early, or shortens its `MATURATION_TICKS` | Direct hook into flora.ts's existing growth timer |
-| Water Gun | Converts an adjacent dry `floor` tile into a temporary puddle | New but minimal — a temporary `TerrainKind` variant or a stock-bearing water tile with a lifespan |
-| Dig | Instantly crosses the user to the layer below, at the same (x,y) | Reuses the existing cross-layer mechanic (needs.ts), as an emergency escape instead of the slow "seek resource, incidentally cross" path |
-| Leech Seed | Transfers a fixed amount of hunger/thirst from target to caster | Direct `Needs` field manipulation — the most combat-adjacent of the set, since it does need a target |
-
-**Recommended build order** (each is a few lines specifically because it
-reuses something that already exists, per the discussion that led here):
-Sunny Day first (purely additive, cannot make anything worse, immediately
-visible in a replay), then Dig-to-escape (meaningfully changes prey
-survival odds, easy to verify with a before/after real-run comparison),
-then Leech Seed (the one genuinely new mechanic — resource transfer
-between two agents — worth building once the simpler two prove the
-trigger-path architecture out).
-
-**Open questions, not yet decided:**
-- Should an environmental move cost anything (a cooldown alone, or also
-  compete with the mate/food/explore urgency scoring in `chooseBehavior`)
-  — right now the design treats it as "free" whenever idle, which risks
-  every idle tick trying to roll it uselessly at scale (cheap per-check,
-  but worth confirming against a real run's tick cost before committing).
-- Whether burn/poison should be visible in the ASCII renderer (a color
-  tint or marker) — cosmetic, but matters for "watching a run and reading
-  the story" the same way fainted/carrying states already do.
-- Whether species that are canonically ability-immune to a status
-  (Fire/burn, Electric/paralysis, Poison-Steel/poison, Ice/freeze) should
-  be the *only* immunity modeled, or whether a later ability system
-  should also grant conditional immunity (e.g. Limber) — deferred; no
-  ability system exists in this sim yet at all (see the Data import
-  section's scope call), so type-only immunity is the right-sized slice
-  for now.
+having them interact with the environment instead of sitting unused. The
+full design — data model, exactly which existing code each piece reuses
+(`applyHealOverTime`'s shape for DOT, the fainted/`beingCarriedBy`
+early-return pattern for skip-turn statuses, `applyExploration`'s
+architectural slot for idle utility moves), a growing table of specific
+moves across three brainstorming rounds, and a real structural finding
+(FOV is fully built in fov.ts and completely unused by any actual AI
+decision — every detection check today is a blind manhattan-distance
+radius) — now lives in **[MOVES_DESIGN.md](./MOVES_DESIGN.md)**, its own
+file so a fast-growing backlog doesn't crowd out this file's own job of
+documenting what's actually shipped. One resolved decision worth stating
+here since it's a real mechanical rule, not just a backlog entry: burn
+and poison have no independent duration or cure — they deal damage every
+tick until the DOT itself causes a faint, exactly like a normal hit does,
+and ordinary recovery (already built) takes it from there.
 
 ## Current state of the code
 
