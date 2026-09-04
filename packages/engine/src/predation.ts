@@ -179,7 +179,7 @@ function activityHuntShift(agent: Agent, tick: number): number {
  * while barely hungry at all; absent both disposition and activityPattern
  * (bare fixtures), this reduces exactly to the original fixed threshold.
  */
-function huntHungerThreshold(agent: Agent, tick: number): number {
+export function huntHungerThreshold(agent: Agent, tick: number): number {
   const aggression = agent.disposition?.aggression ?? 0.5;
   return (
     HUNT_HUNGER_THRESHOLD +
@@ -190,8 +190,47 @@ function huntHungerThreshold(agent: Agent, tick: number): number {
 /** Fallback HP for an agent with no real combat profile (stats/level/types) — shouldn't happen for fully-statted species. Exported so support.ts's body-weight proxy can match it. */
 export const FALLBACK_MAX_HP = 10;
 const FALLBACK_DAMAGE = 1;
-/** A predator at or below this fraction of max HP flees a fight instead of continuing it. */
+/** A predator at or below this fraction of max HP flees a fight instead of continuing it. See `retreatHpFraction` for the juvenile-aware version actually used. */
 const RETREAT_HP_FRACTION = 0.4;
+/**
+ * Juveniles flee a losing fight noticeably earlier than an adult of the same
+ * species — real biology, and a genuine mechanical difference (not just a
+ * flag), per the ontogenetic-niche-shift ask: young animals are markedly
+ * more risk-averse than adults, not just less capable. Applies to `isCriticallyHurt`
+ * generally (any species, not just predators — `isJuvenile` is purely
+ * age-gated, no `rules` lookup involved), which is a deliberate, harmless
+ * generalization: nothing in this codebase's existing tests sets `agent.age`
+ * on a fixture, so every pre-existing scenario (`agent.age === undefined`,
+ * `isJuvenile` false) is completely unaffected — only a genuinely young agent
+ * sees the earlier flee point.
+ */
+const JUVENILE_RETREAT_HP_FRACTION = 0.6;
+/**
+ * How young (in `Agent.age` ticks) counts as a juvenile for the ontogenetic
+ * niche shift — deliberately well below `reproduction.ts`'s `MATURITY_AGE`
+ * (200), reusing that module's existing "age is the maturity proxy" convention
+ * rather than inventing a second age concept (see DESIGN.md). `agent.age ===
+ * undefined` (a hand-built fixture, or an agent spawned directly into a
+ * scenario) reads as already-adult, matching `isMature`'s own "absent = mature"
+ * default exactly.
+ */
+export const JUVENILE_AGE_THRESHOLD = 60;
+
+/**
+ * Is `agent` a juvenile — too young to hunt independently, more skittish in
+ * a fight than an adult of the same species? See `JUVENILE_AGE_THRESHOLD`'s
+ * doc comment for why the cutoff sits well below `MATURITY_AGE`, and this
+ * function's callers (the hunt-eligibility gate below, `retreatHpFraction`,
+ * and support.ts's `applyScavenging`) for the concrete behavior differences.
+ */
+export function isJuvenile(agent: Agent): boolean {
+  return agent.age !== undefined && agent.age < JUVENILE_AGE_THRESHOLD;
+}
+
+/** The real HP fraction `isCriticallyHurt` flees at — earlier (higher) for a juvenile, see `JUVENILE_RETREAT_HP_FRACTION`'s doc comment. */
+function retreatHpFraction(agent: Agent): number {
+  return isJuvenile(agent) ? JUVENILE_RETREAT_HP_FRACTION : RETREAT_HP_FRACTION;
+}
 
 /** How long a predator can go without a kill while actively hunting before it gives up on the area. */
 const RELOCATE_AFTER_TICKS = 150;
@@ -249,6 +288,88 @@ export function isPreyOf(rules: HuntRules, predator: Agent, target: Agent): bool
   if (!rules[predator.species]) return false;
   if (target.species === predator.species) return false;
   return powerOf(target) <= powerOf(predator) * PREY_POWER_RATIO;
+}
+
+/**
+ * How much bigger than `PREY_POWER_RATIO` a target can be and still be worth
+ * a coordinated PACK hunt — real biology: a lone wolf won't take on a moose,
+ * but a pack will. Wider than the solo `PREY_POWER_RATIO` (0.75) but still
+ * bounded, not "anything goes with enough friends" — `isPackPreyOf` only ever
+ * covers the band strictly above solo-eligible (would already be hunted
+ * alone) and at/below this ratio (still hopeless even for a pack). Sim-
+ * original magnitude, judge against a real run like every other tuning
+ * constant here.
+ */
+const PACK_PREY_POWER_RATIO = 1.15;
+/** How far a same-species conspecific has to be to join/be counted toward a pack hunt — muster range, matching `MOB_MUSTER_RADIUS`'s own shape for the mirrored offense-side mechanic. */
+const PACK_MUSTER_RADIUS = 5;
+/** Minimum total pack size (the hunting agent itself plus at least this many nearby same-species conspecifics) before a pack hunt is even attempted — 1 real ally, not zero (a "pack" of one is just a solo hunt). */
+const MIN_PACK_ALLIES = 1;
+/** Real per-ally accuracy bonus for a coordinated pack hunt — more hunters genuinely land more hits, the actual mechanical lever this feature exists to provide (not flavor text). Composes additively per already-committed packmate, capped below. */
+const PACK_ACCURACY_BONUS_PER_ALLY = 0.15;
+/** Ceiling on the pack accuracy bonus — even a large pack doesn't guarantee a hit outright. */
+const PACK_ACCURACY_BONUS_CAP = 0.45;
+
+/**
+ * The dynamic pack-hunting equivalent of `isPreyOf`: `target` is too strong
+ * for `predator` to take on alone (fails `isPreyOf`'s own `PREY_POWER_RATIO`
+ * gate) but still within reach of a coordinated pack, per
+ * `PACK_PREY_POWER_RATIO`. Same same-species exclusion as `isPreyOf` for the
+ * same reason (no cannibalism, and the acyclic-relation argument in that
+ * function's doc comment applies here too). Deliberately does NOT also
+ * require `rules[predator.species]` here — callers already gate on that
+ * before ever reaching this, same convention as `isPreyOf`.
+ */
+export function isPackPreyOf(rules: HuntRules, predator: Agent, target: Agent): boolean {
+  if (!rules[predator.species]) return false;
+  if (target.species === predator.species) return false;
+  const targetPower = powerOf(target);
+  const predatorPower = powerOf(predator);
+  return targetPower > predatorPower * PREY_POWER_RATIO && targetPower <= predatorPower * PACK_PREY_POWER_RATIO;
+}
+
+/**
+ * Living, conscious same-species conspecifics near `pos` — the pack-hunting
+ * equivalent of `countHerdAllies`, but deliberately NOT herd-gated: unlike
+ * prey's mob-fighting (which only ever musters actual herd-mates), this
+ * sim's predator species mostly spawn and stay solitary (no `herdId` at all
+ * in the demo scenario — see `packages/data/src/scenario.ts`), so gating a
+ * predator-side pack mechanic on shared `herdId` the way `countHerdAllies`
+ * does would mean it essentially never fires. Real pack behavior in nature
+ * doesn't require formal herd bookkeeping either — proximity plus species is
+ * the real trigger.
+ */
+function nearbySameSpeciesConspecifics(world: World, agent: Agent, pos: Vec2, radius: number): Agent[] {
+  return world.agents.filter(
+    (other) =>
+      other.id !== agent.id &&
+      other.alive !== false &&
+      !other.fainted &&
+      other.species === agent.species &&
+      other.layer === agent.layer &&
+      manhattan(other.pos, pos) <= radius
+  );
+}
+
+/**
+ * How many OTHER same-species conspecifics are already actively committed to
+ * hunting this exact `targetId` (`Agent.huntTarget`, set the tick they
+ * themselves picked this same target — a real, positioning-driven signal,
+ * not an invented dice roll) within pack range. This is what the accuracy
+ * bonus is actually computed from — a wider "conspecifics somewhere nearby"
+ * count would reward mere proximity, not real coordination on the same
+ * target.
+ */
+function committedPackmates(world: World, agent: Agent, targetId: string, targetPos: Vec2): number {
+  return nearbySameSpeciesConspecifics(world, agent, targetPos, PACK_MUSTER_RADIUS).filter(
+    (other) => other.huntTarget === targetId
+  ).length;
+}
+
+/** The real accuracy multiplier a coordinated pack hunt grants, given how many packmates are already committed to the same target. 1 (no change) with zero committed packmates. */
+function packAccuracyMultiplier(committedAllies: number): number {
+  if (committedAllies <= 0) return 1;
+  return 1 + Math.min(committedAllies * PACK_ACCURACY_BONUS_PER_ALLY, PACK_ACCURACY_BONUS_CAP);
 }
 
 /**
@@ -355,7 +476,7 @@ function isProtectedByMob(world: World, candidate: Agent): boolean {
 
 function isCriticallyHurt(agent: Agent): boolean {
   if (agent.hp === undefined || agent.maxHp === undefined || agent.maxHp === 0) return false;
-  return agent.hp / agent.maxHp <= RETREAT_HP_FRACTION;
+  return agent.hp / agent.maxHp <= retreatHpFraction(agent);
 }
 
 /**
@@ -637,7 +758,8 @@ function resolveHitAgainstTarget(
   faintKind: "killed" | "defeated",
   ctx: LevelingContext | undefined,
   isPrimaryTarget: boolean,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  accuracyBonusMultiplier = 1
 ): boolean {
   if (defender.alive === false) return false; // already a corpse — nothing left to finish off here (looting/scavenging is a separate path, see support.ts)
 
@@ -645,7 +767,7 @@ function resolveHitAgainstTarget(
   defender.hp = defender.hp ?? defender.maxHp;
   const wasFaintedBefore = defender.fainted === true;
 
-  if (!rollAccuracy(move, 0, 0, rng, stormAccuracyMultiplier(world, attacker.layer, attacker.pos))) {
+  if (!rollAccuracy(move, 0, 0, rng, stormAccuracyMultiplier(world, attacker.layer, attacker.pos) * accuracyBonusMultiplier)) {
     log?.record({
       kind: "missed",
       tick: world.tick,
@@ -735,7 +857,8 @@ function resolveAreaHit(
   log: EventLog | undefined,
   faintKind: "killed" | "defeated",
   ctx: LevelingContext | undefined,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  accuracyBonusMultiplier = 1
 ): boolean {
   const facing = facingToward(attacker.pos, primaryTarget.pos);
   const tiles = resolveShape(move.shape, attacker.pos, facing);
@@ -747,7 +870,10 @@ function resolveAreaHit(
   let primaryDied = false;
   for (const target of targets) {
     const isPrimary = target.id === primaryTarget.id;
-    const died = resolveHitAgainstTarget(world, attacker, target, move, log, faintKind, ctx, isPrimary, rng);
+    // The pack-hunting accuracy bonus only ever applies to the deliberately-picked
+    // primary target — an AoE move's incidental side-targets aren't who the pack
+    // coordinated on.
+    const died = resolveHitAgainstTarget(world, attacker, target, move, log, faintKind, ctx, isPrimary, rng, isPrimary ? accuracyBonusMultiplier : 1);
     if (died && isPrimary) primaryDied = true;
   }
   return primaryDied;
@@ -780,7 +906,15 @@ function resolveHit(
   faintKind: "killed" | "defeated",
   ctx: LevelingContext | undefined,
   distance: number,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  /**
+   * Real accuracy multiplier from a coordinated pack hunt (predation.ts's
+   * own `packAccuracyMultiplier`, computed by `applyPredationInstincts`
+   * before this is called) — 1 (no change) for every solo hit, which is
+   * every pre-existing caller of `resolveHit` (mob-fighting's defensive
+   * fights, the guardian branch), so none of them need updating.
+   */
+  accuracyBonusMultiplier = 1
 ): boolean {
   if (defender.alive === false) return false; // already a corpse — nothing left to finish off here (looting/scavenging is a separate path, see support.ts)
 
@@ -812,8 +946,8 @@ function resolveHit(
     applyStatStage(attacker, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
   }
 
-  if (move.hitsArea) return resolveAreaHit(world, attacker, defender, move, log, faintKind, ctx, rng);
-  return resolveHitAgainstTarget(world, attacker, defender, move, log, faintKind, ctx, true, rng);
+  if (move.hitsArea) return resolveAreaHit(world, attacker, defender, move, log, faintKind, ctx, rng, accuracyBonusMultiplier);
+  return resolveHitAgainstTarget(world, attacker, defender, move, log, faintKind, ctx, true, rng, accuracyBonusMultiplier);
 }
 
 function logKillOrDefeat(world: World, attacker: Agent, defender: Agent, faintKind: "killed" | "defeated", log: EventLog | undefined): void {
@@ -995,13 +1129,52 @@ export function applyPredationInstincts(
   // Also skipped while asleep — a sleeping predator doesn't hunt on its own
   // initiative either, same reasoning as the flee/mob block above.
   if (!agent.asleep && rules[agent.species] && agent.needs.hunger < huntHungerThreshold(agent, world.tick)) {
-    const candidates = agentsWithin(world, agent, HUNT_DETECT_RADIUS).filter(
-      (other) =>
-        isPreyOf(rules, agent, other) &&
-        !isProtectedByMob(world, other) &&
-        isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS)
-    );
-    const target = nearest(agent, candidates);
+    // Ontogenetic niche shift: a juvenile predator never initiates an
+    // independent hunt at all (solo OR pack) — real biology, per the direct
+    // ask ("young predators are often more cautious/less effective hunters,
+    // sometimes relying on scavenging or parental provisioning... before
+    // graduating into full adult behavior"). `candidates` stays empty, so a
+    // hungry juvenile falls straight through to the same
+    // ticksSinceMeal/relocate bookkeeping a solo adult that simply couldn't
+    // find prey would — it just never had a real hunt attempt to begin with.
+    // It still gets a real fallback meal: needs.ts calls `applyScavenging`
+    // (support.ts) right after this function returns false, and juveniles
+    // get a much more lenient hunger gate there specifically because this is
+    // now their PRIMARY feeding strategy, not an occasional opportunistic
+    // one — see that function's doc comment. A hungry juvenile can also still
+    // be fed directly by a herd-mate via the pre-existing `applyHerdSupport`
+    // food-delivery mechanic, unaffected by any of this.
+    const juvenile = isJuvenile(agent);
+    const soloCandidates = juvenile
+      ? []
+      : agentsWithin(world, agent, HUNT_DETECT_RADIUS).filter(
+          (other) =>
+            isPreyOf(rules, agent, other) &&
+            !isProtectedByMob(world, other) &&
+            isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS)
+        );
+    let target = nearest(agent, soloCandidates);
+
+    // Pack hunting: only attempted once a solo target couldn't be found —
+    // this is what makes it a real lever against target that a solo predator
+    // would otherwise never even attempt (too strong to be worth the risk
+    // alone), not a strictly-better replacement for solo hunting. Real,
+    // positioning-driven trigger (same shape as the existing defensive
+    // mob-fighting above, flipped to offense): a real, nearby, same-species
+    // conspecific has to actually be there before a pack hunt is even
+    // attempted — no invented dice roll gates whether the pack "forms."
+    if (!juvenile && !target) {
+      const packCandidates = agentsWithin(world, agent, HUNT_DETECT_RADIUS).filter(
+        (other) =>
+          isPackPreyOf(rules, agent, other) &&
+          !isProtectedByMob(world, other) &&
+          isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS)
+      );
+      const packTarget = nearest(agent, packCandidates);
+      if (packTarget && nearbySameSpeciesConspecifics(world, agent, packTarget.pos, PACK_MUSTER_RADIUS).length >= MIN_PACK_ALLIES) {
+        target = packTarget;
+      }
+    }
 
     if (target) {
       logBehaviorChange(log, world, agent, "hunt");
@@ -1009,6 +1182,27 @@ export function applyPredationInstincts(
       agent.huntTarget = target.id;
 
       const huntDistance = manhattan(agent.pos, target.pos);
+      // Real, positioning-driven pack bonus: how many OTHER same-species
+      // conspecifics are already actually committed to this exact target
+      // (not just "somewhere nearby") — see `committedPackmates`'s own doc
+      // comment. Computed for every hunt attempt, solo-eligible targets
+      // included: if packmates happen to already be piling onto a target a
+      // lone predator would also have gone for anyway, that's still real
+      // coordination worth the same accuracy bonus.
+      const packmates = committedPackmates(world, agent, target.id, target.pos);
+      const accuracyBonus = packAccuracyMultiplier(packmates);
+      if (packmates > 0) {
+        log?.record({
+          kind: "packHunt",
+          tick: world.tick,
+          attackerId: agent.id,
+          attackerSpecies: agent.species,
+          targetId: target.id,
+          targetSpecies: target.species,
+          packmates,
+          pos: agent.pos,
+        });
+      }
       if (canAttackFromHere(world, agent, target, huntDistance)) {
         // A single hit may not be lethal now — real HP, real damage, and even
         // a lethal hit only FAINTS the target (see resolveHit/DESIGN.md). The
@@ -1016,7 +1210,7 @@ export function applyPredationInstincts(
         // dead — resolveHit returns true only at that moment, never on a mere
         // faint — so hunting a fainted target across several ticks to finish
         // it off, then eating, is the normal two-stage path here.
-        const died = resolveHit(world, agent, target, log, "killed", ctx, huntDistance, rng);
+        const died = resolveHit(world, agent, target, log, "killed", ctx, huntDistance, rng, accuracyBonus);
         if (died) {
           // A real kill is a much bigger deal than grazing — full restore
           // plus an extended "digesting" slowdown on top (needs.ts's

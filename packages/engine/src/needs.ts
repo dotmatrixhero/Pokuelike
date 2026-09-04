@@ -9,7 +9,16 @@ import { tickCooldowns } from "./combat.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
 import { migrate } from "./migration.js";
 import { applyDispersal, maybeTriggerDispersal } from "./dispersal.js";
-import { applyShelterBuilding, maybeTriggerShelterBuilding } from "./shelter.js";
+import {
+  applyShelterBuilding,
+  applyShelterResting,
+  hasNearbyShelter,
+  maybeFeedFromShelterCache,
+  maybeTriggerShelterBuilding,
+  SHELTER_HEAL_MULTIPLIER,
+  SHELTER_NEEDS_DECAY_MULTIPLIER,
+  SHELTER_REST_RADIUS,
+} from "./shelter.js";
 import { logBehaviorChange, type EventLog } from "./events.js";
 import {
   EXP_ON_CONSUME,
@@ -21,7 +30,7 @@ import {
   sectorId,
   type LevelingContext,
 } from "./leveling.js";
-import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
+import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
 import { findNearestIndexed } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
 import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict } from "./herdConflict.js";
@@ -319,9 +328,18 @@ export function createNeeds(overrides: Partial<Needs> = {}): Needs {
  * parameter rather than folded into `asleep`'s combined multiplier since an
  * agent can be digesting without being asleep (or vice versa), and a kill
  * deliberately doesn't touch thirst the way sleep does.
+ *
+ * `shelterMultiplier` (default 1) composes multiplicatively with `asleep`'s
+ * own multiplier — shelter.ts's `SHELTER_NEEDS_DECAY_MULTIPLIER`, passed
+ * whenever the agent is within `SHELTER_REST_RADIUS` of any shelter tile
+ * (see `tickAgentNeeds`'s call site). A smaller, real-but-lesser reduction
+ * than sleep's own: being merely home is a lighter commitment than being a
+ * genuine sitting duck, so it shouldn't duplicate sleep's "dramatically
+ * reduced" bonus outright — but an asleep agent that's ALSO home gets both,
+ * multiplicatively, the best rest available in this sim.
  */
-export function decayNeeds(needs: Needs, thirstMultiplier = 1, asleep = false, hungerMultiplier = 1): void {
-  const needsMultiplier = asleep ? SLEEP_NEEDS_DECAY_MULTIPLIER : 1;
+export function decayNeeds(needs: Needs, thirstMultiplier = 1, asleep = false, hungerMultiplier = 1, shelterMultiplier = 1): void {
+  const needsMultiplier = (asleep ? SLEEP_NEEDS_DECAY_MULTIPLIER : 1) * shelterMultiplier;
   needs.hunger = Math.max(0, needs.hunger - (needs.hunger * HUNGER_DECAY_RATE + HUNGER_DECAY_FLOOR) * needsMultiplier * hungerMultiplier);
   needs.thirst = Math.max(0, needs.thirst - DECAY_PER_TICK.thirst * thirstMultiplier * needsMultiplier);
   needs.energy = asleep
@@ -477,7 +495,19 @@ export function tickAgentNeeds(
   // Herd-conflict rivalry cooldown (herdConflict.ts) — same "plain bookkeeping,
   // ticks down regardless of `world`" shape as `digestingTicksRemaining` above.
   if ((agent.herdConflictCooldownTicks ?? 0) > 0) agent.herdConflictCooldownTicks = (agent.herdConflictCooldownTicks ?? 0) - 1;
-  decayNeeds(agent.needs, thirstMultiplier, agent.asleep === true, digesting ? KILL_SATIATION_HUNGER_DECAY_MULTIPLIER : 1);
+  // "Incentivize the Pokémon to stay in it" — real, per-tick heal/needs-decay
+  // perks for a `buildsShelter` agent genuinely standing near its shelter,
+  // regardless of which behavior label happens to be set this tick (a fresh
+  // arrival, mid-rest, or just passing through all count) — see shelter.ts's
+  // "Incentive to actually stay" doc comment.
+  const nearShelter = world !== undefined && agent.buildsShelter === true && hasNearbyShelter(world, agent.layer, agent.pos, SHELTER_REST_RADIUS);
+  decayNeeds(
+    agent.needs,
+    thirstMultiplier,
+    agent.asleep === true,
+    digesting ? KILL_SATIATION_HUNGER_DECAY_MULTIPLIER : 1,
+    nearShelter ? SHELTER_NEEDS_DECAY_MULTIPLIER : 1
+  );
 
   // Hunger and thirst each get their own consecutive-zero-ticks counter and
   // their own grace threshold (`STARVATION_GRACE_TICKS` /
@@ -516,7 +546,7 @@ export function tickAgentNeeds(
     return;
   }
 
-  applyHealOverTime(agent, agent.asleep ? SLEEP_HEAL_MULTIPLIER : 1);
+  applyHealOverTime(agent, (agent.asleep ? SLEEP_HEAL_MULTIPLIER : 1) * (nearShelter ? SHELTER_HEAL_MULTIPLIER : 1));
   if (world) maybeRecoverFromFaint(agent, world, log);
   if (world) grantExp(world, agent, EXP_TRICKLE_PER_TICK, ctx, log, rng);
 
@@ -610,6 +640,15 @@ export function tickAgentAction(
   // without a single drink and died of thirst mid-search.
   const thirstIsUrgent = 1 - agent.needs.thirst > 0.3;
   if (rules && applyPredationInstincts(world, agent, rules, log, ctx, rng, thirstIsUrgent)) return;
+  // A real fallback, not a last resort tacked on after everything else: a
+  // hungry predator that had nothing to flee/fight/hunt this tick (solo or
+  // pack — see predation.ts) checks for a nearby corpse to feed from
+  // directly before falling through to looting/herd-support/ordinary
+  // foraging. See support.ts's `applyScavenging` doc comment for why this
+  // sits here specifically (right after predation instincts get first
+  // refusal, same "survival/feeding instincts before routine behavior"
+  // ordering every other step in this function already follows).
+  if (rules && applyScavenging(world, agent, rules, log)) return;
   if (maybeStartCarrying(world, agent, log)) return;
   if (applyLooting(world, agent, log)) return;
   // Real confirmed death case: a zero-cooldown ally-buff move (reachable via
@@ -815,6 +854,15 @@ export function tickAgentAction(
     return;
   }
 
+  if (agent.behavior === "seekFood" && agent.buildsShelter === true && maybeFeedFromShelterCache(world, agent, log)) {
+    // A real safety net: this agent is genuinely hungry AND already home
+    // (or close enough) with something stockpiled — eats from the cache
+    // instead of trekking to a live patch. See shelter.ts's doc comment on
+    // why this is never a trap: an empty/absent cache just returns false
+    // and falls through to the ordinary search below, same tick.
+    return;
+  }
+
   if (agent.behavior === "seekWater" || agent.behavior === "seekFood") {
     const terrain = agent.behavior === "seekWater" ? "water" : "food";
     const excluded = agent.blockedResourceTiles ?? [];
@@ -1009,7 +1057,15 @@ export function tickAgentAction(
 
   if (agent.behavior === "idle") {
     const drewBack = applyHerdCohesion(world, agent, rules);
-    if (!drewBack) applyExploration(world, agent, log, rng);
+    if (!drewBack) {
+      // "Incentivize the Pokémon to stay in it": a buildsShelter agent with
+      // a known shelter goes home and lingers there instead of wandering off
+      // exploring — see shelter.ts's `applyShelterResting`. Only ever a
+      // no-op (falls through to ordinary exploration) when this species'
+      // herd has no shelter anywhere findable yet.
+      const wentHome = agent.buildsShelter === true && applyShelterResting(world, agent, log);
+      if (!wentHome) applyExploration(world, agent, log, rng);
+    }
   }
 }
 

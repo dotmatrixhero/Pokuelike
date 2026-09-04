@@ -372,6 +372,28 @@ export type SimEvent =
       outcome: "missed" | "hit" | "retreated";
     }
   | {
+      kind: "packHunt";
+      tick: number;
+      /** The pack member whose attack this tick actually landed (or missed) with pack assistance — see predation.ts's `applyPredationInstincts`. */
+      attackerId: string;
+      attackerSpecies: string;
+      targetId: string;
+      targetSpecies: string;
+      /** How many OTHER same-species conspecifics were already committed to this exact target (`Agent.huntTarget`) within pack range — the real, positioning-driven count the accuracy bonus is computed from, not the wider "nearby" muster count. Always >= 1 (this event only fires once real coordination is happening). */
+      packmates: number;
+      pos: Vec2;
+    }
+  | {
+      kind: "scavenged";
+      tick: number;
+      agentId: string;
+      species: string;
+      /** The corpse fed from — see support.ts's `applyScavenging`/`isTrulyDead`. */
+      corpseId: string;
+      corpseSpecies: string;
+      pos: Vec2;
+    }
+  | {
       kind: "statusCleared";
       tick: number;
       agentId: string;

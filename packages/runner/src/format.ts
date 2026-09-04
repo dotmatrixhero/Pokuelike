@@ -86,6 +86,10 @@ export function formatEvent(event: SimEvent): string {
       const retreat = event.outcome === "retreated" ? `, ${event.defenderSpecies} (${event.defenderId}) backs off` : "";
       return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) clashed with ${event.defenderSpecies} (${event.defenderId}) over a resource at (${event.pos.x},${event.pos.y}) for ${event.damage}${event.critical ? " (critical hit!)" : ""}${retreat}${rival}`;
     }
+    case "packHunt":
+      return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) pack-hunts ${event.targetSpecies} (${event.targetId}) at (${event.pos.x},${event.pos.y}) with ${event.packmates} packmate${event.packmates === 1 ? "" : "s"}`;
+    case "scavenged":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) scavenged a meal from ${event.corpseSpecies} (${event.corpseId}) at (${event.pos.x},${event.pos.y})`;
   }
 }
 

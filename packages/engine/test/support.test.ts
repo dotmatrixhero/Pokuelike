@@ -22,6 +22,8 @@ import {
   OFF_HOURS_SPEED_MULTIPLIER,
   coldSnapSpeedMultiplier,
   applySupportMove,
+  applyScavenging,
+  DELIVERED_FOOD_HUNGER_RESTORE,
 } from "../src/support.js";
 import type { MoveSpec } from "../src/moves.js";
 import { DAY_LENGTH_TICKS } from "../src/daynight.js";
@@ -585,5 +587,86 @@ describe("applySupportMove: ally-targeting effects", () => {
     expect(thirsty.behavior).toBe("seekWater");
     expect(log.events).toContainEqual(expect.objectContaining({ kind: "consumed", agentId: "thirsty", need: "thirst" }));
     expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "supported", supporterId: "thirsty" }));
+  });
+});
+
+describe("scavenging", () => {
+  const RULES: HuntRules = { scyther: true };
+
+  function corpse(overrides: Partial<Agent> = {}): Agent {
+    return makeAgent({ id: "corpse", species: "bulbasaur", pos: { x: 2, y: 1 }, alive: false, ...overrides });
+  }
+
+  it("a hungry predator adjacent to a real corpse feeds from it, restoring hunger by the established delivered-food amount", () => {
+    const world = createWorld(5, 5);
+    const hungry = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, needs: createNeeds({ hunger: 0.1 }) });
+    const dead = corpse({ pos: { x: 2, y: 1 } }); // adjacent (SCAVENGE_ARRIVAL_RADIUS = 1)
+    world.agents.push(hungry, dead);
+    const log = new EventLog();
+
+    const scavenged = applyScavenging(world, hungry, RULES, log);
+
+    expect(scavenged).toBe(true);
+    expect(hungry.needs.hunger).toBeCloseTo(0.1 + DELIVERED_FOOD_HUNGER_RESTORE);
+    expect(hungry.behavior).toBe("scavenge");
+    expect(hungry.ticksSinceMeal).toBe(0);
+    expect(log.events).toContainEqual(
+      expect.objectContaining({ kind: "scavenged", agentId: "scyther-0", corpseId: "corpse", corpseSpecies: "bulbasaur" })
+    );
+  });
+
+  it("walks toward a real corpse that's out of feeding range instead of feeding instantly", () => {
+    const world = createWorld(10, 10);
+    const hungry = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, needs: createNeeds({ hunger: 0.1 }) });
+    const dead = corpse({ pos: { x: 4, y: 1 } }); // well outside SCAVENGE_ARRIVAL_RADIUS
+    world.agents.push(hungry, dead);
+    const log = new EventLog();
+
+    const scavenged = applyScavenging(world, hungry, RULES, log);
+
+    expect(scavenged).toBe(true);
+    expect(hungry.pos.x).toBeGreaterThan(1); // stepped toward the corpse
+    expect(hungry.needs.hunger).toBeCloseTo(0.1); // not fed yet — still walking
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "scavenged" }));
+  });
+
+  it("does nothing for a well-fed predator, a non-predator species, or with no corpse in range", () => {
+    const world = createWorld(5, 5);
+    const wellFed = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, needs: createNeeds({ hunger: 1 }) });
+    world.agents.push(wellFed, corpse({ pos: { x: 2, y: 1 } }));
+    expect(applyScavenging(world, wellFed, RULES)).toBe(false);
+
+    const herbivoreWorld = createWorld(5, 5);
+    const hungryHerbivore = makeAgent({ id: "bulbasaur-1", species: "bulbasaur", pos: { x: 1, y: 1 }, needs: createNeeds({ hunger: 0.1 }) });
+    herbivoreWorld.agents.push(hungryHerbivore, corpse({ pos: { x: 1, y: 2 } }));
+    expect(applyScavenging(herbivoreWorld, hungryHerbivore, RULES)).toBe(false); // not a hunter species at all
+
+    const emptyWorld = createWorld(5, 5);
+    const alone = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, needs: createNeeds({ hunger: 0.1 }) });
+    emptyWorld.agents.push(alone);
+    expect(applyScavenging(emptyWorld, alone, RULES)).toBe(false); // no corpse anywhere nearby
+  });
+
+  it("gates on the same hunger threshold a live hunt would (huntHungerThreshold) — juvenile and adult alike; the real ontogenetic difference is that a juvenile never gets a competing hunt attempt at all (see predation.test.ts's dedicated suite)", () => {
+    const world = createWorld(5, 5);
+    const juvenile = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, age: 10, needs: createNeeds({ hunger: 0.1 }) });
+    world.agents.push(juvenile, corpse({ pos: { x: 2, y: 1 } }));
+    expect(applyScavenging(world, juvenile, RULES)).toBe(true);
+
+    const wellFedJuvenileWorld = createWorld(5, 5);
+    const wellFedJuvenile = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, age: 10, needs: createNeeds({ hunger: 1 }) });
+    wellFedJuvenileWorld.agents.push(wellFedJuvenile, corpse({ pos: { x: 2, y: 1 } }));
+    expect(applyScavenging(wellFedJuvenileWorld, wellFedJuvenile, RULES)).toBe(false); // not hungry at all — no gate is THAT eager
+  });
+
+  it("rng-determinism: introduces zero new randomness — identical inputs always produce an identical outcome", () => {
+    function run(): { hunger: number; behavior: string } {
+      const world = createWorld(5, 5);
+      const hungry = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, needs: createNeeds({ hunger: 0.1 }) });
+      world.agents.push(hungry, corpse({ pos: { x: 2, y: 1 } }));
+      applyScavenging(world, hungry, RULES);
+      return { hunger: hungry.needs.hunger, behavior: hungry.behavior };
+    }
+    expect(run()).toEqual(run());
   });
 });

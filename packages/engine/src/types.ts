@@ -249,6 +249,24 @@ export interface Tile {
    * self-recovering shape as `vacantTicks`-driven shelter abandonment.
    */
   overgrazed?: boolean;
+  /**
+   * "shelter" tiles only: a real food stockpile, 0-`SHELTER_CACHE_MAX`
+   * (shelter.ts) — direct ask: "shelter should also like give other buff
+   * too... maybe food cache and stuff." Built up gradually while a
+   * `buildsShelter` agent rests at its own shelter (already fed/watered,
+   * since `applyShelterResting` only ever runs once `chooseBehavior` reads
+   * "idle" — see that function's doc comment), and drawn down when a
+   * genuinely hungry `buildsShelter` agent is back home with nothing else to
+   * eat nearby — a real safety net during scarcity, not a trap: an empty
+   * cache (0/`undefined`) just falls through to ordinary live-foraging, it
+   * never blocks or delays a hungry agent from breaking off to eat elsewhere.
+   * Same per-tile-timer shape as `stock`/`vacantTicks` above. Set to 0 at
+   * construction, `undefined` once the tile reverts away from "shelter"
+   * (abandonment included — an abandoned shelter's stockpile is lost along
+   * with the structure itself, same as any other "you stopped maintaining
+   * this" consequence).
+   */
+  cache?: number;
 }
 
 /** Needs decay over time and drive an agent's behavior via simple utility AI. */
@@ -273,7 +291,9 @@ export type BehaviorKind =
   | "explore"
   | "disperse"
   | "buildShelter"
-  | "sleep";
+  | "sleep"
+  | "restAtShelter"
+  | "scavenge";
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
 export interface InventoryItem {
@@ -942,4 +962,23 @@ export interface World {
    * that as "no local modifier," not an error.
    */
   weatherCells?: WeatherCell[];
+  /**
+   * Lifetime total (not a live balance — that's `Tile.cache` itself) of food
+   * deposited into every `buildsShelter` agent's home shelter cache, across
+   * every shelter tile that's ever existed — see `shelter.ts`'s
+   * `applyShelterResting`. Same observational, non-`SimEvent` shape and
+   * reasoning as `resourceBlockedFallbackCount` (packages/web's exhaustive
+   * event-kind switch is off-limits this session): a real-run validation
+   * signal for whether the cache mechanic is actually accumulating anything,
+   * not a value anything in the engine reads back.
+   */
+  shelterCacheDeposited?: number;
+  /**
+   * Lifetime total food actually drawn from a shelter cache to feed a
+   * genuinely hungry `buildsShelter` agent — see `shelter.ts`'s
+   * `maybeFeedFromShelterCache`. The real "did the safety net ever actually
+   * get used" number DESIGN.md's real-run findings look for; mirrors
+   * `shelterCacheDeposited`'s reasoning exactly.
+   */
+  shelterCacheWithdrawn?: number;
 }

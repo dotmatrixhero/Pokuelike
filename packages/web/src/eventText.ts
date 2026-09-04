@@ -147,6 +147,10 @@ export function formatEvent(event: SimEvent, world?: World): string {
       const retreat = event.outcome === "retreated" ? `, ${event.defenderSpecies} (${event.defenderId}) backs off` : "";
       return `${event.attackerSpecies} (${event.attackerId}) clashed with ${event.defenderSpecies} (${event.defenderId}) over a resource for ${event.damage}${event.critical ? " (crit!)" : ""}${retreat}${rival}`;
     }
+    case "packHunt":
+      return `${event.attackerSpecies} (${event.attackerId}) pack-hunts ${event.targetSpecies} (${event.targetId}) with ${event.packmates} packmate${event.packmates === 1 ? "" : "s"}`;
+    case "scavenged":
+      return `${event.species} (${event.agentId}) scavenged a meal from ${event.corpseSpecies} (${event.corpseId})`;
   }
 }
 
@@ -165,7 +169,7 @@ export function formatEvent(event: SimEvent, world?: World): string {
  * information but not a moment worth the same visual weight as a
  * connecting hit.
  */
-export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge", "dispersed", "shelterBuilt", "fought", "immigrated", "herdClash"]);
+export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge", "dispersed", "shelterBuilt", "fought", "immigrated", "herdClash", "packHunt"]);
 
 /**
  * Routine environment/upkeep chatter — real events, just not "the Pokemon
@@ -189,6 +193,10 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
   "shelterAbandoned",
   "fellAsleep",
   "wokeUp",
+  // Real feeding, but the same "routine, not a moment" bucket `consumed`
+  // (self-feeding on flora) already occupies — a scavenged meal is a genuine
+  // alternative to a live hunt, not on the visual weight of one.
+  "scavenged",
 ]);
 
 /**
@@ -218,6 +226,7 @@ export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   fought: "\u{1F4A5}", // boom
   immigrated: "\u{1F6F6}", // canoe
   herdClash: "\u{1F93C}", // wrestlers — rivalry, not a hunt
+  packHunt: "\u{1F43A}", // wolf — coordinated hunting
 };
 
 export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
@@ -232,6 +241,7 @@ export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
   fought: "#ff9d3c",
   immigrated: "#5ee6c4",
   herdClash: "#e0c341",
+  packHunt: "#d16b4c",
 };
 
 /**
@@ -256,6 +266,8 @@ export const AGENT_ID_FIELDS = [
   "carrierId",
   "carriedId",
   "receiverId",
+  "targetId",
+  "corpseId",
 ] as const;
 
 /** Does this event name `agentId` in any of its id-shaped fields? Used to scope the log panel to one agent's history. */

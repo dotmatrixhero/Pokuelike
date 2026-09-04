@@ -5,7 +5,7 @@ import { stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
 import { CONSUME_STOCK_AMOUNT, recordGrazing } from "./flora.js";
 import { isNight, isTwilight } from "./daynight.js";
-import { agentsWithin, isHunterSpecies, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS } from "./predation.js";
+import { agentsWithin, isHunterSpecies, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS, huntHungerThreshold } from "./predation.js";
 import { findNearestIndexed } from "./resourceIndex.js";
 import { COLD_SNAP_SPEED_MULTIPLIER, isInColdSnap } from "./weather.js";
 import { useMove, withinMoveRange } from "./combat.js";
@@ -59,8 +59,15 @@ const CARRY_CAPACITY_PER_MAXHP = 1.5;
 /** A simple carried food unit's weight — small relative to any real agent's carry capacity. */
 export const FOOD_ITEM_WEIGHT = 1;
 export const FOOD_ITEM_KEY = "food";
-/** Restores the same amount as self-feeding (`CONSUME_RATE.seekFood` in needs.ts) — delivered food should feel identical to eating it yourself. */
-const DELIVERED_FOOD_HUNGER_RESTORE = 0.4;
+/**
+ * Restores the same amount as self-feeding (`CONSUME_RATE.seekFood` in
+ * needs.ts) — delivered food should feel identical to eating it yourself.
+ * Exported so `applyScavenging` below can reuse the exact same restore
+ * amount for a real scavenged meal, matching this codebase's established
+ * "match the existing restore convention, don't invent a new number"
+ * pattern (see that function's own doc comment).
+ */
+export const DELIVERED_FOOD_HUNGER_RESTORE = 0.4;
 /** Below this hunger, a herd-mate is "hungry enough to help" for delivery purposes — a bit more lenient than seekFood's own 0.7 trigger since delivery is opportunistic, not urgent. */
 const HUNGRY_HERDMATE_THRESHOLD = 0.4;
 /** How far a well-fed herd-mate will notice a hungry ally to help, and a carrier will look for an adjacent fainted ally. */
@@ -362,6 +369,99 @@ export function applyLooting(world: World, agent: Agent, log?: EventLog): boolea
     fromSpecies: target.species,
     itemKey: item.itemKey,
   });
+  return true;
+}
+
+// --- Scavenging (a hungry predator feeding directly from a corpse's body) ---
+
+/**
+ * How far a hungry predator will notice a scavengeable corpse and go for it
+ * — same magnitude as `predation.ts`'s `HUNT_DETECT_RADIUS`, since this is
+ * meant to be a genuinely competitive alternative to a live hunt, not a
+ * last-resort mechanic with worse detection range than hunting itself.
+ */
+const SCAVENGE_DETECT_RADIUS = 5;
+/** How close to a corpse counts as "arrived, start feeding" — matches `ADJACENT_RADIUS`'s own convention. */
+const SCAVENGE_ARRIVAL_RADIUS = 1;
+
+/**
+ * Any truly-dead corpse (`isTrulyDead`) near `agent`, on the same layer,
+ * nearest first — deliberately NOT `agentsWithin` (predation.ts), which
+ * filters out anything with `alive === false`, exactly the population a
+ * corpse search needs to include. A corpse persists for `CORPSE_PERSIST_TICKS`
+ * (see simulation.ts's `pruneStaleCorpses`) before it's gone, the real,
+ * already-existing window this feature scavenges within — no new corpse-side
+ * bookkeeping needed.
+ */
+function findNearestCorpse(world: World, agent: Agent, radius: number): Agent | undefined {
+  const corpses = world.agents.filter(
+    (other) => other.id !== agent.id && isTrulyDead(other) && other.layer === agent.layer && manhattan(other.pos, agent.pos) <= radius
+  );
+  return nearest(agent, corpses);
+}
+
+/**
+ * A hungry predator (opportunistically, the direct-ask "most directly
+ * relevant to the fragility problem" scope call — see DESIGN.md) that finds
+ * a nearby corpse feeds from it directly instead of hunting live prey: a
+ * real meal (hunger restore, `DELIVERED_FOOD_HUNGER_RESTORE` — the
+ * established restore-amount convention, not a new number) without any of a
+ * live hunt's risk of missing, fleeing prey, or a mob defending the target.
+ * This is the actual lever against predator-population fragility this
+ * feature exists to provide (DESIGN.md): a real alternative "meal" that
+ * never requires a successful kill.
+ *
+ * Called from needs.ts right after `applyPredationInstincts` returns false
+ * (no threat to flee/fight, no live hunt this tick — solo or pack) — i.e.
+ * scavenging is a genuine fallback, checked after a live hunt had its own
+ * first refusal, not a replacement for it. `rules` gates this to hunter
+ * species only, same convention as every other predator-specific check in
+ * this codebase.
+ *
+ * Reuses the exact same hunger gate a live hunt would (`huntHungerThreshold`)
+ * for BOTH adults and juveniles — deliberately no separate, invented
+ * "scavenging eagerness" number: the real ontogenetic difference is already
+ * fully expressed by predation.ts's own hunt-eligibility gate (a juvenile
+ * never even attempts a live hunt — solo or pack — so it reaches this
+ * function, and only this function, every time it's hungry enough to want a
+ * meal; an adult only falls through to this as a fallback once a live hunt
+ * attempt already found nothing to chase). Confirmed end-to-end (not just at
+ * the threshold-check level) in predation.test.ts's own ontogenetic-niche-
+ * shift suite: given a choice between an identical live prey target AND a
+ * corpse, a juvenile scavenges the corpse while an adult goes for the kill.
+ *
+ * Deliberately introduces zero new randomness — no roll decides whether a
+ * scavenge attempt succeeds; finding a real corpse within range and reaching
+ * it is the only gate, matching `rollAccuracy`'s "clean, deterministic"
+ * exemption class the way `applyHerdSupport`'s own food delivery already is.
+ */
+export function applyScavenging(world: World, agent: Agent, rules: HuntRules, log?: EventLog): boolean {
+  if (agent.asleep) return false;
+  if (!rules[agent.species]) return false;
+  if (agent.needs.hunger >= huntHungerThreshold(agent, world.tick)) return false;
+
+  const corpse = findNearestCorpse(world, agent, SCAVENGE_DETECT_RADIUS);
+  if (!corpse) return false;
+
+  logBehaviorChange(log, world, agent, "scavenge");
+  agent.behavior = "scavenge";
+
+  if (manhattan(agent.pos, corpse.pos) <= SCAVENGE_ARRIVAL_RADIUS) {
+    agent.needs.hunger = Math.min(1, agent.needs.hunger + DELIVERED_FOOD_HUNGER_RESTORE);
+    agent.ticksSinceMeal = 0;
+    log?.record({
+      kind: "scavenged",
+      tick: world.tick,
+      agentId: agent.id,
+      species: agent.species,
+      corpseId: corpse.id,
+      corpseSpecies: corpse.species,
+      pos: corpse.pos,
+    });
+    return true;
+  }
+
+  agent.pos = stepToward(world, agent.layer, agent.pos, corpse.pos);
   return true;
 }
 

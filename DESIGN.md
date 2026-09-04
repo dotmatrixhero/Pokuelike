@@ -3487,6 +3487,132 @@ actually showed:
   shelter-building). Judge against further real runs, per this project's
   standing practice.
 
+### Shelter incentives: resting-at-home buffs and a food cache
+
+Decided, direct follow-up ask after shelter-building shipped: "Shelter
+should also like give other buff too. Something that incentivizes the
+Pokémon to stay in it. Maybe food cache and stuff idk?" Before this, a
+completed shelter tile was a real (concealment/storm-cover) but entirely
+passive payoff — nothing made an agent actually want to linger there once
+built; it was treated like any other tile the instant construction ended.
+Two real, composable pieces, both gated on `Agent.buildsShelter` (the same
+small species slice — Diglett/Sandshrew — that has shelters at all):
+
+1. **A real pull to go home when idle.** `needs.ts`'s idle tier used to
+   fall straight to `applyExploration` (wander toward unvisited sectors) for
+   every species once satisfied. Now a `buildsShelter` agent with a known
+   shelter walks to it instead (`shelter.ts`'s new `applyShelterResting`,
+   ranked after herd cohesion — a herd pulling an agent back together still
+   wins over going home specifically) and genuinely lingers there once
+   arrived, logged as a new `"restAtShelter"` `BehaviorKind` so it's visible
+   in the event log exactly like `"buildShelter"`/`"deliverFood"` already
+   are.
+2. **A real buff for actually being there** — `SHELTER_HEAL_MULTIPLIER`
+   (2x) and `SHELTER_NEEDS_DECAY_MULTIPLIER` (0.6x) apply every tick a
+   `buildsShelter` agent is within `SHELTER_REST_RADIUS` (2, tight —
+   "standing right there," not "somewhere in the herd's home range") of any
+   shelter tile, composing multiplicatively with sleep's own multipliers via
+   the exact same `applyHealOverTime`/`decayNeeds` multiplier hooks sleep
+   already established — real but deliberately smaller than sleep's own
+   3x/0.15x (this fires for a fully awake, un-vulnerable agent, so it
+   shouldn't duplicate sleep's "dramatically reduced, real cost to
+   oversleeping" trade for free).
+3. **The user's own named idea: a food cache.** A new `Tile.cache` field on
+   `"shelter"` tiles (0-`SHELTER_CACHE_MAX`, 1.2 — roughly 3 feedings' worth,
+   the same order of magnitude flora.ts's `CONSUME_STOCK_AMOUNT` establishes
+   for a live patch). Every tick spent genuinely resting at home (not just
+   traveling there) deposits `SHELTER_CACHE_DEPOSIT_PER_TICK` (0.01, same
+   magnitude as `support.ts`'s `HEAL_PER_TICK_FRACTION` — a slow, real
+   accumulation, ~120 ticks to fill from empty). A genuinely hungry
+   `buildsShelter` agent already home draws `SHELTER_CACHE_FEED_AMOUNT`
+   (0.4, identical to `needs.ts`'s own live-feeding restore amount, same
+   "delivered food restores exactly what self-feeding would" precedent
+   `support.ts`'s `DELIVERED_FOOD_HUNGER_RESTORE` already established)
+   before ever walking to a live food patch — a real safety net during a
+   lean local patch, not a symbolic one.
+4. **Explicitly not a trap** — direct constraint, and this session's
+   repeatedly-confirmed bug class ("commits no matter what," fixed 4+ times
+   already for dispersal/shelter-building/support-move/herd-food-delivery).
+   `maybeFeedFromShelterCache` only ever fires from `needs.ts`'s existing
+   `"seekFood"` branch (i.e. the agent is already genuinely hungry per
+   `chooseBehavior`'s own urgency cutoff) and returns `false` — touching
+   nothing — the instant the nearby cache is empty or absent, letting the
+   caller fall straight through to the pre-existing live-foraging search the
+   same tick. An agent is never made to wait on, or prefer, an empty cache
+   over breaking off to actually eat elsewhere.
+5. **Composes with abandonment rather than fighting it** — `Tile.cache`
+   resets to `undefined` the moment a shelter tile reverts away from
+   `"shelter"` (`setTile`), abandonment included: losing the structure loses
+   the stockpile with it, the same "stopped maintaining this" consequence
+   `Tile.vacantTicks` already models. And because a resting agent sits
+   within `SHELTER_ABANDON_RADIUS` (6) by construction (`SHELTER_REST_RADIUS`
+   is 2, well inside it), the new pull to go home directly feeds
+   `decayShelters`'s existing occupancy check — a shelter that's a more
+   attractive place to linger should see less abandonment, not a separate
+   mechanism bolted on top of it.
+6. No new `SimEvent` kind: a concurrent session is mid-redesign of
+   `packages/web`'s `eventText.ts` (its `switch` is exhaustive over every
+   `SimEvent.kind`), so touching that file this session would conflict with
+   in-progress, uncommitted work there — same reasoning `needs.ts`'s own
+   `resourceBlockedFallbackCount` doc comment already documents for an
+   identical constraint. `World.shelterCacheDeposited`/
+   `shelterCacheWithdrawn` (lifetime totals, mirroring
+   `resourceBlockedFallbackCount`'s exact shape) are the real-run
+   observability signal instead; the resting behavior itself is legible via
+   the pre-existing `behaviorChanged` event now carrying `"restAtShelter"`.
+
+#### Built — implementation notes and real-run findings
+
+Built in `packages/engine/src/shelter.ts` (`applyShelterResting`,
+`maybeFeedFromShelterCache`, and the constants above) plus the `needs.ts`/
+`world.ts`/`types.ts`/`resourceIndex.ts` wiring listed above (`"shelter"`
+joined `resourceIndex.ts`'s `IndexedTerrain` so "find my nearest shelter"
+is an indexed lookup, not a full-grid scan, the same reasoning that index
+already existed for `"food"`). 664 of the engine's 666 tests pass,
+including 18 new tests covering: the resting behavior triggering/walking
+home/depositing into the cache/respecting `SHELTER_REST_RADIUS`, cache
+withdrawal restoring exactly the right amount (full `SHELTER_CACHE_FEED_AMOUNT`,
+a partial amount from a near-empty cache, or nothing — never blocking — from
+an empty/absent one), the heal/needs-decay buff measurably outperforming
+baseline via `decayNeeds`/`applyHealOverTime`'s existing multiplier hooks,
+a real `tickWorld` end-to-end comparison (a resting agent's hunger drains
+slower than an identical wandering one), a herd that keeps resting never
+accumulating `vacantTicks`, and abandonment clearing the cache along with
+the structure. The 2 pre-existing failures (`predation.test.ts`'s "bush
+concealment" sanity check and its "targetBurning/targetStatused" case, plus
+this file's own now-identically-affected bush/shelter concealment
+detection test) are unrelated to this feature — a concurrent session's
+in-progress, uncommitted `predation.ts` changes (pack hunting/juvenile
+combat) altered the hunt-trigger threshold those specific fixtures depend
+on; confirmed via `git diff --stat` showing only `predation.ts`/`events.ts`
+modified outside this feature's own files, left untouched per this
+session's explicit instruction not to touch that concurrent work.
+Determinism test (`determinism.test.ts`) passes unmodified — nothing new in
+this feature calls `rng()` at all (deposit/withdrawal amounts are fixed
+constants, not random rolls), so it's deterministic by construction, not
+by luck.
+
+**Real-run numbers** (packages/runner, `pnpm --filter @pokuelike/runner run
+<ticks> "" <seed>`, standard seeds):
+
+- **Seed 42, 3000 ticks**: 0 `shelterBuilt` events — confirms the existing,
+  already-documented finding just above (this seed's opening layout is
+  hostile enough that no Diglett/Sandshrew founder survives long enough to
+  finish a build at all, feature or no feature). No shelter ever existing
+  means this feature has nothing to attach to in this specific seed — an
+  honest non-finding, not evidence the mechanism doesn't work, exactly the
+  same caveat DESIGN.md's shelter-building section already flags for this
+  seed.
+- **Seed 7, 5000 ticks**: [FILL IN]
+- **Seed 20260903, 5000 ticks**: [FILL IN]
+
+**Open tuning question, not resolved here**: whether `SHELTER_CACHE_MAX`/
+`SHELTER_CACHE_DEPOSIT_PER_TICK` are the right magnitudes for a cache to
+matter during a real scarcity window rather than either draining
+instantly or never filling meaningfully within a run's practical length —
+flagged in TODO.md for further real-run tuning rather than guessed at
+further here.
+
 ### Herd status: level buys real standing, not just personal stats
 
 Direct ask: "being higher level gives you respect or something. Something
@@ -6333,3 +6459,244 @@ arithmetic with no randomness of its own.
   isolation pass (this file's own established standard elsewhere for
   "confirm, don't assume") would be needed to rule out every alternative
   explanation with full confidence.
+
+## Pack hunting, scavenging, and ontogenetic niche shift
+
+Three real-biology behaviors pitched together, all approved directly: "Pack
+hunting sounds good. Scavenging is good. Ontogenic too." (ontogenetic niche
+shift — juveniles behaving/eating differently than adults). Direct framing
+for why these specific three, not picked at random: this session's own
+`herdConflict.ts` section (just above) had to scope predators out of herd
+conflict *entirely* specifically because of this file and TODO.md's
+repeatedly-documented predator-population fragility — real 2000-3000-tick
+runs routinely end with 0-2 living `scyther`/`spearow`/`onix` per species,
+sometimes zero across the board. Pack hunting (more successful hunts without
+raw stat buffs) and scavenging (a real meal that doesn't require a
+successful kill) are both explicitly aimed at that same fragility as real
+levers, not just "more mechanics" — so this section's actual bar is whether
+they measurably help, honestly reported either way.
+
+### Decided
+
+1. **Pack hunting is the existing mob-fighting pattern, flipped to
+   offense — a real, positioning-driven trigger, not an invented dice
+   roll.** `predation.ts` already has "several agents converge on one target"
+   machinery (`mobThreshold`/`countHerdAllies`/the flee-vs-mob branch in
+   `applyPredationInstincts`), built defensively for prey ganging up on a
+   predator. Pack hunting reuses that exact shape for the predator's own
+   hunt: `isPackPreyOf` extends `isPreyOf`'s existing power-ratio gate with a
+   second, wider band — `PACK_PREY_POWER_RATIO` (1.15) above the solo
+   ceiling (`PREY_POWER_RATIO`, 0.75, unchanged) — so a pack can only ever go
+   after something a lone predator would never attempt alone but isn't
+   hopeless either, never "anything goes with enough friends." The trigger
+   itself only fires once a real, nearby same-species conspecific
+   (`nearbySameSpeciesConspecifics`, `PACK_MUSTER_RADIUS` = 5) is actually
+   there — no chance roll decides whether a pack "forms."
+2. **Deliberately NOT herd-gated, unlike the defensive mob-fighting it's
+   modeled on.** `countHerdAllies` (mob-fighting) requires a shared
+   `herdId`, which works for prey (spawned into real herds), but this sim's
+   predator species spawn and mostly stay solitary — `packages/data/src/
+   scenario.ts` gives `scyther-0`/`onix-0`/`spearow-0` no `herdId` at all.
+   Gating pack hunting on shared `herdId` the same way would mean it
+   essentially never fires. `nearbySameSpeciesConspecifics` is proximity +
+   species only — a real pack in nature doesn't require this sim's formal
+   herd bookkeeping either.
+3. **The real mechanical advantage: an accuracy bonus, not flavor text.**
+   `committedPackmates` counts OTHER same-species conspecifics already
+   actively hunting the exact same target (`Agent.huntTarget === target.id`,
+   itself a real, positioning-driven signal already tracked for other
+   reasons) within pack range, and `packAccuracyMultiplier` turns that into
+   a real `rollAccuracy` boost (`PACK_ACCURACY_BONUS_PER_ALLY` = 0.15 per
+   committed packmate, capped at `PACK_ACCURACY_BONUS_CAP` = 0.45) —
+   threaded as a new `accuracyBonusMultiplier` parameter through `resolveHit`
+   -> `resolveHitAgainstTarget`'s existing `rollAccuracy` call (composing
+   with the pre-existing storm-accuracy multiplier, same pattern). Every
+   pre-existing caller of `resolveHit` (mob-fighting's own defensive fights,
+   the guardian branch) passes no bonus and is completely unaffected — the
+   parameter defaults to 1 (no change). A new `packHunt` `SimEvent` fires
+   whenever `committedPackmates > 0`, carrying `packmates` (the real
+   committed count) so a real run can be checked for whether pack hunting is
+   actually coordinating, not just firing.
+4. **Scavenging: a real alternative meal, not a variant of looting.**
+   `applyLooting` (support.ts) was already purely item-stripping — no hunger
+   restore at all — confirmed by reading it directly rather than assumed, so
+   this is a clean addition, not a duplicate of an existing mechanic. The
+   corpse-persistence window this session inherited (`CORPSE_PERSIST_TICKS`,
+   `isTrulyDead`) already anticipated this: `simulation.ts`'s own doc comment
+   on `pruneStaleCorpses` already says a corpse "persists... so agents other
+   than whoever landed the killing blow get a real scavenge/loot window" —
+   this feature is what actually cashes that in. `support.ts`'s new
+   `applyScavenging` finds the nearest real corpse (`isTrulyDead`, same
+   detection radius as a live hunt, `SCAVENGE_DETECT_RADIUS` = 5), walks to
+   it, and restores hunger by `DELIVERED_FOOD_HUNGER_RESTORE` (0.4) once
+   adjacent — the exact same number `applyHerdSupport`'s food delivery and
+   `needs.ts`'s own self-feeding already use, per this codebase's established
+   "match the existing restore convention, don't invent a new number"
+   pattern. Gated on `rules[agent.species]` (hunter species only, the direct-
+   ask scope call — predators opportunistically scavenging is the most
+   directly relevant case to the fragility problem) and the exact same
+   `huntHungerThreshold` a live hunt would use, so an adult only ever reaches
+   this as a genuine fallback (a live hunt attempt already found nothing to
+   chase this tick — `needs.ts` calls it right after `applyPredationInstincts`
+   returns false). Introduces zero new randomness — finding a real corpse in
+   range is the only gate, no roll decides success.
+5. **Ontogenetic niche shift: a juvenile predator never initiates an
+   independent hunt at all — solo or pack — leaning entirely on scavenging
+   (and the pre-existing `applyHerdSupport` food-delivery mechanic) instead.**
+   `predation.ts`'s new `isJuvenile` reuses `Agent.age` — this codebase's
+   existing maturity proxy (`reproduction.ts`'s `isMature`/`MATURITY_AGE`)
+   — rather than inventing a third age concept, at `JUVENILE_AGE_THRESHOLD`
+   = 60 (well below `MATURITY_AGE`'s 200, per the direct ask). A juvenile's
+   solo AND pack candidate searches are both skipped outright inside
+   `applyPredationInstincts`'s hunt block — real biology, not a flag nobody
+   observes firing: a hungry juvenile falls straight through to
+   `needs.ts`'s `applyScavenging` call (using the identical
+   `huntHungerThreshold` gate an adult's own fallback scavenge would use —
+   see decided point 4's own reasoning for why no separate, invented
+   "juvenile eagerness" number was added) or a herd-mate's food delivery,
+   never a live kill. Confirmed end-to-end, not just unit-level, in
+   `predation.test.ts`: given an identical live-prey-plus-corpse choice, a
+   juvenile scavenges the corpse while an adult in the same setup hunts and
+   kills the live prey.
+6. **A second, real vulnerability difference: juveniles flee a losing fight
+   earlier.** `isCriticallyHurt`'s flee-trigger HP fraction is now
+   `retreatHpFraction(agent)` — `JUVENILE_RETREAT_HP_FRACTION` (0.6) for a
+   juvenile, the pre-existing fixed `RETREAT_HP_FRACTION` (0.4) for an adult
+   — so a juvenile backs off from a fight it's still losing noticeably
+   earlier than an adult of the same species would. Deliberately applies to
+   `isCriticallyHurt` generally (any species, not gated on `rules` at all) —
+   a harmless generalization confirmed against the existing suite: nothing
+   in this codebase's pre-existing tests sets `agent.age` on a fixture
+   (`age === undefined` reads as already-adult, matching `isMature`'s own
+   "absent = mature" default exactly), so this only ever changes behavior
+   for a genuinely young agent. Two pre-existing tests (`predation.test.ts`'s
+   and `shelter.test.ts`'s bush/shelter-concealment tests) DID use
+   `age: 0` on their predator fixture as an incidental way to disable an
+   unrelated explore-wandering check (`MIN_EXPLORE_AGE` = 10) — caught by a
+   real test failure, not missed silently — fixed by giving the predator in
+   those two tests a real adult age instead (its own hunger already keeps it
+   from exploring regardless of age, so this is safe), leaving the prey
+   fixture's `age: 0` untouched.
+
+### Built, real-run findings
+
+18 new engine tests across `predation.test.ts` (pack hunting: a lone
+predator refuses a too-strong-to-solo target, the same target becomes
+huntable once a real nearby conspecific is there, a distant or
+different-species conspecific doesn't count, the real accuracy-bonus lever
+turning a would-be miss into a hit, rng-determinism; ontogenetic niche
+shift: a juvenile never hunts even with solo-eligible prey adjacent, an
+adult in the same setup does, a juvenile flees a losing fight at a higher hp
+fraction than an adult at the identical fraction, the end-to-end
+scavenge-vs-hunt choice) and `support.test.ts` (scavenging: a real corpse
+feeds a hungry predator by the established restore amount, walks toward an
+out-of-range corpse instead of feeding instantly, does nothing for a
+well-fed predator/a non-hunter species/no corpse in range, the shared
+hunger-threshold gate, rng-determinism). All 681 engine tests pass,
+including the two pre-existing tests fixed per decided point 6 above and the
+unmodified `determinism.test.ts` acceptance test — this feature adds zero
+new `Math.random()`/`rng()` call sites of its own (the pack accuracy bonus
+only reweights an existing `rollAccuracy` draw that already happened on
+every real attack; scavenging and the juvenile hunt-gate are pure
+deterministic branching).
+
+**Each mechanism proven working in a dedicated, hand-built stress scenario**
+— this session's own established standard for "confirm a real mechanism
+fires and has its intended effect," not just a longer demo run (see e.g.
+sleep.ts's own "a dedicated small scenario... would be the way to actually
+witness it" precedent elsewhere in this file):
+- **Pack hunting**: 3 scythers clustered around 1 prey sized just above the
+  solo ceiling but within the pack ceiling -> 12 `packHunt` events, 13
+  `fought` events, and a real kill at tick 5 — a target a lone scyther in
+  the identical position never even attempts (confirmed separately by
+  `predation.test.ts`'s own unit test).
+- **Scavenging**: 1 hungry (hunger 0.1) scyther placed adjacent to a fresh
+  corpse feeds twice across 2 ticks, hunger rising 0.1 -> 0.887.
+- **Ontogenetic niche shift**: a juvenile (age 10) and an adult (age 200) in
+  the identical hungry-predator-next-to-solo-eligible-prey setup diverge
+  exactly as designed — the juvenile never hunts (`behavior` stays
+  `seekFood`), the adult hunts and kills within 30 ticks.
+
+**Real 3000-tick runs, 9 seeds (42, 7, 20260903, and 1-6)**:
+
+| seed | scavenged events | packHunt events | living predators at end |
+|---|---|---|---|
+| 42 | 0 | 0 | 1 (onix) |
+| 7 | 0 | 0 | 1 (onix) |
+| 20260903 | 0 | 0 | 0 |
+| 1 | 26 | 0 | 1 (spearow) |
+| 2 | 0 | 0 | 4 (2 spearow, 2 onix) |
+| 3 | 4 | 0 | 3 (2 scyther, 1 spearow) |
+| 4 | 28 | 14 | 2 (2 scyther) |
+| 5 | 0 | 0 | 2 (1 scyther, 1 spearow) |
+| 6 | 0 | 0 | 0 |
+
+**Honest read of this table, not oversold**: both mechanisms are proven real
+and working (the dedicated scenarios above, plus the unit suite), but they
+fire far less often in the *stock* demo scenario than in a purpose-built
+stress test — 0 pack hunts on 8 of 9 seeds, 0 scavenges on 6 of 9. The
+reason is structural, not a bug: `packages/data/src/scenario.ts` spawns
+exactly ONE individual of each predator species, with no `herdId` — pack
+hunting's own trigger (decided point 2) genuinely cannot fire until a second
+same-species predator exists near the first, which in the stock scenario
+only ever happens via reproduction, itself gated behind the same fragile
+predator population this feature is trying to help. Scavenging's gate is
+similarly starved: with only 0-8 total predator kills across a whole
+3000-tick run per seed, a fresh corpse simply isn't often sitting near a
+still-hungry predator when it goes looking.
+
+**Where the mechanisms DID fire, predator populations read healthier, but
+this is a correlation worth stating carefully, not a proven causal
+result**: the 3 seeds with real scavenge/pack activity (1, 3, 4) ended with
+1, 3, and 2 living predators respectively; seeds 42/7/20260903/6 (zero
+activity) ended with 1, 1, 0, 0. Average living predators across all 9 seeds
+is ~1.56 — higher than the 0.25-per-seed baseline TODO.md already documents
+from an earlier 4-seed sample — but a 9-seed sample against a differently-
+sampled 4-seed baseline, on a sim already repeatedly documented elsewhere in
+this file as chaotically rng-trajectory-sensitive (see the herd-conflict
+section's own discarded single-seed A/B, and the tile-capacity section's
+identical finding on a completely different feature), isn't a clean,
+attributable proof the way the dedicated stress scenarios are. A real
+feature-on/feature-off A/B was considered but not run: unlike `herdConflict.ts`
+this feature adds no new `rng()` draws of its own on ticks where it doesn't
+fire, but ANY tick where a juvenile's hunt gate closes off (skips
+`resolveHit`'s own rng draws entirely) or a pack hunt actually fires
+(reweights but doesn't add a draw) still changes what happens that tick,
+which is exactly the kind of divergence that cascaded into unrelated
+same-seed swings elsewhere in this file. Reported honestly: the structural
+mechanism (decided points 1-6, each independently proven by a dedicated
+scenario) is the trustworthy evidence here, not the 9-seed population
+average by itself.
+
+**The honest bottom line on the actual success criterion**: predator
+populations did **not** reliably recover to a healthy, sustainable level —
+they remain fragile, several seeds still ended at 0, and this session is not
+claiming otherwise. What changed is that two genuine, working alternative
+survival levers now exist and are exercised in real runs whenever their
+real preconditions are met, and — per the honest correlation above — the
+seeds where they fired were not the ones that crashed to zero. Whether
+that's enough, or whether the stock scenario itself needs to change (see
+follow-ups below) to actually give these levers a fair shot at mattering, is
+left as an open, explicitly-flagged question rather than papered over.
+
+### Explicitly not done / open follow-ups (see TODO.md)
+
+- The stock demo scenario spawns exactly one of each predator species with
+  no `herdId` — the single biggest reason pack hunting rarely fires in a
+  real run (see above). Seeding 2 of each predator species instead of 1, or
+  giving predators their own home-range cohesion so siblings/offspring stay
+  near their parent instead of dispersing solo, would give this feature a
+  fairer shot at actually mattering in the stock scenario — not attempted
+  here, since changing the demo scenario's spawn composition is its own real
+  design decision with its own validation burden, out of scope for this
+  session's direct ask.
+- Kleptoparasitism (real contention/priority between multiple scavengers
+  over the same corpse) — the brief's own "nice-to-have, not required."
+  `CORPSE_PERSIST_TICKS`'s existing window already lets multiple agents feed
+  from the same corpse across separate ticks, which is enough for the direct
+  "alternative to a risky hunt" ask; no head-to-head same-tick contention
+  mechanic was built.
+- A real, isolated feature-on/feature-off A/B for pack hunting/scavenging's
+  own population effect specifically — considered, not run, for the
+  rng-cascade-sensitivity reason explained above. The dedicated stress
+  scenarios are the trustworthy evidence in the meantime.

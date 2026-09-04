@@ -10,12 +10,22 @@ import type { Agent, HuntRules } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 import {
   applyShelterBuilding,
+  applyShelterResting,
   decayShelters,
+  maybeFeedFromShelterCache,
   maybeTriggerShelterBuilding,
   SHELTER_ABANDON_TICKS,
   SHELTER_BUILD_TICKS,
+  SHELTER_CACHE_DEPOSIT_PER_TICK,
+  SHELTER_CACHE_FEED_AMOUNT,
+  SHELTER_CACHE_MAX,
+  SHELTER_HEAL_MULTIPLIER,
   SHELTER_MIN_BUILD_DISTANCE,
+  SHELTER_NEEDS_DECAY_MULTIPLIER,
+  SHELTER_REST_RADIUS,
 } from "../src/shelter.js";
+import { decayNeeds } from "../src/needs.js";
+import { applyHealOverTime } from "../src/support.js";
 
 /** Deterministic seeded PRNG (mulberry32) — matches dispersal.test.ts's/herdMigration.test.ts's own helper. */
 function seededRng(seed: number): () => number {
@@ -280,16 +290,24 @@ describe("shelter concealment reuses bush's exact mechanism", () => {
       };
     }
     const bold = { boldness: 1, aggression: 0.5, sociability: 0.5 };
+    // The prey keeps age: 0 (below MIN_EXPLORE_AGE, needs.ts) so it doesn't
+    // wander off on its idle turn. The predator gets a real adult age
+    // instead of 0 — predation.ts's `isJuvenile` (this session's ontogenetic-
+    // niche-shift feature) makes a juvenile predator never hunt independently
+    // at all, which would corrupt this test's own "hunt" assertions; the
+    // predator's hunger (well below satisfied) already keeps it from
+    // exploring regardless of age, so this is safe.
+    const ADULT_PREDATOR_AGE = 200;
 
     // Distance 4 is within HUNT_DETECT_RADIUS (5) normally.
     const openWorld = createWorld(20, 20);
-    openWorld.agents.push(prey({ x: 5, y: 5 }, { disposition: bold, age: 0 }), predator({ x: 9, y: 5 }, 0.1, { age: 0 }));
+    openWorld.agents.push(prey({ x: 5, y: 5 }, { disposition: bold, age: 0 }), predator({ x: 9, y: 5 }, 0.1, { age: ADULT_PREDATOR_AGE }));
     tickWorld(openWorld, undefined, RULES, undefined, SAFE_RNG);
     expect(openWorld.agents.find((a) => a.id === "scyther-0")!.behavior).toBe("hunt"); // sanity
 
     const shelterWorld = createWorld(20, 20);
     setTile(shelterWorld, "surface", 5, 5, "shelter");
-    shelterWorld.agents.push(prey({ x: 5, y: 5 }, { disposition: bold, age: 0 }), predator({ x: 9, y: 5 }, 0.1, { age: 0 }));
+    shelterWorld.agents.push(prey({ x: 5, y: 5 }, { disposition: bold, age: 0 }), predator({ x: 9, y: 5 }, 0.1, { age: ADULT_PREDATOR_AGE }));
     tickWorld(shelterWorld, undefined, RULES, undefined, SAFE_RNG);
     expect(shelterWorld.agents.find((a) => a.id === "scyther-0")!.behavior).not.toBe("hunt");
   });
@@ -415,5 +433,200 @@ describe("decayShelters: abandonment reverts an unused shelter to floor", () => 
     }
 
     expect(tileAt(world, "surface", 20, 20)?.terrain).toBe("floor");
+  });
+});
+
+describe("applyShelterResting: the 'incentivize staying' behavior", () => {
+  it("returns false (nothing to do) when this species has no shelter anywhere yet", () => {
+    const world = createWorld(40, 40);
+    const a = agent("no-home", { pos: { x: 20, y: 20 } });
+    world.agents.push(a);
+
+    expect(applyShelterResting(world, a)).toBe(false);
+    expect(a.pos).toEqual({ x: 20, y: 20 }); // never moved
+  });
+
+  it("walks toward a known-but-distant shelter instead of standing still", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 20, 5, "shelter");
+    const a = agent("commuter", { pos: { x: 20, y: 20 } });
+    world.agents.push(a);
+    const log = new EventLog();
+
+    const acted = applyShelterResting(world, a, log);
+
+    expect(acted).toBe(true);
+    expect(a.behavior).toBe("restAtShelter");
+    expect(a.pos.y).toBeLessThan(20); // stepped toward the shelter at y=5
+    expect(log.events.some((e) => e.kind === "behaviorChanged" && e.to === "restAtShelter")).toBe(true);
+  });
+
+  it("once at/near home, deposits into the tile's cache each tick, capped at SHELTER_CACHE_MAX", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 20, 20, "shelter");
+    const a = agent("resident", { pos: { x: 20, y: 20 } });
+    world.agents.push(a);
+
+    applyShelterResting(world, a);
+    expect(tileAt(world, "surface", 20, 20)?.cache).toBeCloseTo(SHELTER_CACHE_DEPOSIT_PER_TICK);
+    expect(world.shelterCacheDeposited).toBeCloseTo(SHELTER_CACHE_DEPOSIT_PER_TICK);
+
+    // Enough ticks to exceed SHELTER_CACHE_MAX -- deposit stops growing past the cap.
+    for (let i = 0; i < 500; i++) applyShelterResting(world, a);
+    expect(tileAt(world, "surface", 20, 20)?.cache).toBeLessThanOrEqual(SHELTER_CACHE_MAX);
+    expect(tileAt(world, "surface", 20, 20)?.cache).toBeCloseTo(SHELTER_CACHE_MAX);
+  });
+
+  it("counts SHELTER_REST_RADIUS as home, not just the exact tile", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 20, 20, "shelter");
+    const a = agent("nearby", { pos: { x: 20 + SHELTER_REST_RADIUS, y: 20 } });
+    world.agents.push(a);
+
+    applyShelterResting(world, a);
+
+    expect(a.pos).toEqual({ x: 20 + SHELTER_REST_RADIUS, y: 20 }); // didn't need to move
+    expect(tileAt(world, "surface", 20, 20)?.cache).toBeGreaterThan(0); // still deposited
+  });
+});
+
+describe("maybeFeedFromShelterCache: the food-cache safety net", () => {
+  it("returns false and touches nothing when there is no shelter nearby at all", () => {
+    const world = createWorld(40, 40);
+    const a = agent("no-home", { pos: { x: 20, y: 20 }, needs: createNeeds({ hunger: 0.2 }) });
+    world.agents.push(a);
+
+    expect(maybeFeedFromShelterCache(world, a)).toBe(false);
+    expect(a.needs.hunger).toBe(0.2);
+  });
+
+  it("returns false (not a trap) when a nearby shelter's cache is empty -- caller must fall through to normal foraging", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 20, 20, "shelter"); // cache starts at 0
+    const a = agent("home-but-hungry", { pos: { x: 20, y: 20 }, needs: createNeeds({ hunger: 0.2 }) });
+    world.agents.push(a);
+
+    expect(maybeFeedFromShelterCache(world, a)).toBe(false);
+    expect(a.needs.hunger).toBe(0.2); // untouched -- needs.ts's caller falls through to live foraging this same tick
+  });
+
+  it("draws SHELTER_CACHE_FEED_AMOUNT from a stocked cache and restores hunger by exactly that much", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 20, 20, "shelter");
+    tileAt(world, "surface", 20, 20)!.cache = 1;
+    const a = agent("fed-from-home", { pos: { x: 20, y: 20 }, needs: createNeeds({ hunger: 0.2 }) });
+    world.agents.push(a);
+    const log = new EventLog();
+
+    const ate = maybeFeedFromShelterCache(world, a, log);
+
+    expect(ate).toBe(true);
+    expect(a.needs.hunger).toBeCloseTo(0.2 + SHELTER_CACHE_FEED_AMOUNT);
+    expect(tileAt(world, "surface", 20, 20)?.cache).toBeCloseTo(1 - SHELTER_CACHE_FEED_AMOUNT);
+    expect(world.shelterCacheWithdrawn).toBeCloseTo(SHELTER_CACHE_FEED_AMOUNT);
+    expect(a.behavior).toBe("restAtShelter");
+  });
+
+  it("a near-empty cache restores only what's actually left, never more", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 20, 20, "shelter");
+    tileAt(world, "surface", 20, 20)!.cache = 0.1; // less than SHELTER_CACHE_FEED_AMOUNT
+    const a = agent("partial", { pos: { x: 20, y: 20 }, needs: createNeeds({ hunger: 0.2 }) });
+    world.agents.push(a);
+
+    maybeFeedFromShelterCache(world, a);
+
+    expect(a.needs.hunger).toBeCloseTo(0.3); // +0.1, not the full 0.4
+    expect(tileAt(world, "surface", 20, 20)?.cache).toBeCloseTo(0);
+  });
+
+  it("only reaches from within SHELTER_REST_RADIUS -- a distant stocked shelter doesn't feed a hungry agent that hasn't walked home", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 20, 20, "shelter");
+    tileAt(world, "surface", 20, 20)!.cache = 1;
+    const a = agent("far-away", { pos: { x: 20, y: 20 + SHELTER_REST_RADIUS + 5 }, needs: createNeeds({ hunger: 0.2 }) });
+    world.agents.push(a);
+
+    expect(maybeFeedFromShelterCache(world, a)).toBe(false);
+    expect(a.needs.hunger).toBe(0.2);
+  });
+});
+
+describe("shelter proximity buff: heal + needs-decay bonus, composed via decayNeeds/applyHealOverTime's existing multiplier hooks", () => {
+  it("SHELTER_NEEDS_DECAY_MULTIPLIER measurably slows hunger/thirst decay versus baseline", () => {
+    const baseline = createNeeds({ hunger: 0.9, thirst: 0.9 });
+    const sheltered = createNeeds({ hunger: 0.9, thirst: 0.9 });
+
+    decayNeeds(baseline);
+    decayNeeds(sheltered, 1, false, 1, SHELTER_NEEDS_DECAY_MULTIPLIER);
+
+    expect(sheltered.hunger).toBeGreaterThan(baseline.hunger);
+    expect(sheltered.thirst).toBeGreaterThan(baseline.thirst);
+  });
+
+  it("SHELTER_HEAL_MULTIPLIER measurably speeds healing versus baseline, for a fed/watered agent", () => {
+    const baseline: Agent = agent("baseline-heal", { hp: 50, maxHp: 100, needs: createNeeds({ hunger: 1, thirst: 1 }) });
+    const sheltered: Agent = agent("sheltered-heal", { hp: 50, maxHp: 100, needs: createNeeds({ hunger: 1, thirst: 1 }) });
+
+    applyHealOverTime(baseline, 1);
+    applyHealOverTime(sheltered, SHELTER_HEAL_MULTIPLIER);
+
+    expect(sheltered.hp!).toBeGreaterThan(baseline.hp!);
+  });
+
+  it("real end-to-end via tickWorld: a resting buildsShelter agent's hunger drains slower than an identical agent with no shelter", () => {
+    const withShelter = createWorld(40, 40);
+    setTile(withShelter, "surface", 20, 20, "shelter");
+    const resident = agent("resident", { pos: { x: 20, y: 20 }, needs: createNeeds({ hunger: 0.9, thirst: 0.9 }) });
+    withShelter.agents.push(resident);
+
+    const noShelter = createWorld(40, 40);
+    const wanderer = agent("wanderer", { pos: { x: 20, y: 20 }, needs: createNeeds({ hunger: 0.9, thirst: 0.9 }) });
+    noShelter.agents.push(wanderer);
+
+    for (let i = 0; i < 50; i++) {
+      tickWorld(withShelter, undefined, undefined, undefined, seededRng(i + 1));
+      tickWorld(noShelter, undefined, undefined, undefined, seededRng(i + 1));
+    }
+
+    expect(resident.needs.hunger).toBeGreaterThan(wanderer.needs.hunger);
+  });
+});
+
+describe("real-run shape: shelter abandonment vs. an actively-used shelter with the new resting/cache incentive", () => {
+  it("a herd that keeps resting at its shelter never lets it decay -- vacantTicks stays at 0 the entire abandonment window", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 20, 20, "shelter");
+    const a = agent("stays-home", { pos: { x: 20, y: 20 }, needs: createNeeds() });
+    world.agents.push(a);
+    const log = new EventLog();
+
+    for (let i = 0; i < SHELTER_ABANDON_TICKS + 50; i++) {
+      world.tick += 1;
+      // Resting keeps this agent within SHELTER_ABANDON_RADIUS the whole time
+      // (SHELTER_REST_RADIUS is well inside it), the same real mechanical
+      // reason a well-used shelter shouldn't accumulate vacantTicks the way
+      // an ignored one does.
+      applyShelterResting(world, a);
+      decayShelters(world, log);
+    }
+
+    expect(tileAt(world, "surface", 20, 20)?.terrain).toBe("shelter");
+    expect(tileAt(world, "surface", 20, 20)?.vacantTicks).toBe(0);
+    expect(log.events.some((e) => e.kind === "shelterAbandoned")).toBe(false);
+  });
+
+  it("abandonment clears the accumulated cache along with the structure itself", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 20, 20, "shelter");
+    tileAt(world, "surface", 20, 20)!.cache = 0.8;
+
+    for (let i = 0; i < SHELTER_ABANDON_TICKS; i++) {
+      world.tick += 1;
+      decayShelters(world);
+    }
+
+    expect(tileAt(world, "surface", 20, 20)?.terrain).toBe("floor");
+    expect(tileAt(world, "surface", 20, 20)?.cache).toBeUndefined();
   });
 });

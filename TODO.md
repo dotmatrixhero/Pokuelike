@@ -104,6 +104,38 @@ work resumes:
    hazard the finding also surfaced. The fancier growth/decay/storm-
    interaction layer terrain lifecycle (1) would add can still attach to
    the shipped `"shelter"` terrain kind later, unblocked by any of this.
+   ~~**Follow-up: resting-at-home buffs + food cache**~~ — **built** (direct
+   ask: "shelter should also...incentivize the Pokémon to stay in it...food
+   cache"), see DESIGN.md's "Shelter incentives" section for the full
+   design/real-run numbers. Doesn't resolve the net-survival-cost finding
+   above by itself (a shelter that's never successfully built, as seed 42's
+   own founders keep proving, has nothing for a resting/cache buff to
+   attach to) — it's a real, separate incentive layer on top of an already-
+   built shelter, not a fix for the build-site-scoring gap. Real follow-ups
+   still open, not done here:
+   - **Extend `buildsShelter` to more species now that shelter does more.**
+     Explicitly flagged rather than done unilaterally — a separate, bigger
+     roster decision the direct ask didn't cover. Worth revisiting once the
+     roster grows past Diglett/Sandshrew: any other genuinely
+     burrowing/nesting-flavored species (candidates judged the same way
+     `species.ts`'s own top-of-roster comment already judges the current
+     roster) would get real, earned value from resting/cache now, not just
+     the passive concealment/storm-cover payoff shelter-building shipped
+     with originally.
+   - **Cache-aware herd food delivery** — `support.ts`'s `applyHerdSupport`
+     currently only ever looks for a live food tile
+     (`findNearestFoodTile`/`findNearestIndexed(..., "food")`); it has no
+     awareness that a `buildsShelter` herd-mate's home shelter might have a
+     stocked cache closer than any live patch. Left alone here since it's a
+     second system's own targeting logic, not this feature's — a real
+     candidate for a future pass rather than a scope-creep addition to this
+     one.
+   - **Tune `SHELTER_CACHE_MAX`/`SHELTER_CACHE_DEPOSIT_PER_TICK` against a
+     seed where a shelter actually survives long enough to matter** — this
+     pass's real-run validation was constrained by seed 42's own
+     already-documented "shelter never gets built here" finding; seeds 7/
+     20260903 (DESIGN.md's real-run numbers) are the first real look at
+     cache accumulation/drawdown in practice, not an exhaustive tuning pass.
 3. **Overworld: the current map becomes one region in a larger graph** —
    the "World scale: layers, elevation, and regions" section from early in
    this project, finally built. Decided: full simulation for the focused/
@@ -1507,6 +1539,14 @@ not something this pathfinding pass itself caused or is positioned to fix.
       predator-dependent feature (this one included) needs a genuinely
       sustainable predator population to actually exercise in a real run,
       not just a longer tick count.
+      **Update, this session**: pack hunting + scavenging (see the section
+      below, DESIGN.md) were built as two direct levers against exactly this
+      — both proven real and working via dedicated stress scenarios, but
+      predator populations still did NOT reliably recover in real 3000-tick,
+      9-seed runs (several seeds still ended at 0). The mechanisms mostly
+      just don't get a chance to fire in the stock demo scenario, because it
+      spawns exactly one of each predator species — see the follow-up below
+      and DESIGN.md's own honest findings section. This bullet stays open.
 - [ ] **Dispersal's pause-on-urgent-need fix real-run numbers (seed 42,
       2000 ticks, A/B against the pre-feature code on the same seed): total
       starvation deaths dropped 109 -> 30 (thirst deaths 82 -> 23, hunger
@@ -1782,3 +1822,68 @@ not something this pathfinding pass itself caused or is positioned to fix.
       suspected bug — see DESIGN.md's "Explicitly not done" for this
       feature) — flagged, not resolved, same as this file's other
       honestly-reported-but-unconfirmed seed-specific observations.
+
+## Pack hunting, scavenging, and ontogenetic niche shift — built, see DESIGN.md
+
+- [x] Three real-biology behaviors, all approved directly ("Pack hunting
+      sounds good. Scavenging is good. Ontogenic too."), built as real
+      levers against this file's own repeatedly-documented predator
+      fragility (see the bullet above). Pack hunting
+      (`predation.ts`'s new `isPackPreyOf`/`nearbySameSpeciesConspecifics`/
+      `committedPackmates`/`packAccuracyMultiplier`) is the existing
+      defensive mob-fighting pattern flipped to offense: a real,
+      positioning-driven trigger (a genuine nearby same-species conspecific
+      has to exist) unlocks hunting a target too strong to solo, with a real
+      accuracy-bonus mechanical advantage threaded through `resolveHit`.
+      Scavenging (`support.ts`'s new `applyScavenging`) is a real
+      alternative meal — feeding directly from a nearby corpse, restoring
+      hunger by the same established amount `applyHerdSupport`'s food
+      delivery already uses, cashing in the corpse-persistence window this
+      session inherited from an earlier feature. Ontogenetic niche shift
+      (`predation.ts`'s new `isJuvenile`, reusing `Agent.age` the same way
+      `reproduction.ts`'s `isMature` already does) makes a juvenile predator
+      never initiate an independent hunt at all — solo or pack — leaning
+      entirely on scavenging/herd food delivery instead, plus a real,
+      earlier flee-threshold vulnerability difference. 18 new engine tests,
+      681 total, all passing including the unmodified determinism acceptance
+      test — zero new `Math.random()`/`rng()` call sites added.
+- [x] Each mechanism proven working in a dedicated, hand-built stress
+      scenario (this project's own "targeted scenario, not just a longer
+      demo run" standard): pack hunting real-kills a too-strong-to-solo
+      target once real packmates are nearby (12 `packHunt` events, 1 kill,
+      in a 3-scyther stress scenario); scavenging restores real hunger from
+      a real corpse (0.1 -> 0.887 hunger in 2 ticks); a juvenile and an
+      adult in the identical hungry-predator-next-to-prey setup diverge
+      exactly as designed (juvenile never hunts, adult hunts and kills).
+- [ ] **Honest real-run finding, not papered over**: a real 3000-tick,
+      9-seed sweep (42, 7, 20260903, 1-6) found `packHunt` firing on only
+      1 of 9 seeds (14 times) and `scavenged` on only 3 of 9 (4-28 times) —
+      both mechanisms are real and working, but rarely get a chance to fire
+      in the *stock* demo scenario specifically because
+      `packages/data/src/scenario.ts` spawns exactly ONE individual of each
+      predator species with no `herdId`, so pack hunting's own trigger
+      structurally can't fire until a second same-species predator exists
+      nearby (only reachable via reproduction — itself gated behind the same
+      fragile predator population this feature targets). Predator
+      populations did NOT reliably recover — several seeds still ended at 0
+      living predators. The 3 seeds with real pack/scavenge activity did end
+      with more living predators (1, 3, 2) than the zero-activity seeds (1,
+      1, 0, 0), a real, honestly-reported correlation, but not treated as
+      proven causal here — this sim is independently, repeatedly documented
+      elsewhere in this file/DESIGN.md as rng-trajectory-chaos-sensitive, and
+      a clean feature-on/feature-off A/B was considered and not run for that
+      same reason (see DESIGN.md's full writeup).
+- [ ] **Real follow-up, not built**: seed the demo scenario with 2 of each
+      predator species instead of 1 (or give predators their own home-range
+      cohesion so offspring stay near a parent), specifically to give pack
+      hunting's own trigger a fair chance to fire in the stock scenario
+      rather than only in a hand-built stress test. Not attempted this
+      session — changing the demo scenario's spawn composition is its own
+      real design decision with its own validation burden, out of scope for
+      the direct ask here.
+- [ ] **Real follow-up, not built**: kleptoparasitism (contention/priority
+      between multiple scavengers over the same corpse) — the original
+      brief's own "nice-to-have, not required." The existing
+      `CORPSE_PERSIST_TICKS` window already lets multiple agents feed from
+      the same corpse across separate ticks, which was judged enough for the
+      direct "alternative to a risky hunt" ask.

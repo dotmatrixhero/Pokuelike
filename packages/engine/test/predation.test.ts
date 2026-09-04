@@ -688,17 +688,24 @@ describe("bush concealment", () => {
     // test before the predator's own hunt check runs (agents tick in push
     // order within the same tickWorld call).
     const bold = { boldness: 1, aggression: 0.5, sociability: 0.5 };
-    // age: 0 keeps both agents below MIN_EXPLORE_AGE (needs.ts) so neither
-    // wanders off on its own idle turn in this large (20x20) world — the
+    // age: 0 keeps the prey below MIN_EXPLORE_AGE (needs.ts) so it doesn't
+    // wander off on its own idle turn in this large (20x20) world — the
     // exp-motivated exploration feature otherwise moves the prey before the
     // predator's own hunt check runs this same tick (agents tick in push
-    // order), corrupting the exact distance this test depends on.
+    // order), corrupting the exact distance this test depends on. The
+    // predator itself gets a real adult age instead of 0 — this session's
+    // ontogenetic-niche-shift feature (predation.ts's `isJuvenile`) makes a
+    // juvenile predator never hunt independently at all, which would corrupt
+    // this test's own "hunt" assertions for an unrelated reason; the
+    // predator's own hunger (well below satisfied) already keeps it from
+    // exploring regardless of age, so this is safe.
+    const ADULT_PREDATOR_AGE = 200;
 
     // Distance 4 is within HUNT_DETECT_RADIUS (5) normally.
     const openWorld = createWorld(20, 20);
     openWorld.agents.push(
       prey({ x: 5, y: 5 }, { disposition: bold, age: 0 }),
-      predator({ x: 9, y: 5 }, 0.1, { age: 0 })
+      predator({ x: 9, y: 5 }, 0.1, { age: ADULT_PREDATOR_AGE })
     );
     tickWorld(openWorld, undefined, RULES, undefined, SAFE_RNG);
     const openHunter = openWorld.agents.find((a) => a.id === "scyther-0")!;
@@ -708,7 +715,7 @@ describe("bush concealment", () => {
     setTile(bushWorld, "surface", 5, 5, "bush");
     bushWorld.agents.push(
       prey({ x: 5, y: 5 }, { disposition: bold, age: 0 }),
-      predator({ x: 9, y: 5 }, 0.1, { age: 0 })
+      predator({ x: 9, y: 5 }, 0.1, { age: ADULT_PREDATOR_AGE })
     );
     tickWorld(bushWorld, undefined, RULES, undefined, SAFE_RNG);
     const concealedHunter = bushWorld.agents.find((a) => a.id === "scyther-0")!;
@@ -1548,5 +1555,189 @@ describe("hunt pursuit of a MOVING target uses real BFS pathfinding (stepTowardM
     // doc comment on this exact case.
     expect(handled).toBe(false);
     expect(hunter.pos).toEqual(posAfterFirstChase); // didn't move via the hunt branch this tick
+  });
+});
+
+describe("pack hunting", () => {
+  // predator()'s default maxHp is 20: PREY_POWER_RATIO (0.75) puts the solo
+  // ceiling at 15, PACK_PREY_POWER_RATIO (1.15) puts the pack ceiling at 23 —
+  // 18 sits squarely in the "too strong to solo, a real pack target" band.
+  const PACK_ONLY_MAXHP = 18;
+
+  it("a lone predator will NOT hunt a target too strong to take on alone", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { maxHp: PACK_ONLY_MAXHP });
+    const lone = predator({ x: 6, y: 5 }, 0.1); // no same-species conspecific anywhere nearby
+    world.agents.push(target, lone);
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(lone.behavior).not.toBe("hunt");
+    expect(lone.huntTarget).toBeUndefined();
+  });
+
+  it("the same target becomes huntable once a real, nearby same-species conspecific is there to pack up with", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { maxHp: PACK_ONLY_MAXHP });
+    // Predator ticks before the ally so its own hunt-eligibility check sees
+    // the ally already in place — position, not shared herdId, is the real
+    // trigger here (predators mostly spawn herdless — see predation.ts's
+    // `nearbySameSpeciesConspecifics` doc comment).
+    const hunter = predator({ x: 6, y: 5 }, 0.1);
+    const ally = predator({ x: 8, y: 5 }, 0.1, { id: "scyther-1" });
+    world.agents.push(hunter, target, ally);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    expect(hunter.behavior).toBe("hunt");
+    expect(hunter.huntTarget).toBe(target.id);
+  });
+
+  it("a distant same-species predator (outside PACK_MUSTER_RADIUS) doesn't count toward forming a pack", () => {
+    const world = createWorld(30, 30);
+    const target = prey({ x: 5, y: 5 }, { maxHp: PACK_ONLY_MAXHP });
+    const hunter = predator({ x: 6, y: 5 }, 0.1);
+    const farAlly = predator({ x: 20, y: 20 }, 0.1, { id: "scyther-1" }); // way outside PACK_MUSTER_RADIUS (5) of the target
+    world.agents.push(hunter, target, farAlly);
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(hunter.behavior).not.toBe("hunt");
+  });
+
+  it("a different-species conspecific doesn't count toward forming a pack (no cross-species pack hunting)", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { maxHp: PACK_ONLY_MAXHP });
+    const hunter = predator({ x: 6, y: 5 }, 0.1);
+    const otherPredatorSpecies = predator({ x: 8, y: 5 }, 0.1, { id: "onix-0", species: "onix" });
+    world.agents.push(hunter, target, otherPredatorSpecies);
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(hunter.behavior).not.toBe("hunt");
+  });
+
+  it("the real mechanical advantage: a pack accuracy bonus turns a would-be miss into a hit", () => {
+    // A partial-accuracy move so the roll actually matters — TEST_MOVE's
+    // 100 accuracy never misses regardless of any multiplier.
+    const PARTIAL_ACC_MOVE: MoveSpec = { ...TEST_MOVE, id: "partial-acc-move", accuracy: 60 };
+    // 65 < 60 fails a solo roll; 65 < 60 * (1 + PACK_ACCURACY_BONUS_PER_ALLY) = 69 succeeds with exactly 1 committed packmate.
+    const fixedRng = () => 0.65;
+    // A solo-eligible target (well within PREY_POWER_RATIO) isolates the
+    // accuracy bonus itself from the separate "pack unlocks an otherwise
+    // too-strong target" trigger effect covered by the tests above.
+    const target = prey({ x: 5, y: 5 });
+
+    const soloWorld = createWorld(10, 10);
+    const soloHunter = predator({ x: 6, y: 5 }, 0.1, { moves: [PARTIAL_ACC_MOVE] });
+    soloWorld.agents.push(soloHunter, target);
+    const soloLog = new EventLog();
+    tickWorld(soloWorld, soloLog, RULES, undefined, fixedRng);
+    expect(soloLog.events).toContainEqual(expect.objectContaining({ kind: "missed", attackerId: "scyther-0" }));
+
+    const packWorld = createWorld(10, 10);
+    const packTarget = prey({ x: 5, y: 5 });
+    const packHunter = predator({ x: 6, y: 5 }, 0.1, { moves: [PARTIAL_ACC_MOVE] });
+    // Already committed to the same target — the real, positioning-driven
+    // signal `committedPackmates` reads (see predation.ts), set up directly
+    // rather than relying on a second agent's own tick this same call.
+    const committedAlly = predator({ x: 8, y: 5 }, 0.1, { id: "scyther-1", huntTarget: packTarget.id });
+    packWorld.agents.push(packHunter, packTarget, committedAlly);
+    const packLog = new EventLog();
+    tickWorld(packWorld, packLog, RULES, undefined, fixedRng);
+
+    expect(packLog.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "scyther-0" }));
+    expect(packLog.events).toContainEqual(
+      expect.objectContaining({ kind: "packHunt", attackerId: "scyther-0", targetId: packTarget.id, packmates: 1 })
+    );
+  });
+
+  it("rng-determinism: the same seed run twice with pack hunting active produces byte-identical outcomes", () => {
+    function run(): unknown {
+      const world = createWorld(10, 10);
+      const target = prey({ x: 5, y: 5 }, { maxHp: PACK_ONLY_MAXHP });
+      const hunter = predator({ x: 6, y: 5 }, 0.1);
+      const ally = predator({ x: 8, y: 5 }, 0.1, { id: "scyther-1" });
+      world.agents.push(hunter, target, ally);
+      const log = new EventLog();
+      const rng = mulberry32(20260904);
+      for (let i = 0; i < 20; i++) tickWorld(world, log, RULES, undefined, rng);
+      return log.events;
+    }
+    expect(JSON.stringify(run())).toBe(JSON.stringify(run()));
+  });
+});
+
+describe("ontogenetic niche shift (juvenile predator behavior)", () => {
+  it("a juvenile predator never initiates an independent hunt, even hungry with solo-eligible prey right next to it", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 });
+    const juvenile = predator({ x: 6, y: 5 }, 0.1, { age: 10 }); // well below JUVENILE_AGE_THRESHOLD (60)
+    world.agents.push(target, juvenile);
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(juvenile.behavior).not.toBe("hunt");
+    expect(juvenile.huntTarget).toBeUndefined();
+  });
+
+  it("an adult predator (same setup, no age or a mature age) does hunt", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 });
+    const adult = predator({ x: 6, y: 5 }, 0.1, { age: 200 });
+    world.agents.push(target, adult);
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(adult.behavior).toBe("hunt");
+  });
+
+  it("a juvenile flees a losing fight at a higher hp fraction than an adult would, at the identical hp fraction", () => {
+    const HALFWAY_HP_FRACTION = 0.5; // below JUVENILE_RETREAT_HP_FRACTION (0.6), above the adult's RETREAT_HP_FRACTION (0.4)
+
+    const juvenileWorld = createWorld(10, 10);
+    const juvenileAttacker = prey({ x: 6, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", behavior: "fight", fightTarget: "scyther-0" });
+    const juvenile = predator({ x: 5, y: 5 }, 0.3, { age: 10 });
+    juvenile.hp = 5;
+    juvenile.maxHp = 10; // exactly HALFWAY_HP_FRACTION
+    juvenileWorld.agents.push(juvenileAttacker, juvenile);
+
+    const handled = applyPredationInstincts(juvenileWorld, juvenile, RULES, undefined, undefined, SAFE_RNG);
+
+    expect(handled).toBe(true);
+    expect(juvenile.behavior).toBe("flee");
+
+    const adultWorld = createWorld(10, 10);
+    const adultAttacker = prey({ x: 6, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", behavior: "fight", fightTarget: "scyther-0" });
+    const adult = predator({ x: 5, y: 5 }, 0.3, { age: 200 });
+    adult.hp = 5;
+    adult.maxHp = 10; // same HALFWAY_HP_FRACTION as the juvenile above
+    adultWorld.agents.push(adultAttacker, adult);
+
+    applyPredationInstincts(adultWorld, adult, RULES, undefined, undefined, SAFE_RNG);
+
+    expect(adult.behavior).not.toBe("flee");
+  });
+
+  it("end-to-end: given a choice between a live kill and a corpse, a juvenile scavenges while an adult hunts", () => {
+    const corpsePos = { x: 3, y: 6 };
+
+    const juvenileWorld = createWorld(10, 10);
+    const juvenileLivePrey = prey({ x: 5, y: 5 });
+    const juvenileCorpse = prey({ x: 3, y: 6 }, { id: "corpse-0", alive: false });
+    const juvenile = predator({ x: 6, y: 5 }, 0.1, { age: 10 });
+    juvenileWorld.agents.push(juvenileLivePrey, juvenileCorpse, juvenile);
+    tickWorld(juvenileWorld, undefined, RULES, undefined, SAFE_RNG);
+    expect(juvenile.behavior).toBe("scavenge");
+    expect(juvenile.huntTarget).toBeUndefined();
+
+    const adultWorld = createWorld(10, 10);
+    const adultLivePrey = prey({ x: 5, y: 5 });
+    const adultCorpse = prey(corpsePos, { id: "corpse-0", alive: false });
+    const adult = predator({ x: 6, y: 5 }, 0.1, { age: 200 });
+    adultWorld.agents.push(adultLivePrey, adultCorpse, adult);
+    tickWorld(adultWorld, undefined, RULES, undefined, SAFE_RNG);
+    expect(adult.behavior).toBe("hunt");
   });
 });
