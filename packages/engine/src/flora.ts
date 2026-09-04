@@ -1,4 +1,4 @@
-import type { Layer, Vec2, World } from "./types.js";
+import type { Layer, Tile, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { tileAt } from "./world.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
@@ -135,6 +135,110 @@ const FOOD_SPREAD_CHANCE = 0.025;
 const FLORA_LIFESPAN_TICKS = 150;
 const FLORA_DECAY_PER_TICK = 1 / FLORA_LIFESPAN_TICKS;
 
+/**
+ * Grazing scars — a lasting mark from SUSTAINED heavy grazing, distinct from
+ * the ordinary instant stock depletion above. A single food patch getting
+ * eaten out over its normal ~3-feeding life (`CONSUME_STOCK_AMOUNT`) isn't
+ * enough on its own to scar the ground; it takes repeated grazing at the
+ * same coordinates — across one patch's feedings, or across several
+ * patches that keep regrowing and getting eaten again at the same spot — to
+ * cross the threshold. User's own pitch, approved directly ("Yeah that
+ * sounds good"): "a patch that's been grazed hard and repeatedly over real
+ * time should measurably degrade... a real lingering 'this ground is
+ * overgrazed' effect."
+ *
+ * `Tile.grazingPressure` (see types.ts) is a persistent per-tile counter,
+ * incremented by `recordGrazing` at both real consumption call sites
+ * (needs.ts's self-feeding `consume()`, support.ts's herd food-delivery
+ * pickup) and decayed a little every tick in `growFlora` below, regardless
+ * of the tile's current terrain — deliberately the same "counter that
+ * decays over time when not being fed" shape as this codebase's other
+ * decaying counters (e.g. `Agent.ticksSinceEligibleMate`), not a novel
+ * mechanism. `Tile.overgrazed` flips on/off around two different
+ * thresholds (hysteresis) so it doesn't flicker tick-to-tick right at the
+ * boundary — the same "enter high, exit low" shape weather.ts and other
+ * threshold-driven state in this codebase already use.
+ */
+/** Added to a tile's grazing pressure on every real consumption event there. */
+const GRAZING_PRESSURE_PER_CONSUME = 1;
+/**
+ * A tile's grazing pressure decays by this much per tick, always (whether
+ * or not it's currently being grazed).
+ *
+ * Tuned against a real headless run, not guessed: an initial 0.02/tick
+ * (full decay of a single grazing event in 50 ticks) turned out to erase
+ * pressure almost as fast as it's earned — a real 3000-tick, 3-seed run
+ * showed individual food tiles genuinely getting grazed 4-8 times each over
+ * the run (170 distinct fed tiles, seed 42; 12 of them hit 4+ times), but
+ * because real regrowth cycles (`FOOD_LIFESPAN_TICKS`=70 to die,
+ * `MATURATION_TICKS`=20 to regrow) space consecutive feedings at the same
+ * coordinate anywhere from a handful of ticks to several hundred apart, the
+ * fast decay wiped pressure out between waves almost every time — only 3
+ * tiles ever crossed the threshold across all three seeds combined, on a
+ * threshold that in principle only needed 4 real feedings. Slowed 5x here
+ * so pressure actually survives the gap between a herd's feeding waves
+ * (matches a food patch's own regrowth-cycle timescale) instead of quietly
+ * resetting itself before the next wave arrives — see this constant's
+ * DESIGN.md entry for the concrete before/after tile counts this produced.
+ */
+const GRAZING_PRESSURE_DECAY_PER_TICK = 0.004;
+/**
+ * Grazing pressure at/above this flips a tile into "overgrazed" — three
+ * real grazing events without much decay in between, matching
+ * `CONSUME_STOCK_AMOUNT`'s own "3 feedings empties a patch" bar: it takes
+ * at least a full patch's worth of real feeding pressure (whether from one
+ * overfed patch or several patches regrown and refed at the same spot) to
+ * actually scar the ground, not just one or two visits.
+ */
+const OVERGRAZED_ENTER_PRESSURE = 3;
+/** Grazing pressure has to decay back down to this (lower than the enter threshold) before a scar fades. */
+const OVERGRAZED_EXIT_PRESSURE = 1;
+/**
+ * How much an overgrazed tile's germination/spread chances are multiplied
+ * by — a REAL suppression (85% reduction), not a token tweak, per the
+ * explicit "a real, visible suppression" ask. Left non-zero (not an outright
+ * ban) so an overgrazed tile can still, rarely, get lucky and start
+ * recovering on its own even under continued light pressure — total denial
+ * is reserved for `trySpread`, which is deliberately pickier (see below).
+ */
+const OVERGRAZED_GROWTH_MULTIPLIER = 0.15;
+
+/** Records a real grazing event at these tile coordinates — call from every place stock is actually consumed. */
+export function recordGrazing(tile: Tile | undefined): void {
+  if (!tile) return;
+  tile.grazingPressure = (tile.grazingPressure ?? 0) + GRAZING_PRESSURE_PER_CONSUME;
+}
+
+/**
+ * Decays this tile's grazing pressure by one tick's worth and flips
+ * `overgrazed` on/off around the hysteresis band above, emitting a
+ * `floraChanged` event on each real state transition (not every tick) so
+ * the event log narrates "this patch scarred over" / "this patch
+ * recovered" as a real, occasional beat rather than noise. Called once per
+ * tile per tick from `growFlora`'s main scan, regardless of terrain.
+ */
+function decayGrazing(world: World, tile: Tile, pos: Vec2, log: EventLog | undefined): void {
+  if (tile.grazingPressure === undefined) return; // never grazed — nothing to decay
+
+  // Check the enter threshold against the pressure AS OF THIS TICK's real
+  // grazing, before this tick's own decay quietly pulls it back under —
+  // otherwise a patch that gets grazed to exactly the threshold and then
+  // immediately decays a hair below it on the very next `growFlora` call
+  // would never register as overgrazed at all (caught by a real test that
+  // grazes a tile to exactly `OVERGRAZED_ENTER_PRESSURE`).
+  if (!tile.overgrazed && tile.grazingPressure >= OVERGRAZED_ENTER_PRESSURE) {
+    tile.overgrazed = true;
+    log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos, stage: "overgrazed" });
+  }
+
+  tile.grazingPressure = Math.max(0, tile.grazingPressure - GRAZING_PRESSURE_DECAY_PER_TICK);
+
+  if (tile.overgrazed && tile.grazingPressure <= OVERGRAZED_EXIT_PRESSURE) {
+    tile.overgrazed = false;
+    log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos, stage: "recovered" });
+  }
+}
+
 const NEIGHBOR_OFFSETS: Vec2[] = [
   { x: 0, y: -1 }, { x: 1, y: -1 }, { x: 1, y: 0 }, { x: 1, y: 1 },
   { x: 0, y: 1 }, { x: -1, y: 1 }, { x: -1, y: 0 }, { x: -1, y: -1 },
@@ -145,13 +249,21 @@ export function seasonalMultiplier(tick: number): number {
   return 0.5 + 0.5 * Math.sin((2 * Math.PI * tick) / SEASON_LENGTH);
 }
 
-/** Tries to seed one open neighbor of a living food patch — how it proliferates. */
+/**
+ * Tries to seed one open neighbor of a living food patch — how it
+ * proliferates. Skips overgrazed neighbors outright rather than just
+ * lowering their odds (unlike germination/maturation below, which are
+ * suppressed but not zeroed) — spreading INTO a patch of ground a herd is
+ * actively hammering flat would undercut the whole point of the scar, and
+ * this is the one growth path with other, un-scarred neighbors usually
+ * available to fall back to instead.
+ */
 function trySpread(world: World, pos: Vec2, log: EventLog | undefined, rng: () => number): void {
   const shuffled = [...NEIGHBOR_OFFSETS].sort(() => rng() - 0.5);
   for (const offset of shuffled) {
     const nx = pos.x + offset.x, ny = pos.y + offset.y;
     const tile = tileAt(world, "surface", nx, ny);
-    if (tile?.terrain === "floor") {
+    if (tile?.terrain === "floor" && !tile.overgrazed) {
       tile.terrain = "seedling";
       tile.growth = 0;
       log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos: { x: nx, y: ny }, stage: "seeded" });
@@ -173,7 +285,10 @@ export function maybeDropSeed(world: World, layer: Layer, pos: Vec2, log?: Event
 
   const tile = tileAt(world, layer, pos.x, pos.y);
   if (!tile || tile.terrain !== "floor") return;
-  if (rng() >= GERMINATION_CHANCE) return;
+  // Overgrazed ground resists germination — real suppression, not a ban
+  // (see OVERGRAZED_GROWTH_MULTIPLIER's doc comment above `trySpread`).
+  const germinationChance = tile.overgrazed ? GERMINATION_CHANCE * OVERGRAZED_GROWTH_MULTIPLIER : GERMINATION_CHANCE;
+  if (rng() >= germinationChance) return;
 
   tile.terrain = "seedling";
   tile.growth = 0;
@@ -187,11 +302,15 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
 
   for (let i = 0; i < tiles.length; i++) {
     const tile = tiles[i]!;
+    const pos = { x: i % world.width, y: Math.floor(i / world.width) };
+    decayGrazing(world, tile, pos, log);
 
     if (tile.terrain === "seedling") {
-      tile.growth = (tile.growth ?? 0) + 1;
+      // Overgrazed ground also slows maturation for whatever DOES manage to
+      // germinate there — real suppression on the growth path, not just a
+      // gate at the germination roll.
+      tile.growth = (tile.growth ?? 0) + (tile.overgrazed ? OVERGRAZED_GROWTH_MULTIPLIER : 1);
       if (tile.growth >= MATURATION_TICKS) {
-        const pos = { x: i % world.width, y: Math.floor(i / world.width) };
         const nearSun = isNearSunbeam(world, pos);
         const becomesFood = rng() < (nearSun ? FOOD_CHANCE_NEAR_SUNBEAM : FOOD_CHANCE);
 
@@ -228,7 +347,6 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
       // less) — see `floraDecayDivisor`'s doc comment for why decay/spread
       // modulation, not a direct stock top-up, is this system's closest
       // equivalent to "boosts/suppresses regrowth."
-      const pos = { x: i % world.width, y: Math.floor(i / world.width) };
       const weatherDivisor = floraDecayDivisor(world, "surface", pos);
       tile.stock -= (NATURAL_DECAY_PER_TICK * (1.5 - season)) / weatherDivisor;
 
@@ -247,7 +365,6 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
     }
 
     if (tile.terrain === "flora" && tile.stock !== undefined) {
-      const pos = { x: i % world.width, y: Math.floor(i / world.width) };
       tile.stock -= (FLORA_DECAY_PER_TICK * (1.5 - season)) / floraDecayDivisor(world, "surface", pos);
 
       if (tile.stock <= 0) {

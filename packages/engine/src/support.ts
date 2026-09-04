@@ -3,7 +3,7 @@ import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
-import { CONSUME_STOCK_AMOUNT } from "./flora.js";
+import { CONSUME_STOCK_AMOUNT, recordGrazing } from "./flora.js";
 import { isNight, isTwilight } from "./daynight.js";
 import { agentsWithin, isHunterSpecies, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS } from "./predation.js";
 import { findNearestIndexed } from "./resourceIndex.js";
@@ -464,7 +464,10 @@ export function applyHerdSupport(world: World, agent: Agent, log?: EventLog, nee
       agent.behavior = "deliverFood";
       if (manhattan(agent.pos, foodTile) === 0) {
         const tile = tileAt(world, agent.layer, foodTile.x, foodTile.y);
-        if (tile?.stock !== undefined) tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
+        if (tile?.stock !== undefined) {
+          tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
+          recordGrazing(tile); // real herd food-delivery grazing event — see flora.ts's "Grazing scars"
+        }
         agent.inventory = [...(agent.inventory ?? []), { itemKey: FOOD_ITEM_KEY, weight: FOOD_ITEM_WEIGHT }];
       } else {
         agent.pos = stepToward(world, agent.layer, agent.pos, foodTile);

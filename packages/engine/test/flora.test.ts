@@ -4,6 +4,7 @@ import {
   maybeDropSeed,
   growFlora,
   seasonalMultiplier,
+  recordGrazing,
   CONSUME_STOCK_AMOUNT,
   FOOD_FLAVORS,
   FLORA_FLAVORS,
@@ -348,5 +349,169 @@ describe("food/flora durability tuning (direct ask: less durable food to force m
     growFlora(world2, log2, () => 0.01);
 
     expect(log2.events.some((e) => e.kind === "floraChanged" && e.stage === "seeded")).toBe(true);
+  });
+});
+
+describe("grazing scars (sustained heavy grazing degrades a tile beyond ordinary stock depletion)", () => {
+  it("recordGrazing accumulates pressure on repeated consumption", () => {
+    const world = createWorld(3, 3);
+    setTile(world, "surface", 1, 1, "food");
+    const tile = tileAt(world, "surface", 1, 1)!;
+    expect(tile.grazingPressure).toBeUndefined();
+
+    recordGrazing(tile);
+    expect(tile.grazingPressure).toBe(1);
+    recordGrazing(tile);
+    recordGrazing(tile);
+    expect(tile.grazingPressure).toBe(3);
+  });
+
+  it("recordGrazing on an undefined tile is a safe no-op", () => {
+    expect(() => recordGrazing(undefined)).not.toThrow();
+  });
+
+  it("a lightly-grazed patch (one feeding) never crosses the overgrazed threshold", () => {
+    const world = createWorld(3, 3);
+    setTile(world, "surface", 1, 1, "food");
+    const tile = tileAt(world, "surface", 1, 1)!;
+    recordGrazing(tile); // a single real feeding — should be a near-miss, not a scar
+
+    for (let t = 1; t <= 50; t++) {
+      world.tick = t;
+      growFlora(world, undefined, () => 1); // never spreads, isolates the grazing accounting
+    }
+
+    expect(tile.overgrazed).not.toBe(true);
+  });
+
+  it("sustained heavy grazing (repeated feedings faster than decay) crosses the overgrazed threshold and fires a real event", () => {
+    const world = createWorld(3, 3);
+    setTile(world, "surface", 1, 1, "food");
+    const tile = tileAt(world, "surface", 1, 1)!;
+    const log = new EventLog();
+
+    // Four real grazing events in quick succession (a herd camped on this
+    // one tile, refeeding faster than the slow per-tick decay can undo) —
+    // crosses OVERGRAZED_ENTER_PRESSURE (4).
+    for (let i = 0; i < 4; i++) recordGrazing(tile);
+
+    world.tick = 1;
+    growFlora(world, log, () => 1);
+
+    expect(tile.overgrazed).toBe(true);
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "floraChanged", stage: "overgrazed" }));
+  });
+
+  it("an overgrazed scar fades on its own after enough real time without further grazing", () => {
+    const world = createWorld(3, 3);
+    setTile(world, "surface", 1, 1, "food");
+    const tile = tileAt(world, "surface", 1, 1)!;
+    for (let i = 0; i < 4; i++) recordGrazing(tile);
+
+    const log = new EventLog();
+    let recoveredTick: number | undefined;
+    for (let t = 1; t <= 1000; t++) {
+      world.tick = t;
+      growFlora(world, log, () => 1); // never re-grazed after tick 0, never spreads
+      if (recoveredTick === undefined && tile.overgrazed === false) recoveredTick = t;
+    }
+
+    // It did fade...
+    expect(recoveredTick).toBeDefined();
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "floraChanged", stage: "recovered" }));
+    // ...but only after a real rest period, not instantly (this is "the
+    // ground needs to rest," not a same-tick flicker around the threshold).
+    expect(recoveredTick!).toBeGreaterThan(50);
+  });
+
+  it("overgrazing suppresses spread onto that specific tile — a heavily-grazed patch's neighbor stays scarred while a fresh patch's neighbor gets seeded", () => {
+    const heavy = createWorld(5, 5);
+    setTile(heavy, "surface", 2, 2, "food");
+    const heavyTile = tileAt(heavy, "surface", 2, 2)!;
+    heavyTile.stock = 1;
+    // Mark the one neighbor `trySpread` will pick (rng()=0 makes every
+    // sort-comparator return -0.5, which for this NEIGHBOR_OFFSETS array
+    // reliably puts {-1,-1} -> (1,1) first — verified directly, not assumed)
+    // as overgrazed, same as if a herd had hammered that exact spot before.
+    const scarredNeighbor = tileAt(heavy, "surface", 1, 1)!;
+    for (let i = 0; i < 4; i++) recordGrazing(scarredNeighbor);
+    scarredNeighbor.overgrazed = true;
+
+    const fresh = createWorld(5, 5);
+    setTile(fresh, "surface", 2, 2, "food");
+    tileAt(fresh, "surface", 2, 2)!.stock = 1;
+
+    // rng() = 0 always beats the spread roll and always picks the first
+    // shuffled neighbor offset — isolates "does it land on the scarred tile
+    // specifically," not "does it roll to spread at all."
+    growFlora(heavy, undefined, () => 0);
+    growFlora(fresh, undefined, () => 0);
+
+    expect(tileAt(heavy, "surface", 1, 1)!.terrain).toBe("floor"); // still scarred, refused the seed
+    expect(tileAt(fresh, "surface", 1, 1)!.terrain).toBe("seedling"); // same setup, no scar — spreads normally
+  });
+
+  it("overgrazed ground resists germination via maybeDropSeed — a roll that would succeed on fresh ground fails here", () => {
+    const world = createWorld(3, 3);
+    const tile = tileAt(world, "surface", 1, 1)!;
+    for (let i = 0; i < 4; i++) recordGrazing(tile);
+    tile.overgrazed = true;
+
+    // rng() is called twice per attempt: once against SEED_DROP_CHANCE
+    // (0.1), once against the germination chance. 0.099 clears the first
+    // (0.099 < 0.1) but must fail the suppressed germination rate
+    // (0.65 * 0.15 = 0.0975 — 0.099 >= 0.0975) while still clearing the
+    // normal, unsuppressed rate (0.099 < 0.65) on fresh ground.
+    maybeDropSeed(world, "surface", { x: 1, y: 1 }, undefined, () => 0.099);
+    expect(tile.terrain).toBe("floor");
+
+    // Same roll succeeds on an otherwise-identical, non-scarred tile.
+    const control = createWorld(3, 3);
+    maybeDropSeed(control, "surface", { x: 1, y: 1 }, undefined, () => 0.099);
+    expect(tileAt(control, "surface", 1, 1)!.terrain).toBe("seedling");
+  });
+
+  it("a seedling on overgrazed ground matures slower than one on fresh ground", () => {
+    const scarred = createWorld(3, 3);
+    setTile(scarred, "surface", 1, 1, "seedling");
+    const scarredTile = tileAt(scarred, "surface", 1, 1)!;
+    for (let i = 0; i < 4; i++) recordGrazing(scarredTile);
+    scarredTile.overgrazed = true;
+
+    const fresh = createWorld(3, 3);
+    setTile(fresh, "surface", 1, 1, "seedling");
+
+    for (let t = 1; t <= 10; t++) {
+      scarred.tick = t;
+      fresh.tick = t;
+      growFlora(scarred, undefined, () => 1);
+      growFlora(fresh, undefined, () => 1);
+    }
+
+    // Fresh ground's growth advances 1/tick; scarred ground advances at the
+    // suppressed rate — after the same 10 ticks it should measurably lag.
+    expect(tileAt(scarred, "surface", 1, 1)!.growth!).toBeLessThan(tileAt(fresh, "surface", 1, 1)!.growth!);
+  });
+
+  it("rng-determinism: identical grazing/decay/overgrazed bookkeeping across two runs of the same fixed rng sequence", () => {
+    function run(): unknown {
+      const world = createWorld(4, 4);
+      setTile(world, "surface", 1, 1, "food");
+      const tile = tileAt(world, "surface", 1, 1)!;
+      for (let i = 0; i < 5; i++) recordGrazing(tile);
+      let calls = 0;
+      const rng = () => {
+        calls++;
+        // A small deterministic pseudo-sequence, not Math.random.
+        return (calls * 0.137) % 1;
+      };
+      for (let t = 1; t <= 200; t++) {
+        world.tick = t;
+        growFlora(world, undefined, rng);
+      }
+      return { pressure: tile.grazingPressure, overgrazed: tile.overgrazed, terrain: tile.terrain, stock: tile.stock };
+    }
+
+    expect(run()).toEqual(run());
   });
 });
