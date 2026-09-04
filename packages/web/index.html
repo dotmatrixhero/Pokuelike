@@ -101,7 +101,13 @@
         pointer-events: none;
         transition: opacity 0.2s ease;
       }
-      #drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+      /* The dimming scrim is a mobile/narrow-viewport affordance only — on a
+         desktop-width screen the drawer is a floating side panel that never
+         covers the canvas, so darkening the rest of the page while it's open
+         reads as an unwanted, unrelated dimming rather than a modal cue. */
+      @media (max-width: 768px) {
+        #drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+      }
 
       #sidebar {
         position: fixed;

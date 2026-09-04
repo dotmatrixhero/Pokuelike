@@ -95,7 +95,7 @@ function hasLineOfSight(world: World, layer: Layer, origin: Vec2, target: Vec2, 
       continue;
     }
     const tile = tileAt(world, layer, point.x, point.y);
-    if (!tile || !tile.walkable) return false;
+    if (!tile || tile.opaque) return false;
     if (tile.elevation > blockingHeight) return false;
   }
   return true;
@@ -175,19 +175,22 @@ export function computeVisible(world: World, layer: Layer, origin: Vec2, baseRad
 }
 
 /**
- * Pure walkability check along a straight line between two points — no
+ * Pure opacity check along a straight line between two points — no
  * elevation gating, unlike `hasLineOfSight`. Used by combat.ts's
  * line/cone-shaped moves (via predation.ts) so an obstacle (tree, boulder,
  * wall) blocks a ranged attack's path exactly like it blocks ambient line of
  * sight, without pulling in `hasLineOfSight`'s elevation-ridge logic, which
- * doesn't apply to a flat combat range check.
+ * doesn't apply to a flat combat range check. Checks `opaque`, not
+ * `walkable` — a boulder is walkable-but-slow (see `Tile.opaque`'s doc
+ * comment) yet still a solid obstruction a ranged attack can't shoot
+ * through.
  */
 export function isPathClear(world: World, layer: Layer, from: Vec2, to: Vec2): boolean {
   const line = bresenhamLine(from, to);
   for (const point of line) {
     if ((point.x === from.x && point.y === from.y) || (point.x === to.x && point.y === to.y)) continue;
     const tile = tileAt(world, layer, point.x, point.y);
-    if (!tile || !tile.walkable) return false;
+    if (!tile || tile.opaque) return false;
   }
   return true;
 }

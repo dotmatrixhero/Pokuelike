@@ -121,7 +121,7 @@ describe("generateWorld", () => {
     }
   });
 
-  it("tree and boulder tiles are unwalkable; bush/sand/mud are walkable", () => {
+  it("tree tiles are unwalkable; boulder/bush/sand/mud are walkable (boulder is slow and opaque, not a hard blocker)", () => {
     const world = generateWorld(90, 60, 77);
     let sawTree = false;
     let sawBoulder = false;
@@ -129,13 +129,19 @@ describe("generateWorld", () => {
       if (tile.terrain === "tree") {
         sawTree = true;
         expect(tile.walkable).toBe(false);
+        expect(tile.opaque).toBe(true);
       }
       if (tile.terrain === "boulder") {
         sawBoulder = true;
-        expect(tile.walkable).toBe(false);
+        // Walkable-but-slow (see support.ts's terrainSpeedMultiplier) and
+        // still opaque (blocks sight/ranged attacks) — direct ask: boulders
+        // shouldn't hard-block movement, just cost speed.
+        expect(tile.walkable).toBe(true);
+        expect(tile.opaque).toBe(true);
       }
       if (tile.terrain === "bush" || tile.terrain === "sand" || tile.terrain === "mud") {
         expect(tile.walkable).toBe(true);
+        expect(tile.opaque).toBe(false);
       }
     }
     expect(sawTree).toBe(true);

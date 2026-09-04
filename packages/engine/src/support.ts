@@ -131,8 +131,17 @@ export function effectiveSpeed(agent: Agent, baseSpeed: number): number {
 
 // --- Elevation/terrain -> effective movement speed (see DESIGN.md's "Environmental generation..." section) ---
 
-/** Sand/mud slow movement; every other terrain kind is neutral. Sim-original magnitudes, not canon. */
-const TERRAIN_SPEED_MULTIPLIER: Partial<Record<TerrainKind, number>> = { sand: 0.75, mud: 0.5 };
+/**
+ * Sand/mud/boulder slow movement; every other terrain kind is neutral.
+ * Boulder is the slowest of the three (0.4) — direct ask: "boulders being
+ * so blocking... if anything it should cost movement speed to get past
+ * 'em" — real rock is harder to scramble over than mud is to wade through.
+ * Composes multiplicatively with `elevationSpeedMultiplier` below, so a
+ * boulder placed on genuinely higher ground (see worldgen.ts's boulder
+ * elevation bump) costs even more than this flat number alone. Sim-original
+ * magnitudes, not canon.
+ */
+const TERRAIN_SPEED_MULTIPLIER: Partial<Record<TerrainKind, number>> = { sand: 0.75, mud: 0.5, boulder: 0.4 };
 
 /** The flat per-terrain-kind multiplier for whichever tile an agent just moved onto. 1 (neutral) for anything not in the table above. */
 export function terrainSpeedMultiplier(terrain: TerrainKind): number {

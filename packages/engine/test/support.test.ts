@@ -336,6 +336,11 @@ describe("elevation/terrain movement-speed modifiers", () => {
     expect(terrainSpeedMultiplier("bush")).toBe(1);
   });
 
+  it("boulder slows movement more than sand or mud — walkable-but-slow, not a hard block", () => {
+    expect(terrainSpeedMultiplier("boulder")).toBeLessThan(1);
+    expect(terrainSpeedMultiplier("boulder")).toBeLessThan(terrainSpeedMultiplier("mud"));
+  });
+
   it("movementSpeedFactor composes elevation and terrain multiplicatively", () => {
     const elevationOnly = movementSpeedFactor(0, 2, "floor");
     const terrainOnly = movementSpeedFactor(0, 0, "mud");

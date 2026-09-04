@@ -168,6 +168,19 @@ export interface Tile {
   terrain: TerrainKind;
   walkable: boolean;
   /**
+   * Blocks sight and ranged attacks (`fov.ts`'s `hasLineOfSight`/
+   * `isPathClear`) independent of `walkable` — "wall"/"tree"/"boulder" are
+   * all real, solid obstructions you can't see or shoot through, but only
+   * "wall"/"tree" also block *movement* outright; a boulder is climbable
+   * (slowly — see `support.ts`'s `terrainSpeedMultiplier`), just still
+   * opaque, matching "a big rock you can scramble over but can't see
+   * through." Previously derived implicitly from `!walkable`; split out once
+   * boulder became walkable-but-slow instead of a full obstacle (direct
+   * ask: "boulders being so blocking... should cost movement speed to get
+   * past 'em" rather than block outright).
+   */
+  opaque: boolean;
+  /**
    * Continuous height within this layer's grid, currently only meaningful
    * on "surface" (open question: whether underground/canopy get their own
    * elevation later). Drives FOV and combat accuracy/evasion.

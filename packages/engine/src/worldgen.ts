@@ -316,6 +316,9 @@ export function biomeWeightsAt(seeds: readonly BiomeSeedInfo[] | undefined, x: n
 const SUNBEAM_ELEVATION_THRESHOLD = 1.5;
 const SUNBEAM_CHANCE = 0.03;
 
+/** Flat elevation bump applied to a boulder tile on top of the ambient field at that spot — see the "boulders sit higher" comment at its one call site below. Sim-original magnitude, not canon. */
+const BOULDER_ELEVATION_BOOST = 0.8;
+
 /**
  * Generates a full surface-layer world: biome seeds scattered by `seed`,
  * every tile's water/obstacle/food placement and elevation drawn from a
@@ -399,7 +402,14 @@ export function generateWorld(width: number, height: number, seed: number): Worl
             bestKind = kind;
           }
         }
-        setTile(world, "surface", x, y, bestKind, elevation);
+        // Boulders sit visibly higher than the ambient terrain around them —
+        // real raised rock, not just a flat obstacle painted onto the same
+        // elevation as everything else. Direct ask: "maybe they are higher
+        // elevated" (offered alongside the movement-speed cost, not instead
+        // of it — see support.ts's `terrainSpeedMultiplier`, which composes
+        // with this via `elevationSpeedMultiplier` for a real combined cost).
+        const tileElevation = bestKind === "boulder" ? elevation + BOULDER_ELEVATION_BOOST : elevation;
+        setTile(world, "surface", x, y, bestKind, tileElevation);
         continue;
       }
 
