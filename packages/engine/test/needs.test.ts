@@ -330,23 +330,23 @@ describe("decayNeeds: thirstMultiplier composes with the flat decay rate (Phase 
   it("defaults to the original flat rate when no multiplier is passed", () => {
     const needs = createNeeds();
     decayNeeds(needs);
-    expect(needs.thirst).toBeCloseTo(1 - 0.01, 10);
+    expect(needs.thirst).toBeCloseTo(1 - 0.005, 10);
   });
 
   it("a multiplier below 1 (rain) eases thirst decay relative to the base rate", () => {
     const needs = createNeeds();
     decayNeeds(needs, 0.6);
     const eased = 1 - needs.thirst;
-    expect(eased).toBeCloseTo(0.01 * 0.6, 10);
-    expect(eased).toBeLessThan(0.01);
+    expect(eased).toBeCloseTo(0.005 * 0.6, 10);
+    expect(eased).toBeLessThan(0.005);
   });
 
   it("a multiplier above 1 (drought) raises thirst decay relative to the base rate", () => {
     const needs = createNeeds();
     decayNeeds(needs, 1.8);
     const raised = 1 - needs.thirst;
-    expect(raised).toBeCloseTo(0.01 * 1.8, 10);
-    expect(raised).toBeGreaterThan(0.01);
+    expect(raised).toBeCloseTo(0.005 * 1.8, 10);
+    expect(raised).toBeGreaterThan(0.005);
   });
 
   it("does not touch hunger/energy/mateDrive — only thirst is weather-modulated", () => {
@@ -384,7 +384,7 @@ describe("tickAgentNeeds: local weather composes with thirst decay through a rea
     ];
     const farAgent = makeAgent({ pos: { x: 1, y: 1 } });
     tickAgentNeeds(farAgent, world);
-    expect(farAgent.needs.thirst).toBeCloseTo(1 - 0.01, 10);
+    expect(farAgent.needs.thirst).toBeCloseTo(1 - 0.005, 10);
   });
 });
 

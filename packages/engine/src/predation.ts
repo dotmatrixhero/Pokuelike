@@ -881,6 +881,21 @@ function giveUpAndRelocate(world: World, agent: Agent, log: EventLog | undefined
  * to someone else even while it happens to be asleep itself, and firing that
  * branch also clears the guardian's own `asleep` flag below, since actively
  * moving to fight isn't consistent with still being asleep.
+ *
+ * `thirstIsUrgent` (default false, computed by the caller) gates only the
+ * "give up hunting and wander off" relocate mechanic near the bottom
+ * (`giveUpAndRelocate`/`migrate`): a real bug this guards against, confirmed
+ * in an actual run — a predator that commits to a directionless multi-
+ * hundred-tick relocate walk never got a chance to drink along the way (the
+ * same "commits no matter what" shape natal dispersal used to have before
+ * its own fix), and died of thirst mid-walk. Deliberately just thirst, not
+ * `chooseBehavior`'s general urgency: hunger is what's driving the hunt/
+ * relocate in the first place, so a hungry predator can and should still
+ * start/continue relocating — that IS how it pursues its own hunger. Flee/
+ * fight/hunting-a-visible-target are all unaffected either way — only the
+ * open-ended wandering search pauses, resuming automatically (via
+ * `agent.relocateTarget`'s own persistence, unchanged by this) once thirst
+ * is satisfied again.
  */
 export function applyPredationInstincts(
   world: World,
@@ -888,7 +903,8 @@ export function applyPredationInstincts(
   rules: HuntRules,
   log?: EventLog,
   ctx?: LevelingContext,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  thirstIsUrgent = false
 ): boolean {
   if (!agent.asleep && isCriticallyHurt(agent)) {
     const attackers = agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter(
@@ -1019,7 +1035,11 @@ export function applyPredationInstincts(
 
     agent.ticksSinceMeal = (agent.ticksSinceMeal ?? 0) + 1;
     if (agent.ticksSinceMeal >= RELOCATE_AFTER_TICKS) {
-      return giveUpAndRelocate(world, agent, log, rng);
+      // Paused, not abandoned, while an urgent need outranks it —
+      // `agent.relocateTarget` (if already set from an earlier tick) is left
+      // untouched, so the walk resumes exactly where it left off once the
+      // agent is idle again. See this function's own doc comment.
+      if (!thirstIsUrgent) return giveUpAndRelocate(world, agent, log, rng);
     }
   }
 

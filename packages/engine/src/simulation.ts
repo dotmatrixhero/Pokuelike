@@ -5,7 +5,7 @@ import { growFlora, maybeDropSeed } from "./flora.js";
 import { decayShelters } from "./shelter.js";
 import { updateHerdMigrations } from "./herdMigration.js";
 import type { LevelingContext } from "./leveling.js";
-import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, coldSnapSpeedMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
+import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, canopySpeedMultiplier, coldSnapSpeedMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
 import { tileAt } from "./world.js";
 import { isNight, lightLevel } from "./daynight.js";
 import { advanceWeather } from "./weather.js";
@@ -86,6 +86,7 @@ export function actionSpeedOf(world: World, agent: Agent, tick: number): number 
     (agent.terrainSpeedFactor ?? 1) *
     activityScheduleMultiplier(agent.activityPattern, tick) *
     coldSnapSpeedMultiplier(world, agent.layer, agent.pos) *
+    canopySpeedMultiplier(agent.layer) *
     (isParalyzed(agent) ? PARALYSIS_SPEED_MULTIPLIER : 1);
   return effectiveSpeed(agent, baseSpeed);
 }

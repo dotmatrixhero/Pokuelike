@@ -180,6 +180,27 @@ export function elevationSpeedMultiplier(fromElevation: number, toElevation: num
  * you up, rough ground is generally slower) still shows up in a real run,
  * just applied to the *next* action rather than the one just taken.
  */
+/**
+ * The canopy is meant to be genuinely easy to move through — real branch-
+ * to-branch travel, not the same trudge-across-open-ground pace as the
+ * surface — direct ask: "canopy should be super easy to move around in
+ * anywhere." A flat, generous boost rather than terrain/elevation-shaped
+ * (the layer has no terrain variety or elevation at all — see
+ * `createDemoWorld`'s doc comment, a pure flat floor grid), applied as its
+ * own independent multiplicative term in `actionSpeedOf` (simulation.ts)
+ * rather than folded into `movementSpeedFactor` (which is specifically the
+ * per-*step* elevation/terrain effect, snapshotted onto
+ * `Agent.terrainSpeedFactor` — this is a standing property of the layer
+ * itself, checked fresh every tick instead). Sim-original magnitude, judge
+ * against a real run like every other tuning constant here.
+ */
+export const CANOPY_SPEED_MULTIPLIER = 2;
+
+/** 1 (neutral) everywhere except the canopy, which gets `CANOPY_SPEED_MULTIPLIER` — see its doc comment. */
+export function canopySpeedMultiplier(layer: Layer): number {
+  return layer === "canopy" ? CANOPY_SPEED_MULTIPLIER : 1;
+}
+
 export function movementSpeedFactor(fromElevation: number, toElevation: number, toTerrain: TerrainKind): number {
   return elevationSpeedMultiplier(fromElevation, toElevation) * terrainSpeedMultiplier(toTerrain);
 }

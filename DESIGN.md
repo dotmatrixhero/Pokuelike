@@ -4230,6 +4230,87 @@ whether real hunting pressure (this fix) plus real population booms
 naturally starts triggering it before building anything new — not
 confirmed yet, a real run at larger scale is the next step.
 
+## Diagnosing "everything dies" on the real demo scenario seed, and three fixes
+
+Real diagnosis on `SCENARIO_SEED` (20260903, the actual default demo world
+— not seed 42, which this session had been using as a friendlier
+comparison baseline) at 2000 ticks: population went from 17 founders to 6
+survivors, two species (Pidgey, Squirtle) wiped out entirely, and **every
+single starvation death (17 of 17) was thirst, zero were hunger.**
+
+Root-caused two real, distinct mechanisms:
+
+1. **Underground and canopy layers generate zero water/food tiles at
+   all** (confirmed by directly counting terrain: surface has 472 water
+   tiles among others, underground/canopy are both pure flat floor,
+   nothing else) — a deliberate design (species native to those layers
+   cross to the surface for every resource, per the existing "Cross-layer
+   behavior" note above), but it means an underground/canopy species'
+   survival depends entirely on how good the surface patch near *its own*
+   specific crossing point happens to be. On this seed, Onix's crossing
+   point landed near decent resources and it survived fine; Diglett and
+   Sandshrew's didn't, and both starved.
+2. **A second, previously-undiscovered instance of dispersal's old
+   "commits no matter what" bug**, this time in predation.ts's predator
+   give-up-and-relocate mechanic (`giveUpAndRelocate`/`migrate`,
+   triggered after `RELOCATE_AFTER_TICKS` without a kill): once a predator
+   started relocating, it walked toward a random far tile for as long as
+   it took, with zero chance to drink along the way — confirmed directly
+   in a real run, an Onix walked 262 ticks straight through on "relocate"
+   without a single drink and died of thirst mid-search. This got *more*
+   exposed, not less, by this session's own earlier "predators should
+   hunt more eagerly" change (raising `HUNT_HUNGER_THRESHOLD`), which
+   makes a predator enter the hunt/relocate state more readily.
+
+Direct ask in response, three changes, all in `needs.ts`/`support.ts`/
+`simulation.ts`/`resourceIndex.ts`/`predation.ts`:
+
+1. **Hunger and thirst decay both halved again** — `HUNGER_DECAY_RATE`
+   0.012→0.006 (and its floor 0.001→0.0005), `DECAY_PER_TICK.thirst`
+   0.01→0.005. Full-to-empty time roughly doubles for both (hunger ~213→
+   ~427 ticks, thirst ~100→~200 ticks) on top of their existing grace
+   periods.
+2. **Canopy is now genuinely fast to move through** — a new
+   `CANOPY_SPEED_MULTIPLIER` (2x, `support.ts`'s `canopySpeedMultiplier`)
+   composed into `actionSpeedOf` (simulation.ts) as its own independent
+   term, not tied to elevation/terrain (the layer has neither). Surface and
+   underground are unaffected.
+3. **Underground now shares water with the surface** — direct ask: real
+   groundwater access instead of every drink requiring an explicit
+   cross-to-surface trip. `resourceIndex.ts`'s three lookup functions
+   redirect a *water* lookup specifically FROM the underground layer to
+   the surface layer's own water index; the agent still walks there and
+   drinks while staying on the underground layer the entire time
+   (underground is a full flat grid at every x,y, and `consume()` never
+   checks the current tile's terrain kind — only that position matches).
+   Canopy deliberately still requires an explicit surface crossing for
+   everything, unchanged — this wasn't asked for there.
+
+Plus the relocate bug found above got the same treatment dispersal already
+has: a new `thirstIsUrgent` parameter on `applyPredationInstincts`,
+computed by needs.ts (`1 - agent.needs.thirst > 0.3`) and passed in, gates
+only the give-up-and-relocate branch — deliberately just thirst, not
+`chooseBehavior`'s general urgency, since hunger is what's driving the
+hunt/relocate in the first place (gating on hunger too would block the
+very relocate that's meant to resolve it). Flee/fight/hunting-a-visible-
+target are all unaffected either way.
+
+**Confirmed in a real re-run of the exact same seed**: the relocate fix
+visibly works (`seekWater -> relocate -> seekMate/seekFood` transitions
+now interrupt and resume cleanly instead of running 262 ticks unchecked),
+and Onix's underground water-sharing fix fired for real (`onix-0 drank at
+(21,45) on underground`). Total starvation deaths only dropped modestly
+(17 → 20, roughly the same order — this specific seed's death toll didn't
+meaningfully improve yet), and Onix still eventually died of thirst, later
+than before (tick 579 → 1139) but still dead. **Honest remaining gap
+found while confirming this**: after its last drink, Onix got stuck
+oscillating in `seekWater` behavior itself for 248 ticks near a boulder
+cluster without ever reaching water — `movement.ts`'s `stepToward` is
+greedy single-step pathing, not real pathfinding, and can fail to route
+around a moderately-sized obstacle cluster between an agent and its
+target. This is a distinct, deeper, pre-existing limitation from the two
+fixed above — not touched here, flagged in TODO.md.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

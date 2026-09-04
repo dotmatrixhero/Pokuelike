@@ -27,12 +27,12 @@ import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffec
 
 const DECAY_PER_TICK = {
   /**
-   * Extended from the original 0.015 — see "Extend thirst's survival
-   * margin" in DESIGN.md. At 0.010, thirst empties in ~100 ticks (was ~67),
-   * closing most of the gap with hunger's own (much longer, exponential)
-   * budget without touching thirst's deliberately-kept-linear curve.
+   * Halved again from 0.01 — direct ask: "thirst and hunger need to be even
+   * slower." At 0.005, thirst empties in ~200 ticks (was ~100), on top of
+   * `THIRST_STARVATION_GRACE_TICKS`, without touching thirst's deliberately-
+   * kept-linear curve.
    */
-  thirst: 0.01,
+  thirst: 0.005,
   energy: 0.005,
   mateDrive: 0.01,
 } as const;
@@ -45,33 +45,33 @@ const DECAY_PER_TICK = {
  * exponential decay of the *remaining* hunger value (a multiplicative term
  * proportional to current hunger, so the absolute drop is largest at full
  * and shrinks as hunger falls) plus a small flat floor so it still reaches
- * true 0 in finite time instead of asymptoting forever — from full (1.0),
- * this reaches the 0.7 "seek food" threshold (`chooseBehavior`'s urgency
- * cutoff) in ~27 ticks, but takes ~213 total to fall the rest of the way to
- * 0 (more than double the old flat rate's 100), where `STARVATION_GRACE_TICKS`
- * (100 more) still has
- * to run out before actual death — sim-original tuning, judge against a
- * real run like everything else here, not a canon formula.
+ * true 0 in finite time instead of asymptoting forever. Both terms halved
+ * again from an earlier pass (0.012/0.001) — direct ask: "thirst and hunger
+ * need to be even slower." From full (1.0), this now reaches the 0.7 "seek
+ * food" threshold (`chooseBehavior`'s urgency cutoff) in ~54 ticks (was
+ * ~27), and takes ~427 total to fall the rest of the way to 0 (was ~213),
+ * where `STARVATION_GRACE_TICKS` (100 more) still has to run out before
+ * actual death — sim-original tuning, judge against a real run like
+ * everything else here, not a canon formula.
  */
-const HUNGER_DECAY_RATE = 0.012;
-const HUNGER_DECAY_FLOOR = 0.001;
+const HUNGER_DECAY_RATE = 0.006;
+const HUNGER_DECAY_FLOOR = 0.0005;
 
 /** Ticks an agent can sit at 0 hunger before it dies of it. */
 const STARVATION_GRACE_TICKS = 100;
 /**
  * Thirst's own, longer, grace period — see "Extend thirst's survival
  * margin" in DESIGN.md. Hunger's full curve (exponential decay of the
- * remaining value, see `HUNGER_DECAY_RATE`'s doc comment) takes ~213 ticks
- * to empty, then 100 more before death — ~313 total. Thirst's flat rate now
- * empties in ~100 ticks (`DECAY_PER_TICK.thirst`); giving it the same 100
- * grace period would leave its total survival budget (~200 ticks) at barely
- * two thirds of hunger's, for no principled reason. 150 brings it to ~250,
- * closing most of that gap without touching hunger's own curve or thirst's
- * deliberate linearity. Tracked independently of `STARVATION_GRACE_TICKS`
- * via `Agent.thirstStarvationTicks` (a separate counter from
- * `Agent.starvationTicks`) since hunger and thirst can cross 0 at different
- * ticks — a single shared counter can't correctly judge two different
- * thresholds.
+ * remaining value, see `HUNGER_DECAY_RATE`'s doc comment) now takes ~427
+ * ticks to empty, then 100 more before death — ~527 total. Thirst's flat
+ * rate empties in ~200 ticks (`DECAY_PER_TICK.thirst`); this 150-tick grace
+ * period brings its total survival budget to ~350 — narrower than hunger's
+ * but not by a principle-violating margin, and thirst deliberately stays
+ * linear rather than getting hunger's exponential shape. Tracked
+ * independently of `STARVATION_GRACE_TICKS` via `Agent.thirstStarvationTicks`
+ * (a separate counter from `Agent.starvationTicks`) since hunger and thirst
+ * can cross 0 at different ticks — a single shared counter can't correctly
+ * judge two different thresholds.
  */
 const THIRST_STARVATION_GRACE_TICKS = 150;
 /**
@@ -546,7 +546,20 @@ export function tickAgentAction(
   if ((agent.actionLockTicks ?? 0) > 0) return;
 
   if (applyCarrying(world, agent, rules, log)) return;
-  if (rules && applyPredationInstincts(world, agent, rules, log, ctx, rng)) return;
+  // `thirstIsUrgent` gates only predation.ts's "give up hunting and wander
+  // off" relocate mechanic — flee/fight/hunt-a-visible-target all still take
+  // priority as before, and a hungry predator can still start/continue
+  // relocating (that's the whole point — it's searching for its next meal).
+  // Specifically thirst, not `chooseBehavior`'s general urgency: hunger is
+  // what's driving the hunt/relocate in the first place, so gating on "any"
+  // urgent need would block the very relocate that's meant to resolve it.
+  // Thirst has nothing to do with that goal, and a directionless multi-
+  // hundred-tick relocate walk shouldn't march a predator through it the
+  // same way natal dispersal used to before its own pause-for-urgent-needs
+  // fix — confirmed in a real run: an Onix walked 262 ticks on "relocate"
+  // without a single drink and died of thirst mid-search.
+  const thirstIsUrgent = 1 - agent.needs.thirst > 0.3;
+  if (rules && applyPredationInstincts(world, agent, rules, log, ctx, rng, thirstIsUrgent)) return;
   if (maybeStartCarrying(world, agent, log)) return;
   if (applyLooting(world, agent, log)) return;
   if (applySupportMove(world, agent, log)) return;

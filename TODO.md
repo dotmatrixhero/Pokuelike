@@ -1246,6 +1246,24 @@ blind `git merge`:
   future seeded-rng test-hygiene pass rather than fixing file-by-file as
   each one happens to get noticed.
 
+## Real pathfinding: `stepToward`/`stepAway` are greedy, not real paths
+
+Found while diagnosing why the real `SCENARIO_SEED` (20260903) demo world
+still loses agents to thirst even after the underground-water-sharing and
+predator-relocate fixes above (see DESIGN.md's "Diagnosing 'everything
+dies'..." section): Onix got stuck oscillating in `seekWater` behavior for
+248 ticks near a boulder cluster and died of thirst without ever reaching
+a real, existing water tile. `movement.ts`'s `stepToward`/`stepAway` pick
+one best single step toward/away from a target each tick
+(`candidatesToward`/`firstWalkable`) — real, working local avoidance for a
+single obstacle tile, but no lookahead or real routing around a
+moderately-sized cluster of blocked tiles, so an agent can end up stuck
+oscillating right next to one instead of walking around it. Not touched in
+this pass — a real fix (even simple flow-field/BFS pathfinding per layer,
+recomputed lazily like `resourceIndex.ts`'s terrain index) is a bigger
+scope call than the seed-diagnosis work that surfaced it. Worth prioritizing
+if thirst deaths near real, reachable water keep showing up in future runs.
+
 ## Urgency-based need priority, extended thirst margin, and sleep — built, tuning follow-ups
 
 - [ ] **`LONG_SLEEP_EXP_TICKS` (200) reads a little high relative to real

@@ -57,6 +57,26 @@ function getIndex(world: World, layer: Layer): LayerIndex {
 }
 
 /**
+ * The underground layer never generates its own water (it's a pure flat
+ * floor grid — see `createDemoWorld`'s doc comment) — direct ask:
+ * "underground should share water with the ground," real groundwater
+ * access rather than every drink requiring an explicit cross-to-surface
+ * trip. Redirects a water lookup FROM the underground layer to the surface
+ * layer's own water index; every other (layer, terrain) combination is
+ * unaffected. The agent doing the lookup still walks there and drinks
+ * while staying on the underground layer the whole time (underground is a
+ * full flat grid at every x,y, so any surface water coordinate is also a
+ * valid underground position) — `consume()` (needs.ts) never checks the
+ * current tile's terrain kind, only that the agent's position matches the
+ * target, so this needs no other plumbing. Canopy is deliberately NOT
+ * included — it still requires an explicit surface crossing for every
+ * resource, unchanged.
+ */
+function effectiveLookupLayer(layer: Layer, terrain: IndexedTerrain): Layer {
+  return layer === "underground" && terrain === "water" ? "surface" : layer;
+}
+
+/**
  * Bump whenever a tile's terrain might have crossed in or out of a tracked
  * kind (water/food/sunbeam) — cheap (an int increment); the actual rebuild
  * is lazy, deferred to the next lookup that needs it.
@@ -80,7 +100,7 @@ function chebyshev(a: Vec2, b: Vec2): number {
  * means in flora.ts.
  */
 export function foodStockNear(world: World, layer: Layer, from: Vec2, radius: number): number {
-  const { positions } = getIndex(world, layer);
+  const { positions } = getIndex(world, effectiveLookupLayer(layer, "food"));
   let total = 0;
   for (const pos of positions.food) {
     if (chebyshev(pos, from) > radius) continue;
@@ -96,7 +116,7 @@ export function foodStockNear(world: World, layer: Layer, from: Vec2, radius: nu
  * general since the index already tracks "sunbeam" too.
  */
 export function countTerrainNear(world: World, layer: Layer, from: Vec2, terrain: IndexedTerrain, radius: number): number {
-  const { positions } = getIndex(world, layer);
+  const { positions } = getIndex(world, effectiveLookupLayer(layer, terrain));
   let count = 0;
   for (const pos of positions[terrain]) {
     if (chebyshev(pos, from) <= radius) count++;
@@ -113,12 +133,13 @@ export function countTerrainNear(world: World, layer: Layer, from: Vec2, terrain
  * reverts to "floor".
  */
 export function findNearestIndexed(world: World, layer: Layer, from: Vec2, terrain: IndexedTerrain): Vec2 | undefined {
-  const { positions } = getIndex(world, layer);
+  const lookupLayer = effectiveLookupLayer(layer, terrain);
+  const { positions } = getIndex(world, lookupLayer);
   let best: Vec2 | undefined;
   let bestDist = Infinity;
   for (const pos of positions[terrain]) {
     if (terrain === "food") {
-      const tile = rawTileAt(world, layer, pos.x, pos.y);
+      const tile = rawTileAt(world, lookupLayer, pos.x, pos.y);
       if ((tile?.stock ?? 0) <= 0) continue;
     }
     const dist = Math.abs(pos.x - from.x) + Math.abs(pos.y - from.y);
