@@ -770,3 +770,65 @@ describe("status effects wired into real combat (resolveHit)", () => {
     expect(burnedDamage.damage).toBeLessThan(healthyDamage.damage);
   });
 });
+
+describe("forced movement wired into real combat (resolveHit)", () => {
+  it("a beforeHit lunge closes distance as part of using the move, without affecting whether it lands", () => {
+    const LUNGE_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "lunge-move",
+      range: { min: 0, max: 2 },
+      forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" },
+    };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 7, y: 5 }, undefined, { moves: [LUNGE_MOVE] }); // starts distance 2, within LUNGE_MOVE's range
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    // The lunge moves the attacker 1 tile closer as part of resolving the
+    // hit — it should end up adjacent to where it started 2 tiles out,
+    // not still at its original distance.
+    expect(hunter.pos).toEqual({ x: 6, y: 5 });
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "scyther-0", defenderId: "bulbasaur-0" }));
+  });
+
+  it("an onHit knockback pushes the defender back after a landed, non-killing hit", () => {
+    const KNOCKBACK_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "knockback-move",
+      forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" },
+    };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 }); // survives FALLBACK_DAMAGE (1), so this is a non-killing hit
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [KNOCKBACK_MOVE] });
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    expect(target.pos).not.toEqual({ x: 5, y: 5 }); // pushed away from where it started
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "scyther-0", defenderId: "bulbasaur-0" }));
+  });
+
+  it("no onHit forced movement fires on a killing/finishing hit — only a landed, non-killing one", () => {
+    const KNOCKBACK_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "knockback-move-2",
+      forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" },
+    };
+    const world = createWorld(10, 10);
+    // hp:1, no types/stats -> this fixture's FALLBACK_DAMAGE (1) brings it to
+    // exactly 0, a fainting hit, not a survived one.
+    const target = prey({ x: 5, y: 5 }, { hp: 1, maxHp: 1 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [KNOCKBACK_MOVE] });
+    world.agents.push(hunter, target);
+
+    tickWorld(world, undefined, RULES);
+
+    // Fainted in place — a fainting hit doesn't trigger onHit forced movement.
+    expect(target.pos).toEqual({ x: 5, y: 5 });
+    expect(target.fainted).toBe(true);
+  });
+});

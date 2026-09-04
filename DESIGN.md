@@ -3368,6 +3368,57 @@ own files rather than folded into the systems that consume them.
   show `statusInflicted` events yet — confirmed via a standalone script
   instead, same as the earlier `moveRespecced` verification.
 
+## Forced movement: drags, knockback, lunges, and retreats
+
+A move can now move someone as part of resolving — not the ordinary flee/
+hunt/idle stepping every agent already does, a real, move-triggered
+displacement. `MoveSpec.forcedMovement?: ForcedMovement` (moves.ts):
+
+```ts
+interface ForcedMovement {
+  mover: "attacker" | "defender";
+  direction: "closer" | "away"; // relative to whichever party isn't `mover`
+  tiles: number;
+  timing: "beforeHit" | "onHit";
+}
+```
+
+- **`applyForcedMovement`** (movement.ts) displaces `mover` `tiles` times,
+  one obstacle-aware step at a time, reusing the exact same `stepToward`/
+  `stepAway` every agent's own ordinary movement already calls — a blocked
+  step (wall, map edge) just doesn't move that tile, same as any other
+  call to those functions. Never a teleport.
+- **`timing: "beforeHit"`** (a lunge) resolves in `resolveHit`
+  (predation.ts) right after the move is committed to (`useMove`) but
+  before the accuracy/damage roll. This can't change whether *this* hit
+  lands — `canAttackFromHere` already validated range before `resolveHit`
+  was ever called — it only changes where the attacker ends up standing,
+  which matters for follow-up ticks (and, incidentally, feeds a
+  post-lunge position into that same roll's storm-accuracy check, which
+  reads as more correct than less).
+- **`timing: "onHit"`** (drag/knockback/retreat) resolves only on a landed,
+  damaging, non-killing hit — the exact same hook `maybeInflictStatus`
+  (status.ts) already uses. A corpse or a hit that itself causes a faint
+  doesn't trigger it: pushing around something that's either already down
+  or about to be doesn't mean anything.
+- `MoveTreeNode.delta.forcedMovement` is overwrite semantics in
+  `applyMoveTree`, same as `shape` — a move has at most one forced-movement
+  effect active at a time, never a stack of several nodes' effects
+  combined.
+- **First real content, shipped alongside the primitive**: Tackle gained
+  `bracing_impact` (Aggression, prereq `full_force_slam`) — an on-hit
+  knockback that shoves the target back a tile. Slash gained `feint`
+  (Boldness, no prerequisite, now itself the prerequisite for
+  `keen_precision`) — a before-hit lunge that closes to melee as part of
+  the strike rather than over several separate ticks. Both confirmed
+  reached by real agents in an actual run (`bulbasaur-2658-56` speccing
+  into `bracing_impact` at tick 3807 among them), not just unit-tested.
+- **Deliberately out of scope for this pass**: U-turn/Volt Switch's
+  designed "retreat at 2x speed for 2 ticks" effect (MOVES_DESIGN.md's
+  round-five moves) needs a *sustained*, multi-tick movement override, a
+  meaningfully different mechanism from this pass's instant, single-action
+  displacement — noted so it isn't mistaken for already covered by this.
+
 ## Current state of the code
 
 - `Agent` has needs, a behavior enum, and position — `tickAgent` decays

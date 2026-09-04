@@ -73,6 +73,13 @@ export interface MoveSpec {
    */
   range?: MoveRange;
   /**
+   * Forces the attacker or defender to move as part of this move — a drag,
+   * knockback, lunge, or retreat, applied via `applyForcedMovement`
+   * (movement.ts) from `resolveHit` (predation.ts). Absent = this move
+   * never moves anyone beyond their own normal steps. See `ForcedMovement`.
+   */
+  forcedMovement?: ForcedMovement;
+  /**
    * Optional respec DAG (see `applyMoveTree`). Each node is a delta applied
    * on top of the base spec, gated by a point cost and prerequisite node
    * id(s). Absent = this move can't be respec'd (the common case — only
@@ -82,6 +89,28 @@ export interface MoveSpec {
    * "Specialization" section.
    */
   tree?: Record<string, MoveTreeNode>;
+}
+
+/**
+ * Describes a move's forced-movement effect — a drag, knockback, lunge, or
+ * retreat, distinct from an agent's own ordinary flee/hunt/idle stepping.
+ * `mover` is displaced `tiles` steps, one obstacle-aware step at a time
+ * (`movement.ts`'s `stepToward`/`stepAway`), toward or away from whichever
+ * party isn't `mover`. `timing` decides when: `"beforeHit"` resolves right
+ * after the move is committed to but before the accuracy/damage roll (a
+ * lunge that can change the attacker's footing for follow-up ticks, even
+ * though this hit's own range was already validated before `resolveHit`
+ * was called); `"onHit"` resolves only after a landed, damaging,
+ * non-killing hit (drag/knockback/retreat) — the same "landed hit" hook
+ * `maybeInflictStatus` (status.ts) uses.
+ */
+export interface ForcedMovement {
+  /** Which party is displaced. */
+  mover: "attacker" | "defender";
+  /** Relative to the other party: `"closer"` drags/lunges them together, `"away"` pushes/retreats them apart. */
+  direction: "closer" | "away";
+  tiles: number;
+  timing: "beforeHit" | "onHit";
 }
 
 /**
@@ -136,6 +165,8 @@ export interface MoveTreeNode {
     accuracy?: number;
     cooldownTicks?: number;
     statusChance?: number;
+    /** Overwrite, like `shape` — a move has at most one forced-movement effect at a time, not a stack of them. */
+    forcedMovement?: ForcedMovement;
   };
 }
 
@@ -261,6 +292,7 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       range: delta.range
         ? { min: delta.range.min ?? result.range?.min ?? 0, max: delta.range.max ?? result.range?.max ?? 1 }
         : result.range,
+      forcedMovement: delta.forcedMovement ?? result.forcedMovement,
     };
   }
 

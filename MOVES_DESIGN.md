@@ -26,7 +26,7 @@ grepping for "needs" across the whole file.
 | `MoveTreeNode.prerequisitesAnyOf` | Crosslink shortcuts; a keystone reachable from either fork tip | **Shipped** — `moves.ts`, not yet used in a shipped tree |
 | Multi-hit (`MoveSpec.hits?: number` + combat.ts rolling N times) | Frenzied Pecking, Frenzy Claws, Rapid Volley/Jets, Frenzy Cutter — half the "Aggression" forks drafted below | Not started |
 | Defense-penetration delta field | Piercing Beak | Not started |
-| Forced movement (drag/knockback/lunge/retreat as part of a move) | Verdant Grip, Feint, Retreat Peck, Knockback Spray, Retreating Current, Bracing Impact, and most of Vine Whip's keystones | Not started — see the "Action-economy levers" section below for the shape this likely takes |
+| Forced movement (drag/knockback/lunge/retreat as part of a move) | Verdant Grip, Retreat Peck, Knockback Spray, Retreating Current, and most of Vine Whip's keystones | **Shipped** — see DESIGN.md's "Forced movement" section. First real content: Tackle's `bracing_impact` (onHit knockback) and Slash's `feint` (beforeHit lunge), both confirmed reached in a real run. Doesn't cover U-turn/Volt Switch's sustained multi-tick retreat — a different mechanism, still not started |
 | Multi-action lock (a move that also consumes the user's next action tick) | Reaping Slash (both Tackle's and Slash's) | Not started |
 | Agent-modifying passive (a tree node whose effect targets `Agent`, not `MoveSpec`) | Brace for Impact, Immovable, Overgrowth, Living Trellis | Not started — flagged as the single biggest structural addition on this list |
 | Conditional/situational bonuses (concealment, day/night, elevation, "was just hit," "moved this tick") | Predator's Instinct, Ambush Claws/Dive, Night Hunter, Counter Slam, Swooping Approach | Not started — needs combat-resolution-time condition checks, not just a tree delta; even the "near-free" tag on these undersold the work versus a pure numeric delta |
@@ -506,17 +506,18 @@ passives, or one of the newly-introduced levers called out per move below).
 ### Tackle (Normal, point/melee) — Utility archetype, full treatment
 
 **Shipped as v1** (`packages/data/src/moves.ts`) — two branches (Aggression,
-Boldness), 8 nodes, both forks real via `excludes`, confirmed working in a
-live run. What follows is the fuller v2 vision this doc still aims at; the
-v1 code only implements the pure-`delta` subset (`weighted_charge` →
-`heavier_blow` → `full_force_slam`/`relentless_pace`; `sturdy_stance` →
-`grounded_hit` → `counter_slam`/`steady_guard`) — no forced movement, no
-Sociability branch, no crosslinks, since none of those have the mechanics
-they'd need yet:
+Boldness), now 9 nodes (`bracing_impact` added once `forcedMovement`
+shipped — see DESIGN.md), both forks real via `excludes`, confirmed working
+in a live run. What follows is the fuller v2 vision this doc still aims at;
+the v1 code still doesn't have a Sociability branch or crosslinks, since
+those need a herd-mate position-swap and agent-modifying passives, neither
+built yet:
 
 - **Aggression — "Full Charge"**: notable *Weighted Charge* (+power,
-  -accuracy, live) → filler → filler → notable *Bracing Impact* (chance to
-  knock the target back 1 tile on hit, needs) → filler. **Fork**:
+  -accuracy, live) → filler → filler → notable *Bracing Impact* (knocks the
+  target back 1 tile on a landed, non-killing hit — **shipped**, prereq
+  `full_force_slam` in the real tree, not gated behind the fork the way
+  this paragraph's shape implies) → filler. **Fork**:
   *Relentless Charge* (2 hits, less power each, live) vs. *Full-Force Slam*
   (+power, +cooldown, live). **Keystone**: *Unstoppable Momentum* — after a
   hit, immediately dash toward the next target (needs: action-economy
@@ -549,12 +550,13 @@ they'd need yet:
 ### Slash (Normal, line-1 melee) — Power archetype, Scyther's only move
 
 **Shipped as v1** (`packages/data/src/moves.ts`) — two short spines
-(`serrated_edge` → `reaping_slash`, `keen_precision` → `fleetfoot_slash`)
-converging on one real exclusive fork via `excludes`. The concealment/
-day-night bonus, the lunge, and the multi-action lock below are still v2:
-they need conditional-effect resolution and forced-movement plumbing that
-don't exist yet, so the shipped fork is a live-only "reliable, accurate
-strike vs. heavier, riskier one" instead.
+(`serrated_edge` → `reaping_slash`, `feint` → `keen_precision` →
+`fleetfoot_slash`) converging on one real exclusive fork via `excludes`.
+`feint` is real now (`forcedMovement`, shipped — see DESIGN.md); the
+concealment/day-night bonus and the multi-action lock below are still v2,
+blocked on conditional-effect resolution and the multi-action-lock
+primitive, neither built yet — the shipped fork is a live-only "reliable,
+accurate strike vs. heavier, riskier one" instead.
 
 Deliberately a different *shape* than Tackle or Vine Whip — proof the
 archetype rule actually changes structure, not just flavor text. Mostly
@@ -564,10 +566,12 @@ branch), a couple of real mid-spine notables, one final exclusive fork:
 Honed Edge (+power, live) → filler → *Predator's Instinct* (bonus
 power/crit if the user was concealed or striking during its active hours
 before the hit, near — reuses concealment + daynight) → filler → *Feint*
-(lunges 1 tile toward the target as part of the move, needs: forced
-movement) → filler → Serrated Edge (+power, -accuracy, live). **Final
-fork**: *Reaping Slash* (big power spike, locks the user out of its next
-action tick, needs: multi-action lock) vs. *Frenzy Cutter* (3 hits at
+(lunges 1 tile toward the target as part of the move — **shipped**, though
+in the real tree it's the boldness spine's own opener rather than mid-spine
+on the aggression side the way this paragraph's shape implies) → filler →
+Serrated Edge (+power, -accuracy, live). **Final fork**: *Reaping Slash*
+(big power spike, locks the user out of its next action tick, needs:
+multi-action lock) vs. *Frenzy Cutter* (3 hits at
 reduced power, still lands partial damage on a fleeing target, needs:
 multi-hit field — this is why the shipped v1 fork below uses different,
 live-only alternatives instead of this pair).

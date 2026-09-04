@@ -168,3 +168,50 @@ describe("applyMoveTree: prerequisitesAnyOf (crosslink shortcuts)", () => {
     expect(() => applyMoveTree(MESHED, ["shared_notable"])).toThrow(/alternative prerequisite set/);
   });
 });
+
+describe("applyMoveTree: forcedMovement delta (overwrite, like shape)", () => {
+  const LUNGE: MoveSpec = {
+    id: "lunge-move",
+    name: "Lunge Move",
+    shape: { kind: "point" },
+    type: "normal",
+    category: "physical",
+    power: 40,
+    accuracy: 100,
+    cooldownTicks: 0,
+    tree: {
+      feint: {
+        id: "feint",
+        name: "Feint",
+        cost: 1,
+        delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" } },
+      },
+      retreat: {
+        id: "retreat",
+        name: "Retreat",
+        cost: 1,
+        prerequisites: ["feint"],
+        delta: { forcedMovement: { mover: "attacker", direction: "away", tiles: 1, timing: "onHit" } },
+      },
+    },
+  };
+
+  it("has no forcedMovement by default", () => {
+    expect(LUNGE.forcedMovement).toBeUndefined();
+  });
+
+  it("a node's forcedMovement delta applies to the respec'd spec", () => {
+    const respec = applyMoveTree(LUNGE, ["feint"]);
+    expect(respec.forcedMovement).toEqual({ mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" });
+  });
+
+  it("a later node's forcedMovement overwrites an earlier one, same as shape — never stacks", () => {
+    const respec = applyMoveTree(LUNGE, ["feint", "retreat"]);
+    expect(respec.forcedMovement).toEqual({ mover: "attacker", direction: "away", tiles: 1, timing: "onHit" });
+  });
+
+  it("is pure: never mutates the base spec's forcedMovement", () => {
+    applyMoveTree(LUNGE, ["feint"]);
+    expect(LUNGE.forcedMovement).toBeUndefined();
+  });
+});

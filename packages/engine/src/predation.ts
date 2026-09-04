@@ -1,7 +1,7 @@
 import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
-import { stepAway, stepToward } from "./movement.js";
+import { applyForcedMovement, stepAway, stepToward } from "./movement.js";
 import { migrate } from "./migration.js";
 import { calculateDamage, pickBestMove, useMove, rollAccuracy, rollCritical } from "./combat.js";
 import { grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
@@ -389,6 +389,12 @@ function resolveHit(
 
   useMove(attacker, move);
 
+  // A lunge resolves before the hit itself — the attacker's range was
+  // already validated by canAttackFromHere before resolveHit was ever
+  // called, so this doesn't change whether THIS hit lands, only where the
+  // attacker ends up standing for whatever comes next.
+  if (move.forcedMovement?.timing === "beforeHit") applyForcedMovement(world, move.forcedMovement, attacker, defender);
+
   if (!rollAccuracy(move, 0, 0, Math.random, stormAccuracyMultiplier(world, attacker.layer, attacker.pos))) {
     log?.record({
       kind: "missed",
@@ -470,9 +476,11 @@ function resolveHit(
   });
 
   if (defender.hp > 0) {
-    // A landed, damaging, non-killing hit — the one place status gets a
-    // chance to apply (a corpse or a freshly-fainted target doesn't need one).
+    // A landed, damaging, non-killing hit — the one place status and
+    // on-hit forced movement (drag/knockback/retreat) get a chance to
+    // apply. A corpse or a freshly-fainted target doesn't need either.
     maybeInflictStatus(defender, attacker.id, move, world, log);
+    if (move.forcedMovement?.timing === "onHit") applyForcedMovement(world, move.forcedMovement, attacker, defender);
     return false;
   }
 

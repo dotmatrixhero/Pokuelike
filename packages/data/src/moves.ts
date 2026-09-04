@@ -36,11 +36,12 @@ export const MOVES: Record<string, MoveSpec> = {
     cooldownTicks: 0,
     range: { min: 0, max: 1 },
     // v1 — the two branches (and their forks) that are buildable today with
-    // nothing but existing MoveSpec delta fields. MOVES_DESIGN.md's full
-    // vision adds a third (Sociability) branch and a crosslink triangle, but
-    // every node in that branch needs mechanics that don't exist yet
-    // (forced movement, a herd-mate position-swap, agent-modifying passives)
-    // — shipping it now would mean nodes that cost a point and do nothing.
+    // existing MoveSpec delta fields, plus one real forced-movement node
+    // (Bracing Impact) now that applyForcedMovement exists. MOVES_DESIGN.md's
+    // full vision still adds a third (Sociability) branch and a crosslink
+    // triangle, but every node in that branch needs mechanics that still
+    // don't exist (a herd-mate position-swap, agent-modifying passives) —
+    // shipping it now would mean nodes that cost a point and do nothing.
     // Same "ship what's real first" pattern Ember started with. Tackle is
     // the most-shared move in the spawned roster (Bulbasaur, Venusaur,
     // Diglett, Pidgey, Onix, Squirtle all know it), so one tree here
@@ -69,6 +70,17 @@ export const MOVES: Record<string, MoveSpec> = {
         excludes: ["relentless_pace"],
         leaning: "aggression",
         delta: { power: 20, cooldownTicks: 1 },
+      },
+      bracing_impact: {
+        id: "bracing_impact",
+        name: "Bracing Impact",
+        cost: 1,
+        prerequisites: ["full_force_slam"],
+        leaning: "aggression",
+        // The first real use of forced movement (movement.ts's
+        // applyForcedMovement) in a shipped tree: a landed, non-killing hit
+        // shoves the target back a tile, denying it easy follow-up range.
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" } },
       },
       relentless_pace: {
         id: "relentless_pace",
@@ -126,10 +138,11 @@ export const MOVES: Record<string, MoveSpec> = {
     // Tackle/Ember (Power archetype, not Utility — see MOVES_DESIGN.md's
     // template) rather than a re-skinned copy of the same tree shape: two
     // short spines converging on one real exclusive fork, no crosslink.
-    // The fuller vision (Predator's Instinct's concealment bonus, Feint's
-    // lunge, the multi-action-locking Reaping Slash) all need mechanics
-    // that don't exist yet, so this fork is two live-only alternatives
-    // instead — a reliable, accurate strike vs. a heavier, riskier one.
+    // Feint is real now (applyForcedMovement); Predator's Instinct's
+    // concealment bonus and the multi-action-locking Reaping Slash still
+    // need mechanics that don't exist yet, so the final fork stays two
+    // live-only alternatives — a reliable, accurate strike vs. a heavier,
+    // riskier one.
     tree: {
       serrated_edge: {
         id: "serrated_edge",
@@ -147,10 +160,21 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { power: 20, accuracy: -10, cooldownTicks: 1 },
       },
+      feint: {
+        id: "feint",
+        name: "Feint",
+        cost: 1,
+        leaning: "boldness",
+        // A lunge, not a strike: closes to melee as part of using the move,
+        // before the hit itself resolves — an ambush predator committing to
+        // the gap rather than closing it over several separate ticks.
+        delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" } },
+      },
       keen_precision: {
         id: "keen_precision",
         name: "Keen Precision",
         cost: 1,
+        prerequisites: ["feint"],
         leaning: "boldness",
         delta: { accuracy: 10 },
       },
