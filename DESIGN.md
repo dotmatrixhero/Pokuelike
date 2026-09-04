@@ -4866,6 +4866,124 @@ added for `packages/web` — it has none today, and inventing one for this
 session's scope wasn't asked for; if a real UI test harness is wanted later,
 that's its own follow-up.
 
+## Stronger weather-driven flora/water dynamics
+
+### Decided
+
+Direct feedback: "i kinda want weather events to be alittle stronger about
+killing off flora and reducing water/iincreasing it. it'd make it mroe
+dynamic." Two changes, both composing with weather.ts's existing
+Surface-only, cell-based weather model rather than inventing a second one:
+
+1. **Flora decay/spread magnitude, widened.** `floraDecayDivisor`
+   (weather.ts) already divided flora.ts's decay-rate term and scaled its
+   spread-chance term by rain/drought — that composition point was right,
+   the magnitudes were just too mild to read as "the weather is killing my
+   food supply." `RAIN_FLORA_DECAY_DIVISOR` went 1.6 -> 3 (decay survival
+   time roughly triples under rain, up from ~1.6x) and
+   `DROUGHT_FLORA_DECAY_DIVISOR` went 0.45 -> 0.25 (decay roughly
+   quadruples under drought, up from ~2.2x) — both feed the same existing
+   `growFlora` call sites (decay-rate divisor and spread-chance multiplier),
+   no new mechanism.
+2. **Water tiles: real terrain mutation, not a rate multiplier.** Water was
+   previously static, undepletable terrain (`TerrainKind = "water"`) that
+   weather never touched at all. New `weather.ts` function
+   `advanceWaterCycle`, wired into `tickWorld` alongside `growFlora`,
+   reuses flora.ts's own "flat per-tile-per-tick chance, rolled only for
+   tiles that currently qualify" spread idiom rather than a new one: a
+   "water" tile inside an active drought cell has a small per-tick chance
+   to dry to "mud" (the driest terrain kind this codebase already had —
+   reads as a cracked lakebed, not an instant flood/drought); a
+   "floor"/"mud"/"sand" tile adjacent to existing water, inside an active
+   rain cell, has a small per-tick chance to become water itself — the same
+   8-neighbor adjacency check flora.ts's `trySpread` uses. New
+   `terrainChanged` `SimEvent` (kind, tick, layer, pos, from, to, cause)
+   narrates each individual change; wired into the noise-filtered tier of
+   both the web app's event log (`eventText.ts`) and the runner's own
+   formatter (`format.ts`), same treatment as `floraChanged`.
+3. **Determinism preserved throughout.** `advanceWaterCycle` takes `rng`
+   as an explicit parameter (defaulting to `Math.random` only for the same
+   "safe default, real caller always passes `world.rng`" reason every other
+   function in this file does), threaded from `tickWorld` exactly like
+   `advanceWeather`/`growFlora` already are — no new bare `Math.random()`
+   call site. See `packages/engine/test/determinism.test.ts`'s new
+   "weather.ts water-cycle determinism" block.
+
+### Built, real-run findings
+
+A real 3000-tick headless run (`packages/runner`, seed `20260903`, the demo
+world from `createDemoWorld`) with the final tuned constants
+(`DROUGHT_WATER_DRY_CHANCE_PER_TICK = 1/500`,
+`RAIN_WATER_FORM_CHANCE_PER_TICK = 1/1500`):
+
+| | tick 0 | tick 3000 (final) |
+|---|---|---|
+| water | 472 | 476 |
+| food | 181 | 349 |
+| flora | 0 | 281 |
+| mud | 81 | 89 |
+
+Five real sustained weather windows occurred naturally in that run (no
+weather forced for the test) — start/end tile counts for each:
+
+- rain, tick 228->567 (339 ticks): water 472->472 (this window happened
+  to have no eligible adjacent-to-water floor/mud/sand tile roll
+  successfully — see the variance note below), food 1113->1247, flora
+  1015->1417
+- **drought, tick 726->998 (272 ticks): water 472->466 (-6 tiles, -1.3%)**,
+  food 478->303, flora 728->211 — a real, visible thinning of both food and
+  the map's water supply over one sustained dry spell
+- rain, tick 1109->1337 (228 ticks): water 464->470 (+6), food 671->1191,
+  flora 544->1209 — recovery under rain, both water and flora
+- rain, tick 1948->2388 (440 ticks): water 470->471 (+1)
+- rain, tick 2546->2786 (240 ticks): water 471->476 (+5)
+
+Total: 20 `terrainChanged` events over the run (8 dried-by-drought, 12
+formed-by-rain). No degenerate state in either direction — water never
+approached 0 or "every tile," and food/flora still swing through their
+existing multi-hundred-tick seasonal cycle (`seasonalMultiplier`,
+`SEASON_LENGTH = 1000`) with weather now visibly compounding, not
+replacing, that cycle (e.g. the drought window above hit during a lean
+season and hit noticeably harder as a result).
+
+**A real tuning trap this surfaced, worth documenting because it isn't
+obvious from the constants alone:** an earlier pass picked
+`RAIN_WATER_FORM_CHANCE_PER_TICK` only "slightly lower" than the drought
+rate (1/600 vs. drought's 1/500), mirroring how the flora rain/drought
+divisors above are just mild asymmetric multipliers of each other. A real
+10,000-tick run at that pairing showed water creeping from 472 up to 554
+(+17%) — not because rain was individually more common, but because
+forming water has a structural growth advantage drying doesn't: each
+newly-formed water tile is immediately a new adjacency source for its own
+neighbors next tick (the same self-reinforcing perimeter-growth shape
+flora's spread has), while drying only shrinks an already-fixed pool of
+existing water tiles. Flora avoids exactly this trap because patches
+eventually die of natural decay (`FLORA_LIFESPAN_TICKS`) — water tiles, as
+built, never do. `RAIN_WATER_FORM_CHANCE_PER_TICK` was lowered to 1/1500
+specifically to counteract that structural asymmetry, not just to make
+rain "weaker" for its own sake — see `weather.ts`'s doc comment above the
+two constants for the full math. A second real 10,000-tick run at the
+final constants, a seed that happened to roll more drought than rain,
+showed the opposite long-run drift instead: water fell from 472 to 353
+(-25%) — real, meaningful, still nowhere near a wipeout (353 tiles
+remained), but confirms this system does not yet converge to a stable
+long-run equilibrium independent of which weather types a given seed
+happens to roll more of. See TODO.md for this as an open follow-up
+question rather than something closed here.
+
+### Explicitly not done here
+
+- No elevation/moisture-driven "naturally low/wet spots" bias for where new
+  water forms beyond "adjacent to existing water" — `worldgen.ts` has a
+  moisture field it uses at generation time, but wiring runtime water
+  formation to sample it too was judged out of scope for this pass (the
+  adjacency-based spread is already exactly the idiom asked for, and adding
+  a second bias term would make the tuning story above harder to read, not
+  easier).
+- No drought-severity-scales-with-duration mechanic — every drought/rain
+  cell affects tiles at the same flat per-tick chance for its entire life,
+  regardless of how long it's already been active. See TODO.md.
+
 ## Explicitly not decided yet
 
 - Turn-based vs. real-time-with-pause for combat.

@@ -1,6 +1,6 @@
-import type { Layer, Vec2, WeatherCell, WeatherType, World } from "./types.js";
+import type { Layer, TerrainKind, Vec2, WeatherCell, WeatherType, World } from "./types.js";
 import type { EventLog } from "./events.js";
-import { tileAt } from "./world.js";
+import { setElevation, setTile, tileAt } from "./world.js";
 import { biomeWeightsAt } from "./worldgen.js";
 
 /**
@@ -257,9 +257,21 @@ export function hasCoverNearby(world: World, layer: Layer, pos: Vec2): boolean {
   return false;
 }
 
-/** Rain eases flora's own decay/spread math (below 1 shrinks the decay rate, above 1 boosts spread chance — see flora.ts's call sites); drought does the reverse. Sim-original magnitudes. */
-export const RAIN_FLORA_DECAY_DIVISOR = 1.6;
-export const DROUGHT_FLORA_DECAY_DIVISOR = 0.45;
+/**
+ * Rain eases flora's own decay/spread math (below 1 shrinks the decay rate,
+ * above 1 boosts spread chance — see flora.ts's call sites); drought does
+ * the reverse. Was 1.6/0.45 — direct ask ("a little stronger about killing
+ * off flora and reducing water/increasing it... more dynamic") widened both:
+ * drought now roughly *quadruples* decay (was *2.22) and roughly *halves*
+ * spread chance (was *0.45), enough to visibly thin a food patch over a
+ * sustained (hundreds-of-ticks) dry spell rather than a marginal wobble;
+ * rain now roughly *triples* the decay divisor (was *1.6, i.e. survival
+ * time up ~3x instead of ~1.6x) and boosts spread chance to match. See
+ * DESIGN.md's "Built, real-run findings" for the actual before/after tile
+ * counts these produced.
+ */
+export const RAIN_FLORA_DECAY_DIVISOR = 3;
+export const DROUGHT_FLORA_DECAY_DIVISOR = 0.25;
 
 /**
  * Divides flora.ts's decay-rate term (bigger divisor = slower decay = a
@@ -352,4 +364,111 @@ export const COLD_SNAP_SPEED_MULTIPLIER = 0.7;
 export function isInColdSnap(world: World, layer: Layer, pos: Vec2): boolean {
   if (layer !== "surface") return false;
   return activeWeatherAt(world, pos)?.type === "coldSnap";
+}
+
+// ---------------------------------------------------------------------------
+// Water-tile lifecycle: real terrain mutation under sustained drought/rain
+// ---------------------------------------------------------------------------
+
+/**
+ * Water was previously static, undepletable terrain — weather never touched
+ * it. Direct ask ("reducing water/increasing it... more dynamic") wanted
+ * real terrain mutation, not another rate multiplier, and explicitly pointed
+ * at flora.ts's own spread idiom as the pattern to reuse rather than
+ * inventing a new one: a flat per-tile-per-tick chance, rolled only for
+ * tiles that currently qualify, same shape as `growFlora`'s spread roll and
+ * `maybeDropSeed`'s germination roll. So: a "water" tile sitting inside an
+ * active drought cell has a small per-tick chance to dry out to "mud" (the
+ * driest already-existing walkable terrain — reads as a cracked lakebed,
+ * not an instant flood/drought); a "floor"/"mud"/"sand" tile adjacent to an
+ * existing "water" tile, sitting inside an active rain cell, has a small
+ * per-tick chance to become water itself (naturally-wet low ground filling
+ * in, spreading from existing water exactly the way flora spreads from an
+ * existing patch — `RAIN_CONVERTIBLE_TERRAIN`'s only non-"floor" additions
+ * are "mud"/"sand", both already-damp terrain kinds, not e.g. "food"/"tree").
+ *
+ * Magnitudes are deliberately conservative first-pass guesses, tuned against
+ * real headless runs rather than picked blind: at
+ * `DROUGHT_WATER_DRY_CHANCE_PER_TICK`, a water tile continuously inside a
+ * drought cell for a full `WEATHER_LIFESPAN_MAX_TICKS` (500 ticks) has
+ * roughly a 1-in-3 chance of drying (1 - (1 - 1/500)^500 ~= 0.63 at full,
+ * uninterrupted exposure — in practice much lower, since a drifting cell
+ * rarely sits on one tile that long) — real, visible thinning over one
+ * sustained drought, not a wipeout. `RAIN_WATER_FORM_CHANCE_PER_TICK` is set
+ * noticeably lower per-roll than the drought rate, not just "slightly" —
+ * this asymmetry is deliberate and NOT the same as flora's rain/drought
+ * asymmetry above: forming water has a structural growth advantage drying
+ * doesn't (each newly-formed water tile immediately becomes a new adjacency
+ * source for its own neighbors next tick, the same self-reinforcing
+ * perimeter-growth shape flora's spread has — but flora's spread is capped
+ * by patches eventually dying of natural decay, while water tiles never
+ * decay on their own). A real 10,000-tick headless run at a naive
+ * "similar magnitude" pair of rates (1/500 dry, 1/600 form) showed exactly
+ * this: water tiles crept from 472 up to 554 (+17%) over the run because
+ * rain's compounding perimeter growth quietly out-paced drought's shrinking-
+ * pool decline — a slow one-way ratchet in the making, the same bug class
+ * flora.ts's own doc comments already warn about (see `FLORA_LIFESPAN_TICKS`).
+ * The current, much lower `RAIN_WATER_FORM_CHANCE_PER_TICK` was chosen to
+ * counteract exactly that structural advantage. See DESIGN.md's "Built,
+ * real-run findings" for the real before/after tile counts multiple runs
+ * produced, and TODO.md for the open question this doesn't fully resolve
+ * (long-run drift still tracks whichever weather type a given seed happens
+ * to roll more of, rather than converging to a stable equilibrium).
+ */
+export const DROUGHT_WATER_DRY_CHANCE_PER_TICK = 1 / 500;
+export const RAIN_WATER_FORM_CHANCE_PER_TICK = 1 / 1500;
+
+/** What a dried-out water tile becomes — see this section's doc comment. */
+const DRIED_WATER_TERRAIN: TerrainKind = "mud";
+/** Terrain kinds eligible to become water under sustained rain, when adjacent to existing water — deliberately narrow (no "food"/"tree"/"bush"/etc). */
+const RAIN_CONVERTIBLE_TERRAIN: ReadonlySet<TerrainKind> = new Set<TerrainKind>(["floor", "mud", "sand"]);
+
+/** Same 8-neighbor adjacency flora.ts's `trySpread`/`NEIGHBOR_OFFSETS` uses — kept as its own local copy rather than a shared export, matching this codebase's existing per-file duplication of that one small constant. */
+const WATER_NEIGHBOR_OFFSETS: Vec2[] = [
+  { x: 0, y: -1 }, { x: 1, y: -1 }, { x: 1, y: 0 }, { x: 1, y: 1 },
+  { x: 0, y: 1 }, { x: -1, y: 1 }, { x: -1, y: 0 }, { x: -1, y: -1 },
+];
+
+function isAdjacentToWater(world: World, pos: Vec2): boolean {
+  for (const offset of WATER_NEIGHBOR_OFFSETS) {
+    if (tileAt(world, "surface", pos.x + offset.x, pos.y + offset.y)?.terrain === "water") return true;
+  }
+  return false;
+}
+
+/**
+ * Once per world tick (called from simulation.ts's `tickWorld`, alongside
+ * `growFlora` — same "world-level system, one full-grid pass" shape). Every
+ * surface tile currently under an active weather cell is checked once:
+ * "water" tiles under drought roll to dry to `DRIED_WATER_TERRAIN`;
+ * `RAIN_CONVERTIBLE_TERRAIN` tiles under rain, adjacent to existing water,
+ * roll to become water. Both branches go through `setTile` (not a hand-
+ * rolled field assignment) so walkable/opaque/stock/flavor/concealment and
+ * `invalidateResourceIndex` (resourceIndex.ts indexes "water" tiles for
+ * thirst-seeking) all stay consistent with every other terrain-change call
+ * site in this codebase. Surface-layer only, matching every other weather
+ * effect in this file.
+ */
+export function advanceWaterCycle(world: World, log?: EventLog, rng: () => number = Math.random): void {
+  const tiles = world.tiles.surface;
+  for (let i = 0; i < tiles.length; i++) {
+    const tile = tiles[i]!;
+    const pos = { x: i % world.width, y: Math.floor(i / world.width) };
+    const cell = activeWeatherAt(world, pos);
+    if (!cell) continue;
+
+    if (tile.terrain === "water" && cell.type === "drought") {
+      if (rng() < DROUGHT_WATER_DRY_CHANCE_PER_TICK) {
+        setTile(world, "surface", pos.x, pos.y, DRIED_WATER_TERRAIN);
+        log?.record({ kind: "terrainChanged", tick: world.tick, layer: "surface", pos, from: "water", to: DRIED_WATER_TERRAIN, cause: "drought" });
+      }
+    } else if (cell.type === "rain" && RAIN_CONVERTIBLE_TERRAIN.has(tile.terrain) && isAdjacentToWater(world, pos)) {
+      if (rng() < RAIN_WATER_FORM_CHANCE_PER_TICK) {
+        const from = tile.terrain;
+        setTile(world, "surface", pos.x, pos.y, "water");
+        setElevation(world, "surface", pos.x, pos.y, 0); // matches worldgen.ts's "a lakebed is flat" convention for freshly-formed water
+        log?.record({ kind: "terrainChanged", tick: world.tick, layer: "surface", pos, from, to: "water", cause: "rain" });
+      }
+    }
+  }
 }

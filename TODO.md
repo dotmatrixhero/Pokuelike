@@ -52,7 +52,64 @@ work resumes:
    herd within the same map) — stretch goal, not required for a first cut.
    Start with a small region count (3-4), not a large graph.
 
-Not started — the user has something else to try first.
+Not started — the user has something else to try first. Note: item (1)'s
+tree-growth/decay half is still not started, but its water-supply half is
+now partially covered by a separate, already-shipped piece — see "Stronger
+weather-driven flora/water dynamics" below — so (1) on resume should scope
+itself to tree lifecycle + biome drift only, not re-do water.
+
+## Stronger weather-driven flora/water dynamics — built, see DESIGN.md
+
+Direct feedback: "i kinda want weather events to be alittle stronger about
+killing off flora and reducing water/iincreasing it. it'd make it mroe
+dynamic." Widened flora's existing rain/drought decay-rate divisors
+(weather.ts) and, the bigger piece, gave water real terrain mutation for
+the first time: a "water" tile inside a drought cell can dry to "mud", and
+a "floor"/"mud"/"sand" tile adjacent to existing water inside a rain cell
+can become water — both a flat per-tile-per-tick roll, same idiom as
+flora.ts's own spread, both threaded through an explicit `rng` param (no
+new bare `Math.random()`), new `terrainChanged` `SimEvent`. See DESIGN.md's
+"Stronger weather-driven flora/water dynamics" section for the full
+before/after real-run numbers (seed 20260903, 3000 ticks: water 472 -> 476
+net over the run, -6 during one 272-tick drought window, +5 to +6 during
+several rain windows — real, non-degenerate movement in both directions).
+
+Open follow-up questions flagged, not implemented:
+
+- **Should drought/rain severity scale with how long the cell has already
+  been active?** Right now every drought/rain cell affects tiles at the
+  same flat per-tick chance for its whole life from tick 1 to its last
+  tick — a cell that's been sitting on the map for 400 ticks is no more
+  intense than one that just spawned. A duration-scaled ramp (a long
+  drought getting *worse* the longer it persists, not just "still going")
+  might read as more dramatic, but wasn't attempted here — it would also
+  make the already-tricky rain-vs-drought equilibrium tuning (below)
+  harder to reason about, not easier, so it was deliberately left for a
+  separate pass.
+- **No stable long-run water-supply equilibrium yet.** A real 10,000-tick
+  run at one seed drifted water supply up (+17%) under a naive symmetric
+  rain/form-vs-drought/dry rate pairing; the asymmetric fix (rain forms
+  water much more slowly per-roll than drought dries it, to counteract
+  forming's own structural "each new water tile seeds its own neighbors"
+  growth advantage) fixed that specific run but a different 10,000-tick
+  seed still drifted the other way instead (-25%, drought-heavy). The
+  system reliably moves in the direction its dominant weather type pushes,
+  it just doesn't yet converge back toward a stable baseline regardless of
+  which weather types a given seed happens to roll more of over very long
+  runs. Worth deciding whether that's acceptable (a map's water supply
+  genuinely drying up or flooding over a very long run is arguably a
+  feature, not a bug, for an ecosystem sim) or needs an explicit
+  equilibrium-restoring term (e.g. a slow background reversion rate, or
+  capping cumulative drift as a fraction of the map's original water
+  count) before trusting it over the timescales (1) above's biome-drift
+  idea already assumes (tens of thousands of ticks).
+- **Water formation doesn't yet use worldgen.ts's moisture field** — new
+  water only ever forms adjacent to existing water, never in a "naturally
+  low/wet spot" the way `generateWorld`'s own moisture-field-driven
+  placement does at world-creation time. Reusing that at runtime (bias
+  formation chance by local moisture, not just raw adjacency) is a natural
+  next step if adjacency-only spread turns out to feel too uniform in a
+  real playtest.
 
 ## Priority: sim depth + observability (current focus)
 

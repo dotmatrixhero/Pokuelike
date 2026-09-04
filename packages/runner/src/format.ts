@@ -14,6 +14,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.species} (${event.motherId} x ${event.fatherId}) had offspring ${event.childId} (${event.nature}, ${event.dispositionSummary}) at (${event.pos.x},${event.pos.y})`;
     case "floraChanged":
       return `[tick ${event.tick}] flora ${event.stage} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
+    case "terrainChanged":
+      return `[tick ${event.tick}] ${event.from} at (${event.pos.x},${event.pos.y}) on ${event.layer} turned to ${event.to} (${event.cause})`;
     case "fought":
       return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) at (${event.pos.x},${event.pos.y}) for ${event.damage}${event.critical ? " (critical hit!)" : ""} (hp left: ${event.defenderHpRemaining})`;
     case "missed":

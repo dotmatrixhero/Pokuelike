@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createWorld, setTile } from "../src/world.js";
+import { createWorld, setTile, tileAt } from "../src/world.js";
 import { EventLog } from "../src/events.js";
 import {
   advanceWeather,
+  advanceWaterCycle,
   pickWeatherType,
   activeWeatherAt,
   hasCoverNearby,
@@ -18,6 +19,8 @@ import {
   STORM_ACCURACY_MULTIPLIER,
   STORM_FOV_PENALTY,
   MAX_ACTIVE_WEATHER_CELLS,
+  DROUGHT_WATER_DRY_CHANCE_PER_TICK,
+  RAIN_WATER_FORM_CHANCE_PER_TICK,
 } from "../src/weather.js";
 import type { WeatherCell } from "../src/types.js";
 
@@ -312,5 +315,130 @@ describe("isInColdSnap", () => {
     const world = createWorld(80, 80);
     world.weatherCells = [cell({ type: "storm", center: { x: 10, y: 10 }, radius: 5 })];
     expect(isInColdSnap(world, "surface", { x: 10, y: 10 })).toBe(false);
+  });
+});
+
+describe("advanceWaterCycle: sustained drought/rain mutate real terrain", () => {
+  it("dries a water tile inside an active drought cell into mud when the roll succeeds, and logs terrainChanged", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    world.weatherCells = [cell({ type: "drought", center: { x: 5, y: 5 }, radius: 5 })];
+    const log = new EventLog();
+
+    advanceWaterCycle(world, log, () => 0); // 0 beats any positive per-tick chance
+
+    expect(tileAt(world, "surface", 5, 5)!.terrain).toBe("mud");
+    expect(log.events).toContainEqual(
+      expect.objectContaining({ kind: "terrainChanged", pos: { x: 5, y: 5 }, from: "water", to: "mud", cause: "drought" })
+    );
+  });
+
+  it("does not dry a water tile when the roll fails", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    world.weatherCells = [cell({ type: "drought", center: { x: 5, y: 5 }, radius: 5 })];
+
+    advanceWaterCycle(world, undefined, () => 0.999999);
+
+    expect(tileAt(world, "surface", 5, 5)!.terrain).toBe("water");
+  });
+
+  it("does not dry water outside an active drought cell, or under rain/storm", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    setTile(world, "surface", 6, 6, "water");
+    world.weatherCells = [cell({ type: "rain", center: { x: 5, y: 5 }, radius: 5 })];
+
+    advanceWaterCycle(world, undefined, () => 0);
+
+    expect(tileAt(world, "surface", 5, 5)!.terrain).toBe("water"); // rain doesn't dry water
+    expect(tileAt(world, "surface", 6, 6)!.terrain).toBe("water"); // inside the cell but not drought-typed anyway
+  });
+
+  it("forms new water on a floor/mud/sand tile adjacent to existing water inside an active rain cell, and logs terrainChanged", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    setTile(world, "surface", 6, 5, "floor"); // adjacent to the water tile
+    world.weatherCells = [cell({ type: "rain", center: { x: 5, y: 5 }, radius: 5 })];
+    const log = new EventLog();
+
+    advanceWaterCycle(world, log, () => 0);
+
+    expect(tileAt(world, "surface", 6, 5)!.terrain).toBe("water");
+    expect(log.events).toContainEqual(
+      expect.objectContaining({ kind: "terrainChanged", pos: { x: 6, y: 5 }, from: "floor", to: "water", cause: "rain" })
+    );
+  });
+
+  it("does not form water on a tile with no adjacent water, even inside an active rain cell", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 2, 2, "floor"); // no water anywhere nearby
+    world.weatherCells = [cell({ type: "rain", center: { x: 2, y: 2 }, radius: 5 })];
+
+    advanceWaterCycle(world, undefined, () => 0);
+
+    expect(tileAt(world, "surface", 2, 2)!.terrain).toBe("floor");
+  });
+
+  it("does not form water on an ineligible terrain kind (e.g. tree) even when adjacent to water under rain", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    setTile(world, "surface", 6, 5, "tree");
+    world.weatherCells = [cell({ type: "rain", center: { x: 5, y: 5 }, radius: 5 })];
+
+    advanceWaterCycle(world, undefined, () => 0);
+
+    expect(tileAt(world, "surface", 6, 5)!.terrain).toBe("tree");
+  });
+
+  it("is a no-op with no active weather cells at all", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    setTile(world, "surface", 6, 5, "floor");
+
+    advanceWaterCycle(world, undefined, () => 0);
+
+    expect(tileAt(world, "surface", 5, 5)!.terrain).toBe("water");
+    expect(tileAt(world, "surface", 6, 5)!.terrain).toBe("floor");
+  });
+
+  it("magnitudes: a full weather-cell lifespan (500 ticks) dries/forms a meaningful minority of tiles, not all or none", () => {
+    // Sanity-checks the doc comment's own math rather than re-deriving it by
+    // hand here: with a per-tick chance p over N independent rolls, the
+    // chance of at least one success is 1 - (1-p)^N.
+    const N = 500;
+    const dryFraction = 1 - Math.pow(1 - DROUGHT_WATER_DRY_CHANCE_PER_TICK, N);
+    const formFraction = 1 - Math.pow(1 - RAIN_WATER_FORM_CHANCE_PER_TICK, N);
+    expect(dryFraction).toBeGreaterThan(0.1);
+    expect(dryFraction).toBeLessThan(0.7);
+    expect(formFraction).toBeGreaterThan(0.05);
+    expect(formFraction).toBeLessThan(0.6);
+    // Rain forms new water noticeably more slowly per-roll than drought dries
+    // it — a deliberate asymmetry to counteract forming's own structural
+    // growth advantage (each new water tile becomes a new adjacency source
+    // for its neighbors) — see this file's own doc comment above the two
+    // exported constants for the full reasoning and the real run that found it.
+    expect(RAIN_WATER_FORM_CHANCE_PER_TICK).toBeLessThan(DROUGHT_WATER_DRY_CHANCE_PER_TICK);
+  });
+
+  it("determinism: the same rng sequence produces the exact same terrain outcome twice", () => {
+    function run(): string {
+      const world = createWorld(12, 12);
+      setTile(world, "surface", 5, 5, "water");
+      setTile(world, "surface", 6, 5, "floor");
+      setTile(world, "surface", 4, 5, "sand");
+      world.weatherCells = [
+        cell({ type: "drought", center: { x: 5, y: 5 }, radius: 6 }),
+      ];
+      const log = new EventLog();
+      const rng = seededRng(777);
+      for (let t = 0; t < 50; t++) {
+        world.tick = t;
+        advanceWaterCycle(world, log, rng);
+      }
+      return JSON.stringify(log.events);
+    }
+
+    expect(run()).toBe(run());
   });
 });

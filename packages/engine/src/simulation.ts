@@ -8,7 +8,7 @@ import type { LevelingContext } from "./leveling.js";
 import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, canopySpeedMultiplier, coldSnapSpeedMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
 import { tileAt } from "./world.js";
 import { isNight, lightLevel } from "./daynight.js";
-import { advanceWeather } from "./weather.js";
+import { advanceWaterCycle, advanceWeather } from "./weather.js";
 import { PARALYSIS_SPEED_MULTIPLIER, isParalyzed } from "./status.js";
 
 /**
@@ -171,6 +171,10 @@ export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?:
     }
   }
   growFlora(world, log, rng);
+  // Once per tick, not once per agent — same "world-level system, one pass"
+  // shape as growFlora above: sustained drought/rain drying out or forming
+  // water tiles (see weather.ts's `advanceWaterCycle` doc comment).
+  advanceWaterCycle(world, log, rng);
   // Once per tick, not once per agent — same "world-level system, one pass"
   // shape as growFlora above (see shelter.ts's `decayShelters`).
   decayShelters(world, log);

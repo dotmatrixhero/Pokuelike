@@ -1,4 +1,4 @@
-import type { Agent, BehaviorKind, DispersalReason, Layer, MigrationReason, StatusKind, Vec2, WeatherType, World } from "./types.js";
+import type { Agent, BehaviorKind, DispersalReason, Layer, MigrationReason, StatusKind, TerrainKind, Vec2, WeatherType, World } from "./types.js";
 import type { PokemonType } from "./typing.js";
 
 export type SimEvent =
@@ -321,6 +321,16 @@ export type SimEvent =
       /** What it actually did — a move can heal, buff, or both, but not neither (see `MoveSpec.allyEffect`). */
       healed: boolean;
       buffed: boolean;
+    }
+  | {
+      kind: "terrainChanged";
+      tick: number;
+      layer: Layer;
+      pos: Vec2;
+      from: TerrainKind;
+      to: TerrainKind;
+      /** Which sustained weather condition caused it — see weather.ts's `advanceWaterCycle`, currently the only producer of this event. */
+      cause: "drought" | "rain";
     }
   | {
       kind: "statusCleared";

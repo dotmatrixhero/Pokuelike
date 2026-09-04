@@ -73,6 +73,8 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `${event.species} (${event.motherId} x ${event.fatherId}) had offspring ${event.childId} (${event.nature}, ${event.dispositionSummary})`;
     case "floraChanged":
       return `flora ${event.stage} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
+    case "terrainChanged":
+      return `${event.from} at (${event.pos.x},${event.pos.y}) turned to ${event.to} on ${event.layer} (${event.cause})`;
     case "fought": {
       const move = world ? findMoveUsed(event, world) : undefined;
       return `${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) for ${event.damage}${event.critical ? " (crit!)" : ""} (hp left: ${event.defenderHpRemaining})${move ? describeMoveModifiers(move) : ""}`;
@@ -168,6 +170,7 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
   "consumed",
   "behaviorChanged",
   "floraChanged",
+  "terrainChanged",
   "herdMigrating",
   "herdSettled",
   "nightfall",

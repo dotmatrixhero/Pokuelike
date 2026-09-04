@@ -7,6 +7,7 @@ import { tickWorld } from "../src/simulation.js";
 import { EventLog } from "../src/events.js";
 import { migrate, findRandomWalkableTile } from "../src/migration.js";
 import { growFlora, maybeDropSeed } from "../src/flora.js";
+import { advanceWaterCycle } from "../src/weather.js";
 import { grantExp } from "../src/leveling.js";
 import { applyMateSeeking } from "../src/reproduction.js";
 import type { Agent, HuntRules } from "../src/types.js";
@@ -147,6 +148,27 @@ describe("flora.ts determinism", () => {
       return results;
     }
     expect(run(9)).toEqual(run(9));
+  });
+});
+
+describe("weather.ts water-cycle determinism", () => {
+  it("advanceWaterCycle: same rng seed -> identical terrain outcomes", () => {
+    function run(seed: number) {
+      const world = createWorld(10, 10, seed);
+      setTile(world, "surface", 5, 5, "water");
+      setTile(world, "surface", 6, 5, "floor");
+      setTile(world, "surface", 4, 5, "sand");
+      world.weatherCells = [
+        { id: "d", type: "drought", center: { x: 5, y: 5 }, radius: 6, startedTick: 0, lifespanTicks: 500, drift: { x: 0, y: 0 } },
+      ];
+      const log = new EventLog();
+      for (let i = 0; i < 60; i++) {
+        world.tick = i;
+        advanceWaterCycle(world, log, world.rng);
+      }
+      return world.tiles.surface.map((t) => t.terrain).join(",");
+    }
+    expect(run(11)).toEqual(run(11));
   });
 });
 
