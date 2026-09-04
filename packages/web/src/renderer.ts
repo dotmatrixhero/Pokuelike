@@ -116,7 +116,12 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
     if (agent.layer === "surface") agentAt.set(`${agent.pos.x},${agent.pos.y}`, agent);
   }
 
-  const isPlantLike = (terrain: TerrainKind) => terrain === "food" || terrain === "flora" || terrain === "seedling";
+  // Things that stand *on* the ground rather than being their own kind of
+  // ground — berries, flora, trees, boulders — get the same faint floor
+  // wash as everything around them, colored glyph on top, instead of a
+  // distinct tinted background that reads as a separate tile.
+  const standsOnGround = (terrain: TerrainKind) =>
+    terrain === "food" || terrain === "flora" || terrain === "seedling" || terrain === "tree" || terrain === "boulder";
 
   for (let y = 0; y < world.height; y++) {
     for (let x = 0; x < world.width; x++) {
@@ -130,12 +135,12 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
       // a uniform grid.
       const light = 0.65 + tileLight(x, y) * 0.7;
 
-      if (isPlantLike(tile.terrain)) {
+      if (standsOnGround(tile.terrain)) {
         // Same faint ground wash floor itself gets (not a block glyph, not
         // no background at all — those both read wrong: one looked like a
         // filled tile, the other like a hole of pure black) so a berry
-        // patch sits on the same ground as everything around it, just with
-        // a colored glyph standing on top of it.
+        // patch/tree/boulder sits on the same ground as everything around
+        // it, just with a colored glyph standing on top of it.
         const groundBg = shade(TERRAIN_BG.floor, tile.elevation);
         ctx.fillStyle = rgbaToCss(groundBg, 0.25 * light);
         ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
