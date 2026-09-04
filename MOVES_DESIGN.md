@@ -90,7 +90,7 @@ that already exists):
 | Move (real) | Effect | What it touches |
 |---|---|---|
 | Sunny Day | Plants a temporary `sunbeam` tile at the caster's position | flora.ts's `isNearSunbeam`/`FOOD_CHANCE_NEAR_SUNBEAM` — zero new terrain code |
-| Dig | Instantly crosses the user to the layer below, at the same (x,y) | Reuses the existing cross-layer mechanic (needs.ts) as an emergency escape |
+| Dig | Instantly crosses the user to the layer below, at the same (x,y) | Reuses the existing cross-layer mechanic (needs.ts) as an emergency escape. **Stronger variant floated, not yet designed or built** — see "Dig as temporary invulnerability" below instead of shipping the plain instant-escape version |
 | Leech Seed | Transfers a fixed amount of hunger/thirst from target to caster | Direct `Needs` field manipulation — the one genuinely new mechanic (resource transfer between two agents) |
 | Growth | Force-matures a nearby `seedling` early, or shortens its `MATURATION_TICKS` | Direct hook into flora.ts's existing growth timer |
 | Water Gun | Converts an adjacent dry `floor` tile into a temporary puddle | New but minimal — a short-lived stock-bearing water tile |
@@ -233,6 +233,48 @@ like Growl would set a temporary "detectable beyond normal range" flag;
 Camouflage would do the opposite). Leer (round two, above) is the
 smallest possible first step — a single move that actually respects FOV —
 without committing to the whole system.
+
+## Floated, not designed: Dig as temporary invulnerability
+
+**Side note to revisit, not scoped yet.** Instead of (or in addition to)
+the plain instant-escape Dig above: burrowing counts as `"concealed"`
+(the existing `SituationalCondition` — reuse it, don't invent a second
+concealment flag) *and*, for the duration, the burrowed agent takes no
+damage from anything not itself on the underground layer. Flagged by its
+own proposer as possibly too strong — the offered balance lever is a
+meaningfully longer cooldown than a normal escape-Dig, not a duration cap,
+so the tradeoff is "safe for a while, but you can't spam it," not "safe
+for a shorter while."
+
+Needs a genuinely new primitive before it's buildable: nothing shipped
+today grants temporary damage immunity gated on the *attacker's* layer
+relative to the defender's — `damageReduction` (existing passive) is a
+flat fraction against everything, not a conditional 100%-or-nothing keyed
+to cross-layer origin. Whatever shape this takes (a new `PassiveKind`, or
+a dedicated `Agent` field like `rallyMarkTicksRemaining`'s, since it's a
+temporary window rather than a persistent trait) needs its own design
+pass — not attempted here, just captured so the idea doesn't get lost.
+
+## Design note: stop overusing `damageReduction`
+
+**Side note to revisit, not urgent.** Feedback on the four new trees
+(Rock Throw/Peck/Scratch/Water Gun): flat `damageReduction` is the
+Boldness-branch opener (and reappears in most Boldness↔Sociability
+crosslinks) in *every* tree shipped or drafted so far — Tackle, Slash,
+Ember, and all four new ones. It works, but leaning on the same lever for
+"this branch is about surviving hits" every single time is exactly the
+"cookie cutter" complaint that prompted the four-tree redesign, just at
+the individual-node level instead of the whole-tree level. Also raised:
+`damageReduction` reduces *all* incoming damage indiscriminately
+(`resolveHit`, predation.ts — it doesn't distinguish physical from
+special), so it's a strictly better, less thematic version of just
+buffing Defense. Direction for future Boldness branches: default to a
+real Defense-stat buff (`MoveTreeNode.delta.statChangeOnHit`/whatever the
+persistent-stage equivalent ends up being, targeting `StatKey`
+`"defense"` specifically) when the intent is "hardier body, still weak to
+special attacks" — reserve flat `damageReduction` for nodes where the
+fiction is specifically armor/hide/thick-skin-against-everything, not the
+default filler for "this is the tanky branch."
 
 ## Confirmed for later: Diglett tunnel networks
 
@@ -645,11 +687,15 @@ and where.
   shape mid-tree (point → a real 2-tile reach) and slows a target down as
   its support payoff instead of healing.
 - **Scratch**'s hook: the roster's first non-Ember status inflicter — a real
-  poison chance baked into the base move, not gated behind a tree node —
-  and the one Sociability branch guaranteed to matter today (Sandshrew's
-  real herd), rewarded with the only two-passive keystone among the four
-  and the roster's first `rallyCall` (Rally the Colony — marks a predator
-  for the whole colony to focus, genuinely stronger than buffing one ally).
+  Sandshrew doesn't canonically have venom glands, so unlike Ember's
+  baked-in burn the poison chance here is entirely tree-earned (the
+  Aggression opener *Envenomed*, not the base move), and the whole
+  Aggression branch leans into it once it's unlocked, instead of being
+  free from the first cast. It's also the one Sociability branch
+  guaranteed to matter today (Sandshrew's real herd), rewarded with the
+  only two-passive keystone among the four and the roster's first
+  `rallyCall` (Rally the Colony — marks a predator for the whole colony to
+  focus, genuinely stronger than buffing one ally).
 - **Water Gun**'s hook: a real answer to the roster's own Fire lineage
   (`bonusVsType` vs. Charmander/Ember) and a Boldness branch built around
   *un*-buffing the target's own footing, not just buffing the user.
@@ -732,19 +778,24 @@ here, not done.
     when the user itself is low).
 
 - **Scratch** (Normal, point) — Sandshrew, a real herd member (shares
-  `"underground-colony"` with Diglett), nocturnal, den-digging. **Base spec
-  change, not just the tree**: adds `statusChance: 0.12`/`statusKind:
-  "poison"` directly to the move itself (like Ember's baked-in burn) — the
-  roster's first poison-inflicter, and the only one outside Ember to carry
-  a status at all.
-  - **Aggression — "Claw Strike"**: opener *Sharpened Claws* (+power) →
-    filler → filler → notable *Frenzy Claws* (`hits` 2) → filler →
-    **fork**: *Envenomed Strike* (+status chance, -power — leans harder
-    into the poison) vs. *Shredding Blow* (+power, -accuracy — a cleaner,
-    less venomous cut) → notable *Sandstorm Claws* (bonus at night —
+  `"underground-colony"` with Diglett), nocturnal, den-digging. Base spec
+  stays clean (no baked-in status, same as Tackle/Slash) — Sandshrew
+  doesn't canonically have venom, so unlike Ember's free burn, poison here
+  is a build choice you earn from the Aggression branch's own opener, not
+  something every Scratch use rolls for free.
+  - **Aggression — "Envenomed Claws"**: opener *Envenomed* (`statusChance:
+    0.15`/`statusKind: "poison"` as a tree delta — the roster's first
+    status added by a node instead of the base move) → filler → filler →
+    notable *Deepening Venom* (`statusChance` +0.10 — stacks on the
+    opener's own roll) → filler → **fork**: *Toxin Overload*
+    (`situationalBonus: targetStatused` — hits harder finishing off
+    something already poisoned/statused) vs. *Widening Fangs* (+power,
+    `-statusChance` — a cleaner, less venomous cut for a build that wants
+    raw damage over the DOT) → notable *Sandstorm Claws* (bonus at night —
     matches Sandshrew's own `activityPattern`) → filler → **keystone**
     *Toxic Spread* (`statusSpreads` — the poison jumps to whoever's
-    standing next to the target too).
+    standing next to the target too, the branch's payoff for actually
+    committing to the venom line instead of forking into Widening Fangs).
   - **Boldness — "Burrow Strike"**: opener *Ambush Claws* (bonus attacking
     from concealment) → filler → filler → notable *Dig-and-Strike*
     (`forcedMovement`, lunges in before the hit) → filler → **fork**:
