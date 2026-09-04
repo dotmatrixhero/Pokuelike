@@ -329,6 +329,35 @@ describe("multi-action lock (Agent.actionLockTicks)", () => {
   });
 });
 
+describe("rally-call focus-fire mark (Agent.rallyMarkTicksRemaining)", () => {
+  it("tickStatusEffects counts a rally mark down to 0", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ rallyMarkTicksRemaining: 2 });
+    tickStatusEffects(agent, world);
+    expect(agent.rallyMarkTicksRemaining).toBe(1);
+    tickStatusEffects(agent, world);
+    expect(agent.rallyMarkTicksRemaining).toBe(0);
+  });
+
+  it("does not go negative once already at 0, and no-ops when never set", () => {
+    const world = createWorld(5, 5);
+    const zeroed = makeAgent({ rallyMarkTicksRemaining: 0 });
+    tickStatusEffects(zeroed, world);
+    expect(zeroed.rallyMarkTicksRemaining).toBe(0);
+
+    const unset = makeAgent();
+    tickStatusEffects(unset, world);
+    expect(unset.rallyMarkTicksRemaining).toBeUndefined();
+  });
+
+  it("does not tick down on a corpse", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ alive: false, rallyMarkTicksRemaining: 3 });
+    tickStatusEffects(agent, world);
+    expect(agent.rallyMarkTicksRemaining).toBe(3);
+  });
+});
+
 describe("thornsOf", () => {
   it("reads the accumulated thorns passive, defaulting to 0", () => {
     const agent = makeAgent();

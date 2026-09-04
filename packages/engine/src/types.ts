@@ -451,6 +451,22 @@ export interface Agent {
    * that doesn't set `lockTicks`.
    */
   actionLockTicks?: number;
+  /**
+   * Ticks remaining during which this agent is marked as a priority target
+   * — set by a landed, non-killing hit from a move with `MoveSpec.rallyCall`
+   * (predation.ts's `resolveHitAgainstTarget`), the same "landed hit" hook
+   * `jamCooldownTicks`/`terrainBurn` use. Read by `preferMarked` (predation.ts)
+   * wherever an agent picks one target out of several candidates (mob-fight
+   * threat selection, a guardian's own threat pick, a predator's hunt-target
+   * pick) — a marked candidate wins over a merely-closer one, so "call out a
+   * threat" (or "mark this prey") actually gets other agents' own,
+   * independently-run target selection to converge on the same target, a
+   * real focus-fire effect rather than everyone still picking by proximity
+   * alone. Ticks down every world tick regardless of whether this agent
+   * itself acts (`tickStatusEffects`, status.ts). Absent/0 = not marked, the
+   * default for every agent and every move that doesn't set `rallyCall`.
+   */
+  rallyMarkTicksRemaining?: number;
   /** General item slots — simple food units and/or ITEM_DEX entries, each carrying its own weight. Capped by `carryCapacityOf` (support.ts). */
   inventory?: InventoryItem[];
   /** The id of a fully-fainted ally this agent is currently carrying, if any. Mutually exclusive in practice with `beingCarriedBy` on the same agent. */

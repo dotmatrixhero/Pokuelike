@@ -172,6 +172,7 @@ function faintFromStatus(agent: Agent, world: World, log?: EventLog): void {
 export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rng: () => number = Math.random): void {
   tickStatStages(agent);
   tickActionLock(agent);
+  tickRallyMark(agent);
   applyRegenPassive(agent);
   applyHealAuraPassive(agent, world);
 
@@ -240,6 +241,12 @@ function tickStatStages(agent: Agent): void {
 function tickActionLock(agent: Agent): void {
   if (agent.alive === false || !agent.actionLockTicks) return;
   agent.actionLockTicks = Math.max(0, agent.actionLockTicks - 1);
+}
+
+/** Ticks down a `MoveSpec.rallyCall` focus-fire mark (`predation.ts`'s `preferMarked`). No-op on a corpse. */
+function tickRallyMark(agent: Agent): void {
+  if (agent.alive === false || !agent.rallyMarkTicksRemaining) return;
+  agent.rallyMarkTicksRemaining = Math.max(0, agent.rallyMarkTicksRemaining - 1);
 }
 
 // --- Agent-modifying passives (Agent.passives) ---

@@ -40,6 +40,7 @@ grepping for "needs" across the whole file.
 | Move-caused terrain change (`MoveSpec.terrainBurn`) | A fire move that burns down a bush the target was hiding in | **Shipped** — on a landed, non-killing hit, reverts a `"bush"` tile the defender stands on to plain floor (`resolveHitAgainstTarget`, via `world.ts`'s `setTile`) — the target loses its concealment as a side effect of getting hit, not a separate mechanic. Not yet used in a shipped tree |
 | Status spreading to a nearby agent (`MoveSpec.statusSpreads`) | A "the fire/poison catches on whoever's standing next to the target" notable | **Shipped** — once the primary status lands, rolls a second, independent chance (`status.ts`'s `maybeSpreadStatus`) to inflict the *same* status on one other living, same-layer agent within a small radius — a plain distance scan kept local to `status.ts` on purpose, to avoid a real import cycle with predation.ts. Not yet used in a shipped tree |
 | Multi-passive nodes (`MoveTreeNode.grantsPassives`, plural, alongside the existing singular `grantsPassive`) | A single notable that grants two passives at once (e.g. Alpha Strike's fix: bonus damage *and* damage reduction, not just one) | **Shipped** — `leveling.ts`'s `maybeAutoRespec` applies both the singular and, when present, every entry of the plural array. Not yet used in a shipped tree |
+| Rally-call focus fire (`MoveSpec.rallyCall` + `Agent.rallyMarkTicksRemaining` + `predation.ts`'s `preferMarked`) | "Rally all allies to attack this enemy" — genuinely stronger than buffing one ally, since it gets a whole herd's *independently-run* target selection to converge on the same threat instead of each agent separately picking whatever's nearest to itself | **Shipped** — on a landed, non-killing hit, marks the defender for `ticks`; `preferMarked` (replacing a plain `nearest` call) is now used at every threat/hunt-target pick where several agents choosing the *same* target matters: mob-fight threat selection, a guardian's own threat pick, and a predator's hunt-target pick — so it works for prey rallying a mob onto a specific predator, a guardian pack converging on a threat, and a predator pack co-hunting the same marked prey. First real content: Scratch's *Rally the Colony* (see below) |
 | Self-state-aware scoring (a bonus keyed to the *user's own* HP, not the target's) | Cornered Fury | **Shipped** — `MoveSpec.selfStateBonus` (`"selfLowHp"`), folded into `pickBestMove`'s scoring (combat.ts). Not yet used in a shipped tree |
 | Real-duration temporary buffs (a stat change that expires after N ticks) | Bubble Shield, Slippery Current | **Shipped** — folded into the same mechanism as persistent stat stages below (`Agent.statStages` entries with `ticksRemaining` set expire; without it, they're permanent) — one array, two lifetimes. `MoveSpec.statChangeOnHit`'s optional `ticks` field drives this from a move. Not yet used in a shipped tree |
 | Position-swap (two agents exchange tiles in one action) | Bodyblock | **Shipped** — `MoveSpec.positionSwap`, resolved in `resolveHitAgainstTarget` (predation.ts) on a landed, non-killing hit only. Not yet used in a shipped tree |
@@ -646,7 +647,9 @@ and where.
 - **Scratch**'s hook: the roster's first non-Ember status inflicter — a real
   poison chance baked into the base move, not gated behind a tree node —
   and the one Sociability branch guaranteed to matter today (Sandshrew's
-  real herd), rewarded with the only two-passive keystone among the four.
+  real herd), rewarded with the only two-passive keystone among the four
+  and the roster's first `rallyCall` (Rally the Colony — marks a predator
+  for the whole colony to focus, genuinely stronger than buffing one ally).
 - **Water Gun**'s hook: a real answer to the roster's own Fire lineage
   (`bonusVsType` vs. Charmander/Ember) and a Boldness branch built around
   *un*-buffing the target's own footing, not just buffing the user.
@@ -751,8 +754,12 @@ here, not done.
     passive) → filler → **keystone** *Spiked Curl* (`thorns` passive —
     Sandshrew's own real spiked hide, curled up defensively).
   - **Sociability — "Colony Bond"**: opener *Colony Call* (`targetsAlly`
-    attack buff) → filler → filler → notable *Shared Burrow*
-    (`targetsAlly` defense buff) → filler → **fork**: *Colony Guard*
+    attack buff) → filler → filler → notable *Rally the Colony*
+    (`rallyCall` — a landed, non-killing hit marks the predator for the
+    whole colony to converge on, genuinely stronger than buffing one
+    ally: it gets every nearby colony-mate's own, independently-run threat
+    pick to land on the *same* predator instead of each one just fighting
+    whatever's nearest to itself) → filler → **fork**: *Colony Guard*
     (`damageReduction`, -power) vs. *Tunnel Runner* (+power,
     `jamCooldownTicks`) → notable *Communal Foraging* (`regen` passive) →
     filler → **keystone** *Colony Warmth* (`grantsPassives`, plural —

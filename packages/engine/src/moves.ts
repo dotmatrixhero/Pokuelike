@@ -234,6 +234,16 @@ export interface MoveSpec {
   /** A burn this move inflicts has a chance to jump to another nearby agent too — rolled once per successful `maybeInflictStatus` call, see status.ts's `maybeSpreadStatus`. Absent/false = no spread, the default. */
   statusSpreads?: boolean;
   /**
+   * On a landed, non-killing hit, marks the defender as a priority target
+   * for `ticks` — see `Agent.rallyMarkTicksRemaining`'s own doc comment for
+   * how other agents' independent target selection reads this mark. A
+   * "focus fire" lever: calling out (or striking) a threat gets herd-mates'
+   * own, separately-run threat/hunt-target picks to converge on the same
+   * one, instead of each agent just picking whatever's nearest to itself.
+   * Absent = no marking, the default.
+   */
+  rallyCall?: { ticks: number };
+  /**
    * Optional respec DAG (see `applyMoveTree`). Each node is a delta applied
    * on top of the base spec, gated by a point cost and prerequisite node
    * id(s). Absent = this move can't be respec'd (the common case — only
@@ -376,6 +386,8 @@ export interface MoveTreeNode {
     resistanceBreaker?: { multiplier: number };
     /** Overwrite, like `shape`. */
     selfCostPerUse?: { need: "energy" | "hunger"; amount: number };
+    /** Overwrite, like `shape`. */
+    rallyCall?: { ticks: number };
   };
 }
 
@@ -525,6 +537,7 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       bonusVsType: delta.bonusVsType ?? result.bonusVsType,
       resistanceBreaker: delta.resistanceBreaker ?? result.resistanceBreaker,
       selfCostPerUse: delta.selfCostPerUse ?? result.selfCostPerUse,
+      rallyCall: delta.rallyCall ?? result.rallyCall,
     };
   }
 

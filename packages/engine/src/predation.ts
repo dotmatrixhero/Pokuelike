@@ -304,6 +304,23 @@ export function nearest(agent: Agent, others: Agent[]): Agent | undefined {
 }
 
 /**
+ * The real "focus fire" primitive: prefers a rally-marked candidate
+ * (`Agent.rallyMarkTicksRemaining`, set by `MoveSpec.rallyCall` on a landed,
+ * non-killing hit) over a merely-closer one, falling back to plain
+ * `nearest` when nothing among `others` is marked. Ties among multiple
+ * marked candidates resolve by distance, same as the unmarked fallback —
+ * marking isn't itself a tie-break priority, just a filter applied first.
+ * Used at every threat/hunt-target pick where several independent agents
+ * choosing the *same* target actually matters (mob-fight, a guardian's own
+ * pick, a predator's hunt target) — not at every `nearest` call site (e.g.
+ * "who's currently attacking me" while fleeing isn't a pick worth biasing).
+ */
+export function preferMarked(agent: Agent, others: Agent[]): Agent | undefined {
+  const marked = others.filter((other) => (other.rallyMarkTicksRemaining ?? 0) > 0);
+  return nearest(agent, marked.length > 0 ? marked : others);
+}
+
+/**
  * Same-species, same-herd, living, conscious agents near `pos`, excluding
  * `excludeId` itself. Fainted allies are excluded on purpose — they're
  * physically present but can't take an action-tick behavior at all (see
@@ -676,6 +693,9 @@ function resolveHitAgainstTarget(
       const tile = tileAt(world, defender.layer, defender.pos.x, defender.pos.y);
       if (tile?.terrain === "bush") setTile(world, defender.layer, defender.pos.x, defender.pos.y, "floor");
     }
+    if (move.rallyCall) {
+      defender.rallyMarkTicksRemaining = move.rallyCall.ticks;
+    }
   }
 
   return diedTrue;
@@ -890,7 +910,7 @@ export function applyPredationInstincts(
       const herdmateThreats = agentsWithin(world, herdmate, FLEE_DETECT_RADIUS).filter((other) =>
         isHunterSpecies(rules, other.species, herdmate.species)
       );
-      const threat = nearest(herdmate, herdmateThreats);
+      const threat = preferMarked(herdmate, herdmateThreats);
       if (threat) {
         const distance = manhattan(agent.pos, threat.pos);
         // Actively fighting to defend a herd-mate isn't consistent with
@@ -925,7 +945,7 @@ export function applyPredationInstincts(
           isHunterSpecies(rules, other.species, agent.species) &&
           isDetectable(world, agent.pos, other, effectiveFleeRadius(agent))
       );
-  const threat = nearest(agent, threats);
+  const threat = preferMarked(agent, threats);
   if (threat) {
     const distance = manhattan(agent.pos, threat.pos);
     // Allies must ALSO be within striking distance of the threat right now — not just
@@ -962,7 +982,7 @@ export function applyPredationInstincts(
         !isProtectedByMob(world, other) &&
         isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS)
     );
-    const target = nearest(agent, candidates);
+    const target = preferMarked(agent, candidates);
 
     if (target) {
       logBehaviorChange(log, world, agent, "hunt");

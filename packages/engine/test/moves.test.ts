@@ -257,6 +257,7 @@ describe("applyMoveTree: newer delta fields", () => {
           bonusVsType: { type: "grass", multiplier: 1.5 },
           resistanceBreaker: { multiplier: 2 },
           selfCostPerUse: { need: "energy", amount: 0.1 },
+          rallyCall: { ticks: 10 },
         },
       },
       overwrite_stack_2: {
@@ -271,6 +272,7 @@ describe("applyMoveTree: newer delta fields", () => {
           bonusVsType: { type: "water", multiplier: 2 },
           resistanceBreaker: { multiplier: 4 },
           selfCostPerUse: { need: "hunger", amount: 0.2 },
+          rallyCall: { ticks: 20 },
         },
       },
     },
@@ -294,6 +296,7 @@ describe("applyMoveTree: newer delta fields", () => {
     expect(respec.bonusVsType).toEqual({ type: "water", multiplier: 2 });
     expect(respec.resistanceBreaker).toEqual({ multiplier: 4 });
     expect(respec.selfCostPerUse).toEqual({ need: "hunger", amount: 0.2 });
+    expect(respec.rallyCall).toEqual({ ticks: 20 });
     // Fields not touched by the second node keep the first node's value.
     expect(respec.positionSwap).toBe(true);
     expect(respec.targetsAlly).toBe(true);

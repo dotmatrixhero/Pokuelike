@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorld, setElevation, setTile } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
 import { tickWorld } from "../src/simulation.js";
-import { applyPredationInstincts } from "../src/predation.js";
+import { applyPredationInstincts, preferMarked } from "../src/predation.js";
 import { EventLog } from "../src/events.js";
 import { mulberry32 } from "../src/rng.js";
 import type { Agent, HuntRules } from "../src/types.js";
@@ -1425,5 +1425,125 @@ describe("new situational conditions wired into real combat", () => {
 
     // targetStatused fires on ANY status (paralysis here), not just burn.
     expect(foughtDamage(paralyzedLog.events)).toBeGreaterThan(foughtDamage(unstatusedLog.events));
+  });
+});
+
+describe("preferMarked (rally-call focus fire)", () => {
+  it("prefers a rally-marked candidate over a merely-closer one", () => {
+    const agent = prey({ x: 5, y: 5 });
+    const close = prey({ x: 6, y: 5 }, { id: "close" });
+    const far = prey({ x: 9, y: 5 }, { id: "far", rallyMarkTicksRemaining: 3 });
+    expect(preferMarked(agent, [close, far])?.id).toBe("far");
+  });
+
+  it("falls back to plain nearest when nothing is marked", () => {
+    const agent = prey({ x: 5, y: 5 });
+    const close = prey({ x: 6, y: 5 }, { id: "close" });
+    const far = prey({ x: 9, y: 5 }, { id: "far" });
+    expect(preferMarked(agent, [close, far])?.id).toBe("close");
+  });
+
+  it("resolves ties among multiple marked candidates by distance, same as the fallback", () => {
+    const agent = prey({ x: 5, y: 5 });
+    const nearMarked = prey({ x: 6, y: 5 }, { id: "near-marked", rallyMarkTicksRemaining: 1 });
+    const farMarked = prey({ x: 9, y: 5 }, { id: "far-marked", rallyMarkTicksRemaining: 1 });
+    expect(preferMarked(agent, [farMarked, nearMarked])?.id).toBe("near-marked");
+  });
+
+  it("a mark of 0 (expired) doesn't count as marked", () => {
+    const agent = prey({ x: 5, y: 5 });
+    const close = prey({ x: 6, y: 5 }, { id: "close" });
+    const far = prey({ x: 9, y: 5 }, { id: "far", rallyMarkTicksRemaining: 0 });
+    expect(preferMarked(agent, [close, far])?.id).toBe("close");
+  });
+
+  it("returns undefined for an empty candidate list", () => {
+    const agent = prey({ x: 5, y: 5 });
+    expect(preferMarked(agent, [])).toBeUndefined();
+  });
+});
+
+describe("rally-call wired into real predation instincts", () => {
+  it("prey flees toward a rally-marked (farther) threat instead of the merely-closer one", () => {
+    const world = createWorld(20, 20);
+    const target = prey({ x: 10, y: 10 }, { id: "bulbasaur-0" });
+    const closeThreat = predator({ x: 8, y: 10 }, undefined, { id: "scyther-close" }); // distance 2, west
+    const farThreat = predator({ x: 13, y: 10 }, undefined, { id: "scyther-far", rallyMarkTicksRemaining: 5 }); // distance 3, east, marked
+    world.agents.push(target, closeThreat, farThreat);
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(target.behavior).toBe("flee");
+    // Fleeing the marked (east) threat moves the target west (x decreases);
+    // fleeing the merely-closer (west) threat would have moved it east instead.
+    expect(target.pos.x).toBeLessThan(10);
+  });
+
+  it("baseline sanity: with nothing marked, the same layout flees the actually-nearest threat", () => {
+    const world = createWorld(20, 20);
+    const target = prey({ x: 10, y: 10 }, { id: "bulbasaur-0" });
+    const closeThreat = predator({ x: 8, y: 10 }, undefined, { id: "scyther-close" });
+    const farThreat = predator({ x: 13, y: 10 }, undefined, { id: "scyther-far" });
+    world.agents.push(target, closeThreat, farThreat);
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(target.behavior).toBe("flee");
+    expect(target.pos.x).toBeGreaterThan(10);
+  });
+
+  it("a hungry predator hunts a rally-marked prey over a merely-closer one", () => {
+    const world = createWorld(20, 20);
+    const hungry = predator({ x: 10, y: 10 }, 0.1, { id: "scyther-hungry" });
+    const closePrey = prey({ x: 11, y: 10 }, { id: "bulbasaur-close" }); // distance 1
+    const farPrey = prey({ x: 14, y: 10 }, { id: "bulbasaur-far", rallyMarkTicksRemaining: 5 }); // distance 4, marked
+    world.agents.push(hungry, closePrey, farPrey);
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(hungry.behavior).toBe("hunt");
+    expect(hungry.huntTarget).toBe("bulbasaur-far");
+  });
+
+  it("a guardian intervenes against a rally-marked threat over a merely-closer one", () => {
+    const world = createWorld(20, 20);
+    const protector = guardian({ x: 5, y: 3 }, { herdId: "herd-a" });
+    const threatened = prey({ x: 5, y: 5 }, { herdId: "herd-a", behavior: "flee" });
+    const closeThreat = predator({ x: 6, y: 5 }, 0.9, { id: "scyther-close" }); // distance 1
+    const farThreat = predator({ x: 8, y: 5 }, 0.9, { id: "scyther-far", rallyMarkTicksRemaining: 5 }); // distance 3, marked
+    world.agents.push(protector, threatened, closeThreat, farThreat);
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(protector.behavior).toBe("fight");
+    expect(protector.fightTarget).toBe("scyther-far");
+  });
+
+  it("a landed, non-killing hit with rallyCall marks the defender for the configured duration", () => {
+    const RALLY_MOVE: MoveSpec = { ...TEST_MOVE, id: "rally-move", rallyCall: { ticks: 8 } };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 }); // survives FALLBACK_DAMAGE (1)
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [RALLY_MOVE] });
+    world.agents.push(hunter, target);
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    // 8 (set during the hunter's own action tick) - 1 (the target's own
+    // tickStatusEffects, which runs later this same tickWorld iteration
+    // since it's processed after the hunter) = 7.
+    expect(target.rallyMarkTicksRemaining).toBe(7);
+  });
+
+  it("no mark on a killing/finishing hit", () => {
+    const RALLY_MOVE: MoveSpec = { ...TEST_MOVE, id: "rally-move-2", rallyCall: { ticks: 8 } };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 1, maxHp: 1 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [RALLY_MOVE] });
+    world.agents.push(hunter, target);
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(target.rallyMarkTicksRemaining).toBeUndefined();
+    expect(target.fainted).toBe(true);
   });
 });
