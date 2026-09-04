@@ -174,10 +174,23 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
   "daybreak",
   "weatherChanged",
   "gainedSkillPoint",
+  "moveRespecced",
   "shelterAbandoned",
   "fellAsleep",
   "wokeUp",
 ]);
+
+/**
+ * The real headline events — births, true deaths, and evolutions — for a
+ * long-lived "quiet mode" that skips even the rest of `STORY_KINDS` (a
+ * fight landing, a shelter completing, a dispersal). Direct ask: watching a
+ * long run, sometimes you just want population-shaping moments, not every
+ * fight. `killed`/`defeated`/`starved`/`diedOfAge` are all real, permanent
+ * deaths (`Agent.alive` newly `false`); `fainted` is deliberately excluded
+ * — it's a recoverable knockdown, not a death (see DESIGN.md's "Faint/
+ * finish-off" section).
+ */
+export const HEADLINE_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "starved", "diedOfAge", "evolved"]);
 
 export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   born: "\u{1F423}", // hatching chick

@@ -1,5 +1,5 @@
 import type { SimEvent, World } from "@pokuelike/engine";
-import { NOISE_KINDS, STORY_COLOR, STORY_ICON, STORY_KINDS, eventNamesAgent, formatEvent } from "./eventText.js";
+import { HEADLINE_KINDS, NOISE_KINDS, STORY_COLOR, STORY_ICON, STORY_KINDS, eventNamesAgent, formatEvent } from "./eventText.js";
 
 /**
  * A real scrollable event log, not a flat forever-growing dump: the in-memory
@@ -38,6 +38,14 @@ export class EventLogPanel {
    * always shown. Off by default given that volume.
    */
   private hideLevelUps = true;
+  /**
+   * Overrides `hideNoise`/`hideLevelUps` entirely when on — a long-lived,
+   * even-quieter mode for watching a run over many thousands of ticks
+   * without every fight/dispersal/shelter scrolling past, just the
+   * population-shaping headlines (see `HEADLINE_KINDS`). Off by default;
+   * an explicit opt-in.
+   */
+  private headlinesOnly = false;
   private dirty = false;
 
   constructor(private readonly container: HTMLElement) {}
@@ -69,6 +77,12 @@ export class EventLogPanel {
     this.dirty = true;
   }
 
+  setHeadlinesOnly(headlinesOnly: boolean): void {
+    if (this.headlinesOnly === headlinesOnly) return;
+    this.headlinesOnly = headlinesOnly;
+    this.dirty = true;
+  }
+
   reset(): void {
     this.buffer = [];
     this.filterAgentId = undefined;
@@ -86,8 +100,12 @@ export class EventLogPanel {
     this.dirty = false;
 
     let source = this.filterAgentId ? this.eventsForAgent(this.filterAgentId) : this.buffer;
-    if (this.hideNoise) source = source.filter((event) => !NOISE_KINDS.has(event.kind));
-    if (this.hideLevelUps) source = source.filter((event) => event.kind !== "leveledUp");
+    if (this.headlinesOnly) {
+      source = source.filter((event) => HEADLINE_KINDS.has(event.kind));
+    } else {
+      if (this.hideNoise) source = source.filter((event) => !NOISE_KINDS.has(event.kind));
+      if (this.hideLevelUps) source = source.filter((event) => event.kind !== "leveledUp");
+    }
     const shown = source.slice(-EventLogPanel.MAX_RENDERED).reverse(); // newest first
 
     this.container.replaceChildren();
