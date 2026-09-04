@@ -447,6 +447,96 @@ describe("herd-status-driven mate preference", () => {
   });
 });
 
+describe("cross-herd mating escape hatch (MATE_ISOLATION_TICKS)", () => {
+  // Confirmed real mechanism this fixes: dispersal.ts's finishDispersal can
+  // found a brand-new herd containing exactly one disperser — a solo herd
+  // that, under the plain herd-locked rule, could never mate again since it
+  // has zero same-herd candidates by construction. These tests build that
+  // exact scenario directly (solo herd + a nearby different-herd candidate)
+  // rather than going through a full dispersal walk.
+
+  it("a solo-herd agent does NOT mate across herds immediately — herd preference still holds before sustained isolation", () => {
+    const world = createWorld(20, 20);
+    const solo: Agent = { ...parent("mother", "female", { x: 5, y: 5 }, { herdId: "solo-herd-of-one" }) };
+    const other: Agent = { ...parent("father", "male", { x: 6, y: 5 }, { herdId: "other-herd" }) };
+    world.agents.push(solo, other);
+
+    tickWorld(world);
+
+    // No offspring — solo hasn't been isolated long enough yet to widen its search.
+    expect(world.agents).toHaveLength(2);
+    const mother = world.agents.find((a) => a.id === "mother")!;
+    expect(mother.ticksSinceEligibleMate).toBe(1);
+  });
+
+  it("a same-herd mate is still preferred over widening the search, even once isolated", () => {
+    // Once the same-herd candidate becomes visible, ticksSinceEligibleMate
+    // resets to 0 and normal herd-locked behavior applies again.
+    const world = createWorld(20, 20);
+    const mother: Agent = {
+      ...parent("mother", "female", { x: 5, y: 5 }, { herdId: "herd-a" }),
+      ticksSinceEligibleMate: 500,
+    };
+    const sameHerdFather: Agent = parent("father", "male", { x: 6, y: 5 }, { herdId: "herd-a" });
+    world.agents.push(mother, sameHerdFather);
+
+    tickWorld(world);
+
+    const updated = world.agents.find((a) => a.id === "mother")!;
+    expect(updated.ticksSinceEligibleMate).toBe(0);
+  });
+
+  it("a solo-herd agent eventually mates across herds once its own herd has been sterile long enough", () => {
+    const world = createWorld(20, 20);
+    const solo: Agent = {
+      ...parent("mother", "female", { x: 5, y: 5 }, { herdId: "solo-herd-of-one" }),
+      ticksSinceEligibleMate: 200, // at MATE_ISOLATION_TICKS threshold
+    };
+    const other: Agent = parent("father", "male", { x: 6, y: 5 }, { herdId: "other-herd" });
+    world.agents.push(solo, other);
+    const log = new EventLog();
+
+    tickWorld(world, log);
+
+    expect(world.agents).toHaveLength(3);
+    const child = world.agents.find((a) => a.id !== "mother" && a.id !== "father")!;
+    expect(child.species).toBe("bulbasaur");
+    expect(log.events).toContainEqual(
+      expect.objectContaining({ kind: "born", motherId: "mother", fatherId: "father" })
+    );
+  });
+
+  it("the escape hatch also opens from the non-isolated side: an isolated male can be accepted by a non-isolated female in another herd", () => {
+    // Mating fires on the female's turn (applyMateSeeking), so her own scan
+    // has to accept the isolated male even though *she* hasn't been isolated
+    // — this is exactly why isEligibleMate checks either party's counter.
+    const world = createWorld(20, 20);
+    const father: Agent = {
+      ...parent("father", "male", { x: 6, y: 5 }, { herdId: "solo-herd-of-one" }),
+      ticksSinceEligibleMate: 500,
+    };
+    const mother: Agent = parent("mother", "female", { x: 5, y: 5 }, { herdId: "other-herd" });
+    world.agents.push(mother, father);
+
+    tickWorld(world);
+
+    expect(world.agents).toHaveLength(3);
+    const child = world.agents.find((a) => a.id !== "mother" && a.id !== "father")!;
+    expect(child.species).toBe("bulbasaur");
+  });
+
+  it("solitary agents (no herdId at all) are unaffected — the escape hatch only concerns herd-locked agents", () => {
+    const world = createWorld(20, 20);
+    const mother: Agent = { ...parent("mother", "female", { x: 2, y: 2 }), herdId: undefined };
+    const father: Agent = { ...parent("father", "male", { x: 3, y: 2 }), herdId: undefined };
+    world.agents.push(mother, father);
+
+    tickWorld(world);
+
+    expect(world.agents).toHaveLength(3);
+  });
+});
+
 /**
  * pathfinding.ts's `stepTowardMovingTarget`, wired into `applyMateSeeking`'s
  * approach step (mate-seeking equivalent of predation.test.ts's hunt

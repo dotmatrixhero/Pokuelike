@@ -57,6 +57,40 @@ function isRelated(agent: Agent, candidate: Agent): boolean {
   return false;
 }
 
+/**
+ * Consecutive ticks a herd-locked agent must go with zero eligible mates
+ * spotted (`Agent.ticksSinceEligibleMate`, maintained just below in
+ * `applyMateSeeking` and already consumed by dispersal.ts's own guaranteed
+ * fallback trigger) before its herd affiliation stops blocking an
+ * otherwise-eligible candidate in a *different* nearby herd. This is the fix
+ * for the confirmed "permanently locked to a herd of one" dead end: when
+ * `finishDispersal` (dispersal.ts) can't find an existing herd to join, it
+ * founds a brand-new herd containing exactly that one disperser — with the
+ * unconditional `agent.herdId && agent.herdId !== candidate.herdId` rule
+ * this replaces, that individual (and any solo/small herd that simply has no
+ * opposite-sex mature member right now) could never mate again short of
+ * another disperser independently wandering into that exact herd later, a
+ * low-probability event on a large map. See DESIGN.md's "Cross-herd mating
+ * escape hatch" section (next to "Natal dispersal") for the full reasoning
+ * and real before/after run numbers.
+ *
+ * Deliberately much shorter than dispersal.ts's `NO_MATES_DISPERSAL_TICKS`
+ * (1000): that threshold gates *physically relocating* an agent across the
+ * map to go look for a new herd, which is rightly patient. This threshold
+ * instead only widens who an agent *already standing right where it is* (the
+ * common case for a solo founder, which never moves again once founded) is
+ * willing to consider within its ordinary, unchanged `mateSearchRadius` —
+ * there's no relocation cost to letting that happen sooner, so it doesn't
+ * need dispersal's own tuning. Set at this codebase's usual "sustained, not
+ * a single bad tick" order of magnitude (matching
+ * `herdMigration.ts`'s `SCARCITY_SUSTAIN_TICKS`-style constants) — long
+ * enough that a herd's mate briefly stepping outside search range for a few
+ * ticks doesn't make the whole herd distinction meaningless, short enough
+ * that a genuinely sterile herd doesn't sit dead for anywhere near
+ * dispersal's full 1000-tick patience before this kicks in.
+ */
+export const MATE_ISOLATION_TICKS = 200;
+
 function isEligibleMate(agent: Agent, candidate: Agent, ctx?: LevelingContext): boolean {
   if (candidate.id === agent.id || candidate.alive === false) return false;
   if (candidate.fainted || candidate.beingCarriedBy) return false; // downed or being carried — not available to mate
@@ -68,8 +102,20 @@ function isEligibleMate(agent: Agent, candidate: Agent, ctx?: LevelingContext): 
   if (!isMature(candidate)) return false;
   if (candidate.behavior === "flee") return false; // don't interrupt a fleeing mate
   if (isRelated(agent, candidate)) return false;
-  // Herd animals pair within their herd; solitary agents (no herdId) aren't restricted.
-  if (agent.herdId && agent.herdId !== candidate.herdId) return false;
+  // Herd animals normally pair within their herd; solitary agents (no
+  // herdId) aren't restricted. Escape hatch: once *either* party's own herd
+  // has gone MATE_ISOLATION_TICKS with zero eligible mates in range, herd
+  // affiliation stops blocking this otherwise-eligible candidate — checking
+  // both sides (not just `agent`'s) matters because mating actually happens
+  // on the *female's* turn in applyMateSeeking below: without this, an
+  // isolated male could walk right up to a non-isolated female in another
+  // herd and still never breed, since her own (unwidened) scan would never
+  // have listed him as a candidate to begin with.
+  if (agent.herdId && agent.herdId !== candidate.herdId) {
+    const agentIsolated = (agent.ticksSinceEligibleMate ?? 0) >= MATE_ISOLATION_TICKS;
+    const candidateIsolated = (candidate.ticksSinceEligibleMate ?? 0) >= MATE_ISOLATION_TICKS;
+    if (!agentIsolated && !candidateIsolated) return false;
+  }
   return true;
 }
 
@@ -214,7 +260,9 @@ function spawnOffspring(world: World, mother: Agent, father: Agent, ctx?: Leveli
 
 /**
  * Called when chooseBehavior has already picked "seekMate". Finds the
- * nearest eligible mate (same species/layer/herd, opposite sex, mature) and
+ * nearest eligible mate (same species/layer, normally same herd — see
+ * `isEligibleMate`'s `MATE_ISOLATION_TICKS` escape hatch for the sustained-
+ * isolation exception — opposite sex, mature) and
  * either closes distance or, once adjacent, produces an offspring — the
  * mother's turn triggers the birth so a pair doesn't double-spawn the same
  * tick. Both parents' mateDrive resets afterward, which is the sim's only

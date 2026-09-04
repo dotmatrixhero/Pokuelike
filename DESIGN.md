@@ -3294,6 +3294,63 @@ not the last word on tuning it — flagged, like the base chance/threshold
 themselves, as sim-original and open to future revision against more runs,
 ideally averaged over several seeds rather than judged off any one.
 
+### Cross-herd mating escape hatch: fixing the solo-dispersal-founder dead end
+
+**Decided and built.** Diagnosed directly from `reproduction.ts`'s
+`isEligibleMate` and `dispersal.ts`'s `finishDispersal`, not a guess: a
+disperser who can't find an existing nearby herd to join founds a brand-new
+herd containing exactly itself. `isEligibleMate`'s herd check
+(`agent.herdId && agent.herdId !== candidate.herdId → ineligible`) then
+permanently blocks that solo founder (and any herd that simply has no
+current opposite-sex mature member) from mating with anyone outside its
+herd of one — a real dead end, not a rare edge case, since a large map with
+many independent dispersal events routinely produces herds-of-one that
+never get an opposite-sex member on their own. This is the confirmed
+mechanism behind "population sometimes explodes, sometimes stays low" —
+whether a run's early dispersals happen to land solo founders next to
+compatible herds is essentially a coin flip per founder.
+
+Fix: `isEligibleMate` now allows a cross-herd pairing once *either* party
+has gone `MATE_ISOLATION_TICKS` (200) consecutive ticks with zero eligible
+mates in range — tracked via the existing `Agent.ticksSinceEligibleMate`
+counter (already maintained in `applyMateSeeking` and already consumed by
+dispersal's own guaranteed-fallback trigger, so this reuses state rather
+than inventing new bookkeeping). Checking *either* side, not just the
+scanning agent, matters because mating fires on the female's turn: without
+checking the male's isolation too, an isolated male standing right next to
+a non-isolated female in another herd would still never be listed as a
+candidate by her own (unwidened) scan. 200 ticks is deliberately much
+shorter than dispersal's own 1000-tick `NO_MATES_DISPERSAL_TICKS` — that
+threshold gates the cost of physically relocating across the map, while
+this one only widens who an agent already standing still is willing to
+consider, so it can afford to be much more impatient.
+
+**Real-run findings (3000-tick, `HUNT_RULES`/`LEVELING_CONTEXT`, three
+seeds):** the fix is confirmed firing — seed 7 produced a genuine
+cross-herd birth at tick 2561 (`venusaur-1`, herd `bulbasaur-herd` ×
+`squirtle-170-4`, herd `wartortle-lineage-squirtle-170-4-2510`) that could
+not have happened under the old unconditional herd lock. Seeds 42 and 123
+saw zero cross-herd births in this particular run — expected, since the
+escape hatch only fires for a herd that's *actually* gone sterile that
+long, not every herd. Final populations shifted substantially across all
+three seeds relative to a same-seed baseline without the fix (e.g. seed 42:
+219 vs. a differently-shaped earlier baseline run) — consistent with this
+sim's documented rng-chaos-sensitivity (changing `isEligibleMate`'s control
+flow perturbs the rng consumption sequence from the first affected tick
+onward, so a same-seed before/after isn't a clean isolated A/B; the
+mechanism firing correctly is the confirmed finding here, not the raw
+population deltas). All 579 engine tests pass, including 4 new tests
+covering: no immediate cross-herd mating before isolation, same-herd
+preference still winning once isolated but a same-herd mate becomes
+available again, an isolated solo founder actually producing cross-herd
+offspring once past the threshold, and the either-side-isolated case.
+Determinism test unaffected.
+
+**Open tuning question, not resolved here:** whether 200 ticks is the right
+number, and whether it should scale with local population density (a
+sparser map might want a shorter fuse) — flagged in TODO.md rather than
+guessed at without more runs.
+
 ## More individual-agent incentive systems: shelter-building and herd status
 
 Decided, not built yet. Direct ask: give individual agents more

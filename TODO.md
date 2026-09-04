@@ -1350,3 +1350,16 @@ not something this pathfinding pass itself caused or is positioned to fix.
       within a fixed window), not a regression, but worth knowing if a
       later feature wants to reason about "how many dispersals typically
       complete in N ticks."
+
+## Cross-herd mating escape hatch — built, see DESIGN.md
+
+- [x] Solo dispersal founders (and any herd with no current opposite-sex
+      mature member) are no longer permanently mate-locked — `isEligibleMate`
+      now allows cross-herd pairing once either party has gone
+      `MATE_ISOLATION_TICKS` (200) ticks with zero eligible mates in range.
+      Confirmed firing in a real 3000-tick run (seed 7, tick 2561). 4 new
+      tests, all 579 engine tests pass, determinism unaffected.
+- [ ] **Open tuning question:** is 200 ticks the right fuse, and should it
+      scale with local population density (sparser maps might want it
+      shorter)? Not resolved — needs more real runs across seeds/densities
+      before touching the constant again.
