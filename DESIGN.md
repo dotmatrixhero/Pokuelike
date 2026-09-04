@@ -4998,7 +4998,7 @@ question rather than something closed here.
 - Save format, map generation, dungeon structure/progression.
 - Data source/legality for sprite art (bring-your-own for now).
 
-## Breeding requires a real earned edge: evolved once, or level 16+
+## Breeding requires a real earned edge: evolved once, or level 12+ (originally 16)
 
 **Decided and built.** Direct instruction: on top of `isMature`'s plain
 age check (`MATURITY_AGE`, 200 ticks — unchanged), breeding now additionally
@@ -5041,5 +5041,32 @@ test; the two herd-status-preference tests, which deliberately used a
 level spread to produce a real rank difference, were bumped to `16/17/20`
 (preserving the same relative ordering) since their old `level: 1` fixture
 now fails the new gate on its own. All 580 engine tests pass.
+
+### Follow-up: quartering hunger/thirst decay didn't fix it; lowering the threshold + a slight exp bump did, partially
+
+Tried first (direct ask): quartering thirst/hunger decay rates (see
+"thirst and hunger... much much much slower" commit), on the theory that
+agents weren't surviving long enough to level up. **Real before/after run
+showed this didn't move the needle** (births stayed at 1-4/run) — root
+cause check found starvation deaths were already rare pre-change (0-6
+thirst, 0 hunger, out of 17 starting agents over 3000 ticks), so survival
+time was never the bottleneck. Kept the slower decay anyway as a real,
+independently-good change, but it doesn't touch the actual lever.
+
+Direct follow-up ask: lower `MIN_BREEDING_LEVEL_UNEVOLVED` 16 -> 12
+(973 vs. 2535 total exp needed for a Medium Slow species) plus a slight
+exp-gain bump (`EXP_TRICKLE_PER_TICK` 0.8 -> 1.0, `EXP_ON_CONSUME` 6 -> 8).
+
+**Real-run results (same 3 seeds, 3000 ticks):** meaningfully better, though
+seed-variable — seed 42: 32 births (was 4), final population 37 (was 14);
+seed 7: 12 births (was 3), final population 22 (was 11); seed 20260903:
+still only 2 births (was 1), final population 13 (was 11). Two of three
+seeds now show real, healthy-looking growth; the third stays stubbornly
+low — worth another look (a longer run, or averaging more seeds) if the
+user wants seed 20260903-like runs to also recover, but the fix as given
+is a real, substantial improvement over the level-16 baseline, not a full
+solve. All 580 engine tests still pass (no test changes needed for this
+follow-up — the `level: 16` fixture default already clears the new
+level-12 floor).
 
 See TODO.md for the running list of side notes to revisit.

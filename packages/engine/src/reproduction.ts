@@ -37,8 +37,17 @@ export function isMature(agent: Agent): boolean {
   return agent.age === undefined || agent.age >= MATURITY_AGE;
 }
 
-/** Direct instruction: breeding needs a real earned edge on top of plain age-maturity — either an evolution, or enough levels to get there some other way. */
-export const MIN_BREEDING_LEVEL_UNEVOLVED = 16;
+/**
+ * Direct instruction: breeding needs a real earned edge on top of plain
+ * age-maturity — either an evolution, or enough levels to get there some
+ * other way. Lowered from 16 -> 12, paired with a slight exp-gain bump
+ * (`EXP_TRICKLE_PER_TICK`/`EXP_ON_CONSUME` in leveling.ts): a real run at
+ * 16 showed births collapsing to 1-4 per 3000-tick run even after
+ * quartering hunger/thirst decay — the bottleneck was exp pace, not
+ * survival time, so lowering the threshold (973 vs. 2535 total exp for a
+ * Medium Slow species at 12 vs. 16) is the more direct fix. See TODO.md.
+ */
+export const MIN_BREEDING_LEVEL_UNEVOLVED = 12;
 
 /**
  * Extra breeding gate on top of `isMature`'s plain age check: an agent may
@@ -46,7 +55,7 @@ export const MIN_BREEDING_LEVEL_UNEVOLVED = 16;
  * form — `ctx.baseSpeciesOf` maps a species id back to its base form, so
  * `species !== baseSpeciesOf(species)` means "has evolved") *or* reached
  * `MIN_BREEDING_LEVEL_UNEVOLVED` without evolving (e.g. a species whose
- * evolution threshold sits well above 16, or one that never evolves at
+ * evolution threshold sits well above 12, or one that never evolves at
  * all). Without `ctx` or `agent.level` (bare test fixtures that don't set
  * either), reads as eligible — same "no data, don't block" convention
  * `isMature` itself uses for `agent.age`.

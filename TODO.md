@@ -1450,3 +1450,11 @@ not something this pathfinding pass itself caused or is positioned to fix.
       rare, this makes it rarer still, no downside found), but it does NOT
       resolve the breeding-rate question above — exp-gain pacing is the
       actual lever, still unaddressed.
+- [x] **Follow-up (direct ask): lowered `MIN_BREEDING_LEVEL_UNEVOLVED` 16 ->
+      12, plus a slight exp bump (`EXP_TRICKLE_PER_TICK` 0.8 -> 1.0,
+      `EXP_ON_CONSUME` 6 -> 8).** Real same-3-seed run: meaningfully
+      better on 2 of 3 seeds — seed 42: 32 births (was 4), final pop 37
+      (was 14); seed 7: 12 births (was 3), final pop 22 (was 11). Seed
+      20260903 stayed stubbornly low (2 births, was 1, final pop 13). A
+      real, substantial improvement, not a full solve — worth a longer run
+      or more seeds if the user wants every seed to recover, not just most.
