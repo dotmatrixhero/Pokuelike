@@ -73,6 +73,32 @@ export const FLAVOR_FG: Record<string, Rgb> = {
   bloom: [205, 125, 195],
 };
 
+/** Direct port of ascii.ts's TERRAIN_GLYPH/FLAVOR_GLYPH — the "ASCII classic" render mode's glyph set, Brogue-style. */
+export const TERRAIN_GLYPH: Record<TerrainKind, string> = {
+  floor: ".",
+  wall: "#",
+  water: "~",
+  food: '"',
+  flora: "`",
+  sunbeam: "o",
+  seedling: ",",
+  tree: "T",
+  boulder: "O",
+  bush: "^",
+  sand: ":",
+  mud: "=",
+};
+
+export const FLAVOR_GLYPH: Record<string, string> = {
+  oran: "%",
+  sitrus: "&",
+  pecha: "*",
+  cheri: "+",
+  moss: "`",
+  fern: "'",
+  bloom: ";",
+};
+
 /** Same elevation-shading formula as ascii.ts's `shade`: lightens toward white as elevation rises. */
 export function shade(rgb: Rgb, elevation: number): Rgb {
   const amount = Math.min(0.35, elevation * 0.07);

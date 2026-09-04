@@ -166,6 +166,13 @@
         </div>
 
         <div class="divider"></div>
+
+        <div class="field-group">
+          <button id="style-tile" class="playing">Tile</button>
+          <button id="style-ascii">ASCII</button>
+        </div>
+
+        <div class="divider"></div>
         <span id="tick-label"></span>
         <span id="clock-label"></span>
       </header>
@@ -185,7 +192,13 @@
           </div>
 
           <div class="panel" id="event-log-panel">
-            <div class="panel-header"><span>Event log</span></div>
+            <div class="panel-header">
+            <span>Event log</span>
+            <label class="inspect-label" style="display: flex; align-items: center; gap: 5px; font-size: 12px; text-transform: none; letter-spacing: normal; font-weight: 400;">
+              <input id="hide-noise" type="checkbox" checked style="width: auto; padding: 0;" />
+              Pokémon events only
+            </label>
+          </div>
             <div id="event-log"></div>
           </div>
         </div>

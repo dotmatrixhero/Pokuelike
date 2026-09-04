@@ -1,5 +1,5 @@
 import type { SimEvent } from "@pokuelike/engine";
-import { STORY_COLOR, STORY_ICON, STORY_KINDS, eventNamesAgent, formatEvent } from "./eventText.js";
+import { NOISE_KINDS, STORY_COLOR, STORY_ICON, STORY_KINDS, eventNamesAgent, formatEvent } from "./eventText.js";
 
 /**
  * A real scrollable event log, not a flat forever-growing dump: the in-memory
@@ -18,6 +18,8 @@ export class EventLogPanel {
 
   private buffer: SimEvent[] = [];
   private filterAgentId: string | undefined;
+  /** On by default — most people watching the log want "the Pokemon stuff," not flora/weather/migration/behavior-switch chatter. */
+  private hideNoise = true;
   private dirty = false;
 
   constructor(private readonly container: HTMLElement) {}
@@ -36,6 +38,12 @@ export class EventLogPanel {
     this.dirty = true;
   }
 
+  setHideNoise(hide: boolean): void {
+    if (this.hideNoise === hide) return;
+    this.hideNoise = hide;
+    this.dirty = true;
+  }
+
   reset(): void {
     this.buffer = [];
     this.filterAgentId = undefined;
@@ -43,7 +51,7 @@ export class EventLogPanel {
     this.render();
   }
 
-  /** All buffered events naming `agentId` — used by the inspector panel, not just this log's own filtered view. */
+  /** All buffered events naming `agentId`, before the noise filter is applied in `render`. */
   eventsForAgent(agentId: string): SimEvent[] {
     return this.buffer.filter((event) => eventNamesAgent(event, agentId));
   }
@@ -52,7 +60,8 @@ export class EventLogPanel {
     if (!this.dirty) return;
     this.dirty = false;
 
-    const source = this.filterAgentId ? this.eventsForAgent(this.filterAgentId) : this.buffer;
+    let source = this.filterAgentId ? this.eventsForAgent(this.filterAgentId) : this.buffer;
+    if (this.hideNoise) source = source.filter((event) => !NOISE_KINDS.has(event.kind));
     const shown = source.slice(-EventLogPanel.MAX_RENDERED).reverse(); // newest first
 
     this.container.replaceChildren();

@@ -1,6 +1,6 @@
 import { EventLog, tickWorld, randomSeed, type Agent, type World } from "@pokuelike/engine";
 import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
-import { agentAtCanvasPos, drawWorld, TILE_SIZE } from "./renderer.js";
+import { agentAtCanvasPos, drawWorld, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { renderInspector } from "./inspector.js";
 
@@ -31,6 +31,9 @@ const clockLabel = document.getElementById("clock-label") as HTMLElement;
 const eventLogEl = document.getElementById("event-log") as HTMLElement;
 const inspectorEl = document.getElementById("inspector") as HTMLElement;
 const clearSelectionBtn = document.getElementById("clear-selection") as HTMLButtonElement;
+const hideNoiseCheckbox = document.getElementById("hide-noise") as HTMLInputElement;
+const styleTileBtn = document.getElementById("style-tile") as HTMLButtonElement;
+const styleAsciiBtn = document.getElementById("style-ascii") as HTMLButtonElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -42,6 +45,7 @@ let intervalId: number | undefined;
 let selectedAgentId: string | undefined;
 let lastLoggedEventCount = 0;
 let inspectorDirty = true;
+let renderStyle: RenderStyle = "tile";
 
 const eventLogPanel = new EventLogPanel(eventLogEl);
 
@@ -174,6 +178,19 @@ canvas.addEventListener("click", (event) => {
 
 clearSelectionBtn.addEventListener("click", () => selectAgent(undefined));
 
+hideNoiseCheckbox.addEventListener("change", () => {
+  eventLogPanel.setHideNoise(hideNoiseCheckbox.checked);
+  eventLogPanel.render();
+});
+
+function setRenderStyle(style: RenderStyle): void {
+  renderStyle = style;
+  styleTileBtn.classList.toggle("playing", style === "tile");
+  styleAsciiBtn.classList.toggle("playing", style === "ascii");
+}
+styleTileBtn.addEventListener("click", () => setRenderStyle("tile"));
+styleAsciiBtn.addEventListener("click", () => setRenderStyle("ascii"));
+
 // --- Boot --------------------------------------------------------------------
 
 const seedParam = new URLSearchParams(location.search).get("seed");
@@ -182,7 +199,7 @@ loadWorld(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED);
 speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
 
 function frame(): void {
-  drawWorld(ctx, world, selectedAgentId);
+  drawWorld(ctx, world, selectedAgentId, renderStyle);
   eventLogPanel.render();
   refreshSelection();
   requestAnimationFrame(frame);

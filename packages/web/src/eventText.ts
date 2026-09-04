@@ -67,6 +67,24 @@ export function formatEvent(event: SimEvent): string {
 /** The event kinds that make a story, per the maintainer's ask — get distinct icon/color/size treatment in the log panel. Everything else renders minimal. */
 export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge"]);
 
+/**
+ * Routine environment/upkeep chatter — real events, just not "the Pokemon
+ * stuff" most people watching the log actually want. Filtered out of the
+ * panel by default (see EventLogPanel's `hideNoise`); a toggle brings them
+ * back for anyone debugging flora/weather/migration systems directly.
+ */
+export const NOISE_KINDS = new Set<SimEvent["kind"]>([
+  "crossedLayer",
+  "consumed",
+  "behaviorChanged",
+  "floraChanged",
+  "herdMigrating",
+  "herdSettled",
+  "nightfall",
+  "daybreak",
+  "weatherChanged",
+]);
+
 export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   born: "\u{1F423}", // hatching chick
   killed: "⚔️", // crossed swords
