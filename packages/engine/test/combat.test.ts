@@ -261,6 +261,18 @@ describe("cooldowns", () => {
     expect(pickBestMove(agent, ["normal"])).toBe(EMBER); // now off cooldown
   });
 
+  it("useMove increments moveUseCounts for the move actually used, once per call", () => {
+    const agent = makeAgent({ moves: [EMBER, TACKLE] });
+    expect(agent.moveUseCounts).toBeUndefined();
+
+    useMove(agent, EMBER);
+    expect(agent.moveUseCounts).toEqual({ ember: 1 });
+
+    useMove(agent, EMBER);
+    useMove(agent, TACKLE);
+    expect(agent.moveUseCounts).toEqual({ ember: 2, tackle: 1 });
+  });
+
   it("picks the higher-expected-damage move against the current defender's type", () => {
     const agent = makeAgent({ types: ["fire"], moves: [TACKLE, EMBER] });
     // Against a Grass defender, Ember (Fire, super effective + STAB) clearly beats Tackle (Normal, neutral, no STAB).

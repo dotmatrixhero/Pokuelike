@@ -1546,3 +1546,27 @@ not something this pathfinding pass itself caused or is positioned to fix.
       it may have been the dominant cause all along, not herd-lock or exp
       pacing. New regression test in support.test.ts. All 594 engine tests
       pass, determinism unaffected.
+
+## Inspector redesign follow-ups (grouped layout / moves / skill trees)
+
+- [ ] The skill-tree layout is a simple BFS-depth layered layout (one row per
+      depth), not a real graph-layout algorithm — no edge lines drawn between
+      a node and its prerequisites, and no crossing-minimization within a
+      row. Fine for the small trees that exist today (5-10 nodes); would
+      likely need real edges drawn (SVG connectors) to stay readable if a
+      much larger/denser tree ever gets authored.
+- [ ] No real browser/DOM test harness exists in this project (confirmed
+      again this session — Playwright/jsdom/happy-dom aren't installed) so
+      the new grouped inspector layout was verified via a hand-rolled DOM
+      shim + typecheck/build, not an actual rendered browser. Worth revisiting
+      if this project ever adds one, especially for anything with real click
+      interaction like the new move-tree toggle.
+- [ ] Mobile/narrow-viewport responsiveness of the new grouped inspector
+      sections is unverified — the existing `#inspector-panel` scroll
+      container should handle it via `overflow-y: auto`, but the group
+      boxes/meters haven't been checked at very narrow widths (the drawer's
+      own `@media (max-width: 768px)` handling was left untouched).
+- [ ] The skill-tree node tooltip (delta/leaning/passive detail) uses a
+      native `title` attribute — functional but not discoverable on touch
+      devices with no hover. A real click-to-expand detail popover would be
+      nicer if this becomes a frequently-used feature.

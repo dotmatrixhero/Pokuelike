@@ -231,6 +231,8 @@ export function useMove(agent: Agent, move: MoveSpec): void {
   agent.moveCooldowns = agent.moveCooldowns ?? {};
   agent.moveCooldowns[move.id] = move.cooldownTicks;
   if (move.lockTicks) agent.actionLockTicks = (agent.actionLockTicks ?? 0) + move.lockTicks;
+  agent.moveUseCounts = agent.moveUseCounts ?? {};
+  agent.moveUseCounts[move.id] = (agent.moveUseCounts[move.id] ?? 0) + 1;
 }
 
 /** Rolls a random hit count within `hits`' [min, max] range (inclusive) — undefined `hits` always means exactly 1 hit. */

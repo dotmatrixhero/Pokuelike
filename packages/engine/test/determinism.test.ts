@@ -10,7 +10,7 @@ import { growFlora, maybeDropSeed } from "../src/flora.js";
 import { advanceWaterCycle } from "../src/weather.js";
 import { grantExp } from "../src/leveling.js";
 import { applyMateSeeking } from "../src/reproduction.js";
-import type { Agent, HuntRules } from "../src/types.js";
+import type { Agent, HuntRules, World } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 
 /**
@@ -104,6 +104,38 @@ describe("tickWorld: full-run determinism (the real acceptance test at unit scal
     const runB = scenario(20260904);
     expect(runA.log.events.length).toBeGreaterThan(0); // not a vacuous pass — real events did happen
     expect(JSON.stringify(runA.log.events)).toBe(JSON.stringify(runB.log.events));
+  });
+
+  it("moveUseCounts (a pure counter, no rng involved) is identical across two same-seed runs and doesn't perturb determinism", () => {
+    // A dedicated, guaranteed-to-fight scenario rather than reusing `scenario`
+    // above: that one is built around mate-seeking (bulbasaurs) and a distant
+    // hunter, so whether the scyther actually closes in and lands a hit
+    // within 500 ticks isn't reliably true every run — placing the hunter
+    // already adjacent to prey it's rules-eligible to hunt, and hungry
+    // enough to always attempt it, makes real `useMove` calls a certainty
+    // rather than a "usually happens" coincidence this test would otherwise
+    // depend on.
+    function fightScenario(seed: number): World {
+      const world = createWorld(20, 20, seed);
+      // maxHp 200 vs 50 (not equal) matters: `isPreyOf` (predation.ts) gates
+      // hunting on the target being meaningfully *smaller* (`PREY_POWER_RATIO`
+      // of the predator's own maxHp-derived power), so two same-maxHp agents
+      // never actually trigger a hunt/attack no matter how hungry or close.
+      world.agents.push(
+        agent("scyther-0", { species: "scyther", pos: { x: 5, y: 5 }, moves: [TEST_MOVE], maxHp: 200, hp: 200, needs: createNeeds({ hunger: 0.1 }) }),
+        agent("bulbasaur-0", { species: "bulbasaur", pos: { x: 5, y: 6 }, moves: [TEST_MOVE], maxHp: 50, hp: 50, needs: createNeeds({ hunger: 0.9 }) })
+      );
+      const rules: HuntRules = { scyther: true };
+      for (let i = 0; i < 30; i++) tickWorld(world, undefined, rules);
+      return world;
+    }
+    const worldA = fightScenario(20260904);
+    const worldB = fightScenario(20260904);
+    const counts = (world: World) => Object.fromEntries(world.agents.map((a) => [a.id, a.moveUseCounts ?? {}]));
+    expect(counts(worldA)).toEqual(counts(worldB));
+    // Real coverage, not a vacuous pass: something in this scenario actually used a move.
+    const anyUses = worldA.agents.some((a) => Object.keys(a.moveUseCounts ?? {}).length > 0);
+    expect(anyUses).toBe(true);
   });
 
   it("different seeds produce different event logs (sanity check against accidental hardcoding)", () => {

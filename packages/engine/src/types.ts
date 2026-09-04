@@ -689,6 +689,19 @@ export interface Agent {
    * always safely misses the cache instead of reusing a stale route.
    */
   pathCache?: { layer: Layer; target: Vec2; targetId?: string; steps: Vec2[] };
+
+  /**
+   * Lifetime count of real uses of each move (by `MoveSpec.id`), incremented
+   * once per call inside `useMove` (combat.ts) — the single call site every
+   * move-use path (predation.ts's hit resolution, support.ts's
+   * `applySupportMove`) already goes through, so every caller gets counted
+   * for free without touching each site individually. Purely observational
+   * (the inspector UI's "used Nx" display) — nothing in the engine itself
+   * reads this back, so it can't affect simulation behavior or determinism.
+   * Absent/0 = never used, same convention as every other optional counter
+   * on this type.
+   */
+  moveUseCounts?: Record<string, number>;
 }
 
 /**

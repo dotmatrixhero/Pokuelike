@@ -5353,3 +5353,102 @@ alone did. New regression test in `support.test.ts` reproduces the exact
 mechanism (a zero-cooldown ally-buff move + permanently-adjacent ally +
 critical thirst) via `tickAgentAction` directly. All 594 engine tests pass,
 determinism unaffected.
+
+## Inspector redesign: grouped layout, gender emoji, moves + skill trees, move-use counts
+
+**Direct ask.** "Can you make when selecting a Pokémon, the details are more
+organized and beautiful. Use emoji for gender, make it easier to see, groups
+rather than rows. Allow me to see the moves, and click into moves to see
+skill trees with their choices lit up. And number of times they used a move
+tbh."
+
+**Decided.** Rewrote `packages/web/src/inspector.ts`'s per-agent panel from a
+flat `.inspect-row` label/value list into five real visual groups — Identity
+(species/level/age chips, type chips colored via `palette.ts`'s
+`TYPE_COLOR`, sex as an emoji-adjacent symbol), Vitals (an HP bar, not just
+text), Needs (hunger/thirst/energy/mate-drive as colored percentage bars),
+Behavior & social (behavior/layer/position/herd/nature/activity
+pattern/disposition/hunt-fight targets), Stats, and Moves. Groups reuse the
+existing `.panel-header`/`.legend-group-title` uppercase-dim-small-letter-
+spaced convention (a new `.inspect-group-title` class styled identically)
+rather than inventing a new heading language — per the direct instruction
+not to invent new visual patterns. The no-selection world-overview view is
+untouched (still the flat row list — it was never the complaint and already
+has its own recently-tuned compact-row spacing fix).
+
+**Gender emoji.** ♂/♀ (plain Unicode symbols, not ZWJ/emoji-presentation
+sequences) rather than the raw word "male"/"female" — these two render
+reliably in every system font without needing an emoji font fallback, unlike
+🚹/🚺 or the harder gendered-people emoji. Still paired with a `title` and
+`aria-label` of the plain word so a screen reader or a hover still gets the
+literal value, not just a symbol.
+
+**Moves list.** Each agent's `agent.moves` now renders as a real list — a
+type-color swatch, name, `type · pwr · acc` summary, and a use count (see
+below) per row. A move with a populated `tree` is clickable; clicking
+toggles an inline skill-tree visualization for that move underneath its row.
+
+**How "which nodes are chosen" is represented — a real investigation, not a
+workaround.** The task description flagged this as possibly unsolved
+anywhere in the data model, needing reconstruction from applied deltas. That
+turned out not to be necessary: `Agent.moveTreeChoices?: Record<string,
+string[]>` (types.ts) already exists and is exactly this — the permanent,
+ordered list of tree-node ids an agent has committed to on a given move,
+maintained by `maybeAutoRespec` (leveling.ts) every time a skill point gets
+auto-spent. The inspector just reads `agent.moveTreeChoices[move.id] ?? []`
+and lights up exactly those node ids in the tree view — no reconstruction,
+no comparing deltas against node definitions. The one real gap: `MoveSpec`
+itself (`agent.moves[i]`) only ever holds the *current respecced spec*, not
+which nodes produced it, so `moveTreeChoices` genuinely is the only source
+of truth for "which nodes" — worth noting for the next person who goes
+looking, since it's easy to assume (wrongly) that it isn't tracked anywhere
+given how deep in `leveling.ts` it's read from.
+
+**Skill-tree layout.** A simple layered/leveled layout: BFS depth from each
+tree's roots (nodes with no `prerequisites`/`prerequisitesAnyOf`), one row
+per depth, nodes within a row sorted by name. Depth for a node with multiple
+prerequisite paths (`prerequisitesAnyOf`) is the *max* of every referenced
+prerequisite's depth + 1, not the first path found — otherwise a node
+reachable via both a short and a long alternate chain could render above a
+node it actually depends on. Verified against a hand-built fixture tree
+with a real crosslink (`prerequisitesAnyOf`) and an `excludes` pair — see
+Verification below. This is deliberately not a real graph-layout algorithm
+(no edge-crossing minimization, no drawn prerequisite lines between nodes) —
+the per-task guidance called that over-engineering for what's needed here;
+`TODO.md` has a follow-up if it's ever worth doing properly.
+
+**Move-use counts.** Nothing tracked this before. Added `Agent.moveUseCounts
+?: Record<string, number>` (types.ts, following the file's existing
+optional-counter convention) and incremented it inside `combat.ts`'s
+`useMove(agent, move)` — the single call site both real move-use paths
+(`predation.ts`'s hit resolution and `support.ts`'s `applySupportMove`)
+already go through, so both get counted for free with no per-call-site
+changes. Pure counter increment, no rng involved, so it can't affect
+determinism — confirmed by a new determinism test (two same-seed 500-tick
+runs produce byte-identical `moveUseCounts` per agent) alongside a direct
+unit test that `useMove` increments the right key. All 596 engine tests
+pass (one pre-existing, unrelated flaky test in `reproduction.test.ts` uses
+an unseeded `createWorld()` and occasionally rolls no offspring that tick —
+confirmed by running it in isolation and re-running the full suite; not
+caused by this change).
+
+**Verification.** No browser test harness exists in this project (see
+TODO.md's existing note) and Playwright/jsdom/happy-dom are not installed
+here, so this was NOT screenshotted or run in a real browser. Instead: (1)
+`pnpm -r typecheck`/`pnpm -r build` both pass clean across all 4 packages,
+producing a real Vite bundle; (2) a throwaway verification script (not
+shipped) ran the actual compiled `renderInspector` against a minimal
+hand-written DOM shim covering exactly the subset of the DOM API this file
+uses (`createElement`/`append(Child)`/`classList`/`style`/`setAttribute`/
+`addEventListener`/`querySelector`/`replaceChildren`), fed it a hand-built
+fixture agent (Bulbasaur, female, Ember with a tree including a real
+`prerequisitesAnyOf` crosslink and an `excludes` pair, 3 of 5 nodes chosen,
+Tackle with no tree), printed the resulting HTML tree, and asserted: use
+counts render, the sex symbol renders with its accessible label, all five
+groups render, chosen nodes get `.skilltree-node-chosen` and unchosen ones
+get `.skilltree-node-dim` (exactly the 3 chosen ids, no more/fewer),
+clicking Ember's row toggles the tree open (verified via a simulated
+`click` dispatch through the shim, not just static rendering), and Tackle
+(no tree) never gets a clickable header. All assertions passed. This
+confirms the DOM construction and click-toggle logic are correct; it does
+not confirm real-browser CSS layout/rendering, which remains unverified.
