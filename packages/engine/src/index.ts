@@ -22,6 +22,7 @@ export * from "./leveling.js";
 export * from "./nature.js";
 export * from "./worldgen.js";
 export * from "./resourceIndex.js";
+export * from "./herdIndex.js";
 export * from "./daynight.js";
 export * from "./weather.js";
 export * from "./shelter.js";

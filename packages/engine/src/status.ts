@@ -3,6 +3,7 @@ import type { PokemonType } from "./typing.js";
 import type { StatKey } from "./nature.js";
 import type { EventLog } from "./events.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
+import { herdMembers } from "./herdIndex.js";
 
 /** Chance a burn spreads to another nearby agent when `MoveSpec.statusSpreads` is set — rolled once per successful `maybeInflictStatus` call, not once per tick. Sim-original magnitude, not canon. */
 export const STATUS_SPREAD_CHANCE = 0.3;
@@ -288,8 +289,12 @@ const HEAL_AURA_RADIUS = 3;
 function applyHealAuraPassive(agent: Agent, world: World): void {
   const fraction = agent.passives?.healAura ?? 0;
   if (agent.alive === false || fraction <= 0 || !agent.herdId) return;
-  for (const other of world.agents) {
-    if (other.alive === false || other.herdId !== agent.herdId || other.layer !== agent.layer) continue;
+  // Scoped to this agent's own herd (herdIndex.ts) rather than a scan of
+  // every living agent in the world — see herdMembers's doc comment for the
+  // real O(agents²) regression this fixes once more than a handful of
+  // agents carry this passive in a large population.
+  for (const other of herdMembers(world, agent.herdId)) {
+    if (other.layer !== agent.layer) continue;
     if (Math.abs(other.pos.x - agent.pos.x) + Math.abs(other.pos.y - agent.pos.y) > HEAL_AURA_RADIUS) continue;
     if (other.hp === undefined || other.maxHp === undefined) continue;
     other.hp = Math.min(other.maxHp, other.hp + other.maxHp * fraction);
