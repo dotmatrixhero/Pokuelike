@@ -1101,3 +1101,52 @@ produce a real story before player mechanics are worth building further.
       the diffed-logs acceptance test, not by inspection). `packages/runner`
       takes an optional seed argument and prints the seed used at the start
       of every run.
+
+## Cross-branch merge notes (parallel session work, not merged yet)
+
+A separate parallel Claude session has been working on
+`claude/pokemon-roguelike-sim-5rje5a` (13 commits diverged from this
+branch as of the check, 26 unique commits on their side) — status effects
+(burn/poison/paralysis/**sleep**/freeze), forced-movement moves
+(knockback/drag/lunge/retreat), and a skill-tree/move-primitives
+expansion. Deliberately kept on a separate branch/path from this session's
+work rather than interleaved. Confirmed intent: **merge eventually**, once
+both sides are far enough along that there's something real to reconcile.
+
+- [ ] **Naming/mechanic collision, already flagged and confirmed intentional
+      by direct request**: this session's new voluntary rest behavior (see
+      DESIGN.md's "Urgency-based need priority, extended thirst margin, and
+      sleep" section — `Agent.asleep`, triggered by low `energy`) and the
+      other branch's combat status effect of the same name (a move that
+      forces a target to sleep, can't act until it wakes) are meant to
+      become **the same underlying mechanic with two different triggers**
+      once merged — not two competing systems needing a rename to coexist.
+      Direct quote: "mechanically i do want them to be the same thing
+      basically. but one is naturally caused by lack of energy and one can
+      be induced by moves." Concretely, once merged: a move-induced sleep
+      should very likely just set the same `agent.asleep` flag (and get the
+      same sitting-duck/no-self-defense treatment already built into
+      `predation.ts`'s `applyPredationInstincts` for the energy-driven
+      case) rather than being a parallel, separately-checked status flag —
+      the actual reconciliation work (does move-induced sleep also restore
+      HP/cooldowns and drain hunger/thirst slower like natural sleep does?
+      does it also get the herd-wake-each-other mechanic? what wakes a
+      status-effect sleep versus a natural one — a fixed duration, a hit,
+      or the same urgency-based conditions?) is real design work for
+      whoever does the merge, not a mechanical rename. Not started — the
+      other branch's status-effects work needs to land first.
+- [ ] **Real file-collision risk when merging**: the other branch's diff
+      touches `needs.ts`, `predation.ts`, `types.ts`, `support.ts`,
+      `simulation.ts`, `combat.ts` — the same files this session's
+      dispersal/thirst/sleep work (see DESIGN.md) is landing on right now.
+      Expect real merge conflicts, not just a clean auto-merge, especially
+      around `BehaviorKind`/`Agent` field additions and
+      `applyPredationInstincts`'s control flow (both branches are adding
+      new early-exit/skip conditions to the same function around the same
+      time). Worth a careful side-by-side read of both diffs before
+      merging, not a blind `git merge`.
+- [ ] `master` is stale relative to both branches (0 commits ahead of this
+      branch, 69 behind) and `Stable-for-Brian` is a heavily diverged,
+      messily-committed branch (34 unique commits, terse/non-descriptive
+      messages) — neither looks relevant to reconcile against, flagging
+      only so it's not mistaken for something that needs attention later.
