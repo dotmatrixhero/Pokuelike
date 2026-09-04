@@ -67,6 +67,10 @@ const EGG_GROUPS_BY_BASE_KEY: Record<string, string[]> = {
   // "underground" thematically; verified against Bulbapedia, so Onix does
   // NOT cross-breed with Diglett/Sandshrew, matching the real games.
   ONIX: ["mineral"],
+  // Real cross-species pair with Bulbasaur AND Charmander (all three
+  // starters share Monster in the real games) as well as with anything
+  // else in Water 1 — verified against Bulbapedia.
+  SQUIRTLE: ["monster", "water1"],
 };
 
 /**

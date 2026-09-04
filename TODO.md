@@ -307,6 +307,16 @@ produce a real story before player mechanics are worth building further.
       pre-existing exp-pacing gap (confirmed on the Bulbasaur line too),
       not something this pass introduced — see the Leveling section below
       for where to pick that up.
+- [x] **First Water-type added: Squirtle** — closes the "zero type-chart
+      representation beyond 6 types" gap found while brainstorming HM-
+      style moves (Surf/Whirlpool/Waterfall were all inert without one).
+      Real Monster+Water1 egg groups (Bulbapedia-verified) make it a real
+      cross-species breeding partner for the existing Bulbasaur/Venusaur
+      line, confirmed live in a run (`squirtle-1 x bulbasaur-2`). Spearow
+      opportunistically killed one with zero new predation code — the
+      dynamic size-based system just worked. Evolved to Wartortle at
+      level 16 in the same run. See DESIGN.md. Electric/Psychic/Ghost-or-
+      Dark candidates confirmed next — see MOVES_DESIGN.md's round four.
 - [x] Mob-fighting, predator risk-assessment, and relocate built on top of
       the above — see DESIGN.md's "Mob-fighting" section and the
       coordination-gap item above for the real (not yet fully successful)

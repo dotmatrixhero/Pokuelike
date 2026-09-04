@@ -115,4 +115,12 @@ export const MOVES: Record<string, MoveSpec> = {
     cooldownTicks: 1,
     range: { min: 0, max: 3 },
   },
+  water_gun: {
+    id: "water_gun",
+    name: "Water Gun",
+    shape: { kind: "line", length: 2 },
+    ...moveCanon("WATER_GUN"),
+    cooldownTicks: 0,
+    range: { min: 0, max: 2 },
+  },
 };

@@ -123,4 +123,14 @@ export const SPECIES: Record<string, SpeciesDef> = {
     isPredator: true,
     moves: ["tackle", "rock_throw"],
   }),
+  squirtle: speciesFromDex("SQUIRTLE", {
+    spriteKey: "squirtle",
+    placeholderColor: "#5090d0",
+    homeLayer: "surface",
+    // Not prey/predator itself — the roster's first Water-type, finally
+    // giving the map's own ponds a resident. Real cross-species breeding
+    // pair with Bulbasaur/Charmander (all three starters share the
+    // Monster egg group in the real games) as well as Water 1.
+    moves: ["tackle", "water_gun"],
+  }),
 };

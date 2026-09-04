@@ -195,6 +195,14 @@ Build order for the species themselves: Water first (existing pond
 infrastructure means it needs zero new terrain, just a new resident —
 same reasoning that put Sunny Day/Growl at the top of the move list).
 
+**Water: shipped.** Squirtle added — see DESIGN.md's "First Water-type"
+section for the real-run evidence (cross-species breeding with the
+Bulbasaur/Venusaur line via the shared Monster egg group, an opportunistic
+Spearow kill with zero new predation code, evolution to Wartortle at
+level 16). Surf/Whirlpool/Waterfall/Water Gun above are now buildable
+against a real species; Water Gun itself is already curated. Electric/
+Psychic/Ghost-or-Dark are next, in that order.
+
 **Declined**: Bug Bite / Pluck (priority looting rights on a corpse) —
 explicitly cut per feedback, not worth the complexity for what it adds.
 

@@ -28,14 +28,15 @@ function fillRect(
  * The one demo world both the browser app and the headless runner show: a
  * Bulbasaur herd near a water hole guarded by Venusaur, a Scyther hunting
  * from its own separate territory, an underground Diglett/Sandshrew colony
- * hunted by Onix, and a canopy Pidgey flock hunted by Spearow — the same
- * predator/prey pattern repeated on all three layers (see DESIGN.md's
- * species-expansion section). Underground/canopy have no food or water
- * tiles of their own, so every agent down there or up there routinely
- * crosses to the surface for both — a deliberate reuse of the existing
- * cross-layer need-seeking mechanic rather than triplicating the resource
- * map per layer. Every agent gets real stats/types/moves via spawnAgent —
- * see DESIGN.md's combat section.
+ * hunted by Onix, a canopy Pidgey flock hunted by Spearow, and a Squirtle
+ * pair at the same water hole as the Bulbasaur herd — the roster's first
+ * Water-type — the same predator/prey pattern repeated on all three layers
+ * (see DESIGN.md's species-expansion section). Underground/canopy have no
+ * food or water tiles of their own, so every agent down there or up there
+ * routinely crosses to the surface for both — a deliberate reuse of the
+ * existing cross-layer need-seeking mechanic rather than triplicating the
+ * resource map per layer. Every agent gets real stats/types/moves via
+ * spawnAgent — see DESIGN.md's combat section.
  *
  * The map used to be almost entirely open floor with exactly one food tile
  * and one water tile — every hungry or thirsty agent in the whole
@@ -187,6 +188,23 @@ export function createDemoWorld(): World {
     sex: "female" as const,
   };
 
-  world.agents.push(...herd, ...guardians, hunter, ...undergroundColony, onix, ...pidgeyFlock, spearow);
+  // Surface: a pair of Squirtle at the northwest pond — the roster's first
+  // Water-type, finally giving the map's own water tiles a resident
+  // instead of just being a generic drink stop. No predator/prey role of
+  // its own yet; opportunistic predation (see predation.ts's isPreyOf)
+  // means an existing hunter could still take one if it's ever small
+  // enough relative to them, same as any other species.
+  const squirtlePair = [
+    {
+      ...spawnAgent("squirtle", "squirtle-0", { x: 1, y: 4 }, 5),
+      sex: "male" as const,
+    },
+    {
+      ...spawnAgent("squirtle", "squirtle-1", { x: 2, y: 4 }, 5),
+      sex: "female" as const,
+    },
+  ];
+
+  world.agents.push(...herd, ...guardians, hunter, ...undergroundColony, onix, ...pidgeyFlock, spearow, ...squirtlePair);
   return world;
 }

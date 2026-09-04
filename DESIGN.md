@@ -1974,6 +1974,49 @@ a new `vitest.config.ts`, confirmed pre-existing and unrelated to any of
 this session's other changes), and the newborn/exploration same-tick
 interaction above.
 
+## First Water-type: Squirtle, and confirmation the roster gap was real
+
+Surfaced while brainstorming HM-style moves (Surf/Whirlpool/Waterfall):
+the roster had zero representation for most of the type chart, and every
+water-themed idea was inert without a species to use it. Squirtle is the
+first fix — real dex data (Water, evolves to Wartortle at level 16, empty
+evolution conditions so the earlier evolution-conditions bug fix doesn't
+affect it), spawned as a pair at the map's existing northwest pond
+(`packages/data/src/scenario.ts`), which until now was just a generic
+drink stop with no resident of its own. Added `water_gun` to the curated
+move roster (real dex numbers: 40 power, 100 accuracy, special) since
+nothing had needed it yet.
+
+**Real egg group, verified against Bulbapedia, with a nice payoff**:
+Squirtle is Monster *and* Water 1 — Monster is the same group Bulbasaur
+and Charmander are already in (all three starters share it in the real
+games), so Squirtle is a real cross-species breeding partner for the
+existing Bulbasaur herd, not just a bystander. Confirmed live in a
+5000-tick run, not just possible in principle: `squirtle-1 x bulbasaur-2`
+and `squirtle-2385-159 x venusaur-0` both produced real Squirtle
+offspring (always the mother's line, per the breeding rules — a Venusaur
+mother crossed with a Squirtle father still produces a Bulbasaur-line
+child, so these are actually Squirtle-mother pairings, not Venusaur/
+Bulbasaur fathering Squirtle).
+
+**No new predation code needed at all** — the dynamic, size-based
+predation system built earlier already treats Squirtle as fair game to
+anything strong enough nearby, with zero species-specific wiring:
+`spearow (spearow-0) killed squirtle (squirtle-315-10)` fired in the same
+run, purely because a Spearow crossed onto the surface, was hungry, and
+Squirtle was small enough. This is the intended payoff of that redesign —
+adding a new species doesn't require touching `HuntRules` at all.
+
+**Squirtle evolved to Wartortle at level 16** in the same run
+(`squirtle-1 evolved: squirtle -> wartortle`), on top of two real
+Bulbasaur→Ivysaur evolutions — confirms the exp-rate overhaul generalizes
+to a brand new species/line, not just the one it was tuned against.
+
+Electric, Psychic, and Ghost-or-Dark candidates are confirmed but not yet
+added — see MOVES_DESIGN.md's round four for the shortlist and why each
+one was picked (each unlocks a cluster of designed moves at once, same
+reasoning that made Squirtle first).
+
 ## Planned: status effects + environmental/utility moves
 
 Requested directly, in two parts: real status effects (burn/poison/
