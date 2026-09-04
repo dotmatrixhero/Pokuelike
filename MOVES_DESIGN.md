@@ -316,6 +316,28 @@ interesting enough to bother with. A single strong node at the end of a
 branch (what Ember's v1 tree already does) is capstone enough. Power moves
 get a couple of these strung along the spine, not just one at the very end.
 
+**Branches aren't isolated spokes — add crosslinks, and it costs nothing
+new.** Three independent chains meeting only at the hub reads as three tiny
+trees wearing one move's name, not one tree — and it means the only real
+decision is "which one branch." A crosslink is a small node whose
+`prerequisites` names one node from each of two *different* branches (e.g.
+Vine Whip's "Crossroots" needs one node from Aggression AND one from
+Boldness) — since branches are purely an authoring grouping, not something
+the engine's flat `Record<string, MoveTreeNode>` + `prerequisites` model
+knows about, this needs zero schema changes, unlike `excludes`. Put one
+crosslink between each adjacent pair of branches (a triangle, for a 3-branch
+tree) at a radius/tier where each side already has a foothold. This is what
+actually delivers "customizability" — a real hybrid route through the mesh,
+not just picking one lane.
+
+**Put a notable early, not just at the end of a long chain.** A tree that
+saves every named effect for deep investment makes the *only* real choice
+"which branch to commit to," made once, on faith, before you've felt
+anything. Lead each branch with a notable as (or near) its very first node
+— filler in the middle, forks/keystones at the tips — so a route through
+the mesh is built from real choices made at multiple points along the way,
+not one branch-select decision followed by a long, uneventful walk.
+
 **Filler nodes are good, not padding to be ashamed of.** Small, low-drama
 nodes (+3% power, -1 cooldown, +5% status chance) between the real decision
 points give the tree size and a sense of "always making progress" — very
