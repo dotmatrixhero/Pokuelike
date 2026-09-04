@@ -15,7 +15,8 @@ export function createTile(terrain: TerrainKind, elevation = 0): Tile {
     walkable: isWalkableTerrain(terrain),
     elevation,
     stock: terrain === "food" ? 1 : undefined,
-    concealment: terrain === "bush" ? true : undefined,
+    concealment: terrain === "bush" || terrain === "shelter" ? true : undefined,
+    vacantTicks: terrain === "shelter" ? 0 : undefined,
   };
 }
 
@@ -68,7 +69,8 @@ export function setTile(
   tile.stock = terrain === "food" || terrain === "flora" ? 1 : undefined;
   tile.growth = terrain === "seedling" ? 0 : undefined;
   tile.flavor = terrain === "food" || terrain === "flora" ? flavor : undefined;
-  tile.concealment = terrain === "bush" ? true : undefined;
+  tile.concealment = terrain === "bush" || terrain === "shelter" ? true : undefined;
+  tile.vacantTicks = terrain === "shelter" ? 0 : undefined;
   if (elevation !== undefined) tile.elevation = elevation;
   invalidateResourceIndex(world);
 }

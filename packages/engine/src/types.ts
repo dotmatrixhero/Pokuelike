@@ -104,6 +104,14 @@ export type ActivityPattern = "diurnal" | "nocturnal" | "crepuscular" | "catheme
  * (see `Tile.concealment`). "sand"/"mud" are walkable but slow movement
  * (see support.ts's `terrainSpeedMultiplier`). All five are placed by
  * procedural generation — see worldgen.ts.
+ *
+ * "shelter" is a player-agent-built structure (see shelter.ts/DESIGN.md's
+ * "Shelter-building" section), never placed by `generateWorld` — walkable,
+ * grants the exact same concealment as "bush" (`Tile.concealment`, reused
+ * verbatim rather than a parallel mechanism), and counts as real cover for
+ * weather.ts's `hasCoverNearby` (reducing storm-exposure accumulation)
+ * alongside "tree"/"bush". Reverts to "floor" on its own if left
+ * unattended for a long sustained stretch — see `Tile.vacantTicks`.
  */
 export type TerrainKind =
   | "floor"
@@ -117,7 +125,8 @@ export type TerrainKind =
   | "boulder"
   | "bush"
   | "sand"
-  | "mud";
+  | "mud"
+  | "shelter";
 
 /**
  * Three layers share one x,y footprint. A species is native to one layer
@@ -162,6 +171,16 @@ export interface Tile {
    * the renderer), no gameplay effect. See flora.ts's FOOD_FLAVORS/FLORA_FLAVORS.
    */
   flavor?: string;
+  /**
+   * "shelter" tiles only: consecutive ticks since any living agent was last
+   * within `shelter.ts`'s abandonment-check radius of this tile — reset to 0
+   * the moment someone's back in range, reverts the tile to "floor" once it
+   * crosses `SHELTER_ABANDON_TICKS`. Same tile-level counter/decay shape as
+   * flora.ts's `stock` (a per-tile timer checked once per tick in a single
+   * scan, not per-agent), just counting "how long alone" instead of "how
+   * much life left." Set to 0 at construction, `undefined` once reverted.
+   */
+  vacantTicks?: number;
 }
 
 /** Needs decay over time and drive an agent's behavior via simple utility AI. */
@@ -184,7 +203,8 @@ export type BehaviorKind =
   | "deliverFood"
   | "carryAlly"
   | "explore"
-  | "disperse";
+  | "disperse"
+  | "buildShelter";
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
 export interface InventoryItem {
@@ -456,6 +476,39 @@ export interface Agent {
    * that never set it. See daynight.ts/DESIGN.md's Phase 2.
    */
   activityPattern?: ActivityPattern;
+
+  // --- Shelter-building (see DESIGN.md's "Shelter-building" section, shelter.ts) ---
+
+  /**
+   * Denormalized from `SpeciesDef.buildsShelter` at spawn time
+   * (packages/data/src/spawn.ts), the same pattern as `activityPattern`
+   * above — so shelter.ts's engine-side checks never need to import
+   * `@pokuelike/data` (which itself depends on `@pokuelike/engine`, so the
+   * reverse import would be circular). Absent/false = this individual never
+   * attempts shelter-building, no matter how idle/settled it is.
+   */
+  buildsShelter?: boolean;
+  /**
+   * Where a shelter-building agent is headed (still traveling) or already
+   * standing (mid-construction) — set once by `shelter.ts`'s
+   * `maybeTriggerShelterBuilding` and cleared only on completion or
+   * cancellation (the site turned out to no longer be bare floor by the
+   * time this agent arrived). Distinct from `dispersalTarget`/`exploreTarget`
+   * for the same reason those stay separate from each other: independent
+   * concepts that could in principle coexist, even though the current
+   * priority ordering in needs.ts's `tickAgentAction` never actually lets
+   * that happen. Whether the agent has arrived yet is read directly off
+   * `agent.pos` vs. this field, rather than a separate boolean — one less
+   * piece of state that could drift out of sync.
+   */
+  shelterTarget?: Vec2;
+  /**
+   * Ticks spent standing at `shelterTarget` actually building, once arrived
+   * — the real multi-tick time investment DESIGN.md's "Shelter-building"
+   * section asks for (not instant on arrival). Only starts counting once
+   * `agent.pos` matches `shelterTarget`; absent/0 while still traveling.
+   */
+  shelterBuildTicks?: number;
 }
 
 /**

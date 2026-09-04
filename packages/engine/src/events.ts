@@ -251,6 +251,23 @@ export type SimEvent =
       /** Whether `toHerd` was an existing herd the agent joined or a fresh one it founded — see dispersal.ts's `finishDispersal`. */
       outcome: "joined" | "founded";
       reason: DispersalReason;
+    }
+  | {
+      kind: "shelterBuilt";
+      tick: number;
+      /** The agent whose build-time investment completed the structure — see shelter.ts's `applyShelterBuilding`. */
+      agentId: string;
+      species: string;
+      /** Absent for a solitary (herdless) builder. */
+      herdId?: string;
+      layer: Layer;
+      pos: Vec2;
+    }
+  | {
+      kind: "shelterAbandoned";
+      tick: number;
+      layer: Layer;
+      pos: Vec2;
     };
 
 /**

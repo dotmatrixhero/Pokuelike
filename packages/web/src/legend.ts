@@ -14,6 +14,7 @@ const TERRAIN_LABEL: Record<TerrainKind, string> = {
   bush: "bush (concealment)",
   sand: "sand",
   mud: "mud",
+  shelter: "shelter (concealment + storm cover)",
 };
 
 /** Static — the palette doesn't change at runtime, so this renders once rather than every frame. */

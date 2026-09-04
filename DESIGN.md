@@ -3341,6 +3341,91 @@ lifecycle actually lands, without this feature waiting on it.
   and abandonment threshold are sim-original tuning guesses like everything
   else here, to judge against a real run.
 
+#### Built — implementation notes and real-run findings
+
+Built as `packages/engine/src/shelter.ts` plus the wiring listed above.
+Concrete scope calls and tuning constants, and what a real seed-42 run
+actually showed:
+
+- **Species**: only `diglett` and `sandshrew` got `buildsShelter: true` —
+  the task brief's own two examples, and the only genuinely literal
+  burrowers in the current roster. Judged and rejected the rest by the same
+  standard rather than defaulting to "every underground/enclosed species":
+  Onix tunnels through solid rock it's already surrounded by rather than
+  constructing a discrete structure; Pidgey/Spearow are ordinary songbirds/
+  raptors with no mainline nest-building flavor text; Bulbasaur/Venusaur/
+  Charmander/Squirtle have no burrowing/nesting flavor at all. See
+  `packages/data/src/species.ts`'s own top-of-roster comment for the full
+  per-species reasoning.
+- **Build-site scoring**: the simpler of the two offered options — a plain
+  random pick at least `SHELTER_MIN_BUILD_DISTANCE` (8, matching
+  `migration.ts`'s own relocation floor) from the builder's *own* position,
+  constrained to still-bare `"floor"` tiles, not `pickDestination`'s
+  abundance-sampling scoring. A shelter's value lives at its own tile
+  (concealment/storm-cover), not at the destination's local abundance the
+  way a migration or dispersal target's value does, so abundance-weighted
+  scoring would be optimizing the wrong signal.
+- **Build-time investment**: `SHELTER_BUILD_TICKS = 40` (same order of
+  magnitude as `flora.ts`'s `MATURATION_TICKS`). **Abandonment**:
+  `SHELTER_ABANDON_RADIUS = 6`, `SHELTER_ABANDON_TICKS = 600` — long enough
+  relative to build time that a shelter doesn't decay away almost as fast
+  as it was built.
+- **Priority tier — corrected mid-implementation by a real run, not a
+  hypothetical.** The first version copied `dispersal.ts`'s "commits no
+  matter what, real risk-taking" shape: once `Agent.shelterTarget` was set,
+  it ran to completion regardless of hunger/thirst, exactly like a natal
+  disperser. A real seed-42 run immediately showed why that copy was wrong
+  for *this* feature: all 4 of the demo scenario's `buildsShelter` founders
+  (2 Diglett, 2 Sandshrew) went idle within the first 5 ticks, every one of
+  them committed to the multi-hundred-tick round trip immediately, and 3 of
+  the 4 starved to death by tick 166 because the task never broke off to
+  eat or drink — the round trip plus build time routinely outlasts this
+  sim's ~150-200 tick starvation window. The direct instruction ("not
+  overriding survival instincts") already called for better than this; the
+  fix makes the task **pausable**: `needs.ts`'s `tickAgentAction` only
+  continues it while the agent reads as `chooseBehavior`-idle, falling
+  through to ordinary needs-driven behavior (without losing `shelterTarget`/
+  `shelterBuildTicks` progress) the instant something more urgent shows up,
+  resuming later once satisfied again — the same shape `applyExploration`
+  already uses, not dispersal's.
+- **Honest finding even after that fix**: the pause fix stopped agents from
+  starving *mid-build*, but a second, follow-up seed-42 run (3000 ticks)
+  showed the feature is still a net survival cost in this particular seed's
+  opening state, not a wash. Baseline (this same seed, feature disabled):
+  one founder dies early to a Spearow camping the underground/surface
+  crossing point (a pre-existing, unrelated predation hazard — confirmed by
+  reproducing it with the feature off too), but the other three survive for
+  thousands of ticks and produce multiple generations of offspring (new
+  diglett-198/298/390, sandshrew-188/275/384/964/1112 lineages appear before
+  the run ends). With shelter-building enabled: all 4 founders are dead by
+  tick 783, and zero offspring were ever produced — worse outcomes across
+  the board, not just a slower version of the same story. No `shelterBuilt`
+  event fired at all in that run; the furthest anyone got was ~37 of the 40
+  required build ticks before being pulled away again. The likely mechanism
+  (not fully isolated, flagged here rather than guessed at further): a
+  build site is picked purely by distance-floor from the builder's current
+  position, with no preference for anywhere resource-rich or already-safe —
+  so the task actively pulls a Diglett/Sandshrew away from the clustered
+  food/water/herd-mate safety net right at the moment a nearby predator is
+  most dangerous, the opposite of what "reduces predation risk via
+  concealment" is supposed to buy them. A synthetic, controlled test (see
+  `shelter.test.ts`'s end-to-end case, on a larger map with well-distributed
+  resources rather than this seed's tight single-crossing-point layout)
+  *does* complete a real build in ~200 ticks with no death — so the
+  mechanism itself works; it's specifically exposed by a hostile opening
+  layout like this seed's, not broken outright.
+- **Still open, flagged rather than fixed further here** (this pass's scope
+  was shelter-building's core mechanism, not a full tuning pass): whether
+  build-site selection should prefer sites nearer existing resources/herd
+  range (closer to `pickDestination`'s abundance-aware scoring after all,
+  just without its `awayFrom`/`preferCover` terms), whether
+  `SHELTER_MIN_BUILD_DISTANCE` is simply too far for a species already
+  living somewhere this predation-exposed, or whether the real fix is
+  upstream of this feature entirely (the Spearow-camps-the-only-crossing-
+  point dynamic looks like its own pre-existing tuning gap, independent of
+  shelter-building). Judge against further real runs, per this project's
+  standing practice.
+
 ### Herd status: level buys real standing, not just personal stats
 
 Direct ask: "being higher level gives you respect or something. Something

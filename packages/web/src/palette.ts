@@ -45,6 +45,7 @@ export const TERRAIN_BG: Record<TerrainKind, Rgb> = {
   bush: [22, 46, 26],
   sand: [92, 80, 50],
   mud: [42, 34, 22],
+  shelter: [64, 50, 34],
 };
 
 export const TERRAIN_FG: Record<TerrainKind, Rgb> = {
@@ -60,6 +61,7 @@ export const TERRAIN_FG: Record<TerrainKind, Rgb> = {
   bush: [110, 190, 110],
   sand: [214, 194, 140],
   mud: [110, 90, 60],
+  shelter: [196, 158, 108],
 };
 
 /** Per-flavor overrides for "food"/"flora" tiles — see flora.ts's FOOD_FLAVORS/FLORA_FLAVORS. */
@@ -87,6 +89,7 @@ export const TERRAIN_GLYPH: Record<TerrainKind, string> = {
   bush: "^",
   sand: ":",
   mud: "=",
+  shelter: "h",
 };
 
 export const FLAVOR_GLYPH: Record<string, string> = {

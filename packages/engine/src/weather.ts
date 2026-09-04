@@ -230,22 +230,28 @@ export function activeWeatherAt(world: World, pos: Vec2): WeatherCell | undefine
 const COVER_SCAN_RADIUS = 3;
 
 /**
- * Is there real forest/canopy-style cover (a "tree" or "bush" tile) within
- * `COVER_SCAN_RADIUS` of `pos`? A direct bounded-box terrain scan (same
- * "small local box, not a full-grid scan" style as flora.ts's
- * `isNearSunbeam`), not a biome-blend lookup — DESIGN.md's storm-exposure
- * mechanic is about literal physical shelter (an agent standing under an
- * actual tree), which is a tile-level fact; `pickDestination`'s
+ * Is there real forest/canopy-style cover (a "tree", "bush", or player-built
+ * "shelter" tile) within `COVER_SCAN_RADIUS` of `pos`? A direct bounded-box
+ * terrain scan (same "small local box, not a full-grid scan" style as
+ * flora.ts's `isNearSunbeam`), not a biome-blend lookup — DESIGN.md's
+ * storm-exposure mechanic is about literal physical shelter (an agent
+ * standing under an actual tree), which is a tile-level fact; `pickDestination`'s
  * `preferCover` term (herdMigration.ts), by contrast, deliberately *does*
  * use biome data, since picking a *destination region* is exactly the kind
  * of "which neighborhood is this" question biome blending answers well —
  * two different questions, two different (documented) data sources.
+ *
+ * "shelter" (shelter.ts/DESIGN.md's "Shelter-building" section) counts here
+ * for exactly the same reason "tree"/"bush" do: a real, physical structure
+ * an agent can stand under — this is the entire real mechanism behind
+ * shelter's "reduces storm-exposure accumulation" payoff, reused verbatim
+ * rather than a second, parallel storm-exposure check.
  */
 export function hasCoverNearby(world: World, layer: Layer, pos: Vec2): boolean {
   for (let dy = -COVER_SCAN_RADIUS; dy <= COVER_SCAN_RADIUS; dy++) {
     for (let dx = -COVER_SCAN_RADIUS; dx <= COVER_SCAN_RADIUS; dx++) {
       const terrain = tileAt(world, layer, pos.x + dx, pos.y + dy)?.terrain;
-      if (terrain === "tree" || terrain === "bush") return true;
+      if (terrain === "tree" || terrain === "bush" || terrain === "shelter") return true;
     }
   }
   return false;

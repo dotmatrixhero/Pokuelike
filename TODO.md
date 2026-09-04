@@ -19,15 +19,23 @@ work resumes:
    timescale (tens of thousands of ticks, a geological-feeling process
    distinct from the fast weather-cell overlay), and vice versa for
    sustained rain. This is the foundation the other two build on.
-2. **Construction/shelter-building** — a real mechanic, not just better use
-   of existing natural cover (direct answer when asked): certain species
-   (nest/den-building temperament — likely tied to high sociability/low
-   boldness) build a persistent structure near their herd's home range,
-   consuming real time/investment, creating a new terrain kind with a real
-   mechanical payoff (concealment and/or reduced storm exposure — ties into
-   the existing storm-exposure-to-migration-trigger and carryAlly's
-   rescue-destination concepts). Decays if abandoned, same lifecycle
-   pattern as (1).
+2. ~~**Construction/shelter-building**~~ — **built**, decoupled from this
+   combined design after all (see DESIGN.md's "Shelter-building" section):
+   it turned out to need only a new terrain kind + a construction behavior,
+   not (1)'s tree growth/decay machinery first. Species-tied (`diglett`/
+   `sandshrew` only), real travel + build-time investment, real concealment
+   + storm-exposure payoffs (both literally reusing bush's/`hasCoverNearby`'s
+   existing mechanisms), decay-if-abandoned. A real seed-42 run surfaced a
+   genuine tuning gap worth tracking as its own follow-up rather than
+   closing here: even after correcting the priority tier to be pausable
+   (not dispersal's "commits no matter what"), the feature was still a net
+   survival cost for this seed's Diglett/Sandshrew founders — see DESIGN.md's
+   "Built" subsection for the full comparison. Candidate next step:
+   resource/safety-aware build-site scoring instead of a plain distance
+   floor, or investigating the pre-existing Spearow-camps-the-crossing-point
+   hazard the finding also surfaced. The fancier growth/decay/storm-
+   interaction layer terrain lifecycle (1) would add can still attach to
+   the shipped `"shelter"` terrain kind later, unblocked by any of this.
 3. **Overworld: the current map becomes one region in a larger graph** —
    the "World scale: layers, elevation, and regions" section from early in
    this project, finally built. Decided: full simulation for the focused/

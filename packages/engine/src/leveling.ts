@@ -86,6 +86,15 @@ export interface LevelingProfile {
    * added rather than pulled from the import. See DESIGN.md.
    */
   eggGroups?: string[];
+  /**
+   * Mirrors `SpeciesDef.buildsShelter` (packages/data) — set here so
+   * `ensureCombatProfile` can denormalize it onto a newborn exactly like
+   * `spawnAgent` already does for a founder, otherwise a shelter-building
+   * lineage's offspring would silently lose the trait the instant they're
+   * born (an agent's own `buildsShelter` is otherwise only ever set once,
+   * at whichever creation site actually built it — see shelter.ts).
+   */
+  buildsShelter?: boolean;
 }
 
 export interface LevelingContext {
@@ -269,6 +278,7 @@ export function ensureCombatProfile(agent: Agent, ctx?: LevelingContext): void {
   agent.maxHp = stats.maxHp;
   agent.hp = stats.maxHp;
   agent.types = profile.types;
+  agent.buildsShelter = agent.buildsShelter ?? profile.buildsShelter;
 
   agent.knownMoves = agent.knownMoves ?? [];
   agent.moves = agent.moves ?? [];

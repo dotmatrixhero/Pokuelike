@@ -2,6 +2,7 @@ import type { Agent, HuntRules, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import { growFlora, maybeDropSeed } from "./flora.js";
+import { decayShelters } from "./shelter.js";
 import { updateHerdMigrations } from "./herdMigration.js";
 import type { LevelingContext } from "./leveling.js";
 import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, coldSnapSpeedMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
@@ -160,6 +161,9 @@ export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?:
     }
   }
   growFlora(world, log, rng);
+  // Once per tick, not once per agent — same "world-level system, one pass"
+  // shape as growFlora above (see shelter.ts's `decayShelters`).
+  decayShelters(world, log);
   pruneStaleCorpses(world);
 }
 

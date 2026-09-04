@@ -1,6 +1,7 @@
 import type { GrowthRateKey, LevelingContext, LevelingProfile, MoveSpec } from "@pokuelike/engine";
 import { SPECIES_DEX, SPECIES_DEX_BY_KEY, MOVE_DEX_BY_KEY } from "./dex/index.js";
 import { MOVES, moveCanon } from "./moves.js";
+import { SPECIES } from "./species.js";
 
 /** Reverse lookup: PokeRogue numeric species id -> its dex key, for resolving evolution targets. */
 const SPECIES_KEY_BY_ID: Record<number, string> = Object.fromEntries(SPECIES_DEX.map((s) => [s.id, s.key]));
@@ -91,6 +92,16 @@ function profileFromDexEntry(speciesId: string): LevelingProfile | undefined {
     baseExp: entry.baseExp,
     levelMoves: entry.levelMoves,
     eggGroups: EGG_GROUPS_BY_BASE_KEY[baseSpeciesOf(speciesId).toUpperCase()] ?? [],
+    // `speciesId` here is always lowercase (`Agent.species`'s convention —
+    // see `speciesFromDex`), matching `SPECIES`'s own keys directly. Only
+    // the curated roster's own entries (not every one of the dex's 1083
+    // species) ever carry `buildsShelter` — an evolved form not itself in
+    // `SPECIES` (e.g. a hypothetical Dugtrio, absent from the current
+    // roster) reads as `undefined`/false here, the same known "denormalized
+    // at spawn, doesn't follow evolution" scope this sim already accepts
+    // for `activityPattern` (see `Agent.activityPattern`'s doc comment) —
+    // not a new gap, an existing one this feature doesn't attempt to close.
+    buildsShelter: SPECIES[speciesId.toLowerCase()]?.buildsShelter,
     // Level-gated evolutions only — item/trade/friendship evolutions are
     // explicitly deferred, see DESIGN.md. Real bug caught while adding Onix:
     // `level` alone isn't sufficient — PokeRogue's dex stamps a `level: 1`

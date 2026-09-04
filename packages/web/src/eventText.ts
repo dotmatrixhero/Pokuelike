@@ -63,11 +63,23 @@ export function formatEvent(event: SimEvent): string {
       return `${event.weatherType} ${event.phase === "began" ? "moves in" : "clears"} near (${event.center.x},${event.center.y})`;
     case "dispersed":
       return `${event.species} (${event.agentId}) left ${event.fromHerd} and ${event.outcome === "joined" ? `joined ${event.toHerd}` : `founded ${event.toHerd}`} (${event.reason})`;
+    case "shelterBuilt":
+      return `${event.species} (${event.agentId}) finished building a shelter at (${event.pos.x},${event.pos.y})`;
+    case "shelterAbandoned":
+      return `a shelter at (${event.pos.x},${event.pos.y}) was abandoned and fell into disrepair`;
   }
 }
 
-/** The event kinds that make a story, per the maintainer's ask — get distinct icon/color/size treatment in the log panel. Everything else renders minimal. */
-export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge", "dispersed"]);
+/**
+ * The event kinds that make a story, per the maintainer's ask — get distinct
+ * icon/color/size treatment in the log panel. Everything else renders
+ * minimal. `shelterBuilt` earns a spot here the same way `dispersed` did: a
+ * real milestone completing a multi-tick agent-driven task, not routine
+ * environment upkeep. `shelterAbandoned`, by contrast, reads more like
+ * `floraChanged`'s "died" stage — ambient world bookkeeping, not a story
+ * beat — so it goes to `NOISE_KINDS` below instead.
+ */
+export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge", "dispersed", "shelterBuilt"]);
 
 /**
  * Routine environment/upkeep chatter — real events, just not "the Pokemon
@@ -86,6 +98,7 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
   "daybreak",
   "weatherChanged",
   "gainedSkillPoint",
+  "shelterAbandoned",
 ]);
 
 export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
@@ -96,6 +109,7 @@ export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   evolved: "✨", // sparkles
   diedOfAge: "\u{1F480}", // skull
   dispersed: "\u{1F9ED}", // compass
+  shelterBuilt: "\u{1F3E0}", // house
 };
 
 export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
@@ -106,6 +120,7 @@ export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
   evolved: "#c792ea",
   diedOfAge: "#9aa0ab",
   dispersed: "#6ec6ff",
+  shelterBuilt: "#c9a876",
 };
 
 /**

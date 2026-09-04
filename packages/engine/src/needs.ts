@@ -8,6 +8,7 @@ import { tickCooldowns } from "./combat.js";
 import { applyHerdCohesion } from "./herding.js";
 import { migrate } from "./migration.js";
 import { applyDispersal, maybeTriggerDispersal } from "./dispersal.js";
+import { applyShelterBuilding, maybeTriggerShelterBuilding } from "./shelter.js";
 import { logBehaviorChange, type EventLog } from "./events.js";
 import {
   EXP_ON_CONSUME,
@@ -316,6 +317,39 @@ export function tickAgentAction(
   if (agent.dispersalTarget) {
     applyDispersal(world, agent, log);
     return;
+  }
+
+  // Shelter-building (shelter.ts) — deliberately NOT given dispersal's
+  // "commits no matter what" priority: a real run at seed 42 confirmed why.
+  // With that first design (checked/continued unconditionally, like
+  // dispersal), all 4 of the demo scenario's buildsShelter founders
+  // (2 Diglett, 2 Sandshrew) either starved mid-build or got caught by a
+  // predator while traveling to a build site far from any resource, wiping
+  // out the entire underground lineage before tick 170 — every one of them
+  // committed to the multi-hundred-tick round trip the instant they first
+  // went idle, then never broke off to eat/drink because the check was
+  // unconditional. Direct instruction is explicit that this feature should
+  // NOT override survival instincts, so an in-progress task pauses (without
+  // losing its travel/build progress — `Agent.shelterTarget`/
+  // `shelterBuildTicks` are left untouched) the moment a real need becomes
+  // urgent, and falls through to ordinary needs-driven behavior for as many
+  // ticks as it takes to resolve — the same "checked fresh every tick, drop
+  // out the instant something more urgent shows up" shape `applyExploration`
+  // already uses below, not dispersal's shape. The trigger itself is gated
+  // the same way: only an agent that's currently satisfied goes to start a
+  // build in the first place.
+  if (agent.shelterTarget) {
+    if (chooseBehavior(agent.needs) === "idle") {
+      applyShelterBuilding(world, agent, log);
+      return;
+    }
+    // Paused, not abandoned — resumes on a later tick once satisfied again.
+  } else if (chooseBehavior(agent.needs) === "idle") {
+    maybeTriggerShelterBuilding(world, agent, rng);
+    if (agent.shelterTarget) {
+      applyShelterBuilding(world, agent, log);
+      return;
+    }
   }
 
   // Continue an in-progress exploration walk as long as nothing more urgent

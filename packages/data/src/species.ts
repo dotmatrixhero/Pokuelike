@@ -31,6 +31,17 @@ export interface SpeciesDef {
    * unspecified below doesn't silently change behavior.
    */
   activityPattern?: ActivityPattern;
+  /**
+   * True if this species deliberately builds a persistent "shelter" tile
+   * near its herd's home range — see `@pokuelike/engine`'s shelter.ts and
+   * DESIGN.md's "Shelter-building" section. Species-tied, not universal, per
+   * direct instruction: judged per-species on a burrowing/nesting
+   * temperament, the same standard as `isPredator`/`activityPattern` rather
+   * than flipped on for the whole roster. Absent/false = this species never
+   * attempts it, denormalized onto `Agent.buildsShelter` at spawn
+   * (spawn.ts), same pattern as `activityPattern`.
+   */
+  buildsShelter?: boolean;
 }
 
 /**
@@ -60,9 +71,24 @@ export function speciesFromDex(dexKey: string, sim: SimSpeciesFields): SpeciesDe
     isPredator: sim.isPredator,
     moves: sim.moves,
     activityPattern: sim.activityPattern,
+    buildsShelter: sim.buildsShelter,
   };
 }
 
+/**
+ * `buildsShelter` roster call (see DESIGN.md's "Shelter-building" section):
+ * only diglett/sandshrew get it, the task brief's own examples and the two
+ * genuinely literal burrowers in the current roster. Everyone else judged
+ * and rejected on the same "real burrowing/nesting temperament, not just
+ * living somewhere enclosed" standard: Onix tunnels through solid rock IN
+ * PLACE (it doesn't construct anything, it just moves through stone it's
+ * already surrounded by) rather than building a discrete structure; Pidgey/
+ * Spearow are ordinary songbirds/raptors with no mainline nest-building
+ * flavor text to point to (unlike a stork or weaverbird, say); Bulbasaur/
+ * Venusaur/Charmander/Squirtle have no burrowing/nesting flavor at all.
+ * Deliberately conservative rather than "every underground/enclosed-space
+ * species gets it" — species-tied per direct instruction, not universal.
+ */
 export const SPECIES: Record<string, SpeciesDef> = {
   bulbasaur: speciesFromDex("BULBASAUR", {
     spriteKey: "bulbasaur",
@@ -101,6 +127,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // The archetypal burrowing mole — avoids the surface (and its daylight)
     // entirely, most active well after dark. The task brief's own example.
     activityPattern: "nocturnal",
+    // Digs its own tunnels for a living (mainline flavor text: lives
+    // "about one yard underground") — the single most literal
+    // shelter-building temperament in the whole roster.
+    buildsShelter: true,
   }),
   venusaur: speciesFromDex("VENUSAUR", {
     spriteKey: "venusaur",
@@ -149,6 +179,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // A desert dweller that mainline flavor text has curling up and hiding
     // from daytime heat — nocturnal, foraging once it cools off.
     activityPattern: "nocturnal",
+    // "Curls up and hides" (mainline flavor text) reads as real den-digging
+    // behavior, not just a burrowing neighbor riding on Diglett's coattails
+    // — the roster's other obvious burrower.
+    buildsShelter: true,
   }),
   onix: speciesFromDex("ONIX", {
     spriteKey: "onix",

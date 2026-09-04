@@ -37,6 +37,7 @@ const TERRAIN_GLYPH: Record<TerrainKind, string> = {
   bush: "^",
   sand: ":",
   mud: "=",
+  shelter: "h",
 };
 
 const TERRAIN_BG: Record<TerrainKind, Rgb> = {
@@ -52,6 +53,7 @@ const TERRAIN_BG: Record<TerrainKind, Rgb> = {
   bush: [22, 46, 26],
   sand: [92, 80, 50],
   mud: [42, 34, 22],
+  shelter: [64, 50, 34],
 };
 
 const TERRAIN_FG: Record<TerrainKind, Rgb> = {
@@ -67,6 +69,7 @@ const TERRAIN_FG: Record<TerrainKind, Rgb> = {
   bush: [110, 190, 110],
   sand: [214, 194, 140],
   mud: [110, 90, 60],
+  shelter: [196, 158, 108],
 };
 
 /**

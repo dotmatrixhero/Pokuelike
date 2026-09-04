@@ -24,3 +24,4 @@ export * from "./worldgen.js";
 export * from "./resourceIndex.js";
 export * from "./daynight.js";
 export * from "./weather.js";
+export * from "./shelter.js";
