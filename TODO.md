@@ -1739,3 +1739,46 @@ not something this pathfinding pass itself caused or is positioned to fix.
       shares the surface's via the existing redirect; canopy has none at
       all), so real contention on those two layers stays unobserved until
       that changes.
+
+## Grazing scars: sustained heavy grazing degrades a tile — built, see DESIGN.md
+- [x] Direct pitch, approved directly ("Yeah that sounds good" — one of three
+      environment-shaping ideas offered, alongside trampled paths and
+      territory marking). `Tile.grazingPressure`/`Tile.overgrazed`
+      (types.ts), accumulated via `flora.ts`'s new `recordGrazing` at both
+      real consumption sites (needs.ts self-feeding, support.ts herd
+      food-delivery pickup), decayed every tick in `growFlora` regardless of
+      terrain. Crossing a hysteresis-gated threshold suppresses (not zeroes)
+      germination/maturation and outright refuses spread onto the scarred
+      tile, self-fading back to normal once grazing pressure decays with
+      real rest. New `floraChanged` stages (`"overgrazed"`/`"recovered"`),
+      filed as `NOISE_KINDS` ambient bookkeeping like the rest of
+      `floraChanged`. 9 new `flora.test.ts` tests, 652 engine tests total,
+      all passing including the unmodified determinism acceptance test.
+- [x] First tuning pass was measurably too weak (only 3 tiles ever went
+      overgrazed across a real 3-seed 3000-tick run) — retuned against that
+      same real data (slower decay, lower threshold) to 9/20/1 tiles
+      overgrazed across the same 3 seeds, zero starvation deaths on all
+      three, confirmed via a real feature-on/feature-off A/B (not just
+      before/after correlation) that the effect is real and attributable.
+      See DESIGN.md for the full numbers and the diagnosis of why the first
+      pass under-fired.
+- [ ] **Real follow-up, not built**: no distinct map/renderer treatment for
+      an overgrazed tile — it still looks like ordinary floor. Worth
+      revisiting if scars turn out common enough in practice to be worth a
+      glyph/tint, once `packages/web`'s tile renderer is being touched for
+      something else anyway.
+- [ ] **Real follow-up, not built**: migration correlation was only tested
+      indirectly (herdMigrating event counts, not a controlled trigger).
+      This session's own herdMigration.ts already has a `"scarcity"` trigger
+      driven by local food availability, not directly by `Tile.overgrazed` —
+      an overgrazed tile currently only discourages migration *indirectly*,
+      by starving out the scarcity check's food-availability read. Wiring
+      `Tile.overgrazed` as a direct migration-scoring input (the way
+      `MigrationReason` already has room for a dedicated reason string) is a
+      real, un-built next step if grazing scars turn out to need a stronger
+      migration nudge than the indirect path currently gives them.
+- [ ] Seed 7's overgrazing events all clustered in the last ~700 of 3000
+      ticks (tracks that seed's late population boom, not chased down as a
+      suspected bug — see DESIGN.md's "Explicitly not done" for this
+      feature) — flagged, not resolved, same as this file's other
+      honestly-reported-but-unconfirmed seed-specific observations.

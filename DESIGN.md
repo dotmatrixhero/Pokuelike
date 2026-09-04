@@ -6169,3 +6169,167 @@ than showing a new predator-specific regression.
   existing mob-fighting shape. Deliberately not attempted: mob-scale herd
   conflict is a much bigger new death-risk surface to validate safely, and
   the individual-pair version already satisfies the direct ask.
+
+## Grazing scars: sustained heavy grazing degrades a tile beyond ordinary depletion
+
+Direct user pitch, approved directly ("Yeah that sounds good"): world-shaping
+behavior beyond shelter-building — species that leave a real, lasting mark on
+the land they use. Three ideas were pitched (grazing scars, trampled paths,
+territory marking); the user picked grazing scars. Explicit ask: sustained
+heavy grazing by a herd should leave a lasting mark distinct from ordinary
+food-patch stock depletion (which already exists) — flora should spread/
+regrow measurably more slowly on a heavily-grazed spot even after the
+immediate stock depletion would normally have let it recover, and this scar
+should fade on its own with real rest, not become a permanent dead zone.
+
+### Decided
+
+1. **A persistent per-tile counter, not a derived/cached index.** `Tile.
+   grazingPressure` (types.ts) accumulates independent of the tile's current
+   terrain — the whole point is that the scar OUTLIVES the food patch's own
+   life-cycle (a patch eaten out and reverted to "floor" keeps its pressure).
+   Same "single per-tick scan in `growFlora`, not per-agent" shape as
+   `Tile.stock`/`Tile.vacantTicks` (shelter abandonment) already use in this
+   codebase — a derived index (`waterBody.ts`'s pattern) would have been
+   overkill for a value that's read/written at the exact same call sites
+   that already own `stock`.
+2. **Real grazing events, not synthetic ticks.** `flora.ts`'s new
+   `recordGrazing(tile)` is called from both real consumption call sites —
+   `needs.ts`'s self-feeding `consume()` and `support.ts`'s herd
+   food-delivery pickup — the same two places `CONSUME_STOCK_AMOUNT` already
+   depletes `stock`. No new species/behavior data needed.
+3. **Hysteresis, not a single threshold.** `Tile.overgrazed` flips true at
+   `OVERGRAZED_ENTER_PRESSURE` (3 — matching `CONSUME_STOCK_AMOUNT`'s own
+   "3 feedings empties a patch" bar: it takes a full patch's worth of real
+   grazing pressure, from one patch or several regrown-and-refed at the same
+   spot, to actually scar the ground) and flips back false only once pressure
+   decays down to `OVERGRAZED_EXIT_PRESSURE` (1) — a lower bar than the entry
+   one, so the flag doesn't flicker tick-to-tick right at the boundary.
+4. **Real, not token, suppression while overgrazed** — three separate growth
+   paths, all in `flora.ts`:
+   - `trySpread` refuses to seed an overgrazed neighbor at all (0% — the one
+     growth path with other, un-scarred neighbors usually available instead,
+     so an outright ban here doesn't strand the map).
+   - `maybeDropSeed`'s germination chance is multiplied by
+     `OVERGRAZED_GROWTH_MULTIPLIER` (0.15 — an 85% reduction) on overgrazed
+     floor, not zeroed — a real suppression, but a scarred tile can still,
+     rarely, get lucky and start recovering under continued light pressure.
+   - A seedling that does take root on overgrazed ground matures at the same
+     0.15x rate, not the normal 1 tick/tick — the growth-path suppression
+     doesn't stop at the germination gate.
+5. **Self-fading, not permanent.** `growFlora` decays every tile's
+   `grazingPressure` by `GRAZING_PRESSURE_DECAY_PER_TICK` every tick,
+   whether or not it's currently overgrazed. A scar reads as "this ground
+   needs to rest," not a dead zone — see the tuning note below for the real
+   real-run finding that drove the actual decay rate.
+6. **A narratable event, filed as ambient noise.** `floraChanged`'s existing
+   `stage` union gained `"overgrazed"`/`"recovered"` (reusing the existing
+   event kind rather than adding a new one, since it's the same "this tile's
+   flora state changed" narration `floraChanged` already carries for
+   seeded/sprouted/died) — both `packages/runner/src/format.ts` and
+   `packages/web/src/eventText.ts` already render `floraChanged` generically
+   (`flora ${stage} at (x,y)`), so no new formatting code was needed. Stays
+   in `NOISE_KINDS` (ambient ecology bookkeeping, same bucket as the other
+   `floraChanged` stages), not `STORY_KINDS`/`HEADLINE_KINDS` — a tile
+   scarring over isn't a moment worth the same visual weight as a birth or a
+   kill.
+
+### Built, real-run findings
+
+**First attempt was measurably too weak — caught by a real run, not
+guessed.** The first tuning pass (`OVERGRAZED_ENTER_PRESSURE = 4`,
+`GRAZING_PRESSURE_DECAY_PER_TICK = 0.02`, chosen so one patch's normal
+3-feeding life-and-death cycle would sit right at the edge of the threshold)
+produced almost nothing in a real 3000-tick, 3-seed run: only 3 tiles ever
+went overgrazed across all three seeds combined. Diagnosed directly, not
+theorized: a real run showed individual food tiles genuinely getting grazed
+4-8 times each over 3000 ticks (170 distinct fed tiles on seed 42 alone, 12
+of them hit 4+ times) — plenty of real repeated grazing was happening. The
+problem was timing: consecutive feedings at the same coordinate are
+naturally spaced anywhere from a few ticks (multiple herd-mates feeding at
+once) to several hundred ticks apart (`FOOD_LIFESPAN_TICKS`=70 to die,
+`MATURATION_TICKS`=20+ to regrow before the next feeding can happen at all),
+and the 0.02/tick decay rate — full decay of a single grazing event in 50
+ticks — was erasing pressure almost as fast as it accumulated, wiping the
+slate clean between a herd's feeding waves nearly every time.
+
+**Retuned against that same real data**: `OVERGRAZED_ENTER_PRESSURE` lowered
+to 3, decay slowed 5x to `GRAZING_PRESSURE_DECAY_PER_TICK = 0.004` (so
+pressure survives the gap between feeding waves instead of resetting before
+the next one lands), `OVERGRAZED_EXIT_PRESSURE` lowered to 1 in step. Same
+3000-tick, 3-seed run after the retune:
+
+| seed | distinct tiles that went overgrazed | overgrazed events | recovered events | herdMigrating events (total) | starvation deaths |
+|---|---|---|---|---|---|
+| 42 | 9 | 9 | 1 | 6 (was 4 before the feature) | 0 |
+| 7 | 20 | 20 | 0 | 4 (unchanged) | 0 |
+| 20260903 | 1 | 1 | 1 | 4 (unchanged) | 0 |
+
+Zero starvation deaths on all three seeds, matching the explicit safety bar
+in the brief — flora regrowth suppression did not tip any seed into a
+starvation regression. Seed 7's 20 overgrazed events all landed late in the
+run (ticks 2272-2969, inspected directly) — consistent with that seed's
+population booming to 248 by the end (231 births), meaning far more real
+feeding traffic late-run than early-run, not a decay-rate bug; none of those
+20 had recovered by tick 3000 because most only crossed the threshold in the
+run's final ~700 ticks, not because recovery is broken (seed 42's one
+`"recovered"` event, and the dedicated `flora.test.ts` regression test that
+grazes a tile once and confirms it fades back under 1000 ticks of rest,
+confirm the fade mechanism works on its own).
+
+**A real, isolated A/B, not just before/after correlation**: re-ran the same
+3 seeds with `OVERGRAZED_ENTER_PRESSURE` set to `Infinity` (the mechanic
+structurally can't ever fire, same call sites otherwise unchanged) —
+population/births/migration-event counts for all 3 seeds matched byte-for-
+byte the very first (weak-tuning) run, confirming the feature's marginal
+contribution is real and attributable, not a coincidence of a different rng
+trajectory. Migration events rose on seed 42 specifically (4 -> 6, split
++1 wanderlust, +1 scarcity) once overgrazing started actually suppressing
+regrowth there — a real, if modest, correlation with the "herds move on once
+their local patch scars over" effect this feature was meant to produce.
+Seeds 7 and 20260903 show no migration-count change despite real overgrazing
+activity on seed 7 specifically (20 tiles) — read honestly, not oversold:
+most of that seed's overgrazing happens late in a booming, food-secure
+run (231 births, healthy end-of-run hunger/thirst averages 0.69-0.73), where
+a scarred tile among many others isn't enough on its own to trigger a full
+herd relocation. The mechanism visibly suppresses regrowth (9-20 tiles per
+run genuinely degrade); whether that reliably escalates into more migration
+specifically is a real, seed-dependent effect, not a guaranteed one.
+
+**New engine tests** (`flora.test.ts`): `recordGrazing` accumulates pressure
+across repeated calls and no-ops safely on an undefined tile; a single real
+feeding never crosses the overgrazed threshold (the "near-miss, not an
+automatic scar" design point); sustained grazing (4 events in quick
+succession) does cross it and fires a real `floraChanged`/`"overgrazed"`
+event; a scarred tile's `trySpread` target is refused while an otherwise-
+identical fresh tile spreads normally; `maybeDropSeed`'s germination chance
+is measurably suppressed on overgrazed ground (a roll that succeeds on fresh
+ground fails against the suppressed rate); a seedling on overgrazed ground
+matures measurably slower over 10 ticks than one on fresh ground; a scar
+fades back to `overgrazed: false` after a real (not instant) rest period
+with a `"recovered"` event; and an rng-determinism check confirming two runs
+of `growFlora` fed the same fixed rng sequence produce byte-identical
+grazing/decay/overgrazed bookkeeping. All 652 engine tests pass, including
+the unmodified `determinism.test.ts` acceptance test (same-seed-twice
+byte-identical event logs) — this feature adds zero new `Math.random()`
+calls; every roll it touches (germination, spread) already threaded `rng`
+from `world.rng`, and the new decay/threshold logic itself is deterministic
+arithmetic with no randomness of its own.
+
+### Explicitly not done / open follow-ups (see TODO.md)
+
+- No suppression of the *decay* of what's already grown elsewhere from an
+  overgrazed tile — only new growth onto/from it is suppressed. A tile that
+  matures to food or flora before crossing the overgrazed threshold decays
+  and dies on its own normal schedule; overgrazing doesn't accelerate that.
+- No visual/renderer treatment for an overgrazed tile beyond the event log
+  entry — it still looks like ordinary "floor" on the map. A real, if
+  cosmetic, follow-up if scars turn out to be common enough in practice to
+  be worth a distinct glyph/tint.
+- Seed 7's late-run-clustering pattern (all 20 overgrazed events in the
+  final ~700 of 3000 ticks) is reported as a real observation, not chased
+  down as a possible timing issue — it tracks that seed's own late
+  population boom, not a suspected bug, but a dedicated tick-by-tick
+  isolation pass (this file's own established standard elsewhere for
+  "confirm, don't assume") would be needed to rule out every alternative
+  explanation with full confidence.
