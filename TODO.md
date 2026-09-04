@@ -607,6 +607,22 @@ produce a real story before player mechanics are worth building further.
       role — see DESIGN.md and the positioning gap above. Still open: a
       real `role` field for contested leadership/succession, which this
       isn't (guardians don't compete for the role, there's no succession).
+- [x] Herd status/rank built (`herdRank` in herding.ts) — level buys real
+      standing, per direct ask, see DESIGN.md's "Herd status" section for the
+      full writeup. Two real payoffs: feeding priority (a lower-ranked
+      herd-mate yields a contested, dwindling-stock food tile to a
+      higher-ranked, also-hungry one) and mate preference (a rank-aware,
+      distance-bounded bias in `reproduction.ts`'s candidate scoring). A real
+      seed-42 run shows the feeding-priority mechanism firing often (2117
+      yield events over 3000 ticks) and the top-ranked member of the run's
+      largest herd siring more than double the next-most-prolific father's
+      offspring — directionally real, though not cleanly isolated from this
+      sim's documented rng-chaos-sensitivity by a single-seed A/B, flagged
+      honestly in DESIGN.md rather than overclaimed. Still open: the real
+      `role` field for contested leadership/succession noted just above is a
+      different, bigger thing than rank (rank is a live-computed ranking,
+      not a contested position), and whether a third status payoff
+      (deference in contested movement/tile disputes) is worth adding.
 - [x] Natal dispersal built — supersedes this bullet's original pitch with a
       more complete version (two triggers, not just evolving: a
       Disposition-weighted chance at maturity or on evolving, plus a
@@ -830,6 +846,25 @@ produce a real story before player mechanics are worth building further.
       pair by test, but **not observable in an actual run yet** —
       `createDemoWorld` doesn't spawn a Charmander, so nothing currently
       exercises this path live. See DESIGN.md's Breeding section.
+- [ ] **Herds are same-species-only today, but real mainline compatibility
+      (Egg Groups) already exists in the engine (`canBreed`/
+      `EGG_GROUPS_BY_BASE_KEY`, just above) and isn't used for herd
+      membership at all** — `Agent.herdId` matching and dispersal's
+      `findNearbyOtherHerd` both filter by exact species, not by breeding
+      compatibility. Per chat: real mixed-species social groups are
+      plausible wherever Egg Groups overlap, so dispersal's "join a nearby
+      herd" check should filter by group compatibility instead of species
+      equality, once there's a roster with real mixed-group opportunities
+      to observe it working. Not started.
+- [ ] **Player-recruitment herd concept (deprioritized with the rest of
+      Player/bonding, captured here since it's the same "herd ≠ species"
+      idea)**: once a player exists, a recruited team should function as
+      the player's own herd — each teammate seeing the others as
+      herd-mates (cohesion/guardian/mate-preference logic already keys off
+      `herdId`, so a player-team herdId would plug into the existing
+      machinery) regardless of species, same egg-group-compatibility
+      question as the bullet above. Not designed in any detail — no
+      player exists yet to recruit onto a team.
 - [ ] **Egg-group table only covers the current spawn roster's lines
       (5 base species).** Extend `EGG_GROUPS_BY_BASE_KEY` whenever a new
       base species is added to `species.ts`. Ditto (universal breeding
