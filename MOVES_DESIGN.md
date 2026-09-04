@@ -261,36 +261,188 @@ overlap and because tunnel shortcuts probably want to interact with
 whatever "biome" boundaries that work introduces. Revisit once migration/
 biomes ship.
 
-## Skill-tree template for new moves
+## Skill-tree template for new moves (v2 — supersedes the first pass)
 
 Every move built from here on should get a real respec tree, not just a
 combat spec — see DESIGN.md's "Specialization" section for the mechanism
 (wild agents auto-respec as they earn skill points, weighted by
-Disposition). Ember's tree (`packages/data/src/moves.ts`) is the reference
-shape to copy:
+Disposition). Ember's first tree (shipped, `packages/data/src/moves.ts`) was
+the v1 reference — two branches, 3 tiers each, costs 1/2/3. That shape is
+now superseded by the rules below; Ember itself is due for a rebuild to the
+new template (tracked, not yet done as of this writing).
 
-- **Two independent branches, not one chain.** Each branch is a complete,
-  self-contained build (no cross-branch prerequisite) so an agent can
-  commit to either, both, or neither — a real choice, not a fixed order.
-  Ember's are Aggression ("Wildfire" — hit harder, more often) and Boldness
-  ("Ring of Fire" — less power, more area, safer to hold ground with).
-  Sociability doesn't have an obvious combat-move analogue yet; a support/
-  utility move (Growl? a future cry/rally move?) is a more natural home for
-  a sociability-leaning branch than trying to force one onto every attack.
-- **Three tiers per branch, costs 1/2/3 (6 per branch, 12 total).** Cheap
-  enough that a single point already does something, expensive enough that
-  fully clearing both branches is a real mid-game commitment rather than
-  resolved by level 4 — see the "Specialization" section's writeup of why
-  Ember's original 2-node/cost-3 tree was too fast against a 100-level
-  curve. Adjust the total up for a move meant to matter later in a run, down
-  for an early/common move — 12 is a starting reference, not a hard rule.
-- **Every node has a `leaning`.** Unleaned nodes still work (weighted
-  neutrally) but a tree that's all unleaned wastes the whole point of tying
-  this to Disposition — tag deliberately.
-- **Real tradeoffs, not strictly-better stat sticks.** Roaring Blaze
-  (+power) costs accuracy; Ring of Fire (+area) costs power and adds
-  cooldown. A tier that's just "more of everything for a point" isn't a
-  choice, it's a formality.
+There's an important asymmetry that makes going big here cheap: **there is
+no player-facing tree UI yet** — every point spent today is a wild agent
+auto-respeccing itself, not a person navigating a passive web. So tree
+depth/complexity costs us authoring and balancing effort, not player
+overwhelm. PoE-scale trees are fine right now; a legible player-facing view
+of one is a separate, later, solvable UI problem.
+
+**Cost:** every node costs exactly 1 point. No escalating per-tier cost —
+depth and branch count carry the "big investment" feeling instead, which
+reads more clearly than an opaque cost curve.
+
+**Archetype per move, and let it dictate tree shape** (don't design each
+move's tree from a blank page — pick an archetype first):
+- **Power moves** (e.g. Flamethrower): shorter, more linear, but not just a
+  single line to one ending — a couple of real capstone-style decision
+  points along the spine (a shape upgrade, a cooldown-vs-power fork), then a
+  genuine **mutually-exclusive final fork between two distinct "sick"
+  end-states** (e.g. a single-target nuke build vs. a wide-cone AoE build).
+  Mostly numeric filler in between (+power, +accuracy, -cooldown) so the
+  climb still feels like steady growth.
+- **Utility moves** (e.g. Ember): the deep tree — real forks early and
+  often, status/environmental/area effects, modest power growth. Cooldown
+  reduction is the signature utility lever: a cheap, frequently-recast
+  utility move can out-value a slow power move in the right moment, which is
+  the actual incentive to keep an early move around instead of replacing it
+  the moment a bigger one unlocks.
+- **Support moves** (sociability-leaning, no example built yet — a future
+  cry/rally move is the natural home): buffs/redirect/cooldown-sharing
+  levers rather than damage levers. Sociability doesn't have anywhere to
+  live on a pure attack move's tree, so give it its own move archetype
+  instead of forcing it in everywhere.
+
+**Real forks need a new primitive: `excludes`.** The current model
+(`prerequisites` only) can express "you need A before B" but not "picking A
+locks out B forever." Add `MoveTreeNode.excludes?: string[]` — once a node
+in the list is chosen, the others become permanently ineligible for that
+agent (author both sides for symmetry). This is the mechanism behind every
+"choose one of two builds" moment called for above, including Flamethrower's
+final fork. Not implemented yet — needed before any real fork can ship.
+
+**Capstones:** skip gating a capstone on multiple branches — not
+interesting enough to bother with. A single strong node at the end of a
+branch (what Ember's v1 tree already does) is capstone enough. Power moves
+get a couple of these strung along the spine, not just one at the very end.
+
+**Filler nodes are good, not padding to be ashamed of.** Small, low-drama
+nodes (+3% power, -1 cooldown, +5% status chance) between the real decision
+points give the tree size and a sense of "always making progress" — very
+PoE-passive-web-shaped — without every single node needing to be a
+dramatic build-defining choice.
+
+**Power-curve target (the actual incentive-to-upgrade lever):** a fully
+maxed instance of a lower-tier move should land **meaningfully below** the
+next move up's base power — not match or exceed it. Rough target: ~65-75%
+of the next tier's base power (current dex numbers: Ember 40, Flamethrower
+90 — so a maxed Ember topping out somewhere around 60-65 power, not 90+,
+keeps Flamethrower an obvious power upgrade while Ember's cooldown/utility
+lead is what earns it a permanent slot in the moveset anyway).
+
+**Every node has a `leaning`.** Unleaned nodes still work (weighted
+neutrally in `maybeAutoRespec`) but a tree that's all unleaned wastes the
+whole point of tying this to Disposition — tag deliberately.
+
+**Real tradeoffs, not strictly-better stat sticks.** A tier that's just
+"more of everything for a point" isn't a choice, it's a formality — every
+node should cost something (accuracy, cooldown, power, range) even when
+small.
+
+## Skill-tree lever brainstorm
+
+The mechanical levers a tree node can pull, organized by how much new
+engine work each needs. `MoveTreeNode.delta` today only supports `shape`,
+`range`, `power`, `accuracy`, `cooldownTicks`, `statusChance` — everything
+below that isn't one of those six is a real (if usually small) schema/engine
+addition, called out per item.
+
+**Already free (schema growth only, no new subsystem):**
+- Multi-strike: hits 2-5 times per use, each roll separately for crit/status.
+- Crit rate ↑.
+- Lifesteal: heal a % of damage dealt.
+- Recoil: extra power for self-damage on use.
+- Charge-up: skip a tick to wind up, then hit much harder (a tempo cost
+  distinct from cooldown).
+- "Battery" cooldown: fire twice back-to-back, then a long lockout.
+- **PP cost**: a move can only be used N times before it needs to
+  recharge/rest — a resource axis completely orthogonal to cooldown
+  (cooldown is "how often," PP is "how many total before you're out"). A
+  tree node could add max PP, or trade PP pool for power, or grant free
+  recasts under some condition.
+- HP or needs (hunger/thirst) cost to use instead of/on top of PP — fits a
+  sim built around needs pressure; a "blood magic" branch.
+- Bonus power vs. a specific type; extra STAB specific to this tree.
+
+**Free by riding an existing subsystem (near-zero new engine work):**
+- Weather synergy: bonus power during a matching weather cell (weather.ts
+  already models storm/drought/rain/coldSnap).
+- Day/night synergy: bonus accuracy/crit at night (daynight.ts already
+  exists).
+- Elevation synergy: bonus power/range attacking from higher ground
+  (elevation combat modifiers already exist).
+- Terrain interaction: burns away a `"bush"` tile on hit, removing
+  concealment there (the concealment system already exists) — a real
+  tactical tradeoff (damage now vs. stealth removed).
+- Herd/guardian redirect: draws a predator's attention off a weaker
+  herd-mate (reuses the existing guardian-cohesion concept).
+
+**Needs the not-yet-built status-effect system first:**
+- Stacking a second status on top of burn.
+- "Jam": extends the target's own move cooldown on a landed hit.
+- Self-buff on hit (temporary attack boost, small heal) — a "momentum"
+  snowball lever.
+
+**Action-economy levers — a category of its own, tied to `actionEnergy`
+rather than `MoveSpec`.** DESIGN.md's "Action economy" section already
+separates two axes that most brainstorming (including everything above)
+had been ignoring: Speed governs *how often an agent gets to act at all*
+(the `actionEnergy`/`ACTION_THRESHOLD` accumulator), while cooldown governs
+*how often one specific move* is available regardless of that. Neither axis
+currently has a way for a *tree node* to reach into it — these levers would
+be the first that do, and they need a new "mid-commit" agent state (nothing
+today lets a move span/consume more than the one action tick that casts
+it):
+- **Locks you into a multi-action commitment.** Using this version of the
+  move consumes the *next* action tick too (can't act freely on it) — a
+  real wind-up/follow-through cost distinct from cooldown, since cooldown
+  only blocks re-using *this* move, not acting at all. The "two really sick
+  end-state" fork on a power move is a natural home for this: a maxed-out
+  nuke that costs you your next turn entirely is a real commitment, not
+  just a cooldown number.
+- **Grows the longer you hold/channel it** — not a fixed one-tick
+  charge-up, but a variable-duration channel: each consecutive action tick
+  spent channeling instead of releasing adds power, and the agent is
+  interruptible/vulnerable the whole time (a real risk, not just a delay).
+  Mainline Solar Beam/Focus Punch energy, but with actual stakes given this
+  sim's predators can and do interrupt things.
+- **Forces movement as part of using the move**, beyond U-turn's already-
+  designed "retreat 2x speed for 2 ticks": a gap-closer that requires
+  moving in a straight line toward the target before it can trigger, or a
+  finisher that repositions the user to a specific tile after landing
+  (e.g. flanking, or into the middle of the AoE it just created).
+
+**Needs the not-yet-built multi-target/AoE resolution first** (see "The
+sim/combat boundary" investigation in DESIGN.md — nothing today applies a
+move to more than one simultaneous target within a resolved shape):
+- Any move whose whole point is "hits everyone in the shape" (Firestorm,
+  Ring of Fire's full fantasy, Growl).
+- A lingering hazard/field tile left behind (burning ground, poison cloud).
+- Status spreading target-to-target.
+
+**A bigger structural idea, worth its own pass later:** a passive-style
+node whose effect isn't part of the move's own `MoveSpec` at all, but
+modifies the *agent* directly (e.g. a fire move's tree granting minor fire
+resistance, or a perception move's tree granting a small detection-radius
+boost). This is the most PoE-shaped idea on this list — not every node in a
+tree has to be about the move it's attached to — but it's a real
+architecture change (a node needs a delta shape that targets `Agent`, not
+`MoveSpec`), so it's flagged rather than assumed.
+
+## Future: a real player-facing respec mechanic
+
+Wild agents never need to respec — `maybeAutoRespec` spends every point
+immediately and permanently, so there's no "should I save this point"
+decision for them, and therefore no hoarding-for-the-big-unlock anti-pattern
+in practice today. That anti-pattern only shows up once a *player* gets
+manual control over when to spend (still undecided, see DESIGN.md). The
+intended answer when that's built: no free per-node undo (that would cheapen
+every "real tradeoff" tree above into `to be revisited later`), but a
+player can **forget an entire move** to reclaim all points sunk into its
+tree. Real cost (you lose the move outright, not just its build), rare,
+deliberate — closer to a PoE respec economy than a free undo button. Not
+needed for wild agents; noted here so it isn't lost before a player exists
+to use it.
 
 ## Build order recommendation, across everything above
 
