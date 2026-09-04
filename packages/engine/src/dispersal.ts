@@ -107,7 +107,13 @@ export const NO_MATES_DISPERSAL_TICKS = 1000;
  * without being so wide that a disperser five separate roaming groups away
  * spuriously "joins" one it never actually encountered.
  */
-const JOIN_HERD_RADIUS = 3 * COHESION_DISTANCE;
+/**
+ * Exported so `immigration.ts` can reuse the exact same "join a nearby
+ * existing herd, or found a new one" radius for a freshly-arrived
+ * immigrant's first member — see that module's `finishImmigrantHerd`, the
+ * same "landed near an existing herd" question a disperser asks on arrival.
+ */
+export const JOIN_HERD_RADIUS = 3 * COHESION_DISTANCE;
 
 /**
  * Checked once per action tick for every living, sexed agent not already
@@ -207,7 +213,7 @@ export function applyDispersal(world: World, agent: Agent, log?: EventLog): void
  * works as a new entry the moment it's on an agent, no pre-registration
  * needed anywhere.
  */
-function findNearbyOtherHerd(world: World, agent: Agent): string | undefined {
+export function findNearbyOtherHerd(world: World, agent: Agent): string | undefined {
   for (const other of world.agents) {
     if (other.id === agent.id || other.alive === false) continue;
     if (other.species !== agent.species || other.layer !== agent.layer) continue;

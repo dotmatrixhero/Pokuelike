@@ -261,6 +261,18 @@ export type SimEvent =
       reason: DispersalReason;
     }
   | {
+      kind: "immigrated";
+      tick: number;
+      /** One or more agent ids (`immigration.ts` spawns a 1-3-member group at once) — every id shares the same `species`/`herdId`/arrival `pos`. */
+      agentIds: string[];
+      species: string;
+      layer: Layer;
+      pos: Vec2;
+      /** Whether this group joined an existing nearby herd or founded a new one — same idea as `dispersed`'s `outcome`. */
+      herdId: string;
+      outcome: "joined" | "founded";
+    }
+  | {
       kind: "shelterBuilt";
       tick: number;
       /** The agent whose build-time investment completed the structure — see shelter.ts's `applyShelterBuilding`. */

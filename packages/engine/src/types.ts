@@ -826,6 +826,16 @@ export interface World {
    */
   biomeSeeds?: BiomeSeedInfo[];
   /**
+   * The tick `immigration.ts`'s `maybeImmigrate` last actually spawned a new
+   * herd, or absent if none has happened yet this world's life — the
+   * cooldown gate for `MIN_TICKS_BETWEEN_IMMIGRATIONS`, so a lucky run of
+   * per-tick rolls can't cluster several immigrations in quick succession.
+   * Mirrors the `herd*Ticks` fields above: per-world state, keyed by
+   * nothing (there's only ever one "last immigration," not one per herd),
+   * absent reads as "never happened."
+   */
+  lastImmigrationTick?: number;
+  /**
    * 1-3 active weather systems at once — see weather.ts/DESIGN.md's Phase 3.
    * Absent (or empty) means no weather is active; every effect consumer
    * (flora.ts/needs.ts/fov.ts/combat.ts/support.ts/herdMigration.ts) treats

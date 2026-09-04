@@ -75,6 +75,8 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `flora ${event.stage} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
     case "terrainChanged":
       return `${event.from} at (${event.pos.x},${event.pos.y}) turned to ${event.to} on ${event.layer} (${event.cause})`;
+    case "immigrated":
+      return `${event.agentIds.length} ${event.species} arrived from outside and ${event.outcome === "joined" ? `joined ${event.herdId}` : `founded ${event.herdId}`} on ${event.layer}`;
     case "fought": {
       const move = world ? findMoveUsed(event, world) : undefined;
       return `${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) for ${event.damage}${event.critical ? " (crit!)" : ""} (hp left: ${event.defenderHpRemaining})${move ? describeMoveModifiers(move) : ""}`;
@@ -157,7 +159,7 @@ export function formatEvent(event: SimEvent, world?: World): string {
  * information but not a moment worth the same visual weight as a
  * connecting hit.
  */
-export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge", "dispersed", "shelterBuilt", "fought"]);
+export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge", "dispersed", "shelterBuilt", "fought", "immigrated"]);
 
 /**
  * Routine environment/upkeep chatter — real events, just not "the Pokemon
@@ -193,7 +195,10 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
  * — it's a recoverable knockdown, not a death (see DESIGN.md's "Faint/
  * finish-off" section).
  */
-export const HEADLINE_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "starved", "diedOfAge", "evolved"]);
+// "immigrated" is a population-shaping event, same category as
+// "born"/"evolved" — a new headline-worthy way the population changes, not
+// a routine per-tick occurrence like "consumed"/"behaviorChanged".
+export const HEADLINE_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "starved", "diedOfAge", "evolved", "immigrated"]);
 
 export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   born: "\u{1F423}", // hatching chick
@@ -205,6 +210,7 @@ export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   dispersed: "\u{1F9ED}", // compass
   shelterBuilt: "\u{1F3E0}", // house
   fought: "\u{1F4A5}", // boom
+  immigrated: "\u{1F6F6}", // canoe
 };
 
 export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
@@ -217,6 +223,7 @@ export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
   dispersed: "#6ec6ff",
   shelterBuilt: "#c9a876",
   fought: "#ff9d3c",
+  immigrated: "#5ee6c4",
 };
 
 /**

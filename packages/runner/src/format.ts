@@ -60,6 +60,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.weatherType} ${event.phase === "began" ? "moves in" : "clears"} near (${event.center.x},${event.center.y}), radius ${event.radius}`;
     case "dispersed":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) left ${event.fromHerd} and ${event.outcome === "joined" ? `joined ${event.toHerd}` : `founded ${event.toHerd}`} (${event.reason})`;
+    case "immigrated":
+      return `[tick ${event.tick}] ${event.agentIds.length} ${event.species} arrived from outside at (${event.pos.x},${event.pos.y}) on ${event.layer} and ${event.outcome === "joined" ? `joined ${event.herdId}` : `founded ${event.herdId}`} (${event.agentIds.join(", ")})`;
     case "shelterBuilt":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) finished building a shelter at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
     case "shelterAbandoned":

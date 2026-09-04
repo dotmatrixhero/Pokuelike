@@ -3,6 +3,74 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Species/biome/immigration — built, see DESIGN.md
+
+- [x] Three new species (Geodude, Growlithe, Mankey) closing the
+      badlands/highland "zero real residents" gap, all reusing an existing
+      move and an existing `EGG_GROUPS_BY_BASE_KEY` entry. Charmander (fully
+      defined earlier, never spawned) now has a real starting spot in
+      `createDemoWorld`, biome-placed via the new `findPosInBiome`.
+- [x] `SpeciesDef.biomes?: string[]` added and tagged on every species (new
+      and existing, best-effort). Real consumers: `findPosInBiome`
+      (Charmander's placement) and `immigration.ts`'s spawn-site species/
+      location scoring.
+- [x] Immigration system (`packages/engine/src/immigration.ts`): flat
+      per-tick chance roll + cooldown + population cap (soft 70/hard 110,
+      linear falloff between), species picked by under-representation x
+      biome-match weighting at a random map-edge arrival point, 1-3 agents
+      join-or-found a herd exactly like `dispersal.ts`'s arrival logic. New
+      `"immigrated"` event, headline-worthy in the web UI. 13 new engine
+      tests + 19 new data-package tests (first test suite for
+      `packages/data` — `vitest` added as a devDependency there). All 593
+      engine tests (580 pre-existing + 13 new) and the determinism
+      acceptance test pass; existing callers without an `ImmigrationContext`
+      see zero behavior change.
+- [x] Real 3000-tick runs, 3 seeds, with vs. without immigration: fired 4-6
+      times per run every seed; final population rose on 2/3 seeds (42:
+      19->35, 7: 21->28), and on the third (20260903, this session's
+      historically low-growth seed) ended at the same total (28) but with
+      real compositional diversity immigration added (Geodude/Charmander/
+      Scyther/Spearow/Mankey present with it on, none of those with it
+      off) — worth knowing the effect isn't purely "always raises
+      population," see DESIGN.md for the honest breakdown.
+- [x] An 8000-tick run confirmed real in-sim survival *and breeding* of a
+      newly-immigrated species (Mankey: 3 immigrants at tick 2459 -> 6
+      living by tick 8000), not just spawn-and-survive.
+- [ ] **Open follow-up: the population cap's scaled-down middle zone
+      (70-110 living agents) is unit-tested in isolation but not yet
+      exercised by a real run that actually reaches it** — every real run
+      in this pass stayed at or under ~69 living agents, so the linear
+      falloff between `POP_SOFT_CAP`/`POP_HARD_CAP` has never been observed
+      firing in a real multi-thousand-tick run, only confirmed correct via
+      `immigration.test.ts`'s direct unit tests. A longer run (10,000+
+      ticks) or a seed/config that grows faster would be the way to
+      actually witness it end to end.
+- [ ] **Open follow-up: immigration's population cap only bounds
+      immigration's own contribution — breeding itself is still completely
+      uncapped**, the same pre-existing gap noted elsewhere in this file. A
+      seed with strong enough organic growth could still exceed
+      `POP_HARD_CAP` through breeding alone, with immigration simply
+      declining to add to it. Not attempted here — a real population cap
+      that reasons about the *whole* population (not just one growth
+      channel) is a bigger, separate design question.
+- [ ] **Open follow-up, flagged rather than guessed at: is Growlithe (and
+      any future item-only-evolution species) actually a good roster fit
+      given it can never evolve in-sim** at all under the current
+      level-only evolution filter (`leveling.ts`)? Onix already lives with
+      this same limitation without apparent issue, so it was judged
+      acceptable to extend it to a second species rather than a blocker —
+      but it's a real, deliberate trade-off, not an oversight, and worth a
+      second look if evolution coverage across the roster ever becomes a
+      priority.
+- [ ] Biome-driven placement was deliberately scoped to *new* placements
+      only (Charmander, immigrants) — every existing hand-placed starting
+      agent (Bulbasaur herd, Venusaur guardians, Scyther, Diglett/Sandshrew
+      colony, Onix, Pidgey flock, Spearow, Squirtle pair) keeps its original
+      fixed coordinates, unretouched, to avoid destabilizing already-
+      validated placements. If a future pass wants the *whole* starting
+      roster biome-driven, that's a real, separate, riskier change — not
+      done here.
+
 ## Next up: terrain lifecycle + construction + overworld (one combined design, not started)
 
 Direct feedback: not enough dynamism in the environment — weather changes

@@ -66,7 +66,9 @@ const EGG_GROUPS_BY_BASE_KEY: Record<string, string[]> = {
   SANDSHREW: ["field"],
   // Mineral group — distinct from Diglett's Field group despite both being
   // "underground" thematically; verified against Bulbapedia, so Onix does
-  // NOT cross-breed with Diglett/Sandshrew, matching the real games.
+  // NOT cross-breed with Diglett/Sandshrew, matching the real games. Now a
+  // real cross-species pair with Geodude below (both Mineral) — the roster
+  // finally has a second Mineral-group species, not just Onix alone.
   ONIX: ["mineral"],
   // Real cross-species pair with Bulbasaur AND Charmander (all three
   // starters share Monster in the real games) as well as with anything
@@ -103,6 +105,9 @@ const EGG_GROUPS_BY_BASE_KEY: Record<string, string[]> = {
   VENONAT: ["bug"],
   MEOWTH: ["field"],
   PSYDUCK: ["water1"],
+  // MANKEY and GROWLITHE below are now real roster species (species.ts) —
+  // no longer just headroom. Left with their original comment context in
+  // place (this whole batch), same table, same convention.
   MANKEY: ["field"],
   GROWLITHE: ["field"],
   POLIWAG: ["water1"],
@@ -110,6 +115,8 @@ const EGG_GROUPS_BY_BASE_KEY: Record<string, string[]> = {
   MACHOP: ["human-like"],
   BELLSPROUT: ["grass"],
   TENTACOOL: ["water3"],
+  // Now a real roster species (species.ts), sharing Mineral with Onix — see
+  // ONIX's own comment above.
   GEODUDE: ["mineral"],
   PONYTA: ["field"],
   SLOWPOKE: ["monster", "water1"],

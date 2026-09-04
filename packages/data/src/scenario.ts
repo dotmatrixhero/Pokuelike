@@ -1,10 +1,12 @@
 import {
   generateWorld,
   findWalkableNear,
+  findPosInBiome,
   createNeeds,
   type World,
 } from "@pokuelike/engine";
 import { spawnAgent } from "./spawn.js";
+import { SPECIES } from "./species.js";
 
 /**
  * ~90x60 (up from the old hand-authored 24x16) — DESIGN.md's "something like
@@ -198,6 +200,37 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
     },
   ];
 
-  world.agents.push(...herd, ...guardians, hunter, ...undergroundColony, onix, ...pidgeyFlock, spearow, ...squirtlePair);
+  // A Charmander pair — fully defined in species.ts (moves, egg groups) but
+  // never actually spawned until now, a gap this feature closes. Placed via
+  // `findPosInBiome` at its tagged badlands biome (species.ts's
+  // `SPECIES.charmander.biomes`) rather than another hardcoded corner — the
+  // roster's first starting agent whose position is actually biome-driven,
+  // not hand-picked. Real "connected to the world" payoff: this pair may
+  // land anywhere the generated map's badlands biome happens to fall, seed
+  // to seed, instead of a fixed coordinate. No predator/prey role of its
+  // own yet, same as Squirtle above.
+  const charmanderSpot = findPosInBiome(world, "surface", SPECIES.charmander!.biomes, world.rng);
+  const charmanderPair = [
+    {
+      ...spawnAgent("charmander", "charmander-0", charmanderSpot, 5, world.rng),
+      sex: "male" as const,
+    },
+    {
+      ...spawnAgent("charmander", "charmander-1", findWalkableNear(world, "surface", charmanderSpot.x + 1, charmanderSpot.y), 5, world.rng),
+      sex: "female" as const,
+    },
+  ];
+
+  world.agents.push(
+    ...herd,
+    ...guardians,
+    hunter,
+    ...undergroundColony,
+    onix,
+    ...pidgeyFlock,
+    spearow,
+    ...squirtlePair,
+    ...charmanderPair
+  );
   return world;
 }

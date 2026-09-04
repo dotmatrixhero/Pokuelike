@@ -27,3 +27,4 @@ export * from "./daynight.js";
 export * from "./weather.js";
 export * from "./shelter.js";
 export * from "./pathfinding.js";
+export * from "./immigration.js";

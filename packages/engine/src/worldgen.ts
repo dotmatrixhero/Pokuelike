@@ -455,3 +455,41 @@ export function findWalkableNear(world: World, layer: Layer, x: number, y: numbe
   }
   return { x: cx, y: cy };
 }
+
+/**
+ * Samples `attempts` random points across the whole map and returns the
+ * nearest walkable tile to whichever one most strongly reads as
+ * `biomeNames` (summed `biomeWeightsAt` weight across every name in the
+ * list — a species with more than one tagged biome, per species.ts's
+ * `SpeciesDef.biomes`, is happy to land in any of them). This is the "find
+ * me a spot that's actually this biome, not just any random tile" primitive
+ * behind `createDemoWorld`'s biome-driven starting placements (e.g.
+ * Charmander -> badlands) — see DESIGN.md's "Species/biome/immigration"
+ * section. `immigration.ts` doesn't reuse this directly (it needs its
+ * candidates biased toward a map *edge*, not the whole map, for "arrives
+ * from outside" to mean anything), but shares the same
+ * `biomeWeightsAt`-scoring idea.
+ *
+ * Falls back to a plain random walkable point when there's no biome
+ * preference to honor (`biomeNames` absent/empty) or no biome data to score
+ * against at all (`world.biomeSeeds` absent — a bare `createWorld`/hand-built
+ * test world) — never throws, never silently ignores the rng.
+ */
+export function findPosInBiome(world: World, layer: Layer, biomeNames: readonly string[] | undefined, rng: () => number, attempts = 40): Vec2 {
+  if (!biomeNames || biomeNames.length === 0 || !world.biomeSeeds || world.biomeSeeds.length === 0) {
+    return findWalkableNear(world, layer, rng() * world.width, rng() * world.height);
+  }
+
+  let bestPos = { x: rng() * world.width, y: rng() * world.height };
+  let bestScore = -1;
+  for (let i = 0; i < attempts; i++) {
+    const candidate = { x: rng() * world.width, y: rng() * world.height };
+    const weights = biomeWeightsAt(world.biomeSeeds, candidate.x, candidate.y);
+    const score = biomeNames.reduce((sum, name) => sum + (weights[name] ?? 0), 0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestPos = candidate;
+    }
+  }
+  return findWalkableNear(world, layer, bestPos.x, bestPos.y);
+}

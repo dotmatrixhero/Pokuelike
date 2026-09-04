@@ -5070,3 +5070,231 @@ follow-up — the `level: 16` fixture default already clears the new
 level-12 floor).
 
 See TODO.md for the running list of side notes to revisit.
+
+## Species/biome/immigration: closing the badlands/highland gap, and a world that populates itself
+
+**Decided.** Direct instruction ("Need more species. Immigration. Biomes
+connected to world. I trust you. Please design and implement.") — a green
+light to make real design calls without checking back on each one. Three
+pieces, built together since they lean on each other:
+
+**1. Three new species, chosen to fix a real, confirmed gap.** Before this
+feature, `worldgen.ts`'s five biomes (`grassland`/`forest`/`wetland`/
+`badlands`/`highland`) existed only for surface terrain generation — nothing
+in the species roster was ever tied to any of them, and badlands/highland
+specifically had zero real residents (every existing species reads as
+grassland/forest/wetland-leaning). Added, all three pulled from
+`leveling.ts`'s existing `EGG_GROUPS_BY_BASE_KEY` Gen 1 headroom batch (no
+new egg-group entries needed) and all three reusing an already-implemented
+move rather than building a new one (per the task brief's explicit steer —
+a whole new move means a whole new skill tree, out of scope here):
+
+- **Geodude** (Rock/Ground, `rock_throw`+`tackle`) — a real cross-species
+  breeding pair with Onix (both Mineral egg group; `leveling.ts`'s own
+  comment on `ONIX` had been anticipating exactly this since the original
+  Onix addition). Tagged badlands/highland — a living boulder, per mainline
+  flavor text, fits both of this roster's rockiest biomes.
+- **Growlithe** (Fire, `ember`) — tagged badlands (mainline flavor text:
+  arid, rocky terrain). Its only mainline evolution (Arcanine) needs a Fire
+  Stone — an item-based trigger `leveling.ts`'s evolution filter already
+  excludes on purpose (see that file's `computeProfileFromDexEntry` doc
+  comment) — so, like Onix already in the roster, Growlithe simply never
+  evolves in-sim yet. Not a new gap, the same accepted limitation Onix
+  already lives with.
+- **Mankey** (Fighting, `scratch`) — tagged highland/badlands (mainline
+  flavor text: rocky mountains). Unlike Growlithe, this one has a real
+  level-only evolution (Primeape at level 28, no conditions) that does work
+  in-sim.
+
+None of the three are tagged `isPredator`. This codebase's own prior
+finding (see TODO.md) is that the existing predator guild
+(Scyther/Spearow/Onix) already crashes toward near-extinction in a real
+run — adding more hunters to an already-struggling guild would make that
+worse, not add real variety. All three verified against
+`SPECIES_DEX_BY_KEY` for real `baseStats`/`types`/evolutions before being
+committed to (see `packages/data/test/species.test.ts`).
+
+**Charmander**, already fully defined in `species.ts` since an earlier
+session but never actually spawned in `createDemoWorld` — a one-line gap,
+now closed. Tagged `biomes: ["badlands"]` (a sun-loving fire lizard, per
+mainline flavor text: found on rocky mountainsides, flame weakens in rain)
+and placed via the new `findPosInBiome` (below) instead of another
+hardcoded corner.
+
+**2. `biomes?: string[]` on `SpeciesDef`, actually wired to placement.**
+Every species — new and existing — now carries a best-effort `biomes` tag
+(same judged-per-species standard as `isPredator`/`buildsShelter`, not a
+hard requirement — nothing stops an agent existing outside its tagged
+biomes; a herd can migrate anywhere, an already-validated hand-placed
+starting position is left untouched). Underground/canopy species (Diglett,
+Sandshrew, Onix, Pidgey, Spearow) are tagged by whichever surface biome
+best fits their flavor, on the documented understanding that those layers
+are flat/biome-agnostic (worldgen.ts) and "their biome" means "the surface
+biome sitting above wherever they actually live" — exactly the reading the
+task brief itself suggested.
+
+Two real consumers, not just a label nobody reads:
+
+- `worldgen.ts`'s new `findPosInBiome(world, layer, biomeNames, rng,
+  attempts=40)`: samples random points across the whole map, scores each via
+  the already-existing `biomeWeightsAt`, and returns the nearest walkable
+  tile to the best match (or a plain random walkable point if there's no
+  biome preference or no biome data at all — never throws, never silently
+  ignores the rng). Used by `createDemoWorld` to place Charmander — the
+  roster's first starting agent whose position is genuinely biome-driven
+  rather than a fixed coordinate, so it lands somewhere different across
+  seeds depending on where the generated map's own badlands biome falls.
+- `immigration.ts`'s spawn-site scoring (below) — the bigger, ongoing payoff.
+
+**3. Immigration — new herds walking in from outside, over the course of a
+run.** New `packages/engine/src/immigration.ts`, wired into `simulation.ts`'s
+`tickWorld` as a new optional 6th parameter (`immigration?: ImmigrationContext`)
+— the same dependency-injection shape `rules`/`ctx` already use, since the
+engine has no access to `@pokuelike/data`'s `SPECIES` table (the dependency
+only runs the other way). `@pokuelike/data`'s new `IMMIGRATION_CONTEXT`
+supplies the real roster + `spawnAgent`.
+
+Real design decisions, each one a direct answer to something the task brief
+explicitly asked to be decided and documented:
+
+- **Trigger shape**: `herdMigration.ts`'s exact idiom — a flat per-tick
+  chance roll (`IMMIGRATION_BASE_CHANCE = 1/500`), gated behind a cooldown
+  (`MIN_TICKS_BETWEEN_IMMIGRATIONS = 250`, so a lucky run of rolls can't
+  cluster several immigrations back to back) and the population cap below.
+- **Population cap** (the task brief's explicit "must not run unbounded"
+  ask — the confirmed gap this codebase has had all along, see TODO.md):
+  `POP_SOFT_CAP = 70` / `POP_HARD_CAP = 110`. Below 70 living agents,
+  immigration rolls at full strength; at or above 110 it's skipped
+  entirely (forced to exactly 0 chance); between the two, the chance scales
+  down linearly — a soft landing, not a cliff. Picked from this session's
+  own real-run context: a normal 3000-tick run's final population currently
+  lands roughly 10-40 (seed 42: 37, seed 7: 22, seed 20260903: 13, after
+  this session's earlier breeding-gate tuning) — 70/110 sits comfortably
+  above that normal range, so immigration can meaningfully help a
+  low-growth seed without choking off a seed that's already growing
+  healthily on its own, while still being a real, finite ceiling. This caps
+  only immigration's own contribution — breeding is still fully uncapped
+  (a separate, bigger pre-existing gap, not attempted here — see TODO.md).
+- **Which species arrives, and where**: two multiplicative weights, not a
+  flat random pick. (1) Under-representation: `1 / (currentCount + 1)` — a
+  species with few or zero living members is more likely to be the one that
+  shows up, so a locally extinct or struggling species (this codebase's own
+  predator-crash finding) has a real mechanical path back rather than
+  staying gone forever. (2) Biome match: the arrival point (a random point
+  on one of the map's four edges — "arrives from outside" is the whole
+  premise, so unlike `pickDestination` this starts from the boundary, not
+  an existing herd's centroid) is scored via `biomeWeightsAt` against the
+  candidate species' own tagged `biomes`; an untagged species reads as
+  neutral everywhere, a tagged species is floored at
+  `UNTAGGED_MATCH_FLOOR = 0.15` so a badlands-tagged species can still,
+  rarely, wander in at a grassland edge (real animals don't hard-respect
+  biome boundaries either) rather than being flatly impossible there.
+- **Group size**: 1-3 agents, matching `dispersal.ts`'s
+  `finishDispersal`/`findNearbyOtherHerd` "join a nearby existing herd
+  within `JOIN_HERD_RADIUS`, or found a new one" pattern exactly (exported
+  from `dispersal.ts` for reuse rather than duplicated) — checked once
+  against the first arrival, applied to the whole group, so they land
+  together as one herd from the start. Once spawned, an immigrant group is
+  an ordinary herd — no special-casing anywhere else in the engine; it
+  feeds, mates, gets hunted, and disperses exactly like any hand-placed
+  starting herd.
+- **New event**: `"immigrated"` (`tick`, `agentIds[]`, `species`, `layer`,
+  `pos`, `herdId`, `outcome: "joined" | "founded"`) — added to `HEADLINE_KINDS`
+  and `STORY_KINDS` in `packages/web/src/eventText.ts` (a population-shaping
+  event, the same category as `born`/`evolved`) with a canoe icon/teal
+  color, and formatted in both `eventText.ts` and
+  `packages/runner/src/format.ts` following the exact pattern
+  `terrainChanged`'s earlier addition used.
+- **New `World` state**: `lastImmigrationTick?: number` — the cooldown gate,
+  mirroring the existing `herd*Ticks` per-world-state fields' documentation
+  style.
+
+### Real-run findings
+
+3000-tick runs, seeds 42/7/20260903, with vs. without immigration
+(`packages/data`'s `IMMIGRATION_CONTEXT` passed or omitted — everything else
+identical):
+
+| seed | immigration | final pop | immigrated events | born events |
+|---|---|---|---|---|
+| 42 | on | 35 | 6 | 22 |
+| 42 | off | 19 | 0 | 11 |
+| 7 | on | 28 | 4 | 14 |
+| 7 | off | 21 | 0 | 8 |
+| 20260903 | on | 28 | 5 | 8 |
+| 20260903 | off | 28 | 0 | 18 |
+
+Immigration fired real, observable numbers every run (4-6 events per 3000
+ticks, matching the tuning target), and both new species and Charmander
+genuinely showed up: seed 42's with-immigration run saw a Growlithe arrive
+at tick 133, Geodude at 611, Onix at 2206, Mankey (a group of 3) at 2459 —
+real per-event log lines, e.g. `[tick 2459] 3 mankey arrived from outside
+at (0,23) on surface and founded mankey-immigrant-lineage-2459`. Seed
+20260903 (this session's historically low-growth seed) ended at the exact
+same population either way (28) but with visibly different composition —
+immigration replaced some of that seed's own weak organic growth with
+externally-arrived diversity (Geodude, Charmander, Scyther, Spearow, Mankey
+all present with immigration on; none of those with it off) rather than
+straightforwardly boosting the total, a real and slightly more nuanced
+outcome than "immigration always raises final population," worth flagging
+honestly rather than only reporting the two seeds where it clearly did.
+
+**A longer 8000-tick run (seed 42) to check the population cap and real
+survival/breeding of the new species**: final population 69 (still under
+`POP_SOFT_CAP=70`, so immigration was still rolling at full strength the
+whole run — the cap's scale-down zone was never actually tested by this
+run), 13 immigration events, 63 births. Mankey grew from the single 3-agent
+immigrant group (tick 2459 in the 3000-tick run) to 6 living members by
+tick 8000 — real in-sim breeding of a newly-immigrated species, not just
+survival. Charmander (2 starting + immigrant arrivals) grew to 11
+living + 7 evolved Charmeleon — the biome-placed starting pair is
+thriving. The population-cap *scaling logic itself* (soft-to-hard-cap
+linear falloff, and the hard skip at/above 110) is covered directly by
+`immigration.test.ts`'s unit tests rather than by this real run alone,
+since a real run staying under 70 the whole time doesn't exercise the
+scaled-down middle zone — see TODO.md for a flagged follow-up (a
+longer/multi-seed run that actually pushes population past 70 to confirm
+the falloff in a real run, not just in isolation).
+
+### Tests
+
+`packages/engine/test/immigration.test.ts` (13 tests): fires under a
+guaranteed roll and spawns 1-3 agents as one herd; never fires under an
+impossible roll; respects the cooldown (blocked mid-cooldown, fires again
+once elapsed); the population-cap gate specifically — never fires at/above
+`POP_HARD_CAP` even under a guaranteed roll, still fires below
+`POP_SOFT_CAP`, and the *same* roll that fires below the soft cap correctly
+stops firing once scaled down at the cap midpoint (a real check of the
+linear falloff math, not just the two endpoints); dead agents don't count
+toward the cap; underground-homed species spawn directly on the flat grid;
+two rng-determinism tests (same-seed `maybeImmigrate` calls across 2000
+ticks produce byte-identical outcomes; immigration threaded through a real
+`tickWorld` run twice produces byte-identical event logs, with a sanity
+check that immigration actually fired in that window). A separate
+`packages/data/test/species.test.ts` (19 tests, new — the data package's
+first test suite, `vitest` added as a devDependency alongside the existing
+`typescript` one) checks the new species' actual data integrity: real dex
+`baseStats`/`types`, moves resolve without crashing through `spawnAgent`,
+egg groups resolve through `LEVELING_CONTEXT.getProfile`, the
+Geodude/Onix Mineral pairing is real, Mankey's evolution resolves to a real
+species id, Growlithe correctly has zero level-only evolutions, and every
+new species is tagged with a real `worldgen.ts` biome name. All existing
+580 engine tests (now 593 with the new file) and the `determinism.test.ts`
+acceptance test pass unchanged — existing callers that don't pass an
+`ImmigrationContext` simply never trigger immigration, so this feature adds
+zero behavior change to anything that doesn't opt in.
+
+### Explicitly not done here
+
+- Population is capped for immigration's own contribution only — breeding
+  itself is still fully uncapped, a bigger pre-existing gap this feature
+  doesn't attempt to solve (see TODO.md).
+- No retrofitting of every existing hand-placed starting agent's position to
+  respect `biomes` — deliberately scoped to new placements only (Charmander,
+  immigrants), per the task brief's own explicit steer, to avoid
+  destabilizing already-validated starting positions.
+- No new moves for the three new species — all three deliberately picked to
+  fit an already-implemented move rather than growing `moves.ts`'s scope.
+- The population-cap's scaled-down middle zone (`POP_SOFT_CAP` to
+  `POP_HARD_CAP`) is unit-tested but not yet exercised by a real multi-
+  thousand-tick run that actually reaches it — see TODO.md.

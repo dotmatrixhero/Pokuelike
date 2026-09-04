@@ -4,6 +4,7 @@ import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import { growFlora, maybeDropSeed } from "./flora.js";
 import { decayShelters } from "./shelter.js";
 import { updateHerdMigrations } from "./herdMigration.js";
+import { maybeImmigrate, type ImmigrationContext } from "./immigration.js";
 import type { LevelingContext } from "./leveling.js";
 import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, canopySpeedMultiplier, coldSnapSpeedMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
 import { tileAt } from "./world.js";
@@ -127,7 +128,14 @@ function isDead(agent: Agent): boolean {
  * itself), matching the existing `log`/`rules`/`ctx` optional-override
  * convention.
  */
-export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext, rng: () => number = world.rng): void {
+export function tickWorld(
+  world: World,
+  log?: EventLog,
+  rules?: HuntRules,
+  ctx?: LevelingContext,
+  rng: () => number = world.rng,
+  immigration?: ImmigrationContext
+): void {
   const previousTick = world.tick;
   world.tick += 1;
   // Once per tick, not once per agent — the day/night cycle is a world-level
@@ -152,6 +160,13 @@ export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?:
   // detection is a slow-moving signal, not something that needs to react to
   // the exact order agents move in within the same tick.
   updateHerdMigrations(world, log, rng);
+  // Once per tick, not once per agent — same "world-level system, one pass"
+  // shape as `updateHerdMigrations` above (see immigration.ts). A newly
+  // arrived immigrant pushed here is picked up by this same tick's agent
+  // loop below, same as a same-tick newborn (see this function's own doc
+  // comment) — harmless, just means an immigrant can already act once
+  // before this call returns.
+  maybeImmigrate(world, immigration, log, rng);
   for (const agent of world.agents) {
     if (isDead(agent)) continue;
 
