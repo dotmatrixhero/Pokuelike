@@ -1420,3 +1420,19 @@ not something this pathfinding pass itself caused or is positioned to fix.
       scale with local population density (sparser maps might want it
       shorter)? Not resolved — needs more real runs across seeds/densities
       before touching the constant again.
+
+## Breeding-level gate — built, but a real severe side effect flagged, see DESIGN.md
+
+- [x] Breeding now requires evolved-once OR level 16+, on top of the
+      existing age-based maturity check. Direct instruction, implemented
+      exactly as asked (`meetsBreedingRequirement` in reproduction.ts).
+- [ ] **Urgent-ish open question, not resolved here:** a real 3000-tick,
+      3-seed run shows births collapsing to 4-5 total per run (was
+      hundreds-to-thousands) — most agents simply don't reach level 16 or
+      evolve within a normal run's lifetime at current exp-gain rates
+      (`EXP_TRICKLE_PER_TICK` 0.8/tick vs. ~2535 exp needed for MEDIUM_SLOW
+      level 16). The eligibility rule does exactly what was asked; whether
+      the *practical* near-zero-breeding outcome at today's exp pacing is
+      the intended end state, or whether exp-gain rates (or the level
+      threshold) should be revisited alongside it, is a real open design
+      question to take back to the user rather than guess at.

@@ -95,6 +95,7 @@ function parent(id: string, sex: "male" | "female", pos: { x: number; y: number 
     herdId: "herd-a",
     sex,
     age: 500,
+    level: 16, // meets the new breeding-level floor by default; tests targeting that gate specifically override it
     ...overrides,
   };
 }
@@ -406,16 +407,18 @@ describe("herd-status-driven mate preference", () => {
   // which is exactly what makes the level spread on the two suitors resolve
   // to a real top-vs-bottom herdRank rather than an arbitrary one: with the
   // seeker herself in the mix, a herd of 3 sorted by level puts the level-20
-  // suitor at rank 1 (full STATUS_DISTANCE_BONUS) and the level-1 suitor at
-  // rank 3 (none).
+  // suitor at rank 1 (full STATUS_DISTANCE_BONUS) and the level-16 suitor at
+  // rank 3 (none). All three levels sit at/above MIN_BREEDING_LEVEL_UNEVOLVED
+  // (16) so the breeding-level gate itself doesn't interfere with what this
+  // describe block is actually testing (rank-driven mate preference).
 
   it("prefers a higher-status suitor over a merely-nearer lower-status one at a comparable distance", () => {
     const world = createWorld(20, 20);
     // Distance 3 (moves in x) vs distance 4 (moves in y) — a 1-tile gap, well
     // inside STATUS_DISTANCE_BONUS (2), so status should flip the pick.
     world.agents.push(
-      parent("mother", "female", { x: 0, y: 0 }, { level: 5 }),
-      parent("nearer-lowrank", "male", { x: 3, y: 0 }, { level: 1 }),
+      parent("mother", "female", { x: 0, y: 0 }, { level: 17 }),
+      parent("nearer-lowrank", "male", { x: 3, y: 0 }, { level: 16 }),
       parent("farther-highrank", "male", { x: 0, y: 4 }, { level: 20 })
     );
 
@@ -434,8 +437,8 @@ describe("herd-status-driven mate preference", () => {
     // still win the effective-distance comparison even though the farther
     // one is top-ranked.
     world.agents.push(
-      parent("mother", "female", { x: 0, y: 0 }, { level: 5 }),
-      parent("nearer-lowrank", "male", { x: 2, y: 0 }, { level: 1 }),
+      parent("mother", "female", { x: 0, y: 0 }, { level: 17 }),
+      parent("nearer-lowrank", "male", { x: 2, y: 0 }, { level: 16 }),
       parent("farther-highrank", "male", { x: 0, y: 5 }, { level: 20 })
     );
 

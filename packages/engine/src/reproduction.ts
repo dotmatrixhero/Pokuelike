@@ -37,6 +37,27 @@ export function isMature(agent: Agent): boolean {
   return agent.age === undefined || agent.age >= MATURITY_AGE;
 }
 
+/** Direct instruction: breeding needs a real earned edge on top of plain age-maturity — either an evolution, or enough levels to get there some other way. */
+export const MIN_BREEDING_LEVEL_UNEVOLVED = 16;
+
+/**
+ * Extra breeding gate on top of `isMature`'s plain age check: an agent may
+ * breed once it's *either* evolved at least once (any stage past its base
+ * form — `ctx.baseSpeciesOf` maps a species id back to its base form, so
+ * `species !== baseSpeciesOf(species)` means "has evolved") *or* reached
+ * `MIN_BREEDING_LEVEL_UNEVOLVED` without evolving (e.g. a species whose
+ * evolution threshold sits well above 16, or one that never evolves at
+ * all). Without `ctx` or `agent.level` (bare test fixtures that don't set
+ * either), reads as eligible — same "no data, don't block" convention
+ * `isMature` itself uses for `agent.age`.
+ */
+export function meetsBreedingRequirement(agent: Agent, ctx?: LevelingContext): boolean {
+  const baseSpecies = ctx?.baseSpeciesOf?.(agent.species);
+  if (baseSpecies !== undefined && baseSpecies !== agent.species) return true;
+  if (agent.level === undefined) return true;
+  return agent.level >= MIN_BREEDING_LEVEL_UNEVOLVED;
+}
+
 /**
  * Inbreeding avoidance: blocks direct parent/offspring, full or half
  * siblings (share at least one parent), and grandparent/grandchild pairs.
@@ -99,7 +120,7 @@ function isEligibleMate(agent: Agent, candidate: Agent, ctx?: LevelingContext): 
   // "monster") are a real cross-species breeding pair. See canBreed.
   if (!canBreed(agent.species, candidate.species, ctx) || candidate.layer !== agent.layer) return false;
   if (!agent.sex || !candidate.sex || agent.sex === candidate.sex) return false;
-  if (!isMature(candidate)) return false;
+  if (!isMature(candidate) || !meetsBreedingRequirement(candidate, ctx)) return false;
   if (candidate.behavior === "flee") return false; // don't interrupt a fleeing mate
   if (isRelated(agent, candidate)) return false;
   // Herd animals normally pair within their herd; solitary agents (no
@@ -275,7 +296,7 @@ export function applyMateSeeking(
   ctx?: LevelingContext,
   rng: () => number = Math.random
 ): void {
-  if (!agent.sex || !isMature(agent)) return;
+  if (!agent.sex || !isMature(agent) || !meetsBreedingRequirement(agent, ctx)) return;
 
   const candidates = world.agents.filter(
     (other) => isEligibleMate(agent, other, ctx) && manhattan(agent.pos, other.pos) <= mateSearchRadius(agent)

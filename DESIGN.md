@@ -4998,4 +4998,48 @@ question rather than something closed here.
 - Save format, map generation, dungeon structure/progression.
 - Data source/legality for sprite art (bring-your-own for now).
 
+## Breeding requires a real earned edge: evolved once, or level 16+
+
+**Decided and built.** Direct instruction: on top of `isMature`'s plain
+age check (`MATURITY_AGE`, 200 ticks — unchanged), breeding now additionally
+requires *either* having evolved at least once *or* being at least level 16
+without evolving. New `meetsBreedingRequirement(agent, ctx)` in
+`reproduction.ts`: `ctx.baseSpeciesOf(agent.species) !== agent.species` means
+"has evolved" (any stage past the base form counts, not just first-stage);
+otherwise falls back to `agent.level >= MIN_BREEDING_LEVEL_UNEVOLVED` (16).
+Without `ctx` or `agent.level` (bare fixtures), reads as eligible — same
+"no data, don't block" convention `isMature` already uses for `agent.age`.
+Checked both for the seeking agent itself (`applyMateSeeking`) and for each
+candidate (`isEligibleMate`), alongside the existing herd/species/sex/
+relatedness/isolation-escape-hatch checks — additive, not a replacement for
+any of them.
+
+**Real-run findings — a genuinely severe effect, flagged honestly:** a
+3000-tick run on three seeds (42, 20260903, 7) with the real demo scenario
+(`HUNT_RULES`/`LEVELING_CONTEXT`) shows births collapsing to **4-5 total**
+per run (final population 13-16), down from the hundreds-to-low-thousands
+seen in every other real run this session under the old age-only gate.
+Average living level at the 3000-tick mark is only ~15-16 — meaning most of
+the population never clears the new bar within a normal run's timescale at
+all, and the agents that do breed are mostly the rare ones that evolved
+early rather than ones that ground out 16 levels first (`EXP_TRICKLE_PER_TICK`
+is 0.8/tick; `totalExpForLevel("MEDIUM_SLOW", 16)` alone is 2535 — passive
+trickle by itself takes ~3169 ticks just to reach 16, longer than most
+individual agents currently survive). The gate does exactly what was asked
+(no agent breeds without a real earned edge), but at this sim's current
+exp-gain rates it reads less like "breeding needs some seasoning" and more
+like "breeding almost never happens" — worth a deliberate look at exp-gain
+pacing (or the 16 threshold itself) as a likely necessary follow-up, not
+assumed to be the intended end state without that conversation. Not touched
+here since tuning exp rates is a distinct decision from the eligibility
+rule itself.
+
+**Tests:** the `parent()` test fixture in `reproduction.test.ts` now
+defaults to `level: 16` (alongside its existing `age: 500`) so pre-existing
+tests about other reproduction mechanics keep exercising what they meant to
+test; the two herd-status-preference tests, which deliberately used a
+level spread to produce a real rank difference, were bumped to `16/17/20`
+(preserving the same relative ordering) since their old `level: 1` fixture
+now fails the new gate on its own. All 580 engine tests pass.
+
 See TODO.md for the running list of side notes to revisit.
