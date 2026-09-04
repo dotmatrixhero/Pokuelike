@@ -45,7 +45,7 @@ let intervalId: number | undefined;
 let selectedAgentId: string | undefined;
 let lastLoggedEventCount = 0;
 let inspectorDirty = true;
-let renderStyle: RenderStyle = "tile";
+let renderStyle: RenderStyle = "ascii";
 
 const eventLogPanel = new EventLogPanel(eventLogEl);
 
