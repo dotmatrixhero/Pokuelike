@@ -396,7 +396,7 @@ export function tickAgentNeeds(
   if (agent.alive === false) return;
   if (agent.age !== undefined) agent.age += 1;
   tickCooldowns(agent, agent.asleep ? SLEEP_COOLDOWN_TICKS : 1);
-  if (world) tickStatusEffects(agent, world, log);
+  if (world) tickStatusEffects(agent, world, log, rng);
   const thirstMultiplier = world ? thirstDecayMultiplier(world, agent.layer, agent.pos) : 1;
   decayNeeds(agent.needs, thirstMultiplier, agent.asleep === true);
 

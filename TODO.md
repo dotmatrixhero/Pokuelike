@@ -1172,7 +1172,7 @@ blind `git merge`:
   messily-committed branch (34 unique commits, terse/non-descriptive
   messages) — neither looks relevant to reconcile against, flagging only
   so it's not mistaken for something that needs attention later.
-- [x] **Real O(agents²) perf regression found and half-fixed**: real timing
+- [x] **Real O(agents²) perf regression found and fixed**: real timing
   (500/1000/2000-tick pure-compute benchmarks, no per-event I/O) showed
   clearly superlinear scaling after this merge — 0.9s/1.2s/6.1s. Traced one
   real cause: `status.ts`'s `applyHealAuraPassive` ran on every agent's
@@ -1180,13 +1180,63 @@ blind `git merge`:
   scanned all of `world.agents` for same-herd neighbors instead of a bounded
   lookup — same class of bug as the pre-existing species-encounter-tracking
   one. Fixed with a new `herdIndex.ts` (per-tick cached herd membership,
-  same pattern as `resourceIndex.ts`). **Not the whole story**: the same
-  benchmark still shows superlinear growth after this fix, so at least one
-  more O(agents) hot path from the merged skill-tree/status-effects work is
-  still unidentified — the huge `moveRespecced`/`gainedSkillPoint` event
-  counts (14,237/4,574 in one 3000-tick run) point toward the auto-respec
-  path (`maybeAutoRespec`, leveling.ts) as the next place to look, not
-  confirmed yet.
+  same pattern as `resourceIndex.ts`).
+
+  That fix wasn't the whole story, and the auto-respec hypothesis
+  (`maybeAutoRespec`, leveling.ts) written down here turned out **not** to be
+  it — read the actual code and confirmed `maybeAutoRespec`'s cost is bounded
+  by a single agent's known-moves/tree-node count, not by population size,
+  so it doesn't scale with agents at all. Profiling (`node --prof` +
+  `--prof-process`) instead pointed at `packages/data/src/leveling.ts`'s
+  `profileFromDexEntry` (`LEVELING_CONTEXT.getProfile`): it rebuilt a fresh
+  `LevelingProfile` object (including an `evolutions.filter().map()` pass)
+  from scratch on *every* call, and `reproduction.ts`'s `applyMateSeeking`
+  calls it (via `canBreed`, up to twice) once per candidate in a full,
+  unindexed `world.agents` scan run for *every* mate-seeking agent, every
+  tick — an O(agents) scan whose per-candidate cost was itself needlessly
+  heavy, and O(agents) of those scans per tick. A per-call counter confirmed
+  it: a 2000-tick/~350-agent run made ~790,000 `getProfile` calls, growing
+  far faster than population or tick count (500 ticks: ~43k; 1000 ticks:
+  ~103k). Fixed by memoizing `profileFromDexEntry` in a small `Map` keyed by
+  species id — safe because the dex it reads from is static for the life of
+  the process, so nothing ever needs to invalidate the cache; same "index
+  instead of a bare scan" fix shape as `herdIndex.ts`, just for a lookup
+  table instead of world-position data.
+
+  **A second, bigger contributor turned out to be a real determinism bug,
+  not a pure perf one**: `grantExp`'s level-up loop (leveling.ts) called
+  `grantSkillPoint(agent, primaryType, world, log, ctx)` — silently dropping
+  the `rng` parameter, so every level-up's guaranteed skill-point grant (and
+  its `maybeAutoRespec` follow-up, and its 1-in-`SKILLPOINT_WILDCARD_INTERVAL`
+  bonus-wildcard recursion) fell back to real, unseeded `Math.random()`
+  instead of `world.rng`. Confirmed via a same-seed-twice checksum
+  (`createDemoWorld(42)` + 500 ticks, same process, same code): agent count
+  and a position/level/HP checksum differed on *every single run* before
+  this fix, identical on every run after it. This explains why the
+  originally-reported 0.9s/1.2s/6.1s numbers looked so dramatically
+  superlinear: re-running that exact unmodified benchmark several times (no
+  code changes) produced wildly different populations at tick 2000 purely by
+  luck — 97, 148, 239, 379, once even 753 — because the unseeded skill-point
+  draws fed back into how much a run's population could grow (more real
+  wildcard points -> more passives/moves committed -> different downstream
+  survival), and a larger population is itself genuinely more expensive to
+  tick. The "superlinear" shape was real variance across un-reproducible
+  runs, not (mostly) a single hidden algorithmic hot path. Also
+  independently found and fixed the same class of bug one call up:
+  `tickAgentNeeds` (needs.ts) called `tickStatusEffects(agent, world, log)`
+  without `rng`, so a frozen agent's per-tick thaw roll had the same
+  unseeded-`Math.random()` problem (smaller blast radius, same fix).
+
+  **Verified end to end**: `pnpm --filter @pokuelike/engine test` (541
+  tests, run twice, no flakes seen) and `test/determinism.test.ts`'s
+  acceptance test both still pass; the exact task benchmark script, run
+  twice back to back on seed 42, now reproduces byte-identical agent
+  counts/timing (500: ~800ms/22 agents; 1000: ~1150ms/13 agents; 2000:
+  ~2100ms/11 agents, both runs). A higher-population seed (4: 27 -> 51 ->
+  314 agents across the same three tick counts) stays reproducible run to
+  run and scales with population roughly in line with tick count rather than
+  blowing up, confirming the fix holds at scale and not just on a
+  small-population seed.
 - [ ] **A second pre-existing flaky test surfaced outside `predation.test.ts`**:
   `reproduction.test.ts`'s cross-species-types assertion failed once in a
   full-suite run, passed 1/1 in isolation immediately after — same unseeded-

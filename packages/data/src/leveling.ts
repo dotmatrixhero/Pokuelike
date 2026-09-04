@@ -170,7 +170,36 @@ const EGG_GROUPS_BY_BASE_KEY: Record<string, string[]> = {
  * `getProfile` reads straight from the full dex, so this works for any of
  * the 1083 imported species, not just the demo roster.
  */
+/**
+ * Memoizes `profileFromDexEntry` per species id — the dex this reads from
+ * (`SPECIES_DEX_BY_KEY`/`SPECIES`/`EGG_GROUPS_BY_BASE_KEY`) is static for the
+ * life of the process, so a given `speciesId` always produces the exact same
+ * `LevelingProfile` object; nothing ever needs to invalidate this cache.
+ * Real motivating case: `getProfile` (this is `LEVELING_CONTEXT.getProfile`)
+ * is called on the sim's hottest paths — `canBreed` (reproduction.ts's
+ * `isEligibleMate`, itself called once per candidate in a full
+ * `world.agents` scan for *every* mate-seeking agent, every tick) and
+ * `grantExp`'s level-up loop — and was rebuilding a fresh profile object
+ * (including an `evolutions.filter().map()` pass) from scratch on every one
+ * of those calls. That turned an already population-scaling mate-seeking
+ * scan into extra allocation-heavy work per candidate: confirmed via a
+ * per-call counter, a 2000-tick/~350-agent run made ~790,000 `getProfile`
+ * calls, growing far faster than population or tick count (500 ticks: ~43k
+ * calls; 1000 ticks: ~103k) — the same "unbounded per-agent-pair cost"
+ * shape as the `healAura` bug `herdIndex.ts` fixed, just for a lookup table
+ * instead of world-position data. Caching removes essentially all of that
+ * repeated allocation/array-work.
+ */
+const profileCache = new Map<string, LevelingProfile | undefined>();
+
 function profileFromDexEntry(speciesId: string): LevelingProfile | undefined {
+  if (profileCache.has(speciesId)) return profileCache.get(speciesId);
+  const profile = computeProfileFromDexEntry(speciesId);
+  profileCache.set(speciesId, profile);
+  return profile;
+}
+
+function computeProfileFromDexEntry(speciesId: string): LevelingProfile | undefined {
   const entry = SPECIES_DEX_BY_KEY[speciesId.toUpperCase()];
   if (!entry) return undefined;
   return {

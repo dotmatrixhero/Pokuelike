@@ -526,7 +526,7 @@ export function grantExp(
     const primaryType = agent.types?.[0];
     // The bonus wildcard (every SKILLPOINT_WILDCARD_INTERVAL-th real point,
     // level-up or on-hit alike) is handled inside grantSkillPoint itself.
-    if (primaryType) grantSkillPoint(agent, primaryType, world, log, ctx);
+    if (primaryType) grantSkillPoint(agent, primaryType, world, log, ctx, rng);
 
     const levelAfterUp = agent.level;
     const evo = profile.evolutions.find((e) => levelAfterUp >= e.level);
