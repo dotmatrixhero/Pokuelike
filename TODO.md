@@ -240,6 +240,39 @@ produce a real story before player mechanics are worth building further.
       capacity, nothing ties reproduction to predation pressure) — the
       Speed work didn't cause this, but it did make the previously-rare
       "predator dies early" case common enough to matter.
+- [x] **`packages/web` evolved from bare canvas dots into a real live
+      observer** — see DESIGN.md's "A real live browser observer" section.
+      Play/Pause/Step/Speed controls over a real `tickWorld` loop, a seed
+      input (`Load`/`Random`/`Copy`, URL-synced via `?seed=`), an
+      ascii.ts-palette-matched terrain/agent grid (weather cells and
+      day/night tinting included, deliberately basic), a real capped/
+      virtualized event log panel with distinct treatment for
+      `born`/`killed`/`defeated`/`fainted`/`evolved`/`diedOfAge`, and
+      click-to-inspect with a per-agent filtered event history. Also fixed
+      the `fought`/`missed` event data gap (added `moveId`/`pos`, matching
+      every other combat-adjacent event) as part of the same session.
+      `dump-replay.ts`'s precomputed-artifact path is untouched and still
+      exists for a no-dev-server snapshot; it's just no longer the primary
+      way to watch a run.
+- [ ] **`packages/web` has no automated UI tests** — validated instead by a
+      clean `pnpm -r build`/`typecheck`/`test` and a real (but
+      click-through-free) dev server run; see DESIGN.md for exactly why
+      (no browser-automation tooling available in this environment, and
+      installing one didn't complete in a reasonable window). A real
+      browser-driven check (Playwright or similar) of seed-load/play-pause-
+      step/click-to-inspect is still open if this app grows enough to
+      justify the infra.
+- [ ] **Day/night and weather visualization in `packages/web` are
+      deliberately basic first passes** — one flat darkness overlay (no
+      directional lighting/gradient) and translucent circles for weather
+      cells (no per-tile shading). Fine for "is something happening
+      visually," not a polished lighting model.
+- [ ] **`packages/web`'s renderer still only draws the surface layer** —
+      unchanged from the original bare renderer; an agent that crosses to
+      underground/canopy for a need still just vanishes/reappears rather
+      than being shown on another view. A real per-layer view (tabs? a
+      picture-in-picture minimap?) is future work if the underground/canopy
+      populations become interesting enough to want to watch directly.
 
 ## World layers, elevation, and regions (see DESIGN.md)
 - [x] `Tile`/`World` have a `layer` dimension (Underground/Surface/Canopy,

@@ -387,6 +387,8 @@ function resolveHit(
       attackerSpecies: attacker.species,
       defenderId: defender.id,
       defenderSpecies: defender.species,
+      moveId: move.id,
+      pos: defender.pos,
     });
     return false;
   }
@@ -429,6 +431,8 @@ function resolveHit(
       damage,
       defenderHpRemaining: defender.hp ?? 0,
       critical: isCritical,
+      moveId: move.id,
+      pos: defender.pos,
     });
 
     if (defender.finishingPool > 0) return false; // still down, not finished
@@ -453,6 +457,8 @@ function resolveHit(
     damage,
     defenderHpRemaining: defender.hp,
     critical: isCritical,
+    moveId: move.id,
+    pos: defender.pos,
   });
 
   if (defender.hp > 0) return false;

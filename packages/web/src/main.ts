@@ -1,36 +1,190 @@
-import { tickWorld } from "@pokuelike/engine";
+import { EventLog, tickWorld, randomSeed, type Agent, type World } from "@pokuelike/engine";
 import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
-import { drawWorld, TILE_SIZE } from "./renderer.js";
-
-const TICK_MS = 400;
+import { agentAtCanvasPos, drawWorld, TILE_SIZE } from "./renderer.js";
+import { EventLogPanel } from "./eventLogPanel.js";
+import { renderInspector } from "./inspector.js";
 
 /**
- * `?seed=<number>` overrides the demo's default fixed seed
- * (`SCENARIO_SEED`) — lets a specific run be reloaded/shared by URL. This is
- * the one bit of seed-threading Part 2 (a real live browser viewer, a
- * separate follow-up) will build on directly, per that task's ask to "get
- * its rng handling right now rather than leaving it inconsistent" — this
- * app doesn't otherwise need anything more than what it already gets for
- * free: `tickWorld`'s `rng` parameter defaults to `world.rng` (see
- * simulation.ts), so every random roll here is already threaded from
- * `world`'s own seeded generator, not raw `Math.random`, with no further
- * change needed in this file.
+ * Ticks per real second at speed multiplier 1x. Multiplied by `SPEED_STEPS`
+ * below for the fast end, divided for the slow end — a dev/observer control,
+ * not tuned for anything more precise than "watch a story unfold at a
+ * comfortable pace, or blast through to see a longer-run outcome."
  */
-const seedParam = new URLSearchParams(location.search).get("seed");
-const seed = seedParam !== null && seedParam !== "" ? Number(seedParam) : SCENARIO_SEED;
-console.log(`Seed: ${seed}`);
+const BASE_TICKS_PER_SEC = 6;
+const SPEED_STEPS = [0.25, 0.5, 1, 2, 4, 8, 16, 32] as const;
+const DEFAULT_SPEED_INDEX = 2; // 1x
 
-const world = createDemoWorld(seed);
+// --- DOM references -------------------------------------------------------
 
 const canvas = document.getElementById("scene") as HTMLCanvasElement;
-canvas.width = world.width * TILE_SIZE;
-canvas.height = world.height * TILE_SIZE;
 const ctx = canvas.getContext("2d")!;
+const seedInput = document.getElementById("seed-input") as HTMLInputElement;
+const loadSeedBtn = document.getElementById("load-seed") as HTMLButtonElement;
+const randomSeedBtn = document.getElementById("random-seed") as HTMLButtonElement;
+const copySeedBtn = document.getElementById("copy-seed") as HTMLButtonElement;
+const playPauseBtn = document.getElementById("play-pause") as HTMLButtonElement;
+const stepBtn = document.getElementById("step") as HTMLButtonElement;
+const speedSlider = document.getElementById("speed") as HTMLInputElement;
+const speedLabel = document.getElementById("speed-label") as HTMLElement;
+const tickLabel = document.getElementById("tick-label") as HTMLElement;
+const clockLabel = document.getElementById("clock-label") as HTMLElement;
+const eventLogEl = document.getElementById("event-log") as HTMLElement;
+const inspectorEl = document.getElementById("inspector") as HTMLElement;
+const clearSelectionBtn = document.getElementById("clear-selection") as HTMLButtonElement;
 
-function render(): void {
-  drawWorld(ctx, world);
-  requestAnimationFrame(render);
+// --- State -----------------------------------------------------------------
+
+let world: World;
+let log: EventLog;
+let playing = false;
+let speedIndex = DEFAULT_SPEED_INDEX;
+let intervalId: number | undefined;
+let selectedAgentId: string | undefined;
+let lastLoggedEventCount = 0;
+let inspectorDirty = true;
+
+const eventLogPanel = new EventLogPanel(eventLogEl);
+
+function currentSeed(): number {
+  return world.rngSeed;
 }
 
-setInterval(() => tickWorld(world, undefined, HUNT_RULES, LEVELING_CONTEXT), TICK_MS);
-render();
+function loadWorld(seed: number): void {
+  world = createDemoWorld(seed);
+  log = new EventLog();
+  lastLoggedEventCount = 0;
+  selectedAgentId = undefined;
+
+  canvas.width = world.width * TILE_SIZE;
+  canvas.height = world.height * TILE_SIZE;
+
+  seedInput.value = String(seed);
+  const url = new URL(location.href);
+  url.searchParams.set("seed", String(seed));
+  history.replaceState(null, "", url);
+
+  eventLogPanel.reset();
+  eventLogPanel.setFilter(undefined);
+  renderInspector(inspectorEl, undefined);
+  updateStatusLabels();
+}
+
+function step(): void {
+  tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT);
+  // Only the events since the last step are new; EventLog is append-only for the life of a world.
+  eventLogPanel.ingest(log.events.slice(lastLoggedEventCount));
+  lastLoggedEventCount = log.events.length;
+  if (selectedAgentId) inspectorDirty = true;
+  updateStatusLabels();
+}
+
+function updateStatusLabels(): void {
+  tickLabel.textContent = `Tick ${world.tick}`;
+  const hour = ((world.tick % 200) / 200) * 24;
+  clockLabel.textContent = `${String(Math.floor(hour)).padStart(2, "0")}:${String(Math.floor((hour % 1) * 60)).padStart(2, "0")}`;
+}
+
+// --- Tick loop control -------------------------------------------------------
+
+function scheduleLoop(): void {
+  if (intervalId !== undefined) {
+    clearInterval(intervalId);
+    intervalId = undefined;
+  }
+  if (!playing) return;
+
+  const speed = SPEED_STEPS[speedIndex]!;
+  const ticksPerSec = BASE_TICKS_PER_SEC * speed;
+  if (ticksPerSec <= 60) {
+    intervalId = window.setInterval(step, 1000 / ticksPerSec);
+  } else {
+    // Beyond ~60 real timer callbacks/sec, batch multiple ticks per callback instead of flooding the event loop.
+    const ticksPerCallback = Math.round(ticksPerSec / 60);
+    intervalId = window.setInterval(() => {
+      for (let i = 0; i < ticksPerCallback; i++) step();
+    }, 1000 / 60);
+  }
+}
+
+function setPlaying(next: boolean): void {
+  playing = next;
+  playPauseBtn.textContent = playing ? "Pause" : "Play";
+  playPauseBtn.classList.toggle("playing", playing);
+  scheduleLoop();
+}
+
+// --- Selection / inspector ---------------------------------------------------
+
+function selectAgent(agent: Agent | undefined): void {
+  selectedAgentId = agent?.id;
+  eventLogPanel.setFilter(selectedAgentId);
+  inspectorDirty = true;
+}
+
+function refreshSelection(): void {
+  if (!inspectorDirty) return;
+  inspectorDirty = false;
+  const agent = selectedAgentId ? world.agents.find((a) => a.id === selectedAgentId) : undefined;
+  renderInspector(inspectorEl, agent);
+}
+
+// --- Wiring ------------------------------------------------------------------
+
+loadSeedBtn.addEventListener("click", () => {
+  const value = Number(seedInput.value);
+  if (!Number.isFinite(value)) return;
+  loadWorld(value);
+});
+
+randomSeedBtn.addEventListener("click", () => {
+  loadWorld(randomSeed());
+});
+
+copySeedBtn.addEventListener("click", () => {
+  navigator.clipboard?.writeText(String(currentSeed())).catch(() => {
+    // Clipboard access can be denied depending on context — the seed is still
+    // visible and selectable in the input field either way, so this is a
+    // convenience, not a required path.
+  });
+});
+
+playPauseBtn.addEventListener("click", () => setPlaying(!playing));
+
+stepBtn.addEventListener("click", () => {
+  setPlaying(false);
+  step();
+});
+
+speedSlider.min = "0";
+speedSlider.max = String(SPEED_STEPS.length - 1);
+speedSlider.value = String(speedIndex);
+speedSlider.addEventListener("input", () => {
+  speedIndex = Number(speedSlider.value);
+  speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
+  scheduleLoop();
+});
+
+canvas.addEventListener("click", (event) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+  const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+  const agent = agentAtCanvasPos(world, x, y);
+  selectAgent(agent);
+});
+
+clearSelectionBtn.addEventListener("click", () => selectAgent(undefined));
+
+// --- Boot --------------------------------------------------------------------
+
+const seedParam = new URLSearchParams(location.search).get("seed");
+const initialSeed = seedParam !== null && seedParam !== "" ? Number(seedParam) : SCENARIO_SEED;
+loadWorld(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED);
+speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
+
+function frame(): void {
+  drawWorld(ctx, world, selectedAgentId);
+  eventLogPanel.render();
+  refreshSelection();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);

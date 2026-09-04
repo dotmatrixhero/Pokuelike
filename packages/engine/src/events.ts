@@ -70,6 +70,10 @@ export type SimEvent =
       damage: number;
       defenderHpRemaining: number;
       critical: boolean;
+      /** The move actually used — see predation.ts's `resolveHit`, which already has it in scope from `pickBestMove`. */
+      moveId: string;
+      /** The defender's position at the moment of the hit — matches every other combat-adjacent event (`killed`/`fainted`/`defeated`). */
+      pos: Vec2;
     }
   | {
       kind: "missed";
@@ -78,6 +82,10 @@ export type SimEvent =
       attackerSpecies: string;
       defenderId: string;
       defenderSpecies: string;
+      /** The move actually used — see predation.ts's `resolveHit`, which already has it in scope from `pickBestMove`. */
+      moveId: string;
+      /** The defender's position at the moment of the attack — matches every other combat-adjacent event (`killed`/`fainted`/`defeated`). */
+      pos: Vec2;
     }
   | {
       kind: "defeated";

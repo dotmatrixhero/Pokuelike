@@ -1,91 +1,140 @@
-import type { World } from "@pokuelike/engine";
+import type { Agent, World } from "@pokuelike/engine";
+import { lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import { getSprite } from "./sprites.js";
+import { FLAVOR_FG, TERRAIN_BG, TYPE_COLOR, WEATHER_TINT, mix, rgbToCss, rgbaToCss, shade } from "./palette.js";
 
-const TERRAIN_COLOR: Record<string, string> = {
-  floor: "#1c2128",
-  wall: "#3a3f4b",
-  water: "#2b6cb0",
-  food: "#8b5a2b",
-  flora: "#3f6b3a",
-  sunbeam: "#e8c547",
-  seedling: "#3f6b2a",
-  tree: "#1f4d2c",
-  boulder: "#5c5a54",
-  bush: "#2f5c33",
-  sand: "#c2a768",
-  mud: "#5a4a32",
-};
-
-/** Per-flavor overrides for "food"/"flora" tiles — see flora.ts's FOOD_FLAVORS/FLORA_FLAVORS. */
-const FLAVOR_COLOR: Record<string, string> = {
-  oran: "#5a8cff",
-  sitrus: "#fab03c",
-  pecha: "#ff8cbe",
-  cheri: "#e64646",
-  moss: "#78a564",
-  fern: "#50825a",
-  bloom: "#cd7dc3",
-};
-
-export const TILE_SIZE = 24;
-
-/** Linear-interpolates from `from` to `to` by `amount` (0 = from, 1 = to). Used to fade a depleted food patch. */
-function mixColor(from: string, to: string, amount: number): string {
-  const [r, g, b] = [1, 3, 5].map((i) => {
-    const a = parseInt(from.slice(i, i + 2), 16);
-    const b = parseInt(to.slice(i, i + 2), 16);
-    return Math.round(a + (b - a) * amount);
-  });
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-/** Elevation shades the floor lighter — a cheap stand-in until real tile art exists. */
-function shade(color: string, elevation: number): string {
-  if (elevation <= 0) return color;
-  const amount = Math.min(0.4, elevation * 0.08);
-  const [r, g, b] = [1, 3, 5].map((i) => {
-    const channel = parseInt(color.slice(i, i + 2), 16);
-    return Math.min(255, Math.round(channel + (255 - channel) * amount));
-  });
-  return `rgb(${r}, ${g}, ${b})`;
-}
+export const TILE_SIZE = 20;
 
 /**
- * Only draws the surface layer — agents on underground/canopy simply aren't
- * drawn, so a Diglett surfacing or a Pidgey landing visibly pops in and out.
+ * Only draws the surface layer, same limitation the original bare renderer
+ * had — an agent on underground/canopy simply isn't drawn, so a Diglett
+ * surfacing or a Pidgey landing visibly pops in and out. Fine for a first
+ * pass; a real per-layer view is future work (see DESIGN.md/TODO.md).
  */
-export function drawWorld(ctx: CanvasRenderingContext2D, world: World): void {
+export function drawWorld(ctx: CanvasRenderingContext2D, world: World, selectedAgentId: string | undefined): void {
   const surface = world.tiles.surface;
+
   for (let y = 0; y < world.height; y++) {
     for (let x = 0; x < world.width; x++) {
       const tile = surface[y * world.width + x]!;
-      let base = (tile.flavor && FLAVOR_COLOR[tile.flavor]) || TERRAIN_COLOR[tile.terrain] || "#000";
-      // A depleted patch fades toward bare floor instead of staying full-color "food".
-      if (tile.terrain === "food" && tile.stock !== undefined) {
-        base = mixColor(TERRAIN_COLOR.floor!, base, tile.stock);
+      let bg = shade(TERRAIN_BG[tile.terrain], tile.elevation);
+      // A depleted food/flora patch fades from its flavor accent back toward plain floor as stock runs out —
+      // same idea as the original renderer's mixColor, now mixing ascii.ts's actual FLAVOR_FG/TERRAIN_BG tables.
+      if ((tile.terrain === "food" || tile.terrain === "flora") && tile.stock !== undefined) {
+        const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_BG[tile.terrain];
+        bg = mix(TERRAIN_BG.floor, accent, tile.stock);
       }
-      ctx.fillStyle = shade(base, tile.elevation);
+      ctx.fillStyle = rgbToCss(bg);
       ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
     }
   }
 
   for (const agent of world.agents) {
     if (agent.layer !== "surface") continue;
-
-    const px = agent.pos.x * TILE_SIZE;
-    const py = agent.pos.y * TILE_SIZE;
-    const def = SPECIES[agent.species];
-    const sprite = def ? getSprite(def.spriteKey) : null;
-
-    if (sprite) {
-      ctx.drawImage(sprite, px, py, TILE_SIZE, TILE_SIZE);
-    } else {
-      ctx.fillStyle = def?.placeholderColor ?? "#ccc";
-      ctx.fillRect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
-      ctx.fillStyle = "#111";
-      ctx.font = `${TILE_SIZE * 0.6}px monospace`;
-      ctx.fillText((def?.name ?? agent.species)[0]!, px + TILE_SIZE * 0.25, py + TILE_SIZE * 0.75);
-    }
+    drawAgent(ctx, agent, agent.id === selectedAgentId);
   }
+
+  drawWeather(ctx, world);
+  drawDayNightTint(ctx, world);
+
+  if (selectedAgentId) {
+    const selected = world.agents.find((a) => a.id === selectedAgentId);
+    if (selected && selected.layer === "surface") drawSelectionRing(ctx, selected);
+  }
+}
+
+function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: boolean): void {
+  const px = agent.pos.x * TILE_SIZE;
+  const py = agent.pos.y * TILE_SIZE;
+  const def = SPECIES[agent.species];
+  const sprite = def ? getSprite(def.spriteKey) : null;
+  const isCorpse = agent.alive === false;
+
+  ctx.save();
+  ctx.globalAlpha = isCorpse ? 0.4 : agent.fainted ? 0.7 : 1;
+
+  if (sprite) {
+    ctx.drawImage(sprite, px, py, TILE_SIZE, TILE_SIZE);
+  } else {
+    const primaryType = agent.types?.[0];
+    const fill = isCorpse ? [90, 90, 90] : primaryType ? TYPE_COLOR[primaryType] : ([200, 200, 200] as const);
+    ctx.fillStyle = rgbToCss(fill as [number, number, number]);
+    ctx.fillRect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+    ctx.fillStyle = "#0d0d0d";
+    ctx.font = `${TILE_SIZE * 0.6}px monospace`;
+    ctx.fillText((def?.name ?? agent.species)[0]!, px + TILE_SIZE * 0.22, py + TILE_SIZE * 0.75);
+  }
+
+  if (agent.fainted && !isCorpse) {
+    ctx.fillStyle = "#fff";
+    ctx.font = `${TILE_SIZE * 0.5}px monospace`;
+    ctx.fillText("z", px + TILE_SIZE * 0.55, py + TILE_SIZE * 0.4);
+  }
+
+  ctx.restore();
+
+  if (isSelected) drawSelectionRing(ctx, agent);
+}
+
+function drawSelectionRing(ctx: CanvasRenderingContext2D, agent: Agent): void {
+  const px = agent.pos.x * TILE_SIZE;
+  const py = agent.pos.y * TILE_SIZE;
+  ctx.save();
+  ctx.strokeStyle = "#ffe066";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+  ctx.restore();
+}
+
+/**
+ * Weather cells as translucent tinted circles — there's no ANSI equivalent
+ * in ascii.ts to port (it doesn't render weather at all), so this is
+ * sim-original: enough to see a storm/drought/etc. sweeping over the map
+ * without trying to shade every individual affected tile.
+ */
+function drawWeather(ctx: CanvasRenderingContext2D, world: World): void {
+  if (!world.weatherCells || world.weatherCells.length === 0) return;
+  ctx.save();
+  for (const cell of world.weatherCells) {
+    const tint = WEATHER_TINT[cell.type] ?? [255, 255, 255];
+    ctx.fillStyle = rgbaToCss(tint, 0.16);
+    ctx.beginPath();
+    ctx.arc(
+      cell.center.x * TILE_SIZE + TILE_SIZE / 2,
+      cell.center.y * TILE_SIZE + TILE_SIZE / 2,
+      cell.radius * TILE_SIZE,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/**
+ * A flat darkening overlay driven by daynight.ts's real `lightLevel` — basic
+ * (no gradient, no light sources), a deliberate first-pass scope call rather
+ * than an oversight; see DESIGN.md/TODO.md.
+ */
+function drawDayNightTint(ctx: CanvasRenderingContext2D, world: World): void {
+  const darkness = 1 - lightLevel(world.tick);
+  if (darkness <= 0.02) return;
+  ctx.save();
+  ctx.fillStyle = `rgba(4, 6, 16, ${Math.min(0.55, darkness * 0.6)})`;
+  ctx.fillRect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
+  ctx.restore();
+}
+
+/** Maps a canvas click to the topmost surface-layer agent at that tile, if any. */
+export function agentAtCanvasPos(world: World, canvasX: number, canvasY: number): Agent | undefined {
+  const tileX = Math.floor(canvasX / TILE_SIZE);
+  const tileY = Math.floor(canvasY / TILE_SIZE);
+  // Last-drawn-wins order (same order world.agents is iterated for drawing) so
+  // a click resolves to whichever agent visually renders on top of the others.
+  let found: Agent | undefined;
+  for (const agent of world.agents) {
+    if (agent.layer === "surface" && agent.pos.x === tileX && agent.pos.y === tileY) found = agent;
+  }
+  return found;
 }

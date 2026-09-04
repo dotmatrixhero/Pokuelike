@@ -15,9 +15,9 @@ export function formatEvent(event: SimEvent): string {
     case "floraChanged":
       return `[tick ${event.tick}] flora ${event.stage} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
     case "fought":
-      return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) hit ${event.defenderSpecies} (${event.defenderId}) for ${event.damage}${event.critical ? " (critical hit!)" : ""} (hp left: ${event.defenderHpRemaining})`;
+      return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) at (${event.pos.x},${event.pos.y}) for ${event.damage}${event.critical ? " (critical hit!)" : ""} (hp left: ${event.defenderHpRemaining})`;
     case "missed":
-      return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) attacked ${event.defenderSpecies} (${event.defenderId}) and missed`;
+      return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) at (${event.pos.x},${event.pos.y}) and missed`;
     case "defeated":
       return `[tick ${event.tick}] ${event.winnerSpecies} (${event.winnerId}) defeated ${event.loserSpecies} (${event.loserId}) at (${event.pos.x},${event.pos.y})`;
     case "starved":

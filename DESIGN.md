@@ -3323,6 +3323,112 @@ which need genuinely different successive draws) through every bare
 `tickWorld` call in that file. Verified flake-free across 10 consecutive
 full-suite runs.
 
+## A real live browser observer, and the `fought`/`missed` event data gap
+
+Part 2 of the seeded-RNG work above: replace the two ways of watching the
+sim — `packages/web`'s bare fixed-interval canvas dots, and
+`packages/runner/src/dump-replay.ts`'s precompute-then-bake-into-static-HTML
+approach — with one real, live, controllable observer built on
+`packages/web`, per an earlier decision to build on that package rather than
+start a parallel artifact. `dump-replay.ts` itself is untouched (still
+useful for a no-dev-server snapshot artifact); it's just no longer the
+primary way anyone watches a run.
+
+**Event schema fix, done first**: `fought` and `missed` (`events.ts`) didn't
+record which move was used or where it happened, unlike every other
+combat-adjacent event (`killed`/`fainted`/`defeated`, which all have `pos`).
+Added `moveId: string` and `pos: Vec2` to both, threaded from
+`predation.ts`'s `resolveHit` — it already has `move` in scope from
+`pickBestMove`, and `defender.pos` was already reachable at both call sites
+(the finishing-blow branch and the normal-hit branch log separately, so both
+needed the same two fields added). `packages/runner/src/format.ts`'s
+`fought`/`missed` formatters now print the move and position. Existing tests
+use `expect.objectContaining`, so they didn't need updating; added explicit
+`moveId`/`pos` assertions to the two `predation.test.ts` cases that already
+exercise a real hit and a storm-forced miss, rather than writing new tests
+from scratch for a data-only field addition. Full 340-test suite still
+green.
+
+**The live observer** (`packages/web`, five source files, no new
+dependencies — still just Vite + the two workspace packages):
+
+- `main.ts` — orchestration and the tick loop. `createDemoWorld(seed)` is
+  called explicitly with a real seed (a numeric input field, prefilled from
+  `?seed=` or `SCENARIO_SEED`, with `Load`/`Random`/`Copy` buttons); loading
+  a seed replaces the world, resets the event log and any selection, and
+  rewrites the URL's `?seed=` via `history.replaceState` so a page reload
+  reproduces the exact same run — the concrete "load the same seed twice"
+  guarantee Part 1's determinism work was for. The tick loop is a real
+  Play/Pause/Step/Speed control surface over `tickWorld`, not a fixed
+  `setInterval(tick, 400)`: a speed slider (0.25x-32x across
+  `BASE_TICKS_PER_SEC = 6`) reschedules an interval at the matching rate,
+  batching multiple `tickWorld` calls per timer callback once the target
+  rate would exceed ~60 real callbacks/sec rather than flooding the event
+  loop with tiny intervals. `tickWorld`'s `rng` parameter is left at its
+  default (`world.rng`), same as the runner — no separate rng plumbing
+  needed here, Part 1 already made this the free/correct default.
+- `renderer.ts` + `palette.ts` — a real terrain/agent grid, not flat colored
+  squares. `palette.ts` is a direct port of `packages/runner/src/ascii.ts`'s
+  `TYPE_COLOR`/`TERRAIN_BG`/`TERRAIN_FG`/`FLAVOR_FG`/`shade` tables (RGB
+  triples instead of ANSI escapes) — the explicit palette reference the
+  task asked for, kept in sync by hand rather than sharing a module across
+  `runner` (CLI-only) and `web` (browser-only) for what's a small, stable
+  table. Terrain tiles render elevation-shaded backgrounds exactly like the
+  ASCII renderer; agents render colored by primary type (not species-initial
+  placeholder color, matching ascii.ts's actual convention) with the same
+  species-initial glyph, dimmed for a fainted agent (plus a small "z") and
+  further dimmed for a lingering corpse (`alive === false`, still rendered
+  — corpses persist for `CORPSE_PERSIST_TICKS`, see `simulation.ts`, and are
+  now visibly distinct from a live agent instead of rendering identically).
+  Two newer environmental layers get a first-pass visualization, deliberately
+  basic: active weather cells draw as large, softly tinted translucent
+  circles (no ASCII equivalent to port — weather has no per-tile ANSI
+  rendering at all — so this part is sim-original, not ported), and
+  day/night is one flat darkening overlay driven by `daynight.ts`'s real
+  `lightLevel` (no directional lighting, no gradient — a scope call, not an
+  oversight; see TODO.md).
+- `eventText.ts` + `eventLogPanel.ts` — a real scrollable log panel, not a
+  flat unbounded dump. `born`/`killed`/`defeated`/`fainted`/`evolved`/
+  `diedOfAge` (the events that make a story, named directly in the ask) get
+  a distinct icon, color, and bold weight; every other event kind renders
+  small and muted. The in-memory event buffer is capped at 4,000 (oldest
+  trimmed) so a long/fast run doesn't leak memory, and only the newest 250
+  of whatever's currently in view ever become real DOM nodes, rebuilt
+  wholesale — not appended to forever — only on animation frames where
+  something actually changed (a dirty flag, not a render on every tick,
+  since a 32x run can tick far faster than the display needs to redraw).
+- `inspector.ts` — click-to-inspect. `renderer.ts`'s `agentAtCanvasPos` maps
+  a canvas click to whichever surface-layer agent occupies that tile
+  (last-drawn-wins, matching the actual render order); the inspector panel
+  shows status (active/fainted/dead), species, level, HP, types, behavior,
+  layer, position, sex, age, herd, nature, activity pattern, disposition
+  (boldness/aggression/sociability), computed stats, current hunt/fight
+  target, needs, and exp — everything meaningfully inspectable on `Agent`
+  from this session's fields. Selecting an agent also narrows the event log
+  panel to only events naming that agent's id (`eventText.ts`'s
+  `eventNamesAgent`, checked generically across every `xId`-shaped field in
+  the `SimEvent` union rather than one switch arm per kind, so a future
+  event kind's own id field is covered for free).
+
+**Validation actually performed**: `pnpm -r typecheck` and `pnpm -r build`
+both clean across all four packages (engine/data/web/runner); `pnpm -r test`
+green (340/340, unchanged pass count). `pnpm --filter @pokuelike/web dev`
+starts cleanly and serves the real module graph (`curl`-verified the served
+HTML and that `src/main.ts` resolves its imports correctly through Vite).
+**What wasn't done**: no headless-browser click-through of the running
+page. This repo has no browser-automation tooling installed, and installing
+one (`playwright-core`, confirmed resolvable in the registry) timed out
+mid-download in this environment rather than completing in a reasonable
+window — a real limitation, not a corner cut silently. Confidence instead
+comes from: the same code paths already exercised by
+`packages/runner`/`packages/engine`'s test suite (rendering and DOM-building
+are the only genuinely new, unexercised code), careful reading of the event
+flow end-to-end, and the type checker/bundler agreeing the whole module
+graph wires together. There is deliberately no new test framework/infra
+added for `packages/web` — it has none today, and inventing one for this
+session's scope wasn't asked for; if a real UI test harness is wanted later,
+that's its own follow-up.
+
 ## Explicitly not decided yet
 
 - Turn-based vs. real-time-with-pause for combat.

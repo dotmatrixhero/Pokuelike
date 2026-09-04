@@ -1,0 +1,116 @@
+import type { SimEvent } from "@pokuelike/engine";
+
+/**
+ * A short human-readable line per event kind — the browser-side equivalent
+ * of `packages/runner/src/format.ts`'s `formatEvent`. Not literally shared
+ * (this app has no dependency on `@pokuelike/runner`, a CLI-only package),
+ * but intentionally the same shape/tone; keep them in sync by hand if an
+ * event's fields change.
+ */
+export function formatEvent(event: SimEvent): string {
+  switch (event.kind) {
+    case "crossedLayer":
+      return `${event.species} (${event.agentId}) crossed ${event.from} -> ${event.to}`;
+    case "consumed":
+      return `${event.species} (${event.agentId}) ${event.need === "thirst" ? "drank" : "ate"} on ${event.layer}`;
+    case "behaviorChanged":
+      return `${event.species} (${event.agentId}) switched behavior: ${event.from} -> ${event.to}`;
+    case "killed":
+      return `${event.predatorSpecies} (${event.predatorId}) killed ${event.preySpecies} (${event.preyId})`;
+    case "born":
+      return `${event.species} (${event.motherId} x ${event.fatherId}) had offspring ${event.childId} (${event.nature}, ${event.dispositionSummary})`;
+    case "floraChanged":
+      return `flora ${event.stage} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
+    case "fought":
+      return `${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) for ${event.damage}${event.critical ? " (crit!)" : ""} (hp left: ${event.defenderHpRemaining})`;
+    case "missed":
+      return `${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) and missed`;
+    case "defeated":
+      return `${event.winnerSpecies} (${event.winnerId}) defeated ${event.loserSpecies} (${event.loserId})`;
+    case "starved":
+      return `${event.species} (${event.agentId}) starved to death (${event.cause})`;
+    case "diedOfAge":
+      return `${event.species} (${event.agentId}) died of old age (${event.age} ticks)`;
+    case "leveledUp":
+      return `${event.species} (${event.agentId}) leveled up: ${event.fromLevel} -> ${event.toLevel}`;
+    case "evolved":
+      return `${event.agentId} evolved: ${event.fromSpecies} -> ${event.toSpecies} at level ${event.level}`;
+    case "learnedMove":
+      return `${event.species} (${event.agentId}) learned ${event.moveId} at level ${event.level}`;
+    case "gainedSkillPoint":
+      return `${event.species} (${event.agentId}) gained a ${event.pointType} skill point`;
+    case "fainted":
+      return `${event.species} (${event.agentId}) fainted`;
+    case "recovered":
+      return `${event.species} (${event.agentId}) recovered consciousness at ${event.hp} hp`;
+    case "looted":
+      return `${event.looterSpecies} (${event.looterId}) looted ${event.itemKey} from ${event.fromSpecies} (${event.fromId})`;
+    case "foodDelivered":
+      return `${event.carrierSpecies} (${event.carrierId}) delivered food to ${event.receiverSpecies} (${event.receiverId})`;
+    case "carrying":
+      return `${event.carrierSpecies} (${event.carrierId}) picked up fainted ${event.carriedSpecies} (${event.carriedId})`;
+    case "setDown":
+      return `${event.carrierSpecies} (${event.carrierId}) set down ${event.carriedSpecies} (${event.carriedId}) (${event.reason})`;
+    case "herdMigrating":
+      return `herd ${event.herdId} is migrating (${event.reason})`;
+    case "herdSettled":
+      return `herd ${event.herdId} ${event.outcome === "arrived" ? "settled" : "gave up migrating"}`;
+    case "nightfall":
+      return `night falls (light ${event.lightLevel.toFixed(2)})`;
+    case "daybreak":
+      return `day breaks (light ${event.lightLevel.toFixed(2)})`;
+    case "weatherChanged":
+      return `${event.weatherType} ${event.phase === "began" ? "moves in" : "clears"} near (${event.center.x},${event.center.y})`;
+  }
+}
+
+/** The event kinds that make a story, per the maintainer's ask — get distinct icon/color/size treatment in the log panel. Everything else renders minimal. */
+export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge"]);
+
+export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
+  born: "\u{1F423}", // hatching chick
+  killed: "⚔️", // crossed swords
+  defeated: "\u{1F3F3}️", // white flag
+  fainted: "\u{1F4AB}", // dizzy
+  evolved: "✨", // sparkles
+  diedOfAge: "\u{1F480}", // skull
+};
+
+export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
+  born: "#7be08a",
+  killed: "#ff6b6b",
+  defeated: "#ffb454",
+  fainted: "#f5d76e",
+  evolved: "#c792ea",
+  diedOfAge: "#9aa0ab",
+};
+
+/**
+ * Every agent-id-shaped field across the whole `SimEvent` union, checked
+ * generically rather than one `switch` arm per kind — cheap (a handful of
+ * property reads on an object that's usually not a match) and future-proof
+ * against a new event kind adding its own `xId` field later.
+ */
+const AGENT_ID_FIELDS = [
+  "agentId",
+  "attackerId",
+  "defenderId",
+  "predatorId",
+  "preyId",
+  "motherId",
+  "fatherId",
+  "childId",
+  "winnerId",
+  "loserId",
+  "looterId",
+  "fromId",
+  "carrierId",
+  "carriedId",
+  "receiverId",
+] as const;
+
+/** Does this event name `agentId` in any of its id-shaped fields? Used to scope the log panel to one agent's history. */
+export function eventNamesAgent(event: SimEvent, agentId: string): boolean {
+  const record = event as unknown as Record<string, unknown>;
+  return AGENT_ID_FIELDS.some((field) => record[field] === agentId);
+}

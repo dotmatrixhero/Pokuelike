@@ -288,7 +288,9 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     );
     const clearLog = new EventLog();
     tickWorld(clearWorld, clearLog, RULES, undefined, fixedRng);
-    expect(clearLog.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
+    expect(clearLog.events).toContainEqual(
+      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
+    );
 
     const stormWorld = createWorld(10, 10);
     stormWorld.weatherCells = [
@@ -303,7 +305,9 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     const stormLog = new EventLog();
     tickWorld(stormWorld, stormLog, RULES, undefined, fixedRng);
     expect(stormLog.events).not.toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
-    expect(stormLog.events).toContainEqual(expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0" }));
+    expect(stormLog.events).toContainEqual(
+      expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
+    );
   });
 });
 
