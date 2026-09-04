@@ -16,6 +16,10 @@ const BASE_TICKS_PER_SEC = 6;
 const SPEED_STEPS = [0.25, 0.5, 1, 2, 4, 8, 16, 32] as const;
 const DEFAULT_SPEED_INDEX = 2; // 1x
 
+/** The 90x60 demo map renders wider/taller than most viewports at 1x (TILE_SIZE px/tile) — zooming out is the common case. */
+const ZOOM_STEPS = [0.15, 0.25, 0.4, 0.6, 0.8, 1, 1.5] as const;
+const DEFAULT_ZOOM_INDEX = 4; // 0.8x — the whole demo map roughly fits a laptop viewport at this level
+
 // --- DOM references -------------------------------------------------------
 
 const canvas = document.getElementById("scene") as HTMLCanvasElement;
@@ -41,6 +45,9 @@ const toggleLegendBtn = document.getElementById("toggle-legend") as HTMLButtonEl
 const sidebarEl = document.getElementById("sidebar") as HTMLElement;
 const drawerBackdrop = document.getElementById("drawer-backdrop") as HTMLElement;
 const toggleDrawerBtn = document.getElementById("toggle-drawer") as HTMLButtonElement;
+const zoomOutBtn = document.getElementById("zoom-out") as HTMLButtonElement;
+const zoomInBtn = document.getElementById("zoom-in") as HTMLButtonElement;
+const zoomLabel = document.getElementById("zoom-label") as HTMLElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -53,6 +60,7 @@ let selectedAgentId: string | undefined;
 let lastLoggedEventCount = 0;
 let inspectorDirty = true;
 let renderStyle: RenderStyle = "ascii";
+let zoomIndex = DEFAULT_ZOOM_INDEX;
 
 const eventLogPanel = new EventLogPanel(eventLogEl);
 const eventPopups = new EventPopups();
@@ -69,6 +77,7 @@ function loadWorld(seed: number): void {
 
   canvas.width = world.width * TILE_SIZE;
   canvas.height = world.height * TILE_SIZE;
+  applyZoom();
 
   seedInput.value = String(seed);
   const url = new URL(location.href);
@@ -218,6 +227,25 @@ function setDrawerOpen(open: boolean): void {
 }
 toggleDrawerBtn.addEventListener("click", () => setDrawerOpen(!sidebarEl.classList.contains("open")));
 drawerBackdrop.addEventListener("click", () => setDrawerOpen(false));
+
+// Scales the canvas's *displayed* size only (CSS width/height), leaving its
+// backing pixel buffer at native TILE_SIZE resolution — agentAtCanvasPos's
+// click math already divides by the element's rendered rect, not a fixed
+// pixel size, so clicking a tile keeps working correctly at any zoom level.
+function applyZoom(): void {
+  const zoom = ZOOM_STEPS[zoomIndex]!;
+  canvas.style.width = `${canvas.width * zoom}px`;
+  canvas.style.height = `${canvas.height * zoom}px`;
+  zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+}
+zoomOutBtn.addEventListener("click", () => {
+  zoomIndex = Math.max(0, zoomIndex - 1);
+  applyZoom();
+});
+zoomInBtn.addEventListener("click", () => {
+  zoomIndex = Math.min(ZOOM_STEPS.length - 1, zoomIndex + 1);
+  applyZoom();
+});
 
 // --- Boot --------------------------------------------------------------------
 

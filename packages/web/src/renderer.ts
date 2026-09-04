@@ -15,6 +15,7 @@ import {
   rgbToCss,
   rgbaToCss,
   shade,
+  tileLight,
 } from "./palette.js";
 
 export const TILE_SIZE = 20;
@@ -123,12 +124,17 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
       const cx = x * TILE_SIZE + TILE_SIZE / 2;
       const cy = y * TILE_SIZE + TILE_SIZE / 2;
       const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_FG[tile.terrain];
+      // Faux ambient light: a static per-tile factor (0.65-1.35) so the
+      // ground reads as unevenly lit stone instead of a flat repeated color
+      // — the actual thing that makes Brogue's ASCII look alive rather than
+      // a uniform grid.
+      const light = 0.65 + tileLight(x, y) * 0.7;
 
       if (isPlantLike(tile.terrain)) {
         // No solid fill at all — a dense block glyph in the patch's own
         // color stands in for a "background", so a berry patch or flora
         // cluster reads as a colored wash made of ASCII, not a filled tile.
-        ctx.fillStyle = rgbaToCss(accent, 0.55);
+        ctx.fillStyle = rgbaToCss(accent, 0.55 * light);
         ctx.fillText("█", cx, cy);
         const flavorGlyph = tile.flavor ? FLAVOR_GLYPH[tile.flavor] : undefined;
         ctx.fillStyle = "rgba(10, 12, 15, 0.85)";
@@ -137,9 +143,9 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
         // Everything else keeps a faint translucent wash of its own color —
         // Brogue's ground reads as lit stone, not a flat tile — plus its glyph.
         const bg = shade(TERRAIN_BG[tile.terrain], tile.elevation);
-        ctx.fillStyle = rgbaToCss(bg, tile.terrain === "floor" ? 0.25 : 0.55);
+        ctx.fillStyle = rgbaToCss(bg, (tile.terrain === "floor" ? 0.25 : 0.55) * light);
         ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-        ctx.fillStyle = rgbaToCss(accent, tile.terrain === "floor" ? 0.45 : 0.9);
+        ctx.fillStyle = rgbaToCss(accent, (tile.terrain === "floor" ? 0.45 : 0.9) * light);
         ctx.fillText(TERRAIN_GLYPH[tile.terrain], cx, cy);
       }
 
@@ -176,10 +182,7 @@ function drawAgentGlyph(ctx: CanvasRenderingContext2D, agent: Agent, cx: number,
 
   const letter = agent.species.charAt(0).toUpperCase();
   ctx.font = `bold ${TILE_SIZE * 0.78}px ui-monospace, "SF Mono", Consolas, monospace`;
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = "rgba(6, 8, 11, 0.9)";
-  ctx.strokeText(letter, cx, cy);
-  ctx.fillStyle = rgbToCss(color as [number, number, number]);
+  ctx.fillStyle = rgbToCss(color);
   ctx.fillText(letter, cx, cy);
   ctx.restore();
 

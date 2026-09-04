@@ -114,7 +114,20 @@ export function rgbToCss([r, g, b]: Rgb): string {
 }
 
 export function rgbaToCss([r, g, b]: Rgb, alpha: number): string {
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, alpha))})`;
+}
+
+/**
+ * A cheap, purely-visual per-tile pseudo-random value in [0, 1) — classic
+ * GLSL-style sine hash, deterministic by (x, y) alone (not tied to the
+ * sim's own seeded rng; this never affects simulation, only how a tile's
+ * wash/glyph brightness is rendered). Static per tile rather than animated,
+ * so the ground reads as unevenly lit stone — Brogue's "not a uniform flat
+ * color" look — without flickering every frame.
+ */
+export function tileLight(x: number, y: number): number {
+  const s = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+  return s - Math.floor(s);
 }
 
 /** Weather-type tint used for the translucent weather-cell overlay — sim-original, not from ascii.ts (which has no weather rendering at all). */

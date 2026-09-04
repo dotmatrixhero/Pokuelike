@@ -63,6 +63,7 @@
       .field-group { display: flex; align-items: center; gap: 4px; }
       #tick-label, #clock-label { font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 13px; }
       #speed-label { min-width: 36px; text-align: center; font-variant-numeric: tabular-nums; }
+      #zoom-label { min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 13px; }
 
       main {
         flex: 1;
@@ -209,6 +210,14 @@
         <div class="field-group">
           <button id="style-tile">Tile</button>
           <button id="style-ascii" class="playing">ASCII</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="field-group">
+          <button id="zoom-out" title="Zoom out">−</button>
+          <span id="zoom-label"></span>
+          <button id="zoom-in" title="Zoom in">+</button>
         </div>
 
         <div class="divider"></div>
