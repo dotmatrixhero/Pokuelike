@@ -35,6 +35,84 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("TACKLE"),
     cooldownTicks: 0,
     range: { min: 0, max: 1 },
+    // v1 — the two branches (and their forks) that are buildable today with
+    // nothing but existing MoveSpec delta fields. MOVES_DESIGN.md's full
+    // vision adds a third (Sociability) branch and a crosslink triangle, but
+    // every node in that branch needs mechanics that don't exist yet
+    // (forced movement, a herd-mate position-swap, agent-modifying passives)
+    // — shipping it now would mean nodes that cost a point and do nothing.
+    // Same "ship what's real first" pattern Ember started with. Tackle is
+    // the most-shared move in the spawned roster (Bulbasaur, Venusaur,
+    // Diglett, Pidgey, Onix, Squirtle all know it), so one tree here
+    // produces very different builds depending on who's wielding it.
+    tree: {
+      weighted_charge: {
+        id: "weighted_charge",
+        name: "Weighted Charge",
+        cost: 1,
+        leaning: "aggression",
+        delta: { power: 10, accuracy: -5 },
+      },
+      heavier_blow: {
+        id: "heavier_blow",
+        name: "Heavier Blow",
+        cost: 1,
+        prerequisites: ["weighted_charge"],
+        leaning: "aggression",
+        delta: { power: 15, accuracy: -5 },
+      },
+      full_force_slam: {
+        id: "full_force_slam",
+        name: "Full-Force Slam",
+        cost: 1,
+        prerequisites: ["heavier_blow"],
+        excludes: ["relentless_pace"],
+        leaning: "aggression",
+        delta: { power: 20, cooldownTicks: 1 },
+      },
+      relentless_pace: {
+        id: "relentless_pace",
+        name: "Relentless Pace",
+        cost: 1,
+        prerequisites: ["heavier_blow"],
+        excludes: ["full_force_slam"],
+        leaning: "aggression",
+        delta: { power: 5, accuracy: 10 },
+      },
+      sturdy_stance: {
+        id: "sturdy_stance",
+        name: "Sturdy Stance",
+        cost: 1,
+        leaning: "boldness",
+        delta: { accuracy: 10 },
+      },
+      grounded_hit: {
+        id: "grounded_hit",
+        name: "Grounded Hit",
+        cost: 1,
+        prerequisites: ["sturdy_stance"],
+        leaning: "boldness",
+        delta: { power: 10 },
+      },
+      counter_slam: {
+        id: "counter_slam",
+        name: "Counter Slam",
+        cost: 1,
+        prerequisites: ["grounded_hit"],
+        excludes: ["steady_guard"],
+        leaning: "boldness",
+        delta: { power: 15, accuracy: -5 },
+      },
+      steady_guard: {
+        id: "steady_guard",
+        name: "Steady Guard",
+        cost: 1,
+        prerequisites: ["grounded_hit"],
+        excludes: ["counter_slam"],
+        leaning: "boldness",
+        delta: { accuracy: 15 },
+      },
+    },
   },
   slash: {
     id: "slash",
@@ -43,6 +121,49 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("SLASH"),
     cooldownTicks: 0,
     range: { min: 0, max: 1 },
+    // v1 — Scyther's only move, so this is the sim's only real predator
+    // build choice today. Deliberately a shorter, more linear shape than
+    // Tackle/Ember (Power archetype, not Utility — see MOVES_DESIGN.md's
+    // template) rather than a re-skinned copy of the same tree shape: two
+    // short spines converging on one real exclusive fork, no crosslink.
+    // The fuller vision (Predator's Instinct's concealment bonus, Feint's
+    // lunge, the multi-action-locking Reaping Slash) all need mechanics
+    // that don't exist yet, so this fork is two live-only alternatives
+    // instead — a reliable, accurate strike vs. a heavier, riskier one.
+    tree: {
+      serrated_edge: {
+        id: "serrated_edge",
+        name: "Serrated Edge",
+        cost: 1,
+        leaning: "aggression",
+        delta: { power: 15, accuracy: -5 },
+      },
+      reaping_slash: {
+        id: "reaping_slash",
+        name: "Reaping Slash",
+        cost: 1,
+        prerequisites: ["serrated_edge"],
+        excludes: ["fleetfoot_slash"],
+        leaning: "aggression",
+        delta: { power: 20, accuracy: -10, cooldownTicks: 1 },
+      },
+      keen_precision: {
+        id: "keen_precision",
+        name: "Keen Precision",
+        cost: 1,
+        leaning: "boldness",
+        delta: { accuracy: 10 },
+      },
+      fleetfoot_slash: {
+        id: "fleetfoot_slash",
+        name: "Fleetfoot Slash",
+        cost: 1,
+        prerequisites: ["keen_precision"],
+        excludes: ["reaping_slash"],
+        leaning: "boldness",
+        delta: { accuracy: 15, statusChance: 0.1 },
+      },
+    },
   },
   vine_whip: {
     id: "vine_whip",

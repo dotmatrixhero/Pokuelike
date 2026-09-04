@@ -90,3 +90,81 @@ describe("applyMoveTree", () => {
     expect(EMBER.range).toBe(rangeBefore);
   });
 });
+
+describe("applyMoveTree: excludes (real forks)", () => {
+  const FORKED: MoveSpec = {
+    id: "forked",
+    name: "Forked",
+    shape: { kind: "point" },
+    type: "normal",
+    category: "physical",
+    power: 40,
+    accuracy: 100,
+    cooldownTicks: 0,
+    tree: {
+      opener: { id: "opener", name: "Opener", cost: 1, delta: { accuracy: 5 } },
+      option_a: { id: "option_a", name: "Option A", cost: 1, prerequisites: ["opener"], excludes: ["option_b"], delta: { power: 20 } },
+      option_b: { id: "option_b", name: "Option B", cost: 1, prerequisites: ["opener"], excludes: ["option_a"], delta: { accuracy: 20 } },
+    },
+  };
+
+  it("allows either exclusive option on its own", () => {
+    expect(applyMoveTree(FORKED, ["opener", "option_a"]).power).toBe(60);
+    expect(applyMoveTree(FORKED, ["opener", "option_b"]).accuracy).toBe(125);
+  });
+
+  it("rejects choosing both sides of a fork", () => {
+    expect(() => applyMoveTree(FORKED, ["opener", "option_a", "option_b"])).toThrow(/conflicts with already-chosen/);
+  });
+
+  it("catches the conflict regardless of which side declared excludes (one-sided authoring still works)", () => {
+    const oneSided: MoveSpec = {
+      ...FORKED,
+      id: "one-sided",
+      tree: {
+        opener: FORKED.tree!.opener,
+        option_a: { ...FORKED.tree!.option_a, excludes: ["option_b"] },
+        option_b: { id: "option_b", name: "Option B", cost: 1, prerequisites: ["opener"], delta: { accuracy: 20 } }, // no excludes of its own
+      },
+    };
+    expect(() => applyMoveTree(oneSided, ["opener", "option_b", "option_a"])).toThrow(/conflicts with already-chosen/);
+  });
+});
+
+describe("applyMoveTree: prerequisitesAnyOf (crosslink shortcuts)", () => {
+  const MESHED: MoveSpec = {
+    id: "meshed",
+    name: "Meshed",
+    shape: { kind: "point" },
+    type: "normal",
+    category: "physical",
+    power: 40,
+    accuracy: 100,
+    cooldownTicks: 0,
+    tree: {
+      branch_filler: { id: "branch_filler", name: "Branch Filler", cost: 1, delta: { accuracy: 5 } },
+      crosslink: { id: "crosslink", name: "Crosslink", cost: 1, delta: { power: 5 } },
+      shared_notable: {
+        id: "shared_notable",
+        name: "Shared Notable",
+        cost: 1,
+        prerequisitesAnyOf: [["branch_filler"], ["crosslink"]],
+        delta: { power: 25 },
+      },
+    },
+  };
+
+  it("is reachable via the normal branch path", () => {
+    const respec = applyMoveTree(MESHED, ["branch_filler", "shared_notable"]);
+    expect(respec.power).toBe(65);
+  });
+
+  it("is also reachable via the alternative (crosslink) path alone", () => {
+    const respec = applyMoveTree(MESHED, ["crosslink", "shared_notable"]);
+    expect(respec.power).toBe(70);
+  });
+
+  it("rejects it when neither alternative set is satisfied", () => {
+    expect(() => applyMoveTree(MESHED, ["shared_notable"])).toThrow(/alternative prerequisite set/);
+  });
+});

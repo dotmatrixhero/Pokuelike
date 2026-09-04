@@ -14,6 +14,30 @@ here to avoid stepping on it. A couple of ideas below (Sandstorm as a
 *local* hazard, not a weather state) are noted as deferred/reframed for
 the same reason.
 
+## Engine primitives needed — running checklist
+
+Every tree/lever in this doc that isn't marked "live" is blocked on one of
+these. Kept in one place so it's a checklist, not something to re-derive by
+grepping for "needs" across the whole file.
+
+| Primitive | Unblocks | Status |
+|---|---|---|
+| `MoveTreeNode.excludes` | Every real fork (pick-one-of-two, permanent) | **Shipped** — `moves.ts`, used by Tackle & Slash |
+| `MoveTreeNode.prerequisitesAnyOf` | Crosslink shortcuts; a keystone reachable from either fork tip | **Shipped** — `moves.ts`, not yet used in a shipped tree |
+| Multi-hit (`MoveSpec.hits?: number` + combat.ts rolling N times) | Frenzied Pecking, Frenzy Claws, Rapid Volley/Jets, Frenzy Cutter — half the "Aggression" forks drafted below | Not started |
+| Defense-penetration delta field | Piercing Beak | Not started |
+| Forced movement (drag/knockback/lunge/retreat as part of a move) | Verdant Grip, Feint, Retreat Peck, Knockback Spray, Retreating Current, Bracing Impact, and most of Vine Whip's keystones | Not started — see the "Action-economy levers" section below for the shape this likely takes |
+| Multi-action lock (a move that also consumes the user's next action tick) | Reaping Slash (both Tackle's and Slash's) | Not started |
+| Agent-modifying passive (a tree node whose effect targets `Agent`, not `MoveSpec`) | Brace for Impact, Immovable, Overgrowth, Living Trellis | Not started — flagged as the single biggest structural addition on this list |
+| Conditional/situational bonuses (concealment, day/night, elevation, "was just hit," "moved this tick") | Predator's Instinct, Ambush Claws/Dive, Night Hunter, Counter Slam, Swooping Approach | Not started — needs combat-resolution-time condition checks, not just a tree delta; even the "near-free" tag on these undersold the work versus a pure numeric delta |
+| Self-state-aware scoring (a bonus keyed to the *user's own* HP, not the target's) | Cornered Fury | Not started — same shape as defender-HP-awareness, already flagged as a gap in `pickBestMove` (DESIGN.md's "Move selection") |
+| Real-duration temporary buffs (a stat change that expires after N ticks) | Bubble Shield, Slippery Current | Not started — nothing in the sim today expires a stat modification on a timer |
+| Position-swap (two agents exchange tiles in one action) | Bodyblock | Not started |
+| Cross-agent effects (a move's hit affects an ally, not just the target) | Vine Link, Nurturing Vines, Rally Charge, Warning Lash | Not started |
+| Multi-target/AoE resolution (apply a move to every agent within its resolved shape, not one target) | Growl (its entire premise), Firestorm, Ring of Fire's full fantasy, Boulder Toss/Skipping Stone | Not started — the biggest single gap; see "The sim/combat boundary" in DESIGN.md |
+| Persistent stat stages (`Agent`-level Attack/Defense/etc. modifiers, wired into `calculateDamage`) | Growl specifically (`statStageMultiplier` already exists in combat.ts as a pure function — nothing calls it against persistent agent state yet) | Not started |
+| Status-effect system (burn/poison DOT, root/paralysis actually doing something) | Every `statusChance` field shipped so far (Ember's burn, Constrict, etc.) — all currently idle numbers | Not started — see "Status effects" section below |
+
 ## Why status effects and environmental moves are two different systems
 
 A damaging move's status chance is a side effect of an existing "attack
@@ -307,9 +331,14 @@ move's tree from a blank page — pick an archetype first):
 (`prerequisites` only) can express "you need A before B" but not "picking A
 locks out B forever." Add `MoveTreeNode.excludes?: string[]` — once a node
 in the list is chosen, the others become permanently ineligible for that
-agent (author both sides for symmetry). This is the mechanism behind every
+agent (checked in both directions regardless of which side declares it —
+one-sided authoring still works). This is the mechanism behind every
 "choose one of two builds" moment called for above, including Flamethrower's
-final fork. Not implemented yet — needed before any real fork can ship.
+final fork. **Shipped** (`packages/engine/src/moves.ts`, validated in
+`applyMoveTree`, respected in `maybeAutoRespec`'s candidate filtering) —
+Tackle and Slash's real forks (see "Move-tree drafts" below) are the first
+production use, confirmed working in a real run (both sides of each fork
+independently chosen by different individuals).
 
 **Capstones:** skip gating a capstone on multiple branches — not
 interesting enough to bother with. A single strong node at the end of a
@@ -359,7 +388,11 @@ actually work:
    via `prerequisitesAnyOf`, `[the crosslink]` — and the notable past it
    still just needs that filler node, same as always, no special-casing.
    This is the same shape as the still-open "keystone reachable from either
-   fork tip" problem two sections up — one primitive solves both.
+   fork tip" problem two sections up — one primitive solves both. **Shipped**
+   alongside `excludes` — validated in `applyMoveTree`, respected in
+   `maybeAutoRespec`. Not yet used in a shipped tree (Vine Whip's crosslinks
+   are still a paper design pending a diagram/data pass); Tackle and Slash's
+   forks only needed `excludes`.
 
 Put one crosslink between each adjacent pair of branches (a triangle, for a
 3-branch tree), each granting its own real ability and shortcutting to one
@@ -530,6 +563,15 @@ passives, or one of the newly-introduced levers called out per move below).
 
 ### Tackle (Normal, point/melee) — Utility archetype, full treatment
 
+**Shipped as v1** (`packages/data/src/moves.ts`) — two branches (Aggression,
+Boldness), 8 nodes, both forks real via `excludes`, confirmed working in a
+live run. What follows is the fuller v2 vision this doc still aims at; the
+v1 code only implements the pure-`delta` subset (`weighted_charge` →
+`heavier_blow` → `full_force_slam`/`relentless_pace`; `sturdy_stance` →
+`grounded_hit` → `counter_slam`/`steady_guard`) — no forced movement, no
+Sociability branch, no crosslinks, since none of those have the mechanics
+they'd need yet:
+
 - **Aggression — "Full Charge"**: notable *Weighted Charge* (+power,
   -accuracy, live) → filler → filler → notable *Bracing Impact* (chance to
   knock the target back 1 tile on hit, needs) → filler. **Fork**:
@@ -564,6 +606,14 @@ passives, or one of the newly-introduced levers called out per move below).
 
 ### Slash (Normal, line-1 melee) — Power archetype, Scyther's only move
 
+**Shipped as v1** (`packages/data/src/moves.ts`) — two short spines
+(`serrated_edge` → `reaping_slash`, `keen_precision` → `fleetfoot_slash`)
+converging on one real exclusive fork via `excludes`. The concealment/
+day-night bonus, the lunge, and the multi-action lock below are still v2:
+they need conditional-effect resolution and forced-movement plumbing that
+don't exist yet, so the shipped fork is a live-only "reliable, accurate
+strike vs. heavier, riskier one" instead.
+
 Deliberately a different *shape* than Tackle or Vine Whip — proof the
 archetype rule actually changes structure, not just flavor text. Mostly
 linear spine, no crosslinks (a lone ambush predator doesn't need a support
@@ -576,7 +626,9 @@ before the hit, near — reuses concealment + daynight) → filler → *Feint*
 movement) → filler → Serrated Edge (+power, -accuracy, live). **Final
 fork**: *Reaping Slash* (big power spike, locks the user out of its next
 action tick, needs: multi-action lock) vs. *Frenzy Cutter* (3 hits at
-reduced power, still lands partial damage on a fleeing target, live).
+reduced power, still lands partial damage on a fleeing target, needs:
+multi-hit field — this is why the shipped v1 fork below uses different,
+live-only alternatives instead of this pair).
 
 ### Rock Throw (Rock, line-3, cooldown 1) — Power archetype, Onix
 
@@ -589,9 +641,13 @@ piercing-hits-everyone part, though the plain reach increase is live).
 ### Peck (Flying, point) — Utility archetype, Spearow, 2 branches
 
 - **Aggression — "Sharp Strike"**: Needle Point (+power, live) → filler →
-  *Frenzied Pecking* (2 hits, live). **Fork**: *Piercing Beak* (+power,
-  ignores some of the target's Defense — needs: a new defense-penetration
-  delta field, not yet in the schema) vs. *Rapid Volley* (3 hits, live).
+  *Frenzied Pecking* (2 hits, needs: a new `hits` field plus combat.ts
+  rolling damage N times — corrected from an earlier "live" tag; multi-hit
+  needs real schema growth, not just a delta on existing fields, same as
+  every other item in this list past the first six). **Fork**: *Piercing
+  Beak* (+power, ignores some of the target's Defense — needs: a new
+  defense-penetration delta field) vs. *Rapid Volley* (3 hits, needs: same
+  multi-hit field as Frenzied Pecking).
   **Keystone**: *Talon Strike* — bonus power/crit against a fleeing target
   (needs: defender-state-aware scoring, the same gap flagged in DESIGN.md's
   "Move selection" section).
@@ -608,8 +664,9 @@ piercing-hits-everyone part, though the plain reach increase is live).
 ### Scratch (Normal, point) — Utility archetype, Sandshrew, 2 branches
 
 - **Aggression — "Claw Strike"**: Sharpened Claws (+power, live) → filler →
-  *Frenzy Claws* (2 hits, live). **Fork**: Shredding Blow (+power,
-  -accuracy, live) vs. Flurry (3 hits, live). **Keystone**: *Sandstorm
+  *Frenzy Claws* (2 hits, needs: multi-hit field). **Fork**: Shredding Blow
+  (+power, -accuracy, live) vs. Flurry (3 hits, needs: multi-hit field).
+  **Keystone**: *Sandstorm
   Claws* — bonus power/status specifically at night (near — reuses
   daynight.ts, matches Sandshrew's nocturnal `activityPattern`).
 - **Boldness — "Burrow Strike"**: *Ambush Claws* (bonus power attacking
@@ -625,7 +682,8 @@ piercing-hits-everyone part, though the plain reach increase is live).
 
 - **Aggression — "Pressurized Blast"**: High Pressure (+power, live) →
   filler → *Piercing Jet* (line +1, live). **Fork**: Torrent (+power,
-  +cooldown, live) vs. Rapid Jets (2 hits, live). **Keystone**: *Deluge* —
+  +cooldown, live) vs. Rapid Jets (2 hits, needs: multi-hit field).
+  **Keystone**: *Deluge* —
   bonus power while the user is near a water tile (near — reuses the
   existing water-resource-tile concept).
 - **Boldness — "Evasive Spray"**: *Knockback Spray* (pushes the target back

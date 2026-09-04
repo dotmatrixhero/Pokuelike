@@ -304,6 +304,14 @@ export function maybeAutoRespec(
     for (const node of Object.values(base.tree)) {
       if (chosenSet.has(node.id)) continue;
       if (!(node.prerequisites ?? []).every((prereq) => chosenSet.has(prereq))) continue;
+      if (node.prerequisitesAnyOf && node.prerequisitesAnyOf.length > 0) {
+        const satisfied = node.prerequisitesAnyOf.some((set) => set.every((prereq) => chosenSet.has(prereq)));
+        if (!satisfied) continue;
+      }
+      const excluded = chosen.some(
+        (chosenId) => (node.excludes ?? []).includes(chosenId) || (base.tree![chosenId]?.excludes ?? []).includes(node.id)
+      );
+      if (excluded) continue;
       if (node.cost > typed + wildcard) continue;
       candidates.push({ moveId, base, node, chosen });
     }

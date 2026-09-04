@@ -433,6 +433,28 @@ describe("maybeAutoRespec (nature-driven specialization)", () => {
     expect(agent.moveTreeChoices!.ember).toHaveLength(1);
   });
 
+  it("respects excludes — once a fork side is chosen, its sibling never becomes a candidate again", () => {
+    const FORKED_MOVE: MoveSpec = {
+      ...LEANING_TREE_MOVE,
+      tree: {
+        fork_a: { id: "fork_a", name: "Fork A", cost: 1, excludes: ["fork_b"], delta: { power: 1 } },
+        fork_b: { id: "fork_b", name: "Fork B", cost: 1, excludes: ["fork_a"], delta: { power: 1 } },
+      },
+    };
+    const forkCtx: LevelingContext = { getProfile: () => undefined, resolveMove: () => FORKED_MOVE };
+    const agent = fireAgentWithMove({
+      skillPoints: { fire: 5 },
+      wildcardSkillPoints: 0,
+      moves: [{ ...FORKED_MOVE }],
+      moveTreeChoices: { ember: ["fork_a"] },
+    });
+    const world = createWorld(5, 5);
+    maybeAutoRespec(agent, world, forkCtx);
+    // fork_b would otherwise be an eligible, affordable candidate — excludes
+    // must keep it out of the candidate pool now that fork_a is committed.
+    expect(agent.moveTreeChoices!.ember).toEqual(["fork_a"]);
+  });
+
   it("a fully neutral disposition weights both eligible candidates equally", () => {
     // With wider_burn already chosen, ring_of_fire is now the *sole*
     // candidate (its prerequisite is met, nothing else on this tree is

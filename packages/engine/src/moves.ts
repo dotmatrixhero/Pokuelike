@@ -85,6 +85,28 @@ export interface MoveTreeNode {
   cost: number;
   prerequisites?: string[];
   /**
+   * Alternative prerequisite sets: the node is eligible if it satisfies its
+   * (possibly absent) `prerequisites` list AND at least one of these inner
+   * arrays is fully satisfied — each inner array is itself AND'd together,
+   * same as `prerequisites`, but only one of the arrays needs to hold. This
+   * is what lets a crosslink node stand in for a branch's own earlier chain
+   * node as an alternate way to reach something downstream (see
+   * MOVES_DESIGN.md's "crosslinks" section) — the same shape also covers a
+   * keystone reachable from either of two forks. The common authoring
+   * pattern is to use this *instead of* `prerequisites`, not alongside it —
+   * a node with both must satisfy both (AND between the two mechanisms).
+   */
+  prerequisitesAnyOf?: string[][];
+  /**
+   * Node ids this one permanently locks out once chosen, and vice versa —
+   * checked in both directions regardless of which side declares it, so a
+   * one-sided declaration still works, though authoring both sides is
+   * clearer to read. This is the real-fork primitive: two nodes that
+   * `excludes` each other are a mutually exclusive, permanent choice (see
+   * MOVES_DESIGN.md's skill-tree template). Absent = no exclusivity.
+   */
+  excludes?: string[];
+  /**
    * Which Disposition axis (nature.ts) this node appeals to, if any — used
    * only by `maybeAutoRespec` (leveling.ts) to weight a wild agent's pick
    * among several currently-affordable/eligible nodes on the same tree.
@@ -170,7 +192,12 @@ export function resolveShape(shape: MoveShape, origin: Vec2, facing: Direction):
  * order-independent; `shape` and `range` are overwrites, applied in the order
  * given, so a tree that offers alternative branches (e.g. Ember: "grow into
  * a ring" vs. "stay a point but hit faster/more often") depends on the caller
- * choosing one, not both, deltas that touch the same field.
+ * choosing one, not both, deltas that touch the same field. Also validates
+ * `prerequisitesAnyOf` (satisfying `prerequisites` alone isn't enough if this
+ * is set — at least one alternative set must also be fully chosen) and
+ * `excludes` (two mutually-exclusive nodes can't both appear in
+ * `chosenNodeIds`, checked in both directions) — see `MoveTreeNode`'s own
+ * doc comments.
  */
 export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec {
   const tree = base.tree;
@@ -189,6 +216,23 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
         `applyMoveTree: node "${nodeId}" on move "${base.id}" requires [${missing.join(", ")}] to be chosen first`
       );
     }
+
+    if (node.prerequisitesAnyOf && node.prerequisitesAnyOf.length > 0) {
+      const satisfied = node.prerequisitesAnyOf.some((set) => set.every((prereq) => chosen.has(prereq)));
+      if (!satisfied) {
+        throw new Error(
+          `applyMoveTree: node "${nodeId}" on move "${base.id}" requires one of its alternative prerequisite sets to already be chosen`
+        );
+      }
+    }
+
+    const conflict = [...chosen].find(
+      (chosenId) => (node.excludes ?? []).includes(chosenId) || (tree[chosenId]?.excludes ?? []).includes(nodeId)
+    );
+    if (conflict) {
+      throw new Error(`applyMoveTree: node "${nodeId}" on move "${base.id}" conflicts with already-chosen node "${conflict}"`);
+    }
+
     chosen.add(nodeId);
 
     const { delta } = node;
