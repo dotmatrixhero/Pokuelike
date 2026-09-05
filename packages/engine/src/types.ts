@@ -808,6 +808,22 @@ export interface Agent {
    * `dispersed` event is logged on arrival. See `DispersalReason`.
    */
   dispersalReason?: DispersalReason;
+  /**
+   * Set instead of the ordinary same-map join-or-found outcome when a
+   * triggered dispersal rolls to target a NEIGHBORING REGION rather than a
+   * random point on this map — the harder half of the overworld's
+   * migration-edges stretch goal (see overworld.ts's top-of-file doc
+   * comment and dispersal.ts's `RegionDispersalContext`). While set,
+   * `dispersalTarget` is a point on this map's edge rather than an interior
+   * herd-founding spot; once the agent arrives there (`dispersalTarget`
+   * clears), it's ready for `overworld.ts`'s `tickOverworld` to actually
+   * remove it from `world.agents` and fold it into the destination region's
+   * aggregate — dispersal.ts itself never touches `World.agents` or any
+   * region/aggregate state, only this one `World`. The region id named
+   * here, not interpreted by dispersal.ts at all (an opaque string from
+   * `RegionDispersalContext.neighborRegionIds`).
+   */
+  crossingToRegionId?: string;
 
   /**
    * When this agent's species prefers to be active — denormalized from

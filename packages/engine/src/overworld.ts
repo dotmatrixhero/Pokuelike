@@ -2,6 +2,7 @@ import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import type { LevelingContext } from "./leveling.js";
 import type { ImmigrationContext, ImmigrationSpeciesInfo } from "./immigration.js";
+import type { RegionDispersalContext } from "./dispersal.js";
 import { tickWorld } from "./simulation.js";
 import { findPosInBiome, findWalkableNear } from "./worldgen.js";
 import { countTerrainNear, findNearestIndexed, foodStockNear } from "./resourceIndex.js";
@@ -51,15 +52,23 @@ import { countTerrainNear, findNearestIndexed, foodStockNear } from "./resourceI
  *
  * **Migration edges** (`RegionEdge`) connect regions for the stretch-goal
  * idea TODO.md flags: "a disperser could eventually target another region."
- * What's actually built here is the CHEAP half only —
- * `advanceAbstractRegion`'s `maybeEmigrate` moves a small population
- * fraction between two regions that are BOTH currently abstract, no
- * individuals involved. The harder half — `dispersal.ts`'s real per-agent
- * disperser actually walking off the edge of the focused region's map and
- * landing as a promoted individual in a neighboring one — is genuinely not
- * built. That would mean `dispersal.ts` (sibling-session territory this
- * session stayed out of) knowing about region edges at all, which is a real
- * follow-up, not attempted here.
+ * BOTH halves are now built:
+ * - The cheap abstract-to-abstract half: `advanceAbstractRegion`'s
+ *   `maybeEmigrate` moves a small population fraction between two regions
+ *   that are BOTH currently abstract, no individuals involved.
+ * - The individual half: `dispersal.ts`'s ordinary natal-dispersal trigger
+ *   (see its `RegionDispersalContext`) can roll to target a neighboring
+ *   region instead of a random point on the focused region's own map — the
+ *   disperser walks to the map's edge instead of an interior spot, and once
+ *   it arrives, `tickOverworld` below removes it from `world.agents` and
+ *   folds it into the destination region's aggregate (`foldAgentIntoAggregate`),
+ *   emitting a `regionCrossed` event. This is still one-directional in
+ *   practice: only the FOCUSED region has real individual agents to
+ *   disperse in the first place, so a crossing always originates from
+ *   focus and lands in an abstract neighbor, never abstract-to-abstract
+ *   (that's what `maybeEmigrate` is for) or abstract-to-focused (which
+ *   would mean inventing a real individual mid-tick outside the normal
+ *   promotion path — not attempted).
  */
 
 /** Per-species abstract state for a region that isn't currently focused. */
@@ -483,19 +492,118 @@ export function advanceAbstractRegion(overworld: Overworld, region: Region, rng:
 }
 
 /**
+ * Folds exactly one real individual into a (possibly brand-new) aggregate
+ * entry — the individual-crossing counterpart to `maybeEmigrate`'s
+ * population-slice version. A weighted average (by existing population)
+ * keeps one new arrival from swinging a large aggregate's average need
+ * levels disproportionately; a species with no existing entry in
+ * `destination` gets a fresh one seeded from this one individual plus a
+ * freshly measured resource baseline for `destination`'s own map (abundance
+ * is a property of the destination region's terrain, not something that
+ * travels with the disperser).
+ */
+function foldAgentIntoAggregate(destination: Region, agent: Agent): void {
+  if (!destination.aggregates) destination.aggregates = {};
+  const aggregates = destination.aggregates;
+  const existing = aggregates[agent.species];
+  if (existing) {
+    const totalAfter = existing.population + 1;
+    existing.avgHunger = (existing.avgHunger * existing.population + agent.needs.hunger) / totalAfter;
+    existing.avgThirst = (existing.avgThirst * existing.population + agent.needs.thirst) / totalAfter;
+    existing.avgEnergy = (existing.avgEnergy * existing.population + agent.needs.energy) / totalAfter;
+    existing.avgLevel = (existing.avgLevel * existing.population + (agent.level ?? existing.avgLevel)) / totalAfter;
+    existing.population = totalAfter;
+  } else {
+    const baseline = measureResourceIndex(destination.world);
+    aggregates[agent.species] = {
+      species: agent.species,
+      homeLayer: agent.homeLayer,
+      population: 1,
+      avgHunger: agent.needs.hunger,
+      avgThirst: agent.needs.thirst,
+      avgEnergy: agent.needs.energy,
+      avgLevel: agent.level ?? 5,
+      baseResourceIndex: baseline,
+      resourceIndex: baseline,
+      lastEventPopulation: 1,
+    };
+  }
+}
+
+/**
+ * Removes every agent that finished walking to this map's edge as a
+ * region-crossing disperser (`Agent.crossingToRegionId` set,
+ * `dispersalTarget` just cleared by `dispersal.ts`'s `applyDispersal` —
+ * see that field's own doc comment for why this exact combination is the
+ * "arrived, ready to leave" signal) from `world.agents` and returns them,
+ * leaving everyone else untouched. A disperser still mid-walk
+ * (`dispersalTarget` still set) or currently fainted is left alone —
+ * fainted is a defensive guard, not a reachable case in practice (a fainted
+ * agent's action tick — and therefore `applyDispersal` — never runs, so
+ * `dispersalTarget` couldn't have just cleared the same tick it fainted).
+ */
+function extractRegionCrossers(world: World): Agent[] {
+  const crossers: Agent[] = [];
+  const remaining: Agent[] = [];
+  for (const agent of world.agents) {
+    if (agent.crossingToRegionId && !agent.dispersalTarget && agent.alive !== false && !agent.fainted) {
+      crossers.push(agent);
+    } else {
+      remaining.push(agent);
+    }
+  }
+  world.agents = remaining;
+  return crossers;
+}
+
+/**
+ * Completes every region-crossing dispersal that finished this tick in the
+ * focused region — the individual half of the migration-edges stretch goal
+ * (see this file's top doc comment). Called once per `tickOverworld` call,
+ * right after the focused region's own `tickWorld` pass.
+ */
+function applyRegionCrossings(overworld: Overworld, region: Region, log?: EventLog): void {
+  const crossers = extractRegionCrossers(region.world);
+  for (const agent of crossers) {
+    const destination = findRegion(overworld, agent.crossingToRegionId!);
+    if (!destination) {
+      // Shouldn't happen — the id only ever comes from this region's own
+      // `RegionDispersalContext.neighborRegionIds`, itself derived from
+      // `overworld.edges`. Put the agent back rather than silently
+      // discarding a real individual over a graph inconsistency.
+      region.world.agents.push(agent);
+      continue;
+    }
+    foldAgentIntoAggregate(destination, agent);
+    log?.record({
+      kind: "regionCrossed",
+      tick: overworld.tick,
+      agentId: agent.id,
+      species: agent.species,
+      fromRegionId: region.id,
+      toRegionId: destination.id,
+    });
+  }
+}
+
+/**
  * Advances the whole region graph by one tick: the focused region gets a
- * real, full `tickWorld` pass; every other region gets the cheap
- * `advanceAbstractRegion` pass. Mirrors `tickWorld`'s own
- * `rng`/`rules`/`ctx`/`immigration` dependency-injection shape — each
- * region's own `world.rng` (seeded at that region's own creation) drives
- * its own randomness, never a shared graph-level generator, so two regions
- * ticked in the same call don't have their random rolls entangled.
+ * real, full `tickWorld` pass (with a `RegionDispersalContext` built from
+ * its own graph edges, so its dispersers can roll to cross into a
+ * neighbor); every other region gets the cheap `advanceAbstractRegion`
+ * pass. Mirrors `tickWorld`'s own `rng`/`rules`/`ctx`/`immigration`
+ * dependency-injection shape — each region's own `world.rng` (seeded at
+ * that region's own creation) drives its own randomness, never a shared
+ * graph-level generator, so two regions ticked in the same call don't have
+ * their random rolls entangled.
  */
 export function tickOverworld(overworld: Overworld, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext, immigration?: ImmigrationContext): void {
   overworld.tick += 1;
   for (const region of overworld.regions) {
     if (region.id === overworld.focusedRegionId) {
-      tickWorld(region.world, log, rules, ctx, region.world.rng, immigration);
+      const regionDispersal: RegionDispersalContext = { neighborRegionIds: neighborsOf(overworld, region.id).map((r) => r.id) };
+      tickWorld(region.world, log, rules, ctx, region.world.rng, immigration, regionDispersal);
+      applyRegionCrossings(overworld, region, log);
     } else {
       advanceAbstractRegion(overworld, region, region.world.rng, log);
     }

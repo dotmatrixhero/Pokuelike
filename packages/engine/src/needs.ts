@@ -8,7 +8,7 @@ import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing, tendSoil } fr
 import { tickCooldowns } from "./combat.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
 import { migrate } from "./migration.js";
-import { applyDispersal, maybeTriggerDispersal } from "./dispersal.js";
+import { applyDispersal, maybeTriggerDispersal, type RegionDispersalContext } from "./dispersal.js";
 import {
   applyShelterBuilding,
   applyShelterResting,
@@ -792,7 +792,8 @@ export function tickAgentAction(
   log?: EventLog,
   rules?: HuntRules,
   ctx?: LevelingContext,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  regionDispersal?: RegionDispersalContext
 ): void {
   if (agent.alive === false) return;
   if (agent.fainted) return;
@@ -884,7 +885,7 @@ export function tickAgentAction(
     }
     // Paused, not abandoned — resumes on a later tick once satisfied again.
   } else {
-    maybeTriggerDispersal(world, agent, log, rng);
+    maybeTriggerDispersal(world, agent, log, rng, regionDispersal);
     if (agent.dispersalTarget && chooseBehavior(agent.needs) === "idle") {
       applyDispersal(world, agent, log);
       return;
