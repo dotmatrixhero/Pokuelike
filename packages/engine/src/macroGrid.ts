@@ -310,19 +310,26 @@ const SEED_POPULATION_VARIANCE = 10;
  * never-visited zone, and roughly how many — the abstract-tier seed for a
  * zone `overworld.ts` needs to track (received migrants, or a first
  * promotion) but has never actually simulated. A species matches when its
- * `biomes` list includes this zone's dominant biome (or has no biome
- * preference at all) AND its `obligateAquatic`-ness agrees with whether this
- * zone is ocean — the same two checks `overworld.ts`'s real `placeInvented`
- * makes when actually spawning an individual, just without ever generating
- * real tiles to place one on.
+ * `obligateAquatic`-ness agrees with whether this zone is ocean, same as
+ * `overworld.ts`'s real `placeInvented` check when actually spawning an
+ * individual. The biome-name check only applies to LAND zones — `"ocean"`
+ * isn't a real per-tile `BIOMES` entry (see worldgen.ts), so an
+ * obligate-aquatic species has nothing literal to tag itself with beyond
+ * `@pokuelike/data`'s existing "wetland" stand-in (its own closest
+ * water-heavy per-tile biome); requiring a biome match for an ocean zone
+ * too would make every ocean zone's estimate come up empty, a real bug an
+ * ocean-zone promotion test in this codebase's own web-app smoke check
+ * caught directly.
  */
 export function estimateZoneSpecies(zone: MacroZone, roster: readonly ImmigrationSpeciesInfo[], rng: () => number): ZoneSpeciesEstimate[] {
   const estimates: ZoneSpeciesEstimate[] = [];
   for (const species of roster) {
     const isAquatic = species.obligateAquatic === true;
     if (isAquatic !== zone.isOcean) continue;
-    const matchesBiome = !species.biomes || species.biomes.length === 0 || species.biomes.includes(zone.biome);
-    if (!matchesBiome) continue;
+    if (!zone.isOcean) {
+      const matchesBiome = !species.biomes || species.biomes.length === 0 || species.biomes.includes(zone.biome);
+      if (!matchesBiome) continue;
+    }
     estimates.push({ speciesId: species.id, homeLayer: species.homeLayer, population: SEED_POPULATION_BASE + rng() * SEED_POPULATION_VARIANCE });
   }
   return estimates;

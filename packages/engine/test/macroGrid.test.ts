@@ -148,6 +148,12 @@ describe("estimateZoneResourceIndex / estimateZoneSpecies", () => {
       { id: "badlands-only", homeLayer: "surface" as const, biomes: ["badlands"] },
       { id: "no-preference", homeLayer: "surface" as const },
       { id: "fish", homeLayer: "surface" as const, obligateAquatic: true },
+      // Mirrors @pokuelike/data's real magikarp/tentacool shape: obligate-
+      // aquatic but tagged "wetland" (the roster's only real water-heavy
+      // per-tile biome — "ocean" isn't a BIOMES entry at all), not "ocean"
+      // literally. This must still match an ocean zone — see
+      // estimateZoneSpecies's own doc comment for the real bug this guards.
+      { id: "wetland-fish", homeLayer: "surface" as const, obligateAquatic: true, biomes: ["wetland"] },
     ];
     const rng = () => 0.5;
 
@@ -156,9 +162,11 @@ describe("estimateZoneResourceIndex / estimateZoneSpecies", () => {
     expect(landMatches.has("badlands-only")).toBe(false);
     expect(landMatches.has("no-preference")).toBe(true);
     expect(landMatches.has("fish")).toBe(false);
+    expect(landMatches.has("wetland-fish")).toBe(false);
 
     const oceanMatches = new Set(estimateZoneSpecies(ocean, roster, rng).map((e) => e.speciesId));
     expect(oceanMatches.has("fish")).toBe(true);
+    expect(oceanMatches.has("wetland-fish")).toBe(true);
     expect(oceanMatches.has("grassland-only")).toBe(false);
     expect(oceanMatches.has("no-preference")).toBe(false); // no-preference isn't obligate-aquatic, so it's excluded from an ocean zone
   });
