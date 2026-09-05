@@ -2,6 +2,7 @@ import type { Agent, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { biomeWeightsAt, findWalkableNear } from "./worldgen.js";
 import { findNearbyOtherHerd } from "./dispersal.js";
+import { findNearestIndexed } from "./resourceIndex.js";
 
 /**
  * Immigration — new herds arriving into the world from outside it, over the
@@ -31,6 +32,16 @@ export interface ImmigrationSpeciesInfo {
   homeLayer: Layer;
   /** See species.ts's `SpeciesDef.biomes` — absent/empty reads as "no particular biome preference." */
   biomes?: string[];
+  /**
+   * See species.ts's `SpeciesDef.obligateAquatic`. Changes ONLY where an
+   * immigrating group of this species actually lands (below) — an ordinary
+   * `findWalkableNear` pick treats any walkable tile, water included, as an
+   * equally valid hit, which for a genuinely obligate-aquatic species could
+   * land a whole immigrant group on dry land with no water anywhere in
+   * `canEnterLand`'s one-shore-tile-deep reach, stranding them from the
+   * moment they arrive. Absent/false = unchanged existing behavior.
+   */
+  obligateAquatic?: boolean;
 }
 
 export interface ImmigrationContext {
@@ -221,12 +232,30 @@ export function maybeImmigrate(world: World, ctx: ImmigrationContext | undefined
       ? findWalkableNear(world, "surface", edgePos.x, edgePos.y)
       : { x: Math.min(world.width - 1, Math.max(0, Math.round(edgePos.x))), y: Math.min(world.height - 1, Math.max(0, Math.round(edgePos.y))) };
 
+  // Obligate-aquatic species (`ImmigrationSpeciesInfo.obligateAquatic`, see
+  // its own doc comment) need a real water tile, not merely a walkable one —
+  // `findWalkableNear` treats the two as equally valid hits. Excludes each
+  // already-picked tile so a `groupSize` > 1 arrival spreads across distinct
+  // nearby water tiles instead of stacking every member on the exact same
+  // one; falls back to whatever the last (possibly land) candidate was if
+  // the map genuinely runs out of nearby distinct water tiles to offer —
+  // vanishingly unlikely on a real generated map, and no worse than this
+  // species' pre-feature placement in that edge case.
+  const usedWaterTiles: Vec2[] = [];
+  function nextArrivalPos(i: number): Vec2 {
+    if (!species!.obligateAquatic) {
+      return species!.homeLayer === "surface"
+        ? findWalkableNear(world, species!.homeLayer, arrivalPos.x + i, arrivalPos.y)
+        : { x: Math.min(world.width - 1, Math.max(0, arrivalPos.x + i)), y: arrivalPos.y };
+    }
+    const waterPos = findNearestIndexed(world, "surface", arrivalPos, "water", usedWaterTiles) ?? arrivalPos;
+    usedWaterTiles.push(waterPos);
+    return waterPos;
+  }
+
   const newAgents: Agent[] = [];
   for (let i = 0; i < groupSize; i++) {
-    const pos =
-      species.homeLayer === "surface"
-        ? findWalkableNear(world, species.homeLayer, arrivalPos.x + i, arrivalPos.y)
-        : { x: Math.min(world.width - 1, Math.max(0, arrivalPos.x + i)), y: arrivalPos.y };
+    const pos = nextArrivalPos(i);
     const agent = ctx.spawnAgent(species.id, `${species.id}-immigrant-${world.tick}-${i}`, pos, IMMIGRANT_LEVEL, rng);
     agent.sex = rng() < 0.5 ? "male" : "female";
     newAgents.push(agent);

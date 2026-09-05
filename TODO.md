@@ -2742,3 +2742,77 @@ not something this pathfinding pass itself caused or is positioned to fix.
       body" threshold, could in principle need a higher bound before
       finding a real reachable shore. Not stress-tested past the seeds used
       here.
+
+## Obligate-aquatic restrictions (Magikarp/Tentacool) — built, see DESIGN.md
+
+- [x] `species.ts`'s new `obligateAquatic?: boolean` flag; `magikarp` and
+      `tentacool` added to the curated roster (both were dex-only before)
+      and flagged, both reusing an existing move, both with no leveling.ts
+      data change needed (egg-group headroom already existed). Denormalized
+      onto `Agent.obligateAquatic` at spawn, mirrored on `LevelingProfile`
+      for bred offspring, and copied straight from mother to egg — the same
+      three-place propagation `isPredator`/`buildsShelter` already use.
+- [x] `waterBody.ts`'s new `canEnterLand` — the land-side mirror of
+      `canEnterWater`: an obligate-aquatic agent can flop onto the
+      immediate shore ring but nothing deeper onto land; a regular
+      (non-flagged) Water-type is completely unaffected. Wired into the
+      same shared `isWalkableFor`/`firstWalkable` choke points the
+      water-crossing feature already built, so every real call site both
+      features share is covered for free.
+- [x] Two real reachability bugs found and fixed via this session's own
+      multi-seed validation (not just unit tests) — see DESIGN.md's "Built,
+      real-run findings" for the actual before/after numbers: (1) `seekFood`
+      had the exact same "geometrically nearest isn't reachable" trap
+      `findReachableWaterTarget` already existed to fix for water, just
+      never extended to food — fixed with a new `findReachableFoodTarget`;
+      (2) `immigration.ts` was placing obligate-aquatic arrivals via
+      `findWalkableNear` (any walkable tile, water included, as an equally
+      valid hit), sometimes stranding them on dry land the instant they
+      arrived — fixed by routing obligate-aquatic arrivals through
+      `resourceIndex.ts`'s `findNearestIndexed(..., "water", ...)` instead,
+      plus a new `scenario.ts` `findWaterNear` helper so the demo world's
+      own founding pair is placed on real water on every seed, not just the
+      one it was eyeballed against.
+- [x] 874 engine tests (11 new) passing twice in a row, determinism intact,
+      real 3-seed 6000/10000-tick validation clean — no
+      thirst-starvation after the fixes, a modest residual
+      hunger-starvation rate honestly reported (not eliminated further —
+      see below).
+- [ ] **Only Magikarp and Tentacool got the flag.** Horsea/Seadra,
+      Staryu/Starmie, Goldeen/Seaking (all real dex entries, none curated
+      roster species yet) would plausibly all qualify on the same
+      real-biology standard whenever they're actually added as roster
+      species — not added this session; see DESIGN.md's "Decided" section
+      for the per-species reasoning that would apply. Gyarados/Tentacruel
+      likewise aren't their own curated entries — they inherit the flag
+      automatically as evolutions of the two that are.
+- [ ] **The flag doesn't reset on evolution** — an evolved Gyarados stays
+      obligate-aquatic even though real Gyarados can fly. Same accepted
+      scope `buildsShelter`/`preferredTerrain` already carry (denormalized
+      at spawn, not re-derived on evolution), not a new gap.
+- [ ] **Real, scoped, NOT done: a worldgen fix for shore-ring food
+      scarcity.** The 10000-tick validation found a modest residual
+      hunger-starvation rate (roughly one death per seed) traceable to a
+      real scarcity of "food" terrain within an obligate-aquatic agent's
+      actual reachable range (water + one-tile shore ring) — the
+      reachability-retry logic itself is correct (`findReachableFoodTarget`
+      finds whatever food genuinely exists in range), there's just not
+      always much of it there. A worldgen change biasing food density to
+      spawn more reliably within an aquatic species' reachable shore ring
+      (same spirit as this session's placement fixes, just for food
+      instead of agents) would directly address this. Not attempted this
+      session — the observed impact at the population sizes validated
+      (1-3 aquatic agents per seed) never approached collapse, so a
+      worldgen change touching every species' food placement wasn't judged
+      worth the risk without a larger aquatic population to re-validate
+      against. A real follow-up, not a punt on an unexamined risk.
+- [ ] **No graduated wading distance** for either direction of this
+      restriction — exactly one tile of shore, no per-species variation
+      (matches the water-crossing feature's own identical scope note).
+- [ ] **No dedicated aquatic breeding population validated at scale.**
+      Magikarp and Tentacool don't share an egg group, so the demo world's
+      founding pair can never breed with each other — every population
+      number in DESIGN.md's validation comes from immigration, not
+      reproduction. A real same-species breeding pair (e.g. a second
+      Magikarp of the opposite sex) was not added or validated this
+      session.

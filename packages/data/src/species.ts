@@ -81,6 +81,24 @@ export interface SpeciesDef {
    * entries are tried first when more than one is listed.
    */
   preferredTerrain?: TerrainKind[];
+  /**
+   * True for a genuinely obligate-aquatic species — one that realistically
+   * can't survive out of water at all, not merely a Water-typed one. Direct
+   * ask: "certain Pokémon like Magicarp and tentacool and stuff should
+   * probably not really be leaving the water" — the mirror image of
+   * `@pokuelike/engine`'s `waterBody.ts`'s `canEnterWater` (non-water types
+   * can't cross large water bodies), enforced by that same module's
+   * `canEnterLand`: an obligate-aquatic agent can wade onto the immediate
+   * shore ring but no deeper onto land, mirroring the shore-wade allowance
+   * `canEnterWater` already gives non-water types the other direction.
+   * Judged per-species on real biology, the same standard as
+   * `isPredator`/`buildsShelter` — NOT every Water-type gets this: plenty
+   * (Squirtle, Psyduck, Poliwag) are canonically amphibious/land-capable in
+   * mainline flavor text and must stay unrestricted. Absent/false = an
+   * ordinary species, denormalized onto `Agent.obligateAquatic` at spawn
+   * (spawn.ts), same pattern as `isPredator`/`buildsShelter`.
+   */
+  obligateAquatic?: boolean;
 }
 
 /**
@@ -113,6 +131,7 @@ export function speciesFromDex(dexKey: string, sim: SimSpeciesFields): SpeciesDe
     buildsShelter: sim.buildsShelter,
     biomes: sim.biomes,
     preferredTerrain: sim.preferredTerrain,
+    obligateAquatic: sim.obligateAquatic,
   };
 }
 
@@ -373,5 +392,54 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // A "rocky mountains" primate — settles among the same boulder fields
     // as Geodude, its badlands/highland neighbor.
     preferredTerrain: ["boulder"],
+  }),
+
+  // --- New species below: real obligate-aquatic residents — direct ask:
+  // "certain Pokémon like Magicarp and tentacool and stuff should probably
+  // not really be leaving the water." Both are named directly in the ask;
+  // both are real entries in this roster's dex import (species.generated.ts)
+  // and already have `EGG_GROUPS_BY_BASE_KEY` headroom entries in
+  // leveling.ts (MAGIKARP/TENTACOOL), so no leveling.ts change was needed to
+  // add them. See DESIGN.md's "obligate-aquatic" section for the roster
+  // survey and reasoning this batch is drawn from (which other Kanto
+  // aquatic species were considered and left out, and why). Both reuse an
+  // already-implemented move (moves.ts) rather than inventing a new one.
+  magikarp: speciesFromDex("MAGIKARP", {
+    spriteKey: "magikarp",
+    placeholderColor: "#e88090",
+    homeLayer: "surface",
+    // A real level-only evolution into Gyarados at level 20, no conditions —
+    // evolves in-sim same as Mankey above. Gyarados's own Flying secondary
+    // typing isn't specially handled: `obligateAquatic` is denormalized at
+    // spawn and, like `buildsShelter`/`preferredTerrain`, doesn't reset on
+    // evolution (see DESIGN.md's "not done here" list) — an evolved
+    // Gyarados stays obligate-aquatic in-sim even though real Gyarados can
+    // fly, an accepted existing-pattern gap, not a new one.
+    moves: ["tackle"],
+    // Famously "virtually powerless... this Pokémon can only splash around
+    // in water" per mainline flavor text — the single most literal
+    // obligate-aquatic case in the whole dex.
+    obligateAquatic: true,
+    // Wetland is this roster's only real water-heavy biome (worldgen.ts's
+    // highest waterDensity) — same fit as Squirtle.
+    biomes: ["wetland"],
+    preferredTerrain: ["water"],
+  }),
+  tentacool: speciesFromDex("TENTACOOL", {
+    spriteKey: "tentacool",
+    placeholderColor: "#88c8d8",
+    homeLayer: "surface",
+    // A real level-only evolution into Tentacruel at level 30, no
+    // conditions — evolves in-sim, same accepted "flag doesn't reset on
+    // evolution" gap noted for Magikarp above (Tentacruel is also
+    // obligate-aquatic in real mainline flavor text regardless, so this
+    // particular case isn't even a real mismatch).
+    moves: ["water_gun"],
+    // A drifting jellyfish per mainline flavor text ("floats on the ocean's
+    // waves... drifts in shallow seas") — has no legs/land locomotion of any
+    // kind, an even more literal case than Magikarp.
+    obligateAquatic: true,
+    biomes: ["wetland"],
+    preferredTerrain: ["water"],
   }),
 };

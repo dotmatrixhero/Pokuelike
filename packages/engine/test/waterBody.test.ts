@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { createWorld, setTile } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
-import { LARGE_WATER_BODY_MIN_SIZE, canEnterWater, isLargeWaterBody, waterBodySizeAt } from "../src/waterBody.js";
+import { LARGE_WATER_BODY_MIN_SIZE, canEnterLand, canEnterWater, isLargeWaterBody, waterBodySizeAt } from "../src/waterBody.js";
 import type { Agent, PokemonType } from "../src/types.js";
 
-function makeAgent(types?: PokemonType[]): Agent {
+function makeAgent(types?: PokemonType[], obligateAquatic?: boolean): Agent {
   return {
     id: "a1",
     species: "test",
     types,
+    obligateAquatic,
     pos: { x: 0, y: 0 },
     layer: "surface",
     homeLayer: "surface",
@@ -184,5 +185,76 @@ describe("canEnterWater", () => {
   it("out of bounds is treated as non-water (true)", () => {
     const world = createWorld(10, 10);
     expect(canEnterWater(world, makeAgent(), "surface", { x: -1, y: 0 })).toBe(true);
+  });
+});
+
+describe("canEnterLand", () => {
+  it("is true unconditionally for a non-obligate-aquatic agent, any tile, any type", () => {
+    const world = createWorld(10, 10);
+    buildLargeLake(world);
+    // Deep inland, no water anywhere nearby.
+    expect(canEnterLand(world, makeAgent(["normal"]), "surface", { x: 9, y: 9 })).toBe(true);
+    expect(canEnterLand(world, makeAgent(["water"]), "surface", { x: 9, y: 9 })).toBe(true);
+    expect(canEnterLand(world, makeAgent(["water"], false), "surface", { x: 9, y: 9 })).toBe(true);
+  });
+
+  it("is true unconditionally for water terrain, regardless of obligateAquatic", () => {
+    const world = createWorld(10, 10);
+    buildLargeLake(world);
+    const aquatic = makeAgent(["water"], true);
+    expect(canEnterLand(world, aquatic, "surface", { x: 4, y: 4 })).toBe(true); // deep interior water
+  });
+
+  it("an obligate-aquatic agent can reach the land shore ring but not deeper onto land", () => {
+    const world = createWorld(10, 10);
+    buildLargeLake(world);
+    const aquatic = makeAgent(["water"], true);
+    // (1,4) is land directly adjacent to the lake's (2,4) water tile — shore.
+    expect(canEnterLand(world, aquatic, "surface", { x: 1, y: 4 })).toBe(true);
+    // (0,4) is two tiles from the lake — not touching water at all.
+    expect(canEnterLand(world, aquatic, "surface", { x: 0, y: 4 })).toBe(false);
+    // Far inland, nowhere near any water.
+    expect(canEnterLand(world, aquatic, "surface", { x: 9, y: 9 })).toBe(false);
+  });
+
+  it("a regular amphibious Water-type (no obligateAquatic flag) is completely unaffected", () => {
+    const world = createWorld(10, 10);
+    buildLargeLake(world);
+    const amphibious = makeAgent(["water"]); // e.g. Squirtle/Psyduck/Poliwag — no obligateAquatic
+    expect(canEnterLand(world, amphibious, "surface", { x: 1, y: 4 })).toBe(true); // shore
+    expect(canEnterLand(world, amphibious, "surface", { x: 9, y: 9 })).toBe(true); // deep inland too
+  });
+
+  it("out of bounds is treated as non-water (true)", () => {
+    const world = createWorld(10, 10);
+    expect(canEnterLand(world, makeAgent(["water"], true), "surface", { x: -1, y: 0 })).toBe(true);
+  });
+
+  it("stacks with canEnterWater without conflict: a land-type still can't cross deep water, an obligate-aquatic type still can't wander onto land, both rules active at once", () => {
+    const world = createWorld(10, 10);
+    buildLargeLake(world);
+    const land = makeAgent(["normal"]);
+    const aquatic = makeAgent(["water"], true);
+
+    // Deep water interior: land type blocked by canEnterWater, unaffected
+    // by canEnterLand (only meaningful on non-water tiles); aquatic type
+    // freely allowed by both.
+    expect(canEnterWater(world, land, "surface", { x: 4, y: 4 })).toBe(false);
+    expect(canEnterLand(world, land, "surface", { x: 4, y: 4 })).toBe(true);
+    expect(canEnterWater(world, aquatic, "surface", { x: 4, y: 4 })).toBe(true);
+    expect(canEnterLand(world, aquatic, "surface", { x: 4, y: 4 })).toBe(true);
+
+    // Deep inland land tile: aquatic type blocked by canEnterLand,
+    // unaffected by canEnterWater (only meaningful on water tiles); land
+    // type freely allowed by both.
+    expect(canEnterLand(world, aquatic, "surface", { x: 9, y: 9 })).toBe(false);
+    expect(canEnterWater(world, aquatic, "surface", { x: 9, y: 9 })).toBe(true);
+    expect(canEnterLand(world, land, "surface", { x: 9, y: 9 })).toBe(true);
+    expect(canEnterWater(world, land, "surface", { x: 9, y: 9 })).toBe(true);
+
+    // The shore ring: both a land type and an obligate-aquatic type can
+    // stand here, from opposite directions.
+    expect(canEnterWater(world, land, "surface", { x: 2, y: 4 })).toBe(true); // land wading in to drink
+    expect(canEnterLand(world, aquatic, "surface", { x: 1, y: 4 })).toBe(true); // aquatic flopping onto shore
   });
 });

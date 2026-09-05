@@ -3,6 +3,8 @@ import {
   findWalkableNear,
   findPosInBiome,
   createNeeds,
+  tileAt,
+  type Vec2,
   type World,
 } from "@pokuelike/engine";
 import { spawnAgent } from "./spawn.js";
@@ -68,12 +70,57 @@ function scaledPos(x: number, y: number) {
 }
 
 /**
+ * `worldgen.ts`'s own `findWalkableNear`, but for real "water" terrain
+ * specifically — needed because `findWalkableNear` treats any walkable
+ * tile as an equally valid hit (water included, since `UNWALKABLE_TERRAIN`
+ * never lists "water" — see `waterBody.ts`'s doc comment), so it can just
+ * as easily land on dry land as on water. An obligate-aquatic founder
+ * (`spawnAgent`'s caller below) needs to start on an ACTUAL water tile, not
+ * merely a walkable one: `canEnterLand` would otherwise immediately treat a
+ * dry-land starting position more than one tile from any water as
+ * off-limits, stranding the founder from tick 0. Ring search outward from
+ * `(x, y)`, same shape as `findWalkableNear` (nearest ring first), so this
+ * reads as "the real water this species actually needs" version of the
+ * same idea rather than a different algorithm. Real bug this closes: an
+ * earlier version of this feature hardcoded a raw coordinate instead
+ * (assuming it was a water tile on the one seed it was eyeballed against),
+ * which put both founders on dry land — silently different terrain — on
+ * every OTHER seed, since `SCENARIO_SEED`'s own generated map isn't the
+ * only one `createDemoWorld(seed)` is ever called with (see this
+ * session's own multi-seed validation runs). Falls back to `(x, y)` itself
+ * if the whole map genuinely has no water tile at all (shouldn't happen —
+ * `worldgen.ts`'s biome water densities are never 0 — but this avoids an
+ * infinite loop over a pathological hand-built `World` in a test).
+ */
+function findWaterNear(world: World, x: number, y: number): Vec2 {
+  const cx = Math.min(world.width - 1, Math.max(0, Math.round(x)));
+  const cy = Math.min(world.height - 1, Math.max(0, Math.round(y)));
+  const maxRadius = Math.max(world.width, world.height);
+
+  for (let r = 0; r <= maxRadius; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= world.width || ny >= world.height) continue;
+        if (tileAt(world, "surface", nx, ny)?.terrain === "water") return { x: nx, y: ny };
+      }
+    }
+  }
+  return { x: cx, y: cy };
+}
+
+/**
  * The one demo world both the browser app and the headless runner show: a
  * Bulbasaur herd near a water hole guarded by Venusaur, a Scyther hunting
  * from its own separate territory, an underground Diglett/Sandshrew colony
- * hunted by Onix, a canopy Pidgey flock hunted by Spearow, and a Squirtle
+ * hunted by Onix, a canopy Pidgey flock hunted by Spearow, a Squirtle
  * pair at the same water hole as the Bulbasaur herd — the roster's first
- * Water-type — the same predator/prey pattern repeated on all three layers
+ * Water-type — and a Magikarp/Tentacool pair actually living IN that same
+ * water hole's deep water, the roster's first obligate-aquatic residents
+ * (see species.ts's `obligateAquatic`) — the same predator/prey pattern
+ * repeated on all three layers
  * (see DESIGN.md's species-expansion section). Underground/canopy have no
  * food or water tiles of their own, so every agent down there or up there
  * routinely crosses to the surface for both — a deliberate reuse of the
@@ -260,6 +307,34 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
     },
   ];
 
+  // Surface: a Magikarp/Tentacool pair actually IN real deep water, the
+  // roster's first two obligate-aquatic residents (see species.ts's
+  // `obligateAquatic`/DESIGN.md's "obligate-aquatic" section) — placed via
+  // `findWaterNear` (this file's own helper, see its doc comment for why
+  // `anchor`/`findWalkableNear` aren't safe for this: both treat any
+  // walkable tile, water included, as an equally valid hit and could just
+  // as easily land these two on dry land). Anchored off a wetland-biome-
+  // weighted point (`findPosInBiome`, same species-tagged-biome placement
+  // Charmander already uses above) rather than a hand-picked coordinate —
+  // this map's own generated wetland/lake placement varies seed to seed, so
+  // a fixed `{x, y}` is real water on whichever seed it happened to be
+  // eyeballed against and silently dry land on every other one (confirmed
+  // by this feature's own multi-seed validation). Not a mated pair
+  // (opposite `sex` isn't set) — same "no predator/prey role of its own
+  // yet" scope as Squirtle/Charmander above; this is about giving the map's
+  // water a real obligate-aquatic resident to validate the movement
+  // restriction against, not standing up a full breeding population from
+  // tick 1.
+  const aquaticAnchor = findPosInBiome(world, "surface", ["wetland"], world.rng);
+  const aquaticSpot = findWaterNear(world, aquaticAnchor.x, aquaticAnchor.y);
+  const aquaticPair = [
+    { ...spawnAgent("magikarp", "magikarp-0", aquaticSpot, 5, world.rng), sex: "male" as const },
+    {
+      ...spawnAgent("tentacool", "tentacool-0", findWaterNear(world, aquaticSpot.x + 1, aquaticSpot.y), 5, world.rng),
+      sex: "female" as const,
+    },
+  ];
+
   world.agents.push(
     ...herd,
     ...guardians,
@@ -269,7 +344,8 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
     ...pidgeyFlock,
     spearow,
     ...squirtlePair,
-    ...charmanderPair
+    ...charmanderPair,
+    ...aquaticPair
   );
   return world;
 }

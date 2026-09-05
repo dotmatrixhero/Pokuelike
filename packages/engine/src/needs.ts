@@ -33,7 +33,7 @@ import {
 import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
 import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
-import { canEnterWater } from "./waterBody.js";
+import { canEnterWater, canEnterLand } from "./waterBody.js";
 import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict } from "./herdConflict.js";
 import { thirstDecayMultiplier } from "./weather.js";
 import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
@@ -510,6 +510,36 @@ function findReachableWaterTarget(world: World, agent: Agent, baseExclude: reado
     const candidate = findNearestIndexed(world, agent.layer, agent.pos, "water", exclude);
     if (!candidate) return undefined;
     if (canEnterWater(world, agent, agent.layer, candidate)) return candidate;
+    exclude.push(candidate);
+  }
+  return undefined;
+}
+
+/**
+ * `findReachableWaterTarget`'s symmetric counterpart, for the obligate-
+ * aquatic side of the same reachability-vs-nearest mismatch: `worldgen.ts`
+ * places "food" terrain on LAND tiles only (water and food are mutually
+ * exclusive per-tile — see that file's tile-generation pass), so an
+ * obligate-aquatic agent (`waterBody.ts`'s `canEnterLand`) can only actually
+ * reach a food tile sitting on the shore ring directly touching water, never
+ * one further inland — exactly the same "geometrically nearest isn't the
+ * same as reachable" trap `findReachableWaterTarget` exists for, just food
+ * instead of water and land-depth instead of water-depth. A NON-
+ * obligate-aquatic agent is completely unaffected: `canEnterLand` is an
+ * unconditional `true` for it, so this behaves exactly like a plain
+ * `findNearestTerrain(..., "food", ...)` lookup, same as before this
+ * function existed. Reuses `WATER_REACHABILITY_MAX_ATTEMPTS` rather than a
+ * second hand-tuned constant — both bounds exist for the identical reason
+ * (an irregular real coastline's nearest candidates can genuinely all be
+ * unreachable before a real reachable one turns up), so there's no reason
+ * to expect a different number to matter here.
+ */
+function findReachableFoodTarget(world: World, agent: Agent, baseExclude: readonly Vec2[]): Vec2 | undefined {
+  const exclude = [...baseExclude];
+  for (let attempts = 0; attempts < WATER_REACHABILITY_MAX_ATTEMPTS; attempts++) {
+    const candidate = findNearestIndexed(world, agent.layer, agent.pos, "food", exclude);
+    if (!candidate) return undefined;
+    if (canEnterLand(world, agent, agent.layer, candidate)) return candidate;
     exclude.push(candidate);
   }
   return undefined;
@@ -1035,7 +1065,7 @@ export function tickAgentAction(
     const target =
       agent.behavior === "seekWater"
         ? findReachableWaterTarget(world, agent, excluded)
-        : findNearestTerrain(world, agent.layer, agent.pos, terrain, excluded);
+        : findReachableFoodTarget(world, agent, excluded);
 
     if (target) {
       agent.ticksWithoutResource = 0;

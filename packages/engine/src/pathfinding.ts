@@ -2,12 +2,12 @@ import type { Agent, Layer, Vec2, World } from "./types.js";
 import { tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
 import { canEnterTile } from "./occupancy.js";
-import { canEnterWater } from "./waterBody.js";
+import { canEnterWater, canEnterLand } from "./waterBody.js";
 
-/** `tileAt(...)?.walkable`, ADDITIONALLY gated on the hard water-crossing constraint (`waterBody.ts`'s `canEnterWater`) for `agent` — the one always-on check every walkability test in this module must apply, capacity-blind pursuit paths included. */
+/** `tileAt(...)?.walkable`, ADDITIONALLY gated on the hard water-crossing constraint (`waterBody.ts`'s `canEnterWater`) AND its land-side mirror (`canEnterLand`, for obligate-aquatic agents) for `agent` — the one always-on pair of checks every walkability test in this module must apply, capacity-blind pursuit paths included. */
 function isWalkableFor(world: World, layer: Layer, pos: Vec2, agent: Agent): boolean {
   const tile = tileAt(world, layer, pos.x, pos.y);
-  return !!tile?.walkable && canEnterWater(world, agent, layer, pos);
+  return !!tile?.walkable && canEnterWater(world, agent, layer, pos) && canEnterLand(world, agent, layer, pos);
 }
 
 /**

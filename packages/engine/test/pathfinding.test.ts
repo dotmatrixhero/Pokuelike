@@ -382,6 +382,65 @@ describe("hard water-crossing constraint: hunt/mate pursuit genuinely respects i
   });
 });
 
+describe("obligate-aquatic land restriction (canEnterLand): symmetric mirror of the water-crossing constraint", () => {
+  it("findPath: an obligate-aquatic agent cannot route deep inland, only onto the shore ring", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14);
+    const aquatic = makeAgent({ types: ["water"], obligateAquatic: true, pos: { x: 10, y: 8 } });
+    // Two tiles past row 14 (last water row) is genuinely deeper than the
+    // shore ring — unreachable.
+    const path = findPath(world, "surface", aquatic.pos, { x: 10, y: 17 }, aquatic);
+    expect(path).toBeUndefined();
+  });
+
+  it("findPath: an obligate-aquatic agent CAN route to the shore ring itself", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14);
+    const aquatic = makeAgent({ types: ["water"], obligateAquatic: true, pos: { x: 10, y: 8 } });
+    // Row 15 is the first land row directly touching the lake band (row 14) — shore.
+    const path = findPath(world, "surface", aquatic.pos, { x: 10, y: 15 }, aquatic);
+    expect(path).toBeDefined();
+    expect(path![path!.length - 1]).toEqual({ x: 10, y: 15 });
+  });
+
+  it("findPath: a regular (non-obligate-aquatic) Water-type agent CAN route deep inland, completely unaffected", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14);
+    const amphibious = makeAgent({ types: ["water"], pos: { x: 10, y: 8 } }); // e.g. Squirtle — no obligateAquatic flag
+    const path = findPath(world, "surface", amphibious.pos, { x: 10, y: 17 }, amphibious);
+    expect(path).toBeDefined();
+    expect(path![path!.length - 1]).toEqual({ x: 10, y: 17 });
+  });
+
+  it("stepTowardMovingTarget: an obligate-aquatic pursuer never leaves the lake band/shore chasing prey deep on land", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14);
+    const predator = makeAgent({ id: "magikarp-test", species: "magikarp", types: ["water"], obligateAquatic: true, pos: { x: 10, y: 8 } });
+    const prey = makeAgent({ id: "prey-deep-inland", pos: { x: 10, y: 19 } });
+
+    for (let tick = 0; tick < 60; tick++) {
+      predator.pos = stepTowardMovingTarget(world, predator, prey);
+      // May flop onto the shore (row 15, the first land row touching the
+      // lake) but never any deeper.
+      expect(predator.pos.y).toBeLessThanOrEqual(15);
+    }
+    expect(manhattan(predator.pos, prey.pos)).toBeGreaterThan(3);
+  });
+
+  it("both hard constraints active simultaneously without conflict: a land-type still can't cross the lake, an obligate-aquatic type still can't leave it, on the very same map", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14);
+    const land = makeAgent({ types: ["normal"], pos: { x: 10, y: 2 } });
+    const aquatic = makeAgent({ types: ["water"], obligateAquatic: true, pos: { x: 10, y: 8 } });
+
+    expect(findPath(world, "surface", land.pos, { x: 10, y: 17 }, land)).toBeUndefined();
+    expect(findPath(world, "surface", aquatic.pos, { x: 10, y: 17 }, aquatic)).toBeUndefined();
+    // Both can still reach their respective shore rings.
+    expect(findPath(world, "surface", land.pos, { x: 10, y: 5 }, land)).toBeDefined();
+    expect(findPath(world, "surface", aquatic.pos, { x: 10, y: 15 }, aquatic)).toBeDefined();
+  });
+});
+
 describe("seekWater/seekFood integration: routes around an obstacle cluster instead of getting stuck", () => {
   it("an agent that would oscillate forever via naive greedy stepping reaches water via real pathfinding", () => {
     const world = createWorld(20, 20);

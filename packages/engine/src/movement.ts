@@ -3,7 +3,7 @@ import type { ForcedMovement } from "./moves.js";
 import { tileAt } from "./world.js";
 import { isImmovable } from "./status.js";
 import { canEnterTile } from "./occupancy.js";
-import { canEnterWater } from "./waterBody.js";
+import { canEnterWater, canEnterLand } from "./waterBody.js";
 
 function candidatesToward(pos: Vec2, dx: number, dy: number): Vec2[] {
   return [
@@ -41,6 +41,7 @@ function firstWalkable(world: World, layer: Layer, pos: Vec2, candidates: Vec2[]
     if (avoid && candidate.x === avoid.x && candidate.y === avoid.y) continue;
     if (!tileAt(world, layer, candidate.x, candidate.y)?.walkable) continue;
     if (!canEnterWater(world, agent, layer, candidate)) continue;
+    if (!canEnterLand(world, agent, layer, candidate)) continue;
     if (mover && !canEnterTile(world, mover, layer, candidate)) continue;
     return candidate;
   }

@@ -110,6 +110,9 @@ const EGG_GROUPS_BY_BASE_KEY: Record<string, string[]> = {
   // place (this whole batch), same table, same convention.
   MANKEY: ["field"],
   GROWLITHE: ["field"],
+  // TENTACOOL/MAGIKARP below (further down this batch) are likewise now
+  // real roster species (species.ts's obligate-aquatic pair) — same "no
+  // longer just headroom" note, same convention.
   POLIWAG: ["water1"],
   ABRA: ["human-like"],
   MACHOP: ["human-like"],
@@ -231,6 +234,12 @@ function computeProfileFromDexEntry(speciesId: string): LevelingProfile | undefi
     // from its own (base-form) species entry, not whatever it might later
     // evolve into.
     preferredTerrain: SPECIES[speciesId.toLowerCase()]?.preferredTerrain,
+    // Same "denormalized at spawn, doesn't follow evolution" scope as
+    // `buildsShelter`/`preferredTerrain` above — an evolved Gyarados hatched
+    // fresh (rather than leveled up from an already-spawned Magikarp) would
+    // read `obligateAquatic` from ITS OWN species entry (absent — Gyarados
+    // isn't in `SPECIES`), same known gap.
+    obligateAquatic: SPECIES[speciesId.toLowerCase()]?.obligateAquatic,
     // Level-gated evolutions only — item/trade/friendship evolutions are
     // explicitly deferred, see DESIGN.md. Real bug caught while adding Onix:
     // `level` alone isn't sufficient — PokeRogue's dex stamps a `level: 1`
