@@ -11621,3 +11621,231 @@ promoted individuals. No console/page errors. Full engine test suite
 unaffected (packages/web-only change; one unrelated pre-existing flaky
 `eggs.test.ts` failure reproduced in isolation on the pre-change code too,
 confirmed not a regression), typecheck clean, build succeeds.
+
+## Overworld rearchitecture: a real macro zone grid, built
+
+This section makes good on the correction two sections up ("overworld and
+zone are two distinct levels, not one"): everything described there as
+"not yet built" now is. The 3-named-region graph the two visualization
+passes above were built against (`region-a`/`region-b`/`region-c`, each an
+independently-seeded `createDemoWorld` with no spatial relationship to its
+"neighbors" at all) is gone. In its place: a real coarse grid of thousands
+of zone-cells with actual 2D adjacency, where the macro geology genuinely
+runs, and a promoted zone's full-resolution terrain is biased from that
+macro data instead of an unrelated seed. Direct trigger, after seeing the
+3-region graph: "I meant like overworld is like... all these previews put
+together. And then abstracted into 4 tiles for each zone... Did the
+overworld we create not do the rivers and mountains and land and ocean
+over[all] as large swaths of positionally specific zones? That was the
+whole point. To have it contiguous."
+
+### The macro grid itself (`packages/engine/src/macroGrid.ts`)
+
+Reuses `worldgen.ts`'s existing macro-elevation/river machinery directly,
+one level up — not a reimplementation. `generateMacroElevation` (the
+"Groudon/Kyogre" uplift-and-basin field from the first built slice above)
+already takes a plain `(width, height)` and returns elevation/ocean queried
+by integer coordinate; feeding it `(cols, rows)` at ZONE-grid resolution
+instead of tile resolution costs nothing extra to build and produces the
+exact same kind of coherent, continent-shaped land/ocean boundary, just one
+level up the hierarchy. A second macro-scale noise field (independent
+seed) supplies moisture, thresholded together with elevation into one of
+the same 5 land biome names `worldgen.ts`'s per-tile `BIOMES` table already
+uses (plus `"ocean"`, which isn't a real per-tile biome — see the bug
+below). Rivers reuse the same steepest-descent idea (`carveSuicuneRivers`'s
+tile-level algorithm), restricted to orthogonal (not 8-directional) steps
+at the zone level so every step crosses exactly one well-defined N/E/S/W
+edge — river presence/direction and coastline direction are recorded per
+zone as which of its 4 edges they cross, not per-tile detail.
+
+**Real numbers, not "should be cheap" reasoning**: a 1000x1000 grid — one
+million zone-cells — generates in ~2.5s; 250,000 zones in ~700ms; 90,000 in
+~267ms; the interactive web demo's 64x64 (4096 zones) in ~30ms. This is the
+whole "not all of that needs to be simulated, that's why we have generation
+passes" claim made concrete: the macro grid holding real elevation/biome/
+coastline/river facts for *every* cell is cheap enough that "thousands" was
+an understatement — a million-cell grid is a sub-3-second one-time cost,
+not a scaling concern.
+
+### Promotion is now biased from the macro grid, not an independent seed
+
+`worldgen.ts`'s `generateMacroElevation`/`generateWorld` both gained an
+optional `bias` parameter (`MacroElevationBias`/`ZoneGenerationBias`) —
+omitted entirely by every pre-existing caller (`createDemoWorld` included),
+so this is fully backward-compatible, confirmed by the full pre-existing
+test suite passing unchanged. `macroGrid.ts`'s `biasForZone` derives one
+from a zone's own macro facts: an ocean-fraction target (high for an ocean
+zone, moderate for a coastal one, low inland), a directional pull toward
+whichever tile-grid edge faces an actual ocean/higher-elevation neighbor
+(so the coastline/mountain-lean forms on the geometrically correct side,
+not a random one), and a dominant-biome nudge (extra biome seeds of the
+zone's own macro biome, so the per-tile biome blend actually leans that
+way).
+
+**Validated directly, not just by algorithm inspection**
+(`packages/runner/src/validateZoneBias.ts`): generated 12 real coastal
+zones (excluding the macro grid's own border, so every one has a real
+neighbor in every direction) and measured water fraction in a 15%-wide band
+on the macro-marked coastal edge vs. the directly opposite edge. Average
+across the sample: **~51% water on the coastal edge vs. ~17% on the
+opposite one** — roughly 3x, a real, measurable directional lean. Not
+perfect: 1 of the 12 samples inverted (opposite-edge water fraction came
+out higher than the coastal side) — an honest miss, not swept under the
+rug. The bias nudges the existing per-tile generation's own random
+uplift/basin points and detail noise; it doesn't override them outright, so
+a zone's local variety survives at the cost of occasionally not fully
+winning the directional pull.
+
+**Terrain is deterministic by grid position; invented individuals are
+not** — a deliberate split, not an oversight. A zone's terrain seed is
+`(worldSeed, row, col)` alone (`overworld.ts`'s `zoneSeed`), so the same
+spot generates the same terrain regardless of when, or how many times, it
+happens to get promoted — confirmed by a direct test (`overworld.test.ts`)
+generating the same zone from two `MacroWorld`s with different unrelated
+prior rng consumption and asserting byte-identical tile terrain. The
+individuals INVENTED onto that terrain are drawn from the macro world's own
+shared rng stream instead — the same non-determinism `promoteRegion`
+already had in the named-region version (a fresh, different roster each
+promotion), not a new looseness.
+
+### `overworld.ts`: sparse tracking, lazy generation, grid neighbors
+
+`Region.world` is now optional. A zone only gets a real per-tile `World`
+the first time it's actually promoted; before that, a zone `MacroWorld`
+happens to be TRACKING (received migrants, or had its aggregate estimated)
+holds nothing but a `RegionAggregate` — no tiles at all. `MacroWorld.regions`
+is a sparse `Map`, not the old fixed 3-element array: the overwhelming
+majority of a real grid's zones never get an entry at all. `tickMacroWorld`
+only ever iterates tracked entries, so ticking cost is bounded by how many
+zones a session has actually touched, never by the grid's total size — a
+1,000,000-zone grid and a 3-zone one cost the same to tick once only the
+same handful of zones are actually being visited.
+
+Migration (both the abstract-to-abstract emigration roll and individual
+region-crossing dispersal, both pre-existing mechanisms from the
+named-region version) generalizes to real grid adjacency and now lazily
+creates a minimal tracked entry for a previously-untouched neighbor instead
+of requiring every zone to already exist — the same "fake it" principle
+DESIGN.md's vision section already called for, just actually load-bearing
+now instead of moot (every zone used to exist upfront anyway).
+`dispersal.ts` needed zero changes: region/zone ids were already opaque
+strings it never interprets, just a different string shape now (a plain
+`"row,col"` instead of a name).
+
+**Real validation run** (`packages/runner/src/validateOverworld.ts`, a
+64x64/4096-zone grid, 3000 ticks, one forced focus switch to a fresh
+never-before-tracked neighbor at tick 1000): grid generation ~110-120ms;
+the switch produced a real `regionDemoted`/`regionPromoted` pair — the
+newly promoted neighbor got 13 invented Squirtle (roster/biome-estimated,
+not measured, since it had never been visited); the old zone's background
+population correctly declined over the following ~2000 ticks, including
+three real `regionDieOff` events, ending fully extinct. `finalTrackedZoneCount`
+stayed at 2 throughout a run against a 4096-zone grid — exactly the sparse-
+tracking claim, not just an aspiration.
+
+### A real bug this surfaced, fixed: ocean zones promoted with zero population
+
+`estimateZoneSpecies` (the roster-matching guess for a never-visited zone's
+starting aggregate) originally required a biome-name match for every zone,
+ocean included. But `"ocean"` isn't a real per-tile `BIOMES` entry at all
+(see the first built slice above — the per-tile generator has always had
+exactly 5 land biomes; ocean has only ever been a macro `isOcean` mask, not
+a per-tile biome with its own density parameters); `@pokuelike/data`'s two
+obligate-aquatic species (Magikarp, Tentacool) tag themselves `biomes:
+["wetland"]`, their closest existing water-heavy stand-in, not a literal
+`"ocean"` that doesn't exist in the vocabulary. Every ocean zone's estimate
+came up completely empty as a result — confirmed live in the browser
+(clicking an ocean zone on the macro map promoted it to a real, correctly
+mostly-water map with "Population 0 alive"). Fixed by skipping the
+biome-name check specifically for ocean zones (aquatic-ness agreement is
+already the real constraint there; there's no biome vocabulary to check
+against). Reconfirmed live after the fix: the same ocean zone now promotes
+20 real Magikarp/Tentacool. A new test (`macroGrid.test.ts`) locks in the
+exact real-data shape (an obligate-aquatic species tagged `"wetland"`, not
+`"ocean"`) so this doesn't regress silently.
+
+### Web UI: one pannable/zoomable canvas, not a card strip
+
+Direct follow-up, correcting course before the card-strip UI above got
+generalized to thousands of zones: "single pannable canvas — one canvas
+the viewer pans/zooms around, not a separate macro-overview-plus-
+neighborhood-panel split. Show the whole macro grid at a coarse zoom level
+by default, with zoom-in support so individual zones become large enough to
+actually click as the viewer zooms in — same canvas throughout." Built
+exactly that (`packages/web/src/macroMap.ts`): native-resolution zoom (the
+canvas's own native pixel size per zone IS the zoom level — zooming in
+regenerates the canvas at higher resolution rather than CSS-upscaling a
+small bitmap, so zoomed-in zones get real detail, not blur), panned via
+ordinary browser scroll on the wrapping div, same idiom `#canvas-wrap`
+already used for the tile-level view. Below a legibility threshold (14
+native px/zone) a zone is its flat macro-color block (biome + ocean, shaded
+by elevation via the same `shade()` the tile renderer's own elevation
+shading already uses); at/above it, a zone that's actually been promoted
+gets its real terrain thumbnail inset instead, reusing the previous pass's
+`drawRegionThumbnail` via `drawImage` rather than duplicating it. The
+focused zone gets a gold outline; any other tracked zone (real history, not
+just a macro guess) gets a faint one even at flat-block scale. Rendering is
+throttled (500ms) except on a forced redraw (focus change, zoom change) —
+redrawing thousands of zones' worth of `fillRect` every animation frame
+would be wasted work for data that doesn't change that fast.
+
+Confirmed live in the browser (Playwright, full walkthrough not just a
+single screenshot): toggling Overworld on renders one real, contiguous
+macro map — actual continents, oceans, and biome bands visible at a glance,
+not three separate thumbnails in a row; zooming in 4 steps (8px/zone to
+41px/zone) and clicking a visibly badlands-colored zone promoted it with a
+real terrain inset AND correctly biome-matched invented species
+(Charmander/Growlithe/Geodude/Diglett/Onix/Sandshrew/Mankey — all
+fire/rock/ground-leaning, a real confirmation that `estimateZoneSpecies`'s
+biome matching works end to end, not just in a unit test); playing forward
+ticked it live (tick 0 to 13, population steady) with zero console/page
+errors; panning, zooming out to a 2px/zone whole-grid overview, and
+toggling Overworld off then back on all worked cleanly, resetting to the
+same default focused zone. Full engine suite (939 tests) and data suite (19
+tests) green throughout; web production build succeeds.
+
+### What's honestly still open
+
+- **No true edge-blending between neighboring zones' tiles.** Two adjacent
+  zones are both biased from the same macro elevation/coastline/biome data
+  (confirmed close — the ~3x coastal-vs-opposite water ratio above), but
+  nothing reconciles their actual tile-level edges against each other after
+  the fact — a river or coastline is NOT guaranteed to visibly continue
+  pixel-for-pixel across a zone boundary, just plausible on both sides
+  independently. This is exactly DESIGN.md's own "neighbor consistency
+  pass" (see the "Generation as ordered passes" section above) — designed,
+  not built. A real, named gap, not a silent one.
+- **Macro river/lake edges (`MacroZone.riverEdges`/`isLake`) aren't fed
+  into `biasForZone` at all yet** — only elevation/ocean/biome are. A
+  promoted zone's own per-tile rivers are generated by the ordinary
+  unbiased `carveSuicuneRivers` pass, so a zone the macro grid marked as
+  river-crossing isn't guaranteed to actually show a river once promoted,
+  let alone one crossing at the marked edge. Diplomatically: the "roughly
+  which edge" macro river fact is currently a genuine per-zone macro fact
+  that nothing downstream consumes yet.
+- **Neighbor-adjacency is orthogonal only (N/E/S/W), no diagonals** — a
+  deliberate simplification so "which edge" stays an unambiguous compass
+  direction; DESIGN.md's original vision didn't specify either way.
+- **Biome-threshold constants (`macroGrid.ts`'s `HIGHLAND_ELEVATION_
+  THRESHOLD`/moisture thresholds) are un-tuned sim-original guesses** —
+  real generated distributions varied noticeably run to run (badlands
+  ranged from ~3% to ~14% of land across three different seed/scale
+  combinations tried during validation) — plausible-looking, not
+  calibrated against anything.
+- **`estimateZoneResourceIndex`/`estimateZoneSpecies` are analytic
+  guesses, never measurements** — a never-visited zone's starting
+  aggregate population/resource baseline comes from a biome-density
+  formula and a flat species-count guess, not anything simulated. It
+  settles toward the abstract tier's own capacity-driven equilibrium after
+  a few ticks regardless (same safety net the named-region version always
+  had), so a rough initial guess was an accepted tradeoff, not overlooked.
+- **`MacroWorld.regions` only ever grows, never prunes** — a zone that
+  wanders down to zero population everywhere and is never visited again
+  stays in the map forever (as an empty `{}` aggregate). Cheap per entry,
+  but genuinely unbounded over a very long session; not addressed here.
+- Everything else the original vision section named and this rearchitecture
+  didn't touch — tectonics/glaciers, forest-seeding, volcanic islands,
+  earthquakes, deserts, the expanded legendary roster, human society,
+  Z-levels, the life/notable-history generation passes, dynamic cross-zone
+  propagation — is still exactly where it was: real, vision-stage, not
+  built.

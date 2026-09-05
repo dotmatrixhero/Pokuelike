@@ -3,7 +3,53 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
-## Overworld visualization — built, see DESIGN.md
+## Overworld rearchitecture: a real macro zone grid — built, see DESIGN.md
+
+Direct correction after seeing the region-graph visualization below: "I
+meant like overworld is like... all these previews put together... Did the
+overworld we create not do the rivers and mountains and land and ocean
+over[all] as large swaths of positionally specific zones? That was the
+whole point. To have it contiguous." The 3-named-region graph (see
+"Overworld: region graph with promotion/demotion" further down, now marked
+superseded) is replaced by a real coarse grid of thousands of zone-cells
+with actual 2D adjacency — `packages/engine/src/macroGrid.ts` generates
+coherent macro elevation/ocean/biome/coastline/river facts for every cell up
+front (reusing the existing tile-level macro-elevation/river algorithms one
+level up), and `overworld.ts` promotes zones lazily and sparsely by grid
+position instead of eagerly generating a fixed handful of named regions.
+See DESIGN.md's "Overworld rearchitecture: a real macro zone grid" section
+for the full design, real numbers (a 1,000,000-zone grid generates in
+~2.5s), and browser-validated screenshots-in-prose.
+
+- [x] **Web UI, direct follow-up**: "single pannable canvas — one canvas the
+      viewer pans/zooms around, not a separate macro-overview-plus-
+      neighborhood-panel split." The 3-card strip below is gone; one canvas
+      (`packages/web/src/macroMap.ts`) now covers the whole macro grid,
+      native-resolution zoom, promoted zones showing a real terrain inset
+      once zoomed in enough. Confirmed live in the browser end to end.
+- [ ] **No true edge-blending between neighboring zones' tiles** — DESIGN.md's
+      own "neighbor consistency pass" from the original vision write-up,
+      designed but not built. Two adjacent zones are both biased from the
+      same macro data (confirmed close, ~3x more water on a coastal zone's
+      macro-marked edge than the opposite one) but nothing reconciles their
+      actual tile-level edges against each other after the fact.
+- [ ] **Macro river/lake facts aren't fed into zone promotion bias at all
+      yet** — only elevation/ocean/biome are. A zone the macro grid marked
+      as river-crossing isn't guaranteed to actually show a river once
+      promoted.
+- [ ] Biome-threshold constants (`macroGrid.ts`) are un-tuned sim-original
+      guesses — real distributions varied noticeably (badlands ~3%-14% of
+      land) across different seed/scale combinations tried.
+- [ ] `MacroWorld.regions` only ever grows, never prunes — cheap per entry,
+      genuinely unbounded over a very long session.
+
+## Overworld visualization — SUPERSEDED, see above and "Overworld rearchitecture" above
+
+**Superseded** — the region-graph card strip (`overworldPanel.ts`) this
+section describes no longer exists; replaced by `macroMap.ts`'s single
+pannable/zoomable canvas, see the "Overworld rearchitecture" section above.
+Left in place as the historical record of what was built and validated at
+the time.
 
 Direct ask: "I want to be able to see the overworld stuff... visualize
 overworld." The region-graph engine (merged from the sibling
@@ -28,11 +74,11 @@ a real focus switch confirmed end to end).
 - [ ] The graph strip is a plain left-to-right layout matching the demo's
       own chain topology (`region-a - region-b - region-c`) — a real
       non-chain graph would need an actual layout algorithm, not attempted
-      since only a chain currently exists.
+      since only a chain currently exists. Moot now — see above.
 - [ ] No visual indication on the graph strip itself of migration-edge
       dispersal/emigration actually happening between two regions (visible
       in the event log/Inspector, not as e.g. an animated pulse along the
-      connector between two cards).
+      connector between two cards). Moot now — see above.
 
 ## Underground/canopy agents stranding in surface water on layer-crossing — fixed, see DESIGN.md
 
@@ -374,7 +420,19 @@ weather-driven flora/water dynamics" below — so (1) on resume should scope
 itself to tree lifecycle + biome drift only, not re-do water. Items (2) and
 (3) are both done — see their own sections below.
 
-## Overworld: region graph with promotion/demotion — built, see DESIGN.md
+## Overworld: region graph with promotion/demotion — SUPERSEDED, see below
+
+**Superseded by the macro zone grid** — see "Overworld rearchitecture: a
+real macro zone grid" further down this file and DESIGN.md's own section of
+the same name. The named 3-region graph this section describes (`Overworld`/
+`Region`/`RegionEdge`, `createDemoOverworld`) was built at the wrong level
+of the hierarchy — each "region" was a fully independent seed with no
+spatial relationship to its neighbors, not a real geography. Left in place
+below as the historical record of what was built and validated at the time
+(the promotion/demotion mechanism itself, the aggregate math, the migration
+mechanics — all genuinely reused, not thrown away); every named-graph
+specific detail (the 3 hardcoded region ids, `RegionEdge`, `tickOverworld`/
+`setFocusedRegion`/`createDemoOverworld`) no longer exists in the codebase.
 
 New `packages/engine/src/overworld.ts`: a small region graph (`Overworld`,
 `Region`, `RegionEdge`) where the focused region runs the ordinary full
