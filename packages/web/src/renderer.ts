@@ -1,7 +1,7 @@
 import type { Agent, TerrainKind, World } from "@pokuelike/engine";
 import { lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
-import { getSprite } from "./sprites.js";
+import { getSprite, type SpriteDirection } from "./sprites.js";
 import type { ActivePopup } from "./eventPopups.js";
 import {
   FLAVOR_FG,
@@ -22,6 +22,46 @@ import {
 export const TILE_SIZE = 20;
 
 export type RenderStyle = "tile" | "ascii";
+
+/**
+ * The engine has no facing concept at all (see Agent in
+ * packages/engine/src/types.ts) — an agent is just a position each tick.
+ * Direction is purely a client-side rendering concern, derived here by
+ * comparing this frame's position to whatever we saw for the same agent id
+ * last frame. Larger axis of movement wins ties (matches predation.ts's own
+ * `facingToward` convention); no movement at all keeps the last known
+ * direction instead of snapping back to "down", so a agent that pauses
+ * mid-walk doesn't visibly spin. Cleared for ids no longer present so a
+ * despawned agent's id can't pin memory forever, then repopulated fresh by
+ * whichever new agent (if any) reuses that id.
+ */
+const lastFacing = new Map<string, SpriteDirection>();
+const lastPos = new Map<string, { x: number; y: number }>();
+
+function facingOf(agent: Agent): SpriteDirection {
+  const prev = lastPos.get(agent.id);
+  lastPos.set(agent.id, { x: agent.pos.x, y: agent.pos.y });
+  if (!prev) return lastFacing.get(agent.id) ?? "down";
+
+  const dx = agent.pos.x - prev.x;
+  const dy = agent.pos.y - prev.y;
+  if (dx === 0 && dy === 0) return lastFacing.get(agent.id) ?? "down";
+
+  const direction: SpriteDirection = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
+  lastFacing.set(agent.id, direction);
+  return direction;
+}
+
+/** Drops facing/position memory for agent ids no longer in the world (dead, despawned) so the maps don't grow forever. */
+function pruneStaleFacings(world: World): void {
+  const liveIds = new Set(world.agents.map((a) => a.id));
+  for (const id of lastPos.keys()) {
+    if (!liveIds.has(id)) {
+      lastPos.delete(id);
+      lastFacing.delete(id);
+    }
+  }
+}
 
 /**
  * Only draws the surface layer, same limitation the original bare renderer
@@ -87,6 +127,7 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
   // of time of day, not get dimmed along with the terrain underneath them.
   drawDayNightTint(ctx, world);
 
+  pruneStaleFacings(world);
   for (const agent of world.agents) {
     if (agent.layer !== "surface") continue;
     drawAgent(ctx, agent, agent.id === selectedAgentId);
@@ -248,7 +289,7 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
   const px = agent.pos.x * TILE_SIZE;
   const py = agent.pos.y * TILE_SIZE;
   const def = SPECIES[agent.species];
-  const sprite = def ? getSprite(def.spriteKey) : null;
+  const sprite = def ? getSprite(def.spriteKey, facingOf(agent)) : null;
   const isCorpse = agent.alive === false;
 
   ctx.save();
