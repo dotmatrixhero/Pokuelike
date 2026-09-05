@@ -197,17 +197,24 @@ export function drawWorld(
   ctx: CanvasRenderingContext2D,
   world: World,
   selectedAgentId: string | undefined,
-  style: RenderStyle = "tile"
+  style: RenderStyle = "tile",
+  autoCamHighlightIds?: ReadonlySet<string>
 ): void {
   // Always advance the animation clock, even in ASCII mode (which ignores
   // `dt` entirely) — so switching from ASCII back to tile mode doesn't hand
   // `interpolatedPos` one huge accumulated `dt` and produce a visible warp.
   const dt = frameDeltaSeconds();
   if (style === "ascii") return drawWorldAscii(ctx, world, selectedAgentId);
-  return drawWorldTiles(ctx, world, selectedAgentId, dt);
+  return drawWorldTiles(ctx, world, selectedAgentId, dt, autoCamHighlightIds);
 }
 
-function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAgentId: string | undefined, dt: number): void {
+function drawWorldTiles(
+  ctx: CanvasRenderingContext2D,
+  world: World,
+  selectedAgentId: string | undefined,
+  dt: number,
+  autoCamHighlightIds?: ReadonlySet<string>
+): void {
   const surface = world.tiles.surface;
 
   ctx.fillStyle = rgbToCss(TERRAIN_BG.floor);
@@ -334,6 +341,8 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
 
   drawWarmLights(ctx, world);
   drawWeather(ctx, world);
+
+  if (autoCamHighlightIds && autoCamHighlightIds.size > 0) drawAutoCamHighlight(ctx, world, autoCamHighlightIds);
 
   if (selectedAgentId) {
     const selected = world.agents.find((a) => a.id === selectedAgentId);
@@ -573,6 +582,53 @@ function drawSelectionRing(ctx: CanvasRenderingContext2D, px: number, py: number
   ctx.strokeStyle = "#ffe066";
   ctx.lineWidth = 2;
   ctx.strokeRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+  ctx.restore();
+}
+
+/**
+ * A dashed spotlight box around whatever Auto Camera is currently following
+ * — direct ask: "on mobile auto cam is great. on desktop its a bit too wide
+ * to know whats going on. can you either zoom in further or draw a box
+ * around it." A fixed zoom level (`AUTO_CAM_ZOOM`) covers proportionally
+ * less of a wide desktop viewport than a narrow mobile one, so the same
+ * zoom can read as "too far out" on one and fine on the other — a box drawn
+ * around the actual participants scales with the situation instead of
+ * fighting one fixed number for every screen size. Covers every live
+ * participant's own tile (not just a single focus point), using the same
+ * interpolated `renderPos` `drawAgent` just drew them at so the box tracks
+ * their smoothed on-screen position exactly, not a half-tile-behind raw
+ * grid position. An id with no live surface agent (an egg, a despawned
+ * participant, a herd id) is simply skipped rather than guessed at.
+ */
+function drawAutoCamHighlight(ctx: CanvasRenderingContext2D, world: World, ids: ReadonlySet<string>): void {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let found = false;
+  for (const id of ids) {
+    const agent = world.agents.find((a) => a.id === id);
+    if (!agent || agent.layer !== "surface") continue;
+    const pos = renderPos.get(id) ?? agent.pos;
+    minX = Math.min(minX, pos.x);
+    minY = Math.min(minY, pos.y);
+    maxX = Math.max(maxX, pos.x);
+    maxY = Math.max(maxY, pos.y);
+    found = true;
+  }
+  if (!found) return;
+
+  const pad = 0.85; // tiles of breathing room around the tightest bounding box, not a flush outline right on the sprites' edges
+  const left = (minX - pad) * TILE_SIZE;
+  const top = (minY - pad) * TILE_SIZE;
+  const right = (maxX + 1 + pad) * TILE_SIZE;
+  const bottom = (maxY + 1 + pad) * TILE_SIZE;
+
+  ctx.save();
+  ctx.strokeStyle = "#ffe066";
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([7, 5]);
+  ctx.strokeRect(left, top, right - left, bottom - top);
   ctx.restore();
 }
 

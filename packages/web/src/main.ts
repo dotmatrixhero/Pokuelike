@@ -530,11 +530,19 @@ loadWorld(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED);
 speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
 
 function frame(): void {
-  drawWorld(ctx, world, selectedAgentId, renderStyle);
-  drawEventPopups(ctx, eventPopups.active());
+  // Run before drawWorld (was after) so this frame's highlight box below
+  // reflects the engagement autoCamera just decided on, not last frame's —
+  // update() itself doesn't depend on anything drawWorld does.
   autoCamera.update(world);
+  const engagement = autoCamera.currentEngagement();
+  // Direct ask: "on desktop [auto cam] is a bit too wide to know whats
+  // going on... draw a box around it" — see drawAutoCamHighlight's own doc
+  // comment (renderer.ts) for why a box scales better across viewport sizes
+  // than retuning the fixed zoom level would.
+  drawWorld(ctx, world, selectedAgentId, renderStyle, engagement?.ids);
+  drawEventPopups(ctx, eventPopups.active());
   autoCamStatusEl.textContent = autoCamera.currentLabel() ?? (autoCamera.isEnabled() ? "watching…" : "");
-  battleScreenPanel.setActive(autoCamera.currentEngagement());
+  battleScreenPanel.setActive(engagement);
   maybeAutoSwitchTab();
   battleScreenPanel.render(world);
   eventLogPanel.render();
