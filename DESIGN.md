@@ -8924,3 +8924,119 @@ same honest gap as the earlier movement-interpolation pass) and whether a
 "lighter"-blended `sunbeam` glow reads well against every terrain it can
 neighbor (only spot-checked a handful of real map tiles, not every
 adjacency).
+
+## Sandshrew was a mis-cropped Raichu; Ivysaur/Wartortle were a false alarm
+
+**Direct bug report.** "sandshrew is a raichu sprite for some reason. And
+ivysaur and wartortle doesn't exist" — informal shorthand for "the art shown
+for these species doesn't look like that species," not a literal missing
+file (all three PNGs existed, non-corrupt, valid 32x32 RGBA).
+
+**Sandshrew: real bug, confirmed and fixed.** Template-matched every
+existing sprite file's exact pixel content back to its source position in
+`legacy-cpp/data/sprites/Sir_Henry's_32x32 and sprites.png` (a numpy
+exact-match grid search, not eyeballing) to reconstruct the sheet's own
+layout: each species occupies a 64x64 super-block (`(x,y)`=down,
+`(x,y-64)`=up, `(x+32,y)`=left, `(x+32,y-64)`=right). In the row containing
+Pikachu (x=64) and Sandslash (x=256), the slot at x=192 — right where
+Sandshrew belongs between them — is `sandshrew_down.png`'s actual source
+position, and it contains a second, distinct Raichu (a different pose,
+confirmed pixel-different from the real Raichu block at x=128, which is why
+an earlier md5sum-based duplicate check found zero exact dupes and cleared
+this of being simple copy-paste). Searched the rest of that sheet for any
+unclaimed cell containing real Sandshrew art (built a "claimed" bitmap by
+grid-aligned-matching all 604 committed sprite files back onto the sheet,
+then inspected every unclaimed cell near the Pikachu/Raichu/Sandslash row):
+none exists — whoever built the original Sir Henry composite simply never
+drew Sandshrew into it, and the extraction agent grabbed a spare Raichu
+region instead without noticing.
+
+Real Sandshrew art exists in a second legacy sheet, `legacy-cpp/data/sprites/kanto
+sprites.png` ("Kanto Pokemon Overworlds - Ripped by Dragon for TSR, v3.0",
+a different, smaller-native-resolution — 16x16 vs. Sir Henry's 32x32 —
+fan rip). Found it there by dex-adjacency (between Rattata/Raticate and the
+Nidoran pair) and confirmed by eye: unmistakably the tan/orange armadillo
+body with the back ridge of spines. Cropped both poses this sheet actually
+has (a front-standing "down" pose and a curled-up side pose used for
+left/right), chroma-keyed the sheet's flat olive background (`(160,176,128)`,
+10-tolerance) to real alpha transparency, and composited each onto a
+transparent 32x32 canvas at roughly the sheet's native pixel density
+(*not* blindly 2x-upscaled — an early attempt at 2x nearest-neighbor made
+Sandshrew fill the whole 32px frame edge to edge, visibly larger than every
+neighboring ground-critter sprite; matching Raichu's and Sandslash's own
+~14-16px content-bbox width by scaling down instead reads as the same size
+class as its neighbors). No distinct back/"up" view exists in the source at
+all (this sheet appears to only ever draw a front idle + a side idle per
+species, unlike Sir Henry's fuller 4-direction sets) — `sandshrew_up.png` is
+therefore a documented, deliberate reuse of the front pose rather than a
+fabricated back view. Left/right follow this codebase's established (if
+backwards-named) convention confirmed in the facing-mirror fix above:
+`_right.png` holds the left-facing raw crop, `_left.png` is its horizontal
+mirror.
+
+**Honest caveat.** This Sandshrew is real, correct, unmistakably-Sandshrew
+art — but it's sourced from a different sheet than the other 150 species,
+at a coarser native pixel density hand-scaled down rather than crisply
+native at 32x32 like its neighbors. Up close it reads slightly chunkier
+than a Sir-Henry-sourced sprite of the same size. Judged a clearly better
+outcome than shipping wrong-species Raichu art, and disclosed here rather
+than silently passed off as seamless.
+
+**Ivysaur and Wartortle: could not reproduce — these already look correct.**
+Direct pixel inspection of all four direction files for both species (10x
+nearest-neighbor upscales, not chat-scaled thumbnails — this codebase has
+already been burned once by exactly that mistake, see the facing-mirror
+bug above) shows exactly what each species should look like: Ivysaur is a
+teal quadruped with a green leaf collar and a pink, partially-open bud
+(distinct from Bulbasaur's plain green bud and Venusaur's full bloom — the
+right "middle stage" look) in all of down/up/left/right; Wartortle is a
+blue turtle with white/gray fin-like ears and a tan belly, visually
+distinct from Squirtle's plain round head and consistent with Blastoise's
+family look, likewise correct in all four directions. Compared side by side
+against their own evolutionary neighbors (Bulbasaur/Ivysaur/Venusaur and
+Squirtle/Wartortle/Blastoise) and both read as a coherent, correctly-scaled
+progression, not swapped or duplicated art. Live-verified too: ran a real
+seed-42 session forward (Play at 32x, ~2500+ ticks, long enough for
+Bulbasaur→Ivysaur evolutions to actually occur) and clicked into an
+in-world Ivysaur agent with Auto Camera tracking a live battle — the
+rendered in-game sprite matches the file pixel-for-pixel (teal body, pink
+petaled bud). Did not manage to land on a standalone, non-overlapping
+Wartortle in the same live session (evolutions are population-dependent and
+the map is large with no click-to-locate-species feature), but `sprites.ts`
+has no per-species branching — `getSprite` is one generic
+`spriteKey_direction` lookup used identically for every species — and
+Squirtle was separately confirmed rendering correctly in-app via the same
+code path, so there is no mechanism by which Wartortle's already-correct,
+validly-formatted file would render differently. Left both untouched. Best
+guess for the original report: a second instance of the same "judged from a
+tiny thumbnail" mistake the facing-mirror bug already made once in this
+codebase — plausible but not confirmed, since no one on this pass reproduced
+what the original reporter saw.
+
+**Broader sanity sample — not exhaustive.** Spot-checked ~40 additional
+species' `_down.png` art by eye against their names, weighted toward
+"evolution stage 2" species per the task's own lead (all of: charmeleon,
+metapod, kakuna, nidorina, nidorino, graveler, haunter, gloom, weepinbell,
+dragonair — the full requested list — plus a scattered ~30 more spanning
+early/late dex numbers and several fully-evolved/legendary species:
+magneton, gyarados, alakazam, machoke, golbat, rapidash, seaking, tentacool,
+exeggutor, kingler, pidgeotto, weedle, oddish, poliwhirl, abra, machamp,
+victreebel, tentacruel, gengar, onix, koffing, rhyhorn, dratini, mewtwo,
+vaporeon, jolteon, flareon, ditto, snorlax, articuno). All matched their
+name convincingly. One near-miss investigated and cleared: `pidgeotto`'s
+sprite is a red/orange/gold bird, an unusual palette for that species —
+but `pidgey`/`pidgeotto`/`pidgeot` all share the same unusual palette and
+the same design scaled up through the family, meaning it's just this sheet's
+particular stylization of the whole line, not a mismatched species.
+**The remaining ~109 of 151 species were not checked this pass** — this was
+a targeted sample, not a full audit, and should be read as exactly that.
+
+**Verification.** `pnpm -r typecheck` clean across all 4 packages;
+`pnpm --filter engine test` — 790/790 passing, unaffected (this is a
+public-asset-only change, no engine source touched). Real Playwright
+session against `pnpm --filter web dev` (Chromium,
+`executablePath: '/opt/pw-browsers/chromium'`): confirmed the new Sandshrew
+files load through the actual dev-server asset path used in production, and
+separately confirmed (see above) live in-game rendering for Ivysaur and
+Squirtle matches their files exactly, via the same generic sprite-loading
+code both species and the newly-fixed Sandshrew all share.
