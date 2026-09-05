@@ -163,10 +163,17 @@ export interface MoveSpec {
   /** Attacker and defender swap tiles on a landed, non-killing hit — a Bodyblock-style position swap. Absent = no swap, the default. */
   positionSwap?: boolean;
   /**
-   * This move targets a nearby ally instead of a threat — resolved by
-   * `applySupportMove` (support.ts) from the agent's own idle/support tick,
-   * never from `resolveHit`'s hostile hit-resolution path. Meaningless
-   * without `allyEffect` set. Absent = an ordinary hostile move, the default.
+   * This move ALSO gets a real ally-support use, on top of remaining an
+   * ordinary attack — additive, not a replacement of its combat identity.
+   * The ally-buff/heal itself only ever resolves via `applySupportMove`
+   * (support.ts) on the agent's own idle/support tick (which needs.ts only
+   * reaches once predation already gets first refusal that tick), never
+   * from `resolveHit`'s hostile hit-resolution path; `pickBestMove`
+   * (combat.ts) does NOT exclude a `targetsAlly` move from hostile
+   * selection, so the same move (with whatever power/accuracy/other
+   * combat deltas it's accumulated) is a genuine attack option whenever
+   * the agent is actually fighting. Meaningless without `allyEffect` set.
+   * Absent = an ordinary hostile-only move, the default.
    */
   targetsAlly?: boolean;
   /** What a `targetsAlly` move does to the ally it resolves against — a heal, a buff, or both. */
@@ -306,7 +313,9 @@ export interface MoveSpec {
    * full mechanic. Checked only in `applyPredationInstincts`'s main flee
    * branch (predation.ts), never as an offensive move — `pickBestMove`
    * (combat.ts) excludes any move with this set from hostile move
-   * selection, the same way it already excludes `targetsAlly` moves.
+   * selection (unlike `targetsAlly`, which stays a real attack option
+   * too — a fleeing burrow genuinely never makes sense as an attack, so
+   * this one really is exclusive, not additive).
    * Absent = this move never lets its user burrow, the default.
    */
   burrow?: { ticks: number };

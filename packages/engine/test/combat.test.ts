@@ -405,17 +405,17 @@ describe("calculateDamage: bonusVsType", () => {
   });
 });
 
-describe("pickBestMove: targetsAlly moves are never selected for hostile targeting", () => {
-  it("skips an ally-support move even if it scores highest on paper", () => {
-    const supportMove: MoveSpec = { ...TACKLE, id: "support", power: 999, targetsAlly: true };
+describe("pickBestMove: targetsAlly moves stay a real attack option (additive, not a replacement)", () => {
+  it("picks a targetsAlly move over a weaker ordinary one when it scores higher", () => {
+    const supportMove: MoveSpec = { ...TACKLE, id: "support", power: 999, targetsAlly: true, allyEffect: { healFraction: 0.1 } };
     const agent = makeAgent({ moves: [TACKLE, supportMove] });
-    expect(pickBestMove(agent, ["normal"])?.id).toBe("tackle");
+    expect(pickBestMove(agent, ["normal"])?.id).toBe("support");
   });
 
-  it("returns undefined if every move targets an ally", () => {
-    const supportMove: MoveSpec = { ...TACKLE, id: "support", targetsAlly: true };
+  it("still returns a targetsAlly move when it's the only one available — it never gets excluded from hostile selection", () => {
+    const supportMove: MoveSpec = { ...TACKLE, id: "support", targetsAlly: true, allyEffect: { healFraction: 0.1 } };
     const agent = makeAgent({ moves: [supportMove] });
-    expect(pickBestMove(agent, ["normal"])).toBeUndefined();
+    expect(pickBestMove(agent, ["normal"])?.id).toBe("support");
   });
 });
 

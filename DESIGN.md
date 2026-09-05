@@ -4364,15 +4364,23 @@ defender trade tiles on a landed, non-killing hit (`resolveHitAgainstTarget`)
 — a Bodyblock-style swap, gated the same way onHit forced movement is.
 
 **Cross-agent effects** — `MoveSpec.targetsAlly?: boolean` +
-`allyEffect?: { healFraction?; buff? }`, resolved by a genuinely separate
-path from `resolveHit`'s hostile resolution: `applySupportMove` (support.ts),
-called from the agent's own idle/support tick (`tickAgentAction`, needs.ts),
-right alongside `applyHerdSupport`. It finds the nearest in-range,
-hurt-preferred herd-mate for an off-cooldown ally-targeting move, heals
-and/or buffs it, and puts the move on cooldown — confirming this doc's own
-earlier prediction (in "Why status effects and environmental moves are two
-different systems") that a cross-agent effect would need its own trigger
-path rather than living inside the hostile hit pipeline.
+`allyEffect?: { healFraction?; buff? }`. The ally-buff/heal itself resolves
+via a genuinely separate path from `resolveHit`'s hostile resolution:
+`applySupportMove` (support.ts), called from the agent's own idle/support
+tick (`tickAgentAction`, needs.ts), right alongside `applyHerdSupport`. It
+finds the nearest in-range, hurt-preferred herd-mate for an off-cooldown
+ally-targeting move, heals and/or buffs it, and puts the move on cooldown —
+confirming this doc's own earlier prediction (in "Why status effects and
+environmental moves are two different systems") that a cross-agent effect
+would need its own trigger path rather than living inside the hostile hit
+pipeline. **Additive, not a replacement of the move's combat identity**
+(direct feedback): `pickBestMove` (combat.ts) does NOT exclude a
+`targetsAlly` move from hostile selection, so the same move, with whatever
+power/accuracy/other combat deltas it's accumulated, is also a real attack
+option whenever the agent is actually fighting — it only ever gets its
+ally-effect on a completely different tick, one with nothing hostile going
+on. One move, two contexts, never both in the same tick (they share the
+same cooldown via `useMove`).
 
 **Multi-target/AoE resolution** — the biggest single gap on the checklist,
 and Growl's entire premise. `MoveSpec.hitsArea?: boolean` switches

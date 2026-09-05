@@ -196,11 +196,18 @@ export const MOVE_SCORE_TEMPO_WEIGHT = 0.15;
  * first and checking range after.
  */
 export function pickBestMove(attacker: Agent, defenderTypes: PokemonType[], distance?: number): MoveSpec | undefined {
-  // `targetsAlly` moves (support/heal-style) and `burrow` moves (a flee-only
-  // escape, resolved directly in predation.ts's flee branch) are never a
-  // candidate for hostile move selection — this scans hostile targeting
-  // only, neither kind makes sense as an attack against `defenderTypes`.
-  const offCooldown = (attacker.moves ?? []).filter((move) => !attacker.moveCooldowns?.[move.id] && !move.targetsAlly && !move.burrow);
+  // `burrow` moves (a flee-only escape, resolved directly in predation.ts's
+  // flee branch) never make sense as an attack, so they're excluded here.
+  // `targetsAlly` moves are NOT excluded, on purpose: the ally-buff/heal
+  // itself only ever resolves via `applySupportMove` (support.ts) on the
+  // agent's own idle/support tick, which runs strictly after predation
+  // already gets first refusal (needs.ts) — so a `targetsAlly` move is a
+  // real, ordinary attack option here (using whatever power/accuracy/other
+  // combat deltas it's accumulated) whenever the agent is actually in a
+  // fight, and only ever gets its support effect on a tick with nothing
+  // hostile going on. One move, two contexts, additive rather than a
+  // branch that trades its combat identity away for a support one.
+  const offCooldown = (attacker.moves ?? []).filter((move) => !attacker.moveCooldowns?.[move.id] && !move.burrow);
   const available = distance === undefined ? offCooldown : offCooldown.filter((move) => withinMoveRange(move, distance));
   if (available.length === 0) return undefined;
 

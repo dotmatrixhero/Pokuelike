@@ -2147,3 +2147,21 @@ describe("burrow (MoveSpec.burrow, Dig-to-escape)", () => {
     expect(attacker.burrowedTicksRemaining).toBeUndefined(); // never self-triggered either
   });
 });
+
+describe("targetsAlly moves are additive, not a replacement — real combat use", () => {
+  it("a hunting predator attacks with its own targetsAlly move when it's the only one available", () => {
+    const ALLY_ATTACK_MOVE: MoveSpec = { ...TEST_MOVE, id: "ally-attack-move", targetsAlly: true, allyEffect: { healFraction: 0.1 } };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [ALLY_ATTACK_MOVE] });
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    // A real hostile hit landed using the targetsAlly move — its ally-heal
+    // effect never fires here (that only ever resolves via applySupportMove,
+    // on a completely different tick with nothing hostile going on).
+    expect(log.events.some((e) => e.kind === "fought" && (e as any).moveId === "ally-attack-move")).toBe(true);
+  });
+});
