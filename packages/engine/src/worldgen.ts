@@ -691,6 +691,155 @@ export function effectiveWaterDensityAt(seeds: readonly BiomeSeedInfo[] | undefi
 }
 
 // ---------------------------------------------------------------------------
+// Badlands BSP chambers — direct ask: partition each Badlands region into
+// chambers/canyons via binary space partitioning. Chamber boundaries are
+// mostly "boulder" (already walkable-but-slow — support.ts's
+// `terrainSpeedMultiplier` — and opaque — world.ts's `isOpaqueTerrain`), not
+// hard "wall": most of a boundary line should read as rough, slow terrain to
+// push through, not a corridor maze. A sparse fraction of each line's tiles
+// become real "wall" instead, for occasional genuine chokepoints/dead-ends —
+// the exception, not the rule, per direct request.
+//
+// Composes with, doesn't replace, the per-tile terrainWeights/obstacleDensity
+// system and `blendBiomeParams`'s continuous cross-biome blending above: this
+// runs as a post-hoc structural overlay, the same idiom `carveSuicuneRivers`
+// below already uses, masked tile-by-tile to wherever a point reads as
+// Badlands-*dominant* (`isBadlandsDominant`) — a boundary line simply isn't
+// painted once it crosses out of Badlands' own footprint, so a hard BSP grid
+// never fights the smooth transition at a biome edge; it only ever adds
+// structure inside ground that was already going to be sand/boulder/badlands
+// anyway. Runs after `carveSuicuneRivers` (skips any tile a river already
+// carved to "water") specifically so it never has to reason about rivers at
+// all beyond that one exclusion.
+// ---------------------------------------------------------------------------
+
+/**
+ * A chamber rectangle stops splitting once either side would fall below this
+ * many tiles — small enough that this codebase's ~90x60 default scenario map
+ * (`SCENARIO_WIDTH`/`HEIGHT`, packages/data/src/scenario.ts) gets several
+ * real chambers per Badlands region, large enough that a chamber still reads
+ * as a real room, not a sliver.
+ */
+const BSP_MIN_LEAF_SIZE = 10;
+
+/**
+ * Chance a given boundary-line tile — outside its own line's reserved safe
+ * gap, see `BSP_SAFE_GAP_FRACTION` below — becomes a real "wall" tile instead
+ * of boulder. Deliberately low: "should feel like the exception, not the
+ * rule," direct request. Sim-original guess, judge against a real generated
+ * map like every other tuning constant in this file.
+ */
+const BSP_WALL_CHANCE = 0.08;
+
+/**
+ * Fraction of a boundary line's own length reserved as a guaranteed-crossable
+ * "canyon mouth" — these tiles always paint as boulder, never rolled for the
+ * `BSP_WALL_CHANCE` upgrade, regardless of how the rest of that line's rolls
+ * land. This is what keeps a chamber from ever being fully sealed off by
+ * unlucky rolls: even in the (astronomically unlikely) worst case where every
+ * other tile on every one of a chamber's boundary lines rolls "wall," each
+ * line's own reserved gap stays open. At least 1 tile even on a short line.
+ */
+const BSP_SAFE_GAP_FRACTION = 0.25;
+
+interface BspBoundary {
+  /** "vertical": a line of constant `x`, spanning `y` in `[y, y + length)`. "horizontal": constant `y`, spanning `x` in `[x, x + length)`. */
+  orientation: "vertical" | "horizontal";
+  x: number;
+  y: number;
+  length: number;
+}
+
+/**
+ * Recursively splits the rectangle `[x0, x1) x [y0, y1)` into two
+ * sub-rectangles, one call at a time, and records each split as a
+ * `BspBoundary` line — classic BSP dungeon generation. Splits whichever axis
+ * is currently longer (keeps chambers roughly square rather than ever-
+ * thinner slivers), with a coin flip when the two sides are within a tile of
+ * each other; stops recursing once a rectangle can't be split without either
+ * side falling below `BSP_MIN_LEAF_SIZE`.
+ */
+function splitBspRect(rng: () => number, x0: number, y0: number, x1: number, y1: number, out: BspBoundary[]): void {
+  const w = x1 - x0;
+  const h = y1 - y0;
+  const canSplitVertical = w >= BSP_MIN_LEAF_SIZE * 2 + 1;
+  const canSplitHorizontal = h >= BSP_MIN_LEAF_SIZE * 2 + 1;
+  if (!canSplitVertical && !canSplitHorizontal) return;
+
+  const splitVertical = canSplitVertical && (!canSplitHorizontal || (w === h ? rng() < 0.5 : w > h));
+
+  if (splitVertical) {
+    const splitX = x0 + BSP_MIN_LEAF_SIZE + Math.floor(rng() * (w - 2 * BSP_MIN_LEAF_SIZE - 1));
+    out.push({ orientation: "vertical", x: splitX, y: y0, length: h });
+    splitBspRect(rng, x0, y0, splitX, y1, out);
+    splitBspRect(rng, splitX + 1, y0, x1, y1, out); // +1 skips the line tile itself, so children never overlap it
+  } else {
+    const splitY = y0 + BSP_MIN_LEAF_SIZE + Math.floor(rng() * (h - 2 * BSP_MIN_LEAF_SIZE - 1));
+    out.push({ orientation: "horizontal", x: x0, y: splitY, length: w });
+    splitBspRect(rng, x0, y0, x1, splitY, out);
+    splitBspRect(rng, x0, splitY + 1, x1, y1, out);
+  }
+}
+
+/**
+ * True if `(x, y)` reads as Badlands more strongly than every other biome in
+ * `biomeWeightsAt`'s blend — deliberately *dominant*, not merely "Badlands
+ * has some nonzero weight here." This is what keeps the BSP grid inside
+ * Badlands' own footprint (see this section's doc comment) instead of
+ * spilling into the continuous cross-biome transition band at its edges.
+ */
+function isBadlandsDominant(seeds: readonly BiomeSeedInfo[], x: number, y: number): boolean {
+  const weights = biomeWeightsAt(seeds, x, y);
+  const badlandsWeight = weights["badlands"] ?? 0;
+  if (badlandsWeight <= 0) return false;
+  for (const [name, weight] of Object.entries(weights)) {
+    if (name !== "badlands" && weight >= badlandsWeight) return false;
+  }
+  return true;
+}
+
+/**
+ * Carves BSP chamber/canyon boundaries into every Badlands-dominant tile —
+ * see this section's doc comment. A no-op on a world with no biome data at
+ * all (`world.biomeSeeds` absent/empty), same contract every other biome-
+ * aware function in this file follows. A boundary tile's elevation reuses
+ * whatever ambient elevation the main generation loop already gave that spot
+ * — undoing the existing `BOULDER_ELEVATION_BOOST` first if it happened to
+ * already be boulder, so re-painting it is a no-op, not a double boost —
+ * plus that same boost, so BSP-placed boulder/wall reads exactly like a
+ * hand-placed boulder: raised terrain, consistent with every other boulder
+ * on the map.
+ */
+function carveBadlandsChambers(world: World, width: number, height: number, rng: () => number): void {
+  const seeds = world.biomeSeeds;
+  if (!seeds || seeds.length === 0) return;
+
+  const boundaries: BspBoundary[] = [];
+  splitBspRect(rng, 0, 0, width, height, boundaries);
+
+  for (const boundary of boundaries) {
+    const safeGapLength = Math.max(1, Math.round(boundary.length * BSP_SAFE_GAP_FRACTION));
+    const safeGapStart = Math.floor(rng() * Math.max(1, boundary.length - safeGapLength));
+
+    for (let i = 0; i < boundary.length; i++) {
+      const x = boundary.orientation === "vertical" ? boundary.x : boundary.x + i;
+      const y = boundary.orientation === "vertical" ? boundary.y + i : boundary.y;
+      if (x < 0 || y < 0 || x >= width || y >= height) continue;
+
+      const tile = tileAt(world, "surface", x, y);
+      if (!tile || tile.terrain === "water") continue;
+      if (!isBadlandsDominant(seeds, x, y)) continue;
+
+      const ambientElevation = tile.terrain === "boulder" ? tile.elevation - BOULDER_ELEVATION_BOOST : tile.elevation;
+      const boostedElevation = ambientElevation + BOULDER_ELEVATION_BOOST;
+      const inSafeGap = i >= safeGapStart && i < safeGapStart + safeGapLength;
+      const kind = !inSafeGap && rng() < BSP_WALL_CHANCE ? "wall" : "boulder";
+      setTile(world, "surface", x, y, kind, boostedElevation);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Generation
 // ---------------------------------------------------------------------------
 
@@ -829,6 +978,12 @@ export function generateWorld(width: number, height: number, seed: number): Worl
   // Rivers run last, once the full land/ocean/biome/obstacle grid (and its
   // real final elevations) already exists for steepest descent to work from.
   carveSuicuneRivers(world, width, height, macroElevation);
+
+  // Badlands BSP chambers run after rivers — see this file's own section doc
+  // comment for why — using their own derived rng sub-stream, same "distinct
+  // xor'd seed per generation concern" pattern as every other noise field
+  // above.
+  carveBadlandsChambers(world, width, height, mulberry32(seed ^ 0x2545f491));
 
   return world;
 }
