@@ -174,6 +174,7 @@ export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rn
   tickStatStages(agent);
   tickActionLock(agent);
   tickRallyMark(agent);
+  tickBurrow(agent);
   applyRegenPassive(agent);
   applyHealAuraPassive(agent, world);
 
@@ -250,6 +251,20 @@ function tickRallyMark(agent: Agent): void {
   agent.rallyMarkTicksRemaining = Math.max(0, agent.rallyMarkTicksRemaining - 1);
 }
 
+/**
+ * Ticks down a `MoveSpec.burrow` self-escape (set in `applyPredationInstincts`'s
+ * flee branch, predation.ts) — reaching 0 resurfaces the agent to
+ * `burrowedFromLayer` and clears both fields. No-op on a corpse.
+ */
+function tickBurrow(agent: Agent): void {
+  if (agent.alive === false || !agent.burrowedTicksRemaining) return;
+  agent.burrowedTicksRemaining = Math.max(0, agent.burrowedTicksRemaining - 1);
+  if (agent.burrowedTicksRemaining === 0 && agent.burrowedFromLayer) {
+    agent.layer = agent.burrowedFromLayer;
+    agent.burrowedFromLayer = undefined;
+  }
+}
+
 // --- Agent-modifying passives (Agent.passives) ---
 
 /** Grants (accumulates into) a permanent passive — called from `maybeAutoRespec` (leveling.ts) when a node with `grantsPassive` is chosen. */
@@ -266,6 +281,18 @@ export function damageReductionOf(agent: Agent): number {
 /** True if the `"immovable"` passive should block this agent from being forced-moved — read by `applyForcedMovement` (movement.ts). */
 export function isImmovable(agent: Agent): boolean {
   return (agent.passives?.immovable ?? 0) > 0;
+}
+
+/**
+ * Extra permanent Defense stat-stage from the `"defenseBoost"` passive —
+ * added on top of the agent's own stacked `statStages` entries in
+ * `applySingleDamageInstance` (predation.ts). Physical-only for free: a
+ * special move never reads the `defense` field at all (`calculateDamage`
+ * reads `spDefense` instead), so this never needs its own category check.
+ * 0 if the agent has none.
+ */
+export function defenseBoostOf(agent: Agent): number {
+  return agent.passives?.defenseBoost ?? 0;
 }
 
 /** Per-tick HP regen from the `"regen"` passive, on top of (independent of) the fed/watered `applyHealOverTime` (support.ts) — a regen agent heals even while starving. No-op on a corpse or one with no regen passive. */

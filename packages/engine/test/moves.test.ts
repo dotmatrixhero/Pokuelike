@@ -276,6 +276,8 @@ describe("applyMoveTree: newer delta fields", () => {
           rallyCall: { ticks: 10 },
           critCooldownReset: true,
           statusSeverity: 1.5,
+          consumesOwnTerrain: { terrain: "boulder", damageMultiplier: 2 },
+          terrainFill: { terrain: "water" },
         },
       },
       overwrite_stack_2: {
@@ -292,6 +294,8 @@ describe("applyMoveTree: newer delta fields", () => {
           selfCostPerUse: { need: "hunger", amount: 0.2 },
           rallyCall: { ticks: 20 },
           statusSeverity: 2,
+          consumesOwnTerrain: { terrain: "sand", damageMultiplier: 4 },
+          terrainFill: { terrain: "mud" },
         },
       },
     },
@@ -318,6 +322,8 @@ describe("applyMoveTree: newer delta fields", () => {
     expect(respec.selfCostPerUse).toEqual({ need: "hunger", amount: 0.2 });
     expect(respec.rallyCall).toEqual({ ticks: 20 });
     expect(respec.statusSeverity).toBe(2);
+    expect(respec.consumesOwnTerrain).toEqual({ terrain: "sand", damageMultiplier: 4 });
+    expect(respec.terrainFill).toEqual({ terrain: "mud" });
     // Fields not touched by the second node keep the first node's value.
     expect(respec.positionSwap).toBe(true);
     expect(respec.targetsAlly).toBe(true);

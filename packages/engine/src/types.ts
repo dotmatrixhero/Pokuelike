@@ -30,9 +30,14 @@ export type StatusKind = "burn" | "poison" | "paralysis" | "sleep" | "freeze";
  * being fed/watered), `"thorns"` (predation.ts's `applySingleDamageInstance`,
  * reflects a fraction of incoming damage back at the attacker), `"healAura"`
  * (needs.ts's `tickAgentNeeds`, heals nearby herd-mates every tick, not just
- * the passive-holder itself). See MOVES_DESIGN.md's primitives checklist.
+ * the passive-holder itself), `"defenseBoost"` (predation.ts's
+ * `applySingleDamageInstance`, added as extra permanent Defense stat-stage
+ * on top of the agent's own stacked stages — physical-only for free, since
+ * `calculateDamage` only ever reads the `defense` stage for a physical
+ * move, never `spDefense`, unlike `damageReduction` which blunts every hit
+ * indiscriminately). See MOVES_DESIGN.md's primitives checklist.
  */
-export type PassiveKind = "damageReduction" | "immovable" | "regen" | "thorns" | "healAura";
+export type PassiveKind = "damageReduction" | "immovable" | "regen" | "thorns" | "healAura" | "defenseBoost";
 
 /**
  * Why a herd is (or was) migrating — see herdMigration.ts/DESIGN.md's
@@ -577,6 +582,26 @@ export interface Agent {
    * default for every agent and every move that doesn't set `rallyCall`.
    */
   rallyMarkTicksRemaining?: number;
+  /**
+   * Ticks remaining in a temporary self-burrow — set by `MoveSpec.burrow`
+   * when a fleeing agent uses it instead of its normal flee step
+   * (`applyPredationInstincts`, predation.ts's main flee branch), which also
+   * moves it to the `"underground"` layer at its current (x,y) and records
+   * `burrowedFromLayer` to resurface to. Ticked down every tick regardless
+   * of action (`tickBurrow`, status.ts, same shape as `rallyMarkTicksRemaining`);
+   * reaching 0 restores `layer` from `burrowedFromLayer` and clears both
+   * fields. While burrowed, `predation.ts`'s `isConcealed` reports true
+   * (on top of whatever the current tile's own concealment says) — real
+   * protection from anything not *also* on the underground layer comes free
+   * from the engine's own strict same-layer targeting (`agentsWithin`/
+   * `resolveAreaHit` and everything built on them already require
+   * `other.layer === agent.layer`), not from a separate immunity check.
+   * Absent/0 = not burrowed, the default for every agent and every move
+   * that doesn't set `burrow`.
+   */
+  burrowedTicksRemaining?: number;
+  /** The layer this agent burrowed *from* — see `burrowedTicksRemaining`. Absent whenever not currently burrowed. */
+  burrowedFromLayer?: Layer;
   /** General item slots — simple food units and/or ITEM_DEX entries, each carrying its own weight. Capped by `carryCapacityOf` (support.ts). */
   inventory?: InventoryItem[];
   /** The id of a fully-fainted ally this agent is currently carrying, if any. Mutually exclusive in practice with `beingCarriedBy` on the same agent. */

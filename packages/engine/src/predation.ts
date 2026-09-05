@@ -1,4 +1,4 @@
-import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
+import type { Agent, HuntRules, Layer, TerrainKind, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { applyForcedMovement, stepAway, stepToward } from "./movement.js";
@@ -19,6 +19,7 @@ import {
   applyStatStage,
   BURN_ATTACK_STAGE,
   damageReductionOf,
+  defenseBoostOf,
   getStatStage,
   isBurned,
   maybeInflictStatus,
@@ -29,6 +30,9 @@ import {
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
+
+/** Dry, walkable terrain kinds `MoveSpec.terrainFill` can convert into standing water — deliberately narrow, not every non-water tile (a wall/tree obviously shouldn't become a puddle). */
+const TERRAIN_FILLABLE = new Set<TerrainKind>(["floor", "sand", "mud"]);
 
 /**
  * How close an awake, conscious, same-herd agent has to be to a SLEEPING
@@ -703,6 +707,7 @@ function canAttackFromHere(world: World, agent: Agent, target: Agent, distance: 
 
 /** True if a "bush" tile is what `agent` is currently standing on — see `Tile.concealment`. */
 function isConcealed(world: World, agent: Agent): boolean {
+  if ((agent.burrowedTicksRemaining ?? 0) > 0) return true;
   return tileAt(world, agent.layer, agent.pos.x, agent.pos.y)?.concealment === true;
 }
 
@@ -827,6 +832,21 @@ function applySingleDamageInstance(
   }
   const situational = situationalMultiplier(world, attacker, defender, move);
 
+  // Consumes the attacker's own tile (e.g. an actual boulder) for a damage
+  // multiplier — checked before the damage formula runs, since it changes
+  // the damage itself rather than reacting to a landed hit. Reverting the
+  // tile to floor here (not gated on the hit landing/killing) means a
+  // multi-hit flurry only ever gets this once: the second hit's own check
+  // just sees plain floor already.
+  let consumedTerrainMultiplier = 1;
+  if (move.consumesOwnTerrain) {
+    const ownTile = tileAt(world, attacker.layer, attacker.pos.x, attacker.pos.y);
+    if (ownTile?.terrain === move.consumesOwnTerrain.terrain) {
+      consumedTerrainMultiplier = move.consumesOwnTerrain.damageMultiplier;
+      setTile(world, attacker.layer, attacker.pos.x, attacker.pos.y, "floor");
+    }
+  }
+
   // `weightScaling` adds bonus power proportional to the attacker's own
   // maxHp (this sim's proxy for size/weight — see `powerOf`'s own doc
   // comment) — computed into an effective move rather than mutating `move`
@@ -847,14 +867,18 @@ function applySingleDamageInstance(
               spAttack: getStatStage(attacker, "spAttack"),
             },
           },
-          { types: defender.types ?? [], stats: defender.stats, statStages: { defense: getStatStage(defender, "defense"), spDefense: getStatStage(defender, "spDefense") } },
+          {
+            types: defender.types ?? [],
+            stats: defender.stats,
+            statStages: { defense: getStatStage(defender, "defense") + defenseBoostOf(defender), spDefense: getStatStage(defender, "spDefense") },
+          },
           effectiveMove,
           0.85 + rng() * 0.15,
           isCritical
         ).damage
       : FALLBACK_DAMAGE;
 
-  const damage = Math.max(0, Math.floor(rawDamage * situational * (1 - damageReductionOf(defender))));
+  const damage = Math.max(0, Math.floor(rawDamage * situational * consumedTerrainMultiplier * (1 - damageReductionOf(defender))));
 
   if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log, ctx, rng);
 
@@ -1027,6 +1051,10 @@ function resolveHitAgainstTarget(
     if (move.terrainBurn) {
       const tile = tileAt(world, defender.layer, defender.pos.x, defender.pos.y);
       if (tile?.terrain === "bush") setTile(world, defender.layer, defender.pos.x, defender.pos.y, "floor");
+    }
+    if (move.terrainFill) {
+      const tile = tileAt(world, defender.layer, defender.pos.x, defender.pos.y);
+      if (tile && TERRAIN_FILLABLE.has(tile.terrain)) setTile(world, defender.layer, defender.pos.x, defender.pos.y, move.terrainFill.terrain);
     }
     if (move.rallyCall) {
       defender.rallyMarkTicksRemaining = move.rallyCall.ticks;
@@ -1346,7 +1374,24 @@ export function applyPredationInstincts(
     agent.behavior = "flee";
     agent.huntTarget = undefined;
     agent.fightTarget = undefined;
-    agent.pos = stepAway(world, agent.layer, agent.pos, threat.pos);
+
+    // A real escape hatch: burrow instead of the normal flee step, if this
+    // agent knows an off-cooldown `burrow` move. Real protection from
+    // anything not also underground comes free from the engine's own
+    // strict same-layer targeting (see `Agent.burrowedTicksRemaining`'s own
+    // doc comment) — this just needs to actually relocate the agent and
+    // start the clock. `useMove` puts it on cooldown same as any other use,
+    // so the balance lever is a longer `cooldownTicks` than a plain
+    // step-away flee costs nothing to spam, not a cap on `ticks` itself.
+    const burrowMove = (agent.moves ?? []).find((move) => move.burrow && !agent.moveCooldowns?.[move.id]);
+    if (burrowMove) {
+      useMove(agent, burrowMove);
+      agent.burrowedFromLayer = agent.layer;
+      agent.layer = "underground";
+      agent.burrowedTicksRemaining = burrowMove.burrow!.ticks;
+    } else {
+      agent.pos = stepAway(world, agent.layer, agent.pos, threat.pos);
+    }
     return true;
   }
 

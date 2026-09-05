@@ -11,6 +11,7 @@ import {
   SLEEP_TICKS_MIN,
   applyStatStage,
   damageReductionOf,
+  defenseBoostOf,
   getStatStage,
   grantPassive,
   isAsleep,
@@ -321,6 +322,14 @@ describe("agent-modifying passives (grantPassive/damageReductionOf/isImmovable)"
     expect(isImmovable(agent)).toBe(false);
     grantPassive(agent, "immovable", 1);
     expect(isImmovable(agent)).toBe(true);
+  });
+
+  it("defenseBoostOf reads the accumulated Defense stat-stage bonus, unclamped (calculateDamage does its own [-6,6] clamp after summing)", () => {
+    const agent = makeAgent();
+    expect(defenseBoostOf(agent)).toBe(0);
+    grantPassive(agent, "defenseBoost", 0.5);
+    grantPassive(agent, "defenseBoost", 0.5);
+    expect(defenseBoostOf(agent)).toBe(1);
   });
 
   it("the regen passive heals a fraction of maxHp every tick, independent of being fed/watered", () => {

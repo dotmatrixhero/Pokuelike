@@ -609,14 +609,19 @@ export const MOVES: Record<string, MoveSpec> = {
         delta: { power: 15, accuracy: 10 },
       },
       // Crosslink: Boldness <-> Sociability — watching each other's blind
-      // spots means fewer clean hits land.
+      // spots means fewer clean hits land. Refined per feedback: converted
+      // from a flat damageReduction (already the default lever for most
+      // "tanky branch" nodes across every tree) to a real Defense-stat
+      // buff — "watchful" isn't an armor/hide fiction, so a stat buff (also
+      // physical-only for free, unlike damageReduction's indiscriminate
+      // blunting) reads truer to the name.
       watchful_pack: {
         id: "watchful_pack",
         name: "Watchful Pack",
         cost: 1,
         prerequisites: ["keen_eye", "shared_scent"],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        grantsPassive: { kind: "defenseBoost", value: 0.5 },
         delta: {},
       },
       shared_scent: {
@@ -947,14 +952,18 @@ export const MOVES: Record<string, MoveSpec> = {
         delta: { resistanceBreaker: { multiplier: 1.4 } },
       },
       // Crosslink: Boldness <-> Sociability — a fire kept low and shared
-      // burns just as steady, and is harder to knock out.
+      // burns just as steady, and is harder to knock out. Refined per
+      // feedback: converted from a flat damageReduction to a real
+      // Defense-stat buff — "banked" (a fire kept smoldering, not raging)
+      // isn't an armor fiction, so this reads truer as toughness than as
+      // literal hide/plating, and it's physical-only for free besides.
       banked_embers: {
         id: "banked_embers",
         name: "Banked Embers",
         cost: 1,
         prerequisites: ["ring_of_fire", "shared_warmth"],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        grantsPassive: { kind: "defenseBoost", value: 0.5 },
         delta: {},
       },
       shared_warmth: {
@@ -1101,6 +1110,13 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("ROCK_THROW"),
     cooldownTicks: 1,
     range: { min: 0, max: 3 },
+    // Standing on a real "boulder" tile (worldgen.ts's Highland-leaning
+    // obstacle kind) lets this throw consume it for real, ~3x damage —
+    // checked in applySingleDamageInstance (predation.ts) before the damage
+    // formula runs, since it's a genuine damage bonus, not a post-hit side
+    // effect like terrainBurn. The boulder tile reverts to floor either way
+    // once thrown; a clean miss doesn't waste it (accuracy is rolled first).
+    consumesOwnTerrain: { terrain: "boulder", damageMultiplier: 3 },
   },
   water_gun: {
     id: "water_gun",
@@ -1109,5 +1125,31 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("WATER_GUN"),
     cooldownTicks: 0,
     range: { min: 0, max: 2 },
+    // A landed, non-killing hit leaves a real puddle where it struck —
+    // converts a dry floor/sand/mud tile at the defender's position into
+    // "water" (resolveHitAgainstTarget, predation.ts). Deliberately
+    // permanent, like terrainBurn's own bush->floor conversion — a real
+    // decaying puddle needs a generic "this tile change expires"
+    // mechanism this sim doesn't have yet (see MOVES_DESIGN.md).
+    terrainFill: { terrain: "water" },
+  },
+  dig: {
+    id: "dig",
+    name: "Dig",
+    shape: { kind: "point" },
+    ...moveCanon("DIG"),
+    // Never actually used offensively — pickBestMove (combat.ts) excludes
+    // any move with `burrow` set from hostile move selection, same as
+    // targetsAlly moves. cooldownTicks/range are set anyway for MoveSpec's
+    // sake, not because either is ever read for this move's real use.
+    cooldownTicks: 15,
+    range: { min: 0, max: 1 },
+    // A fleeing Diglett/Sandshrew burrows instead of taking a normal flee
+    // step — applyPredationInstincts' main flee branch (predation.ts). 20
+    // ticks of real safety (see Agent.burrowedTicksRemaining's own doc
+    // comment for what that actually protects against), balanced by a real
+    // cooldown — unlike an ordinary flee step, which costs nothing and can
+    // be repeated every tick, this can't be spammed.
+    burrow: { ticks: 20 },
   },
 };

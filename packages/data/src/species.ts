@@ -191,7 +191,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "diglett",
     placeholderColor: "#966037",
     homeLayer: "underground",
-    moves: ["tackle"],
+    moves: ["tackle", "dig"],
     // The archetypal burrowing mole — avoids the surface (and its daylight)
     // entirely, most active well after dark. The task brief's own example.
     activityPattern: "nocturnal",
@@ -262,7 +262,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Not prey/predator itself — coexists with Diglett underground and
     // shares its Field egg group (see EGG_GROUPS_BY_BASE_KEY in
     // leveling.ts), a real cross-species breeding pair.
-    moves: ["scratch"],
+    moves: ["scratch", "dig"],
     // A desert dweller that mainline flavor text has curling up and hiding
     // from daytime heat — nocturnal, foraging once it cools off.
     activityPattern: "nocturnal",

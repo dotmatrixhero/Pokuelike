@@ -1017,10 +1017,14 @@ produce a real story before player mechanics are worth building further.
       built in `fov.ts` and used by zero actual AI decisions — every
       detection check today is a blind radius, not real line-of-sight) —
       now lives in **MOVES_DESIGN.md** at the repo root, its own file
-      since the backlog outgrew a DESIGN.md subsection. Current top of
-      the build-order list: Growl (highest payoff — most of the roster
-      already knows it at level 1 and it's completely inert), Sunny Day,
-      Leer, Dig-to-escape, then burn/poison.
+      since the backlog outgrew a DESIGN.md subsection. Dig-to-escape
+      shipped for real (Diglett/Sandshrew both know it) — in a leaner,
+      stronger form than originally build-ordered: a real temporary
+      burrow with automatic resurfacing, not just an instant one-shot
+      layer cross, per MOVES_DESIGN.md's primitives checklist. Current
+      top of the build-order list: Growl (highest payoff — most of the
+      roster already knows it at level 1 and it's completely inert),
+      Sunny Day, Leer, then burn/poison.
 - [ ] **Non-combat exp trickle amounts are unguessed tuning** (trickle
       0.02/tick, consume 0.5, mate-attempt 1, birth 3, new-sector 2,
       new-species 2 — see DESIGN.md) — no canon formula exists for any of

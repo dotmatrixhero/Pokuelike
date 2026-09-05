@@ -1,4 +1,4 @@
-import type { Agent, PassiveKind, StatusKind, Vec2 } from "./types.js";
+import type { Agent, PassiveKind, StatusKind, TerrainKind, Vec2 } from "./types.js";
 import type { Disposition, StatKey } from "./nature.js";
 import type { PokemonType } from "./typing.js";
 
@@ -274,6 +274,43 @@ export interface MoveSpec {
    */
   statusSeverity?: number;
   /**
+   * While the attacker's own tile is `terrain`, a hit multiplies its damage
+   * by `damageMultiplier` and reverts that tile to `"floor"` — the boulder
+   * (or whatever) is consumed as part of throwing it, checked and applied in
+   * `applySingleDamageInstance` (predation.ts) before the damage formula
+   * runs, since it changes the damage itself rather than reacting to a
+   * landed hit after the fact. A miss never reaches this check (accuracy is
+   * rolled first, in `resolveHitAgainstTarget`), so a clean miss doesn't
+   * waste the terrain — only an actual attack attempt does. On a multi-hit
+   * move this naturally only ever fires once: the first hit reverts the
+   * tile to `"floor"`, so every later hit in the same flurry just sees plain
+   * floor and gets no bonus, no special-casing needed. Absent = this move
+   * never reads or consumes the attacker's own tile, the default.
+   */
+  consumesOwnTerrain?: { terrain: TerrainKind; damageMultiplier: number };
+  /**
+   * On a landed, non-killing hit, converts a `"floor"`/`"sand"`/`"mud"` tile
+   * at the *defender's* position into `terrain` (e.g. Water Gun leaving a
+   * puddle where it hit) — the inverse of `terrainBurn`, same "landed hit"
+   * hook (`resolveHitAgainstTarget`). Deliberately permanent, like
+   * `terrainBurn`, not a temporary tile that reverts on its own — this sim
+   * has no generic "this tile change expires" mechanism yet (shelter.ts's
+   * `vacantTicks` is shelter-specific), so a real decaying puddle is a
+   * follow-up, not part of this pass. No-op if the defender's tile isn't
+   * one of the fillable kinds. Absent = no terrain fill, the default.
+   */
+  terrainFill?: { terrain: TerrainKind };
+  /**
+   * Lets a fleeing agent burrow instead of taking its normal flee step —
+   * see `Agent.burrowedTicksRemaining`'s own doc comment (types.ts) for the
+   * full mechanic. Checked only in `applyPredationInstincts`'s main flee
+   * branch (predation.ts), never as an offensive move — `pickBestMove`
+   * (combat.ts) excludes any move with this set from hostile move
+   * selection, the same way it already excludes `targetsAlly` moves.
+   * Absent = this move never lets its user burrow, the default.
+   */
+  burrow?: { ticks: number };
+  /**
    * Optional respec DAG (see `applyMoveTree`). Each node is a delta applied
    * on top of the base spec, gated by a point cost and prerequisite node
    * id(s). Absent = this move can't be respec'd (the common case — only
@@ -424,6 +461,10 @@ export interface MoveTreeNode {
     positionSwapPull?: number;
     /** Overwrite, like `shape` — a move has at most one severity multiplier at a time, not a stack of them. */
     statusSeverity?: number;
+    /** Overwrite, like `shape`. */
+    consumesOwnTerrain?: { terrain: TerrainKind; damageMultiplier: number };
+    /** Overwrite, like `shape`. */
+    terrainFill?: { terrain: TerrainKind };
   };
 }
 
@@ -578,6 +619,8 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       positionSwapPull:
         delta.positionSwapPull !== undefined ? (result.positionSwapPull ?? 0) + delta.positionSwapPull : result.positionSwapPull,
       statusSeverity: delta.statusSeverity ?? result.statusSeverity,
+      consumesOwnTerrain: delta.consumesOwnTerrain ?? result.consumesOwnTerrain,
+      terrainFill: delta.terrainFill ?? result.terrainFill,
     };
   }
 

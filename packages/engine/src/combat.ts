@@ -196,10 +196,11 @@ export const MOVE_SCORE_TEMPO_WEIGHT = 0.15;
  * first and checking range after.
  */
 export function pickBestMove(attacker: Agent, defenderTypes: PokemonType[], distance?: number): MoveSpec | undefined {
-  // `targetsAlly` moves (support/heal-style) are never a candidate for
-  // hostile move selection — this scans hostile targeting only, an ally-
-  // support move here would just never make sense against `defenderTypes`.
-  const offCooldown = (attacker.moves ?? []).filter((move) => !attacker.moveCooldowns?.[move.id] && !move.targetsAlly);
+  // `targetsAlly` moves (support/heal-style) and `burrow` moves (a flee-only
+  // escape, resolved directly in predation.ts's flee branch) are never a
+  // candidate for hostile move selection — this scans hostile targeting
+  // only, neither kind makes sense as an attack against `defenderTypes`.
+  const offCooldown = (attacker.moves ?? []).filter((move) => !attacker.moveCooldowns?.[move.id] && !move.targetsAlly && !move.burrow);
   const available = distance === undefined ? offCooldown : offCooldown.filter((move) => withinMoveRange(move, distance));
   if (available.length === 0) return undefined;
 

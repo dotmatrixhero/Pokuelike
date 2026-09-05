@@ -46,6 +46,10 @@ grepping for "needs" across the whole file.
 | Position-swap (two agents exchange tiles in one action) | Bodyblock | **Shipped** — `MoveSpec.positionSwap`, resolved in `resolveHitAgainstTarget` (predation.ts) on a landed, non-killing hit only; optional `positionSwapPull` continues the defender further past the swap (reuses `applyForcedMovement`, same obstacle/immovable-aware stepping as any other forced movement). First real content: Peck's *Snatch and Swap* |
 | Crit-triggered cooldown reset (`MoveSpec.critCooldownReset`) | A real crit-fisher notable — reward landing a crit with tempo, not just bonus damage | **Shipped** — checked in `applySingleDamageInstance` right where the crit roll itself already happens; resets the attacker's own cooldown for that move to 0 on a landed critical hit. First real content: Peck's *Relentless Harrier* |
 | Status severity multiplier (`MoveSpec.statusSeverity` → `Agent.status.severityMultiplier`) | A "badly poisons/burns" lever | **Shipped** — set on the status at infliction time (`maybeInflictStatus`), read every tick alongside the existing burn/poison DOT fraction (`tickStatusEffects`). Deliberately a flat multiplier for the whole DOT duration, not mainline Toxic's turn-by-turn escalation — a real severity difference without a second per-status counter to track. First real content: Scratch's *Widening Fangs* |
+| Defense-stat boost passive (`PassiveKind` `"defenseBoost"`) | Diversifying away from flat `damageReduction` as the default "tanky branch" lever — see the design note above | **Shipped** — `predation.ts`'s `applySingleDamageInstance` adds it straight into the defender's Defense stat-stage sum fed to `calculateDamage`; physical-only for free, since `calculateDamage` only ever reads the `defense` stage for a physical move (a special move reads `spDefense` instead, untouched by this). First real content: Tackle's `watchful_pack` and Ember's `banked_embers`, both converted from flat `damageReduction` |
+| Own-terrain consumption (`MoveSpec.consumesOwnTerrain`) | Rock Throw's boulder-throw idea — a real environmental payoff for standing on the right tile | **Shipped** — checked in `applySingleDamageInstance` before the damage formula runs (it changes the damage itself, not a post-hit side effect): while the attacker's own tile matches `terrain`, multiplies damage and reverts that tile to `"floor"`. A clean miss never reaches this check (accuracy is rolled first), so it doesn't waste the terrain; a multi-hit flurry only ever triggers it once, for free (the tile's already floor for later hits in the same use). First real content: Rock Throw's real, shipped base spec (3x vs. a real `"boulder"` tile) |
+| Terrain fill on a landed hit (`MoveSpec.terrainFill`) | Water Gun leaving a real puddle where it hits | **Shipped** — the inverse of `terrainBurn`, same "landed, non-killing hit" hook (`resolveHitAgainstTarget`): converts a dry `"floor"`/`"sand"`/`"mud"` tile at the *defender's* position into `terrain`. Deliberately permanent, not a temporary puddle — this sim has no generic "tile change expires" mechanism yet. First real content: Water Gun's real, shipped base spec (leaves `"water"`) |
+| Temporary self-burrow (`MoveSpec.burrow` → `Agent.burrowedTicksRemaining`/`burrowedFromLayer`) | The floated "Dig as temporary invulnerability" idea above | **Shipped**, in a leaner form than originally floated — a fleeing agent with an off-cooldown `burrow` move relocates to the `"underground"` layer (from wherever it currently is) instead of taking a normal flee step, for a set duration, then resurfaces automatically. **The "invulnerability" half needed no new mechanism at all**: every targeting/detection function in this engine (`agentsWithin`, `resolveAreaHit`, everything built on them) already requires `other.layer === agent.layer`, so a burrowed agent is already fundamentally untargetable by anything not also underground — this was true before this feature and would be true of any layer swap. What's actually new is the temporary/durationed window, the automatic resurfacing, `isConcealed` (predation.ts) now also returning true while burrowed (so it composes with the `"concealed"` situational bonus and detection-radius reduction against *other* underground agents), and the cooldown as the balance lever the original idea asked for — a plain flee step costs nothing and can repeat every tick, `dig`'s 15-tick cooldown can't. `pickBestMove` (combat.ts) excludes any `burrow` move from hostile move selection, the same way it already excludes `targetsAlly` moves. First real content: Diglett's and Sandshrew's real, shipped `dig` move |
 | Cross-agent effects (a move's hit affects an ally, not just the target) | Vine Link, Nurturing Vines, Rally Charge, Warning Lash | **Shipped** — `MoveSpec.targetsAlly`/`allyEffect` (heal and/or buff), resolved by `applySupportMove` (support.ts) from the agent's own idle/support tick — a genuinely separate path from `resolveHit`'s hostile resolution, as this doc's own "why status effects and environmental moves are two different systems" section predicted a cross-agent effect would need. Not yet used in a shipped tree |
 | Multi-target/AoE resolution (apply a move to every agent within its resolved shape, not one target) | Growl (its entire premise), Firestorm, Ring of Fire's full fantasy, Boulder Toss/Skipping Stone | **Shipped** — `MoveSpec.hitsArea`, resolved by `resolveAreaHit` (predation.ts): facing derived from attacker->primary-target direction, `resolveShape` finds every living agent in the move's footprint, each gets its own accuracy roll and damage instance; only the deliberately-picked primary target gets status/stat-change/forced-movement/position-swap hooks, incidental targets just take the raw hit. Confirmed in a real fight: a ring-shaped move centered on the attacker landed on both the picked target and an unrelated bystander standing on the same ring. Growl itself still isn't built — see below |
 | Persistent stat stages (`Agent`-level Attack/Defense/etc. modifiers, settable by a move, lasting until cured — distinct from burn's one-off computed halving, which just derives a stage from `agent.status` fresh at each `calculateDamage` call rather than storing one) | Growl specifically (`statStageMultiplier` already exists in combat.ts as a pure function; burn now calls it, but from a computed value, not a stored `Agent.statStages` field) | **Shipped** — `Agent.statStages` (an array of `{stat, stage, ticksRemaining?}` entries, `status.ts`'s `applyStatStage`/`getStatStage`), fed into `calculateDamage`'s existing stat-stage machinery for both attacker and defender, and composing additively with burn's own -2 Attack. `MoveSpec.statChangeOnHit` is the move-level lever: `target: "self"` applies the instant the move is used, `target: "defender"` only on a landed, non-killing hit. **Growl itself is still not built** — it needs this primitive plus multi-target/AoE (both now shipped) plus a no-damage/status-move representation, which remains the one open piece |
@@ -237,30 +241,25 @@ Camouflage would do the opposite). Leer (round two, above) is the
 smallest possible first step — a single move that actually respects FOV —
 without committing to the whole system.
 
-## Floated, not designed: Dig as temporary invulnerability
+## Dig as temporary invulnerability — done, leaner than floated
 
-**Side note to revisit, not scoped yet.** Instead of (or in addition to)
-the plain instant-escape Dig above: burrowing counts as `"concealed"`
-(the existing `SituationalCondition` — reuse it, don't invent a second
-concealment flag) *and*, for the duration, the burrowed agent takes no
-damage from anything not itself on the underground layer. Flagged by its
-own proposer as possibly too strong — the offered balance lever is a
-meaningfully longer cooldown than a normal escape-Dig, not a duration cap,
-so the tradeoff is "safe for a while, but you can't spam it," not "safe
-for a shorter while."
+**Was a side note, now shipped** — see the primitives checklist's
+"Temporary self-burrow" row above for the real mechanism. The
+"invulnerability" half turned out to need no new primitive at all: this
+engine's targeting/detection functions already require the attacker and
+defender to share a layer, so a burrowed agent (relocated to
+`"underground"`) is already fundamentally unreachable from any other
+layer — that was true before this feature and would be true of any layer
+swap. What got built instead: a *temporary*, durationed burrow (not a
+one-shot escape) with automatic resurfacing, `isConcealed` (predation.ts)
+extended to report true while burrowed, and a real cooldown as the
+balance lever, exactly as originally asked — a plain flee step is free
+and repeatable every tick, Dig's cooldown isn't. Diglett and Sandshrew
+both know it for real now.
 
-Needs a genuinely new primitive before it's buildable: nothing shipped
-today grants temporary damage immunity gated on the *attacker's* layer
-relative to the defender's — `damageReduction` (existing passive) is a
-flat fraction against everything, not a conditional 100%-or-nothing keyed
-to cross-layer origin. Whatever shape this takes (a new `PassiveKind`, or
-a dedicated `Agent` field like `rallyMarkTicksRemaining`'s, since it's a
-temporary window rather than a persistent trait) needs its own design
-pass — not attempted here, just captured so the idea doesn't get lost.
+## Stop overusing `damageReduction` — partially done
 
-## Design note: stop overusing `damageReduction`
-
-**Side note to revisit, not urgent.** Feedback on the four new trees
+**Was a side note, now partly actioned.** Feedback on the four new trees
 (Rock Throw/Peck/Scratch/Water Gun): flat `damageReduction` is the
 Boldness-branch opener (and reappears in most Boldness↔Sociability
 crosslinks) in *every* tree shipped or drafted so far — Tackle, Slash,
@@ -271,13 +270,23 @@ the individual-node level instead of the whole-tree level. Also raised:
 `damageReduction` reduces *all* incoming damage indiscriminately
 (`resolveHit`, predation.ts — it doesn't distinguish physical from
 special), so it's a strictly better, less thematic version of just
-buffing Defense. Direction for future Boldness branches: default to a
-real Defense-stat buff (`MoveTreeNode.delta.statChangeOnHit`/whatever the
-persistent-stage equivalent ends up being, targeting `StatKey`
-`"defense"` specifically) when the intent is "hardier body, still weak to
-special attacks" — reserve flat `damageReduction` for nodes where the
-fiction is specifically armor/hide/thick-skin-against-everything, not the
-default filler for "this is the tanky branch."
+buffing Defense.
+
+**Shipped**: a real `defenseBoost` passive (see the primitives checklist)
+— physical-only for free, since `calculateDamage` only ever reads the
+`defense` stat stage for a physical move. Two shipped, real nodes were
+converted as a first pass: Tackle's `watchful_pack` and Ember's
+`banked_embers` (both generic-named crosslinks with no armor/hide fiction
+behind them). **Deliberately NOT touched**: `iron_hide` (Tackle) and
+`bedrock_stance` (Rock Throw) — both literally named after armor/rock
+hide, exactly the case this note's own rule says to *keep* as
+`damageReduction` — plus `bulwark`/`bulwark_stance` (Slash, "a last line
+that doesn't move," explicit fortification fiction) and `alpha_strike`
+(Ember, a deliberate two-passive keystone the primitives checklist
+already calls out by name). Everything else across the drafted trees
+(Screening Wings, Burrow Guard, Guarded Den, Colony Guard, Tidal Guard,
+Undertow Guard, Sheltering Current, Cover Call, and the rest) is still
+flat `damageReduction`, untouched — a real follow-up, not a full sweep.
 
 ## Confirmed for later: Diglett tunnel networks
 
