@@ -9721,9 +9721,70 @@ been discussed or designed yet. The only decided thing so far is the
 sequencing: geological/historical world-shape first, human society layered
 on top of an already-coherent world second, not simultaneously.
 
+### Dwarf-Fortress-style Z-levels within a region
+
+Direct ask, verbatim: "I want Dwarf Fortress style z levels in overworld so
+you can enter a zone and it's just like a cliff on the side of the
+mountain. And fallin down the side you can end up on a lower elevation of
+the same mountain." Explicitly framed by the user as scope creep, embraced
+anyway — and it's a genuinely coherent extension of the geological vision
+rather than an unrelated add-on: it's what makes the History phase's
+elevation data mean something spatially, not just cosmetic color-by-height.
+
+**A real precedent already exists in this codebase for the shape of this**:
+agents already move between `surface`/`underground`/`canopy` as distinct
+layers at the same (x, y) — see `Agent.layer` throughout `packages/engine`.
+Z-levels within an overworld region would be the natural generalization of
+that exact mechanic: instead of exactly 3 fixed named layers, a region's
+number of slices and their vertical connectivity would come from the real
+elevation the geological phase computed for it. A mountain region built by
+real (simulated) tectonics would have real height and real slices; a plains
+region would have effectively one. Entering a mountain region partway up
+its slope would drop you into whichever slice matches the elevation you
+approached it from — a literal cliff face on the side of a mountain the
+world actually "believes" is that tall, not a flat color gradient standing
+in for height.
+
+**Real, unsolved complexity, flagged honestly rather than glossed over**:
+- Today's `Agent.layer` is a flat 3-value enum, not a variable-depth stack
+  — generalizing to "however many slices this specific region's real
+  elevation implies" is a real structural change, not just adding a number.
+- "Falling" needs an actual resolution rule in a tick-based sim: drop one
+  slice per tick? Resolve instantly to the bottom? Real fall damage tied to
+  distance? None of this is decided.
+- Connectivity between slices (where can you actually climb/fall between
+  two adjacent Z-levels of the same region, vs. where is it a sheer,
+  impassable cliff) needs real rules, presumably derived from the same
+  elevation data rather than invented separately.
+- How this interacts with the existing `surface`/`underground`/`canopy`
+  layer concept — are those now sub-categories *within* a Z-level (a canopy
+  layer existing at each vertical slice that has forest) or an orthogonal
+  concept entirely — is a real open question, not answered here.
+
+**Not every slice needs to be a real, simulated place** — direct follow-up:
+"not every layer has to have a fleshed out thing. There would be zones of
+entire just rock. We can fill the simple ones in unless they're actually
+traveled to." This is the exact same "fake it" principle already captured
+for the horizontal overworld (a compact off-screen summary, expanded into a
+real live grid only once actually visited), just applied to the vertical
+axis too: most of a mountain's interior slices are just solid rock with
+nothing worth simulating and should stay an unexpanded placeholder (a
+"solid rock" marker, not a real generated sub-map) until something actually
+falls into or digs into that specific slice — at which point it gets
+expanded for real, the same lazy-expansion moment the horizontal case
+already describes. This meaningfully caps the real cost of Z-levels: the
+number of slices that ever need real generation is bounded by what's
+actually explored, not by a mountain's full real height.
+
+Not scoped or sequenced relative to the geological/legendary processes or
+the human-society phase yet — captured as a real, embraced piece of the
+overworld vision, to be placed in the build order once the first slice(s)
+of the geological phase actually prove the pipeline shape works.
+
 Next step, explicitly deferred per direct instruction ("note my vision
 first... then we pick a couple features and slice it out"): pick 2-3 of the
 processes above (now an expanded roster, not just the original seven) for a
 first real build, prove the "simulated history -> coherent per-tile world"
 pipeline shape works end to end, before expanding further — and separately,
-whenever it's time, a dedicated vision pass for the human-society phase.
+whenever it's time, a dedicated vision pass for the human-society phase and
+for how Z-levels actually get built.
