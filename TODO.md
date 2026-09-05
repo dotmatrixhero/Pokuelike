@@ -2597,12 +2597,38 @@ not something this pathfinding pass itself caused or is positioned to fix.
       Would need actual shelter/hut sprite art (not yet extracted) plus a
       way to apply the existing owner tint on top of a sprite instead of a
       solid fill.
-- [ ] **Not wired up, sitting in public/tiles/ for later**: `floor_desert`
-      and `floor_snow` — clean, real textures pulled from the biome sheet's
-      desert/snow scene panels, but there's no desert/snow `TerrainKind`
-      or biome system yet, so nothing selects them today. `floor_lava` was
-      also attempted from the same sheet but turned out to be a fake — a
-      flat solid-red background block, not textured lava art — and was
+- [x] **Follow-up, resolved**: `floor_desert` and `floor_stone` are now
+      actually wired up, now that worldgen.ts's real biome system (merged
+      from the sibling branch) exists to select them by. Direct ask: real
+      bug report on plain `sand` terrain ("I don't love how sand looks.
+      Green bordered") + "we got more biomes an shit [do more fun art
+      cutout]." Two real, separate things fixed in one pass: (1) `sand.png`
+      itself was a bad crop — the whole 144x144 source image was a real
+      desert scene panel (cacti, paths) with its surrounding green
+      background never cropped out, so a visible green fringe showed on
+      every "sand" terrain tile; re-cropped a genuinely clean 32x32 patch
+      of open sand from the same biome-sheet desert panel, no decorations
+      or background bleed. (2) `renderer.ts`'s `drawGroundBacking` now
+      looks up each tile's dominant biome (new `dominantBiomeAt`, using
+      worldgen's `biomeWeightsAt`, memoized per `World` object since biome
+      seed placement never changes mid-sim — real work once per tile ever,
+      not once per tile per frame) and passes it to `sprites.ts`'s
+      `getFloorTexture`/`getFloorOverlay`, which now take an optional
+      biome name and swap in a per-biome texture set (new `BIOME_FLOOR`
+      map): "badlands" gets the (now-clean) desert family (`floor_desert`
+      base + `sand` decal, same tan palette so they blend), "highland"
+      gets `floor_stone`'s real cobble/brick crop (previously unused).
+      Any other biome, or a world with no biome data at all (bare test
+      fixtures), falls straight through to the original cave/dirt pool —
+      purely additive, nothing about the existing look changed for
+      grassland/forest/wetland. Verified live in the browser (Tile mode,
+      Playwright screenshot): the desert patch shows clean tan sand with
+      no green fringe, and a highland patch shows the distinct gray stone
+      texture, both visibly different from the surrounding brown cave
+      floor. `floor_snow` is still unused — no biome maps to "snow" yet.
+      `floor_lava` was also attempted from the same sheet a while back but
+      turned out to be a fake — a flat solid-red background block, not
+      textured lava art — and was
       deleted rather than used.
 - [x] Web: real berry-plant art for "food"/"flora"/"seedling" tiles, direct
       ask ("do we have any berries? or other plants?"). Ripped from
@@ -2937,3 +2963,21 @@ not something this pathfinding pass itself caused or is positioned to fix.
       reproduction. A real same-species breeding pair (e.g. a second
       Magikarp of the opposite sex) was not added or validated this
       session.
+- [ ] **Queued, not started**: two visual follow-ups raised in conversation,
+      not yet built. (1) Biome floor-texture edging — now that desert/
+      highland/etc. floor textures are real and distinct (see the
+      `floor_desert`/`floor_stone` wiring entry above), a hard cut where
+      one biome's floor meets another's reads as a seam; direct ask: "Hmm
+      border edging around different tiles to blend would be nice." Same
+      technique `getWaterEdge` already uses for water-to-land (crop a
+      directional strip, composite it onto whichever side(s) actually
+      face a different neighbor) should generalize, but needs real edge
+      art (or a generated blend) per biome-texture pair, not just water's
+      one bordered source image — a bigger lift than the texture swap
+      itself. (2) Contiguous fertile-ground decals — direct ask: "Maybe
+      fertile ground next to each other can be contiguous grass," i.e. the
+      green fertile-patch decal (flora.ts's `Tile.fertility`, decaled in
+      renderer.ts) should read as one blended meadow across adjacent
+      fertile tiles instead of independent per-tile stamps. Needs a
+      per-tile "which neighbors are also fertile" check at render time —
+      cheap, but real added work versus today's single-image stamp.

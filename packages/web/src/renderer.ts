@@ -1,5 +1,5 @@
 import type { Agent, TerrainKind, World } from "@pokuelike/engine";
-import { lightLevel } from "@pokuelike/engine";
+import { biomeWeightsAt, lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import {
   getFertilePatch,
@@ -100,8 +100,42 @@ function drawTileVignette(ctx: CanvasRenderingContext2D, x: number, y: number): 
  * `null` until then — see `loadSprite`). NOT used for "water", which is
  * its own full-tile opaque surface, not an object standing on ground.
  */
-function drawGroundBacking(ctx: CanvasRenderingContext2D, x: number, y: number, elevation: number): void {
-  const texture = getFloorTexture();
+/**
+ * Which biome (by name) dominates this tile, per worldgen.ts's real
+ * per-tile blend (`biomeWeightsAt`) — memoized per `World` object since
+ * biome seed placement is fixed at generation time and never changes
+ * mid-simulation, so this is real work only once per tile ever, not once
+ * per tile per frame. Returns `undefined` for a `World` with no biome data
+ * at all (a bare test fixture, or worldgen never run), same as
+ * `biomeWeightsAt` itself returning `{}` in that case.
+ */
+const dominantBiomeCache = new WeakMap<World, (string | undefined)[]>();
+function dominantBiomeAt(world: World, x: number, y: number): string | undefined {
+  if (!world.biomeSeeds || world.biomeSeeds.length === 0) return undefined;
+  let cache = dominantBiomeCache.get(world);
+  if (!cache) {
+    cache = new Array(world.width * world.height);
+    dominantBiomeCache.set(world, cache);
+  }
+  const idx = y * world.width + x;
+  if (cache[idx] === undefined) {
+    const weights = biomeWeightsAt(world.biomeSeeds, x, y);
+    let best: string | undefined;
+    let bestWeight = 0;
+    for (const [name, weight] of Object.entries(weights)) {
+      if (weight > bestWeight) {
+        bestWeight = weight;
+        best = name;
+      }
+    }
+    cache[idx] = best ?? ""; // "" sentinel: computed, no dominant biome
+  }
+  return cache[idx] || undefined;
+}
+
+function drawGroundBacking(ctx: CanvasRenderingContext2D, world: World, x: number, y: number, elevation: number): void {
+  const biome = dominantBiomeAt(world, x, y);
+  const texture = getFloorTexture(biome);
   if (texture) {
     ctx.save();
     ctx.globalAlpha = Math.min(1, 0.82 + elevation * 0.18);
@@ -118,7 +152,7 @@ function drawGroundBacking(ctx: CanvasRenderingContext2D, x: number, y: number, 
   // Feathered to a soft blob (see featheredOverlayStamp) rather than
   // drawn as a hard-edged square, direct ask: "make decals a little less
   // square."
-  const overlay = getFloorOverlay(x, y);
+  const overlay = getFloorOverlay(x, y, biome);
   if (overlay) {
     ctx.save();
     ctx.globalAlpha = 0.48;
@@ -310,7 +344,7 @@ function drawWorldTiles(
         // art itself already has real tonal variation, so it doesn't need
         // to be faded down to avoid looking like a flat loud fill the way
         // a single solid color would.
-        drawGroundBacking(ctx, x, y, tile.elevation);
+        drawGroundBacking(ctx, world, x, y, tile.elevation);
         ctx.fillStyle = rgbaToCss(shade([120, 128, 140], tile.elevation), 0.35);
         ctx.fillText(".", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
         drawTileVignette(ctx, x, y);
@@ -361,7 +395,7 @@ function drawWorldTiles(
           // those corners instead of the near-black canvas base. "water" is
           // its own full-tile opaque surface, not an object standing on
           // ground, so it's excluded.
-          if (tile.terrain !== "water") drawGroundBacking(ctx, x, y, tile.elevation);
+          if (tile.terrain !== "water") drawGroundBacking(ctx, world, x, y, tile.elevation);
           ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
           drawTileVignette(ctx, x, y);
           continue;
@@ -382,7 +416,7 @@ function drawWorldTiles(
         // "black behind transparent corners" fix as boulders/trees/etc.
         // above, since the real berry-plant art (below) also has transparent
         // corners around the plant itself.
-        drawGroundBacking(ctx, x, y, tile.elevation);
+        drawGroundBacking(ctx, world, x, y, tile.elevation);
 
         // A green "fertile ground" patch under the plant itself — direct
         // ask: "can we decal a little green patch under the plants...
