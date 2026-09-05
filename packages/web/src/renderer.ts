@@ -1,7 +1,7 @@
 import type { Agent, TerrainKind, World } from "@pokuelike/engine";
 import { lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
-import { getFloorTexture, getSprite, getTileSprite, type SpriteDirection } from "./sprites.js";
+import { getFloorTexture, getFloraSprite, getFoodSprite, getSeedlingSprite, getSprite, getTileSprite, type SpriteDirection } from "./sprites.js";
 import type { ActivePopup } from "./eventPopups.js";
 import {
   FLAVOR_FG,
@@ -142,6 +142,38 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
       // transparent."
       ctx.fillStyle = isPlant ? rgbaToCss(bg, 0.75) : rgbToCss(bg);
       ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+
+      // Real berry-plant art (see sprites.ts's getFoodSprite/getFloraSprite/
+      // getSeedlingSprite) layers on top of that same color-mix fill rather
+      // than replacing it — the flat color is still what a depleted patch
+      // fades back toward, this is just the "there's a real plant here"
+      // detail on top of it, faded by the tile's own stock so a nearly-
+      // depleted patch still reads as thinning out, not popping in/out.
+      if (tile.terrain === "food" && tile.flavor) {
+        const sprite = getFoodSprite(tile.flavor);
+        if (sprite) {
+          ctx.save();
+          ctx.globalAlpha = 0.4 + (tile.stock ?? 1) * 0.6;
+          ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          ctx.restore();
+        }
+      } else if (tile.terrain === "flora" && tile.flavor) {
+        const sprite = getFloraSprite(tile.flavor);
+        if (sprite) {
+          ctx.save();
+          ctx.globalAlpha = 0.4 + (tile.stock ?? 1) * 0.6;
+          ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          ctx.restore();
+        }
+      } else if (tile.terrain === "seedling") {
+        const sprite = getSeedlingSprite(x, y);
+        if (sprite) {
+          ctx.save();
+          ctx.globalAlpha = 0.7;
+          ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          ctx.restore();
+        }
+      }
     }
   }
   ctx.restore();
