@@ -198,10 +198,10 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
   defender.hp = defender.hp ?? defender.maxHp;
 
   const distance = manhattan(attacker.pos, defender.pos);
-  const move = pickBestMove(attacker, defender.types ?? [], distance);
+  const move = pickBestMove(attacker, defender.types ?? [], distance, world.tick);
   if (!move) return; // nothing off-cooldown/in-range — no-op this tick, tried again on a later eligible tick
 
-  useMove(attacker, move);
+  useMove(attacker, move, world.tick);
 
   if (!rollAccuracy(move, 0, 0, rng, stormAccuracyMultiplier(world, attacker.layer, attacker.pos))) {
     log?.record({

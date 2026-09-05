@@ -3206,3 +3206,37 @@ not something this pathfinding pass itself caused or is positioned to fix.
       screenshots at several biome-boundary seeds; full suite still green
       (888/888 engine, 19/19 data) since neither change touches engine
       code at all, purely renderer.ts/sprites.ts.
+- [x] Move-selection recency discount, direct ask: "I don't see Pokemon
+      using a variety of moves often... to make the world feel real...
+      they have to be choosing to use moves and stuff well" ->
+      "cooldown should play a part. So like you should cycle moves" ->
+      "Ticks realtime". Real finding, not just perception: `pickBestMove`
+      (combat.ts) was pure greedy-best with zero memory — against a fixed
+      opponent it picked the exact same top-scoring move every single time
+      it came off cooldown, forever, since a fixed matchup's score barely
+      changes tick to tick. New `Agent.moveLastUsedTick` (types.ts, set
+      alongside `moveUseCounts` in `useMove`) feeds a new recency factor in
+      `pickBestMove`'s scoring: a move's score is discounted to
+      `MOVE_RECENCY_MIN_MULTIPLIER` (0.6) the instant it's used, recovering
+      linearly back to 1 over `cooldownTicks * MOVE_RECENCY_WINDOW_MULTIPLIER`
+      ticks (floored at `MOVE_RECENCY_MIN_WINDOW_TICKS`=3 so even a
+      0-cooldown move gets real rotation pressure). A discount, not a ban —
+      a genuinely superior move (e.g. STAB + a real type advantage) still
+      wins immediately even fresh off cooldown; only a real, close-to-tied
+      call actually rotates. Ticks-based per direct confirmation, not
+      uses-based — a long fight against one target still cycles back to the
+      top move once enough real time passes. Fully deterministic (no rng
+      involved), so `determinism.test.ts`'s byte-identical-log guarantee is
+      untouched. `Agent.moveUseCounts` (already-existing, purely
+      observational lifetime-use tracking) turned out to be exactly the
+      instrumentation needed to validate this for real: a scripted
+      2-species population run (seed 42, 3000 ticks) showed the fix doesn't
+      manufacture fake variety where a real type-effectiveness choice
+      exists (ivysaur correctly kept spamming Tackle over Vine Whip against
+      Scyther — grass is quad-resisted by bug/flying, so that's the right
+      call, not a bug) — real cycling only shows up in a genuine close-call
+      integration test (`predation.test.ts`'s new "real tickWorld combat
+      cycles..." test: a minimal 2x1 world, two identical-stat moves,
+      confirmed clean ~50/50 alternation over 30 real attack ticks, versus
+      the old code's 100/0 spam). 8 new unit tests (combat.test.ts) plus
+      that one full-integration test; full suite green (931/931 engine).

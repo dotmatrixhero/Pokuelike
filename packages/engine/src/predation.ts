@@ -748,7 +748,7 @@ function canAttackFromHere(world: World, agent: Agent, target: Agent, distance: 
   // checking whether it happens to reach would reject an attack even when a
   // different, in-range move was available the whole time. See
   // pickBestMove's own doc comment and DESIGN.md's "Move selection" section.
-  const move = pickBestMove(agent, target.types ?? [], distance);
+  const move = pickBestMove(agent, target.types ?? [], distance, world.tick);
   if (!move) return false;
   return isPathClear(world, agent.layer, agent.pos, target.pos);
 }
@@ -1224,10 +1224,10 @@ function resolveHit(
   // right above it, so this picks consistently with what was just validated
   // as reachable, rather than re-deriving its own (possibly different, now
   // that scoring is tempo-weighted too) answer independently.
-  const move = pickBestMove(attacker, defender.types ?? [], distance);
+  const move = pickBestMove(attacker, defender.types ?? [], distance, world.tick);
   if (!move) return false; // every move on cooldown, or none reach from here, this tick
 
-  useMove(attacker, move);
+  useMove(attacker, move, world.tick);
 
   if (move.selfCostPerUse) {
     attacker.needs[move.selfCostPerUse.need] = Math.max(0, attacker.needs[move.selfCostPerUse.need] - move.selfCostPerUse.amount);
@@ -1478,7 +1478,7 @@ export function applyPredationInstincts(
     // step-away flee costs nothing to spam, not a cap on `ticks` itself.
     const burrowMove = (agent.moves ?? []).find((move) => move.burrow && !agent.moveCooldowns?.[move.id]);
     if (burrowMove) {
-      useMove(agent, burrowMove);
+      useMove(agent, burrowMove, world.tick);
       agent.burrowedFromLayer = agent.layer;
       agent.layer = "underground";
       agent.burrowedTicksRemaining = burrowMove.burrow!.ticks;
