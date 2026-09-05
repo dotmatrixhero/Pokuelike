@@ -190,11 +190,10 @@ describe("reproduction", () => {
   });
 
   it("a single laying event lays MULTIPLE eggs (a clutch) when the shelter cluster has room for them", () => {
-    // Four adjacent shelter tiles -> a 4-tile cluster -> 16 egg slots
-    // (SHELTER_TILE_EGG_CAP=4 per tile), comfortably more than
-    // EGG_CLUTCH_MAX so the whole clutch can fit. Force the clutch-size
-    // draw to its max via a fixed rng so this test is deterministic rather
-    // than "usually more than one egg."
+    // Four adjacent shelter tiles -> a 4-tile cluster -> 4 egg slots
+    // (SHELTER_TILE_EGG_CAP=1 per tile) -> exactly enough for the whole
+    // clutch to fit. Force the clutch-size draw to its max via a fixed rng
+    // so this test is deterministic rather than "usually more than one egg."
     const world = createWorld(10, 10);
     setTile(world, "surface", 2, 3, "shelter");
     setTile(world, "surface", 3, 3, "shelter");
@@ -213,25 +212,20 @@ describe("reproduction", () => {
   });
 
   it("a clutch that doesn't fully fit is capped by real available shelter-cluster capacity, not crammed in regardless", () => {
-    // A single shelter tile (cap SHELTER_TILE_EGG_CAP=4) pre-occupied by
-    // 2 existing eggs, leaving exactly 2 real free slots — the clutch-size
-    // draw forced to its max (4) should still only place 2, not cram the
-    // rest in or drop the whole household's egg count to 0.
+    // A single shelter tile (SHELTER_TILE_EGG_CAP=1) has exactly 1 real
+    // free slot — the clutch-size draw forced to its max (4) should still
+    // only place 1, not cram the rest in or drop the whole household's egg
+    // count to 0.
     const world = createWorld(10, 10);
     setTile(world, "surface", 2, 3, "shelter");
-    world.agents.push(
-      parent("mother", "female", { x: 2, y: 2 }),
-      parent("father", "male", { x: 3, y: 2 }),
-      { ...parent("existing-egg-1", "female", { x: 2, y: 3 }), isEgg: true },
-      { ...parent("existing-egg-2", "female", { x: 2, y: 3 }), isEgg: true }
-    );
+    world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
     const log = new EventLog();
 
     applyMateSeeking(world, world.agents[0]!, log, undefined, () => 0.999);
 
-    const newEggs = world.agents.filter((a) => a.isEgg && a.id !== "existing-egg-1" && a.id !== "existing-egg-2");
-    expect(newEggs.length).toBe(2); // capped by the 2 real remaining slots, not the 4-egg clutch draw
-    expect(world.eggsLaid).toBe(2);
+    const newEggs = world.agents.filter((a) => a.isEgg);
+    expect(newEggs.length).toBe(1); // capped by the 1 real available slot, not the 4-egg clutch draw
+    expect(world.eggsLaid).toBe(1);
   });
 
   it("a bigger, more successful household (more adjacent shelter) reliably gets more eggs out of the same clutch draw", () => {

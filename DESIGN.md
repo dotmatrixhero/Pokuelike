@@ -7459,3 +7459,30 @@ right properties" or to pre-occupy known capacity rather than assume an
 exact count, per this file's established "fix a test if new real behavior
 invalidates an old assumption" convention. All 718 engine tests pass,
 including the unmodified determinism suite.
+
+**Full 8000-tick numbers, for the record:** seed 7 reached population
+**414** by tick 8000 (422 eggs laid, 757 bonds) — confirms the mechanism
+was working exactly as designed, at real scale, not just a modest bump.
+
+### Follow-up: reverted back to 1 (direct ask)
+
+Direct ask, after seeing the above numbers: "reduce the cap back to 1."
+`SHELTER_TILE_EGG_CAP` back to 1 (was briefly 4). Clutches (`eggs.ts`,
+2-4 eggs drawn per laying event) still draw the same way — with the cap
+back at 1, only the first egg of any clutch actually gets placed on a
+lone (non-clustered) shelter tile, so the mechanism is real but
+practically inert again in the current demo world, same as before the
+cap was raised. Real population is back down to modest, non-explosive
+levels: 3000/6000/8000 ticks, seed 42: pop 15/25/39; seed 7: pop 17/10/11
+— zero hunger-starvation deaths throughout. Several tests that were
+updated for the cap-of-4 scenario (multi-egg-clutch capacity tests) were
+adjusted back to reflect the real cap-of-1 behavior rather than reverted
+wholesale — the underlying clutch mechanism and its tests remain valid,
+just re-pointed at the current real per-tile limit. All 718 tests pass.
+
+The real lever for population growth, if wanted again later without
+reopening this exact back-and-forth, is still the same one flagged
+earlier and left untouched: biasing `pickBuildSite` (shelter.ts) toward
+building adjacent to existing shelter, so clusters actually form and the
+existing "multiple adjacent shelter increases capacity" rule (part of
+the original spec) does real work on its own — see TODO.md.
