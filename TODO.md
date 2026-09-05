@@ -2626,3 +2626,31 @@ not something this pathfinding pass itself caused or is positioned to fix.
       -> "sprouting" -> "lush") the way seedling growth or grazing scars
       get their own terrain kinds. Revisit if the single smooth ramp ends
       up reading as too subtle in actual play.
+- [x] Plant quality, direct ask ("fully fertile plant gives super higher
+      quality berries and such. But they don't need to be fully fertile to
+      produce it. And fully fertile plants tend to survive noticeably
+      longer and produce more"). New `Tile.quality?: number` (0-1) in the
+      engine — a fixed trait frozen onto a food/flora patch the moment it
+      matures in `flora.ts`'s `growFlora`, sampling whatever the tile's
+      live `fertility` happens to be right then (`undefined` behaves as
+      quality 1, same convention as `fertility` itself, so ordinary
+      never-harvested-before growth is unaffected). Drives three real,
+      independently-floored effects, none of which can crush a patch to
+      uselessness even at quality 0: (1) **yield** — starting `stock`
+      scales from 70% to 100% of `FOOD_MAX_STOCK` (`yieldFactor`) — "don't
+      need to be fully fertile to produce it"; (2) **lifespan** — decay
+      rate scales ±40% around neutral (`decayFactor`), applied to both
+      food and flora patches — "survive noticeably longer"; (3)
+      **nutrition** — a new `foodNutritionFactor(tile)`, read from
+      `needs.ts`'s actual feeding site, scales the real hunger restored by
+      a feeding ±30% around neutral — "super higher quality berries."
+      `quality` is cleared back to `undefined` when a patch dies, so the
+      next thing that grows on that tile gets its own fresh quality
+      sampled from fertility at that later maturation, not a stale
+      leftover value. 15 new tests across `flora.test.ts` and
+      `needs.test.ts`; one pre-existing decay-tuning test
+      (`flora.test.ts`'s "dies of natural decay meaningfully sooner")
+      needed an explicit neutral `tile.quality = 0.5` to stay isolated
+      from this new effect, since it hand-builds a tile without going
+      through `growFlora`'s maturation path. Full repo suite green
+      (845/845 engine, 19/19 data).

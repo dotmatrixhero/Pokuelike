@@ -295,6 +295,22 @@ export interface Tile {
    */
   fertility?: number;
   /**
+   * Founding fertility, frozen onto a food/flora patch the moment it
+   * matures (flora.ts's `growFlora`) — direct ask: "fully fertile plant
+   * gives super higher quality berries... they don't need to be fully
+   * fertile to produce it. And fully fertile plants tend to survive
+   * noticeably longer and produce more." A fixed trait of THIS plant,
+   * not a live readout of the tile's own `fertility` above (which keeps
+   * changing underneath it for whatever grows there NEXT once this
+   * patch dies). Drives three real effects, all in flora.ts: starting
+   * `stock` (yield), decay rate (lifespan), and — via
+   * `foodNutritionFactor`, read from needs.ts — how much hunger actually
+   * gets restored per feeding. `undefined` behaves as quality 1 (full
+   * quality), the same "missing == unaffected" default as `fertility`.
+   * Cleared back to `undefined` when the patch dies.
+   */
+  quality?: number;
+  /**
    * "shelter" tiles only: which species most recently finished building
    * (part of) this shelter — purely a rendering hint (packages/web's
    * renderer.ts/palette.ts tint a shelter tile per owner species) with no

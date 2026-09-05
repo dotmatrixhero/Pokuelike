@@ -106,6 +106,21 @@ describe("tickAgent", () => {
     expect(secondAgent.pos).toEqual({ x: 2, y: 0 }); // no reachable food, so it doesn't just sit "on" the depleted tile pretending to eat
     expect(secondAgent.behavior).toBe("seekFood");
   });
+
+  it("eating a high-quality patch restores noticeably more hunger than eating a low-quality one — direct ask: \"fully fertile plant gives super higher quality berries\"", () => {
+    function hungerRestored(quality: number): number {
+      const world = createWorld(5, 1);
+      setTile(world, "surface", 2, 0, "food");
+      tileAt(world, "surface", 2, 0)!.quality = quality;
+      const agent = makeAgent({ pos: { x: 2, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
+
+      tickAgent(world, agent);
+
+      return agent.needs.hunger - 0.1;
+    }
+
+    expect(hungerRestored(1)).toBeGreaterThan(hungerRestored(0));
+  });
 });
 
 describe("herd-status feeding priority", () => {

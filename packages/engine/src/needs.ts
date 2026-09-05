@@ -4,7 +4,7 @@ import { stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
 import { applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
-import { CONSUME_STOCK_AMOUNT, recordGrazing, tendSoil } from "./flora.js";
+import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing, tendSoil } from "./flora.js";
 import { tickCooldowns } from "./combat.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
 import { migrate } from "./migration.js";
@@ -479,9 +479,14 @@ export function findLayerWithTerrain(
   return undefined;
 }
 
-function consume(needs: Needs, behavior: "seekWater" | "seekFood"): void {
+/**
+ * `qualityMultiplier` — direct ask: "fully fertile plant gives super
+ * higher quality berries." Only `seekFood` ever passes anything but the
+ * default 1: water tiles have no `quality` concept of their own.
+ */
+function consume(needs: Needs, behavior: "seekWater" | "seekFood", qualityMultiplier = 1): void {
   const { need, amount } = CONSUME_RATE[behavior];
-  needs[need] = Math.min(1, needs[need] + amount);
+  needs[need] = Math.min(1, needs[need] + amount * qualityMultiplier);
 }
 
 /**
@@ -996,12 +1001,12 @@ export function tickAgentAction(
         agent.blockedResourceTiles = undefined;
         agent.ticksBlockedFromResource = 0;
         const need = agent.behavior === "seekWater" ? "thirst" : "hunger";
-        consume(agent.needs, agent.behavior);
+        const targetTile = agent.behavior === "seekFood" ? tileAt(world, agent.layer, target.x, target.y) : undefined;
+        consume(agent.needs, agent.behavior, agent.behavior === "seekFood" ? foodNutritionFactor(targetTile) : 1);
         if (agent.behavior === "seekFood") {
-          const tile = tileAt(world, agent.layer, target.x, target.y);
-          if (tile?.stock !== undefined) {
-            tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
-            recordGrazing(tile); // real self-feeding grazing event — see flora.ts's "Grazing scars"
+          if (targetTile?.stock !== undefined) {
+            targetTile.stock = Math.max(0, targetTile.stock - CONSUME_STOCK_AMOUNT);
+            recordGrazing(targetTile); // real self-feeding grazing event — see flora.ts's "Grazing scars"
           }
         }
         grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);

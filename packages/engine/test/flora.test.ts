@@ -7,6 +7,7 @@ import {
   recordGrazing,
   waterSoil,
   tendSoil,
+  foodNutritionFactor,
   CONSUME_STOCK_AMOUNT,
   FOOD_MAX_STOCK,
   FOOD_FLAVORS,
@@ -299,6 +300,12 @@ describe("food/flora durability tuning (direct ask: less durable food to force m
     setTile(world, "surface", 2, 2, "food");
     const tile = tileAt(world, "surface", 2, 2)!;
     tile.stock = 1;
+    // Quality 0.5 (neutral) keeps this test isolated to the base decay
+    // tuning it's actually about — an unset quality behaves as 1 (full
+    // quality, see types.ts), which would slow decay via the "fully
+    // fertile plants survive longer" quality effect and confound this
+    // measurement.
+    tile.quality = 0.5;
     world.tick = 0;
 
     // rng() always returns 1 so the spread roll (which would otherwise
@@ -679,5 +686,130 @@ describe("soil fertility (direct ask: soil should take time to recover after gro
     }
 
     expect(run()).toEqual(run());
+  });
+});
+
+describe("plant quality (direct ask: \"fully fertile plant gives super higher quality berries... they don't need to be fully fertile to produce it. And fully fertile plants tend to survive noticeably longer and produce more\")", () => {
+  it("a patch maturing on fertile-but-not-full ground still becomes food, at a reduced but not near-zero yield", () => {
+    const world = createWorld(3, 3);
+    setTile(world, "surface", 1, 1, "seedling");
+    const tile = tileAt(world, "surface", 1, 1)!;
+    tile.growth = MATURATION_TICKS - 1;
+    tile.fertility = 0; // worst case: freshly-harvested, zero recovery yet
+    vi.spyOn(Math, "random").mockReturnValue(0); // wins the food-vs-flora roll
+
+    growFlora(world);
+
+    expect(tile.terrain).toBe("food");
+    // Not exactly 0 — this same growFlora pass also applies one tick of
+    // passive fertility regen before checking maturation, same per-tile
+    // scan order as everything else in this file — but still ~0.
+    expect(tile.quality!).toBeLessThan(0.01);
+    // "don't need to be fully fertile to produce it" — a real majority of
+    // FOOD_MAX_STOCK, not next to nothing.
+    expect(tile.stock!).toBeGreaterThanOrEqual(FOOD_MAX_STOCK * 0.7);
+    expect(tile.stock!).toBeLessThan(FOOD_MAX_STOCK);
+  });
+
+  it("a patch maturing on fully fertile ground yields the full FOOD_MAX_STOCK and records quality 1", () => {
+    const world = createWorld(3, 3);
+    setTile(world, "surface", 1, 1, "seedling");
+    const tile = tileAt(world, "surface", 1, 1)!;
+    tile.growth = MATURATION_TICKS - 1;
+    tile.fertility = 1;
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    growFlora(world);
+
+    expect(tile.quality).toBe(1);
+    expect(tile.stock).toBe(FOOD_MAX_STOCK);
+  });
+
+  it("an untouched tile (undefined fertility, == fully fertile) also matures at full quality — no regression for ordinary growth", () => {
+    const world = createWorld(3, 3);
+    setTile(world, "surface", 1, 1, "seedling");
+    const tile = tileAt(world, "surface", 1, 1)!;
+    tile.growth = MATURATION_TICKS - 1;
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    growFlora(world);
+
+    expect(tile.quality).toBe(1);
+    expect(tile.stock).toBe(FOOD_MAX_STOCK);
+  });
+
+  it("a full-quality patch survives noticeably longer than a low-quality patch under identical decay conditions", () => {
+    function ticksToDie(quality: number): number {
+      const world = createWorld(3, 3);
+      setTile(world, "surface", 1, 1, "food");
+      const tile = tileAt(world, "surface", 1, 1)!;
+      tile.stock = 1;
+      tile.quality = quality;
+      world.tick = 0;
+      for (let t = 1; t <= 500; t++) {
+        world.tick = t;
+        growFlora(world, undefined, () => 1); // rng() == 1 never fires the spread roll
+        if (tileAt(world, "surface", 1, 1)!.terrain === "floor") return t;
+      }
+      throw new Error("never died");
+    }
+
+    expect(ticksToDie(1)).toBeGreaterThan(ticksToDie(0));
+  });
+
+  it("quality is cleared back to undefined once a food patch dies", () => {
+    const world = createWorld(3, 3);
+    setTile(world, "surface", 1, 1, "food");
+    const tile = tileAt(world, "surface", 1, 1)!;
+    tile.stock = 0.001;
+    tile.quality = 1;
+
+    growFlora(world, undefined, () => 0.99);
+
+    expect(tile.terrain).toBe("floor");
+    expect(tile.quality).toBeUndefined();
+  });
+
+  it("quality is cleared back to undefined once a flora patch dies", () => {
+    const world = createWorld(3, 3);
+    setTile(world, "surface", 1, 1, "flora");
+    const tile = tileAt(world, "surface", 1, 1)!;
+    tile.stock = 0.001;
+    tile.quality = 0.2;
+
+    growFlora(world, undefined, () => 0.99);
+
+    expect(tile.terrain).toBe("floor");
+    expect(tile.quality).toBeUndefined();
+  });
+
+  describe("foodNutritionFactor (direct ask: higher-quality berries restore more hunger)", () => {
+    it("is 1 (neutral) for a tile with no recorded quality", () => {
+      const world = createWorld(3, 3);
+      setTile(world, "surface", 1, 1, "food");
+      expect(foodNutritionFactor(tileAt(world, "surface", 1, 1))).toBe(1);
+    });
+
+    it("is 1 for undefined (no tile at all)", () => {
+      expect(foodNutritionFactor(undefined)).toBe(1);
+    });
+
+    it("is greater than 1 for a full-quality patch", () => {
+      const world = createWorld(3, 3);
+      setTile(world, "surface", 1, 1, "food");
+      const tile = tileAt(world, "surface", 1, 1)!;
+      tile.quality = 1;
+      expect(foodNutritionFactor(tile)).toBeGreaterThan(1);
+    });
+
+    it("is less than 1 for a zero-quality patch — still real nutrition, just less", () => {
+      const world = createWorld(3, 3);
+      setTile(world, "surface", 1, 1, "food");
+      const tile = tileAt(world, "surface", 1, 1)!;
+      tile.quality = 0;
+      const factor = foodNutritionFactor(tile);
+      expect(factor).toBeLessThan(1);
+      expect(factor).toBeGreaterThan(0);
+    });
   });
 });

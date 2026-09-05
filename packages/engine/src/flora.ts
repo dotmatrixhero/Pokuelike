@@ -258,6 +258,53 @@ export function tendSoil(tile: Tile | undefined): void {
   raiseFertility(tile, FERTILITY_TEND_PER_TICK);
 }
 
+/**
+ * Plant quality — direct ask: "fully fertile plant gives super higher
+ * quality berries and such. But they don't need to be fully fertile to
+ * produce it. And fully fertile plants tend to survive noticeably longer
+ * and produce more." Whatever the tile's fertility happens to be the
+ * moment a seedling matures gets frozen onto the new patch as
+ * `Tile.quality` (see its doc comment in types.ts) and drives three real
+ * effects below — yield, lifespan, and (via `foodNutritionFactor`, read
+ * from needs.ts) how much a feeding actually restores.
+ */
+/**
+ * A patch's starting stock never drops below this fraction of
+ * `FOOD_MAX_STOCK`, even at zero founding quality — "they don't need to
+ * be fully fertile to produce it," so a poor patch still yields a real
+ * majority of the max rather than next to nothing.
+ */
+const QUALITY_MIN_YIELD_FRACTION = 0.7;
+/** Starting stock scales linearly from `QUALITY_MIN_YIELD_FRACTION` (quality 0) up to the full `FOOD_MAX_STOCK` (quality 1). */
+function yieldFactor(quality: number): number {
+  return QUALITY_MIN_YIELD_FRACTION + quality * (1 - QUALITY_MIN_YIELD_FRACTION);
+}
+/**
+ * How much founding quality can speed up or slow down a patch's own
+ * decay — "fully fertile plants tend to survive noticeably longer." At
+ * quality 1, decays this fraction SLOWER (survives proportionally
+ * longer); at quality 0, this fraction FASTER. Applied to both food and
+ * flora decay below — "survive longer" isn't specific to edible berries
+ * the way yield/nutrition are.
+ */
+const QUALITY_LIFESPAN_SWING = 0.4;
+function decayFactor(quality: number): number {
+  return 1 + QUALITY_LIFESPAN_SWING * (1 - 2 * quality);
+}
+/**
+ * How much founding quality scales the real hunger benefit of eating from
+ * a patch — "fully fertile plant gives super higher quality berries."
+ * Symmetric with `decayFactor` but inverted (higher quality = more
+ * benefit, not less); exported so needs.ts's actual feeding site can use
+ * the same quality->benefit curve instead of duplicating it.
+ */
+const QUALITY_NUTRITION_SWING = 0.3;
+/** How much hunger-restoration a feeding from this tile is worth, relative to a baseline (quality-1) feeding — 1 for an unset/quality-1 tile. */
+export function foodNutritionFactor(tile: Tile | undefined): number {
+  if (!tile || tile.quality === undefined) return 1;
+  return 1 + QUALITY_NUTRITION_SWING * (2 * tile.quality - 1);
+}
+
 /** Records a real grazing event at these tile coordinates — call from every place stock is actually consumed. */
 export function recordGrazing(tile: Tile | undefined): void {
   if (!tile) return;
@@ -385,10 +432,15 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
       if (tile.growth >= MATURATION_TICKS) {
         const nearSun = isNearSunbeam(world, pos);
         const becomesFood = rng() < (nearSun ? FOOD_CHANCE_NEAR_SUNBEAM : FOOD_CHANCE);
+        // Frozen onto the new patch as its `quality` — the tile's own
+        // `fertility` keeps moving after this, but this plant's yield/
+        // lifespan/nutrition are set for its whole life right here.
+        const quality = tile.fertility ?? 1;
+        tile.quality = quality;
 
         if (becomesFood) {
           tile.terrain = "food";
-          tile.stock = FOOD_MAX_STOCK;
+          tile.stock = FOOD_MAX_STOCK * yieldFactor(quality);
           tile.flavor = nearSun ? pickFlavor(SUN_FOOD_FLAVORS, rng) : pickFlavor(FOOD_FLAVORS, rng);
           invalidateResourceIndex(world); // a new "food" tile — resourceIndex.ts's cache needs rebuilding
         } else {
@@ -420,12 +472,13 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
       // modulation, not a direct stock top-up, is this system's closest
       // equivalent to "boosts/suppresses regrowth."
       const weatherDivisor = floraDecayDivisor(world, "surface", pos);
-      tile.stock -= (NATURAL_DECAY_PER_TICK * (1.5 - season)) / weatherDivisor;
+      tile.stock -= (NATURAL_DECAY_PER_TICK * (1.5 - season) * decayFactor(tile.quality ?? 1)) / weatherDivisor;
 
       if (tile.stock <= 0) {
         tile.terrain = "floor";
         tile.stock = undefined;
         tile.flavor = undefined;
+        tile.quality = undefined;
         tile.fertility = FERTILITY_AFTER_HARVEST; // the ground that just fed something needs a little time before it's this ready again
         invalidateResourceIndex(world); // a "food" tile just reverted to "floor"
         log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos, stage: "died" });
@@ -438,12 +491,13 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
     }
 
     if (tile.terrain === "flora" && tile.stock !== undefined) {
-      tile.stock -= (FLORA_DECAY_PER_TICK * (1.5 - season)) / floraDecayDivisor(world, "surface", pos);
+      tile.stock -= (FLORA_DECAY_PER_TICK * (1.5 - season) * decayFactor(tile.quality ?? 1)) / floraDecayDivisor(world, "surface", pos);
 
       if (tile.stock <= 0) {
         tile.terrain = "floor";
         tile.stock = undefined;
         tile.flavor = undefined;
+        tile.quality = undefined;
         tile.fertility = FERTILITY_AFTER_HARVEST; // same recovery-time reasoning as the food-death branch above
         log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos, stage: "died" });
       }
