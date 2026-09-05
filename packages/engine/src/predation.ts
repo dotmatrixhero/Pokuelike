@@ -1,4 +1,4 @@
-import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
+import type { Agent, HuntRules, Layer, TerrainKind, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { applyForcedMovement, stepAway, stepToward } from "./movement.js";
@@ -8,7 +8,7 @@ import type { Direction } from "./moves.js";
 import { resolveShape } from "./moves.js";
 import type { MoveSpec } from "./moves.js";
 import { canBreed, grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
-import { FINISHING_POOL_FRACTION } from "./support.js";
+import { FINISHING_POOL_FRACTION, applyAllyEffect, nearestAllyEffectTarget } from "./support.js";
 import { RAPPORT_MOB_DEFENSE_DELTA, strengthenRapportMutual } from "./rapport.js";
 import { isPathClear } from "./fov.js";
 import { stepTowardMovingTarget } from "./pathfinding.js";
@@ -20,6 +20,7 @@ import {
   applyStatStage,
   BURN_ATTACK_STAGE,
   damageReductionOf,
+  defenseBoostOf,
   getStatStage,
   isBurned,
   maybeInflictStatus,
@@ -30,6 +31,9 @@ import {
 
 /** How far a herd's non-prey members (e.g. Venusaur) will travel to intervene when a herd-mate is in trouble. */
 const GUARDIAN_DETECT_RADIUS = 6;
+
+/** Dry, walkable terrain kinds `MoveSpec.terrainFill` can convert into standing water — deliberately narrow, not every non-water tile (a wall/tree obviously shouldn't become a puddle). */
+const TERRAIN_FILLABLE = new Set<TerrainKind>(["floor", "sand", "mud"]);
 
 /**
  * How close an awake, conscious, same-herd agent has to be to a SLEEPING
@@ -460,6 +464,23 @@ export function nearest(agent: Agent, others: Agent[]): Agent | undefined {
 }
 
 /**
+ * The real "focus fire" primitive: prefers a rally-marked candidate
+ * (`Agent.rallyMarkTicksRemaining`, set by `MoveSpec.rallyCall` on a landed,
+ * non-killing hit) over a merely-closer one, falling back to plain
+ * `nearest` when nothing among `others` is marked. Ties among multiple
+ * marked candidates resolve by distance, same as the unmarked fallback —
+ * marking isn't itself a tie-break priority, just a filter applied first.
+ * Used at every threat/hunt-target pick where several independent agents
+ * choosing the *same* target actually matters (mob-fight, a guardian's own
+ * pick, a predator's hunt target) — not at every `nearest` call site (e.g.
+ * "who's currently attacking me" while fleeing isn't a pick worth biasing).
+ */
+export function preferMarked(agent: Agent, others: Agent[]): Agent | undefined {
+  const marked = others.filter((other) => (other.rallyMarkTicksRemaining ?? 0) > 0);
+  return nearest(agent, marked.length > 0 ? marked : others);
+}
+
+/**
  * Same-species, same-herd, living, conscious agents near `pos`, excluding
  * `excludeId` itself. Fainted allies are excluded on purpose — they're
  * physically present but can't take an action-tick behavior at all (see
@@ -721,6 +742,7 @@ function canAttackFromHere(world: World, agent: Agent, target: Agent, distance: 
 
 /** True if a "bush" tile is what `agent` is currently standing on — see `Tile.concealment`. */
 function isConcealed(world: World, agent: Agent): boolean {
+  if ((agent.burrowedTicksRemaining ?? 0) > 0) return true;
   return tileAt(world, agent.layer, agent.pos.x, agent.pos.y)?.concealment === true;
 }
 
@@ -840,7 +862,25 @@ function applySingleDamageInstance(
   rng: () => number = Math.random
 ): boolean {
   const isCritical = rollCritical(move.critRateStage ?? 0, rng);
+  if (isCritical && move.critCooldownReset && attacker.moveCooldowns) {
+    attacker.moveCooldowns[move.id] = 0;
+  }
   const situational = situationalMultiplier(world, attacker, defender, move);
+
+  // Consumes the attacker's own tile (e.g. an actual boulder) for a damage
+  // multiplier — checked before the damage formula runs, since it changes
+  // the damage itself rather than reacting to a landed hit. Reverting the
+  // tile to floor here (not gated on the hit landing/killing) means a
+  // multi-hit flurry only ever gets this once: the second hit's own check
+  // just sees plain floor already.
+  let consumedTerrainMultiplier = 1;
+  if (move.consumesOwnTerrain) {
+    const ownTile = tileAt(world, attacker.layer, attacker.pos.x, attacker.pos.y);
+    if (ownTile?.terrain === move.consumesOwnTerrain.terrain) {
+      consumedTerrainMultiplier = move.consumesOwnTerrain.damageMultiplier;
+      setTile(world, attacker.layer, attacker.pos.x, attacker.pos.y, "floor");
+    }
+  }
 
   // `weightScaling` adds bonus power proportional to the attacker's own
   // maxHp (this sim's proxy for size/weight — see `powerOf`'s own doc
@@ -862,14 +902,18 @@ function applySingleDamageInstance(
               spAttack: getStatStage(attacker, "spAttack"),
             },
           },
-          { types: defender.types ?? [], stats: defender.stats, statStages: { defense: getStatStage(defender, "defense"), spDefense: getStatStage(defender, "spDefense") } },
+          {
+            types: defender.types ?? [],
+            stats: defender.stats,
+            statStages: { defense: getStatStage(defender, "defense") + defenseBoostOf(defender), spDefense: getStatStage(defender, "spDefense") },
+          },
           effectiveMove,
           0.85 + rng() * 0.15,
           isCritical
         ).damage
       : FALLBACK_DAMAGE;
 
-  const damage = Math.max(0, Math.floor(rawDamage * situational * (1 - damageReductionOf(defender))));
+  const damage = Math.max(0, Math.floor(rawDamage * situational * consumedTerrainMultiplier * (1 - damageReductionOf(defender))));
 
   if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log, ctx, rng);
 
@@ -1020,7 +1064,7 @@ function resolveHitAgainstTarget(
     // swap get a chance to apply.
     maybeInflictStatus(defender, attacker.id, move, world, log, rng);
     if (move.statusSpreads && defender.status) {
-      maybeSpreadStatus(defender, attacker.id, defender.status.kind, world, log, rng);
+      maybeSpreadStatus(defender, attacker.id, defender.status.kind, world, log, rng, move.statusSeverity);
     }
     if (move.statChangeOnHit?.target === "defender") {
       applyStatStage(defender, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
@@ -1030,6 +1074,9 @@ function resolveHitAgainstTarget(
       const attackerPos = { ...attacker.pos };
       attacker.pos = { ...defender.pos };
       defender.pos = attackerPos;
+      if (move.positionSwapPull) {
+        applyForcedMovement(world, { mover: "defender", direction: "away", tiles: move.positionSwapPull, timing: "onHit" }, attacker, defender);
+      }
     }
     if (move.jamCooldownTicks && defender.moveCooldowns) {
       for (const moveId of Object.keys(defender.moveCooldowns)) {
@@ -1039,6 +1086,13 @@ function resolveHitAgainstTarget(
     if (move.terrainBurn) {
       const tile = tileAt(world, defender.layer, defender.pos.x, defender.pos.y);
       if (tile?.terrain === "bush") setTile(world, defender.layer, defender.pos.x, defender.pos.y, "floor");
+    }
+    if (move.terrainFill) {
+      const tile = tileAt(world, defender.layer, defender.pos.x, defender.pos.y);
+      if (tile && TERRAIN_FILLABLE.has(tile.terrain)) setTile(world, defender.layer, defender.pos.x, defender.pos.y, move.terrainFill.terrain);
+    }
+    if (move.rallyCall) {
+      defender.rallyMarkTicksRemaining = move.rallyCall.ticks;
     }
   }
 
@@ -1163,6 +1217,15 @@ function resolveHit(
   // the move is used — see `MoveSpec.statChangeOnHit`'s own doc comment.
   if (move.statChangeOnHit?.target === "self") {
     applyStatStage(attacker, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
+  }
+
+  // `allyEffectOnAttack`: the ally-effect piggybacks on a hostile attack,
+  // additively — same "the moment the move is used" timing as the self-side
+  // stat change above, independent of whether this attack itself lands. A
+  // no-op if no eligible herd-mate is in range this tick.
+  if (move.allyEffectOnAttack && move.allyEffect) {
+    const ally = nearestAllyEffectTarget(world, attacker, move);
+    if (ally) applyAllyEffect(world, attacker, ally, move.allyEffect, log);
   }
 
   if (move.hitsArea) return resolveAreaHit(world, attacker, defender, move, log, faintKind, ctx, rng, accuracyBonusMultiplier);
@@ -1311,7 +1374,7 @@ export function applyPredationInstincts(
       const herdmateThreats = agentsWithin(world, herdmate, FLEE_DETECT_RADIUS).filter((other) =>
         isHunterSpecies(rules, other.species, herdmate.species)
       );
-      const threat = nearest(herdmate, herdmateThreats);
+      const threat = preferMarked(herdmate, herdmateThreats);
       if (threat) {
         const distance = manhattan(agent.pos, threat.pos);
         // Actively fighting to defend a herd-mate isn't consistent with
@@ -1352,7 +1415,7 @@ export function applyPredationInstincts(
           isHunterSpecies(rules, other.species, agent.species) &&
           isDetectable(world, agent.pos, other, effectiveFleeRadius(agent))
       );
-  const threat = nearest(agent, threats);
+  const threat = preferMarked(agent, threats);
   if (threat) {
     const distance = manhattan(agent.pos, threat.pos);
     // Allies must ALSO be within striking distance of the threat right now — not just
@@ -1376,7 +1439,24 @@ export function applyPredationInstincts(
     agent.behavior = "flee";
     agent.huntTarget = undefined;
     agent.fightTarget = undefined;
-    agent.pos = stepAway(world, agent.layer, agent.pos, threat.pos);
+
+    // A real escape hatch: burrow instead of the normal flee step, if this
+    // agent knows an off-cooldown `burrow` move. Real protection from
+    // anything not also underground comes free from the engine's own
+    // strict same-layer targeting (see `Agent.burrowedTicksRemaining`'s own
+    // doc comment) — this just needs to actually relocate the agent and
+    // start the clock. `useMove` puts it on cooldown same as any other use,
+    // so the balance lever is a longer `cooldownTicks` than a plain
+    // step-away flee costs nothing to spam, not a cap on `ticks` itself.
+    const burrowMove = (agent.moves ?? []).find((move) => move.burrow && !agent.moveCooldowns?.[move.id]);
+    if (burrowMove) {
+      useMove(agent, burrowMove);
+      agent.burrowedFromLayer = agent.layer;
+      agent.layer = "underground";
+      agent.burrowedTicksRemaining = burrowMove.burrow!.ticks;
+    } else {
+      agent.pos = stepAway(world, agent.layer, agent.pos, threat.pos);
+    }
     return true;
   }
 
@@ -1407,7 +1487,7 @@ export function applyPredationInstincts(
             !isProtectedByMob(world, other) &&
             isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS)
         );
-    let target = nearest(agent, soloCandidates);
+    let target = preferMarked(agent, soloCandidates);
 
     // Pack hunting: only attempted once a solo target couldn't be found —
     // this is what makes it a real lever against target that a solo predator
@@ -1424,7 +1504,7 @@ export function applyPredationInstincts(
           !isProtectedByMob(world, other) &&
           isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS)
       );
-      const packTarget = nearest(agent, packCandidates);
+      const packTarget = preferMarked(agent, packCandidates);
       if (packTarget && nearbySameSpeciesConspecifics(world, agent, packTarget.pos, PACK_MUSTER_RADIUS).length >= MIN_PACK_ALLIES) {
         target = packTarget;
       }

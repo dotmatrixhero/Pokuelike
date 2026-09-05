@@ -40,10 +40,18 @@ grepping for "needs" across the whole file.
 | Move-caused terrain change (`MoveSpec.terrainBurn`) | A fire move that burns down a bush the target was hiding in | **Shipped** — on a landed, non-killing hit, reverts a `"bush"` tile the defender stands on to plain floor (`resolveHitAgainstTarget`, via `world.ts`'s `setTile`) — the target loses its concealment as a side effect of getting hit, not a separate mechanic. Not yet used in a shipped tree |
 | Status spreading to a nearby agent (`MoveSpec.statusSpreads`) | A "the fire/poison catches on whoever's standing next to the target" notable | **Shipped** — once the primary status lands, rolls a second, independent chance (`status.ts`'s `maybeSpreadStatus`) to inflict the *same* status on one other living, same-layer agent within a small radius — a plain distance scan kept local to `status.ts` on purpose, to avoid a real import cycle with predation.ts. Not yet used in a shipped tree |
 | Multi-passive nodes (`MoveTreeNode.grantsPassives`, plural, alongside the existing singular `grantsPassive`) | A single notable that grants two passives at once (e.g. Alpha Strike's fix: bonus damage *and* damage reduction, not just one) | **Shipped** — `leveling.ts`'s `maybeAutoRespec` applies both the singular and, when present, every entry of the plural array. Not yet used in a shipped tree |
+| Rally-call focus fire (`MoveSpec.rallyCall` + `Agent.rallyMarkTicksRemaining` + `predation.ts`'s `preferMarked`) | "Rally all allies to attack this enemy" — genuinely stronger than buffing one ally, since it gets a whole herd's *independently-run* target selection to converge on the same threat instead of each agent separately picking whatever's nearest to itself | **Shipped** — on a landed, non-killing hit, marks the defender for `ticks`; `preferMarked` (replacing a plain `nearest` call) is now used at every threat/hunt-target pick where several agents choosing the *same* target matters: mob-fight threat selection, a guardian's own threat pick, and a predator's hunt-target pick — so it works for prey rallying a mob onto a specific predator, a guardian pack converging on a threat, and a predator pack co-hunting the same marked prey. First real content: Scratch's *Rally the Colony* (see below) |
 | Self-state-aware scoring (a bonus keyed to the *user's own* HP, not the target's) | Cornered Fury | **Shipped** — `MoveSpec.selfStateBonus` (`"selfLowHp"`), folded into `pickBestMove`'s scoring (combat.ts). Not yet used in a shipped tree |
 | Real-duration temporary buffs (a stat change that expires after N ticks) | Bubble Shield, Slippery Current | **Shipped** — folded into the same mechanism as persistent stat stages below (`Agent.statStages` entries with `ticksRemaining` set expire; without it, they're permanent) — one array, two lifetimes. `MoveSpec.statChangeOnHit`'s optional `ticks` field drives this from a move. Not yet used in a shipped tree |
-| Position-swap (two agents exchange tiles in one action) | Bodyblock | **Shipped** — `MoveSpec.positionSwap`, resolved in `resolveHitAgainstTarget` (predation.ts) on a landed, non-killing hit only. Not yet used in a shipped tree |
-| Cross-agent effects (a move's hit affects an ally, not just the target) | Vine Link, Nurturing Vines, Rally Charge, Warning Lash | **Shipped** — `MoveSpec.targetsAlly`/`allyEffect` (heal and/or buff), resolved by `applySupportMove` (support.ts) from the agent's own idle/support tick — a genuinely separate path from `resolveHit`'s hostile resolution, as this doc's own "why status effects and environmental moves are two different systems" section predicted a cross-agent effect would need. Not yet used in a shipped tree |
+| Position-swap (two agents exchange tiles in one action) | Bodyblock | **Shipped** — `MoveSpec.positionSwap`, resolved in `resolveHitAgainstTarget` (predation.ts) on a landed, non-killing hit only; optional `positionSwapPull` continues the defender further past the swap (reuses `applyForcedMovement`, same obstacle/immovable-aware stepping as any other forced movement). First real content: Peck's *Snatch and Swap* |
+| Crit-triggered cooldown reset (`MoveSpec.critCooldownReset`) | A real crit-fisher notable — reward landing a crit with tempo, not just bonus damage | **Shipped** — checked in `applySingleDamageInstance` right where the crit roll itself already happens; resets the attacker's own cooldown for that move to 0 on a landed critical hit. First real content: Peck's *Relentless Harrier* |
+| Status severity multiplier (`MoveSpec.statusSeverity` → `Agent.status.severityMultiplier`) | A "badly poisons/burns" lever | **Shipped** — set on the status at infliction time (`maybeInflictStatus`), read every tick alongside the existing burn/poison DOT fraction (`tickStatusEffects`). Deliberately a flat multiplier for the whole DOT duration, not mainline Toxic's turn-by-turn escalation — a real severity difference without a second per-status counter to track. First real content: Scratch's *Widening Fangs* |
+| Defense-stat boost passive (`PassiveKind` `"defenseBoost"`) | Diversifying away from flat `damageReduction` as the default "tanky branch" lever — see the design note above | **Shipped** — `predation.ts`'s `applySingleDamageInstance` adds it straight into the defender's Defense stat-stage sum fed to `calculateDamage`; physical-only for free, since `calculateDamage` only ever reads the `defense` stage for a physical move (a special move reads `spDefense` instead, untouched by this). First real content: Tackle's `watchful_pack` and Ember's `banked_embers`, both converted from flat `damageReduction` |
+| Own-terrain consumption (`MoveSpec.consumesOwnTerrain`) | Rock Throw's boulder-throw idea — a real environmental payoff for standing on the right tile | **Shipped** — checked in `applySingleDamageInstance` before the damage formula runs (it changes the damage itself, not a post-hit side effect): while the attacker's own tile matches `terrain`, multiplies damage and reverts that tile to `"floor"`. A clean miss never reaches this check (accuracy is rolled first), so it doesn't waste the terrain; a multi-hit flurry only ever triggers it once, for free (the tile's already floor for later hits in the same use). First real content: Rock Throw's real, shipped base spec (3x vs. a real `"boulder"` tile) |
+| Terrain fill on a landed hit (`MoveSpec.terrainFill`) | Water Gun leaving a real puddle where it hits | **Shipped** — the inverse of `terrainBurn`, same "landed, non-killing hit" hook (`resolveHitAgainstTarget`): converts a dry `"floor"`/`"sand"`/`"mud"` tile at the *defender's* position into `terrain`. Deliberately permanent, not a temporary puddle — this sim has no generic "tile change expires" mechanism yet. First real content: Water Gun's real, shipped base spec (leaves `"water"`) |
+| Temporary self-burrow (`MoveSpec.burrow` → `Agent.burrowedTicksRemaining`/`burrowedFromLayer`) | The floated "Dig as temporary invulnerability" idea above | **Shipped**, in a leaner form than originally floated — a fleeing agent with an off-cooldown `burrow` move relocates to the `"underground"` layer (from wherever it currently is) instead of taking a normal flee step, for a set duration, then resurfaces automatically. **The "invulnerability" half needed no new mechanism at all**: every targeting/detection function in this engine (`agentsWithin`, `resolveAreaHit`, everything built on them) already requires `other.layer === agent.layer`, so a burrowed agent is already fundamentally untargetable by anything not also underground — this was true before this feature and would be true of any layer swap. What's actually new is the temporary/durationed window, the automatic resurfacing, `isConcealed` (predation.ts) now also returning true while burrowed (so it composes with the `"concealed"` situational bonus and detection-radius reduction against *other* underground agents), and the cooldown as the balance lever the original idea asked for — a plain flee step costs nothing and can repeat every tick, `dig`'s 15-tick cooldown can't. `pickBestMove` (combat.ts) excludes any `burrow` move from hostile move selection (a `targetsAlly` move, by contrast, is deliberately NOT excluded — see the row below and the "additive, not a replacement" note). First real content: Diglett's and Sandshrew's real, shipped `dig` move |
+| Cross-agent effects (a move's hit affects an ally, not just the target) | Vine Link, Nurturing Vines, Rally Charge, Warning Lash | **Shipped** — `MoveSpec.targetsAlly`/`allyEffect` (heal and/or buff), resolved by `applySupportMove` (support.ts) from the agent's own idle/support tick — a genuinely separate path from `resolveHit`'s hostile resolution, as this doc's own "why status effects and environmental moves are two different systems" section predicted a cross-agent effect would need. **Refined per feedback**: `targetsAlly` no longer excludes a move from hostile selection either — `pickBestMove` (combat.ts) treats it as an ordinary attack option too (using whatever power/accuracy/other combat deltas it's accumulated), so every real "ally-opener" node (Colony Call, Flock Call, Shared Current, etc.) is additive to that move's combat identity, not a trade-off against it. The two effects never fire in the same tick (predation gets first refusal every tick before `applySupportMove` even runs, and both share the same cooldown via `useMove`) |
+| Ally-effect piggybacking on an attack (`MoveSpec.allyEffectOnAttack`) | "Make it so some of 'em not only do it as a separate target but also auto trigger if using against an enemy while ally is in range too" — a second, independent way the ally-effect fires, on top of (not instead of) `targetsAlly`'s dedicated idle-tick use | **Shipped** — checked in `resolveHit` (predation.ts) the instant the move is used against an enemy, same timing as `statChangeOnHit`'s self-side effect, independent of whether the attack itself lands: finds the nearest in-range, hurt-preferred herd-mate (`nearestAllyEffectTarget`, support.ts — the same "who gets it" rule `applySupportMove` uses, pulled out so both share it) and applies `allyEffect` to them too, at no extra cost. Works with or without `targetsAlly` also set — a move can auto-trigger on attack without ever being a dedicated idle-tick support move, or do both. First real content: Scratch's *Colony Call* and Water Gun's *Shared Current* (see below) |
 | Multi-target/AoE resolution (apply a move to every agent within its resolved shape, not one target) | Growl (its entire premise), Firestorm, Ring of Fire's full fantasy, Boulder Toss/Skipping Stone | **Shipped** — `MoveSpec.hitsArea`, resolved by `resolveAreaHit` (predation.ts): facing derived from attacker->primary-target direction, `resolveShape` finds every living agent in the move's footprint, each gets its own accuracy roll and damage instance; only the deliberately-picked primary target gets status/stat-change/forced-movement/position-swap hooks, incidental targets just take the raw hit. Confirmed in a real fight: a ring-shaped move centered on the attacker landed on both the picked target and an unrelated bystander standing on the same ring. Growl itself still isn't built — see below |
 | Persistent stat stages (`Agent`-level Attack/Defense/etc. modifiers, settable by a move, lasting until cured — distinct from burn's one-off computed halving, which just derives a stage from `agent.status` fresh at each `calculateDamage` call rather than storing one) | Growl specifically (`statStageMultiplier` already exists in combat.ts as a pure function; burn now calls it, but from a computed value, not a stored `Agent.statStages` field) | **Shipped** — `Agent.statStages` (an array of `{stat, stage, ticksRemaining?}` entries, `status.ts`'s `applyStatStage`/`getStatStage`), fed into `calculateDamage`'s existing stat-stage machinery for both attacker and defender, and composing additively with burn's own -2 Attack. `MoveSpec.statChangeOnHit` is the move-level lever: `target: "self"` applies the instant the move is used, `target: "defender"` only on a landed, non-killing hit. **Growl itself is still not built** — it needs this primitive plus multi-target/AoE (both now shipped) plus a no-damage/status-move representation, which remains the one open piece |
 | Status-effect system (burn/poison DOT, paralysis/sleep/freeze) | Ember's/Flamethrower's burn chance, previously idle | **Shipped** — see DESIGN.md's "Status effects" section. Constrict's designed root effect still needs a sixth `StatusKind` (`"root"`), not modeled yet |
@@ -89,11 +97,12 @@ that already exists):
 | Move (real) | Effect | What it touches |
 |---|---|---|
 | Sunny Day | Plants a temporary `sunbeam` tile at the caster's position | flora.ts's `isNearSunbeam`/`FOOD_CHANCE_NEAR_SUNBEAM` — zero new terrain code |
-| Dig | Instantly crosses the user to the layer below, at the same (x,y) | Reuses the existing cross-layer mechanic (needs.ts) as an emergency escape |
+| Dig | Instantly crosses the user to the layer below, at the same (x,y) | Reuses the existing cross-layer mechanic (needs.ts) as an emergency escape. **Stronger variant floated, not yet designed or built** — see "Dig as temporary invulnerability" below instead of shipping the plain instant-escape version |
 | Leech Seed | Transfers a fixed amount of hunger/thirst from target to caster | Direct `Needs` field manipulation — the one genuinely new mechanic (resource transfer between two agents) |
 | Growth | Force-matures a nearby `seedling` early, or shortens its `MATURATION_TICKS` | Direct hook into flora.ts's existing growth timer |
-| Water Gun | Converts an adjacent dry `floor` tile into a temporary puddle | New but minimal — a short-lived stock-bearing water tile |
+| Water Gun | Converts an adjacent dry `floor` tile into a temporary puddle, or restores a real `water` tile that's been drying/receding | New but minimal — a short-lived stock-bearing water tile; the "restore" half reuses whatever water tiles already track once anything does (currently they don't dry up at all, so this waits on that first) |
 | Ember (opportunistic, not on-hit) | Burns an adjacent `flora`/`food` tile back to `floor` | Real terraforming, double-edged (clears a blocker, destroys a resource) |
+| Rock Throw (**own-terrain consumption, own spec — floated, not yet built**) | While standing on a real `boulder` tile (already a real, generated `TerrainKind` — `worldgen.ts`'s Highland-leaning obstacle kind, currently just unwalkable scenery), throws *that* boulder instead of a generic rock: the boulder tile reverts to `floor` (consumed, like `terrainBurn` but on the attacker's own tile instead of the defender's) and the hit deals roughly triple damage. Its own tree node, not baked into the base move — most Rock Throw uses are the ordinary version; this is the payoff for actually standing on real terrain when you use it | Closer to buildable than it looks: `terrainBurn` is the exact same shape (revert one tile, consequence attached to a landed hit) already proven in the engine, just checked against the *attacker's* tile instead of the *defender's*, and gated on `terrain === "boulder"` specifically rather than any landed hit. Needs one new field (e.g. `MoveSpec.consumesOwnTerrain?: { terrain: TerrainKind; damageMultiplier: number }`), checked at the top of the hit-resolution path (before damage, since it changes the damage itself) rather than in the existing post-hit hook block |
 
 ### Round two
 
@@ -232,6 +241,53 @@ like Growl would set a temporary "detectable beyond normal range" flag;
 Camouflage would do the opposite). Leer (round two, above) is the
 smallest possible first step — a single move that actually respects FOV —
 without committing to the whole system.
+
+## Dig as temporary invulnerability — done, leaner than floated
+
+**Was a side note, now shipped** — see the primitives checklist's
+"Temporary self-burrow" row above for the real mechanism. The
+"invulnerability" half turned out to need no new primitive at all: this
+engine's targeting/detection functions already require the attacker and
+defender to share a layer, so a burrowed agent (relocated to
+`"underground"`) is already fundamentally unreachable from any other
+layer — that was true before this feature and would be true of any layer
+swap. What got built instead: a *temporary*, durationed burrow (not a
+one-shot escape) with automatic resurfacing, `isConcealed` (predation.ts)
+extended to report true while burrowed, and a real cooldown as the
+balance lever, exactly as originally asked — a plain flee step is free
+and repeatable every tick, Dig's cooldown isn't. Diglett and Sandshrew
+both know it for real now.
+
+## Stop overusing `damageReduction` — partially done
+
+**Was a side note, now partly actioned.** Feedback on the four new trees
+(Rock Throw/Peck/Scratch/Water Gun): flat `damageReduction` is the
+Boldness-branch opener (and reappears in most Boldness↔Sociability
+crosslinks) in *every* tree shipped or drafted so far — Tackle, Slash,
+Ember, and all four new ones. It works, but leaning on the same lever for
+"this branch is about surviving hits" every single time is exactly the
+"cookie cutter" complaint that prompted the four-tree redesign, just at
+the individual-node level instead of the whole-tree level. Also raised:
+`damageReduction` reduces *all* incoming damage indiscriminately
+(`resolveHit`, predation.ts — it doesn't distinguish physical from
+special), so it's a strictly better, less thematic version of just
+buffing Defense.
+
+**Shipped**: a real `defenseBoost` passive (see the primitives checklist)
+— physical-only for free, since `calculateDamage` only ever reads the
+`defense` stat stage for a physical move. Two shipped, real nodes were
+converted as a first pass: Tackle's `watchful_pack` and Ember's
+`banked_embers` (both generic-named crosslinks with no armor/hide fiction
+behind them). **Deliberately NOT touched**: `iron_hide` (Tackle) and
+`bedrock_stance` (Rock Throw) — both literally named after armor/rock
+hide, exactly the case this note's own rule says to *keep* as
+`damageReduction` — plus `bulwark`/`bulwark_stance` (Slash, "a last line
+that doesn't move," explicit fortification fiction) and `alpha_strike`
+(Ember, a deliberate two-passive keystone the primitives checklist
+already calls out by name). Everything else across the drafted trees
+(Screening Wings, Burrow Guard, Guarded Den, Colony Guard, Tidal Guard,
+Undertow Guard, Sheltering Current, Cover Call, and the rest) is still
+flat `damageReduction`, untouched — a real follow-up, not a full sweep.
 
 ## Confirmed for later: Diglett tunnel networks
 
@@ -624,110 +680,248 @@ own "brace and shield" branches).
   Fire↔Hearthfire, `damageReduction`) · *Kindled Fury*
   (Hearthfire↔Wildfire, `critRateStage`).
 
-### Rock Throw (Rock, line-3, cooldown 1) — Power archetype, Onix
+### Rock Throw, Peck, Scratch, Water Gun — full triangle treatment (designed, not yet shipped)
 
-Heavy Stones (+power, -accuracy, live) → filler → *Longer Throw* (range +1,
-live) → filler. **Final fork**: *Boulder Toss* (shape → small burst at the
-impact point, +power, needs: AoE resolution) vs. *Skipping Stone* (line +1,
-pierces everything in the path, -power, needs: AoE resolution for the
-piercing-hits-everyone part, though the plain reach increase is live).
+**Second pass.** The first draft here upgraded all four to Tackle's full
+triangle template but did it lazily — every tree ran the exact same fork
+shape (multi-hit-vs-power or self-buff-vs-self-buff), and the keystone pool
+was just `resistanceBreaker`/`thorns`/`healAura` reshuffled four times with
+new names on top. Real critique, taken seriously: this pass gives each move
+its own actual hook — a mechanic or matchup unique to it — and keeps the
+lever palette from repeating keystone-for-keystone across trees. Every
+lever used is still already real and shipped; the difference is which ones
+and where.
 
-### Peck (Flying, point) — Utility archetype, Spearow, 2 branches
+- **Rock Throw**'s hook: a ranged bombardment that costs the thrower real
+  stamina and specifically cracks Flying-type intruders — `selfCostPerUse`,
+  `bonusVsType`, and a *denial*-flavored support keystone instead of a heal.
+- **Peck**'s hook: the roster's first `positionSwap` (with `positionSwapPull`
+  on top — the roster's first use of that too — genuinely hauling the
+  target past the swap, not just trading tiles) and the roster's first
+  `critCooldownReset` (a real crit-fisher notable, not just more crit
+  rate) — plus its only move that changes its own shape mid-tree (point →
+  a real 2-tile reach) and slows a target down as its support payoff
+  instead of healing.
+- **Scratch**'s hook: the roster's first non-Ember status inflicter — a real
+  Sandshrew doesn't canonically have venom glands, so unlike Ember's
+  baked-in burn the poison chance here is entirely tree-earned (the
+  Aggression opener *Envenomed*, not the base move), and the whole
+  Aggression branch leans into it once it's unlocked, instead of being
+  free from the first cast. It's also the one Sociability branch
+  guaranteed to matter today (Sandshrew's real herd), rewarded with the
+  only two-passive keystone among the four and the roster's first
+  `rallyCall` (Rally the Colony — marks a predator for the whole colony to
+  focus, genuinely stronger than buffing one ally).
+- **Water Gun**'s hook: `resistanceBreaker` fixes its own real weakness
+  (resisted by Grass/Water/Dragon) instead of padding an already-favorable
+  matchup — the answer to Charmander/Ember was never actually needed,
+  since Water Gun already beats Fire 2x — plus a storm-specific (not just
+  rainy) opener, and a Boldness branch built around *un*-buffing the
+  target's own footing, not just buffing the user.
 
-- **Aggression — "Sharp Strike"**: Needle Point (+power, live) → filler →
-  *Frenzied Pecking* (2 hits, needs: a new `hits` field plus combat.ts
-  rolling damage N times — corrected from an earlier "live" tag; multi-hit
-  needs real schema growth, not just a delta on existing fields, same as
-  every other item in this list past the first six). **Fork**: *Piercing
-  Beak* (+power, ignores some of the target's Defense — needs: a new
-  defense-penetration delta field) vs. *Rapid Volley* (3 hits, needs: same
-  multi-hit field as Frenzied Pecking).
-  **Keystone**: *Talon Strike* — bonus power/crit against a fleeing target
-  (needs: defender-state-aware scoring, the same gap flagged in DESIGN.md's
-  "Move selection" section).
-- **Boldness — "Dive Strike"**: *Swooping Approach* (bonus power/accuracy
-  if the user moved toward the target this tick before attacking, needs:
-  movement-context-aware) → filler → *Retreat Peck* (retreats 1 tile
-  immediately after landing a hit, needs: forced movement). **Fork**:
-  *Ambush Dive* (bonus vs. a target that hasn't detected the user yet, near
-  — reuses concealment/detection) vs. *Harrying Wings* (-cooldown, -power,
-  live). **Keystone**: *Relentless Harrier* — chains directly into another
-  action without waiting for the normal action-energy threshold (needs:
-  action-economy interaction).
+A real, honest caveat carried over from Slash's own precedent: a
+Sociability branch is real engine content the moment any two same-herd
+agents knowing the move exist, but **Onix, Spearow, and the Squirtle pair
+have no `herdId` in the current demo world** (`packages/data/src/scenario.ts`)
+— `targetsAlly`/`allyEffect` and `healAura` both key off herd membership
+(`support.ts`'s `nearbyHerdmates`, `herdIndex.ts`'s `herdMembers`) and
+simply find nobody, the same silently-inert state Slash's own Pack Instinct
+branch is in for the sole spawned Scyther today. Sandshrew is the one
+exception — it already shares a real herd (`"underground-colony"`, with
+Diglett). Giving the Squirtle pair a shared `herdId` would be a small, real
+follow-up if their branch should matter sooner rather than later; noted
+here, not done.
 
-### Scratch (Normal, point) — Utility archetype, Sandshrew, 2 branches
+- **Rock Throw** (Rock, line-3, cooldown 1) — Onix's second move, alongside
+  Tackle.
+  - **Aggression — "Landslide"**: opener *Heavy Stones* (+power, -accuracy)
+    → filler → filler → notable *Crushing Weight* (`defensePenetration`)
+    → filler → **fork**: *Overhand Heave* (+power, `selfCostPerUse` energy
+    — an all-out throw that costs the thrower something real every time)
+    vs. *Measured Toss* (+accuracy, no cost — a controlled, sustainable
+    throw) → notable *Skyfall* (`bonusVsType` vs. Flying — a rockslide is a
+    real answer to anything with wings) → filler → **keystone** *Cave-In*
+    (+power, heavy `critRateStage`).
+  - **Boldness — "Bedrock"**: opener *Bedrock Stance* (`damageReduction`
+    passive) → filler → notable *Unshakeable* (`immovable` passive) →
+    filler → **fork**: *Aftershock Counter* (bonus vs. a flanking target)
+    vs. *Granite Ward* (+accuracy, more `damageReduction`) → notable
+    *Fracturing Blow* (`statChangeOnHit` target Defense -1 — repeated
+    braced throws crack the target's own guard, not the user's) → filler →
+    **keystone** *Bedrock Breaker* (`resistanceBreaker`).
+  - **Sociability — "Tremor Call"**: opener *Tremor Signal* (`targetsAlly`
+    defense buff) → filler → filler → notable *Seismic Rally*
+    (`targetsAlly` attack buff) → filler → **fork**: *Bulwark Coil*
+    (`damageReduction`, -power) vs. *Vanguard Tunneler* (+power,
+    `jamCooldownTicks`) → notable *Colony Watch* (`regen` passive) →
+    filler → **keystone** *Seismic Lockdown* (heavy `jamCooldownTicks` — a
+    denial capstone, not a heal: the ground itself won't let enemies
+    recover their tempo).
+  - **Crosslinks**: *Grinding Advance* (Aggression↔Boldness,
+    `statChangeOnHit` self-buff off a braced throw) · *Warning Tremor*
+    (Boldness↔Sociability, shared `damageReduction`) · *Rolling Thunder*
+    (Sociability↔Aggression, `lockTicks` — a combined tremor-and-throw big
+    enough to lock the user out of its next tick, not just another
+    situational bonus).
 
-- **Aggression — "Claw Strike"**: Sharpened Claws (+power, live) → filler →
-  *Frenzy Claws* (2 hits, needs: multi-hit field). **Fork**: Shredding Blow
-  (+power, -accuracy, live) vs. Flurry (3 hits, needs: multi-hit field).
-  **Keystone**: *Sandstorm
-  Claws* — bonus power/status specifically at night (near — reuses
-  daynight.ts, matches Sandshrew's nocturnal `activityPattern`).
-- **Boldness — "Burrow Strike"**: *Ambush Claws* (bonus power attacking
-  from concealment, near) → filler → *Dig-and-Strike* (briefly reposition
-  to an adjacent tile right after hitting, needs — foreshadows the
-  already-backlogged Dig-to-escape move). **Fork**: *Retreating Slash*
-  (retreats 1 tile after hitting, needs: forced movement) vs. *Cornered
-  Fury* (+power while the user itself is at low HP, needs: self-state-aware
-  scoring). **Keystone**: *Night Hunter* — full power/accuracy bonus during
-  Sandshrew's nocturnal active hours (near — reuses daynight + activityPattern).
+- **Peck** (Flying, point) — Spearow's only move, a solitary crepuscular
+  ambush hunter (mismatched with its diurnal Pidgey prey — see
+  `species.ts`'s own comment on that).
+  - **Aggression — "Sharp Strike"**: opener *Needle Point* (+power) →
+    filler → filler → notable *Frenzied Pecking* (`hits` 2) → filler →
+    **fork**: *Piercing Beak* (`defensePenetration`) vs. *Rapid Volley*
+    (`hits` 3, -power) → notable *Talon Strike* (bonus vs. a low-HP target)
+    → filler → **keystone** *Skybreaker* (`bonusVsType` vs. Grass — Flying
+    beats Grass, a real answer to the roster's own Bulbasaur/Venusaur line).
+  - **Boldness — "Dive Strike"**: opener *Swooping Approach* (bonus damage
+    attacking from higher ground — `elevation`) → filler → filler →
+    notable *Extended Wingspan* (`shape`/`range` change — Peck actually
+    gains reach for the first time, a 2-tile line instead of a point-blank
+    stab) → filler → **fork**: *Ambush Dive* (bonus vs. a flanking target)
+    vs. *Harrying Wings* (-power, +accuracy) → notable *Relentless Harrier*
+    (+power, `critRateStage`, `critCooldownReset` — a real crit-fisher
+    spec: leans into landing one, and when it lands the dive is ready to go
+    again immediately instead of just hitting harder) → filler →
+    **keystone** *Snatch and Swap* (`positionSwap` + `positionSwapPull: 2`
+    — the roster's first use of either: a dive that doesn't just trade
+    places with the target, it keeps hauling it two more tiles past the
+    swap, genuinely wrenching it out of position instead of a same-spot
+    trade).
+  - **Sociability — "Flock Call"**: opener *Flock Call* (`targetsAlly`
+    attack buff) → filler → filler → notable *Wingmate Cover*
+    (`targetsAlly` defense buff) → filler → **fork**: *Screening Wings*
+    (`damageReduction`, -power) vs. *Harrier's Charge* (+power,
+    `jamCooldownTicks`) → notable *Preening Recovery* (`regen` passive) →
+    filler → **keystone** *Harrying Flock* (`statChangeOnHit` target Speed
+    -1 — a crowd-control capstone, slowing prey down, instead of a heal).
+  - **Crosslinks**: *Ambush Strike* (Aggression↔Boldness,
+    `jamCooldownTicks` — a coordinated snatch that throws off the target's
+    own rhythm) · *Cover Call* (Boldness↔Sociability, shared
+    `damageReduction`) · *War Cry* (Sociability↔Aggression,
+    `selfStateBonus` — a cornered flock-mate fights harder, scored higher
+    when the user itself is low).
 
-### Water Gun (Water, line-2) — Utility archetype, Squirtle, 2 branches
+- **Scratch** (Normal, point) — Sandshrew, a real herd member (shares
+  `"underground-colony"` with Diglett), nocturnal, den-digging. Base spec
+  stays clean (no baked-in status, same as Tackle/Slash) — Sandshrew
+  doesn't canonically have venom, so unlike Ember's free burn, poison here
+  is a build choice you earn from the Aggression branch's own opener, not
+  something every Scratch use rolls for free.
+  - **Aggression — "Envenomed Claws"**: opener *Envenomed* (`statusChance:
+    0.15`/`statusKind: "poison"` as a tree delta — the roster's first
+    status added by a node instead of the base move) → filler → filler →
+    notable *Deepening Venom* (`statusChance` +0.10 — stacks on the
+    opener's own roll) → filler → **fork**: *Toxin Overload*
+    (`situationalBonus: targetStatused` — hits harder finishing off
+    something already poisoned/statused) vs. *Widening Fangs* (+power,
+    `statusChance` -0.10, `statusSeverity: 2` — **refined per feedback**:
+    the original version just turned the poison off for +power, which
+    fought the branch's own theme instead of building on it; this trades
+    away some of the earned *chance* to poison for whatever poison does
+    land hitting twice as hard — a real "badly poisons" mainline callback,
+    approximated as a flat DOT multiplier rather than mainline Toxic's
+    turn-by-turn escalation, since this sim doesn't track per-status turn
+    counters) → notable *Sandstorm Claws* (bonus at night —
+    matches Sandshrew's own `activityPattern`) → filler → **keystone**
+    *Toxic Spread* (`statusSpreads` — the poison jumps to whoever's
+    standing next to the target too, the branch's payoff for actually
+    committing to the venom line instead of forking into Widening Fangs).
+  - **Boldness — "Burrow Strike"**: opener *Ambush Claws* (bonus attacking
+    from concealment) → filler → filler → notable *Dig-and-Strike*
+    (`forcedMovement`, lunges in before the hit) → filler → **fork**:
+    *Retreating Slash* (`forcedMovement`, retreats after hitting) vs.
+    *Cornered Fury* (`selfStateBonus` — scores higher when the user itself
+    is at or below half HP) → notable *Burrow Guard* (`damageReduction`
+    passive) → filler → **keystone** *Spiked Curl* (`thorns` passive —
+    Sandshrew's own real spiked hide, curled up defensively).
+  - **Sociability — "Colony Bond"**: opener *Colony Call* (`targetsAlly` +
+    `allyEffectOnAttack` attack buff — **refined per feedback**: as well as
+    a dedicated idle-tick support use, a landed hit ALSO buffs a nearby
+    colony-mate's attack for free, real "as you strike the predator, your
+    denmate gets pumped up too" pack coordination) → filler → filler →
+    notable *Rally the Colony*
+    (`rallyCall` — a landed, non-killing hit marks the predator for the
+    whole colony to converge on, genuinely stronger than buffing one
+    ally: it gets every nearby colony-mate's own, independently-run threat
+    pick to land on the *same* predator instead of each one just fighting
+    whatever's nearest to itself) → filler → **fork**: *Colony Guard*
+    (`damageReduction`, -power) vs. *Tunnel Runner* (+power,
+    `jamCooldownTicks`) → notable *Communal Foraging* (`regen` passive) →
+    filler → **keystone** *Colony Warmth* (`grantsPassives`, plural —
+    `healAura` *and* `regen` together, the only two-passive keystone among
+    these four trees, earned because this is the one branch guaranteed to
+    actually fire for real herd-mates today, Diglett included).
+  - **Crosslinks**: *Frenzied Burrow* (Aggression↔Boldness, bonus vs. a
+    flanking target) · *Guarded Den* (Boldness↔Sociability, shared
+    `damageReduction`) · *Colony Fury* (Sociability↔Aggression,
+    `lifestealFraction` — a colony-backed strike that recoups a little of
+    what it deals, not another self-buff).
 
-- **Aggression — "Pressurized Blast"**: High Pressure (+power, live) →
-  filler → *Piercing Jet* (line +1, live). **Fork**: Torrent (+power,
-  +cooldown, live) vs. Rapid Jets (2 hits, needs: multi-hit field).
-  **Keystone**: *Deluge* —
-  bonus power while the user is near a water tile (near — reuses the
-  existing water-resource-tile concept).
-- **Boldness — "Evasive Spray"**: *Knockback Spray* (pushes the target back
-  1 tile on hit, needs: forced movement) → filler → *Retreating Current*
-  (the user may immediately retreat after using this move, needs: forced
-  movement). **Fork**: *Bubble Shield* (brief incoming-damage reduction
-  after use, needs: temporary buff — new concept, nothing in the sim
-  currently expires a stat change on a timer) vs. *Slippery Current* (brief
-  evasion bump after use, needs: same new temporary-buff concept).
-  **Keystone**: *Tidal Retreat* — using this move at low HP triggers a full
-  disengage (long retreat + brief speed boost), a real panic button for the
-  sim's most fragile spawned agent (needs).
-
-### New levers/primitives this pass surfaced, not in the earlier brainstorm
-
-- **Defense-penetration** (Piercing Beak): ignore some of the target's
-  Defense — a new numeric `delta` field, live-tier once added, no new
-  subsystem.
-- **Movement-context-aware bonuses** (Swooping Approach, Bracing Impact's
-  cousin effects): the score/effect depends on what the *agent itself* did
-  the same tick, not just the target's state — needs the move-resolution
-  call site to know the agent's last action, which it doesn't pass down
-  today.
-- **Self-state-aware bonuses** (Cornered Fury): a delta conditioned on the
-  *user's own* HP fraction, not the target's — mechanically simple (the
-  data's already on `Agent`) but needs a call-site plumbing change, same
-  shape as the defender-HP-awareness already flagged as a gap in
-  `pickBestMove`.
-- **Temporary buffs with a real duration** (Bubble Shield, Slippery
-  Current): nothing in the sim today expires a stat modification on a
-  timer — every existing stat effect is either permanent (a tree's
-  `delta`) or instantaneous (one hit's damage roll). A real "for N ticks"
-  buff is a genuinely new piece of state on `Agent`, not just a bigger
-  `MoveTreeNode.delta`.
-- **Position-swap** (Bodyblock): a movement lever distinct from drag/
-  knockback/lunge — both agents' positions exchange in one action, not one
-  agent pulling or pushing the other.
+- **Water Gun** (Water, line-2) — the Squirtle pair's second move,
+  alongside Tackle.
+  - **Aggression — "Pressurized Blast"**: opener *High-Pressure Jet*
+    (**refined per feedback**: the original was just a flat +power opener
+    with no real identity — replaced with `situationalBonus: storm`, a
+    genuine barometric-pressure pun: this jet hits hardest specifically
+    during a storm, not just any rain, distinguishing it from Deluge's
+    plain-rain bonus later in the same branch) → filler → filler →
+    notable *Piercing Jet* (range +1) → filler → **fork**: *Torrent*
+    (+power, +cooldown) vs. *Rapid Jets* (`hits` 2, -power) → notable
+    *Deluge* (bonus power while it's raining) → filler → **keystone**
+    *Overwhelming Current* (**refined per feedback, renamed from Quenching
+    Blast**: `resistanceBreaker` instead of `bonusVsType` vs. Fire — Water
+    Gun's own type chart already beats Fire 2x, so a Fire-specific bonus
+    was answering a matchup that was never actually a problem; Water Gun
+    *is* resisted by Grass, Water, and Dragon (all 0.5x), so a
+    `resistanceBreaker` keystone fixes a real, printed weakness instead of
+    padding an already-favorable one — it's the correct primitive for
+    "negate the typing loss" too, since it only ever kicks in on a matchup
+    this move is actually resisted on, rather than a flat bonus vs. one
+    named type regardless of whether that matchup needed help).
+  - **Boldness — "Evasive Spray"**: opener *Knockback Spray*
+    (`forcedMovement`, pushes the target back on a landed hit) → filler →
+    filler → notable *Retreating Current* (`forcedMovement`, attacker
+    retreats after hitting) → filler → **fork**: *Undertow*
+    (`statChangeOnHit` target Speed -1 — washes the target's own footing
+    out from under it) vs. *Bubble Shield* (`statChangeOnHit` self Defense
+    +1, temporary — the one self-buff kept from the original draft, as the
+    alternative to Undertow's debuff) → notable *Tidal Guard*
+    (`damageReduction` passive) → filler → **keystone** *Tidal Retreat*
+    (`forcedMovement`, a full 3-tile disengage on a landed hit — a real,
+    always-usable panic-button retreat for the sim's most fragile spawned
+    agent).
+  - **Sociability — "Pond Kinship"**: opener *Shared Current*
+    (`targetsAlly` + `allyEffectOnAttack` heal — **refined per feedback**:
+    the splash from a landed hit also heals a nearby hurt herd-mate for
+    free, on top of the dedicated idle-tick support use) → filler → filler
+    → notable *Calming Wave*
+    (`targetsAlly` defense buff) → filler → **fork**: *Undertow Guard*
+    (`damageReduction`, -power) vs. *Riptide Rush* (+power,
+    `jamCooldownTicks`) → notable *Steady Tides* (`regen` passive) →
+    filler → **keystone** *Tidal Bond* (`healAura`).
+  - **Crosslinks**: *Surging Retreat* (Aggression↔Boldness,
+    `statChangeOnHit` self buff after a forceful hit) · *Sheltering
+    Current* (Boldness↔Sociability, shared `damageReduction`) · *Rising
+    Tide* (Sociability↔Aggression, `critRateStage` — a shared burst of
+    coordinated ferocity, not another flanking check).
 
 ## Build order recommendation, across everything above
 
-1. **Growl** — highest payoff-to-effort ratio on this entire list; most
-   of the roster already knows it.
-2. **Sunny Day** — purely additive, cannot make anything worse, visible
+1. **Rock Throw / Peck / Scratch / Water Gun** — designed above, zero new
+   primitives needed, purely porting work identical to what Tackle/Slash/
+   Ember already went through. Highest payoff-to-effort ratio left on this
+   whole document now that the primitives checklist is clear.
+2. **Growl** — still the highest payoff-to-effort ratio *new-mechanism*
+   item; most of the roster already knows it, but it needs a real no-
+   damage/status-move representation first (see the primitives checklist).
+3. **Sunny Day** — purely additive, cannot make anything worse, visible
    in a replay immediately.
-3. **Leer** — first real FOV consumer; proves out line-of-sight-gated
+4. **Leer** — first real FOV consumer; proves out line-of-sight-gated
    targeting as a pattern other moves (and eventually detection in
    general) can reuse.
-4. **Dig-to-escape** — meaningfully changes prey survival odds, easy to
+5. **Dig-to-escape** — meaningfully changes prey survival odds, easy to
    verify with a before/after real-run comparison.
-5. ~~Burn/poison (the DOT half of status effects)~~ — **done**, see
+6. ~~Burn/poison (the DOT half of status effects)~~ — **done**, see
    DESIGN.md's "Status effects" section; unlocks Aromatherapy/Safeguard's
    counterplay whenever those get built.
-6. Everything else, roughly in the order listed above within each round.
+7. Everything else, roughly in the order listed above within each round.

@@ -77,7 +77,7 @@ export function isBurned(agent: Agent): boolean {
 export function maybeInflictStatus(
   defender: Agent,
   attackerId: string,
-  move: { statusKind?: StatusKind; statusChance?: number },
+  move: { statusKind?: StatusKind; statusChance?: number; statusSeverity?: number },
   world: World,
   log?: EventLog,
   rng: () => number = Math.random
@@ -89,7 +89,7 @@ export function maybeInflictStatus(
 
   const ticksRemaining =
     move.statusKind === "sleep" ? SLEEP_TICKS_MIN + Math.floor(rng() * (SLEEP_TICKS_MAX - SLEEP_TICKS_MIN + 1)) : undefined;
-  defender.status = { kind: move.statusKind, ticksRemaining };
+  defender.status = { kind: move.statusKind, ticksRemaining, severityMultiplier: move.statusSeverity };
   log?.record({
     kind: "statusInflicted",
     tick: world.tick,
@@ -117,7 +117,8 @@ export function maybeSpreadStatus(
   statusKind: StatusKind,
   world: World,
   log?: EventLog,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  statusSeverity?: number
 ): void {
   if (rng() >= STATUS_SPREAD_CHANCE) return;
 
@@ -129,7 +130,7 @@ export function maybeSpreadStatus(
       Math.abs(other.pos.x - defender.pos.x) + Math.abs(other.pos.y - defender.pos.y) <= STATUS_SPREAD_RADIUS
   );
   for (const other of nearby) {
-    maybeInflictStatus(other, attackerId, { statusKind, statusChance: 1 }, world, log, rng);
+    maybeInflictStatus(other, attackerId, { statusKind, statusChance: 1, statusSeverity }, world, log, rng);
     if (other.status?.kind === statusKind) return; // spread to the first eligible neighbor only
   }
 }
@@ -172,6 +173,8 @@ function faintFromStatus(agent: Agent, world: World, log?: EventLog): void {
 export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rng: () => number = Math.random): void {
   tickStatStages(agent);
   tickActionLock(agent);
+  tickRallyMark(agent);
+  tickBurrow(agent);
   applyRegenPassive(agent);
   applyHealAuraPassive(agent, world);
 
@@ -181,7 +184,7 @@ export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rn
 
   if (status.kind === "burn" || status.kind === "poison") {
     if (agent.hp === undefined || agent.maxHp === undefined) return;
-    const fraction = status.kind === "burn" ? BURN_DAMAGE_FRACTION : POISON_DAMAGE_FRACTION;
+    const fraction = (status.kind === "burn" ? BURN_DAMAGE_FRACTION : POISON_DAMAGE_FRACTION) * (status.severityMultiplier ?? 1);
     agent.hp = Math.max(0, agent.hp - agent.maxHp * fraction);
     if (agent.hp <= 0) faintFromStatus(agent, world, log);
     return;
@@ -242,6 +245,26 @@ function tickActionLock(agent: Agent): void {
   agent.actionLockTicks = Math.max(0, agent.actionLockTicks - 1);
 }
 
+/** Ticks down a `MoveSpec.rallyCall` focus-fire mark (`predation.ts`'s `preferMarked`). No-op on a corpse. */
+function tickRallyMark(agent: Agent): void {
+  if (agent.alive === false || !agent.rallyMarkTicksRemaining) return;
+  agent.rallyMarkTicksRemaining = Math.max(0, agent.rallyMarkTicksRemaining - 1);
+}
+
+/**
+ * Ticks down a `MoveSpec.burrow` self-escape (set in `applyPredationInstincts`'s
+ * flee branch, predation.ts) — reaching 0 resurfaces the agent to
+ * `burrowedFromLayer` and clears both fields. No-op on a corpse.
+ */
+function tickBurrow(agent: Agent): void {
+  if (agent.alive === false || !agent.burrowedTicksRemaining) return;
+  agent.burrowedTicksRemaining = Math.max(0, agent.burrowedTicksRemaining - 1);
+  if (agent.burrowedTicksRemaining === 0 && agent.burrowedFromLayer) {
+    agent.layer = agent.burrowedFromLayer;
+    agent.burrowedFromLayer = undefined;
+  }
+}
+
 // --- Agent-modifying passives (Agent.passives) ---
 
 /** Grants (accumulates into) a permanent passive — called from `maybeAutoRespec` (leveling.ts) when a node with `grantsPassive` is chosen. */
@@ -258,6 +281,18 @@ export function damageReductionOf(agent: Agent): number {
 /** True if the `"immovable"` passive should block this agent from being forced-moved — read by `applyForcedMovement` (movement.ts). */
 export function isImmovable(agent: Agent): boolean {
   return (agent.passives?.immovable ?? 0) > 0;
+}
+
+/**
+ * Extra permanent Defense stat-stage from the `"defenseBoost"` passive —
+ * added on top of the agent's own stacked `statStages` entries in
+ * `applySingleDamageInstance` (predation.ts). Physical-only for free: a
+ * special move never reads the `defense` field at all (`calculateDamage`
+ * reads `spDefense` instead), so this never needs its own category check.
+ * 0 if the agent has none.
+ */
+export function defenseBoostOf(agent: Agent): number {
+  return agent.passives?.defenseBoost ?? 0;
 }
 
 /** Per-tick HP regen from the `"regen"` passive, on top of (independent of) the fed/watered `applyHealOverTime` (support.ts) — a regen agent heals even while starving. No-op on a corpse or one with no regen passive. */

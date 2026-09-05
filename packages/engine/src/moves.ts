@@ -1,4 +1,4 @@
-import type { Agent, PassiveKind, StatusKind, Vec2 } from "./types.js";
+import type { Agent, PassiveKind, StatusKind, TerrainKind, Vec2 } from "./types.js";
 import type { Disposition, StatKey } from "./nature.js";
 import type { PokemonType } from "./typing.js";
 
@@ -163,14 +163,39 @@ export interface MoveSpec {
   /** Attacker and defender swap tiles on a landed, non-killing hit — a Bodyblock-style position swap. Absent = no swap, the default. */
   positionSwap?: boolean;
   /**
-   * This move targets a nearby ally instead of a threat — resolved by
-   * `applySupportMove` (support.ts) from the agent's own idle/support tick,
-   * never from `resolveHit`'s hostile hit-resolution path. Meaningless
-   * without `allyEffect` set. Absent = an ordinary hostile move, the default.
+   * This move ALSO gets a real ally-support use, on top of remaining an
+   * ordinary attack — additive, not a replacement of its combat identity.
+   * The dedicated support use only ever resolves via `applySupportMove`
+   * (support.ts) on the agent's own idle/support tick (which needs.ts only
+   * reaches once predation already gets first refusal that tick);
+   * `pickBestMove` (combat.ts) does NOT exclude a `targetsAlly` move from
+   * hostile selection, so the same move (with whatever power/accuracy/other
+   * combat deltas it's accumulated) is a genuine attack option whenever the
+   * agent is actually fighting. Meaningless without `allyEffect` set.
+   * Absent = an ordinary hostile-only move, the default. See
+   * `allyEffectOnAttack` for a second, independent way the ally-effect
+   * itself can also fire from a hostile attack.
    */
   targetsAlly?: boolean;
-  /** What a `targetsAlly` move does to the ally it resolves against — a heal, a buff, or both. */
+  /** What a `targetsAlly`/`allyEffectOnAttack` move does to the ally it resolves against — a heal, a buff, or both. */
   allyEffect?: { healFraction?: number; buff?: { stat: StatKey; stage: number; ticks?: number } };
+  /**
+   * A second, independent way `allyEffect` can fire, on top of (not instead
+   * of) `targetsAlly`'s dedicated idle-tick support use: every time this
+   * move is used against an enemy (`resolveHit`, predation.ts — the moment
+   * the move is used, same timing as `statChangeOnHit`'s self-side effect,
+   * independent of whether the attack itself lands), it ALSO checks for the
+   * nearest in-range, hurt-preferred herd-mate (`nearestAllyEffectTarget`,
+   * support.ts) and applies `allyEffect` to them too, at no extra cost — a
+   * real "as you strike the enemy, your ally nearby benefits too" effect,
+   * not a second attack. Meaningless without `allyEffect` set; works
+   * whether or not `targetsAlly` is also set (a move can auto-trigger on
+   * attack without ever being a dedicated idle-tick support move, or do
+   * both). Absent/false = the ally-effect never fires from a hostile
+   * attack, the default — a plain `targetsAlly` move stays exactly as
+   * before.
+   */
+  allyEffectOnAttack?: boolean;
   /**
    * Resolves against every living agent within the move's `shape` (not just
    * one picked target) via `resolveAreaHit` (predation.ts), which reuses
@@ -233,6 +258,85 @@ export interface MoveSpec {
   terrainBurn?: boolean;
   /** A burn this move inflicts has a chance to jump to another nearby agent too — rolled once per successful `maybeInflictStatus` call, see status.ts's `maybeSpreadStatus`. Absent/false = no spread, the default. */
   statusSpreads?: boolean;
+  /**
+   * On a landed, non-killing hit, marks the defender as a priority target
+   * for `ticks` — see `Agent.rallyMarkTicksRemaining`'s own doc comment for
+   * how other agents' independent target selection reads this mark. A
+   * "focus fire" lever: calling out (or striking) a threat gets herd-mates'
+   * own, separately-run threat/hunt-target picks to converge on the same
+   * one, instead of each agent just picking whatever's nearest to itself.
+   * Absent = no marking, the default.
+   */
+  rallyCall?: { ticks: number };
+  /**
+   * On a landed critical hit, resets this move's own cooldown on the
+   * attacker to 0 — read in `applySingleDamageInstance` (predation.ts)
+   * right where the crit roll itself already happens, independent of
+   * whether the hit goes on to kill or just land. A precision-reward lever
+   * distinct from `critRateStage` (which only makes crits *more likely*):
+   * this makes landing one actually *matter* tempo-wise. Absent/false = a
+   * crit is still just bonus damage, the default.
+   */
+  critCooldownReset?: boolean;
+  /**
+   * On a landed, non-killing `positionSwap` hit, additionally pushes the
+   * defender this many extra tiles further away from the attacker's new
+   * (post-swap) position — reuses `applyForcedMovement` (movement.ts) with
+   * `direction: "away"`, so it's obstacle-aware and respects the
+   * `"immovable"` passive same as any other forced movement. Meaningless
+   * without `positionSwap` also set. Absent/0 = a plain swap, the default.
+   */
+  positionSwapPull?: number;
+  /**
+   * Multiplies the per-tick damage fraction of whatever status this move's
+   * `statusChance` inflicts (`BURN_DAMAGE_FRACTION`/`POISON_DAMAGE_FRACTION`,
+   * status.ts) — a "badly poisons/burns" lever, set on `Agent.status` at
+   * infliction time (`maybeInflictStatus`) and read every tick alongside it
+   * (`tickStatusEffects`). Deliberately a flat multiplier for the sim's
+   * whole DOT duration, not mainline Toxic's turn-by-turn escalation — a
+   * real severity difference without a second counter to track. Absent = a
+   * normal-severity status, the default (equivalent to `1`).
+   */
+  statusSeverity?: number;
+  /**
+   * While the attacker's own tile is `terrain`, a hit multiplies its damage
+   * by `damageMultiplier` and reverts that tile to `"floor"` — the boulder
+   * (or whatever) is consumed as part of throwing it, checked and applied in
+   * `applySingleDamageInstance` (predation.ts) before the damage formula
+   * runs, since it changes the damage itself rather than reacting to a
+   * landed hit after the fact. A miss never reaches this check (accuracy is
+   * rolled first, in `resolveHitAgainstTarget`), so a clean miss doesn't
+   * waste the terrain — only an actual attack attempt does. On a multi-hit
+   * move this naturally only ever fires once: the first hit reverts the
+   * tile to `"floor"`, so every later hit in the same flurry just sees plain
+   * floor and gets no bonus, no special-casing needed. Absent = this move
+   * never reads or consumes the attacker's own tile, the default.
+   */
+  consumesOwnTerrain?: { terrain: TerrainKind; damageMultiplier: number };
+  /**
+   * On a landed, non-killing hit, converts a `"floor"`/`"sand"`/`"mud"` tile
+   * at the *defender's* position into `terrain` (e.g. Water Gun leaving a
+   * puddle where it hit) — the inverse of `terrainBurn`, same "landed hit"
+   * hook (`resolveHitAgainstTarget`). Deliberately permanent, like
+   * `terrainBurn`, not a temporary tile that reverts on its own — this sim
+   * has no generic "this tile change expires" mechanism yet (shelter.ts's
+   * `vacantTicks` is shelter-specific), so a real decaying puddle is a
+   * follow-up, not part of this pass. No-op if the defender's tile isn't
+   * one of the fillable kinds. Absent = no terrain fill, the default.
+   */
+  terrainFill?: { terrain: TerrainKind };
+  /**
+   * Lets a fleeing agent burrow instead of taking its normal flee step —
+   * see `Agent.burrowedTicksRemaining`'s own doc comment (types.ts) for the
+   * full mechanic. Checked only in `applyPredationInstincts`'s main flee
+   * branch (predation.ts), never as an offensive move — `pickBestMove`
+   * (combat.ts) excludes any move with this set from hostile move
+   * selection (unlike `targetsAlly`, which stays a real attack option
+   * too — a fleeing burrow genuinely never makes sense as an attack, so
+   * this one really is exclusive, not additive).
+   * Absent = this move never lets its user burrow, the default.
+   */
+  burrow?: { ticks: number };
   /**
    * Optional respec DAG (see `applyMoveTree`). Each node is a delta applied
    * on top of the base spec, gated by a point cost and prerequisite node
@@ -355,6 +459,7 @@ export interface MoveTreeNode {
     /** OR-merge, like a boolean flag being turned on for good once any node sets it. */
     positionSwap?: boolean;
     targetsAlly?: boolean;
+    allyEffectOnAttack?: boolean;
     hitsArea?: boolean;
     terrainBurn?: boolean;
     statusSpreads?: boolean;
@@ -376,6 +481,18 @@ export interface MoveTreeNode {
     resistanceBreaker?: { multiplier: number };
     /** Overwrite, like `shape`. */
     selfCostPerUse?: { need: "energy" | "hunger"; amount: number };
+    /** Overwrite, like `shape`. */
+    rallyCall?: { ticks: number };
+    /** OR-merge, like a boolean flag being turned on for good once any node sets it. */
+    critCooldownReset?: boolean;
+    /** Additive, like `power` — meaningless without `positionSwap` also set by some node in the chosen set. */
+    positionSwapPull?: number;
+    /** Overwrite, like `shape` — a move has at most one severity multiplier at a time, not a stack of them. */
+    statusSeverity?: number;
+    /** Overwrite, like `shape`. */
+    consumesOwnTerrain?: { terrain: TerrainKind; damageMultiplier: number };
+    /** Overwrite, like `shape`. */
+    terrainFill?: { terrain: TerrainKind };
   };
 }
 
@@ -511,6 +628,7 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       statChangeOnHit: delta.statChangeOnHit ?? result.statChangeOnHit,
       positionSwap: delta.positionSwap ?? result.positionSwap,
       targetsAlly: delta.targetsAlly ?? result.targetsAlly,
+      allyEffectOnAttack: delta.allyEffectOnAttack ?? result.allyEffectOnAttack,
       hitsArea: delta.hitsArea ?? result.hitsArea,
       terrainBurn: delta.terrainBurn ?? result.terrainBurn,
       statusSpreads: delta.statusSpreads ?? result.statusSpreads,
@@ -525,6 +643,13 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       bonusVsType: delta.bonusVsType ?? result.bonusVsType,
       resistanceBreaker: delta.resistanceBreaker ?? result.resistanceBreaker,
       selfCostPerUse: delta.selfCostPerUse ?? result.selfCostPerUse,
+      rallyCall: delta.rallyCall ?? result.rallyCall,
+      critCooldownReset: delta.critCooldownReset ?? result.critCooldownReset,
+      positionSwapPull:
+        delta.positionSwapPull !== undefined ? (result.positionSwapPull ?? 0) + delta.positionSwapPull : result.positionSwapPull,
+      statusSeverity: delta.statusSeverity ?? result.statusSeverity,
+      consumesOwnTerrain: delta.consumesOwnTerrain ?? result.consumesOwnTerrain,
+      terrainFill: delta.terrainFill ?? result.terrainFill,
     };
   }
 

@@ -1,5 +1,6 @@
 import type { ActivityPattern, Agent, HuntRules, InventoryItem, Layer, TerrainKind, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
+import type { MoveSpec } from "./moves.js";
 import { logBehaviorChange } from "./events.js";
 import { stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
@@ -472,7 +473,16 @@ function isSameHerd(a: Agent, b: Agent): boolean {
   return a.herdId !== undefined && a.herdId === b.herdId && a.species === b.species;
 }
 
-function nearbyHerdmates(world: World, agent: Agent, radius: number): Agent[] {
+/**
+ * Living, same-herd, same-layer agents within `radius` — the shared "who
+ * counts as an ally to help" scan behind `applySupportMove`, food-delivery,
+ * and (via `predation.ts`'s `allyEffectOnAttack` hook) a hostile move's
+ * piggybacked ally-effect. Exported for that last case specifically —
+ * predation.ts already imports from this module (`FINISHING_POOL_FRACTION`),
+ * so this doesn't open a new import direction, just a second name crossing
+ * an existing one.
+ */
+export function nearbyHerdmates(world: World, agent: Agent, radius: number): Agent[] {
   if (!agent.herdId) return [];
   return world.agents.filter(
     (other) => other.id !== agent.id && other.alive !== false && isSameHerd(agent, other) && other.layer === agent.layer && manhattan(other.pos, agent.pos) <= radius
@@ -600,59 +610,84 @@ export function applyHerdSupport(world: World, agent: Agent, log?: EventLog, nee
 // --- Ally-targeting support moves (MoveSpec.targetsAlly/allyEffect) ---
 
 /**
+ * Applies a `MoveSpec.allyEffect` (heal and/or buff) to `target` and logs
+ * the `"supported"` event — the actual payload-application half of both
+ * `applySupportMove` below (an idle-tick support use) and predation.ts's
+ * `allyEffectOnAttack` hook (the same effect piggybacking on a hostile
+ * attack). Pulled out on purpose so both call sites apply the exact same
+ * heal/buff math and emit the exact same event shape, rather than two
+ * copies that could quietly drift apart.
+ */
+export function applyAllyEffect(world: World, supporter: Agent, target: Agent, effect: NonNullable<MoveSpec["allyEffect"]>, log?: EventLog): void {
+  let healed = false;
+  let buffed = false;
+
+  if (effect.healFraction && target.hp !== undefined && target.maxHp !== undefined) {
+    target.hp = Math.min(target.maxHp, target.hp + target.maxHp * effect.healFraction);
+    healed = true;
+  }
+  if (effect.buff) {
+    target.statStages = target.statStages ?? [];
+    target.statStages.push({ stat: effect.buff.stat, stage: effect.buff.stage, ticksRemaining: effect.buff.ticks });
+    buffed = true;
+  }
+
+  log?.record({
+    kind: "supported",
+    tick: world.tick,
+    supporterId: supporter.id,
+    supporterSpecies: supporter.species,
+    allyId: target.id,
+    allySpecies: target.species,
+    healed,
+    buffed,
+  });
+}
+
+/**
+ * The nearest in-range, hurt-preferred conscious herd-mate for an
+ * ally-effect move — shared by `applySupportMove`'s own idle-tick pick and
+ * predation.ts's `allyEffectOnAttack` hook, so both use the exact same
+ * "who gets it" rule. Prefers an ally that's actually hurt (below max HP)
+ * over a full-health one when both are in range, so a heal doesn't waste
+ * itself on someone who doesn't need it while a hurt ally waits; falls
+ * back to any in-range ally (for a pure-buff move with no heal component)
+ * if none are hurt. `undefined` if no eligible ally is in range at all.
+ */
+export function nearestAllyEffectTarget(world: World, agent: Agent, move: MoveSpec): Agent | undefined {
+  const allies = nearbyHerdmates(world, agent, HERD_SUPPORT_RADIUS).filter((a) => !a.fainted);
+  if (allies.length === 0) return undefined;
+
+  const hurtAllies = allies.filter((a) => a.hp !== undefined && a.maxHp !== undefined && a.hp < a.maxHp);
+  const pool = hurtAllies.length > 0 ? hurtAllies : allies;
+
+  return nearest(
+    agent,
+    pool.filter((a) => withinMoveRange(move, manhattan(agent.pos, a.pos)))
+  );
+}
+
+/**
  * Resolves an off-cooldown ally-targeting move (`MoveSpec.targetsAlly` +
- * `allyEffect`) against the nearest in-range, conscious herd-mate — a Vine
- * Link/Nurturing Vines-style "cross-agent effect," distinct from
- * `resolveHit`'s hostile hit-resolution path entirely (no accuracy roll, no
- * damage, never targets a threat). Prefers an ally that's actually hurt
- * (below max HP) over a full-health one when both are in range, so a heal
- * doesn't waste itself on someone who doesn't need it while a hurt ally
- * waits; falls back to any in-range ally (for a pure-buff move with no heal
- * component) if none are hurt. Returns true if this tick was spent
- * supporting, so the caller skips normal needs-driven behavior.
+ * `allyEffect`) against the nearest in-range, hurt-preferred conscious
+ * herd-mate (`nearestAllyEffectTarget`) — a Vine Link/Nurturing Vines-style
+ * "cross-agent effect," distinct from `resolveHit`'s hostile hit-resolution
+ * path entirely (no accuracy roll, no damage, never targets a threat).
+ * Returns true if this tick was spent supporting, so the caller skips
+ * normal needs-driven behavior. See `allyEffectOnAttack` (predation.ts) for
+ * the same effect ALSO piggybacking on a hostile attack, additively — this
+ * function only ever covers the dedicated idle-tick use.
  */
 export function applySupportMove(world: World, agent: Agent, log?: EventLog): boolean {
   const supportMoves = (agent.moves ?? []).filter((m) => m.targetsAlly && m.allyEffect && !agent.moveCooldowns?.[m.id]);
   if (supportMoves.length === 0) return false;
 
-  const allies = nearbyHerdmates(world, agent, HERD_SUPPORT_RADIUS).filter((a) => !a.fainted);
-  if (allies.length === 0) return false;
-
-  const hurtAllies = allies.filter((a) => a.hp !== undefined && a.maxHp !== undefined && a.hp < a.maxHp);
-  const pool = hurtAllies.length > 0 ? hurtAllies : allies;
-
   for (const move of supportMoves) {
-    const target = nearest(
-      agent,
-      pool.filter((a) => withinMoveRange(move, manhattan(agent.pos, a.pos)))
-    );
+    const target = nearestAllyEffectTarget(world, agent, move);
     if (!target) continue;
 
     useMove(agent, move);
-    const effect = move.allyEffect!;
-    let healed = false;
-    let buffed = false;
-
-    if (effect.healFraction && target.hp !== undefined && target.maxHp !== undefined) {
-      target.hp = Math.min(target.maxHp, target.hp + target.maxHp * effect.healFraction);
-      healed = true;
-    }
-    if (effect.buff) {
-      target.statStages = target.statStages ?? [];
-      target.statStages.push({ stat: effect.buff.stat, stage: effect.buff.stage, ticksRemaining: effect.buff.ticks });
-      buffed = true;
-    }
-
-    log?.record({
-      kind: "supported",
-      tick: world.tick,
-      supporterId: agent.id,
-      supporterSpecies: agent.species,
-      allyId: target.id,
-      allySpecies: target.species,
-      healed,
-      buffed,
-    });
+    applyAllyEffect(world, agent, target, move.allyEffect!, log);
     return true;
   }
   return false;

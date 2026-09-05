@@ -11,6 +11,7 @@ import {
   SLEEP_TICKS_MIN,
   applyStatStage,
   damageReductionOf,
+  defenseBoostOf,
   getStatStage,
   grantPassive,
   isAsleep,
@@ -99,6 +100,13 @@ describe("maybeInflictStatus", () => {
     expect(defender.status).toEqual({ kind: "paralysis" });
   });
 
+  it("carries statusSeverity from the move onto the inflicted status, for a 'badly poisons' move", () => {
+    const world = createWorld(5, 5);
+    const defender = makeAgent({ types: ["grass"] });
+    maybeInflictStatus(defender, "attacker-1", { statusKind: "poison", statusChance: 1, statusSeverity: 2 }, world, undefined, () => 0);
+    expect(defender.status).toEqual({ kind: "poison", ticksRemaining: undefined, severityMultiplier: 2 });
+  });
+
   it("no-ops when the move carries no statusKind or statusChance", () => {
     const world = createWorld(5, 5);
     const defender = makeAgent({ types: ["grass"] });
@@ -155,6 +163,20 @@ describe("tickStatusEffects: burn/poison DOT", () => {
   it("poison deals 1/8 maxHp damage per tick", () => {
     const world = createWorld(5, 5);
     const agent = makeAgent({ status: { kind: "poison" } });
+    tickStatusEffects(agent, world);
+    expect(agent.hp).toBeCloseTo(50 - 50 * POISON_DAMAGE_FRACTION);
+  });
+
+  it("statusSeverity multiplies the DOT fraction — a 'badly poisons' move hits harder every tick, not just once", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ status: { kind: "poison", severityMultiplier: 2 } });
+    tickStatusEffects(agent, world);
+    expect(agent.hp).toBeCloseTo(50 - 50 * POISON_DAMAGE_FRACTION * 2);
+  });
+
+  it("no severityMultiplier set behaves exactly like normal-severity poison", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ status: { kind: "poison", severityMultiplier: undefined } });
     tickStatusEffects(agent, world);
     expect(agent.hp).toBeCloseTo(50 - 50 * POISON_DAMAGE_FRACTION);
   });
@@ -302,6 +324,14 @@ describe("agent-modifying passives (grantPassive/damageReductionOf/isImmovable)"
     expect(isImmovable(agent)).toBe(true);
   });
 
+  it("defenseBoostOf reads the accumulated Defense stat-stage bonus, unclamped (calculateDamage does its own [-6,6] clamp after summing)", () => {
+    const agent = makeAgent();
+    expect(defenseBoostOf(agent)).toBe(0);
+    grantPassive(agent, "defenseBoost", 0.5);
+    grantPassive(agent, "defenseBoost", 0.5);
+    expect(defenseBoostOf(agent)).toBe(1);
+  });
+
   it("the regen passive heals a fraction of maxHp every tick, independent of being fed/watered", () => {
     const world = createWorld(5, 5);
     const agent = makeAgent({ hp: 10, maxHp: 50, needs: createNeeds({ hunger: 0, thirst: 0 }) });
@@ -326,6 +356,35 @@ describe("multi-action lock (Agent.actionLockTicks)", () => {
     const agent = makeAgent({ actionLockTicks: 0 });
     tickStatusEffects(agent, world);
     expect(agent.actionLockTicks).toBe(0);
+  });
+});
+
+describe("rally-call focus-fire mark (Agent.rallyMarkTicksRemaining)", () => {
+  it("tickStatusEffects counts a rally mark down to 0", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ rallyMarkTicksRemaining: 2 });
+    tickStatusEffects(agent, world);
+    expect(agent.rallyMarkTicksRemaining).toBe(1);
+    tickStatusEffects(agent, world);
+    expect(agent.rallyMarkTicksRemaining).toBe(0);
+  });
+
+  it("does not go negative once already at 0, and no-ops when never set", () => {
+    const world = createWorld(5, 5);
+    const zeroed = makeAgent({ rallyMarkTicksRemaining: 0 });
+    tickStatusEffects(zeroed, world);
+    expect(zeroed.rallyMarkTicksRemaining).toBe(0);
+
+    const unset = makeAgent();
+    tickStatusEffects(unset, world);
+    expect(unset.rallyMarkTicksRemaining).toBeUndefined();
+  });
+
+  it("does not tick down on a corpse", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ alive: false, rallyMarkTicksRemaining: 3 });
+    tickStatusEffects(agent, world);
+    expect(agent.rallyMarkTicksRemaining).toBe(3);
   });
 });
 

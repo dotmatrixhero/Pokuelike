@@ -231,14 +231,30 @@ describe("applyMoveTree: newer delta fields", () => {
         id: "additive_stack",
         name: "Additive Stack",
         cost: 1,
-        delta: { defensePenetration: 0.1, lockTicks: 1, critRateStage: 1, lifestealFraction: 0.1, recoilFraction: 0.05, jamCooldownTicks: 1 },
+        delta: {
+          defensePenetration: 0.1,
+          lockTicks: 1,
+          critRateStage: 1,
+          lifestealFraction: 0.1,
+          recoilFraction: 0.05,
+          jamCooldownTicks: 1,
+          positionSwapPull: 1,
+        },
       },
       additive_stack_2: {
         id: "additive_stack_2",
         name: "Additive Stack 2",
         cost: 1,
         prerequisites: ["additive_stack"],
-        delta: { defensePenetration: 0.1, lockTicks: 1, critRateStage: 1, lifestealFraction: 0.1, recoilFraction: 0.05, jamCooldownTicks: 1 },
+        delta: {
+          defensePenetration: 0.1,
+          lockTicks: 1,
+          critRateStage: 1,
+          lifestealFraction: 0.1,
+          recoilFraction: 0.05,
+          jamCooldownTicks: 1,
+          positionSwapPull: 1,
+        },
       },
       overwrite_stack: {
         id: "overwrite_stack",
@@ -250,6 +266,7 @@ describe("applyMoveTree: newer delta fields", () => {
           statChangeOnHit: { target: "defender", stat: "defense", stage: -1 },
           positionSwap: true,
           targetsAlly: true,
+          allyEffectOnAttack: true,
           hitsArea: true,
           terrainBurn: true,
           statusSpreads: true,
@@ -257,6 +274,11 @@ describe("applyMoveTree: newer delta fields", () => {
           bonusVsType: { type: "grass", multiplier: 1.5 },
           resistanceBreaker: { multiplier: 2 },
           selfCostPerUse: { need: "energy", amount: 0.1 },
+          rallyCall: { ticks: 10 },
+          critCooldownReset: true,
+          statusSeverity: 1.5,
+          consumesOwnTerrain: { terrain: "boulder", damageMultiplier: 2 },
+          terrainFill: { terrain: "water" },
         },
       },
       overwrite_stack_2: {
@@ -271,6 +293,10 @@ describe("applyMoveTree: newer delta fields", () => {
           bonusVsType: { type: "water", multiplier: 2 },
           resistanceBreaker: { multiplier: 4 },
           selfCostPerUse: { need: "hunger", amount: 0.2 },
+          rallyCall: { ticks: 20 },
+          statusSeverity: 2,
+          consumesOwnTerrain: { terrain: "sand", damageMultiplier: 4 },
+          terrainFill: { terrain: "mud" },
         },
       },
     },
@@ -284,6 +310,7 @@ describe("applyMoveTree: newer delta fields", () => {
     expect(respec.lifestealFraction).toBeCloseTo(0.2);
     expect(respec.recoilFraction).toBeCloseTo(0.1);
     expect(respec.jamCooldownTicks).toBe(2);
+    expect(respec.positionSwapPull).toBe(2);
   });
 
   it("overwrite fields take the latest node's value, never stacking", () => {
@@ -294,13 +321,19 @@ describe("applyMoveTree: newer delta fields", () => {
     expect(respec.bonusVsType).toEqual({ type: "water", multiplier: 2 });
     expect(respec.resistanceBreaker).toEqual({ multiplier: 4 });
     expect(respec.selfCostPerUse).toEqual({ need: "hunger", amount: 0.2 });
+    expect(respec.rallyCall).toEqual({ ticks: 20 });
+    expect(respec.statusSeverity).toBe(2);
+    expect(respec.consumesOwnTerrain).toEqual({ terrain: "sand", damageMultiplier: 4 });
+    expect(respec.terrainFill).toEqual({ terrain: "mud" });
     // Fields not touched by the second node keep the first node's value.
     expect(respec.positionSwap).toBe(true);
+    expect(respec.allyEffectOnAttack).toBe(true);
     expect(respec.targetsAlly).toBe(true);
     expect(respec.hitsArea).toBe(true);
     expect(respec.terrainBurn).toBe(true);
     expect(respec.statusSpreads).toBe(true);
     expect(respec.statChangeOnHit).toEqual({ target: "defender", stat: "defense", stage: -1 });
+    expect(respec.critCooldownReset).toBe(true);
   });
 
   it("is pure: never mutates the base spec", () => {
