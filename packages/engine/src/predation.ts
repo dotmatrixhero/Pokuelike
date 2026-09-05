@@ -972,6 +972,7 @@ function applySingleDamageInstance(
       critical: isCritical,
       moveId: move.id,
       pos: defender.pos,
+      finishingBlow: true,
     });
 
     if (defender.finishingPool > 0) return false; // still down, not finished

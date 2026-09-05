@@ -265,14 +265,24 @@ export function drawWorld(
   world: World,
   selectedAgentId: string | undefined,
   style: RenderStyle = "tile",
-  autoCamHighlightIds?: ReadonlySet<string>
+  autoCamHighlightIds?: ReadonlySet<string>,
+  /**
+   * Every OTHER currently-tracked battle's id set — drawn as a dimmer, more
+   * sparsely-dashed box alongside `autoCamHighlightIds`'s own solid-following
+   * one. Direct ask: "draw the yellow bounding box anyways on all cool
+   * events happening around the map [while not on auto cam mode]" — see
+   * `autoCamera.ts`'s `listBattleEngagements` for why this is always
+   * populated (detection now runs regardless of Auto Camera's on/off
+   * toggle) and scoped to battles only, not every notable one-shot.
+   */
+  passiveHighlights?: readonly ReadonlySet<string>[]
 ): void {
   // Always advance the animation clock, even in ASCII mode (which ignores
   // `dt` entirely) — so switching from ASCII back to tile mode doesn't hand
   // `interpolatedPos` one huge accumulated `dt` and produce a visible warp.
   const dt = frameDeltaSeconds();
   if (style === "ascii") return drawWorldAscii(ctx, world, selectedAgentId);
-  return drawWorldTiles(ctx, world, selectedAgentId, dt, autoCamHighlightIds);
+  return drawWorldTiles(ctx, world, selectedAgentId, dt, autoCamHighlightIds, passiveHighlights);
 }
 
 function drawWorldTiles(
@@ -280,7 +290,8 @@ function drawWorldTiles(
   world: World,
   selectedAgentId: string | undefined,
   dt: number,
-  autoCamHighlightIds?: ReadonlySet<string>
+  autoCamHighlightIds?: ReadonlySet<string>,
+  passiveHighlights?: readonly ReadonlySet<string>[]
 ): void {
   const surface = world.tiles.surface;
 
@@ -458,6 +469,15 @@ function drawWorldTiles(
   drawWeather(ctx, world);
 
   if (autoCamHighlightIds && autoCamHighlightIds.size > 0) drawAutoCamHighlight(ctx, world, autoCamHighlightIds);
+  if (passiveHighlights) {
+    for (const ids of passiveHighlights) {
+      // Skip whatever's already got the solid, actively-followed box above —
+      // this loop is only for the OTHER battles the viewer isn't currently
+      // looking at.
+      if (autoCamHighlightIds && setsShareAnId(ids, autoCamHighlightIds)) continue;
+      drawPassiveHighlight(ctx, world, ids);
+    }
+  }
 
   if (selectedAgentId) {
     const selected = world.agents.find((a) => a.id === selectedAgentId);
@@ -715,7 +735,23 @@ function drawSelectionRing(ctx: CanvasRenderingContext2D, px: number, py: number
  * grid position. An id with no live surface agent (an egg, a despawned
  * participant, a herd id) is simply skipped rather than guessed at.
  */
-function drawAutoCamHighlight(ctx: CanvasRenderingContext2D, world: World, ids: ReadonlySet<string>): void {
+export interface HighlightBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * Pixel-space bounding box (canvas coordinates, tile-render mode only)
+ * covering every `ids` member with a live surface agent — the shared math
+ * behind both `drawAutoCamHighlight` (the solid, actively-followed box) and
+ * `drawPassiveHighlight`/main.ts's click-to-follow hit test (the dimmer
+ * boxes for every other currently-tracked battle). An id with no live
+ * surface agent is simply skipped, same as before this was extracted;
+ * `undefined` when nothing in `ids` currently resolves to one.
+ */
+export function highlightBounds(world: World, ids: ReadonlySet<string>): HighlightBounds | undefined {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -731,20 +767,52 @@ function drawAutoCamHighlight(ctx: CanvasRenderingContext2D, world: World, ids: 
     maxY = Math.max(maxY, pos.y);
     found = true;
   }
-  if (!found) return;
+  if (!found) return undefined;
 
   const pad = 0.85; // tiles of breathing room around the tightest bounding box, not a flush outline right on the sprites' edges
-  const left = (minX - pad) * TILE_SIZE;
-  const top = (minY - pad) * TILE_SIZE;
-  const right = (maxX + 1 + pad) * TILE_SIZE;
-  const bottom = (maxY + 1 + pad) * TILE_SIZE;
+  return {
+    left: (minX - pad) * TILE_SIZE,
+    top: (minY - pad) * TILE_SIZE,
+    right: (maxX + 1 + pad) * TILE_SIZE,
+    bottom: (maxY + 1 + pad) * TILE_SIZE,
+  };
+}
 
+function drawAutoCamHighlight(ctx: CanvasRenderingContext2D, world: World, ids: ReadonlySet<string>): void {
+  const bounds = highlightBounds(world, ids);
+  if (!bounds) return;
   ctx.save();
   ctx.strokeStyle = "#ffe066";
   ctx.lineWidth = 2.5;
   ctx.setLineDash([7, 5]);
-  ctx.strokeRect(left, top, right - left, bottom - top);
+  ctx.strokeRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
   ctx.restore();
+}
+
+/**
+ * The dimmer, more-sparsely-dashed sibling of `drawAutoCamHighlight` — one
+ * of these per OTHER currently-tracked battle (see `drawWorld`'s
+ * `passiveHighlights` param), so a viewer not currently following anything
+ * (or following a different fight) can still see "something's happening
+ * over there" and click it. Same yellow, deliberately less visually loud
+ * than the solid actively-followed box so the two read as "this one has my
+ * attention" vs. "these are also going on."
+ */
+function drawPassiveHighlight(ctx: CanvasRenderingContext2D, world: World, ids: ReadonlySet<string>): void {
+  const bounds = highlightBounds(world, ids);
+  if (!bounds) return;
+  ctx.save();
+  ctx.strokeStyle = "#ffe066";
+  ctx.lineWidth = 1.5;
+  ctx.globalAlpha = 0.55;
+  ctx.setLineDash([3, 5]);
+  ctx.strokeRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
+  ctx.restore();
+}
+
+function setsShareAnId(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  for (const v of a) if (b.has(v)) return true;
+  return false;
 }
 
 /** Cheap deterministic per-position hash — gives each light source its own stable shimmer phase without touching `world.rng` (this is pure visual flourish, zero gameplay effect). Same technique sprites.ts's water-tile animation already uses. */

@@ -89,8 +89,6 @@
       }
       canvas { image-rendering: pixelated; cursor: pointer; border-radius: 3px; }
 
-      #inspector-panel { flex: 0 0 auto; max-height: 38vh; overflow-y: auto; }
-
       /* Battle Screen — a second, differently-formatted view of whatever
          Auto Camera is currently following, styled like a mainline Pokémon
          battle text box (see DESIGN.md's "Battle Screen" section). Lives as
@@ -113,7 +111,21 @@
       #inspector[hidden], #battle-screen[hidden] { display: none; }
       .battle-screen-empty { color: var(--text-dim); padding: 10px 4px; font-size: 12px; }
       .battle-screen-vs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-      .battle-screen-combatant { flex: 1 1 160px; min-width: 130px; display: flex; flex-direction: column; gap: 3px; }
+      .battle-screen-combatant {
+        flex: 1 1 160px;
+        min-width: 130px;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        border-left: 3px solid transparent;
+        padding-left: 6px;
+      }
+      /* One row per combatant chip: a small sprite thumbnail next to its
+         (color-coded, see palette.ts's agentAccentColor) name — direct ask:
+         "add their hp to the battle log side and also color code them +
+         their sprite" for telling same-species combatants apart. */
+      .battle-screen-combatant-ident { display: flex; align-items: center; gap: 5px; }
+      .battle-screen-sprite { width: 20px; height: 20px; image-rendering: pixelated; flex: 0 0 auto; }
       .battle-screen-name { font-weight: 700; font-size: 13px; }
       .battle-screen-hp-track { height: 7px; border-radius: 4px; background: #232a34; overflow: hidden; }
       .battle-screen-hp-fill { height: 100%; border-radius: 4px; transition: width 0.25s ease; }
@@ -124,6 +136,7 @@
         flex: 1;
         min-height: 0;
         overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
         border-top: 1px solid var(--panel-border);
         padding-top: 6px;
         display: flex;
@@ -229,11 +242,25 @@
       .legend-glyph { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-weight: 700; width: 1.4em; text-align: center; flex: 0 0 auto; }
       .legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
 
-      #inspector-panel { flex: 0 0 auto; max-height: 46%; overflow-y: auto; }
+      /*
+       * Real ask: "the actual battle log... needs to be scrollable on
+       * mobile. Or more expandable." `overflow-y: auto` alone was already
+       * here, but without `-webkit-overflow-scrolling: touch` a nested
+       * scrollable panel like this one (inside a fixed-position drawer —
+       * see #sidebar above) is a well-known iOS Safari trap where touch
+       * drags don't actually scroll it — same fix `#canvas-wrap` already
+       * needed for the same reason. `.panel-expanded` (toggled by the new
+       * expand button in the panel header, see .panel-tabs below and
+       * main.ts) is the "more expandable" half — a real, much taller
+       * reading mode instead of the fixed 46%-of-drawer-height default.
+       */
+      #inspector-panel { flex: 0 0 auto; max-height: 46%; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+      #inspector-panel.panel-expanded { max-height: 82%; }
       #event-log-panel { flex: 1; min-height: 0; }
       #event-log {
         flex: 1;
         overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
         padding: 4px 8px;
         font-family: ui-monospace, "SF Mono", Consolas, monospace;
         font-size: 11.5px;
@@ -426,6 +453,7 @@
               <button id="tab-inspector" class="panel-tab-btn playing" role="tab" aria-selected="true" title="Population stats and per-agent detail">Inspector</button>
               <button id="tab-battle-screen" class="panel-tab-btn" role="tab" aria-selected="false" title="Pokémon-battle-textbox view of whatever Auto Camera is following">Battle Screen</button>
             </div>
+            <button id="expand-panel" title="Expand this panel for easier reading, especially on mobile">⤢</button>
             <button id="clear-selection" title="Clear selection">Clear</button>
           </div>
           <div id="inspector"></div>

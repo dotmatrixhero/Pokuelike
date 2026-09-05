@@ -1,6 +1,6 @@
 import { EventLog, tickWorld, randomSeed, type Agent, type Vec2, type World } from "@pokuelike/engine";
 import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
-import { agentAtCanvasPos, drawEventPopups, drawWorld, TILE_SIZE, type RenderStyle } from "./renderer.js";
+import { agentAtCanvasPos, drawEventPopups, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { EventPopups } from "./eventPopups.js";
 import { renderInspector } from "./inspector.js";
@@ -68,6 +68,8 @@ const clockLabel = document.getElementById("clock-label") as HTMLElement;
 const eventLogEl = document.getElementById("event-log") as HTMLElement;
 const inspectorEl = document.getElementById("inspector") as HTMLElement;
 const clearSelectionBtn = document.getElementById("clear-selection") as HTMLButtonElement;
+const expandPanelBtn = document.getElementById("expand-panel") as HTMLButtonElement;
+const inspectorPanelEl = document.getElementById("inspector-panel") as HTMLElement;
 const hideNoiseCheckbox = document.getElementById("hide-noise") as HTMLInputElement;
 const hideLevelUpsCheckbox = document.getElementById("hide-levelups") as HTMLInputElement;
 const headlinesOnlyCheckbox = document.getElementById("headlines-only") as HTMLInputElement;
@@ -216,10 +218,21 @@ function step(): void {
   tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
   // Only the events since the last step are new; EventLog is append-only for the life of a world.
   const newEvents = log.events.slice(lastLoggedEventCount);
-  eventLogPanel.ingest(newEvents, world);
-  eventPopups.ingest(newEvents, world);
-  autoCamera.ingest(newEvents, world);
-  battleScreenPanel.ingest(newEvents, world);
+  // A finishing-blow `fought` hit (predation.ts's `finishingPool` mechanic —
+  // a mob still whacking an already-fainted body) carries no new information
+  // for a live viewer: the target's already down, its HP is already 0, and
+  // it stays 0 until the real `killed`/`defeated` event (unaffected by this
+  // filter) fires. Direct ask: "if a unit is already fainted it shouldn't
+  // say 0 hp in the log... just fast forward to the death." Filtered once,
+  // here, rather than in each of the four display consumers below — none of
+  // them (log, map popups, auto-camera engagement tracking, battle screen)
+  // needs these repeats; the eventual death event already keeps a battle
+  // engagement alive/concluded without them.
+  const displayEvents = newEvents.filter((e) => !(e.kind === "fought" && e.finishingBlow));
+  eventLogPanel.ingest(displayEvents, world);
+  eventPopups.ingest(displayEvents, world);
+  autoCamera.ingest(displayEvents, world);
+  battleScreenPanel.ingest(displayEvents, world);
   lastLoggedEventCount = log.events.length;
   // Always dirty, not just when something's selected — the no-selection
   // view is a live population/weather overview, not a static placeholder.
@@ -396,11 +409,35 @@ canvas.addEventListener("click", (event) => {
   const rect = canvas.getBoundingClientRect();
   const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
   const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+  // Direct ask: "draw the yellow bounding box anyways on all cool events
+  // happening around the map, and clicking in it enters auto cam just for
+  // that one event" — checked before the ordinary agent-select hit test
+  // below, since a click inside one of these (deliberately larger than a
+  // single tile) boxes is clearly "I want that fight," not "I want to
+  // inspect whichever agent happens to be under my exact tap."
+  for (const engagement of autoCamera.listBattleEngagements()) {
+    const bounds = highlightBounds(world, engagement.ids);
+    if (bounds && x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) {
+      autoCamera.focusEngagement(engagement.seq);
+      syncAutoCamToggleButton();
+      return;
+    }
+  }
   const agent = agentAtCanvasPos(world, x, y);
   selectAgent(agent);
 });
 
 clearSelectionBtn.addEventListener("click", () => selectAgent(undefined));
+
+// Direct ask: "the actual battle log... needs to be scrollable on mobile.
+// Or more expandable." The real scroll bug is fixed in CSS
+// (-webkit-overflow-scrolling: touch); this is the "more expandable" half —
+// a much taller reading mode for the Inspector/Battle Screen panel, toggled
+// on demand rather than always eating that much vertical space.
+expandPanelBtn.addEventListener("click", () => {
+  const expanded = inspectorPanelEl.classList.toggle("panel-expanded");
+  expandPanelBtn.classList.toggle("playing", expanded);
+});
 
 hideNoiseCheckbox.addEventListener("change", () => {
   eventLogPanel.setHideNoise(hideNoiseCheckbox.checked);
@@ -515,11 +552,16 @@ canvasWrap.addEventListener(
   { passive: true }
 );
 
-autoCamToggleBtn.addEventListener("click", () => {
-  autoCamera.setEnabled(!autoCamera.isEnabled());
+/** Keeps the toggle button's label/style in sync with `autoCamera.isEnabled()` — needed both from the button's own click handler and from clicking a passive engagement box (which can turn Auto Camera on without going through the button at all). */
+function syncAutoCamToggleButton(): void {
   autoCamToggleBtn.textContent = `Auto Camera: ${autoCamera.isEnabled() ? "On" : "Off"}`;
   autoCamToggleBtn.classList.toggle("playing", autoCamera.isEnabled());
   if (!autoCamera.isEnabled()) autoCamStatusEl.textContent = "";
+}
+
+autoCamToggleBtn.addEventListener("click", () => {
+  autoCamera.setEnabled(!autoCamera.isEnabled());
+  syncAutoCamToggleButton();
 });
 
 // --- Boot --------------------------------------------------------------------
@@ -538,8 +580,18 @@ function frame(): void {
   // Direct ask: "on desktop [auto cam] is a bit too wide to know whats
   // going on... draw a box around it" — see drawAutoCamHighlight's own doc
   // comment (renderer.ts) for why a box scales better across viewport sizes
-  // than retuning the fixed zoom level would.
-  drawWorld(ctx, world, selectedAgentId, renderStyle, engagement?.ids);
+  // than retuning the fixed zoom level would. `listBattleEngagements()` is
+  // the follow-up ask ("draw the yellow bounding box anyways on all cool
+  // events happening around the map") — every other currently-tracked
+  // battle, shown dimmer, clickable (see the canvas click handler above).
+  drawWorld(
+    ctx,
+    world,
+    selectedAgentId,
+    renderStyle,
+    engagement?.ids,
+    autoCamera.listBattleEngagements().map((e) => e.ids)
+  );
   drawEventPopups(ctx, eventPopups.active());
   autoCamStatusEl.textContent = autoCamera.currentLabel() ?? (autoCamera.isEnabled() ? "watching…" : "");
   battleScreenPanel.setActive(engagement);

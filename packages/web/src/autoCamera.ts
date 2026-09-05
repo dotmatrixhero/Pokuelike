@@ -24,8 +24,11 @@ const DWELL_TICKS = 24;
  * A concluded battle gets a short "epilogue" hold on the same view before the
  * camera releases — long enough to actually see the kill/retreat land,
  * short enough not to stall the queue behind a fight that's already over.
+ * At battle-step's fixed ~650ms/tick cadence (`BATTLE_STEP_INTERVAL_MS` in
+ * main.ts), this is ~3.9s — trimmed down from an original 16 (~10.4s) per
+ * direct feedback that it "lingers a bit too long after battle is over."
  */
-const BATTLE_EPILOGUE_TICKS = 16;
+const BATTLE_EPILOGUE_TICKS = 6;
 /**
  * A battle with no new `fought`/`missed`/`herdClash` hit involving either
  * participant for this many ticks is treated as silently disengaged (one
@@ -152,10 +155,49 @@ export class AutoCameraController {
   setEnabled(on: boolean): void {
     if (this.enabled === on) return;
     this.enabled = on;
-    // Turning it off mid-event releases everything immediately, not at the
-    // next natural conclusion — an explicit toggle-off is the viewer saying
-    // "stop," not "finish this one first."
-    if (!on) this.reset();
+    if (!on) {
+      // Turning off releases camera/speed/log-filter control immediately,
+      // not at the next natural conclusion — an explicit toggle-off is the
+      // viewer saying "stop driving the view for me." Deliberately does NOT
+      // clear `this.active`/`this.queue` the way `reset()` does — detection
+      // keeps running even while disabled (see `ingest`), which is what
+      // lets `listBattleEngagements`'s passive bounding-box overlay keep
+      // working with Auto Camera toggled off. Use `reset()` instead for an
+      // actual "everything tracked is now meaningless" moment (world reload).
+      this.releaseControl();
+      return;
+    }
+    // Turning on while something was already being passively tracked (the
+    // overlay above was already showing a box for it) — catch the camera up
+    // to it immediately, since `reconcile`'s own promotion branch only fires
+    // when `this.active` transitions from unset, which it won't here.
+    this.takeControlOfActive();
+  }
+
+  /** The "start actively driving the view for whatever `this.active` currently is" half of `setEnabled(true)` — also called directly by `focusEngagement` for the already-enabled case, where `setEnabled(true)` itself would no-op (already on) and so never reach this logic on its own. */
+  private takeControlOfActive(): void {
+    if (!this.active) return;
+    this.viewerTookOver = false;
+    this.host.setLogFilter(this.active.ids);
+    if (!this.controllingView) {
+      this.controllingView = true;
+      this.host.captureHomeView();
+    }
+    this.applySlowdownIfNeeded();
+  }
+
+  /** The shared "let go of the view/speed/log-filter" logic behind both `setEnabled(false)` and `reset()` — see their own doc comments for how they differ (this alone leaves `active`/`queue` untouched). */
+  private releaseControl(): void {
+    this.releaseSpeedOverride();
+    if (this.controllingView) {
+      this.controllingView = false;
+      // Only snap back to the pre-auto-camera view if the viewer never took
+      // the wheel during whatever was just released — see `reconcile`'s
+      // identical rule for why.
+      if (!this.viewerTookOver) this.host.restoreHomeView();
+    }
+    this.viewerTookOver = false;
+    this.host.setLogFilter(undefined);
   }
 
   /**
@@ -168,15 +210,7 @@ export class AutoCameraController {
   reset(): void {
     this.queue = [];
     this.active = undefined;
-    this.releaseSpeedOverride();
-    if (this.controllingView) {
-      this.controllingView = false;
-      // Same "don't stomp a deliberate manual pan" rule as the ordinary
-      // idle-cleanup path in `reconcile` — see its comment.
-      if (!this.viewerTookOver) this.host.restoreHomeView();
-    }
-    this.viewerTookOver = false;
-    this.host.setLogFilter(undefined);
+    this.releaseControl();
   }
 
   /** The viewer manually panned/scrolled/zoomed while an engagement was in progress — stop re-centering for it, but keep tracking it (log filter, conclusion checks) until it ends or a new one takes over. */
@@ -196,32 +230,81 @@ export class AutoCameraController {
    * dwell/epilogue deadline could stall indefinitely if expiry were only
    * ever checked here — `update` (driven by `requestAnimationFrame`, so it
    * keeps running even across ticks with zero new events) owns that.
+   *
+   * Deliberately NOT gated on `isEnabled()` (unlike before this passive
+   * overlay feature existed) — detection needs to keep running even while
+   * Auto Camera is toggled off, so `listBattleEngagements` has something
+   * real to show. `update`/`reconcile` below are the ones responsible for
+   * making sure this doesn't touch the camera/speed/log filter unless
+   * `enabled`.
    */
   ingest(events: readonly SimEvent[], world: World): void {
-    if (!this.enabled || events.length === 0) return;
+    if (events.length === 0) return;
     for (const event of events) this.observe(event, world);
   }
 
-  /** Called once per animation frame to advance the state machine (promote the next queued engagement, expire a finished one) and apply the active engagement's camera focus. Cheap no-op when idle. */
+  /**
+   * Called once per animation frame to advance the state machine (promote
+   * the next queued engagement, expire a finished one) and, while enabled,
+   * apply the active engagement's camera focus. `reconcile` itself always
+   * runs (detection/expiry needs to keep working while disabled — see
+   * `ingest`); only the actual camera pan is gated here.
+   */
   update(world: World): void {
-    if (!this.enabled) return;
     this.reconcile(world);
-    if (this.active && !this.viewerTookOver) this.host.focusOn(this.focusPos(this.active, world));
+    if (this.enabled && this.active && !this.viewerTookOver) this.host.focusOn(this.focusPos(this.active, world));
   }
 
-  /** The ids the log should currently be scoped to, or `undefined` for no auto-cam filter — `main.ts` doesn't need this directly (the host callback already receives it), but it's exposed for a status readout/tests. */
+  /** The ids the log should currently be scoped to, or `undefined` for no auto-cam filter — gated on `isEnabled()` since this reflects what the log/status UI should show, unchanged by this file's passive-tracking-while-disabled feature. */
   currentIds(): Set<string> | undefined {
-    return this.active?.ids;
+    return this.enabled ? this.active?.ids : undefined;
   }
 
   currentLabel(): string | undefined {
-    return this.active?.label;
+    return this.enabled ? this.active?.label : undefined;
   }
 
-  /** The active engagement's full public shape (`undefined` when idle), for a consumer that needs more than `currentIds`/`currentLabel` alone — see `ActiveEngagementInfo`. */
+  /** The active engagement's full public shape (`undefined` when idle or disabled), for a consumer that needs more than `currentIds`/`currentLabel` alone — see `ActiveEngagementInfo`. Gated on `isEnabled()`, same as those — see `listBattleEngagements` for the enabled-independent equivalent. */
   currentEngagement(): ActiveEngagementInfo | undefined {
-    if (!this.active) return undefined;
+    if (!this.enabled || !this.active) return undefined;
     return { seq: this.active.seq, category: this.active.category, ids: this.active.ids, label: this.active.label };
+  }
+
+  /**
+   * Every currently-tracked *battle* engagement (the active one, if it's a
+   * battle, plus any battles still queued behind it) — unlike
+   * `currentEngagement()`, NOT gated on `isEnabled()`, since detection now
+   * always runs (see `ingest`). Direct ask: "draw the yellow bounding box
+   * anyways on all cool events happening around the map" while Auto Camera
+   * is off. Deliberately scoped to battles only, not every notable one-shot
+   * (immigration/courtship/hatch/evolution/death) — those are momentary and
+   * don't have a meaningful "still ongoing, still worth a box" window the
+   * way a continuous battle naturally tracks via `expiresOrLastActiveTick`/
+   * `concludedAtTick`; a real follow-up if the one-shot case is wanted too.
+   */
+  listBattleEngagements(): ActiveEngagementInfo[] {
+    const all = this.active ? [this.active, ...this.queue] : this.queue;
+    return all.filter((e) => e.category === "battle").map((e) => ({ seq: e.seq, category: e.category, ids: e.ids, label: e.label }));
+  }
+
+  /**
+   * Click-to-follow for the passive overlay above — direct ask: "clicking in
+   * it enters auto cam just for that one event." Turns Auto Camera on (if
+   * not already — reusing `setEnabled`'s own "catch up to an already-active
+   * engagement" logic) and force-promotes `seq` to active immediately,
+   * ahead of whatever else is active/queued, rather than waiting its turn
+   * in the ordinary battle-priority/FIFO order. A no-op if `seq` no longer
+   * corresponds to a still-tracked engagement (it concluded/expired between
+   * the click and this call).
+   */
+  focusEngagement(seq: number): void {
+    const found = this.active?.seq === seq ? this.active : this.queue.find((e) => e.seq === seq);
+    if (!found) return;
+    if (this.active && this.active.seq !== seq) this.queue.unshift(this.active);
+    this.queue = this.queue.filter((e) => e.seq !== seq);
+    this.active = found;
+    this.enabled = true;
+    this.takeControlOfActive();
   }
 
   // --- detection -------------------------------------------------------------
@@ -274,6 +357,30 @@ export class AutoCameraController {
         return;
       case "behaviorChanged":
         if (event.to === "flee") this.onBattleParticipantLeft(event.agentId);
+        // A fresh `behaviorChanged` to "fight" is the earliest possible
+        // signal a battle is starting — predation.ts sets `agent.fightTarget`
+        // in the exact same call that logs this, so it's already resolvable
+        // here even before any hit lands. Direct ask ("I feel like I'm only
+        // cutting auto cam to AFTER a Pokémon fainted... feels bad to miss
+        // it"): most fights take at least one tick to close distance before
+        // the first hit connects (only `canAttackFromHere` lets the very
+        // same tick land a hit too), so hooking this instead of waiting for
+        // the first `fought` gives the camera a real head start in that
+        // common case. An instant point-blank ambush still can't be caught
+        // any earlier than this — `fought` fires the same tick either way —
+        // that's a genuine, honest limit, not something this fixes.
+        if (event.to === "fight") {
+          const agent = world.agents.find((a) => a.id === event.agentId);
+          if (agent?.fightTarget) {
+            const target = world.agents.find((a) => a.id === agent.fightTarget);
+            this.onBattleHit(
+              new Set([event.agentId, agent.fightTarget]),
+              agent.pos,
+              `${idLabel(world, event.agentId, event.species)} vs ${target ? idLabel(world, target.id, target.species) : "something"} engaging`,
+              world
+            );
+          }
+        }
         return;
       default:
         return;
@@ -382,27 +489,15 @@ export class AutoCameraController {
       if (!next.continuous) next.expiresOrLastActiveTick = tick + DWELL_TICKS;
       this.active = next;
       this.viewerTookOver = false; // a genuinely new thing to look at re-earns camera control even if the viewer panned away from the last one
-      this.host.setLogFilter(next.ids);
-      if (!this.controllingView) {
-        this.controllingView = true;
-        this.host.captureHomeView();
-      }
-      this.applySlowdownIfNeeded();
+      // Promotion bookkeeping (`this.active`/`viewerTookOver` above) always
+      // happens — detection/tracking runs regardless of `enabled` (see
+      // `ingest`) — but only actually take the view/speed/log-filter over
+      // while Auto Camera is switched on; `listBattleEngagements`'s passive
+      // overlay is what a disabled viewer sees instead.
+      if (this.enabled) this.takeControlOfActive();
     }
 
-    if (!this.active) {
-      this.host.setLogFilter(undefined);
-      this.releaseSpeedOverride();
-      if (this.controllingView) {
-        this.controllingView = false;
-        // Only snap back to the pre-auto-camera view if the viewer never
-        // took the wheel during whatever just concluded — if they manually
-        // panned/zoomed away from the last followed moment, that's their
-        // deliberate choice of where to look now, not something a "give the
-        // view back" cleanup step should override.
-        if (!this.viewerTookOver) this.host.restoreHomeView();
-      }
-    }
+    if (!this.active && this.enabled) this.releaseControl();
   }
 
   private finishActive(world: World): void {

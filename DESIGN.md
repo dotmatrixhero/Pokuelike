@@ -10944,3 +10944,204 @@ distinct "the threat is now adjacent, not just nearby" retaliation
 threshold — not attempted here, since it changes the mob-threshold/flee
 balance TODO.md already documents as a deliberately separate, bigger lever
 ("the lever is the level/stat gap, not the formula").
+
+## Auto Camera / Battle Screen follow-up: catch the fight earlier, release it sooner, stop repeating "0 HP"
+
+Direct user feedback on the live artifact, three separate points:
+
+1. "I'm only cutting auto cam to AFTER a Pokémon in the fight fainted... it's
+   very possible that it's just getting one-shot, but it feels bad to miss
+   it."
+2. "Auto cam lingers a bit too long after battle is over."
+3. "If a unit is already fainted it shouldn't say 0 hp in the log, it should
+   just fast forward to the death unless something happened."
+
+### 1. Battle detection now hooks the "decided to fight" moment, not just the first landed hit
+
+`autoCamera.ts`'s `onBattleHit` previously only fired off `fought`/
+non-missed `herdClash` events — i.e. only once a hit had already landed.
+Traced why that reads as "always arriving after the fact": `predation.ts`
+sets `agent.behavior = "fight"` (logging a `behaviorChanged` event) and
+`agent.fightTarget` in the *same* call that then either lands a hit this
+tick (if already adjacent) or just steps the agent closer (if not) — so for
+any fight that takes more than one tick to close distance, there's a real,
+usable window between "decided to fight" and "first hit lands" that auto-cam
+was simply not watching.
+
+Fixed: `observe`'s `behaviorChanged` case now also starts (or widens) a
+battle engagement when `event.to === "fight"`, by resolving `agent.fightTarget`
+against the live `world.agents` (already in scope and already set by the
+time this event is observed). Confirmed in a real 3000-tick run (seed
+20260903): 22 `behaviorChanged`-to-`"fight"` transitions occurred, each now
+a real earlier hook than waiting for the first `fought`.
+
+Honestly still a real limit, not fixed here: a genuine point-blank ambush
+(attacker and target already adjacent, first move lands the same tick
+`fight` starts) can't be caught any earlier than the hit itself — `fought`
+fires in the identical tick either way. The user's own suspicion ("it's
+very possible that it's just getting one-shot") was correct for that
+specific case; this fix addresses the common multi-tick-approach case, not
+that one.
+
+### 2. Post-battle epilogue hold shortened
+
+`BATTLE_EPILOGUE_TICKS` (how long the camera stays on a concluded battle
+before releasing) was 16 — at battle-step's fixed ~650ms/tick cadence,
+~10.4 real seconds of standing on a corpse after the kill/retreat already
+landed. Cut to 6 (~3.9s) — long enough to actually read the "X defeated Y"
+line, short enough not to stall whatever's queued behind it. A sim-original
+tuning number, not derived from anything deeper; revisit if it now feels too
+short.
+
+### 3. Finishing-blow hits on an already-fainted target no longer repeat "0 HP"
+
+Traced to `predation.ts`'s `finishingPool` mechanic (a mob keeps hitting an
+already-fainted-but-not-yet-truly-dead predator across however many ticks it
+takes) — every one of those hits logged a full `fought` event with
+`defenderHpRemaining: 0`, and every display consumer (the event log, the
+map's popup icons, and Battle Screen's turn-by-turn narrative) rendered it
+as a fresh "takes N damage! (HP left: 0)" line, repeating for however long
+the finishing sequence took. Confirmed in the same 3000-tick run: 25 such
+hits fired.
+
+Fixed with a new optional `finishingBlow?: boolean` field on the `fought`
+`SimEvent` (`events.ts`), set `true` at the one place `predation.ts` already
+computes this case (`resolveHitAgainstTarget`'s `defender.fainted` branch —
+no new state, just surfacing what the engine already knew). `main.ts` filters
+these out of `displayEvents` once, before handing the tick's events to all
+four live-view consumers (event log, map popups, auto-camera, battle
+screen) — the underlying `EventLog` itself is untouched (nothing lossy for
+a data/determinism consumer; `runner`'s plain-text CLI dump also still shows
+them, since that's a complete data record, not a "watch it happen" view).
+The real `killed`/`defeated` event that eventually ends the sequence is
+never filtered — the "fast forward to the death" in the direct ask is
+exactly what this produces: silence during the repeat hits, then the one
+real conclusion line.
+
+All three fixes: full 907-test suite (888 engine + 19 data) still green,
+typecheck clean across all four packages, real `pnpm --filter @pokuelike/web
+build` succeeds. `packages/web` still has no automated UI test suite (see
+TODO.md's existing note on that) — validated by the real-run event-count
+checks above plus a clean build, not a browser click-through.
+
+## Auto Camera passive overlay, multi-combatant Battle Screen, mobile log scroll/expand
+
+Three more direct asks on top of the earlier Auto Camera/Battle Screen pass:
+
+1. "Draw the yellow bounding box anyways on all cool events happening around
+   the map [when not on auto cam mode], and clicking in it enters auto cam
+   just for that one event."
+2. "When multiple units are in battle esp same species it's quite hard to
+   tell em apart. Can you add their hp to the battle log side and also color
+   code them + their sprite."
+3. "The actual battle log... needs to be scrollable on mobile. Or more
+   expandable."
+
+### 1. Passive battle overlay + click-to-follow
+
+`autoCamera.ts`'s detection (`ingest`/`observe`/`reconcile`) previously only
+ran while `enabled` — turning Auto Camera off meant no tracking at all, so
+there was nothing to show a box for. Refactored so detection/expiry always
+runs regardless of the toggle; only the actual camera-driving side effects
+(`host.focusOn`/`setSpeed`/`enterBattleStep`/`setLogFilter`/
+`captureHomeView`/`restoreHomeView`) are now gated on `isEnabled()`
+(`takeControlOfActive`/`releaseControl`, the two halves `setEnabled`/
+`reconcile` both call into). `setEnabled(false)` no longer wipes tracking
+state (`reset()`, still used for a real world reload, keeps that full-wipe
+behavior) — it only releases view/speed control, so a battle already being
+tracked keeps being tracked while the viewer has the toggle off.
+
+New `listBattleEngagements()` exposes every currently-tracked *battle*
+(deliberately scoped to battles only, not one-shot immigration/courtship/
+hatch/evolution/death moments — those don't have a meaningful "still going"
+window the way a continuous battle's own stale/conclusion tracking already
+gives it; a real follow-up if the one-shot case is wanted too), independent
+of `isEnabled()`. `renderer.ts`'s bounding-box math was extracted into a
+shared `highlightBounds` (pixel-space rect for an id set) reused by both the
+existing solid actively-followed box and a new dimmer, more-sparsely-dashed
+`drawPassiveHighlight` per other tracked battle. `main.ts`'s canvas click
+handler checks every passive engagement's bounds before falling through to
+the ordinary agent-select hit test; a hit calls `autoCamera.focusEngagement(seq)`
+(force-promotes that engagement to active, turns Auto Camera on if it
+wasn't already) and syncs the toggle button's label/style, since that state
+change didn't go through the button's own click handler.
+
+Real browser validation (Playwright against the live dev server, seed
+20260903): the earlier-detection fix and this refactor compose correctly —
+watched Auto Camera pick up `bulbasaur (bulbasaur-2) vs onix (onix-1)
+engaging` (the pre-hit signal, see the previous section) with the toggle
+starting from *off*, confirming tracking survives across an off→on
+transition. Toggling off again correctly released camera control (button
+reverted to "Auto Camera: Off") without erroring. No console/page errors
+across the full interaction sequence (enable, disable, tab-switch, panel
+expand, canvas click). Honestly incomplete: a screenshot specifically
+catching a passive dashed box on screen while a battle was in progress
+elsewhere on a large map wasn't captured in the time available (the
+battle's location fell outside the initial viewport, and nothing pans the
+camera while Auto Camera is off, by design) — the underlying bounds/render
+path is the same one already proven correct for the solid active box, but
+this exact interaction is validated by code review and the shared render
+path, not a screenshot.
+
+### 2. Multi-combatant Battle Screen: sprite, per-agent color, disambiguated names
+
+`battleScreenPanel.ts`'s header previously showed only the first two
+participants plus a "+N more" count with no detail on the rest — useless
+for a mob fight, and even for exactly two same-species combatants the
+turn-by-turn text lines (`"Scyther used Slash!"`) gave no way to tell which
+individual was acting.
+
+Fixed on three fronts:
+- **Every participant now gets a chip**, not just the first two — a
+  flex-wrap row of `renderCombatant` boxes with "VS" separators between
+  consecutive ones, replacing the fixed 2-slot layout.
+- **A new `agentAccentColor(agentId)` (palette.ts)** hashes the *agent id*
+  (not species — `shelterOwnerTint`'s existing per-species hash was the
+  wrong key here, since the whole point is telling apart two individuals of
+  the same species) into a stable HSL accent color. Each combatant chip's
+  name and left border use it; the "move"/"damage" text lines (the ones
+  that literally name a participant) are tinted the same color so a reader
+  can visually track one specific fighter as the log scrolls. Deliberately
+  NOT applied to crit/effectiveness/miss/faint/retreat/conclusion lines —
+  those already carry real semantic meaning through their own fixed CSS
+  color, which a per-agent override would have traded away.
+- **A small sprite thumbnail** (`sprites.ts`'s existing `getSprite`, `.src`
+  copied into a fresh `<img>` rather than reusing the cached canvas-source
+  `Image` instance directly, since two same-species combatants would
+  otherwise fight over one shared DOM node) sits next to each chip's name.
+- **Text lines now use `idLabel`** (already used by `autoCamera.ts`) instead
+  of bare species strings — `"Scyther (scyther-2) used Slash!"` instead of
+  `"Scyther used Slash!"` — real disambiguation in the text itself, not just
+  the header.
+
+Confirmed live in the browser: a real Bulbasaur-vs-Onix engagement rendered
+two distinct colored chips (pink Bulbasaur, teal Onix) each with a correct
+sprite and live HP bar (34/34, 28/28), and the log line beneath them read
+`bulbasaur (bulbasaur-2) vs onix (onix-1) engaging!` — individually
+identified, not generic species names.
+
+### 3. Mobile scroll/expand
+
+`-webkit-overflow-scrolling: touch` (already used by `#canvas-wrap` for the
+identical reason) was missing from `#inspector-panel`, `.battle-screen-log`,
+and `#event-log` — a well-known iOS Safari trap where a nested scrollable
+element inside a fixed-position container (this app's `#sidebar` drawer)
+doesn't actually respond to touch drags without it. Added to all three.
+Also consolidated a stale duplicate `#inspector-panel` CSS rule (two
+conflicting `max-height` declarations, 38vh and 46%, only the second ever
+actually applied) found while making this change.
+
+Added a real "more expandable" control per the direct ask's second half: a
+new "⤢" expand-panel button in the Inspector/Battle Screen panel header
+toggles `.panel-expanded` on `#inspector-panel`, raising its `max-height`
+from 46% to 82% of the drawer's height — a genuine full-reading mode rather
+than the fixed default, on demand.
+
+All three: full 907-test suite (888 engine + 19 data) unaffected (these are
+`packages/web`-only changes), typecheck clean across all four packages, a
+real `pnpm --filter @pokuelike/web build` succeeds, and Playwright-driven
+live-browser interaction produced zero console/page errors across the full
+sequence (load, play, speed change, style switch, Auto Camera on/off, tab
+switch, canvas click, panel expand). `packages/web` still has no automated
+UI test suite (unchanged pre-existing gap, see TODO.md) — this was real
+browser validation, not a claim of automated coverage.

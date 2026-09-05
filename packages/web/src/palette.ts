@@ -167,6 +167,23 @@ export function shelterOwnerTint(rgb: Rgb, ownerSpecies: string | undefined): Rg
 }
 
 /**
+ * A stable, per-INDIVIDUAL (not per-species) accent color — direct ask:
+ * "when multiple units are in battle esp same species it's quite hard to
+ * tell em apart... color code them." Hashing the same-species-but-different
+ * `agentId` string (not `species`, which is `shelterOwnerTint`'s key) is
+ * exactly what makes two same-species combatants land on two different
+ * colors here despite sharing every other visual trait. A bright, readable
+ * fixed saturation/lightness rather than `shelterOwnerTint`'s "mix a little
+ * accent into a base color" — this is meant to stand alone as a name/HP-bar
+ * accent, not tint an existing terrain color.
+ */
+export function agentAccentColor(agentId: string): string {
+  const hue = hashString(agentId) % 360;
+  const [r, g, b] = hslToRgb(hue, 0.65, 0.62);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+/**
  * A cheap, purely-visual per-tile pseudo-random value in [0, 1) — classic
  * GLSL-style sine hash, deterministic by (x, y) alone (not tied to the
  * sim's own seeded rng; this never affects simulation, only how a tile's
