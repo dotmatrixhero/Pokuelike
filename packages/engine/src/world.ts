@@ -1,7 +1,49 @@
 import { LAYER_ORDER, type Layer, type Tile, type TerrainKind, type World } from "./types.js";
+import { invalidateResourceIndex } from "./resourceIndex.js";
+import { mulberry32, randomSeed } from "./rng.js";
+
+const UNWALKABLE_TERRAIN: ReadonlySet<TerrainKind> = new Set(["wall", "tree"]);
+/**
+ * Blocks sight/ranged attacks (see `Tile.opaque`'s doc comment) — a
+ * superset of `UNWALKABLE_TERRAIN`: "boulder" is real, solid rock you can't
+ * see or shoot through, but (direct ask) no longer a hard movement
+ * blocker — see `terrainSpeedMultiplier` (support.ts) for the real
+ * movement-speed cost that replaces it.
+ */
+const OPAQUE_TERRAIN: ReadonlySet<TerrainKind> = new Set(["wall", "tree", "boulder"]);
+
+/**
+ * Local duplicate of `flora.ts`'s canonical `FOOD_MAX_STOCK` (0.8) — a real
+ * import isn't possible here without closing a circular-dependency loop
+ * (flora.ts already imports from this file), same reasoning as
+ * `occupancy.ts`'s own duplicated `bodyWeightOf` formula. If you're tuning
+ * food yield, change `FOOD_MAX_STOCK` in flora.ts — that's the value both
+ * this file and flora.ts's own maturation logic should agree on — and keep
+ * this literal in sync.
+ */
+const WORLDGEN_FOOD_MAX_STOCK = 0.8;
+
+/** "wall"/"tree" block movement outright; everything else (including "boulder", now just slow) is passable. */
+export function isWalkableTerrain(terrain: TerrainKind): boolean {
+  return !UNWALKABLE_TERRAIN.has(terrain);
+}
+
+/** "wall"/"tree"/"boulder" block sight and ranged attacks — see `Tile.opaque`'s doc comment. */
+export function isOpaqueTerrain(terrain: TerrainKind): boolean {
+  return OPAQUE_TERRAIN.has(terrain);
+}
 
 export function createTile(terrain: TerrainKind, elevation = 0): Tile {
-  return { terrain, walkable: terrain !== "wall", elevation, stock: terrain === "food" ? 1 : undefined };
+  return {
+    terrain,
+    walkable: isWalkableTerrain(terrain),
+    opaque: isOpaqueTerrain(terrain),
+    elevation,
+    stock: terrain === "food" ? WORLDGEN_FOOD_MAX_STOCK : undefined,
+    concealment: terrain === "bush" || terrain === "shelter" ? true : undefined,
+    vacantTicks: terrain === "shelter" ? 0 : undefined,
+    cache: terrain === "shelter" ? 0 : undefined,
+  };
 }
 
 function createLayerGrid(width: number, height: number): Tile[] {
@@ -12,12 +54,24 @@ function createLayerGrid(width: number, height: number): Tile[] {
   return tiles;
 }
 
-export function createWorld(width: number, height: number): World {
+/**
+ * `seed` seeds `World.rng` — the ONE shared seeded generator every random
+ * roll anywhere in the engine (agent behavior, not just terrain generation)
+ * must be threaded from, per DESIGN.md's determinism section. Omitted, it
+ * falls back to a real (non-reproducible) seed via `randomSeed()` — fine for
+ * a one-off bare `createWorld` call (most engine unit tests don't care about
+ * reproducibility at all), but any caller that DOES want a reproducible run
+ * (packages/runner, packages/data's `createDemoWorld`/`generateWorld`) must
+ * pass an explicit seed. `World.rngSeed` records whichever seed actually got
+ * used (explicit or freshly minted) so it can always be read back off the
+ * world and printed/logged for a later exact replay — see `packages/runner`.
+ */
+export function createWorld(width: number, height: number, seed: number = randomSeed()): World {
   const tiles = {} as Record<Layer, Tile[]>;
   for (const layer of LAYER_ORDER) {
     tiles[layer] = createLayerGrid(width, height);
   }
-  return { width, height, tiles, agents: [], tick: 0 };
+  return { width, height, tiles, agents: [], tick: 0, rngSeed: seed, rng: mulberry32(seed) };
 }
 
 export function tileAt(world: World, layer: Layer, x: number, y: number): Tile | undefined {
@@ -31,15 +85,32 @@ export function setTile(
   x: number,
   y: number,
   terrain: TerrainKind,
-  elevation?: number
+  elevation?: number,
+  flavor?: string
 ): void {
   const tile = tileAt(world, layer, x, y);
   if (!tile) return;
   tile.terrain = terrain;
-  tile.walkable = terrain !== "wall";
-  tile.stock = terrain === "food" ? 1 : undefined;
+  tile.walkable = isWalkableTerrain(terrain);
+  tile.opaque = isOpaqueTerrain(terrain);
+  tile.stock = terrain === "food" ? WORLDGEN_FOOD_MAX_STOCK : terrain === "flora" ? 1 : undefined;
   tile.growth = terrain === "seedling" ? 0 : undefined;
+  tile.flavor = terrain === "food" || terrain === "flora" ? flavor : undefined;
+  tile.concealment = terrain === "bush" || terrain === "shelter" ? true : undefined;
+  tile.vacantTicks = terrain === "shelter" ? 0 : undefined;
+  // Reverting away from "shelter" (abandonment, or something else claiming
+  // the tile) loses whatever was stockpiled — same "stopped maintaining it"
+  // consequence as vacantTicks resetting; a freshly built shelter starts
+  // with an empty cache, filled only by real resting time afterward.
+  tile.cache = terrain === "shelter" ? 0 : undefined;
+  // Reverting away from "shelter" also drops the cosmetic per-species owner
+  // hint — a fresh build (shelter.ts's `applyShelterBuilding`, which sets
+  // this right after calling `setTile`) starts unowned until its builder's
+  // species stamps it, same "stopped maintaining it, starts over" shape as
+  // `cache`/`vacantTicks` just above.
+  if (terrain !== "shelter") tile.shelterOwnerSpecies = undefined;
   if (elevation !== undefined) tile.elevation = elevation;
+  invalidateResourceIndex(world);
 }
 
 export function setElevation(world: World, layer: Layer, x: number, y: number, elevation: number): void {
