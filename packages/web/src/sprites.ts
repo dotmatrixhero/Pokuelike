@@ -160,8 +160,8 @@ export function getWaterEdge(x: number, y: number): HTMLImageElement | null {
  */
 const FLOOR_BASE = "floor_cave_2";
 const FLOOR_OVERLAYS = ["floor_cave_3", "floor_cave_4", "floor_cave_5", "floor_dirt_1", "floor_dirt_2", "floor_dirt_3"];
-/** Only this fraction of tiles get a decal at all — the rest are the plain base, so decals read as occasional detail, not a second competing pattern. */
-const FLOOR_OVERLAY_CHANCE = 4; // 1-in-N tiles
+/** Only this fraction of tiles get a decal at all — the rest are the plain base, so decals read as occasional detail, not a second competing pattern. Direct ask after the first pass looked good: "let's add like double the amt" (was 1-in-4). */
+const FLOOR_OVERLAY_CHANCE = 2; // 1-in-N tiles
 
 export function getFloorTexture(): HTMLImageElement | null {
   return loadSprite(`tile_${FLOOR_BASE}`, `/tiles/${FLOOR_BASE}.png`);
