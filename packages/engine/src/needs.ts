@@ -4,7 +4,7 @@ import { stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
 import { applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
-import { CONSUME_STOCK_AMOUNT, recordGrazing } from "./flora.js";
+import { CONSUME_STOCK_AMOUNT, recordGrazing, tendSoil } from "./flora.js";
 import { tickCooldowns } from "./combat.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
 import { migrate } from "./migration.js";
@@ -568,6 +568,12 @@ export function tickAgentNeeds(
   if (agent.age !== undefined) agent.age += 1;
   tickCooldowns(agent, agent.asleep ? SLEEP_COOLDOWN_TICKS : 1);
   if (world) tickStatusEffects(agent, world, log, rng);
+  // "tilling/planting it via grass type help" — a live Grass-type agent
+  // gradually enriches the ground it's standing on, every tick, no move
+  // or intent required. Surface-only, matching flora.ts's own scope.
+  if (world && agent.layer === "surface" && agent.types?.includes("grass")) {
+    tendSoil(tileAt(world, agent.layer, agent.pos.x, agent.pos.y));
+  }
   const thirstMultiplier = world ? thirstDecayMultiplier(world, agent.layer, agent.pos) : 1;
   // Post-kill "digesting" slowdown (see KILL_SATIATION_TICKS's doc comment)
   // — checked and ticked down here rather than gated behind `world` like

@@ -178,6 +178,19 @@ export function getFloorOverlay(x: number, y: number): HTMLImageElement | null {
 }
 
 /**
+ * A green "fertile ground" patch drawn under food/flora/seedling tiles —
+ * direct ask: "can we decal a little green patch under the plants."
+ * `floor_grass_1` was one of the two building-sheet crops originally
+ * excluded from the general floor pool for clashing with the cave/dirt
+ * palette (see getFloorTexture's doc comment) — that mismatch is exactly
+ * why it works *here*: growing ground is supposed to read as visibly
+ * different from the surrounding cave floor, not blend in with it.
+ */
+export function getFertilePatch(): HTMLImageElement | null {
+  return loadSprite("tile_floor_grass_1", "/tiles/floor_grass_1.png");
+}
+
+/**
  * Real berry-plant art (ripped from legacy-cpp/data/sprites/"berry
  * sprites.png", a growth-stage sheet: each berry has a small/medium/ripe
  * stage) for "food"/"flora" tiles, keyed by the same flavor name

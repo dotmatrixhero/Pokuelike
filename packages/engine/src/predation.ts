@@ -14,6 +14,7 @@ import { effectiveDisposition } from "./herdLeadership.js";
 import { isPathClear } from "./fov.js";
 import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt, setTile } from "./world.js";
+import { waterSoil } from "./flora.js";
 import { recordPredatorPressure } from "./herdMigration.js";
 import { isNight, isTwilight, lightLevel } from "./daynight.js";
 import { activeWeatherAt, isInColdSnap, stormAccuracyMultiplier } from "./weather.js";
@@ -1105,7 +1106,15 @@ function resolveHitAgainstTarget(
     }
     if (move.terrainFill) {
       const tile = tileAt(world, defender.layer, defender.pos.x, defender.pos.y);
-      if (tile && TERRAIN_FILLABLE.has(tile.terrain)) setTile(world, defender.layer, defender.pos.x, defender.pos.y, move.terrainFill.terrain);
+      if (tile && TERRAIN_FILLABLE.has(tile.terrain)) {
+        setTile(world, defender.layer, defender.pos.x, defender.pos.y, move.terrainFill.terrain);
+        // Direct ask: "Pokémon that help, like watering it via water
+        // moves." `terrainFill` is currently exclusive to Water Gun's
+        // puddle effect, so a real puddle forming here already means "a
+        // Water-type move just wet this ground" — a real fertility boost
+        // on top of the puddle itself.
+        waterSoil(tile);
+      }
     }
     if (move.rallyCall) {
       defender.rallyMarkTicksRemaining = move.rallyCall.ticks;

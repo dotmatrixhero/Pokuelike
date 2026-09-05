@@ -649,3 +649,54 @@ describe("tickAgentAction: status-effect action-tick guards", () => {
     expect(agent.pos).toEqual({ x: 0, y: 0 });
   });
 });
+
+describe("tickAgentNeeds: soil tending (direct ask: Grass-type Pokémon till/tend the ground they stand on)", () => {
+  it("a live Grass-type agent raises the fertility of the tile under it, every tick", () => {
+    const world = createWorld(3, 3);
+    const tile = tileAt(world, "surface", 1, 1)!;
+    tile.fertility = 0.35;
+    const grassAgent = makeAgent({ pos: { x: 1, y: 1 }, types: ["grass"] });
+
+    tickAgentNeeds(grassAgent, world);
+
+    expect(tile.fertility!).toBeGreaterThan(0.35);
+  });
+
+  it("a non-Grass-type agent standing on the same tile does nothing to its fertility", () => {
+    const world = createWorld(3, 3);
+    const tile = tileAt(world, "surface", 1, 1)!;
+    tile.fertility = 0.35;
+    const waterAgent = makeAgent({ pos: { x: 1, y: 1 }, types: ["water"] });
+
+    tickAgentNeeds(waterAgent, world);
+
+    expect(tile.fertility).toBe(0.35);
+  });
+
+  it("a fainted (alive === false) Grass-type agent doesn't tend the ground — tickAgentNeeds returns before any of this", () => {
+    const world = createWorld(3, 3);
+    const tile = tileAt(world, "surface", 1, 1)!;
+    tile.fertility = 0.35;
+    const deadGrassAgent = makeAgent({ pos: { x: 1, y: 1 }, types: ["grass"], alive: false });
+
+    tickAgentNeeds(deadGrassAgent, world);
+
+    expect(tile.fertility).toBe(0.35);
+  });
+
+  it("a Grass-type agent underground (not surface) doesn't tend a surface tile at the same x,y", () => {
+    const world = createWorld(3, 3);
+    const surfaceTile = tileAt(world, "surface", 1, 1)!;
+    surfaceTile.fertility = 0.35;
+    const undergroundGrassAgent = makeAgent({ pos: { x: 1, y: 1 }, layer: "underground", homeLayer: "underground", types: ["grass"] });
+
+    tickAgentNeeds(undergroundGrassAgent, world);
+
+    expect(surfaceTile.fertility).toBe(0.35);
+  });
+
+  it("works with no world at all (bare-fixture caller) — same graceful-degradation shape as the rest of tickAgentNeeds", () => {
+    const grassAgent = makeAgent({ types: ["grass"] });
+    expect(() => tickAgentNeeds(grassAgent)).not.toThrow();
+  });
+});

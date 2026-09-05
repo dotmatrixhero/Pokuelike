@@ -2,6 +2,7 @@ import type { Agent, TerrainKind, World } from "@pokuelike/engine";
 import { lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import {
+  getFertilePatch,
   getFloorOverlay,
   getFloorTexture,
   getFloraSprite,
@@ -382,6 +383,22 @@ function drawWorldTiles(
         // above, since the real berry-plant art (below) also has transparent
         // corners around the plant itself.
         drawGroundBacking(ctx, x, y, tile.elevation);
+
+        // A green "fertile ground" patch under the plant itself — direct
+        // ask: "can we decal a little green patch under the plants...
+        // simulate the ground underneath the plants becoming fertile...
+        // with intermediate states." Opacity tracks the tile's real
+        // `fertility` (flora.ts) so a freshly-harvested, still-recovering
+        // patch reads as faint and a fully-fertile one as vivid — the
+        // actual mechanic, not a stand-in.
+        const fertilePatch = getFertilePatch();
+        if (fertilePatch) {
+          const fertility = tile.fertility ?? 1;
+          ctx.save();
+          ctx.globalAlpha = 0.15 + fertility * 0.4;
+          ctx.drawImage(featheredOverlayStamp(fertilePatch), x * TILE_SIZE, y * TILE_SIZE);
+          ctx.restore();
+        }
 
         // Real berry-plant art (see sprites.ts's getFoodSprite/getFloraSprite/
         // getSeedlingSprite) is the primary visual when it exists — faded by

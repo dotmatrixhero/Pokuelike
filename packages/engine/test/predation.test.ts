@@ -2072,6 +2072,19 @@ describe("terrainFill (Water Gun leaving a puddle)", () => {
     expect(tileAt(world, "surface", 5, 5)?.terrain).toBe("water");
   });
 
+  it("a real puddle forming also 'waters' the ground — direct ask: soil fertility helped by Water-type moves", () => {
+    const FILL_MOVE: MoveSpec = { ...TEST_MOVE, id: "fill-move-water", terrainFill: { terrain: "water" } };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 100 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [FILL_MOVE] });
+    world.agents.push(hunter, target);
+    tileAt(world, "surface", 5, 5)!.fertility = 0.35; // a recently-harvested tile, still recovering
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(tileAt(world, "surface", 5, 5)!.fertility!).toBeGreaterThan(0.6);
+  });
+
   it("does nothing to a tile kind that isn't fillable (e.g. a wall)", () => {
     const FILL_MOVE: MoveSpec = { ...TEST_MOVE, id: "fill-move-2", terrainFill: { terrain: "water" } };
     const world = createWorld(10, 10);

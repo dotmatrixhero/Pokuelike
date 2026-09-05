@@ -217,6 +217,47 @@ const OVERGRAZED_EXIT_PRESSURE = 1;
  */
 const OVERGRAZED_GROWTH_MULTIPLIER = 0.15;
 
+/**
+ * Soil fertility — direct ask: "this limits how flora can spawn... make
+ * it take time for the soil to be able to accommodate life... Pokémon
+ * that help, like watering it via water moves and tilling/planting it
+ * via grass type help." Distinct from the grazing-scar system above:
+ * that punishes over-consumption, this just models ordinary recovery
+ * time after *any* harvest — see `Tile.fertility`'s doc comment in
+ * types.ts for why `undefined`/1 (fully fertile) is the default so the
+ * map's initial growth is completely unaffected.
+ */
+/** A tile's fertility drops to this once whatever grew on it dies — not to 0, so recovery is real but not glacial even with zero help. */
+const FERTILITY_AFTER_HARVEST = 0.35;
+/**
+ * Passive fertility regen per tick, whether or not anything's helping —
+ * reaches full from `FERTILITY_AFTER_HARVEST` in ~130 ticks on its own,
+ * comfortably inside one food-patch lifecycle (`FOOD_LIFESPAN_TICKS` +
+ * `MATURATION_TICKS` = 90) so a spot that's never actively tended still
+ * recovers rather than staying gated forever, just not instantly.
+ */
+const FERTILITY_REGEN_PER_TICK = 0.005;
+/** A landed Water-type hit's puddle also counts as "watering" the ground it hits — a real, immediate boost, not just a faster passive rate. */
+const FERTILITY_WATER_BOOST = 0.35;
+/** Per tick a Grass-type agent spends standing on a tile — slower than watering's one-off boost, but sustained presence adds up ("tilling/planting it"). */
+const FERTILITY_TEND_PER_TICK = 0.02;
+
+/** Bumps this tile's fertility (capped at 1) — shared by waterSoil/tendSoil below and the harvest-recovery reset in growFlora. */
+function raiseFertility(tile: Tile | undefined, amount: number): void {
+  if (!tile) return;
+  tile.fertility = Math.min(1, (tile.fertility ?? 1) + amount);
+}
+
+/** Call when a Water-type move's hit lands and creates a puddle (predation.ts's `terrainFill` site) — the ground it hits gets a real, immediate fertility boost. */
+export function waterSoil(tile: Tile | undefined): void {
+  raiseFertility(tile, FERTILITY_WATER_BOOST);
+}
+
+/** Call once per tick for every Grass-type agent, at the tile under its own position (needs.ts) — sustained presence gradually enriches the ground it stands on. */
+export function tendSoil(tile: Tile | undefined): void {
+  raiseFertility(tile, FERTILITY_TEND_PER_TICK);
+}
+
 /** Records a real grazing event at these tile coordinates — call from every place stock is actually consumed. */
 export function recordGrazing(tile: Tile | undefined): void {
   if (!tile) return;
@@ -277,12 +318,17 @@ function trySpread(world: World, pos: Vec2, log: EventLog | undefined, rng: () =
   for (const offset of shuffled) {
     const nx = pos.x + offset.x, ny = pos.y + offset.y;
     const tile = tileAt(world, "surface", nx, ny);
-    if (tile?.terrain === "floor" && !tile.overgrazed) {
-      tile.terrain = "seedling";
-      tile.growth = 0;
-      log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos: { x: nx, y: ny }, stage: "seeded" });
-      return;
-    }
+    if (tile?.terrain !== "floor" || tile.overgrazed) continue;
+    // Low fertility (a recently-harvested neighbor still recovering) is a
+    // real but probabilistic setback, same "reduce, don't ban" shape as
+    // the overgrazed multiplier elsewhere — not a hard skip, so a
+    // just-harvested spot can still occasionally take the next seed
+    // rather than being locked out for its whole recovery window.
+    if (rng() >= (tile.fertility ?? 1)) continue;
+    tile.terrain = "seedling";
+    tile.growth = 0;
+    log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos: { x: nx, y: ny }, stage: "seeded" });
+    return;
   }
 }
 
@@ -301,7 +347,11 @@ export function maybeDropSeed(world: World, layer: Layer, pos: Vec2, log?: Event
   if (!tile || tile.terrain !== "floor") return;
   // Overgrazed ground resists germination — real suppression, not a ban
   // (see OVERGRAZED_GROWTH_MULTIPLIER's doc comment above `trySpread`).
-  const germinationChance = tile.overgrazed ? GERMINATION_CHANCE * OVERGRAZED_GROWTH_MULTIPLIER : GERMINATION_CHANCE;
+  // Low fertility (recently-harvested, still recovering) composes with
+  // that the same way — a probabilistic dampener, not a gate — and is
+  // 1 (no effect at all) on every untouched world-gen tile, so this never
+  // slows the map's very first growth cycle.
+  const germinationChance = (tile.overgrazed ? GERMINATION_CHANCE * OVERGRAZED_GROWTH_MULTIPLIER : GERMINATION_CHANCE) * (tile.fertility ?? 1);
   if (rng() >= germinationChance) return;
 
   tile.terrain = "seedling";
@@ -318,6 +368,14 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
     const tile = tiles[i]!;
     const pos = { x: i % world.width, y: Math.floor(i / world.width) };
     decayGrazing(world, tile, pos, log);
+    // Passive fertility recovery, regardless of terrain — same
+    // single-scan shape as grazing pressure's own decay just above.
+    // `fertility === undefined` already means "fully fertile" (see
+    // types.ts), so this only ever does real work on a tile that's
+    // actually recovering from a recent harvest.
+    if (tile.fertility !== undefined && tile.fertility < 1) {
+      tile.fertility = Math.min(1, tile.fertility + FERTILITY_REGEN_PER_TICK);
+    }
 
     if (tile.terrain === "seedling") {
       // Overgrazed ground also slows maturation for whatever DOES manage to
@@ -368,6 +426,7 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
         tile.terrain = "floor";
         tile.stock = undefined;
         tile.flavor = undefined;
+        tile.fertility = FERTILITY_AFTER_HARVEST; // the ground that just fed something needs a little time before it's this ready again
         invalidateResourceIndex(world); // a "food" tile just reverted to "floor"
         log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos, stage: "died" });
         continue;
@@ -385,6 +444,7 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
         tile.terrain = "floor";
         tile.stock = undefined;
         tile.flavor = undefined;
+        tile.fertility = FERTILITY_AFTER_HARVEST; // same recovery-time reasoning as the food-death branch above
         log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos, stage: "died" });
       }
     }

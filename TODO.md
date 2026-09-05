@@ -2573,3 +2573,56 @@ not something this pathfinding pass itself caused or is positioned to fix.
       one shared `drawGroundBacking` helper, so floor/objects-on-ground/
       food-flora-seedling all get the same base+decal treatment
       consistently.
+- [x] Floor decal shape/density follow-up, direct ask ("maybe to round...
+      border radius", "double the amt"). The overlay decal was a bare
+      square PNG stamp, reading as a hard-edged tile; `featheredOverlayStamp`
+      now renders each decal image through a cached offscreen canvas
+      (`roundRect` mask + `blur(1.5px)` + `destination-in` compositing)
+      into a soft rounded-rect blob before it's ever drawn, and the
+      per-tile decal frequency doubled (1-in-4 -> 1-in-2 tiles). Reused
+      as-is for the fertile-patch decal below.
+- [x] Soil fertility mechanic, direct ask ("can we decal a little green
+      patch under the plants?... simulate the ground underneath the
+      plants becoming fertile for growing stuff.. with intermediate
+      states... tying into grazing scars but able to show it" +
+      follow-up: "this limits how flora can spawn. I don't want to make
+      it too much harder to spawn and ruin population growth. But make
+      it take time for the soil to be able to accommodate life. And...
+      Pokémon that help, like watering it via water moves and
+      tilling/planting it via grass type help"). New `Tile.fertility?:
+      number` (0-1) in the engine, distinct from the existing
+      grazing-scar system (that punishes over-consumption; this models
+      ordinary recovery time after ANY harvest). Key design choice:
+      `undefined` fertility means fully fertile (1.0) — every world-gen
+      floor tile starts here, so this cannot make the initial population's
+      first growth cycle harder by construction, not by tuning. Only set
+      to a real, lower value (0.35) in `flora.ts`'s `growFlora` once a
+      food/flora patch on that tile actually dies; climbs back to 1 on
+      its own (`+0.005`/tick, ~130 ticks to fully recover — comfortably
+      inside one food-patch lifecycle) or faster with real Pokémon help:
+      a Water-type move's hit-landing puddle (`waterSoil`, called from
+      predation.ts's existing `terrainFill` site — Water Gun already
+      creates puddles, so a real puddle now also "waters" the ground) or
+      a live Grass-type agent simply standing on the tile, every tick
+      (`tendSoil`, called from `needs.ts`'s per-tick `tickAgentNeeds`, no
+      new move/intent plumbing). Fertility probabilistically (not a hard
+      gate — "reduce, don't ban," same shape as the overgrazed multiplier)
+      throttles both seed-drop germination chance and neighbor-tile
+      spread in `flora.ts`; deliberately left seedling maturation speed
+      alone to avoid stacking a second penalty on top of the existing
+      overgrazed slowdown. Visually: `renderer.ts` draws a green
+      `getFertilePatch()` decal (reusing `featheredOverlayStamp` above)
+      under every food/flora/seedling tile, opacity `0.15 + fertility *
+      0.4`, so a freshly-harvested patch reads faint and a fully-fertile
+      one reads vivid — "tying into grazing scars but able to show it"
+      made real rather than a `grazingPressure`-proxy stand-in. 42 new/
+      updated engine tests (flora/predation/needs), full suite green
+      (one `support.test.ts` failure confirmed to be a pre-existing
+      order-dependent flake unrelated to this change — passes 36/36 in
+      isolation).
+- [ ] **Open follow-up, not done**: fertility has no "intermediate states"
+      of its own beyond the single continuous 0-1 float + one decal
+      opacity ramp — no distinct terrain/sprite stages (e.g. "bare dirt"
+      -> "sprouting" -> "lush") the way seedling growth or grazing scars
+      get their own terrain kinds. Revisit if the single smooth ramp ends
+      up reading as too subtle in actual play.

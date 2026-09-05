@@ -5,6 +5,8 @@ import {
   growFlora,
   seasonalMultiplier,
   recordGrazing,
+  waterSoil,
+  tendSoil,
   CONSUME_STOCK_AMOUNT,
   FOOD_MAX_STOCK,
   FOOD_FLAVORS,
@@ -511,6 +513,169 @@ describe("grazing scars (sustained heavy grazing degrades a tile beyond ordinary
         growFlora(world, undefined, rng);
       }
       return { pressure: tile.grazingPressure, overgrazed: tile.overgrazed, terrain: tile.terrain, stock: tile.stock };
+    }
+
+    expect(run()).toEqual(run());
+  });
+});
+
+describe("soil fertility (direct ask: soil should take time to recover after growing something, with Water/Grass-type help)", () => {
+  it("an untouched world-gen floor tile has undefined fertility (== fully fertile) — never gates a map's very first growth", () => {
+    const world = createWorld(3, 3);
+    expect(tileAt(world, "surface", 1, 1)!.fertility).toBeUndefined();
+  });
+
+  it("germination on an untouched tile is completely unaffected by the fertility gate (same odds as before this feature)", () => {
+    const world = createWorld(3, 3);
+    // First roll (SEED_DROP_CHANCE) just needs to pass; second roll is just
+    // under GERMINATION_CHANCE (0.65) — succeeds only if fertility's
+    // multiplier is exactly 1 on a never-touched tile, not silently < 1.
+    const values = [0, 0.64];
+    let i = 0;
+    vi.spyOn(Math, "random").mockImplementation(() => values[i++]!);
+
+    maybeDropSeed(world, "surface", { x: 1, y: 1 });
+
+    expect(tileAt(world, "surface", 1, 1)!.terrain).toBe("seedling");
+  });
+
+  it("a food patch dying reverts fertility to a real, lower (not zero, not still-full) value", () => {
+    const world = createWorld(3, 3);
+    setTile(world, "surface", 1, 1, "food");
+    const tile = tileAt(world, "surface", 1, 1)!;
+    tile.stock = 0.001; // one tick of decay away from dying
+
+    growFlora(world, undefined, () => 0.99); // never spreads/germinates elsewhere, just decays this tile to death
+
+    expect(tile.terrain).toBe("floor");
+    expect(tile.fertility).toBeGreaterThan(0);
+    expect(tile.fertility).toBeLessThan(1);
+  });
+
+  it("a flora patch dying also reverts fertility the same way", () => {
+    const world = createWorld(3, 3);
+    setTile(world, "surface", 1, 1, "flora");
+    const tile = tileAt(world, "surface", 1, 1)!;
+    tile.stock = 0.001;
+
+    growFlora(world, undefined, () => 0.99);
+
+    expect(tile.terrain).toBe("floor");
+    expect(tile.fertility).toBeGreaterThan(0);
+    expect(tile.fertility).toBeLessThan(1);
+  });
+
+  it("low fertility measurably suppresses (but doesn't outright ban) germination", () => {
+    const world = createWorld(3, 3);
+    const tile = tileAt(world, "surface", 1, 1)!;
+    tile.fertility = 0.5;
+    // Just over GERMINATION_CHANCE * 0.5 (0.325) — fails only because the
+    // fertility multiplier is actually being applied, not ignored.
+    vi.spyOn(Math, "random").mockReturnValue(0.33);
+
+    maybeDropSeed(world, "surface", { x: 1, y: 1 });
+
+    expect(tile.terrain).toBe("floor"); // germination roll failed
+  });
+
+  it("fertility recovers on its own over time via growFlora, without any watering/tending", () => {
+    const world = createWorld(3, 3);
+    const tile = tileAt(world, "surface", 1, 1)!;
+    tile.fertility = 0.5;
+
+    for (let t = 1; t <= 50; t++) {
+      world.tick = t;
+      growFlora(world, undefined, () => 0.99); // no spontaneous germination/spread noise
+    }
+
+    expect(tile.fertility!).toBeGreaterThan(0.5);
+    expect(tile.fertility!).toBeLessThanOrEqual(1);
+  });
+
+  it("passive regen never pushes fertility above 1, and never touches an already-fully-fertile (undefined) tile", () => {
+    const world = createWorld(3, 3);
+    const untouched = tileAt(world, "surface", 1, 1)!;
+    const recovering = tileAt(world, "surface", 2, 2)!;
+    recovering.fertility = 0.999;
+
+    for (let t = 1; t <= 10; t++) {
+      world.tick = t;
+      growFlora(world, undefined, () => 0.99);
+    }
+
+    expect(untouched.fertility).toBeUndefined();
+    expect(recovering.fertility).toBe(1);
+  });
+
+  describe("waterSoil (Water-type moves)", () => {
+    it("raises fertility, capped at 1", () => {
+      const world = createWorld(3, 3);
+      const tile = tileAt(world, "surface", 1, 1)!;
+      tile.fertility = 0.9;
+
+      waterSoil(tile);
+
+      expect(tile.fertility).toBe(1);
+    });
+
+    it("gives a real boost off a low baseline, not a token nudge", () => {
+      const world = createWorld(3, 3);
+      const tile = tileAt(world, "surface", 1, 1)!;
+      tile.fertility = 0.35;
+
+      waterSoil(tile);
+
+      expect(tile.fertility!).toBeGreaterThan(0.6);
+    });
+
+    it("is a safe no-op on an undefined tile", () => {
+      expect(() => waterSoil(undefined)).not.toThrow();
+    });
+  });
+
+  describe("tendSoil (Grass-type agents standing on a tile)", () => {
+    it("raises fertility a smaller amount than a single watering", () => {
+      const world = createWorld(3, 3);
+      const tile = tileAt(world, "surface", 1, 1)!;
+      tile.fertility = 0.35;
+
+      tendSoil(tile);
+
+      expect(tile.fertility!).toBeGreaterThan(0.35);
+      expect(tile.fertility!).toBeLessThan(0.6); // meaningfully less than waterSoil's own boost
+    });
+
+    it("sustained tending over many ticks adds up to a real recovery", () => {
+      const world = createWorld(3, 3);
+      const tile = tileAt(world, "surface", 1, 1)!;
+      tile.fertility = 0.35;
+
+      for (let i = 0; i < 40; i++) tendSoil(tile);
+
+      expect(tile.fertility).toBe(1);
+    });
+
+    it("is a safe no-op on an undefined tile", () => {
+      expect(() => tendSoil(undefined)).not.toThrow();
+    });
+  });
+
+  it("rng-determinism: identical fertility bookkeeping across two runs of the same fixed rng sequence", () => {
+    function run(): unknown {
+      const world = createWorld(4, 4);
+      setTile(world, "surface", 1, 1, "food");
+      const tile = tileAt(world, "surface", 1, 1)!;
+      tile.stock = 0.001;
+      let calls = 0;
+      const rng = () => {
+        calls++;
+        return (calls * 0.137) % 1;
+      };
+      for (let t = 1; t <= 200; t++) {
+        world.tick = t;
+        growFlora(world, undefined, rng);
+      }
+      return { fertility: tile.fertility, terrain: tile.terrain };
     }
 
     expect(run()).toEqual(run());

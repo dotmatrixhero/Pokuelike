@@ -273,6 +273,28 @@ export interface Tile {
    */
   cache?: number;
   /**
+   * Soil readiness for new growth, 0-1 — direct ask: "make it take time
+   * for the soil to be able to accommodate life," distinct from
+   * `grazingPressure`/`overgrazed` above (that tracks damage from
+   * OVER-consumption; this tracks a freshly-spent patch's own recovery,
+   * which happens on every harvest, not just an abusive one).
+   * `undefined` == 1 (fully fertile) — every world-gen "floor" tile
+   * starts here, so this deliberately does NOT gate the initial
+   * population's very first growth cycle at all (explicit ask: "I don't
+   * want to make it too much harder to spawn and ruin population
+   * growth"). Only set to a real, lower value in flora.ts once a food/
+   * flora patch on this tile actually dies — the ground it leaves behind
+   * needs a little time before it's as ready to support new growth as it
+   * was before something already grew there. Climbs back toward 1 on its
+   * own every tick (flora.ts's `growFlora`, same per-tile-scan shape as
+   * `grazingPressure`'s own decay), or faster with real Pokémon help: a
+   * Water-type move's hit-landing puddle (flora.ts's `waterSoil`, called
+   * from predation.ts's existing `terrainFill` site) or a Grass-type
+   * agent simply standing on the tile (flora.ts's `tendSoil`, called
+   * once per tick per such agent from needs.ts).
+   */
+  fertility?: number;
+  /**
    * "shelter" tiles only: which species most recently finished building
    * (part of) this shelter — purely a rendering hint (packages/web's
    * renderer.ts/palette.ts tint a shelter tile per owner species) with no
