@@ -554,11 +554,45 @@ function nearbyOwnEggs(world: World, agent: Agent): Agent[] {
  * `EGG_THREAT_RADIUS`-scale adjacency check). Same-herd agents are never
  * treated as threats (a guardian of a different species than the egg's own
  * still isn't hostile to it), independent of the egg-group check.
+ *
+ * **Species-dependent, "not to the death"** (direct follow-up ask:
+ * "predators... maybe they don't have the protect to death mentality with
+ * it. Species dependent I guess"): an `agent.isPredator` defender still
+ * fights for its egg — it isn't undefended — but two real things change
+ * relative to the original universal design:
+ *
+ * 1. **Priority.** See `applyPredationInstincts`'s own call site: a
+ *    predator's own critically-hurt flee check is allowed to run FIRST, so a
+ *    badly hurt predator genuinely flees instead of unconditionally
+ *    committing to a fight over its egg — this is the real "no longer
+ *    overrides self-preservation" half of "not to the death," and the
+ *    actual mechanism that reduces a predator's own risk of dying in this
+ *    situation (this session's whole reason for touching this feature at
+ *    all — predator population fragility).
+ * 2. **Event labeling.** `resolveHit` is called with `"defeated"` (the same
+ *    label `applyPredationInstincts`'s own guardian/herdmate-defense
+ *    branches already use) instead of `"killed"`. Documented honestly: in
+ *    the CURRENT combat model this is a real distinction for anything
+ *    reading the event log (an ordinary combat loss reads differently from
+ *    a predation kill), but it is NOT a change in survivability —
+ *    `resolveHitAgainstTarget`'s actual death branch sets
+ *    `defender.alive = false` unconditionally regardless of `faintKind`;
+ *    only `herdConflict.ts`'s separate, HP-floor-clamped `resolveRivalryHit`
+ *    can truly guarantee non-lethality, and reusing that resolver here was
+ *    judged out of scope for this pass (a real follow-up, see TODO.md) since
+ *    the priority change above is what actually moves the predator-survival
+ *    needle, not the label.
+ *
+ * A non-predator defender is completely unaffected by either change — still
+ * the original, direct-instruction "will defend them to death," checked
+ * first, unconditionally.
  */
 function applyEggDefense(world: World, agent: Agent, ctx: LevelingContext | undefined, log: EventLog | undefined, rng: () => number): boolean {
   if (agent.isEgg || agent.fainted || agent.beingCarriedBy) return false;
   const eggs = nearbyOwnEggs(world, agent);
   if (eggs.length === 0) return false;
+
+  const faintKind: "killed" | "defeated" = agent.isPredator ? "defeated" : "killed";
 
   for (const egg of eggs) {
     const threats = world.agents.filter(
@@ -581,7 +615,7 @@ function applyEggDefense(world: World, agent: Agent, ctx: LevelingContext | unde
     agent.fightTarget = threat.id;
     const distance = manhattan(agent.pos, threat.pos);
     if (canAttackFromHere(world, agent, threat, distance)) {
-      resolveHit(world, agent, threat, log, "killed", ctx, distance, rng);
+      resolveHit(world, agent, threat, log, faintKind, ctx, distance, rng);
     } else {
       agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
     }
@@ -1237,7 +1271,17 @@ export function applyPredationInstincts(
   // defender (unlike this function's other self-defense branches, which
   // stay silent while `agent.asleep`) — see `applyEggDefense`'s own doc
   // comment.
-  if (applyEggDefense(world, agent, ctx, log, rng)) return true;
+  //
+  // **`agent.isPredator` is a real, deliberate exception to this
+  // priority**, not just to the fight's lethality (`applyEggDefense`'s own
+  // outcome already downgrades to `"defeated"` for a predator): a predator
+  // doesn't have the "no matter what, even to the death" mentality at all,
+  // so its own critically-hurt self-preservation check gets to run FIRST —
+  // a badly hurt predator can and does flee instead of committing to a
+  // fight over its egg, falling through to whatever ordinary flee/fight
+  // logic would apply as if this feature didn't single it out. A
+  // non-predator's priority is completely unchanged.
+  if (!agent.isPredator && applyEggDefense(world, agent, ctx, log, rng)) return true;
 
   if (!agent.asleep && isCriticallyHurt(agent)) {
     const attackers = agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter(
@@ -1252,6 +1296,11 @@ export function applyPredationInstincts(
       return true;
     }
   }
+
+  // A predator that's NOT critically hurt (or has no live attacker to flee
+  // from right now) still defends its egg — just non-lethally, and only
+  // after its own survival check above has had first refusal.
+  if (agent.isPredator && applyEggDefense(world, agent, ctx, log, rng)) return true;
 
   if (!isPreyOfAnything(rules, world, agent)) {
     const herdmate = findHerdmateInDanger(world, agent);

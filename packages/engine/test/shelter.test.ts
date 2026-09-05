@@ -11,6 +11,7 @@ import type { MoveSpec } from "../src/moves.js";
 import {
   applyShelterBuilding,
   applyShelterResting,
+  builderShelterTicks,
   decayShelters,
   maybeFeedFromShelterCache,
   maybeTriggerShelterBuilding,
@@ -118,6 +119,39 @@ describe("maybeTriggerShelterBuilding", () => {
     expect(bonded.shelterTarget).toBeDefined();
   });
 
+  it("a predator triggers at a lower comfort level than an otherwise-identical non-predator (direct ask: predators should have it easier)", () => {
+    // Needs sit between the predator-discounted threshold (0.85 - 0.15 =
+    // 0.70) and the ordinary threshold (0.85): a non-predator at these needs
+    // does NOT trigger, an otherwise-identical predator DOES.
+    const needs = { hunger: 0.8, thirst: 0.8, energy: 1, mateDrive: 0 };
+    const world1 = createWorld(100, 100);
+    const nonPredator = agent("non-predator", { pos: { x: 50, y: 50 }, needs: { ...needs } });
+    world1.agents.push(nonPredator);
+    maybeTriggerShelterBuilding(world1, nonPredator, seededRng(3));
+    expect(nonPredator.shelterTarget).toBeUndefined();
+
+    const world2 = createWorld(100, 100);
+    const predator = agent("predator", { pos: { x: 50, y: 50 }, needs: { ...needs }, isPredator: true });
+    world2.agents.push(predator);
+    maybeTriggerShelterBuilding(world2, predator, seededRng(3));
+    expect(predator.shelterTarget).toBeDefined();
+  });
+
+  it("a bonded predator stacks both discounts (0.85 - 0.15 - 0.15 = 0.55)", () => {
+    const world = createWorld(100, 100);
+    const a = agent("bonded-predator", {
+      pos: { x: 50, y: 50 },
+      needs: { hunger: 0.6, thirst: 0.6, energy: 1, mateDrive: 0 },
+      isPredator: true,
+      bondedPartnerId: "someone",
+    });
+    world.agents.push(a);
+
+    maybeTriggerShelterBuilding(world, a, seededRng(3));
+
+    expect(a.shelterTarget).toBeDefined();
+  });
+
   it("does not trigger (or re-pick) while a shelter task is already in progress", () => {
     const world = createWorld(100, 100);
     const a = agent("mid-task", { pos: { x: 50, y: 50 }, shelterTarget: { x: 10, y: 10 } });
@@ -190,6 +224,25 @@ describe("applyShelterBuilding: real spatial task, three real steps", () => {
       expect(event.agentId).toBe("builder");
       expect(event.pos).toEqual({ x: 10, y: 10 });
     }
+  });
+
+  it("a predator finishes construction in half the ordinary SHELTER_BUILD_TICKS (direct ask: predators should have it easier)", () => {
+    expect(builderShelterTicks(agent("p", { isPredator: true }))).toBe(SHELTER_BUILD_TICKS / 2);
+    expect(builderShelterTicks(agent("np", { isPredator: false }))).toBe(SHELTER_BUILD_TICKS);
+
+    const world = createWorld(100, 100);
+    const a = agent("fast-builder", { pos: { x: 10, y: 10 }, shelterTarget: { x: 10, y: 10 }, shelterBuildTicks: 0, isPredator: true });
+    world.agents.push(a);
+    const log = new EventLog();
+
+    for (let i = 0; i < SHELTER_BUILD_TICKS / 2 - 1; i++) {
+      applyShelterBuilding(world, a, log);
+      expect(tileAt(world, "surface", 10, 10)?.terrain).toBe("floor");
+    }
+    applyShelterBuilding(world, a, log);
+
+    expect(tileAt(world, "surface", 10, 10)?.terrain).toBe("shelter");
+    expect(log.events.some((e) => e.kind === "shelterBuilt")).toBe(true);
   });
 
   it("cancels (without building) if the site stopped being bare floor before this agent arrived", () => {

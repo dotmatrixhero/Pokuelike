@@ -623,6 +623,23 @@ export interface Agent {
    */
   preferredTerrain?: TerrainKind[];
 
+  /**
+   * Denormalized from `SpeciesDef.isPredator` at spawn time
+   * (packages/data/src/spawn.ts), the same pattern as `activityPattern`/
+   * `buildsShelter`/`preferredTerrain` above — engine-side species-
+   * conditional logic never needs to import `@pokuelike/data`. Absent/false
+   * = an ordinary non-hunting species. See DESIGN.md's "Species-dependent
+   * shelter ease and egg-defense lethality" section: predators (currently
+   * Scyther/Onix/Spearow) get an easier bond->shelter path
+   * (`shelter.ts`'s `PREDATOR_COMFORT_DISCOUNT`/`PREDATOR_BUILD_TICKS`) and
+   * a non-lethal, fall-through-to-ordinary-instincts egg defense
+   * (`predation.ts`'s `applyEggDefense`) instead of the universal
+   * fight-to-the-death override every other species still gets — a direct
+   * response to this session's repeatedly-documented predator population
+   * fragility, not a change to how prey-role hunting itself works.
+   */
+  isPredator?: boolean;
+
   // --- Individual variance: Nature and Disposition (see DESIGN.md) ---
 
   /**

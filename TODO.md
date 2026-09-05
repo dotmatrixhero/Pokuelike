@@ -2137,3 +2137,59 @@ not something this pathfinding pass itself caused or is positioned to fix.
       battle observed) — a longer real-time watch session across several
       seeds, actually looking at the zoomed-in view rather than just
       asserting on DOM state, would be the next real check.
+
+## Species-dependent shelter ease and egg-defense lethality — built, see DESIGN.md
+
+- [x] Predators (`Agent.isPredator`, newly denormalized from
+      `SpeciesDef.isPredator` at spawn/egg-lay) trigger shelter-building at a
+      lower comfort threshold (`PREDATOR_COMFORT_DISCOUNT`, 0.15, stacks with
+      the existing `BOND_COMFORT_DISCOUNT`) and finish construction in half
+      the ordinary time (`PREDATOR_BUILD_TICKS_MULTIPLIER`, 0.5, via new
+      `builderShelterTicks(agent)`) — direct ask: "predators should have it
+      easier to make shelter."
+- [x] A predator's own critically-hurt flee check now runs BEFORE
+      `applyEggDefense` in `applyPredationInstincts` (reverse of the
+      universal ordering every other species still gets) — a badly hurt
+      predator flees instead of unconditionally fighting to the death over
+      its egg; a predator that isn't critically hurt still defends normally
+      afterward. When a predator does fight, the outcome logs as
+      `"defeated"` instead of `"killed"` — direct ask: "maybe they don't
+      have the protect to death mentality with it."
+- [x] New tests (`shelter.test.ts`/`eggs.test.ts`): predator-vs-non-predator
+      trigger-threshold and build-tick comparisons, bonded-predator
+      double-discount stacking, non-predator-still-fights-to-real-death
+      baseline (unchanged), predator-fights-non-lethally-labeled,
+      critically-hurt-predator-flees-instead-of-fighting. 725 engine tests
+      pass, including the unmodified determinism acceptance suite (no new
+      `rng()` calls introduced). `pnpm -r typecheck`/`build` clean across
+      all 4 packages.
+- [x] Real headless validation, seeds 42/7/20260903, 3000/6000/8000 ticks:
+      predator population (Scyther/Onix/Spearow + evolutions) up on 6 of 9
+      seed/tick combinations, including every seed-42 checkpoint (1/0/1 ->
+      8/9/9) and seed 7's later ticks (2/0 -> 7/5) — flat or slightly down
+      on the other 3. Zero starvation deaths on every seed/tick after this
+      change (was 2/2/4 on seed 7 before). A real event-log check confirms
+      the new predator-specific egg-defense branch actually fires in real
+      runs (4/4 and 16/58 of that seed's total `eggDefended` events had a
+      predator defender). See DESIGN.md for the full table and the honest
+      "raw seed comparison isn't a clean isolated A/B in this chaotic
+      system" caveat.
+- [ ] **Real, honestly-reported side effect, not tuned against**: total/prey
+      population is meaningfully lower after this change on 2 of 3 seeds at
+      8000 ticks (a plausible, mechanistically-expected trade-off — more
+      surviving predators means more sustained hunting pressure — not a
+      bug). If a future pass judges this trade too aggressive, re-tuning
+      `PREDATOR_COMFORT_DISCOUNT`/`PREDATOR_BUILD_TICKS_MULTIPLIER` down is
+      the flagged next step, not reverting the feature.
+- [ ] **Open follow-up, not done**: a predator's `"defeated"` egg-defense
+      outcome only changes the EVENT LABEL today, not actual survivability —
+      `resolveHitAgainstTarget`'s death branch sets `alive = false`
+      regardless of `faintKind`. A genuinely can't-die predator egg-defense
+      fight would need to reuse `herdConflict.ts`'s separate, HP-floor-
+      clamped `resolveRivalryHit` resolver instead of `predation.ts`'s own
+      faint/finishing-pool combat — not attempted this pass.
+- [ ] **Open follow-up, not done**: no third lever (e.g. a shorter
+      `SHELTER_MIN_BUILD_DISTANCE` for predators) was added on top of the
+      two shipped (comfort discount + build-tick halving) — judged
+      sufficient and validated as such, but a real option if more predator
+      ease is wanted later.

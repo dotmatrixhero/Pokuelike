@@ -140,6 +140,24 @@ const SHELTER_COMFORT_THRESHOLD = 0.85;
 const BOND_COMFORT_DISCOUNT = 0.15;
 
 /**
+ * Direct ask: "predators should have it easier to make shelter... species
+ * dependent." Stacks additively with `BOND_COMFORT_DISCOUNT` (a bonded
+ * predator gets both, dropping the effective trigger threshold to
+ * 0.85 - 0.15 - 0.15 = 0.55) rather than replacing it — the two are
+ * independent reasons to be more eager to build (partnered, and
+ * population-starved), and this codebase's other stacking multipliers
+ * (`SHELTER_HEAL_MULTIPLIER` x `SLEEP_HEAL_MULTIPLIER`, etc.) already
+ * compose the same way. Same magnitude as `BOND_COMFORT_DISCOUNT` — this
+ * session's other predator-fragility fixes (pack hunting, scavenging, a
+ * bigger starting predator roster) all picked "a real, measurable
+ * difference, not a token one" over a barely-there nudge, and 0.15 is
+ * already established in this file as that bar. See DESIGN.md's
+ * "Species-dependent shelter ease and egg-defense lethality" section for
+ * the real-run validation this was judged against.
+ */
+const PREDATOR_COMFORT_DISCOUNT = 0.15;
+
+/**
  * Real multi-tick time investment once standing at the build site, before
  * the tile actually completes — sim-original tuning guess, same order of
  * magnitude as `flora.ts`'s `MATURATION_TICKS` (20): long enough to read as
@@ -150,6 +168,30 @@ const BOND_COMFORT_DISCOUNT = 0.15;
  * tests at. Judge against a real run like every other tuning constant here.
  */
 export const SHELTER_BUILD_TICKS = 40;
+
+/**
+ * Multiplier applied to `SHELTER_BUILD_TICKS` for a predator agent
+ * (`agent.isPredator`) — the second concrete "easier to make shelter" lever,
+ * alongside `PREDATOR_COMFORT_DISCOUNT` above: not just triggering a build
+ * sooner, but actually finishing it faster once standing at the site. 0.5
+ * (half the ordinary 40-tick investment, i.e. 20) is a real, obviously-
+ * measurable difference without making a predator's shelter free/instant —
+ * it still has to travel `SHELTER_MIN_BUILD_DISTANCE` and stand there
+ * `buildersOwnTicks(agent)` real ticks, exposed to interruption the whole
+ * time, same as anyone else. Sim-original tuning guess, judged against a
+ * real run (see DESIGN.md).
+ */
+const PREDATOR_BUILD_TICKS_MULTIPLIER = 0.5;
+
+/**
+ * The real number of build ticks this specific agent needs to invest —
+ * `SHELTER_BUILD_TICKS`, halved for a predator. Exported so tests can assert
+ * the exact predator-vs-non-predator difference directly instead of
+ * re-deriving it.
+ */
+export function builderShelterTicks(agent: Agent): number {
+  return agent.isPredator ? Math.round(SHELTER_BUILD_TICKS * PREDATOR_BUILD_TICKS_MULTIPLIER) : SHELTER_BUILD_TICKS;
+}
 
 /**
  * How far (Chebyshev) around a shelter tile counts as "still in use" for
@@ -230,7 +272,12 @@ export function maybeTriggerShelterBuilding(world: World, agent: Agent, rng: () 
   // biasing a bonded agent toward starting a build measurably sooner (in
   // expectation, across many idle ticks where hunger/thirst are still
   // climbing back up) than an unbonded one would at the exact same needs.
-  const threshold = agent.bondedPartnerId ? SHELTER_COMFORT_THRESHOLD - BOND_COMFORT_DISCOUNT : SHELTER_COMFORT_THRESHOLD;
+  // Direct ask: "predators should have it easier to make shelter... species
+  // dependent." Stacks with the bonded discount above rather than
+  // replacing it — see `PREDATOR_COMFORT_DISCOUNT`'s own doc comment.
+  let threshold = SHELTER_COMFORT_THRESHOLD;
+  if (agent.bondedPartnerId) threshold -= BOND_COMFORT_DISCOUNT;
+  if (agent.isPredator) threshold -= PREDATOR_COMFORT_DISCOUNT;
   if (agent.needs.hunger < threshold || agent.needs.thirst < threshold) return;
 
   const anchor = agent.herdId ? (herdCentroid(world, agent.herdId, agent.layer) ?? agent.pos) : agent.pos;
@@ -272,7 +319,7 @@ export function applyShelterBuilding(world: World, agent: Agent, log?: EventLog)
   }
 
   agent.shelterBuildTicks = (agent.shelterBuildTicks ?? 0) + 1;
-  if (agent.shelterBuildTicks < SHELTER_BUILD_TICKS) return;
+  if (agent.shelterBuildTicks < builderShelterTicks(agent)) return;
 
   setTile(world, agent.layer, agent.pos.x, agent.pos.y, "shelter");
   // Cosmetic-only rendering hint (point 1: universal mechanics, per-species

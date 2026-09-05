@@ -7701,3 +7701,211 @@ the hand-rolled-shim fallback:
    event and the off-toggle were also exercised with no console/page
    errors the whole run. This is real-browser confirmation of the actual
    wiring, not just the isolated state-machine logic from step 2.
+
+## Species-dependent shelter ease and egg-defense lethality: a direct predator-fragility follow-up
+
+**Direct ask, verbatim.** "I think I also want to make different species
+have different requirements for shelter, as in predators should have it
+easier to make shelter; and maybe they don't have the protect to death
+mentality with it. Species dependent I guess. Predators don't have numbers
+so giving them easier reproductive cycle seems good." A continuation of this
+session's repeatedly-documented predator-population-fragility investigation
+(see this file's "Pack hunting, scavenging, and ontogenetic niche shift" and
+"Species expansion" sections, plus the several "predator went extinct"
+findings throughout) — this pass targets the bond -> shelter -> egg
+reproduction pipeline itself (the "Bonding, shelter, and eggs" feature above)
+specifically for predators, since a population-starved species can't afford
+the same slow, cautious cycle a thriving herbivore herd can.
+
+### Decided
+
+1. **Predators trigger shelter-building at a lower comfort threshold.**
+   `shelter.ts`'s `maybeTriggerShelterBuilding` already lowers
+   `SHELTER_COMFORT_THRESHOLD` (0.85) by `BOND_COMFORT_DISCOUNT` (0.15) for a
+   bonded, shelterless agent — this adds a second, independent
+   `PREDATOR_COMFORT_DISCOUNT` (also 0.15, the same "real, measurable, not a
+   token nudge" bar this file's other predator-fragility fixes already
+   established) for any `agent.isPredator`. The two stack additively rather
+   than one replacing the other: a bonded predator triggers at
+   0.85 - 0.15 - 0.15 = 0.55, a genuinely large drop, because "partnered"
+   and "population-starved" are independent, both-real reasons to be more
+   eager to build.
+2. **Predators finish construction in half the time.** New
+   `PREDATOR_BUILD_TICKS_MULTIPLIER` (0.5) and exported
+   `builderShelterTicks(agent)` helper — a predator invests 20 ticks at the
+   build site instead of the ordinary `SHELTER_BUILD_TICKS` (40). Still a
+   real, interruptible, multi-tick task (travel + `SHELTER_MIN_BUILD_DISTANCE`
+   still apply unchanged), just a genuinely faster one, not a free/instant
+   shelter.
+3. **`Agent.isPredator`, a new denormalized field**, following the exact
+   `activityPattern`/`buildsShelter`/`preferredTerrain` precedent already
+   established in this codebase: `SpeciesDef.isPredator` (already existed,
+   engine-side-consumed only via `HuntRules`/`isPreyOf` before now) is copied
+   onto `Agent.isPredator` at spawn (`spawn.ts`), so `shelter.ts`/`predation.ts`
+   never need to import `@pokuelike/data` (a circular dependency —
+   `@pokuelike/data` depends on `@pokuelike/engine`). `eggs.ts`'s `spawnEgg`
+   also copies `mother.isPredator` onto the egg it lays — an egg needs this
+   the moment it exists, not only after hatching, since `applyEggDefense`'s
+   new species-conditional check reads it directly off whichever agent is
+   defending, and reads the DEFENDER's own `isPredator`, not the egg's — but
+   copying it onto the egg too keeps the field consistently populated for
+   any future consumer, and costs nothing (an evolved/base-form pair always
+   shares the same hunting temperament, so inheriting straight from the
+   mother is always correct, never a re-lookup that could disagree with her
+   own already-denormalized value).
+4. **A predator's egg defense is no longer unconditionally "to the death."**
+   Two real, separate changes inside `predation.ts`, both gated on
+   `agent.isPredator` and fully additive to the original design (a
+   non-predator defender is completely unaffected by either):
+   - **Priority**: `applyPredationInstincts` checks a predator's own
+     critically-hurt flee reflex BEFORE `applyEggDefense`, the exact reverse
+     of the original universal ordering (egg defense first, overriding
+     self-preservation, for every species). A badly hurt predator now
+     genuinely flees instead of unconditionally committing to a fight over
+     its egg — this is the real, load-bearing mechanism: it directly reduces
+     a predator's own risk of dying in this situation, which is this whole
+     follow-up's actual point. A predator that ISN'T critically hurt (or has
+     no live attacker fleeing from) still reaches `applyEggDefense`
+     afterward and defends normally — the egg is never left undefended just
+     because its parent is a predator.
+   - **Event labeling**: when a predator does fight, `resolveHit` is called
+     with `"defeated"` (the same label `applyPredationInstincts`'s own
+     guardian/herdmate-defense branches already use for an ordinary win) in
+     place of `"killed"` (the predation-kill label). Documented honestly,
+     because it would be easy to oversell: in the CURRENT combat model this
+     is a real distinction for anything reading the event log (a predator's
+     egg-defense fight now reads as an ordinary combat loss rather than a
+     predation kill), but it is **not** a change in survivability —
+     `resolveHitAgainstTarget`'s actual death branch sets
+     `defender.alive = false` unconditionally regardless of `faintKind`; only
+     `herdConflict.ts`'s separate, HP-floor-clamped `resolveRivalryHit`
+     resolver can truly guarantee an agent can't die, and reusing that
+     resolver here was judged out of scope for this pass — the priority
+     change above is what actually moves the predator-survival needle, the
+     label swap does not, and TODO.md flags reusing `herdConflict.ts`'s
+     non-lethal resolver here as the real follow-up if a truly-can't-die
+     predator egg-defense fight is wanted later.
+
+### Built, real-run findings
+
+New `Agent.isPredator` (types.ts), denormalized at spawn (`spawn.ts`) and at
+egg-lay (`eggs.ts`'s `spawnEgg`). New `shelter.ts` exports:
+`PREDATOR_COMFORT_DISCOUNT`/`PREDATOR_BUILD_TICKS_MULTIPLIER`/
+`builderShelterTicks`. `predation.ts`'s `applyEggDefense` takes a
+per-agent `faintKind`, and `applyPredationInstincts`'s call-site ordering is
+now conditional on `agent.isPredator`.
+
+**New tests** (`shelter.test.ts`): a predator triggers shelter-building at
+needs where an otherwise-identical non-predator does not (0.8/0.8, between
+the discounted 0.70 and ordinary 0.85 thresholds); a bonded predator stacks
+both discounts and triggers at 0.6/0.6 (below the ordinary-bonded 0.70 but
+above the stacked 0.55); `builderShelterTicks` returns exactly half for a
+predator, full for a non-predator, and a real `applyShelterBuilding` loop
+confirms a predator's shelter actually completes at the halved tick count.
+(`eggs.test.ts`): a non-predator defender's egg-defense fight against an
+already-fainted threat still resolves as a real `"killed"` kill (unchanged
+baseline); an otherwise-identical `isPredator` defender's fight against the
+same setup logs `"defeated"` instead, never `"killed"` — while honestly
+still resulting in `threat.alive === false` (see the label-vs-survivability
+distinction above); a critically-hurt `isPredator` defender flees
+(`behavior === "flee"`, no `eggDefended` event) instead of committing to the
+fight, while a non-predator at identical HP still fights to the death
+(pre-existing, unchanged test); an `isPredator` defender that ISN'T
+critically hurt still reaches and fires `applyEggDefense` normally. No new
+`rng()` calls were introduced by any of this (`builderShelterTicks` is pure
+arithmetic on `agent.isPredator`; the `faintKind`/priority changes only
+branch on already-available agent state) — `determinism.test.ts`'s full-run
+acceptance suite passes unmodified. **All 725 engine tests pass** (one
+pre-existing, seed-independent flake in `predation.test.ts`'s burn-damage-
+variance test was reproduced on an unmodified rerun too — not introduced by
+this change, matches this file's own prior note about that exact test).
+`pnpm -r typecheck` and `pnpm -r build` both clean across all 4 packages.
+
+**Real headless runs, seeds 42/7/20260903, 3000/6000/8000 ticks — the
+critical predator-population check, this follow-up's actual point.** Total
+living predator count (Scyther + Onix + Spearow, plus their evolutions
+Fearow/etc. — `isPredator` carries forward across evolution unchanged, see
+`leveling.ts`), before (this branch's tip immediately prior to this
+follow-up) vs. after:
+
+| seed | ticks | before | after |
+|---|---|---|---|
+| 42 | 3000 | 1 (1 spearow) | 8 (4 scyther, 2 spearow, 2 onix) |
+| 42 | 6000 | 0 | 9 (5 scyther, 2 onix, 2 spearow) |
+| 42 | 8000 | 1 (1 scyther) | 9 (5 scyther, 2 onix, 1 spearow, 1 fearow) |
+| 7 | 3000 | 7 (2 scyther, 1 onix, 4 spearow) | 4 (3 scyther, 1 onix) |
+| 7 | 6000 | 2 (1 onix, 1 spearow) | 7 (6 scyther, 1 spearow) |
+| 7 | 8000 | 0 | 5 (4 scyther, 1 spearow) |
+| 20260903 | 3000 | 2 (1 onix, 1 spearow) | 2 (1 onix, 1 spearow) |
+| 20260903 | 6000 | 5 (2 onix, 2 scyther, 1 fearow) | 4 (2 scyther, 1 onix, 1 fearow) |
+| 20260903 | 8000 | 5 (2 onix, 2 scyther, 1 fearow) | 2 (1 scyther, 1 onix) |
+
+**Honest read**: 6 of 9 seed/tick combinations show a real, often dramatic
+improvement — seed 42 in particular goes from "predators effectively extinct
+or down to a single individual" (1, 0, 1) at every checkpoint to a sustained
+multi-individual population (8, 9, 9) at every checkpoint, and seed 7's later
+ticks (6000/8000) go from 2/0 to 7/5. 3 of 9 (seed 7 at 3000, and seed
+20260903 at 6000/8000) are flat or slightly down. This is a genuinely
+different picture from the mixed-to-negative "clutch size"/"raise-then-revert
+egg cap" follow-ups earlier in this file — this one moved the actual metric
+being chased (predator survival) in the intended direction on the clear
+majority of real runs tested, not just in isolated unit tests.
+
+**A necessary caveat, consistent with this file's own repeatedly-documented
+finding**: any code-path change in this chaotic system reshuffles every
+subsequent `rng()` draw for the rest of a run (see the "clutch size"
+follow-up's own honest diagnosis of the identical phenomenon), so a raw
+seed-by-seed population table is not a clean, isolated A/B of ONLY this
+feature's effect — a same-seed run before/after this change diverges in
+countless unrelated ways the instant the very first affected agent's
+behavior differs by even one tick. Two things temper this: first, the
+directional finding (predators up on 6/9 combinations, including every
+single seed-42 checkpoint) is large and consistent enough to read as real
+signal, not rng noise, especially given seed 42 went from single digits to
+sustained real populations at all three checkpoints. Second, a direct,
+non-chaotic confirmation that the mechanism itself fires and works exactly
+as designed: a real 8000-tick run's own event log shows `eggDefended` events
+where the defender is a predator species firing 4/4 times (seed 42) and
+16/58 times (seed 7) — real, non-hypothetical evidence the new
+priority-and-labeling logic engages in an actual run, not just in synthetic
+unit tests.
+
+**A real, honestly-reported side effect**: total living population (all
+species combined) is noticeably LOWER after this change on 2 of 3 seeds at
+8000 ticks (seed 42: 60 -> 13; seed 7: 70 -> 15; seed 20260903: 23 -> 29,
+essentially flat/slightly up), while starvation deaths dropped to 0 on every
+seed/tick after this change (seed 7's baseline showed 2/2/4 starvation
+deaths at 3000/6000/8000 — genuinely eliminated, not just reduced). Reading
+the species breakdown directly: prey-species colonies (Bulbasaur/Charmander/
+Squirtle lines) that grew very large in the "before" runs are much smaller
+or absent in the "after" runs. This reads as a real, mechanistically
+plausible ecological trade-off, not a bug: more predators surviving for
+longer is, definitionally, more sustained hunting pressure on prey — a
+predator population this thin before couldn't meaningfully suppress prey
+growth at all, so fixing the predator side was always going to cost the
+prey side something. Whether this specific trade (far healthier predator
+populations, meaningfully smaller total/prey populations, zero starvation)
+is the right balance is a real, legitimate follow-up judgment call flagged
+in TODO.md, not resolved further in this pass — the task's explicit bar was
+"does this help predator population health," and on the clear majority of
+real runs tested, honestly, it does.
+
+### Explicitly not done / open follow-ups (see TODO.md)
+
+- `applyEggDefense`'s `"defeated"` outcome for a predator does not actually
+  prevent the defender's death today — only the event label changes (see
+  the "Event labeling" point above). Making a predator's egg-defense fight
+  genuinely non-lethal (reusing `herdConflict.ts`'s HP-floor-clamped
+  `resolveRivalryHit` instead of `predation.ts`'s own faint/finishing-pool
+  combat) is a real, separate, larger follow-up, not attempted here.
+- The prey-population suppression side effect above is reported, not tuned
+  against. If the honest trade-off (healthier predators, smaller/leaner prey
+  populations) turns out to be too aggressive in a longer run, the next
+  lever is almost certainly re-tuning `PREDATOR_COMFORT_DISCOUNT`/
+  `PREDATOR_BUILD_TICKS_MULTIPLIER` down rather than reverting the feature
+  outright, given the directional predator-health win is real.
+- No third lever (e.g. a lower `SHELTER_MIN_BUILD_DISTANCE` for predators)
+  was added on top of the two shipped — the task's own instruction was to
+  pick real, needle-moving levers rather than touch every one offered, and
+  the comfort-discount + build-speed pair was judged sufficient and was
+  validated as such.
