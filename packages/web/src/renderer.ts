@@ -1,7 +1,7 @@
 import type { Agent, TerrainKind, World } from "@pokuelike/engine";
 import { lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
-import { getSprite, type SpriteDirection } from "./sprites.js";
+import { getSprite, getTileSprite, type SpriteDirection } from "./sprites.js";
 import type { ActivePopup } from "./eventPopups.js";
 import {
   FLAVOR_FG,
@@ -102,6 +102,19 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
         ctx.fillStyle = "rgba(120, 128, 140, 0.35)";
         ctx.fillText(".", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
         continue;
+      }
+
+      // Real tile art (see sprites.ts's getTileSprite) takes priority when it
+      // exists for this terrain kind. "shelter" keeps its dynamic per-owner
+      // tint and "food"/"flora"/"seedling" their stock-based color fade —
+      // neither has a fixed piece of art to swap in — so those three always
+      // fall through to the flat-color rect below regardless of availability.
+      if (tile.terrain !== "shelter" && tile.terrain !== "food" && tile.terrain !== "flora" && tile.terrain !== "seedling") {
+        const sprite = getTileSprite(tile.terrain);
+        if (sprite) {
+          ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          continue;
+        }
       }
 
       let bg = shade(tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies) : TERRAIN_BG[tile.terrain], tile.elevation);

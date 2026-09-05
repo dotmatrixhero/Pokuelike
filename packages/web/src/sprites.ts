@@ -32,3 +32,15 @@ export function getSprite(spriteKey: string, direction: SpriteDirection = "down"
   // rather than dropping straight to the letter while the real one loads.
   return loadSprite(`${spriteKey}_down`, `/sprites/${spriteKey}_down.png`);
 }
+
+/**
+ * Terrain tile art — ripped from legacy-cpp/data/sprites/"building and lake
+ * sprites.png" (plus "biome sprites unripped.png" for mud) into
+ * public/tiles/<terrainKind>.png. Only some terrain kinds have real art;
+ * the rest simply have no file at that path, so this returns null exactly
+ * like a missing Pokémon sprite would, and renderer.ts falls back to its
+ * existing colored-rect rendering for them.
+ */
+export function getTileSprite(terrainKind: string): HTMLImageElement | null {
+  return loadSprite(`tile_${terrainKind}`, `/tiles/${terrainKind}.png`);
+}
