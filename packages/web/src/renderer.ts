@@ -68,6 +68,33 @@ function drawTileVignette(ctx: CanvasRenderingContext2D, x: number, y: number): 
   ctx.restore();
 }
 
+/**
+ * The real tile art for boulders/trees/bushes/walls and berry plants are all
+ * small icons with transparent corners (a rounded rock, a plant sprouting
+ * out of a pot), not full-tile-opaque textures — direct ask: "behind the
+ * berries needs to be a dirt tile or something. same with boulders.
+ * otherwise its just black behind it" (the near-black canvas base, per
+ * `drawWorldTiles`'s own base `fillRect`, was showing straight through
+ * those transparent corners). Draws the same dirt/cave floor texture
+ * `plain "floor" terrain already uses underneath every one of those
+ * object-on-ground sprites, with a flat-color fallback for the brief window
+ * before the texture image has actually loaded (`getFloorTexture` returns
+ * `null` until then — see `loadSprite`). NOT used for "water", which is
+ * its own full-tile opaque surface, not an object standing on ground.
+ */
+function drawGroundBacking(ctx: CanvasRenderingContext2D, x: number, y: number, elevation: number): void {
+  const texture = getFloorTexture(x, y);
+  if (texture) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, 0.82 + elevation * 0.18);
+    ctx.drawImage(texture, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = rgbToCss(shade(TERRAIN_BG.floor, elevation));
+    ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+  }
+}
+
 export type RenderStyle = "tile" | "ascii";
 
 /**
@@ -207,13 +234,7 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
         // The dirt art itself already has real tonal variation, so it
         // doesn't need to be faded down to avoid looking like a flat loud
         // fill the way a single solid color would.
-        const texture = getFloorTexture(x, y);
-        if (texture) {
-          ctx.save();
-          ctx.globalAlpha = Math.min(1, 0.82 + tile.elevation * 0.18);
-          ctx.drawImage(texture, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-          ctx.restore();
-        }
+        drawGroundBacking(ctx, x, y, tile.elevation);
         ctx.fillStyle = rgbaToCss(shade([120, 128, 140], tile.elevation), 0.35);
         ctx.fillText(".", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
         drawTileVignette(ctx, x, y);
@@ -229,6 +250,12 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
       if (tile.terrain !== "shelter" && tile.terrain !== "food" && tile.terrain !== "flora" && tile.terrain !== "seedling") {
         const sprite = getTileSprite(tile.terrain, x, y);
         if (sprite) {
+          // Boulders/trees/bushes/walls are all small icons with transparent
+          // corners, not full-tile-opaque art — ground needs to show through
+          // those corners instead of the near-black canvas base. "water" is
+          // its own full-tile opaque surface, not an object standing on
+          // ground, so it's excluded.
+          if (tile.terrain !== "water") drawGroundBacking(ctx, x, y, tile.elevation);
           ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
           drawTileVignette(ctx, x, y);
           continue;
@@ -245,9 +272,11 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
       // Ported that same treatment here instead of the old mix-to-full-color
       // fill.
       if (tile.terrain === "food" || tile.terrain === "flora" || tile.terrain === "seedling") {
-        const groundBg = shade(TERRAIN_BG.floor, tile.elevation);
-        ctx.fillStyle = rgbaToCss(groundBg, 0.35);
-        ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+        // Real ground texture underneath, not the old flat dark wash — same
+        // "black behind transparent corners" fix as boulders/trees/etc.
+        // above, since the real berry-plant art (below) also has transparent
+        // corners around the plant itself.
+        drawGroundBacking(ctx, x, y, tile.elevation);
 
         // Real berry-plant art (see sprites.ts's getFoodSprite/getFloraSprite/
         // getSeedlingSprite) is the primary visual when it exists — faded by
