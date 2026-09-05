@@ -63,6 +63,24 @@ interface Engagement {
   expiresOrLastActiveTick: number;
   /** Set once conclusion fires on a continuous engagement — it keeps a short epilogue hold rather than vanishing on the same tick as the kill/retreat. */
   concludedAtTick?: number;
+  /**
+   * A monotonically increasing id, one per real `Engagement` object (assigned
+   * once, at construction, in `nextSeq`) — lets a consumer like
+   * `BattleScreenPanel` (see battleScreenPanel.ts) tell "the same battle,
+   * widened by a new hit or pack-hunt assist" apart from "a genuinely new
+   * engagement just got promoted," which `category`/`sourceKind` alone can't
+   * do (two battles in a row both have `category: "battle"`,
+   * `sourceKind: "fought"`).
+   */
+  seq: number;
+}
+
+/** Everything a consumer needs to render the currently-active engagement without reaching into `AutoCameraController`'s private state — see `currentEngagement()`. */
+export interface ActiveEngagementInfo {
+  seq: number;
+  category: NotableCategory;
+  ids: ReadonlySet<string>;
+  label: string;
 }
 
 /** What `main.ts` needs to actually move the camera/speed/log — kept tiny and DOM-agnostic so this file stays testable without a real browser. */
@@ -86,6 +104,8 @@ function speciesLabel(a: string, b?: string): string {
 }
 
 export class AutoCameraController {
+  /** Backs `Engagement.seq` — module-instance-scoped rather than a static counter so two independent controllers (tests) don't share a sequence. */
+  private nextSeq = 1;
   private enabled = false;
   private queue: Engagement[] = [];
   private active: Engagement | undefined;
@@ -171,6 +191,12 @@ export class AutoCameraController {
     return this.active?.label;
   }
 
+  /** The active engagement's full public shape (`undefined` when idle), for a consumer that needs more than `currentIds`/`currentLabel` alone — see `ActiveEngagementInfo`. */
+  currentEngagement(): ActiveEngagementInfo | undefined {
+    if (!this.active) return undefined;
+    return { seq: this.active.seq, category: this.active.category, ids: this.active.ids, label: this.active.label };
+  }
+
   // --- detection -------------------------------------------------------------
 
   private observe(event: SimEvent, world: World): void {
@@ -236,7 +262,7 @@ export class AutoCameraController {
     // comment for why a shared category isn't enough here.
     if (this.active && this.active.sourceKind === sourceKind && setsOverlap(this.active.ids, ids)) return;
     if (this.queue.some((e) => e.sourceKind === sourceKind && setsOverlap(e.ids, ids))) return;
-    this.queue.push({ category, sourceKind, ids, fallbackPos: pos, label, continuous: false, expiresOrLastActiveTick: 0 });
+    this.queue.push({ category, sourceKind, ids, fallbackPos: pos, label, continuous: false, expiresOrLastActiveTick: 0, seq: this.nextSeq++ });
     if (this.queue.length > MAX_QUEUE) this.queue.shift();
   }
 
@@ -252,7 +278,7 @@ export class AutoCameraController {
       existing.expiresOrLastActiveTick = world.tick;
       return;
     }
-    this.queue.push({ category: "battle", sourceKind: "fought", ids: new Set(ids), fallbackPos: pos, label, continuous: true, expiresOrLastActiveTick: world.tick });
+    this.queue.push({ category: "battle", sourceKind: "fought", ids: new Set(ids), fallbackPos: pos, label, continuous: true, expiresOrLastActiveTick: world.tick, seq: this.nextSeq++ });
     if (this.queue.length > MAX_QUEUE) this.queue.shift();
   }
 

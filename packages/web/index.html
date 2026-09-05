@@ -91,6 +91,63 @@
 
       #inspector-panel { flex: 0 0 auto; max-height: 38vh; overflow-y: auto; }
 
+      /* Battle Screen — a second, differently-formatted view of whatever
+         Auto Camera is currently following, styled like a mainline Pokémon
+         battle text box (see DESIGN.md's "Battle Screen" section). Docked
+         under the canvas next to the Inspector rather than in the #sidebar
+         drawer specifically so it's visible the moment a battle starts
+         without the viewer having to open the drawer first — "as the auto
+         cam events are happening," per the direct ask. Small fixed height,
+         same reasoning as #inspector-panel's own max-height: real content,
+         not something that should be free to grow and push the canvas
+         around. */
+      #battle-screen-panel { flex: 0 0 auto; max-height: 30vh; }
+      #battle-screen { padding: 8px 12px; font-size: 12.5px; display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: hidden; }
+      .battle-screen-empty { color: var(--text-dim); padding: 10px 4px; font-size: 12px; }
+      .battle-screen-vs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .battle-screen-combatant { flex: 1 1 160px; min-width: 130px; display: flex; flex-direction: column; gap: 3px; }
+      .battle-screen-name { font-weight: 700; font-size: 13px; }
+      .battle-screen-hp-track { height: 7px; border-radius: 4px; background: #232a34; overflow: hidden; }
+      .battle-screen-hp-fill { height: 100%; border-radius: 4px; transition: width 0.25s ease; }
+      .battle-screen-hp-value { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+      .battle-screen-vs-label { flex: 0 0 auto; color: var(--text-dim); font-weight: 700; font-size: 12px; }
+      .battle-screen-extra { flex: 0 0 auto; color: var(--text-dim); font-size: 11px; }
+      .battle-screen-log {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        border-top: 1px solid var(--panel-border);
+        padding-top: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-family: ui-monospace, "SF Mono", Consolas, monospace;
+      }
+      .battle-screen-line { line-height: 1.4; }
+      .battle-screen-line-intro, .battle-screen-line-scene { font-weight: 700; color: var(--text); }
+      .battle-screen-line-move { color: var(--text); }
+      .battle-screen-line-crit { color: #ff6b6b; font-weight: 700; }
+      .battle-screen-line-effective { color: #7be08a; font-weight: 700; }
+      .battle-screen-line-notvery { color: var(--text-dim); font-style: italic; }
+      .battle-screen-line-damage { color: #ff9d3c; font-weight: 600; }
+      .battle-screen-line-miss { color: var(--text-dim); font-style: italic; }
+      .battle-screen-line-retreat { color: #6ec6ff; }
+      .battle-screen-line-faint { color: #f5d76e; font-weight: 700; }
+      .battle-screen-line-conclusion { color: #ff6b6b; font-weight: 700; }
+      /* A brief CSS-only flash, applied only to the single newest line by
+         `BattleScreenPanel.render` (a `.battle-screen-line-newest` marker on
+         the last element, not on every crit/kill line every re-render) — the
+         whole log is rebuilt from scratch each dirty render, so without that
+         marker every past crit would replay the flash alongside the new one.
+         No JS animation framework, per the task's own constraint — this is
+         plain CSS on a freshly-created element. */
+      .battle-screen-line-newest { animation: battle-flash 0.5s ease-out; }
+      @keyframes battle-flash {
+        from { background: rgba(255, 107, 107, 0.35); }
+        to { background: transparent; }
+      }
+      #battle-screen.battle-screen-concluded .battle-screen-vs { opacity: 0.7; }
+
       /* The legend + event log live in a drawer that floats over the canvas
          from the right and slides off-screen when closed — makes narrow/
          mobile viewports usable without permanently eating canvas width. */
@@ -346,6 +403,14 @@
       <main>
         <div id="canvas-wrap">
           <canvas id="scene"></canvas>
+        </div>
+
+        <div class="panel" id="battle-screen-panel">
+          <div class="panel-header">
+            <span>Battle Screen</span>
+            <button id="toggle-battle-screen" title="Show/hide">Hide</button>
+          </div>
+          <div id="battle-screen"></div>
         </div>
 
         <div class="panel" id="inspector-panel">

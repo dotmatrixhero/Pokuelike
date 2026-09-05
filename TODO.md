@@ -2138,6 +2138,50 @@ not something this pathfinding pass itself caused or is positioned to fix.
       seeds, actually looking at the zoomed-in view rather than just
       asserting on DOM state, would be the next real check.
 
+## Battle Screen — built, see DESIGN.md
+
+- [x] A second, differently-formatted view of Auto Camera's currently-
+      followed event (`packages/web/src/battleScreenPanel.ts`), styled like
+      a mainline Pokémon battle text box: a "vs" header with live HP bars for
+      a followed battle's combatants, a scrolling turn-by-turn log (move
+      used, crit/effectiveness callouts, damage, HP remaining, fainting/
+      retreat/conclusion), and a single flavor-text scene line for every
+      other notable category (hatch/evolution/immigration/death). Coexists
+      with the plain event log's existing auto-cam filter rather than
+      replacing it. Docked next to the Inspector panel with its own Hide/
+      Show toggle, not inside the sidebar drawer.
+- [ ] **No effectiveness callout when the defender agent's already been
+      pruned.** "It's super effective!"/"not very effective" is computed
+      client-side via the engine's own exported `typeEffectiveness` against
+      the *live* defender `Agent.types` — if that agent's already left
+      `world.agents` (its corpse-persistence window elapsed) by the time a
+      frame renders, the callout is silently skipped rather than guessed.
+      Rare in practice (the defender is almost always still present while
+      its own battle is the actively-followed one), but a real gap; fixing
+      it would mean snapshotting the defender's types onto the engagement
+      the moment the hit event fires, rather than reading them live.
+- [ ] **No client-side smoothing on the HP bar.** `Agent.hp` can carry float
+      noise from elsewhere in the engine's combat math (partial-tick
+      effects) — display-rounded for the bar/label, but the bar itself still
+      jumps in whatever-sized steps the underlying hits actually dealt, no
+      CSS transition beyond the fill's `width` easing already provides.
+      Acceptable for now; a "damage taken" flash/shake on the losing side's
+      HP bar specifically (distinct from the existing per-line text flash)
+      would be a nice further polish pass if this feature gets revisited.
+- [ ] **`+N more` for a >2-participant battle (pack hunts, herd brawls)
+      doesn't show who the extra participants are** — just a count, no
+      names/HP. The "vs" header assumes a clean 1v1 (reads the first two ids
+      in insertion order, which are reliably the original attacker/defender
+      even after widening — see `Engagement.ids`' insertion-order comment in
+      autoCamera.ts), matching the same "not a bespoke brawl camera mode"
+      simplicity call the Auto Camera TODO above already made for the actual
+      camera framing.
+- [ ] Real in-browser visual polish (the CSS-only crit/kill flash
+      animation's actual timing/feel, the HP bar's color-threshold
+      transitions) only spot-checked via Playwright DOM assertions, not an
+      extended human eyes-on-it watch session — same standing caveat the
+      Auto Camera section above already carries for its own zoom/pan feel.
+
 ## Species-dependent shelter ease and egg-defense lethality — built, see DESIGN.md
 
 - [x] Predators (`Agent.isPredator`, newly denormalized from

@@ -6,6 +6,7 @@ import { EventPopups } from "./eventPopups.js";
 import { renderInspector } from "./inspector.js";
 import { renderLegend } from "./legend.js";
 import { AutoCameraController, type AutoCameraHost } from "./autoCamera.js";
+import { BattleScreenPanel } from "./battleScreenPanel.js";
 
 /**
  * Ticks per real second at speed multiplier 1x. Multiplied by `SPEED_STEPS`
@@ -70,6 +71,8 @@ const zoomInBtn = document.getElementById("zoom-in") as HTMLButtonElement;
 const zoomLabel = document.getElementById("zoom-label") as HTMLElement;
 const autoCamToggleBtn = document.getElementById("auto-cam-toggle") as HTMLButtonElement;
 const autoCamStatusEl = document.getElementById("auto-cam-status") as HTMLElement;
+const battleScreenEl = document.getElementById("battle-screen") as HTMLElement;
+const toggleBattleScreenBtn = document.getElementById("toggle-battle-screen") as HTMLButtonElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -85,6 +88,7 @@ let renderStyle: RenderStyle = "ascii";
 let zoom = DEFAULT_ZOOM;
 
 const eventLogPanel = new EventLogPanel(eventLogEl);
+const battleScreenPanel = new BattleScreenPanel(battleScreenEl);
 const eventPopups = new EventPopups();
 
 // --- Auto Camera -------------------------------------------------------------
@@ -171,6 +175,7 @@ function loadWorld(seed: number): void {
 
   eventLogPanel.reset();
   eventLogPanel.setFilter(undefined);
+  battleScreenPanel.reset();
   eventPopups.reset();
   renderInspector(inspectorEl, undefined, world);
   updateStatusLabels();
@@ -183,6 +188,7 @@ function step(): void {
   eventLogPanel.ingest(newEvents, world);
   eventPopups.ingest(newEvents, world);
   autoCamera.ingest(newEvents, world);
+  battleScreenPanel.ingest(newEvents, world);
   lastLoggedEventCount = log.events.length;
   // Always dirty, not just when something's selected — the no-selection
   // view is a live population/weather overview, not a static placeholder.
@@ -403,6 +409,12 @@ canvasWrap.addEventListener(
   { passive: true }
 );
 
+toggleBattleScreenBtn.addEventListener("click", () => {
+  const hidden = battleScreenEl.hidden;
+  battleScreenEl.hidden = !hidden;
+  toggleBattleScreenBtn.textContent = hidden ? "Hide" : "Show";
+});
+
 autoCamToggleBtn.addEventListener("click", () => {
   autoCamera.setEnabled(!autoCamera.isEnabled());
   autoCamToggleBtn.textContent = `Auto Camera: ${autoCamera.isEnabled() ? "On" : "Off"}`;
@@ -422,6 +434,8 @@ function frame(): void {
   drawEventPopups(ctx, eventPopups.active());
   autoCamera.update(world);
   autoCamStatusEl.textContent = autoCamera.currentLabel() ?? (autoCamera.isEnabled() ? "watching…" : "");
+  battleScreenPanel.setActive(autoCamera.currentEngagement());
+  battleScreenPanel.render(world);
   eventLogPanel.render();
   refreshSelection();
   requestAnimationFrame(frame);

@@ -7702,6 +7702,145 @@ the hand-rolled-shim fallback:
    errors the whole run. This is real-browser confirmation of the actual
    wiring, not just the isolated state-machine logic from step 2.
 
+## Battle Screen: a Pokémon-textbox-style view of what Auto Camera is following
+
+**Direct ask, verbatim.** "Can I get something outside of event log that
+kinda shows better text as the auto cam events are happening? Like, more
+pretty printed and sorta in a different collapsible view. Damage dealt,
+critical hits. More framed like a Pokémon battle." A direct extension of the
+just-shipped Auto Camera feature above, not a standalone request — this
+panel exists specifically to narrate whatever Auto Camera is currently
+following.
+
+**Decided: additive, not a replacement — the plain event log's auto-cam
+filter and this panel coexist.** `EventLogPanel.setAutoCamFilter` already
+narrows the log to a followed moment's participants with full precision
+(every event kind, every move-build modifier via `describeMoveModifiers`).
+This new panel (`packages/web/src/battleScreenPanel.ts`) is a second,
+differently-*formatted* view of a narrower slice of the same data — turn-by-
+turn prose for a battle's `fought`/`missed`/`herdClash`/`fainted`/death/flee
+events specifically, styled like a mainline battle text box, not a superset
+or a subset that makes the log redundant. Someone who wants exact numbers
+and every event kind still has the log; someone who just wants to watch the
+story now has somewhere better-framed to look. Both update off the exact
+same tick data (`main.ts`'s `step()` feeds both `eventLogPanel.ingest` and
+the new `battleScreenPanel.ingest`), so they never drift out of sync with
+each other.
+
+**Scope: every notable category gets a line here, not just battles.** The
+task brief explicitly said not to hard-restrict to battles "if other event
+types read well in this format too." They do — "2 bulbasaur arrived!", "Oh?
+charmander egg hatched!", "What? bulbasaur evolved into ivysaur!" all read
+fine in the same battle-textbox voice. Only `"battle"` gets the rich
+turn-by-turn scrollback + live HP bars treatment, though (see
+`sceneLine`/`battleLinesFor` in battleScreenPanel.ts): a one-shot moment
+doesn't have "turns" to scroll through, so it gets exactly one flavor-text
+line instead of an empty box with a single line rattling around in it.
+
+**Interaction model: a static, always-present collapsible panel that
+updates in place — not something that pops open/closed on its own.**
+Docked in `main` next to the Inspector panel (`#battle-screen-panel` in
+index.html), *not* inside the `#sidebar` drawer with the legend/event log —
+the drawer is closed by default and sits behind a toggle, which would defeat
+"as the auto cam events are happening": the whole point is seeing it the
+moment a battle starts without an extra click. It has its own Hide/Show
+button (`#toggle-battle-screen`), the same convention `#toggle-legend`
+already established, and shows a plain "Nothing to show" placeholder while
+idle rather than collapsing/expanding itself automatically. Considered
+auto-expanding on a new battle and auto-collapsing after — rejected because
+it would fight a viewer who deliberately collapsed it (every new battle
+would silently re-open something they just closed), the same "don't
+surprise the viewer by overriding their own choice" principle Auto Camera's
+own manual-override design already established for the camera/speed
+controls.
+
+**History model: a scrolling turn-by-turn log for the current battle,
+cleared when a new one starts.** A real mainline battle screen shows a short
+scrollback of the current fight's messages, not just the latest line — this
+does the same, capped at `MAX_LINES` (60) with the DOM only ever rendering
+the newest 40. The scrollback is keyed off a new `Engagement.seq` field
+added to `autoCamera.ts` (a monotonic id stamped once per real `Engagement`
+object) specifically so "the same battle widened by a pack-hunt assist" (an
+existing engagement's `ids` set gaining a member — not a new `seq`) can be
+told apart from "a genuinely new battle just got promoted" (a new `seq`),
+which `category`/`sourceKind` alone can't do since two unrelated battles in
+a row share both. `AutoCameraController.currentEngagement()` exposes this
+as a small `ActiveEngagementInfo` shape (`seq`/`category`/`ids`/`label`)
+rather than requiring the panel to reach into the controller's private
+state.
+
+**What's actually renderable, straight from what the engine already
+logs — no client-side combat recomputation.** Checked `events.ts`'s real
+`"fought"`/`"missed"`/`"herdClash"` shapes before assuming anything:
+
+- **Damage, crit, HP remaining**: all real, already on `fought`/non-missed
+  `herdClash` (`event.damage`, `event.critical`, `event.defenderHpRemaining`)
+  — rendered directly, not recomputed. (HP values can carry float noise from
+  elsewhere in the engine's combat math — e.g. "11.560000000000002" — which
+  is real, pre-existing engine behavior unrelated to this feature; this
+  panel rounds only for *display*, a presentation choice, not a claim the
+  underlying number is actually an integer.)
+- **Move name**: `fought`/`missed` carry `moveId` (a raw id like `"vineWhip"`)
+  but not a display name — resolved via the exact same live-attacker-lookup
+  `eventText.ts`'s `formatEvent` already used for the plain log
+  (`findMoveUsed`, now exported and reused rather than duplicated) to get
+  the move's real `MoveSpec.name` ("Vine Whip"). Best-effort: if the
+  attacker's since died/been pruned, falls back to the raw `moveId`, same
+  tradeoff the log already accepts.
+- **"It's super effective!" / "It's not very effective..."**: **not** on the
+  event — `events.ts` logs no effectiveness multiplier at all. This is the
+  one thing computed client-side, and deliberately via the engine's own
+  exported `typeEffectiveness(attackType, defenderTypes)` (typing.ts) — the
+  *real* type chart the engine's own damage math is built on, not a
+  reimplemented/guessed one that could drift from it. Inputs are the
+  resolved move's real `type` and the live defender `Agent`'s real `types`
+  array (denormalized onto every combat-capable agent at spawn) — both real
+  engine data, not fabricated. The one honest gap: if the defender agent has
+  already been pruned from `world.agents` (corpse persistence window
+  elapsed) by the time this renders, the callout is silently skipped rather
+  than guessed — an accepted, rare edge case for a live-observer panel.
+- **HP bars**: live `Agent.hp`/`maxHp`, read fresh every animation frame (not
+  just when a new line arrives) the same way `autoCamera.ts`'s own
+  `focusPos` re-reads live positions every frame — real data, not a
+  snapshot frozen at the moment of the last hit.
+- **Fainting/retreat/death conclusion lines**: straight from
+  `fainted`/`behaviorChanged("flee")`/`herdClash("retreated")`/`killed`/
+  `defeated` — the exact same three-signal conclusion set `autoCamera.ts`'s
+  `onBattleParticipantLeft` already recognizes, reused rather than
+  re-derived; a matching line also flags the panel's `.battle-screen-
+  concluded` visual state (dimmed "vs" header) once one fires.
+
+**Visual treatment: CSS-only, no animation library.** A crit/faint/kill line
+gets a brief highlight flash (`@keyframes battle-flash`, a background fade)
+applied only to the single newest such line (a `.battle-screen-line-newest`
+marker `BattleScreenPanel.render` adds to the last-rendered element) rather
+than to every crit-class line — the whole log is rebuilt from scratch on
+each dirty render (same "cheap, wholesale rebuild" pattern `EventLogPanel`
+already uses), so without that marker every past crit would replay the
+flash alongside a genuinely new one. Colors reuse the existing dark-theme
+CSS variables and the same color values `eventText.ts`'s `STORY_COLOR`
+already assigns to `fought`/`fainted`/`killed` — not a new palette.
+
+**Verification.** Same two-level approach the Auto Camera commit itself
+used:
+
+1. `pnpm -r typecheck`/`pnpm -r build` clean across all 4 packages.
+2. Real headless-browser runs (Playwright/Chromium, confirmed pre-installed
+   at `/opt/node22/lib/node_modules/playwright` in this environment) against
+   the actual `pnpm --filter @pokuelike/web dev` server: loaded the page,
+   set speed to max, toggled Auto Camera on, pressed Play, and polled the
+   live DOM. Directly confirmed, from real combat: the "vs" header with both
+   combatants' live species/level/HP bars; a real turn-by-turn line sequence
+   ("bulbasaur used Vine Whip! It's not very effective... spearow takes 6
+   damage! (HP left: 12)") with genuinely correct type-effectiveness text
+   (grass vs. a flying/normal-type defender computing to not-very-effective,
+   matching the real chart); a critical-hit callout; a fainted-participant
+   conclusion line; and, on a longer run, a non-battle scene line ("2
+   bulbasaur arrived!") confirming the panel renders immigration too, not
+   just battles. Also confirmed the Hide/Show toggle actually sets
+   `#battle-screen`'s `hidden` attribute. Zero console/page errors across
+   both runs.
+
 ## Species-dependent shelter ease and egg-defense lethality: a direct predator-fragility follow-up
 
 **Direct ask, verbatim.** "I think I also want to make different species
