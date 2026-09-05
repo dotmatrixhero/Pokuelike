@@ -2469,3 +2469,24 @@ not something this pathfinding pass itself caused or is positioned to fix.
       tilesets do exactly this (scattered near-identical variants read as
       natural grain at small scale/low contrast; only a hard-edged
       multi-tile block of one texture reads as "chunks").
+- [x] Post-merge polish pass, direct ask ("some of the tiles have weird
+      shadow on them to make look like beveled. Some of the color
+      matching isn't great. And I feel like the biome pic had way more
+      beautiful variety"). Three real, distinct causes found and fixed,
+      not just one tuning knob: (1) `floor_cave_3` had a dark diagonal
+      crack baked into its crop from a bad extraction boundary — clean at
+      small scale/low opacity, but glaring once `drawGroundBacking`
+      (merged in from the sibling branch) started drawing floor texture
+      at near-full strength everywhere; re-cropped clean. (2) the
+      per-tile radial vignette (also from that merge) had a genuinely too
+      -strong edge-darkening term — a bright-center/dark-edge gradient
+      repeated on every tile is, by construction, a grid of embossed
+      tiles; cut its highlight/shadow strength and max alpha by roughly
+      two-thirds rather than removing it outright, since "silly simulated
+      lighting" was itself a real prior ask. (3) `floor_cave` (the
+      original building-sheet crop) was a measurably different, more
+      pink/saturated hue than the other 5 crops (checked via actual mean
+      RGB, not eyeballing) — dropped from the pool, and two more crops
+      from the same clean source panel added in its place so variety went
+      up (5 -> 7) while every texture in the active pool now averages
+      within a few RGB points of the others.

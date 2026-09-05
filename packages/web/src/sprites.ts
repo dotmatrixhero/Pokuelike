@@ -131,24 +131,34 @@ export function getWaterEdge(x: number, y: number): HTMLImageElement | null {
 
 /**
  * Plain "floor" has no fixed art of its own (see renderer.ts's faint "."
- * glyph) — these are real, previously-unused cave-floor/dirt-path textures
- * from the legacy sheets, drawn underneath that glyph at low opacity
- * purely to give open ground some texture/lighting instead of a flat
- * wash.
+ * glyph, and drawGroundBacking for the objects-on-ground case) — these
+ * are real, previously-unused cave-floor/dirt-path textures from the
+ * legacy sheets, drawn underneath that glyph purely to give open ground
+ * real texture/lighting instead of a flat wash.
  *
- * Went through two wrong extremes before landing here: picking among all
- * 6 crops per 4x4-tile BLOCK made every block boundary a visible seam (a
- * literal grid of differently-textured squares); dropping to a single
- * texture for the whole map fixed the seams but then just looked like
- * the same tile stamped over and over ("really try to make the floor
- * varied and beautiful... same tile over and over can look bad"). This
- * picks per INDIVIDUAL tile instead, at low opacity — real tilesets do
- * exactly this (several near-identical floor variants scattered
- * pseudo-randomly) specifically because at small scale and low contrast
- * it reads as natural grain, not a patchwork; only a hard-edged multi-
- * tile block of one texture read as "chunks" before.
+ * Went through several wrong turns before landing here:
+ * - Picking among crops per 4x4-tile BLOCK made every block boundary a
+ *   visible seam (a literal grid of differently-textured squares).
+ * - Dropping to a single texture for the whole map fixed the seams but
+ *   then just looked like the same tile stamped over and over ("really
+ *   try to make the floor varied and beautiful... same tile over and
+ *   over can look bad").
+ * - Per-INDIVIDUAL-tile selection (what this does now) fixed both —
+ *   real tilesets scatter several near-identical variants exactly this
+ *   way, since at small scale it reads as natural grain, not a
+ *   patchwork — but the original 6-crop set had two real defects that
+ *   only became obvious once it was actually the primary ground art
+ *   (not a faint wash): `floor_cave` was a visibly different, more pink/
+ *   saturated hue than the rest (a real "color matching isn't great"
+ *   complaint — dropped, kept as a loose file), and `floor_cave_3` had a
+ *   dark diagonal crack baked into the crop from a bad boundary that,
+ *   repeated across many tiles, read as an unwanted embossed/beveled
+ *   edge. Re-cropped `floor_cave_3` clean and added two more crops from
+ *   the same source panel for real variety without the hue mismatch —
+ *   all 7 average within a few RGB points of each other now (checked
+ *   directly, not eyeballed).
  */
-const FLOOR_TEXTURES = ["floor_cave", "floor_cave_2", "floor_cave_3", "floor_dirt_1", "floor_dirt_2", "floor_dirt_3"];
+const FLOOR_TEXTURES = ["floor_cave_2", "floor_cave_3", "floor_cave_4", "floor_cave_5", "floor_dirt_1", "floor_dirt_2", "floor_dirt_3"];
 
 export function getFloorTexture(x: number, y: number): HTMLImageElement | null {
   const name = FLOOR_TEXTURES[hashTile(x, y) % FLOOR_TEXTURES.length]!;

@@ -33,15 +33,21 @@ const SPRITE_SCALE = 1.6;
  * A tiny cached radial-gradient stamp, reused (via `drawImage`, not a fresh
  * `createRadialGradient` per tile) across every tile in the tile-style
  * render — direct ask: "radial light effects per tile, if possible... just
- * silly simulated lighting stuff." A brighter center fading to a darker
- * edge gives each tile a subtle "domed" look instead of a flat fill, at
- * basically the cost of one extra `drawImage` per tile (an offscreen-canvas
- * stamp is orders of magnitude cheaper per-draw than building a real
- * gradient ~5000+ times a frame on a full map). Purely decorative — no
- * gameplay signal, just texture. Modulated per-tile by `tileLight` (the
- * same pseudo-random 0.65-1.35 ambient factor `drawWorldAscii` already uses
- * for its "unevenly lit stone" look) so the two render styles read as the
- * same underlying lighting concept.
+ * silly simulated lighting stuff." Purely decorative — no gameplay signal,
+ * just texture. Modulated per-tile by `tileLight` (the same pseudo-random
+ * 0.65-1.35 ambient factor `drawWorldAscii` already uses for its "unevenly
+ * lit stone" look) so the two render styles read as the same underlying
+ * lighting concept.
+ *
+ * Deliberately much weaker than the first version, which had a highlight
+ * up to 0.10 and an edge darkening up to 0.18 at up to full alpha — direct
+ * follow-up ask once real floor/ground art was the primary thing on
+ * screen rather than a faint wash: "some of the tiles have weird shadow
+ * on them to make look like beveled." A per-tile bright-center/dark-edge
+ * gradient repeated across every tile is, by construction, an embossed-
+ * grid look; real biome art has no such per-tile edge darkening at all.
+ * Kept as a much subtler ambient variation instead of removed outright,
+ * since the original ask for "silly lighting stuff" was real too.
  */
 let vignetteTileCache: HTMLCanvasElement | undefined;
 function vignetteStamp(): HTMLCanvasElement {
@@ -51,9 +57,9 @@ function vignetteStamp(): HTMLCanvasElement {
   canvas.height = TILE_SIZE;
   const vctx = canvas.getContext("2d")!;
   const grad = vctx.createRadialGradient(TILE_SIZE / 2, TILE_SIZE / 2, 0, TILE_SIZE / 2, TILE_SIZE / 2, TILE_SIZE * 0.75);
-  grad.addColorStop(0, "rgba(255,255,255,0.10)");
+  grad.addColorStop(0, "rgba(255,255,255,0.03)");
   grad.addColorStop(0.55, "rgba(255,255,255,0.0)");
-  grad.addColorStop(1, "rgba(0,0,0,0.18)");
+  grad.addColorStop(1, "rgba(0,0,0,0.05)");
   vctx.fillStyle = grad;
   vctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
   vignetteTileCache = canvas;
@@ -63,7 +69,7 @@ function vignetteStamp(): HTMLCanvasElement {
 /** Stamps the per-tile radial vignette at `(x, y)`, modulated by the same ambient `tileLight` factor `drawWorldAscii` uses. Called once per tile, right before that tile's loop iteration ends. */
 function drawTileVignette(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.save();
-  ctx.globalAlpha = 0.5 + tileLight(x, y) * 0.5;
+  ctx.globalAlpha = 0.3 + tileLight(x, y) * 0.3;
   ctx.drawImage(vignetteStamp(), x * TILE_SIZE, y * TILE_SIZE);
   ctx.restore();
 }
