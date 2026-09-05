@@ -133,3 +133,29 @@ export function getFloorTexture(x: number, y: number): HTMLImageElement | null {
   const name = FLOOR_TEXTURES[hashTile(Math.floor(x / FLOOR_PATCH_SIZE), Math.floor(y / FLOOR_PATCH_SIZE)) % FLOOR_TEXTURES.length]!;
   return loadSprite(`tile_${name}`, `/tiles/${name}.png`);
 }
+
+/**
+ * Real berry-plant art (ripped from legacy-cpp/data/sprites/"berry
+ * sprites.png", a growth-stage sheet: each berry has a small/medium/ripe
+ * stage) for "food"/"flora" tiles, keyed by the same flavor name
+ * flora.ts's FOOD_FLAVORS/FLORA_FLAVORS already assigns — so a "cheri"
+ * food tile always draws the same real Cheri-Berry-ish plant, not a
+ * random one. Ripe (fruit-visible) stage only; renderer.ts scales opacity
+ * by the tile's own stock so a depleted patch still visually fades like
+ * it did before this art existed.
+ */
+export function getFoodSprite(flavor: string): HTMLImageElement | null {
+  return loadSprite(`tile_food_${flavor}`, `/tiles/food_${flavor}.png`);
+}
+
+export function getFloraSprite(flavor: string): HTMLImageElement | null {
+  return loadSprite(`tile_flora_${flavor}`, `/tiles/flora_${flavor}.png`);
+}
+
+/** A "seedling" hasn't been assigned a flavor yet (flora.ts only picks one once it matures), so this is hash-varied per tile instead of flavor-keyed. */
+const SEEDLING_VARIANTS = 7;
+
+export function getSeedlingSprite(x: number, y: number): HTMLImageElement | null {
+  const n = (hashTile(x, y) % SEEDLING_VARIANTS) + 1;
+  return loadSprite(`tile_seedling_${n}`, `/tiles/seedling_${n}.png`);
+}

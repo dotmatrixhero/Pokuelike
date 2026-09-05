@@ -1,7 +1,7 @@
 import type { Agent, TerrainKind, World } from "@pokuelike/engine";
 import { lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
-import { getFloorTexture, getSprite, getTileSprite, type SpriteDirection } from "./sprites.js";
+import { getFloorTexture, getFloraSprite, getFoodSprite, getSeedlingSprite, getSprite, getTileSprite, type SpriteDirection } from "./sprites.js";
 import type { ActivePopup } from "./eventPopups.js";
 import {
   FLAVOR_FG,
@@ -248,14 +248,38 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
         const groundBg = shade(TERRAIN_BG.floor, tile.elevation);
         ctx.fillStyle = rgbaToCss(groundBg, 0.35);
         ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-        const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_FG[tile.terrain];
-        const glyph = (tile.flavor && FLAVOR_GLYPH[tile.flavor]) || TERRAIN_GLYPH[tile.terrain];
-        // Same "fades back toward nothing as stock runs out" idea the old
-        // full-tile fill had, just applied to the glyph's own alpha instead
-        // of a whole-tile color mix.
-        const glyphAlpha = tile.stock !== undefined ? 0.3 + 0.5 * tile.stock : 0.55;
-        ctx.fillStyle = rgbaToCss(accent, glyphAlpha);
-        ctx.fillText(glyph, x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
+
+        // Real berry-plant art (see sprites.ts's getFoodSprite/getFloraSprite/
+        // getSeedlingSprite) is the primary visual when it exists — faded by
+        // the tile's own stock so a nearly-depleted patch still reads as
+        // thinning out, not popping in/out. Falls back to the muted
+        // glyph-on-faint-wash treatment below only when there's no real art
+        // for this flavor (or none assigned yet) — same "match the ascii,
+        // don't fill the whole tile with a loud color" reasoning as before,
+        // just as a fallback now instead of the only option.
+        const plantSprite =
+          tile.terrain === "food" && tile.flavor
+            ? getFoodSprite(tile.flavor)
+            : tile.terrain === "flora" && tile.flavor
+              ? getFloraSprite(tile.flavor)
+              : tile.terrain === "seedling"
+                ? getSeedlingSprite(x, y)
+                : null;
+        if (plantSprite) {
+          ctx.save();
+          ctx.globalAlpha = tile.terrain === "seedling" ? 0.7 : 0.4 + (tile.stock ?? 1) * 0.6;
+          ctx.drawImage(plantSprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          ctx.restore();
+        } else {
+          const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_FG[tile.terrain];
+          const glyph = (tile.flavor && FLAVOR_GLYPH[tile.flavor]) || TERRAIN_GLYPH[tile.terrain];
+          // Same "fades back toward nothing as stock runs out" idea the real
+          // art gets above, just applied to the glyph's own alpha instead of
+          // a whole-tile color mix.
+          const glyphAlpha = tile.stock !== undefined ? 0.3 + 0.5 * tile.stock : 0.55;
+          ctx.fillStyle = rgbaToCss(accent, glyphAlpha);
+          ctx.fillText(glyph, x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
+        }
         drawTileVignette(ctx, x, y);
         continue;
       }

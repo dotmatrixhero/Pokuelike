@@ -2413,3 +2413,23 @@ not something this pathfinding pass itself caused or is positioned to fix.
       also attempted from the same sheet but turned out to be a fake — a
       flat solid-red background block, not textured lava art — and was
       deleted rather than used.
+- [x] Web: real berry-plant art for "food"/"flora"/"seedling" tiles, direct
+      ask ("do we have any berries? or other plants?"). Ripped from
+      legacy-cpp's "berry sprites.png" — a growth-stage sheet (each berry
+      has small/medium/ripe stages, 2 idle-sway animation frames per
+      stage, ~64 berries in dex order across 4 labeled blocks) that hadn't
+      been touched at all before this. Grid pitch turned out to be an
+      irregular ~23x35px (not the 32x32 every other sheet in this pack
+      uses) — found via black-gridline detection (`np.all(arr<40,...)`)
+      rather than guessed. Ripe-stage art is now keyed by the real flavor
+      names flora.ts already assigns (`FOOD_FLAVORS`/`FLORA_FLAVORS`:
+      cheri/oran/pecha/sitrus for food, moss/fern/bloom for flora) so a
+      given tile's flavor always draws the matching plant, not a random
+      one; "seedling" (pre-flavor-assignment) hash-varies across all 7
+      instead. Drawn as an overlay on top of the existing flavor-tinted
+      color-mix fill (not a replacement), opacity scaled by the tile's own
+      `stock` so a depleting patch still visually thins out. Real Pokémon
+      dex-color accuracy wasn't chased (e.g. this sheet's "oran" slot reads
+      gray/rock-textured, not blue) — picked for visual distinctness
+      instead, since the flavor names are this codebase's own internal
+      labels, not a promise of canon fidelity.
