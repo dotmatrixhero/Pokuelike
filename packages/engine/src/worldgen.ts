@@ -840,6 +840,130 @@ function carveBadlandsChambers(world: World, width: number, height: number, rng:
 }
 
 // ---------------------------------------------------------------------------
+// Underground caves — cellular automata. Underground has always been a flat,
+// terrain-uniform grid (see this file's top doc comment: "Underground/canopy
+// are untouched... this is a Surface-only pass") — this is the first time it
+// gets any real generated structure at all. Classic "random fill + smoothing"
+// cellular automata produces an organic, blobby cavern shape — a
+// deliberately different character from Badlands' angular BSP chambers above
+// (a natural cave, not a carved chamber), fitting for a layer that has no
+// biome/elevation/moisture concept of its own to give it any other shape
+// language. Writes directly onto `world.tiles.underground`, independent of
+// every Surface-only concept (biome seeds, macro elevation, moisture) the
+// main generation loop below uses.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fraction of underground tiles that start as "wall" before smoothing —
+ * picked, together with the smoothing rule below, to land the *surviving*
+ * cave at a real-but-modest wall fraction, not a maze: underground movement/
+ * hunting was tuned against a flat, fully-open grid, so this adds real
+ * structure without turning every existing behavior into a pathfinding
+ * nightmare. Sim-original guess, judge against a real generated map like
+ * every other tuning constant in this file.
+ */
+const CAVE_INITIAL_WALL_CHANCE = 0.4;
+
+/** How many "5+ of 8 neighbors are wall -> become wall, else floor" smoothing passes run — enough for the initial static to settle into smooth-edged blobs (the standard cellular-automata cave-gen recipe) without over-iterating toward a nearly-solid or nearly-empty fixed point. */
+const CAVE_SMOOTHING_ITERATIONS = 4;
+
+/** A cell becomes (or stays) "wall" this pass if at least this many of its 8 Moore neighbors are "wall" this pass — off the map edge counts as wall too, so a cave never opens directly onto the world's border. */
+const CAVE_WALL_NEIGHBOR_THRESHOLD = 5;
+
+function countWallNeighbors(grid: Uint8Array, width: number, height: number, x: number, y: number): number {
+  let count = 0;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+        count++; // off-map counts as wall — keeps a cave from opening onto the border
+        continue;
+      }
+      if (grid[ny * width + nx]) count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Keeps only the single largest 4-connected "floor" (non-wall) region in
+ * `grid`, walling off every smaller disconnected pocket — same connectivity
+ * convention `waterBody.ts` uses for "is this one contiguous feature." Random
+ * CA smoothing alone can (and does) leave several disconnected floor
+ * pockets; without this, the underground layer could end up with isolated,
+ * unreachable cave rooms no path could ever reach.
+ */
+function keepOnlyLargestFloorRegion(grid: Uint8Array, width: number, height: number): void {
+  const visited = new Uint8Array(grid.length);
+  let bestComponent: number[] = [];
+
+  for (let start = 0; start < grid.length; start++) {
+    if (visited[start] || grid[start]) continue; // already visited, or a wall cell
+    const component: number[] = [start];
+    visited[start] = 1;
+    const queue = [start];
+    while (queue.length > 0) {
+      const i = queue.pop()!;
+      const x = i % width;
+      const y = Math.floor(i / width);
+      for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]) {
+        if (nx! < 0 || ny! < 0 || nx! >= width || ny! >= height) continue;
+        const ni = ny! * width + nx!;
+        if (visited[ni] || grid[ni]) continue;
+        visited[ni] = 1;
+        queue.push(ni);
+        component.push(ni);
+      }
+    }
+    if (component.length > bestComponent.length) bestComponent = component;
+  }
+
+  const keep = new Uint8Array(grid.length);
+  for (const i of bestComponent) keep[i] = 1;
+  for (let i = 0; i < grid.length; i++) {
+    if (!grid[i] && !keep[i]) grid[i] = 1; // a floor cell outside the largest region becomes wall
+  }
+}
+
+/**
+ * Generates cellular-automata cave structure for the Underground layer — see
+ * this section's doc comment. Deterministic for a given rng, same contract
+ * as every other generation step in this file.
+ *
+ * Doesn't know or care about any hand-placed agent spawn coordinate
+ * (`@pokuelike/data`'s scenario.ts) — a fixed anchor could land inside solid
+ * rock with no guarantee of exactly missing every wall this generates. That's
+ * `findWalkableNear`'s job, the same primitive that already fixed the
+ * analogous Surface-layer problem (a fixed anchor landing mid-lake) — every
+ * caller placing an agent onto a specific Underground coordinate needs to go
+ * through it now, for exactly the same reason.
+ */
+function generateUndergroundCaves(world: World, width: number, height: number, rng: () => number): void {
+  const grid = new Uint8Array(width * height); // 1 = wall, 0 = floor
+  for (let i = 0; i < grid.length; i++) grid[i] = rng() < CAVE_INITIAL_WALL_CHANCE ? 1 : 0;
+
+  for (let iter = 0; iter < CAVE_SMOOTHING_ITERATIONS; iter++) {
+    const next = new Uint8Array(grid.length);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        next[y * width + x] = countWallNeighbors(grid, width, height, x, y) >= CAVE_WALL_NEIGHBOR_THRESHOLD ? 1 : 0;
+      }
+    }
+    grid.set(next);
+  }
+
+  keepOnlyLargestFloorRegion(grid, width, height);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (grid[y * width + x]) setTile(world, "underground", x, y, "wall");
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Generation
 // ---------------------------------------------------------------------------
 
@@ -984,6 +1108,12 @@ export function generateWorld(width: number, height: number, seed: number): Worl
   // xor'd seed per generation concern" pattern as every other noise field
   // above.
   carveBadlandsChambers(world, width, height, mulberry32(seed ^ 0x2545f491));
+
+  // Underground caves are independent of everything Surface-only above (no
+  // biome/elevation/moisture data to read) — its own derived rng sub-stream,
+  // same "distinct xor'd seed per generation concern" pattern as every other
+  // noise field in this function.
+  generateUndergroundCaves(world, width, height, mulberry32(seed ^ 0x27220a95));
 
   return world;
 }

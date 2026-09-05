@@ -109,16 +109,25 @@ describe("generateWorld", () => {
     expect(kindsSeen.size).toBeGreaterThanOrEqual(5);
   });
 
-  it("underground/canopy stay the plain flat grid — a Surface-only generation pass", () => {
+  it("canopy stays the plain flat grid — a Surface-only generation pass; underground now gets real cellular-automata cave structure", () => {
     const world = generateWorld(40, 30, 9);
-    for (const tile of world.tiles.underground) {
-      expect(tile.terrain).toBe("floor");
-      expect(tile.elevation).toBe(0);
-    }
     for (const tile of world.tiles.canopy) {
       expect(tile.terrain).toBe("floor");
       expect(tile.elevation).toBe(0);
     }
+    // Underground: every tile is still either "floor" or "wall" (the CA cave
+    // carver's own vocabulary — no water/food/elevation texture, unlike
+    // Surface), but it's no longer guaranteed *all* floor.
+    let sawUndergroundWall = false;
+    let sawUndergroundFloor = false;
+    for (const tile of world.tiles.underground) {
+      expect(["floor", "wall"]).toContain(tile.terrain);
+      expect(tile.elevation).toBe(0);
+      if (tile.terrain === "wall") sawUndergroundWall = true;
+      if (tile.terrain === "floor") sawUndergroundFloor = true;
+    }
+    expect(sawUndergroundWall).toBe(true);
+    expect(sawUndergroundFloor).toBe(true);
   });
 
   it("tree tiles are unwalkable; boulder/bush/sand/mud are walkable (boulder is slow and opaque, not a hard blocker)", () => {
@@ -379,6 +388,68 @@ describe("generateWorld: Badlands BSP chambers", () => {
       for (let x = 0; x < 90; x++) {
         expect(tileAt(a, "surface", x, y)!.terrain).toBe(tileAt(b, "surface", x, y)!.terrain);
       }
+    }
+  });
+});
+
+describe("generateWorld: Underground cellular-automata caves", () => {
+  /** 4-connected flood-fill component sizes over every "floor" underground tile — same connectivity convention waterBody.ts uses, checked independently here rather than reaching into worldgen.ts's own internal `keepOnlyLargestFloorRegion`. */
+  function floorComponentSizes(world: ReturnType<typeof generateWorld>): number[] {
+    const width = world.width, height = world.height;
+    const visited = new Uint8Array(width * height);
+    const sizes: number[] = [];
+    for (let start = 0; start < width * height; start++) {
+      const t = world.tiles.underground[start]!;
+      if (visited[start] || t.terrain !== "floor") continue;
+      let size = 0;
+      const queue = [start];
+      visited[start] = 1;
+      while (queue.length > 0) {
+        const i = queue.pop()!;
+        size++;
+        const x = i % width, y = Math.floor(i / width);
+        for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]) {
+          if (nx! < 0 || ny! < 0 || nx! >= width || ny! >= height) continue;
+          const ni = ny! * width + nx!;
+          if (visited[ni] || world.tiles.underground[ni]!.terrain !== "floor") continue;
+          visited[ni] = 1;
+          queue.push(ni);
+        }
+      }
+      sizes.push(size);
+    }
+    return sizes;
+  }
+
+  it("produces a real, non-trivial mix of floor and wall — not all-one or all-the-other", () => {
+    for (const seed of [9, 42, 7, 100]) {
+      const world = generateWorld(90, 60, seed);
+      const counts = { floor: 0, wall: 0 };
+      for (const t of world.tiles.underground) counts[t.terrain as "floor" | "wall"]++;
+      expect(counts.floor).toBeGreaterThan(0);
+      expect(counts.wall).toBeGreaterThan(0);
+    }
+  });
+
+  it("every floor tile belongs to exactly one connected region — no isolated, unreachable cave pockets", () => {
+    for (const seed of [9, 42, 7, 100]) {
+      const world = generateWorld(90, 60, seed);
+      const sizes = floorComponentSizes(world);
+      expect(sizes.length).toBe(1); // keepOnlyLargestFloorRegion walled off every other pocket
+      expect(sizes[0]).toBeGreaterThan(0);
+    }
+  });
+
+  it("canopy is untouched by cave generation — still the plain flat grid", () => {
+    const world = generateWorld(90, 60, 9);
+    for (const tile of world.tiles.canopy) expect(tile.terrain).toBe("floor");
+  });
+
+  it("determinism: the same seed produces byte-identical underground cave layout", () => {
+    const a = generateWorld(90, 60, 42);
+    const b = generateWorld(90, 60, 42);
+    for (let i = 0; i < a.tiles.underground.length; i++) {
+      expect(a.tiles.underground[i]!.terrain).toBe(b.tiles.underground[i]!.terrain);
     }
   });
 });
