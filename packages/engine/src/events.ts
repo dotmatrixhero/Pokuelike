@@ -74,6 +74,20 @@ export type SimEvent =
       moveId: string;
       /** The defender's position at the moment of the hit — matches every other combat-adjacent event (`killed`/`fainted`/`defeated`). */
       pos: Vec2;
+      /**
+       * True when the defender was already fainted (unconscious, hp already
+       * at 0) BEFORE this hit landed — a finishing-blow hit against a downed
+       * body (`predation.ts`'s `finishingPool` mechanic: a mob keeps hitting
+       * an already-fainted predator across several ticks until it's truly
+       * dead). Absent/`false` for an ordinary hit. Consumers that show a live
+       * play-by-play (the web app's event log, battle screen, and map
+       * popups) use this to skip re-announcing "0 HP" every one of those
+       * ticks — real, direct ask: "if a unit is already fainted it shouldn't
+       * say 0 hp in the log... just fast forward to the death" — while the
+       * eventual `killed`/`defeated` event (unaffected by this flag) still
+       * always fires and is always shown.
+       */
+      finishingBlow?: boolean;
     }
   | {
       kind: "missed";

@@ -3,6 +3,79 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Bonding: pairs don't stay together, and rapport is invisible in the UI (flagged, not built)
+
+Direct question, not a bug report, but worth tracking as a real, confirmed
+gap: "it's kinda weird that bonded Pokémon don't really hang around each
+other much after doing the deed. Is that true? And... are they forming
+relationships with each other?"
+
+Traced both, answer is yes to both halves:
+
+- **Bonding doesn't create ongoing togetherness.** `reproduction.ts`'s
+  `applyMateSeeking` sets `Agent.bondedPartnerId` on both agents at first
+  contact, but that flag is only ever read by (a) `shelter.ts`'s
+  `BOND_COMFORT_DISCOUNT` (biases toward starting a shelter sooner) and (b)
+  as an input to the rapport-driven mate-search distance bonus
+  (`mateScore`'s `rapportAdvantage` term) the NEXT time the pair happens to
+  wander back within `mateSearchRadius` of each other. There is no active
+  "seek out my bonded partner" or "stay near my bonded partner" behavior —
+  nothing in `herding.ts` pulls a bonded pair together the way herd cohesion
+  pulls a herd-mate toward its centroid. A bonded pair only re-converges by
+  the same coincidence any two herd-mates might, plus a modest scoring nudge
+  if they do cross paths again.
+- **Relationships ARE real and tracked, just completely invisible.**
+  `rapport.ts`'s agent-to-agent relationship graph is genuinely live (sparse,
+  decaying, capped, adjusted by bonding/mob-defense/food-delivery — see its
+  own module doc comment and the "Rapport" DESIGN.md section) and has two
+  real engine-side consumers (`reproduction.ts`'s mate preference,
+  `herdConflict.ts`'s rival targeting). Confirmed by grep: nothing in
+  `packages/web` (inspector.ts or anywhere else) ever reads or displays
+  `Agent.rapport` — a real, working backend system with zero UI surface.
+
+Two real, well-scoped candidate follow-ups, neither built here:
+- [ ] A "pair cohesion" behavior — bonded partners drift toward each other
+      when idle and not too far apart, similar in shape to
+      `applyHerdCohesion` but keyed on `bondedPartnerId` instead of
+      `herdId`. Would make bonding read as an actual ongoing relationship on
+      the map, not just a one-time flag flip.
+- [ ] Surface rapport in the inspector panel — e.g. a per-agent "top
+      relationships" list (highest |score| edges) alongside the existing
+      per-agent stat rows, so a real relationship graph that's been running
+      the whole time becomes something a viewer can actually see.
+
+## Auto Camera passive overlay + multi-combatant Battle Screen + mobile log — built, see DESIGN.md
+
+Three direct follow-up asks, all built: (1) a passive, dimmer bounding box
+now shows for every currently-tracked battle even with Auto Camera toggled
+off, click-to-focus turns Auto Camera on scoped to that one fight
+(`autoCamera.ts`'s `listBattleEngagements`/`focusEngagement`,
+`renderer.ts`'s extracted `highlightBounds`); (2) Battle Screen now shows
+every combatant (not just 2 + "+N more") with a sprite, a per-INDIVIDUAL
+(not per-species) accent color, and disambiguated `idLabel` names in both
+the header and the turn-by-turn text lines; (3) real mobile touch-scroll fix
+(`-webkit-overflow-scrolling: touch` was missing on three panels) plus a new
+expand-panel toggle for a much taller reading mode. See DESIGN.md's "Auto
+Camera passive overlay, multi-combatant Battle Screen, mobile log
+scroll/expand" section for the full design and real-browser validation.
+
+- [ ] Real, honestly-flagged gap: the passive-overlay-while-disabled
+      interaction (item 1 above) was validated via code review and by
+      confirming detection survives an off→on→off toggle cycle live in the
+      browser, but a screenshot specifically catching a passive dashed box
+      on screen mid-battle wasn't captured — the battle's map location fell
+      outside the initial (unpanned, since nothing moves the camera while
+      Auto Camera is off) viewport during the validation window. The
+      underlying bounds math is the same one already proven correct for the
+      solid active box, so this is a real but low-risk gap, not a guess.
+- [ ] Deliberately scoped out: the passive overlay only covers *battle*
+      engagements, not one-shot notable moments (immigration/courtship/
+      hatch/evolution/death) — those don't have a natural "still ongoing"
+      window the way a continuous battle's own stale/conclusion tracking
+      gives it for free. Extending the overlay to one-shots would need real
+      new timing semantics (an explicit lifetime assigned at creation, not
+      just at eventual promotion) — a bigger change than this pass took on.
+
 ## Stranded spawns + cornered prey never fighting back — fixed, see DESIGN.md
 
 Direct user feedback on the live artifact ("non water Pokemon spawning in

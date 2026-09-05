@@ -1,7 +1,9 @@
 import { typeEffectiveness, type Agent, type SimEvent, type World } from "@pokuelike/engine";
 import type { ActiveEngagementInfo, NotableCategory } from "./autoCamera.js";
 import { eventNamesAnyOf, findMoveUsed } from "./eventText.js";
-import { LEADER_ICON, TITLE_DISPLAY_NAME } from "./notableTitles.js";
+import { idLabel, LEADER_ICON, TITLE_DISPLAY_NAME } from "./notableTitles.js";
+import { agentAccentColor } from "./palette.js";
+import { getSprite } from "./sprites.js";
 
 /**
  * "Battle Screen" — a second, differently-formatted view of Auto Camera's
@@ -138,37 +140,55 @@ export class BattleScreenPanel {
     this.dirty = false;
   }
 
+  /**
+   * Every participant gets its own chip now, not just the first two plus a
+   * "+N more" — direct ask: "when multiple units are in battle esp same
+   * species it's quite hard to tell em apart. Can you add their hp to the
+   * battle log side and also color code them + their sprite." A "VS"
+   * separator still sits between consecutive chips for the common 1-vs-1
+   * case's familiar reading; a mob fight just reads as a longer wrapped row
+   * of chips instead of a lost "+N more" count.
+   */
   private renderVsHeader(world: World): HTMLElement {
     const wrap = document.createElement("div");
     wrap.className = "battle-screen-vs";
     const ids = [...this.ids!];
-    const extra = ids.length - 2;
-    const combatants = ids.slice(0, 2).map((id) => this.renderCombatant(id, world));
-    wrap.appendChild(combatants[0] ?? emptyCombatant());
-    const vsLabel = document.createElement("div");
-    vsLabel.className = "battle-screen-vs-label";
-    vsLabel.textContent = "VS";
-    wrap.appendChild(vsLabel);
-    wrap.appendChild(combatants[1] ?? emptyCombatant());
-    if (extra > 0) {
-      const more = document.createElement("div");
-      more.className = "battle-screen-extra";
-      more.textContent = `+${extra} more`;
-      wrap.appendChild(more);
-    }
+    ids.forEach((id, i) => {
+      wrap.appendChild(this.renderCombatant(id, world));
+      if (i < ids.length - 1) {
+        const vsLabel = document.createElement("div");
+        vsLabel.className = "battle-screen-vs-label";
+        vsLabel.textContent = "VS";
+        wrap.appendChild(vsLabel);
+      }
+    });
     return wrap;
   }
 
   private renderCombatant(id: string, world: World): HTMLElement {
     const agent = world.agents.find((a) => a.id === id) as Agent | undefined;
+    const accent = agentAccentColor(id);
     const box = document.createElement("div");
     box.className = "battle-screen-combatant";
+    box.style.borderLeftColor = accent;
+    const identRow = document.createElement("div");
+    identRow.className = "battle-screen-combatant-ident";
+    const sprite = agent ? getSprite(agent.species, "down") : null;
+    if (sprite) {
+      const img = document.createElement("img");
+      img.src = sprite.src;
+      img.alt = agent!.species;
+      img.className = "battle-screen-sprite";
+      identRow.appendChild(img);
+    }
     const name = document.createElement("div");
     name.className = "battle-screen-name";
+    name.style.color = accent;
     name.textContent = agent
       ? `${agent.isHerdLeader ? `${LEADER_ICON} ` : ""}${agent.notableTitle ? TITLE_DISPLAY_NAME[agent.notableTitle] : agent.species} (${agent.alive === false ? "down" : "Lv" + (agent.level ?? "?")})`
       : id;
-    box.appendChild(name);
+    identRow.appendChild(name);
+    box.appendChild(identRow);
     if (agent && agent.maxHp) {
       // Rounded for display only — combat math elsewhere in the engine can
       // leave HP as a non-integer fraction (partial-tick regen, fractional
@@ -200,13 +220,6 @@ function roundForDisplay(n: number | undefined): number | string {
   return n === undefined ? "?" : Math.round(n);
 }
 
-function emptyCombatant(): HTMLElement {
-  const box = document.createElement("div");
-  box.className = "battle-screen-combatant";
-  box.textContent = "?";
-  return box;
-}
-
 function emptyNote(text: string): HTMLElement {
   const note = document.createElement("div");
   note.className = "battle-screen-empty";
@@ -219,6 +232,16 @@ type LineKind = "intro" | "scene" | "move" | "miss" | "crit" | "effective" | "no
 interface BattleLine {
   kind: LineKind;
   text: string;
+  /**
+   * The one agent this line is "about" (the mover for a move/crit/
+   * effectiveness line, the one taking the hit for damage/faint/retreat) —
+   * absent for a line with no single clear subject (scene-setting, a
+   * conclusion naming two agents by name already). Used only to tint the
+   * line the same accent color as that agent's chip in the header above —
+   * direct ask: color-coding to help tell same-species combatants apart as
+   * the log scrolls, not just at the header's HP bars.
+   */
+  agentId?: string;
 }
 
 const FLASH_KINDS: ReadonlySet<LineKind> = new Set(["crit", "conclusion", "faint"]);
@@ -227,6 +250,13 @@ function renderLine(line: BattleLine, isNewest: boolean): HTMLElement {
   const el = document.createElement("div");
   el.className = `battle-screen-line battle-screen-line-${line.kind}`;
   if (isNewest && FLASH_KINDS.has(line.kind)) el.classList.add("battle-screen-line-newest");
+  // Only "move"/"damage" get the per-agent tint — every other kind (crit,
+  // effectiveness, miss, faint, retreat, conclusion) already carries real
+  // semantic meaning through its own fixed CSS color (see the .battle-
+  // screen-line-* rules in index.html); overriding those with a per-agent
+  // color would trade away "this was a critical hit" for "this was
+  // scyther-1," which isn't the ask.
+  if (line.agentId && (line.kind === "move" || line.kind === "damage")) el.style.color = agentAccentColor(line.agentId);
   el.textContent = line.text;
   return el;
 }
@@ -264,24 +294,34 @@ function battleLinesFor(event: SimEvent, world: World): BattleLine[] {
       return moveLines(event, "used", world);
     case "missed":
       return [...moveOpeningLines(event, "used", world), { kind: "miss", text: "But it missed!" }];
-    case "herdClash":
+    case "herdClash": {
+      const attacker = idLabel(world, event.attackerId, event.attackerSpecies);
+      const defender = idLabel(world, event.defenderId, event.defenderSpecies);
       if (event.outcome === "missed") {
-        return [{ kind: "move", text: `${event.attackerSpecies} clashes with ${event.defenderSpecies}!` }, { kind: "miss", text: "But it missed!" }];
+        return [
+          { kind: "move", text: `${attacker} clashes with ${defender}!`, agentId: event.attackerId },
+          { kind: "miss", text: "But it missed!" },
+        ];
       }
       return [
-        { kind: "move", text: `${event.attackerSpecies} clashes with ${event.defenderSpecies}!` },
+        { kind: "move", text: `${attacker} clashes with ${defender}!`, agentId: event.attackerId },
         ...(event.critical ? [{ kind: "crit" as const, text: "A critical hit!" }] : []),
-        { kind: "damage", text: `${event.defenderSpecies} takes ${roundForDisplay(event.damage)} damage!${event.defenderHpRemaining !== undefined ? ` (HP left: ${roundForDisplay(event.defenderHpRemaining)})` : ""}` },
-        ...(event.outcome === "retreated" ? [{ kind: "retreat" as const, text: `${event.defenderSpecies} backs off!` }] : []),
+        {
+          kind: "damage",
+          text: `${defender} takes ${roundForDisplay(event.damage)} damage!${event.defenderHpRemaining !== undefined ? ` (HP left: ${roundForDisplay(event.defenderHpRemaining)})` : ""}`,
+          agentId: event.defenderId,
+        },
+        ...(event.outcome === "retreated" ? [{ kind: "retreat" as const, text: `${defender} backs off!` }] : []),
       ];
+    }
     case "fainted":
-      return [{ kind: "faint", text: `${event.species} fainted!` }];
+      return [{ kind: "faint", text: `${idLabel(world, event.agentId, event.species)} fainted!` }];
     case "behaviorChanged":
-      return event.to === "flee" ? [{ kind: "retreat", text: `${event.species} flees from the battle!` }] : [];
+      return event.to === "flee" ? [{ kind: "retreat", text: `${idLabel(world, event.agentId, event.species)} flees from the battle!` }] : [];
     case "killed":
-      return [{ kind: "conclusion", text: `${event.preySpecies} was defeated by ${event.predatorSpecies}!` }];
+      return [{ kind: "conclusion", text: `${idLabel(world, event.preyId, event.preySpecies)} was defeated by ${idLabel(world, event.predatorId, event.predatorSpecies)}!` }];
     case "defeated":
-      return [{ kind: "conclusion", text: `${event.winnerSpecies} defeated ${event.loserSpecies}!` }];
+      return [{ kind: "conclusion", text: `${idLabel(world, event.winnerId, event.winnerSpecies)} defeated ${idLabel(world, event.loserId, event.loserSpecies)}!` }];
     default:
       return [];
   }
@@ -290,7 +330,7 @@ function battleLinesFor(event: SimEvent, world: World): BattleLine[] {
 /** The "X used Move!" opening line(s) shared by both `fought` and `missed` — a super/not-very-effective callout is only ever meaningful on `fought` (a miss deals no damage to be effective *against*), so this stays deliberately narrower than `moveLines`. */
 function moveOpeningLines(event: { attackerId: string; attackerSpecies: string; moveId: string }, verb: string, world: World): BattleLine[] {
   const move = findMoveUsed(event, world);
-  return [{ kind: "move", text: `${event.attackerSpecies} ${verb} ${move?.name ?? event.moveId}!` }];
+  return [{ kind: "move", text: `${idLabel(world, event.attackerId, event.attackerSpecies)} ${verb} ${move?.name ?? event.moveId}!`, agentId: event.attackerId }];
 }
 
 function moveLines(event: Extract<SimEvent, { kind: "fought" }>, verb: string, world: World): BattleLine[] {
@@ -306,6 +346,10 @@ function moveLines(event: Extract<SimEvent, { kind: "fought" }>, verb: string, w
     else if (multiplier === 0) lines.push({ kind: "notvery", text: "It had no effect!" });
   }
 
-  lines.push({ kind: "damage", text: `${event.defenderSpecies} takes ${roundForDisplay(event.damage)} damage! (HP left: ${roundForDisplay(event.defenderHpRemaining)})` });
+  lines.push({
+    kind: "damage",
+    text: `${idLabel(world, event.defenderId, event.defenderSpecies)} takes ${roundForDisplay(event.damage)} damage! (HP left: ${roundForDisplay(event.defenderHpRemaining)})`,
+    agentId: event.defenderId,
+  });
   return lines;
 }
