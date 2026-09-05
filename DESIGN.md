@@ -9911,6 +9911,146 @@ idea:
 Not sequenced against the "first built slice" below or scoped into a build
 yet — still vision-stage, same as the rest of this section.
 
+### Habitat/settlement-site evaluation, and mate-following
+
+Direct ask, verbatim: "I'm thinking we'll want to imbue agents with the
+ability to identify a good zone for them. A place to settle and build
+shelter and such. And if they're moving, their mate should follow. Things
+like temperature and available food and water should play into it. That'll
+help cross zone travel migration."
+
+Two distinct pieces:
+- **A real site-quality scorer**, weighing temperature/climate fit, food
+  availability, and water availability together (existing per-tile pieces
+  of this already exist scattered across `dispersal.ts`/`herdMigration.ts`/
+  `shelter.ts`'s build-site picking, but not as one unified "is this a good
+  place to live" evaluation). Genuinely buildable **now**, at the current
+  single-zone scope — it doesn't need the overworld to exist first.
+- **Mate-following during relocation** — a real, checkable question (not
+  yet investigated): does a bonded mate currently get left behind when its
+  partner disperses or a herd migrates? If not, that's a real, scoped gap
+  to fix, independent of everything else here.
+
+The connection to the overworld vision: once built, the same site-quality
+scorer is the natural thing that later evaluates a *neighboring zone's*
+overworld-level summary data (climate, resource abundance) to decide
+whether relocating there is worth the trip, without needing to fully
+simulate that zone first. Building it now at single-zone scope is real
+groundwork for cross-zone travel later, not throwaway work. Not scoped into
+an actual build yet — captured here first, per this session's established
+pattern.
+
+### A toolbox of zone-generation techniques, beyond noise
+
+Direct ask: "I want zones to have sick generative algorithms... Can you
+list out some ways to make interesting zones? That feel more than just
+randomly. Places shit?" A real, curated list, not yet scoped into any
+specific build:
+
+**Structural/layout:**
+- **Binary Space Partitioning (BSP)** — recursively split a zone into
+  sub-regions; guarantees connectivity and distinct large areas/caverns
+  joined by corridors.
+- **Cellular automata** — random noise smoothed by iterative neighbor-count
+  rules (classic Game-of-Life-style); produces organic, non-rectangular
+  cave walls and lake shapes.
+- **BSP + CA combined** — direct ask, and a real, well-known combo: BSP
+  solves reachability/distinct-room structure, CA solves "doesn't look
+  geometric." Run BSP for the cavern skeleton, CA within/around each region
+  for organic texture; structured (pure-BSP) rooms can coexist with cave
+  rooms in the same generation for contrast (a ruin built into a cavern).
+- **Voronoi diagrams** — scatter seed points, partition by nearest-seed;
+  natural (non-grid-aligned) region boundaries, and a natural fit for
+  "sphere of influence" falloff around a point of interest.
+- **Poisson disk sampling** — even-but-irregular point spacing; the direct
+  answer to "interesting forests" — pure random placement clumps and gaps,
+  a grid looks robotic, this gives natural-feeling, evenly-distributed tree
+  placement.
+- **Domain-warped noise** — warp input coordinates through a second noise
+  field before sampling the first; turns raw-Perlin's obviously-algorithmic
+  blobs into organic coastlines/terrain features.
+- **L-systems** — branching-structure generation; cave tunnel networks,
+  root systems, paths radiating from a settlement.
+
+**Elevation-specific:**
+- **Simplified hydraulic erosion** — simulate rain droplets flowing
+  downhill, picking up/depositing sediment on top of base elevation; turns
+  smooth noise-bumps into real-feeling valleys/ridgelines — probably the
+  single biggest lever for "interesting forests with different elevations"
+  specifically.
+- **Ridge/Worley (cellular) noise** — real mountain ridgelines and
+  canyon-like patterns instead of smooth rounded hills.
+
+**Point-of-interest-organized** (the direct Xerneas-spring example given:
+"a particular magical spring created by Xerneas that the zone and
+surrounding zones are organized around"):
+- **Landmark-first generation** — pick the POI *before* generating anything
+  else, then make everything else a function of distance/relationship to
+  it: fertility/magical influence falling off radially, terrain naturally
+  oriented toward it, resource density boosted nearby. Structurally
+  different from "generate terrain, then sprinkle POIs on top" — this is
+  specifically why it reads as *designed around* something.
+- **Graph/MST-based anchor placement** — place a handful of anchor POIs
+  (possibly spanning neighboring zones, once the overworld exists), then
+  generate connective tissue (paths, gradients, transitions) between them
+  via a minimum-spanning-tree-style graph — a hub-and-spoke feel instead of
+  uniform scatter.
+- **Whittaker-diagram biome assignment** — a real temperature x moisture 2D
+  lookup table (the classic ecology-textbook/proc-gen approach) instead of
+  ad hoc thresholds — biome transitions that feel ecologically grounded
+  rather than arbitrary.
+
+### The Playability Pass: keeping emergent messiness fun, not broken
+
+Direct ask, verbatim, framed as a deliberate layer on top of everything
+above: "keeping player playability is important. Having unreachable places
+is bad... After the initial generation, we need another pass to like
+'imagine the player experience.' It'd suck to load a zone and only be able
+to access four tiles in the corner of it cuz the rest is blocked. Think
+about player journey, and the interesting parts of interacting with the
+sim. Like, emergent behavior and navigating difficult, dynamic, but not
+impossible situations. Try to index for that."
+
+This is a distinct, cross-cutting concern from the four generation passes
+already documented above — not another content-generating pass, but a
+**validation-and-touch-up pass that runs after them**, checking their
+combined output against real player-experience criteria and fixing what it
+finds, rather than generating new content of its own. Real precedent: this
+is standard practice in respected procedural-generation systems (roguelikes
+routinely run a post-generation connectivity/fairness check before
+accepting a generated level) — not a novel idea, but a real and important
+one to build deliberately rather than hope for by accident.
+
+Concrete checks this pass should perform:
+- **Reachability/connectivity audit**: flood-fill from real entry points
+  (zone-edge connections to neighbors, or a designated spawn point) and
+  measure what fraction of the zone's interesting content is actually
+  reachable. A zone that generates with a large sealed-off pocket (the
+  literal "only four tiles in a corner" example given) needs either a
+  carved connector (a passage/bridge/tunnel added specifically to fix it)
+  or an explicit, deliberate "this really is a secret/locked area" flag —
+  the failure mode being guarded against is an *accidental* unreachable
+  region, not the deliberate existence of hidden areas as a design choice.
+- **Interest pacing/distribution audit**: check that points of interest,
+  resource density, and terrain variety aren't accidentally clustered in a
+  way that leaves large boring dead zones between them — a real "player
+  journey" concern, not just a technical reachability one.
+- **Difficulty fairness, without neutering emergent danger**: the sim's
+  emergent chaos (real predator pressure, real resource scarcity, real
+  danger) is treated as a *feature* to preserve and even highlight, not
+  something to sand down — the direct ask is explicitly for "difficult,
+  dynamic, but not impossible" situations. This pass's job is narrower than
+  "make it safe": it's checking for genuinely degenerate/unfair outcomes
+  (a generated configuration where survival or progress is effectively
+  impossible by construction, not just hard) and fixing only those, while
+  leaving real difficulty and unpredictability alone.
+
+Not designed at the mechanism level yet (exactly how "fix a sealed-off
+pocket" or "detect degenerate difficulty" would work algorithmically isn't
+decided), and not scoped into a build — captured here as a firm, named
+principle that should shape how every generation pass above gets built,
+not an afterthought bolted on at the end.
+
 ## The first built slice: macro land/ocean elevation + rivers
 
 This is the "pick 2-3 processes for a first real build" step the section
