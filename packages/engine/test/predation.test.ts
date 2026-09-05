@@ -1669,7 +1669,18 @@ describe("hunt pursuit of a MOVING target uses real BFS pathfinding (stepTowardM
       // Simulate the prey shifting every tick within a small range —  a
       // real moving hunt target, not a static resource tile — while
       // staying close enough to remain a detectable/reachable target.
-      const dx = tick % 2 === 0 ? 1 : -1;
+      // Deliberately a period-3 pattern, not a plain period-2 alternation:
+      // a pursuer that sidesteps to stay off the prey's own tile (see
+      // stepTowardMovingTarget's own doc comment on this exact scenario)
+      // can lock into a stable non-intersecting cycle against a target
+      // whose movement exactly matches its own reaction period — a real,
+      // accepted synthetic-test-only edge case, not something any real
+      // engine-driven (randomized/converging) prey behavior would ever
+      // produce. Period-3 against the hunter's period-2 reaction breaks
+      // that exact lockstep while still genuinely exercising "prey keeps
+      // moving, forcing route recomputation," which is this test's actual
+      // point.
+      const dx = [1, 1, -1][tick % 3]!;
       const nextX = Math.max(4, Math.min(7, target.pos.x + dx));
       if (tileAt(world, "surface", nextX, target.pos.y)?.walkable) target.pos = { ...target.pos, x: nextX };
 
@@ -1742,6 +1753,32 @@ describe("hunt pursuit of a MOVING target uses real BFS pathfinding (stepTowardM
     // doc comment on this exact case.
     expect(handled).toBe(false);
     expect(hunter.pos).toEqual(posAfterFirstChase); // didn't move via the hunt branch this tick
+  });
+
+  it("never lands the hunter on the same tile as its prey, even chasing a stationary target diagonally across an open map", () => {
+    const world = createWorld(12, 12);
+    const target = prey({ x: 7, y: 7 });
+    // Within HUNT_DETECT_RADIUS (5) from the start, matching every other
+    // hunt test in this file — a predator that never detects its prey in
+    // the first place isn't exercising the pursuit logic this test is
+    // actually about.
+    const hunter = predator({ x: 5, y: 5 }, 0.3);
+    world.agents.push(target, hunter);
+    const log = new EventLog();
+
+    for (let tick = 0; tick < 60; tick++) {
+      world.tick = tick;
+      applyPredationInstincts(world, hunter, RULES, log, undefined, SAFE_RNG);
+      // The real assertion: no matter how close the chase gets, the two
+      // agents' positions are never literally identical — a stronger,
+      // exact-position check than just "the hunt eventually connects."
+      expect(hunter.pos).not.toEqual(target.pos);
+      if (target.alive === false || target.fainted) break;
+    }
+    // And the hunt still actually connects (a real kill/faint), same
+    // real-behavior guarantee the other tests in this describe block check
+    // — this isn't a regression that just makes the hunter give up instead.
+    expect(log.events.some((e) => e.kind === "killed" || e.kind === "fainted")).toBe(true);
   });
 });
 

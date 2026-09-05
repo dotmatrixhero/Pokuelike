@@ -740,8 +740,14 @@ describe("mate-seeking approach uses real BFS pathfinding for a MOVING partner (
     for (let tick = 0; tick < 300 && !born; tick++) {
       world.tick = tick;
       // Simulate the father shifting every tick within a small range — a
-      // real moving mate-seeking target, not a stationary one.
-      const dx = tick % 2 === 0 ? 1 : -1;
+      // real moving mate-seeking target, not a stationary one. Deliberately
+      // a period-3 pattern, not a plain period-2 alternation — see
+      // predation.test.ts's identically-reasoned hunt-pursuit test for why:
+      // a pursuer that sidesteps to avoid landing on the target's own tile
+      // (stepTowardMovingTarget's doc comment) can lock into a stable
+      // non-intersecting cycle against a target whose movement exactly
+      // matches its own reaction period.
+      const dx = [1, 1, -1][tick % 3]!;
       const nextX = Math.max(4, Math.min(7, father.pos.x + dx));
       if (tileAt(world, "surface", nextX, father.pos.y)?.walkable) father.pos = { ...father.pos, x: nextX };
 

@@ -2342,3 +2342,27 @@ not something this pathfinding pass itself caused or is positioned to fix.
       the "notables vs. anonymous population" split it implies — still
       fully deferred, not started; captured here only so the design
       reasoning isn't lost.
+
+## Combat/species tile-sharing (done — see DESIGN.md)
+
+- [x] Combat approach (hunt/mob-fight/egg-defense/guardian-defense/forced-
+      movement lunge) never steps an attacker onto its target's exact tile.
+- [x] General same-species-only tile sharing on every non-shelter tile
+      (`occupancy.ts`'s `canEnterTile`), shelter kept as the deliberate
+      any-species exception.
+- [ ] **Open, honest follow-up, not attempted**: the species rule above only
+      gates ordinary *movement* — it doesn't retroactively separate agents
+      already co-located from two other placement paths: (a) `leveling.ts`
+      evolving an agent's species in place (no movement, no occupancy check
+      at all), and (b) `immigration.ts` spawning a fresh arrival via
+      `findWalkableNear` with no capacity/species check (a deliberate,
+      already-existing exemption — see DESIGN.md's "Tile capacity" section
+      for why immigration is intentionally capacity-blind). A real 3000-tick
+      seed-42 run showed a handful of stable different-species pairs from
+      exactly these two paths (an evolved `ivysaur` next to a `pidgey`, a
+      `wartortle` next to its own hatched offspring). Fixing this would mean
+      either (a) making evolution check/resolve tile-sharing at the moment
+      species changes, or (b) giving immigration spawn placement a
+      species-aware fallback search — both real, scoped pieces of work, not
+      attempted here given immigration's documented history of regressing
+      hard when given any capacity gate at all.

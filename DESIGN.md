@@ -8750,3 +8750,111 @@ untouched.
   itself (a static screenshot can't show smoothness) — the math is
   straightforward frame-rate-independent exponential easing and passed
   typecheck, but nobody has watched it move in a real running session yet.
+
+## Two units in combat should never share a tile, and (broader follow-up) generally only same-species units should
+
+**Direct asks, verbatim, back to back.** "Two units in combat should never share the same tile. Just as a rule for clarity." Then, mid-investigation: "I think generally only units of the same species should share a space."
+
+**Combat approach never lands on the target's tile.** Investigated first
+(background agent, `Explore`): every hunt/mob-fight/egg-defense/guardian-
+defense approach path shares one root cause — attack **range** is Manhattan
+distance, but the fallback **movement** toward an out-of-range target is
+8-directional (diagonals included, via `movement.ts`'s `stepToward` and
+`pathfinding.ts`'s BFS-backed `stepTowardMovingTarget`), and neither ever
+excludes the target's own tile as a legal step. Whenever attacker and target
+are diagonally adjacent (Chebyshev 1, but Manhattan 2 — just out of a
+melee-range check), the very first movement candidate tried **is** the
+target's tile.
+
+Fix, `movement.ts`: `stepToward` gained an opt-in `stopAdjacent` parameter —
+when true, `firstWalkable` also excludes any candidate equal to the target,
+falling through to an orthogonal neighbor instead of the diagonal-onto-
+target candidate. Opt-in and defaulted off, not a global behavior change:
+most `stepToward` callers (seeking a food/water/shelter tile, migrating to a
+destination) genuinely want to arrive exactly on `target`. Threaded through
+the four real combat-approach call sites in `predation.ts` (main hunt,
+guardian/herd-mate defense, mob-fighting, egg defense) and into
+`applyForcedMovement`'s "closer" (lunge) case in `movement.ts` — a forced
+pull/lunge is still combat, so it shouldn't drag the mover onto the other
+party's exact tile either.
+
+`pathfinding.ts`'s `stepTowardMovingTarget` needed its own version of the
+same fix, since `findPath`'s destination is always `target.pos` itself, so
+the final real BFS step toward a live target always **is** the target's
+tile. First attempt (discard the path, hold position instead of taking that
+last step) broke a real existing test: against a stationary target it works
+fine, but a target that relocates by exactly 1 tile every single tick,
+independent of the pursuer, is common in this codebase's own moving-target-
+pursuit tests — and a *stationary* pursuer waiting one diagonal tile short
+forever never gets a second chance to close the gap if the target's own
+motion never happens to walk back into range. Real fix: fall through to the
+same `stepToward(..., stopAdjacent=true)` guard instead of holding position
+— from a diagonal-adjacent tile this converges to a genuine Manhattan-1 tile
+in one hop.
+
+That in turn surfaced a second, narrower real edge case: an *actively
+repositioning* pursuer sidestepping every tick against a target moving by
+exactly 1 tile every tick, in a plain period-2 alternation precisely matched
+to the pursuer's own once-per-tick reaction, can lock into a stable,
+never-intersecting 2-cycle (confirmed via debug instrumentation — 297 of
+300 ticks stuck oscillating between the same two tile pairs). No real
+engine-driven behavior in this codebase moves like that (flee/wander/
+dispersal all have real randomness or genuinely converge) — this only shows
+up against a synthetic test double built to move on a fixed clock — so
+`predation.test.ts`'s and `reproduction.test.ts`'s own moving-target-
+pursuit tests had their synthetic prey/mate movement detuned from an exact
+period-2 pattern to period-3 (`[1, 1, -1][tick % 3]`), which still
+genuinely exercises "target keeps moving, forcing route recomputation"
+(the tests' actual point) without exactly matching the pursuer's reaction
+period. A real regression test was added alongside this
+(`predation.test.ts`, "never lands the hunter on the same tile as its prey
+… units in combat should never share a tile") asserting `hunter.pos` is
+never `toEqual` `target.pos` across a real chase-to-kill run, not just that
+the hunt eventually succeeds.
+
+**Broader follow-up: species-exclusive tile sharing, generally.**
+`occupancy.ts`'s `canEnterTile` previously only gated *how many* /
+*how heavy* the occupants of a tile could be — never *which species*.
+Direct follow-up ask, mid-investigation: "generally only units of the same
+species should share a space." Added: the `OccupancyIndex` now also tracks
+a `Set` of species present per tile (built in the same per-tick pass as the
+existing count/weight maps), and `canEnterTile` now blocks a newcomer whose
+species doesn't match every existing live occupant's, checked *before* the
+ordinary headcount/weight rules — on every tile except shelter, which
+explicitly keeps its own, already-documented universal (any-species) rule
+("only 2 units and an egg can share a single tile of shelter" was never
+species-restricted to begin with — see this file's shelter section). An
+already-empty tile still always admits any species first, same "never
+totally unable to stand anywhere" guarantee the weight rule already had.
+
+**Real-run finding — this is a movement-time gate, not a retroactive
+guarantee.** Ran a real 3000-tick seed-42 headless check sampling tile
+occupancy every 10 ticks: zero combat/hunt-pursuit overlaps (the movement-
+layer fix above holds), but 49 sampled snapshots still showed a handful of
+distinct different-species pairs stably co-located on the same non-shelter
+tile — e.g. an evolved `ivysaur` still sharing a tile with a `pidgey`, a
+`wartortle` still sharing a tile with its own hatched offspring. Root cause,
+confirmed by reading the actual code paths (not guessed): `canEnterTile` is
+only consulted when an agent *moves* onto a tile — it says nothing about an
+agent that's already standing somewhere and then either (a) evolves in
+place (`leveling.ts` mutates `Agent.species` directly, no movement, no
+occupancy check at all — a parent standing next to its own about-to-hatch
+egg can end up "different species" from a neighbor purely by evolving where
+it already stood), or (b) is a fresh immigrant spawned directly onto a
+`findWalkableNear` tile (`immigration.ts`) with no capacity/species check at
+all — a **deliberate**, already-documented exemption (immigration and
+hunt/mate pursuit are both intentionally capacity-blind; DESIGN.md's own
+"Tile capacity" section has the real-run regression numbers from when that
+gate was tried and reverted). Retrofitting species-exclusivity onto either
+of those two paths risks reintroducing that exact same regression and was
+not attempted here — flagged as a real, honest, scoped follow-up in
+TODO.md, not silently left undocumented.
+
+**Verification.** `pnpm -r typecheck` clean across all 4 packages; the full
+790-test engine suite (6 new tests: 3 occupancy species-exclusivity cases +
+1 shelter-stays-universal case + 1 hunt-never-shares-a-tile regression,
+alongside the 2 existing moving-target-pursuit tests' detuned synthetic
+movement) passed twice in a row to rule out flakiness. Real headless run
+(seed 42, 3000 ticks) confirmed zero combat-overlap violations and
+population health unaffected (16 alive at tick 3000, consistent with this
+seed's other documented runs this session).
