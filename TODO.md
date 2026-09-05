@@ -3,6 +3,36 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Stranded spawns + cornered prey never fighting back — fixed, see DESIGN.md
+
+Direct user feedback on the live artifact ("non water Pokemon spawning in
+the middle of water," "a lot of battles are sorta just one Pokémon beating
+up another. Not so much fighting back."). Both traced and fixed — see
+DESIGN.md's "Land spawns stranded mid-lake, and prey with nowhere left to
+run" section for the full root-cause writeup and real-run evidence
+(confirmed: every one of 7 tested seeds had 2-7 stranded land agents before
+the fix, 0 after; a cornered Bulbasaur actually defeated a Scyther in a real
+3000-tick run after gaining a last-resort counterattack).
+
+- [x] `findWalkableNear` (worldgen.ts) now excludes tiles that would strand
+      a non-water agent deep in a large lake, via the same `canEnterWater`
+      check movement already enforces — fixes `anchor()`/`findPosInBiome`
+      starting-agent placement, herd-migration destinations, and
+      immigration's non-obligate-aquatic arrivals all at once (one shared
+      root cause, one fix).
+- [x] A cornered prey agent (flee step is a no-op — nowhere left to run)
+      now fights back as a last resort instead of standing still and
+      absorbing free hits forever, reusing the existing mob-fighting
+      `resolveHit` call. Deliberately narrow: an agent that still has any
+      escape route still always flees, unchanged.
+- [ ] **Real follow-up, not fixed here**: a prey agent that's merely slower
+      than its pursuer (not literally cornered) still takes a full chase's
+      worth of free hits with no counterattack of its own, since it never
+      stops having *a* flee step even as the gap closes to zero. Needs real
+      speed-driven positioning or a distinct "threat is now adjacent, not
+      just nearby" threshold — see DESIGN.md's section for why this wasn't
+      bundled in here.
+
 ## Species/biome/immigration — built, see DESIGN.md
 
 - [x] Three new species (Geodude, Growlithe, Mankey) closing the

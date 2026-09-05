@@ -10790,3 +10790,87 @@ feature — a re-run passed clean, per that test's own known-flaky status);
   above come entirely from immigration, not reproduction. A real same-species
   breeding pair for either (a second Magikarp of the opposite sex, say) was
   not added or validated this session.
+
+## Land spawns stranded mid-lake, and prey with nowhere left to run
+
+Direct user feedback on the live artifact: "there are non water Pokemon
+spawning in the middle of water which really makes them unable to do
+anything" and "a lot of battles are sorta just one Pokémon beating up
+another. Not so much fighting back."
+
+### Stranded spawns — a real, severe bug, confirmed on every seed tested
+
+Root cause, traced directly: `worldgen.ts`'s `findWalkableNear` (the ring-
+search primitive `createDemoWorld`'s `anchor()`, `findPosInBiome`,
+`herdMigration.ts`'s destination picker, and immigration.ts's non-obligate-
+aquatic arrival path all go through) only ever checked `tile.walkable` — and
+`waterBody.ts`'s own doc comment already says plainly that water tiles ARE
+walkable (`UNWALKABLE_TERRAIN` never lists "water"; only obstacles like
+boulders/trees are unwalkable). So a hand-placed starting agent, a
+biome-scored Charmander/immigrant, or a migrating herd's destination could
+all land dead-center in a large lake — a tile `waterBody.ts`'s `canEnterWater`
+then permanently refuses to let a non-water-type agent step off of, since
+every neighboring water tile fails the same shore check. Stranded from the
+moment it spawns, exactly as reported.
+
+Confirmed empirically, not just reasoned about: a small script placing every
+`createDemoWorld` starting agent and checking `canEnterWater` against its own
+spawn tile found real stranded agents on **every one of 7 tested seeds**,
+including the live demo seed (`20260903`, 4 stranded: 3 Bulbasaur + 1
+Venusaur) — 2 to 7 stranded agents per seed, hitting Bulbasaur, Venusaur,
+Scyther, and Charmander.
+
+Fix: `findWalkableNear` now also requires `canEnterWater(world, <plain land
+probe agent>, layer, pos)` — reusing the exact same check movement already
+enforces, rather than a second, duplicated water-body computation — so it
+never returns a tile that would immediately strand whoever lands there. This
+is NOT a behavior change for the placement functions that already
+intentionally seek real water (`findWaterNear` in `@pokuelike/data`'s
+scenario.ts, `findNearestIndexed(..., "water")` in immigration.ts's
+obligate-aquatic path) — neither goes through `findWalkableNear`. Re-running
+the same stranding check post-fix: **0 stranded agents on all 7 seeds.**
+
+### Cornered prey now fights back as a last resort
+
+Traced separately: a solo prey agent below `mobThreshold` (no herd-mates
+within striking distance of the threat) always chose `flee` over `fight`,
+every tick, unconditionally — by design, matching real prey behavior, and
+correctly documented elsewhere in this file as "mainline-accurate." But
+combined with the stranding bug above (and ordinary obstacles/map edges),
+`stepAway` frequently produced a no-op — the agent literally had nowhere
+left to flee to — and the engine's response to that was nothing: it just
+stood there and kept absorbing hits every tick until it fainted, with no
+counterattack ever thrown. That is almost certainly the concrete shape of
+what read as "one Pokémon just beating up another."
+
+Fix, in `predation.ts`'s `applyPredationInstincts`: when the computed flee
+step is a no-op (position unchanged — cornered by terrain, water, or a map
+edge) AND the agent's own best move can actually reach the threat from here,
+it turns and fights instead of standing still — same `resolveHit(...,
+"defeated", ...)` call the existing mob-fighting branch already uses, not a
+new combat path. An agent that still has anywhere to run always prefers to
+run, unchanged; this only fires in the genuine last-resort case.
+
+Confirmed with real instrumentation on a live 3000-tick run (seed 20260903):
+the cornered-fight branch fired 14 times across 2 separate encounters, and
+in one of them — `bulbasaur-3`, cornered by `scyther-3` from tick 1803 —
+repeated counterattacks over 8 ticks actually **defeated the Scyther**
+(`ivysaur (bulbasaur-3) defeated scyther-3` at tick 1829), an outcome that
+was structurally impossible before this fix (the Bulbasaur would have had no
+attack of its own in that exchange at all). Full suite (893 tests across
+engine+data) passes unchanged; the one intermittently-flaky pre-existing
+test in `predation.test.ts` (an unseeded-`Math.random` knockback test,
+~10% failure rate) was confirmed to fail at the same rate on the pre-fix
+code too — not a regression this change introduced.
+
+Real gap still open, flagged rather than fixed here: this only addresses
+the fully-cornered case. A prey agent that still has *some* escape route but
+is slower than its pursuer (speed isn't a real mechanic yet — see the
+"Movement/speed is still uniform" TODO item) still gets run down and takes
+free hits the whole way without ever landing one of its own, since it never
+stops being able to take *a* flee step even as the gap to the threat closes
+to zero. Fixing that fully needs either real speed-driven positioning or a
+distinct "the threat is now adjacent, not just nearby" retaliation
+threshold — not attempted here, since it changes the mob-threshold/flee
+balance TODO.md already documents as a deliberately separate, bigger lever
+("the lever is the level/stat gap, not the formula").
