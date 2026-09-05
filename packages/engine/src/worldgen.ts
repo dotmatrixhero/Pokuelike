@@ -1,7 +1,28 @@
-import type { BiomeSeedInfo, Layer, Vec2, World } from "./types.js";
+import type { Agent, BiomeSeedInfo, Layer, Vec2, World } from "./types.js";
 import { createWorld, setElevation, setTile, tileAt } from "./world.js";
 import { FOOD_FLAVORS } from "./flora.js";
 import { mulberry32 } from "./rng.js";
+import { canEnterWater } from "./waterBody.js";
+
+/**
+ * Stand-in for `canEnterWater`'s `agent` parameter — an ordinary land
+ * species (no `types`, not obligate-aquatic) — used by `findWalkableNear`
+ * below so it asks the same question `canEnterWater` already answers for
+ * movement ("can a plain land Pokémon actually stand here"), rather than a
+ * second, duplicated water-body check. Real bug this closes: `.walkable` is
+ * true for water tiles too (see `waterBody.ts`'s own doc comment —
+ * `UNWALKABLE_TERRAIN` never lists "water"), so a hand-placed or biome-
+ * scored spawn point could previously land dead-center in a large lake, a
+ * tile `canEnterWater` would then permanently refuse to let a non-water
+ * agent step off of — stranded from tick 0. Deliberately reused by every
+ * `findWalkableNear` caller, not opt-in: the handful of callers that
+ * actually want a genuine water tile (obligate-aquatic placement) already
+ * go through a different, water-specific primitive (`findWaterNear` in
+ * `@pokuelike/data`'s scenario.ts, `findNearestIndexed(..., "water")` in
+ * immigration.ts) rather than `findWalkableNear`, so nothing that needed
+ * water was ever relying on this function returning one.
+ */
+const LAND_PROBE: Agent = { types: [] } as unknown as Agent;
 
 // Re-exported for backward compatibility — this used to be defined here
 // (every existing import site, e.g. worldgen.test.ts, still does
@@ -832,7 +853,8 @@ export function findWalkableNear(world: World, layer: Layer, x: number, y: numbe
         const nx = cx + dx;
         const ny = cy + dy;
         if (nx < 0 || ny < 0 || nx >= world.width || ny >= world.height) continue;
-        if (tileAt(world, layer, nx, ny)?.walkable) return { x: nx, y: ny };
+        const tile = tileAt(world, layer, nx, ny);
+        if (tile?.walkable && canEnterWater(world, LAND_PROBE, layer, { x: nx, y: ny })) return { x: nx, y: ny };
       }
     }
   }

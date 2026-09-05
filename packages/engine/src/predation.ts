@@ -1482,7 +1482,25 @@ export function applyPredationInstincts(
       agent.layer = "underground";
       agent.burrowedTicksRemaining = burrowMove.burrow!.ticks;
     } else {
-      agent.pos = stepAway(world, agent.layer, agent.pos, threat.pos, agent);
+      const fleeStep = stepAway(world, agent.layer, agent.pos, threat.pos, agent);
+      // Cornered: this flee step is a no-op (map edge, obstacle, or a large
+      // water body blocking every direction away from the threat — see
+      // movement.ts's firstWalkable) and the threat is already close enough
+      // to hit. A below-mob-threshold loner that can't outrun the thing
+      // biting it would, in reality, turn and fight rather than stand there
+      // absorbing free hits forever — this is that last resort, not a
+      // change to the mob-threshold math above (an escapable agent still
+      // always prefers to run). Uses "defeated", same as the mob-fighting
+      // branch above: a single cornered loner isn't expected to actually
+      // kill its attacker, just make the fight cost something.
+      if (fleeStep.x === agent.pos.x && fleeStep.y === agent.pos.y && canAttackFromHere(world, agent, threat, distance)) {
+        logBehaviorChange(log, world, agent, "fight");
+        agent.behavior = "fight";
+        agent.fightTarget = threat.id;
+        resolveHit(world, agent, threat, log, "defeated", ctx, distance, rng);
+      } else {
+        agent.pos = fleeStep;
+      }
     }
     return true;
   }
