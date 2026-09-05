@@ -532,29 +532,22 @@ function hashLightPhase(x: number, y: number): number {
 
 /**
  * Warm, gently shimmering area-of-effect light glow — direct ask: "some warm
- * color lights kinda do aoe shimmering shit." Two source kinds, both already
- * thematically warm in this codebase's own palette rather than invented
- * colors: live fire-type agents (`TYPE_COLOR.fire`) and "sunbeam" terrain
- * tiles (`TERRAIN_FG.sunbeam` — a permanent high-elevation light patch, see
- * worldgen.ts). Drawn with additive ("lighter") blending so it reads as
- * light actually brightening the scene — including punching through
- * `drawDayNightTint`'s darkening, the way a real light source should —
- * rather than a colored shape painted on top. Shimmer is two overlapping
- * sine waves at different frequencies (a single sine reads as a steady
- * metronome pulse; two together read as an organic flicker), phase-offset
- * per source via `hashLightPhase` so multiple lights don't pulse in unison.
+ * color lights kinda do aoe shimmering shit." Live fire-type agents only
+ * (`TYPE_COLOR.fire`, already the thematically warm color this codebase
+ * uses for the type elsewhere) — a "sunbeam" terrain-tile light source was
+ * tried alongside this and dropped on direct follow-up ("let's remove the
+ * sunbeam one, fire Pokémon one is awesome"). Drawn with additive
+ * ("lighter") blending so it reads as light actually brightening the
+ * scene — including punching through `drawDayNightTint`'s darkening, the
+ * way a real light source should — rather than a colored shape painted on
+ * top. Shimmer is two overlapping sine waves at different frequencies (a
+ * single sine reads as a steady metronome pulse; two together read as an
+ * organic flicker), phase-offset per source via `hashLightPhase` so
+ * multiple lights don't pulse in unison.
  */
 function drawWarmLights(ctx: CanvasRenderingContext2D, world: World): void {
-  const surface = world.tiles.surface;
   const sources: { cx: number; cy: number; radiusTiles: number; color: [number, number, number]; strength: number; phase: number }[] = [];
 
-  for (let y = 0; y < world.height; y++) {
-    for (let x = 0; x < world.width; x++) {
-      if (surface[y * world.width + x]!.terrain === "sunbeam") {
-        sources.push({ cx: x + 0.5, cy: y + 0.5, radiusTiles: 2.1, color: TERRAIN_FG.sunbeam, strength: 0.35, phase: hashLightPhase(x, y) });
-      }
-    }
-  }
   for (const agent of world.agents) {
     if (agent.layer !== "surface" || agent.alive === false) continue;
     if (!agent.types?.includes("fire")) continue;
