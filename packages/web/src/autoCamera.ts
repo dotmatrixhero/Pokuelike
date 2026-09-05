@@ -35,10 +35,22 @@ const BATTLE_EPILOGUE_TICKS = 16;
 const BATTLE_STALE_TICKS = 40;
 /** Hard cap on queued-but-not-yet-shown engagements — a chaotic tick (mass death event, say) shouldn't grow this unboundedly; overflow drops the oldest still-queued entries first. */
 const MAX_QUEUE = 20;
-/** Playback speed (the `SPEED_STEPS` value, not an index) auto-camera holds a followed event to. */
+/** Playback speed (the `SPEED_STEPS` value, not an index) auto-camera holds a followed *non-battle* event to. */
 export const AUTO_CAM_SLOWDOWN_SPEED = 2;
-/** Auto-camera only intervenes on speed at/above this — below it, playback is already slow enough to watch without help. */
+/** Auto-camera only intervenes on speed at/above this for a non-battle event — below it, playback is already slow enough to watch without help. */
 const SLOWDOWN_THRESHOLD_SPEED = 4;
+/**
+ * Playback speed a *battle* specifically drops to — real cinematic slow-
+ * motion, deliberately slower than even normal 1x (direct ask: "slow down
+ * battles to .25x"). Because this is slower than every other speed step
+ * (including the 1x/2x/3x range `SLOWDOWN_THRESHOLD_SPEED` treats as "already
+ * watchable"), a battle ignores that threshold entirely and always drops to
+ * this the moment it starts, regardless of what speed the viewer was at —
+ * the whole point is a guaranteed slow-motion fight, not just reining in an
+ * already-fast playback speed. Every other notable category keeps the
+ * unchanged ≥4x-only / 2x-target behavior above.
+ */
+export const AUTO_CAM_BATTLE_SLOWDOWN_SPEED = 0.25;
 
 interface Engagement {
   category: NotableCategory;
@@ -363,6 +375,17 @@ export class AutoCameraController {
   private applySlowdownIfNeeded(): void {
     if (this.savedSpeed !== undefined) return; // already slowed down for a still-ongoing earlier engagement
     const current = this.host.getSpeed();
+    if (this.active?.category === "battle") {
+      // Cinematic slow-motion: always drop to it (even from 1x) — see
+      // `AUTO_CAM_BATTLE_SLOWDOWN_SPEED`'s doc comment for why the ≥4x gate
+      // below doesn't apply here. Skip only if the viewer is already exactly
+      // at the target (nothing to save/restore).
+      if (current !== AUTO_CAM_BATTLE_SLOWDOWN_SPEED) {
+        this.savedSpeed = current;
+        this.host.setSpeed(AUTO_CAM_BATTLE_SLOWDOWN_SPEED);
+      }
+      return;
+    }
     if (current >= SLOWDOWN_THRESHOLD_SPEED) {
       this.savedSpeed = current;
       this.host.setSpeed(AUTO_CAM_SLOWDOWN_SPEED);

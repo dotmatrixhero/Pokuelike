@@ -7702,6 +7702,59 @@ the hand-rolled-shim fallback:
    errors the whole run. This is real-browser confirmation of the actual
    wiring, not just the isolated state-machine logic from step 2.
 
+### Follow-up: zoom pulled back to 150%, and real 0.25x slow-motion for battles specifically
+
+**Direct asks, verbatim.** "Okay so ui wise I want a little more zoom out on
+auto cam. Maybe 150%." And: "And also slow down battles to .25x."
+
+**Zoom: `AUTO_CAM_ZOOM` (main.ts) is now a literal `1.5`**, down from
+`ZOOM_MAX` (2, i.e. 200%) — still a fixed level for the same reasons as
+before (see the original zoom writeup above), just a little less
+tight/claustrophobic per direct feedback. `zoomLabel` reads the raw `zoom`
+value as a percentage, so this shows as exactly "150%" in the UI.
+
+**Speed: battles get their own, much lower, always-applied target —
+`AUTO_CAM_BATTLE_SLOWDOWN_SPEED` (0.25x) in `autoCamera.ts`.** The existing
+`AUTO_CAM_SLOWDOWN_SPEED`/`SLOWDOWN_THRESHOLD_SPEED` pair (2x target, only
+kicking in at ≥4x) is unchanged and still governs every *other* notable
+category (immigration, courtship, hatch, evolution, death) exactly as
+before. Battles needed a genuinely different rule, not just a different
+number plugged into the same one: 0.25x is *slower than normal 1x/2x/3x
+speed*, so "only intervene when the viewer is already going fast" makes no
+sense here — the whole point of "slow down battles to .25x" is guaranteed
+cinematic slow-motion combat, whatever speed the viewer happened to have
+selected, even 1x. `applySlowdownIfNeeded` now branches on
+`this.active?.category === "battle"` before deciding whether/what to slow
+to:
+
+- **Battle**: always drops to `AUTO_CAM_BATTLE_SLOWDOWN_SPEED`, skipping the
+  ≥4x gate entirely — the only guard left is "don't bother saving/setting if
+  the viewer is already exactly at 0.25x" (nothing to restore in that case).
+- **Everything else**: unchanged ≥4x-only / 2x-target behavior, byte-for-byte
+  the same code path as before.
+
+Both paths still go through the exact same `savedSpeed`
+save/restore/`releaseSpeedOverride` machinery — a battle at 1x still
+remembers "1x" and puts it back afterward, not some default. This is the
+same mechanism, just a conditional target/threshold, which keeps the
+existing manual-override (`noteManualSpeedChange`) and no-double-save
+behavior (a second engagement starting mid-slowdown doesn't re-save) intact
+for both cases without duplicating any of that logic.
+
+**Verification (Playwright, real browser, `pnpm --filter @pokuelike/web dev`).**
+Confirmed live, not just via typecheck/build:
+
+- Auto Camera zooms to exactly `150%` (`#zoom-label`) the moment it starts
+  tracking any notable event.
+- Starting playback at a normal `1x` and letting a real battle break out: the
+  live `#speed-label` dropped to `0.25x` — confirmed at both `1x` and `8x`
+  starting speeds, i.e. the battle-specific slowdown fires regardless of the
+  ≥4x gate that governs every other category.
+- The same run, for a non-battle event: starting at `1x` stayed at `1x`
+  (below the ≥4x threshold, correctly untouched) and starting at `16x`
+  (index 6) dropped to `2x` for a non-battle event — the original ≥4x/2x
+  behavior, unchanged.
+
 ## Battle Screen: a Pokémon-textbox-style view of what Auto Camera is following
 
 **Direct ask, verbatim.** "Can I get something outside of event log that
@@ -7840,6 +7893,108 @@ used:
    just battles. Also confirmed the Hide/Show toggle actually sets
    `#battle-screen`'s `hidden` attribute. Zero console/page errors across
    both runs.
+
+### Follow-up: merged into the Inspector panel as a real tab, not a second docked panel
+
+**Direct ask, verbatim.** "The battle log ui is great but it obscures the
+map. Can you have it be a tab actually built in where the population stats
+and stuff are? Just a different tab look at but you can switch back and
+forth." The standalone `#battle-screen-panel` from the original feature
+above (docked under the canvas, its own fixed `max-height`) cost the canvas
+real vertical space on top of the Inspector panel already there — the fix is
+to make it share the Inspector's existing footprint as a second tab, not add
+to it.
+
+**Decided: a thin visibility-only tab switcher in `main.ts`, neither panel
+module changed.** `renderInspector` (inspector.ts) and `BattleScreenPanel`
+(battleScreenPanel.ts) are completely unaware tabs exist — both still render
+into their own `#inspector`/`#battle-screen` divs exactly as before, on
+every tick/frame, regardless of which one is currently visible. The two divs
+are now DOM siblings inside one `.panel` (`#inspector-panel` in index.html),
+and a small `selectTab("inspector" | "battle-screen", manual)` function in
+main.ts is the *only* new logic — it toggles `.hidden` on the two content
+divs, `.playing`/`aria-selected` on the two new tab buttons
+(`#tab-inspector`/`#tab-battle-screen`, in `#inspector-panel`'s own
+`.panel-header`, replacing the old plain `<span>Inspector</span>` title),
+and shows/hides the "Clear [selection]" button (meaningless on the Battle
+Screen tab). This is deliberately the cheapest possible integration: neither
+panel's own render logic, dirty-tracking, or public API changed at all,
+which also means the two panels' existing "always render every frame,
+regardless of visibility" behavior (each already cheap — a handful of DOM
+nodes) is unchanged; the only new cost is two `.hidden` assignments.
+
+**A real, non-obvious CSS gotcha caught while wiring this up:** both
+`#inspector` and `#battle-screen` set their own unconditional `display`
+(`block` default / `display: flex` respectively) for their own internal
+layout needs. An *author* stylesheet's `display` declaration always beats
+the browser's own built-in `[hidden] { display: none }` rule regardless of
+selector specificity (origin priority, not specificity, decides between
+author and user-agent stylesheets) — so naively toggling `.hidden` on either
+div would have silently done nothing visually. Fixed with an explicit,
+higher-specificity `#inspector[hidden], #battle-screen[hidden] { display:
+none; }` override in index.html.
+
+**Interaction model: manual switching always works; auto-switching to
+Battle Screen on a new battle is a nice-to-have that respects a manual
+override for that same battle — deliberately mirroring Auto Camera's own
+existing manual-override pattern, not a new design language.** The user's
+own phrasing ("switch back and forth") made manual control non-negotiable,
+but leaving *only* manual control would regress the "as the auto cam events
+are happening" spirit the original standalone panel had (it just appeared).
+Landed on:
+
+- Clicking either tab button always switches immediately — no override logic
+  gates a manual click itself.
+- The moment Auto Camera starts tracking a *new* battle engagement (a fresh
+  `Engagement.seq`, from `currentEngagement()`), the tab auto-switches to
+  Battle Screen — `main.ts`'s `maybeAutoSwitchTab()`, called once per frame
+  alongside the existing `battleScreenPanel.setActive` call.
+- If the viewer manually switches back to Inspector *during* that same
+  battle, that choice sticks for the rest of it — recorded as
+  `tabManualOverrideForBattleSeq = <that battle's seq>` — so auto-switch
+  doesn't fight them back to Battle Screen on the very next frame. This is
+  byte-for-byte the same shape as `AutoCameraController`'s own
+  `viewerTookOver` flag for camera panning: a deliberate override sticks for
+  the duration of *this* engagement, but a genuinely *new* one (a different
+  `seq` — the next battle) is a fresh thing to show and earns the
+  auto-switch again, exactly as a new engagement re-earns camera control
+  even from a viewer who'd panned away from the last one.
+- Manually switching *to* Battle Screen (whether or not a battle is active)
+  clears any standing override — the viewer chose to look at it, so there's
+  nothing left to protect against.
+- Loading/reloading a world resets both the auto-switch and override
+  tracking and snaps the tab back to Inspector — a fresh world's battle
+  `seq`s (and every tracked agent id) are unrelated to whatever was on
+  screen a moment ago, the same "everything's meaningless now" reasoning
+  `AutoCameraController.reset()` already applies to its own state on a world
+  reload.
+
+**Sizing: the merged panel keeps the Inspector's existing footprint, not the
+sum of both former panels.** `#inspector-panel`'s existing `max-height`
+(46%, unchanged) now bounds whichever tab is showing — Battle Screen's own
+internal flex/scroll layout (`.battle-screen-log`'s `flex: 1` + `overflow-y:
+auto`) still works the same way inside that shared bound it did inside its
+own former panel, since the same "container has a real height ceiling, so
+flex-shrink squeezes the scrollable child to fit" mechanism applies either
+way. Net effect: the canvas gets back roughly the vertical space the
+standalone Battle Screen panel used to take, which was the entire point of
+this follow-up.
+
+**Verification (Playwright, real browser, `pnpm --filter @pokuelike/web dev`).**
+- `#battle-screen-panel` no longer exists in the DOM at all (confirmed via a
+  zero-count locator query) — it's genuinely gone, not just visually hidden.
+- Both tab buttons render inside `#inspector-panel`'s header; clicking
+  `#tab-battle-screen` hides `#inspector` and un-hides `#battle-screen` (and
+  vice versa for `#tab-inspector`) — confirmed via each div's real `.hidden`
+  state after each click, both directions, several times in the same
+  session.
+- Triggering a real battle with Auto Camera on and the Inspector tab
+  showing: the tab auto-switched to Battle Screen the moment the battle
+  engagement started, with the live "vs" header/HP bars/turn-by-turn lines
+  rendering in the now-visible `#battle-screen` div.
+- `#canvas-wrap`'s live bounding-box height was measured post-merge to
+  confirm the map now gets the vertical space the old second panel used to
+  occupy (no separate fixed-height panel below the canvas any more).
 
 ## Species-dependent shelter ease and egg-defense lethality: a direct predator-fragility follow-up
 

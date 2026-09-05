@@ -93,16 +93,24 @@
 
       /* Battle Screen — a second, differently-formatted view of whatever
          Auto Camera is currently following, styled like a mainline Pokémon
-         battle text box (see DESIGN.md's "Battle Screen" section). Docked
-         under the canvas next to the Inspector rather than in the #sidebar
-         drawer specifically so it's visible the moment a battle starts
-         without the viewer having to open the drawer first — "as the auto
-         cam events are happening," per the direct ask. Small fixed height,
-         same reasoning as #inspector-panel's own max-height: real content,
-         not something that should be free to grow and push the canvas
-         around. */
-      #battle-screen-panel { flex: 0 0 auto; max-height: 30vh; }
+         battle text box (see DESIGN.md's "Battle Screen" section). Lives as
+         a second *tab* inside #inspector-panel (see .panel-tabs below)
+         rather than its own docked panel — a direct follow-up ask: the
+         standalone panel "obscures the map" by eating extra vertical space
+         under the canvas, so it now shares the Inspector's existing
+         footprint instead of adding to it. #inspector and #battle-screen are
+         siblings inside the same panel body; exactly one is un-hidden at a
+         time (see main.ts's `selectTab`), the same `[hidden]` convention the
+         drawer/legend toggles already use elsewhere in this file. */
       #battle-screen { padding: 8px 12px; font-size: 12.5px; display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: hidden; }
+      /* `#inspector`/`#battle-screen` both set their own unconditional
+         `display` above/below (needed either way for their internal flex
+         layout) — an author `display` declaration otherwise always beats the
+         UA stylesheet's plain `[hidden] { display: none }`, so the inactive
+         tab's content div needs an explicit, higher-specificity override
+         here or toggling `.hidden` in main.ts's `selectTab` would do nothing
+         visually. */
+      #inspector[hidden], #battle-screen[hidden] { display: none; }
       .battle-screen-empty { color: var(--text-dim); padding: 10px 4px; font-size: 12px; }
       .battle-screen-vs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
       .battle-screen-combatant { flex: 1 1 160px; min-width: 130px; display: flex; flex-direction: column; gap: 3px; }
@@ -206,6 +214,13 @@
         justify-content: space-between;
         align-items: center;
       }
+      /* Inspector/Battle Screen tab switcher — lives inside #inspector-panel's
+         own .panel-header, in place of the plain <span> title every other
+         panel-header uses, so it costs no extra vertical space of its own.
+         Small variants of the app's ordinary button/.playing convention
+         (see button.playing above) rather than a new visual language. */
+      .panel-tabs { display: flex; gap: 5px; }
+      .panel-tab-btn { padding: 3px 8px; font-size: 11px; font-weight: 600; }
       #legend-panel { flex: 0 0 auto; max-height: 34%; overflow-y: auto; }
       #legend { padding: 8px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px; }
       .legend-group-title { color: var(--text-dim); text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.05em; margin-bottom: 3px; }
@@ -405,20 +420,16 @@
           <canvas id="scene"></canvas>
         </div>
 
-        <div class="panel" id="battle-screen-panel">
-          <div class="panel-header">
-            <span>Battle Screen</span>
-            <button id="toggle-battle-screen" title="Show/hide">Hide</button>
-          </div>
-          <div id="battle-screen"></div>
-        </div>
-
         <div class="panel" id="inspector-panel">
           <div class="panel-header">
-            <span>Inspector</span>
+            <div class="panel-tabs" role="tablist">
+              <button id="tab-inspector" class="panel-tab-btn playing" role="tab" aria-selected="true" title="Population stats and per-agent detail">Inspector</button>
+              <button id="tab-battle-screen" class="panel-tab-btn" role="tab" aria-selected="false" title="Pokémon-battle-textbox view of whatever Auto Camera is following">Battle Screen</button>
+            </div>
             <button id="clear-selection" title="Clear selection">Clear</button>
           </div>
           <div id="inspector"></div>
+          <div id="battle-screen" hidden></div>
         </div>
       </main>
 

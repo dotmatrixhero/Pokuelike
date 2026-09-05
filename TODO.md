@@ -2090,8 +2090,15 @@ not something this pathfinding pass itself caused or is positioned to fix.
       `main.ts` wiring): follows immigration, courtship (bonded/
       shelterBuilt/eggLaid as three separate moments), egg hatching,
       battles (start-to-death-or-retreat), evolution, and true deaths;
-      zooms in, temporarily drops playback to 2x from 4x+, and scopes the
-      event log to exactly that moment's participants.
+      zooms in to 150% (`AUTO_CAM_ZOOM`, follow-up-adjusted down from the
+      original 200%), and scopes the event log to exactly that moment's
+      participants. Playback slowdown is now category-conditional: a battle
+      always drops to 0.25x real slow-motion regardless of the viewer's
+      current speed (`AUTO_CAM_BATTLE_SLOWDOWN_SPEED`, a direct follow-up
+      ask), while every other category keeps the original 2x-from-4x+-only
+      behavior (`AUTO_CAM_SLOWDOWN_SPEED`/`SLOWDOWN_THRESHOLD_SPEED`). See
+      DESIGN.md's "Follow-up" subsection for the reasoning and Playwright
+      verification of both changes.
 - [ ] **No camera easing/animation.** Both the zoom change and the scroll
       reposition are instant (a plain `scrollLeft`/`scrollTop` assignment,
       no CSS transition) — a deliberate choice for this pass (see
@@ -2148,8 +2155,19 @@ not something this pathfinding pass itself caused or is positioned to fix.
       retreat/conclusion), and a single flavor-text scene line for every
       other notable category (hatch/evolution/immigration/death). Coexists
       with the plain event log's existing auto-cam filter rather than
-      replacing it. Docked next to the Inspector panel with its own Hide/
-      Show toggle, not inside the sidebar drawer.
+      replacing it.
+- [x] **Follow-up: merged into the Inspector panel as a tab, not a second
+      docked panel** — the standalone `#battle-screen-panel` (and its own
+      Hide/Show toggle) is gone; "Battle Screen" is now a second tab inside
+      `#inspector-panel`, next to "Inspector" (`#tab-inspector`/
+      `#tab-battle-screen` in its `.panel-header`), toggled via `main.ts`'s
+      `selectTab` — pure visibility switching, neither `renderInspector` nor
+      `BattleScreenPanel` changed at all. Auto-switches to Battle Screen the
+      moment a new battle engagement starts, but a manual switch back to
+      Inspector sticks for the rest of that same battle (mirrors Auto
+      Camera's own manual-view-override pattern) — see DESIGN.md's
+      "Follow-up" subsection for the full interaction-model writeup and
+      Playwright verification.
 - [ ] **No effectiveness callout when the defender agent's already been
       pruned.** "It's super effective!"/"not very effective" is computed
       client-side via the engine's own exported `typeEffectiveness` against

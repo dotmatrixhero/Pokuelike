@@ -29,14 +29,16 @@ const ZOOM_MAX = 2;
 const ZOOM_BUTTON_FACTOR = 1.25;
 const DEFAULT_ZOOM = 0.8; // the whole demo map roughly fits a laptop viewport at this level
 /**
- * Auto Camera's fixed close-in zoom — `ZOOM_MAX` itself (2.5x `DEFAULT_ZOOM`)
- * rather than something scaled to fit exactly two combatants: a fixed level
- * is simple, predictable, and already a genuinely closer view than default
- * for every notable-event category (a lone hatchling, a two-agent battle, a
- * three-agent immigration group) without per-category zoom-fit math that a
- * moving multi-agent battle would immediately invalidate anyway.
+ * Auto Camera's fixed close-in zoom. Originally `ZOOM_MAX` (200%); direct
+ * follow-up ask ("a little more zoom out on auto cam, maybe 150%") pulled it
+ * back to 150% — still a fixed level rather than something scaled to fit
+ * exactly two combatants: simple, predictable, and already a genuinely
+ * closer view than default for every notable-event category (a lone
+ * hatchling, a two-agent battle, a three-agent immigration group) without
+ * per-category zoom-fit math that a moving multi-agent battle would
+ * immediately invalidate anyway.
  */
-const AUTO_CAM_ZOOM = ZOOM_MAX;
+const AUTO_CAM_ZOOM = 1.5;
 
 // --- DOM references -------------------------------------------------------
 
@@ -72,7 +74,8 @@ const zoomLabel = document.getElementById("zoom-label") as HTMLElement;
 const autoCamToggleBtn = document.getElementById("auto-cam-toggle") as HTMLButtonElement;
 const autoCamStatusEl = document.getElementById("auto-cam-status") as HTMLElement;
 const battleScreenEl = document.getElementById("battle-screen") as HTMLElement;
-const toggleBattleScreenBtn = document.getElementById("toggle-battle-screen") as HTMLButtonElement;
+const tabInspectorBtn = document.getElementById("tab-inspector") as HTMLButtonElement;
+const tabBattleScreenBtn = document.getElementById("tab-battle-screen") as HTMLButtonElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -178,6 +181,12 @@ function loadWorld(seed: number): void {
   battleScreenPanel.reset();
   eventPopups.reset();
   renderInspector(inspectorEl, undefined, world);
+  // Every tracked battle seq from the old world is meaningless now, same as
+  // autoCamera.reset() above — and a fresh world is a natural point to hand
+  // the view back to the default Inspector tab.
+  tabManualOverrideForBattleSeq = undefined;
+  lastAutoSwitchedBattleSeq = undefined;
+  selectTab("inspector", false);
   updateStatusLabels();
 }
 
@@ -244,6 +253,72 @@ function refreshSelection(): void {
   inspectorDirty = false;
   const agent = selectedAgentId ? world.agents.find((a) => a.id === selectedAgentId) : undefined;
   renderInspector(inspectorEl, agent, world);
+}
+
+// --- Inspector / Battle Screen tabs -----------------------------------------
+// Battle Screen used to be its own docked panel; direct follow-up ask: it
+// "obscures the map," so it now shares the Inspector panel's footprint as a
+// second tab instead (see index.html's `#inspector-panel` markup). Both
+// `renderInspector`/`BattleScreenPanel` keep rendering into their own
+// `#inspector`/`#battle-screen` divs exactly as before — this is purely a
+// thin visibility switch over the two, the same `[hidden]` convention the
+// drawer/legend toggles already use.
+
+type PanelTab = "inspector" | "battle-screen";
+let activeTab: PanelTab = "inspector";
+/**
+ * The `seq` of the battle engagement the viewer last manually switched away
+ * from Battle Screen *during* (back to Inspector) — mirrors
+ * `AutoCameraController`'s own `viewerTookOver` sticky-override pattern:
+ * auto-switching won't re-steal the tab back for *this* battle, but a
+ * genuinely new battle (a different seq) is a fresh thing to show and earns
+ * the auto-switch back. `undefined` when there's no active override.
+ */
+let tabManualOverrideForBattleSeq: number | undefined;
+/** The `seq` of the battle engagement auto-switch has already acted on — so a battle that's still ongoing next frame doesn't keep re-triggering the switch (which would also stomp a manual switch back to Inspector on every single frame). */
+let lastAutoSwitchedBattleSeq: number | undefined;
+
+function selectTab(tab: PanelTab, manual: boolean): void {
+  activeTab = tab;
+  inspectorEl.hidden = tab !== "inspector";
+  battleScreenEl.hidden = tab !== "battle-screen";
+  clearSelectionBtn.hidden = tab !== "inspector"; // "Clear [selection]" only means anything on the Inspector tab
+  tabInspectorBtn.classList.toggle("playing", tab === "inspector");
+  tabInspectorBtn.setAttribute("aria-selected", String(tab === "inspector"));
+  tabBattleScreenBtn.classList.toggle("playing", tab === "battle-screen");
+  tabBattleScreenBtn.setAttribute("aria-selected", String(tab === "battle-screen"));
+
+  if (!manual) return;
+  // A deliberate click always wins over auto-switch's own bookkeeping — see
+  // the two fields' doc comments above.
+  const battleSeq = autoCamera.currentEngagement()?.category === "battle" ? autoCamera.currentEngagement()!.seq : undefined;
+  if (tab === "inspector" && battleSeq !== undefined) {
+    tabManualOverrideForBattleSeq = battleSeq;
+  } else if (tab === "battle-screen") {
+    tabManualOverrideForBattleSeq = undefined;
+  }
+}
+
+tabInspectorBtn.addEventListener("click", () => selectTab("inspector", true));
+tabBattleScreenBtn.addEventListener("click", () => selectTab("battle-screen", true));
+
+/**
+ * Auto-switches to the Battle Screen tab the moment Auto Camera starts
+ * tracking a new battle — mirrors the spirit of the old standalone panel
+ * just appearing on its own, without permanently taking the wheel: the
+ * viewer can still switch back to Inspector mid-battle (a manual override,
+ * tracked by `tabManualOverrideForBattleSeq`), and that choice sticks for
+ * the rest of *this* battle, but a fresh battle (new `seq`) always earns the
+ * auto-switch again, the same "a new thing to look at re-earns control"
+ * rule Auto Camera's own camera-follow already applies to a manual pan.
+ */
+function maybeAutoSwitchTab(): void {
+  const engagement = autoCamera.currentEngagement();
+  if (!engagement || engagement.category !== "battle") return;
+  if (engagement.seq === lastAutoSwitchedBattleSeq) return;
+  lastAutoSwitchedBattleSeq = engagement.seq;
+  if (engagement.seq === tabManualOverrideForBattleSeq) return;
+  if (activeTab !== "battle-screen") selectTab("battle-screen", false);
 }
 
 // --- Wiring ------------------------------------------------------------------
@@ -409,12 +484,6 @@ canvasWrap.addEventListener(
   { passive: true }
 );
 
-toggleBattleScreenBtn.addEventListener("click", () => {
-  const hidden = battleScreenEl.hidden;
-  battleScreenEl.hidden = !hidden;
-  toggleBattleScreenBtn.textContent = hidden ? "Hide" : "Show";
-});
-
 autoCamToggleBtn.addEventListener("click", () => {
   autoCamera.setEnabled(!autoCamera.isEnabled());
   autoCamToggleBtn.textContent = `Auto Camera: ${autoCamera.isEnabled() ? "On" : "Off"}`;
@@ -435,6 +504,7 @@ function frame(): void {
   autoCamera.update(world);
   autoCamStatusEl.textContent = autoCamera.currentLabel() ?? (autoCamera.isEnabled() ? "watching…" : "");
   battleScreenPanel.setActive(autoCamera.currentEngagement());
+  maybeAutoSwitchTab();
   battleScreenPanel.render(world);
   eventLogPanel.render();
   refreshSelection();
