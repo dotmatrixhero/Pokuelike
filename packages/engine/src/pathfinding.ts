@@ -2,6 +2,13 @@ import type { Agent, Layer, Vec2, World } from "./types.js";
 import { tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
 import { canEnterTile } from "./occupancy.js";
+import { canEnterWater, canEnterLand } from "./waterBody.js";
+
+/** `tileAt(...)?.walkable`, ADDITIONALLY gated on the hard water-crossing constraint (`waterBody.ts`'s `canEnterWater`) AND its land-side mirror (`canEnterLand`, for obligate-aquatic agents) for `agent` — the one always-on pair of checks every walkability test in this module must apply, capacity-blind pursuit paths included. */
+function isWalkableFor(world: World, layer: Layer, pos: Vec2, agent: Agent): boolean {
+  const tile = tileAt(world, layer, pos.x, pos.y);
+  return !!tile?.walkable && canEnterWater(world, agent, layer, pos) && canEnterLand(world, agent, layer, pos);
+}
 
 /**
  * Fixed neighbor visit order for BFS — deterministic regardless of any
@@ -43,23 +50,31 @@ function key(pos: Vec2): string {
  * or otherwise affecting the seeded-replay guarantee (see DESIGN.md's
  * "Determinism" section).
  *
- * `mover`, when given, treats a tile at capacity (`occupancy.ts`'s
- * `canEnterTile`) as impassable for this search too — a full tile "routes
- * around, same as an obstacle" per direct instruction, applied uniformly to
- * every tile BFS would step onto, `to` included. That last part is a
- * deliberate scope call: if `to` itself is currently at capacity, this
- * returns `undefined` (unreachable right now) rather than finding a route to
- * some tile adjacent to it — needs.ts's blocked-resource handling treats
- * that `undefined` as "can't make progress toward this target right now"
- * and reacts (waits out a grace period, then tries a different resource
- * tile), which in practice still reads as "stopped near the resource" for
- * the common case (an agent that had been closing in over many prior ticks,
- * only blocked in the final stretch once other agents got there first) —
- * see DESIGN.md's "Tile capacity" section for the real-run read on this.
+ * `agent` (required — see `isWalkableFor`/`movement.ts`'s own doc comment on
+ * why this one, unlike `mover` below, is never optional) gates every tile
+ * this search would step onto — `to` included — on the hard water-crossing
+ * constraint (`waterBody.ts`'s `canEnterWater`): a non-water type genuinely
+ * cannot BFS-route through a large lake/ocean's interior any more than it
+ * can greedy-step through one.
+ *
+ * `mover`, when given, ADDITIONALLY treats a tile at capacity
+ * (`occupancy.ts`'s `canEnterTile`) as impassable for this search too — a
+ * full tile "routes around, same as an obstacle" per direct instruction,
+ * applied uniformly to every tile BFS would step onto, `to` included. That
+ * last part is a deliberate scope call: if `to` itself is currently at
+ * capacity, this returns `undefined` (unreachable right now) rather than
+ * finding a route to some tile adjacent to it — needs.ts's blocked-resource
+ * handling treats that `undefined` as "can't make progress toward this
+ * target right now" and reacts (waits out a grace period, then tries a
+ * different resource tile), which in practice still reads as "stopped near
+ * the resource" for the common case (an agent that had been closing in over
+ * many prior ticks, only blocked in the final stretch once other agents got
+ * there first) — see DESIGN.md's "Tile capacity" section for the real-run
+ * read on this.
  */
-export function findPath(world: World, layer: Layer, from: Vec2, to: Vec2, mover?: Agent): Vec2[] | undefined {
+export function findPath(world: World, layer: Layer, from: Vec2, to: Vec2, agent: Agent, mover?: Agent): Vec2[] | undefined {
   if (from.x === to.x && from.y === to.y) return [];
-  if (!tileAt(world, layer, to.x, to.y)?.walkable) return undefined;
+  if (!isWalkableFor(world, layer, to, agent)) return undefined;
   if (mover && !canEnterTile(world, mover, layer, to)) return undefined;
 
   const startKey = key(from);
@@ -78,7 +93,7 @@ export function findPath(world: World, layer: Layer, from: Vec2, to: Vec2, mover
       const next: Vec2 = { x: current.x + offset.x, y: current.y + offset.y };
       const nextKey = key(next);
       if (visited.has(nextKey)) continue;
-      if (!tileAt(world, layer, next.x, next.y)?.walkable) continue;
+      if (!isWalkableFor(world, layer, next, agent)) continue;
       // `to` was already capacity-checked above (the early-return guard);
       // re-checking it here would be redundant, not wrong, but this keeps
       // the capacity check scoped to intermediate tiles being expanded.
@@ -134,7 +149,7 @@ export function stepAlongPath(world: World, agent: Agent, target: Vec2): Vec2 {
 
   let steps = targetMatches ? cache!.steps : undefined;
   if (!steps || steps.length === 0) {
-    steps = findPath(world, agent.layer, agent.pos, target, agent);
+    steps = findPath(world, agent.layer, agent.pos, target, agent, agent);
     if (!steps || steps.length === 0) {
       agent.pathCache = undefined;
       return agent.pos;
@@ -142,11 +157,12 @@ export function stepAlongPath(world: World, agent: Agent, target: Vec2): Vec2 {
   }
 
   let next = steps[0]!;
-  if (!tileAt(world, agent.layer, next.x, next.y)?.walkable || !canEnterTile(world, agent, agent.layer, next)) {
-    // Defensive: the cached next step is no longer walkable, OR (far more
-    // common now — crowding shifts tick to tick) no longer has room.
-    // Recompute fresh rather than walking into a wall or a full tile.
-    const fresh = findPath(world, agent.layer, agent.pos, target, agent);
+  if (!isWalkableFor(world, agent.layer, next, agent) || !canEnterTile(world, agent, agent.layer, next)) {
+    // Defensive: the cached next step is no longer walkable (terrain OR the
+    // hard water-crossing constraint), OR (far more common now — crowding
+    // shifts tick to tick) no longer has room. Recompute fresh rather than
+    // walking into a wall or a full tile.
+    const fresh = findPath(world, agent.layer, agent.pos, target, agent, agent);
     if (!fresh || fresh.length === 0) {
       agent.pathCache = undefined;
       return agent.pos;
@@ -257,6 +273,14 @@ export function stepTowardMovingTarget(world: World, agent: Agent, target: Agent
   // on; reverting just this function back to its pre-feature capacity-blind
   // behavior restored normal hunt/mate-seeking while `stepAlongPath`'s
   // consumption-gate (the part the feature is actually about) stays intact.
+  //
+  // `agent` IS still threaded through, though, as the new required
+  // water-crossing argument (`findPath`/`stepToward`'s `agent` parameter) —
+  // that's a hard physical constraint, not the soft crowding gate this
+  // function is deliberately blind to, so it applies here same as
+  // everywhere else: a landlocked non-water pursuer genuinely cannot BFS-
+  // or greedy-route across a large lake/ocean to reach prey/a mate on the
+  // far shore, full stop.
   const cache = agent.pathCache;
   const sameTarget = !!cache && cache.layer === agent.layer && cache.targetId === target.id;
   const drifted = sameTarget && manhattanDistance(cache!.target, target.pos) >= PURSUIT_RECOMPUTE_DRIFT_TILES;
@@ -265,12 +289,14 @@ export function stepTowardMovingTarget(world: World, agent: Agent, target: Agent
   let steps = sameTarget && !drifted && !closingIn ? cache!.steps : undefined;
 
   if (!steps || steps.length === 0) {
-    const fresh = findPath(world, agent.layer, agent.pos, target.pos);
+    const fresh = findPath(world, agent.layer, agent.pos, target.pos, agent);
     if (!fresh) {
       // Genuinely unreachable right now — give up on routing and fall back
       // to the pre-existing greedy approach rather than freezing in place.
+      // (Greedy `stepToward` also carries the same water-crossing check, so
+      // this fallback can't be used to route around it either.)
       agent.pathCache = undefined;
-      return stepToward(world, agent.layer, agent.pos, target.pos);
+      return stepToward(world, agent.layer, agent.pos, target.pos, agent);
     }
     if (fresh.length === 0) {
       // Already standing on the target's own tile (shouldn't normally
@@ -283,12 +309,13 @@ export function stepTowardMovingTarget(world: World, agent: Agent, target: Agent
   }
 
   let next = steps[0]!;
-  if (!tileAt(world, agent.layer, next.x, next.y)?.walkable) {
-    // Defensive: the cached next step is no longer walkable.
-    const fresh = findPath(world, agent.layer, agent.pos, target.pos);
+  if (!isWalkableFor(world, agent.layer, next, agent)) {
+    // Defensive: the cached next step is no longer walkable (terrain OR the
+    // hard water-crossing constraint).
+    const fresh = findPath(world, agent.layer, agent.pos, target.pos, agent);
     if (!fresh) {
       agent.pathCache = undefined;
-      return stepToward(world, agent.layer, agent.pos, target.pos);
+      return stepToward(world, agent.layer, agent.pos, target.pos, agent);
     }
     if (fresh.length === 0) {
       agent.pathCache = undefined;
@@ -321,7 +348,7 @@ export function stepTowardMovingTarget(world: World, agent: Agent, target: Agent
   // cached route.
   if (next.x === target.pos.x && next.y === target.pos.y) {
     agent.pathCache = undefined;
-    return stepToward(world, agent.layer, agent.pos, target.pos, undefined, true);
+    return stepToward(world, agent.layer, agent.pos, target.pos, agent, undefined, true);
   }
 
   const remaining = steps.slice(1);

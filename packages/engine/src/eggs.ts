@@ -129,6 +129,11 @@ export function spawnEgg(world: World, mother: Agent, father: Agent, pos: Vec2, 
     // has something to read the moment an egg exists, not only after it
     // hatches.
     isPredator: mother.isPredator,
+    // Same "denormalized straight from the mother" reasoning as `isPredator`
+    // immediately above — an obligate-aquatic mother's egg (and, once
+    // hatched, hatchling) is restricted from the moment it exists, not just
+    // once `ensureCombatProfile` happens to run for it.
+    obligateAquatic: mother.obligateAquatic,
   };
 }
 

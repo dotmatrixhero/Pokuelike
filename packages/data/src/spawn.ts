@@ -65,5 +65,6 @@ export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5, 
     buildsShelter: species.buildsShelter,
     preferredTerrain: species.preferredTerrain,
     isPredator: species.isPredator,
+    obligateAquatic: species.obligateAquatic,
   };
 }

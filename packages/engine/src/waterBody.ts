@@ -1,4 +1,5 @@
-import type { Vec2, World } from "./types.js";
+import type { Agent, Layer, Vec2, World } from "./types.js";
+import { tileAt } from "./world.js";
 
 /**
  * Connected-component sizing for "water" terrain — the missing concept
@@ -127,4 +128,135 @@ export const LARGE_WATER_BODY_MIN_SIZE = 12;
 
 export function isLargeWaterBody(size: number): boolean {
   return size >= LARGE_WATER_BODY_MIN_SIZE;
+}
+
+/**
+ * A water tile counts as "shore" when at least one 4-connected neighbor is
+ * itself walkable, non-water terrain — direct-adjacency-to-land, same
+ * adjacency shape `occupancy.ts`'s `shelterCluster` already uses for "is
+ * this tile part of the same contiguous feature," reused here for "does
+ * this water tile actually touch land" rather than inventing a second
+ * offset table. `NEIGHBOR_OFFSETS` above (this module's own 4-connected
+ * table, used for water-body component sizing) is reused rather than
+ * `flora.ts`/`weather.ts`'s 8-connected spread offsets — see this module's
+ * doc comment for why 4- vs 8-connectivity is a deliberate, non-interchangeable
+ * choice per use.
+ */
+function isShoreTile(world: World, layer: Layer, pos: Vec2): boolean {
+  for (const offset of NEIGHBOR_OFFSETS) {
+    const neighbor = tileAt(world, layer, pos.x + offset.x, pos.y + offset.y);
+    if (neighbor?.walkable && neighbor.terrain !== "water") return true;
+  }
+  return false;
+}
+
+/**
+ * The land-side mirror of `isShoreTile`: a non-water, walkable tile counts
+ * as "shore" for an obligate-aquatic agent when at least one 4-connected
+ * neighbor is itself water. Deliberately a separate function rather than a
+ * generalized single "does this tile touch the other terrain" helper reused
+ * both directions: `isShoreTile` only ever needs to ask the question from a
+ * water tile looking for land, `isLandShoreTile` only ever from a land tile
+ * looking for water — inlining a direction parameter into one shared helper
+ * would buy nothing but an extra branch at every call site, for a body this
+ * short.
+ */
+function isLandShoreTile(world: World, layer: Layer, pos: Vec2): boolean {
+  for (const offset of NEIGHBOR_OFFSETS) {
+    const neighbor = tileAt(world, layer, pos.x + offset.x, pos.y + offset.y);
+    if (neighbor?.terrain === "water") return true;
+  }
+  return false;
+}
+
+/**
+ * Direct ask: "non water Pokemon can't move across large bodies of water...
+ * They still need water to drink, so they wade into maybe the first shore
+ * level, but anything deeper is no good." A hard physical constraint —
+ * categorically different from `occupancy.ts`'s soft, opt-in-by-`mover`
+ * crowding gate (see `movement.ts`/`pathfinding.ts`'s own doc comments for
+ * why those two are NOT the same kind of restriction, and why this one is
+ * always applied rather than skippable by omitting an optional parameter):
+ * a landlocked non-water Pokémon physically cannot swim, full stop, whether
+ * or not the caller remembered to opt in.
+ *
+ * Only meaningful when `pos` is water terrain on `layer` — returns `true`
+ * unconditionally otherwise, so callers can use this as a blanket "can this
+ * agent actually enter this tile, water-wise" check stacked directly
+ * alongside the existing terrain `walkable` flag without a separate
+ * "is this even water" branch of their own.
+ *
+ * The rule, in order:
+ *  - Water-type agents (`agent.types?.includes("water")`): always `true`,
+ *    everywhere, no restriction at all — a water Pokémon can obviously swim.
+ *  - A water tile belonging to a body that ISN'T "large"
+ *    (`!isLargeWaterBody`) — an ordinary pond/puddle/stream: always `true`
+ *    for every type, completely unrestricted. This is deliberately the
+ *    common case left untouched: most of this sim's incidental wet ground
+ *    is exactly this, and it's also where an ordinary land Pokémon drinks
+ *    freely, same as before this feature existed.
+ *  - A LARGE water body's shore tile (`isShoreTile`) — `true` for every
+ *    non-water type uniformly (wading in to drink). An earlier draft singled
+ *    out Rock/Fire for a stricter shore exclusion; direct user feedback
+ *    corrected that — the "esp rock and fire" in the original ask was
+ *    emphasis on how bad swimming is for those types, not a request for a
+ *    separate stricter tier, so there's no type-specific exception here.
+ *  - Anything deeper into a large body (not touching land at all): `false`
+ *    for every non-water type, no exception — this is the actual "can't
+ *    move across large bodies of water" restriction the feature is about.
+ */
+export function canEnterWater(world: World, agent: Agent, layer: Layer, pos: Vec2): boolean {
+  const tile = tileAt(world, layer, pos.x, pos.y);
+  if (!tile || tile.terrain !== "water") return true;
+  if (agent.types?.includes("water")) return true;
+
+  const size = waterBodySizeAt(world, pos);
+  if (!isLargeWaterBody(size)) return true;
+
+  return isShoreTile(world, layer, pos);
+}
+
+/**
+ * The mirror image of `canEnterWater` — direct ask: "certain Pokémon like
+ * Magicarp and tentacool and stuff should probably not really be leaving
+ * the water." Only meaningful for `agent.obligateAquatic` (denormalized
+ * from `SpeciesDef.obligateAquatic` — packages/data/src/species.ts):
+ * a genuinely obligate-aquatic species, not merely a Water-typed one (many
+ * Water-types, e.g. Squirtle/Psyduck/Poliwag, are perfectly fine on land
+ * and never carry this flag, so this function is a no-op `true` for them,
+ * same as every non-obligate-aquatic agent).
+ *
+ * Only meaningful when `pos` is NOT water terrain on `layer` — returns
+ * `true` unconditionally otherwise (an obligate-aquatic agent can obviously
+ * enter any water tile it's already allowed onto — this function has
+ * nothing to say about water-vs-water distinctions, that's
+ * `canEnterWater`'s job for everyone else). Stacks alongside
+ * `canEnterWater` at every real call site: the two constraints are
+ * evaluated independently and never conflict, since one only fires on land
+ * tiles and the other only on water tiles.
+ *
+ * The rule, in order:
+ *  - A non-obligate-aquatic agent (`!agent.obligateAquatic`): always `true`,
+ *    completely unrestricted — this function only ever restricts the
+ *    handful of species that actually need it.
+ *  - A land tile directly adjacent (4-connected) to water
+ *    (`isLandShoreTile`) — the mirror of `canEnterWater`'s "wade into the
+ *    first shore level to drink": an obligate-aquatic agent can flop onto
+ *    the immediate shore ring (baiting/beaching/being carried, same
+ *    single-tile-deep allowance as the land-side rule), `true`.
+ *  - Anything deeper onto land (not touching water at all): `false` — the
+ *    actual "can't really be leaving the water" restriction.
+ *
+ * Deliberately NOT gated on `isLargeWaterBody` the way `canEnterWater` is:
+ * an obligate-aquatic species is just as unable to survive out of a small
+ * pond as out of a large lake — the large/small distinction only matters
+ * for whether a *non-water* type can cross the *water*, an orthogonal
+ * question this function doesn't ask.
+ */
+export function canEnterLand(world: World, agent: Agent, layer: Layer, pos: Vec2): boolean {
+  if (!agent.obligateAquatic) return true;
+  const tile = tileAt(world, layer, pos.x, pos.y);
+  if (!tile || tile.terrain === "water") return true;
+
+  return isLandShoreTile(world, layer, pos);
 }

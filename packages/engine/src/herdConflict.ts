@@ -262,7 +262,7 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
   });
 
   if (retreated) {
-    defender.pos = stepAway(world, defender.layer, defender.pos, attacker.pos, defender);
+    defender.pos = stepAway(world, defender.layer, defender.pos, attacker.pos, defender, defender);
     defender.herdConflictCooldownTicks = HERD_CONFLICT_COOLDOWN_TICKS;
     attacker.herdConflictCooldownTicks = HERD_CONFLICT_COOLDOWN_TICKS;
   }

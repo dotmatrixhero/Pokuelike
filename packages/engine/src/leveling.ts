@@ -106,6 +106,15 @@ export interface LevelingProfile {
    * spawn (see needs.ts's `applyExploration`).
    */
   preferredTerrain?: TerrainKind[];
+  /**
+   * Mirrors `SpeciesDef.obligateAquatic` (packages/data) — same
+   * denormalize-onto-newborn reasoning as `buildsShelter`/`preferredTerrain`
+   * immediately above: without this, a genuinely obligate-aquatic lineage's
+   * offspring would hatch with no restriction at all, since an agent's own
+   * `obligateAquatic` is otherwise only ever set once, at whichever creation
+   * site actually built it — see `waterBody.ts`'s `canEnterLand`.
+   */
+  obligateAquatic?: boolean;
 }
 
 export interface LevelingContext {
@@ -448,6 +457,7 @@ export function ensureCombatProfile(agent: Agent, ctx?: LevelingContext): void {
   agent.types = profile.types;
   agent.buildsShelter = agent.buildsShelter ?? profile.buildsShelter;
   agent.preferredTerrain = agent.preferredTerrain ?? profile.preferredTerrain;
+  agent.obligateAquatic = agent.obligateAquatic ?? profile.obligateAquatic;
 
   agent.knownMoves = agent.knownMoves ?? [];
   agent.moves = agent.moves ?? [];

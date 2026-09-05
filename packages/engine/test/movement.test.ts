@@ -21,32 +21,32 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
 describe("stepToward / stepAway", () => {
   it("stepToward moves one tile toward the target", () => {
     const world = createWorld(10, 10);
-    expect(stepToward(world, "surface", { x: 5, y: 5 }, { x: 8, y: 5 })).toEqual({ x: 6, y: 5 });
+    expect(stepToward(world, "surface", { x: 5, y: 5 }, { x: 8, y: 5 }, makeAgent())).toEqual({ x: 6, y: 5 });
   });
 
   it("stepAway moves one tile away from the threat (y tie-broken toward +1 when already aligned)", () => {
     const world = createWorld(10, 10);
-    expect(stepAway(world, "surface", { x: 5, y: 5 }, { x: 8, y: 5 })).toEqual({ x: 4, y: 6 });
+    expect(stepAway(world, "surface", { x: 5, y: 5 }, { x: 8, y: 5 }, makeAgent())).toEqual({ x: 4, y: 6 });
   });
 
   it("neither steps through an unwalkable tile", () => {
     const world = createWorld(10, 10);
     setTile(world, "surface", 6, 5, "tree");
-    const result = stepToward(world, "surface", { x: 5, y: 5 }, { x: 8, y: 5 });
+    const result = stepToward(world, "surface", { x: 5, y: 5 }, { x: 8, y: 5 }, makeAgent());
     expect(result).not.toEqual({ x: 6, y: 5 });
   });
 
-  it("without a mover argument, capacity is ignored entirely (pre-existing, capacity-blind behavior)", () => {
+  it("without a capacity mover argument, capacity is ignored entirely (pre-existing, capacity-blind behavior)", () => {
     const world = createWorld(10, 10);
     world.agents = [
       makeAgent({ id: "x", pos: { x: 6, y: 5 }, maxHp: 200 }),
       makeAgent({ id: "y", pos: { x: 6, y: 5 }, maxHp: 200 }),
       makeAgent({ id: "z", pos: { x: 6, y: 5 }, maxHp: 200 }),
     ];
-    expect(stepToward(world, "surface", { x: 5, y: 5 }, { x: 8, y: 5 })).toEqual({ x: 6, y: 5 });
+    expect(stepToward(world, "surface", { x: 5, y: 5 }, { x: 8, y: 5 }, makeAgent())).toEqual({ x: 6, y: 5 });
   });
 
-  it("with a mover, refuses to step onto a tile already at weight capacity, trying the next candidate instead", () => {
+  it("with a capacity mover, refuses to step onto a tile already at weight capacity, trying the next candidate instead", () => {
     const world = createWorld(10, 10);
     // Fill (6,5) to capacity (three ~30-weight occupants).
     world.agents = [
@@ -55,14 +55,14 @@ describe("stepToward / stepAway", () => {
       makeAgent({ id: "z", pos: { x: 6, y: 5 }, maxHp: 30 }),
     ];
     const mover = makeAgent({ id: "mover", pos: { x: 5, y: 5 }, maxHp: 30 });
-    const result = stepToward(world, "surface", mover.pos, { x: 8, y: 5 }, mover);
+    const result = stepToward(world, "surface", mover.pos, { x: 8, y: 5 }, mover, mover);
     expect(result).not.toEqual({ x: 6, y: 5 });
   });
 
-  it("with a mover, still admits it onto an EMPTY full-capacity-adjacent tile even if the mover alone would exceed capacity", () => {
+  it("with a capacity mover, still admits it onto an EMPTY full-capacity-adjacent tile even if the mover alone would exceed capacity", () => {
     const world = createWorld(10, 10);
     const mover = makeAgent({ id: "mover", pos: { x: 5, y: 5 }, maxHp: 99999 });
-    const result = stepToward(world, "surface", mover.pos, { x: 8, y: 5 }, mover);
+    const result = stepToward(world, "surface", mover.pos, { x: 8, y: 5 }, mover, mover);
     expect(result).toEqual({ x: 6, y: 5 });
   });
 });

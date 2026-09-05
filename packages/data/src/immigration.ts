@@ -16,6 +16,7 @@ export const IMMIGRATION_CONTEXT: ImmigrationContext = {
     id: species.id,
     homeLayer: species.homeLayer,
     biomes: species.biomes,
+    obligateAquatic: species.obligateAquatic,
   })),
   spawnAgent,
 };

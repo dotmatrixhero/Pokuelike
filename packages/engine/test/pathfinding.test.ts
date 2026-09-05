@@ -5,6 +5,13 @@ import { tickWorld } from "../src/simulation.js";
 import { findPath, stepAlongPath, stepTowardMovingTarget } from "../src/pathfinding.js";
 import type { Agent } from "../src/types.js";
 
+/** A full-map-width band of water spanning rows [y0, y1] — since it touches BOTH map edges, there is no land route around it, only the hard water-crossing constraint decides whether the two land masses it separates are reachable from each other. Wide enough (>= LARGE_WATER_BODY_MIN_SIZE tiles) to count as a "large" body. */
+function buildLakeBand(world: ReturnType<typeof createWorld>, y0: number, y1: number): void {
+  for (let y = y0; y <= y1; y++) {
+    for (let x = 0; x < world.width; x++) setTile(world, "surface", x, y, "water");
+  }
+}
+
 function manhattan(a: { x: number; y: number }, b: { x: number; y: number }): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
@@ -30,18 +37,18 @@ function buildWallRow(world: ReturnType<typeof createWorld>, y: number, x0: numb
 describe("findPath", () => {
   it("returns an empty array when already at the target", () => {
     const world = createWorld(10, 10);
-    expect(findPath(world, "surface", { x: 3, y: 3 }, { x: 3, y: 3 })).toEqual([]);
+    expect(findPath(world, "surface", { x: 3, y: 3 }, { x: 3, y: 3 }, makeAgent())).toEqual([]);
   });
 
   it("returns undefined when the target itself is unwalkable", () => {
     const world = createWorld(10, 10);
     setTile(world, "surface", 5, 5, "tree");
-    expect(findPath(world, "surface", { x: 0, y: 0 }, { x: 5, y: 5 })).toBeUndefined();
+    expect(findPath(world, "surface", { x: 0, y: 0 }, { x: 5, y: 5 }, makeAgent())).toBeUndefined();
   });
 
   it("finds a straight-line path with no obstacles", () => {
     const world = createWorld(10, 10);
-    const path = findPath(world, "surface", { x: 0, y: 0 }, { x: 3, y: 0 });
+    const path = findPath(world, "surface", { x: 0, y: 0 }, { x: 3, y: 0 }, makeAgent());
     expect(path).toEqual([
       { x: 1, y: 0 },
       { x: 2, y: 0 },
@@ -60,7 +67,7 @@ describe("findPath", () => {
     const from = { x: 5, y: 2 };
     const to = { x: 5, y: 9 };
 
-    const path = findPath(world, "surface", from, to);
+    const path = findPath(world, "surface", from, to, makeAgent());
 
     expect(path).toBeDefined();
     expect(path![path!.length - 1]).toEqual(to);
@@ -80,7 +87,7 @@ describe("findPath", () => {
     setTile(world, "surface", 4, 5, "tree");
     setTile(world, "surface", 6, 5, "tree");
 
-    const path = findPath(world, "surface", { x: 0, y: 0 }, { x: 5, y: 5 });
+    const path = findPath(world, "surface", { x: 0, y: 0 }, { x: 5, y: 5 }, makeAgent());
     expect(path).toBeUndefined();
   });
 
@@ -91,8 +98,8 @@ describe("findPath", () => {
     const from = { x: 3, y: 3 };
     const to = { x: 3, y: 12 };
 
-    const first = findPath(world, "surface", from, to);
-    const second = findPath(world, "surface", from, to);
+    const first = findPath(world, "surface", from, to, makeAgent());
+    const second = findPath(world, "surface", from, to, makeAgent());
     expect(second).toEqual(first);
   });
 
@@ -105,7 +112,7 @@ describe("findPath", () => {
         makeAgent({ id: "y", pos: target, maxHp: 30 }),
         makeAgent({ id: "z", pos: target, maxHp: 30 }),
       ];
-      expect(findPath(world, "surface", { x: 0, y: 0 }, target)).toBeDefined();
+      expect(findPath(world, "surface", { x: 0, y: 0 }, target, makeAgent())).toBeDefined();
     });
 
     it("with a mover, returns undefined when the target tile itself is at capacity", () => {
@@ -117,7 +124,7 @@ describe("findPath", () => {
         makeAgent({ id: "z", pos: target, maxHp: 30 }),
       ];
       const mover = makeAgent({ id: "mover", pos: { x: 0, y: 0 }, maxHp: 30 });
-      expect(findPath(world, "surface", mover.pos, target, mover)).toBeUndefined();
+      expect(findPath(world, "surface", mover.pos, target, mover, mover)).toBeUndefined();
     });
 
     it("routes AROUND a full tile blocking the only straight route, same as a real obstacle", () => {
@@ -134,14 +141,14 @@ describe("findPath", () => {
       const mover = makeAgent({ id: "mover", pos: { x: 5, y: 2 }, maxHp: 30 });
       const to = { x: 5, y: 9 };
 
-      expect(findPath(world, "surface", mover.pos, to, mover)).toBeUndefined(); // the gap was the only route, and it's full
+      expect(findPath(world, "surface", mover.pos, to, mover, mover)).toBeUndefined(); // the gap was the only route, and it's full
     });
 
     it("still admits the mover onto an EMPTY tile even if the mover alone would exceed weight capacity", () => {
       const world = createWorld(10, 10);
       const target = { x: 3, y: 0 };
       const mover = makeAgent({ id: "mover", pos: { x: 0, y: 0 }, maxHp: 99999 });
-      const path = findPath(world, "surface", mover.pos, target, mover);
+      const path = findPath(world, "surface", mover.pos, target, mover, mover);
       expect(path).toBeDefined();
       expect(path![path!.length - 1]).toEqual(target);
     });
@@ -313,6 +320,124 @@ describe("stepTowardMovingTarget: hunt/mate pursuit of a MOVING target", () => {
     const next = stepTowardMovingTarget(world, agent, newTarget);
     expect(agent.pathCache?.targetId).toBe("prey-new");
     expect(next).not.toEqual({ x: 2, y: 0 }); // not continuing the old cached route
+  });
+});
+
+describe("hard water-crossing constraint: hunt/mate pursuit genuinely respects it, not just capacity", () => {
+  it("findPath: a land-type agent cannot route across a large lake band spanning the whole map width", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14); // 20x10 = 200 tiles, well above LARGE_WATER_BODY_MIN_SIZE, no land route around it
+    const land = makeAgent({ types: ["normal"], pos: { x: 10, y: 2 } });
+    const path = findPath(world, "surface", land.pos, { x: 10, y: 17 }, land);
+    expect(path).toBeUndefined();
+  });
+
+  it("findPath: a water-type agent CAN route straight across the same lake band", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14);
+    const swimmer = makeAgent({ types: ["water"], pos: { x: 10, y: 2 } });
+    const path = findPath(world, "surface", swimmer.pos, { x: 10, y: 17 }, swimmer);
+    expect(path).toBeDefined();
+    expect(path![path!.length - 1]).toEqual({ x: 10, y: 17 });
+  });
+
+  it("stepTowardMovingTarget: a land-type predator on one shore never crosses a large lake to reach prey on the far shore, even though pursuit is otherwise capacity-blind", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14);
+    const predator = makeAgent({ id: "predator", species: "onix", types: ["rock"], pos: { x: 10, y: 2 } });
+    const prey = makeAgent({ id: "prey-far-shore", pos: { x: 10, y: 17 } });
+
+    for (let tick = 0; tick < 60; tick++) {
+      predator.pos = stepTowardMovingTarget(world, predator, prey);
+      // May wade onto the shore (row 5, the first water row touching land)
+      // but never any deeper — this is the real regression class flagged in
+      // this module's own doc comment (a hard obstacle silently making a
+      // huge area "unreachable" and starving hunt/mate-seeking): here the
+      // correct behavior IS to stay blocked past the shore, so the real
+      // risk is the *opposite* bug — capacity-blind pursuit accidentally
+      // routing straight through the lake's interior anyway.
+      expect(predator.pos.y).toBeLessThanOrEqual(5);
+    }
+    // Never got anywhere close to the far shore (y=17) — confirms it's
+    // genuinely blocked, not just slow.
+    expect(manhattan(predator.pos, prey.pos)).toBeGreaterThan(9);
+    // Confirms it didn't just fail to move at all (a stuck-in-place bug
+    // would trivially "pass" the above too) — it's free to roam the shore.
+    expect(predator.pos).not.toEqual({ x: 10, y: 2 });
+  });
+
+  it("stepTowardMovingTarget: a water-type pursuer DOES cross the same lake to reach prey on the far shore", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14);
+    const predator = makeAgent({ id: "predator", species: "gyarados", types: ["water"], pos: { x: 10, y: 2 } });
+    const prey = makeAgent({ id: "prey-far-shore", pos: { x: 10, y: 17 } });
+
+    let crossedIntoLake = false;
+    for (let tick = 0; tick < 40 && manhattan(predator.pos, prey.pos) > 1; tick++) {
+      predator.pos = stepTowardMovingTarget(world, predator, prey);
+      if (predator.pos.y >= 5 && predator.pos.y <= 14) crossedIntoLake = true;
+    }
+    expect(crossedIntoLake).toBe(true);
+    expect(manhattan(predator.pos, prey.pos)).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("obligate-aquatic land restriction (canEnterLand): symmetric mirror of the water-crossing constraint", () => {
+  it("findPath: an obligate-aquatic agent cannot route deep inland, only onto the shore ring", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14);
+    const aquatic = makeAgent({ types: ["water"], obligateAquatic: true, pos: { x: 10, y: 8 } });
+    // Two tiles past row 14 (last water row) is genuinely deeper than the
+    // shore ring — unreachable.
+    const path = findPath(world, "surface", aquatic.pos, { x: 10, y: 17 }, aquatic);
+    expect(path).toBeUndefined();
+  });
+
+  it("findPath: an obligate-aquatic agent CAN route to the shore ring itself", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14);
+    const aquatic = makeAgent({ types: ["water"], obligateAquatic: true, pos: { x: 10, y: 8 } });
+    // Row 15 is the first land row directly touching the lake band (row 14) — shore.
+    const path = findPath(world, "surface", aquatic.pos, { x: 10, y: 15 }, aquatic);
+    expect(path).toBeDefined();
+    expect(path![path!.length - 1]).toEqual({ x: 10, y: 15 });
+  });
+
+  it("findPath: a regular (non-obligate-aquatic) Water-type agent CAN route deep inland, completely unaffected", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14);
+    const amphibious = makeAgent({ types: ["water"], pos: { x: 10, y: 8 } }); // e.g. Squirtle — no obligateAquatic flag
+    const path = findPath(world, "surface", amphibious.pos, { x: 10, y: 17 }, amphibious);
+    expect(path).toBeDefined();
+    expect(path![path!.length - 1]).toEqual({ x: 10, y: 17 });
+  });
+
+  it("stepTowardMovingTarget: an obligate-aquatic pursuer never leaves the lake band/shore chasing prey deep on land", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14);
+    const predator = makeAgent({ id: "magikarp-test", species: "magikarp", types: ["water"], obligateAquatic: true, pos: { x: 10, y: 8 } });
+    const prey = makeAgent({ id: "prey-deep-inland", pos: { x: 10, y: 19 } });
+
+    for (let tick = 0; tick < 60; tick++) {
+      predator.pos = stepTowardMovingTarget(world, predator, prey);
+      // May flop onto the shore (row 15, the first land row touching the
+      // lake) but never any deeper.
+      expect(predator.pos.y).toBeLessThanOrEqual(15);
+    }
+    expect(manhattan(predator.pos, prey.pos)).toBeGreaterThan(3);
+  });
+
+  it("both hard constraints active simultaneously without conflict: a land-type still can't cross the lake, an obligate-aquatic type still can't leave it, on the very same map", () => {
+    const world = createWorld(20, 20);
+    buildLakeBand(world, 5, 14);
+    const land = makeAgent({ types: ["normal"], pos: { x: 10, y: 2 } });
+    const aquatic = makeAgent({ types: ["water"], obligateAquatic: true, pos: { x: 10, y: 8 } });
+
+    expect(findPath(world, "surface", land.pos, { x: 10, y: 17 }, land)).toBeUndefined();
+    expect(findPath(world, "surface", aquatic.pos, { x: 10, y: 17 }, aquatic)).toBeUndefined();
+    // Both can still reach their respective shore rings.
+    expect(findPath(world, "surface", land.pos, { x: 10, y: 5 }, land)).toBeDefined();
+    expect(findPath(world, "surface", aquatic.pos, { x: 10, y: 15 }, aquatic)).toBeDefined();
   });
 });
 

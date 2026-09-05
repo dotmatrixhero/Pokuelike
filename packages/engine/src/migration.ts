@@ -43,6 +43,6 @@ export function migrate(world: World, agent: Agent, log?: EventLog, rng: () => n
     return "arrived";
   }
 
-  agent.pos = stepToward(world, agent.layer, agent.pos, agent.relocateTarget);
+  agent.pos = stepToward(world, agent.layer, agent.pos, agent.relocateTarget, agent);
   return "traveling";
 }

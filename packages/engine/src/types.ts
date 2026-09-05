@@ -719,6 +719,20 @@ export interface Agent {
    */
   isPredator?: boolean;
 
+  /**
+   * Denormalized from `SpeciesDef.obligateAquatic` at spawn time
+   * (packages/data/src/spawn.ts), the same pattern as `isPredator`/
+   * `buildsShelter`/`preferredTerrain` above. True for a genuinely
+   * obligate-aquatic species (Magikarp, Tentacool and stuff — a species
+   * that realistically can't survive out of water, not merely a
+   * Water-typed one) — see `waterBody.ts`'s `canEnterLand`, the mirror
+   * image of `isPredator`'s sibling hard constraint `canEnterWater`.
+   * Absent/false = an ordinary species, including plenty of amphibious
+   * Water-types (Squirtle, Psyduck, Poliwag) that are fine wandering
+   * onto land and must NOT be restricted by this flag.
+   */
+  obligateAquatic?: boolean;
+
   // --- Individual variance: Nature and Disposition (see DESIGN.md) ---
 
   /**

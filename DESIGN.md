@@ -9789,6 +9789,128 @@ pipeline shape works end to end, before expanding further — and separately,
 whenever it's time, a dedicated vision pass for the human-society phase and
 for how Z-levels actually get built.
 
+### Correction: overworld and zone are two distinct levels, not one
+
+The first built slice below (macro elevation + rivers) was built at the
+**wrong level of the hierarchy** — direct follow-up after seeing it:
+"I thought we were building the overworld where each single map represents
+a zoom in of a single tile (or maybe like 4 tiles) on that overworld. The
+overworld is where the big geo stuff happens. The zone (the zoomed-in map)
+was supposed to be generally influenced by it." Corrected architecture,
+confirmed right by direct reply ("That is correct"):
+
+- **Overworld** = a coarse grid. This is where the geological/legendary
+  simulation actually runs, at overworld-cell granularity — Groudon/Kyogre
+  deciding continent shape, tectonics, legendary paths, etc. — producing
+  broad facts per cell (roughly: elevation band, whether a river/cave
+  passes through and roughly where, edge elevation for matching neighbors).
+- **Zone** = what the existing single-map sim (the one the observer
+  renders) represents: a zoomed-in detail view of *one* overworld cell (or
+  a small handful). A zone's terrain isn't independently decided — it's
+  generated to be consistent with what the overworld already decided for
+  that cell and its neighbors. Direct example given: "the overworld decides
+  that this zone is a mid to low elevation where a river snakes around a
+  cave. The zone then fills in the details with that in mind, roughly
+  matching features like 'north of this is higher elevation so water is
+  flowing downwards.'"
+
+What got built in the "first built slice" section below is a real,
+reusable **zone-detail generator** (the elevation-blending and
+steepest-descent river algorithms are sound) — it just currently invents
+its own facts from scratch (its own Groudon/Kyogre points) instead of
+being handed them by an outer overworld layer. The missing piece is the
+overworld grid itself plus rewiring the zone generator to take overworld
+cell facts as constraints. Not yet built — this is a correction to the
+vision doc, not a new implementation.
+
+**A real, flagged, unresolved risk from this correction**: zones are
+lazily generated only when actually visited (the "fake it" principle), so
+two neighboring zones can be generated arbitrarily far apart in time, in
+either order. A zone's edges (river continuing across the boundary,
+elevation gradient matching) can't safely depend on a neighbor zone's
+already-generated tiles at generation time, since that neighbor might not
+exist yet — see the "neighbor pass" below for how this actually gets
+resolved (not by requiring perfect one-shot consistency, but by
+reconciling after the fact).
+
+### Generation as ordered passes, not one monolithic step
+
+Direct ask, verbatim: "It'd be cool if we did it in 'passes'." Four passes,
+in order:
+
+1. **Geo overworld pass** — the zone gets generally sketched out: the
+   important high-level features (elevation band, river/cave presence and
+   rough path, coastline, etc. — everything the corrected architecture
+   above says the overworld decides) plus climate (temperature/moisture/
+   biome-banding). This is the pass the "first built slice" below should
+   eventually be rebuilt to sit *under*, not replace.
+2. **Life pass** — species population and flora get decided for the zone,
+   "including extent of human influence" — a per-zone gradient/attribute
+   for how touched by civilization a zone is, not the full human-society
+   simulation itself (that's still the separate, later human-society phase
+   from earlier in this doc — this pass just decides *how much* of it
+   applies to this specific zone, as an input the later phase would read).
+3. **Notable/history pass** — a zone's notable individuals and history get
+   decided. A real, direct connection to the already-built Notables/Herd
+   Leadership systems: this could mean a freshly-generated zone starts with
+   real seeded history ("there was once a great Hero here") instead of
+   needing thousands of live-simulated ticks to ever produce its first
+   notable — genuinely interesting, not scoped or designed further here.
+4. **Neighbor consistency pass** — explicitly different in character from
+   the first three: not guaranteed to run immediately, "small and
+   lightweight," triggered on demand and probably scoped by locality (e.g.
+   only when a player is actually near a boundary). It re-checks a zone
+   against its actual (by-then-possibly-generated) neighbors and tunes the
+   zone toward consistency with them. This is the real answer to the
+   lazy-generation edge-consistency risk flagged just above: rather than
+   demanding perfect one-shot consistency from overworld facts alone, a
+   zone is allowed to be "good enough" initially and gets reconciled with
+   its neighbors opportunistically once they actually exist nearby.
+   **Resolved** (was an open question in an earlier pass of this doc, now
+   settled by direct follow-up: "I don't think it changes while they're
+   there"): this pass is strictly about *static, historical* geology
+   (does a river/elevation gradient line up across the boundary) — it
+   settles once, at generation/first-visit time, and does not keep quietly
+   re-editing a zone's terrain after a player has already seen it. Anything
+   that visibly changes a zone while someone is actually there is a
+   different mechanic entirely — see below.
+
+### A separate, distinct mechanic: dynamic cross-zone propagation (not a generation pass)
+
+Direct follow-up, explicitly distinguishing this from the neighbor
+consistency pass above: "let's say we added an avalanche... I'd want it to
+spill into neighbors. Or a cave collapse. Or a wildfire or flash flood. It
+needs to affect neighbors dynamically — in the 'present'. That is different
+than the historical neighbor pass... so maybe we split those two types of
+things up?" Confirmed as a real, correct split, not a variation of the same
+idea:
+
+- The neighbor consistency pass (above) is about **history settling once**
+  — did the generated geology agree at the seam.
+- Dynamic cross-zone propagation is about a **live, ongoing simulation
+  event actually crossing a boundary while it's happening** — an
+  avalanche, cave collapse, wildfire, or flash flood that starts in one
+  zone and spreads into a neighboring one in real (simulated) time. This
+  belongs with the live per-tick simulation, not the generation pipeline
+  at all — a fundamentally different system, triggered by in-sim events
+  rather than by world-generation or by a player approaching a boundary.
+- **A real precedent for this already exists in the codebase**:
+  `world.weatherCells` (see `weather.ts`) already sweep effects across a
+  single zone's map live. Cross-zone dynamic propagation is plausibly the
+  same underlying idea — a live effect with a position and a radius/spread
+  rule — just needing to cross a zone boundary into a neighboring zone's
+  own simulation instead of stopping at the current map's edge. Not
+  designed further here (how a zone that isn't currently being actively
+  simulated would even receive/apply an incoming effect from a
+  neighbor is a real, unresolved question — the whole "fake it" per-zone
+  model implies most neighboring zones aren't running a live tick loop at
+  all most of the time), just flagged as the natural extension point and a
+  real, concrete example list (avalanche, cave collapse, wildfire, flash
+  flood) to design against later.
+
+Not sequenced against the "first built slice" below or scoped into a build
+yet — still vision-stage, same as the rest of this section.
+
 ## The first built slice: macro land/ocean elevation + rivers
 
 This is the "pick 2-3 processes for a first real build" step the section
@@ -10031,3 +10153,500 @@ times; `pnpm -r typecheck` clean across all 4 packages.
   above. A future pass could tune this more deliberately once more of the
   vision (e.g. a real multi-region overworld) makes "how much of one map
   should be ocean" a more load-bearing question than it is today.
+
+## Water-crossing restrictions: non-water types can't cross large bodies of water
+
+Direct ask: "non water Pokemon can't move across large bodies of water. Esp
+deep water, and esp certain typing like rock and fire. They still need water
+to drink, so they wade into maybe the first shore level, but anything
+deeper is no good." A direct, real consumer of the previous section's macro
+land/ocean generation: before this, `world.ts`'s `isWalkableTerrain`
+(`UNWALKABLE_TERRAIN = {"wall", "tree"}`) never included "water" at all, so
+every agent of every type could walk across any lake/ocean completely
+freely — the new ~44-52%-ocean maps made that gap actually matter for the
+first time.
+
+### Decided
+
+**The rule, uniformly for every non-water type (no Rock/Fire exception —
+see the correction below).** `waterBody.ts`'s new `canEnterWater(world,
+agent, layer, pos)`:
+- Water-type agents (`agent.types?.includes("water")`): unrestricted
+  everywhere, always `true`.
+- A water tile whose connected body is NOT "large" (`waterBody.ts`'s
+  pre-existing `waterBodySizeAt`/`isLargeWaterBody`, reused rather than
+  reinvented) — an ordinary pond/puddle/stream: unrestricted for everyone,
+  unchanged from before this feature. This is deliberately the common case
+  left alone, and it's also where a land Pokémon drinks freely.
+- A large water body's **shore** tile — a water tile with at least one
+  directly-adjacent (4-connected, matching `occupancy.ts`'s
+  `shelterCluster` adjacency shape) walkable non-water neighbor — stays
+  enterable for every non-water type, land types and Rock/Fire alike: this
+  is the "wade into the first shore level to drink" part of the ask.
+- Anything deeper into a large body (not touching land at all): impassable
+  for every non-water type. This is the actual "can't move across large
+  bodies of water" restriction.
+
+**Correction, direct user feedback, before this landed:** an earlier draft
+gave Rock/Fire a *stricter* rule — blocked from a large body's shore too,
+not just its interior, reading "esp certain typing like rock and fire" as a
+request for a separate harsher tier for those two types. Corrected: "esp
+rock and fire" was emphasis on how bad swimming is for those types, not a
+request for a stricter shore exclusion — the shore-wade rule applies
+uniformly to every non-water type, Rock/Fire included, no special case.
+
+**Always-on, not opt-in like the soft capacity gate.** `movement.ts`'s
+`stepToward`/`stepAway` and `pathfinding.ts`'s `findPath` already had an
+*optional* `mover?: Agent` parameter gating a soft, skippable capacity
+check — several real call sites (hunt/mate pursuit) deliberately omit it to
+stay capacity-blind, per this codebase's own documented real-run finding
+(see `pathfinding.ts`'s `stepTowardMovingTarget` doc comment: making
+pursuit capacity-aware tanked births ~90% on one seed by misreading normal
+herd density as "unreachable"). Water-crossing is a **hard physical
+constraint** — categorically different, and it must not be skippable the
+same way. So it got its own, separate, REQUIRED parameter instead of
+reusing that optional slot: `stepToward(world, layer, pos, target, agent,
+mover?, stopAdjacent?)` and the equivalent shapes for `stepAway`/`findPath`
+— `agent` (required) gates the hard water check; `mover` (still optional)
+ADDITIONALLY gates the soft capacity check, independently. Every real
+engine call site across `movement.ts`, `pathfinding.ts`, `predation.ts`,
+`dispersal.ts`, `herdConflict.ts`, `herding.ts`, `migration.ts`,
+`needs.ts`, `reproduction.ts`, `shelter.ts`, and `support.ts` now threads
+the moving `Agent` through for the water check — including the
+capacity-blind hunt/mate pursuit paths (`stepTowardMovingTarget`), which
+stay capacity-blind (no `mover`) while still being water-crossing-aware
+(real `agent`). `pathfinding.ts`'s `findPath`/`stepAlongPath` route every
+walkability check through a shared `isWalkableFor` helper (`tileAt(...)?
+.walkable && canEnterWater(...)`) so the constraint can't be forgotten at a
+new call site by accident the way a second, parallel `if` check could be.
+
+**The seekWater edge case: geometric "nearest" isn't the same as
+"reachable."** `needs.ts`'s `findNearestTerrain` is purely geometric
+(nearest water tile by Manhattan distance) — it has no idea `canEnterWater`
+can rule an otherwise-nearer tile out. Left unhandled, a thirsty land
+Pokémon near an irregular real coastline could keep re-targeting a
+nearer-but-unreachable interior tile forever, exactly the "silently
+unreachable, permanently stuck" bug class `pathfinding.ts`'s
+`stepTowardMovingTarget` doc comment already documents for hunt/mate
+pursuit — just for drinking instead. Fixed with a new
+`findReachableWaterTarget` in `needs.ts`: same nearest-tile lookup, but
+retrying past any `canEnterWater`-rejected candidate, bounded by
+`WATER_REACHABILITY_MAX_ATTEMPTS` (24 — see below for why not the smaller,
+pre-existing `MAX_BLOCKED_RESOURCE_MEMORY`), falling through to the
+pre-existing `ticksWithoutResource`/`migrate` escape valve when every
+attempt is exhausted (a type genuinely surrounded only by one huge lake
+with nothing reachable nearby has nothing to target — that's correct, not
+a bug to route further around).
+
+### Built, real-run findings
+
+**A real bug found and fixed by the real-run validation itself, not just
+unit tests.** The first version of `findReachableWaterTarget` reused
+`agent.blockedResourceTiles` (the existing transient capacity-wait
+exclusion list, capped at `MAX_BLOCKED_RESOURCE_MEMORY` = 4) for the
+water-reachability retry too. On the three real validation seeds below,
+this measurably increased thirst-starvation deaths versus a pre-feature
+baseline (seed 20260903 at 6000 ticks: population fell from a healthy
+33 to 12, with 6 of 10 starvation deaths thirst-caused, versus 0 thirst
+deaths in the baseline) — real friction from a real, irregular generated
+coastline (not a clean rectangle), where more than 4 geometrically-nearest
+water candidates can genuinely all be unreachable interior tiles before the
+real nearest reachable shore turns up. Splitting the water-reachability
+retry into its own, larger (24), non-persisted budget — rather than
+sharing the small list meant for "a crowded tile that might free up
+later" — fixed it: same seed 20260903 at 6000 ticks went from 12 final
+population back up to 22 (thirst deaths 6 -> 4), with no seed showing
+sustained decline toward collapse. This is exactly the regression class
+this session was warned to validate against (a real obstacle silently
+making a huge reachable area "unreachable" and starving resource-seeking),
+found and fixed the same way the codebase's own documented precedent
+(`stepTowardMovingTarget`'s capacity-blind pursuit) was: real headless
+runs, not just unit tests, because the failure mode only shows up against
+real, irregular generated terrain.
+
+**Multi-seed population health, seeds 42/7/20260903, 6000 ticks each, after
+the fix (pre-feature baseline in parentheses):**
+- Seed 42: final population 25 (baseline 18) — no decline; if anything
+  healthier, most likely a rng-chaos-sensitivity swing (see this file's
+  determinism section) rather than the feature itself. 2 thirst-starvation
+  deaths out of 18 total (baseline: 0 of 18).
+- Seed 7: final population 86 (baseline 20) — strong sustained growth
+  throughout the run (population samples climbing steadily from tick 3000
+  onward), no collapse. 1 thirst-starvation death out of 12 total (baseline:
+  1 of 23).
+- Seed 20260903: final population 22 (baseline 33) — a real but bounded
+  decline, population oscillating in the high-teens/low-20s for the back
+  half of the run rather than trending to zero; immigration (5 events)
+  kept contributing. 4 thirst-starvation deaths out of 5 total (baseline: 0
+  of 12).
+
+No seed showed the "landlocked pocket, population collapses toward zero"
+failure mode this session was specifically asked to check for. Some
+increase in thirst-driven death is an expected, real, direct consequence of
+this feature actually doing something (a land Pokémon that wanders far
+inland from any shore now sometimes can't get back before its thirst grace
+period runs out) rather than a bug — the fix above was about making sure
+that increase reflects real distance-to-reachable-water, not an
+artificially-low retry budget giving up early.
+
+**Confirmed thirsty land-type agents near a large lake still drink, via a
+worst-case synthetic test, not just real-run inference.** `needs.test.ts`'s
+"seekWater near a large lake" tests build a large lake walled in on every
+side except one deliberate gap, so the raw-nearest water tile from the
+wrong side is genuinely unreachable (its only "land" neighbor is an
+unwalkable wall) while the real shore sits behind the one gap, farther away
+by raw distance — exactly the trap `findReachableWaterTarget` exists for.
+Both a land-type and a Rock-type agent successfully drink within budget.
+
+**Determinism.** `canEnterWater`/`findReachableWaterTarget` touch no
+randomness at all — pure terrain/type lookups. `determinism.test.ts` is
+unmodified and passing; a same-seed-twice real `tickWorld` run (2000 ticks,
+seed 20260903) produced a byte-identical event log, and the full engine
+suite (863 tests, up from 850) ran clean twice in a row; `pnpm -r
+typecheck` clean across all 4 packages.
+
+### Tests
+
+- `waterBody.test.ts`: dedicated `canEnterWater` coverage — a land-type
+  agent blocked from a large body's interior but able to reach its shore; a
+  water-type agent unrestricted everywhere including the interior; Rock and
+  Fire types confirmed to get NO special stricter rule (shore yes, interior
+  no, same as any other non-water type) plus confirmed free entry to a
+  small pond; a land-type agent on a small (non-large) body fully
+  unrestricted (regression check — ordinary ponds unchanged).
+- `pathfinding.test.ts`: a dedicated "hard water-crossing constraint"
+  suite proving the capacity-blind hunt/mate pursuit path genuinely
+  respects this constraint — a land-type predator on one shore of a
+  full-map-width large lake band never crosses to reach prey on the far
+  shore (across 60 ticks, `findPath` directly confirmed `undefined`), while
+  a water-type pursuer of the same shape both finds a path and actually
+  reaches the prey.
+- `needs.test.ts`: the walled-lake reachability tests above (land-type and
+  Rock-type both confirmed to drink via the real shore, not the nearer
+  unreachable tile).
+
+### Explicitly not done here (see TODO.md)
+
+- **No graduated "wading depth" beyond a single shore-tile ring.** Every
+  large body has exactly two zones for a non-water type: shore (one tile
+  deep) and impassable. No intermediate "can wade two tiles in but no
+  further," no per-species wading depth.
+- **No swimming-speed penalty or bonus for water types**, or for anyone
+  wading onto a shore tile — entering water (where allowed) costs the same
+  one action tick as any other step, same as before this feature.
+- **No distinction between "large lake" and "ocean"** beyond the existing
+  `isLargeWaterBody` tile-count threshold — an ocean and a large landlocked
+  lake are treated identically by this rule.
+- **No new escape-hatch move or ability lets a non-water type cross
+  anyway** (no raft, no Fly-equivalent, no temporary water-walking) — the
+  restriction has no in-sim workaround yet.
+- **`findReachableWaterTarget`'s 24-attempt bound is empirically chosen
+  from this session's three validation seeds, not derived from map
+  geometry.** A future map with a much more convoluted coastline (or a much
+  larger `LARGE_WATER_BODY_MIN_SIZE` body) could in principle need more
+  attempts before finding a real reachable shore; this wasn't stress-tested
+  beyond the seeds validated here.
+
+## Obligate-aquatic restrictions: Magikarp/Tentacool (and stuff) can't really leave the water
+
+Direct ask, verbatim: "certain Pokémon like Magicarp and tentacool and stuff
+should probably not really be leaving the water." The mirror image of the
+previous section's water-crossing restriction: that feature stops a
+non-water type from crossing a large body of water; this one stops a
+genuinely obligate-aquatic species from wandering off the water it lives in
+at all, land-crossing depth included.
+
+### Decided
+
+**A new per-species flag, not a typing check.** Plenty of this roster's own
+Water-types (and Kanto's more broadly) are canonically amphibious/land-
+capable — Squirtle, Psyduck, Poliwag all bask, walk, and hunt on land in
+mainline flavor text — so `agent.types?.includes("water")` (the check
+`canEnterWater` already uses the other direction) is the wrong signal here.
+Instead, `species.ts`'s `SpeciesDef` gets a new `obligateAquatic?: boolean`
+field, judged per-species on real biology, the same standard this file's
+`isPredator`/`buildsShelter` sections already established — and
+denormalized onto `Agent.obligateAquatic` at spawn (`spawn.ts`), exactly the
+same "curated flag, not a typing inference" pattern those two fields use.
+It also follows their exact propagation shape end to end: mirrored onto
+`LevelingProfile` (`leveling.ts`, both packages) so a bred lineage's hatchling
+picks it up via `ensureCombatProfile`, and denormalized straight from the
+mother onto a laid egg (`eggs.ts`'s `spawnEgg`) the same way `isPredator`
+already is, so a hatchling is restricted from the moment it exists rather
+than only once something happens to call `ensureCombatProfile` for it.
+
+**The species list, and the reasoning per entry.** This roster (`species.ts`)
+had zero real aquatic residents before this feature — Squirtle is Water-typed
+but amphibious, so the map's own lakes had nobody who actually lived in the
+deep water. Checked the roster's dex import (`species.generated.ts`) for
+every Kanto aquatic species the task brief's own examples pointed at
+(Tentacruel as Tentacool's evolution, Horsea/Seadra, Staryu/Starmie,
+Goldeen/Seaking): all exist in the raw dex import, none were curated `SPECIES`
+roster entries yet. Added exactly two, both named directly in the ask, both
+already carrying `EGG_GROUPS_BY_BASE_KEY` headroom entries in `leveling.ts`
+(no leveling.ts data change needed) and both with a real, already-implemented
+move (`tackle`/`water_gun`) to spawn with, no new move needed:
+- **`magikarp`** (`obligateAquatic: true`) — "virtually powerless... this
+  Pokémon can only splash around in water" per mainline flavor text, the
+  single most literal obligate-aquatic case in the whole dex. A real
+  level-20 evolution into Gyarados (no conditions), so it evolves in-sim.
+- **`tentacool`** (`obligateAquatic: true`) — a drifting jellyfish
+  ("floats on the ocean's waves... drifts in shallow seas," no legs or land
+  locomotion of any kind at all) — if anything an even more literal case
+  than Magikarp. A real level-30 evolution into Tentacruel (no conditions).
+
+Deliberately did NOT add Horsea/Seadra/Staryu/Starmie/Goldeen/Seaking, or
+Gyarados/Tentacruel as their own curated roster entries, this session:
+Magikarp and Tentacool alone are enough to validate the mechanism for real
+(a full new species needs a real spawn slot, moveset, and its own
+biome/immigration tagging to mean anything, not just a data-table row), and
+the task's own two named examples are the load-bearing case. Expanding the
+curated aquatic roster further is real, scoped follow-up work, not done here
+(see TODO.md) — not a claim that the others don't deserve the flag; on the
+same real-biology standard, Horsea/Seadra, Staryu/Starmie, and Goldeen/Seaking
+would all plausibly get it too when they're actually added (all four are
+finned, gill-breathing swimmers with no mainline land locomotion), same as
+Gyarados/Tentacruel inheriting it automatically as evolutions.
+
+**A known, accepted gap: the flag doesn't reset on evolution**, the exact
+same "denormalized at spawn, doesn't follow evolution" scope this file's
+`buildsShelter`/`preferredTerrain` sections already accept for a hatchling
+built directly from a `LevelingProfile` rather than carrying a parent's
+already-set field forward. In practice this cuts both ways and is mostly
+harmless here: an evolved Gyarados stays obligate-aquatic even though real
+Gyarados can fly (an accepted mismatch, not a new kind of gap), while an
+evolved Tentacruel staying obligate-aquatic isn't even a mismatch — real
+Tentacruel is just as much a "lives in the ocean" species as Tentacool.
+
+**The symmetric movement rule: `waterBody.ts`'s new `canEnterLand`,**
+alongside `canEnterWater` in the exact same file (both are hard physical
+constraints on the same movement pipeline, not the soft capacity gate):
+- A non-`obligateAquatic` agent: always `true`, everywhere — this function
+  only ever restricts the handful of species that actually carry the flag.
+  A regular amphibious Water-type is completely unaffected, same as before
+  this feature existed.
+- Water terrain: always `true` for an obligate-aquatic agent — obviously,
+  it can enter any water it's already allowed onto (this function has
+  nothing to say about water-vs-water distinctions; that's still
+  `canEnterWater`'s job for everyone else).
+- A land tile directly adjacent (4-connected) to water — `isLandShoreTile`,
+  a new, separate helper deliberately NOT merged into `isShoreTile` into one
+  bidirectional function (see that function's own doc comment: each is only
+  ever asked from one direction, so a shared helper would just add a branch
+  for no real benefit at this length) — `true`. The land-side mirror of
+  `canEnterWater`'s own shore-wade allowance: an obligate-aquatic agent can
+  flop onto the immediate shore ring, one tile deep, same allowance depth as
+  the water-crossing feature gives the other direction.
+- Anything deeper onto land: `false`, no exception — the actual "shouldn't
+  really be leaving the water" restriction.
+
+Deliberately NOT gated on `isLargeWaterBody` the way `canEnterWater` is: an
+obligate-aquatic species is just as unable to survive out of a small pond as
+out of a large lake, so the large/small distinction (which only matters for
+whether a *non-water* type can cross the *water*) doesn't apply here at all.
+
+**Wired into the same shared choke point the water-crossing feature already
+built, not a second parallel check.** `pathfinding.ts`'s `isWalkableFor` —
+the one helper every walkability test in `findPath`/`stepAlongPath`/
+`stepTowardMovingTarget` already routes through — now ANDs `canEnterLand`
+alongside `canEnterWater`, so every real call site the water-crossing
+feature already covers (`movement.ts`'s `stepToward`/`stepAway`,
+`pathfinding.ts`'s three functions, and every real engine call site across
+predation/dispersal/herdConflict/herding/migration/needs/reproduction/
+shelter/support that flows through them) is obligate-aquatic-aware for
+free, no second pass through those modules needed. `movement.ts`'s
+`firstWalkable` (the one place `canEnterWater` is checked outside the
+pathfinding module) gets the same second check alongside it. `agent`
+(required, not the optional `mover` capacity slot) is what gates both hard
+constraints — no new parameter needed, since the water-crossing feature
+already made `agent` required everywhere for exactly this reason.
+
+### The food-reachability investigation — a real problem, found and fixed twice
+
+**This session was specifically warned to check for this, and it was real.**
+No existing worldgen logic places "food" terrain with any awareness of
+proximity to water (confirmed by reading `worldgen.ts`'s tile-generation
+pass directly: water and food are mutually exclusive per-tile, checked
+water-first with an unconditional `continue`, so a tile can never be both —
+food only ever lands on land tiles). Once an obligate-aquatic agent is
+restricted to water plus a one-tile shore ring, the only food it can ever
+reach is whatever "food" happens to land inside that thin ring — everything
+else `findNearestTerrain`'s purely geometric "nearest food tile" lookup
+would otherwise offer it is unreachable.
+
+**Bug #1 (found before any real run, by reasoning from the water-crossing
+feature's own documented precedent): the same "nearest isn't the same as
+reachable" trap `findReachableWaterTarget` already exists to fix, just for
+food.** `seekFood` was calling plain `findNearestTerrain(..., "food", ...)`
+— purely geometric, no idea `canEnterLand` can rule out an otherwise-nearer
+candidate. Fixed with a new `findReachableFoodTarget` in `needs.ts`, the
+same shape as `findReachableWaterTarget`: same nearest-tile lookup, retrying
+past any `canEnterLand`-rejected candidate, reusing
+`WATER_REACHABILITY_MAX_ATTEMPTS` (24) rather than a second hand-tuned
+constant — both bounds exist for the identical "an irregular coastline's
+nearest candidates can genuinely all be unreachable before a real one turns
+up" reason, so there's no basis to expect a different number to matter here.
+For a non-obligate-aquatic agent this is a complete no-op (`canEnterLand` is
+an unconditional `true`), so every existing species' `seekFood` behavior is
+byte-for-byte unchanged.
+
+**Bug #2 (found only by the real multi-seed validation runs themselves, not
+reasoning ahead of time — the exact "real-run findings catch what analysis
+alone doesn't" pattern the water-crossing feature's own bug already
+demonstrated): immigration was placing obligate-aquatic arrivals on dry
+land, sometimes nowhere near water at all.** `immigration.ts`'s
+`maybeImmigrate` picks an arrival position via `findWalkableNear` — any
+walkable tile, water included, treated as an equally valid hit — biome-
+weighted toward where the species is likely to be picked at all, but never
+actually checked for proximity to water. A first, hardcoded-coordinate
+version of this feature's own demo-world founders (`scenario.ts`) hit the
+identical bug in miniature: a coordinate that happened to be real water on
+`SCENARIO_SEED` (20260903) landed the founding Magikarp/Tentacool pair on dry
+land on the other two validation seeds, confirmed by an initial debug trace
+showing thirst declining to 0 over 200 ticks while `behavior: "seekWater"`
+and `pos` never moved — the founders were standing on land, `findWalkableNear`
+had handed them a shore-adjacent-but-dry tile, and canEnterLand's own arrival
+gate isn't consulted by placement code at all (it only gates movement after
+the fact). Both were fixed the same way: **place obligate-aquatic agents on
+real water terrain, not merely a walkable tile.**
+- `scenario.ts` gets a new local `findWaterNear` (ring search outward from a
+  point, same shape as `worldgen.ts`'s own `findWalkableNear`, just filtered
+  to `terrain === "water"`), anchored off a wetland-biome-weighted point
+  (`findPosInBiome`, the same species-tagged-biome placement Charmander
+  already uses) rather than a hand-picked coordinate — this map's generated
+  wetland/lake placement varies seed to seed, so a fixed `{x, y}` can never
+  be trusted to be water on every seed.
+- `immigration.ts`'s `ImmigrationSpeciesInfo` gets a new `obligateAquatic?`
+  field (populated from `SPECIES` by `packages/data/src/immigration.ts`'s
+  `IMMIGRATION_CONTEXT`); `maybeImmigrate`'s arrival-position logic now
+  routes an obligate-aquatic species through `resourceIndex.ts`'s
+  `findNearestIndexed(..., "water", ...)` instead of `findWalkableNear`,
+  excluding each already-placed group member's tile so a multi-agent
+  immigrant group spreads across distinct nearby water tiles instead of
+  stacking on one, with a safe (documented, non-crashing) fallback to the
+  ordinary land position in the vanishingly unlikely case a map has no
+  nearby water tile left to offer at all.
+
+### Built, real-run findings
+
+**Multi-seed validation, seeds 42/7/20260903, `createDemoWorld` (a founding
+Magikarp/Tentacool pair placed on real water via `findWaterNear`, plus
+whatever immigration adds over the run), 6000 and 10000 ticks — before vs.
+after both reachability fixes above:**
+
+- **Before either fix (hardcoded founder coordinate, plain
+  `findNearestTerrain` for food, `findWalkableNear` for immigrant arrivals):**
+  seed 42 — founders' thirst declined monotonically to 0 while standing
+  motionless on what should have been their own water tile (confirmed via a
+  direct debug trace, `behavior: "seekWater"`, `pos` never changing,
+  `target` resolving to a real water tile 3+ tiles away instead of the
+  agent's own position) and both died of thirst before tick 1000, on the two
+  seeds (42, 7) where the hardcoded coordinate wasn't actually water. This
+  is exactly the "silently starves to extinction" regression class this
+  session was specifically warned to check for, and it was real — just from
+  a placement bug, not the movement restriction's own logic.
+- **After the `findWaterNear`/`findReachableFoodTarget` fixes, before the
+  immigration fix:** founders survive (no more thirst-starvation from a bad
+  starting tile), but seed 42 showed 3 thirst-starvation deaths among later
+  immigrant arrivals over 6000 ticks — the exact same placement bug,
+  independently, in `immigration.ts`'s arrival logic.
+- **After all three fixes, 6000 ticks:** zero thirst-starvation deaths across
+  all three seeds. Population never collapsed to zero on any seed — at least
+  one obligate-aquatic agent (founder or immigrant-descended) alive at the
+  end of every run: seed 42 (3 aquatic agents alive, final pop 26 total),
+  seed 7 (2 alive, final pop 25), seed 20260903 (1 alive, final pop 17).
+  Founders can't breed with each other (Magikarp/Tentacool share no egg
+  group), so the only source of population growth here is immigration —
+  correctly reflected in a small, non-collapsing aquatic headcount rather
+  than a large one; this is not a claim about a real breeding population,
+  see "not done here" below.
+- **After all three fixes, 10000 ticks (longer-horizon check):** one modest,
+  real hunger-starvation death per seed on average (seed 42: 2 across the
+  full run — 1 tentacool at tick 3757, 1 magikarp at tick 6304; seed 7: 1
+  magikarp at tick 9668; seed 20260903: 0) — every one an immigrant that
+  survived thousands of ticks before starving, not an immediate arrival
+  death, and zero thirst-starvation deaths in this longer window too. At
+  least one obligate-aquatic agent (including a real Gyarados evolution on
+  two of the three seeds, confirming the flag survives evolution as
+  documented above) alive at the end of every 10000-tick run. This residual
+  hunger-starvation rate is the real, direct, and honestly-reported
+  consequence of the shore-ring food scarcity flagged in the investigation
+  above — a modest elevated risk, not the "silently starves to extinction"
+  failure mode this session was warned against, and the same "some increase
+  in [x]-driven death is an expected, real, direct consequence of this
+  feature actually doing something" framing the water-crossing feature's own
+  findings used for its thirst deaths.
+
+**Determinism.** `canEnterLand`/`findReachableFoodTarget` touch no
+randomness at all, same as their water-side counterparts — pure terrain/type
+lookups. `determinism.test.ts` is unmodified and passing; a same-seed-twice
+real `tickWorld` run (2000 ticks, seed 20260903) produced a byte-identical
+event log; the full engine suite (874 tests, up from 863) ran clean across
+multiple runs (one run hit this codebase's documented pre-existing flaky
+probabilistic burn/recoil test in `predation.test.ts`, unrelated to this
+feature — a re-run passed clean, per that test's own known-flaky status);
+`pnpm -r typecheck` clean across all 4 packages.
+
+### Tests
+
+- `waterBody.test.ts`: dedicated `canEnterLand` coverage — a
+  non-`obligateAquatic` agent (including a regular amphibious Water-type)
+  completely unrestricted everywhere; an obligate-aquatic agent unrestricted
+  on any water tile including a large body's deep interior; an
+  obligate-aquatic agent confined to the shore ring but blocked from
+  anything deeper onto land; a dedicated interaction test proving
+  `canEnterWater` and `canEnterLand` both apply simultaneously without
+  conflict on the same map (a land type still can't cross the deep water, an
+  obligate-aquatic type still can't wander onto deep land, both from the
+  shore ring outward in opposite directions).
+- `pathfinding.test.ts`: a dedicated "obligate-aquatic land restriction"
+  suite mirroring the existing hard-water-crossing suite exactly — `findPath`
+  confirmed `undefined` for an obligate-aquatic agent routing deep inland but
+  defined for the shore ring itself; a regular (non-`obligateAquatic`)
+  Water-type confirmed completely unaffected on the identical map;
+  `stepTowardMovingTarget` confirmed an obligate-aquatic pursuer never
+  leaves the lake/shore chasing prey deep on land, capacity-blind pursuit
+  included; a combined test with both `canEnterWater` and `canEnterLand`
+  active on the same map, neither constraint interfering with the other.
+
+### Explicitly not done here (see TODO.md)
+
+- **Only Magikarp and Tentacool got the flag this session** — the task's own
+  two named examples, enough to validate the mechanism for real. Horsea/
+  Seadra, Staryu/Starmie, Goldeen/Seaking, and Gyarados/Tentacruel as their
+  own curated roster entries (rather than un-tagged evolutions) are real,
+  scoped follow-up, not a claim they don't deserve the flag — see this
+  section's "Decided" writeup above for the per-species reasoning that would
+  apply to each.
+- **The flag doesn't reset on evolution** (documented above) — an evolved
+  Gyarados stays obligate-aquatic even though real Gyarados can fly. Same
+  accepted scope as `buildsShelter`/`preferredTerrain` already carry, not a
+  new gap this feature introduces.
+- **No worldgen-level fix for shore-ring food scarcity itself** — the
+  residual, modest hunger-starvation rate found in the 10000-tick validation
+  above (roughly one death per seed over that horizon) traces to a real
+  scarcity of "food" terrain within an obligate-aquatic agent's actual
+  reachable range (water interior + one-tile shore ring), not a bug in the
+  reachability-retry logic itself (that part IS fixed — `findReachableFoodTarget`
+  correctly finds whatever food genuinely exists in range; there's just not
+  always much of it). A worldgen change biasing food density to spawn more
+  reliably within an aquatic species' reachable shore ring (the same spirit
+  as this session's `findWaterNear`/immigration fixes, just for food
+  placement instead of agent placement) would directly address this, but
+  wasn't attempted — the real-run impact at the population sizes this
+  session validated against (1-3 aquatic agents per seed, no real breeding
+  population yet) never approached collapse, so a worldgen change affecting
+  every species' food placement wasn't judged worth the risk of moving this
+  session couldn't fully re-validate at scale. Flagged honestly rather than
+  shipped silently or over-engineered against a single-seed anecdote.
+- **No graduated "wading distance" beyond a single shore-tile ring** for
+  either direction of this restriction (matches the water-crossing feature's
+  own identical scope note) — an obligate-aquatic agent can reach exactly
+  one tile of dry land, no per-species variation (a Tentacool arguably
+  tolerates air even less well than a Magikarp, say — not modeled).
+- **No dedicated aquatic breeding population validated at scale.** Magikarp
+  and Tentacool don't share an egg group, so this session's demo-world
+  founders can never breed with each other; the population numbers reported
+  above come entirely from immigration, not reproduction. A real same-species
+  breeding pair for either (a second Magikarp of the opposite sex, say) was
+  not added or validated this session.

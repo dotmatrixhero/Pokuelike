@@ -627,6 +627,85 @@ describe("migration on unreachable resources", () => {
   });
 });
 
+describe("seekWater near a large lake: targets a genuinely reachable tile, not the raw-nearest one", () => {
+  /**
+   * `findNearestTerrain` is purely geometric ("nearest water tile by
+   * Manhattan distance") — it has no idea `waterBody.ts`'s `canEnterWater`
+   * can rule an otherwise-nearer tile out for a non-water-type agent. This
+   * builds exactly that trap: a large lake walled in on every side except
+   * one gap, so the raw-nearest water tile to an agent approaching from the
+   * WRONG side is one whose only "land" neighbor is an unwalkable wall (so
+   * `waterBody.ts`'s `isShoreTile` correctly refuses it) even though it's
+   * still the closest water tile in straight-line terms — while the real,
+   * reachable shore sits behind the one gap, farther away by raw distance.
+   * Before this session's fix, `seekWater` would just keep re-targeting the
+   * nearer, unreachable tile forever (`stepAlongPath`/`findPath` correctly
+   * refusing to route into it every single tick) and the agent would never
+   * drink — exactly the "silently unreachable target" bug class flagged in
+   * `pathfinding.ts`'s `stepTowardMovingTarget` doc comment, just for
+   * drinking instead of hunting.
+   */
+  function buildWalledLake(world: ReturnType<typeof createWorld>): void {
+    for (let x = 5; x <= 14; x++) {
+      for (let y = 5; y <= 14; y++) setTile(world, "surface", x, y, "water");
+    }
+    // Wall the entire ring immediately outside the lake...
+    for (let x = 4; x <= 15; x++) {
+      setTile(world, "surface", x, 4, "wall");
+      setTile(world, "surface", x, 15, "wall");
+    }
+    for (let y = 4; y <= 15; y++) {
+      setTile(world, "surface", 4, y, "wall");
+      setTile(world, "surface", 15, y, "wall");
+    }
+    // ...except one gap on the north side (9,4), the only real way in.
+    setTile(world, "surface", 9, 4, "floor");
+  }
+
+  it("a land-type agent approaching from the walled side still finds and drinks from the real shore, not the nearer walled-off tile", () => {
+    const world = createWorld(20, 20);
+    buildWalledLake(world);
+    // West side, well outside the wall ring, so the raw-nearest water tile
+    // (x=5, same row) sits behind the wall — genuinely unreachable — while
+    // the real shore is behind the single north gap at (9,4)->(9,5).
+    const agent = makeAgent({
+      id: "thirsty",
+      pos: { x: 0, y: 9 },
+      needs: createNeeds({ thirst: 0.1, hunger: 1, energy: 1, mateDrive: 0 }),
+    });
+    world.agents.push(agent);
+
+    let drank = false;
+    for (let tick = 0; tick < 300 && !drank; tick++) {
+      tickAgentAction(world, agent);
+      if (agent.needs.thirst > 0.1) drank = true;
+    }
+
+    expect(drank).toBe(true);
+  });
+
+  it("a Rock-type agent (no special shore restriction) also successfully drinks via the real shore", () => {
+    const world = createWorld(20, 20);
+    buildWalledLake(world);
+    const agent = makeAgent({
+      id: "thirsty-rock",
+      species: "geodude",
+      types: ["rock"],
+      pos: { x: 0, y: 9 },
+      needs: createNeeds({ thirst: 0.1, hunger: 1, energy: 1, mateDrive: 0 }),
+    });
+    world.agents.push(agent);
+
+    let drank = false;
+    for (let tick = 0; tick < 300 && !drank; tick++) {
+      tickAgentAction(world, agent);
+      if (agent.needs.thirst > 0.1) drank = true;
+    }
+
+    expect(drank).toBe(true);
+  });
+});
+
 describe("tickAgentAction: status-effect action-tick guards", () => {
   it("an asleep agent takes no action at all", () => {
     const world = createWorld(5, 5);

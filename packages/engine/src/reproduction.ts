@@ -434,6 +434,6 @@ export function applyMateSeeking(
     // `stepTowardMovingTarget`'s own doc comment (pathfinding.ts) for why
     // this needs its own staleness/recompute handling rather than plain
     // `stepToward` or `stepAlongPath`'s static-target cache match.
-    agent.pos = stepTowardMovingTarget(world, agent, partner);
+    agent.pos = stepTowardMovingTarget(world, agent, partner); // stepTowardMovingTarget threads `agent` through internally for the water-crossing check
   }
 }
