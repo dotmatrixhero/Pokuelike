@@ -200,7 +200,12 @@ export function updateNotables(world: World, log?: EventLog): void {
       }
       bestAgent!.notableTitle = title;
       world.notables = world.notables ?? {};
-      world.notables[title] = { agentId: bestAgent!.id, value: bestValue };
+      // A genuine new claim (or transfer) — `claimedAtTick` starts fresh here,
+      // NOT inherited from the previous holder, even for the "same agent
+      // reclaiming the same title after briefly losing it" edge case (a real
+      // gap in eligibility, so a fresh tenure). See NotableRecord's doc
+      // comment and herdLeadership.ts's seniority tie-break, which reads this.
+      world.notables[title] = { agentId: bestAgent!.id, value: bestValue, claimedAtTick: world.tick };
       log?.record({
         kind: "titleClaimed",
         tick: world.tick,
@@ -213,9 +218,11 @@ export function updateNotables(world: World, log?: EventLog): void {
     } else if (sameHolder && holderAgent) {
       // Same holder, refreshed value — keep World.notables current (e.g. a
       // living Elder's age keeps climbing every tick) without emitting an
-      // event for a title that hasn't actually changed hands.
+      // event for a title that hasn't actually changed hands. `claimedAtTick`
+      // is preserved from `holderRecord`, not reset — the holder's tenure
+      // didn't restart just because their stat ticked up.
       world.notables = world.notables ?? {};
-      world.notables[title] = { agentId: holderAgent.id, value: bestValue };
+      world.notables[title] = { agentId: holderAgent.id, value: bestValue, claimedAtTick: holderRecord!.claimedAtTick };
     } else if (!challengerQualifies && holderRecord && !holderAlive) {
       // The incumbent is gone (died, or its corpse was already pruned) and
       // no living agent currently clears the threshold — the title

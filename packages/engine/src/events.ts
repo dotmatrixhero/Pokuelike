@@ -468,6 +468,23 @@ export type SimEvent =
       agentId: string;
       species: string;
       reason: "died" | "dethroned";
+    }
+  | {
+      kind: "leadershipClaimed";
+      tick: number;
+      herdId: string;
+      agentId: string;
+      species: string;
+      /** The previous leader, if this was a transfer rather than the herd's first-ever leader. */
+      previousLeaderId?: string;
+    }
+  | {
+      kind: "leadershipLost";
+      tick: number;
+      herdId: string;
+      agentId: string;
+      species: string;
+      reason: "died" | "titleLost" | "herdChanged";
     };
 
 /**

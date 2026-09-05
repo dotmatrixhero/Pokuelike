@@ -1,7 +1,7 @@
 import { typeEffectiveness, type Agent, type SimEvent, type World } from "@pokuelike/engine";
 import type { ActiveEngagementInfo, NotableCategory } from "./autoCamera.js";
 import { eventNamesAnyOf, findMoveUsed } from "./eventText.js";
-import { TITLE_DISPLAY_NAME } from "./notableTitles.js";
+import { LEADER_ICON, TITLE_DISPLAY_NAME } from "./notableTitles.js";
 
 /**
  * "Battle Screen" — a second, differently-formatted view of Auto Camera's
@@ -166,7 +166,7 @@ export class BattleScreenPanel {
     const name = document.createElement("div");
     name.className = "battle-screen-name";
     name.textContent = agent
-      ? `${agent.notableTitle ? TITLE_DISPLAY_NAME[agent.notableTitle] : agent.species} (${agent.alive === false ? "down" : "Lv" + (agent.level ?? "?")})`
+      ? `${agent.isHerdLeader ? `${LEADER_ICON} ` : ""}${agent.notableTitle ? TITLE_DISPLAY_NAME[agent.notableTitle] : agent.species} (${agent.alive === false ? "down" : "Lv" + (agent.level ?? "?")})`
       : id;
     box.appendChild(name);
     if (agent && agent.maxHp) {

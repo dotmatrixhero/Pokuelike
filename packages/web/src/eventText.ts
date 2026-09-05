@@ -172,6 +172,12 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `${event.species} (${event.agentId}) became ${TITLE_DISPLAY_NAME[event.title]}!`;
     case "titleLost":
       return `${event.species} (${event.agentId}) is no longer ${TITLE_DISPLAY_NAME[event.title]} (${event.reason})`;
+    case "leadershipClaimed": {
+      const herdName = world ? herdDisplayName(world, event.herdId) : event.herdId;
+      return `${idLabel(world, event.agentId, event.species)} now leads herd ${herdName}`;
+    }
+    case "leadershipLost":
+      return `${idLabel(world, event.agentId, event.species)} no longer leads its herd (${event.reason})`;
   }
 }
 
@@ -208,6 +214,7 @@ export const STORY_KINDS = new Set<SimEvent["kind"]>([
   "eggEaten",
   "eggDefended",
   "titleClaimed",
+  "leadershipClaimed",
 ]);
 
 /**
@@ -245,6 +252,10 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
   // which reads as the mirror image of the `titleClaimed` moment that
   // already got the spotlight — not its own second headline.
   "titleLost",
+  // Same reasoning as `titleLost` immediately above — a leader stepping
+  // down is the mirror image of `leadershipClaimed` (already a STORY_KINDS
+  // moment), not its own second headline.
+  "leadershipLost",
 ]);
 
 /**
@@ -280,6 +291,7 @@ export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   eggEaten: "\u{1F374}", // fork and knife
   eggDefended: "\u{1F6E1}️", // shield
   titleClaimed: "\u{1F451}", // crown
+  leadershipClaimed: "\u{1F396}️", // military medal — matches notableTitles.ts's LEADER_ICON
 };
 
 export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
@@ -300,6 +312,7 @@ export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
   eggEaten: "#ff6b6b",
   eggDefended: "#5ee6c4",
   titleClaimed: "#ffd76e",
+  leadershipClaimed: "#a0c9ff",
 };
 
 /**

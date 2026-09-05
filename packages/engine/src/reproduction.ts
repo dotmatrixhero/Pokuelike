@@ -8,6 +8,7 @@ import { RAPPORT_BONDING_DELTA, rapportScore, strengthenRapportMutual } from "./
 import { hasNearbyShelter, SHELTER_SEARCH_RADIUS } from "./shelter.js";
 import { canLayEggAt, shelterCluster } from "./occupancy.js";
 import { pickClutchSize, spawnEgg } from "./eggs.js";
+import { effectiveDisposition } from "./herdLeadership.js";
 
 /**
  * Ticks before an agent can mate. A single global constant for now — real
@@ -27,8 +28,8 @@ const MATE_SEARCH_SPREAD = 2;
  * disposition (hand-built fixtures) reads as neutral (0.5), reproducing the
  * original fixed 5-tile radius exactly.
  */
-function mateSearchRadius(agent: Agent): number {
-  const sociability = agent.disposition?.sociability ?? 0.5;
+function mateSearchRadius(world: World, agent: Agent): number {
+  const sociability = effectiveDisposition(world, agent).sociability;
   return MATE_SEARCH_RADIUS + (sociability - 0.5) * (2 * MATE_SEARCH_SPREAD);
 }
 
@@ -340,7 +341,7 @@ export function applyMateSeeking(
   if (!agent.sex || !isMature(agent) || !meetsBreedingRequirement(agent, ctx)) return;
 
   const candidates = world.agents.filter(
-    (other) => isEligibleMate(agent, other, ctx) && manhattan(agent.pos, other.pos) <= mateSearchRadius(agent)
+    (other) => isEligibleMate(agent, other, ctx) && manhattan(agent.pos, other.pos) <= mateSearchRadius(world, agent)
   );
   // Feeds dispersal.ts's guaranteed "sustained zero eligible mates" fallback
   // trigger — piggybacks on this scan (already paid for every time this

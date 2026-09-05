@@ -8535,6 +8535,218 @@ above.
   bonds"/"grudges") is a real, separate follow-up, not attempted here —
   `packages/web` was out of scope for this task.
 
+## Herd Leadership: a notable can lead its herd, and the herd follows a bit
+
+Direct, verbatim ask, building on Notables: "I think over time they can lead
+their herd if there are no other notables (there can be multiple in a herd
+but only one can lead) and then their herd sorta changes to follow their
+behaviors a bit." Follow-up, proposed and confirmed with "Yeah": tie-break
+multiple eligible candidates in a herd by seniority (whoever's held their
+qualifying status longest), and blend the leader's Disposition into
+herd-mates' effective behavior via nature.ts's existing boldness/aggression/
+sociability system.
+
+### Decided
+
+1. **Eligibility exactly matches Notables' own bar.** Only a currently-titled
+   agent (`Agent.notableTitle !== undefined`) is eligible to lead — leadership
+   is the SAME earned standing translated into local, herd-scoped authority,
+   not a second independent bar with its own thresholds. An agent stops being
+   eligible the instant it loses its title, changes/leaves herd, or dies,
+   re-checked fresh every tick.
+2. **Seniority tie-break reuses a new field on `NotableRecord`, not a second
+   clock.** `NotableRecord.claimedAtTick` (types.ts) — absent before this
+   feature, added specifically because seniority can't be computed without
+   knowing *when* a candidate's current title was actually claimed. Set fresh
+   on every real claim/transfer in `notables.ts`'s `updateNotables`, and
+   deliberately preserved (not reset) on a same-holder value refresh (a
+   living Elder's age climbing every tick doesn't restart its tenure). A
+   real, acknowledged simplification: seniority tracks tenure under the
+   agent's CURRENT title specifically, not a broader "ever eligible" history
+   — an agent that lost one title and later claimed a different one starts a
+   fresh seniority clock, even though (loosely) it was "eligible" under its
+   old title too. Building a continuous cross-title eligibility clock would
+   need its own new field with no existing precedent to borrow from — the
+   same class of tradeoff Notables' own Beloved-title section already made
+   for a similar reason (see that section's offspring-vs-bonded-duration
+   writeup). Existing test's exact-equality check on `World.notables`'s shape
+   (`notables.test.ts`) was updated to include the new field.
+3. **Promotion rule, and the deliberate no-churn guarantee.** A herd gets a
+   leader when it has at least one eligible member and currently has no
+   leader. Among multiple eligible candidates, lowest `claimedAtTick` wins
+   (ties broken by agent id — arbitrary but deterministic, no rng). Critically,
+   `herdLeadership.ts`'s `updateHerdLeadership` only ever RE-EVALUATES a
+   herd's leadership when something changes FOR THAT HERD SPECIFICALLY — its
+   current leader becoming ineligible, or the herd's eligible-member count
+   crossing zero -> nonzero. A herd with a perfectly fine, still-eligible
+   leader is never swapped out just because a more-senior candidate happens
+   to exist somewhere else in the world (a real risk the task brief itself
+   flagged) — confirmed by a dedicated unit test (a more-senior candidate
+   joining an already-led herd afterward does NOT displace the incumbent, and
+   emits no event at all). Storage: `World.herdLeaders?: Record<string,
+   string>` (herdId -> agentId), matching `World.herdMigrations`'s exact
+   "keyed by herdId, one value per herd" convention; `Agent.isHerdLeader?:
+   boolean` is the denormalized per-agent copy, the same pattern
+   `Agent.notableTitle` already established for `World.notables` — a boolean
+   (not a stored herdId) was chosen since an agent already carries its own
+   `herdId`, so "which herd does this leader lead" is always just
+   `agent.herdId` itself; no second field would ever disagree with it.
+4. **New `SimEvent` kinds** — `leadershipClaimed` (herdId, agentId, species,
+   optional `previousLeaderId`) and `leadershipLost` (herdId, agentId,
+   species, `reason: "died" | "titleLost" | "herdChanged"`) — following
+   `titleClaimed`/`titleLost`'s exact shape convention. `titleLost`'s own
+   `reason` union is `"died" | "dethroned"`; leadership's is richer
+   (`"died" | "titleLost" | "herdChanged"`) since a herd's leader can become
+   ineligible three genuinely different ways Notables itself doesn't have to
+   distinguish (a titled agent can't "change herd" out from under its own
+   title the way it can out from under its leadership role).
+5. **The behavioral effect — `effectiveDisposition`, a new small function in
+   `herdLeadership.ts`.** Returns an agent's own Disposition nudged toward its
+   herd's current leader's Disposition by `LEADERSHIP_DISPOSITION_BLEND_WEIGHT
+   = 0.2`, unchanged (the agent's own value, or the codebase's existing
+   neutral-0.5 fallback) when the herd has no leader, the agent IS the leader
+   (a leader leads, it doesn't follow itself), or the agent has no herd.
+   **0.2, not the 0.15-0.25 band's edges**: this codebase's other "real,
+   felt, never-dominant" magnitudes (`RAPPORT_MOB_DEFENSE_DELTA`,
+   `NOTABLE_DISTANCE_BONUS`) all sit comfortably mid-band on their own
+   scales rather than at an extreme, and 0.2 keeps a maximally-different
+   follower retaining 80% of its own value — individual variance stays the
+   dominant signal, leadership is a real but secondary lean. Confirmed by a
+   dedicated unit test with known agent/leader dispositions and the exact
+   expected blended output (0.2 + (leader - own) * 0.2 per axis). The six
+   existing per-INDIVIDUAL disposition read sites were swapped from
+   `agent.disposition?.X ?? 0.5` to `effectiveDisposition(world, agent).X`:
+   predation.ts's `mobThreshold`/`effectiveFleeRadius`/`huntHungerThreshold`
+   (all three needed a new `world` parameter threaded in — confirmed `world`
+   was already in scope at every real call site first), herdConflict.ts's
+   `courageOf` (feeding `herdConflictChance`), dispersal.ts's
+   `dispersalChance`, and reproduction.ts's `mateSearchRadius`.
+6. **herdMigration.ts's herd-*aggregate* case — a real, considered decision,
+   not left untouched.** `herdWanderlustFactor` already computes a herd-wide
+   average (boldness+sociability across all living members), a different
+   shape than the six per-individual sites above — there's no single "this
+   agent's own disposition" to swap for `effectiveDisposition` mid-function.
+   Decided: after the plain unweighted average is computed exactly as
+   before, it's nudged the REST OF THE WAY toward the herd's current leader's
+   own raw disposition by the same `LEADERSHIP_DISPOSITION_BLEND_WEIGHT`,
+   rather than inventing a second, differently-tuned "how much does the herd
+   average lean on its leader" constant purely for this one site. A
+   leaderless herd, or a leader with no `disposition` (a bare fixture),
+   falls through to the plain average unchanged — this function's existing
+   tests were unaffected since none of them set up a leader. This directly
+   extends "their herd sorta changes to follow their behaviors" to migration
+   TIMING too, on top of the six individual-level thresholds: a bold,
+   restless leader now measurably shifts how eagerly its whole herd decides
+   to relocate.
+7. **`updateHerdLeadership` runs once per tick, strictly after
+   `updateNotables`** (simulation.ts's `tickWorld`) — so a title claimed or
+   lost THIS tick is already reflected in `Agent.notableTitle` before
+   leadership eligibility is re-checked the same tick. Pure bookkeeping plus
+   event emission; no rng, so it doesn't affect determinism.
+8. **`packages/web/src/notableTitles.ts`'s `herdDisplayName` upgraded to name
+   a herd after its actual LEADER specifically**, falling back to the
+   original "any living titled member" behavior only when the herd has
+   titled member(s) but genuinely no leader yet. In practice this fallback
+   case is not observed in real runs — `updateHerdLeadership` promotes a
+   herd's first leader the same tick it gains its first eligible member, and
+   runs after `updateNotables` within that same tick, so there's no tick
+   boundary where a titled member exists mid-render without having already
+   been considered for leadership. It's kept as a defensive fallback anyway
+   (a titled agent with no `herdId` at all, for instance, can never lead but
+   could still exist) rather than an assumption the code silently relies on.
+   A new `LEADER_ICON` (🎖️, a military medal — deliberately distinct from
+   `TITLE_ICON`'s per-title icons and from the existing 👑 `titleClaimed`
+   crown, since a title and leadership are separate, simultaneously-held
+   marks on the same agent) prefixes `idLabel`/`agentDisplayName` wherever an
+   agent's identity renders (inspector title bar, event log, auto-camera
+   labels, Battle Screen combatant names), plus a dedicated "Leadership" row
+   in the inspector's Behavior & social group. `leadershipClaimed`/
+   `leadershipLost` render in the event log the same way `titleClaimed`/
+   `titleLost` already do (claimed is a STORY_KINDS headline with its own
+   icon/color; lost is filtered to NOISE_KINDS as the claimed event's mirror
+   image, exactly mirroring Notables' own treatment).
+
+### Built, real-run findings
+
+`packages/engine/src/herdLeadership.ts` (the promotion/demotion mechanism,
+`effectiveDisposition`, and the blend weight constant), a new
+`claimedAtTick` field on `NotableRecord` and `Agent.isHerdLeader`/
+`World.herdLeaders` (types.ts), two new `SimEvent` kinds, six call-site swaps
+across predation.ts/herdConflict.ts/dispersal.ts/reproduction.ts (three of
+which needed a new `world` parameter threaded through), the
+herdMigration.ts aggregate-blend decision above, and web UI identity/herd-
+naming updates across notableTitles.ts/inspector.ts/eventText.ts/
+battleScreenPanel.ts/format.ts (the runner's own exhaustive event-formatting
+switch also needed the two new cases to keep typechecking). 12 new engine
+tests (`herdLeadership.test.ts`) cover: single-candidate promotion; the
+seniority tie-break with two controlled, fixed `claimedAtTick` values (the
+unconfounded proof); the no-churn guarantee (a more-senior candidate
+appearing later does NOT displace an already-installed, still-eligible
+leader, and emits no event); an untitled agent never leading even alone in
+its herd; demotion + immediate handoff to a herd's next-best remaining
+candidate; each of the three loss reasons (`died`/`titleLost`/`herdChanged`)
+individually; and `effectiveDisposition`'s exact blended value against a
+known agent/leader/weight combination, plus its three no-op cases
+(leaderless herd, the leader itself, no herd at all). All 814 engine tests
+pass (34 -> 35 files, 802 -> 814 tests; 3 consecutive full-suite runs), with
+`determinism.test.ts` unmodified and passing, plus a separate same-seed-
+twice real `tickWorld` run (seed 42, 3000 ticks, run at the runner level)
+confirmed byte-identical — this feature's `updateHerdLeadership` has no rng
+of its own, same as `updateNotables`.
+
+**Real 8000-tick runs, the three standard seeds (42, 7, 20260903)** — via
+`packages/runner/src/validateLeadership.ts` (modeled on
+`validateNotables.ts`):
+
+| seed | final population | herds ever existed | herds ever led | herds never led | total leadership transfers | unique agents ever led | min ticks between successive leaders (same herd) |
+|---|---|---|---|---|---|---|---|
+| 42 | 19 | 30 | 6 (20%) | 24 | 9 | 6 | 25 |
+| 7 | 27 | 22 | 3 (14%) | 19 | 3 | 3 | none (each herd led at most once) |
+| 20260903 | 72 | 22 | 2 (9%) | 20 | 4 | 3 | 1049 |
+
+**Read honestly**: as Notables' own section already found, most herds a run
+ever produces never accumulate a titled member at all (80-91% here) — a herd
+with zero eligible members simply never gets a leader, which is the correct,
+expected outcome, not a gap. Of the herds that DO get a leader, transfers are
+genuinely rare and not fast-churning: seed 42's single 25-tick gap (the
+closest call across all three seeds) came from a real dethroning cascade
+(title lost -> immediate handoff to the herd's one remaining eligible
+member, itself then also losing its title 25 ticks later) rather than any
+back-and-forth flapping between the same two candidates — no herd in any of
+the three seeds ever showed the "leader changes every few ticks" red flag
+the validation brief called out as disqualifying, so the no-churn guarantee
+(point 3 above) needed no further stability fix. `lossReasons` across all
+three seeds skewed heavily toward `titleLost` (an incumbent getting
+dethroned in the underlying Notables record-holder mechanism) over `died` or
+`herdChanged`, consistent with Notables' own finding that most title
+transfers come from a genuine new challenger, not death.
+
+**Mechanical payoff — real, not just wired-and-untested**: `effectiveDisposition`
+is exercised by a dedicated unit test with a known numeric answer (not just
+"it changed something"); the six individual call-site swaps and the
+herdMigration.ts aggregate blend reuse the exact composition every existing
+disposition consumer already had, so no isolated real-run A/B was attempted
+for those specifically, for the same documented reason Notables' own mate-
+preference bonus gave (rng-chaos-sensitivity: which individual disperses,
+mates, or migrates when is itself a cascading simulation-state change a
+single-seed on/off comparison can't cleanly attribute) — the trustworthy
+evidence is the structural unit test on the blend math itself plus the
+honest real-run leadership-transfer distribution above.
+
+**Not done here**:
+- No map-tile visual badge for a leader — same gap Notables' own "not done
+  here" list already named for title-holders; leadership reuses the same
+  text-based identity rendering, `renderer.ts`'s per-agent map drawing is
+  untouched.
+- No `leadershipClaimed`/`leadershipLost` Auto Camera one-shot moment, same
+  gap as Notables' own `titleClaimed` Auto Camera follow-up.
+- Seniority's "current title's tenure only" simplification (point 2 above)
+  is a real, acknowledged gap, not revisited in this pass.
+- No overworld/region system (out of scope per the task brief, unrelated to
+  this feature).
+- No new dedicated leadership UI panel (out of scope per the task brief) —
+  inline markers/labels on existing displays only.
+
 ## Notables: rare, earned individual titles
 
 Direct, verbatim asks across several messages: "I like the idea of

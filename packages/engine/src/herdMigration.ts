@@ -4,6 +4,7 @@ import { herdCentroid, COHESION_DISTANCE } from "./herding.js";
 import { foodStockNear, countTerrainNear } from "./resourceIndex.js";
 import { findWalkableNear, biomeWeightsAt } from "./worldgen.js";
 import { activeWeatherAt, hasCoverNearby } from "./weather.js";
+import { LEADERSHIP_DISPOSITION_BLEND_WEIGHT } from "./herdLeadership.js";
 
 /**
  * Herd-level migration — see DESIGN.md's "Herd-level migration: moving as a
@@ -359,12 +360,37 @@ const WANDERLUST_MIN_MULTIPLIER = 0.25;
  * Members without a `disposition` (hand-built fixtures) read as neutral
  * (0.5/0.5), matching every other disposition-consuming site in this
  * codebase (predation.ts, reproduction.ts).
+ *
+ * **Herd Leadership decision (see DESIGN.md's "Herd Leadership" section):**
+ * unlike the six per-INDIVIDUAL disposition consumers (predation.ts,
+ * herdConflict.ts, dispersal.ts, reproduction.ts), which each swap a plain
+ * `agent.disposition` read for `effectiveDisposition(world, agent)`, this
+ * function already computes a herd-wide AGGREGATE, so there's no single
+ * "this agent's own disposition" to blend per-member. Instead, once the
+ * plain unweighted average above is computed, it's nudged the rest of the
+ * way toward the herd's current leader's own raw disposition by the exact
+ * same `LEADERSHIP_DISPOSITION_BLEND_WEIGHT` used everywhere else — reusing
+ * one blend weight/mechanism rather than inventing a second, differently-
+ * tuned "how much does the herd average lean on its leader" constant purely
+ * for this one site. A leaderless herd (or a herd whose leader's own
+ * disposition is absent) falls through unchanged to the plain average,
+ * exactly as before this feature. This directly extends "their herd sorta
+ * changes to follow their behaviors" to migration timing too, not just the
+ * six individual-level thresholds: a bold, restless leader measurably
+ * shifts how eagerly its WHOLE herd decides to relocate, on top of shifting
+ * each member's own flee/hunt/mob-fight calls individually.
  */
 function herdWanderlustFactor(world: World, herdId: string): number {
   const members = world.agents.filter((agent) => agent.alive !== false && !agent.isEgg && agent.herdId === herdId);
   if (members.length === 0) return 0.5;
   const sum = members.reduce((total, agent) => total + (agent.disposition?.boldness ?? 0.5) + (agent.disposition?.sociability ?? 0.5), 0);
-  return sum / (members.length * 2);
+  const average = sum / (members.length * 2);
+
+  const leaderId = world.herdLeaders?.[herdId];
+  const leader = leaderId ? world.agents.find((a) => a.id === leaderId) : undefined;
+  if (!leader?.disposition) return average;
+  const leaderFactor = (leader.disposition.boldness + leader.disposition.sociability) / 2;
+  return average + (leaderFactor - average) * LEADERSHIP_DISPOSITION_BLEND_WEIGHT;
 }
 
 function wanderlustChance(world: World, herdId: string): number {

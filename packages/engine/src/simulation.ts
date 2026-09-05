@@ -13,6 +13,7 @@ import { isNight, lightLevel } from "./daynight.js";
 import { advanceWaterCycle, advanceWeather } from "./weather.js";
 import { PARALYSIS_SPEED_MULTIPLIER, isParalyzed } from "./status.js";
 import { updateNotables } from "./notables.js";
+import { updateHerdLeadership } from "./herdLeadership.js";
 
 /**
  * Energy an agent needs to accumulate before it gets to act. Chosen against
@@ -212,6 +213,11 @@ export function tickWorld(
   // sites plus a second periodic scan for the three "currently highest"
   // titles (rival/elder/wanderer).
   updateNotables(world, log);
+  // Herd Leadership builds directly on Notables — must run strictly after
+  // updateNotables so a title lost/claimed THIS tick is already reflected in
+  // `Agent.notableTitle` before leadership eligibility is re-checked. See
+  // herdLeadership.ts's top-of-file doc comment.
+  updateHerdLeadership(world, log);
 }
 
 /**

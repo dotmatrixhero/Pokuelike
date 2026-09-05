@@ -40,7 +40,7 @@ describe("notables: record-holder transfer mechanism", () => {
 
     updateNotables(world, log);
 
-    expect(world.notables?.hero).toEqual({ agentId: "a", value: NOTABLE_TITLE_MIN_THRESHOLDS.hero });
+    expect(world.notables?.hero).toEqual({ agentId: "a", value: NOTABLE_TITLE_MIN_THRESHOLDS.hero, claimedAtTick: 0 });
     expect(a.notableTitle).toBe("hero");
     const claimed = log.events.find((e) => e.kind === "titleClaimed");
     expect(claimed).toMatchObject({ title: "hero", agentId: "a" });

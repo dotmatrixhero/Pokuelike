@@ -2355,6 +2355,37 @@ not something this pathfinding pass itself caused or is positioned to fix.
       the record by some real amount, not just by one tile) if this proves
       too active once watched over a longer real run.
 
+## Herd Leadership: a notable can lead its herd — built, see DESIGN.md
+
+- [x] `herdLeadership.ts`'s `updateHerdLeadership` (promotion/demotion,
+      seniority tie-break via new `NotableRecord.claimedAtTick`, the
+      deliberate no-churn guarantee) and `effectiveDisposition`
+      (`LEADERSHIP_DISPOSITION_BLEND_WEIGHT` = 0.2), `World.herdLeaders`/
+      `Agent.isHerdLeader`, `leadershipClaimed`/`leadershipLost` `SimEvent`s,
+      six per-individual disposition call sites swapped to
+      `effectiveDisposition` (predation.ts x3, herdConflict.ts,
+      dispersal.ts, reproduction.ts), herdMigration.ts's herd-aggregate
+      wanderlust factor blended toward its leader too, and web UI leader
+      marker (🎖️)/leader-named-herd rendering. 12 new engine tests, all 814
+      engine tests passing including determinism.test.ts unmodified. Real
+      8000-tick runs (seeds 42, 7, 20260903) — see DESIGN.md's "Herd
+      Leadership" section for the full calibration/validation numbers; no
+      churn issue found (closest successive-leader gap in any seed was 25
+      ticks, from a real dethroning cascade, not flapping).
+- [ ] **Open follow-up, not done**: leadership seniority tracks tenure under
+      an agent's CURRENT title only, not a broader "ever eligible" history —
+      an agent that lost one title and later claimed a different one starts
+      a fresh seniority clock even though it was arguably "eligible" the
+      whole time under whichever title it held. A real, acknowledged
+      simplification (see DESIGN.md), not revisited here.
+- [ ] **Open follow-up, not done**: no map-tile visual badge for a herd
+      leader, same gap Notables' own title-holder follow-up already named —
+      `renderer.ts`'s per-agent map drawing is untouched.
+- [ ] **Open follow-up, not done**: no `leadershipClaimed`/`leadershipLost`
+      Auto Camera one-shot moment, mirroring Notables' own `titleClaimed`
+      Auto Camera follow-up (still visible in the event log panel either
+      way).
+
 ## Auto Camera battle-log follow-up (done — see DESIGN.md)
 
 - [x] Prioritize a queued/starting battle over whatever else is active or

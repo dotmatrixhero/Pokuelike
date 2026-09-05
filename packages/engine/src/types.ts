@@ -1025,6 +1025,19 @@ export interface Agent {
    * counts. Absent/0 = never moved (or no `birthPos` to measure from).
    */
   maxDispersalDistance?: number;
+
+  // --- Herd Leadership (builds on Notables — see herdLeadership.ts, DESIGN.md's "Herd Leadership" section) ---
+
+  /**
+   * Denormalized from `World.herdLeaders[this.herdId] === this.id`, the same
+   * "cheap read-time copy for the common rendering case" pattern
+   * `notableTitle` already established for `World.notables`. `World.herdLeaders`
+   * stays the source of truth; this is set/cleared exclusively by
+   * `herdLeadership.ts`'s `updateHerdLeadership`. Absent = leads no herd, true
+   * for the overwhelming majority of agents (and of titled agents — only one
+   * per herd can ever be `true`).
+   */
+  isHerdLeader?: boolean;
 }
 
 /** One directed edge of `Agent.rapport` — see that field's doc comment. */
@@ -1046,6 +1059,16 @@ export type NotableTitleId = "hero" | "builder" | "gatherer" | "rival" | "belove
 export interface NotableRecord {
   agentId: string;
   value: number;
+  /**
+   * `World.tick` this record-holder actually claimed the title (a first-ever
+   * claim or a transfer) — NOT touched on a same-holder value refresh (e.g. a
+   * living Elder's age keeps climbing every tick without this changing). Added
+   * for herdLeadership.ts's seniority tie-break: "whoever's held their
+   * qualifying (titled) status longest leads" needs to compare *when* each
+   * candidate's current title was actually claimed, not just that they hold
+   * one — see herdLeadership.ts's top-of-file doc comment.
+   */
+  claimedAtTick: number;
 }
 
 /**
@@ -1156,6 +1179,17 @@ export interface World {
    * ordinary centroid-based cohesion applies.
    */
   herdMigrations?: Record<string, { target: Vec2; reason: MigrationReason; startedTick: number }>;
+  /**
+   * Per-herd current leader — see herdLeadership.ts/DESIGN.md's "Herd
+   * Leadership" section. Keyed by `herdId`, matching `herdMigrations`'s exact
+   * convention (a herd shares exactly one of these at a time). Absent, or
+   * missing a given herdId, means that herd currently has no leader (either
+   * it's never had an eligible — currently-titled — member, or its last
+   * leader just became ineligible and no other eligible member existed at
+   * that same herd to immediately succeed them). Source of truth;
+   * `Agent.isHerdLeader` is the denormalized per-agent copy.
+   */
+  herdLeaders?: Record<string, string>;
   /**
    * Per-herd consecutive-tick counter for "was this herd's local food/water
    * below the scarcity threshold this tick" — see herdMigration.ts. Tracked
