@@ -494,6 +494,9 @@ function applySingleDamageInstance(
   rng: () => number = Math.random
 ): boolean {
   const isCritical = rollCritical(move.critRateStage ?? 0, rng);
+  if (isCritical && move.critCooldownReset && attacker.moveCooldowns) {
+    attacker.moveCooldowns[move.id] = 0;
+  }
   const situational = situationalMultiplier(world, attacker, defender, move);
 
   // `weightScaling` adds bonus power proportional to the attacker's own
@@ -673,7 +676,7 @@ function resolveHitAgainstTarget(
     // swap get a chance to apply.
     maybeInflictStatus(defender, attacker.id, move, world, log, rng);
     if (move.statusSpreads && defender.status) {
-      maybeSpreadStatus(defender, attacker.id, defender.status.kind, world, log, rng);
+      maybeSpreadStatus(defender, attacker.id, defender.status.kind, world, log, rng, move.statusSeverity);
     }
     if (move.statChangeOnHit?.target === "defender") {
       applyStatStage(defender, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
@@ -683,6 +686,9 @@ function resolveHitAgainstTarget(
       const attackerPos = { ...attacker.pos };
       attacker.pos = { ...defender.pos };
       defender.pos = attackerPos;
+      if (move.positionSwapPull) {
+        applyForcedMovement(world, { mover: "defender", direction: "away", tiles: move.positionSwapPull, timing: "onHit" }, attacker, defender);
+      }
     }
     if (move.jamCooldownTicks && defender.moveCooldowns) {
       for (const moveId of Object.keys(defender.moveCooldowns)) {

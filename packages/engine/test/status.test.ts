@@ -99,6 +99,13 @@ describe("maybeInflictStatus", () => {
     expect(defender.status).toEqual({ kind: "paralysis" });
   });
 
+  it("carries statusSeverity from the move onto the inflicted status, for a 'badly poisons' move", () => {
+    const world = createWorld(5, 5);
+    const defender = makeAgent({ types: ["grass"] });
+    maybeInflictStatus(defender, "attacker-1", { statusKind: "poison", statusChance: 1, statusSeverity: 2 }, world, undefined, () => 0);
+    expect(defender.status).toEqual({ kind: "poison", ticksRemaining: undefined, severityMultiplier: 2 });
+  });
+
   it("no-ops when the move carries no statusKind or statusChance", () => {
     const world = createWorld(5, 5);
     const defender = makeAgent({ types: ["grass"] });
@@ -155,6 +162,20 @@ describe("tickStatusEffects: burn/poison DOT", () => {
   it("poison deals 1/8 maxHp damage per tick", () => {
     const world = createWorld(5, 5);
     const agent = makeAgent({ status: { kind: "poison" } });
+    tickStatusEffects(agent, world);
+    expect(agent.hp).toBeCloseTo(50 - 50 * POISON_DAMAGE_FRACTION);
+  });
+
+  it("statusSeverity multiplies the DOT fraction — a 'badly poisons' move hits harder every tick, not just once", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ status: { kind: "poison", severityMultiplier: 2 } });
+    tickStatusEffects(agent, world);
+    expect(agent.hp).toBeCloseTo(50 - 50 * POISON_DAMAGE_FRACTION * 2);
+  });
+
+  it("no severityMultiplier set behaves exactly like normal-severity poison", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ status: { kind: "poison", severityMultiplier: undefined } });
     tickStatusEffects(agent, world);
     expect(agent.hp).toBeCloseTo(50 - 50 * POISON_DAMAGE_FRACTION);
   });

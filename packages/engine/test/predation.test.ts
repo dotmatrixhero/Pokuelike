@@ -1547,3 +1547,62 @@ describe("rally-call wired into real predation instincts", () => {
     expect(target.fainted).toBe(true);
   });
 });
+
+describe("critCooldownReset (predation.ts's applySingleDamageInstance)", () => {
+  it("a landed critical hit resets the attacker's own cooldown for that move to 0", () => {
+    const CRIT_RESET_MOVE: MoveSpec = { ...TEST_MOVE, id: "crit-reset-move", cooldownTicks: 5, critRateStage: 3, critCooldownReset: true };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 }); // survives FALLBACK_DAMAGE (1)
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [CRIT_RESET_MOVE] });
+    world.agents.push(hunter, target);
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    // critRateStage: 3 is mainline's "always" crit table entry (combat.ts's
+    // CRIT_STAGE_CHANCE) — this hit is guaranteed to crit regardless of rng.
+    expect(hunter.moveCooldowns?.["crit-reset-move"]).toBe(0);
+  });
+
+  it("without critCooldownReset, a crit is still just bonus damage — the normal cooldown stands", () => {
+    const CRIT_ONLY_MOVE: MoveSpec = { ...TEST_MOVE, id: "crit-only-move", cooldownTicks: 5, critRateStage: 3 };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [CRIT_ONLY_MOVE] });
+    world.agents.push(hunter, target);
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(hunter.moveCooldowns?.["crit-only-move"]).toBe(5);
+  });
+});
+
+describe("positionSwapPull (predation.ts's resolveHitAgainstTarget)", () => {
+  it("pulls the defender further past the swap, continuing away from the attacker's new position", () => {
+    const PULL_SWAP_MOVE: MoveSpec = { ...TEST_MOVE, id: "pull-swap-move", positionSwap: true, positionSwapPull: 2 };
+    const world = createWorld(20, 20);
+    const target = prey({ x: 10, y: 5 }, { hp: 10 }); // survives FALLBACK_DAMAGE (1)
+    const hunter = predator({ x: 9, y: 5 }, undefined, { moves: [PULL_SWAP_MOVE] }); // adjacent, west of target
+
+    world.agents.push(hunter, target);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    // A plain swap alone would leave the target at the hunter's old spot,
+    // x=9. positionSwapPull:2 continues it further west from there, away
+    // from the hunter's new (post-swap) position at x=10.
+    expect(hunter.pos).toEqual({ x: 10, y: 5 });
+    expect(target.pos.x).toBeLessThan(9);
+  });
+
+  it("a plain positionSwap with no pull just trades tiles, unchanged from before this field existed", () => {
+    const PLAIN_SWAP_MOVE: MoveSpec = { ...TEST_MOVE, id: "plain-swap-move", positionSwap: true };
+    const world = createWorld(20, 20);
+    const target = prey({ x: 10, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 9, y: 5 }, undefined, { moves: [PLAIN_SWAP_MOVE] });
+
+    world.agents.push(hunter, target);
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(hunter.pos).toEqual({ x: 10, y: 5 });
+    expect(target.pos).toEqual({ x: 9, y: 5 });
+  });
+});

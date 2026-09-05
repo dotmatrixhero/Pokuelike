@@ -77,7 +77,7 @@ export function isBurned(agent: Agent): boolean {
 export function maybeInflictStatus(
   defender: Agent,
   attackerId: string,
-  move: { statusKind?: StatusKind; statusChance?: number },
+  move: { statusKind?: StatusKind; statusChance?: number; statusSeverity?: number },
   world: World,
   log?: EventLog,
   rng: () => number = Math.random
@@ -89,7 +89,7 @@ export function maybeInflictStatus(
 
   const ticksRemaining =
     move.statusKind === "sleep" ? SLEEP_TICKS_MIN + Math.floor(rng() * (SLEEP_TICKS_MAX - SLEEP_TICKS_MIN + 1)) : undefined;
-  defender.status = { kind: move.statusKind, ticksRemaining };
+  defender.status = { kind: move.statusKind, ticksRemaining, severityMultiplier: move.statusSeverity };
   log?.record({
     kind: "statusInflicted",
     tick: world.tick,
@@ -117,7 +117,8 @@ export function maybeSpreadStatus(
   statusKind: StatusKind,
   world: World,
   log?: EventLog,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  statusSeverity?: number
 ): void {
   if (rng() >= STATUS_SPREAD_CHANCE) return;
 
@@ -129,7 +130,7 @@ export function maybeSpreadStatus(
       Math.abs(other.pos.x - defender.pos.x) + Math.abs(other.pos.y - defender.pos.y) <= STATUS_SPREAD_RADIUS
   );
   for (const other of nearby) {
-    maybeInflictStatus(other, attackerId, { statusKind, statusChance: 1 }, world, log, rng);
+    maybeInflictStatus(other, attackerId, { statusKind, statusChance: 1, statusSeverity }, world, log, rng);
     if (other.status?.kind === statusKind) return; // spread to the first eligible neighbor only
   }
 }
@@ -182,7 +183,7 @@ export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rn
 
   if (status.kind === "burn" || status.kind === "poison") {
     if (agent.hp === undefined || agent.maxHp === undefined) return;
-    const fraction = status.kind === "burn" ? BURN_DAMAGE_FRACTION : POISON_DAMAGE_FRACTION;
+    const fraction = (status.kind === "burn" ? BURN_DAMAGE_FRACTION : POISON_DAMAGE_FRACTION) * (status.severityMultiplier ?? 1);
     agent.hp = Math.max(0, agent.hp - agent.maxHp * fraction);
     if (agent.hp <= 0) faintFromStatus(agent, world, log);
     return;

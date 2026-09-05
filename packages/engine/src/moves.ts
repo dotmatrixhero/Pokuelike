@@ -244,6 +244,36 @@ export interface MoveSpec {
    */
   rallyCall?: { ticks: number };
   /**
+   * On a landed critical hit, resets this move's own cooldown on the
+   * attacker to 0 — read in `applySingleDamageInstance` (predation.ts)
+   * right where the crit roll itself already happens, independent of
+   * whether the hit goes on to kill or just land. A precision-reward lever
+   * distinct from `critRateStage` (which only makes crits *more likely*):
+   * this makes landing one actually *matter* tempo-wise. Absent/false = a
+   * crit is still just bonus damage, the default.
+   */
+  critCooldownReset?: boolean;
+  /**
+   * On a landed, non-killing `positionSwap` hit, additionally pushes the
+   * defender this many extra tiles further away from the attacker's new
+   * (post-swap) position — reuses `applyForcedMovement` (movement.ts) with
+   * `direction: "away"`, so it's obstacle-aware and respects the
+   * `"immovable"` passive same as any other forced movement. Meaningless
+   * without `positionSwap` also set. Absent/0 = a plain swap, the default.
+   */
+  positionSwapPull?: number;
+  /**
+   * Multiplies the per-tick damage fraction of whatever status this move's
+   * `statusChance` inflicts (`BURN_DAMAGE_FRACTION`/`POISON_DAMAGE_FRACTION`,
+   * status.ts) — a "badly poisons/burns" lever, set on `Agent.status` at
+   * infliction time (`maybeInflictStatus`) and read every tick alongside it
+   * (`tickStatusEffects`). Deliberately a flat multiplier for the sim's
+   * whole DOT duration, not mainline Toxic's turn-by-turn escalation — a
+   * real severity difference without a second counter to track. Absent = a
+   * normal-severity status, the default (equivalent to `1`).
+   */
+  statusSeverity?: number;
+  /**
    * Optional respec DAG (see `applyMoveTree`). Each node is a delta applied
    * on top of the base spec, gated by a point cost and prerequisite node
    * id(s). Absent = this move can't be respec'd (the common case — only
@@ -388,6 +418,12 @@ export interface MoveTreeNode {
     selfCostPerUse?: { need: "energy" | "hunger"; amount: number };
     /** Overwrite, like `shape`. */
     rallyCall?: { ticks: number };
+    /** OR-merge, like a boolean flag being turned on for good once any node sets it. */
+    critCooldownReset?: boolean;
+    /** Additive, like `power` — meaningless without `positionSwap` also set by some node in the chosen set. */
+    positionSwapPull?: number;
+    /** Overwrite, like `shape` — a move has at most one severity multiplier at a time, not a stack of them. */
+    statusSeverity?: number;
   };
 }
 
@@ -538,6 +574,10 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       resistanceBreaker: delta.resistanceBreaker ?? result.resistanceBreaker,
       selfCostPerUse: delta.selfCostPerUse ?? result.selfCostPerUse,
       rallyCall: delta.rallyCall ?? result.rallyCall,
+      critCooldownReset: delta.critCooldownReset ?? result.critCooldownReset,
+      positionSwapPull:
+        delta.positionSwapPull !== undefined ? (result.positionSwapPull ?? 0) + delta.positionSwapPull : result.positionSwapPull,
+      statusSeverity: delta.statusSeverity ?? result.statusSeverity,
     };
   }
 

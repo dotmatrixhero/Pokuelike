@@ -419,7 +419,7 @@ export interface Agent {
    * as every other status kind (mainline-real: fainting always cures
    * status).
    */
-  status?: { kind: StatusKind; ticksRemaining?: number };
+  status?: { kind: StatusKind; ticksRemaining?: number; severityMultiplier?: number };
   /**
    * Stacked stat-stage modifiers, each independent of `status`/burn's own
    * one-off computed halving — see `getStatStage`/`applyStatStage`
