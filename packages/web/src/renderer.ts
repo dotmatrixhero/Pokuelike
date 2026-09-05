@@ -1,7 +1,7 @@
 import type { Agent, TerrainKind, World } from "@pokuelike/engine";
 import { lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
-import { getSprite, getTileSprite, type SpriteDirection } from "./sprites.js";
+import { getFloorTexture, getSprite, getTileSprite, type SpriteDirection } from "./sprites.js";
 import type { ActivePopup } from "./eventPopups.js";
 import {
   FLAVOR_FG,
@@ -99,7 +99,18 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
       // a roguelike's open ground, deliberately ignoring elevation shading
       // (which is still visible on every non-floor terrain).
       if (tile.terrain === "floor") {
-        ctx.fillStyle = "rgba(120, 128, 140, 0.35)";
+        // A real texture (see sprites.ts's getFloorTexture — cave/grass/stone
+        // scraps previously left unused) at low, elevation-scaled opacity
+        // gives open ground some varied lighting without it becoming the
+        // loud, everything-else-drowning tile a full-strength fill would be.
+        const texture = getFloorTexture(x, y);
+        if (texture) {
+          ctx.save();
+          ctx.globalAlpha = 0.05 + tile.elevation * 0.03;
+          ctx.drawImage(texture, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          ctx.restore();
+        }
+        ctx.fillStyle = rgbaToCss(shade([120, 128, 140], tile.elevation), 0.35);
         ctx.fillText(".", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
         continue;
       }
@@ -110,7 +121,7 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
       // neither has a fixed piece of art to swap in — so those three always
       // fall through to the flat-color rect below regardless of availability.
       if (tile.terrain !== "shelter" && tile.terrain !== "food" && tile.terrain !== "flora" && tile.terrain !== "seedling") {
-        const sprite = getTileSprite(tile.terrain);
+        const sprite = getTileSprite(tile.terrain, x, y);
         if (sprite) {
           ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
           continue;
