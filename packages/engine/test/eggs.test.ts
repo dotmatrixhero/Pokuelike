@@ -376,3 +376,40 @@ describe("predation.ts: extreme egg defense overrides ordinary flee/self-preserv
     expect(prey.behavior).toBe("flee");
   });
 });
+
+describe("eggs never starve or die of thirst", () => {
+  // Direct question, confirmed here rather than just by reading the code:
+  // "can eggs die of starvation or thirst? that should not happen." An egg
+  // is routed straight to tickEgg (simulation.ts's tickWorld) instead of
+  // tickAgentNeeds — the only function that ever decays hunger/thirst or
+  // checks starvation — so this is structurally impossible, not just
+  // unlikely. Proven with a real tickWorld run well past both starvation
+  // grace periods, starting from 0 on both needs.
+  it("survives incubation with 0 hunger/thirst and no starved event, even well past both grace periods", () => {
+    const world = createWorld(5, 5);
+    setTile(world, "surface", 2, 2, "shelter");
+    const egg: Agent = {
+      id: "egg-1",
+      species: "bulbasaur",
+      pos: { x: 2, y: 2 },
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds({ hunger: 0, thirst: 0 }),
+      behavior: "idle",
+      isEgg: true,
+      eggTicks: 0,
+    };
+    world.agents.push(egg);
+    const log = new EventLog();
+
+    // Comfortably past EGG_INCUBATION_TICKS and both starvation grace
+    // periods (100/150 ticks) — an ordinary agent at 0/0 needs the whole
+    // time would be long dead.
+    for (let i = 0; i < EGG_INCUBATION_TICKS + 50; i++) tickWorld(world, log, undefined, FAKE_CTX);
+
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "starved" }));
+    const hatched = world.agents.find((a) => a.id === "egg-1")!;
+    expect(hatched.alive).not.toBe(false);
+    expect(hatched.isEgg).toBeUndefined(); // hatched successfully, not just surviving as an egg
+  });
+});

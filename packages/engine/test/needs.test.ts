@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorld, setTile, tileAt } from "../src/world.js";
 import { ageMortalityChance, createNeeds, decayNeeds, tickAgent, tickAgentAction, tickAgentNeeds } from "../src/needs.js";
-import { CONSUME_STOCK_AMOUNT } from "../src/flora.js";
+import { CONSUME_STOCK_AMOUNT, FOOD_MAX_STOCK } from "../src/flora.js";
 import { EventLog } from "../src/events.js";
 import type { Agent } from "../src/types.js";
 
@@ -98,7 +98,7 @@ describe("tickAgent", () => {
     const agent = makeAgent({ pos: { x: 2, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
 
     tickAgent(world, agent);
-    expect(tileAt(world, "surface", 2, 0)!.stock).toBeCloseTo(1 - CONSUME_STOCK_AMOUNT);
+    expect(tileAt(world, "surface", 2, 0)!.stock).toBeCloseTo(FOOD_MAX_STOCK - CONSUME_STOCK_AMOUNT);
 
     tileAt(world, "surface", 2, 0)!.stock = 0;
     const secondAgent = makeAgent({ id: "a2", pos: { x: 2, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });

@@ -89,6 +89,20 @@ const SEASON_LENGTH = 1000;
  */
 export const CONSUME_STOCK_AMOUNT = 0.35;
 /**
+ * How much stock a freshly-matured (or worldgen-placed) "food" tile starts
+ * with — was an implicit 1 everywhere; now a real, named knob. Direct ask:
+ * "food sources to die out a little faster, like 20% less food produced per
+ * food source." Cut to 0.8 (a flat 20% reduction), which composes with
+ * `CONSUME_STOCK_AMOUNT` (0.35) to bring a patch down from ~3 feedings
+ * (1 / 0.35 ≈ 2.86) to ~2 feedings (0.8 / 0.35 ≈ 2.29) before it's eaten
+ * out — a real, meaningfully smaller yield per source, independent of
+ * `FOOD_LIFESPAN_TICKS`'s separate "dies of old age" clock. Does NOT apply
+ * to "flora" tiles (see the `tile.stock = 1` comment at the flora branch
+ * below) — that field there tracks vitality/decay progress, not edible
+ * yield, and is a different concept that happens to reuse the same field.
+ */
+export const FOOD_MAX_STOCK = 0.8;
+/**
  * A living food patch's natural lifespan in ticks, before it dies (reverts
  * to bare floor) on its own — on top of, not instead of, being eaten out.
  * A full patch used to just sit at low stock forever, slowly regrowing in
@@ -316,7 +330,7 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
 
         if (becomesFood) {
           tile.terrain = "food";
-          tile.stock = 1;
+          tile.stock = FOOD_MAX_STOCK;
           tile.flavor = nearSun ? pickFlavor(SUN_FOOD_FLAVORS, rng) : pickFlavor(FOOD_FLAVORS, rng);
           invalidateResourceIndex(world); // a new "food" tile — resourceIndex.ts's cache needs rebuilding
         } else {
