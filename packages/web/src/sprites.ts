@@ -11,6 +11,23 @@ export type SpriteDirection = "up" | "down" | "left" | "right";
 
 const cache = new Map<string, HTMLImageElement | null>();
 
+/**
+ * A path like "/sprites/pikachu_down.png" resolves normally against the
+ * real dev server / built `packages/web/dist` (served from `public/`) —
+ * but the single-file observer artifact has no server behind that path at
+ * all, so it would silently 404 there. The artifact-splicing step embeds
+ * every referenced asset as a base64 data URI in a `window.__INLINE_ASSETS__`
+ * map (path -> data URI) injected as an inline `<script>` before this
+ * bundle; this indirection checks that map first and only falls back to the
+ * bare path (the normal dev/build case, where the map is simply absent)
+ * when it isn't there. Keeps the ordinary Vite dev/build flow completely
+ * unchanged.
+ */
+function resolveAssetUrl(path: string): string {
+  const inline = (window as unknown as { __INLINE_ASSETS__?: Record<string, string> }).__INLINE_ASSETS__;
+  return inline?.[path] ?? path;
+}
+
 function loadSprite(cacheKey: string, src: string): HTMLImageElement | null {
   const cached = cache.get(cacheKey);
   if (cached !== undefined) return cached;
@@ -19,7 +36,7 @@ function loadSprite(cacheKey: string, src: string): HTMLImageElement | null {
   cache.set(cacheKey, null);
   img.onload = () => cache.set(cacheKey, img);
   img.onerror = () => cache.set(cacheKey, null);
-  img.src = src;
+  img.src = resolveAssetUrl(src);
   return null;
 }
 
