@@ -1,4 +1,5 @@
 import type { Agent, SimEvent, Vec2, World } from "@pokuelike/engine";
+import { idLabel } from "./notableTitles.js";
 
 /**
  * "Auto Camera" — a toggleable observer mode that watches the live event
@@ -248,10 +249,10 @@ export class AutoCameraController {
         return;
       }
       case "killed":
-        this.onDeath(event.kind, new Set([event.predatorId, event.preyId]), event.pos, `${event.predatorSpecies} killed ${event.preySpecies}`);
+        this.onDeath(event.kind, new Set([event.predatorId, event.preyId]), event.pos, `${idLabel(world, event.predatorId, event.predatorSpecies)} killed ${idLabel(world, event.preyId, event.preySpecies)}`);
         return;
       case "defeated":
-        this.onDeath(event.kind, new Set([event.winnerId, event.loserId]), event.pos, `${event.winnerSpecies} defeated ${event.loserSpecies}`);
+        this.onDeath(event.kind, new Set([event.winnerId, event.loserId]), event.pos, `${idLabel(world, event.winnerId, event.winnerSpecies)} defeated ${idLabel(world, event.loserId, event.loserSpecies)}`);
         return;
       case "starved":
         this.onDeath(event.kind, new Set([event.agentId]), event.pos, `${event.species} starved`);
@@ -260,11 +261,11 @@ export class AutoCameraController {
         this.onDeath(event.kind, new Set([event.agentId]), event.pos, `${event.species} died of old age`);
         return;
       case "fought":
-        this.onBattleHit(new Set([event.attackerId, event.defenderId]), event.pos, `${speciesLabel(event.attackerSpecies, event.defenderSpecies)} fighting`, world);
+        this.onBattleHit(new Set([event.attackerId, event.defenderId]), event.pos, `${idLabel(world, event.attackerId, event.attackerSpecies)} vs ${idLabel(world, event.defenderId, event.defenderSpecies)} fighting`, world);
         return;
       case "herdClash":
         if (event.outcome !== "missed") {
-          this.onBattleHit(new Set([event.attackerId, event.defenderId]), event.pos, `${speciesLabel(event.attackerSpecies, event.defenderSpecies)} clashing`, world);
+          this.onBattleHit(new Set([event.attackerId, event.defenderId]), event.pos, `${idLabel(world, event.attackerId, event.attackerSpecies)} vs ${idLabel(world, event.defenderId, event.defenderSpecies)} clashing`, world);
         }
         if (event.outcome === "retreated") this.onBattleParticipantLeft(event.defenderId);
         return;

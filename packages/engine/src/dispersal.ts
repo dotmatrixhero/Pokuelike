@@ -6,6 +6,7 @@ import { findRandomWalkableTile } from "./migration.js";
 import { isMature } from "./reproduction.js";
 import { COHESION_DISTANCE } from "./herding.js";
 import { DISPERSAL_MIN_LEVEL } from "./leveling.js";
+import { effectiveDisposition } from "./herdLeadership.js";
 
 /**
  * Natal dispersal — see DESIGN.md's "Natal dispersal: real biology's actual
@@ -76,10 +77,9 @@ export const DISPERSAL_BASE_CHANCE = 0.3;
  * guaranteed no-mates fallback below as a backstop). Sim-original mapping,
  * explicitly flagged open in DESIGN.md — not canon.
  */
-function dispersalChance(agent: Agent): number {
-  const boldness = agent.disposition?.boldness ?? 0.5;
-  const sociability = agent.disposition?.sociability ?? 0.5;
-  const factor = boldness + (1 - sociability);
+function dispersalChance(world: World, agent: Agent): number {
+  const disposition = effectiveDisposition(world, agent);
+  const factor = disposition.boldness + (1 - disposition.sociability);
   return Math.min(1, DISPERSAL_BASE_CHANCE * factor);
 }
 
@@ -151,7 +151,7 @@ export function maybeTriggerDispersal(world: World, agent: Agent, log: EventLog 
   const justReachedDispersalLevel = agent.pendingLevelDispersalCheck === true;
   agent.pendingLevelDispersalCheck = undefined;
 
-  if ((justReachedDispersalLevel || justEvolved) && rng() < dispersalChance(agent)) {
+  if ((justReachedDispersalLevel || justEvolved) && rng() < dispersalChance(world, agent)) {
     startDispersal(world, agent, "matured", rng);
     return;
   }

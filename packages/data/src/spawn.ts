@@ -41,6 +41,10 @@ export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5, 
     // rescue destination (support.ts) — see DESIGN.md's carry-capacity/home-
     // range scope call.
     homePos: { ...pos },
+    // Notables: The Wanderer's anchor, set once and never mutated again
+    // (unlike `homePos`) — a founder/immigrant's real birth position is
+    // wherever it entered the sim. See Agent.birthPos's doc comment.
+    birthPos: { ...pos },
     needs: createNeeds(),
     behavior: "idle",
     level,

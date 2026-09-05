@@ -10,6 +10,7 @@ import type { MoveSpec } from "./moves.js";
 import { canBreed, grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
 import { FINISHING_POOL_FRACTION, applyAllyEffect, nearestAllyEffectTarget } from "./support.js";
 import { RAPPORT_MOB_DEFENSE_DELTA, strengthenRapportMutual } from "./rapport.js";
+import { effectiveDisposition } from "./herdLeadership.js";
 import { isPathClear } from "./fov.js";
 import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt, setTile } from "./world.js";
@@ -118,11 +119,15 @@ const MOB_THRESHOLD_SPREAD = 1;
  * point, wired from both axes since a prey animal's willingness to stand and
  * fight is as much about aggression as nerve. Absent disposition (hand-built
  * fixtures) reads as neutral (0.5/0.5), reproducing the original fixed
- * MOB_THRESHOLD of 3 exactly.
+ * MOB_THRESHOLD of 3 exactly. Reads `effectiveDisposition` (herdLeadership.ts),
+ * not `agent.disposition` directly, so a herd's current leader's own
+ * boldness/aggression pulls its herd-mates' mob-commitment threshold toward
+ * its own — see DESIGN.md's "Herd Leadership" section.
  */
-function mobThreshold(agent: Agent): number {
-  const boldness = agent.disposition?.boldness ?? 0.5;
-  const aggression = agent.disposition?.aggression ?? 0.5;
+function mobThreshold(world: World, agent: Agent): number {
+  const disposition = effectiveDisposition(world, agent);
+  const boldness = disposition.boldness;
+  const aggression = disposition.aggression;
   const courage = (boldness + aggression) / 2;
   const shift = Math.round((courage - 0.5) * 2 * MOB_THRESHOLD_SPREAD);
   return Math.max(1, MOB_THRESHOLD - shift);
@@ -135,10 +140,12 @@ function mobThreshold(agent: Agent): number {
  * flee-trigger point. Clamped to `FLEE_RADIUS_FLOOR` so no boldness value
  * makes a threat invisible at point-blank range. Absent disposition (hand-
  * built fixtures) reads as neutral (0.5), reproducing the original fixed
- * FLEE_DETECT_RADIUS of 4 exactly.
+ * FLEE_DETECT_RADIUS of 4 exactly. Reads `effectiveDisposition`
+ * (herdLeadership.ts), so a herd's current leader's own boldness nudges its
+ * herd-mates' flee-trigger radius toward its own.
  */
-function effectiveFleeRadius(agent: Agent): number {
-  const boldness = agent.disposition?.boldness ?? 0.5;
+function effectiveFleeRadius(world: World, agent: Agent): number {
+  const boldness = effectiveDisposition(world, agent).boldness;
   const radius = FLEE_DETECT_RADIUS + (0.5 - boldness) * (2 * FLEE_RADIUS_SPREAD);
   return Math.max(FLEE_RADIUS_FLOOR, radius);
 }
@@ -183,9 +190,12 @@ function activityHuntShift(agent: Agent, tick: number): number {
  * aggressive nocturnal predator at midnight stacks both shifts, hunting
  * while barely hungry at all; absent both disposition and activityPattern
  * (bare fixtures), this reduces exactly to the original fixed threshold.
+ * Reads `effectiveDisposition` (herdLeadership.ts), so a herd's current
+ * leader's own aggression nudges its herd-mates' hunt-trigger threshold
+ * toward its own.
  */
-export function huntHungerThreshold(agent: Agent, tick: number): number {
-  const aggression = agent.disposition?.aggression ?? 0.5;
+export function huntHungerThreshold(world: World, agent: Agent, tick: number): number {
+  const aggression = effectiveDisposition(world, agent).aggression;
   return (
     HUNT_HUNGER_THRESHOLD +
     (aggression - 0.5) * (2 * HUNT_THRESHOLD_SPREAD) +
@@ -505,7 +515,7 @@ function countHerdAllies(world: World, excludeId: string, species: string, herdI
 /** Would hunting this candidate mean walking into a mob? Used by predators to avoid unwinnable fights. */
 function isProtectedByMob(world: World, candidate: Agent): boolean {
   const allies = countHerdAllies(world, candidate.id, candidate.species, candidate.herdId, candidate.layer, candidate.pos, MOB_MUSTER_RADIUS);
-  return allies + 1 >= mobThreshold(candidate);
+  return allies + 1 >= mobThreshold(world, candidate);
 }
 
 function isCriticallyHurt(agent: Agent): boolean {
@@ -970,6 +980,10 @@ function applySingleDamageInstance(
     defender.diedAtTick = world.tick;
     grantKillExp(world, attacker, defender, ctx, log, rng);
     logKillOrDefeat(world, attacker, defender, faintKind, log);
+    // Notables: The Hero's real stat — every true kill counts, both the
+    // ordinary hunt path ("killed") and the guardian mob-defense finishing
+    // blow ("defeated") — see Agent.lifetimeKills's doc comment.
+    attacker.lifetimeKills = (attacker.lifetimeKills ?? 0) + 1;
     return true;
   }
 
@@ -1413,10 +1427,10 @@ export function applyPredationInstincts(
   // mob on its own initiative, per this function's doc comment above.
   const threats = agent.asleep
     ? []
-    : agentsWithin(world, agent, effectiveFleeRadius(agent)).filter(
+    : agentsWithin(world, agent, effectiveFleeRadius(world, agent)).filter(
         (other) =>
           isHunterSpecies(rules, other.species, agent.species) &&
-          isDetectable(world, agent.pos, other, effectiveFleeRadius(agent))
+          isDetectable(world, agent.pos, other, effectiveFleeRadius(world, agent))
       );
   const threat = preferMarked(agent, threats);
   if (threat) {
@@ -1426,7 +1440,7 @@ export function applyPredationInstincts(
     // waiting for backup that's still several tiles away.
     const mobSize = countHerdAllies(world, agent.id, agent.species, agent.herdId, agent.layer, threat.pos, MOB_TRIGGER_RADIUS) + 1;
 
-    if (distance <= MOB_TRIGGER_RADIUS && mobSize >= mobThreshold(agent)) {
+    if (distance <= MOB_TRIGGER_RADIUS && mobSize >= mobThreshold(world, agent)) {
       logBehaviorChange(log, world, agent, "fight");
       agent.behavior = "fight";
       agent.fightTarget = threat.id;
@@ -1466,7 +1480,7 @@ export function applyPredationInstincts(
 
   // Also skipped while asleep — a sleeping predator doesn't hunt on its own
   // initiative either, same reasoning as the flee/mob block above.
-  if (!agent.asleep && rules[agent.species] && agent.needs.hunger < huntHungerThreshold(agent, world.tick)) {
+  if (!agent.asleep && rules[agent.species] && agent.needs.hunger < huntHungerThreshold(world, agent, world.tick)) {
     // Ontogenetic niche shift: a juvenile predator never initiates an
     // independent hunt at all (solo OR pack) — real biology, per the direct
     // ask ("young predators are often more cautious/less effective hunters,

@@ -1,6 +1,7 @@
 import type { Agent, MoveSpec, MoveTreeNode, World } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import { TYPE_COLOR, rgbToCss, rgbaToCss } from "./palette.js";
+import { agentDisplayName, herdDisplayName, LEADER_ICON, TITLE_ICON } from "./notableTitles.js";
 
 // --- Small shared DOM helpers ------------------------------------------------
 
@@ -316,7 +317,13 @@ export function renderInspector(container: HTMLElement, agent: Agent | undefined
   const def = SPECIES[agent.species];
   const title = document.createElement("div");
   title.className = "inspect-title";
-  title.textContent = `${def?.name ?? agent.species} (${agent.id})`;
+  // `agentDisplayName` already prepends the leader marker (see
+  // notableTitles.ts's `leaderPrefix`) — only the plain no-title branch below
+  // needs its own explicit prefix, since it doesn't call `agentDisplayName`.
+  const leaderMark = agent.isHerdLeader ? `${LEADER_ICON} ` : "";
+  title.textContent = agent.notableTitle
+    ? `${TITLE_ICON[agent.notableTitle]} ${agentDisplayName(agent, def)} (${agent.id})`
+    : `${leaderMark}${def?.name ?? agent.species} (${agent.id})`;
   container.appendChild(title);
 
   // --- Identity ---------------------------------------------------------
@@ -374,7 +381,8 @@ export function renderInspector(container: HTMLElement, agent: Agent | undefined
   social.appendChild(row("Behavior", agent.behavior, true));
   social.appendChild(row("Layer", `${agent.layer} (home: ${agent.homeLayer})`, true));
   social.appendChild(row("Position", `(${agent.pos.x}, ${agent.pos.y})`, true));
-  if (agent.herdId) social.appendChild(row("Herd", agent.herdId, true));
+  if (agent.herdId) social.appendChild(row("Herd", herdDisplayName(world, agent.herdId), true));
+  if (agent.isHerdLeader) social.appendChild(row("Leadership", `${LEADER_ICON} leads this herd`, true));
   if (agent.nature) social.appendChild(row("Nature", agent.nature, true));
   if (agent.activityPattern) social.appendChild(row("Activity pattern", agent.activityPattern, true));
   if (agent.disposition) {

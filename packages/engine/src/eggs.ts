@@ -162,6 +162,11 @@ export function tickEgg(world: World, agent: Agent, log: EventLog | undefined, c
   agent.behavior = "idle";
   agent.sex = rng() < 0.5 ? "male" : "female";
   agent.age = 0;
+  // Notables: The Wanderer's anchor — a hatchling's real birth position is
+  // wherever its egg was laid (still its current `pos`, an egg never
+  // moves), not inherited from its mother's own `homePos` (see
+  // Agent.birthPos's doc comment).
+  agent.birthPos = { ...agent.pos };
   agent.level = 1;
   agent.exp = 0;
   agent.hp = undefined;
@@ -174,6 +179,15 @@ export function tickEgg(world: World, agent: Agent, log: EventLog | undefined, c
   ensureCombatProfile(agent, ctx);
 
   world.eggsHatched = (world.eggsHatched ?? 0) + 1;
+  // Notables: The Beloved's real stat — counted for both parents once this
+  // egg actually survives incubation and hatches (not at lay time — see
+  // Agent.lifetimeOffspring's doc comment for why "hatched," not "laid,"
+  // was chosen). `parentIds` is still this hatchling's own, set once at
+  // `spawnEgg` and untouched by anything above.
+  for (const parentId of agent.parentIds ?? []) {
+    const parent = world.agents.find((a) => a.id === parentId);
+    if (parent) parent.lifetimeOffspring = (parent.lifetimeOffspring ?? 0) + 1;
+  }
   log?.record({
     kind: "eggHatched",
     tick: world.tick,

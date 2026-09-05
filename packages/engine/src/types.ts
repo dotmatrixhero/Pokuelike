@@ -946,6 +946,98 @@ export interface Agent {
    * built yet, this is the general agent-to-agent version only.
    */
   rapport?: Record<string, RapportEdge>;
+
+  // --- Notables: rare, earned individual titles (see notables.ts, DESIGN.md's "Notables" section) ---
+
+  /**
+   * Denormalized from `World.notables[title].agentId === this.id`, the same
+   * "cheap read-time copy for the common rendering case" pattern as
+   * `isPredator` (denormalized from `SpeciesDef.isPredator`) — the web UI's
+   * per-agent inspector/label rendering can key off this directly instead of
+   * cross-referencing the world-level holder map on every render.
+   * `World.notables` stays the source of truth; this is set/cleared
+   * exclusively by `notables.ts`'s `updateNotables` whenever a title changes
+   * hands. Absent = holds no title, true for the overwhelming majority of
+   * agents by design — see `NOTABLE_TITLE_MIN_THRESHOLDS`.
+   */
+  notableTitle?: NotableTitleId;
+  /**
+   * Lifetime true-kill count (predation.ts's `applySingleDamageInstance`,
+   * the same moment `grantKillExp` fires — both the ordinary hunt path
+   * (`faintKind: "killed"`) and the guardian mob-defense path
+   * (`faintKind: "defeated"`) count, since both are a real, landed,
+   * finishing blow) — the record `notableTitle: "hero"` (The Hero) is judged
+   * against. Never decremented. Absent/0 = never landed a kill.
+   */
+  lifetimeKills?: number;
+  /**
+   * Lifetime real shelter-construction ticks actually invested (shelter.ts's
+   * `applyShelterBuilding`, incremented every real build tick alongside the
+   * per-attempt `shelterBuildTicks`, unlike which this one is never reset —
+   * it accumulates across every shelter this agent ever contributes to over
+   * its whole life). The record `notableTitle: "builder"` (The Builder) is
+   * judged against. Absent/0 = never contributed a build tick.
+   */
+  lifetimeShelterTicks?: number;
+  /**
+   * Lifetime count of real herd food deliveries this agent personally
+   * carried out as the carrier (support.ts's `applyHerdSupport`, the same
+   * real `foodDelivered` trigger rapport.ts's `RAPPORT_FOOD_DELIVERY_DELTA`
+   * hooks — DESIGN.md's Rapport section found this fires rarely in a real
+   * run, 0-1 times per 8000-tick run; The Gatherer is deliberately judged
+   * against this same rare, real signal rather than a padded proxy). The
+   * record `notableTitle: "gatherer"` (The Gatherer) is judged against.
+   * Absent/0 = never delivered.
+   */
+  lifetimeFoodDeliveries?: number;
+  /**
+   * Lifetime count of this agent's own eggs that survived incubation and
+   * hatched into a real newborn (eggs.ts's `tickEgg`, `eggHatched`) —
+   * counted for both parents (`Agent.parentIds`) of the hatchling. Offspring
+   * that never hatch (eaten, or still incubating) don't count — see
+   * DESIGN.md's "Notables" section for why hatched (not laid) was chosen.
+   * The record `notableTitle: "beloved"` (The Beloved) is judged against.
+   * Absent/0 = no surviving offspring yet.
+   */
+  lifetimeOffspring?: number;
+  /**
+   * This agent's own spawn/hatch position, set once and never mutated again
+   * (unlike `homePos`, which a herd or a carrying ally can reset) — the
+   * anchor `notables.ts`'s "farthest disperser" (The Wanderer) stat measures
+   * live Manhattan distance from. Set at `spawnAgent` (founders/immigrants)
+   * and at `eggs.ts`'s `tickEgg` hatch (a hatchling's real birth position is
+   * wherever its egg was laid, not inherited from its mother). Absent only
+   * on a bare hand-built test fixture.
+   */
+  birthPos?: Vec2;
+  /**
+   * The highest Manhattan distance from `birthPos` this agent has EVER
+   * reached, updated once per tick by `notables.ts`'s `updateNotables` for
+   * every living, non-egg agent — deliberately a lifetime high-water mark,
+   * not a live snapshot of the agent's current distance, so The Wanderer
+   * behaves like every other title (a real, permanent, non-decreasing
+   * record) instead of being lost the moment a disperser wanders back
+   * toward home. A live-distance version was tried first and discarded: it
+   * churned the title constantly in a real run (an ordinary random walk lets
+   * a challenger's *current* distance overtake the incumbent's without
+   * either agent doing anything genuinely more impressive) — see
+   * DESIGN.md's "Notables" section for the real before/after transfer
+   * counts. Absent/0 = never moved (or no `birthPos` to measure from).
+   */
+  maxDispersalDistance?: number;
+
+  // --- Herd Leadership (builds on Notables — see herdLeadership.ts, DESIGN.md's "Herd Leadership" section) ---
+
+  /**
+   * Denormalized from `World.herdLeaders[this.herdId] === this.id`, the same
+   * "cheap read-time copy for the common rendering case" pattern
+   * `notableTitle` already established for `World.notables`. `World.herdLeaders`
+   * stays the source of truth; this is set/cleared exclusively by
+   * `herdLeadership.ts`'s `updateHerdLeadership`. Absent = leads no herd, true
+   * for the overwhelming majority of agents (and of titled agents — only one
+   * per herd can ever be `true`).
+   */
+  isHerdLeader?: boolean;
 }
 
 /** One directed edge of `Agent.rapport` — see that field's doc comment. */
@@ -954,6 +1046,29 @@ export interface RapportEdge {
   score: number;
   /** `World.tick` this edge was last created or touched — anchors `rapport.ts`'s lazy decay. */
   lastInteractionTick: number;
+}
+
+/**
+ * The seven rare, earned individual titles — see notables.ts/DESIGN.md's
+ * "Notables" section for the full record-holder mechanism and real-run
+ * calibration.
+ */
+export type NotableTitleId = "hero" | "builder" | "gatherer" | "rival" | "beloved" | "elder" | "wanderer";
+
+/** One entry of `World.notables` — the current record-holder for a title, and the live stat value that earned it. */
+export interface NotableRecord {
+  agentId: string;
+  value: number;
+  /**
+   * `World.tick` this record-holder actually claimed the title (a first-ever
+   * claim or a transfer) — NOT touched on a same-holder value refresh (e.g. a
+   * living Elder's age keeps climbing every tick without this changing). Added
+   * for herdLeadership.ts's seniority tie-break: "whoever's held their
+   * qualifying (titled) status longest leads" needs to compare *when* each
+   * candidate's current title was actually claimed, not just that they hold
+   * one — see herdLeadership.ts's top-of-file doc comment.
+   */
+  claimedAtTick: number;
 }
 
 /**
@@ -1065,6 +1180,17 @@ export interface World {
    */
   herdMigrations?: Record<string, { target: Vec2; reason: MigrationReason; startedTick: number }>;
   /**
+   * Per-herd current leader — see herdLeadership.ts/DESIGN.md's "Herd
+   * Leadership" section. Keyed by `herdId`, matching `herdMigrations`'s exact
+   * convention (a herd shares exactly one of these at a time). Absent, or
+   * missing a given herdId, means that herd currently has no leader (either
+   * it's never had an eligible — currently-titled — member, or its last
+   * leader just became ineligible and no other eligible member existed at
+   * that same herd to immediately succeed them). Source of truth;
+   * `Agent.isHerdLeader` is the denormalized per-agent copy.
+   */
+  herdLeaders?: Record<string, string>;
+  /**
    * Per-herd consecutive-tick counter for "was this herd's local food/water
    * below the scarcity threshold this tick" — see herdMigration.ts. Tracked
    * separately from `herdMigrations` (rather than folded into it) because it
@@ -1165,4 +1291,17 @@ export interface World {
   eggsHatched?: number;
   /** Lifetime eggs eaten by a non-egg-group-compatible agent before hatching — see `eggs.ts`'s `applyEggEating`. */
   eggsEaten?: number;
+
+  /**
+   * Current record-holder per title, if any — see notables.ts/DESIGN.md's
+   * "Notables" section. Absent, or a missing entry for a given title, means
+   * nobody has ever met that title's real minimum threshold yet (a
+   * legitimate, honestly-reportable "unclaimed" state, not an error) —
+   * exactly one living agent holds each present entry at a time. This is
+   * the source of truth; `Agent.notableTitle` is a cheap denormalized copy
+   * for the web UI's common per-agent rendering case (same pattern as
+   * `Agent.isPredator`). Keyed by `NotableTitleId`, not stored redundantly
+   * per-agent — only ever a handful of entries (at most one per title).
+   */
+  notables?: Partial<Record<NotableTitleId, NotableRecord>>;
 }

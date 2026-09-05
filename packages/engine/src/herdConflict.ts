@@ -5,6 +5,7 @@ import { stepAway } from "./movement.js";
 import { stormAccuracyMultiplier } from "./weather.js";
 import { FALLBACK_MAX_HP, manhattan } from "./predation.js";
 import { RAPPORT_HERD_CLASH_DELTA, rapportScore, strengthenRapportMutual } from "./rapport.js";
+import { effectiveDisposition } from "./herdLeadership.js";
 
 /**
  * Herd-vs-herd resource conflict — the direct ask ("I think escalated
@@ -134,11 +135,16 @@ function powerOf(agent: Agent): number {
   return agent.maxHp ?? agent.stats?.maxHp ?? FALLBACK_MAX_HP;
 }
 
-/** Combined boldness+aggression (0..1) — "courage" in the same sense predation.ts's `mobThreshold` uses it. Absent disposition reads neutral (0.5), same convention as every other disposition consumer in this codebase. */
-function courageOf(agent: Agent): number {
-  const boldness = agent.disposition?.boldness ?? 0.5;
-  const aggression = agent.disposition?.aggression ?? 0.5;
-  return (boldness + aggression) / 2;
+/**
+ * Combined boldness+aggression (0..1) — "courage" in the same sense
+ * predation.ts's `mobThreshold` uses it. Reads `effectiveDisposition`
+ * (herdLeadership.ts), so a herd's current leader's own courage nudges its
+ * herd-mates' rivalry-escalation chance toward its own — see DESIGN.md's
+ * "Herd Leadership" section.
+ */
+function courageOf(world: World, agent: Agent): number {
+  const disposition = effectiveDisposition(world, agent);
+  return (disposition.boldness + disposition.aggression) / 2;
 }
 
 /**
@@ -148,9 +154,9 @@ function courageOf(agent: Agent): number {
  * below the plain disposition-driven baseline, matching the "biased toward,
  * doesn't invent a new suppression path" scope of this consumer).
  */
-function herdConflictChance(agent: Agent, grudge: number): number {
+function herdConflictChance(world: World, agent: Agent, grudge: number): number {
   const grudgeBonus = Math.max(0, -grudge) * HERD_CONFLICT_GRUDGE_SCALE;
-  return HERD_CONFLICT_BASE_CHANCE + courageOf(agent) * HERD_CONFLICT_DISPOSITION_SCALE + grudgeBonus;
+  return HERD_CONFLICT_BASE_CHANCE + courageOf(world, agent) * HERD_CONFLICT_DISPOSITION_SCALE + grudgeBonus;
 }
 
 /**
@@ -283,7 +289,7 @@ export function applyHerdRivalryConflict(world: World, agent: Agent, rules: Hunt
   if (ratio < HERD_CONFLICT_MIN_POWER_RATIO || ratio > 1 / HERD_CONFLICT_MIN_POWER_RATIO) return false;
 
   const grudge = rapportScore(agent, rival.id, world.tick);
-  if (rng() >= herdConflictChance(agent, grudge)) return false;
+  if (rng() >= herdConflictChance(world, agent, grudge)) return false;
 
   resolveRivalryHit(world, agent, rival, log, rng);
   return true;

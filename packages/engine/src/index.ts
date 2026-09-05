@@ -31,3 +31,5 @@ export * from "./immigration.js";
 export * from "./occupancy.js";
 export * from "./herdConflict.js";
 export * from "./rapport.js";
+export * from "./notables.js";
+export * from "./herdLeadership.js";
