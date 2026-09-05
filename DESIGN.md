@@ -9789,6 +9789,91 @@ pipeline shape works end to end, before expanding further — and separately,
 whenever it's time, a dedicated vision pass for the human-society phase and
 for how Z-levels actually get built.
 
+### Correction: overworld and zone are two distinct levels, not one
+
+The first built slice below (macro elevation + rivers) was built at the
+**wrong level of the hierarchy** — direct follow-up after seeing it:
+"I thought we were building the overworld where each single map represents
+a zoom in of a single tile (or maybe like 4 tiles) on that overworld. The
+overworld is where the big geo stuff happens. The zone (the zoomed-in map)
+was supposed to be generally influenced by it." Corrected architecture,
+confirmed right by direct reply ("That is correct"):
+
+- **Overworld** = a coarse grid. This is where the geological/legendary
+  simulation actually runs, at overworld-cell granularity — Groudon/Kyogre
+  deciding continent shape, tectonics, legendary paths, etc. — producing
+  broad facts per cell (roughly: elevation band, whether a river/cave
+  passes through and roughly where, edge elevation for matching neighbors).
+- **Zone** = what the existing single-map sim (the one the observer
+  renders) represents: a zoomed-in detail view of *one* overworld cell (or
+  a small handful). A zone's terrain isn't independently decided — it's
+  generated to be consistent with what the overworld already decided for
+  that cell and its neighbors. Direct example given: "the overworld decides
+  that this zone is a mid to low elevation where a river snakes around a
+  cave. The zone then fills in the details with that in mind, roughly
+  matching features like 'north of this is higher elevation so water is
+  flowing downwards.'"
+
+What got built in the "first built slice" section below is a real,
+reusable **zone-detail generator** (the elevation-blending and
+steepest-descent river algorithms are sound) — it just currently invents
+its own facts from scratch (its own Groudon/Kyogre points) instead of
+being handed them by an outer overworld layer. The missing piece is the
+overworld grid itself plus rewiring the zone generator to take overworld
+cell facts as constraints. Not yet built — this is a correction to the
+vision doc, not a new implementation.
+
+**A real, flagged, unresolved risk from this correction**: zones are
+lazily generated only when actually visited (the "fake it" principle), so
+two neighboring zones can be generated arbitrarily far apart in time, in
+either order. A zone's edges (river continuing across the boundary,
+elevation gradient matching) can't safely depend on a neighbor zone's
+already-generated tiles at generation time, since that neighbor might not
+exist yet — see the "neighbor pass" below for how this actually gets
+resolved (not by requiring perfect one-shot consistency, but by
+reconciling after the fact).
+
+### Generation as ordered passes, not one monolithic step
+
+Direct ask, verbatim: "It'd be cool if we did it in 'passes'." Four passes,
+in order:
+
+1. **Geo overworld pass** — the zone gets generally sketched out: the
+   important high-level features (elevation band, river/cave presence and
+   rough path, coastline, etc. — everything the corrected architecture
+   above says the overworld decides) plus climate (temperature/moisture/
+   biome-banding). This is the pass the "first built slice" below should
+   eventually be rebuilt to sit *under*, not replace.
+2. **Life pass** — species population and flora get decided for the zone,
+   "including extent of human influence" — a per-zone gradient/attribute
+   for how touched by civilization a zone is, not the full human-society
+   simulation itself (that's still the separate, later human-society phase
+   from earlier in this doc — this pass just decides *how much* of it
+   applies to this specific zone, as an input the later phase would read).
+3. **Notable/history pass** — a zone's notable individuals and history get
+   decided. A real, direct connection to the already-built Notables/Herd
+   Leadership systems: this could mean a freshly-generated zone starts with
+   real seeded history ("there was once a great Hero here") instead of
+   needing thousands of live-simulated ticks to ever produce its first
+   notable — genuinely interesting, not scoped or designed further here.
+4. **Neighbor pass** — explicitly different in character from the first
+   three: not guaranteed to run immediately, "small and lightweight,"
+   triggered on demand and probably scoped by locality (e.g. only when a
+   player is actually near a boundary). It re-checks a zone against its
+   actual (by-then-possibly-generated) neighbors and tunes the zone toward
+   consistency with them. This is the real answer to the lazy-generation
+   edge-consistency risk flagged just above: rather than demanding perfect
+   one-shot consistency from overworld facts alone, a zone is allowed to be
+   "good enough" initially and gets reconciled with its neighbors
+   opportunistically once they actually exist nearby. Open question,
+   flagged but not resolved: if a zone was already visited and its terrain
+   remembered, can the neighbor pass still visibly change it later, or
+   should it be restricted to just the boundary ring rather than the
+   zone's interior? Not decided.
+
+Not sequenced against the "first built slice" below or scoped into a build
+yet — still vision-stage, same as the rest of this section.
+
 ## The first built slice: macro land/ocean elevation + rivers
 
 This is the "pick 2-3 processes for a first real build" step the section
