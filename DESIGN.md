@@ -11145,3 +11145,56 @@ sequence (load, play, speed change, style switch, Auto Camera on/off, tab
 switch, canvas click, panel expand). `packages/web` still has no automated
 UI test suite (unchanged pre-existing gap, see TODO.md) — this was real
 browser validation, not a claim of automated coverage.
+
+## Underground/canopy agents stranding in surface water on layer-crossing
+
+Direct user report on the live artifact: "a buncha canopy and underground
+Pokémon are dying in water zones?"
+
+Root cause, traced directly: `needs.ts`'s `seekWater`/`seekFood` cross-layer
+branch (the path a Diglett/Sandshrew/Onix/Pidgey/Spearow — none of which
+have their own food or water underground/in the canopy — takes to reach the
+surface for either) flipped `agent.layer` to `"surface"` without ever
+touching `agent.pos`. That's safe in the OTHER direction (returning to
+Underground/Canopy, always a flat obstacle-free grid — see worldgen.ts's own
+doc comment), but crossing UP to Surface has no such guarantee: the exact
+same (x, y) coordinate could be the middle of a lake. A non-water-type agent
+landing there was exactly as stranded as the spawn-placement bug fixed
+earlier this session (`worldgen.ts`'s `findWalkableNear`) — same root cause
+(nothing checking `canEnterWater` before committing to a position), a
+different code path that fix didn't touch. `status.ts`'s `tickBurrow`
+(resurfacing after a burrow-escape) had the identical bug for the same
+reason — burrowing is triggered by fleeing a Surface threat, so resurfacing
+back to `burrowedFromLayer` almost always means "back to Surface, same
+untouched (x, y)."
+
+Confirmed empirically, not just reasoned about: a script re-checking every
+real `crossedLayer`-to-surface event from a 3000-tick run against
+`canEnterWater`'s actual rule (deep tile of a large water body, no
+non-water-type escape) found **6-8 stranded crossings per seed out of only
+15-31 total crossings-to-surface — roughly a quarter to nearly half of
+EVERY cross-layer trip ended in a stranding** on the pre-fix code, across
+all 5 tested seeds (20260903/42/7/12345/99). This is a large, high-frequency
+bug, not an edge case, and matches the user's report exactly ("a buncha...
+dying").
+
+Fix: both call sites (`needs.ts`'s cross-layer branch, `status.ts`'s
+`tickBurrow`) now relocate to `findWalkableNear(world, <new layer>, x, y)`
+immediately after flipping `agent.layer` — the exact same fix already built
+for the spawn-placement bug, reused rather than duplicated (a no-op
+ring-search on Underground/Canopy, already everywhere-walkable; a real one
+landing safely on Surface). Re-running the same stranding check post-fix:
+**0-1 stranded crossings per seed** (down from 6-8) — the one residual case
+(seed 99) traced to a real but separate, already-documented mechanic:
+weather-driven water formation (`weather.ts`'s rain-forms-water rule, see
+TODO.md's "no stable long-run water equilibrium" note) grew a nearby lake
+*after* the agent had already safely landed on a legitimately-safe tile,
+retroactively surrounding it — not a gap in this fix, a pre-existing,
+separately-scoped risk this session didn't set out to solve (an agent
+already standing somewhere getting slowly boxed in by expanding water over
+hundreds of ticks, versus this fix's actual scope of "don't teleport an
+agent into deep water in the first place").
+
+Full 907-test suite unaffected, typecheck clean, no circular-import issues
+introduced (`worldgen.ts`'s `findWalkableNear` has no dependency back on
+`needs.ts`/`status.ts`).

@@ -34,6 +34,7 @@ import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, apply
 import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
+import { findWalkableNear } from "./worldgen.js";
 import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict } from "./herdConflict.js";
 import { thirstDecayMultiplier } from "./weather.js";
 import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
@@ -1197,6 +1198,21 @@ export function tickAgentAction(
       agent.ticksWithoutResource = 0;
       const from = agent.layer;
       agent.layer = crossTo;
+      // Real bug this closes: crossing layers used to keep the agent's (x,
+      // y) completely unchanged, relying on Underground/Canopy always being
+      // a flat, obstacle-free grid (true) — but the reverse direction
+      // (crossing UP to Surface, which is the one that actually happens
+      // here, since Underground/Canopy have no water/food of their own) has
+      // no such guarantee: the exact same (x, y) on Surface could be the
+      // middle of a lake. A non-water-type Diglett/Pidgey landing there was
+      // then just as stranded as the spawn-placement bug this session
+      // already fixed in worldgen.ts's `findWalkableNear` — same root
+      // cause, different code path. Reuses that exact fix: relocate to the
+      // nearest tile on the new layer that's actually safe to stand on
+      // (walkable AND not deep water for a land agent) before anything else
+      // runs. A no-op ring-search on Underground/Canopy (already
+      // everywhere-walkable), a real one landing on Surface.
+      agent.pos = findWalkableNear(world, crossTo, agent.pos.x, agent.pos.y);
       log?.record({
         kind: "crossedLayer",
         tick: world.tick,

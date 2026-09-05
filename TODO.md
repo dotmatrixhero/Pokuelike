@@ -3,6 +3,28 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Underground/canopy agents stranding in surface water on layer-crossing — fixed, see DESIGN.md
+
+Direct user report: "a buncha canopy and underground Pokémon are dying in
+water zones?" Real, high-frequency bug: crossing to Surface to seek water/
+food (`needs.ts`) or resurfacing from a burrow-escape (`status.ts`) kept the
+agent's (x, y) completely unchanged, with no check that the landing tile was
+actually safe — a quarter to nearly half of every real cross-layer trip in a
+3000-tick run ended in the agent stranded mid-lake, confirmed across 5
+seeds. Fixed by reusing the exact `findWalkableNear` relocate-to-safety fix
+already built for the spawn-placement version of this same bug. See
+DESIGN.md's "Underground/canopy agents stranding in surface water on
+layer-crossing" section for the full before/after numbers.
+
+- [ ] Real, separate, honestly-flagged residual (not this fix's scope): an
+      agent that lands safely can still be slowly boxed in by weather-driven
+      water formation (`weather.ts`'s rain-forms-water rule) expanding a
+      nearby lake around it over hundreds of ticks. Confirmed as the cause
+      of the one still-flagged case (of 5 seeds) after this fix. A real
+      future fix would need periodic re-validation of an agent's own
+      standing tile, not just its landing tile — a bigger, different
+      mechanic than "don't teleport into deep water."
+
 ## Bonding: pairs don't stay together, and rapport is invisible in the UI (flagged, not built)
 
 Direct question, not a bug report, but worth tracking as a real, confirmed
