@@ -130,12 +130,16 @@ function drawGroundBacking(ctx: CanvasRenderingContext2D, x: number, y: number, 
  * A soft-edged version of a floor-decal image — the source crop is a
  * plain opaque square, so drawn as-is it reads as a hard-edged square
  * patch sitting on the base texture ("make decals a little less
- * square"). Masks it with a radial gradient (destination-in: keeps only
- * the decal's own pixels, fading its alpha toward the edges) so it reads
- * as an organic blob of detail instead. Cached per source image — there
- * are only a handful of overlay crops total, reused across every tile
- * that rolls that variant, so this runs once per image ever, not once
- * per tile per frame.
+ * square"). A first attempt masked it into a perfect circle (radial
+ * gradient, destination-in), but that read as too geometric the other
+ * way ("maybe too round... can we go half way or do some border
+ * radius") — this masks it to a rounded-rectangle instead (roundRect,
+ * corner radius a third of the tile) with a light blur on the mask edge
+ * for a touch of softness, a middle ground between the hard square and
+ * a full circle. Cached per source image — there are only a handful of
+ * overlay crops total, reused across every tile that rolls that
+ * variant, so this runs once per image ever, not once per tile per
+ * frame.
  */
 const featheredOverlayCache = new Map<HTMLImageElement, HTMLCanvasElement>();
 function featheredOverlayStamp(img: HTMLImageElement): HTMLCanvasElement {
@@ -148,12 +152,11 @@ function featheredOverlayStamp(img: HTMLImageElement): HTMLCanvasElement {
   const octx = canvas.getContext("2d")!;
   octx.drawImage(img, 0, 0, TILE_SIZE, TILE_SIZE);
   octx.globalCompositeOperation = "destination-in";
-  const grad = octx.createRadialGradient(TILE_SIZE / 2, TILE_SIZE / 2, 0, TILE_SIZE / 2, TILE_SIZE / 2, TILE_SIZE / 2);
-  grad.addColorStop(0, "rgba(0,0,0,1)");
-  grad.addColorStop(0.6, "rgba(0,0,0,1)");
-  grad.addColorStop(1, "rgba(0,0,0,0)");
-  octx.fillStyle = grad;
-  octx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+  octx.filter = "blur(1.5px)";
+  octx.beginPath();
+  octx.roundRect(1, 1, TILE_SIZE - 2, TILE_SIZE - 2, TILE_SIZE / 3);
+  octx.fillStyle = "black";
+  octx.fill();
   featheredOverlayCache.set(img, canvas);
   return canvas;
 }
