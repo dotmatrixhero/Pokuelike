@@ -9562,3 +9562,93 @@ files load through the actual dev-server asset path used in production, and
 separately confirmed (see above) live in-game rendering for Ivysaur and
 Squirtle matches their files exactly, via the same generic sprite-loading
 code both species and the newly-fixed Sandshrew all share.
+
+## Overworld generation vision (exploratory — nothing built yet)
+
+Captured here so this doesn't get lost between sessions, same as the earlier
+"Player-recruitment design notes" section — this is a vision write-up, not a
+build plan. Nothing in this section is implemented. The next step (separate,
+deliberate) is picking 2-3 pieces of this to slice out as a first real build,
+not attempting the whole thing at once.
+
+**Direct ask, verbatim, that kicked this off:** "I think we should start
+from the overworld generation itself. It can have its own distinct
+Generative phase." Followed by a detailed picture of what that phase should
+actually simulate — quoted/paraphrased faithfully below rather than
+compressed away, since the specific examples are the vision.
+
+**The core idea.** Today's `worldgen.ts` produces a single map's terrain via
+noise functions (elevation/moisture/biome-seed noise — see
+`createDemoWorld`/`generateWorld`) — plausible-looking, but with no causal
+"why" behind any of it. The proposal: an overworld (many maps/regions) gets
+its terrain from a distinct **Generative/History phase** that runs once,
+before any per-tile noise, simulating broad-strokes geological and
+mythological history in simplified form — and *that* simulated history is
+what produces the elevation/water/biome data the existing per-tile worldgen
+logic would otherwise have invented from noise. Every tile ends up with a
+real, traceable reason it looks the way it does, not just a plausible
+coincidence.
+
+**The specific historical processes described, roughly in the order given:**
+- **Ocean/land boundary formation** — Kyogre and Groudon simulated as
+  large-scale forces actively "creating" the macro land/ocean boundary
+  (their canonical mythic role), driving broad elevation change.
+- **Tectonic plates and glaciers** — simplified, broad-strokes plate
+  movement and glacial activity shaping elevation further (mountain
+  ranges, scraped valleys, etc.), not a literal physics simulation.
+- **Forest seeding** — Xerneas and Celebi "travel through the land,"
+  and forests grow up around their paths — a legendary's *route* becomes
+  the causal reason a forest biome exists exactly where it does.
+- **Rivers** — carve the land, pool into lakes, form waterfalls,
+  beaches, and tributaries as they reach other water bodies/the coast.
+- **Volcanic islands** — erupt and grow over (simulated) time, a
+  distinct landmass-creation process from the tectonic/glacial one.
+- **Earthquakes** — split land and create canyons — a discrete,
+  event-like process rather than a continuous one like the others.
+- **Deserts** — sandstorm-type Pokémon simulated creating desert
+  regions, the same "a species' presence/behavior is the causal reason
+  this biome exists here" idea as the forest-seeding one.
+
+**How this connects to the "fake it" per-tile idea from the earlier
+overworld discussion** (see this file's existing notes on simulating a
+compact per-region summary off-screen and reconstructing a plausible live
+grid on visiting): the user's own framing was "each square... that's where
+we sorta fake it. But with coherent reasons for why and how stuff exists."
+In other words, the History phase's job isn't to simulate every tile in
+full — it's to produce enough real, causal, coherent *upstream* data
+(elevation, water features, biome-seeding events, their rough
+locations/timing) that the later per-tile faking has real grounding to draw
+from, instead of inventing plausible nonsense with no history behind it.
+
+**A real, un-scoped-yet connection to systems already built this session**:
+Notables/Herd Leadership already give individual agents and herds a real,
+earned identity; a History phase that tracks *where* and *why* certain
+biomes/resources exist could plausibly become the reason certain species
+clusters or notable-title patterns show up in certain regions (e.g. a
+Xerneas-seeded ancient forest region trending toward more Gatherer/Builder
+notables over time) — genuinely interesting, but explicitly not scoped or
+designed here; flagging the connection so it isn't lost.
+
+**Open, unresolved questions, on purpose — not yet answered:**
+- Scale/granularity: is this simulated at the same per-tile resolution as
+  the existing single-map sim, or a coarser macro-grid that the per-tile
+  worldgen later resolves against? (Performance and determinism both hinge
+  on this — the existing sim's own real-run findings about tile-count/
+  performance would need revisiting at overworld scale.)
+- Determinism: this still needs to follow the codebase's seeded-rng rules
+  (see this file's repeated documentation of "rng-chaos-sensitivity"), but
+  a one-time world-genesis pass has very different performance/complexity
+  tolerances than the existing per-tick ecosystem sim — worth being
+  explicit that these are different budgets.
+- How literally "simulated" each process needs to be (a real multi-agent
+  Kyogre-vs-Groudon tug-of-war vs. a single deterministic pass that
+  produces a Kyogre/Groudon-*flavored* boundary) is an open, real design
+  choice per process, not a single answer for all seven.
+- Sequencing/dependency order between processes (tectonics before rivers,
+  rivers before forests, etc.) isn't decided.
+
+Next step, explicitly deferred per direct instruction ("note my vision
+first... then we pick a couple features and slice it out"): pick 2-3 of the
+seven processes above for a first real build, prove the "simulated history
+-> coherent per-tile world" pipeline shape works end to end, before
+expanding to the rest of the roster.
