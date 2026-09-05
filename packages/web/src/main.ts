@@ -1,5 +1,5 @@
-import { EventLog, tickWorld, randomSeed, type Agent, type Vec2, type World } from "@pokuelike/engine";
-import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
+import { EventLog, tickWorld, tickOverworld, setFocusedRegion, findRegion, randomSeed, type Agent, type Overworld, type Vec2, type World } from "@pokuelike/engine";
+import { createDemoWorld, createDemoOverworld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { EventPopups } from "./eventPopups.js";
@@ -7,6 +7,7 @@ import { renderInspector } from "./inspector.js";
 import { renderLegend } from "./legend.js";
 import { AutoCameraController, type AutoCameraHost } from "./autoCamera.js";
 import { BattleScreenPanel } from "./battleScreenPanel.js";
+import { renderOverworldPanel } from "./overworldPanel.js";
 
 /**
  * Ticks per real second at speed multiplier 1x. Multiplied by `SPEED_STEPS`
@@ -92,6 +93,18 @@ const tabBattleScreenBtn = document.getElementById("tab-battle-screen") as HTMLB
 // --- State -----------------------------------------------------------------
 
 let world: World;
+/**
+ * Set only while Overworld mode is on — `world` above always mirrors
+ * whatever region is currently focused (`findRegion(overworld,
+ * overworld.focusedRegionId)!.world`), so every existing single-map
+ * consumer (renderer, inspector, event log, auto camera, ...) keeps working
+ * completely unchanged; this is purely what `step()`/the overworld-toggle
+ * handler need to drive the region graph itself. `undefined` in ordinary
+ * single-map mode.
+ */
+let overworld: Overworld | undefined;
+const overworldPanelEl = document.getElementById("overworld-panel") as HTMLElement;
+const overworldToggleBtn = document.getElementById("overworld-toggle") as HTMLButtonElement;
 let log: EventLog;
 let playing = false;
 let speedIndex = DEFAULT_SPEED_INDEX;
@@ -184,38 +197,79 @@ function currentSeed(): number {
   return world.rngSeed;
 }
 
-function loadWorld(seed: number): void {
-  world = createDemoWorld(seed);
-  log = new EventLog();
+/**
+ * Every tracked-id/view reset shared by loading a fresh single-map world,
+ * loading a fresh overworld, and switching overworld focus (demoting the
+ * old region, promoting the new one) — in all three cases, `world` has just
+ * been pointed at a brand new set of agent ids, so every UI tracker keyed
+ * on the old ones (auto camera's engagements, the event log's buffer, the
+ * battle screen's active engagement, the inspector's selection) is
+ * meaningless and needs the same clean slate. Assumes `world`/`log` are
+ * already set to their new values by the caller.
+ */
+function resetUiForNewWorld(): void {
   lastLoggedEventCount = 0;
   selectedAgentId = undefined;
-  autoCamera.reset(); // every tracked id from the old world is meaningless now
+  autoCamera.reset();
 
   canvas.width = world.width * TILE_SIZE;
   canvas.height = world.height * TILE_SIZE;
   applyZoom();
-
-  seedInput.value = String(seed);
-  const url = new URL(location.href);
-  url.searchParams.set("seed", String(seed));
-  history.replaceState(null, "", url);
 
   eventLogPanel.reset();
   eventLogPanel.setFilter(undefined);
   battleScreenPanel.reset();
   eventPopups.reset();
   renderInspector(inspectorEl, undefined, world);
-  // Every tracked battle seq from the old world is meaningless now, same as
-  // autoCamera.reset() above — and a fresh world is a natural point to hand
-  // the view back to the default Inspector tab.
   tabManualOverrideForBattleSeq = undefined;
   lastAutoSwitchedBattleSeq = undefined;
   selectTab("inspector", false);
   updateStatusLabels();
 }
 
+function loadWorld(seed: number): void {
+  overworld = undefined;
+  world = createDemoWorld(seed);
+  log = new EventLog();
+  resetUiForNewWorld();
+
+  seedInput.value = String(seed);
+  const url = new URL(location.href);
+  url.searchParams.set("seed", String(seed));
+  history.replaceState(null, "", url);
+}
+
+/** Direct ask: "I want to be able to see the overworld stuff... visualize overworld." See overworldPanel.ts for the region-graph strip this drives. */
+function loadOverworld(): void {
+  overworld = createDemoOverworld();
+  world = findRegion(overworld, overworld.focusedRegionId)!.world;
+  log = new EventLog();
+  resetUiForNewWorld();
+  renderOverworldPanel(overworldPanelEl, overworld, focusRegion);
+}
+
+/** The region-graph's own promotion/demotion transition, triggered by clicking an unfocused region card — see overworldPanel.ts. */
+function focusRegion(regionId: string): void {
+  if (!overworld) return;
+  setFocusedRegion(overworld, regionId, IMMIGRATION_CONTEXT, world.rng, log);
+  world = findRegion(overworld, overworld.focusedRegionId)!.world;
+  resetUiForNewWorld();
+  renderOverworldPanel(overworldPanelEl, overworld, focusRegion);
+}
+
 function step(): void {
-  tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
+  if (overworld) {
+    // tickOverworld runs the focused region's ordinary tickWorld internally
+    // (unchanged) plus cheap per-species advancement for every other region
+    // — see overworld.ts's own doc comment. `world` is re-synced right after
+    // in case this tick's `regionCrossed`/emigration bookkeeping mattered,
+    // though focus itself only ever changes via `focusRegion` (a region
+    // card click), never mid-tick.
+    tickOverworld(overworld, log, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT);
+    world = findRegion(overworld, overworld.focusedRegionId)!.world;
+  } else {
+    tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
+  }
   // Only the events since the last step are new; EventLog is append-only for the life of a world.
   const newEvents = log.events.slice(lastLoggedEventCount);
   // A finishing-blow `fought` hit (predation.ts's `finishingPool` mechanic —
@@ -564,6 +618,22 @@ autoCamToggleBtn.addEventListener("click", () => {
   syncAutoCamToggleButton();
 });
 
+overworldToggleBtn.addEventListener("click", () => {
+  const enabling = !overworld;
+  // The seed controls don't mean anything in Overworld mode (each region
+  // has its own fixed seed — see overworldScenario.ts's OVERWORLD_REGION_SEEDS)
+  // — disabled rather than left to silently drop the viewer out of
+  // Overworld mode if clicked.
+  seedInput.disabled = enabling;
+  loadSeedBtn.disabled = enabling;
+  randomSeedBtn.disabled = enabling;
+  overworldPanelEl.hidden = !enabling;
+  overworldToggleBtn.textContent = `Overworld: ${enabling ? "On" : "Off"}`;
+  overworldToggleBtn.classList.toggle("playing", enabling);
+  if (enabling) loadOverworld();
+  else loadWorld(SCENARIO_SEED);
+});
+
 // --- Boot --------------------------------------------------------------------
 
 const seedParam = new URLSearchParams(location.search).get("seed");
@@ -599,6 +669,11 @@ function frame(): void {
   battleScreenPanel.render(world);
   eventLogPanel.render();
   refreshSelection();
+  // Region populations/resources drift every tick — re-render is cheap
+  // (a handful of DOM nodes, same reasoning battleScreenPanel's own
+  // every-frame render already uses) and keeps the strip live without
+  // needing its own dirty-tracking.
+  if (overworld) renderOverworldPanel(overworldPanelEl, overworld, focusRegion);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

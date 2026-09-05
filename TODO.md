@@ -3,6 +3,28 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Overworld visualization — built, see DESIGN.md
+
+Direct ask: "I want to be able to see the overworld stuff... visualize
+overworld." The region-graph engine (merged from the sibling
+`overworld-regions` session, including its migration-edge dispersal
+follow-up) had zero UI before this. New "Overworld: On/Off" toggle in
+`packages/web`, a region-graph card strip (`overworldPanel.ts`) showing each
+region's real individuals (if focused) or abstract aggregate stats (if
+not), click-to-focus driving the actual `setFocusedRegion` promotion/
+demotion. See DESIGN.md's "Overworld visualization" section for the full
+design and real-browser validation (toggle on/off, live population drift,
+a real focus switch confirmed end to end).
+
+- [ ] The graph strip is a plain left-to-right layout matching the demo's
+      own chain topology (`region-a - region-b - region-c`) — a real
+      non-chain graph would need an actual layout algorithm, not attempted
+      since only a chain currently exists.
+- [ ] No visual indication on the graph strip itself of migration-edge
+      dispersal/emigration actually happening between two regions (visible
+      in the event log/Inspector, not as e.g. an animated pulse along the
+      connector between two cards).
+
 ## Underground/canopy agents stranding in surface water on layer-crossing — fixed, see DESIGN.md
 
 Direct user report: "a buncha canopy and underground Pokémon are dying in
