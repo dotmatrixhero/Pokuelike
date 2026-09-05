@@ -114,13 +114,48 @@ function drawGroundBacking(ctx: CanvasRenderingContext2D, x: number, y: number, 
   // A sparse, semi-transparent decal on top of the consistent base — see
   // sprites.ts's getFloorOverlay doc comment for why this replaced N
   // competing full-strength base textures. Most tiles get none (null).
+  // Feathered to a soft blob (see featheredOverlayStamp) rather than
+  // drawn as a hard-edged square, direct ask: "make decals a little less
+  // square."
   const overlay = getFloorOverlay(x, y);
   if (overlay) {
     ctx.save();
-    ctx.globalAlpha = 0.35;
-    ctx.drawImage(overlay, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    ctx.globalAlpha = 0.48;
+    ctx.drawImage(featheredOverlayStamp(overlay), x * TILE_SIZE, y * TILE_SIZE);
     ctx.restore();
   }
+}
+
+/**
+ * A soft-edged version of a floor-decal image — the source crop is a
+ * plain opaque square, so drawn as-is it reads as a hard-edged square
+ * patch sitting on the base texture ("make decals a little less
+ * square"). Masks it with a radial gradient (destination-in: keeps only
+ * the decal's own pixels, fading its alpha toward the edges) so it reads
+ * as an organic blob of detail instead. Cached per source image — there
+ * are only a handful of overlay crops total, reused across every tile
+ * that rolls that variant, so this runs once per image ever, not once
+ * per tile per frame.
+ */
+const featheredOverlayCache = new Map<HTMLImageElement, HTMLCanvasElement>();
+function featheredOverlayStamp(img: HTMLImageElement): HTMLCanvasElement {
+  const cached = featheredOverlayCache.get(img);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE_SIZE;
+  canvas.height = TILE_SIZE;
+  const octx = canvas.getContext("2d")!;
+  octx.drawImage(img, 0, 0, TILE_SIZE, TILE_SIZE);
+  octx.globalCompositeOperation = "destination-in";
+  const grad = octx.createRadialGradient(TILE_SIZE / 2, TILE_SIZE / 2, 0, TILE_SIZE / 2, TILE_SIZE / 2, TILE_SIZE / 2);
+  grad.addColorStop(0, "rgba(0,0,0,1)");
+  grad.addColorStop(0.6, "rgba(0,0,0,1)");
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  octx.fillStyle = grad;
+  octx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+  featheredOverlayCache.set(img, canvas);
+  return canvas;
 }
 
 export type RenderStyle = "tile" | "ascii";
