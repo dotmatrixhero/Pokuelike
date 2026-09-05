@@ -16,6 +16,15 @@ demotion. See DESIGN.md's "Overworld visualization" section for the full
 design and real-browser validation (toggle on/off, live population drift,
 a real focus switch confirmed end to end).
 
+- [x] **v2, direct follow-up feedback**: "I kinda thought overworld would
+      be it's own tileset... its own renderer... see the bigger picture and
+      select a zone... but it seems like you just have three zones in an
+      array." Fair — v1 was plain data cards. Each card now shows a real,
+      zoomed-out satellite-view thumbnail of that region's own actual
+      terrain (`overworldMap.ts`'s `drawRegionThumbnail` — one canvas pixel
+      per tile, real population as colored dots), not an abstract swatch.
+      See DESIGN.md's "Overworld visualization v2" section.
+
 - [ ] The graph strip is a plain left-to-right layout matching the demo's
       own chain topology (`region-a - region-b - region-c`) — a real
       non-chain graph would need an actual layout algorithm, not attempted

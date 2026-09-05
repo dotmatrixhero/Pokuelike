@@ -1,4 +1,5 @@
 import type { Overworld, Region } from "@pokuelike/engine";
+import { drawRegionThumbnail } from "./overworldMap.js";
 
 /**
  * Renders the overworld region graph as a horizontal strip of clickable
@@ -9,7 +10,15 @@ import type { Overworld, Region } from "@pokuelike/engine";
  * though a chain is the only shape validated so far).
  *
  * Direct ask: "I want to be able to see the overworld stuff... visualize
- * overworld." The focused region's card is highlighted and shows its real,
+ * overworld." Follow-up, after the first pass shipped as plain data cards:
+ * "I kinda thought overworld would be it's own tileset we can zoom out
+ * to... its own renderer... see the bigger picture and select a zone."
+ * Each card is now a real, zoomed-all-the-way-out satellite view of that
+ * region's own generated terrain (`overworldMap.ts`'s `drawRegionThumbnail`
+ * — one canvas pixel per tile, upscaled with `image-rendering: pixelated`),
+ * not an abstract color swatch — clicking a thumbnail IS "selecting a
+ * zone." The stat/species text below each thumbnail is unchanged from the
+ * first pass and still matters: the focused region's card shows its real,
  * live per-species population (straight off `world.agents`, exactly what
  * the Inspector panel's "World overview" already reports for the single-map
  * mode); every other region's card shows its abstracted `RegionAggregate`
@@ -18,7 +27,10 @@ import type { Overworld, Region } from "@pokuelike/engine";
  * changes shape (real agents vs. abstract stats) depending on whether it's
  * focused, which is the whole point of this system (see overworld.ts's own
  * doc comment on why this is "explicitly lossy, not an implementation
- * detail to gloss over").
+ * detail to gloss over"). A demoted region's thumbnail correctly shows its
+ * real (frozen, un-ticked) terrain with zero population dots —
+ * `demoteRegion` empties `world.agents` entirely, so there's nothing false
+ * to plot.
  *
  * Pure rendering + a click callback — no simulation state of its own, same
  * "DOM-agnostic detection, host does the rest" split `autoCamera.ts` uses,
@@ -42,6 +54,11 @@ function renderRegionCard(region: Region, focused: boolean, onFocusRegion: (regi
   card.className = `region-card${focused ? " region-card-focused" : ""}`;
   card.title = focused ? "This region is fully simulated right now — click another card to switch focus" : "Click to switch focus here (demotes the current region, promotes this one — see DESIGN.md's overworld section)";
   if (!focused) card.addEventListener("click", () => onFocusRegion(region.id));
+
+  const thumb = document.createElement("canvas");
+  thumb.className = "region-card-thumb";
+  drawRegionThumbnail(thumb, region.world);
+  card.appendChild(thumb);
 
   const title = document.createElement("div");
   title.className = "region-card-title";
