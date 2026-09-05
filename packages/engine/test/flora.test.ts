@@ -6,6 +6,7 @@ import {
   seasonalMultiplier,
   recordGrazing,
   CONSUME_STOCK_AMOUNT,
+  FOOD_MAX_STOCK,
   FOOD_FLAVORS,
   FLORA_FLAVORS,
   MATURATION_TICKS,
@@ -60,7 +61,7 @@ describe("growFlora", () => {
     growFlora(world, log);
 
     expect(tile.terrain).toBe("food");
-    expect(tile.stock).toBe(1);
+    expect(tile.stock).toBe(FOOD_MAX_STOCK);
     expect(tile.flavor).toBe(FOOD_FLAVORS[0]);
     expect(log.events).toContainEqual(
       expect.objectContaining({ kind: "floraChanged", stage: "sprouted", flavor: FOOD_FLAVORS[0] })

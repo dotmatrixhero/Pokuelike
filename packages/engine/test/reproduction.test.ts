@@ -5,6 +5,7 @@ import { createNeeds } from "../src/needs.js";
 import { tickWorld } from "../src/simulation.js";
 import { EventLog } from "../src/events.js";
 import type { Agent } from "../src/types.js";
+import { SHELTER_TILE_EGG_CAP } from "../src/occupancy.js";
 import type { LevelingContext, LevelingProfile } from "../src/leveling.js";
 import type { Disposition } from "../src/nature.js";
 import { EGG_INCUBATION_TICKS, tickEgg } from "../src/eggs.js";
@@ -161,6 +162,11 @@ describe("reproduction", () => {
   });
 
   it("lays a real egg (not an instant newborn) once the household has real shelter access", () => {
+    // Real rng: a clutch (EGG_CLUTCH_MIN..MAX = 2-4) is drawn, and this
+    // single shelter tile now has room for the whole thing
+    // (SHELTER_TILE_EGG_CAP=4) — so this test checks "at least one real
+    // egg, not an instant newborn," not an exact count; see the dedicated
+    // clutch-size tests below for the exact-count behavior.
     const world = createWorld(10, 10);
     setTile(world, "surface", 2, 3, "shelter");
     world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
@@ -168,9 +174,10 @@ describe("reproduction", () => {
 
     tickWorld(world, log);
 
-    expect(world.agents).toHaveLength(3);
-    const egg = world.agents.find((a) => a.isEgg)!;
-    expect(egg).toBeDefined();
+    expect(world.agents.length).toBeGreaterThan(2);
+    const eggs = world.agents.filter((a) => a.isEgg);
+    expect(eggs.length).toBeGreaterThanOrEqual(1);
+    const egg = eggs[0]!;
     expect(egg.species).toBe("bulbasaur");
     expect(egg.parentIds).toEqual(["mother", "father"]);
     expect(egg.herdId).toBe("herd-a");
@@ -183,8 +190,8 @@ describe("reproduction", () => {
   });
 
   it("a single laying event lays MULTIPLE eggs (a clutch) when the shelter cluster has room for them", () => {
-    // Four adjacent shelter tiles -> a 4-tile cluster -> 4 egg slots
-    // (SHELTER_TILE_EGG_CAP=1 per tile), comfortably more than
+    // Four adjacent shelter tiles -> a 4-tile cluster -> 16 egg slots
+    // (SHELTER_TILE_EGG_CAP=4 per tile), comfortably more than
     // EGG_CLUTCH_MAX so the whole clutch can fit. Force the clutch-size
     // draw to its max via a fixed rng so this test is deterministic rather
     // than "usually more than one egg."
@@ -206,29 +213,43 @@ describe("reproduction", () => {
   });
 
   it("a clutch that doesn't fully fit is capped by real available shelter-cluster capacity, not crammed in regardless", () => {
-    // Only TWO egg slots available (a single shelter tile, cap 1, plus the
-    // clutch-size draw forced to its max of 4) — the excess two eggs are
-    // simply dropped, not queued or crammed onto one tile.
+    // A single shelter tile (cap SHELTER_TILE_EGG_CAP=4) pre-occupied by
+    // 2 existing eggs, leaving exactly 2 real free slots — the clutch-size
+    // draw forced to its max (4) should still only place 2, not cram the
+    // rest in or drop the whole household's egg count to 0.
     const world = createWorld(10, 10);
     setTile(world, "surface", 2, 3, "shelter");
-    setTile(world, "surface", 3, 3, "shelter");
-    world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
+    world.agents.push(
+      parent("mother", "female", { x: 2, y: 2 }),
+      parent("father", "male", { x: 3, y: 2 }),
+      { ...parent("existing-egg-1", "female", { x: 2, y: 3 }), isEgg: true },
+      { ...parent("existing-egg-2", "female", { x: 2, y: 3 }), isEgg: true }
+    );
     const log = new EventLog();
 
     applyMateSeeking(world, world.agents[0]!, log, undefined, () => 0.999);
 
-    const eggs = world.agents.filter((a) => a.isEgg);
-    expect(eggs.length).toBe(2); // capped by the 2-tile cluster's 2 egg slots, not the 4-egg clutch draw
+    const newEggs = world.agents.filter((a) => a.isEgg && a.id !== "existing-egg-1" && a.id !== "existing-egg-2");
+    expect(newEggs.length).toBe(2); // capped by the 2 real remaining slots, not the 4-egg clutch draw
     expect(world.eggsLaid).toBe(2);
   });
 
   it("a bigger, more successful household (more adjacent shelter) reliably gets more eggs out of the same clutch draw", () => {
+    // Each shelter tile pre-occupied down to exactly 1 free slot
+    // (SHELTER_TILE_EGG_CAP - 1 existing eggs), so free room scales 1:1
+    // with tile count regardless of the cap's own absolute value.
     function layWithClusterSize(shelterTiles: number): number {
       const world = createWorld(10, 10);
-      for (let i = 0; i < shelterTiles; i++) setTile(world, "surface", 2 + i, 3, "shelter");
-      world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
+      const existing: Agent[] = [];
+      for (let i = 0; i < shelterTiles; i++) {
+        setTile(world, "surface", 2 + i, 3, "shelter");
+        for (let j = 0; j < SHELTER_TILE_EGG_CAP - 1; j++) {
+          existing.push({ ...parent(`existing-${i}-${j}`, "female", { x: 2 + i, y: 3 }), isEgg: true });
+        }
+      }
+      world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }), ...existing);
       applyMateSeeking(world, world.agents[0]!, undefined, undefined, () => 0.999);
-      return world.agents.filter((a) => a.isEgg).length;
+      return world.agents.filter((a) => a.isEgg && !a.id.startsWith("existing-")).length;
     }
     expect(layWithClusterSize(1)).toBe(1);
     expect(layWithClusterSize(2)).toBe(2);
@@ -339,7 +360,9 @@ describe("reproduction", () => {
 
     tickWorld(world, undefined, undefined, FAKE_CTX);
 
-    expect(world.agents).toHaveLength(3);
+    // Real rng draws a real clutch (2-4, all fit — SHELTER_TILE_EGG_CAP=4);
+    // this test only cares that a real egg of the right species appears.
+    expect(world.agents.length).toBeGreaterThan(2);
     const egg = world.agents.find((a) => a.isEgg)!;
     expect(egg.species).toBe("mysteryon");
   });
@@ -453,7 +476,7 @@ describe("reproduction", () => {
 
       tickWorld(world);
 
-      expect(world.agents).toHaveLength(3);
+      expect(world.agents.length).toBeGreaterThan(2); // real rng clutch (2-4), all fit
       expect(world.agents.some((a) => a.isEgg)).toBe(true);
     });
 
@@ -652,7 +675,7 @@ describe("cross-herd mating escape hatch (MATE_ISOLATION_TICKS)", () => {
 
     tickWorld(world, log);
 
-    expect(world.agents).toHaveLength(3);
+    expect(world.agents.length).toBeGreaterThan(2); // real rng clutch (2-4), all fit
     const egg = world.agents.find((a) => a.isEgg)!;
     expect(egg.species).toBe("bulbasaur");
     expect(log.events).toContainEqual(
@@ -675,7 +698,7 @@ describe("cross-herd mating escape hatch (MATE_ISOLATION_TICKS)", () => {
 
     tickWorld(world);
 
-    expect(world.agents).toHaveLength(3);
+    expect(world.agents.length).toBeGreaterThan(2); // real rng clutch (2-4), all fit
     const egg = world.agents.find((a) => a.isEgg)!;
     expect(egg.species).toBe("bulbasaur");
   });
@@ -689,7 +712,7 @@ describe("cross-herd mating escape hatch (MATE_ISOLATION_TICKS)", () => {
 
     tickWorld(world);
 
-    expect(world.agents).toHaveLength(3);
+    expect(world.agents.length).toBeGreaterThan(2); // real rng clutch (2-4), all fit
   });
 });
 

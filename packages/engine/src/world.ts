@@ -12,6 +12,17 @@ const UNWALKABLE_TERRAIN: ReadonlySet<TerrainKind> = new Set(["wall", "tree"]);
  */
 const OPAQUE_TERRAIN: ReadonlySet<TerrainKind> = new Set(["wall", "tree", "boulder"]);
 
+/**
+ * Local duplicate of `flora.ts`'s canonical `FOOD_MAX_STOCK` (0.8) — a real
+ * import isn't possible here without closing a circular-dependency loop
+ * (flora.ts already imports from this file), same reasoning as
+ * `occupancy.ts`'s own duplicated `bodyWeightOf` formula. If you're tuning
+ * food yield, change `FOOD_MAX_STOCK` in flora.ts — that's the value both
+ * this file and flora.ts's own maturation logic should agree on — and keep
+ * this literal in sync.
+ */
+const WORLDGEN_FOOD_MAX_STOCK = 0.8;
+
 /** "wall"/"tree" block movement outright; everything else (including "boulder", now just slow) is passable. */
 export function isWalkableTerrain(terrain: TerrainKind): boolean {
   return !UNWALKABLE_TERRAIN.has(terrain);
@@ -28,7 +39,7 @@ export function createTile(terrain: TerrainKind, elevation = 0): Tile {
     walkable: isWalkableTerrain(terrain),
     opaque: isOpaqueTerrain(terrain),
     elevation,
-    stock: terrain === "food" ? 1 : undefined,
+    stock: terrain === "food" ? WORLDGEN_FOOD_MAX_STOCK : undefined,
     concealment: terrain === "bush" || terrain === "shelter" ? true : undefined,
     vacantTicks: terrain === "shelter" ? 0 : undefined,
     cache: terrain === "shelter" ? 0 : undefined,
@@ -82,7 +93,7 @@ export function setTile(
   tile.terrain = terrain;
   tile.walkable = isWalkableTerrain(terrain);
   tile.opaque = isOpaqueTerrain(terrain);
-  tile.stock = terrain === "food" || terrain === "flora" ? 1 : undefined;
+  tile.stock = terrain === "food" ? WORLDGEN_FOOD_MAX_STOCK : terrain === "flora" ? 1 : undefined;
   tile.growth = terrain === "seedling" ? 0 : undefined;
   tile.flavor = terrain === "food" || terrain === "flora" ? flavor : undefined;
   tile.concealment = terrain === "bush" || terrain === "shelter" ? true : undefined;

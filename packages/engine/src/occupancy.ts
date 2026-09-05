@@ -146,8 +146,22 @@ export function canEnterTile(world: World, agent: Agent, layer: Layer, pos: Vec2
 
 /** Adults (non-egg occupants) a single shelter tile holds on its own. */
 export const SHELTER_TILE_ADULT_CAP = 2;
-/** Eggs a single shelter tile holds on its own. */
-export const SHELTER_TILE_EGG_CAP = 1;
+/**
+ * Eggs a single shelter tile holds on its own. Originally 1 (the literal
+ * "only 2 units and an egg" instruction) — raised to 4 as a direct
+ * follow-up once real runs showed clutches (`eggs.ts`'s
+ * `EGG_CLUTCH_MIN`/`EGG_CLUTCH_MAX`, 2-4) were structurally inert: every
+ * real shelter cluster observed across all three standard seeds at 8000
+ * ticks was exactly 1 tile (shelter-site-picking has no bias toward
+ * building adjacent to existing shelter), so a 1-egg-per-tile cap meant a
+ * full clutch always immediately dropped every egg past the first,
+ * regardless of the size actually drawn. Set to `EGG_CLUTCH_MAX` so a
+ * single-tile household — the realistic common case, not just a
+ * multi-tile cluster — can hold an entire clutch at once, the direct fix
+ * the user asked for ("increase the per tile thing to allow for more
+ * eggs") rather than the alternative of first fixing shelter clustering.
+ */
+export const SHELTER_TILE_EGG_CAP = 4;
 
 /** Cap on how large a connected shelter cluster's BFS is allowed to grow before giving up — a real map should never approach this; it's a defensive bound against a pathological all-shelter map, not a tuning constant. */
 const SHELTER_CLUSTER_SCAN_CAP = 200;

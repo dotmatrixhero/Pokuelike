@@ -5888,6 +5888,49 @@ packages.
   caveated, just not a clean single-variable isolation the way the
   migration-event stash-based A/B test above is.
 
+### Follow-up: a real, named yield cap per food source (direct ask)
+
+Direct ask: "i think we need food sources to die out a little faster, like
+20% less food produced per food source." Distinct from `CONSUME_STOCK_AMOUNT`
+(how much one bite takes) — this is how much a source *holds* in the first
+place. Previously an implicit `1` scattered across `flora.ts`'s maturation
+branch and `world.ts`'s `createTile`/`setTile`; now a real, named constant,
+`FOOD_MAX_STOCK = 0.8` (flora.ts), a flat 20% cut. Composes with
+`CONSUME_STOCK_AMOUNT` (0.35) to bring a patch from ~3 feedings
+(1 / 0.35 ≈ 2.86) down to ~2 (0.8 / 0.35 ≈ 2.29) before it's eaten out —
+independent of `FOOD_LIFESPAN_TICKS`'s separate old-age clock. Does NOT
+touch "flora" tiles' own `stock` field, which tracks decay/vitality
+progress, not edible yield, and only happens to share the field name.
+`world.ts` keeps a local duplicated literal (`WORLDGEN_FOOD_MAX_STOCK`) for
+the same circular-dependency reason `occupancy.ts`'s `bodyWeightOf`
+duplicate already documents — flora.ts is canonical, keep both in sync.
+
+Also confirmed and answered directly (not a change, a verification): eggs
+cannot die of starvation or thirst — `simulation.ts`'s `tickWorld` routes
+every `isEgg` agent straight to `eggs.ts`'s `tickEgg`, never through
+`tickAgentNeeds` (the only function that decays hunger/thirst or checks
+starvation) — structurally impossible, not just unlikely. A new dedicated
+test in `eggs.test.ts` proves this with a real `tickWorld` run starting at
+0/0 needs, run well past both starvation grace periods.
+
+Also clarified, since asked directly: there is no dynamic/runtime flora
+tuning UI — "parametrize... so I can tune it" (this session's earlier
+ask) delivered well-documented, grouped source constants (this file's own
+"Tuning constants" section), not a live slider or debug panel. Tuning
+still means editing `flora.ts` and rebuilding, same as every other
+constant in this codebase.
+
+**Real-run findings:** 3000-tick, 3-seed check: zero hunger-starvation
+deaths on all three seeds (the safety bar holds), migration still firing
+(2-4 events/seed), final populations 15-17 — consistent with, not a
+regression from, the current post-egg-system baseline (population growth
+is now bottlenecked upstream by the bond→shelter pipeline, see the eggs
+section below; this change doesn't materially interact with that). Two
+pre-existing tests (`flora.test.ts`, `needs.test.ts`) that hardcoded the
+old implicit stock of `1` were updated to reference `FOOD_MAX_STOCK`
+directly instead. All 718 engine tests pass, including the unmodified
+determinism suite.
+
 ## Tile capacity: a hard limit on how crowded one tile can get
 
 **Direct ask.** "Can we hard limit space so there's a weight limit for how
@@ -7390,3 +7433,29 @@ an agent that already has one nearby) is a real, separate, out-of-scope-
 for-this-ask follow-up — flagged in TODO.md — and is the actual next lever
 if the goal is still "raise the population ceiling without touching the
 pipeline's pacing."
+
+### Follow-up: raise SHELTER_TILE_EGG_CAP instead of fixing clustering
+
+Direct ask, after the clutch-inert finding above: "i think we increase the
+per tile thing to allow for more eggs" — the more direct fix (raise the
+per-tile cap) over the alternative discussed (bias shelter-building toward
+clustering). `SHELTER_TILE_EGG_CAP` (occupancy.ts) 1 -> `EGG_CLUTCH_MAX`
+(4), so a single, realistic one-tile household can now hold an entire
+clutch on its own, without needing a multi-tile cluster to ever form.
+
+**Real-run findings — this time a genuine, large effect:** 3000/6000/8000
+ticks, standard 3 seeds. Seed 42: pop 15/35/120, eggLaid 2/24/109 (was
+inert at cap=1). Seed 7: pop 33/162/(pending), eggLaid 17/166 — genuinely
+thriving. Seed 20260903: still 0 eggs laid at any tick count despite 9-15
+bonds forming — that seed's pairs never finish building a shelter at all
+(a real, separate, pre-existing shelter-building-pace issue, not something
+this cap change touches). Zero hunger-starvation deaths across every seed
+and tick count tested — the safety bar holds throughout.
+
+Several pre-existing tests hardcoded the old cap-of-1 behavior (either
+directly, or indirectly via real-rng clutch draws that used to always cap
+out at exactly 1 egg) — updated to check "at least one real egg with the
+right properties" or to pre-occupy known capacity rather than assume an
+exact count, per this file's established "fix a test if new real behavior
+invalidates an old assumption" convention. All 718 engine tests pass,
+including the unmodified determinism suite.
