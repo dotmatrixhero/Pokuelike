@@ -3,6 +3,7 @@ import { createWorld, setElevation, setTile, tileAt } from "./world.js";
 import { FOOD_FLAVORS } from "./flora.js";
 import { mulberry32 } from "./rng.js";
 import { canEnterWater } from "./waterBody.js";
+import type { ZoneDirection } from "./directions.js";
 
 /**
  * Stand-in for `canEnterWater`'s `agent` parameter — an ordinary land
@@ -233,6 +234,52 @@ export interface MacroElevation {
 }
 
 /**
+ * Optional steering for `generateMacroElevation`, used ONLY when generating a
+ * single zone's full-resolution map as a promoted cell of a larger
+ * `macroGrid.ts` macro grid (see that module's `biasForZone`) — every
+ * existing caller that omits this (a bare `generateWorld(width, height,
+ * seed)`, exactly as `createDemoWorld` still calls it) gets byte-identical
+ * behavior to before this existed. The whole point: a promoted zone's
+ * terrain should read as "the zoomed-in version of that macro spot," not an
+ * independent reroll — see DESIGN.md's "overworld and zone are two distinct
+ * levels" correction.
+ */
+export interface MacroElevationBias {
+  /**
+   * Where this zone's macro elevation sits, roughly -1 (deep basin) to 1
+   * (high uplift) — re-centers `.normalized()`'s reported value so a
+   * highland-marked zone's per-tile elevation actually reads as
+   * higher/mountainous, not just independently re-rolled. Does NOT move the
+   * land/ocean boundary itself (that's `oceanFraction`/`lowEdges`/
+   * `highEdges` below) — this only biases the reported elevation *within*
+   * whatever land this zone generates.
+   */
+  elevationShift: number;
+  /** Overrides the fixed `OCEAN_FRACTION` percentile target — a zone the macro grid marked as ocean should generate mostly ocean, a fully inland zone almost none. */
+  oceanFraction: number;
+  /** Edges of the tile grid to pull elevation DOWN toward — a zone with an ocean neighbor in this direction should form its own coastline on the matching edge, not a random one. */
+  lowEdges: readonly ZoneDirection[];
+  /** Edges of the tile grid to pull elevation UP toward — the mirror of `lowEdges`, for a neighbor the macro grid marked as higher elevation. */
+  highEdges: readonly ZoneDirection[];
+}
+
+/** How strongly `lowEdges`/`highEdges` pull the raw macro field toward/away from a tile-grid edge — a linear gradient from 1 at the named edge to 0 at the opposite one, scaled by this. Tuned against a real generated zone (see DESIGN.md) so a coastline reliably lands on the biased edge without flattening the rest of the zone's own local variety. */
+const EDGE_BIAS_STRENGTH = 0.6;
+
+/** How much of `.normalized()`'s reported value is pulled toward `MacroElevationBias.elevationShift` vs. this zone's own locally generated shape — kept well under 1 so a highland zone still has real local peaks/valleys, not a flat plateau at the target height. */
+const ELEVATION_SHIFT_WEIGHT = 0.35;
+
+/** 1 at the named tile-grid edge, 0 at the opposite edge, linear in between — the gradient `lowEdges`/`highEdges` ride on. */
+function edgeCloseness(dir: ZoneDirection, x: number, y: number, width: number, height: number): number {
+  switch (dir) {
+    case "N": return 1 - y / height;
+    case "S": return y / height;
+    case "W": return 1 - x / width;
+    case "E": return x / width;
+  }
+}
+
+/**
  * `applyGroudonUplift` + `applyKyogreBasin`, blended: places a few uplift
  * and basin points, sums every point's falloff-weighted contribution at
  * every tile (plus a little detail noise for coastline roughness), then
@@ -248,7 +295,13 @@ export interface MacroElevation {
  * independently places small in-land ponds/wetland water — see the tile
  * loop below).
  */
-export function generateMacroElevation(rng: () => number, width: number, height: number, detailNoise: (x: number, y: number) => number): MacroElevation {
+export function generateMacroElevation(
+  rng: () => number,
+  width: number,
+  height: number,
+  detailNoise: (x: number, y: number) => number,
+  bias?: MacroElevationBias
+): MacroElevation {
   const upliftPoints = placeMacroInfluencePoints(rng, width, height, UPLIFT_POINT_COUNT, 1);
   const basinPoints = placeMacroInfluencePoints(rng, width, height, BASIN_POINT_COUNT, -1);
   const allPoints = [...upliftPoints, ...basinPoints];
@@ -266,6 +319,10 @@ export function generateMacroElevation(rng: () => number, width: number, height:
       // Detail noise centered on 0 so it can push the field either way, same
       // (-0.5)*2 recentering the tile loop below already uses elsewhere.
       v += (detailNoise(x, y) - 0.5) * 2 * MACRO_DETAIL_WEIGHT;
+      if (bias) {
+        for (const dir of bias.lowEdges) v -= edgeCloseness(dir, x, y, width, height) * EDGE_BIAS_STRENGTH;
+        for (const dir of bias.highEdges) v += edgeCloseness(dir, x, y, width, height) * EDGE_BIAS_STRENGTH;
+      }
       raw[y * width + x] = v;
       if (v < min) min = v;
       if (v > max) max = v;
@@ -274,10 +331,15 @@ export function generateMacroElevation(rng: () => number, width: number, height:
 
   const range = max - min || 1;
   const sorted = Float64Array.from(raw).sort();
-  const seaLevel = sorted[Math.min(sorted.length - 1, Math.floor(OCEAN_FRACTION * sorted.length))]!;
+  const oceanFraction = bias?.oceanFraction ?? OCEAN_FRACTION;
+  const seaLevel = sorted[Math.min(sorted.length - 1, Math.floor(oceanFraction * sorted.length))]!;
+  const shiftTarget = bias ? (bias.elevationShift + 1) / 2 : 0;
 
   return {
-    normalized: (x: number, y: number) => Math.max(0, Math.min(1, (raw[y * width + x]! - min) / range)),
+    normalized: (x: number, y: number) => {
+      const n = Math.max(0, Math.min(1, (raw[y * width + x]! - min) / range));
+      return bias ? n * (1 - ELEVATION_SHIFT_WEIGHT) + shiftTarget * ELEVATION_SHIFT_WEIGHT : n;
+    },
     isOcean: (x: number, y: number) => raw[y * width + x]! < seaLevel,
   };
 }
@@ -638,6 +700,23 @@ export function biomeWeightsAt(seeds: readonly BiomeSeedInfo[] | undefined, x: n
 
 /** `BIOMES` indexed by name, for the runtime (post-generation) lookups below — generation itself still walks the array directly. */
 const BIOME_BY_NAME: Readonly<Record<string, BiomeDef>> = Object.fromEntries(BIOMES.map((b) => [b.name, b]));
+
+/** Every real per-tile biome name this module knows how to generate — `macroGrid.ts` picks a zone's dominant biome from exactly this list (plus its own "ocean" for a zone the macro elevation pass marked below sea level, which isn't a `BiomeDef` at all). */
+export const BIOME_NAMES: readonly string[] = BIOMES.map((b) => b.name);
+
+/**
+ * A biome's raw food/water density parameters, for `macroGrid.ts`'s cheap
+ * per-zone resource-abundance estimate (`estimateResourceIndexForZone`) —
+ * used ONLY to seed a never-visited zone's `RegionAggregate.baseResourceIndex`
+ * before any real tiles exist to `measureResourceIndex` from (see
+ * `overworld.ts`). Returns `undefined` for an unknown name (e.g. "ocean",
+ * which isn't a `BiomeDef` — callers handle that case with their own ocean
+ * estimate) rather than guessing.
+ */
+export function biomeFoodWaterDensity(name: string): { foodDensity: number; waterDensity: number } | undefined {
+  const biome = BIOME_BY_NAME[name];
+  return biome ? { foodDensity: biome.foodDensity, waterDensity: biome.waterDensity } : undefined;
+}
 
 /** The driest biome's own `waterDensity` — the fixed target every seed's own `effectiveWaterDensityAt` drifts toward under sustained local drought (see `World.biomeSeedDrift`'s doc comment). */
 const BADLANDS_WATER_DENSITY = BIOME_BY_NAME["badlands"]!.waterDensity;
@@ -1000,10 +1079,38 @@ const BOULDER_ELEVATION_BOOST = 0.8;
  */
 const BEHAVIOR_RNG_SEED_XOR = 0x632be5ab;
 
-export function generateWorld(width: number, height: number, seed: number): World {
+/**
+ * Optional steering for `generateWorld`, threaded straight into
+ * `generateMacroElevation` (see `MacroElevationBias`'s own doc comment) plus
+ * one more per-tile concern that lives at this level instead: which biome
+ * should actually dominate this zone's land, so a promoted zone matches its
+ * macro grid cell's own dominant biome rather than whatever the ordinary
+ * random biome-seed scatter happens to roll. Absent entirely for every
+ * existing caller (`createDemoWorld`'s plain `generateWorld(w, h, seed)`) —
+ * zero behavior change there.
+ */
+export interface ZoneGenerationBias {
+  elevation: MacroElevationBias;
+  /** A `BIOME_NAMES` entry to bias this zone's biome-seed scatter toward — absent (or a name `generateWorld` doesn't recognize, e.g. "ocean") leaves biome placement exactly as unbiased `placeBiomeSeeds` would. */
+  dominantBiome?: string;
+}
+
+/** How many extra seeds of `ZoneGenerationBias.dominantBiome` get scattered on top of the ordinary biome mix — enough to make it genuinely dominate the blend (see `blendBiomeParams`'s nearest-`NEAREST_BIOME_SEEDS` weighting) without completely erasing the variety a real zone should still have. Sim-original guess, judge against a real promoted zone like every other tuning constant in this file. */
+const DOMINANT_BIOME_EXTRA_SEEDS = 8;
+
+function addDominantBiomeSeeds(seeds: BiomeSeed[], biomeName: string | undefined, rng: () => number, width: number, height: number): void {
+  const biome = biomeName ? BIOME_BY_NAME[biomeName] : undefined;
+  if (!biome) return;
+  for (let i = 0; i < DOMINANT_BIOME_EXTRA_SEEDS; i++) {
+    seeds.push({ x: rng() * width, y: rng() * height, biome });
+  }
+}
+
+export function generateWorld(width: number, height: number, seed: number, bias?: ZoneGenerationBias): World {
   const world = createWorld(width, height, seed ^ BEHAVIOR_RNG_SEED_XOR);
   const placementRng = mulberry32(seed);
   const seeds = placeBiomeSeeds(placementRng, width, height);
+  addDominantBiomeSeeds(seeds, bias?.dominantBiome, mulberry32(seed ^ 0x6a09e667), width, height);
   // Name-only projection persisted on the World — see types.ts's
   // `BiomeSeedInfo` doc comment for why weather.ts needs this and can't just
   // reuse the full internal `BiomeSeed[]` (private to this module's own
@@ -1019,7 +1126,7 @@ export function generateWorld(width: number, height: number, seed: number): Worl
   // "elevation-ish detail texture" role.
   const macroDetailNoise = makeNoise2D(mulberry32(seed ^ 0x9e3779b9), width, height, noiseScale / 10);
   const macroPointsRng = mulberry32(seed ^ 0x51c48a7d);
-  const macroElevation = generateMacroElevation(macroPointsRng, width, height, macroDetailNoise);
+  const macroElevation = generateMacroElevation(macroPointsRng, width, height, macroDetailNoise, bias?.elevation);
   const moistureField = makeDensityField(seed ^ 0x85ebca6b, width, height, noiseScale / 8);
   const obstacleField = makeDensityField(seed ^ 0xc2b2ae35, width, height, 4);
   const foodField = makeDensityField(seed ^ 0x27d4eb2f, width, height, 3);
