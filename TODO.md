@@ -2255,3 +2255,59 @@ not something this pathfinding pass itself caused or is positioned to fix.
       two shipped (comfort discount + build-tick halving) — judged
       sufficient and validated as such, but a real option if more predator
       ease is wanted later.
+
+## Rapport: agent-to-agent relationship graph — built, see DESIGN.md
+- [x] Sparse `Agent.rapport?: Record<string, RapportEdge>` (score -1..1,
+      `lastInteractionTick`), lazy read-time decay (`RAPPORT_DECAY_PER_TICK`
+      = 0.9977, ~300-tick half-life), prune-on-touch below
+      `RAPPORT_PRUNE_THRESHOLD` (0.02), and a hard per-agent cap
+      (`RAPPORT_MAX_EDGES_PER_AGENT` = 16) with real weakest/stalest-first
+      eviction (rng-tie-broken, threaded from `world.rng`).
+- [x] Fed by four real, existing trigger events (not invented ones): herd
+      food delivery (+0.03 both ways), joint mob-defense — the guardian
+      branch of `applyPredationInstincts` (+0.06 both ways), bonding
+      (+0.6 both ways, a real jump not an incremental nudge), and
+      herd-conflict clash hits between the same two individuals (-0.06 both
+      ways, never herd/species-wide).
+- [x] Two real consumers: mate preference (`reproduction.ts`'s `mateScore`
+      gains a `RAPPORT_DISTANCE_BONUS` = 3 discount term alongside the
+      existing `STATUS_DISTANCE_BONUS`) and herd-conflict targeting/
+      escalation (`herdConflict.ts`'s `findRivalOccupant` biases toward an
+      existing grudge target, `herdConflictChance` gains a
+      `HERD_CONFLICT_GRUDGE_SCALE` = 0.4 re-escalation bonus).
+- [x] 20 new engine tests, all 745 engine tests passing including
+      determinism.test.ts unmodified. Real 5000-8000-tick runs (seeds 42, 7,
+      20260903) confirm the graph stays genuinely bounded (max 9 edges on
+      any one agent across all three runs, cap of 16 never actually reached)
+      and both consumers do real, measurable work — see DESIGN.md's
+      "Rapport" section for the full numbers.
+- [ ] **Honest finding, not a bug in this feature**: `foodDelivered` fired
+      0-1 times total across all three 8000-tick validation runs —
+      `applyHerdSupport`'s own real-run gate (well-fed, non-threatened,
+      carry headroom, a hungry herd-mate in range) is apparently rare to
+      satisfy in this sim's actual population dynamics. Bonding and
+      herd-clash are this graph's two real workhorse triggers in practice,
+      not food delivery. If herd food delivery itself ever gets a real-run
+      tuning pass to fire more often, this rapport channel gets more real
+      signal for free — not something to chase specifically for rapport's
+      sake.
+- [ ] **Open follow-up, not done**: extend rapport into natal dispersal — an
+      agent with strong existing bonds inside its herd should plausibly
+      resist leaving (a real discount on `dispersal.ts`'s own trigger
+      chance/threshold), the mirror of what this pass already did for mate
+      preference.
+- [ ] **Open follow-up, not done**: egg-defense willingness scaling with
+      rapport toward the egg's other parent/herd-mates — not attempted this
+      pass; `applyEggDefense`'s current model is unconditional ("defend to
+      death") regardless of any relationship.
+- [ ] **The actual next step this foundation exists for, per direct
+      discussion with the user**: the eventual player-as-a-node recruitment
+      mechanic — a player builds real rapport with individual agents (the
+      same graph, the player just becomes another id it can hold edges
+      toward), and which specific herd members actually want to join a
+      player's team depends on that real relationship, not just herd
+      membership. Explicitly NOT built in this pass — no player/UI concept
+      exists in this codebase yet. This TODO entry is the flagged
+      breadcrumb for when that work starts; see also the "Player / bonding
+      (deprioritized until sim depth lands)" section above, which this
+      eventually supersedes/merges into once real UI work begins.

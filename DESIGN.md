@@ -8203,3 +8203,326 @@ real runs tested, honestly, it does.
   pick real, needle-moving levers rather than touch every one offered, and
   the comfort-discount + build-speed pair was judged sufficient and was
   validated as such.
+
+## Rapport: a real agent-to-agent relationship graph — the foundation for future player recruitment
+
+Direct, explicit framing from the user: a future evolution of this project
+from a pure ecosystem sim into a real game where a player recruits
+individual Pokémon by building rapport with them — a herd becomes the
+player's team, but which specific individuals actually want to join depends
+on a real relationship, not just herd membership. Direct quote on priority:
+"I think it's the most important thing right now." This section is
+deliberately scoped to the general, in-sim, **agent-to-agent** foundation
+only — no player/UI concept exists in this codebase yet, and none is built
+here. The point of building it now, before any player-facing mechanic
+exists, is that the general relationship graph needs to already be a real,
+mechanically load-bearing part of the sim (not a UI-only stat invented later
+purely to serve recruitment) — the same reasoning this codebase has already
+applied to herd status, disposition, and herd conflict: a system a future
+feature can plug into is only trustworthy if it's already doing real work on
+its own.
+
+### Decided
+
+1. **Sparse, not a dense matrix.** `Agent.rapport?: Record<string,
+   RapportEdge>` (types.ts), keyed by the OTHER agent's id —
+   `RapportEdge = { score: number; lastInteractionTick: number }`. Absence
+   means neutral/unacquainted, not a stored zero: most agents in a real run
+   never interact with most other agents, so most pairs should cost nothing
+   at all, the same "don't store what nothing has touched" instinct behind
+   every other optional field on `Agent`. Score ranges **-1 to 1** —
+   deliberately signed, not a plain friendship counter, so the same
+   structure represents both a real bond (`bonded`, food delivery,
+   mob-defense — all positive) and a real grudge (`herdClash` — negative).
+2. **Lazy, read-time decay, not a per-tick global sweep.** `rapport.ts`'s
+   `decayedRapportScore(edge, tick)` computes `edge.score *
+   RAPPORT_DECAY_PER_TICK ** (tick - edge.lastInteractionTick)` — pure
+   arithmetic, no stored intermediate state, evaluated fresh every time a
+   consumer reads an edge (`rapportScore`) or a trigger touches one
+   (`adjustRapport`). This is the same "computed from elapsed ticks on
+   read/touch" shape `Tile.grazingPressure`'s decay established, chosen
+   specifically *instead of* an actively-ticked-every-agent-every-tick sweep
+   (the way `Agent.herdConflictCooldownTicks`/`digestingTicksRemaining` are
+   ticked down inside `tickAgentNeeds`) for a structural reason:
+   `grazingPressure` and the cooldown counters all live on a value already
+   being visited by an existing per-tick scan (the tile grid, or the acting
+   agent's own needs tick) — decaying them costs nothing extra. A
+   relationship graph has no such free ride: decaying every edge of every
+   agent every tick would mean a new O(agents × edges) pass with no existing
+   scan to piggyback on, purely to keep values fresh that mostly nothing is
+   reading on most ticks. Lazy, read-time decay means the cost is paid
+   exactly when (and only when) an edge is actually consulted or touched —
+   the "cheaper than a per-tick global sweep" call the task brief itself
+   flagged as the likely right shape.
+   - `RAPPORT_DECAY_PER_TICK = 0.9977`, chosen for a ~300-tick half-life
+     (`0.5 ** (1/300) ≈ 0.9977`) — the same order of magnitude as this
+     codebase's other "sustained, not a single bad tick" social/behavioral
+     time constants (`MATE_ISOLATION_TICKS` = 200, `HERD_CONFLICT_COOLDOWN_TICKS`
+     = 80), deliberately much faster than `grazingPressure`'s own decay
+     (0.004/tick, tuned for a totally different multi-hundred-tick
+     food-patch regrowth cycle) — a relationship should survive a herd-mate
+     briefly stepping out of sight, but a genuine multi-hundred-tick dry
+     spell with zero fresh interaction should measurably fade it back toward
+     stranger-neutral.
+3. **Pruned on touch, once decayed below a real threshold — the sparsity
+   guarantee's other half.** `RAPPORT_PRUNE_THRESHOLD = 0.02`: any edge
+   whose |decayed score| falls under this is deleted outright rather than
+   left sitting at a value indistinguishable from "never interacted"
+   forever. Checked both on write (`adjustRapport`, e.g. a strong grudge
+   nudged back toward 0 by later goodwill) and, deliberately, on plain read
+   (`rapportScore` opportunistically deletes a stale edge it discovers has
+   decayed under threshold) — a real edge that nothing ever interacts with
+   again would otherwise never get touched by a write again either, and
+   would sit in the map forever; letting the read path prune too means a
+   pair that simply stops interacting genuinely leaves the sparse structure,
+   not just conceptually.
+4. **A hard cap on edges per agent, independent of decay/pruning.**
+   `RAPPORT_MAX_EDGES_PER_AGENT = 16` — a defensive bound in the same "should
+   never be approached in practice, but bounds the pathological case" role
+   as `SHELTER_CLUSTER_SCAN_CAP`. This matters specifically because decay/
+   pruning alone can't guarantee sparsity under heavy, sustained interaction:
+   a long-lived, stable, socially active herd could in principle accumulate
+   real interaction partners faster than a ~300-tick half-life clears stale
+   ones. `evictWeakestEdge` fires whenever a genuinely *new* partner (not an
+   existing one being adjusted) would push an agent past the cap — it evicts
+   by current decayed |score| first (the least-meaningful relationship to
+   keep), then by staleness (`lastInteractionTick`), then, for a genuine tie
+   on both, by `rng` (always threaded from `world.rng`, never bare
+   `Math.random`, per this codebase's determinism rules — see the note
+   below). Confirmed by a dedicated unit test that this holds even for 20+
+   uniformly strong, uniformly fresh edges (a case decay/pruning would never
+   touch on their own).
+5. **Interaction magnitudes — reusing real, existing trigger events, not
+   inventing new ones.** Every delta below is applied via
+   `strengthenRapportMutual` (both participants' opinion of each other
+   moves, not just one side):
+   - **`RAPPORT_FOOD_DELIVERY_DELTA = 0.03`** — support.ts's
+     `applyHerdSupport`, on a real `foodDelivered` event (carrier and
+     receiver). The smallest magnitude here on purpose: an ordinary,
+     opportunistic errand, not a significant moment — real repetition
+     between the same two individuals is meant to be what eventually adds
+     up to something a consumer actually feels.
+   - **`RAPPORT_MOB_DEFENSE_DELTA = 0.06`** — predation.ts's existing
+     guardian mechanic (`findHerdmateInDanger` inside
+     `applyPredationInstincts`): when a herd-mate actually lands a hit
+     defending another that's currently fleeing/fighting a threat, both come
+     away with a real, positive nudge. Twice the food-delivery magnitude — a
+     real, risk-bearing act (picking a fight with whatever's threatening a
+     herd-mate), not just running food over — but still modest, since a herd
+     with an active predator problem produces many of these between the same
+     pairs over a real run (confirmed below), so repetition still does most
+     of the work here too. (This codebase's other, more literal "mob"
+     mechanic — several prey converging on one predator threat,
+     `mobThreshold`/`countHerdAllies` — was considered as the hook instead;
+     the guardian branch was chosen because it names an explicit, singular
+     "the one defended" `herdmate`, which is the cleaner, more literal match
+     for "the defender(s) and the one defended" than the mob branch's
+     implicit, shared "whoever's nearest to the predator.")
+   - **`RAPPORT_BONDING_DELTA = 0.6`** — reproduction.ts's `applyMateSeeking`,
+     on first real contact (the `bonded` event, gated by
+     `Agent.bondedPartnerId` so it fires exactly once per pair). Deliberately
+     a real, immediate jump, not an incremental nudge: bonding is already a
+     deliberate, rare, significant event with no repetition path of its own
+     (unlike food delivery/mob-defense, which happen repeatedly between the
+     same pair), so the one application has to carry the whole weight of
+     "these two are now mates." 0.6 lands solidly in "clearly a bond"
+     territory on the -1..1 scale without maxing it out outright, leaving
+     room for a bonded pair's later real interactions to push it higher.
+   - **`RAPPORT_HERD_CLASH_DELTA = -0.06`** — herdConflict.ts's
+     `resolveRivalryHit`, applied to exactly the attacker/defender pair (never
+     species- or herd-wide) on a real landed hit (`outcome: "hit"` or
+     `"retreated"` — never `"missed"`, which never actually connected).
+     Magnitude-matched to mob-defense's positive delta (same size, opposite
+     sign): a single clash is a real, felt negative moment, but sustained
+     rivalry between the same specific pair — which the mechanic's own
+     cooldown/re-blocking structure makes likely once two herds keep
+     recontesting the same tile — is what's meant to build a real, escalating
+     grudge, confirmed by a real run below.
+6. **Consumer #1 — mate preference (reproduction.ts).** `mateScore`
+   (`nearestMate`'s ranking function) already composed a real-distance
+   discount for herd status (`STATUS_DISTANCE_BONUS`, from the "Herd status"
+   feature) before this — rapport is added alongside it, in the exact same
+   "discount off effective distance, distance still dominates a real gap"
+   composition, not a parallel mechanism:
+   `distance - statusAdvantage*STATUS_DISTANCE_BONUS -
+   rapportAdvantage*RAPPORT_DISTANCE_BONUS`. `RAPPORT_DISTANCE_BONUS = 3`
+   (slightly above `STATUS_DISTANCE_BONUS`'s 2) — a real, earned relationship
+   is judged a somewhat stronger signal than relative herd rank, but both
+   stay small next to `mateSearchRadius`'s ~3-7 tile range, so this still
+   only ever tips a close call, never overrides a genuine distance gap. Only
+   the *positive* half of rapport attracts here (`rapportAdvantage` clamps
+   negative scores to 0) — a grudge doesn't repel mate choice on its own,
+   that's the herd-conflict consumer's job, not this one's.
+7. **Consumer #2 — herd-conflict targeting/escalation (herdConflict.ts).**
+   Two real behavioral hooks, both biased by `rapportScore(agent, rival.id,
+   ...)`:
+   - **Targeting**: `findRivalOccupant` (which of possibly several eligible
+     occupants at the contested tile becomes the fight target) now scores
+     candidates the same "distance minus a scaled discount" way `mateScore`
+     already established — `dist - grudge*RAPPORT_TARGET_BIAS_TILES`
+     (`RAPPORT_TARGET_BIAS_TILES = 1`), so a specific individual with an
+     existing grudge is preferred over a merely-nearer stranger at
+     `RIVAL_DETECT_RADIUS`'s tight 1-tile range.
+   - **Escalation chance**: `herdConflictChance` gains a
+     `HERD_CONFLICT_GRUDGE_SCALE = 0.4` term — at a full -1.0 grudge, the
+     per-tick escalation roll gets the same order-of-magnitude boost as full
+     boldness+aggression (`HERD_CONFLICT_DISPOSITION_SCALE`, also 0.4) — a
+     real grudge is meant to be a comparably strong driver of re-escalating a
+     fight as raw disposition, not a token nudge. Only the negative half of
+     rapport biases this (a positive relationship never suppresses
+     escalation below the plain disposition-driven baseline) — this consumer
+     is specifically about grudges, the mirror of consumer #1 being
+     specifically about bonds.
+
+### Built, real-run findings
+
+`packages/engine/src/rapport.ts` (new module, the data structure/decay/
+prune/cap plus the tuning constants above) and small hooks at each of the
+four trigger sites plus the two consumer sites listed above. 20 new engine
+tests (`rapport.test.ts`) cover: absence reads as neutral (no stored zero);
+clamping to [-1, 1]; representing both a bond and a grudge on the same
+structure; `decayedRapportScore`'s pure elapsed-ticks decay; pruning on both
+write and read once decayed under threshold; the hard cap holding with real
+eviction, including the "cap holds even before decay/pruning would have
+helped" case (all-fresh, all-strong edges); rng-determinism of the eviction
+tie-break under a genuine tie, given the same seeded `world.rng`; each of
+the four real triggers (food delivery, bonding, joint mob-defense, herd
+clash) actually creating/strengthening the right edge on the right pair
+(and, for herd clash, explicitly confirming an uninvolved same-herd
+bystander is untouched — never a herd/species-wide effect); a real
+behavioral mate-preference test (an otherwise-identical setup, isolated from
+`STATUS_DISTANCE_BONUS`'s own confound by using solitary candidates, flips
+from preferring a nearer stranger to preferring a farther bonded candidate
+purely because of the rapport edge); and two real herd-conflict behavioral
+tests (the *exact same* rng roll flips from refusing to accepting a fight
+purely because of an added grudge edge; and targeting a specific grudge
+individual over an equally-near stranger). All 745 engine tests pass,
+including the unmodified `determinism.test.ts` acceptance test — this
+feature's only new randomness (the eviction tie-break) is threaded from
+`world.rng` at every real call site, and a same-seed-twice full `tickWorld`
+run (verified separately at the runner level, 3000 ticks, seed 42) produces
+a byte-identical event log.
+
+**Real 5000-8000-tick runs, the three standard seeds (42, 7, 20260903),
+feature on** — the graph-size/bounding question first, since a brand-new
+per-agent structure is a real performance risk if it isn't actually kept
+sparse:
+
+| seed | ticks | living agents (end) | total rapport edges (end) | max edges on any one agent (end) | max edges on any one agent (peak, whole run) |
+|---|---|---|---|---|---|
+| 42 | 8000 | 13 | 8 | 2 | 5 |
+| 7 | 8000 | 15 | 27 | 9 | 9 |
+| 20260903 | 8000 | 60 | 99 | 7 | 7 |
+
+The cap (16) was never actually reached by any agent in any of these three
+runs — decay + pruning kept the structure genuinely sparse on their own at
+this population scale, exactly as intended; the cap's own dedicated unit
+test (not a real run) is what actually exercises eviction. Total edge count
+tracks population size roughly linearly (seed 20260903's population of 60
+carries about 1.65 edges/agent on average, seed 7's 15 carries 1.8/agent) —
+no runaway growth over the run in any seed (seed 42's edge count peaks at 19
+around tick 4500 then *falls* to 8 by tick 8000 as agents die/edges decay,
+which is exactly the intended shape, not a leak).
+
+**Trigger frequency, honestly reported — one channel barely fires in a real
+run**: across the three runs, `bonded` fired 14-55 times and `herdClash`
+fired 6-26 times (hit+retreated+missed combined) — both real, frequent
+drivers of the graph. `foodDelivered`, by contrast, fired 0-1 times total
+across all three 8000-tick runs — the existing `applyHerdSupport` mechanic's
+own real-run gate (a well-fed, non-threatened herd-mate with carry headroom
+noticing a hungry ally within `HERD_SUPPORT_RADIUS`) is apparently rare to
+actually satisfy in this sim's real population dynamics, independent of
+anything this feature added. This is reported honestly rather than
+papered over: `RAPPORT_FOOD_DELIVERY_DELTA` is real and correctly wired
+(confirmed by its own unit test), but in practice, bonding and herd-clash
+are this graph's two real workhorse triggers in an actual run, not food
+delivery — a genuine finding about this sim's existing food-delivery
+mechanic, not a bug in this feature.
+
+**Consumer #1 (mate preference) — a real, if seed-variable, effect**: of
+matings (`bonded` events) where a rapport edge already existed between the
+two individuals *before* that tick's bonding call (i.e. they'd already
+interacted — via food delivery or mob-defense — as ordinary herd-mates
+before pairing up), compared against an honest "pure chance" baseline (the
+background density of positive rapport edges among all living agents at
+that moment — roughly what fraction of any two random agents would already
+hold one):
+
+| seed | matings with pre-existing positive rapport | background chance baseline |
+|---|---|---|
+| 42 | 0/14 (0%) | 5.1% |
+| 7 | 4/21 (19.0%) | 8.1% |
+| 20260903 | 11/55 (20.0%) | 2.2% |
+
+Two of three seeds show a real, meaningfully-above-baseline rate (roughly
+2.3x and 9x the background chance), one seed shows none at all — read
+honestly as genuine seed-to-seed variance at this sample size (14-55
+matings per run is not a lot to detect a modest effect), not oversold as a
+uniform win. The clean, unconfounded proof this consumer does real work is
+the dedicated behavioral unit test above (an otherwise-tied setup flips
+choice purely on the rapport edge, isolated from every other scoring
+signal) — the real-run numbers are supporting, directionally-consistent
+color on top of that, not the primary evidence.
+
+**Consumer #2 (herd conflict) — real re-escalation between the same pairs
+shows up in every run with any clashes at all**: of the distinct
+attacker/defender pairs that ever landed a real clash hit, the fraction that
+clashed more than once (a real repeat, i.e. the exact re-escalation this
+consumer is meant to make more likely) was 2/4 (seed 42), 6/11 (seed 7), and
+4/10 (seed 20260903) — roughly half of all real clash pairs in every run
+that had any. This alone isn't clean proof of the grudge mechanism
+specifically (two herds recontesting the same crowded tile would tend to
+re-meet the same rival somewhat even without any rapport bias, since
+`herdConflict.ts`'s own trigger structure — sustained blocking at the same
+tile — naturally recreates the same standoff), so, as with consumer #1, the
+clean unconfounded proof is the dedicated unit test: the *exact same* rng
+roll that fails against a stranger succeeds against the identical rival once
+a strong existing grudge is added, and, separately, a grudge individual is
+chosen as the fight target over an equally-near stranger. The real-run
+repeat-pair rate is honest, real-run color confirming the mechanism has
+somewhere to act (rivalries do recur), not the isolated proof of the bias
+itself.
+
+**A real, isolated A/B was attempted and explicitly discarded as
+unreliable, consistent with this file's own established standard** (see the
+"Herd conflict" section's own identical finding): temporarily zeroing
+`RAPPORT_DISTANCE_BONUS` and `HERD_CONFLICT_GRUDGE_SCALE` and re-running the
+same three seeds produced wildly different downstream population/event
+counts on two of the three seeds (e.g. seed 20260903: 55 bondings/60 living
+agents with the feature at full strength vs. 16 bondings/23 living agents
+with it zeroed) — not because either flag directly consumes extra rng
+draws (both are pure, no-rng arithmetic comparisons), but because changing
+*which specific individual gets chosen as a mate or a rival* is itself a
+real, cascading change to simulation state (a different pairing produces
+different agents in different places doing different things every following
+tick), the same "a small deterministic change early cascades into a
+completely different trajectory" dynamic this file has already documented
+for `herdConflict.ts` and the tile-capacity tightening. Single-seed A/B
+is not a trustworthy signal for this kind of change; the trustworthy
+evidence is the structural guarantee (the dedicated, unconfounded behavioral
+unit tests) plus the honest, seed-variable real-run distribution reported
+above.
+
+### Explicitly not done here (see TODO.md)
+
+- Nothing player-facing. This section is the general, in-sim,
+  agent-to-agent foundation only, built specifically because the user named
+  a future player-recruitment mechanic (a herd becomes the player's team,
+  but which individuals actually want to join tracks a real relationship,
+  not just herd membership) as the current top priority — but no player/UI
+  concept exists in this codebase yet, and none is built here. The natural
+  extension point, when that work starts, is treating the player as just
+  another node this same graph can hold an edge toward.
+- No extension of rapport into natal dispersal (an agent resisting leaving
+  behind a herd it has strong existing bonds to), egg-defense willingness
+  scaling with rapport toward the egg's other parent, or any other existing
+  mechanic beyond the two consumers built here — real, scoped follow-ups,
+  not attempted in this pass (see TODO.md).
+- No new `SimEvent` kind for a rapport change itself (no `rapportChanged`
+  narration) — every trigger already narrates its own real event
+  (`foodDelivered`/`bonded`/`herdClash`/the guardian fight's own `"fought"`),
+  and this feature deliberately reuses those rather than adding a second,
+  parallel log entry for the same real moment. A UI/narrator surfacing an
+  agent's rapport standing directly (e.g. an inspector panel showing "close
+  bonds"/"grudges") is a real, separate follow-up, not attempted here —
+  `packages/web` was out of scope for this task.
