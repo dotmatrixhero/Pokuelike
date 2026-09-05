@@ -11090,3 +11090,58 @@ standard seeds completes with no crashes.
 New worldgen tests (non-trivial floor/wall mix, single-connected-region
 guarantee across seeds, canopy-untouched, determinism). Full engine (898
 tests) and data-package suites green.
+
+## Subtle rendering: low elevation darker, deep water darker
+
+Direct ask: "tiles with lower elevation are darker. Water that's deep is
+darker... subtle stuff, not too over the top." Two small, purely-cosmetic
+tweaks, same "no gameplay signal, no dedicated test suite, verified by
+typecheck + a real numeric/visual check" treatment this file's own "Silly
+simulated lighting stuff" section already established as this codebase's
+way of validating decorative-only rendering changes.
+
+**Elevation**: `shade()` (`packages/web/src/palette.ts`, mirrored by hand in
+`packages/runner/src/ascii.ts` per that pair's existing "keep in sync"
+convention) used to only ever lighten toward white as elevation rises,
+capped at 0.35 — elevation 0 (the map's most common value: most Wetland/
+Grassland/Badlands terrain sits under ~1, per `worldgen.ts`'s `BIOMES`) read
+as perfectly neutral, no shading at all. Now it's two symmetric halves: at
+or above 0.3 elevation, byte-for-byte the same lighten-toward-white behavior
+as before (zero regression for Highland peaks or anything else that already
+read as "high ground"); below 0.3, a new, smaller (capped 0.12, vs. the
+existing 0.35 lighten cap — "subtle" was explicit) darken toward black as
+elevation drops toward 0.
+
+**Water depth**: there's no real per-tile water depth concept in this
+engine — every water tile's elevation is permanently forced to 0
+(`generateWorld`/`advanceWaterCycle` both call this out: "a lakebed is
+flat, not textured by the elevation field"), so plugging water into the
+same elevation formula above would just apply one flat darken to literally
+all water uniformly, a puddle indistinguishable from an ocean. Used
+`waterBody.ts`'s connected-component body *size* instead — the actual
+signal this codebase already has for "how big/deep-feeling a body of water
+is" (the same one `isLargeWaterBody`/`canEnterWater` use) — newly exported
+from the engine's public `index.ts` (`waterBody.ts` was previously
+internal-only). `waterDepthFactor(world, pos)` normalizes size against a
+60-tile cap (well above `LARGE_WATER_BODY_MIN_SIZE`'s 12-tile "real lake"
+threshold, so only a genuinely large lake/ocean reaches full darkening) and
+`waterDepthShade` mixes toward black by up to 0.22 at that cap. The web
+tile-sprite render mode draws real water art (`getWaterInterior`/
+`getWaterEdge`), not a flat fill `shade`/`waterDepthShade` could tint
+directly, so that path composites its own translucent black overlay at the
+same `depthFactor * WATER_DEPTH_DARKEN_MAX` instead — same constant, same
+feel, different mechanism, since there was no flat color to mix there.
+
+Verified numerically on 3 seeds (42/7/20260903) rather than just by
+eyeballing an ANSI dump: a lone 1-tile puddle rendered at `[12,45,74]`
+(exactly the base water color — `depthFactor` ~0.017, invisible, correctly
+"barely darkened") next to the map's largest water body (1355-2353 tiles
+across the 3 seeds, every one comfortably over the 60-tile cap) rendering at
+`[9,35,58]` — exactly the math's own prediction (each channel × 0.78) at
+full `depthFactor = 1`. Elevation: the lowest-elevation floor tile on each
+seed (~0.09-0.13) rendered visibly darker (`[20,22,27]`-`[21,22,27]`) than
+the base floor color (`[22,24,29]`), the highest-elevation floor tile
+visibly lighter (`[49,51,55]`-`[56,58,62]`), confirming both halves of the
+new `shade()` fire correctly and land in the intended subtle range. Full
+engine/data suites (898 + 19 tests) and a full `pnpm -r typecheck` stay
+green — this change touches no simulation logic, only render-time color math.
