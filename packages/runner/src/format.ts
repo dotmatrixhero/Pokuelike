@@ -108,6 +108,18 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) now leads herd ${event.herdId}${event.previousLeaderId ? `, taking over from ${event.previousLeaderId}` : ""}`;
     case "leadershipLost":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) no longer leads herd ${event.herdId} (${event.reason})`;
+    case "regionDemoted": {
+      const counts = Object.entries(event.speciesCounts).map(([species, count]) => `${species}: ${count}`).join(", ");
+      return `[tick ${event.tick}] region ${event.regionId} demoted to abstract (${counts || "no living population"})`;
+    }
+    case "regionPromoted":
+      return `[tick ${event.tick}] region ${event.regionId} promoted to full sim (${event.agentIds.length} individuals invented)`;
+    case "regionPopulationBoom":
+      return `[tick ${event.tick}] region ${event.regionId}'s ${event.species} population is booming (~${event.population})`;
+    case "regionDieOff":
+      return `[tick ${event.tick}] region ${event.regionId}'s ${event.species} population is dying off (~${event.population})`;
+    case "regionEmigrated":
+      return `[tick ${event.tick}] ~${event.population} ${event.species} emigrated from region ${event.fromRegionId} to region ${event.toRegionId}`;
   }
 }
 

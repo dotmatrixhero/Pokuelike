@@ -178,6 +178,18 @@ export function formatEvent(event: SimEvent, world?: World): string {
     }
     case "leadershipLost":
       return `${idLabel(world, event.agentId, event.species)} no longer leads its herd (${event.reason})`;
+    case "regionDemoted": {
+      const counts = Object.entries(event.speciesCounts).map(([species, count]) => `${species}: ${count}`).join(", ");
+      return `region ${event.regionId} demoted to abstract (${counts || "no living population"})`;
+    }
+    case "regionPromoted":
+      return `region ${event.regionId} promoted to full sim (${event.agentIds.length} individuals invented)`;
+    case "regionPopulationBoom":
+      return `region ${event.regionId}'s ${event.species} population is booming (~${event.population})`;
+    case "regionDieOff":
+      return `region ${event.regionId}'s ${event.species} population is dying off (~${event.population})`;
+    case "regionEmigrated":
+      return `~${event.population} ${event.species} emigrated from region ${event.fromRegionId} to region ${event.toRegionId}`;
   }
 }
 
@@ -215,6 +227,10 @@ export const STORY_KINDS = new Set<SimEvent["kind"]>([
   "eggDefended",
   "titleClaimed",
   "leadershipClaimed",
+  "regionPromoted",
+  "regionDemoted",
+  "regionPopulationBoom",
+  "regionDieOff",
 ]);
 
 /**
@@ -256,6 +272,10 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
   // down is the mirror image of `leadershipClaimed` (already a STORY_KINDS
   // moment), not its own second headline.
   "leadershipLost",
+  // The abstract tier's cheap population-transfer roll (overworld.ts's
+  // `maybeEmigrate`) — real, but routine background-region bookkeeping, not
+  // a moment involving any individual the player has ever seen.
+  "regionEmigrated",
 ]);
 
 /**
@@ -271,7 +291,18 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
 // "immigrated" is a population-shaping event, same category as
 // "born"/"evolved" — a new headline-worthy way the population changes, not
 // a routine per-tick occurrence like "consumed"/"behaviorChanged".
-export const HEADLINE_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "starved", "diedOfAge", "evolved", "immigrated", "eggHatched"]);
+export const HEADLINE_KINDS = new Set<SimEvent["kind"]>([
+  "born",
+  "killed",
+  "defeated",
+  "starved",
+  "diedOfAge",
+  "evolved",
+  "immigrated",
+  "eggHatched",
+  "regionPromoted",
+  "regionDemoted",
+]);
 
 export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   born: "\u{1F423}", // hatching chick
