@@ -396,24 +396,15 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
   if (sprite) {
     // Bigger than one tile (see SPRITE_SCALE) and bottom-anchored so the
     // sprite's feet sit on its actual tile instead of the whole thing being
-    // centered/squished into TILE_SIZE.
+    // centered/squished into TILE_SIZE. No canvas mirroring needed — see
+    // getSprite's doc comment: "_left"/"_right" are genuine, correctly
+    // mirrored art once you load the (swapped) right file for each
+    // direction, so the plain source image is already correctly oriented.
     const w = TILE_SIZE * SPRITE_SCALE;
     const h = TILE_SIZE * SPRITE_SCALE;
     const dx = px + TILE_SIZE / 2 - w / 2;
     const dy = py + TILE_SIZE - h;
-    if (direction === "right") {
-      // getSprite already resolved "right" to the same "_left" art (see its
-      // doc comment — the ripped "_right" frame isn't actually mirrored) —
-      // flip it here via a canvas transform to get a real rightward-facing
-      // sprite instead of one that's still visually facing left.
-      ctx.save();
-      ctx.translate(dx + w, dy);
-      ctx.scale(-1, 1);
-      ctx.drawImage(sprite, 0, 0, w, h);
-      ctx.restore();
-    } else {
-      ctx.drawImage(sprite, dx, dy, w, h);
-    }
+    ctx.drawImage(sprite, dx, dy, w, h);
   } else {
     const primaryType = agent.types?.[0];
     const fill = isCorpse ? [90, 90, 90] : primaryType ? TYPE_COLOR[primaryType] : ([200, 200, 200] as const);

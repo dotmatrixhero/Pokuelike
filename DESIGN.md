@@ -8673,22 +8673,34 @@ above) rather than centered in the box — the natural way an overworld sprite
 larger than its tile is normally drawn. A first-guess constant, not derived
 from anything; retune if it still reads wrong once watched for real.
 
-**Real facing-mirror bug, found and fixed.** Checked visually (via a real
-headless-browser screenshot comparison, not assumption) across several
-species — pikachu, charizard, squirtle: the ripped `_right.png` sprite frame
-for every species is *not* actually mirrored from `_left.png`, it's the same
-left-facing pose duplicated into the wrong slot. An agent walking right was
-visually still facing/leading with its left side. Fix, in two files:
-- `sprites.ts`'s `getSprite` now resolves `direction: "right"` to the same
-  `_left` image entirely (the broken `_right` asset is never loaded at all
-  any more).
-- `renderer.ts`'s `drawAgent` draws that image through a canvas
-  `translate`+`scale(-1, 1)` transform when the agent's real facing is
-  `"right"`, producing a genuinely mirrored, correctly-oriented sprite.
-  Verified directly: a synthetic canvas test drawing `charmander_left.png`
-  both plain and through this exact transform side by side confirmed the
-  flipped copy has its snout on the right and tail/flame trailing left —
-  the mirror is correct, not just "different."
+**Real facing-mirror bug, found and fixed — twice, the first pass was wrong.**
+First pass judged `_left.png`/`_right.png` from tiny, chat-scaled thumbnails
+and concluded they were duplicates of the same left-facing pose; the "fix"
+was to always load `_left` and mirror it via a canvas transform for
+`"right"`. Direct follow-up report: "still see them walking backwards a
+lot." Re-checked properly this time — real 10x-upscaled crops via a local
+Python/Pillow script, not chat thumbnails — and the first read was simply
+wrong: `_left.png` and `_right.png` are genuine, correctly hand-drawn mirror
+images of each other (confirmed on pikachu and charizard: `_left.png`'s
+eye/snout sits on the image's *right* side, `_right.png`'s sits on the
+*left* — i.e. the files are real art, just swapped relative to their
+filenames). The old canvas-mirror "fix" therefore made things consistently
+backwards in *both* directions (loading the right-facing `_left` file
+unflipped for `"left"`, and flipping it — producing left-facing art — for
+`"right"`). Real fix, simpler than the first attempt:
+- `sprites.ts`'s `getSprite` now swaps which file loads for which
+  direction: `"left"` loads `_right.png`, `"right"` loads `_left.png`
+  (up/down untouched). No canvas transform involved at all — the art was
+  never broken, just mislabeled.
+- `renderer.ts`'s `drawAgent` dropped the `translate`+`scale(-1, 1)` mirror
+  transform entirely — drawing the resolved image directly is correct now.
+- Verified directly: a browser test loading `pikachu_right.png` for
+  direction `"left"` and `pikachu_left.png` for direction `"right"` side by
+  side confirmed each faces the correct way with zero transform applied.
+
+Lesson for next time: judge sprite orientation from a real upscaled crop,
+never a small chat-rendered thumbnail — the first pass's entire
+misdiagnosis traced back to that one shortcut.
 
 **Muted plant tiles, matching ASCII.** The tile-style renderer used to fill
 an entire food/flora/seedling tile with a near-solid wash of its flavor's

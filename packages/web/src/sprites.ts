@@ -41,14 +41,17 @@ function loadSprite(cacheKey: string, src: string): HTMLImageElement | null {
 }
 
 export function getSprite(spriteKey: string, direction: SpriteDirection = "down"): HTMLImageElement | null {
-  // Real finding, checked visually across several species (pikachu,
-  // charizard, squirtle): the ripped "_right.png" frame isn't actually
-  // mirrored from "_left.png" — it's the same left-facing pose again, just
-  // duplicated into the wrong slot. Rather than trust that broken asset,
-  // "right" always resolves to the same canonical "_left" image; the
-  // renderer (see drawAgent in renderer.ts) draws it flipped horizontally
-  // via a canvas transform to get an actually-rightward-facing sprite.
-  const resolvedDirection = direction === "right" ? "left" : direction;
+  // Real finding, checked at full resolution (a first pass mistakenly
+  // judged these from tiny scaled-down thumbnails and got it backwards —
+  // see DESIGN.md): "_left.png" and "_right.png" ARE genuine, correctly
+  // hand-drawn mirror images of each other — they're just swapped.
+  // "_left.png" actually depicts the pose facing right (eye/snout on the
+  // image's right side), "_right.png" actually depicts the pose facing
+  // left. Confirmed on pikachu and charizard at 10x scale. So the fix is
+  // just swapping which file loads for which requested direction — no
+  // canvas mirroring needed, the art is already correct once you ask for
+  // the right file.
+  const resolvedDirection = direction === "left" ? "right" : direction === "right" ? "left" : direction;
   const direct = loadSprite(`${spriteKey}_${resolvedDirection}`, `/sprites/${spriteKey}_${resolvedDirection}.png`);
   if (direct) return direct;
   if (resolvedDirection === "down") return null;
