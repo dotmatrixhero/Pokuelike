@@ -6745,6 +6745,27 @@ left as an open, explicitly-flagged question rather than papered over.
   rng-cascade-sensitivity reason explained above. The dedicated stress
   scenarios are the trustworthy evidence in the meantime.
 
+### Follow-up: more starting predators (direct ask)
+
+The gap flagged above — "seeding 2+ of each predator species... would give
+this feature a fairer shot" — acted on directly: `createDemoWorld` now
+starts with 4 Scyther (was 1) and 3 Onix (was 1), specifically so pack
+hunting has real conspecifics to muster from tick 1. Predators have no
+species allowlist for prey (`isPreyOf` is pure relative-power, no fixed
+prey list) — confirmed they'll opportunistically go after Charmander/
+Squirtle too, same as any other sufficiently weak nearby agent.
+
+**Real-run findings, honest:** a 3000-tick, 3-seed check shows real
+improvement on one seed but not the others — seed 42: `packHunt` fired 24
+times, 2 Scyther survived to the end (previously this species usually died
+out entirely); seeds 7 and 20260903: both Scyther and Onix still ended at
+0 living, `packHunt` never fired at all. More starting predators gives the
+mechanism real material to work with sometimes, but doesn't fix the
+underlying fragility on its own — consistent with, not a resolution of,
+the predator-population-fragility finding above. All 710 engine tests
+pass including the unmodified determinism test (a pure scenario-data
+change, no engine logic touched).
+
 ## Tile preference: satisfied idle agents gravitate toward their species' natural terrain
 
 Direct ask, verbatim: "Like tile pref. Like bulbasaur should strongly
