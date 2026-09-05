@@ -1,0 +1,46 @@
+name: Deploy web to Cloudflare Pages
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "packages/web/**"
+      - "packages/engine/**"
+      - "packages/data/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web app
+        run: pnpm --filter @pokuelike/web build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: pokuelike
+          directory: packages/web/dist
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
