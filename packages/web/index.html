@@ -109,19 +109,34 @@
         border-radius: 6px;
       }
       .region-card {
-        flex: 1 1 140px;
-        min-width: 130px;
+        flex: 1 1 190px;
+        min-width: 180px;
+        max-width: 220px;
         border: 1px solid var(--panel-border);
         border-radius: 5px;
-        padding: 7px 10px;
+        padding: 7px;
         cursor: pointer;
         background: #1b2129;
         display: flex;
         flex-direction: column;
-        gap: 3px;
+        gap: 4px;
       }
       .region-card:hover { background: #232b36; }
       .region-card.region-card-focused { border-color: var(--accent); background: #1a2740; cursor: default; }
+      /* The actual "zoom out to see the bigger picture" view — real
+         terrain, one canvas pixel per tile, upscaled crisp (not blurred)
+         via image-rendering. A click anywhere on the card (thumbnail
+         included) selects that zone — see overworldMap.ts's own doc
+         comment for why this replaced a plain color-swatch card. */
+      .region-card-thumb {
+        width: 100%;
+        aspect-ratio: 3 / 2;
+        image-rendering: pixelated;
+        border-radius: 3px;
+        border: 1px solid var(--panel-border);
+        display: block;
+      }
+      .region-card.region-card-focused .region-card-thumb { border-color: var(--accent); }
       .region-card-title { font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
       .region-card-badge { font-size: 9.5px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
       .region-card-stat { font-size: 11px; color: var(--text-dim); }

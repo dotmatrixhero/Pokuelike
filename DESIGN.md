@@ -11578,3 +11578,46 @@ Honestly out of scope for this pass, real follow-ups:
   (`regionCrossed`/`regionEmigrated`) actually happening between cards
   (e.g. an animated pulse along a connector) — they're visible in the event
   log/Inspector, but not on the region-graph strip itself.
+
+## Overworld visualization v2: real terrain thumbnails, not data cards
+
+Direct follow-up feedback on the first overworld visualization pass: "I
+kinda thought overworld would be it's own tileset we can zoom out to...
+that it would have it's own renderer, and it could help us to see the
+bigger picture and select a zone...? But it seems like you just have three
+zones in an array." Fair and accurate — the first pass was a horizontal
+strip of plain data cards (population numbers, species chips), not
+anything you could call a map.
+
+Fixed by giving each region card a real, zoomed-all-the-way-out satellite
+view of its own actual generated terrain (`overworldMap.ts`'s new
+`drawRegionThumbnail`): one canvas pixel per tile (reusing the exact same
+`TERRAIN_BG`/`shade` palette the full tile renderer already derives its
+colors from, so a region's minimap and its drilled-in view always agree on
+what a biome looks like), upscaled crisp via `image-rendering: pixelated`
+rather than blurred. Every living agent gets its own bright, type-colored
+single pixel on top of the terrain — real population presence/clustering
+visible at a glance, not a fabricated icon. A demoted (abstracted) region's
+thumbnail correctly shows its real frozen terrain with zero population
+dots, since `demoteRegion` genuinely empties `world.agents` — nothing false
+to plot, an honest reflection of the lossy abstraction.
+
+This is deliberately NOT a fabricated macro-map with invented geographic
+coordinates — the region graph has no spatial layout data at all (just a
+chain topology), so a card strip with connectors remains the honest layout;
+what changed is that each "zone" is now a real rendering of that region's
+actual world instead of a text summary standing in for one. Clicking
+anywhere on a thumbnail (unchanged click-to-focus wiring from the first
+pass) is now genuinely "selecting a zone" on something that looks like a
+zone.
+
+Confirmed live in the browser: both region-a and region-b's thumbnails
+correctly showed their own distinct real terrain (different lake shapes,
+different biome color distributions — two different seeds, exactly as
+`overworldScenario.ts`'s `OVERWORLD_REGION_SEEDS` intends), with visible
+colored agent dots on the focused one; clicking region-b's thumbnail
+switched focus and its dots/population count updated to match the real
+promoted individuals. No console/page errors. Full engine test suite
+unaffected (packages/web-only change; one unrelated pre-existing flaky
+`eggs.test.ts` failure reproduced in isolation on the pre-change code too,
+confirmed not a regression), typecheck clean, build succeeds.
