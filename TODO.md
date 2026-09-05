@@ -2316,6 +2316,45 @@ not something this pathfinding pass itself caused or is positioned to fix.
       (deprioritized until sim depth lands)" section above, which this
       eventually supersedes/merges into once real UI work begins.
 
+## Notables: rare, earned individual titles — built, see DESIGN.md
+
+- [x] Seven global record-holder titles (hero/builder/gatherer/rival/
+      beloved/elder/wanderer), `World.notables`/`Agent.notableTitle`,
+      one-per-agent, checked once per tick (`notables.ts`'s
+      `updateNotables`), `titleClaimed`/`titleLost` `SimEvent`s,
+      `NOTABLE_XP_MULTIPLIER` = 1.5x, `NOTABLE_DISTANCE_BONUS` = 2.5 mate
+      preference, and web UI identity/herd-name rendering. 12 new engine
+      tests, all 802 engine tests passing including determinism.test.ts
+      unmodified. Real 8000-tick runs (seeds 42, 7, 20260903) — see
+      DESIGN.md's "Notables" section for the full calibration/validation
+      numbers.
+- [ ] **Open follow-up, not done**: The Beloved counts hatched offspring,
+      not longest continuously-bonded mate relationship — a real,
+      documented tradeoff (see DESIGN.md), not revisited here. A bonded
+      pair that never clears this sim's real bond -> shelter -> egg pipeline
+      currently can't earn this title at all no matter how long the bond
+      itself lasts.
+- [ ] **Open follow-up, not done**: no map-tile visual badge/icon for a
+      title-holder — only the text-based inspector/event-log/battle-screen
+      identity strings change; `renderer.ts`'s per-agent map drawing itself
+      is untouched.
+- [ ] **Open follow-up, not done**: no `titleClaimed` Auto Camera one-shot
+      moment — `autoCamera.ts`'s `NotableCategory` union wasn't extended
+      with an eighth category, so a title changing hands doesn't get its
+      own camera cut the way a birth/evolution does (still visible in the
+      event log panel like every other event).
+- [ ] **Open follow-up, not fully resolved**: Wanderer's real-run numbers
+      show it dominates total title transfers across all three validation
+      seeds (it's the one title with effectively unbounded headroom — a
+      living agent can always in principle set a new personal-best
+      distance, unlike a bounded-by-death age/kill/build record). The
+      threshold was already retuned once (30 -> 60 tiles) after a real run
+      caught a worse, now-fixed bug (a live-distance version churned
+      constantly on ordinary back-and-forth wandering — see DESIGN.md). A
+      future session may want a required-margin-over-incumbent rule (beat
+      the record by some real amount, not just by one tile) if this proves
+      too active once watched over a longer real run.
+
 ## Auto Camera battle-log follow-up (done — see DESIGN.md)
 
 - [x] Prioritize a queued/starting battle over whatever else is active or

@@ -1,4 +1,5 @@
 import type { MoveSpec, SimEvent, World } from "@pokuelike/engine";
+import { TITLE_DISPLAY_NAME, herdDisplayName, idLabel } from "./notableTitles.js";
 
 /**
  * The attacker's own live copy of the move it just used, if `world` still
@@ -68,25 +69,27 @@ export function formatEvent(event: SimEvent, world?: World): string {
     case "behaviorChanged":
       return `${event.species} (${event.agentId}) switched behavior: ${event.from} -> ${event.to}`;
     case "killed":
-      return `${event.predatorSpecies} (${event.predatorId}) killed ${event.preySpecies} (${event.preyId})`;
+      return `${idLabel(world, event.predatorId, event.predatorSpecies)} killed ${idLabel(world, event.preyId, event.preySpecies)}`;
     case "born":
       return `${event.species} (${event.motherId} x ${event.fatherId}) had offspring ${event.childId} (${event.nature}, ${event.dispositionSummary})`;
     case "floraChanged":
       return `flora ${event.stage} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
     case "terrainChanged":
       return `${event.from} at (${event.pos.x},${event.pos.y}) turned to ${event.to} on ${event.layer} (${event.cause})`;
-    case "immigrated":
-      return `${event.agentIds.length} ${event.species} arrived from outside and ${event.outcome === "joined" ? `joined ${event.herdId}` : `founded ${event.herdId}`} on ${event.layer}`;
+    case "immigrated": {
+      const herdName = world ? herdDisplayName(world, event.herdId) : event.herdId;
+      return `${event.agentIds.length} ${event.species} arrived from outside and ${event.outcome === "joined" ? `joined ${herdName}` : `founded ${herdName}`} on ${event.layer}`;
+    }
     case "fought": {
       const move = world ? findMoveUsed(event, world) : undefined;
-      return `${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) for ${event.damage}${event.critical ? " (crit!)" : ""} (hp left: ${event.defenderHpRemaining})${move ? describeMoveModifiers(move) : ""}`;
+      return `${idLabel(world, event.attackerId, event.attackerSpecies)} used ${event.moveId} on ${idLabel(world, event.defenderId, event.defenderSpecies)} for ${event.damage}${event.critical ? " (crit!)" : ""} (hp left: ${event.defenderHpRemaining})${move ? describeMoveModifiers(move) : ""}`;
     }
     case "missed": {
       const move = world ? findMoveUsed(event, world) : undefined;
-      return `${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) and missed${move ? describeMoveModifiers(move) : ""}`;
+      return `${idLabel(world, event.attackerId, event.attackerSpecies)} used ${event.moveId} on ${idLabel(world, event.defenderId, event.defenderSpecies)} and missed${move ? describeMoveModifiers(move) : ""}`;
     }
     case "defeated":
-      return `${event.winnerSpecies} (${event.winnerId}) defeated ${event.loserSpecies} (${event.loserId})`;
+      return `${idLabel(world, event.winnerId, event.winnerSpecies)} defeated ${idLabel(world, event.loserId, event.loserSpecies)}`;
     case "starved":
       return `${event.species} (${event.agentId}) starved to death (${event.cause})`;
     case "diedOfAge":
@@ -106,17 +109,21 @@ export function formatEvent(event: SimEvent, world?: World): string {
     case "recovered":
       return `${event.species} (${event.agentId}) recovered consciousness at ${event.hp} hp`;
     case "looted":
-      return `${event.looterSpecies} (${event.looterId}) looted ${event.itemKey} from ${event.fromSpecies} (${event.fromId})`;
+      return `${idLabel(world, event.looterId, event.looterSpecies)} looted ${event.itemKey} from ${idLabel(world, event.fromId, event.fromSpecies)}`;
     case "foodDelivered":
-      return `${event.carrierSpecies} (${event.carrierId}) delivered food to ${event.receiverSpecies} (${event.receiverId})`;
+      return `${idLabel(world, event.carrierId, event.carrierSpecies)} delivered food to ${idLabel(world, event.receiverId, event.receiverSpecies)}`;
     case "carrying":
-      return `${event.carrierSpecies} (${event.carrierId}) picked up fainted ${event.carriedSpecies} (${event.carriedId})`;
+      return `${idLabel(world, event.carrierId, event.carrierSpecies)} picked up fainted ${idLabel(world, event.carriedId, event.carriedSpecies)}`;
     case "setDown":
-      return `${event.carrierSpecies} (${event.carrierId}) set down ${event.carriedSpecies} (${event.carriedId}) (${event.reason})`;
-    case "herdMigrating":
-      return `herd ${event.herdId} is migrating (${event.reason})`;
-    case "herdSettled":
-      return `herd ${event.herdId} ${event.outcome === "arrived" ? "settled" : "gave up migrating"}`;
+      return `${idLabel(world, event.carrierId, event.carrierSpecies)} set down ${idLabel(world, event.carriedId, event.carriedSpecies)} (${event.reason})`;
+    case "herdMigrating": {
+      const herdName = world ? herdDisplayName(world, event.herdId) : event.herdId;
+      return `herd ${herdName} is migrating (${event.reason})`;
+    }
+    case "herdSettled": {
+      const herdName = world ? herdDisplayName(world, event.herdId) : event.herdId;
+      return `herd ${herdName} ${event.outcome === "arrived" ? "settled" : "gave up migrating"}`;
+    }
     case "nightfall":
       return `night falls (light ${event.lightLevel.toFixed(2)})`;
     case "daybreak":
@@ -140,27 +147,31 @@ export function formatEvent(event: SimEvent, world?: World): string {
     case "statusCleared":
       return `${event.species} (${event.agentId}) ${event.reason} (${event.statusKind})`;
     case "supported":
-      return `${event.supporterSpecies} (${event.supporterId}) supported ${event.allySpecies} (${event.allyId})${event.healed ? " (healed)" : ""}${event.buffed ? " (buffed)" : ""}`;
+      return `${idLabel(world, event.supporterId, event.supporterSpecies)} supported ${idLabel(world, event.allyId, event.allySpecies)}${event.healed ? " (healed)" : ""}${event.buffed ? " (buffed)" : ""}`;
     case "herdClash": {
       const rival = event.attackerHerdId && event.defenderHerdId && event.attackerHerdId !== event.defenderHerdId ? ` (herd ${event.attackerHerdId} vs ${event.defenderHerdId})` : "";
-      if (event.outcome === "missed") return `${event.attackerSpecies} (${event.attackerId}) clashed with ${event.defenderSpecies} (${event.defenderId}) over a resource and missed${rival}`;
-      const retreat = event.outcome === "retreated" ? `, ${event.defenderSpecies} (${event.defenderId}) backs off` : "";
-      return `${event.attackerSpecies} (${event.attackerId}) clashed with ${event.defenderSpecies} (${event.defenderId}) over a resource for ${event.damage}${event.critical ? " (crit!)" : ""}${retreat}${rival}`;
+      if (event.outcome === "missed") return `${idLabel(world, event.attackerId, event.attackerSpecies)} clashed with ${idLabel(world, event.defenderId, event.defenderSpecies)} over a resource and missed${rival}`;
+      const retreat = event.outcome === "retreated" ? `, ${idLabel(world, event.defenderId, event.defenderSpecies)} backs off` : "";
+      return `${idLabel(world, event.attackerId, event.attackerSpecies)} clashed with ${idLabel(world, event.defenderId, event.defenderSpecies)} over a resource for ${event.damage}${event.critical ? " (crit!)" : ""}${retreat}${rival}`;
     }
     case "packHunt":
-      return `${event.attackerSpecies} (${event.attackerId}) pack-hunts ${event.targetSpecies} (${event.targetId}) with ${event.packmates} packmate${event.packmates === 1 ? "" : "s"}`;
+      return `${idLabel(world, event.attackerId, event.attackerSpecies)} pack-hunts ${idLabel(world, event.targetId, event.targetSpecies)} with ${event.packmates} packmate${event.packmates === 1 ? "" : "s"}`;
     case "scavenged":
-      return `${event.species} (${event.agentId}) scavenged a meal from ${event.corpseSpecies} (${event.corpseId})`;
+      return `${event.species} (${event.agentId}) scavenged a meal from ${idLabel(world, event.corpseId, event.corpseSpecies)}`;
     case "bonded":
-      return `${event.species} (${event.agentId}) bonded with ${event.partnerSpecies} (${event.partnerId})`;
+      return `${event.species} (${event.agentId}) bonded with ${idLabel(world, event.partnerId, event.partnerSpecies)}`;
     case "eggLaid":
       return `${event.species} (${event.motherId} x ${event.fatherId}) laid an egg (${event.eggId}) at (${event.pos.x},${event.pos.y})`;
     case "eggHatched":
       return `${event.species} egg (${event.agentId}) hatched at (${event.pos.x},${event.pos.y})`;
     case "eggEaten":
-      return `${event.eaterSpecies} (${event.eaterId}) ate a ${event.eggSpecies} egg (${event.eggId})`;
+      return `${idLabel(world, event.eaterId, event.eaterSpecies)} ate a ${event.eggSpecies} egg (${event.eggId})`;
     case "eggDefended":
-      return `${event.defenderSpecies} (${event.defenderId}) fought off ${event.threatSpecies} (${event.threatId}) to defend its egg`;
+      return `${idLabel(world, event.defenderId, event.defenderSpecies)} fought off ${idLabel(world, event.threatId, event.threatSpecies)} to defend its egg`;
+    case "titleClaimed":
+      return `${event.species} (${event.agentId}) became ${TITLE_DISPLAY_NAME[event.title]}!`;
+    case "titleLost":
+      return `${event.species} (${event.agentId}) is no longer ${TITLE_DISPLAY_NAME[event.title]} (${event.reason})`;
   }
 }
 
@@ -196,6 +207,7 @@ export const STORY_KINDS = new Set<SimEvent["kind"]>([
   "eggHatched",
   "eggEaten",
   "eggDefended",
+  "titleClaimed",
 ]);
 
 /**
@@ -228,6 +240,11 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
   // shelter access exists) — the real milestones are `eggLaid` (an egg
   // finally exists) and `eggHatched` (a real newborn), both in STORY_KINDS.
   "bonded",
+  // A title changing hands away from an agent — either a real death (already
+  // its own headline event: `killed`/`starved`/`diedOfAge`) or a dethroning,
+  // which reads as the mirror image of the `titleClaimed` moment that
+  // already got the spotlight — not its own second headline.
+  "titleLost",
 ]);
 
 /**
@@ -262,6 +279,7 @@ export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   eggHatched: "\u{1F423}", // hatching chick
   eggEaten: "\u{1F374}", // fork and knife
   eggDefended: "\u{1F6E1}️", // shield
+  titleClaimed: "\u{1F451}", // crown
 };
 
 export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
@@ -281,6 +299,7 @@ export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
   eggHatched: "#7be08a",
   eggEaten: "#ff6b6b",
   eggDefended: "#5ee6c4",
+  titleClaimed: "#ffd76e",
 };
 
 /**

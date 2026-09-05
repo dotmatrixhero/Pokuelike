@@ -12,6 +12,7 @@ import { tileAt } from "./world.js";
 import { isNight, lightLevel } from "./daynight.js";
 import { advanceWaterCycle, advanceWeather } from "./weather.js";
 import { PARALYSIS_SPEED_MULTIPLIER, isParalyzed } from "./status.js";
+import { updateNotables } from "./notables.js";
 
 /**
  * Energy an agent needs to accumulate before it gets to act. Chosen against
@@ -204,6 +205,13 @@ export function tickWorld(
   // shape as growFlora above (see shelter.ts's `decayShelters`).
   decayShelters(world, log);
   pruneStaleCorpses(world);
+  // Once per tick, not per triggering event — see notables.ts's top-of-file
+  // doc comment for why a single per-tick scan covers every title's
+  // transfer condition (new claim, dethroning, and holder-died-so-transfer)
+  // more simply than a bespoke hook at each of the four separate trigger
+  // sites plus a second periodic scan for the three "currently highest"
+  // titles (rival/elder/wanderer).
+  updateNotables(world, log);
 }
 
 /**

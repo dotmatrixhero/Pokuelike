@@ -100,6 +100,10 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.eaterSpecies} (${event.eaterId}) ate a ${event.eggSpecies} egg (${event.eggId}) at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
     case "eggDefended":
       return `[tick ${event.tick}] ${event.defenderSpecies} (${event.defenderId}) fought off ${event.threatSpecies} (${event.threatId}) to defend its egg at (${event.pos.x},${event.pos.y})`;
+    case "titleClaimed":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) became The ${event.title[0]!.toUpperCase()}${event.title.slice(1)} (value ${event.value})${event.previousHolderId ? `, taking it from ${event.previousHolderId}` : ""}`;
+    case "titleLost":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) lost The ${event.title[0]!.toUpperCase()}${event.title.slice(1)} (${event.reason})`;
   }
 }
 

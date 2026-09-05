@@ -189,6 +189,23 @@ const STATUS_DISTANCE_BONUS = 2;
  */
 const RAPPORT_DISTANCE_BONUS = 3;
 
+/**
+ * Notable-title mate preference — direct ask ("socially they are
+ * respected"), the mate-preference half of that (see notables.ts's
+ * top-of-file doc comment; the other half is `NOTABLE_XP_MULTIPLIER`). Same
+ * "discount off effective distance, distance still dominates a real gap"
+ * shape as `STATUS_DISTANCE_BONUS`/`RAPPORT_DISTANCE_BONUS` above, applied
+ * as a flat bonus (not scaled 0..1 like the other two — holding a title is
+ * binary, there's no "partial" title to scale by) whenever `candidate`
+ * currently holds any Notables title. Set between the two existing bonuses
+ * (2.5, vs. status's 2 and rapport's 3): a title is a real, earned,
+ * world-wide distinction — a stronger signal than relative herd rank, since
+ * it's judged against literally everyone in the world, not just herd-mates
+ * — but a full, already-earned rapport bond (which most realistically means
+ * an actual existing mate) is still judged the stronger of the two.
+ */
+const NOTABLE_DISTANCE_BONUS = 2.5;
+
 /** 0 (no/negative rapport) .. 1 (a full, earned bond) — how much of `RAPPORT_DISTANCE_BONUS` a candidate earns. */
 function rapportAdvantage(agent: Agent, candidate: Agent, tick: number): number {
   return Math.max(0, rapportScore(agent, candidate.id, tick));
@@ -219,7 +236,8 @@ function mateScore(world: World, agent: Agent, candidate: Agent, distance: numbe
   return (
     distance -
     statusAdvantage(world, candidate) * STATUS_DISTANCE_BONUS -
-    rapportAdvantage(agent, candidate, world.tick) * RAPPORT_DISTANCE_BONUS
+    rapportAdvantage(agent, candidate, world.tick) * RAPPORT_DISTANCE_BONUS -
+    (candidate.notableTitle !== undefined ? NOTABLE_DISTANCE_BONUS : 0)
   );
 }
 

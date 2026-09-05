@@ -970,6 +970,10 @@ function applySingleDamageInstance(
     defender.diedAtTick = world.tick;
     grantKillExp(world, attacker, defender, ctx, log, rng);
     logKillOrDefeat(world, attacker, defender, faintKind, log);
+    // Notables: The Hero's real stat — every true kill counts, both the
+    // ordinary hunt path ("killed") and the guardian mob-defense finishing
+    // blow ("defeated") — see Agent.lifetimeKills's doc comment.
+    attacker.lifetimeKills = (attacker.lifetimeKills ?? 0) + 1;
     return true;
   }
 

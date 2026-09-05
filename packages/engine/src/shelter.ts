@@ -319,6 +319,11 @@ export function applyShelterBuilding(world: World, agent: Agent, log?: EventLog)
   }
 
   agent.shelterBuildTicks = (agent.shelterBuildTicks ?? 0) + 1;
+  // Notables: The Builder's real stat — accumulates across every shelter
+  // this agent ever contributes to over its whole life, unlike the
+  // per-attempt `shelterBuildTicks` this mirrors (see Agent.lifetimeShelterTicks's
+  // doc comment).
+  agent.lifetimeShelterTicks = (agent.lifetimeShelterTicks ?? 0) + 1;
   if (agent.shelterBuildTicks < builderShelterTicks(agent)) return;
 
   setTile(world, agent.layer, agent.pos.x, agent.pos.y, "shelter");

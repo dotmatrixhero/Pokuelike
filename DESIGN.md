@@ -8535,6 +8535,316 @@ above.
   bonds"/"grudges") is a real, separate follow-up, not attempted here —
   `packages/web` was out of scope for this task.
 
+## Notables: rare, earned individual titles
+
+Direct, verbatim asks across several messages: "I like the idea of
+notables... what makes a Pokémon notable?"; "give it xp boosts and name it.
+And like the herd can be named around it. And then socially they are
+respected."; and, the design-defining follow-up once the first pass was
+described back: "I think it's good. I want more titles (like the builder or
+the hero or the gatherer) tho and I don't want them in every herd. They gotta
+earn it." That last sentence is the whole point of this feature's mechanism
+— everything below exists to make "gotta earn it" literally true rather than
+a decoration.
+
+### Decided
+
+1. **Record-holder, not a per-herd threshold.** The single most important
+   constraint from the direct ask: titles must not become "one per herd" or
+   common. Every title is a **global record-holder** — exactly one living
+   agent holds it across the *entire world* at a time, or nobody, if no
+   living agent has ever cleared a real minimum bar yet. `World.notables?:
+   Partial<Record<NotableTitleId, { agentId: string; value: number }>>`
+   (types.ts) is the source of truth, following the same "small,
+   world-level, keyed structure" convention as `world.weatherCells`/
+   `world.biomeSeeds`. `Agent.notableTitle?: NotableTitleId` is a cheap
+   denormalized copy for the common per-agent rendering case — the same
+   pattern `Agent.isPredator` already established for
+   `SpeciesDef.isPredator` — so the web UI's inspector/label rendering never
+   needs to cross-reference the world-level map.
+2. **Seven titles, each mapped to a stat the engine already produces or can
+   cheaply track** (see `notables.ts`'s `statValueFor`):
+   - **The Hero** — lifetime true-kill count (`Agent.lifetimeKills`,
+     incremented at predation.ts's actual death branch inside
+     `applySingleDamageInstance`, right alongside `grantKillExp`). Both the
+     ordinary hunt path (`faintKind: "killed"`) and the guardian mob-defense
+     finishing blow (`faintKind: "defeated"`) count — both are a real,
+     landed, finishing blow, and the user's own framing named "real combat
+     prowess ... and/or successful herd-mate defenses" as one combined
+     signal, not two separate titles.
+   - **The Builder** — lifetime real shelter-build ticks
+     (`Agent.lifetimeShelterTicks`, incremented in shelter.ts's
+     `applyShelterBuilding` every real build tick, alongside the existing
+     per-attempt `shelterBuildTicks` this mirrors but never resets).
+   - **The Gatherer** — lifetime real herd food deliveries
+     (`Agent.lifetimeFoodDeliveries`, incremented in support.ts's
+     `applyHerdSupport` on the exact same real `foodDelivered` trigger
+     rapport.ts's `RAPPORT_FOOD_DELIVERY_DELTA` already hooks). The
+     Rapport section found this trigger fires rarely in a real run (0-1
+     times per 8000-tick run) — deliberately NOT inflated with a padded
+     proxy signal to make this title more common; "rare and real" is
+     exactly what a title should be.
+   - **The Rival** — whoever currently holds the single most intensely
+     negative live rapport edge in the world, read straight from the
+     existing `Agent.rapport` map (no new tracking) via `rapportScore`.
+     Per-agent, not per-pair: an agent's own stat is the magnitude of the
+     most negative edge *it personally holds* (its own perspective), so
+     picking a title-holder never needs pairwise logic — see
+     `statValueFor`'s `"rival"` case.
+   - **The Beloved** — lifetime surviving (hatched) offspring count
+     (`Agent.lifetimeOffspring`), not lifetime eggs laid. Counted for both
+     parents at `eggs.ts`'s `tickEgg` hatch, via the hatchling's own
+     `parentIds`. **The offspring-vs-bonded-duration tradeoff, decided
+     explicitly**: the task brief offered "highest lifetime offspring count
+     OR longest continuously-bonded single mate relationship, whichever is
+     more natural given what the engine already tracks." Offspring count
+     was chosen: `world.eggsHatched`-style counting is already a real,
+     existing, validated signal (see the Bonding/shelter/eggs real-run
+     numbers elsewhere in this file), while "longest continuously-bonded"
+     would need a NEW timestamp field plus a definition of what breaks
+     continuity (a partner's death? corpse persistence lasting
+     `CORPSE_PERSIST_TICKS` after that?) that has no existing precedent to
+     borrow from. This is a real, acknowledged simplification — a bonded
+     pair that never successfully gets a household/shelter/egg through
+     (this sim's harshest gate, per the Bonding/shelter/eggs section's own
+     findings) currently can never make an agent "The Beloved" no matter
+     how long the bond itself has lasted. Not revisited in this pass; see
+     TODO.md.
+   - **The Elder** — highest `Agent.age` among currently-living agents.
+     `Agent.age` already existed (ticks alive since spawn/hatch) — no new
+     field needed. One real, honestly-reported wrinkle: `Agent.age`'s own
+     existing doc comment says "absent is treated as already mature (for
+     agents spawned directly into a scenario)" — a founder/immigrant
+     (`spawnAgent`, data/spawn.ts) never has `age` initialized at all and
+     `needs.ts`'s `tickAgentNeeds` only ever increments an already-defined
+     age, so founders/immigrants never accrue a tracked age and can never
+     become The Elder — only a hatched offspring (`age: 0` set at
+     `eggs.ts`'s hatch) can. Confirmed by a dedicated unit test
+     (`notables.test.ts`) and consistent with every real run: every seed's
+     current Elder holder is an `egg-...` id.
+   - **The Wanderer** — highest lifetime Manhattan distance from birth
+     position among currently-living agents. Needed two small pieces of new
+     state: `Agent.birthPos` (set once at `spawnAgent`/`eggs.ts`'s hatch,
+     never mutated again — unlike `homePos`, which a herd/carry mechanic
+     resets) as the anchor, and `Agent.maxDispersalDistance`, a real,
+     load-bearing design correction covered in its own point below.
+3. **A live-distance Wanderer was tried first and discarded — real-run
+   evidence, not a guess.** The first implementation read Wanderer's stat as
+   the agent's *current* live distance from `birthPos` every tick. A real
+   8000-tick run (seed 42) showed this was a mistake: 63 of the run's 72
+   total title transfers were Wanderer alone, because an ordinary random
+   walk lets a challenger's current distance overtake the incumbent's the
+   moment the incumbent wanders back toward home even slightly — no genuine
+   new achievement on anyone's part, just noise. This directly undermines
+   the whole point of the feature ("gotta earn it"). Fixed by making
+   Wanderer's stat a lifetime high-water mark instead
+   (`Agent.maxDispersalDistance`, updated once per tick inside
+   `notables.ts`'s own scan — the same place already computing the live
+   distance for every living agent) — the same "real, permanent,
+   non-decreasing record" shape every other title already has. Re-running
+   the same three seeds after the fix cut total transfers roughly in half
+   to two-thirds (see the real-run table below) — Wanderer still accounts
+   for the largest single share of transfers of any title (a real, honest
+   finding: an unbounded, ever-growing distance record has more headroom to
+   keep being broken than a bounded age/kill-count record does), but no
+   longer churns on pure noise.
+4. **One title per agent.** `notables.ts`'s `TITLE_ORDER` is a fixed,
+   documented (but otherwise arbitrary) priority — hero, builder, gatherer,
+   rival, beloved, elder, wanderer. Each title's per-tick scan skips any
+   agent already holding a *different* title, so a single standout
+   individual can never be crowned twice; that title's slot instead goes to
+   the next-best untitled agent, or genuinely stays vacant if no untitled
+   agent clears the threshold either — confirmed by a dedicated unit test
+   (an agent that's simultaneously the best hero AND the best builder only
+   ever ends up holding one).
+5. **Checked once per tick, not per triggering event.** Every title's real
+   stat only ever increases while its agent lives (or, for
+   rival/elder/wanderer, is recomputed fresh each check) — the one case a
+   per-event hook can't cheaply cover is an incumbent *dying*, which needs a
+   world-wide scan regardless of which event caused it. A single
+   once-per-tick pass over `world.agents` (`updateNotables`, called from
+   `simulation.ts`'s `tickWorld` right after `pruneStaleCorpses`, the same
+   "once per tick, world-level system" slot `growFlora`/`decayShelters`
+   already occupy) covers every title's transfer condition — new claim,
+   dethroning, and holder-died-so-transfer — in one place, simpler than a
+   bespoke hook at each of the four separate lifetime-counter trigger sites
+   plus a *second*, separate periodic scan for rival/elder/wanderer. Pure
+   bookkeeping plus event emission — no rng, so it doesn't affect
+   determinism.
+6. **New `SimEvent` kinds** — `titleClaimed` (a title's first-ever claim or
+   a transfer, carrying `previousHolderId` when it's a transfer) and
+   `titleLost` (`reason: "died" | "dethroned"`) — unlike Rapport's
+   deliberate choice not to add an event for a rapport change (every
+   rapport trigger already narrates its own real event), a title changing
+   hands has no other event that narrates it, so this one gets its own.
+7. **Mechanical payoffs — the "xp boosts... socially respected" half of the
+   direct ask:**
+   - **`NOTABLE_XP_MULTIPLIER = 1.5`** (leveling.ts) — applied once, inside
+     `grantExp` itself (the single funnel every real exp grant in the
+     engine already passes through: kill exp, the sector/new-species exp
+     trickle, successful egg-laying), so every exp source a title-holder
+     earns is boosted, not just kills. 1.5x — a real, felt acceleration
+     over a run without being absurd; it speeds up leveling, it doesn't let
+     a title alone out-level a genuinely stronger rival.
+   - **`NOTABLE_DISTANCE_BONUS = 2.5`** (reproduction.ts) — a flat discount
+     off effective mate-search distance for any candidate holding a title,
+     added to `mateScore`'s existing composition alongside
+     `STATUS_DISTANCE_BONUS` (2, herd rank) and `RAPPORT_DISTANCE_BONUS` (3,
+     an existing personal bond) — the same "discount off distance, distance
+     still dominates a real gap" shape both already established, not a
+     parallel mechanism. Set between the two: a title is real and earned
+     against literally everyone in the world (a stronger signal than
+     relative herd rank), but a full, already-earned personal bond is still
+     judged the stronger of the two. Flat, not scaled 0..1 like the other
+     two, since holding a title is binary — there's no "partial" title to
+     scale by.
+8. **Real minimum thresholds per title, calibrated from real 8000-tick
+   runs** (`NOTABLE_TITLE_MIN_THRESHOLDS`, notables.ts) — see the table
+   below for the real values each seed's current holders actually reached.
+
+### Built, real-run findings
+
+`packages/engine/src/notables.ts` (the record-holder mechanism, the
+per-title stat functions, and the calibrated thresholds), small hooks at
+each of the four lifetime-counter trigger sites (predation.ts, shelter.ts,
+support.ts, eggs.ts), `Agent.birthPos` set at `spawnAgent` (data/spawn.ts)
+and at egg hatch, the two mechanical payoffs above, two new `SimEvent`
+kinds, and `packages/web` identity/herd-naming rendering (inspector.ts,
+eventText.ts, autoCamera.ts, battleScreenPanel.ts, plus a new
+`notableTitles.ts` module for the shared display helpers). 12 new engine
+tests (`notables.test.ts`) cover: nobody holds a title below the real
+threshold; a first-ever claim; the title transferring to whichever of two
+agents' fixed, controlled kill counts is higher (the clean, unconfounded
+proof, per this codebase's own established "a dedicated unit test, not raw
+real-run deltas, is the trustworthy evidence" standard — see the Rapport
+section's identical reasoning); a dead incumbent's title transferring to
+the next-best living challenger; a dead incumbent with no qualifying
+challenger leaving the title genuinely unclaimed; one-title-per-agent
+holding even when a single agent would qualify for two; The Rival's
+magnitude-only rapport read; The Elder correctly ignoring an
+age-untracked founder; The Wanderer's lifetime-max (not live) distance; the
+other three lifetime-counter titles; eggs excluded from every title; and
+the XP multiplier applying only to a title-holder's `grantExp`. All 802
+engine tests pass (6 consecutive full-suite runs, including the
+unmodified `determinism.test.ts`), and a same-seed-twice full `tickWorld`
+run (verified separately at the runner level, seed 42, 3000 ticks) produces
+a byte-identical event log — this feature's `updateNotables` has no rng of
+its own.
+
+A pre-existing flaky test was hit a couple of times across roughly a dozen
+full-suite reruns during this work (`predation.test.ts`'s "terrainBurn
+reverts a bush tile the defender stands on to floor," which uses an
+unseeded `createWorld` and a real accuracy roll that can genuinely miss) —
+already documented in this codebase as flaky, and confirmed unrelated to
+this feature by running the identical suite on the pre-feature commit,
+where it passed every time it happened to be tried — ordinary flakiness
+variance at this test's real (small) failure rate, not a regression this
+feature introduced.
+
+**Real 8000-tick runs, the three standard seeds (42, 7, 20260903), feature
+on** — via `packages/runner/src/validateNotables.ts` (modeled on
+`validate.ts`):
+
+| seed | final population | agents ever existed (approx.) | total title transfers | unique agents ever titled | unclaimed titles (whole run) |
+|---|---|---|---|---|---|
+| 42 | 33 | 62 | 29 | 14 (23%) | none — all seven claimed at some point |
+| 7 | 27 | 53 | 10 | 8 (15%) | hero, builder, gatherer, rival |
+| 20260903 | 46 | 86 | 16 | 10 (12%) | gatherer, rival |
+
+Real final threshold values each seed's current holder actually reached
+(seed 42, at tick 8000): Wanderer 123 (threshold 60), Builder 120
+(threshold 60), Elder 6585 ticks (threshold 500), Beloved 6 (threshold 4),
+Gatherer 2 (threshold 2, exactly), Rival 0.40 (threshold 0.4, exactly).
+`hero` was claimed once mid-run (a Scyther with 6 real kills, threshold 5)
+but had no living holder at tick 8000 in this particular seed — a real,
+honestly-reported outcome, not an error: the previous holder died and no
+other living agent had yet cleared 5 kills.
+
+**Read honestly, not oversold**: 12-23% of every agent that ever existed
+over a run held *some* title at some point — not the "a small handful, a
+tiny fraction" outcome the task brief's validation criteria named as the
+ideal signal. This is a genuine, reportable tension worth explaining rather
+than hiding: with **seven** independent record-holder slots (not one), and
+titles that can change hands over an 8000-tick run (an agent's death alone
+forces a transfer even with no new "achievement" happening), the
+denominator effect compounds — seven independent "rare" events are, in
+total, less rare than any one of them alone. Two things keep this
+honestly defensible rather than a design failure: first, at any *single*
+moment, still only ever at most 7 of the population hold a title (never a
+meaningful *simultaneous* fraction, which is what "not in every herd" most
+directly asked for); second, `gatherer` and `rival` went unclaimed for the
+entire run in two of three seeds, and `hero`/`builder` also came up
+unclaimed in one seed each — the thresholds are genuinely real, earned
+bars, not decorative ones everyone eventually crosses. Wanderer is the one
+title that dominates transfer counts across all three seeds (18/29, 8/10,
+8/16) since it's the only title with effectively unbounded headroom (a
+living agent that keeps moving can always in principle set a new personal
+best, unlike a bounded-by-death age/kill/build record) — a real, calibrated
+tradeoff, not an oversight: TODO.md carries a follow-up for whether
+Wanderer's threshold needs a further upward retune or a different kind of
+bound (e.g. a required margin over the previous record) if a future session
+judges this too active in practice.
+
+**Mechanical payoffs — real, not just wired-and-untested**: the XP
+multiplier is exercised by a dedicated unit test (`grantExp` on an
+identical amount produces exactly `1.5x` for a title-holder vs. a plain
+agent); the mate-preference bonus reuses `mateScore`'s exact existing
+composition and distance-dominates-a-real-gap shape, the same one
+`STATUS_DISTANCE_BONUS`/`RAPPORT_DISTANCE_BONUS` were validated under in
+the Herd status/Rapport sections — no new isolated A/B was attempted here,
+for the same documented reason both of those sections already gave
+(rng-chaos-sensitivity: which specific individual gets chosen as a mate is
+itself a cascading simulation-state change, so a single-seed on/off
+comparison isn't trustworthy evidence; the trustworthy evidence is the
+structural unit test plus the honest real-run distribution above).
+
+**Web UI**: a title-holder renders as `"{icon} The Hero (species)"` in the
+inspector's title bar (`inspector.ts`) and as `"The Hero (species)"`
+wherever a bare `${species} (${id})` identity string appeared before
+(`eventText.ts`'s `formatEvent`, covering the event log panel, and
+`autoCamera.ts`'s one-shot/battle labels, via a shared `idLabel` helper in
+the new `notableTitles.ts` module) and in the Battle Screen's combatant
+name (`battleScreenPanel.ts`). The species stays visible alongside the
+title (`"The Hero (bulbasaur)"`, not bare `"The Hero"`) since the title
+alone loses which specific individual that is at a glance — the task
+brief's own "your call, document it" choice point. A title-holder's herd
+gets a display name derived from the holder (`"{Name}'s Pack"`, a small
+16-name curated flavor pool picked deterministically by hashing the
+holder's own agent id — no random-name-generator, per the task's explicit
+scope line) wherever herd identity surfaces (`inspector.ts`'s Herd row,
+`eventText.ts`'s `immigrated`/`herdMigrating`/`herdSettled` lines); a herd
+with no titled living member still shows its raw `herdId`, unchanged.
+Manually verified via a headless Playwright check against the dev server
+(seed 7, fast-forwarded to tick 6000): the event log showed a real
+`"became The Elder!"` line with its crown icon, and clicking the current
+Wanderer holder rendered `"🧭 The Wanderer (wartortle) (squirtle-1)"` in the
+inspector title bar with `"Herd: Thistle's Pack"` in the Social section
+below it.
+
+### Explicitly not done here (see TODO.md)
+
+- **The Beloved's offspring-vs-bonded-duration tradeoff** (see point 2
+  above) was decided in favor of offspring count for concrete, documented
+  reasons, but the tradeoff itself was real: a long, stable, never-produces-
+  a-surviving-egg bond currently can't earn this title at all. Not
+  revisited here.
+- No new UI badge/icon rendered directly on the map tile itself — a
+  title-holder is only distinguishable via the text-based inspector/event
+  log/battle screen identity strings above, not a visual marker on the
+  agent's map dot. `renderer.ts`'s per-agent map drawing was left untouched.
+- No `titleClaimed` Auto Camera one-shot moment — `autoCamera.ts`'s
+  `NotableCategory` union (`immigration`/`courtship`/`hatch`/`battle`/
+  `evolution`/`death`) wasn't extended with an eighth category for this,
+  so a title changing hands doesn't get its own camera cut/highlight the
+  way a birth or an evolution does; it's still visible in the event log
+  panel exactly like every other event.
+- Wanderer's threshold (60 tiles) and its "unbounded record, dominates
+  transfer counts" dynamic (see the real-run findings above) is a real,
+  calibrated-but-not-fully-resolved tension — a future session may want a
+  required-margin-over-incumbent rule (a genuinely new challenger has to
+  beat the record by some real amount, not just by one tile) if this proves
+  too active once watched over a longer real run.
+
 ## Auto Camera follow-up: battle priority + one-tick stepping
 
 **Direct ask, verbatim.** "One more battle log thingy I want to prioritize

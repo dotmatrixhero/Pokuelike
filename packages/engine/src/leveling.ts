@@ -482,6 +482,19 @@ export function ensureCombatProfile(agent: Agent, ctx?: LevelingContext): void {
  * same "optional injected policy" pattern as `HuntRules`, so callers that
  * don't have dex data on hand (bare engine tests) keep working unchanged.
  */
+/**
+ * Permanent XP multiplier while an agent holds any Notables title — the
+ * "give it xp boosts" half of the direct ask (see notables.ts's top-of-file
+ * doc comment). Applied here, the single funnel every real exp grant in the
+ * engine already passes through (kill exp, sector/new-species exp trickle,
+ * successful egg-laying), rather than duplicating the check at every grant
+ * site. 1.5x — a real, felt reward (noticeably faster leveling over a run)
+ * without being absurd (a title-holder still can't out-level a genuinely
+ * higher-level rival through this bonus alone; it accelerates, it doesn't
+ * replace, real combat/exploration exp).
+ */
+export const NOTABLE_XP_MULTIPLIER = 1.5;
+
 export function grantExp(
   world: World,
   agent: Agent,
@@ -491,7 +504,8 @@ export function grantExp(
   rng: () => number = Math.random
 ): void {
   if (agent.alive === false || amount <= 0) return;
-  agent.exp = (agent.exp ?? 0) + amount;
+  const effectiveAmount = agent.notableTitle !== undefined ? amount * NOTABLE_XP_MULTIPLIER : amount;
+  agent.exp = (agent.exp ?? 0) + effectiveAmount;
   agent.level = agent.level ?? 1;
 
   if (!ctx) return;
