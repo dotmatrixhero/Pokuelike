@@ -73,6 +73,10 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `${event.species} (${event.motherId} x ${event.fatherId}) had offspring ${event.childId} (${event.nature}, ${event.dispositionSummary})`;
     case "floraChanged":
       return `flora ${event.stage} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
+    case "terrainChanged":
+      return `${event.from} at (${event.pos.x},${event.pos.y}) turned to ${event.to} on ${event.layer} (${event.cause})`;
+    case "immigrated":
+      return `${event.agentIds.length} ${event.species} arrived from outside and ${event.outcome === "joined" ? `joined ${event.herdId}` : `founded ${event.herdId}`} on ${event.layer}`;
     case "fought": {
       const move = world ? findMoveUsed(event, world) : undefined;
       return `${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) for ${event.damage}${event.critical ? " (crit!)" : ""} (hp left: ${event.defenderHpRemaining})${move ? describeMoveModifiers(move) : ""}`;
@@ -137,6 +141,26 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `${event.species} (${event.agentId}) ${event.reason} (${event.statusKind})`;
     case "supported":
       return `${event.supporterSpecies} (${event.supporterId}) supported ${event.allySpecies} (${event.allyId})${event.healed ? " (healed)" : ""}${event.buffed ? " (buffed)" : ""}`;
+    case "herdClash": {
+      const rival = event.attackerHerdId && event.defenderHerdId && event.attackerHerdId !== event.defenderHerdId ? ` (herd ${event.attackerHerdId} vs ${event.defenderHerdId})` : "";
+      if (event.outcome === "missed") return `${event.attackerSpecies} (${event.attackerId}) clashed with ${event.defenderSpecies} (${event.defenderId}) over a resource and missed${rival}`;
+      const retreat = event.outcome === "retreated" ? `, ${event.defenderSpecies} (${event.defenderId}) backs off` : "";
+      return `${event.attackerSpecies} (${event.attackerId}) clashed with ${event.defenderSpecies} (${event.defenderId}) over a resource for ${event.damage}${event.critical ? " (crit!)" : ""}${retreat}${rival}`;
+    }
+    case "packHunt":
+      return `${event.attackerSpecies} (${event.attackerId}) pack-hunts ${event.targetSpecies} (${event.targetId}) with ${event.packmates} packmate${event.packmates === 1 ? "" : "s"}`;
+    case "scavenged":
+      return `${event.species} (${event.agentId}) scavenged a meal from ${event.corpseSpecies} (${event.corpseId})`;
+    case "bonded":
+      return `${event.species} (${event.agentId}) bonded with ${event.partnerSpecies} (${event.partnerId})`;
+    case "eggLaid":
+      return `${event.species} (${event.motherId} x ${event.fatherId}) laid an egg (${event.eggId}) at (${event.pos.x},${event.pos.y})`;
+    case "eggHatched":
+      return `${event.species} egg (${event.agentId}) hatched at (${event.pos.x},${event.pos.y})`;
+    case "eggEaten":
+      return `${event.eaterSpecies} (${event.eaterId}) ate a ${event.eggSpecies} egg (${event.eggId})`;
+    case "eggDefended":
+      return `${event.defenderSpecies} (${event.defenderId}) fought off ${event.threatSpecies} (${event.threatId}) to defend its egg`;
   }
 }
 
@@ -155,7 +179,24 @@ export function formatEvent(event: SimEvent, world?: World): string {
  * information but not a moment worth the same visual weight as a
  * connecting hit.
  */
-export const STORY_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "fainted", "evolved", "diedOfAge", "dispersed", "shelterBuilt", "fought"]);
+export const STORY_KINDS = new Set<SimEvent["kind"]>([
+  "born",
+  "killed",
+  "defeated",
+  "fainted",
+  "evolved",
+  "diedOfAge",
+  "dispersed",
+  "shelterBuilt",
+  "fought",
+  "immigrated",
+  "herdClash",
+  "packHunt",
+  "eggLaid",
+  "eggHatched",
+  "eggEaten",
+  "eggDefended",
+]);
 
 /**
  * Routine environment/upkeep chatter — real events, just not "the Pokemon
@@ -168,6 +209,7 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
   "consumed",
   "behaviorChanged",
   "floraChanged",
+  "terrainChanged",
   "herdMigrating",
   "herdSettled",
   "nightfall",
@@ -178,6 +220,14 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
   "shelterAbandoned",
   "fellAsleep",
   "wokeUp",
+  // Real feeding, but the same "routine, not a moment" bucket `consumed`
+  // (self-feeding on flora) already occupies — a scavenged meal is a genuine
+  // alternative to a live hunt, not on the visual weight of one.
+  "scavenged",
+  // A pair forming a bond happens routinely (every eligible contact before
+  // shelter access exists) — the real milestones are `eggLaid` (an egg
+  // finally exists) and `eggHatched` (a real newborn), both in STORY_KINDS.
+  "bonded",
 ]);
 
 /**
@@ -190,7 +240,10 @@ export const NOISE_KINDS = new Set<SimEvent["kind"]>([
  * — it's a recoverable knockdown, not a death (see DESIGN.md's "Faint/
  * finish-off" section).
  */
-export const HEADLINE_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "starved", "diedOfAge", "evolved"]);
+// "immigrated" is a population-shaping event, same category as
+// "born"/"evolved" — a new headline-worthy way the population changes, not
+// a routine per-tick occurrence like "consumed"/"behaviorChanged".
+export const HEADLINE_KINDS = new Set<SimEvent["kind"]>(["born", "killed", "defeated", "starved", "diedOfAge", "evolved", "immigrated", "eggHatched"]);
 
 export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   born: "\u{1F423}", // hatching chick
@@ -202,6 +255,13 @@ export const STORY_ICON: Partial<Record<SimEvent["kind"], string>> = {
   dispersed: "\u{1F9ED}", // compass
   shelterBuilt: "\u{1F3E0}", // house
   fought: "\u{1F4A5}", // boom
+  immigrated: "\u{1F6F6}", // canoe
+  herdClash: "\u{1F93C}", // wrestlers — rivalry, not a hunt
+  packHunt: "\u{1F43A}", // wolf — coordinated hunting
+  eggLaid: "\u{1F95A}", // egg
+  eggHatched: "\u{1F423}", // hatching chick
+  eggEaten: "\u{1F374}", // fork and knife
+  eggDefended: "\u{1F6E1}️", // shield
 };
 
 export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
@@ -214,6 +274,13 @@ export const STORY_COLOR: Partial<Record<SimEvent["kind"], string>> = {
   dispersed: "#6ec6ff",
   shelterBuilt: "#c9a876",
   fought: "#ff9d3c",
+  immigrated: "#5ee6c4",
+  herdClash: "#e0c341",
+  packHunt: "#d16b4c",
+  eggLaid: "#e8d48a",
+  eggHatched: "#7be08a",
+  eggEaten: "#ff6b6b",
+  eggDefended: "#5ee6c4",
 };
 
 /**
@@ -238,6 +305,8 @@ export const AGENT_ID_FIELDS = [
   "carrierId",
   "carriedId",
   "receiverId",
+  "targetId",
+  "corpseId",
 ] as const;
 
 /** Does this event name `agentId` in any of its id-shaped fields? Used to scope the log panel to one agent's history. */

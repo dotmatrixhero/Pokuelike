@@ -121,6 +121,52 @@ export function rgbaToCss([r, g, b]: Rgb, alpha: number): string {
 }
 
 /**
+ * Deterministic string hash (FNV-1a-ish, cheap) — purely for deriving a
+ * stable per-species hue below, not tied to the sim's own seeded rng.
+ */
+function hashString(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/** Plain HSL -> RGB, hue in degrees, s/l in [0,1] — no library needed for this one conversion. */
+function hslToRgb(h: number, s: number, l: number): Rgb {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = (h % 360) / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  let [r, g, b] = [0, 0, 0];
+  if (hp < 1) [r, g, b] = [c, x, 0];
+  else if (hp < 2) [r, g, b] = [x, c, 0];
+  else if (hp < 3) [r, g, b] = [0, c, x];
+  else if (hp < 4) [r, g, b] = [0, x, c];
+  else if (hp < 5) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  const m = l - c / 2;
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
+/**
+ * Universal shelter, per-species cosmetic look (point 1 — "all units have
+ * it, it just looks different for each type"; the mechanics are identical
+ * across species, only this rendering hint varies). Derives a stable hue
+ * from `Tile.shelterOwnerSpecies` (engine, set by shelter.ts's
+ * `applyShelterBuilding`) and mixes a modest amount of it into the base
+ * shelter color/glyph tint — a real, per-owner visual variation with zero
+ * gameplay effect, `rgb` unchanged when no owner is recorded yet (an older
+ * or not-yet-repainted shelter tile).
+ */
+export function shelterOwnerTint(rgb: Rgb, ownerSpecies: string | undefined): Rgb {
+  if (!ownerSpecies) return rgb;
+  const hue = hashString(ownerSpecies) % 360;
+  const accent = hslToRgb(hue, 0.55, 0.55);
+  return mix(rgb, accent, 0.4);
+}
+
+/**
  * A cheap, purely-visual per-tile pseudo-random value in [0, 1) — classic
  * GLSL-style sine hash, deterministic by (x, y) alone (not tied to the
  * sim's own seeded rng; this never affects simulation, only how a tile's

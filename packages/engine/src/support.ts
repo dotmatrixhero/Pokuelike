@@ -3,9 +3,9 @@ import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
-import { CONSUME_STOCK_AMOUNT } from "./flora.js";
+import { CONSUME_STOCK_AMOUNT, recordGrazing } from "./flora.js";
 import { isNight, isTwilight } from "./daynight.js";
-import { agentsWithin, isHunterSpecies, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS } from "./predation.js";
+import { agentsWithin, isHunterSpecies, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS, huntHungerThreshold } from "./predation.js";
 import { findNearestIndexed } from "./resourceIndex.js";
 import { COLD_SNAP_SPEED_MULTIPLIER, isInColdSnap } from "./weather.js";
 import { useMove, withinMoveRange } from "./combat.js";
@@ -59,8 +59,15 @@ const CARRY_CAPACITY_PER_MAXHP = 1.5;
 /** A simple carried food unit's weight — small relative to any real agent's carry capacity. */
 export const FOOD_ITEM_WEIGHT = 1;
 export const FOOD_ITEM_KEY = "food";
-/** Restores the same amount as self-feeding (`CONSUME_RATE.seekFood` in needs.ts) — delivered food should feel identical to eating it yourself. */
-const DELIVERED_FOOD_HUNGER_RESTORE = 0.4;
+/**
+ * Restores the same amount as self-feeding (`CONSUME_RATE.seekFood` in
+ * needs.ts) — delivered food should feel identical to eating it yourself.
+ * Exported so `applyScavenging` below can reuse the exact same restore
+ * amount for a real scavenged meal, matching this codebase's established
+ * "match the existing restore convention, don't invent a new number"
+ * pattern (see that function's own doc comment).
+ */
+export const DELIVERED_FOOD_HUNGER_RESTORE = 0.4;
 /** Below this hunger, a herd-mate is "hungry enough to help" for delivery purposes — a bit more lenient than seekFood's own 0.7 trigger since delivery is opportunistic, not urgent. */
 const HUNGRY_HERDMATE_THRESHOLD = 0.4;
 /** How far a well-fed herd-mate will notice a hungry ally to help, and a carrier will look for an adjacent fainted ally. */
@@ -86,7 +93,15 @@ function isFedAndWatered(agent: Agent): boolean {
   return agent.needs.hunger >= FED_THRESHOLD && agent.needs.thirst >= FED_THRESHOLD;
 }
 
-function bodyWeightOf(agent: Agent): number {
+/**
+ * Exported (previously module-private) so `occupancy.ts`'s tile-capacity
+ * rule can point back to this as the canonical "how much does this agent
+ * weigh" convention in its own doc comments — see that module's writeup for
+ * why it keeps a small local duplicate of this exact formula instead of
+ * importing it directly (a real import would close a circular-dependency
+ * loop through movement.ts).
+ */
+export function bodyWeightOf(agent: Agent): number {
   return agent.maxHp ?? FALLBACK_MAX_HP;
 }
 
@@ -131,8 +146,17 @@ export function effectiveSpeed(agent: Agent, baseSpeed: number): number {
 
 // --- Elevation/terrain -> effective movement speed (see DESIGN.md's "Environmental generation..." section) ---
 
-/** Sand/mud slow movement; every other terrain kind is neutral. Sim-original magnitudes, not canon. */
-const TERRAIN_SPEED_MULTIPLIER: Partial<Record<TerrainKind, number>> = { sand: 0.75, mud: 0.5 };
+/**
+ * Sand/mud/boulder slow movement; every other terrain kind is neutral.
+ * Boulder is the slowest of the three (0.4) — direct ask: "boulders being
+ * so blocking... if anything it should cost movement speed to get past
+ * 'em" — real rock is harder to scramble over than mud is to wade through.
+ * Composes multiplicatively with `elevationSpeedMultiplier` below, so a
+ * boulder placed on genuinely higher ground (see worldgen.ts's boulder
+ * elevation bump) costs even more than this flat number alone. Sim-original
+ * magnitudes, not canon.
+ */
+const TERRAIN_SPEED_MULTIPLIER: Partial<Record<TerrainKind, number>> = { sand: 0.75, mud: 0.5, boulder: 0.4 };
 
 /** The flat per-terrain-kind multiplier for whichever tile an agent just moved onto. 1 (neutral) for anything not in the table above. */
 export function terrainSpeedMultiplier(terrain: TerrainKind): number {
@@ -180,6 +204,27 @@ export function elevationSpeedMultiplier(fromElevation: number, toElevation: num
  * you up, rough ground is generally slower) still shows up in a real run,
  * just applied to the *next* action rather than the one just taken.
  */
+/**
+ * The canopy is meant to be genuinely easy to move through — real branch-
+ * to-branch travel, not the same trudge-across-open-ground pace as the
+ * surface — direct ask: "canopy should be super easy to move around in
+ * anywhere." A flat, generous boost rather than terrain/elevation-shaped
+ * (the layer has no terrain variety or elevation at all — see
+ * `createDemoWorld`'s doc comment, a pure flat floor grid), applied as its
+ * own independent multiplicative term in `actionSpeedOf` (simulation.ts)
+ * rather than folded into `movementSpeedFactor` (which is specifically the
+ * per-*step* elevation/terrain effect, snapshotted onto
+ * `Agent.terrainSpeedFactor` — this is a standing property of the layer
+ * itself, checked fresh every tick instead). Sim-original magnitude, judge
+ * against a real run like every other tuning constant here.
+ */
+export const CANOPY_SPEED_MULTIPLIER = 2;
+
+/** 1 (neutral) everywhere except the canopy, which gets `CANOPY_SPEED_MULTIPLIER` — see its doc comment. */
+export function canopySpeedMultiplier(layer: Layer): number {
+  return layer === "canopy" ? CANOPY_SPEED_MULTIPLIER : 1;
+}
+
 export function movementSpeedFactor(fromElevation: number, toElevation: number, toTerrain: TerrainKind): number {
   return elevationSpeedMultiplier(fromElevation, toElevation) * terrainSpeedMultiplier(toTerrain);
 }
@@ -327,6 +372,99 @@ export function applyLooting(world: World, agent: Agent, log?: EventLog): boolea
   return true;
 }
 
+// --- Scavenging (a hungry predator feeding directly from a corpse's body) ---
+
+/**
+ * How far a hungry predator will notice a scavengeable corpse and go for it
+ * — same magnitude as `predation.ts`'s `HUNT_DETECT_RADIUS`, since this is
+ * meant to be a genuinely competitive alternative to a live hunt, not a
+ * last-resort mechanic with worse detection range than hunting itself.
+ */
+const SCAVENGE_DETECT_RADIUS = 5;
+/** How close to a corpse counts as "arrived, start feeding" — matches `ADJACENT_RADIUS`'s own convention. */
+const SCAVENGE_ARRIVAL_RADIUS = 1;
+
+/**
+ * Any truly-dead corpse (`isTrulyDead`) near `agent`, on the same layer,
+ * nearest first — deliberately NOT `agentsWithin` (predation.ts), which
+ * filters out anything with `alive === false`, exactly the population a
+ * corpse search needs to include. A corpse persists for `CORPSE_PERSIST_TICKS`
+ * (see simulation.ts's `pruneStaleCorpses`) before it's gone, the real,
+ * already-existing window this feature scavenges within — no new corpse-side
+ * bookkeeping needed.
+ */
+function findNearestCorpse(world: World, agent: Agent, radius: number): Agent | undefined {
+  const corpses = world.agents.filter(
+    (other) => other.id !== agent.id && isTrulyDead(other) && other.layer === agent.layer && manhattan(other.pos, agent.pos) <= radius
+  );
+  return nearest(agent, corpses);
+}
+
+/**
+ * A hungry predator (opportunistically, the direct-ask "most directly
+ * relevant to the fragility problem" scope call — see DESIGN.md) that finds
+ * a nearby corpse feeds from it directly instead of hunting live prey: a
+ * real meal (hunger restore, `DELIVERED_FOOD_HUNGER_RESTORE` — the
+ * established restore-amount convention, not a new number) without any of a
+ * live hunt's risk of missing, fleeing prey, or a mob defending the target.
+ * This is the actual lever against predator-population fragility this
+ * feature exists to provide (DESIGN.md): a real alternative "meal" that
+ * never requires a successful kill.
+ *
+ * Called from needs.ts right after `applyPredationInstincts` returns false
+ * (no threat to flee/fight, no live hunt this tick — solo or pack) — i.e.
+ * scavenging is a genuine fallback, checked after a live hunt had its own
+ * first refusal, not a replacement for it. `rules` gates this to hunter
+ * species only, same convention as every other predator-specific check in
+ * this codebase.
+ *
+ * Reuses the exact same hunger gate a live hunt would (`huntHungerThreshold`)
+ * for BOTH adults and juveniles — deliberately no separate, invented
+ * "scavenging eagerness" number: the real ontogenetic difference is already
+ * fully expressed by predation.ts's own hunt-eligibility gate (a juvenile
+ * never even attempts a live hunt — solo or pack — so it reaches this
+ * function, and only this function, every time it's hungry enough to want a
+ * meal; an adult only falls through to this as a fallback once a live hunt
+ * attempt already found nothing to chase). Confirmed end-to-end (not just at
+ * the threshold-check level) in predation.test.ts's own ontogenetic-niche-
+ * shift suite: given a choice between an identical live prey target AND a
+ * corpse, a juvenile scavenges the corpse while an adult goes for the kill.
+ *
+ * Deliberately introduces zero new randomness — no roll decides whether a
+ * scavenge attempt succeeds; finding a real corpse within range and reaching
+ * it is the only gate, matching `rollAccuracy`'s "clean, deterministic"
+ * exemption class the way `applyHerdSupport`'s own food delivery already is.
+ */
+export function applyScavenging(world: World, agent: Agent, rules: HuntRules, log?: EventLog): boolean {
+  if (agent.asleep) return false;
+  if (!rules[agent.species]) return false;
+  if (agent.needs.hunger >= huntHungerThreshold(agent, world.tick)) return false;
+
+  const corpse = findNearestCorpse(world, agent, SCAVENGE_DETECT_RADIUS);
+  if (!corpse) return false;
+
+  logBehaviorChange(log, world, agent, "scavenge");
+  agent.behavior = "scavenge";
+
+  if (manhattan(agent.pos, corpse.pos) <= SCAVENGE_ARRIVAL_RADIUS) {
+    agent.needs.hunger = Math.min(1, agent.needs.hunger + DELIVERED_FOOD_HUNGER_RESTORE);
+    agent.ticksSinceMeal = 0;
+    log?.record({
+      kind: "scavenged",
+      tick: world.tick,
+      agentId: agent.id,
+      species: agent.species,
+      corpseId: corpse.id,
+      corpseSpecies: corpse.species,
+      pos: corpse.pos,
+    });
+    return true;
+  }
+
+  agent.pos = stepToward(world, agent.layer, agent.pos, corpse.pos);
+  return true;
+}
+
 // --- Herd food delivery ---
 
 function isSameHerd(a: Agent, b: Agent): boolean {
@@ -374,11 +512,22 @@ function deliverFoodItem(agent: Agent): InventoryItem | undefined {
  * food item, the same "resumable multi-tick errand" pattern as `relocate` in
  * predation.ts. Returns true if this tick was spent on delivery (so the
  * caller should skip normal needs-driven behavior).
+ *
+ * `needsAreUrgent` (default false, from `chooseBehavior(agent.needs) !==
+ * "idle"` in needs.ts's `tickAgentAction`) pauses an in-progress errand
+ * exactly like dispersal/shelter-building's own pause-on-urgent-need fix —
+ * `deliverTargetId` is left untouched so the errand resumes once the
+ * deliverer is satisfied again. Before this, an errand only checked the
+ * deliverer's own needs once, at the moment it started (`isFedAndWatered`
+ * below) — never again during the walk, letting a real multi-hundred-tick
+ * delivery run straight through the deliverer's own hunger/thirst the same
+ * way the pre-fix versions of dispersal/shelter-building used to.
  */
-export function applyHerdSupport(world: World, agent: Agent, log?: EventLog): boolean {
+export function applyHerdSupport(world: World, agent: Agent, log?: EventLog, needsAreUrgent = false): boolean {
   if (!agent.herdId) return false;
 
   if (agent.deliverTargetId) {
+    if (needsAreUrgent) return false; // paused, not abandoned — deliverTargetId untouched, resumes later
     const target = world.agents.find((a) => a.id === agent.deliverTargetId);
     const targetGone = !target || target.alive === false || !isSameHerd(agent, target);
 
@@ -415,7 +564,10 @@ export function applyHerdSupport(world: World, agent: Agent, log?: EventLog): bo
       agent.behavior = "deliverFood";
       if (manhattan(agent.pos, foodTile) === 0) {
         const tile = tileAt(world, agent.layer, foodTile.x, foodTile.y);
-        if (tile?.stock !== undefined) tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
+        if (tile?.stock !== undefined) {
+          tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
+          recordGrazing(tile); // real herd food-delivery grazing event — see flora.ts's "Grazing scars"
+        }
         agent.inventory = [...(agent.inventory ?? []), { itemKey: FOOD_ITEM_KEY, weight: FOOD_ITEM_WEIGHT }];
       } else {
         agent.pos = stepToward(world, agent.layer, agent.pos, foodTile);
@@ -437,7 +589,7 @@ export function applyHerdSupport(world: World, agent: Agent, log?: EventLog): bo
   if (!hungryMate) return false;
 
   agent.deliverTargetId = hungryMate.id;
-  return applyHerdSupport(world, agent, log);
+  return applyHerdSupport(world, agent, log, needsAreUrgent);
 }
 
 // --- Ally-targeting support moves (MoveSpec.targetsAlly/allyEffect) ---

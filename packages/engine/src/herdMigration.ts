@@ -202,7 +202,7 @@ function herdSpecies(world: World, herdId: string): string | undefined {
 
 /** Number of living members in the herd — used to decide which of two territorially-clashing herds gets displaced (the smaller one). */
 function herdSize(world: World, herdId: string): number {
-  return world.agents.filter((agent) => agent.alive !== false && agent.herdId === herdId).length;
+  return world.agents.filter((agent) => agent.alive !== false && !agent.isEgg && agent.herdId === herdId).length;
 }
 
 /**
@@ -361,7 +361,7 @@ const WANDERLUST_MIN_MULTIPLIER = 0.25;
  * codebase (predation.ts, reproduction.ts).
  */
 function herdWanderlustFactor(world: World, herdId: string): number {
-  const members = world.agents.filter((agent) => agent.alive !== false && agent.herdId === herdId);
+  const members = world.agents.filter((agent) => agent.alive !== false && !agent.isEgg && agent.herdId === herdId);
   if (members.length === 0) return 0.5;
   const sum = members.reduce((total, agent) => total + (agent.disposition?.boldness ?? 0.5) + (agent.disposition?.sociability ?? 0.5), 0);
   return sum / (members.length * 2);

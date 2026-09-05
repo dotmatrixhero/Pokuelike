@@ -1,4 +1,4 @@
-import type { Agent, BehaviorKind, DispersalReason, Layer, MigrationReason, StatusKind, Vec2, WeatherType, World } from "./types.js";
+import type { Agent, BehaviorKind, DispersalReason, Layer, MigrationReason, StatusKind, TerrainKind, Vec2, WeatherType, World } from "./types.js";
 import type { PokemonType } from "./typing.js";
 
 export type SimEvent =
@@ -56,7 +56,7 @@ export type SimEvent =
       tick: number;
       layer: Layer;
       pos: Vec2;
-      stage: "seeded" | "sprouted" | "died";
+      stage: "seeded" | "sprouted" | "died" | "overgrazed" | "recovered";
       /** Set on "sprouted" only — which specific plant it grew into (see flora.ts). */
       flavor?: string;
     }
@@ -261,6 +261,18 @@ export type SimEvent =
       reason: DispersalReason;
     }
   | {
+      kind: "immigrated";
+      tick: number;
+      /** One or more agent ids (`immigration.ts` spawns a 1-3-member group at once) — every id shares the same `species`/`herdId`/arrival `pos`. */
+      agentIds: string[];
+      species: string;
+      layer: Layer;
+      pos: Vec2;
+      /** Whether this group joined an existing nearby herd or founded a new one — same idea as `dispersed`'s `outcome`. */
+      herdId: string;
+      outcome: "joined" | "founded";
+    }
+  | {
       kind: "shelterBuilt";
       tick: number;
       /** The agent whose build-time investment completed the structure — see shelter.ts's `applyShelterBuilding`. */
@@ -323,6 +335,65 @@ export type SimEvent =
       buffed: boolean;
     }
   | {
+      kind: "terrainChanged";
+      tick: number;
+      layer: Layer;
+      pos: Vec2;
+      from: TerrainKind;
+      to: TerrainKind;
+      /** Which sustained weather condition caused it — see weather.ts's `advanceWaterCycle`, currently the only producer of this event. */
+      cause: "drought" | "rain";
+    }
+  | {
+      kind: "herdClash";
+      tick: number;
+      attackerId: string;
+      attackerSpecies: string;
+      /** Absent for a solitary (herdless) participant — same-or-different-species conflict doesn't require either side to actually have a herd. */
+      attackerHerdId?: string;
+      defenderId: string;
+      defenderSpecies: string;
+      defenderHerdId?: string;
+      /** Absent on a "missed" outcome (see below) — no damage was dealt. */
+      damage?: number;
+      /** Absent on a "missed" outcome. */
+      defenderHpRemaining?: number;
+      critical?: boolean;
+      pos: Vec2;
+      /**
+       * "missed": the accuracy roll failed, nothing happened. "hit": a real
+       * hit landed but the defender wasn't hurt enough to back off yet.
+       * "retreated": the defender crossed `herdConflict.ts`'s
+       * `HERD_CONFLICT_RETREAT_HP_FRACTION` and stepped away — this
+       * mechanic's actual resolution; see herdConflict.ts's doc comment for
+       * why this can never be "fainted"/"killed" the way predation's
+       * `fought`/`defeated` can.
+       */
+      outcome: "missed" | "hit" | "retreated";
+    }
+  | {
+      kind: "packHunt";
+      tick: number;
+      /** The pack member whose attack this tick actually landed (or missed) with pack assistance — see predation.ts's `applyPredationInstincts`. */
+      attackerId: string;
+      attackerSpecies: string;
+      targetId: string;
+      targetSpecies: string;
+      /** How many OTHER same-species conspecifics were already committed to this exact target (`Agent.huntTarget`) within pack range — the real, positioning-driven count the accuracy bonus is computed from, not the wider "nearby" muster count. Always >= 1 (this event only fires once real coordination is happening). */
+      packmates: number;
+      pos: Vec2;
+    }
+  | {
+      kind: "scavenged";
+      tick: number;
+      agentId: string;
+      species: string;
+      /** The corpse fed from — see support.ts's `applyScavenging`/`isTrulyDead`. */
+      corpseId: string;
+      corpseSpecies: string;
+      pos: Vec2;
+    }
+  | {
       kind: "statusCleared";
       tick: number;
       agentId: string;
@@ -330,6 +401,55 @@ export type SimEvent =
       statusKind: StatusKind;
       /** Sleep's duration running out, or freeze's per-tick/fire-hit thaw. A faint (burn/poison DOT or any other cause) clears status silently — the "fainted" event itself narrates that, no separate reason needed here. */
       reason: "woke" | "thawed";
+    }
+  | {
+      kind: "bonded";
+      tick: number;
+      /** The pair that formed a `bondedPartnerId` link — see reproduction.ts's `applyMateSeeking`. Order matches the calling (female-turn) convention: `agentId` is the female, `partnerId` the male. */
+      agentId: string;
+      species: string;
+      partnerId: string;
+      partnerSpecies: string;
+      pos: Vec2;
+    }
+  | {
+      kind: "eggLaid";
+      tick: number;
+      motherId: string;
+      fatherId: string;
+      eggId: string;
+      species: string;
+      layer: Layer;
+      pos: Vec2;
+    }
+  | {
+      kind: "eggHatched";
+      tick: number;
+      agentId: string;
+      species: string;
+      layer: Layer;
+      pos: Vec2;
+    }
+  | {
+      kind: "eggEaten";
+      tick: number;
+      eaterId: string;
+      eaterSpecies: string;
+      eggId: string;
+      eggSpecies: string;
+      layer: Layer;
+      pos: Vec2;
+    }
+  | {
+      kind: "eggDefended";
+      tick: number;
+      /** The parent/herd-mate defending the egg. */
+      defenderId: string;
+      defenderSpecies: string;
+      eggId: string;
+      threatId: string;
+      threatSpecies: string;
+      pos: Vec2;
     };
 
 /**

@@ -15,6 +15,7 @@ import {
   rgbToCss,
   rgbaToCss,
   shade,
+  shelterOwnerTint,
   tileLight,
 } from "./palette.js";
 
@@ -63,19 +64,28 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
         continue;
       }
 
-      let bg = shade(TERRAIN_BG[tile.terrain], tile.elevation);
+      let bg = shade(tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies) : TERRAIN_BG[tile.terrain], tile.elevation);
       // A depleted food/flora patch fades from its flavor accent back toward plain floor as stock runs out —
       // same idea as the original renderer's mixColor, now mixing ascii.ts's actual FLAVOR_FG/TERRAIN_BG tables.
+      const isPlant = tile.terrain === "food" || tile.terrain === "flora" || tile.terrain === "seedling";
       if ((tile.terrain === "food" || tile.terrain === "flora") && tile.stock !== undefined) {
         const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_BG[tile.terrain];
         bg = mix(TERRAIN_BG.floor, accent, tile.stock);
       }
 
-      ctx.fillStyle = rgbToCss(bg);
+      // Living plant matter reads a bit more translucent than solid terrain
+      // — direct ask: "plants and flora should always be a little more
+      // transparent."
+      ctx.fillStyle = isPlant ? rgbaToCss(bg, 0.75) : rgbToCss(bg);
       ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
     }
   }
   ctx.restore();
+
+  // Night darkening applies to the ground only, drawn before agents step in
+  // on top of it — Pokémon should always read at full brightness regardless
+  // of time of day, not get dimmed along with the terrain underneath them.
+  drawDayNightTint(ctx, world);
 
   for (const agent of world.agents) {
     if (agent.layer !== "surface") continue;
@@ -83,7 +93,6 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
   }
 
   drawWeather(ctx, world);
-  drawDayNightTint(ctx, world);
 
   if (selectedAgentId) {
     const selected = world.agents.find((a) => a.id === selectedAgentId);
@@ -128,7 +137,9 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
       const tile = surface[y * world.width + x]!;
       const cx = x * TILE_SIZE + TILE_SIZE / 2;
       const cy = y * TILE_SIZE + TILE_SIZE / 2;
-      const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_FG[tile.terrain];
+      const accent =
+        (tile.flavor && FLAVOR_FG[tile.flavor]) ||
+        (tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_FG.shelter, tile.shelterOwnerSpecies) : TERRAIN_FG[tile.terrain]);
       // Faux ambient light: a static per-tile factor (0.65-1.35) so the
       // ground reads as unevenly lit stone instead of a flat repeated color
       // — the actual thing that makes Brogue's ASCII look alive rather than
@@ -145,26 +156,48 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
         ctx.fillStyle = rgbaToCss(groundBg, 0.25 * light);
         ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
         const flavorGlyph = tile.flavor ? FLAVOR_GLYPH[tile.flavor] : undefined;
-        ctx.fillStyle = rgbaToCss(accent, 0.85 * light);
+        // Living plant matter (food/flora/seedling) reads a bit lighter/more
+        // translucent than a tree or boulder's glyph — those two are solid
+        // obstacles, these are meant to feel soft/growing rather than as
+        // visually loud as a rock. Direct ask: "plants and flora should
+        // always be a little more transparent."
+        const isPlant = tile.terrain === "food" || tile.terrain === "flora" || tile.terrain === "seedling";
+        ctx.fillStyle = rgbaToCss(accent, (isPlant ? 0.6 : 0.85) * light);
         ctx.fillText(flavorGlyph ?? TERRAIN_GLYPH[tile.terrain], cx, cy);
       } else {
         // Everything else keeps a faint translucent wash of its own color —
         // Brogue's ground reads as lit stone, not a flat tile — plus its glyph.
-        const bg = shade(TERRAIN_BG[tile.terrain], tile.elevation);
+        const bg = shade(tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies) : TERRAIN_BG[tile.terrain], tile.elevation);
         ctx.fillStyle = rgbaToCss(bg, (tile.terrain === "floor" ? 0.25 : 0.55) * light);
         ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
         ctx.fillStyle = rgbaToCss(accent, (tile.terrain === "floor" ? 0.45 : 0.9) * light);
         ctx.fillText(TERRAIN_GLYPH[tile.terrain], cx, cy);
       }
 
-      const agent = agentAt.get(`${x},${y}`);
-      if (agent) drawAgentGlyph(ctx, agent, cx, cy, agent.id === selectedAgentId);
     }
   }
   ctx.restore();
 
-  drawWeather(ctx, world);
+  // Night darkening applies to the ground only, drawn before agent glyphs go
+  // in on top of it — Pokémon should always read at full brightness
+  // regardless of time of day, not get dimmed along with the terrain
+  // underneath them. Agents used to be drawn inline in the tile loop above
+  // (before this tint existed as a separate final pass); pulled into their
+  // own pass here so the draw order is tiles -> tint -> agents.
   drawDayNightTint(ctx, world);
+
+  ctx.save();
+  ctx.font = `${TILE_SIZE * 0.68}px ui-monospace, "SF Mono", Consolas, monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const agent of agentAt.values()) {
+    const cx = agent.pos.x * TILE_SIZE + TILE_SIZE / 2;
+    const cy = agent.pos.y * TILE_SIZE + TILE_SIZE / 2;
+    drawAgentGlyph(ctx, agent, cx, cy, agent.id === selectedAgentId);
+  }
+  ctx.restore();
+
+  drawWeather(ctx, world);
 }
 
 /**

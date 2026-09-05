@@ -3,6 +3,74 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Species/biome/immigration — built, see DESIGN.md
+
+- [x] Three new species (Geodude, Growlithe, Mankey) closing the
+      badlands/highland "zero real residents" gap, all reusing an existing
+      move and an existing `EGG_GROUPS_BY_BASE_KEY` entry. Charmander (fully
+      defined earlier, never spawned) now has a real starting spot in
+      `createDemoWorld`, biome-placed via the new `findPosInBiome`.
+- [x] `SpeciesDef.biomes?: string[]` added and tagged on every species (new
+      and existing, best-effort). Real consumers: `findPosInBiome`
+      (Charmander's placement) and `immigration.ts`'s spawn-site species/
+      location scoring.
+- [x] Immigration system (`packages/engine/src/immigration.ts`): flat
+      per-tick chance roll + cooldown + population cap (soft 70/hard 110,
+      linear falloff between), species picked by under-representation x
+      biome-match weighting at a random map-edge arrival point, 1-3 agents
+      join-or-found a herd exactly like `dispersal.ts`'s arrival logic. New
+      `"immigrated"` event, headline-worthy in the web UI. 13 new engine
+      tests + 19 new data-package tests (first test suite for
+      `packages/data` — `vitest` added as a devDependency there). All 593
+      engine tests (580 pre-existing + 13 new) and the determinism
+      acceptance test pass; existing callers without an `ImmigrationContext`
+      see zero behavior change.
+- [x] Real 3000-tick runs, 3 seeds, with vs. without immigration: fired 4-6
+      times per run every seed; final population rose on 2/3 seeds (42:
+      19->35, 7: 21->28), and on the third (20260903, this session's
+      historically low-growth seed) ended at the same total (28) but with
+      real compositional diversity immigration added (Geodude/Charmander/
+      Scyther/Spearow/Mankey present with it on, none of those with it
+      off) — worth knowing the effect isn't purely "always raises
+      population," see DESIGN.md for the honest breakdown.
+- [x] An 8000-tick run confirmed real in-sim survival *and breeding* of a
+      newly-immigrated species (Mankey: 3 immigrants at tick 2459 -> 6
+      living by tick 8000), not just spawn-and-survive.
+- [ ] **Open follow-up: the population cap's scaled-down middle zone
+      (70-110 living agents) is unit-tested in isolation but not yet
+      exercised by a real run that actually reaches it** — every real run
+      in this pass stayed at or under ~69 living agents, so the linear
+      falloff between `POP_SOFT_CAP`/`POP_HARD_CAP` has never been observed
+      firing in a real multi-thousand-tick run, only confirmed correct via
+      `immigration.test.ts`'s direct unit tests. A longer run (10,000+
+      ticks) or a seed/config that grows faster would be the way to
+      actually witness it end to end.
+- [ ] **Open follow-up: immigration's population cap only bounds
+      immigration's own contribution — breeding itself is still completely
+      uncapped**, the same pre-existing gap noted elsewhere in this file. A
+      seed with strong enough organic growth could still exceed
+      `POP_HARD_CAP` through breeding alone, with immigration simply
+      declining to add to it. Not attempted here — a real population cap
+      that reasons about the *whole* population (not just one growth
+      channel) is a bigger, separate design question.
+- [ ] **Open follow-up, flagged rather than guessed at: is Growlithe (and
+      any future item-only-evolution species) actually a good roster fit
+      given it can never evolve in-sim** at all under the current
+      level-only evolution filter (`leveling.ts`)? Onix already lives with
+      this same limitation without apparent issue, so it was judged
+      acceptable to extend it to a second species rather than a blocker —
+      but it's a real, deliberate trade-off, not an oversight, and worth a
+      second look if evolution coverage across the roster ever becomes a
+      priority.
+- [ ] Biome-driven placement was deliberately scoped to *new* placements
+      only (Charmander, immigrants) — every existing hand-placed starting
+      agent (Bulbasaur herd, Venusaur guardians, Scyther, Diglett/Sandshrew
+      colony, Onix, Pidgey flock, Spearow, Squirtle pair) keeps its original
+      fixed coordinates, unretouched, to avoid destabilizing already-
+      validated placements. If a future pass wants the *whole* starting
+      roster biome-driven, that's a real, separate, riskier change — not
+      done here.
+
 ## Next up: terrain lifecycle + construction + overworld (one combined design, not started)
 
 Direct feedback: not enough dynamism in the environment — weather changes
@@ -36,6 +104,49 @@ work resumes:
    hazard the finding also surfaced. The fancier growth/decay/storm-
    interaction layer terrain lifecycle (1) would add can still attach to
    the shipped `"shelter"` terrain kind later, unblocked by any of this.
+   ~~**Follow-up: resting-at-home buffs + food cache**~~ — **built** (direct
+   ask: "shelter should also...incentivize the Pokémon to stay in it...food
+   cache"), see DESIGN.md's "Shelter incentives" section for the full
+   design/real-run numbers. Doesn't resolve the net-survival-cost finding
+   above by itself (a shelter that's never successfully built, as seed 42's
+   own founders keep proving, has nothing for a resting/cache buff to
+   attach to) — it's a real, separate incentive layer on top of an already-
+   built shelter, not a fix for the build-site-scoring gap. Real follow-ups
+   still open, not done here:
+   - **Extend `buildsShelter` to more species now that shelter does more.**
+     Explicitly flagged rather than done unilaterally — a separate, bigger
+     roster decision the direct ask didn't cover. Worth revisiting once the
+     roster grows past Diglett/Sandshrew: any other genuinely
+     burrowing/nesting-flavored species (candidates judged the same way
+     `species.ts`'s own top-of-roster comment already judges the current
+     roster) would get real, earned value from resting/cache now, not just
+     the passive concealment/storm-cover payoff shelter-building shipped
+     with originally.
+   - **Cache-aware herd food delivery** — `support.ts`'s `applyHerdSupport`
+     currently only ever looks for a live food tile
+     (`findNearestFoodTile`/`findNearestIndexed(..., "food")`); it has no
+     awareness that a `buildsShelter` herd-mate's home shelter might have a
+     stocked cache closer than any live patch. Left alone here since it's a
+     second system's own targeting logic, not this feature's — a real
+     candidate for a future pass rather than a scope-creep addition to this
+     one.
+   - **Tune `SHELTER_CACHE_MAX`/`SHELTER_CACHE_DEPOSIT_PER_TICK` against a
+     seed where a shelter actually survives long enough to matter** — all
+     three standard seeds (42/7/20260903) produced zero `shelterBuilt`
+     events at 3000 ticks (DESIGN.md's real-run numbers), so this pass's
+     real validation had to fall back to a controlled larger-map scenario
+     (same fix `shelter.test.ts`'s own end-to-end test already needed for
+     the identical problem) — the standard seeds still owe a real look at
+     cache accumulation/drawdown once the underlying build-site-scoring gap
+     above is addressed.
+   - **Some shelters still get abandoned even with the resting pull
+     active** (3-5 of 4-10 built per 3000-tick run in the controlled
+     validation above — a real reduction versus the mechanism's own
+     always-abandons-if-unattended baseline, not a full elimination). Not
+     isolated further here: candidate causes worth checking are a
+     founder's death leaving nobody to return to a specific shelter, or a
+     herd relocating away (`herdMigration.ts`) and never coming back to an
+     older one while a newer one gets built closer to the new range.
 3. **Overworld: the current map becomes one region in a larger graph** —
    the "World scale: layers, elevation, and regions" section from early in
    this project, finally built. Decided: full simulation for the focused/
@@ -52,7 +163,64 @@ work resumes:
    herd within the same map) — stretch goal, not required for a first cut.
    Start with a small region count (3-4), not a large graph.
 
-Not started — the user has something else to try first.
+Not started — the user has something else to try first. Note: item (1)'s
+tree-growth/decay half is still not started, but its water-supply half is
+now partially covered by a separate, already-shipped piece — see "Stronger
+weather-driven flora/water dynamics" below — so (1) on resume should scope
+itself to tree lifecycle + biome drift only, not re-do water.
+
+## Stronger weather-driven flora/water dynamics — built, see DESIGN.md
+
+Direct feedback: "i kinda want weather events to be alittle stronger about
+killing off flora and reducing water/iincreasing it. it'd make it mroe
+dynamic." Widened flora's existing rain/drought decay-rate divisors
+(weather.ts) and, the bigger piece, gave water real terrain mutation for
+the first time: a "water" tile inside a drought cell can dry to "mud", and
+a "floor"/"mud"/"sand" tile adjacent to existing water inside a rain cell
+can become water — both a flat per-tile-per-tick roll, same idiom as
+flora.ts's own spread, both threaded through an explicit `rng` param (no
+new bare `Math.random()`), new `terrainChanged` `SimEvent`. See DESIGN.md's
+"Stronger weather-driven flora/water dynamics" section for the full
+before/after real-run numbers (seed 20260903, 3000 ticks: water 472 -> 476
+net over the run, -6 during one 272-tick drought window, +5 to +6 during
+several rain windows — real, non-degenerate movement in both directions).
+
+Open follow-up questions flagged, not implemented:
+
+- **Should drought/rain severity scale with how long the cell has already
+  been active?** Right now every drought/rain cell affects tiles at the
+  same flat per-tick chance for its whole life from tick 1 to its last
+  tick — a cell that's been sitting on the map for 400 ticks is no more
+  intense than one that just spawned. A duration-scaled ramp (a long
+  drought getting *worse* the longer it persists, not just "still going")
+  might read as more dramatic, but wasn't attempted here — it would also
+  make the already-tricky rain-vs-drought equilibrium tuning (below)
+  harder to reason about, not easier, so it was deliberately left for a
+  separate pass.
+- **No stable long-run water-supply equilibrium yet.** A real 10,000-tick
+  run at one seed drifted water supply up (+17%) under a naive symmetric
+  rain/form-vs-drought/dry rate pairing; the asymmetric fix (rain forms
+  water much more slowly per-roll than drought dries it, to counteract
+  forming's own structural "each new water tile seeds its own neighbors"
+  growth advantage) fixed that specific run but a different 10,000-tick
+  seed still drifted the other way instead (-25%, drought-heavy). The
+  system reliably moves in the direction its dominant weather type pushes,
+  it just doesn't yet converge back toward a stable baseline regardless of
+  which weather types a given seed happens to roll more of over very long
+  runs. Worth deciding whether that's acceptable (a map's water supply
+  genuinely drying up or flooding over a very long run is arguably a
+  feature, not a bug, for an ecosystem sim) or needs an explicit
+  equilibrium-restoring term (e.g. a slow background reversion rate, or
+  capping cumulative drift as a fraction of the map's original water
+  count) before trusting it over the timescales (1) above's biome-drift
+  idea already assumes (tens of thousands of ticks).
+- **Water formation doesn't yet use worldgen.ts's moisture field** — new
+  water only ever forms adjacent to existing water, never in a "naturally
+  low/wet spot" the way `generateWorld`'s own moisture-field-driven
+  placement does at world-creation time. Reusing that at runtime (bias
+  formation chance by local moisture, not just raw adjacency) is a natural
+  next step if adjacency-only spread turns out to feel too uniform in a
+  real playtest.
 
 ## Priority: sim depth + observability (current focus)
 
@@ -589,6 +757,50 @@ produce a real story before player mechanics are worth building further.
       cutting short how many chances it gets to roll. Not fixed here — the
       right lever is herd survival time (a pre-existing, separately-scoped
       gap), not a higher wanderlust chance.
+- [x] **Herd conflict: fighting over resources — built, see DESIGN.md.**
+      Direct ask ("I think escalated rivalry, even between species or same
+      species, having them fight over resources would be cool"). New
+      `herdConflict.ts`, triggered off real tile-capacity contention
+      (occupancy.ts) via needs.ts's existing `ticksBlockedFromResource`
+      counter, not an extension of herdMigration.ts's territorial trigger
+      (see below for that as an explicit follow-up). Scoped to non-predator
+      species on both sides, disposition-weighted (not a flat chance,
+      matching `wanderlustChance`'s convention) and relative-strength-gated,
+      and structurally non-lethal — the defender's hp is clamped at 15% of
+      max, it can never faint or die from this mechanic, only retreat once
+      hurt past 60% hp. New `herdClash` `SimEvent`, display support in
+      `packages/web/src/eventText.ts`/`packages/runner/src/format.ts`. 10 new
+      engine tests, 652 total, all passing including the unmodified
+      determinism acceptance test. Real 9-seed 3000-tick validation: fires
+      19-90 times per run, real hit/retreat/miss distribution, zero
+      kill/faint events ever produced by it, and predator populations
+      (scyther/spearow/onix) stayed at the same fragile-but-nonzero baseline
+      level this file already documents elsewhere — no new predator-specific
+      regression observed, and by construction (predators excluded from the
+      trigger entirely) this mechanic cannot be the cause of one.
+- [ ] **Real follow-up, deliberately not built this pass**: extending
+      herdMigration.ts's existing same-species territorial-rivalry trigger
+      (today it always resolves by the smaller herd relocating away) to
+      sometimes escalate into a real fight instead, using the same
+      non-lethal `herdConflict.ts` resolution machinery. This was the other
+      real candidate trigger from the original design brief — resource
+      contention (built) was judged the more concrete, better-motivated
+      mechanism given the user's own "fight over resources" phrasing and
+      occupancy.ts's real, frequent tile-capacity contention, but territorial
+      escalation is a real, reasonable second half worth a future pass.
+- [ ] **Real follow-up, deliberately scoped out for predator-fragility
+      safety**: herd conflict currently excludes predator species entirely,
+      on both sides of a potential fight (no predator-vs-predator rivalry,
+      no predator muscling a herbivore off a resource). If predator
+      populations are ever judged healthy/stable enough to safely absorb a
+      new (even non-lethal) stress source, extending this mechanic to
+      predators is a real next step — not attempted here given this
+      session's repeatedly-documented predator-fragility findings.
+- [ ] **Real follow-up, not built**: a herd-level (multiple members per
+      side, closer to predation.ts's existing mob-fighting shape) version of
+      herd conflict, rather than the current individual-pair version. Judged
+      a materially bigger new death-risk surface to validate safely; the
+      individual-pair version already satisfies the direct ask.
 
 ## Culture, disposition, and roles (pitched, not built — see chat)
 - [x] Disposition vector per individual (boldness/aggression/sociability)
@@ -1246,6 +1458,60 @@ blind `git merge`:
   future seeded-rng test-hygiene pass rather than fixing file-by-file as
   each one happens to get noticed.
 
+## Real pathfinding for `seekWater`/`seekFood` — built; other behaviors still greedy
+
+**Built**: a new `pathfinding.ts` (BFS, `findPath`/`stepAlongPath`, cached
+per-agent on `Agent.pathCache`) now backs `needs.ts`'s `seekWater`/
+`seekFood` stepping specifically — see DESIGN.md's "Follow-up: real BFS
+pathfinding for `seekWater`/`seekFood`" section for the full writeup. Real
+re-run of the exact seed that surfaced this (20260903): thirst-starvation
+deaths 20 → 13, and the specific stuck-oscillating Onix from the original
+diagnosis no longer dies of thirst at all (it now dies later, in combat,
+instead). Chose per-agent path caching over a shared per-(layer, target)
+flow-field cache (the `resourceIndex.ts`/`herdIndex.ts` pattern) — the map
+is small enough that per-agent BFS is already cheap and a real run showed
+no measurable slowdown; a shared cache is a possible future optimization
+if per-agent recomputation ever shows up as a real cost in a much larger
+map or population, but wasn't worth its extra invalidation surface now.
+
+**Still open at the time / now built**: hunt-a-visible-target and
+mate-seeking (predation.ts/reproduction.ts) now ALSO get real BFS
+pathfinding — see DESIGN.md's "Follow-up 2: real BFS pathfinding for
+hunting and mate-seeking, with moving-target handling" for the full
+writeup. A moving target needed its own recompute-staleness rules
+(`stepTowardMovingTarget`, a new function alongside `stepAlongPath`) rather
+than the static-target cache, or the caching benefit would have been
+defeated by the target moving nearly every tick. Real re-run findings on
+both the seed that surfaced the original bug (20260903) and seed 42: seed
+42 shows the intended effect clearly (births 39 → 75, fought 21 → 26), but
+seed 20260903 shows LESS combat/reproduction after the change (fought
+20 → 7, born 14 → 7) — not a regression (every test passes, no wall-clock
+slowdown either seed), just the same butterfly-effect divergence a
+behavior-shaping change always produces in a deterministic-but-chaotic sim
+under a fixed seed. See DESIGN.md for the full honest breakdown.
+
+**Still open / explicitly out of scope for this pass**: flee, exploration,
+dispersal's long walk, shelter-building's travel, and herd-migration's
+relocate walk still call `movement.ts`'s plain `stepToward`/`stepAway`
+unchanged, on purpose (flee especially wants "away right now," not an
+optimal route, and none of these were a confirmed death-causing case).
+Worth revisiting as a candidate follow-up, not fixing preemptively, if a
+future real run shows one of THEM getting stuck near an obstacle cluster
+the same way seekWater/seekFood (and, before this pass, hunting/mate-
+seeking) used to.
+
+**Unrelated gap noticed in passing while validating this pass, not fixed
+(out of scope)**: both real 2000-tick runs (seeds 20260903 and 42) still
+show `killed`/`defeated`/`born` counts that are small relative to
+`floraChanged`/`supported`/`leveledUp` — hunting and mating are working
+mechanically (confirmed directly by this pass's own obstacle-course
+integration tests) but remain rare events over a full run relative to
+everything else going on. Might be worth a future look at whether
+`HUNT_HUNGER_THRESHOLD`/`MATE_SEARCH_RADIUS`/herd-density tuning is
+leaving real hunting/mating opportunities on the table, independent of
+pathfinding — not investigated further here since it's a tuning question,
+not something this pathfinding pass itself caused or is positioned to fix.
+
 ## Urgency-based need priority, extended thirst margin, and sleep — built, tuning follow-ups
 
 - [ ] **`LONG_SLEEP_EXP_TICKS` (200) reads a little high relative to real
@@ -1284,6 +1550,14 @@ blind `git merge`:
       predator-dependent feature (this one included) needs a genuinely
       sustainable predator population to actually exercise in a real run,
       not just a longer tick count.
+      **Update, this session**: pack hunting + scavenging (see the section
+      below, DESIGN.md) were built as two direct levers against exactly this
+      — both proven real and working via dedicated stress scenarios, but
+      predator populations still did NOT reliably recover in real 3000-tick,
+      9-seed runs (several seeds still ended at 0). The mechanisms mostly
+      just don't get a chance to fire in the stock demo scenario, because it
+      spawns exactly one of each predator species — see the follow-up below
+      and DESIGN.md's own honest findings section. This bullet stays open.
 - [ ] **Dispersal's pause-on-urgent-need fix real-run numbers (seed 42,
       2000 ticks, A/B against the pre-feature code on the same seed): total
       starvation deaths dropped 109 -> 30 (thirst deaths 82 -> 23, hunger
@@ -1296,3 +1570,516 @@ blind `git merge`:
       within a fixed window), not a regression, but worth knowing if a
       later feature wants to reason about "how many dispersals typically
       complete in N ticks."
+
+## Cross-herd mating escape hatch — built, see DESIGN.md
+
+- [x] Solo dispersal founders (and any herd with no current opposite-sex
+      mature member) are no longer permanently mate-locked — `isEligibleMate`
+      now allows cross-herd pairing once either party has gone
+      `MATE_ISOLATION_TICKS` (200) ticks with zero eligible mates in range.
+      Confirmed firing in a real 3000-tick run (seed 7, tick 2561). 4 new
+      tests, all 579 engine tests pass, determinism unaffected.
+- [ ] **Open tuning question:** is 200 ticks the right fuse, and should it
+      scale with local population density (sparser maps might want it
+      shorter)? Not resolved — needs more real runs across seeds/densities
+      before touching the constant again.
+
+## Breeding-level gate — built, but a real severe side effect flagged, see DESIGN.md
+
+- [x] Breeding now requires evolved-once OR level 16+, on top of the
+      existing age-based maturity check. Direct instruction, implemented
+      exactly as asked (`meetsBreedingRequirement` in reproduction.ts).
+- [ ] **Urgent-ish open question, not resolved here:** a real 3000-tick,
+      3-seed run shows births collapsing to 4-5 total per run (was
+      hundreds-to-thousands) — most agents simply don't reach level 16 or
+      evolve within a normal run's lifetime at current exp-gain rates
+      (`EXP_TRICKLE_PER_TICK` 0.8/tick vs. ~2535 exp needed for MEDIUM_SLOW
+      level 16). The eligibility rule does exactly what was asked; whether
+      the *practical* near-zero-breeding outcome at today's exp pacing is
+      the intended end state, or whether exp-gain rates (or the level
+      threshold) should be revisited alongside it, is a real open design
+      question to take back to the user rather than guess at.
+- [x] **Tried: quarter thirst/hunger decay rates, direct ask, on the theory
+      that agents weren't surviving long enough to level up.** Real
+      before/after run (same 3 seeds) shows this **did not fix breeding**:
+      births stayed at 1-4 per run. Root-cause check: starvation deaths
+      were already rare even before this change (0-6 thirst deaths, 0
+      hunger deaths, ~2-4 kills per 3000-tick run, out of a starting
+      population of 17) — agents were already surviving fine. The real
+      bottleneck is leveling *speed*, not survival time: most agents simply
+      never accumulate enough exp to reach level 16 within 3000 ticks
+      regardless of how long they live. Kept the slower decay anyway (a
+      real, independently-requested improvement — starvation was already
+      rare, this makes it rarer still, no downside found), but it does NOT
+      resolve the breeding-rate question above — exp-gain pacing is the
+      actual lever, still unaddressed.
+- [x] **Follow-up (direct ask): lowered `MIN_BREEDING_LEVEL_UNEVOLVED` 16 ->
+      12, plus a slight exp bump (`EXP_TRICKLE_PER_TICK` 0.8 -> 1.0,
+      `EXP_ON_CONSUME` 6 -> 8).** Real same-3-seed run: meaningfully
+      better on 2 of 3 seeds — seed 42: 32 births (was 4), final pop 37
+      (was 14); seed 7: 12 births (was 3), final pop 22 (was 11). Seed
+      20260903 stayed stubbornly low (2 births, was 1, final pop 13). A
+      real, substantial improvement, not a full solve — worth a longer run
+      or more seeds if the user wants every seed to recover, not just most.
+
+## Real bug fix: "died of thirst while in water" — see DESIGN.md
+
+- [x] Direct report, traced to a real mechanism: `applySupportMove` had no
+      urgent-need escape valve, so a zero-cooldown ally-buff move (reachable
+      via the skill tree) plus a permanently-adjacent herd-mate let it claim
+      every action tick forever — `tickAgentAction` never reached
+      `chooseBehavior` again. Fixed via a `needsAreUrgent` gate at the
+      caller (needs.ts), same pattern as dispersal/shelter's existing pause
+      fix; `applyHerdSupport`'s food-delivery errand got the same fix (only
+      checked the deliverer's own needs once, at errand start). This
+      resolves the seed-20260903 low-growth mystery noted in the entry just
+      above far more than the exp/level tuning did: real before/after same
+      3 seeds, this fix alone — seed 20260903: final pop 13->40, births
+      2->28, zero starvation deaths (was 5 near/on water); seed 7: 21->164;
+      seed 42: 19->34. Every prior "population stays low on some seeds"
+      finding this session should probably be re-read in light of this —
+      it may have been the dominant cause all along, not herd-lock or exp
+      pacing. New regression test in support.test.ts. All 594 engine tests
+      pass, determinism unaffected.
+
+## Inspector redesign follow-ups (grouped layout / moves / skill trees)
+
+- [ ] The skill-tree layout is a simple BFS-depth layered layout (one row per
+      depth), not a real graph-layout algorithm — no edge lines drawn between
+      a node and its prerequisites, and no crossing-minimization within a
+      row. Fine for the small trees that exist today (5-10 nodes); would
+      likely need real edges drawn (SVG connectors) to stay readable if a
+      much larger/denser tree ever gets authored.
+- [ ] No real browser/DOM test harness exists in this project (confirmed
+      again this session — Playwright/jsdom/happy-dom aren't installed) so
+      the new grouped inspector layout was verified via a hand-rolled DOM
+      shim + typecheck/build, not an actual rendered browser. Worth revisiting
+      if this project ever adds one, especially for anything with real click
+      interaction like the new move-tree toggle.
+- [ ] Mobile/narrow-viewport responsiveness of the new grouped inspector
+      sections is unverified — the existing `#inspector-panel` scroll
+      container should handle it via `overflow-y: auto`, but the group
+      boxes/meters haven't been checked at very narrow widths (the drawer's
+      own `@media (max-width: 768px)` handling was left untouched).
+- [ ] The skill-tree node tooltip (delta/leaning/passive detail) uses a
+      native `title` attribute — functional but not discoverable on touch
+      devices with no hover. A real click-to-expand detail popover would be
+      nicer if this becomes a frequently-used feature.
+
+## Food durability + real water-body terrain transformation — built, see DESIGN.md
+
+- [x] Direct asks ("make food less durable... force migration" / "water
+      sources dry out and refill more during droughts and rain... bigger
+      lake/spring bodies might shrink but never run out") both built.
+      `CONSUME_STOCK_AMOUNT` 0.25->0.35, `FOOD_LIFESPAN_TICKS` 100->70,
+      `FOOD_SPREAD_CHANCE` 0.035->0.025 (flora.ts). New `waterBody.ts`
+      (4-connected flood-fill component sizing, cached via
+      `World.resourceVersion`) backs a tiered `advanceWaterCycle`: small
+      bodies dry at a much faster `1/150` (was a flat `1/500`) and can fully
+      vanish; bodies at/above `LARGE_WATER_BODY_MIN_SIZE` (12, picked from a
+      real measured size distribution — see DESIGN.md) dry at a much slower
+      `1/3000` and are floored at exactly that same threshold so they can
+      never run out. `RAIN_WATER_FORM_CHANCE_PER_TICK` settled at `1/1800`
+      (lower than the pre-existing `1/1500`) after a first attempt at
+      `1/1000` was checked against a real 10,000-tick terrain-only run and
+      found to cause worse runaway water growth than before (+20-47%,
+      root-caused to ~89% of a real map's water now sitting in the
+      slow-drying large-body tier) — `1/1800` brought that back to near
+      equilibrium (-2% to +8% over the same window).
+- [x] Real correctness bug found and fixed *before* shipping, not after: an
+      earlier floor value (6, below the 12-tile large-body threshold) let a
+      shrinking lake silently reclassify as "small" once it crossed under
+      12 tiles, then dry the rest of the way to 0 at the fast rate — a
+      synthetic worst-case unit test (permanent drought, no dissipation)
+      caught a 25-tile lake reaching 0 tiles by tick ~2000. Fixed by setting
+      the floor equal to the large-body threshold itself, closing the gap
+      by construction. See `weather.test.ts`'s dedicated large-vs-small test
+      and DESIGN.md's full writeup.
+- [x] Real-run validation (stash-based A/B isolating just this feature's two
+      files, 3000 ticks, seeds 42/7/20260903): migration-start events rose
+      2->10, 2->9, 1->3 across the three seeds — a real, meaningful increase
+      in scarcity-driven relocation, this feature's actual goal. Final
+      population/births moved in both directions per-seed (butterfly-effect
+      sensitivity, not a systematic direction) and zero starvation deaths in
+      every run, before and after.
+- [x] The user's own direct "keep an eye on it" ask about idle/sated agents
+      answered with real sampled numbers (ticks 1000/2000/3000, all 3
+      seeds): idle-and-both-needs-above-0.7 fraction of living agents never
+      exceeded 11%, mostly well under 5%. See DESIGN.md for the full table
+      and two honestly-flagged caveats (not fully isolated from a concurrent
+      unrelated tile-occupancy feature also landing in `needs.ts` this same
+      session; doesn't itself prove causation vs. the migration-count
+      evidence above).
+- [ ] **Residual, honestly-flagged edge case, distinct from the bug already
+      fixed above:** water-body "large" classification is a stateless,
+      current-size-only check with no memory of a body's own history. The
+      floor-equals-threshold fix guarantees a large body can't be
+      immediately reclassified-then-drained in one continuous exposure, but
+      a border-line-sized lake (just above the 12-tile threshold) that
+      survives many *repeated* separate droughts over a very long run could
+      still, in principle, eventually cross the threshold for good and then
+      dry at the fast small-body rate with no more protection. Real
+      generated maps' actual major lakes sit well above the threshold
+      (34-183 tiles per DESIGN.md's measured distribution), so this mainly
+      matters for the handful of borderline 12-30-tile bodies specifically,
+      over run lengths well beyond what the performance-ceiling item below
+      currently allows a real agent-population run to reach anyway. Real
+      persistent per-body hysteresis tracking (not just a per-tick size
+      check) would close this fully if it's ever worth the complexity.
+- [ ] **A real 8000-tick, 3-seed validation run (this task's own suggested
+      upper end) could not be completed** — killed after several minutes
+      without finishing, and a follow-up single-seed 5000-tick attempt was
+      also killed. Confirmed this is the pre-existing population-driven
+      performance ceiling noted elsewhere in this file, not something this
+      feature caused (a terrain-only water-cycle run with zero agents
+      completed a full 10,000 ticks in ~6 seconds). 3000 ticks per seed
+      (~7-10 seconds) is this feature's actual validated range — worth
+      revisiting once the underlying population-growth performance ceiling
+      is addressed, so a real long-run validation (and a real check of
+      whether the residual water-body edge case above ever actually bites)
+      becomes practical.
+
+## Tile capacity (weight/headcount limit per tile)
+
+- [x] Hard per-tile capacity, direct ask: surface uses a weight-based rule
+      (`TILE_WEIGHT_CAPACITY = 90`, ~3 real average-weight agents, reusing
+      `support.ts`'s `bodyWeightOf` convention), underground/canopy use a
+      flat `FLAT_TILE_HEADCOUNT_CAP = 5` headcount instead (mid-implementation
+      clarification), both with an "empty tile always admits at least one"
+      floor. New `packages/engine/src/occupancy.ts`, following
+      `herdIndex.ts`'s exact per-tick cache shape.
+- [x] Capacity composes with movement/pathfinding — a full tile "routes
+      around, same as an obstacle" — but SCOPED to seekWater/seekFood
+      (`stepAlongPath`) and exploration wandering only, not hunt/mate
+      pursuit, herding, dispersal, migration, herd support, or forced
+      movement. See DESIGN.md's "real-run finding that narrowed this scope"
+      — capacity-gating those too caused a real, measured population
+      regression (up to ~83% on one seed) with zero starvation deaths,
+      traced to hunt/mate pursuit misreading ordinary herd density as
+      "unreachable."
+- [x] Blocked-resource AI: waits `BLOCKED_RESOURCE_GRACE_TICKS` (25) ticks
+      near a crowded target, then excludes it and tries the next-nearest
+      tile of the same terrain, with a fast-track safety valve into the
+      existing `migrate()` escape hatch once every nearby known tile is
+      excluded — prevents infinite oscillation between mutually-crowded
+      tiles (tested directly). Along the way, fixed a real, initially-missed
+      bug: `findLayerWithTerrain` (the underground<->surface water-sharing
+      cross-layer check) wasn't threading the exclusion list, letting an
+      agent ping-pong layers forever re-discovering the very tile it just
+      excluded — caught by the oscillation test, not theorized in advance.
+- [x] Real 3000-tick, 3-seed validation (42/7/20260903): zero starvation
+      deaths on all three, real contention (max 7-9 simultaneous occupants
+      on one seed's tiles, up to ~2 avg per occupied tile), and real
+      waiting confirmed (`resourceWaitTicks`:`resourceBlockedFallbackCount`
+      ratios of ~48:1 to ~105:1 — agents mostly wait out contention rather
+      than instantly relocating).
+- [ ] **Honestly-flagged, not chased down further this pass:** seed
+      20260903's population dropped much more (249 -> 42, -83%) than its
+      own contention numbers would predict (that seed had the LOWEST
+      contention of the three: only 3 blocked-fallback events, max 2
+      simultaneous occupants). Zero deaths, healthy sampled hunger/thirst
+      throughout — this reads as this sim's already-documented chaotic
+      seed-sensitivity (a small deterministic tick-order change cascading
+      into a large population difference on a seed already flagged
+      elsewhere in this file as stubborn/low-growth-prone), not a
+      capacity-crowding bug, but pinning that down for certain would need
+      its own dedicated event-by-event A/B isolation pass.
+- [ ] Underground/canopy's flat headcount cap is unit-tested directly but
+      never actually exercised by a real run — neither layer's current
+      world generation places its own water/food terrain there (underground
+      shares the surface's via the existing redirect; canopy has none at
+      all), so real contention on those two layers stays unobserved until
+      that changes.
+
+## Grazing scars: sustained heavy grazing degrades a tile — built, see DESIGN.md
+- [x] Direct pitch, approved directly ("Yeah that sounds good" — one of three
+      environment-shaping ideas offered, alongside trampled paths and
+      territory marking). `Tile.grazingPressure`/`Tile.overgrazed`
+      (types.ts), accumulated via `flora.ts`'s new `recordGrazing` at both
+      real consumption sites (needs.ts self-feeding, support.ts herd
+      food-delivery pickup), decayed every tick in `growFlora` regardless of
+      terrain. Crossing a hysteresis-gated threshold suppresses (not zeroes)
+      germination/maturation and outright refuses spread onto the scarred
+      tile, self-fading back to normal once grazing pressure decays with
+      real rest. New `floraChanged` stages (`"overgrazed"`/`"recovered"`),
+      filed as `NOISE_KINDS` ambient bookkeeping like the rest of
+      `floraChanged`. 9 new `flora.test.ts` tests, 652 engine tests total,
+      all passing including the unmodified determinism acceptance test.
+- [x] First tuning pass was measurably too weak (only 3 tiles ever went
+      overgrazed across a real 3-seed 3000-tick run) — retuned against that
+      same real data (slower decay, lower threshold) to 9/20/1 tiles
+      overgrazed across the same 3 seeds, zero starvation deaths on all
+      three, confirmed via a real feature-on/feature-off A/B (not just
+      before/after correlation) that the effect is real and attributable.
+      See DESIGN.md for the full numbers and the diagnosis of why the first
+      pass under-fired.
+- [ ] **Real follow-up, not built**: no distinct map/renderer treatment for
+      an overgrazed tile — it still looks like ordinary floor. Worth
+      revisiting if scars turn out common enough in practice to be worth a
+      glyph/tint, once `packages/web`'s tile renderer is being touched for
+      something else anyway.
+- [ ] **Real follow-up, not built**: migration correlation was only tested
+      indirectly (herdMigrating event counts, not a controlled trigger).
+      This session's own herdMigration.ts already has a `"scarcity"` trigger
+      driven by local food availability, not directly by `Tile.overgrazed` —
+      an overgrazed tile currently only discourages migration *indirectly*,
+      by starving out the scarcity check's food-availability read. Wiring
+      `Tile.overgrazed` as a direct migration-scoring input (the way
+      `MigrationReason` already has room for a dedicated reason string) is a
+      real, un-built next step if grazing scars turn out to need a stronger
+      migration nudge than the indirect path currently gives them.
+- [ ] Seed 7's overgrazing events all clustered in the last ~700 of 3000
+      ticks (tracks that seed's late population boom, not chased down as a
+      suspected bug — see DESIGN.md's "Explicitly not done" for this
+      feature) — flagged, not resolved, same as this file's other
+      honestly-reported-but-unconfirmed seed-specific observations.
+
+## Pack hunting, scavenging, and ontogenetic niche shift — built, see DESIGN.md
+
+- [x] Three real-biology behaviors, all approved directly ("Pack hunting
+      sounds good. Scavenging is good. Ontogenic too."), built as real
+      levers against this file's own repeatedly-documented predator
+      fragility (see the bullet above). Pack hunting
+      (`predation.ts`'s new `isPackPreyOf`/`nearbySameSpeciesConspecifics`/
+      `committedPackmates`/`packAccuracyMultiplier`) is the existing
+      defensive mob-fighting pattern flipped to offense: a real,
+      positioning-driven trigger (a genuine nearby same-species conspecific
+      has to exist) unlocks hunting a target too strong to solo, with a real
+      accuracy-bonus mechanical advantage threaded through `resolveHit`.
+      Scavenging (`support.ts`'s new `applyScavenging`) is a real
+      alternative meal — feeding directly from a nearby corpse, restoring
+      hunger by the same established amount `applyHerdSupport`'s food
+      delivery already uses, cashing in the corpse-persistence window this
+      session inherited from an earlier feature. Ontogenetic niche shift
+      (`predation.ts`'s new `isJuvenile`, reusing `Agent.age` the same way
+      `reproduction.ts`'s `isMature` already does) makes a juvenile predator
+      never initiate an independent hunt at all — solo or pack — leaning
+      entirely on scavenging/herd food delivery instead, plus a real,
+      earlier flee-threshold vulnerability difference. 18 new engine tests,
+      681 total, all passing including the unmodified determinism acceptance
+      test — zero new `Math.random()`/`rng()` call sites added.
+- [x] Each mechanism proven working in a dedicated, hand-built stress
+      scenario (this project's own "targeted scenario, not just a longer
+      demo run" standard): pack hunting real-kills a too-strong-to-solo
+      target once real packmates are nearby (12 `packHunt` events, 1 kill,
+      in a 3-scyther stress scenario); scavenging restores real hunger from
+      a real corpse (0.1 -> 0.887 hunger in 2 ticks); a juvenile and an
+      adult in the identical hungry-predator-next-to-prey setup diverge
+      exactly as designed (juvenile never hunts, adult hunts and kills).
+- [ ] **Honest real-run finding, not papered over**: a real 3000-tick,
+      9-seed sweep (42, 7, 20260903, 1-6) found `packHunt` firing on only
+      1 of 9 seeds (14 times) and `scavenged` on only 3 of 9 (4-28 times) —
+      both mechanisms are real and working, but rarely get a chance to fire
+      in the *stock* demo scenario specifically because
+      `packages/data/src/scenario.ts` spawns exactly ONE individual of each
+      predator species with no `herdId`, so pack hunting's own trigger
+      structurally can't fire until a second same-species predator exists
+      nearby (only reachable via reproduction — itself gated behind the same
+      fragile predator population this feature targets). Predator
+      populations did NOT reliably recover — several seeds still ended at 0
+      living predators. The 3 seeds with real pack/scavenge activity did end
+      with more living predators (1, 3, 2) than the zero-activity seeds (1,
+      1, 0, 0), a real, honestly-reported correlation, but not treated as
+      proven causal here — this sim is independently, repeatedly documented
+      elsewhere in this file/DESIGN.md as rng-trajectory-chaos-sensitive, and
+      a clean feature-on/feature-off A/B was considered and not run for that
+      same reason (see DESIGN.md's full writeup).
+- [ ] **Real follow-up, not built**: seed the demo scenario with 2 of each
+      predator species instead of 1 (or give predators their own home-range
+      cohesion so offspring stay near a parent), specifically to give pack
+      hunting's own trigger a fair chance to fire in the stock scenario
+      rather than only in a hand-built stress test. Not attempted this
+      session — changing the demo scenario's spawn composition is its own
+      real design decision with its own validation burden, out of scope for
+      the direct ask here.
+- [ ] **Real follow-up, not built**: kleptoparasitism (contention/priority
+      between multiple scavengers over the same corpse) — the original
+      brief's own "nice-to-have, not required." The existing
+      `CORPSE_PERSIST_TICKS` window already lets multiple agents feed from
+      the same corpse across separate ticks, which was judged enough for the
+      direct "alternative to a risky hunt" ask.
+
+## Tile preference: satisfied idle agents drift toward their species' terrain — built, see DESIGN.md
+
+- [x] Direct ask, verbatim: "Like tile pref. Like bulbasaur should strongly
+      prefer flora tiles. Squirtle should prefer water. If their needs are
+      met." A new `SpeciesDef.preferredTerrain?: TerrainKind[]` field
+      (denormalized onto `Agent.preferredTerrain` at spawn/birth, same
+      three-hop pattern as `activityPattern`/`buildsShelter`), consulted
+      inside `needs.ts`'s existing idle-wander extension point
+      (`applyExploration`) ahead of its pre-existing random-unvisited-tile
+      search: a tagged, satisfied agent heads toward its nearest matching
+      terrain instead of a uniformly random nearby spot, and goes fully idle
+      (no wander at all) once already lingering near it. An untagged
+      species, or a tagged one with nothing reachable, falls straight
+      through to the original random-wander behavior, unchanged. Roster
+      tagging: bulbasaur/venusaur -> flora, squirtle -> water, charmander/
+      mankey -> sunbeam, scyther -> bush, geodude/growlithe -> boulder;
+      diglett/sandshrew/pidgey/spearow/onix deliberately left untagged
+      (underground/canopy are flat, terrain-uniform grids — nothing
+      meaningful to prefer among, see DESIGN.md's point 5 for the full
+      per-species reasoning).
+- [x] `resourceIndex.ts`'s `IndexedTerrain` extended with `"flora"`
+      (justified the same way `"shelter"` was — 2+ real consumers); a
+      preference kind tagged by only one species (`"bush"`, `"boulder"`)
+      uses a new bounded local scan instead of extending the global index
+      further. 7 new engine tests, 688 total, all passing including the
+      unmodified determinism acceptance suite — zero new rng call sites
+      added (the preference lookup is a pure deterministic nearest-tile
+      search).
+- [x] Real 3000-tick, 3-seed (42/7/20260903) feature-on/feature-off A/B via
+      an isolated instrumented script: average distance from a tagged
+      agent to its nearest preferred tile dropped on ON vs OFF across all
+      3 seeds overall (3.70->2.96, 3.20->3.07, 4.92->3.43), and
+      consistently for Bulbasaur specifically (the brief's own named
+      example: 3.06->2.32, 3.10->2.66, 4.77->3.35) — see DESIGN.md for the
+      full per-species table and the honest Venusaur-is-mixed caveat (herd
+      cohesion dominates tile preference for the roster's almost-always-
+      solo guardian).
+- [ ] **Real follow-up, not built**: "we could add more tile types" (the
+      brief's own explicitly optional, vague half). Nothing cheap and
+      obviously missing presented itself for the *current* roster — every
+      species with a real flavor-text terrain affinity already maps onto
+      an existing `TerrainKind`. The one real idea worth flagging: a real
+      "burrow"/underground-den terrain kind distinct from plain `"floor"`,
+      giving Diglett/Sandshrew a genuine tile preference of their own
+      instead of relying solely on `buildsShelter`'s homing pull — would
+      require generating real terrain variance into `worldgen.ts`'s
+      currently-flat underground grid, its own real design decision with
+      its own validation burden. Not attempted this session.
+- [ ] **Real follow-up, not built**: Venusaur's mixed A/B result (worse on
+      1 of 3 seeds, essentially flat/better on the other 2) traced to herd
+      cohesion (`applyHerdCohesion`, checked before `applyExploration`)
+      dominating tile preference for a species that's almost always alone
+      in guardian position — not a bug, but worth a closer look if herd
+      cohesion and tile preference priority are ever revisited together.
+
+## Bonding, shelter, and eggs — built, see DESIGN.md
+
+- [x] Universal shelter: `SpeciesDef.buildsShelter`/`Agent.buildsShelter`
+      no longer gate any shelter mechanic in the engine (species-tied ->
+      universal, a deliberate reversal of the earlier direct instruction) —
+      the field is left in place, unused for gating, purely legacy/cosmetic
+      denormalization. Per-species visual variation instead:
+      `Tile.shelterOwnerSpecies` + `packages/web/src/palette.ts`'s new
+      `shelterOwnerTint` (deterministic per-species hue), wired into both
+      of `renderer.ts`'s draw paths.
+- [x] Real shelter-specific capacity: `occupancy.ts`'s
+      `SHELTER_TILE_ADULT_CAP` (2) / `SHELTER_TILE_EGG_CAP` (1), layered on
+      top of (not replacing) the existing weight/headcount tile-capacity
+      system — shelter terrain routes through a new
+      `canEnterShelter`/`canLayEggAt` pair instead. Adjacent shelter tiles
+      form one connected cluster (`shelterCluster`, 4-directional BFS)
+      whose capacity is the sum of its members' own caps, and household
+      members range across the whole cluster rather than being pinned to
+      one tile.
+- [x] Bonding replaces instant offspring: `reproduction.ts`'s
+      `applyMateSeeking` sets `Agent.bondedPartnerId` on first contact
+      instead of spawning a child; `spawnOffspring` deleted entirely (its
+      logic moved to `eggs.ts`'s hatch step). A bonded, shelterless agent
+      gets a real, unit-tested comfort-threshold discount
+      (`BOND_COMFORT_DISCOUNT`, 0.15) biasing it toward starting a shelter
+      build sooner than an unbonded agent at the same needs.
+- [x] Real eggs: new `eggs.ts` module (`spawnEgg`/`tickEgg`,
+      `EGG_INCUBATION_TICKS = 80`). Egg-laying only once the household has
+      real shelter access with egg-capacity room; the egg is a real `Agent`
+      (`isEgg: true`), stationary and behavior-less (routed straight to
+      `tickEgg` by `simulation.ts`, skipping the ordinary needs/action
+      pipeline entirely); nature/disposition/sex/stat-block assignment
+      moved from lay time to hatch time.
+- [x] Eggs as food: `predation.ts`'s `applyEggEating` — any species that
+      doesn't share an egg group with the egg (reusing `canBreed`) can eat
+      an adjacent egg once hungry enough (`EGG_EAT_HUNGER_THRESHOLD = 0.9`),
+      restoring hunger/granting exp via the exact same `grantKillExp`/
+      hunger-restore path a real kill uses. Deliberately NOT routed through
+      the `HuntRules` predator/prey pipeline — a real, explicit widening of
+      who eats what, independent of a species' predator/prey role.
+- [x] Extreme egg defense: `predation.ts`'s `applyEggDefense`, checked
+      first in `applyPredationInstincts` — ahead of the critically-hurt
+      flee check — overriding a defender's ordinary flee/self-preservation
+      entirely (and waking it if asleep) to fight a threat near its own/its
+      herd's egg, resolving via the real true-death combat path
+      (`resolveHit(..., "killed", ...)`). A real, explicit, documented
+      departure from herdConflict.ts's non-lethal rivalry model, not an
+      accidental softening of it.
+- [x] Fixed a real, latent bug this feature surfaced: universal
+      shelter-building didn't check `agent.asleep`, letting a sleeping
+      agent silently start a shelter task and skip the sleep wake-check
+      machinery entirely — now gated on `!agent.asleep`, same as every
+      other self-directed task in `needs.ts`'s `tickAgentAction`.
+- [x] Fixed a real, latent test-hygiene bug this feature surfaced: an
+      unrestored `vi.spyOn(Math, "random")` in `needs.test.ts` could pin
+      `Math.random` for every later test in the same file once shelter-
+      building's default `rng` param started actually calling it (it never
+      had before, since shelter-building was species-gated) — added a
+      file-level `afterEach(() => vi.restoreAllMocks())`.
+- [x] New tests: `eggs.test.ts` (hatch timing/profile backfill/
+      rng-determinism, egg-eating's full compatibility matrix, egg-defense
+      overriding ordinary flee), `occupancy.test.ts`'s new shelter-capacity
+      describe block, `shelter.test.ts`'s universal-triggering and
+      bonded-discount cases, a full rewrite of `reproduction.test.ts`'s
+      bonding/egg assertions, and a replaced `determinism.test.ts`
+      reproduction section (lay-time is now deterministic; hatch-time
+      nature/sex is the real rng-swept case). 720 total engine tests, all
+      passing, including the unmodified full-`tickWorld` determinism
+      acceptance suite.
+- [x] Real headless validation, seeds 42/7/20260903: a real, honestly-large
+      reduction vs. a completely-uninstrumented instant-birth baseline at
+      3000 ticks (298/332/294 living -> 23/19/24 living) — but a real,
+      GROWING curve, not a stalled one: seed 42 alone goes 23 -> 56 -> 94
+      living across 3000/6000/8000 ticks, with 88 eggs laid and 82 hatched
+      (93% survival) by tick 8000, zero starvation deaths at every tick
+      count on every seed, and egg-defense firing 181-187 times over the
+      longer runs — a real, frequently-exercised mechanic. See DESIGN.md
+      for the full numbers and the honest "the baseline itself is a
+      pathological comparison point" context.
+- [ ] **Open follow-up, not chased down**: the exact growth-rate pacing
+      (80-tick incubation, 0.85/0.70 shelter comfort thresholds, 0.9
+      egg-eating hunger gate) is a real, legitimate tuning target — the
+      population trend is proven growing and zero-starvation (the load-
+      bearing safety property), but whether it reaches this session's
+      previously-cited "healthy" 62-80ish range fast enough, or should grow
+      faster, wasn't further hand-tuned this pass. A longer (10000+ tick)
+      run, or a dedicated re-tuning pass on any of those three constants,
+      would be the way to actually chase this further.
+- [ ] **Open follow-up, not investigated**: dispersal interacting with a
+      bonded-but-shelterless pair — a disperser keeps a `bondedPartnerId`
+      pointing at an agent it may now be far away from (or that joined a
+      different herd), with nothing currently clearing or re-validating a
+      stale bond across a dispersal event.
+- [ ] **Open follow-up, not investigated**: egg-defense's interaction with
+      herd-conflict's non-lethal model — whether a rival-herd, same-egg-
+      group agent can ever get caught in both systems' overlapping radii on
+      the same tick.
+- [ ] **Open follow-up, not investigated**: adjacency-capacity edge cases
+      beyond the direct unit tests — a shelter cluster that grows or shrinks
+      (new tile built, or an existing one abandoned) while an egg is already
+      incubating inside it, against a real run rather than a synthetic test.
+- [x] **Clutch size follow-up** ("maybe we can have multiple eggs spawn at
+      once instead of one at a time"): `eggs.ts`'s `pickClutchSize(rng)`
+      draws 2-4 eggs per successful laying event; `reproduction.ts`'s
+      `applyMateSeeking` places as many as the existing shelter-cluster
+      egg-capacity (`canLayEggAt`/`SHELTER_TILE_EGG_CAP`) actually allows,
+      dropping the rest of the clutch rather than queuing or cramming it
+      onto one tile. Everything downstream (incubation/hatching/egg-eating/
+      egg-defense) verified to already work per-egg with no changes needed.
+      New tests in `eggs.test.ts`/`reproduction.test.ts`; 717 engine tests
+      pass, `pnpm -r typecheck`/`build` clean. See DESIGN.md's "Follow-up:
+      clutch size" subsection for the full writeup.
+- [ ] **Real, load-bearing follow-up surfaced by the above, not fixed
+      here (out of scope for "let clutches vary")**: the clutch mechanism
+      currently has near-zero effect on real population in the actual demo
+      world, because `shelter.ts`'s `pickBuildSite` picks a uniformly
+      random floor tile with no bias toward existing shelter — confirmed
+      directly that every real shelter cluster across all three validation
+      seeds at 8000 ticks stayed exactly 1 tile, so `SHELTER_TILE_EGG_CAP`
+      (1/tile) capped every real laying event to at most 1 egg regardless
+      of the clutch size drawn. If clutch size is meant to actually move
+      the population needle (not just work correctly in isolated tests),
+      the real next lever is biasing shelter-site selection toward building
+      adjacent to an agent's own existing shelter when it has one, so
+      multi-tile clusters actually form in a real run.
+- [ ] **Open follow-up, not done**: `packages/runner/src/ascii.ts`'s own
+      terrain palette (the headless CLI's rendering, separate from
+      `packages/web`) was not given the same per-species shelter tint —
+      real, known, cosmetic-only gap.

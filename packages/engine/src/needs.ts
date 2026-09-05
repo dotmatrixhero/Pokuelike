@@ -1,14 +1,24 @@
-import type { Agent, BehaviorKind, HuntRules, Layer, Needs, Vec2, World } from "./types.js";
+import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Vec2, World } from "./types.js";
 import { otherLayers, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
-import { applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan } from "./predation.js";
+import { stepAlongPath } from "./pathfinding.js";
+import { applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
-import { CONSUME_STOCK_AMOUNT } from "./flora.js";
+import { CONSUME_STOCK_AMOUNT, recordGrazing } from "./flora.js";
 import { tickCooldowns } from "./combat.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
 import { migrate } from "./migration.js";
 import { applyDispersal, maybeTriggerDispersal } from "./dispersal.js";
-import { applyShelterBuilding, maybeTriggerShelterBuilding } from "./shelter.js";
+import {
+  applyShelterBuilding,
+  applyShelterResting,
+  hasNearbyShelter,
+  maybeFeedFromShelterCache,
+  maybeTriggerShelterBuilding,
+  SHELTER_HEAL_MULTIPLIER,
+  SHELTER_NEEDS_DECAY_MULTIPLIER,
+  SHELTER_REST_RADIUS,
+} from "./shelter.js";
 import { logBehaviorChange, type EventLog } from "./events.js";
 import {
   EXP_ON_CONSUME,
@@ -20,19 +30,26 @@ import {
   sectorId,
   type LevelingContext,
 } from "./leveling.js";
-import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
-import { findNearestIndexed } from "./resourceIndex.js";
+import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
+import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
+import { canEnterTile } from "./occupancy.js";
+import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict } from "./herdConflict.js";
 import { thirstDecayMultiplier } from "./weather.js";
 import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
 
 const DECAY_PER_TICK = {
   /**
-   * Extended from the original 0.015 — see "Extend thirst's survival
-   * margin" in DESIGN.md. At 0.010, thirst empties in ~100 ticks (was ~67),
-   * closing most of the gap with hunger's own (much longer, exponential)
-   * budget without touching thirst's deliberately-kept-linear curve.
+   * Quartered again from 0.005 — direct ask: "thirst and hunger... much
+   * much much slower... like 1/4 the time it is now." At 0.00125, thirst
+   * empties in ~800 ticks (was ~200), on top of `THIRST_STARVATION_GRACE_TICKS`,
+   * without touching thirst's deliberately-kept-linear curve. Motivated by
+   * the breeding-level gate (agents now need to survive to level 16 or
+   * evolve before they can reproduce at all) — see DESIGN.md's "Breeding
+   * requires a real earned edge" section, whose real-run findings showed
+   * near-zero breeding because agents weren't surviving long enough to
+   * level up; giving needs a much longer runway is the direct fix.
    */
-  thirst: 0.01,
+  thirst: 0.00125,
   energy: 0.005,
   mateDrive: 0.01,
 } as const;
@@ -45,33 +62,35 @@ const DECAY_PER_TICK = {
  * exponential decay of the *remaining* hunger value (a multiplicative term
  * proportional to current hunger, so the absolute drop is largest at full
  * and shrinks as hunger falls) plus a small flat floor so it still reaches
- * true 0 in finite time instead of asymptoting forever — from full (1.0),
- * this reaches the 0.7 "seek food" threshold (`chooseBehavior`'s urgency
- * cutoff) in ~27 ticks, but takes ~213 total to fall the rest of the way to
- * 0 (more than double the old flat rate's 100), where `STARVATION_GRACE_TICKS`
- * (100 more) still has
- * to run out before actual death — sim-original tuning, judge against a
- * real run like everything else here, not a canon formula.
+ * true 0 in finite time instead of asymptoting forever. Both terms
+ * quartered again from an earlier pass (0.006/0.0005) — direct ask: "thirst
+ * and hunger... much much much slower... like 1/4 the time it is now,"
+ * motivated by the breeding-level gate needing agents to actually survive
+ * long enough to reach level 16 or evolve (see DESIGN.md). From full (1.0),
+ * this now reaches the 0.7 "seek food" threshold (`chooseBehavior`'s
+ * urgency cutoff) in ~216 ticks (was ~54), and takes ~1708 total to fall
+ * the rest of the way to 0 (was ~427), where `STARVATION_GRACE_TICKS` (100
+ * more) still has to run out before actual death — sim-original tuning,
+ * judge against a real run like everything else here, not a canon formula.
  */
-const HUNGER_DECAY_RATE = 0.012;
-const HUNGER_DECAY_FLOOR = 0.001;
+const HUNGER_DECAY_RATE = 0.0015;
+const HUNGER_DECAY_FLOOR = 0.000125;
 
 /** Ticks an agent can sit at 0 hunger before it dies of it. */
 const STARVATION_GRACE_TICKS = 100;
 /**
  * Thirst's own, longer, grace period — see "Extend thirst's survival
  * margin" in DESIGN.md. Hunger's full curve (exponential decay of the
- * remaining value, see `HUNGER_DECAY_RATE`'s doc comment) takes ~213 ticks
- * to empty, then 100 more before death — ~313 total. Thirst's flat rate now
- * empties in ~100 ticks (`DECAY_PER_TICK.thirst`); giving it the same 100
- * grace period would leave its total survival budget (~200 ticks) at barely
- * two thirds of hunger's, for no principled reason. 150 brings it to ~250,
- * closing most of that gap without touching hunger's own curve or thirst's
- * deliberate linearity. Tracked independently of `STARVATION_GRACE_TICKS`
- * via `Agent.thirstStarvationTicks` (a separate counter from
- * `Agent.starvationTicks`) since hunger and thirst can cross 0 at different
- * ticks — a single shared counter can't correctly judge two different
- * thresholds.
+ * remaining value, see `HUNGER_DECAY_RATE`'s doc comment) now takes ~427
+ * ticks to empty, then 100 more before death — ~527 total. Thirst's flat
+ * rate empties in ~200 ticks (`DECAY_PER_TICK.thirst`); this 150-tick grace
+ * period brings its total survival budget to ~350 — narrower than hunger's
+ * but not by a principle-violating margin, and thirst deliberately stays
+ * linear rather than getting hunger's exponential shape. Tracked
+ * independently of `STARVATION_GRACE_TICKS` via `Agent.thirstStarvationTicks`
+ * (a separate counter from `Agent.starvationTicks`) since hunger and thirst
+ * can cross 0 at different ticks — a single shared counter can't correctly
+ * judge two different thresholds.
  */
 const THIRST_STARVATION_GRACE_TICKS = 150;
 /**
@@ -103,6 +122,41 @@ export function ageMortalityChance(age: number): number {
 }
 /** Ticks a non-predator can go wanting food/water with none reachable anywhere before it gives up and migrates. */
 const MIGRATE_AFTER_TICKS = 150;
+
+/**
+ * Tile capacity's "blocked-resource AI" — direct ask: "Might need ai to
+ * recognize when it's blocked or unable to get a resource and try to
+ * relocate to find a new one." How long an agent tolerates its current
+ * seekWater/seekFood target being at capacity (`occupancy.ts`) before
+ * giving up on THIS specific tile and trying a different one of the same
+ * terrain kind. Deliberately much shorter than `MIGRATE_AFTER_TICKS` (150,
+ * "no resource of this kind exists/is reachable ANYWHERE") — this is a much
+ * narrower, more common situation (a real resource sits right there,
+ * several tiles away or one hop away, just currently full), and per this
+ * codebase's established "sustained, not instant" tuning convention, a real
+ * short wait should read as genuine queueing/turn-taking (the user's
+ * explicit ask: "feeding and drinking has to actually be timed") before an
+ * agent gives up and looks elsewhere — instant switching would produce
+ * relocation-with-a-guise instead of visible contention. 25 ticks sits
+ * comfortably below the scale of a real multi-hundred-tick errand
+ * (dispersal/shelter-building/food-delivery) while still being a genuine
+ * wait, not a single-tick flicker. See DESIGN.md's "Tile capacity" section
+ * for the real-run read on whether agents actually wait vs. just relocate.
+ */
+const BLOCKED_RESOURCE_GRACE_TICKS = 25;
+
+/**
+ * How many recently-crowded tiles of the same terrain kind one seeking
+ * episode remembers to exclude from the next nearest-tile pick — bounds the
+ * "try a different resource tile" fallback so it doesn't immediately
+ * re-offer a tile it just gave up on. Small on purpose — a real local
+ * water/food supply rarely has more than a couple of genuinely nearby
+ * alternatives; this isn't meant to remember a map-spanning list. Real
+ * exhaustion (every currently-known nearby tile of this terrain excluded)
+ * is detected structurally, not by hitting this exact count — see
+ * `somethingExistsNearby`'s use below.
+ */
+const MAX_BLOCKED_RESOURCE_MEMORY = 4;
 
 /**
  * Sleep — see DESIGN.md's "Sleep: a real vulnerable-rest state" section.
@@ -160,6 +214,21 @@ export const LONG_SLEEP_EXP_TICKS = 200;
 export const LONG_SLEEP_EXP_BONUS = 25;
 
 /**
+ * A real kill should be a much bigger deal than grazing — direct ask: "a
+ * kill is just a lot more incentive for them, keeps em sated." A predator
+ * still eats plants (this doesn't touch generic foraging at all), but a
+ * kill fully restores hunger to 1.0 and starts a `digestingTicksRemaining`
+ * countdown (`Agent`'s own field, set by predation.ts's hunt branch — see
+ * `KILL_SATIATION_TICKS` there for the tick count) during which hunger
+ * decays at this multiplier instead of its normal rate — a big meal
+ * actually lasts, rather than being back to normal hunger-seeking within
+ * the next few dozen ticks like an ordinary plant meal. 0.1 means roughly
+ * 10x the normal post-meal runway. Thirst is deliberately untouched —
+ * eating doesn't quench thirst.
+ */
+export const KILL_SATIATION_HUNGER_DECAY_MULTIPLIER = 0.1;
+
+/**
  * How far a fully-satisfied idle agent will look for a not-yet-visited
  * sector to wander to — the exp-motivated exploration drive. Deliberately
  * local (`SECTOR_SIZE` in leveling.ts is 5, so this reaches a handful of
@@ -195,6 +264,73 @@ function findNearbyUnvisitedTile(world: World, agent: Agent, rng: () => number):
 }
 
 /**
+ * Terrain kinds resourceIndex.ts's cheap index tracks — a preference in this
+ * set gets the same O(matching tiles) `findNearestIndexed` lookup as an
+ * ordinary food/water search. A preference kind outside this set (currently
+ * "bush"/"boulder", each tagged by only a single roster species so far — see
+ * DESIGN.md's "Tile preference" section) falls back to
+ * `findNearestPreferredLocal`'s bounded scan instead of extending the global
+ * index for one consumer.
+ */
+const INDEXED_PREFERENCE_KINDS: ReadonlySet<TerrainKind> = new Set(["water", "food", "sunbeam", "flora"]);
+
+/**
+ * Bounded local scan for a preferred terrain kind that isn't in
+ * resourceIndex.ts's cheap index. Same shape as `findNearbyUnvisitedTile`'s
+ * "cheap, local, not a full-grid scan" standard, but exhaustive within its
+ * radius (rather than a handful of random tries) since this is a real
+ * destination search, not a curiosity roll.
+ */
+const PREFERRED_TERRAIN_LOCAL_SCAN_RADIUS = 12;
+
+function findNearestPreferredLocal(world: World, agent: Agent, terrain: TerrainKind): Vec2 | undefined {
+  let best: Vec2 | undefined;
+  let bestDist = Infinity;
+  const r = PREFERRED_TERRAIN_LOCAL_SCAN_RADIUS;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const x = agent.pos.x + dx;
+      const y = agent.pos.y + dy;
+      if (tileAt(world, agent.layer, x, y)?.terrain !== terrain) continue;
+      const dist = Math.abs(dx) + Math.abs(dy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = { x, y };
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Close enough to a preferred-terrain tile that lingering here already
+ * satisfies the preference — no need to path the last step or two onto the
+ * exact tile. Small and deliberate: this is "hang out near the flora patch,"
+ * not "always be standing exactly on a flora tile."
+ */
+const PREFERRED_TERRAIN_SATISFIED_RADIUS = 2;
+
+/**
+ * "arrived": the agent is already within `PREFERRED_TERRAIN_SATISFIED_RADIUS`
+ * of a matching tile — content, no wander needed this tick. `Vec2`: a real
+ * destination to head toward. `undefined`: no `preferredTerrain` tagged, or
+ * none of the tagged kinds exist anywhere reachable — caller should fall
+ * back to ordinary exploration.
+ */
+function locatePreferredTerrain(world: World, agent: Agent): "arrived" | Vec2 | undefined {
+  const prefs = agent.preferredTerrain;
+  if (!prefs || prefs.length === 0) return undefined;
+  for (const terrain of prefs) {
+    const pos = INDEXED_PREFERENCE_KINDS.has(terrain)
+      ? findNearestIndexed(world, agent.layer, agent.pos, terrain as IndexedTerrain)
+      : findNearestPreferredLocal(world, agent, terrain);
+    if (!pos) continue;
+    return manhattan(agent.pos, pos) <= PREFERRED_TERRAIN_SATISFIED_RADIUS ? "arrived" : pos;
+  }
+  return undefined;
+}
+
+/**
  * Called only once an agent is otherwise fully idle (no urgent need, no
  * herd pull-back needed) — instead of just standing on the last tile it
  * ate/drank at forever, it wanders toward nearby unexplored territory,
@@ -206,12 +342,28 @@ function findNearbyUnvisitedTile(world: World, agent: Agent, rng: () => number):
  * stacking section. A no-op (stays idle) if nothing new is reachable
  * nearby right now — exploring is optional flavor, not another need that
  * can starve.
+ *
+ * Tile preference (see DESIGN.md's "Tile preference" section) is checked
+ * FIRST, ahead of the unvisited-sector wander: a `preferredTerrain`-tagged
+ * species that's already lingering near its preferred terrain kind is
+ * content and skips wandering entirely this tick (the `"arrived"` case);
+ * one that isn't heads there instead of a uniformly random nearby spot. Only
+ * an untagged species, or a tagged one with no matching tile reachable at
+ * all, falls through to the pre-existing random-wander behavior — so this
+ * is a strict, additive extension, not a replacement: nothing changes for
+ * any species that was never tagged. Deliberately checked fresh every time
+ * `agent.exploreTarget` is empty (same as the unvisited-tile search below),
+ * never persisted as its own separate commitment field — a preference-
+ * driven wander is exactly as droppable by an urgent need as ordinary
+ * exploration already is, since both live in the same `exploreTarget`.
  */
 function applyExploration(world: World, agent: Agent, log: EventLog | undefined, rng: () => number): void {
   if (agent.age !== undefined && agent.age < MIN_EXPLORE_AGE) return;
 
   if (!agent.exploreTarget) {
-    agent.exploreTarget = findNearbyUnvisitedTile(world, agent, rng);
+    const preferred = locatePreferredTerrain(world, agent);
+    if (preferred === "arrived") return;
+    agent.exploreTarget = preferred ?? findNearbyUnvisitedTile(world, agent, rng);
     if (!agent.exploreTarget) return;
   }
 
@@ -222,7 +374,7 @@ function applyExploration(world: World, agent: Agent, log: EventLog | undefined,
     agent.pos = agent.exploreTarget;
     agent.exploreTarget = undefined;
   } else {
-    agent.pos = stepToward(world, agent.layer, agent.pos, agent.exploreTarget);
+    agent.pos = stepToward(world, agent.layer, agent.pos, agent.exploreTarget, agent);
   }
 }
 
@@ -251,10 +403,27 @@ export function createNeeds(overrides: Partial<Needs> = {}): Needs {
  * than a third numeric multiplier parameter: sleep doesn't just scale
  * energy's decay, it inverts its direction entirely, which a multiplier
  * alone can't express.
+ *
+ * `hungerMultiplier` (default 1) composes multiplicatively with the base
+ * hunger-decay term only (never thirst) — the post-kill "digesting"
+ * slowdown (`KILL_SATIATION_HUNGER_DECAY_MULTIPLIER`, set via
+ * `Agent.digestingTicksRemaining` in `tickAgentNeeds`). Kept as its own
+ * parameter rather than folded into `asleep`'s combined multiplier since an
+ * agent can be digesting without being asleep (or vice versa), and a kill
+ * deliberately doesn't touch thirst the way sleep does.
+ *
+ * `shelterMultiplier` (default 1) composes multiplicatively with `asleep`'s
+ * own multiplier — shelter.ts's `SHELTER_NEEDS_DECAY_MULTIPLIER`, passed
+ * whenever the agent is within `SHELTER_REST_RADIUS` of any shelter tile
+ * (see `tickAgentNeeds`'s call site). A smaller, real-but-lesser reduction
+ * than sleep's own: being merely home is a lighter commitment than being a
+ * genuine sitting duck, so it shouldn't duplicate sleep's "dramatically
+ * reduced" bonus outright — but an asleep agent that's ALSO home gets both,
+ * multiplicatively, the best rest available in this sim.
  */
-export function decayNeeds(needs: Needs, thirstMultiplier = 1, asleep = false): void {
-  const needsMultiplier = asleep ? SLEEP_NEEDS_DECAY_MULTIPLIER : 1;
-  needs.hunger = Math.max(0, needs.hunger - (needs.hunger * HUNGER_DECAY_RATE + HUNGER_DECAY_FLOOR) * needsMultiplier);
+export function decayNeeds(needs: Needs, thirstMultiplier = 1, asleep = false, hungerMultiplier = 1, shelterMultiplier = 1): void {
+  const needsMultiplier = (asleep ? SLEEP_NEEDS_DECAY_MULTIPLIER : 1) * shelterMultiplier;
+  needs.hunger = Math.max(0, needs.hunger - (needs.hunger * HUNGER_DECAY_RATE + HUNGER_DECAY_FLOOR) * needsMultiplier * hungerMultiplier);
   needs.thirst = Math.max(0, needs.thirst - DECAY_PER_TICK.thirst * thirstMultiplier * needsMultiplier);
   needs.energy = asleep
     ? Math.min(1, needs.energy + SLEEP_ENERGY_RESTORE_RATE)
@@ -290,9 +459,10 @@ export function findNearestTerrain(
   world: World,
   layer: Layer,
   from: Vec2,
-  terrain: "water" | "food" | "sunbeam"
+  terrain: "water" | "food" | "sunbeam",
+  exclude: readonly Vec2[] = []
 ): Vec2 | undefined {
-  return findNearestIndexed(world, layer, from, terrain);
+  return findNearestIndexed(world, layer, from, terrain, exclude);
 }
 
 /** Finds a layer other than `from` that has the given terrain, nearest (adjacent) layers first. */
@@ -300,10 +470,11 @@ export function findLayerWithTerrain(
   world: World,
   from: Layer,
   origin: Vec2,
-  terrain: "water" | "food" | "sunbeam"
+  terrain: "water" | "food" | "sunbeam",
+  exclude: readonly Vec2[] = []
 ): Layer | undefined {
   for (const layer of otherLayers(from)) {
-    if (findNearestTerrain(world, layer, origin, terrain)) return layer;
+    if (findNearestTerrain(world, layer, origin, terrain, exclude)) return layer;
   }
   return undefined;
 }
@@ -398,7 +569,30 @@ export function tickAgentNeeds(
   tickCooldowns(agent, agent.asleep ? SLEEP_COOLDOWN_TICKS : 1);
   if (world) tickStatusEffects(agent, world, log, rng);
   const thirstMultiplier = world ? thirstDecayMultiplier(world, agent.layer, agent.pos) : 1;
-  decayNeeds(agent.needs, thirstMultiplier, agent.asleep === true);
+  // Post-kill "digesting" slowdown (see KILL_SATIATION_TICKS's doc comment)
+  // — checked and ticked down here rather than gated behind `world` like
+  // the trickle/starvation logic below, since it's pure needs bookkeeping
+  // that should still count down even for a bare-fixture caller.
+  const digesting = (agent.digestingTicksRemaining ?? 0) > 0;
+  if (digesting) agent.digestingTicksRemaining = (agent.digestingTicksRemaining ?? 0) - 1;
+  // Herd-conflict rivalry cooldown (herdConflict.ts) — same "plain bookkeeping,
+  // ticks down regardless of `world`" shape as `digestingTicksRemaining` above.
+  if ((agent.herdConflictCooldownTicks ?? 0) > 0) agent.herdConflictCooldownTicks = (agent.herdConflictCooldownTicks ?? 0) - 1;
+  // "Incentivize the Pokémon to stay in it" — real, per-tick heal/needs-decay
+  // perks for ANY agent genuinely standing near a shelter (universal now,
+  // per direct instruction — no longer gated on `agent.buildsShelter`, see
+  // shelter.ts's `maybeTriggerShelterBuilding` doc comment), regardless of
+  // which behavior label happens to be set this tick (a fresh arrival,
+  // mid-rest, or just passing through all count) — see shelter.ts's
+  // "Incentive to actually stay" doc comment.
+  const nearShelter = world !== undefined && hasNearbyShelter(world, agent.layer, agent.pos, SHELTER_REST_RADIUS);
+  decayNeeds(
+    agent.needs,
+    thirstMultiplier,
+    agent.asleep === true,
+    digesting ? KILL_SATIATION_HUNGER_DECAY_MULTIPLIER : 1,
+    nearShelter ? SHELTER_NEEDS_DECAY_MULTIPLIER : 1
+  );
 
   // Hunger and thirst each get their own consecutive-zero-ticks counter and
   // their own grace threshold (`STARVATION_GRACE_TICKS` /
@@ -437,7 +631,7 @@ export function tickAgentNeeds(
     return;
   }
 
-  applyHealOverTime(agent, agent.asleep ? SLEEP_HEAL_MULTIPLIER : 1);
+  applyHealOverTime(agent, (agent.asleep ? SLEEP_HEAL_MULTIPLIER : 1) * (nearShelter ? SHELTER_HEAL_MULTIPLIER : 1));
   if (world) maybeRecoverFromFaint(agent, world, log);
   if (world) grantExp(world, agent, EXP_TRICKLE_PER_TICK, ctx, log, rng);
 
@@ -517,11 +711,59 @@ export function tickAgentAction(
   if ((agent.actionLockTicks ?? 0) > 0) return;
 
   if (applyCarrying(world, agent, rules, log)) return;
-  if (rules && applyPredationInstincts(world, agent, rules, log, ctx, rng)) return;
+  // `thirstIsUrgent` gates only predation.ts's "give up hunting and wander
+  // off" relocate mechanic — flee/fight/hunt-a-visible-target all still take
+  // priority as before, and a hungry predator can still start/continue
+  // relocating (that's the whole point — it's searching for its next meal).
+  // Specifically thirst, not `chooseBehavior`'s general urgency: hunger is
+  // what's driving the hunt/relocate in the first place, so gating on "any"
+  // urgent need would block the very relocate that's meant to resolve it.
+  // Thirst has nothing to do with that goal, and a directionless multi-
+  // hundred-tick relocate walk shouldn't march a predator through it the
+  // same way natal dispersal used to before its own pause-for-urgent-needs
+  // fix — confirmed in a real run: an Onix walked 262 ticks on "relocate"
+  // without a single drink and died of thirst mid-search.
+  const thirstIsUrgent = 1 - agent.needs.thirst > 0.3;
+  if (rules && applyPredationInstincts(world, agent, rules, log, ctx, rng, thirstIsUrgent)) return;
+  // Egg-eating (point 5 — "eggs are highly edible... super desired as food
+  // by any Pokémon that does not share egg type... given the chance") — a
+  // real, opportunistic feeding source checked at the same priority tier as
+  // `applyScavenging` right below (both are fallback meals tried once
+  // ordinary hunting/fleeing/fighting found nothing to do), deliberately
+  // NOT gated on `rules` the way scavenging/hunting are: egg-eating is
+  // explicitly wider than the predator/prey `HuntRules` roster — see
+  // predation.ts's `applyEggEating` doc comment for why it's a separate
+  // mechanism entirely.
+  if (applyEggEating(world, agent, ctx, log, rng)) return;
+  // A real fallback, not a last resort tacked on after everything else: a
+  // hungry predator that had nothing to flee/fight/hunt this tick (solo or
+  // pack — see predation.ts) checks for a nearby corpse to feed from
+  // directly before falling through to looting/herd-support/ordinary
+  // foraging. See support.ts's `applyScavenging` doc comment for why this
+  // sits here specifically (right after predation instincts get first
+  // refusal, same "survival/feeding instincts before routine behavior"
+  // ordering every other step in this function already follows).
+  if (rules && applyScavenging(world, agent, rules, log)) return;
   if (maybeStartCarrying(world, agent, log)) return;
   if (applyLooting(world, agent, log)) return;
-  if (applySupportMove(world, agent, log)) return;
-  if (applyHerdSupport(world, agent, log)) return;
+  // Real confirmed death case: a zero-cooldown ally-buff move (reachable via
+  // the skill tree — e.g. Tackle respecced into `steadfast_guard`) plus an
+  // adjacent, permanently-in-range herd-mate let `applySupportMove` return
+  // true on literally every action tick forever, since it had no urgent-need
+  // escape valve of its own — an agent could stand on a water tile rebuffing
+  // its neighbor nonstop while its own thirst ran to 0 and then through the
+  // full starvation grace period, never once reaching `chooseBehavior` below.
+  // Same for `applyHerdSupport`'s multi-tick food-delivery errand: it only
+  // checked the deliverer's own needs once, at the moment the errand started,
+  // never again during the walk — the exact "commits no matter what" shape
+  // dispersal/shelter-building already had to be fixed for. General urgency
+  // (not just thirst, unlike `thirstIsUrgent` above) is the right gate here:
+  // unlike predation's hunt/relocate, neither of these behaviors exists to
+  // resolve the agent's own hunger/thirst, so there's no reason to let either
+  // one through just because hunger specifically is what's urgent.
+  const needsAreUrgent = chooseBehavior(agent.needs) !== "idle";
+  if (!needsAreUrgent && applySupportMove(world, agent, log)) return;
+  if (applyHerdSupport(world, agent, log, needsAreUrgent)) return;
 
   // Natal dispersal (dispersal.ts) — checked once per action tick for every
   // agent not already dispersing, ranked below survival/carrying/looting/
@@ -577,13 +819,23 @@ export function tickAgentAction(
   // already uses below, not dispersal's shape. The trigger itself is gated
   // the same way: only an agent that's currently satisfied goes to start a
   // build in the first place.
-  if (agent.shelterTarget) {
+  // Also paused (not triggered) while genuinely asleep — a sleeping agent
+  // doesn't start or continue any task on its own initiative, matching every
+  // other self-directed branch above/below this one. Without this guard, a
+  // sleeping agent's shelter-building trigger (now universal — see this
+  // block's own doc comment above) could silently hijack its action tick
+  // before ever reaching the sleep block just below, skipping the real
+  // wake-check machinery entirely (confirmed by a real test: a sleeping
+  // agent with full hunger/thirst, once shelter-building applied to every
+  // species, started walking to a build site instead of ever being checked
+  // for waking).
+  if (!agent.asleep && agent.shelterTarget) {
     if (chooseBehavior(agent.needs) === "idle") {
       applyShelterBuilding(world, agent, log);
       return;
     }
     // Paused, not abandoned — resumes on a later tick once satisfied again.
-  } else if (chooseBehavior(agent.needs) === "idle") {
+  } else if (!agent.asleep && chooseBehavior(agent.needs) === "idle") {
     maybeTriggerShelterBuilding(world, agent, rng);
     if (agent.shelterTarget) {
       applyShelterBuilding(world, agent, log);
@@ -692,14 +944,34 @@ export function tickAgentAction(
     });
   }
 
+  if (agent.behavior !== previousBehavior && agent.behavior !== "seekWater" && agent.behavior !== "seekFood") {
+    // A different, more urgent need (or none) took over — this
+    // seekWater/seekFood episode is over, so its crowded-tile memory
+    // shouldn't carry into whatever comes next (or a later, fresh episode
+    // of the same behavior). Same "episode ends -> forget" boundary as
+    // `deliverTargetId` clearing on arrival/give-up elsewhere in this file.
+    agent.blockedResourceTiles = undefined;
+    agent.ticksBlockedFromResource = 0;
+  }
+
   if (agent.behavior === "seekMate") {
     applyMateSeeking(world, agent, log, ctx, rng);
     return;
   }
 
+  if (agent.behavior === "seekFood" && maybeFeedFromShelterCache(world, agent, log)) {
+    // A real safety net: this agent is genuinely hungry AND already home
+    // (or close enough) with something stockpiled — eats from the cache
+    // instead of trekking to a live patch. See shelter.ts's doc comment on
+    // why this is never a trap: an empty/absent cache just returns false
+    // and falls through to the ordinary search below, same tick.
+    return;
+  }
+
   if (agent.behavior === "seekWater" || agent.behavior === "seekFood") {
     const terrain = agent.behavior === "seekWater" ? "water" : "food";
-    const target = findNearestTerrain(world, agent.layer, agent.pos, terrain);
+    const excluded = agent.blockedResourceTiles ?? [];
+    const target = findNearestTerrain(world, agent.layer, agent.pos, terrain, excluded);
 
     if (target) {
       agent.ticksWithoutResource = 0;
@@ -711,11 +983,20 @@ export function tickAgentAction(
           // consume; re-checked fresh next tick.
           return;
         }
+        // Standing exactly on the target tile means this agent already got
+        // a valid slot (capacity was checked on the step that got it here)
+        // — a fresh consume always clears the "this specific tile is
+        // crowded" memory for this episode, same as arriving cleanly.
+        agent.blockedResourceTiles = undefined;
+        agent.ticksBlockedFromResource = 0;
         const need = agent.behavior === "seekWater" ? "thirst" : "hunger";
         consume(agent.needs, agent.behavior);
         if (agent.behavior === "seekFood") {
           const tile = tileAt(world, agent.layer, target.x, target.y);
-          if (tile?.stock !== undefined) tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
+          if (tile?.stock !== undefined) {
+            tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
+            recordGrazing(tile); // real self-feeding grazing event — see flora.ts's "Grazing scars"
+          }
         }
         grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
         log?.record({
@@ -727,13 +1008,97 @@ export function tickAgentAction(
           pos: agent.pos,
           need,
         });
+      } else if (!canEnterTile(world, agent, agent.layer, target)) {
+        // Herd conflict (herdConflict.ts) — a real, sustained standoff over
+        // this exact crowded tile (not a fresh block, see
+        // `HERD_CONFLICT_MIN_BLOCKED_TICKS`) gets a disposition-weighted
+        // chance to escalate into a rivalry fight against whoever's actually
+        // occupying it, instead of only ever waiting/relocating. When it
+        // fires this tick counts as spent on the fight, same as the ordinary
+        // wait/path branches below it's an alternative to; when it doesn't
+        // (no eligible rival, on cooldown, predator involved, or the roll
+        // just misses), falls straight through to the existing behavior,
+        // unchanged.
+        if (
+          rules &&
+          (agent.ticksBlockedFromResource ?? 0) >= HERD_CONFLICT_MIN_BLOCKED_TICKS &&
+          applyHerdRivalryConflict(world, agent, rules, target, log, rng)
+        ) {
+          return;
+        }
+        // Direct ask: "ai to recognize when it's blocked or unable to get a
+        // resource and try to relocate to find a new one." The nearest
+        // matching tile exists but is currently at tile capacity
+        // (occupancy.ts) — wait nearby for a bounded grace period (real
+        // queueing, matching "feeding and drinking has to actually be
+        // timed"), rather than instantly bailing on a tile that might free
+        // up in a few ticks. `stepAlongPath` is itself capacity-aware, so
+        // this still makes whatever progress it safely can toward/near the
+        // tile instead of doing nothing during the wait.
+        // Same lightweight-counter reasoning as `resourceBlockedFallbackCount`
+        // just below: one agent-tick spent actually waiting on a crowded
+        // tile (whether or not this is the tick the grace period runs out) —
+        // lets real-run validation compare "how much waiting happens" against
+        // "how often that waiting actually ends in giving up," per DESIGN.md's
+        // "Tile capacity" section (does queueing actually happen, or does
+        // everyone just instantly relocate?).
+        world.resourceWaitTicks = (world.resourceWaitTicks ?? 0) + 1;
+        agent.ticksBlockedFromResource = (agent.ticksBlockedFromResource ?? 0) + 1;
+        if (agent.ticksBlockedFromResource >= BLOCKED_RESOURCE_GRACE_TICKS) {
+          agent.ticksBlockedFromResource = 0;
+          const nextExcluded = [...excluded, target].slice(-MAX_BLOCKED_RESOURCE_MEMORY);
+          agent.blockedResourceTiles = nextExcluded;
+          // Not a SimEvent: packages/web's `eventText.ts` switches
+          // exhaustively over every `SimEvent.kind` and is off-limits this
+          // session (a concurrent redesign is in progress there), so a new
+          // discriminated event variant here would break its build. A
+          // plain counter on `World` (same shape as `resourceVersion`) is
+          // the lightweight substitute — real-run validation reads it
+          // directly rather than grepping the event log. See DESIGN.md's
+          // "Tile capacity" section.
+          world.resourceBlockedFallbackCount = (world.resourceBlockedFallbackCount ?? 0) + 1;
+        }
+        agent.pos = stepAlongPath(world, agent, target);
       } else {
-        agent.pos = stepToward(world, agent.layer, agent.pos, target);
+        // Real BFS-backed pathing (pathfinding.ts), not greedy stepToward —
+        // this is the confirmed real death case (an Onix got stuck
+        // oscillating near a boulder cluster on the way to reachable water,
+        // see DESIGN.md/TODO.md), so seekWater/seekFood specifically get
+        // routed around obstacle clusters instead of single-step-greedy.
+        agent.ticksBlockedFromResource = 0;
+        agent.pos = stepAlongPath(world, agent, target);
       }
       return;
     }
 
-    const crossTo = findLayerWithTerrain(world, agent.layer, agent.pos, terrain);
+    // No un-excluded candidate this tick — either this terrain genuinely
+    // doesn't exist/isn't reachable at all, or every nearby tile of it is
+    // currently remembered as crowded. Tell those two apart with one
+    // unfiltered lookup: if something of this terrain exists at all, KEEP
+    // the exclusion memory (don't immediately re-offer a tile just excluded
+    // for being crowded — that would turn the grace period into a
+    // same-tick round trip) and let the pre-existing
+    // `ticksWithoutResource`/`migrate` escape valve below run its own
+    // course, exactly as it already does for "nothing reachable at all" —
+    // reused rather than inventing a second timeout, so a genuinely urgent
+    // need still can't get stuck forever bouncing between a small set of
+    // mutually-crowded tiles: it eventually relocates away instead. Only
+    // actually forget the exclusion memory once nothing of this terrain
+    // exists anywhere nearby at all — that memory would otherwise never get
+    // a reason to clear on its own.
+    const somethingExistsNearby = findNearestTerrain(world, agent.layer, agent.pos, terrain) !== undefined;
+    if (!somethingExistsNearby) {
+      agent.blockedResourceTiles = undefined;
+    }
+
+    // Threads the same exclusion list a same-layer lookup uses: without
+    // this, a crowded surface water tile that's also reachable from
+    // underground via `resourceIndex.ts`'s underground->surface water
+    // redirect would keep being "found" via the cross-layer check even
+    // after the same-layer check just excluded it for being crowded — an
+    // agent could ping-pong underground<->surface forever, each hop
+    // "discovering" the very tile it just gave up on, without this.
+    const crossTo = findLayerWithTerrain(world, agent.layer, agent.pos, terrain, excluded);
     if (crossTo) {
       agent.ticksWithoutResource = 0;
       const from = agent.layer;
@@ -750,12 +1115,32 @@ export function tickAgentAction(
       return;
     }
 
+    // Safety valve on top of the one below: reaching this branch AT ALL
+    // while `somethingExistsNearby` is true already means every real,
+    // currently-known candidate of this terrain is in the exclusion list
+    // (otherwise `findNearestTerrain` above would have returned one) — the
+    // agent has already spent one real grace period per excluded tile
+    // failing to get a slot anywhere nearby, so don't also make it sit
+    // through the FULL separate `MIGRATE_AFTER_TICKS` "nothing reachable at
+    // all" timeout on top of that before finally relocating. This is what
+    // actually prevents the worst case named in DESIGN.md's real-run
+    // findings: a small, mutually-crowded local water/food supply
+    // shouldn't be able to hold an agent in a wait/exclude loop right up
+    // against its own starvation grace period.
+    if (somethingExistsNearby) {
+      agent.ticksWithoutResource = MIGRATE_AFTER_TICKS;
+    }
+
     // No layer has the resource at all — this agent isn't starving-immediately
     // (that's the check above), but if this drags on, standing in place forever
     // isn't better than trying somewhere else.
     agent.ticksWithoutResource = (agent.ticksWithoutResource ?? 0) + 1;
     if (agent.ticksWithoutResource >= MIGRATE_AFTER_TICKS) {
-      if (migrate(world, agent, log, rng) === "arrived") agent.ticksWithoutResource = 0;
+      if (migrate(world, agent, log, rng) === "arrived") {
+        agent.ticksWithoutResource = 0;
+        agent.blockedResourceTiles = undefined; // fresh location, fresh look at what's crowded there
+        agent.ticksBlockedFromResource = 0;
+      }
     }
     return;
   }
@@ -777,7 +1162,16 @@ export function tickAgentAction(
 
   if (agent.behavior === "idle") {
     const drewBack = applyHerdCohesion(world, agent, rules);
-    if (!drewBack) applyExploration(world, agent, log, rng);
+    if (!drewBack) {
+      // "Incentivize the Pokémon to stay in it": any agent (universal
+      // shelter now — see shelter.ts's doc comment) with a known shelter
+      // goes home and lingers there instead of wandering off exploring — see
+      // shelter.ts's `applyShelterResting`. Only ever a no-op (falls through
+      // to ordinary exploration) when this herd has no shelter anywhere
+      // findable yet.
+      const wentHome = applyShelterResting(world, agent, log);
+      if (!wentHome) applyExploration(world, agent, log, rng);
+    }
   }
 }
 

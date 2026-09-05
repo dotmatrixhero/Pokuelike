@@ -101,7 +101,13 @@
         pointer-events: none;
         transition: opacity 0.2s ease;
       }
-      #drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+      /* The dimming scrim is a mobile/narrow-viewport affordance only — on a
+         desktop-width screen the drawer is a floating side panel that never
+         covers the canvas, so darkening the rest of the page while it's open
+         reads as an unwanted, unrelated dimming rather than a modal cue. */
+      @media (max-width: 768px) {
+        #drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+      }
 
       #sidebar {
         position: fixed;
@@ -174,9 +180,109 @@
 
       #inspector { padding: 8px 12px; font-size: 12.5px; }
       .inspect-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+      /* Label and value sit close together on the left, not spread across
+         the panel's full width — on a wide desktop inspector, space-between
+         put a lot of empty space between e.g. "Bulbasaur" and its count.
+         A fixed label width keeps every row's value lined up in a loose
+         column without needing the label to stretch to fill the row.
+         Scoped to #inspector specifically — .inspect-label/.inspect-row
+         are also reused (for text-color/spacing only) by the header's
+         Seed/Speed controls, which shouldn't get this fixed-width/left-
+         aligned treatment. */
       .inspect-row { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; border-bottom: 1px dashed #232a34; }
       .inspect-label { color: var(--text-dim); }
       .inspect-value { text-align: right; }
+      #inspector .inspect-row { justify-content: flex-start; }
+      #inspector .inspect-label { flex: 0 0 auto; min-width: 130px; }
+      #inspector .inspect-value { text-align: left; }
+      /* Population/species-count rows in the world-overview panel: short
+         label, short number — the general 130px label column (sized for
+         longer per-agent field names) left a big gap between them. */
+      #inspector .inspect-row.inspect-row-compact { gap: 6px; }
+      #inspector .inspect-row.inspect-row-compact .inspect-label { min-width: 0; }
+
+      /* --- Grouped per-agent inspector layout ------------------------------
+         Groups reuse .panel-header/.legend-group-title's typographic
+         convention (uppercase, dim, small, letter-spaced) rather than
+         inventing a new heading style. */
+      .inspect-group {
+        border: 1px solid var(--panel-border);
+        border-radius: 5px;
+        padding: 7px 9px;
+        margin-bottom: 8px;
+        background: rgba(255, 255, 255, 0.015);
+      }
+      .inspect-group-title {
+        color: var(--text-dim);
+        text-transform: uppercase;
+        font-size: 10.5px;
+        letter-spacing: 0.05em;
+        font-weight: 600;
+        margin-bottom: 5px;
+      }
+      .inspect-group .inspect-row { border-bottom: none; padding: 1px 0; }
+
+      .inspect-identity-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 4px; }
+      .type-chip, .inspect-chip {
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 7px;
+        border-radius: 10px;
+        color: #0a0d12;
+        text-transform: capitalize;
+      }
+      .inspect-chip { background: #262c37; color: var(--text); text-transform: none; }
+      .inspect-sex { font-size: 15px; font-weight: 700; line-height: 1; padding: 0 2px; cursor: default; }
+      .inspect-sex-male { color: #4a8cff; }
+      .inspect-sex-female { color: #ff6fae; }
+
+      .inspect-meter-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+      .inspect-meter-label { flex: 0 0 auto; min-width: 76px; font-size: 11.5px; color: var(--text-dim); }
+      .inspect-meter-track {
+        flex: 1;
+        height: 7px;
+        border-radius: 4px;
+        background: #232a34;
+        overflow: hidden;
+      }
+      .inspect-meter-fill { height: 100%; border-radius: 4px; }
+      .inspect-meter-value { flex: 0 0 auto; min-width: 34px; text-align: right; font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+      /* --- Moves list + skill tree ------------------------------------------ */
+      .move-list { display: flex; flex-direction: column; gap: 3px; }
+      .move-row { border-bottom: 1px dashed #232a34; padding-bottom: 3px; }
+      .move-row:last-child { border-bottom: none; }
+      .move-row-header { display: flex; align-items: center; gap: 7px; padding: 3px 2px; border-radius: 4px; flex-wrap: wrap; }
+      .move-row-clickable { cursor: pointer; }
+      .move-row-clickable:hover { background: rgba(255, 255, 255, 0.04); }
+      .move-row-clickable:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+      .move-type-swatch { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+      .move-name { font-weight: 600; }
+      .move-summary { color: var(--text-dim); font-size: 11px; }
+      .move-use-count { color: var(--text-dim); font-size: 11px; margin-left: auto; font-variant-numeric: tabular-nums; }
+      .move-caret { color: var(--text-dim); font-size: 10px; width: 1em; text-align: center; }
+
+      .skilltree {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 8px 4px 6px 18px;
+        margin-top: 2px;
+        border-left: 2px solid var(--panel-border);
+      }
+      .skilltree-row { display: flex; flex-wrap: wrap; gap: 8px; }
+      .skilltree-node {
+        border: 1px solid var(--panel-border);
+        border-radius: 5px;
+        padding: 4px 8px;
+        min-width: 84px;
+        background: #1b2129;
+        cursor: default;
+      }
+      .skilltree-node-dim { opacity: 0.45; }
+      .skilltree-node-chosen { opacity: 1; background: #232b1f; }
+      .skilltree-node-name { font-size: 11.5px; font-weight: 600; }
+      .skilltree-node-cost { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
     </style>
   </head>
   <body>

@@ -7,9 +7,11 @@ import { tickWorld } from "../src/simulation.js";
 import { EventLog } from "../src/events.js";
 import { migrate, findRandomWalkableTile } from "../src/migration.js";
 import { growFlora, maybeDropSeed } from "../src/flora.js";
+import { advanceWaterCycle } from "../src/weather.js";
 import { grantExp } from "../src/leveling.js";
 import { applyMateSeeking } from "../src/reproduction.js";
-import type { Agent, HuntRules } from "../src/types.js";
+import { spawnEgg, tickEgg, EGG_INCUBATION_TICKS } from "../src/eggs.js";
+import type { Agent, HuntRules, World } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 
 /**
@@ -105,6 +107,38 @@ describe("tickWorld: full-run determinism (the real acceptance test at unit scal
     expect(JSON.stringify(runA.log.events)).toBe(JSON.stringify(runB.log.events));
   });
 
+  it("moveUseCounts (a pure counter, no rng involved) is identical across two same-seed runs and doesn't perturb determinism", () => {
+    // A dedicated, guaranteed-to-fight scenario rather than reusing `scenario`
+    // above: that one is built around mate-seeking (bulbasaurs) and a distant
+    // hunter, so whether the scyther actually closes in and lands a hit
+    // within 500 ticks isn't reliably true every run — placing the hunter
+    // already adjacent to prey it's rules-eligible to hunt, and hungry
+    // enough to always attempt it, makes real `useMove` calls a certainty
+    // rather than a "usually happens" coincidence this test would otherwise
+    // depend on.
+    function fightScenario(seed: number): World {
+      const world = createWorld(20, 20, seed);
+      // maxHp 200 vs 50 (not equal) matters: `isPreyOf` (predation.ts) gates
+      // hunting on the target being meaningfully *smaller* (`PREY_POWER_RATIO`
+      // of the predator's own maxHp-derived power), so two same-maxHp agents
+      // never actually trigger a hunt/attack no matter how hungry or close.
+      world.agents.push(
+        agent("scyther-0", { species: "scyther", pos: { x: 5, y: 5 }, moves: [TEST_MOVE], maxHp: 200, hp: 200, needs: createNeeds({ hunger: 0.1 }) }),
+        agent("bulbasaur-0", { species: "bulbasaur", pos: { x: 5, y: 6 }, moves: [TEST_MOVE], maxHp: 50, hp: 50, needs: createNeeds({ hunger: 0.9 }) })
+      );
+      const rules: HuntRules = { scyther: true };
+      for (let i = 0; i < 30; i++) tickWorld(world, undefined, rules);
+      return world;
+    }
+    const worldA = fightScenario(20260904);
+    const worldB = fightScenario(20260904);
+    const counts = (world: World) => Object.fromEntries(world.agents.map((a) => [a.id, a.moveUseCounts ?? {}]));
+    expect(counts(worldA)).toEqual(counts(worldB));
+    // Real coverage, not a vacuous pass: something in this scenario actually used a move.
+    const anyUses = worldA.agents.some((a) => Object.keys(a.moveUseCounts ?? {}).length > 0);
+    expect(anyUses).toBe(true);
+  });
+
   it("different seeds produce different event logs (sanity check against accidental hardcoding)", () => {
     const runA = scenario(1);
     const runB = scenario(2);
@@ -147,6 +181,27 @@ describe("flora.ts determinism", () => {
       return results;
     }
     expect(run(9)).toEqual(run(9));
+  });
+});
+
+describe("weather.ts water-cycle determinism", () => {
+  it("advanceWaterCycle: same rng seed -> identical terrain outcomes", () => {
+    function run(seed: number) {
+      const world = createWorld(10, 10, seed);
+      setTile(world, "surface", 5, 5, "water");
+      setTile(world, "surface", 6, 5, "floor");
+      setTile(world, "surface", 4, 5, "sand");
+      world.weatherCells = [
+        { id: "d", type: "drought", center: { x: 5, y: 5 }, radius: 6, startedTick: 0, lifespanTicks: 500, drift: { x: 0, y: 0 } },
+      ];
+      const log = new EventLog();
+      for (let i = 0; i < 60; i++) {
+        world.tick = i;
+        advanceWaterCycle(world, log, world.rng);
+      }
+      return world.tiles.surface.map((t) => t.terrain).join(",");
+    }
+    expect(run(11)).toEqual(run(11));
   });
 });
 
@@ -215,20 +270,38 @@ describe("reproduction.ts determinism", () => {
     expect(run(555)).toEqual(run(555));
   });
 
-  it("applyMateSeeking: different seeds can produce a different newborn nature/sex/position", () => {
+  it("applyMateSeeking: laying an egg (with real shelter access) is deterministic given the same seed, same as the instant-newborn flow it replaced", () => {
+    // Bonding/egg-laying (reproduction.ts) no longer produces an instant
+    // newborn on contact — see that module's own doc comment — and
+    // `pickEggTile`'s cluster-tile choice is deliberately deterministic
+    // (nearest tile with room first, no rng), so there's no lay-time
+    // randomness left to sweep across seeds the way the old instant-birth
+    // flow had. What matters here is that laying still goes through the
+    // shared `World.rng`/tick-sequence machinery without any stray
+    // `Math.random()` — two independent runs from the same seed produce a
+    // byte-identical egg.
     function run(seed: number) {
       const world = createWorld(10, 10, seed);
+      setTile(world, "surface", 5, 5, "shelter");
       const mother = agent("mother", { species: "bulbasaur", sex: "female", pos: { x: 5, y: 5 }, herdId: "h" });
       const father = agent("father", { species: "bulbasaur", sex: "male", pos: { x: 5, y: 6 }, herdId: "h" });
       world.agents.push(mother, father);
       applyMateSeeking(world, mother, undefined, undefined, world.rng);
-      const child = world.agents[2];
-      return child ? JSON.stringify({ nature: child.nature, sex: child.sex, pos: child.pos }) : undefined;
+      const egg = world.agents.find((a) => a.isEgg);
+      return egg ? JSON.stringify({ id: egg.id, pos: egg.pos }) : undefined;
     }
-    // Try a handful of seed pairs — natures/sex/spawn tile are drawn from a
-    // small discrete set, so any single pair has a real (if small) chance of
-    // coincidentally matching; requiring at least one differing pair out of
-    // several keeps this a real, non-flaky sanity check.
+    expect(run(42)).toEqual(run(42));
+  });
+
+  it("eggs.ts's tickEgg: different seeds produce a different hatchling nature/sex from the same egg", () => {
+    function run(seed: number) {
+      const world = createWorld(10, 10, seed);
+      const mother = agent("mother", { species: "bulbasaur", sex: "female", pos: { x: 5, y: 5 } });
+      const father = agent("father", { species: "bulbasaur", sex: "male", pos: { x: 5, y: 6 } });
+      const egg = spawnEgg(world, mother, father, { x: 5, y: 5 }, 1);
+      for (let i = 0; i < EGG_INCUBATION_TICKS; i++) tickEgg(world, egg, undefined, undefined, world.rng);
+      return JSON.stringify({ nature: egg.nature, sex: egg.sex });
+    }
     const outcomes = new Set([1, 2, 3, 4, 5].map(run));
     expect(outcomes.size).toBeGreaterThan(1);
   });

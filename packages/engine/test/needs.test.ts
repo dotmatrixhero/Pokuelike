@@ -5,6 +5,21 @@ import { CONSUME_STOCK_AMOUNT } from "../src/flora.js";
 import { EventLog } from "../src/events.js";
 import type { Agent } from "../src/types.js";
 
+// A real leak this session already hit once (see vitest.config.ts's "forks"
+// pool comment, added for the cross-FILE version of this bug): a bare
+// `vi.spyOn(Math, "random")` a few tests down (the "no tagged preference"
+// exploration test) was never restored, so it silently pinned `Math.random`
+// to 0 for every test that ran after it in this same file/process —
+// harmless while shelter-building was species-gated (nothing else in this
+// file called unmocked `Math.random`), but a real, order-dependent flake
+// once shelter-building became universal (needs.ts's default `rng` param):
+// later "idle, comfortable" fixtures would deterministically (or not) walk
+// into `maybeTriggerShelterBuilding`'s `pickBuildSite` depending on whether
+// this mock was still active, purely a function of test execution order.
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
     id: "a1",
@@ -276,10 +291,18 @@ describe("old-age mortality", () => {
   });
 });
 
+// Below `SHELTER_COMFORT_THRESHOLD` (0.85) but well above `chooseBehavior`'s
+// 0.7 urgency cutoff — "idle enough to explore" without also being
+// "comfortable enough to trigger shelter-building" (universal now, per
+// shelter.ts's doc comment, so a plain fully-satisfied `makeAgent` fixture
+// would otherwise nondeterministically divert into building a shelter
+// instead of exploring, depending on `pickBuildSite`'s unseeded rng roll).
+const EXPLORE_NOT_SHELTER_NEEDS = { hunger: 0.8, thirst: 0.8 };
+
 describe("exp-motivated exploration", () => {
   it("a fully-satisfied idle agent in a large world wanders toward unexplored territory instead of standing still", () => {
     const world = createWorld(40, 40);
-    const agent = makeAgent({ pos: { x: 20, y: 20 } });
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
     tickAgent(world, agent);
 
@@ -289,7 +312,7 @@ describe("exp-motivated exploration", () => {
 
   it("keeps walking toward the same exploreTarget across multiple ticks rather than re-rolling every tick", () => {
     const world = createWorld(40, 40);
-    const agent = makeAgent({ pos: { x: 20, y: 20 } });
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
     tickAgent(world, agent);
     const target = agent.exploreTarget;
@@ -303,7 +326,7 @@ describe("exp-motivated exploration", () => {
   it("an urgent need interrupts an in-progress exploration walk", () => {
     const world = createWorld(40, 40);
     setTile(world, "surface", 0, 0, "water");
-    const agent = makeAgent({ pos: { x: 20, y: 20 } });
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
     tickAgent(world, agent);
     expect(agent.behavior).toBe("explore");
@@ -326,27 +349,115 @@ describe("exp-motivated exploration", () => {
   });
 });
 
+describe("tile preference (Agent.preferredTerrain, applyExploration)", () => {
+  it("a satisfied agent with a tagged flora preference heads toward the nearest flora tile instead of a random unvisited one", () => {
+    const world = createWorld(40, 40);
+    // Only one flora tile anywhere on the map — deterministic single target,
+    // no reliance on rng at all for this path.
+    setTile(world, "surface", 35, 20, "flora");
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["flora"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
+
+    tickAgent(world, agent);
+
+    expect(agent.behavior).toBe("explore");
+    expect(agent.exploreTarget).toEqual({ x: 35, y: 20 });
+    // Actually moved toward it this tick, not just picked a target and stalled.
+    expect(agent.pos.x).toBeGreaterThan(20);
+  });
+
+  it("a satisfied agent with a tagged water preference heads toward water, not wherever ordinary random exploration would otherwise go", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 5, 20, "water");
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["water"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
+
+    tickAgent(world, agent);
+
+    expect(agent.exploreTarget).toEqual({ x: 5, y: 20 });
+    expect(agent.pos.x).toBeLessThan(20);
+  });
+
+  it("an agent already lingering near its preferred terrain stays idle instead of wandering off to a new spot", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 21, 20, "flora"); // 1 tile away, inside the "already satisfied" radius
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["flora"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
+
+    tickAgent(world, agent);
+
+    expect(agent.behavior).toBe("idle");
+    expect(agent.pos).toEqual({ x: 20, y: 20 });
+    expect(agent.exploreTarget).toBeUndefined();
+  });
+
+  it("falls back to a bounded local scan for a preference kind outside the cheap resource index (e.g. boulder)", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 25, 20, "boulder");
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["boulder"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
+
+    tickAgent(world, agent);
+
+    expect(agent.exploreTarget).toEqual({ x: 25, y: 20 });
+  });
+
+  it("tries preferred terrain kinds in order, falling through to the next when the first has no reachable tile anywhere", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 30, 20, "water"); // no "flora" placed anywhere on this map
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["flora", "water"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
+
+    tickAgent(world, agent);
+
+    expect(agent.exploreTarget).toEqual({ x: 30, y: 20 });
+  });
+
+  it("an agent with no tagged preference is completely unaffected — same random-wander behavior as before this feature", () => {
+    const world = createWorld(40, 40);
+    setTile(world, "surface", 35, 20, "flora"); // present on the map, but this agent isn't tagged to care
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) }); // no preferredTerrain
+
+    vi.spyOn(Math, "random").mockReturnValue(0); // deterministic: findNearbyUnvisitedTile's first roll always lands top-left of the search box
+
+    tickAgent(world, agent);
+
+    expect(agent.behavior).toBe("explore");
+    // Never even looks at the flora tile — target is the ordinary
+    // rng-driven unvisited-sector pick, not the flora tile placed above.
+    expect(agent.exploreTarget).not.toEqual({ x: 35, y: 20 });
+  });
+
+  it("rng-determinism: the preference-driven wander consumes no rng and is byte-identical across two independent runs from the same state", () => {
+    function run(): { pos: Agent["pos"]; target: Agent["exploreTarget"] } {
+      const world = createWorld(40, 40);
+      setTile(world, "surface", 35, 20, "flora");
+      const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["flora"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
+      tickAgent(world, agent);
+      return { pos: agent.pos, target: agent.exploreTarget };
+    }
+    const first = run();
+    const second = run();
+    expect(second).toEqual(first);
+  });
+});
+
 describe("decayNeeds: thirstMultiplier composes with the flat decay rate (Phase 3 weather)", () => {
   it("defaults to the original flat rate when no multiplier is passed", () => {
     const needs = createNeeds();
     decayNeeds(needs);
-    expect(needs.thirst).toBeCloseTo(1 - 0.01, 10);
+    expect(needs.thirst).toBeCloseTo(1 - 0.00125, 10);
   });
 
   it("a multiplier below 1 (rain) eases thirst decay relative to the base rate", () => {
     const needs = createNeeds();
     decayNeeds(needs, 0.6);
     const eased = 1 - needs.thirst;
-    expect(eased).toBeCloseTo(0.01 * 0.6, 10);
-    expect(eased).toBeLessThan(0.01);
+    expect(eased).toBeCloseTo(0.00125 * 0.6, 10);
+    expect(eased).toBeLessThan(0.00125);
   });
 
   it("a multiplier above 1 (drought) raises thirst decay relative to the base rate", () => {
     const needs = createNeeds();
     decayNeeds(needs, 1.8);
     const raised = 1 - needs.thirst;
-    expect(raised).toBeCloseTo(0.01 * 1.8, 10);
-    expect(raised).toBeGreaterThan(0.01);
+    expect(raised).toBeCloseTo(0.00125 * 1.8, 10);
+    expect(raised).toBeGreaterThan(0.00125);
   });
 
   it("does not touch hunger/energy/mateDrive — only thirst is weather-modulated", () => {
@@ -384,7 +495,103 @@ describe("tickAgentNeeds: local weather composes with thirst decay through a rea
     ];
     const farAgent = makeAgent({ pos: { x: 1, y: 1 } });
     tickAgentNeeds(farAgent, world);
-    expect(farAgent.needs.thirst).toBeCloseTo(1 - 0.01, 10);
+    expect(farAgent.needs.thirst).toBeCloseTo(1 - 0.00125, 10);
+  });
+});
+
+describe("tile-capacity: blocked-resource fallback", () => {
+  // 3 rows tall (not 1) in every test below — a real route around a crowded
+  // tile needs to actually exist. A single-row world would force every path
+  // straight through the crowded tile, which is a dead end, not the "blocked
+  // resource with a way around" scenario this feature targets.
+
+  it("waits near a crowded target rather than instantly bailing on it", () => {
+    const world = createWorld(10, 3);
+    setTile(world, "surface", 2, 1, "water");
+    setTile(world, "surface", 8, 1, "water");
+    // Crowd the nearer tile (x=2,y=1) to capacity — three 30-weight
+    // occupants at the 90 capacity ceiling.
+    world.agents = [
+      makeAgent({ id: "c1", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c2", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c3", pos: { x: 2, y: 1 }, maxHp: 30 }),
+    ];
+    const agent = makeAgent({ id: "thirsty", pos: { x: 0, y: 1 }, maxHp: 30, needs: createNeeds({ thirst: 0.1 }) });
+    world.agents.push(agent);
+
+    for (let i = 0; i < 10; i++) tickAgentAction(world, agent);
+
+    // Still hasn't drunk (never got a slot on the crowded tile) and hasn't
+    // given up on it yet either (grace period not exhausted).
+    expect(agent.needs.thirst).toBeCloseTo(0.1, 5);
+    expect(agent.blockedResourceTiles ?? []).toHaveLength(0);
+    expect(world.resourceBlockedFallbackCount ?? 0).toBe(0);
+  });
+
+  it("gives up on a persistently crowded tile after its grace period and tries a different one", () => {
+    const world = createWorld(10, 3);
+    setTile(world, "surface", 2, 1, "water");
+    setTile(world, "surface", 8, 1, "water");
+    world.agents = [
+      makeAgent({ id: "c1", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c2", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c3", pos: { x: 2, y: 1 }, maxHp: 30 }),
+    ];
+    const agent = makeAgent({ id: "thirsty", pos: { x: 0, y: 1 }, maxHp: 30, needs: createNeeds({ thirst: 0.1 }) });
+    world.agents.push(agent);
+
+    // Run exactly past the grace period (25 ticks) — one tick past where the
+    // fallback should have just fired, before it's had time to also walk all
+    // the way to and drink from the alternate.
+    for (let i = 0; i < 25; i++) {
+      tickAgentAction(world, agent);
+      if (agent.needs.thirst < 0.1) agent.needs.thirst = 0.1;
+    }
+
+    expect(world.resourceBlockedFallbackCount ?? 0).toBeGreaterThanOrEqual(1);
+    expect(agent.blockedResourceTiles?.some((p) => p.x === 2 && p.y === 1)).toBe(true);
+
+    // Now let it actually walk to and drink from the alternate (x=8,y=1),
+    // which isn't crowded — confirms the fallback produces a real, working
+    // target, not just a memory entry.
+    for (let i = 0; i < 30; i++) {
+      tickAgentAction(world, agent);
+      if (agent.needs.thirst < 0.1) agent.needs.thirst = 0.1;
+      if (agent.needs.thirst > 0.1) break;
+    }
+    expect(agent.needs.thirst).toBeGreaterThan(0.1);
+  });
+
+  it("does not infinite-loop between two mutually-crowded tiles — eventually relocates instead of oscillating forever", () => {
+    const world = createWorld(10, 3);
+    setTile(world, "surface", 2, 1, "water");
+    setTile(world, "surface", 8, 1, "water");
+    // Crowd BOTH tiles to capacity.
+    world.agents = [
+      makeAgent({ id: "c1", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c2", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c3", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c4", pos: { x: 8, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c5", pos: { x: 8, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c6", pos: { x: 8, y: 1 }, maxHp: 30 }),
+    ];
+    const agent = makeAgent({ id: "thirsty", pos: { x: 0, y: 1 }, maxHp: 30, needs: createNeeds({ thirst: 0.1 }) });
+    world.agents.push(agent);
+
+    let sawRelocate = false;
+    for (let i = 0; i < 300; i++) {
+      tickAgentAction(world, agent);
+      agent.needs.thirst = Math.max(agent.needs.thirst, 0.1); // isolate from starvation/death
+      if (agent.behavior === "relocate") {
+        sawRelocate = true;
+        break;
+      }
+    }
+
+    // With both known water tiles perpetually full, the agent must eventually
+    // fall through to the existing, already-tested relocate/migrate escape
+    // valve rather than bouncing between the two forever.
+    expect(sawRelocate).toBe(true);
   });
 });
 

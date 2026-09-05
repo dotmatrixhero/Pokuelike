@@ -18,6 +18,18 @@ export class EventLogPanel {
 
   private buffer: SimEvent[] = [];
   /**
+   * Every `HEADLINE_KINDS` event ever ingested, kept separately from
+   * `buffer` and never trimmed — direct ask: quiet-mode announcements
+   * shouldn't expire just because `buffer`'s 4000-event cap rolled past
+   * them on a long run (a birth from early on would otherwise silently
+   * vanish from "Quiet mode" once enough later noise pushed `buffer`'s
+   * window past it, even though quiet mode is specifically for watching
+   * the population arc over a *long* run). Headline events are a small
+   * fraction of total volume, so this stays cheap in practice without
+   * needing its own cap.
+   */
+  private headlineCache: SimEvent[] = [];
+  /**
    * The most recently ticked world — used so a `fought`/`missed` row can
    * show the attacker's currently-built move (see `formatEvent`'s `world`
    * param). Always the live reference, not a per-event snapshot: rows show
@@ -56,6 +68,9 @@ export class EventLogPanel {
     this.buffer.push(...events);
     const overflow = this.buffer.length - EventLogPanel.MAX_BUFFER;
     if (overflow > 0) this.buffer.splice(0, overflow);
+    for (const event of events) {
+      if (HEADLINE_KINDS.has(event.kind)) this.headlineCache.push(event);
+    }
     this.dirty = true;
   }
 
@@ -85,6 +100,7 @@ export class EventLogPanel {
 
   reset(): void {
     this.buffer = [];
+    this.headlineCache = [];
     this.filterAgentId = undefined;
     this.dirty = true;
     this.render();
@@ -99,10 +115,13 @@ export class EventLogPanel {
     if (!this.dirty) return;
     this.dirty = false;
 
-    let source = this.filterAgentId ? this.eventsForAgent(this.filterAgentId) : this.buffer;
+    // Quiet mode reads from the never-trimmed headlineCache, not buffer —
+    // see headlineCache's own doc comment for why.
+    let source: SimEvent[];
     if (this.headlinesOnly) {
-      source = source.filter((event) => HEADLINE_KINDS.has(event.kind));
+      source = this.filterAgentId ? this.headlineCache.filter((event) => eventNamesAgent(event, this.filterAgentId!)) : this.headlineCache;
     } else {
+      source = this.filterAgentId ? this.eventsForAgent(this.filterAgentId) : this.buffer;
       if (this.hideNoise) source = source.filter((event) => !NOISE_KINDS.has(event.kind));
       if (this.hideLevelUps) source = source.filter((event) => event.kind !== "leveledUp");
     }

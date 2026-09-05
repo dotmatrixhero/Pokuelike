@@ -1,4 +1,4 @@
-import type { Agent, World } from "./types.js";
+import type { Agent, TerrainKind, World } from "./types.js";
 import type { PokemonType } from "./typing.js";
 import type { MoveSpec, MoveTreeNode } from "./moves.js";
 import { applyMoveTree, trySpendSkillPoints } from "./moves.js";
@@ -97,6 +97,15 @@ export interface LevelingProfile {
    * at whichever creation site actually built it — see shelter.ts).
    */
   buildsShelter?: boolean;
+  /**
+   * Mirrors `SpeciesDef.preferredTerrain` (packages/data) — same
+   * denormalize-onto-newborn reasoning as `buildsShelter` immediately
+   * above: without this, a tile-preference lineage's offspring would
+   * silently wander with no preference the instant they're born, since an
+   * agent's own `preferredTerrain` is otherwise only ever set once, at
+   * spawn (see needs.ts's `applyExploration`).
+   */
+  preferredTerrain?: TerrainKind[];
 }
 
 export interface LevelingContext {
@@ -156,7 +165,16 @@ export function canBreed(speciesA: string, speciesB: string, ctx?: LevelingConte
 // inside the run lengths (3,000-8,000 ticks) already used to validate
 // dispersal, instead of the level gate making dispersal fire even more
 // rarely than before this change.
-export const EXP_TRICKLE_PER_TICK = 0.8;
+//
+// Slight bump again (0.8 -> 1.0), direct ask, alongside lowering the new
+// breeding-level gate (reproduction.ts's MIN_BREEDING_LEVEL_UNEVOLVED,
+// 16 -> 12): a real run with the gate at 16 showed births collapsing to
+// 1-4 per 3000-tick run even after quartering hunger/thirst decay — the
+// actual bottleneck was exp pace, not survival time (see TODO.md). A
+// lower threshold needs less exp on its own (973 vs. 2535 for Medium Slow
+// level 12 vs. 16); this trickle bump is a modest push on top of that,
+// not the primary fix.
+export const EXP_TRICKLE_PER_TICK = 1.0;
 /**
  * Minimum level before natal dispersal (dispersal.ts) can trigger at all —
  * direct instruction: dispersal should read as something an older/more
@@ -168,7 +186,7 @@ export const EXP_TRICKLE_PER_TICK = 0.8;
  * existed.
  */
 export const DISPERSAL_MIN_LEVEL = 15;
-export const EXP_ON_CONSUME = 6;
+export const EXP_ON_CONSUME = 8; // slight bump from 6, same pass as EXP_TRICKLE_PER_TICK's increase above
 export const EXP_ON_MATE_ATTEMPT = 4;
 export const EXP_ON_BIRTH_PARENT = 15;
 export const EXP_ON_NEW_SECTOR = 20;
@@ -429,6 +447,7 @@ export function ensureCombatProfile(agent: Agent, ctx?: LevelingContext): void {
   agent.hp = stats.maxHp;
   agent.types = profile.types;
   agent.buildsShelter = agent.buildsShelter ?? profile.buildsShelter;
+  agent.preferredTerrain = agent.preferredTerrain ?? profile.preferredTerrain;
 
   agent.knownMoves = agent.knownMoves ?? [];
   agent.moves = agent.moves ?? [];

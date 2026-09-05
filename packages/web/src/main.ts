@@ -1,5 +1,5 @@
 import { EventLog, tickWorld, randomSeed, type Agent, type World } from "@pokuelike/engine";
-import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
+import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawWorld, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { EventPopups } from "./eventPopups.js";
@@ -102,7 +102,7 @@ function loadWorld(seed: number): void {
 }
 
 function step(): void {
-  tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT);
+  tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
   // Only the events since the last step are new; EventLog is append-only for the life of a world.
   const newEvents = log.events.slice(lastLoggedEventCount);
   eventLogPanel.ingest(newEvents, world);

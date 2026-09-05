@@ -1,6 +1,23 @@
 import type { Layer, Vec2, World } from "./types.js";
 
-export type IndexedTerrain = "water" | "food" | "sunbeam";
+/**
+ * "shelter" joined this list for `shelter.ts`'s `applyShelterResting`/
+ * `maybeFeedFromShelterCache` — same reasoning as `food`: a `buildsShelter`
+ * agent looking for "my nearest shelter" every idle tick shouldn't fall back
+ * to a naive full-grid scan any more than a hungry agent looking for its
+ * nearest food patch should.
+ *
+ * "flora" joined this list for needs.ts's `applyExploration` terrain-
+ * preference wander: with two roster species (bulbasaur/venusaur) tagged
+ * `preferredTerrain: ["flora"]` — see DESIGN.md's "Tile preference" section
+ * — an idle satisfied grazer looking for "my nearest flora patch" every
+ * idle tick earns the same indexed-lookup treatment as food/water/shelter
+ * above, rather than a naive scan. Preference kinds tagged by only a single
+ * species (e.g. "bush"/"boulder") stay off this list and fall back to a
+ * bounded local scan instead — see `findPreferredTerrainTarget` in
+ * needs.ts.
+ */
+export type IndexedTerrain = "water" | "food" | "sunbeam" | "shelter" | "flora";
 
 interface LayerIndex {
   version: number;
@@ -20,11 +37,11 @@ function rawTileAt(world: World, layer: Layer, x: number, y: number) {
 }
 
 function buildIndex(world: World, layer: Layer): LayerIndex {
-  const positions: Record<IndexedTerrain, Vec2[]> = { water: [], food: [], sunbeam: [] };
+  const positions: Record<IndexedTerrain, Vec2[]> = { water: [], food: [], sunbeam: [], shelter: [], flora: [] };
   const tiles = world.tiles[layer];
   for (let i = 0; i < tiles.length; i++) {
     const terrain = tiles[i]!.terrain;
-    if (terrain === "water" || terrain === "food" || terrain === "sunbeam") {
+    if (terrain === "water" || terrain === "food" || terrain === "sunbeam" || terrain === "shelter" || terrain === "flora") {
       positions[terrain].push({ x: i % world.width, y: Math.floor(i / world.width) });
     }
   }
@@ -57,6 +74,26 @@ function getIndex(world: World, layer: Layer): LayerIndex {
 }
 
 /**
+ * The underground layer never generates its own water (it's a pure flat
+ * floor grid — see `createDemoWorld`'s doc comment) — direct ask:
+ * "underground should share water with the ground," real groundwater
+ * access rather than every drink requiring an explicit cross-to-surface
+ * trip. Redirects a water lookup FROM the underground layer to the surface
+ * layer's own water index; every other (layer, terrain) combination is
+ * unaffected. The agent doing the lookup still walks there and drinks
+ * while staying on the underground layer the whole time (underground is a
+ * full flat grid at every x,y, so any surface water coordinate is also a
+ * valid underground position) — `consume()` (needs.ts) never checks the
+ * current tile's terrain kind, only that the agent's position matches the
+ * target, so this needs no other plumbing. Canopy is deliberately NOT
+ * included — it still requires an explicit surface crossing for every
+ * resource, unchanged.
+ */
+function effectiveLookupLayer(layer: Layer, terrain: IndexedTerrain): Layer {
+  return layer === "underground" && terrain === "water" ? "surface" : layer;
+}
+
+/**
  * Bump whenever a tile's terrain might have crossed in or out of a tracked
  * kind (water/food/sunbeam) — cheap (an int increment); the actual rebuild
  * is lazy, deferred to the next lookup that needs it.
@@ -80,7 +117,7 @@ function chebyshev(a: Vec2, b: Vec2): number {
  * means in flora.ts.
  */
 export function foodStockNear(world: World, layer: Layer, from: Vec2, radius: number): number {
-  const { positions } = getIndex(world, layer);
+  const { positions } = getIndex(world, effectiveLookupLayer(layer, "food"));
   let total = 0;
   for (const pos of positions.food) {
     if (chebyshev(pos, from) > radius) continue;
@@ -96,7 +133,7 @@ export function foodStockNear(world: World, layer: Layer, from: Vec2, radius: nu
  * general since the index already tracks "sunbeam" too.
  */
 export function countTerrainNear(world: World, layer: Layer, from: Vec2, terrain: IndexedTerrain, radius: number): number {
-  const { positions } = getIndex(world, layer);
+  const { positions } = getIndex(world, effectiveLookupLayer(layer, terrain));
   let count = 0;
   for (const pos of positions[terrain]) {
     if (chebyshev(pos, from) <= radius) count++;
@@ -111,14 +148,30 @@ export function countTerrainNear(world: World, layer: Layer, from: Vec2, terrain
  * without the terrain kind itself changing) — so a depleted patch is
  * correctly skipped even though it's still present in the index until it
  * reverts to "floor".
+ *
+ * `exclude` (default none) skips any candidate whose coordinates exactly
+ * match an entry in the list — needs.ts's blocked-resource fallback uses
+ * this to ask "nearest tile of this terrain, NOT counting the one(s) I
+ * already know are crowded right now" once its grace period on the current
+ * target runs out, without needing a second index or a live capacity check
+ * baked into this module (occupancy.ts's tile-capacity concept is a
+ * movement-time concern; this stays a pure terrain lookup).
  */
-export function findNearestIndexed(world: World, layer: Layer, from: Vec2, terrain: IndexedTerrain): Vec2 | undefined {
-  const { positions } = getIndex(world, layer);
+export function findNearestIndexed(
+  world: World,
+  layer: Layer,
+  from: Vec2,
+  terrain: IndexedTerrain,
+  exclude: readonly Vec2[] = []
+): Vec2 | undefined {
+  const lookupLayer = effectiveLookupLayer(layer, terrain);
+  const { positions } = getIndex(world, lookupLayer);
   let best: Vec2 | undefined;
   let bestDist = Infinity;
   for (const pos of positions[terrain]) {
+    if (exclude.some((e) => e.x === pos.x && e.y === pos.y)) continue;
     if (terrain === "food") {
-      const tile = rawTileAt(world, layer, pos.x, pos.y);
+      const tile = rawTileAt(world, lookupLayer, pos.x, pos.y);
       if ((tile?.stock ?? 0) <= 0) continue;
     }
     const dist = Math.abs(pos.x - from.x) + Math.abs(pos.y - from.y);

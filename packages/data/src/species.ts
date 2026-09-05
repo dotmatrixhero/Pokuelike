@@ -1,4 +1,4 @@
-import type { ActivityPattern, BaseStats, Layer, PokemonType } from "@pokuelike/engine";
+import type { ActivityPattern, BaseStats, Layer, PokemonType, TerrainKind } from "@pokuelike/engine";
 import { SPECIES_DEX_BY_KEY } from "./dex/index.js";
 
 export interface SpeciesDef {
@@ -42,6 +42,45 @@ export interface SpeciesDef {
    * (spawn.ts), same pattern as `activityPattern`.
    */
   buildsShelter?: boolean;
+  /**
+   * Which of worldgen.ts's `BIOMES` names ("grassland" | "forest" |
+   * "wetland" | "badlands" | "highland") this species is naturally found
+   * in - best-effort flavor-driven tagging (same judged-per-species
+   * standard as `isPredator`/`buildsShelter`), not a hard requirement:
+   * nothing prevents an agent from existing outside its tagged biomes (a
+   * herd can migrate anywhere, a hand-placed starting position isn't
+   * checked against it), and an untagged species (absent/empty) reads as
+   * "no particular preference, fine anywhere" everywhere this is
+   * consulted. The real, meaningful consumer is `immigration.ts`'s
+   * spawn-site scoring - see DESIGN.md's "Immigration" section - plus
+   * `createDemoWorld`'s placement of any new (not hand-tuned-in-place)
+   * starting agent. Underground/canopy species have no biome of their own
+   * (those layers are flat, biome-agnostic grids - see worldgen.ts) so
+   * they're tagged by whichever surface biome best matches their flavor
+   * text, on the understanding that "their biome" means "the surface
+   * biome sitting above wherever they actually live."
+   */
+  biomes?: string[];
+  /**
+   * Which literal `TerrainKind`(s) (types.ts — "water" | "flora" | "food" |
+   * "sunbeam" | "bush" | "boulder" | ...) this species gravitates toward
+   * once genuinely idle (needs met, no herd pull-back) — a finer-grained,
+   * tile-level cousin of `biomes` above, NOT derived from it: `biomes` is
+   * "which map region does this species spawn/immigrate into," this is
+   * "once standing on that region's tiles with nothing urgent to do, which
+   * specific tile kind does it drift toward" (e.g. Bulbasaur toward flora
+   * patches, Squirtle toward water) — see DESIGN.md's "Tile preference"
+   * section and `@pokuelike/engine`'s needs.ts `applyExploration`. Same
+   * judged-per-species standard as `biomes`/`buildsShelter`, not universal:
+   * only tagged for species whose home layer (surface) actually has varied
+   * terrain to prefer among — underground/canopy natives live on flat,
+   * terrain-uniform grids (see worldgen.ts's doc comment), so tagging them
+   * would be meaningless and is skipped rather than guessed at. Absent/empty
+   * = no particular tile preference, falls back to ordinary random-wander
+   * exploration exactly as before this feature. Order matters: earlier
+   * entries are tried first when more than one is listed.
+   */
+  preferredTerrain?: TerrainKind[];
 }
 
 /**
@@ -72,6 +111,8 @@ export function speciesFromDex(dexKey: string, sim: SimSpeciesFields): SpeciesDe
     moves: sim.moves,
     activityPattern: sim.activityPattern,
     buildsShelter: sim.buildsShelter,
+    biomes: sim.biomes,
+    preferredTerrain: sim.preferredTerrain,
   };
 }
 
@@ -98,6 +139,14 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // The bulb on its back needs sunlight to grow (mainline flavor text) —
     // basks and grazes by day, same reasoning as its evolutions below.
     activityPattern: "diurnal",
+    // A grass-type grazer — grassland is the obvious flavor fit, forest as
+    // a secondary (plenty of shade/undergrowth grass-types are also drawn
+    // to in mainline flavor text).
+    biomes: ["grassland", "forest"],
+    // Direct ask's own named example — "Bulbasaur should strongly prefer
+    // flora tiles." A grass-type grazer settles near the grass patches it
+    // actually grazes, once fed/watered/rested.
+    preferredTerrain: ["flora"],
   }),
   scyther: speciesFromDex("SCYTHER", {
     spriteKey: "scyther",
@@ -109,6 +158,15 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // ninja" per mainline flavor text) — crepuscular, striking at the
     // low-light edges of the day rather than in full daylight or full dark.
     activityPattern: "crepuscular",
+    // A stealthy forest ambusher (mainline flavor text has it living in
+    // dense woodland) — forest as primary, grassland as a secondary edge
+    // habitat.
+    biomes: ["forest", "grassland"],
+    // "Vanishes like a ninja" — an ambush predator that lingers in
+    // concealing undergrowth between strikes, not out in the open. Reuses
+    // "bush" terrain's existing concealment mechanic (`Tile.concealment`)
+    // rather than inventing a new one — idling here is doubly in-character.
+    preferredTerrain: ["bush"],
   }),
   charmander: speciesFromDex("CHARMANDER", {
     spriteKey: "charmander",
@@ -118,6 +176,16 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // A sun-loving fire lizard whose flame is said to weaken without warmth
     // — diurnal, active while the sun's out.
     activityPattern: "diurnal",
+    // A fire lizard that thrives on heat and dry ground (mainline flavor
+    // text: found on rocky mountainsides, flame weakens in the rain) —
+    // badlands is the real flavor fit, not the grassland/wetland crowd the
+    // rest of the roster leans toward. See createDemoWorld for its
+    // biome-driven placement (the first starting agent placed this way).
+    biomes: ["badlands"],
+    // Its flame is said to weaken without warmth (mainline flavor text) — a
+    // sun-loving lizard that idles on the warmest tiles it can find, same
+    // "sunbeam" terrain the sim already uses for basking/warmth mechanics.
+    preferredTerrain: ["sunbeam"],
   }),
   diglett: speciesFromDex("DIGLETT", {
     spriteKey: "diglett",
@@ -131,6 +199,16 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // "about one yard underground") — the single most literal
     // shelter-building temperament in the whole roster.
     buildsShelter: true,
+    // Underground has no biome of its own (worldgen.ts's biomes only vary
+    // the surface layer) — tagged by the surface biome its tunnels would
+    // sit under: loose, diggable ground reads as grassland/badlands, not
+    // dense forest or waterlogged wetland.
+    biomes: ["grassland", "badlands"],
+    // No `preferredTerrain` tag: underground is a flat, terrain-uniform
+    // floor grid (worldgen.ts never varies it), so there's no meaningful
+    // tile kind to prefer among on its own home layer — and it already has
+    // a real idle-homing pull via `buildsShelter` above (shelter.ts). Same
+    // reasoning applies to sandshrew/pidgey/spearow/onix below.
   }),
   venusaur: speciesFromDex("VENUSAUR", {
     spriteKey: "venusaur",
@@ -141,6 +219,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // pre-evolution: this is the herd's guardian (nothing preys on it — see
     // predation.ts), and a guardian that only watches half the clock isn't
     // much of one. No override needed; omission here IS the design choice.
+    biomes: ["grassland", "forest"],
+    // The herd's guardian grazer, same grass-type flora affinity as its
+    // pre-evolution above.
+    preferredTerrain: ["flora"],
   }),
   pidgey: speciesFromDex("PIDGEY", {
     spriteKey: "pidgey",
@@ -149,6 +231,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     moves: ["tackle"],
     // An ordinary daytime bird — diurnal, the task brief's own example.
     activityPattern: "diurnal",
+    // Canopy has no biome of its own (a flat grid, same as underground) —
+    // tagged by the surface biome its treetop canopy sits above: an
+    // ordinary woodland/hedgerow bird, grassland/forest.
+    biomes: ["grassland", "forest"],
   }),
   spearow: speciesFromDex("SPEAROW", {
     spriteKey: "spearow",
@@ -167,6 +253,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // an off-hours Speed penalty (support.ts) — real predation pressure
     // from the mismatch, not just flavor.
     activityPattern: "crepuscular",
+    biomes: ["grassland", "forest"],
   }),
   sandshrew: speciesFromDex("SANDSHREW", {
     spriteKey: "sandshrew",
@@ -183,6 +270,11 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // behavior, not just a burrowing neighbor riding on Diglett's coattails
     // — the roster's other obvious burrower.
     buildsShelter: true,
+    // Same "no biome of its own, tagged by the surface above" reasoning as
+    // Diglett — a desert-dwelling burrower reads squarely as badlands, with
+    // grassland as a secondary (real-world ground squirrels/gophers aren't
+    // desert-exclusive).
+    biomes: ["badlands", "grassland"],
   }),
   onix: speciesFromDex("ONIX", {
     spriteKey: "onix",
@@ -197,6 +289,9 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Left cathemeral (the default): it tunnels through solid rock deep
     // underground, where the surface day/night cycle has no real bearing —
     // there's no "daylight" down there to be diurnal or nocturnal about.
+    // A giant rock snake — badlands/highland, the roster's two stoniest,
+    // least vegetated biomes, over the softer grassland/forest/wetland set.
+    biomes: ["badlands", "highland"],
   }),
   squirtle: speciesFromDex("SQUIRTLE", {
     spriteKey: "squirtle",
@@ -207,5 +302,76 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // pair with Bulbasaur/Charmander (all three starters share the
     // Monster egg group in the real games) as well as Water 1.
     moves: ["tackle", "water_gun"],
+    // The obvious fit — a Water-type drawn to `worldgen.ts`'s highest
+    // water-density biome.
+    biomes: ["wetland"],
+    // Direct ask's own named example — "Squirtle should prefer water."
+    preferredTerrain: ["water"],
+  }),
+
+  // --- New species below: badlands/highland residents, closing the
+  // "badlands/highland have zero real residents" gap flagged in this
+  // feature's task brief. Each reuses an already-implemented move
+  // (moves.ts) rather than inventing a new one, and each is drawn from
+  // `EGG_GROUPS_BY_BASE_KEY`'s existing Gen 1 headroom batch in
+  // leveling.ts (no new egg-group entries needed). None are tagged
+  // `isPredator` — the demo scenario's existing predator populations
+  // (Scyther/Spearow/Onix) already crash toward extinction in a real run
+  // (see TODO.md), so adding more hunters to an already-struggling
+  // predator guild would just make that worse, not add real variety.
+  geodude: speciesFromDex("GEODUDE", {
+    spriteKey: "geodude",
+    placeholderColor: "#b8a878",
+    homeLayer: "surface",
+    // Real cross-species breeding pair with Onix — both Mineral egg group
+    // (see leveling.ts's EGG_GROUPS_BY_BASE_KEY), the first actual pairing
+    // that table's existing Onix-is-alone-in-Mineral comment anticipated.
+    moves: ["rock_throw", "tackle"],
+    // A living boulder that mainline flavor text has rolling down
+    // mountainsides — badlands/highland, both rock-and-boulder-heavy biomes
+    // (see worldgen.ts's BIOMES boulder terrainWeights).
+    biomes: ["badlands", "highland"],
+    // Literally a living boulder (mainline flavor text) — the roster's most
+    // direct terrain-preference fit of all: it settles among the same rocks
+    // it's made of, not just the biome that happens to contain them.
+    preferredTerrain: ["boulder"],
+  }),
+  growlithe: speciesFromDex("GROWLITHE", {
+    spriteKey: "growlithe",
+    placeholderColor: "#e07850",
+    homeLayer: "surface",
+    moves: ["ember"],
+    // A loyal, territory-patrolling dog per mainline flavor text — diurnal,
+    // an active daytime patroller rather than a night hunter.
+    activityPattern: "diurnal",
+    // Fire-type, dry/hot terrain flavor (mainline: found in rocky, arid
+    // regions) — badlands. Its only mainline evolution (Arcanine) needs a
+    // Fire Stone, an item-based trigger `leveling.ts`'s evolution filter
+    // deliberately excludes (see that file's `computeProfileFromDexEntry`
+    // doc comment on why level-with-no-conditions is the bar) — so, like
+    // Onix in the existing roster, this species simply never evolves
+    // in-sim yet. Not a bug, an accepted existing limitation.
+    biomes: ["badlands"],
+    // Fire-type warmth-seeker, same "sunbeam" affinity reasoning as
+    // Charmander above — a dry-terrain dog that suns itself when idle.
+    preferredTerrain: ["sunbeam"],
+  }),
+  mankey: speciesFromDex("MANKEY", {
+    spriteKey: "mankey",
+    placeholderColor: "#c07850",
+    homeLayer: "surface",
+    // Fighting-type — Scratch is its actual first-level mainline move
+    // (levelMoves[0] in the dex data), not a stretch reuse.
+    moves: ["scratch"],
+    // A short-tempered, easily-provoked highland/mountain primate per
+    // mainline flavor text — badlands as a secondary (its Pokedex entries
+    // also place it in "rocky mountains," which blends into both of this
+    // roster's rockiest biomes).
+    biomes: ["highland", "badlands"],
+    // A real level-only evolution (Primeape at level 28, no conditions) —
+    // unlike Growlithe above, this species does evolve in-sim.
+    // A "rocky mountains" primate — settles among the same boulder fields
+    // as Geodude, its badlands/highland neighbor.
+    preferredTerrain: ["boulder"],
   }),
 };

@@ -1,5 +1,5 @@
 import { EventLog, tickWorld, randomSeed } from "@pokuelike/engine";
-import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT } from "@pokuelike/data";
+import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT } from "@pokuelike/data";
 import { TERRAIN_ORDER } from "./ascii.js";
 import { writeFileSync } from "node:fs";
 
@@ -86,7 +86,7 @@ function captureAgents(): number[] {
 agentFrames.push(captureAgents());
 
 for (let tick = 1; tick <= ticks; tick++) {
-  tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT);
+  tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
 
   for (let i = 0; i < width * height; i++) {
     const kind = kindOf(i);

@@ -1,10 +1,12 @@
 import {
   generateWorld,
   findWalkableNear,
+  findPosInBiome,
   createNeeds,
   type World,
 } from "@pokuelike/engine";
 import { spawnAgent } from "./spawn.js";
+import { SPECIES } from "./species.js";
 
 /**
  * ~90x60 (up from the old hand-authored 24x16) — DESIGN.md's "something like
@@ -115,11 +117,34 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
     },
   ];
 
-  const hunter = {
-    ...spawnAgent("scyther", "scyther-0", anchor(world, OLD_WIDTH - 2, 1), 8, world.rng),
-    needs: createNeeds({ hunger: 0.3 }),
-    sex: "female" as const,
-  };
+  // A small Scyther hunting party rather than one lone hunter — direct ask,
+  // giving pack hunting (predation.ts's isPackPreyOf) real conspecifics to
+  // actually coordinate with from tick 1, and generally more real predation
+  // pressure on the surface herds (isPreyOf has no species allowlist — any
+  // sufficiently weak nearby agent, Charmander/Squirtle included, is fair
+  // game once a Scyther is hungry, same as Bulbasaur/Pidgey already are).
+  const scytherParty = [
+    {
+      ...spawnAgent("scyther", "scyther-0", anchor(world, OLD_WIDTH - 2, 1), 8, world.rng),
+      needs: createNeeds({ hunger: 0.3 }),
+      sex: "female" as const,
+    },
+    {
+      ...spawnAgent("scyther", "scyther-1", anchor(world, OLD_WIDTH - 3, 2), 8, world.rng),
+      needs: createNeeds({ hunger: 0.3 }),
+      sex: "male" as const,
+    },
+    {
+      ...spawnAgent("scyther", "scyther-2", anchor(world, OLD_WIDTH - 2, 3), 8, world.rng),
+      needs: createNeeds({ hunger: 0.3 }),
+      sex: "male" as const,
+    },
+    {
+      ...spawnAgent("scyther", "scyther-3", anchor(world, OLD_WIDTH - 4, 1), 8, world.rng),
+      needs: createNeeds({ hunger: 0.3 }),
+      sex: "female" as const,
+    },
+  ];
 
   // Underground: a small Diglett/Sandshrew colony (real cross-species
   // breeding pair, both Field egg group — see leveling.ts) with Onix
@@ -154,11 +179,27 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
       sex: "female" as const,
     },
   ];
-  const onix = {
-    ...spawnAgent("onix", "onix-0", scaledPos(2, OLD_HEIGHT - 2), 10, world.rng),
-    needs: createNeeds({ hunger: 0.3 }),
-    sex: "male" as const,
-  };
+  // Three Onix instead of one, same reasoning as the Scyther party above —
+  // real conspecifics for pack hunting underground, more predation pressure
+  // on Diglett/Sandshrew (and opportunistically anything else small enough
+  // that wanders onto this layer — no species allowlist, see isPreyOf).
+  const onixGroup = [
+    {
+      ...spawnAgent("onix", "onix-0", scaledPos(2, OLD_HEIGHT - 2), 10, world.rng),
+      needs: createNeeds({ hunger: 0.3 }),
+      sex: "male" as const,
+    },
+    {
+      ...spawnAgent("onix", "onix-1", scaledPos(3, OLD_HEIGHT - 3), 10, world.rng),
+      needs: createNeeds({ hunger: 0.3 }),
+      sex: "female" as const,
+    },
+    {
+      ...spawnAgent("onix", "onix-2", scaledPos(2, OLD_HEIGHT - 4), 10, world.rng),
+      needs: createNeeds({ hunger: 0.3 }),
+      sex: "male" as const,
+    },
+  ];
 
   // Canopy: a small Pidgey flock with Spearow hunting it, mirroring the
   // same pattern one layer up.
@@ -198,6 +239,37 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
     },
   ];
 
-  world.agents.push(...herd, ...guardians, hunter, ...undergroundColony, onix, ...pidgeyFlock, spearow, ...squirtlePair);
+  // A Charmander pair — fully defined in species.ts (moves, egg groups) but
+  // never actually spawned until now, a gap this feature closes. Placed via
+  // `findPosInBiome` at its tagged badlands biome (species.ts's
+  // `SPECIES.charmander.biomes`) rather than another hardcoded corner — the
+  // roster's first starting agent whose position is actually biome-driven,
+  // not hand-picked. Real "connected to the world" payoff: this pair may
+  // land anywhere the generated map's badlands biome happens to fall, seed
+  // to seed, instead of a fixed coordinate. No predator/prey role of its
+  // own yet, same as Squirtle above.
+  const charmanderSpot = findPosInBiome(world, "surface", SPECIES.charmander!.biomes, world.rng);
+  const charmanderPair = [
+    {
+      ...spawnAgent("charmander", "charmander-0", charmanderSpot, 5, world.rng),
+      sex: "male" as const,
+    },
+    {
+      ...spawnAgent("charmander", "charmander-1", findWalkableNear(world, "surface", charmanderSpot.x + 1, charmanderSpot.y), 5, world.rng),
+      sex: "female" as const,
+    },
+  ];
+
+  world.agents.push(
+    ...herd,
+    ...guardians,
+    ...scytherParty,
+    ...undergroundColony,
+    ...onixGroup,
+    ...pidgeyFlock,
+    spearow,
+    ...squirtlePair,
+    ...charmanderPair
+  );
   return world;
 }

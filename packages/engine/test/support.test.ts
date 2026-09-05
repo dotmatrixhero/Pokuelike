@@ -22,6 +22,8 @@ import {
   OFF_HOURS_SPEED_MULTIPLIER,
   coldSnapSpeedMultiplier,
   applySupportMove,
+  applyScavenging,
+  DELIVERED_FOOD_HUNGER_RESTORE,
 } from "../src/support.js";
 import type { MoveSpec } from "../src/moves.js";
 import { DAY_LENGTH_TICKS } from "../src/daynight.js";
@@ -336,6 +338,11 @@ describe("elevation/terrain movement-speed modifiers", () => {
     expect(terrainSpeedMultiplier("bush")).toBe(1);
   });
 
+  it("boulder slows movement more than sand or mud — walkable-but-slow, not a hard block", () => {
+    expect(terrainSpeedMultiplier("boulder")).toBeLessThan(1);
+    expect(terrainSpeedMultiplier("boulder")).toBeLessThan(terrainSpeedMultiplier("mud"));
+  });
+
   it("movementSpeedFactor composes elevation and terrain multiplicatively", () => {
     const elevationOnly = movementSpeedFactor(0, 2, "floor");
     const terrainOnly = movementSpeedFactor(0, 0, "mud");
@@ -548,5 +555,118 @@ describe("applySupportMove: ally-targeting effects", () => {
     const nearAlly = makeAgent({ id: "a4", pos: { x: 1, y: 0 }, herdId: "h2", hp: 10, maxHp: 100 });
     world.agents.push(onCooldown, nearAlly);
     expect(applySupportMove(world, onCooldown, undefined)).toBe(false);
+  });
+
+  it("a real confirmed death case: a zero-cooldown ally-buff move must NOT let a thirsty agent skip drinking forever", () => {
+    // Real bug found via a real seed-20260903 run: Tackle respecced into the
+    // skill tree's `steadfast_guard` node (support.ts) gains `targetsAlly`
+    // and, via `herd_instinct`'s -1 cooldown, can end up at cooldownTicks: 0
+    // — with a permanently-adjacent herd-mate, `applySupportMove` used to
+    // return true on literally every action tick forever (no urgent-need
+    // check of its own), so `tickAgentAction` never reached `chooseBehavior`
+    // — two agents were confirmed dying of thirst standing exactly on a
+    // water tile, having spent hundreds of ticks only ever rebuffing each
+    // other. This is `tickAgentAction`'s own gate (needs.ts), not
+    // `applySupportMove` itself — see the `!needsAreUrgent &&` check there.
+    const ZERO_COOLDOWN_BUFF: MoveSpec = { ...BUFF_ALLY, id: "steadfast_tackle", cooldownTicks: 0 };
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    const thirsty = makeAgent({
+      id: "thirsty",
+      pos: { x: 5, y: 5 },
+      herdId: "h1",
+      needs: createNeeds({ thirst: 0.05, hunger: 1, mateDrive: 0 }),
+      moves: [ZERO_COOLDOWN_BUFF],
+    });
+    const ally = makeAgent({ id: "ally", pos: { x: 6, y: 5 }, herdId: "h1", hp: 100, maxHp: 100 });
+    world.agents.push(thirsty, ally);
+    const log = new EventLog();
+
+    tickAgentAction(world, thirsty, log);
+
+    expect(thirsty.behavior).toBe("seekWater");
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "consumed", agentId: "thirsty", need: "thirst" }));
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "supported", supporterId: "thirsty" }));
+  });
+});
+
+describe("scavenging", () => {
+  const RULES: HuntRules = { scyther: true };
+
+  function corpse(overrides: Partial<Agent> = {}): Agent {
+    return makeAgent({ id: "corpse", species: "bulbasaur", pos: { x: 2, y: 1 }, alive: false, ...overrides });
+  }
+
+  it("a hungry predator adjacent to a real corpse feeds from it, restoring hunger by the established delivered-food amount", () => {
+    const world = createWorld(5, 5);
+    const hungry = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, needs: createNeeds({ hunger: 0.1 }) });
+    const dead = corpse({ pos: { x: 2, y: 1 } }); // adjacent (SCAVENGE_ARRIVAL_RADIUS = 1)
+    world.agents.push(hungry, dead);
+    const log = new EventLog();
+
+    const scavenged = applyScavenging(world, hungry, RULES, log);
+
+    expect(scavenged).toBe(true);
+    expect(hungry.needs.hunger).toBeCloseTo(0.1 + DELIVERED_FOOD_HUNGER_RESTORE);
+    expect(hungry.behavior).toBe("scavenge");
+    expect(hungry.ticksSinceMeal).toBe(0);
+    expect(log.events).toContainEqual(
+      expect.objectContaining({ kind: "scavenged", agentId: "scyther-0", corpseId: "corpse", corpseSpecies: "bulbasaur" })
+    );
+  });
+
+  it("walks toward a real corpse that's out of feeding range instead of feeding instantly", () => {
+    const world = createWorld(10, 10);
+    const hungry = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, needs: createNeeds({ hunger: 0.1 }) });
+    const dead = corpse({ pos: { x: 4, y: 1 } }); // well outside SCAVENGE_ARRIVAL_RADIUS
+    world.agents.push(hungry, dead);
+    const log = new EventLog();
+
+    const scavenged = applyScavenging(world, hungry, RULES, log);
+
+    expect(scavenged).toBe(true);
+    expect(hungry.pos.x).toBeGreaterThan(1); // stepped toward the corpse
+    expect(hungry.needs.hunger).toBeCloseTo(0.1); // not fed yet — still walking
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "scavenged" }));
+  });
+
+  it("does nothing for a well-fed predator, a non-predator species, or with no corpse in range", () => {
+    const world = createWorld(5, 5);
+    const wellFed = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, needs: createNeeds({ hunger: 1 }) });
+    world.agents.push(wellFed, corpse({ pos: { x: 2, y: 1 } }));
+    expect(applyScavenging(world, wellFed, RULES)).toBe(false);
+
+    const herbivoreWorld = createWorld(5, 5);
+    const hungryHerbivore = makeAgent({ id: "bulbasaur-1", species: "bulbasaur", pos: { x: 1, y: 1 }, needs: createNeeds({ hunger: 0.1 }) });
+    herbivoreWorld.agents.push(hungryHerbivore, corpse({ pos: { x: 1, y: 2 } }));
+    expect(applyScavenging(herbivoreWorld, hungryHerbivore, RULES)).toBe(false); // not a hunter species at all
+
+    const emptyWorld = createWorld(5, 5);
+    const alone = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, needs: createNeeds({ hunger: 0.1 }) });
+    emptyWorld.agents.push(alone);
+    expect(applyScavenging(emptyWorld, alone, RULES)).toBe(false); // no corpse anywhere nearby
+  });
+
+  it("gates on the same hunger threshold a live hunt would (huntHungerThreshold) — juvenile and adult alike; the real ontogenetic difference is that a juvenile never gets a competing hunt attempt at all (see predation.test.ts's dedicated suite)", () => {
+    const world = createWorld(5, 5);
+    const juvenile = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, age: 10, needs: createNeeds({ hunger: 0.1 }) });
+    world.agents.push(juvenile, corpse({ pos: { x: 2, y: 1 } }));
+    expect(applyScavenging(world, juvenile, RULES)).toBe(true);
+
+    const wellFedJuvenileWorld = createWorld(5, 5);
+    const wellFedJuvenile = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, age: 10, needs: createNeeds({ hunger: 1 }) });
+    wellFedJuvenileWorld.agents.push(wellFedJuvenile, corpse({ pos: { x: 2, y: 1 } }));
+    expect(applyScavenging(wellFedJuvenileWorld, wellFedJuvenile, RULES)).toBe(false); // not hungry at all — no gate is THAT eager
+  });
+
+  it("rng-determinism: introduces zero new randomness — identical inputs always produce an identical outcome", () => {
+    function run(): { hunger: number; behavior: string } {
+      const world = createWorld(5, 5);
+      const hungry = makeAgent({ id: "scyther-0", species: "scyther", pos: { x: 1, y: 1 }, needs: createNeeds({ hunger: 0.1 }) });
+      world.agents.push(hungry, corpse({ pos: { x: 2, y: 1 } }));
+      applyScavenging(world, hungry, RULES);
+      return { hunger: hungry.needs.hunger, behavior: hungry.behavior };
+    }
+    expect(run()).toEqual(run());
   });
 });

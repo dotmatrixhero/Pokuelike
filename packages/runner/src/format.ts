@@ -14,6 +14,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.species} (${event.motherId} x ${event.fatherId}) had offspring ${event.childId} (${event.nature}, ${event.dispositionSummary}) at (${event.pos.x},${event.pos.y})`;
     case "floraChanged":
       return `[tick ${event.tick}] flora ${event.stage} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
+    case "terrainChanged":
+      return `[tick ${event.tick}] ${event.from} at (${event.pos.x},${event.pos.y}) on ${event.layer} turned to ${event.to} (${event.cause})`;
     case "fought":
       return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) used ${event.moveId} on ${event.defenderSpecies} (${event.defenderId}) at (${event.pos.x},${event.pos.y}) for ${event.damage}${event.critical ? " (critical hit!)" : ""} (hp left: ${event.defenderHpRemaining})`;
     case "missed":
@@ -58,6 +60,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.weatherType} ${event.phase === "began" ? "moves in" : "clears"} near (${event.center.x},${event.center.y}), radius ${event.radius}`;
     case "dispersed":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) left ${event.fromHerd} and ${event.outcome === "joined" ? `joined ${event.toHerd}` : `founded ${event.toHerd}`} (${event.reason})`;
+    case "immigrated":
+      return `[tick ${event.tick}] ${event.agentIds.length} ${event.species} arrived from outside at (${event.pos.x},${event.pos.y}) on ${event.layer} and ${event.outcome === "joined" ? `joined ${event.herdId}` : `founded ${event.herdId}`} (${event.agentIds.join(", ")})`;
     case "shelterBuilt":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) finished building a shelter at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
     case "shelterAbandoned":
@@ -74,6 +78,28 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) ${event.reason} (${event.statusKind})`;
     case "supported":
       return `[tick ${event.tick}] ${event.supporterSpecies} (${event.supporterId}) supported ${event.allySpecies} (${event.allyId})${event.healed ? " (healed)" : ""}${event.buffed ? " (buffed)" : ""}`;
+    case "herdClash": {
+      const rival = event.attackerHerdId && event.defenderHerdId && event.attackerHerdId !== event.defenderHerdId ? ` (herd ${event.attackerHerdId} vs ${event.defenderHerdId})` : "";
+      if (event.outcome === "missed") {
+        return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) clashed with ${event.defenderSpecies} (${event.defenderId}) over a resource at (${event.pos.x},${event.pos.y}) and missed${rival}`;
+      }
+      const retreat = event.outcome === "retreated" ? `, ${event.defenderSpecies} (${event.defenderId}) backs off` : "";
+      return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) clashed with ${event.defenderSpecies} (${event.defenderId}) over a resource at (${event.pos.x},${event.pos.y}) for ${event.damage}${event.critical ? " (critical hit!)" : ""}${retreat}${rival}`;
+    }
+    case "packHunt":
+      return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) pack-hunts ${event.targetSpecies} (${event.targetId}) at (${event.pos.x},${event.pos.y}) with ${event.packmates} packmate${event.packmates === 1 ? "" : "s"}`;
+    case "scavenged":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) scavenged a meal from ${event.corpseSpecies} (${event.corpseId}) at (${event.pos.x},${event.pos.y})`;
+    case "bonded":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) bonded with ${event.partnerSpecies} (${event.partnerId}) at (${event.pos.x},${event.pos.y})`;
+    case "eggLaid":
+      return `[tick ${event.tick}] ${event.species} (${event.motherId} x ${event.fatherId}) laid an egg (${event.eggId}) at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
+    case "eggHatched":
+      return `[tick ${event.tick}] ${event.species} egg (${event.agentId}) hatched at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
+    case "eggEaten":
+      return `[tick ${event.tick}] ${event.eaterSpecies} (${event.eaterId}) ate a ${event.eggSpecies} egg (${event.eggId}) at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
+    case "eggDefended":
+      return `[tick ${event.tick}] ${event.defenderSpecies} (${event.defenderId}) fought off ${event.threatSpecies} (${event.threatId}) to defend its egg at (${event.pos.x},${event.pos.y})`;
   }
 }
 

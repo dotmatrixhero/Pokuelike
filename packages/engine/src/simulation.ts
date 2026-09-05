@@ -3,12 +3,14 @@ import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import { growFlora, maybeDropSeed } from "./flora.js";
 import { decayShelters } from "./shelter.js";
+import { tickEgg } from "./eggs.js";
 import { updateHerdMigrations } from "./herdMigration.js";
+import { maybeImmigrate, type ImmigrationContext } from "./immigration.js";
 import type { LevelingContext } from "./leveling.js";
-import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, coldSnapSpeedMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
+import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, canopySpeedMultiplier, coldSnapSpeedMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
 import { tileAt } from "./world.js";
 import { isNight, lightLevel } from "./daynight.js";
-import { advanceWeather } from "./weather.js";
+import { advanceWaterCycle, advanceWeather } from "./weather.js";
 import { PARALYSIS_SPEED_MULTIPLIER, isParalyzed } from "./status.js";
 
 /**
@@ -86,6 +88,7 @@ export function actionSpeedOf(world: World, agent: Agent, tick: number): number 
     (agent.terrainSpeedFactor ?? 1) *
     activityScheduleMultiplier(agent.activityPattern, tick) *
     coldSnapSpeedMultiplier(world, agent.layer, agent.pos) *
+    canopySpeedMultiplier(agent.layer) *
     (isParalyzed(agent) ? PARALYSIS_SPEED_MULTIPLIER : 1);
   return effectiveSpeed(agent, baseSpeed);
 }
@@ -126,7 +129,14 @@ function isDead(agent: Agent): boolean {
  * itself), matching the existing `log`/`rules`/`ctx` optional-override
  * convention.
  */
-export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext, rng: () => number = world.rng): void {
+export function tickWorld(
+  world: World,
+  log?: EventLog,
+  rules?: HuntRules,
+  ctx?: LevelingContext,
+  rng: () => number = world.rng,
+  immigration?: ImmigrationContext
+): void {
   const previousTick = world.tick;
   world.tick += 1;
   // Once per tick, not once per agent — the day/night cycle is a world-level
@@ -151,8 +161,24 @@ export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?:
   // detection is a slow-moving signal, not something that needs to react to
   // the exact order agents move in within the same tick.
   updateHerdMigrations(world, log, rng);
+  // Once per tick, not once per agent — same "world-level system, one pass"
+  // shape as `updateHerdMigrations` above (see immigration.ts). A newly
+  // arrived immigrant pushed here is picked up by this same tick's agent
+  // loop below, same as a same-tick newborn (see this function's own doc
+  // comment) — harmless, just means an immigrant can already act once
+  // before this call returns.
+  maybeImmigrate(world, immigration, log, rng);
   for (const agent of world.agents) {
     if (isDead(agent)) continue;
+    // Eggs (`Agent.isEgg`) are stationary and behavior-less — routed
+    // straight to `eggs.ts`'s `tickEgg` (incubation/hatch) instead of the
+    // ordinary needs-decay/action-economy pipeline, which would otherwise
+    // starve/move/act an egg the same as any other agent. See eggs.ts's
+    // top-of-file doc comment.
+    if (agent.isEgg) {
+      tickEgg(world, agent, log, ctx, rng);
+      continue;
+    }
 
     tickAgentNeeds(agent, world, ctx, log, rng);
 
@@ -170,6 +196,10 @@ export function tickWorld(world: World, log?: EventLog, rules?: HuntRules, ctx?:
     }
   }
   growFlora(world, log, rng);
+  // Once per tick, not once per agent — same "world-level system, one pass"
+  // shape as growFlora above: sustained drought/rain drying out or forming
+  // water tiles (see weather.ts's `advanceWaterCycle` doc comment).
+  advanceWaterCycle(world, log, rng);
   // Once per tick, not once per agent — same "world-level system, one pass"
   // shape as growFlora above (see shelter.ts's `decayShelters`).
   decayShelters(world, log);

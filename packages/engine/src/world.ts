@@ -2,21 +2,36 @@ import { LAYER_ORDER, type Layer, type Tile, type TerrainKind, type World } from
 import { invalidateResourceIndex } from "./resourceIndex.js";
 import { mulberry32, randomSeed } from "./rng.js";
 
-const UNWALKABLE_TERRAIN: ReadonlySet<TerrainKind> = new Set(["wall", "tree", "boulder"]);
+const UNWALKABLE_TERRAIN: ReadonlySet<TerrainKind> = new Set(["wall", "tree"]);
+/**
+ * Blocks sight/ranged attacks (see `Tile.opaque`'s doc comment) — a
+ * superset of `UNWALKABLE_TERRAIN`: "boulder" is real, solid rock you can't
+ * see or shoot through, but (direct ask) no longer a hard movement
+ * blocker — see `terrainSpeedMultiplier` (support.ts) for the real
+ * movement-speed cost that replaces it.
+ */
+const OPAQUE_TERRAIN: ReadonlySet<TerrainKind> = new Set(["wall", "tree", "boulder"]);
 
-/** "wall"/"tree"/"boulder" block movement (and, for free via `hasLineOfSight`, sight); everything else is passable. */
+/** "wall"/"tree" block movement outright; everything else (including "boulder", now just slow) is passable. */
 export function isWalkableTerrain(terrain: TerrainKind): boolean {
   return !UNWALKABLE_TERRAIN.has(terrain);
+}
+
+/** "wall"/"tree"/"boulder" block sight and ranged attacks — see `Tile.opaque`'s doc comment. */
+export function isOpaqueTerrain(terrain: TerrainKind): boolean {
+  return OPAQUE_TERRAIN.has(terrain);
 }
 
 export function createTile(terrain: TerrainKind, elevation = 0): Tile {
   return {
     terrain,
     walkable: isWalkableTerrain(terrain),
+    opaque: isOpaqueTerrain(terrain),
     elevation,
     stock: terrain === "food" ? 1 : undefined,
     concealment: terrain === "bush" || terrain === "shelter" ? true : undefined,
     vacantTicks: terrain === "shelter" ? 0 : undefined,
+    cache: terrain === "shelter" ? 0 : undefined,
   };
 }
 
@@ -66,11 +81,23 @@ export function setTile(
   if (!tile) return;
   tile.terrain = terrain;
   tile.walkable = isWalkableTerrain(terrain);
+  tile.opaque = isOpaqueTerrain(terrain);
   tile.stock = terrain === "food" || terrain === "flora" ? 1 : undefined;
   tile.growth = terrain === "seedling" ? 0 : undefined;
   tile.flavor = terrain === "food" || terrain === "flora" ? flavor : undefined;
   tile.concealment = terrain === "bush" || terrain === "shelter" ? true : undefined;
   tile.vacantTicks = terrain === "shelter" ? 0 : undefined;
+  // Reverting away from "shelter" (abandonment, or something else claiming
+  // the tile) loses whatever was stockpiled — same "stopped maintaining it"
+  // consequence as vacantTicks resetting; a freshly built shelter starts
+  // with an empty cache, filled only by real resting time afterward.
+  tile.cache = terrain === "shelter" ? 0 : undefined;
+  // Reverting away from "shelter" also drops the cosmetic per-species owner
+  // hint — a fresh build (shelter.ts's `applyShelterBuilding`, which sets
+  // this right after calling `setTile`) starts unowned until its builder's
+  // species stamps it, same "stopped maintaining it, starts over" shape as
+  // `cache`/`vacantTicks` just above.
+  if (terrain !== "shelter") tile.shelterOwnerSpecies = undefined;
   if (elevation !== undefined) tile.elevation = elevation;
   invalidateResourceIndex(world);
 }

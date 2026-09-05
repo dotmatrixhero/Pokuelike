@@ -168,6 +168,19 @@ export interface Tile {
   terrain: TerrainKind;
   walkable: boolean;
   /**
+   * Blocks sight and ranged attacks (`fov.ts`'s `hasLineOfSight`/
+   * `isPathClear`) independent of `walkable` — "wall"/"tree"/"boulder" are
+   * all real, solid obstructions you can't see or shoot through, but only
+   * "wall"/"tree" also block *movement* outright; a boulder is climbable
+   * (slowly — see `support.ts`'s `terrainSpeedMultiplier`), just still
+   * opaque, matching "a big rock you can scramble over but can't see
+   * through." Previously derived implicitly from `!walkable`; split out once
+   * boulder became walkable-but-slow instead of a full obstacle (direct
+   * ask: "boulders being so blocking... should cost movement speed to get
+   * past 'em" rather than block outright).
+   */
+  opaque: boolean;
+  /**
    * Continuous height within this layer's grid, currently only meaningful
    * on "surface" (open question: whether underground/canopy get their own
    * elevation later). Drives FOV and combat accuracy/evasion.
@@ -207,6 +220,67 @@ export interface Tile {
    * much life left." Set to 0 at construction, `undefined` once reverted.
    */
   vacantTicks?: number;
+  /**
+   * Any terrain kind — cumulative grazing pressure, independent of what the
+   * tile's terrain currently is (a food patch eaten out and reverted to
+   * "floor" keeps its pressure, which is the whole point: the SCAR outlives
+   * the patch's own life-cycle). Incremented on every real consumption event
+   * at this tile's coordinates (self-feeding via needs.ts's `consume()`, or
+   * herd food-delivery pickup via support.ts — both call flora.ts's
+   * `recordGrazing`), and decayed a little every tick in `growFlora`
+   * regardless of terrain, the same "single per-tick scan, not per-agent"
+   * shape as `stock`/`vacantTicks` above. Crossing
+   * `OVERGRAZED_ENTER_PRESSURE` flips `overgrazed` on; decaying back below
+   * `OVERGRAZED_EXIT_PRESSURE` flips it off — see flora.ts's "Grazing scars"
+   * section for the hysteresis reasoning and the real suppression this
+   * drives. `undefined` until the first grazing event ever touches this
+   * tile (never reset to `undefined` afterward — decays asymptotically
+   * toward, but only ever reaches exactly, 0).
+   */
+  grazingPressure?: number;
+  /**
+   * True while `grazingPressure` is at/above the "overgrazed" threshold —
+   * see `grazingPressure`'s doc comment above. While true, flora.ts's
+   * `growFlora` measurably suppresses new growth onto or from this specific
+   * tile (germination chance, spread eligibility, seedling maturation rate)
+   * without touching decay of whatever's already grown elsewhere — a
+   * temporary "this ground needs to rest" state, not a permanent dead zone:
+   * it clears itself once grazing pressure decays back down, the same
+   * self-recovering shape as `vacantTicks`-driven shelter abandonment.
+   */
+  overgrazed?: boolean;
+  /**
+   * "shelter" tiles only: a real food stockpile, 0-`SHELTER_CACHE_MAX`
+   * (shelter.ts) — direct ask: "shelter should also like give other buff
+   * too... maybe food cache and stuff." Built up gradually while a
+   * `buildsShelter` agent rests at its own shelter (already fed/watered,
+   * since `applyShelterResting` only ever runs once `chooseBehavior` reads
+   * "idle" — see that function's doc comment), and drawn down when a
+   * genuinely hungry `buildsShelter` agent is back home with nothing else to
+   * eat nearby — a real safety net during scarcity, not a trap: an empty
+   * cache (0/`undefined`) just falls through to ordinary live-foraging, it
+   * never blocks or delays a hungry agent from breaking off to eat elsewhere.
+   * Same per-tile-timer shape as `stock`/`vacantTicks` above. Set to 0 at
+   * construction, `undefined` once the tile reverts away from "shelter"
+   * (abandonment included — an abandoned shelter's stockpile is lost along
+   * with the structure itself, same as any other "you stopped maintaining
+   * this" consequence).
+   */
+  cache?: number;
+  /**
+   * "shelter" tiles only: which species most recently finished building
+   * (part of) this shelter — purely a rendering hint (packages/web's
+   * renderer.ts/palette.ts tint a shelter tile per owner species) with no
+   * gameplay effect of its own, per the direct instruction that universal
+   * shelter should still "look different for each type." Set every time
+   * `applyShelterBuilding` (shelter.ts) completes a tile, so an
+   * already-standing shelter a second builder happens to extend/rebuild near
+   * simply repaints to the newer builder's species — there's no real
+   * "ownership" concept here beyond that, deliberately: mechanical access
+   * (who may live/lay eggs there) is universal and unrelated to this field.
+   * `undefined` once the tile reverts away from "shelter".
+   */
+  shelterOwnerSpecies?: string;
 }
 
 /** Needs decay over time and drive an agent's behavior via simple utility AI. */
@@ -231,7 +305,9 @@ export type BehaviorKind =
   | "explore"
   | "disperse"
   | "buildShelter"
-  | "sleep";
+  | "sleep"
+  | "restAtShelter"
+  | "scavenge";
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
 export interface InventoryItem {
@@ -303,6 +379,40 @@ export interface Agent {
   thirstStarvationTicks?: number;
   /** Ticks a non-predator has spent wanting food/water with none reachable anywhere — drives migrating away once too high. */
   ticksWithoutResource?: number;
+  /**
+   * Consecutive ticks the current seekWater/seekFood target tile has been
+   * at tile capacity (occupancy.ts) and therefore unreachable — see
+   * needs.ts's blocked-resource handling. Resets to 0 the instant the
+   * tracked target has room again, is reached, or a new target is picked.
+   * Distinct from `ticksWithoutResource` (that one fires when NO resource
+   * tile exists/is reachable anywhere; this one fires when a real resource
+   * tile exists nearby but is currently too crowded to stand on).
+   */
+  ticksBlockedFromResource?: number;
+  /**
+   * Ticks remaining before this agent can start or be drawn into another
+   * herd-conflict rivalry fight (herdConflict.ts) — set on both participants
+   * once one of them retreats, so the same pair doesn't immediately grind on
+   * each other again the very next eligible tick. Ticked down every world
+   * tick in `tickAgentNeeds`, same shape as `actionLockTicks`. Absent/0 = no
+   * cooldown, the default.
+   */
+  herdConflictCooldownTicks?: number;
+  /**
+   * Rolling memory of resource tiles (same terrain kind as the current
+   * seekWater/seekFood target) found crowded during the current seeking
+   * episode — excluded from the next nearest-tile pick once
+   * `ticksBlockedFromResource` crosses its grace period, so the agent tries
+   * a genuinely different tile instead of immediately re-targeting the one
+   * it just gave up on. Cleared whenever the episode ends (a successful
+   * consume, or `chooseBehavior` moves on to something else) so a tile's
+   * crowding is never remembered longer than the attempt that found it
+   * crowded — a tile that frees up later gets a clean fresh chance next
+   * time thirst/hunger drives an agent back to it. See needs.ts's
+   * "Blocked-resource fallback" section in DESIGN.md for the full
+   * oscillation-prevention reasoning.
+   */
+  blockedResourceTiles?: Vec2[];
   /**
    * Speed-driven action-economy accumulator (see simulation.ts). Gains the
    * agent's real Speed stat every world tick; once it crosses
@@ -514,6 +624,21 @@ export interface Agent {
    */
   exploreTarget?: Vec2;
 
+  /**
+   * Denormalized from `SpeciesDef.preferredTerrain` at spawn time
+   * (packages/data/src/spawn.ts), the same pattern as `activityPattern`/
+   * `buildsShelter` above — engine-side terrain-preference logic
+   * (needs.ts's `applyExploration`) never needs to import `@pokuelike/data`.
+   * Which literal `TerrainKind`(s) this individual gravitates toward once
+   * genuinely idle (needs met, no herd pull-back) — tile-level flavor
+   * ("Bulbasaur lingers near flora, Squirtle near water"), distinct from
+   * `SpeciesDef.biomes`'s map-region-level preference. Absent/empty = no
+   * particular tile preference, falls back to `applyExploration`'s
+   * pre-existing random-unvisited-tile wander exactly as before. Order
+   * matters: earlier entries are tried first when picking a nearby target.
+   */
+  preferredTerrain?: TerrainKind[];
+
   // --- Individual variance: Nature and Disposition (see DESIGN.md) ---
 
   /**
@@ -633,6 +758,53 @@ export interface Agent {
    */
   shelterBuildTicks?: number;
 
+  // --- Bonding and eggs (see reproduction.ts/eggs.ts, DESIGN.md's "Bonding,
+  // shelter, and eggs" section) — direct instruction: mating no longer
+  // spawns offspring instantly. A first contact between eligible mates
+  // "bonds" the pair (this field, on both agents); a bonded, shelterless
+  // pair is measurably more likely to start building (shelter.ts's
+  // `maybeTriggerShelterBuilding`); only once the pair has real shelter
+  // access does mating produce a real egg (`isEgg` below) instead. ---
+
+  /**
+   * The id of this agent's bonded mate, once formed — set on both agents at
+   * once by `reproduction.ts`'s `applyMateSeeking` the first time an
+   * eligible pair makes contact (adjacent), mirroring how
+   * `Agent.deliverTargetId`/`carryingId` already track a paired relationship
+   * elsewhere in this codebase. Persists once set — there's no "unbonding"
+   * mechanic (a bonded partner's death simply leaves this pointing at a
+   * since-pruned id, harmless: every reader already treats "partner not
+   * found among living agents" as "no longer bonded" rather than crashing on
+   * a stale id, the same tolerance-for-pruned-references convention
+   * `parentIds`/`grandparentIds` already rely on).
+   */
+  bondedPartnerId?: string;
+
+  /**
+   * True for an egg, not a normal agent — a real spawned entity at its
+   * shelter tile's position (reusing `Agent` for position/hp/predation-
+   * targeting/rendering almost for free, per direct instruction), stationary
+   * and behavior-less: `simulation.ts`'s `tickWorld` routes an egg straight
+   * to `eggs.ts`'s `tickEgg` and skips the ordinary `tickAgentNeeds`/
+   * `tickAgentAction` pipeline entirely for it (no hunger/thirst decay, no
+   * movement, no action-economy participation). Every herd/threat/mate/prey
+   * scan elsewhere in the engine (`predation.ts`'s `agentsWithin`,
+   * `herding.ts`'s herd-stat functions, `reproduction.ts`'s
+   * `isEligibleMate`) explicitly excludes `isEgg` agents, so an egg never
+   * gets swept up in ordinary fleeing/hunting/herd-cohesion/mate-seeking
+   * logic — it's only ever touched by `eggs.ts`'s own hatch/defend/eat
+   * functions.
+   */
+  isEgg?: boolean;
+  /**
+   * Ticks since this egg was laid — incremented once per world tick by
+   * `eggs.ts`'s `tickEgg` (a world-level pass, not gated on the egg's own
+   * nonexistent action economy). Hatches into the real newborn once this
+   * crosses `EGG_INCUBATION_TICKS` — see that constant's doc comment for the
+   * real-run-scale reasoning. `undefined`/absent for a non-egg agent.
+   */
+  eggTicks?: number;
+
   // --- Sleep (see DESIGN.md's "Sleep" section, needs.ts/predation.ts) ---
 
   /**
@@ -660,6 +832,51 @@ export interface Agent {
    * modules; here both happen in the same `tickAgentNeeds` call).
    */
   sleepTicks?: number;
+  /**
+   * Ticks remaining on a post-kill "digesting" hunger-decay slowdown — set
+   * by `predation.ts` on a real (not merely fainted) kill, ticked down and
+   * cleared in `tickAgentNeeds` (needs.ts). A big meal should actually last:
+   * see `KILL_SATIATION_TICKS`/`KILL_SATIATION_HUNGER_DECAY_MULTIPLIER` in
+   * needs.ts for the exact effect. Absent/0 = not currently digesting, the
+   * default.
+   */
+  digestingTicksRemaining?: number;
+
+  /**
+   * Cached BFS route (pathfinding.ts's `findPath`) for the current
+   * `seekWater`/`seekFood` walk, so a multi-tile walk doesn't recompute a
+   * full BFS every tick — only when the target moves, the layer changes, the
+   * route is exhausted, or the next queued step is unexpectedly no longer
+   * walkable. `steps` excludes the agent's current position; the array
+   * shrinks by one each tick as `stepAlongPath` consumes it, and the whole
+   * field is cleared (`undefined`) once exhausted or invalidated. Deliberately
+   * per-agent rather than a shared per-(layer, target) cache — see
+   * `stepAlongPath`'s doc comment for why. Scoped to `seekWater`/`seekFood`
+   * only; every other behavior that moves an agent (flee/hunt/mate-seeking/
+   * exploration/dispersal/shelter-travel/herd-migration/relocate) still uses
+   * `movement.ts`'s plain greedy `stepToward`/`stepAway` and never touches
+   * this field. Also reused (with `targetId` set) by `stepTowardMovingTarget`
+   * for hunt/mate-seeking pursuit of a moving target — see that function's
+   * own doc comment in pathfinding.ts for the staleness/recompute rules that
+   * differ from the static seekWater/seekFood case. `targetId` is what tells
+   * the two apart: a static-target cache never sets it, so switching from
+   * one kind of walk to the other (or onto a different pursuit target)
+   * always safely misses the cache instead of reusing a stale route.
+   */
+  pathCache?: { layer: Layer; target: Vec2; targetId?: string; steps: Vec2[] };
+
+  /**
+   * Lifetime count of real uses of each move (by `MoveSpec.id`), incremented
+   * once per call inside `useMove` (combat.ts) — the single call site every
+   * move-use path (predation.ts's hit resolution, support.ts's
+   * `applySupportMove`) already goes through, so every caller gets counted
+   * for free without touching each site individually. Purely observational
+   * (the inspector UI's "used Nx" display) — nothing in the engine itself
+   * reads this back, so it can't affect simulation behavior or determinism.
+   * Absent/0 = never used, same convention as every other optional counter
+   * on this type.
+   */
+  moveUseCounts?: Record<string, number>;
 }
 
 /**
@@ -737,6 +954,30 @@ export interface World {
    */
   resourceVersion?: number;
   /**
+   * Lifetime count of tile-capacity blocked-resource fallback firings (an
+   * agent's seekWater/seekFood target sat at capacity past its grace period
+   * and it switched to a different tile of the same terrain — see
+   * needs.ts's `BLOCKED_RESOURCE_GRACE_TICKS` handling). A plain counter
+   * rather than a `SimEvent`, deliberately: see needs.ts's own doc comment
+   * at the increment site for why (packages/web's exhaustive event-kind
+   * switch is off-limits this session). Purely observational — nothing in
+   * the engine reads this back, so it can't affect simulation behavior or
+   * determinism. Absent/0 = never fired.
+   */
+  resourceBlockedFallbackCount?: number;
+  /**
+   * Lifetime count of agent-ticks spent actually waiting on a crowded
+   * seekWater/seekFood target (whether or not that particular tick is the
+   * one where `BLOCKED_RESOURCE_GRACE_TICKS` runs out) — a much bigger
+   * number than `resourceBlockedFallbackCount` is the real-run signal that
+   * agents genuinely queue/wait near a contested resource rather than just
+   * instantly relocating to an alternate every time (see DESIGN.md's "Tile
+   * capacity" section). Same observational, non-`SimEvent` shape and
+   * reasoning as `resourceBlockedFallbackCount` — see needs.ts's increment
+   * site.
+   */
+  resourceWaitTicks?: number;
+  /**
    * Per-herd migration state — see herdMigration.ts/DESIGN.md's "Herd-level
    * migration" section. Keyed by `herdId`, not present on every agent: a
    * whole herd shares exactly one migration target at a time, so this is
@@ -797,10 +1038,54 @@ export interface World {
    */
   biomeSeeds?: BiomeSeedInfo[];
   /**
+   * The tick `immigration.ts`'s `maybeImmigrate` last actually spawned a new
+   * herd, or absent if none has happened yet this world's life — the
+   * cooldown gate for `MIN_TICKS_BETWEEN_IMMIGRATIONS`, so a lucky run of
+   * per-tick rolls can't cluster several immigrations in quick succession.
+   * Mirrors the `herd*Ticks` fields above: per-world state, keyed by
+   * nothing (there's only ever one "last immigration," not one per herd),
+   * absent reads as "never happened."
+   */
+  lastImmigrationTick?: number;
+  /**
    * 1-3 active weather systems at once — see weather.ts/DESIGN.md's Phase 3.
    * Absent (or empty) means no weather is active; every effect consumer
    * (flora.ts/needs.ts/fov.ts/combat.ts/support.ts/herdMigration.ts) treats
    * that as "no local modifier," not an error.
    */
   weatherCells?: WeatherCell[];
+  /**
+   * Lifetime total (not a live balance — that's `Tile.cache` itself) of food
+   * deposited into every `buildsShelter` agent's home shelter cache, across
+   * every shelter tile that's ever existed — see `shelter.ts`'s
+   * `applyShelterResting`. Same observational, non-`SimEvent` shape and
+   * reasoning as `resourceBlockedFallbackCount` (packages/web's exhaustive
+   * event-kind switch is off-limits this session): a real-run validation
+   * signal for whether the cache mechanic is actually accumulating anything,
+   * not a value anything in the engine reads back.
+   */
+  shelterCacheDeposited?: number;
+  /**
+   * Lifetime total food actually drawn from a shelter cache to feed a
+   * genuinely hungry `buildsShelter` agent — see `shelter.ts`'s
+   * `maybeFeedFromShelterCache`. The real "did the safety net ever actually
+   * get used" number DESIGN.md's real-run findings look for; mirrors
+   * `shelterCacheDeposited`'s reasoning exactly.
+   */
+  shelterCacheWithdrawn?: number;
+  // --- Bonding/eggs (see reproduction.ts/eggs.ts, DESIGN.md's "Bonding, shelter,
+  // and eggs" section) — lifetime counters, same observational,
+  // non-`SimEvent` shape as `shelterCacheDeposited`/`shelterCacheWithdrawn`
+  // above: real-run validation signals, never read back by the engine
+  // itself. Real `SimEvent`s (`bonded`/`eggLaid`/`eggHatched`/`eggEaten`)
+  // exist for narration; these are just the cheap running totals a
+  // validation script wants without re-scanning the whole event log. ---
+  /** Lifetime pairs that formed a `bondedPartnerId` link — see `reproduction.ts`'s `applyMateSeeking`. */
+  bondsFormed?: number;
+  /** Lifetime eggs laid (a bonded pair with real shelter access producing an egg instead of an instant newborn). */
+  eggsLaid?: number;
+  /** Lifetime eggs that survived incubation and hatched into a real newborn — see `eggs.ts`'s `tickEgg`. */
+  eggsHatched?: number;
+  /** Lifetime eggs eaten by a non-egg-group-compatible agent before hatching — see `eggs.ts`'s `applyEggEating`. */
+  eggsEaten?: number;
 }
