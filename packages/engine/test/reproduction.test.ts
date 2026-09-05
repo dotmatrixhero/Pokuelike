@@ -182,6 +182,84 @@ describe("reproduction", () => {
     );
   });
 
+  it("a single laying event lays MULTIPLE eggs (a clutch) when the shelter cluster has room for them", () => {
+    // Four adjacent shelter tiles -> a 4-tile cluster -> 4 egg slots
+    // (SHELTER_TILE_EGG_CAP=1 per tile), comfortably more than
+    // EGG_CLUTCH_MAX so the whole clutch can fit. Force the clutch-size
+    // draw to its max via a fixed rng so this test is deterministic rather
+    // than "usually more than one egg."
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 2, 3, "shelter");
+    setTile(world, "surface", 3, 3, "shelter");
+    setTile(world, "surface", 4, 3, "shelter");
+    setTile(world, "surface", 5, 3, "shelter");
+    world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
+    const log = new EventLog();
+
+    applyMateSeeking(world, world.agents[0]!, log, undefined, () => 0.999);
+
+    const eggs = world.agents.filter((a) => a.isEgg);
+    expect(eggs.length).toBe(4); // EGG_CLUTCH_MAX
+    expect(log.events.filter((e) => e.kind === "eggLaid")).toHaveLength(4);
+    // Only one exp grant per laying EVENT, not per egg in the clutch.
+    expect(world.eggsLaid).toBe(4);
+  });
+
+  it("a clutch that doesn't fully fit is capped by real available shelter-cluster capacity, not crammed in regardless", () => {
+    // Only TWO egg slots available (a single shelter tile, cap 1, plus the
+    // clutch-size draw forced to its max of 4) — the excess two eggs are
+    // simply dropped, not queued or crammed onto one tile.
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 2, 3, "shelter");
+    setTile(world, "surface", 3, 3, "shelter");
+    world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
+    const log = new EventLog();
+
+    applyMateSeeking(world, world.agents[0]!, log, undefined, () => 0.999);
+
+    const eggs = world.agents.filter((a) => a.isEgg);
+    expect(eggs.length).toBe(2); // capped by the 2-tile cluster's 2 egg slots, not the 4-egg clutch draw
+    expect(world.eggsLaid).toBe(2);
+  });
+
+  it("a bigger, more successful household (more adjacent shelter) reliably gets more eggs out of the same clutch draw", () => {
+    function layWithClusterSize(shelterTiles: number): number {
+      const world = createWorld(10, 10);
+      for (let i = 0; i < shelterTiles; i++) setTile(world, "surface", 2 + i, 3, "shelter");
+      world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
+      applyMateSeeking(world, world.agents[0]!, undefined, undefined, () => 0.999);
+      return world.agents.filter((a) => a.isEgg).length;
+    }
+    expect(layWithClusterSize(1)).toBe(1);
+    expect(layWithClusterSize(2)).toBe(2);
+    expect(layWithClusterSize(3)).toBe(3);
+    expect(layWithClusterSize(4)).toBe(4); // clamped at EGG_CLUTCH_MAX even with more room than that
+  });
+
+  it("each egg in a clutch is an independent Agent instance — hatching/eating one doesn't affect its siblings", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 2, 3, "shelter");
+    setTile(world, "surface", 3, 3, "shelter");
+    world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
+
+    applyMateSeeking(world, world.agents[0]!, undefined, undefined, () => 0.999);
+    const [eggA, eggB] = world.agents.filter((a) => a.isEgg);
+    expect(eggA).toBeDefined();
+    expect(eggB).toBeDefined();
+    expect(eggA!.id).not.toBe(eggB!.id);
+
+    // Fast-forward only eggA through incubation — eggB must stay untouched.
+    for (let i = 0; i <= EGG_INCUBATION_TICKS; i++) tickEgg(world, eggA!, undefined, undefined, Math.random);
+    expect(eggA!.isEgg).toBeUndefined(); // hatched
+    expect(eggB!.isEgg).toBe(true); // sibling completely unaffected
+    expect(eggB!.eggTicks).toBe(0);
+
+    // Killing eggB (simulating egg-eating) must not touch eggA's now-hatched state.
+    eggB!.alive = false;
+    expect(eggA!.isEgg).toBeUndefined();
+    expect(eggA!.alive).not.toBe(false);
+  });
+
   it("the egg is laid at the shelter tile, not stacked on the mother's own tile", () => {
     // Regression this replaces: spawnOffspring used to place the child at
     // `{ ...mother.pos }` verbatim, which (combined with herd cohesion)

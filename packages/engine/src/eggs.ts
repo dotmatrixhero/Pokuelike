@@ -44,6 +44,46 @@ function freshNeeds(): Needs {
 export const EGG_INCUBATION_TICKS = 80;
 
 /**
+ * Clutch size — follow-up to the original single-egg design, per direct
+ * ask ("maybe we can have multiple eggs spawn at once instead of one at a
+ * time"). Real-run validation of the original point-4 design (see
+ * DESIGN.md) showed the bond -> shelter -> lay pipeline itself is the slow,
+ * high-stakes part (80-tick incubation, a real ~40-tick shelter build/travel
+ * task before that), and that pacing is explicitly NOT being touched here —
+ * the user likes it. A clutch is the intended lever instead: a SINGLE
+ * successful laying event now produces multiple eggs at once, so a
+ * household that clears the whole slow pipeline gets more population out of
+ * that one success, without making the pipeline itself any easier or faster
+ * to clear.
+ *
+ * Real animal clutch sizes vary enormously (a bird lays 1-2, a reptile can
+ * lay dozens) — no attempt at canon accuracy here, just a real, modest,
+ * sim-original number in the same "judge it against a real run" spirit as
+ * every other tuning constant in this file. 2-4 (uniform, inclusive) is
+ * deliberately small: enough to meaningfully raise the population curve
+ * without letting one lucky laying event dominate growth on its own (that
+ * would just move the "one contact = a population explosion" problem this
+ * whole feature was built to avoid from the mating step to the laying
+ * step). See `pickClutchSize`.
+ */
+export const EGG_CLUTCH_MIN = 2;
+export const EGG_CLUTCH_MAX = 4;
+
+/**
+ * Draws a real clutch size in `[EGG_CLUTCH_MIN, EGG_CLUTCH_MAX]` — always
+ * through the passed-in `rng`, never `Math.random` directly, per this
+ * codebase's determinism rule (see `determinism.test.ts`). The caller
+ * (`reproduction.ts`'s `applyMateSeeking`) is responsible for actually
+ * placing that many eggs against real shelter-cluster capacity — this
+ * function only decides how many eggs a household is TRYING to lay, not how
+ * many actually fit.
+ */
+export function pickClutchSize(rng: () => number): number {
+  const span = EGG_CLUTCH_MAX - EGG_CLUTCH_MIN + 1;
+  return EGG_CLUTCH_MIN + Math.floor(rng() * span);
+}
+
+/**
  * An egg's own hp/maxHp — small and mostly cosmetic (predation.ts/
  * support.ts's combat-adjacent code paths expect *some* hp/maxHp on any
  * agent they might touch, and eggs are never actually damaged down through

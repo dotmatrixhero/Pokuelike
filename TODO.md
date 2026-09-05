@@ -2055,6 +2055,30 @@ not something this pathfinding pass itself caused or is positioned to fix.
       beyond the direct unit tests — a shelter cluster that grows or shrinks
       (new tile built, or an existing one abandoned) while an egg is already
       incubating inside it, against a real run rather than a synthetic test.
+- [x] **Clutch size follow-up** ("maybe we can have multiple eggs spawn at
+      once instead of one at a time"): `eggs.ts`'s `pickClutchSize(rng)`
+      draws 2-4 eggs per successful laying event; `reproduction.ts`'s
+      `applyMateSeeking` places as many as the existing shelter-cluster
+      egg-capacity (`canLayEggAt`/`SHELTER_TILE_EGG_CAP`) actually allows,
+      dropping the rest of the clutch rather than queuing or cramming it
+      onto one tile. Everything downstream (incubation/hatching/egg-eating/
+      egg-defense) verified to already work per-egg with no changes needed.
+      New tests in `eggs.test.ts`/`reproduction.test.ts`; 717 engine tests
+      pass, `pnpm -r typecheck`/`build` clean. See DESIGN.md's "Follow-up:
+      clutch size" subsection for the full writeup.
+- [ ] **Real, load-bearing follow-up surfaced by the above, not fixed
+      here (out of scope for "let clutches vary")**: the clutch mechanism
+      currently has near-zero effect on real population in the actual demo
+      world, because `shelter.ts`'s `pickBuildSite` picks a uniformly
+      random floor tile with no bias toward existing shelter — confirmed
+      directly that every real shelter cluster across all three validation
+      seeds at 8000 ticks stayed exactly 1 tile, so `SHELTER_TILE_EGG_CAP`
+      (1/tile) capped every real laying event to at most 1 egg regardless
+      of the clutch size drawn. If clutch size is meant to actually move
+      the population needle (not just work correctly in isolated tests),
+      the real next lever is biasing shelter-site selection toward building
+      adjacent to an agent's own existing shelter when it has one, so
+      multi-tile clusters actually form in a real run.
 - [ ] **Open follow-up, not done**: `packages/runner/src/ascii.ts`'s own
       terrain palette (the headless CLI's rendering, separate from
       `packages/web`) was not given the same per-species shelter tint —

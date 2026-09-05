@@ -7270,3 +7270,123 @@ regression.
 - `packages/runner/src/ascii.ts`'s own terrain palette was not given the
   same `shelterOwnerTint` treatment `packages/web` got — a real, known gap
   in the headless CLI's visual output, not a functional one.
+
+### Follow-up: clutch size
+
+Direct, verbatim ask, after seeing the pipeline above validated for real:
+"i like it, maybe we can have multiple eggs spawn at once instead of one at
+a time tho." Explicit constraint carried over from the same conversation:
+the slow bond -> shelter -> lay -> incubate pipeline itself should NOT get
+any easier or faster — the user likes that pacing. A clutch is the intended
+lever instead: one successful laying event should be able to produce
+several eggs at once, so a household that clears the whole slow pipeline
+gets more population out of that one success.
+
+**Built**: `eggs.ts`'s `pickClutchSize(rng)` draws a clutch size uniformly
+from `EGG_CLUTCH_MIN`/`EGG_CLUTCH_MAX` = 2-4 (a real, modest, sim-original
+number — real animal clutch sizes vary enormously with no attempt at canon
+accuracy here, just "meaningfully more than one, without letting one lucky
+laying event dominate growth on its own," judged the same "check it against
+a real run" way as every other tuning constant in this codebase).
+`reproduction.ts`'s `applyMateSeeking` reuses the EXISTING capacity
+mechanism rather than a new one: it loops up to the drawn clutch size,
+calling the same `pickEggTile`/`canLayEggAt` (occupancy.ts's real shelter-
+cluster capacity check, `SHELTER_TILE_EGG_CAP` = 1 per tile summed across
+the cluster) once per candidate egg, pushing each placed egg onto
+`world.agents` before the next capacity check — so a later check in the
+same clutch genuinely sees the room the earlier eggs in the same clutch
+just used up. The loop stops the moment `pickEggTile` returns `undefined`
+(cluster's egg capacity exhausted); **the rest of the clutch is simply
+dropped, not queued or held for a later attempt** — the simplest, most
+defensible choice given the point is "a bigger household reliably gets more
+eggs," and no egg-holding-pattern mechanic was asked for. Exp
+(`EXP_ON_BIRTH_PARENT`) is granted once per successful laying EVENT, not
+once per egg in the clutch, so clutch-size rng can't also swing leveling
+speed. `eggLaid` is still logged once per egg (unchanged event shape) —
+a 3-egg clutch produces 3 `eggLaid` events, same as 3 separate 1-egg
+events used to, so nothing downstream needed to change at all.
+
+**Verified everything downstream already "just works" for multiple
+sibling eggs**, per the task's own explicit ask to check rather than
+assume it: each egg is its own independent `Agent` object with its own
+`id`/`eggTicks`/position from the moment it's pushed onto `world.agents` —
+incubation (`tickEgg`), hatching, egg-eating (`applyEggEating`), and egg-
+defense (`applyEggDefense`) all already operate per-`Agent`, with no
+shared state between siblings anywhere in any of those four functions.
+Confirmed directly with a new test (`reproduction.test.ts`): hatching one
+egg from a 2-egg clutch leaves the other completely untouched
+(`eggTicks` still 0, `isEgg` still true), and killing one doesn't touch the
+other's (by then hatched) state either.
+
+**New tests**: `eggs.test.ts` (`pickClutchSize` stays within
+`[EGG_CLUTCH_MIN, EGG_CLUTCH_MAX]` across many draws, rng-determinism
+same-seed/different-seed, and that repeated draws actually cover the whole
+range rather than silently collapsing to one value).
+`reproduction.test.ts` (a single laying event lays the full clutch — forced
+to `EGG_CLUTCH_MAX` via a fixed rng — when a 4-tile shelter cluster has
+room for it; the same forced-max clutch is capped down to exactly the
+real available capacity when the cluster is smaller — 1 tile -> 1 egg, 2
+tiles -> 2 eggs — never crammed onto one tile past `SHELTER_TILE_EGG_CAP`;
+a direct 1/2/3/4-tile sweep showing a bigger cluster reliably yields more
+eggs from the identical forced-max clutch draw, clamped at
+`EGG_CLUTCH_MAX` once cluster room exceeds it; sibling-independence as
+described above). **All 717 engine tests pass**, including the unmodified
+`determinism.test.ts` full-`tickWorld` acceptance suite (`pnpm --filter
+@pokuelike/engine test` — one pre-existing, seed-dependent flake in
+`predation.test.ts`'s burn-damage-variance test was observed on the
+unmodified baseline too, in an isolated rerun before this feature's changes
+were applied at all — not introduced by this follow-up). `pnpm -r
+typecheck` and `pnpm -r build` both clean across all 4 packages.
+
+**Real headless runs, seeds 42/7/20260903, 3000/6000/8000 ticks — reporting
+the honest result, which is a genuine, mechanism-level finding, not the
+straightforward population win the ask was hoping for:**
+
+| ticks | seed 42 before → after | seed 7 before → after | seed 20260903 before → after |
+|---|---|---|---|
+| 3000 | 27 → 24 | 25 → 28 | 23 → 17 |
+| 6000 | 24 → 29 | 43 → 20 | 22 → 15 |
+| 8000 | 25 → 50 | 85 → 22 | 18 → 16 |
+
+("before" = this session's current tip immediately prior to this follow-up,
+single-egg-per-event, same `createDemoWorld` — NOT the older instant-birth
+baseline or the older 23/56/94 table earlier in this section, both of which
+predate later population-affecting changes on this branch, e.g. the demo
+world's predator roster growing from 1 Scyther/1 Onix to 4 Scyther/3 Onix.)
+
+That table looks like a wash at best and a regression at worst on 2 of 3
+seeds — worth being straight about why, because it's not what "lay more
+eggs per event" should do on its face. **Root cause, confirmed directly**:
+added a diagnostic dump of every real shelter cluster's size at the end of
+each run — across all three seeds at 8000 ticks, EVERY shelter cluster
+that ever existed was exactly 1 tile (11 clusters total, sizes
+`[1,1,1,1,1,1]`/`[1]`/`[1,1,1,1]`). `shelter.ts`'s `pickBuildSite` chooses
+a uniformly random floor tile at least `SHELTER_MIN_BUILD_DISTANCE` away
+from the builder, with zero bias toward building next to an existing
+shelter tile — so in a real run, shelter tiles essentially never end up
+spatially adjacent to each other, which means `SHELTER_TILE_EGG_CAP` (1
+per tile) caps EVERY real laying event to at most 1 egg regardless of the
+clutch size drawn, in every run actually observed. Confirmed this is the
+whole story with a direct control: temporarily pinning
+`EGG_CLUTCH_MIN`/`EGG_CLUTCH_MAX` to 1 (i.e., disabling the clutch
+mechanism entirely while keeping its one extra `rng()` draw per laying
+event) reproduced the "after" column's numbers byte-for-byte. So the
+before/after differences in the table above are not the clutch mechanism
+doing real work at all — they're the ordinary, previously-documented
+sensitivity of this whole chaotic system to a new rng draw anywhere in a
+hot path (any new `rng()` call reshuffles every subsequent random outcome
+for the rest of the run, regardless of what that call is even used for).
+
+**Honest bottom line**: the clutch mechanism itself is real, correct, and
+verified working in isolation (the unit tests above directly construct a
+multi-tile cluster and confirm more eggs come out of it) — it does exactly
+what was asked, reusing the existing capacity system exactly as directed,
+with no special-casing needed anywhere downstream. But in the CURRENT demo
+world, it has essentially zero practical effect on population, because the
+"bigger household -> more eggs" lever depends on adjacent shelter clusters
+that this world's shelter-site selection doesn't currently ever produce.
+Fixing that (biasing `pickBuildSite` toward existing shelter, at least for
+an agent that already has one nearby) is a real, separate, out-of-scope-
+for-this-ask follow-up — flagged in TODO.md — and is the actual next lever
+if the goal is still "raise the population ceiling without touching the
+pipeline's pacing."

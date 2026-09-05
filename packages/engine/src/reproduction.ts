@@ -6,7 +6,7 @@ import { EXP_ON_BIRTH_PARENT, EXP_ON_MATE_ATTEMPT, canBreed, grantExp, type Leve
 import { herdCentroid, herdRank, herdSize } from "./herding.js";
 import { hasNearbyShelter, SHELTER_SEARCH_RADIUS } from "./shelter.js";
 import { canLayEggAt, shelterCluster } from "./occupancy.js";
-import { spawnEgg } from "./eggs.js";
+import { pickClutchSize, spawnEgg } from "./eggs.js";
 
 /**
  * Ticks before an agent can mate. A single global constant for now — real
@@ -320,22 +320,48 @@ export function applyMateSeeking(
       }
 
       const shelterTile = householdShelterTile(world, agent);
-      const eggTile = shelterTile ? pickEggTile(world, agent.layer, shelterTile) : undefined;
-      if (eggTile) {
-        world.offspringSequence = (world.offspringSequence ?? 0) + 1;
-        const egg = spawnEgg(world, agent, partner, eggTile, world.offspringSequence);
-        world.agents.push(egg);
-        world.eggsLaid = (world.eggsLaid ?? 0) + 1;
-        log?.record({
-          kind: "eggLaid",
-          tick: world.tick,
-          motherId: agent.id,
-          fatherId: partner.id,
-          eggId: egg.id,
-          species: egg.species,
-          layer: egg.layer,
-          pos: { ...egg.pos },
-        });
+      // Follow-up: clutch, not one egg (see DESIGN.md's "Follow-up: clutch
+      // size" subsection). `pickClutchSize` decides how many eggs this
+      // laying event is TRYING for; the loop below places as many as
+      // actually fit, re-checking `pickEggTile`'s real shelter-cluster
+      // capacity (`canLayEggAt`) after each placement — each pushed egg
+      // immediately counts against the next check via
+      // `occupancy.ts`'s live `world.agents` scan, so a clutch is capped by
+      // genuine available room, not just dumped in regardless of it. A
+      // clutch that doesn't fully fit simply lays fewer eggs; the excess is
+      // dropped (not queued or held for later) — the simplest, most
+      // defensible choice given the whole point is "a bigger, more
+      // successful household reliably gets more eggs out of a clutch," and
+      // the user didn't ask for an egg-holding-pattern mechanic.
+      let laidThisEvent = 0;
+      if (shelterTile) {
+        const clutchSize = pickClutchSize(rng);
+        for (let i = 0; i < clutchSize; i++) {
+          const eggTile = pickEggTile(world, agent.layer, shelterTile);
+          if (!eggTile) break; // cluster's egg capacity is exhausted — rest of the clutch is lost
+          world.offspringSequence = (world.offspringSequence ?? 0) + 1;
+          const egg = spawnEgg(world, agent, partner, eggTile, world.offspringSequence);
+          world.agents.push(egg);
+          world.eggsLaid = (world.eggsLaid ?? 0) + 1;
+          laidThisEvent++;
+          log?.record({
+            kind: "eggLaid",
+            tick: world.tick,
+            motherId: agent.id,
+            fatherId: partner.id,
+            eggId: egg.id,
+            species: egg.species,
+            layer: egg.layer,
+            pos: { ...egg.pos },
+          });
+        }
+      }
+      if (laidThisEvent > 0) {
+        // Exp is granted once per successful laying EVENT, not once per egg
+        // in the clutch — a deliberate choice: the parents did one real
+        // thing (successfully laid a clutch), and scaling exp with clutch
+        // size would let clutch-size rng also swing leveling speed, which
+        // isn't what this follow-up is about.
         grantExp(world, agent, EXP_ON_BIRTH_PARENT, ctx, log, rng);
         grantExp(world, partner, EXP_ON_BIRTH_PARENT, ctx, log, rng);
       }

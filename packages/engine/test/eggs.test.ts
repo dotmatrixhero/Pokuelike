@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createWorld, setTile } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
-import { spawnEgg, tickEgg, EGG_INCUBATION_TICKS, isLivingEgg } from "../src/eggs.js";
+import { spawnEgg, tickEgg, EGG_INCUBATION_TICKS, EGG_CLUTCH_MIN, EGG_CLUTCH_MAX, pickClutchSize, isLivingEgg } from "../src/eggs.js";
 import { applyEggEating, applyPredationInstincts } from "../src/predation.js";
 import { tickWorld } from "../src/simulation.js";
 import { EventLog } from "../src/events.js";
@@ -93,6 +93,35 @@ describe("eggs.ts: spawnEgg", () => {
     expect(egg.nature).toBeUndefined();
     expect(egg.level).toBeUndefined();
     expect(isLivingEgg(egg)).toBe(true);
+  });
+});
+
+describe("eggs.ts: pickClutchSize", () => {
+  it("always draws within [EGG_CLUTCH_MIN, EGG_CLUTCH_MAX]", () => {
+    const world = createWorld(10, 10, 1);
+    for (let i = 0; i < 500; i++) {
+      const size = pickClutchSize(world.rng);
+      expect(size).toBeGreaterThanOrEqual(EGG_CLUTCH_MIN);
+      expect(size).toBeLessThanOrEqual(EGG_CLUTCH_MAX);
+      expect(Number.isInteger(size)).toBe(true);
+    }
+  });
+
+  it("rng-determinism: the same seed draws the same clutch-size sequence, a different seed can differ", () => {
+    function run(seed: number) {
+      const world = createWorld(10, 10, seed);
+      return [pickClutchSize(world.rng), pickClutchSize(world.rng), pickClutchSize(world.rng)];
+    }
+    expect(run(42)).toEqual(run(42));
+    const outcomes = new Set([1, 2, 3, 4, 5].map((seed) => JSON.stringify(run(seed))));
+    expect(outcomes.size).toBeGreaterThan(1);
+  });
+
+  it("actually uses the full range given enough draws (not silently collapsed to one value)", () => {
+    const world = createWorld(10, 10, 7);
+    const seen = new Set<number>();
+    for (let i = 0; i < 500; i++) seen.add(pickClutchSize(world.rng));
+    for (let size = EGG_CLUTCH_MIN; size <= EGG_CLUTCH_MAX; size++) expect(seen.has(size)).toBe(true);
   });
 });
 
