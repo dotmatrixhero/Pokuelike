@@ -10,6 +10,7 @@ import { agentsWithin, isHunterSpecies, manhattan, nearest, FALLBACK_MAX_HP, FLE
 import { findNearestIndexed } from "./resourceIndex.js";
 import { COLD_SNAP_SPEED_MULTIPLIER, isInColdSnap } from "./weather.js";
 import { useMove, withinMoveRange } from "./combat.js";
+import { RAPPORT_FOOD_DELIVERY_DELTA, strengthenRapportMutual } from "./rapport.js";
 
 /**
  * Faint/finish-off, heal-over-time, and herd support (inventory, food
@@ -546,6 +547,10 @@ export function applyHerdSupport(world: World, agent: Agent, log?: EventLog, nee
         const item = deliverFoodItem(agent);
         if (item) {
           target!.needs.hunger = Math.min(1, target!.needs.hunger + DELIVERED_FOOD_HUNGER_RESTORE);
+          // Rapport: a small, real nudge between exactly these two —
+          // repetition (many deliveries over a run) is what's meant to add
+          // up to something meaningful. See rapport.ts's doc comment.
+          strengthenRapportMutual(world, agent, target!, RAPPORT_FOOD_DELIVERY_DELTA);
           log?.record({
             kind: "foodDelivered",
             tick: world.tick,

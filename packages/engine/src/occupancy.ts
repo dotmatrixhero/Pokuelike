@@ -34,6 +34,7 @@ interface OccupancyIndex {
   tick: number;
   countByKey: Map<string, number>;
   weightByKey: Map<string, number>;
+  speciesByKey: Map<string, Set<string>>;
 }
 
 const cache = new WeakMap<World, OccupancyIndex>();
@@ -61,13 +62,20 @@ function tileKey(layer: Layer, pos: Vec2): string {
 function buildIndex(world: World): OccupancyIndex {
   const countByKey = new Map<string, number>();
   const weightByKey = new Map<string, number>();
+  const speciesByKey = new Map<string, Set<string>>();
   for (const agent of world.agents) {
     if (agent.alive === false || agent.beingCarriedBy) continue;
     const k = tileKey(agent.layer, agent.pos);
     countByKey.set(k, (countByKey.get(k) ?? 0) + 1);
     weightByKey.set(k, (weightByKey.get(k) ?? 0) + bodyWeight(agent));
+    let species = speciesByKey.get(k);
+    if (!species) {
+      species = new Set();
+      speciesByKey.set(k, species);
+    }
+    species.add(agent.species);
   }
-  return { tick: world.tick, countByKey, weightByKey };
+  return { tick: world.tick, countByKey, weightByKey, speciesByKey };
 }
 
 function getIndex(world: World): OccupancyIndex {
@@ -122,17 +130,31 @@ export function tileOccupantWeight(world: World, layer: Layer, pos: Vec2): numbe
  * Can `agent` move onto `(layer, pos)` right now, capacity-wise? An
  * already-empty tile always admits at least one agent regardless of weight
  * or species — direct requirement, so a single heavy/populous species is
- * never unable to stand anywhere. Otherwise: underground/canopy use the flat
- * headcount cap; every other layer (surface) uses the weight rule. This is a
- * pure capacity check — it says nothing about terrain walkability, which
- * callers (movement.ts, pathfinding.ts) check separately and first.
+ * never unable to stand anywhere. Otherwise: shelter keeps its own universal
+ * (any-species) headcount rule (see the section below — a deliberate,
+ * already-documented exception, "any species" was the explicit original
+ * shelter instruction); every other tile is now also species-exclusive —
+ * direct follow-up ask: "generally only units of the same species should
+ * share a space" — checked before the existing headcount/weight capacity
+ * rules, not instead of them. Underground/canopy use the flat headcount cap,
+ * every other layer (surface) uses the weight rule. This is a pure capacity
+ * check — it says nothing about terrain walkability, which callers
+ * (movement.ts, pathfinding.ts) check separately and first.
  */
 export function canEnterTile(world: World, agent: Agent, layer: Layer, pos: Vec2): boolean {
   const count = tileOccupantCount(world, layer, pos);
   if (count === 0) return true;
   if (tileAt(world, layer, pos.x, pos.y)?.terrain === "shelter") return canEnterShelter(world, layer, pos);
+  if (hasOtherSpeciesOccupant(world, agent, layer, pos)) return false;
   if (isFlatCapacityLayer(layer)) return count < FLAT_TILE_HEADCOUNT_CAP;
   return tileOccupantWeight(world, layer, pos) + bodyWeight(agent) <= TILE_WEIGHT_CAPACITY;
+}
+
+/** True if `(layer, pos)` currently holds at least one live occupant of a species other than `agent`'s own — see `canEnterTile`'s doc comment. */
+function hasOtherSpeciesOccupant(world: World, agent: Agent, layer: Layer, pos: Vec2): boolean {
+  const species = getIndex(world).speciesByKey.get(tileKey(layer, pos));
+  if (!species) return false;
+  return species.size > 1 || !species.has(agent.species);
 }
 
 // --- Shelter capacity (direct instruction: "only 2 units and an egg can

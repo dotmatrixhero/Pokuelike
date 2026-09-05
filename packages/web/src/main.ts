@@ -6,6 +6,7 @@ import { EventPopups } from "./eventPopups.js";
 import { renderInspector } from "./inspector.js";
 import { renderLegend } from "./legend.js";
 import { AutoCameraController, type AutoCameraHost } from "./autoCamera.js";
+import { BattleScreenPanel } from "./battleScreenPanel.js";
 
 /**
  * Ticks per real second at speed multiplier 1x. Multiplied by `SPEED_STEPS`
@@ -28,14 +29,26 @@ const ZOOM_MAX = 2;
 const ZOOM_BUTTON_FACTOR = 1.25;
 const DEFAULT_ZOOM = 0.8; // the whole demo map roughly fits a laptop viewport at this level
 /**
- * Auto Camera's fixed close-in zoom — `ZOOM_MAX` itself (2.5x `DEFAULT_ZOOM`)
- * rather than something scaled to fit exactly two combatants: a fixed level
- * is simple, predictable, and already a genuinely closer view than default
- * for every notable-event category (a lone hatchling, a two-agent battle, a
- * three-agent immigration group) without per-category zoom-fit math that a
- * moving multi-agent battle would immediately invalidate anyway.
+ * Auto Camera's fixed close-in zoom. Originally `ZOOM_MAX` (200%); direct
+ * follow-up ask ("a little more zoom out on auto cam, maybe 150%") pulled it
+ * back to 150% — still a fixed level rather than something scaled to fit
+ * exactly two combatants: simple, predictable, and already a genuinely
+ * closer view than default for every notable-event category (a lone
+ * hatchling, a two-agent battle, a three-agent immigration group) without
+ * per-category zoom-fit math that a moving multi-agent battle would
+ * immediately invalidate anyway.
  */
-const AUTO_CAM_ZOOM = ZOOM_MAX;
+const AUTO_CAM_ZOOM = 1.5;
+/**
+ * Real ms per tick while a battle has taken over ticking (see
+ * `AutoCameraHost.enterBattleStep`) — a fixed, deliberate beat per tick
+ * rather than a speed multiplier. Direct follow-up ask: "step through them
+ * one tick at a time rather than super slow speed, it's too hard to
+ * follow" (0.25x was still continuous timer-driven ticking, which could
+ * still blur consecutive hits together). Chosen slow enough to read one
+ * battle-log line/HP change per beat without feeling like a stall.
+ */
+const BATTLE_STEP_INTERVAL_MS = 650;
 
 // --- DOM references -------------------------------------------------------
 
@@ -70,6 +83,9 @@ const zoomInBtn = document.getElementById("zoom-in") as HTMLButtonElement;
 const zoomLabel = document.getElementById("zoom-label") as HTMLElement;
 const autoCamToggleBtn = document.getElementById("auto-cam-toggle") as HTMLButtonElement;
 const autoCamStatusEl = document.getElementById("auto-cam-status") as HTMLElement;
+const battleScreenEl = document.getElementById("battle-screen") as HTMLElement;
+const tabInspectorBtn = document.getElementById("tab-inspector") as HTMLButtonElement;
+const tabBattleScreenBtn = document.getElementById("tab-battle-screen") as HTMLButtonElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -78,6 +94,8 @@ let log: EventLog;
 let playing = false;
 let speedIndex = DEFAULT_SPEED_INDEX;
 let intervalId: number | undefined;
+/** True while a battle owns ticking via its own fixed `BATTLE_STEP_INTERVAL_MS` cadence instead of the ordinary speed slider — see `scheduleLoop` and the `enterBattleStep`/`exitBattleStep` host methods below. */
+let battleStepMode = false;
 let selectedAgentId: string | undefined;
 let lastLoggedEventCount = 0;
 let inspectorDirty = true;
@@ -85,6 +103,7 @@ let renderStyle: RenderStyle = "ascii";
 let zoom = DEFAULT_ZOOM;
 
 const eventLogPanel = new EventLogPanel(eventLogEl);
+const battleScreenPanel = new BattleScreenPanel(battleScreenEl);
 const eventPopups = new EventPopups();
 
 // --- Auto Camera -------------------------------------------------------------
@@ -142,6 +161,16 @@ const autoCamHost: AutoCameraHost = {
     speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
     scheduleLoop();
   },
+  enterBattleStep(): void {
+    if (battleStepMode) return;
+    battleStepMode = true;
+    scheduleLoop();
+  },
+  exitBattleStep(): void {
+    if (!battleStepMode) return;
+    battleStepMode = false;
+    scheduleLoop();
+  },
   setLogFilter(ids: Set<string> | undefined): void {
     eventLogPanel.setAutoCamFilter(ids);
   },
@@ -171,8 +200,15 @@ function loadWorld(seed: number): void {
 
   eventLogPanel.reset();
   eventLogPanel.setFilter(undefined);
+  battleScreenPanel.reset();
   eventPopups.reset();
   renderInspector(inspectorEl, undefined, world);
+  // Every tracked battle seq from the old world is meaningless now, same as
+  // autoCamera.reset() above — and a fresh world is a natural point to hand
+  // the view back to the default Inspector tab.
+  tabManualOverrideForBattleSeq = undefined;
+  lastAutoSwitchedBattleSeq = undefined;
+  selectTab("inspector", false);
   updateStatusLabels();
 }
 
@@ -183,6 +219,7 @@ function step(): void {
   eventLogPanel.ingest(newEvents, world);
   eventPopups.ingest(newEvents, world);
   autoCamera.ingest(newEvents, world);
+  battleScreenPanel.ingest(newEvents, world);
   lastLoggedEventCount = log.events.length;
   // Always dirty, not just when something's selected — the no-selection
   // view is a live population/weather overview, not a static placeholder.
@@ -204,6 +241,15 @@ function scheduleLoop(): void {
     intervalId = undefined;
   }
   if (!playing) return;
+
+  if (battleStepMode) {
+    // A battle owns ticking now — exactly one tick per fixed real-time beat,
+    // ignoring the speed slider entirely (see `BATTLE_STEP_INTERVAL_MS`'s
+    // doc comment). Still gated on `playing` above: if the viewer is
+    // paused, a battle starting shouldn't un-pause the world for them.
+    intervalId = window.setInterval(step, BATTLE_STEP_INTERVAL_MS);
+    return;
+  }
 
   const speed = SPEED_STEPS[speedIndex]!;
   const ticksPerSec = BASE_TICKS_PER_SEC * speed;
@@ -238,6 +284,72 @@ function refreshSelection(): void {
   inspectorDirty = false;
   const agent = selectedAgentId ? world.agents.find((a) => a.id === selectedAgentId) : undefined;
   renderInspector(inspectorEl, agent, world);
+}
+
+// --- Inspector / Battle Screen tabs -----------------------------------------
+// Battle Screen used to be its own docked panel; direct follow-up ask: it
+// "obscures the map," so it now shares the Inspector panel's footprint as a
+// second tab instead (see index.html's `#inspector-panel` markup). Both
+// `renderInspector`/`BattleScreenPanel` keep rendering into their own
+// `#inspector`/`#battle-screen` divs exactly as before — this is purely a
+// thin visibility switch over the two, the same `[hidden]` convention the
+// drawer/legend toggles already use.
+
+type PanelTab = "inspector" | "battle-screen";
+let activeTab: PanelTab = "inspector";
+/**
+ * The `seq` of the battle engagement the viewer last manually switched away
+ * from Battle Screen *during* (back to Inspector) — mirrors
+ * `AutoCameraController`'s own `viewerTookOver` sticky-override pattern:
+ * auto-switching won't re-steal the tab back for *this* battle, but a
+ * genuinely new battle (a different seq) is a fresh thing to show and earns
+ * the auto-switch back. `undefined` when there's no active override.
+ */
+let tabManualOverrideForBattleSeq: number | undefined;
+/** The `seq` of the battle engagement auto-switch has already acted on — so a battle that's still ongoing next frame doesn't keep re-triggering the switch (which would also stomp a manual switch back to Inspector on every single frame). */
+let lastAutoSwitchedBattleSeq: number | undefined;
+
+function selectTab(tab: PanelTab, manual: boolean): void {
+  activeTab = tab;
+  inspectorEl.hidden = tab !== "inspector";
+  battleScreenEl.hidden = tab !== "battle-screen";
+  clearSelectionBtn.hidden = tab !== "inspector"; // "Clear [selection]" only means anything on the Inspector tab
+  tabInspectorBtn.classList.toggle("playing", tab === "inspector");
+  tabInspectorBtn.setAttribute("aria-selected", String(tab === "inspector"));
+  tabBattleScreenBtn.classList.toggle("playing", tab === "battle-screen");
+  tabBattleScreenBtn.setAttribute("aria-selected", String(tab === "battle-screen"));
+
+  if (!manual) return;
+  // A deliberate click always wins over auto-switch's own bookkeeping — see
+  // the two fields' doc comments above.
+  const battleSeq = autoCamera.currentEngagement()?.category === "battle" ? autoCamera.currentEngagement()!.seq : undefined;
+  if (tab === "inspector" && battleSeq !== undefined) {
+    tabManualOverrideForBattleSeq = battleSeq;
+  } else if (tab === "battle-screen") {
+    tabManualOverrideForBattleSeq = undefined;
+  }
+}
+
+tabInspectorBtn.addEventListener("click", () => selectTab("inspector", true));
+tabBattleScreenBtn.addEventListener("click", () => selectTab("battle-screen", true));
+
+/**
+ * Auto-switches to the Battle Screen tab the moment Auto Camera starts
+ * tracking a new battle — mirrors the spirit of the old standalone panel
+ * just appearing on its own, without permanently taking the wheel: the
+ * viewer can still switch back to Inspector mid-battle (a manual override,
+ * tracked by `tabManualOverrideForBattleSeq`), and that choice sticks for
+ * the rest of *this* battle, but a fresh battle (new `seq`) always earns the
+ * auto-switch again, the same "a new thing to look at re-earns control"
+ * rule Auto Camera's own camera-follow already applies to a manual pan.
+ */
+function maybeAutoSwitchTab(): void {
+  const engagement = autoCamera.currentEngagement();
+  if (!engagement || engagement.category !== "battle") return;
+  if (engagement.seq === lastAutoSwitchedBattleSeq) return;
+  lastAutoSwitchedBattleSeq = engagement.seq;
+  if (engagement.seq === tabManualOverrideForBattleSeq) return;
+  if (activeTab !== "battle-screen") selectTab("battle-screen", false);
 }
 
 // --- Wiring ------------------------------------------------------------------
@@ -418,10 +530,21 @@ loadWorld(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED);
 speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
 
 function frame(): void {
-  drawWorld(ctx, world, selectedAgentId, renderStyle);
-  drawEventPopups(ctx, eventPopups.active());
+  // Run before drawWorld (was after) so this frame's highlight box below
+  // reflects the engagement autoCamera just decided on, not last frame's —
+  // update() itself doesn't depend on anything drawWorld does.
   autoCamera.update(world);
+  const engagement = autoCamera.currentEngagement();
+  // Direct ask: "on desktop [auto cam] is a bit too wide to know whats
+  // going on... draw a box around it" — see drawAutoCamHighlight's own doc
+  // comment (renderer.ts) for why a box scales better across viewport sizes
+  // than retuning the fixed zoom level would.
+  drawWorld(ctx, world, selectedAgentId, renderStyle, engagement?.ids);
+  drawEventPopups(ctx, eventPopups.active());
   autoCamStatusEl.textContent = autoCamera.currentLabel() ?? (autoCamera.isEnabled() ? "watching…" : "");
+  battleScreenPanel.setActive(engagement);
+  maybeAutoSwitchTab();
+  battleScreenPanel.render(world);
   eventLogPanel.render();
   refreshSelection();
   requestAnimationFrame(frame);

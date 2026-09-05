@@ -24,9 +24,10 @@ function candidatesToward(pos: Vec2, dx: number, dy: number): Vec2[] {
  * pre-existing behavior (capacity-blind) rather than being forced to
  * fabricate an agent just to compile.
  */
-function firstWalkable(world: World, layer: Layer, pos: Vec2, candidates: Vec2[], mover?: Agent): Vec2 {
+function firstWalkable(world: World, layer: Layer, pos: Vec2, candidates: Vec2[], mover?: Agent, avoid?: Vec2): Vec2 {
   for (const candidate of candidates) {
     if (candidate.x === pos.x && candidate.y === pos.y) continue;
+    if (avoid && candidate.x === avoid.x && candidate.y === avoid.y) continue;
     if (!tileAt(world, layer, candidate.x, candidate.y)?.walkable) continue;
     if (mover && !canEnterTile(world, mover, layer, candidate)) continue;
     return candidate;
@@ -34,11 +35,24 @@ function firstWalkable(world: World, layer: Layer, pos: Vec2, candidates: Vec2[]
   return pos;
 }
 
-/** Moves one step toward `target` using simple Manhattan stepping. `mover`, if given, makes the step capacity-aware (see `firstWalkable`). */
-export function stepToward(world: World, layer: Layer, pos: Vec2, target: Vec2, mover?: Agent): Vec2 {
+/**
+ * Moves one step toward `target` using simple Manhattan stepping. `mover`,
+ * if given, makes the step capacity-aware (see `firstWalkable`).
+ *
+ * `stopAdjacent`, when true, never lands exactly on `target`'s own tile —
+ * direct ask: "two units in combat should never share the same tile."
+ * `candidatesToward`'s first (diagonal) candidate is the one that can equal
+ * `target` exactly (when already diagonally adjacent, Manhattan distance 2);
+ * excluding it here falls through to an orthogonal candidate instead, which
+ * lands *next to* the target rather than on it. Opt-in and defaulted off:
+ * most `stepToward` callers (seeking a food/water/shelter tile, migrating to
+ * a destination) genuinely want to arrive exactly on `target`, so this only
+ * applies where a caller explicitly asks for "approach, don't occupy."
+ */
+export function stepToward(world: World, layer: Layer, pos: Vec2, target: Vec2, mover?: Agent, stopAdjacent?: boolean): Vec2 {
   const dx = Math.sign(target.x - pos.x);
   const dy = Math.sign(target.y - pos.y);
-  return firstWalkable(world, layer, pos, candidatesToward(pos, dx, dy), mover);
+  return firstWalkable(world, layer, pos, candidatesToward(pos, dx, dy), mover, stopAdjacent ? target : undefined);
 }
 
 /** Moves one step directly away from `threat`, deterministically tie-broken when already aligned. `mover`, if given, makes the step capacity-aware (see `firstWalkable`). */
@@ -73,6 +87,10 @@ export function applyForcedMovement(world: World, forced: ForcedMovement, attack
   // codebase's capacity gate is specifically about a tile you're standing on
   // and consuming from — see occupancy.ts's/needs.ts's doc comments.
   for (let i = 0; i < forced.tiles; i++) {
-    mover.pos = forced.direction === "closer" ? stepToward(world, mover.layer, mover.pos, other.pos) : stepAway(world, mover.layer, mover.pos, other.pos);
+    // "closer" (a lunge) passes `stopAdjacent` — a forced pull/lunge is
+    // still combat, so it shouldn't be able to drag the mover onto the
+    // other party's exact tile either. "away" can't land on `other` in the
+    // first place (it's moving away from it), so no equivalent guard needed.
+    mover.pos = forced.direction === "closer" ? stepToward(world, mover.layer, mover.pos, other.pos, undefined, true) : stepAway(world, mover.layer, mover.pos, other.pos);
   }
 }

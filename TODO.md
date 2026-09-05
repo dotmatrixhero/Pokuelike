@@ -2094,8 +2094,15 @@ not something this pathfinding pass itself caused or is positioned to fix.
       `main.ts` wiring): follows immigration, courtship (bonded/
       shelterBuilt/eggLaid as three separate moments), egg hatching,
       battles (start-to-death-or-retreat), evolution, and true deaths;
-      zooms in, temporarily drops playback to 2x from 4x+, and scopes the
-      event log to exactly that moment's participants.
+      zooms in to 150% (`AUTO_CAM_ZOOM`, follow-up-adjusted down from the
+      original 200%), and scopes the event log to exactly that moment's
+      participants. Playback slowdown is now category-conditional: a battle
+      always drops to 0.25x real slow-motion regardless of the viewer's
+      current speed (`AUTO_CAM_BATTLE_SLOWDOWN_SPEED`, a direct follow-up
+      ask), while every other category keeps the original 2x-from-4x+-only
+      behavior (`AUTO_CAM_SLOWDOWN_SPEED`/`SLOWDOWN_THRESHOLD_SPEED`). See
+      DESIGN.md's "Follow-up" subsection for the reasoning and Playwright
+      verification of both changes.
 - [ ] **No camera easing/animation.** Both the zoom change and the scroll
       reposition are instant (a plain `scrollLeft`/`scrollTop` assignment,
       no CSS transition) — a deliberate choice for this pass (see
@@ -2141,6 +2148,61 @@ not something this pathfinding pass itself caused or is positioned to fix.
       battle observed) — a longer real-time watch session across several
       seeds, actually looking at the zoomed-in view rather than just
       asserting on DOM state, would be the next real check.
+
+## Battle Screen — built, see DESIGN.md
+
+- [x] A second, differently-formatted view of Auto Camera's currently-
+      followed event (`packages/web/src/battleScreenPanel.ts`), styled like
+      a mainline Pokémon battle text box: a "vs" header with live HP bars for
+      a followed battle's combatants, a scrolling turn-by-turn log (move
+      used, crit/effectiveness callouts, damage, HP remaining, fainting/
+      retreat/conclusion), and a single flavor-text scene line for every
+      other notable category (hatch/evolution/immigration/death). Coexists
+      with the plain event log's existing auto-cam filter rather than
+      replacing it.
+- [x] **Follow-up: merged into the Inspector panel as a tab, not a second
+      docked panel** — the standalone `#battle-screen-panel` (and its own
+      Hide/Show toggle) is gone; "Battle Screen" is now a second tab inside
+      `#inspector-panel`, next to "Inspector" (`#tab-inspector`/
+      `#tab-battle-screen` in its `.panel-header`), toggled via `main.ts`'s
+      `selectTab` — pure visibility switching, neither `renderInspector` nor
+      `BattleScreenPanel` changed at all. Auto-switches to Battle Screen the
+      moment a new battle engagement starts, but a manual switch back to
+      Inspector sticks for the rest of that same battle (mirrors Auto
+      Camera's own manual-view-override pattern) — see DESIGN.md's
+      "Follow-up" subsection for the full interaction-model writeup and
+      Playwright verification.
+- [ ] **No effectiveness callout when the defender agent's already been
+      pruned.** "It's super effective!"/"not very effective" is computed
+      client-side via the engine's own exported `typeEffectiveness` against
+      the *live* defender `Agent.types` — if that agent's already left
+      `world.agents` (its corpse-persistence window elapsed) by the time a
+      frame renders, the callout is silently skipped rather than guessed.
+      Rare in practice (the defender is almost always still present while
+      its own battle is the actively-followed one), but a real gap; fixing
+      it would mean snapshotting the defender's types onto the engagement
+      the moment the hit event fires, rather than reading them live.
+- [ ] **No client-side smoothing on the HP bar.** `Agent.hp` can carry float
+      noise from elsewhere in the engine's combat math (partial-tick
+      effects) — display-rounded for the bar/label, but the bar itself still
+      jumps in whatever-sized steps the underlying hits actually dealt, no
+      CSS transition beyond the fill's `width` easing already provides.
+      Acceptable for now; a "damage taken" flash/shake on the losing side's
+      HP bar specifically (distinct from the existing per-line text flash)
+      would be a nice further polish pass if this feature gets revisited.
+- [ ] **`+N more` for a >2-participant battle (pack hunts, herd brawls)
+      doesn't show who the extra participants are** — just a count, no
+      names/HP. The "vs" header assumes a clean 1v1 (reads the first two ids
+      in insertion order, which are reliably the original attacker/defender
+      even after widening — see `Engagement.ids`' insertion-order comment in
+      autoCamera.ts), matching the same "not a bespoke brawl camera mode"
+      simplicity call the Auto Camera TODO above already made for the actual
+      camera framing.
+- [ ] Real in-browser visual polish (the CSS-only crit/kill flash
+      animation's actual timing/feel, the HP bar's color-threshold
+      transitions) only spot-checked via Playwright DOM assertions, not an
+      extended human eyes-on-it watch session — same standing caveat the
+      Auto Camera section above already carries for its own zoom/pan feel.
 
 ## Species-dependent shelter ease and egg-defense lethality — built, see DESIGN.md
 
@@ -2197,6 +2259,116 @@ not something this pathfinding pass itself caused or is positioned to fix.
       two shipped (comfort discount + build-tick halving) — judged
       sufficient and validated as such, but a real option if more predator
       ease is wanted later.
+
+## Rapport: agent-to-agent relationship graph — built, see DESIGN.md
+- [x] Sparse `Agent.rapport?: Record<string, RapportEdge>` (score -1..1,
+      `lastInteractionTick`), lazy read-time decay (`RAPPORT_DECAY_PER_TICK`
+      = 0.9977, ~300-tick half-life), prune-on-touch below
+      `RAPPORT_PRUNE_THRESHOLD` (0.02), and a hard per-agent cap
+      (`RAPPORT_MAX_EDGES_PER_AGENT` = 16) with real weakest/stalest-first
+      eviction (rng-tie-broken, threaded from `world.rng`).
+- [x] Fed by four real, existing trigger events (not invented ones): herd
+      food delivery (+0.03 both ways), joint mob-defense — the guardian
+      branch of `applyPredationInstincts` (+0.06 both ways), bonding
+      (+0.6 both ways, a real jump not an incremental nudge), and
+      herd-conflict clash hits between the same two individuals (-0.06 both
+      ways, never herd/species-wide).
+- [x] Two real consumers: mate preference (`reproduction.ts`'s `mateScore`
+      gains a `RAPPORT_DISTANCE_BONUS` = 3 discount term alongside the
+      existing `STATUS_DISTANCE_BONUS`) and herd-conflict targeting/
+      escalation (`herdConflict.ts`'s `findRivalOccupant` biases toward an
+      existing grudge target, `herdConflictChance` gains a
+      `HERD_CONFLICT_GRUDGE_SCALE` = 0.4 re-escalation bonus).
+- [x] 20 new engine tests, all 745 engine tests passing including
+      determinism.test.ts unmodified. Real 5000-8000-tick runs (seeds 42, 7,
+      20260903) confirm the graph stays genuinely bounded (max 9 edges on
+      any one agent across all three runs, cap of 16 never actually reached)
+      and both consumers do real, measurable work — see DESIGN.md's
+      "Rapport" section for the full numbers.
+- [ ] **Honest finding, not a bug in this feature**: `foodDelivered` fired
+      0-1 times total across all three 8000-tick validation runs —
+      `applyHerdSupport`'s own real-run gate (well-fed, non-threatened,
+      carry headroom, a hungry herd-mate in range) is apparently rare to
+      satisfy in this sim's actual population dynamics. Bonding and
+      herd-clash are this graph's two real workhorse triggers in practice,
+      not food delivery. If herd food delivery itself ever gets a real-run
+      tuning pass to fire more often, this rapport channel gets more real
+      signal for free — not something to chase specifically for rapport's
+      sake.
+- [ ] **Open follow-up, not done**: extend rapport into natal dispersal — an
+      agent with strong existing bonds inside its herd should plausibly
+      resist leaving (a real discount on `dispersal.ts`'s own trigger
+      chance/threshold), the mirror of what this pass already did for mate
+      preference.
+- [ ] **Open follow-up, not done**: egg-defense willingness scaling with
+      rapport toward the egg's other parent/herd-mates — not attempted this
+      pass; `applyEggDefense`'s current model is unconditional ("defend to
+      death") regardless of any relationship.
+- [ ] **The actual next step this foundation exists for, per direct
+      discussion with the user**: the eventual player-as-a-node recruitment
+      mechanic — a player builds real rapport with individual agents (the
+      same graph, the player just becomes another id it can hold edges
+      toward), and which specific herd members actually want to join a
+      player's team depends on that real relationship, not just herd
+      membership. Explicitly NOT built in this pass — no player/UI concept
+      exists in this codebase yet. This TODO entry is the flagged
+      breadcrumb for when that work starts; see also the "Player / bonding
+      (deprioritized until sim depth lands)" section above, which this
+      eventually supersedes/merges into once real UI work begins.
+
+## Auto Camera battle-log follow-up (done — see DESIGN.md)
+
+- [x] Prioritize a queued/starting battle over whatever else is active or
+      queued.
+- [x] Replace continuous 0.25x slow-motion with genuine one-tick-at-a-time
+      stepping (`BATTLE_STEP_INTERVAL_MS`).
+- [ ] Open: retune `BATTLE_STEP_INTERVAL_MS` (currently 650ms) once actually
+      watched for real — no real-run/visual feedback on this exact value
+      yet, it's a first guess.
+
+## Player-recruitment design notes (exploratory, unbuilt — see DESIGN.md)
+
+- [ ] Four bonding verbs locked in by direct discussion: feed, fight-
+      alongside, **rescue** (the new special/high-stakes one — carry to
+      safety or craft/apply medicine when the target is critically
+      hurt/dying), and presence (demoted to lowest-priority/fourth). None
+      of the four have any code yet — this is design-only.
+- [ ] Rescue implies two real, unscoped follow-ups if ever built: (a) a new
+      narratable "critically hurt/near death" moment (nothing in the engine
+      currently distinguishes this from an ordinary low-HP tick), and (b) a
+      crafting/medicine system for the "heal it" half.
+- [ ] Overworld "faking"/region abstraction (simulate a compact per-region
+      summary off-screen, reconstruct a plausible live grid on visiting) and
+      the "notables vs. anonymous population" split it implies — still
+      fully deferred, not started; captured here only so the design
+      reasoning isn't lost.
+
+## Combat/species tile-sharing (done — see DESIGN.md)
+
+- [x] Combat approach (hunt/mob-fight/egg-defense/guardian-defense/forced-
+      movement lunge) never steps an attacker onto its target's exact tile.
+- [x] General same-species-only tile sharing on every non-shelter tile
+      (`occupancy.ts`'s `canEnterTile`), shelter kept as the deliberate
+      any-species exception.
+- [ ] **Open, honest follow-up, not attempted**: the species rule above only
+      gates ordinary *movement* — it doesn't retroactively separate agents
+      already co-located from two other placement paths: (a) `leveling.ts`
+      evolving an agent's species in place (no movement, no occupancy check
+      at all), and (b) `immigration.ts` spawning a fresh arrival via
+      `findWalkableNear` with no capacity/species check (a deliberate,
+      already-existing exemption — see DESIGN.md's "Tile capacity" section
+      for why immigration is intentionally capacity-blind). A real 3000-tick
+      seed-42 run showed a handful of stable different-species pairs from
+      exactly these two paths (an evolved `ivysaur` next to a `pidgey`, a
+      `wartortle` next to its own hatched offspring). Fixing this would mean
+      either (a) making evolution check/resolve tile-sharing at the moment
+      species changes, or (b) giving immigration spawn placement a
+      species-aware fallback search — both real, scoped pieces of work, not
+      attempted here given immigration's documented history of regressing
+      hard when given any capacity gate at all.
+
+## Web: varied/animated tile art and floor lighting texture (done)
+
 - [x] Web: varied/animated tile art — 7 tree variants, 2 boulder variants,
       4 bush variants, 2 wall variants (all hash-selected per tile, stable
       across frames), animated water (4 real wave-animation frames found

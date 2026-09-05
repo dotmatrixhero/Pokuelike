@@ -7710,6 +7710,300 @@ the hand-rolled-shim fallback:
    errors the whole run. This is real-browser confirmation of the actual
    wiring, not just the isolated state-machine logic from step 2.
 
+### Follow-up: zoom pulled back to 150%, and real 0.25x slow-motion for battles specifically
+
+**Direct asks, verbatim.** "Okay so ui wise I want a little more zoom out on
+auto cam. Maybe 150%." And: "And also slow down battles to .25x."
+
+**Zoom: `AUTO_CAM_ZOOM` (main.ts) is now a literal `1.5`**, down from
+`ZOOM_MAX` (2, i.e. 200%) — still a fixed level for the same reasons as
+before (see the original zoom writeup above), just a little less
+tight/claustrophobic per direct feedback. `zoomLabel` reads the raw `zoom`
+value as a percentage, so this shows as exactly "150%" in the UI.
+
+**Speed: battles get their own, much lower, always-applied target —
+`AUTO_CAM_BATTLE_SLOWDOWN_SPEED` (0.25x) in `autoCamera.ts`.** The existing
+`AUTO_CAM_SLOWDOWN_SPEED`/`SLOWDOWN_THRESHOLD_SPEED` pair (2x target, only
+kicking in at ≥4x) is unchanged and still governs every *other* notable
+category (immigration, courtship, hatch, evolution, death) exactly as
+before. Battles needed a genuinely different rule, not just a different
+number plugged into the same one: 0.25x is *slower than normal 1x/2x/3x
+speed*, so "only intervene when the viewer is already going fast" makes no
+sense here — the whole point of "slow down battles to .25x" is guaranteed
+cinematic slow-motion combat, whatever speed the viewer happened to have
+selected, even 1x. `applySlowdownIfNeeded` now branches on
+`this.active?.category === "battle"` before deciding whether/what to slow
+to:
+
+- **Battle**: always drops to `AUTO_CAM_BATTLE_SLOWDOWN_SPEED`, skipping the
+  ≥4x gate entirely — the only guard left is "don't bother saving/setting if
+  the viewer is already exactly at 0.25x" (nothing to restore in that case).
+- **Everything else**: unchanged ≥4x-only / 2x-target behavior, byte-for-byte
+  the same code path as before.
+
+Both paths still go through the exact same `savedSpeed`
+save/restore/`releaseSpeedOverride` machinery — a battle at 1x still
+remembers "1x" and puts it back afterward, not some default. This is the
+same mechanism, just a conditional target/threshold, which keeps the
+existing manual-override (`noteManualSpeedChange`) and no-double-save
+behavior (a second engagement starting mid-slowdown doesn't re-save) intact
+for both cases without duplicating any of that logic.
+
+**Verification (Playwright, real browser, `pnpm --filter @pokuelike/web dev`).**
+Confirmed live, not just via typecheck/build:
+
+- Auto Camera zooms to exactly `150%` (`#zoom-label`) the moment it starts
+  tracking any notable event.
+- Starting playback at a normal `1x` and letting a real battle break out: the
+  live `#speed-label` dropped to `0.25x` — confirmed at both `1x` and `8x`
+  starting speeds, i.e. the battle-specific slowdown fires regardless of the
+  ≥4x gate that governs every other category.
+- The same run, for a non-battle event: starting at `1x` stayed at `1x`
+  (below the ≥4x threshold, correctly untouched) and starting at `16x`
+  (index 6) dropped to `2x` for a non-battle event — the original ≥4x/2x
+  behavior, unchanged.
+
+## Battle Screen: a Pokémon-textbox-style view of what Auto Camera is following
+
+**Direct ask, verbatim.** "Can I get something outside of event log that
+kinda shows better text as the auto cam events are happening? Like, more
+pretty printed and sorta in a different collapsible view. Damage dealt,
+critical hits. More framed like a Pokémon battle." A direct extension of the
+just-shipped Auto Camera feature above, not a standalone request — this
+panel exists specifically to narrate whatever Auto Camera is currently
+following.
+
+**Decided: additive, not a replacement — the plain event log's auto-cam
+filter and this panel coexist.** `EventLogPanel.setAutoCamFilter` already
+narrows the log to a followed moment's participants with full precision
+(every event kind, every move-build modifier via `describeMoveModifiers`).
+This new panel (`packages/web/src/battleScreenPanel.ts`) is a second,
+differently-*formatted* view of a narrower slice of the same data — turn-by-
+turn prose for a battle's `fought`/`missed`/`herdClash`/`fainted`/death/flee
+events specifically, styled like a mainline battle text box, not a superset
+or a subset that makes the log redundant. Someone who wants exact numbers
+and every event kind still has the log; someone who just wants to watch the
+story now has somewhere better-framed to look. Both update off the exact
+same tick data (`main.ts`'s `step()` feeds both `eventLogPanel.ingest` and
+the new `battleScreenPanel.ingest`), so they never drift out of sync with
+each other.
+
+**Scope: every notable category gets a line here, not just battles.** The
+task brief explicitly said not to hard-restrict to battles "if other event
+types read well in this format too." They do — "2 bulbasaur arrived!", "Oh?
+charmander egg hatched!", "What? bulbasaur evolved into ivysaur!" all read
+fine in the same battle-textbox voice. Only `"battle"` gets the rich
+turn-by-turn scrollback + live HP bars treatment, though (see
+`sceneLine`/`battleLinesFor` in battleScreenPanel.ts): a one-shot moment
+doesn't have "turns" to scroll through, so it gets exactly one flavor-text
+line instead of an empty box with a single line rattling around in it.
+
+**Interaction model: a static, always-present collapsible panel that
+updates in place — not something that pops open/closed on its own.**
+Docked in `main` next to the Inspector panel (`#battle-screen-panel` in
+index.html), *not* inside the `#sidebar` drawer with the legend/event log —
+the drawer is closed by default and sits behind a toggle, which would defeat
+"as the auto cam events are happening": the whole point is seeing it the
+moment a battle starts without an extra click. It has its own Hide/Show
+button (`#toggle-battle-screen`), the same convention `#toggle-legend`
+already established, and shows a plain "Nothing to show" placeholder while
+idle rather than collapsing/expanding itself automatically. Considered
+auto-expanding on a new battle and auto-collapsing after — rejected because
+it would fight a viewer who deliberately collapsed it (every new battle
+would silently re-open something they just closed), the same "don't
+surprise the viewer by overriding their own choice" principle Auto Camera's
+own manual-override design already established for the camera/speed
+controls.
+
+**History model: a scrolling turn-by-turn log for the current battle,
+cleared when a new one starts.** A real mainline battle screen shows a short
+scrollback of the current fight's messages, not just the latest line — this
+does the same, capped at `MAX_LINES` (60) with the DOM only ever rendering
+the newest 40. The scrollback is keyed off a new `Engagement.seq` field
+added to `autoCamera.ts` (a monotonic id stamped once per real `Engagement`
+object) specifically so "the same battle widened by a pack-hunt assist" (an
+existing engagement's `ids` set gaining a member — not a new `seq`) can be
+told apart from "a genuinely new battle just got promoted" (a new `seq`),
+which `category`/`sourceKind` alone can't do since two unrelated battles in
+a row share both. `AutoCameraController.currentEngagement()` exposes this
+as a small `ActiveEngagementInfo` shape (`seq`/`category`/`ids`/`label`)
+rather than requiring the panel to reach into the controller's private
+state.
+
+**What's actually renderable, straight from what the engine already
+logs — no client-side combat recomputation.** Checked `events.ts`'s real
+`"fought"`/`"missed"`/`"herdClash"` shapes before assuming anything:
+
+- **Damage, crit, HP remaining**: all real, already on `fought`/non-missed
+  `herdClash` (`event.damage`, `event.critical`, `event.defenderHpRemaining`)
+  — rendered directly, not recomputed. (HP values can carry float noise from
+  elsewhere in the engine's combat math — e.g. "11.560000000000002" — which
+  is real, pre-existing engine behavior unrelated to this feature; this
+  panel rounds only for *display*, a presentation choice, not a claim the
+  underlying number is actually an integer.)
+- **Move name**: `fought`/`missed` carry `moveId` (a raw id like `"vineWhip"`)
+  but not a display name — resolved via the exact same live-attacker-lookup
+  `eventText.ts`'s `formatEvent` already used for the plain log
+  (`findMoveUsed`, now exported and reused rather than duplicated) to get
+  the move's real `MoveSpec.name` ("Vine Whip"). Best-effort: if the
+  attacker's since died/been pruned, falls back to the raw `moveId`, same
+  tradeoff the log already accepts.
+- **"It's super effective!" / "It's not very effective..."**: **not** on the
+  event — `events.ts` logs no effectiveness multiplier at all. This is the
+  one thing computed client-side, and deliberately via the engine's own
+  exported `typeEffectiveness(attackType, defenderTypes)` (typing.ts) — the
+  *real* type chart the engine's own damage math is built on, not a
+  reimplemented/guessed one that could drift from it. Inputs are the
+  resolved move's real `type` and the live defender `Agent`'s real `types`
+  array (denormalized onto every combat-capable agent at spawn) — both real
+  engine data, not fabricated. The one honest gap: if the defender agent has
+  already been pruned from `world.agents` (corpse persistence window
+  elapsed) by the time this renders, the callout is silently skipped rather
+  than guessed — an accepted, rare edge case for a live-observer panel.
+- **HP bars**: live `Agent.hp`/`maxHp`, read fresh every animation frame (not
+  just when a new line arrives) the same way `autoCamera.ts`'s own
+  `focusPos` re-reads live positions every frame — real data, not a
+  snapshot frozen at the moment of the last hit.
+- **Fainting/retreat/death conclusion lines**: straight from
+  `fainted`/`behaviorChanged("flee")`/`herdClash("retreated")`/`killed`/
+  `defeated` — the exact same three-signal conclusion set `autoCamera.ts`'s
+  `onBattleParticipantLeft` already recognizes, reused rather than
+  re-derived; a matching line also flags the panel's `.battle-screen-
+  concluded` visual state (dimmed "vs" header) once one fires.
+
+**Visual treatment: CSS-only, no animation library.** A crit/faint/kill line
+gets a brief highlight flash (`@keyframes battle-flash`, a background fade)
+applied only to the single newest such line (a `.battle-screen-line-newest`
+marker `BattleScreenPanel.render` adds to the last-rendered element) rather
+than to every crit-class line — the whole log is rebuilt from scratch on
+each dirty render (same "cheap, wholesale rebuild" pattern `EventLogPanel`
+already uses), so without that marker every past crit would replay the
+flash alongside a genuinely new one. Colors reuse the existing dark-theme
+CSS variables and the same color values `eventText.ts`'s `STORY_COLOR`
+already assigns to `fought`/`fainted`/`killed` — not a new palette.
+
+**Verification.** Same two-level approach the Auto Camera commit itself
+used:
+
+1. `pnpm -r typecheck`/`pnpm -r build` clean across all 4 packages.
+2. Real headless-browser runs (Playwright/Chromium, confirmed pre-installed
+   at `/opt/node22/lib/node_modules/playwright` in this environment) against
+   the actual `pnpm --filter @pokuelike/web dev` server: loaded the page,
+   set speed to max, toggled Auto Camera on, pressed Play, and polled the
+   live DOM. Directly confirmed, from real combat: the "vs" header with both
+   combatants' live species/level/HP bars; a real turn-by-turn line sequence
+   ("bulbasaur used Vine Whip! It's not very effective... spearow takes 6
+   damage! (HP left: 12)") with genuinely correct type-effectiveness text
+   (grass vs. a flying/normal-type defender computing to not-very-effective,
+   matching the real chart); a critical-hit callout; a fainted-participant
+   conclusion line; and, on a longer run, a non-battle scene line ("2
+   bulbasaur arrived!") confirming the panel renders immigration too, not
+   just battles. Also confirmed the Hide/Show toggle actually sets
+   `#battle-screen`'s `hidden` attribute. Zero console/page errors across
+   both runs.
+
+### Follow-up: merged into the Inspector panel as a real tab, not a second docked panel
+
+**Direct ask, verbatim.** "The battle log ui is great but it obscures the
+map. Can you have it be a tab actually built in where the population stats
+and stuff are? Just a different tab look at but you can switch back and
+forth." The standalone `#battle-screen-panel` from the original feature
+above (docked under the canvas, its own fixed `max-height`) cost the canvas
+real vertical space on top of the Inspector panel already there — the fix is
+to make it share the Inspector's existing footprint as a second tab, not add
+to it.
+
+**Decided: a thin visibility-only tab switcher in `main.ts`, neither panel
+module changed.** `renderInspector` (inspector.ts) and `BattleScreenPanel`
+(battleScreenPanel.ts) are completely unaware tabs exist — both still render
+into their own `#inspector`/`#battle-screen` divs exactly as before, on
+every tick/frame, regardless of which one is currently visible. The two divs
+are now DOM siblings inside one `.panel` (`#inspector-panel` in index.html),
+and a small `selectTab("inspector" | "battle-screen", manual)` function in
+main.ts is the *only* new logic — it toggles `.hidden` on the two content
+divs, `.playing`/`aria-selected` on the two new tab buttons
+(`#tab-inspector`/`#tab-battle-screen`, in `#inspector-panel`'s own
+`.panel-header`, replacing the old plain `<span>Inspector</span>` title),
+and shows/hides the "Clear [selection]" button (meaningless on the Battle
+Screen tab). This is deliberately the cheapest possible integration: neither
+panel's own render logic, dirty-tracking, or public API changed at all,
+which also means the two panels' existing "always render every frame,
+regardless of visibility" behavior (each already cheap — a handful of DOM
+nodes) is unchanged; the only new cost is two `.hidden` assignments.
+
+**A real, non-obvious CSS gotcha caught while wiring this up:** both
+`#inspector` and `#battle-screen` set their own unconditional `display`
+(`block` default / `display: flex` respectively) for their own internal
+layout needs. An *author* stylesheet's `display` declaration always beats
+the browser's own built-in `[hidden] { display: none }` rule regardless of
+selector specificity (origin priority, not specificity, decides between
+author and user-agent stylesheets) — so naively toggling `.hidden` on either
+div would have silently done nothing visually. Fixed with an explicit,
+higher-specificity `#inspector[hidden], #battle-screen[hidden] { display:
+none; }` override in index.html.
+
+**Interaction model: manual switching always works; auto-switching to
+Battle Screen on a new battle is a nice-to-have that respects a manual
+override for that same battle — deliberately mirroring Auto Camera's own
+existing manual-override pattern, not a new design language.** The user's
+own phrasing ("switch back and forth") made manual control non-negotiable,
+but leaving *only* manual control would regress the "as the auto cam events
+are happening" spirit the original standalone panel had (it just appeared).
+Landed on:
+
+- Clicking either tab button always switches immediately — no override logic
+  gates a manual click itself.
+- The moment Auto Camera starts tracking a *new* battle engagement (a fresh
+  `Engagement.seq`, from `currentEngagement()`), the tab auto-switches to
+  Battle Screen — `main.ts`'s `maybeAutoSwitchTab()`, called once per frame
+  alongside the existing `battleScreenPanel.setActive` call.
+- If the viewer manually switches back to Inspector *during* that same
+  battle, that choice sticks for the rest of it — recorded as
+  `tabManualOverrideForBattleSeq = <that battle's seq>` — so auto-switch
+  doesn't fight them back to Battle Screen on the very next frame. This is
+  byte-for-byte the same shape as `AutoCameraController`'s own
+  `viewerTookOver` flag for camera panning: a deliberate override sticks for
+  the duration of *this* engagement, but a genuinely *new* one (a different
+  `seq` — the next battle) is a fresh thing to show and earns the
+  auto-switch again, exactly as a new engagement re-earns camera control
+  even from a viewer who'd panned away from the last one.
+- Manually switching *to* Battle Screen (whether or not a battle is active)
+  clears any standing override — the viewer chose to look at it, so there's
+  nothing left to protect against.
+- Loading/reloading a world resets both the auto-switch and override
+  tracking and snaps the tab back to Inspector — a fresh world's battle
+  `seq`s (and every tracked agent id) are unrelated to whatever was on
+  screen a moment ago, the same "everything's meaningless now" reasoning
+  `AutoCameraController.reset()` already applies to its own state on a world
+  reload.
+
+**Sizing: the merged panel keeps the Inspector's existing footprint, not the
+sum of both former panels.** `#inspector-panel`'s existing `max-height`
+(46%, unchanged) now bounds whichever tab is showing — Battle Screen's own
+internal flex/scroll layout (`.battle-screen-log`'s `flex: 1` + `overflow-y:
+auto`) still works the same way inside that shared bound it did inside its
+own former panel, since the same "container has a real height ceiling, so
+flex-shrink squeezes the scrollable child to fit" mechanism applies either
+way. Net effect: the canvas gets back roughly the vertical space the
+standalone Battle Screen panel used to take, which was the entire point of
+this follow-up.
+
+**Verification (Playwright, real browser, `pnpm --filter @pokuelike/web dev`).**
+- `#battle-screen-panel` no longer exists in the DOM at all (confirmed via a
+  zero-count locator query) — it's genuinely gone, not just visually hidden.
+- Both tab buttons render inside `#inspector-panel`'s header; clicking
+  `#tab-battle-screen` hides `#inspector` and un-hides `#battle-screen` (and
+  vice versa for `#tab-inspector`) — confirmed via each div's real `.hidden`
+  state after each click, both directions, several times in the same
+  session.
+- Triggering a real battle with Auto Camera on and the Inspector tab
+  showing: the tab auto-switched to Battle Screen the moment the battle
+  engagement started, with the live "vs" header/HP bars/turn-by-turn lines
+  rendering in the now-visible `#battle-screen` div.
+- `#canvas-wrap`'s live bounding-box height was measured post-merge to
+  confirm the map now gets the vertical space the old second panel used to
+  occupy (no separate fixed-height panel below the canvas any more).
+
 ## Species-dependent shelter ease and egg-defense lethality: a direct predator-fragility follow-up
 
 **Direct ask, verbatim.** "I think I also want to make different species
@@ -7917,3 +8211,716 @@ real runs tested, honestly, it does.
   pick real, needle-moving levers rather than touch every one offered, and
   the comfort-discount + build-speed pair was judged sufficient and was
   validated as such.
+
+## Rapport: a real agent-to-agent relationship graph — the foundation for future player recruitment
+
+Direct, explicit framing from the user: a future evolution of this project
+from a pure ecosystem sim into a real game where a player recruits
+individual Pokémon by building rapport with them — a herd becomes the
+player's team, but which specific individuals actually want to join depends
+on a real relationship, not just herd membership. Direct quote on priority:
+"I think it's the most important thing right now." This section is
+deliberately scoped to the general, in-sim, **agent-to-agent** foundation
+only — no player/UI concept exists in this codebase yet, and none is built
+here. The point of building it now, before any player-facing mechanic
+exists, is that the general relationship graph needs to already be a real,
+mechanically load-bearing part of the sim (not a UI-only stat invented later
+purely to serve recruitment) — the same reasoning this codebase has already
+applied to herd status, disposition, and herd conflict: a system a future
+feature can plug into is only trustworthy if it's already doing real work on
+its own.
+
+### Decided
+
+1. **Sparse, not a dense matrix.** `Agent.rapport?: Record<string,
+   RapportEdge>` (types.ts), keyed by the OTHER agent's id —
+   `RapportEdge = { score: number; lastInteractionTick: number }`. Absence
+   means neutral/unacquainted, not a stored zero: most agents in a real run
+   never interact with most other agents, so most pairs should cost nothing
+   at all, the same "don't store what nothing has touched" instinct behind
+   every other optional field on `Agent`. Score ranges **-1 to 1** —
+   deliberately signed, not a plain friendship counter, so the same
+   structure represents both a real bond (`bonded`, food delivery,
+   mob-defense — all positive) and a real grudge (`herdClash` — negative).
+2. **Lazy, read-time decay, not a per-tick global sweep.** `rapport.ts`'s
+   `decayedRapportScore(edge, tick)` computes `edge.score *
+   RAPPORT_DECAY_PER_TICK ** (tick - edge.lastInteractionTick)` — pure
+   arithmetic, no stored intermediate state, evaluated fresh every time a
+   consumer reads an edge (`rapportScore`) or a trigger touches one
+   (`adjustRapport`). This is the same "computed from elapsed ticks on
+   read/touch" shape `Tile.grazingPressure`'s decay established, chosen
+   specifically *instead of* an actively-ticked-every-agent-every-tick sweep
+   (the way `Agent.herdConflictCooldownTicks`/`digestingTicksRemaining` are
+   ticked down inside `tickAgentNeeds`) for a structural reason:
+   `grazingPressure` and the cooldown counters all live on a value already
+   being visited by an existing per-tick scan (the tile grid, or the acting
+   agent's own needs tick) — decaying them costs nothing extra. A
+   relationship graph has no such free ride: decaying every edge of every
+   agent every tick would mean a new O(agents × edges) pass with no existing
+   scan to piggyback on, purely to keep values fresh that mostly nothing is
+   reading on most ticks. Lazy, read-time decay means the cost is paid
+   exactly when (and only when) an edge is actually consulted or touched —
+   the "cheaper than a per-tick global sweep" call the task brief itself
+   flagged as the likely right shape.
+   - `RAPPORT_DECAY_PER_TICK = 0.9977`, chosen for a ~300-tick half-life
+     (`0.5 ** (1/300) ≈ 0.9977`) — the same order of magnitude as this
+     codebase's other "sustained, not a single bad tick" social/behavioral
+     time constants (`MATE_ISOLATION_TICKS` = 200, `HERD_CONFLICT_COOLDOWN_TICKS`
+     = 80), deliberately much faster than `grazingPressure`'s own decay
+     (0.004/tick, tuned for a totally different multi-hundred-tick
+     food-patch regrowth cycle) — a relationship should survive a herd-mate
+     briefly stepping out of sight, but a genuine multi-hundred-tick dry
+     spell with zero fresh interaction should measurably fade it back toward
+     stranger-neutral.
+3. **Pruned on touch, once decayed below a real threshold — the sparsity
+   guarantee's other half.** `RAPPORT_PRUNE_THRESHOLD = 0.02`: any edge
+   whose |decayed score| falls under this is deleted outright rather than
+   left sitting at a value indistinguishable from "never interacted"
+   forever. Checked both on write (`adjustRapport`, e.g. a strong grudge
+   nudged back toward 0 by later goodwill) and, deliberately, on plain read
+   (`rapportScore` opportunistically deletes a stale edge it discovers has
+   decayed under threshold) — a real edge that nothing ever interacts with
+   again would otherwise never get touched by a write again either, and
+   would sit in the map forever; letting the read path prune too means a
+   pair that simply stops interacting genuinely leaves the sparse structure,
+   not just conceptually.
+4. **A hard cap on edges per agent, independent of decay/pruning.**
+   `RAPPORT_MAX_EDGES_PER_AGENT = 16` — a defensive bound in the same "should
+   never be approached in practice, but bounds the pathological case" role
+   as `SHELTER_CLUSTER_SCAN_CAP`. This matters specifically because decay/
+   pruning alone can't guarantee sparsity under heavy, sustained interaction:
+   a long-lived, stable, socially active herd could in principle accumulate
+   real interaction partners faster than a ~300-tick half-life clears stale
+   ones. `evictWeakestEdge` fires whenever a genuinely *new* partner (not an
+   existing one being adjusted) would push an agent past the cap — it evicts
+   by current decayed |score| first (the least-meaningful relationship to
+   keep), then by staleness (`lastInteractionTick`), then, for a genuine tie
+   on both, by `rng` (always threaded from `world.rng`, never bare
+   `Math.random`, per this codebase's determinism rules — see the note
+   below). Confirmed by a dedicated unit test that this holds even for 20+
+   uniformly strong, uniformly fresh edges (a case decay/pruning would never
+   touch on their own).
+5. **Interaction magnitudes — reusing real, existing trigger events, not
+   inventing new ones.** Every delta below is applied via
+   `strengthenRapportMutual` (both participants' opinion of each other
+   moves, not just one side):
+   - **`RAPPORT_FOOD_DELIVERY_DELTA = 0.03`** — support.ts's
+     `applyHerdSupport`, on a real `foodDelivered` event (carrier and
+     receiver). The smallest magnitude here on purpose: an ordinary,
+     opportunistic errand, not a significant moment — real repetition
+     between the same two individuals is meant to be what eventually adds
+     up to something a consumer actually feels.
+   - **`RAPPORT_MOB_DEFENSE_DELTA = 0.06`** — predation.ts's existing
+     guardian mechanic (`findHerdmateInDanger` inside
+     `applyPredationInstincts`): when a herd-mate actually lands a hit
+     defending another that's currently fleeing/fighting a threat, both come
+     away with a real, positive nudge. Twice the food-delivery magnitude — a
+     real, risk-bearing act (picking a fight with whatever's threatening a
+     herd-mate), not just running food over — but still modest, since a herd
+     with an active predator problem produces many of these between the same
+     pairs over a real run (confirmed below), so repetition still does most
+     of the work here too. (This codebase's other, more literal "mob"
+     mechanic — several prey converging on one predator threat,
+     `mobThreshold`/`countHerdAllies` — was considered as the hook instead;
+     the guardian branch was chosen because it names an explicit, singular
+     "the one defended" `herdmate`, which is the cleaner, more literal match
+     for "the defender(s) and the one defended" than the mob branch's
+     implicit, shared "whoever's nearest to the predator.")
+   - **`RAPPORT_BONDING_DELTA = 0.6`** — reproduction.ts's `applyMateSeeking`,
+     on first real contact (the `bonded` event, gated by
+     `Agent.bondedPartnerId` so it fires exactly once per pair). Deliberately
+     a real, immediate jump, not an incremental nudge: bonding is already a
+     deliberate, rare, significant event with no repetition path of its own
+     (unlike food delivery/mob-defense, which happen repeatedly between the
+     same pair), so the one application has to carry the whole weight of
+     "these two are now mates." 0.6 lands solidly in "clearly a bond"
+     territory on the -1..1 scale without maxing it out outright, leaving
+     room for a bonded pair's later real interactions to push it higher.
+   - **`RAPPORT_HERD_CLASH_DELTA = -0.06`** — herdConflict.ts's
+     `resolveRivalryHit`, applied to exactly the attacker/defender pair (never
+     species- or herd-wide) on a real landed hit (`outcome: "hit"` or
+     `"retreated"` — never `"missed"`, which never actually connected).
+     Magnitude-matched to mob-defense's positive delta (same size, opposite
+     sign): a single clash is a real, felt negative moment, but sustained
+     rivalry between the same specific pair — which the mechanic's own
+     cooldown/re-blocking structure makes likely once two herds keep
+     recontesting the same tile — is what's meant to build a real, escalating
+     grudge, confirmed by a real run below.
+6. **Consumer #1 — mate preference (reproduction.ts).** `mateScore`
+   (`nearestMate`'s ranking function) already composed a real-distance
+   discount for herd status (`STATUS_DISTANCE_BONUS`, from the "Herd status"
+   feature) before this — rapport is added alongside it, in the exact same
+   "discount off effective distance, distance still dominates a real gap"
+   composition, not a parallel mechanism:
+   `distance - statusAdvantage*STATUS_DISTANCE_BONUS -
+   rapportAdvantage*RAPPORT_DISTANCE_BONUS`. `RAPPORT_DISTANCE_BONUS = 3`
+   (slightly above `STATUS_DISTANCE_BONUS`'s 2) — a real, earned relationship
+   is judged a somewhat stronger signal than relative herd rank, but both
+   stay small next to `mateSearchRadius`'s ~3-7 tile range, so this still
+   only ever tips a close call, never overrides a genuine distance gap. Only
+   the *positive* half of rapport attracts here (`rapportAdvantage` clamps
+   negative scores to 0) — a grudge doesn't repel mate choice on its own,
+   that's the herd-conflict consumer's job, not this one's.
+7. **Consumer #2 — herd-conflict targeting/escalation (herdConflict.ts).**
+   Two real behavioral hooks, both biased by `rapportScore(agent, rival.id,
+   ...)`:
+   - **Targeting**: `findRivalOccupant` (which of possibly several eligible
+     occupants at the contested tile becomes the fight target) now scores
+     candidates the same "distance minus a scaled discount" way `mateScore`
+     already established — `dist - grudge*RAPPORT_TARGET_BIAS_TILES`
+     (`RAPPORT_TARGET_BIAS_TILES = 1`), so a specific individual with an
+     existing grudge is preferred over a merely-nearer stranger at
+     `RIVAL_DETECT_RADIUS`'s tight 1-tile range.
+   - **Escalation chance**: `herdConflictChance` gains a
+     `HERD_CONFLICT_GRUDGE_SCALE = 0.4` term — at a full -1.0 grudge, the
+     per-tick escalation roll gets the same order-of-magnitude boost as full
+     boldness+aggression (`HERD_CONFLICT_DISPOSITION_SCALE`, also 0.4) — a
+     real grudge is meant to be a comparably strong driver of re-escalating a
+     fight as raw disposition, not a token nudge. Only the negative half of
+     rapport biases this (a positive relationship never suppresses
+     escalation below the plain disposition-driven baseline) — this consumer
+     is specifically about grudges, the mirror of consumer #1 being
+     specifically about bonds.
+
+### Built, real-run findings
+
+`packages/engine/src/rapport.ts` (new module, the data structure/decay/
+prune/cap plus the tuning constants above) and small hooks at each of the
+four trigger sites plus the two consumer sites listed above. 20 new engine
+tests (`rapport.test.ts`) cover: absence reads as neutral (no stored zero);
+clamping to [-1, 1]; representing both a bond and a grudge on the same
+structure; `decayedRapportScore`'s pure elapsed-ticks decay; pruning on both
+write and read once decayed under threshold; the hard cap holding with real
+eviction, including the "cap holds even before decay/pruning would have
+helped" case (all-fresh, all-strong edges); rng-determinism of the eviction
+tie-break under a genuine tie, given the same seeded `world.rng`; each of
+the four real triggers (food delivery, bonding, joint mob-defense, herd
+clash) actually creating/strengthening the right edge on the right pair
+(and, for herd clash, explicitly confirming an uninvolved same-herd
+bystander is untouched — never a herd/species-wide effect); a real
+behavioral mate-preference test (an otherwise-identical setup, isolated from
+`STATUS_DISTANCE_BONUS`'s own confound by using solitary candidates, flips
+from preferring a nearer stranger to preferring a farther bonded candidate
+purely because of the rapport edge); and two real herd-conflict behavioral
+tests (the *exact same* rng roll flips from refusing to accepting a fight
+purely because of an added grudge edge; and targeting a specific grudge
+individual over an equally-near stranger). All 745 engine tests pass,
+including the unmodified `determinism.test.ts` acceptance test — this
+feature's only new randomness (the eviction tie-break) is threaded from
+`world.rng` at every real call site, and a same-seed-twice full `tickWorld`
+run (verified separately at the runner level, 3000 ticks, seed 42) produces
+a byte-identical event log.
+
+**Real 5000-8000-tick runs, the three standard seeds (42, 7, 20260903),
+feature on** — the graph-size/bounding question first, since a brand-new
+per-agent structure is a real performance risk if it isn't actually kept
+sparse:
+
+| seed | ticks | living agents (end) | total rapport edges (end) | max edges on any one agent (end) | max edges on any one agent (peak, whole run) |
+|---|---|---|---|---|---|
+| 42 | 8000 | 13 | 8 | 2 | 5 |
+| 7 | 8000 | 15 | 27 | 9 | 9 |
+| 20260903 | 8000 | 60 | 99 | 7 | 7 |
+
+The cap (16) was never actually reached by any agent in any of these three
+runs — decay + pruning kept the structure genuinely sparse on their own at
+this population scale, exactly as intended; the cap's own dedicated unit
+test (not a real run) is what actually exercises eviction. Total edge count
+tracks population size roughly linearly (seed 20260903's population of 60
+carries about 1.65 edges/agent on average, seed 7's 15 carries 1.8/agent) —
+no runaway growth over the run in any seed (seed 42's edge count peaks at 19
+around tick 4500 then *falls* to 8 by tick 8000 as agents die/edges decay,
+which is exactly the intended shape, not a leak).
+
+**Trigger frequency, honestly reported — one channel barely fires in a real
+run**: across the three runs, `bonded` fired 14-55 times and `herdClash`
+fired 6-26 times (hit+retreated+missed combined) — both real, frequent
+drivers of the graph. `foodDelivered`, by contrast, fired 0-1 times total
+across all three 8000-tick runs — the existing `applyHerdSupport` mechanic's
+own real-run gate (a well-fed, non-threatened herd-mate with carry headroom
+noticing a hungry ally within `HERD_SUPPORT_RADIUS`) is apparently rare to
+actually satisfy in this sim's real population dynamics, independent of
+anything this feature added. This is reported honestly rather than
+papered over: `RAPPORT_FOOD_DELIVERY_DELTA` is real and correctly wired
+(confirmed by its own unit test), but in practice, bonding and herd-clash
+are this graph's two real workhorse triggers in an actual run, not food
+delivery — a genuine finding about this sim's existing food-delivery
+mechanic, not a bug in this feature.
+
+**Consumer #1 (mate preference) — a real, if seed-variable, effect**: of
+matings (`bonded` events) where a rapport edge already existed between the
+two individuals *before* that tick's bonding call (i.e. they'd already
+interacted — via food delivery or mob-defense — as ordinary herd-mates
+before pairing up), compared against an honest "pure chance" baseline (the
+background density of positive rapport edges among all living agents at
+that moment — roughly what fraction of any two random agents would already
+hold one):
+
+| seed | matings with pre-existing positive rapport | background chance baseline |
+|---|---|---|
+| 42 | 0/14 (0%) | 5.1% |
+| 7 | 4/21 (19.0%) | 8.1% |
+| 20260903 | 11/55 (20.0%) | 2.2% |
+
+Two of three seeds show a real, meaningfully-above-baseline rate (roughly
+2.3x and 9x the background chance), one seed shows none at all — read
+honestly as genuine seed-to-seed variance at this sample size (14-55
+matings per run is not a lot to detect a modest effect), not oversold as a
+uniform win. The clean, unconfounded proof this consumer does real work is
+the dedicated behavioral unit test above (an otherwise-tied setup flips
+choice purely on the rapport edge, isolated from every other scoring
+signal) — the real-run numbers are supporting, directionally-consistent
+color on top of that, not the primary evidence.
+
+**Consumer #2 (herd conflict) — real re-escalation between the same pairs
+shows up in every run with any clashes at all**: of the distinct
+attacker/defender pairs that ever landed a real clash hit, the fraction that
+clashed more than once (a real repeat, i.e. the exact re-escalation this
+consumer is meant to make more likely) was 2/4 (seed 42), 6/11 (seed 7), and
+4/10 (seed 20260903) — roughly half of all real clash pairs in every run
+that had any. This alone isn't clean proof of the grudge mechanism
+specifically (two herds recontesting the same crowded tile would tend to
+re-meet the same rival somewhat even without any rapport bias, since
+`herdConflict.ts`'s own trigger structure — sustained blocking at the same
+tile — naturally recreates the same standoff), so, as with consumer #1, the
+clean unconfounded proof is the dedicated unit test: the *exact same* rng
+roll that fails against a stranger succeeds against the identical rival once
+a strong existing grudge is added, and, separately, a grudge individual is
+chosen as the fight target over an equally-near stranger. The real-run
+repeat-pair rate is honest, real-run color confirming the mechanism has
+somewhere to act (rivalries do recur), not the isolated proof of the bias
+itself.
+
+**A real, isolated A/B was attempted and explicitly discarded as
+unreliable, consistent with this file's own established standard** (see the
+"Herd conflict" section's own identical finding): temporarily zeroing
+`RAPPORT_DISTANCE_BONUS` and `HERD_CONFLICT_GRUDGE_SCALE` and re-running the
+same three seeds produced wildly different downstream population/event
+counts on two of the three seeds (e.g. seed 20260903: 55 bondings/60 living
+agents with the feature at full strength vs. 16 bondings/23 living agents
+with it zeroed) — not because either flag directly consumes extra rng
+draws (both are pure, no-rng arithmetic comparisons), but because changing
+*which specific individual gets chosen as a mate or a rival* is itself a
+real, cascading change to simulation state (a different pairing produces
+different agents in different places doing different things every following
+tick), the same "a small deterministic change early cascades into a
+completely different trajectory" dynamic this file has already documented
+for `herdConflict.ts` and the tile-capacity tightening. Single-seed A/B
+is not a trustworthy signal for this kind of change; the trustworthy
+evidence is the structural guarantee (the dedicated, unconfounded behavioral
+unit tests) plus the honest, seed-variable real-run distribution reported
+above.
+
+### Explicitly not done here (see TODO.md)
+
+- Nothing player-facing. This section is the general, in-sim,
+  agent-to-agent foundation only, built specifically because the user named
+  a future player-recruitment mechanic (a herd becomes the player's team,
+  but which individuals actually want to join tracks a real relationship,
+  not just herd membership) as the current top priority — but no player/UI
+  concept exists in this codebase yet, and none is built here. The natural
+  extension point, when that work starts, is treating the player as just
+  another node this same graph can hold an edge toward.
+- No extension of rapport into natal dispersal (an agent resisting leaving
+  behind a herd it has strong existing bonds to), egg-defense willingness
+  scaling with rapport toward the egg's other parent, or any other existing
+  mechanic beyond the two consumers built here — real, scoped follow-ups,
+  not attempted in this pass (see TODO.md).
+- No new `SimEvent` kind for a rapport change itself (no `rapportChanged`
+  narration) — every trigger already narrates its own real event
+  (`foodDelivered`/`bonded`/`herdClash`/the guardian fight's own `"fought"`),
+  and this feature deliberately reuses those rather than adding a second,
+  parallel log entry for the same real moment. A UI/narrator surfacing an
+  agent's rapport standing directly (e.g. an inspector panel showing "close
+  bonds"/"grudges") is a real, separate follow-up, not attempted here —
+  `packages/web` was out of scope for this task.
+
+## Auto Camera follow-up: battle priority + one-tick stepping
+
+**Direct ask, verbatim.** "One more battle log thingy I want to prioritize
+battles if there are multiple things goin on.. And step through them one
+tick at a time rather than super slow speed. It's too hard to follow."
+
+**Battle priority.** Auto Camera's queue was plain FIFO across all six
+notable categories — a battle that started while, say, an immigration
+one-shot was already on screen just waited its turn behind it. Two changes
+in `autoCamera.ts`:
+- `AutoCameraController.popNextEngagement` (replacing a bare `queue.shift()`
+  in `reconcile`) now scans the queue for any `category: "battle"` entry
+  and pops that first, falling back to plain FIFO among whatever's left. A
+  battle queued behind three other moments still jumps straight to the
+  front the instant it's this controller's turn to promote something.
+- `onBattleHit` now also preempts whatever's *currently active*, not just
+  what's queued: the moment a brand-new battle starts (not an existing one
+  widening via a new hit — that path already just extends the existing
+  engagement), if `this.active` is a non-battle one-shot, its
+  `expiresOrLastActiveTick` is stamped to the current tick. `reconcile`'s
+  existing `tick >= this.active.expiresOrLastActiveTick` check then retires
+  it on the very next pass and immediately promotes the battle — no new
+  expiry code path needed, just feeding the existing one an already-expired
+  deadline. A battle never preempts another battle (there's only ever one
+  battle engagement live; a second `fought`/`herdClash` pair widens or
+  starts its own queued entry, which the priority-pop above still surfaces
+  next).
+
+**One-tick stepping, not continuous slow-motion.** The `AUTO_CAM_BATTLE_SLOWDOWN_SPEED = 0.25` fixed-speed
+slow-motion from the previous pass (see "UI polish" section above) was
+still *continuous* — a `setInterval` firing every ~667ms at that speed,
+which is fast enough that several hits or a hit-plus-a-flee could still
+land close enough together to blur past a viewer, especially with the
+Battle Screen log's line-by-line flash animation competing for attention.
+Direct ask was explicit: step through it, don't just slow it down further.
+Replaced with a completely different mechanism rather than a smaller speed
+value:
+- `AutoCameraHost` gained two new methods, `enterBattleStep()`/
+  `exitBattleStep()`, replacing the battle branch's old `setSpeed`/
+  `getSpeed` calls entirely (non-battle categories still use the original
+  `setSpeed`-based 2x/4x-threshold slowdown, unchanged).
+- `main.ts` implements them with a new `battleStepMode` flag consulted at
+  the top of `scheduleLoop()`: while true, the ordinary speed-slider-driven
+  interval math is bypassed completely and ticking runs on its own fixed
+  `BATTLE_STEP_INTERVAL_MS = 650` timer instead — exactly one `step()` call
+  per beat, decoupled from whatever `speedIndex` the viewer had selected
+  before the battle started (and restored untouched once
+  `exitBattleStep()` fires). Still gated on the existing `playing` check in
+  `scheduleLoop` — if the viewer is paused, a battle starting doesn't
+  quietly un-pause the world for them, same as the old speed-override
+  behavior never did either.
+- `AutoCameraController` tracks this with a new `battleStepping` boolean
+  (mirroring `savedSpeed`'s "already applied, don't re-apply" guard, but as
+  its own flag since this path never touches `getSpeed`/`setSpeed` at all),
+  set in `applySlowdownIfNeeded` and cleared in `releaseSpeedOverride`
+  alongside the ordinary speed-restore logic — so `reset()` (world reload,
+  or the viewer toggling Auto Camera off mid-battle) still correctly hands
+  ticking back to the speed slider through the one existing cleanup path.
+
+**Not done here.** No manual "click to advance" control — `650ms` is a
+fixed, automatic cadence, not a step button the viewer has to press
+per-tick; the ask was "too hard to follow" at continuous slow motion, not
+"I want manual control," so automatic-but-discrete seemed like the right
+read. If `650ms` turns out too fast or slow once watched for real, it's a
+single named constant to retune, not a design change.
+
+## Player-recruitment design notes (exploratory — nothing built yet)
+
+Captured here so this ongoing design thread doesn't get lost between
+sessions; none of this has a mechanic behind it yet, and none of it was
+asked to be built now — the rapport *engine* above is the only piece of it
+that's actually implemented so far, as the deliberately player-agnostic
+foundation this would eventually build on.
+
+**"Faking" an overworld.** Direct exploratory question: can other biome
+tiles be faked rather than fully simulated while off-screen, the way
+Crusader Kings/RimWorld/Dwarf Fortress abstract regions the player isn't
+currently looking at? Recommendation discussed: yes — simulate a compact
+per-region summary (population counts, notable individuals, rough
+herd/rival state) between visits rather than ticking every agent on every
+unvisited grid every tick, and reconstruct a plausible-looking live grid
+the moment the player jumps there. This implies a **"notables vs. anonymous
+population" split**: a small number of individually-tracked, persistent
+agents (with real stories, moves, rapport edges) per region, with the rest
+of the population represented in aggregate until/unless something promotes
+one to notable (e.g. the player interacts with it directly). Follow-up
+question raised and answered: yes, an anonymous unit's "story" (its moves,
+its specific history) is effectively generated on the spot the moment it's
+promoted to a notable, not pre-simulated in full off-screen.
+
+**Player bonding verbs — locked in as four, not three:**
+1. **Feed** — reliable, slow, grindable. Repeated small positive nudges,
+   same shape as the existing `foodDelivered` rapport trigger already
+   built for herd-mates.
+2. **Fight alongside** — helping the target fight off a predator
+   threatening it (proactive assistance *before* a crisis lands), reusing
+   the existing joint mob-defense mechanic's shape. Rarer and riskier than
+   feeding.
+3. **Rescue** — the special, high-stakes one, added specifically because
+   "presence is nice but too passive... it has to feel special, intentional,
+   with a payoff... the Pokémon chooses you as much as you chose it."
+   Concretely: intervening when the target is critically hurt/dying (at or
+   near a death-branch moment, not just "in a fight") — either carrying it
+   to safety or applying/crafting medicine to heal it (the latter implying
+   a real item-crafting hook, not just a flag flip). Rare, unrepeatable-
+   feeling, and mutual in a way the other three aren't: the Pokémon
+   remembers being saved specifically by *you*, not generic assistance.
+4. **Presence** — patient, passive, time-invested; watching over a
+   vulnerable moment like sleep or egg incubation, reusing the existing
+   sleep-watch/incubation mechanics. Explicitly demoted to the fourth/
+   lowest-priority verb once "rescue" was proposed — presence alone was
+   judged too passive to be a primary path, but still worth keeping as one
+   option among several.
+
+**Open, unbuilt questions this raises for later:** what a "vulnerable
+moment" or "critically hurt" threshold actually reads as UI-side, whether
+rescue needs its own new `SimEvent` kind (a real death-branch near-miss
+isn't currently narrated as a distinct moment), and the crafting/medicine
+system rescue's second half implies — none of this has been scoped, let
+alone built.
+
+## Sprite/tile art polish: bigger sprites, a real facing-mirror bug, muted plants, movement interpolation
+
+Four direct, rapid-fire follow-ups on the newly-merged sprite/tile art (see
+the merge commit bringing in `claude/pokemon-roguelike-sim-5rje5a`'s real
+tile art and Pokémon sprites): "Pokemon sprites are tiny make em bigger,"
+"they don't face the right direction, like they face left and move right,
+might have to mirror sprite," "plant tiles are too colorful, make em match
+the ascii," and "give the Pokémon some interpolated animation too."
+
+**Bigger sprites.** `renderer.ts`'s `drawAgent` used to squeeze the sprite
+into an exact `TILE_SIZE` (20px) box. New `SPRITE_SCALE = 1.6` constant:
+sprites now draw at `TILE_SIZE * SPRITE_SCALE` and are bottom-anchored (feet
+on the actual occupied tile, body/head overflowing upward into the tile
+above) rather than centered in the box — the natural way an overworld sprite
+larger than its tile is normally drawn. A first-guess constant, not derived
+from anything; retune if it still reads wrong once watched for real.
+
+**Real facing-mirror bug, found and fixed — twice, the first pass was wrong.**
+First pass judged `_left.png`/`_right.png` from tiny, chat-scaled thumbnails
+and concluded they were duplicates of the same left-facing pose; the "fix"
+was to always load `_left` and mirror it via a canvas transform for
+`"right"`. Direct follow-up report: "still see them walking backwards a
+lot." Re-checked properly this time — real 10x-upscaled crops via a local
+Python/Pillow script, not chat thumbnails — and the first read was simply
+wrong: `_left.png` and `_right.png` are genuine, correctly hand-drawn mirror
+images of each other (confirmed on pikachu and charizard: `_left.png`'s
+eye/snout sits on the image's *right* side, `_right.png`'s sits on the
+*left* — i.e. the files are real art, just swapped relative to their
+filenames). The old canvas-mirror "fix" therefore made things consistently
+backwards in *both* directions (loading the right-facing `_left` file
+unflipped for `"left"`, and flipping it — producing left-facing art — for
+`"right"`). Real fix, simpler than the first attempt:
+- `sprites.ts`'s `getSprite` now swaps which file loads for which
+  direction: `"left"` loads `_right.png`, `"right"` loads `_left.png`
+  (up/down untouched). No canvas transform involved at all — the art was
+  never broken, just mislabeled.
+- `renderer.ts`'s `drawAgent` dropped the `translate`+`scale(-1, 1)` mirror
+  transform entirely — drawing the resolved image directly is correct now.
+- Verified directly: a browser test loading `pikachu_right.png` for
+  direction `"left"` and `pikachu_left.png` for direction `"right"` side by
+  side confirmed each faces the correct way with zero transform applied.
+
+Lesson for next time: judge sprite orientation from a real upscaled crop,
+never a small chat-rendered thumbnail — the first pass's entire
+misdiagnosis traced back to that one shortcut.
+
+**Muted plant tiles, matching ASCII.** The tile-style renderer used to fill
+an entire food/flora/seedling tile with a near-solid wash of its flavor's
+full-saturation `FLAVOR_FG` accent (colors like a vivid pink `[255,140,190]`
+meant as small ASCII-glyph foregrounds, not full-tile fills) — direct
+complaint: too colorful. The ASCII render style never had this problem: a
+plant tile there gets the same faint ground wash every other tile gets, plus
+a small colored *glyph* standing on top, not a full-tile color fill. Ported
+that same treatment into the tile style instead of the old
+`mix(TERRAIN_BG.floor, accent, tile.stock)`-to-near-full-color fill: a faint
+35%-alpha floor wash, plus the tile's real `TERRAIN_GLYPH`/`FLAVOR_GLYPH`
+character drawn in the accent color, fading from 30% to 80% alpha with
+`tile.stock` (same "fades toward nothing as it depletes" idea the old fill
+had, just applied to a glyph's alpha instead of a whole-tile color mix).
+
+**Movement interpolation.** The engine has no sub-tick position — an agent
+occupies exactly one integer tile per tick (see `facingOf`'s doc comment) —
+so a real sprite used to visibly teleport one tile at a time every tick,
+which reads far worse with actual art than it ever did with a single ASCII
+letter. Purely a client-side rendering illusion, `renderer.ts`:
+`interpolatedPos` keeps a per-agent `renderPos` (separate from the engine's
+real `agent.pos`) and eases it a `dt`-scaled fraction of the way toward the
+real tile position every animation frame (`1 - Math.exp(-ANIM_CATCHUP_RATE
+* dt)`, frame-rate-independent since `dt` is real elapsed seconds, tracked
+by a module-level `frameDeltaSeconds()` clamped to 0.25s so a backgrounded
+tab regaining focus can't produce one huge catch-up slide). A jump of
+`TELEPORT_SNAP_TILES` (3) or more in one tick — a real relocation/dispersal/
+fresh spawn, not a walk — snaps instantly instead of sliding across the map.
+Scoped to the sprite/tile render style only: ASCII mode deliberately
+collapses to exactly one glyph per grid cell (`drawWorldAscii`'s `agentAt`
+map), which a fractional/interpolated position would break, so it's left
+untouched.
+
+**Verification (real browser, Playwright against `pnpm --filter web dev`).**
+- Loaded seed 42 in tile style, pressed Play, screenshotted at 156%/200%
+  zoom — real sprite art (Bulbasaur, water/grass tile art) rendering
+  correctly, noticeably larger than one tile, standing on their tiles.
+- Plant tiles read as faint dots/small colored glyphs (a purple `&`, a pink
+  `%`) on a near-black wash, not colorful filled squares — matches the
+  ASCII style's look as asked.
+- The synthetic mirror-transform test described above, confirming the
+  facing fix is a real correct mirror and not just "looks different."
+- `pnpm -r typecheck` clean across all 4 packages; `packages/engine`'s full
+  784-test suite passed (untouched by this pass — sprite/tile rendering is
+  `packages/web`-only).
+- Not independently re-verified live in a browser: the interpolation easing
+  itself (a static screenshot can't show smoothness) — the math is
+  straightforward frame-rate-independent exponential easing and passed
+  typecheck, but nobody has watched it move in a real running session yet.
+
+## Two units in combat should never share a tile, and (broader follow-up) generally only same-species units should
+
+**Direct asks, verbatim, back to back.** "Two units in combat should never share the same tile. Just as a rule for clarity." Then, mid-investigation: "I think generally only units of the same species should share a space."
+
+**Combat approach never lands on the target's tile.** Investigated first
+(background agent, `Explore`): every hunt/mob-fight/egg-defense/guardian-
+defense approach path shares one root cause — attack **range** is Manhattan
+distance, but the fallback **movement** toward an out-of-range target is
+8-directional (diagonals included, via `movement.ts`'s `stepToward` and
+`pathfinding.ts`'s BFS-backed `stepTowardMovingTarget`), and neither ever
+excludes the target's own tile as a legal step. Whenever attacker and target
+are diagonally adjacent (Chebyshev 1, but Manhattan 2 — just out of a
+melee-range check), the very first movement candidate tried **is** the
+target's tile.
+
+Fix, `movement.ts`: `stepToward` gained an opt-in `stopAdjacent` parameter —
+when true, `firstWalkable` also excludes any candidate equal to the target,
+falling through to an orthogonal neighbor instead of the diagonal-onto-
+target candidate. Opt-in and defaulted off, not a global behavior change:
+most `stepToward` callers (seeking a food/water/shelter tile, migrating to a
+destination) genuinely want to arrive exactly on `target`. Threaded through
+the four real combat-approach call sites in `predation.ts` (main hunt,
+guardian/herd-mate defense, mob-fighting, egg defense) and into
+`applyForcedMovement`'s "closer" (lunge) case in `movement.ts` — a forced
+pull/lunge is still combat, so it shouldn't drag the mover onto the other
+party's exact tile either.
+
+`pathfinding.ts`'s `stepTowardMovingTarget` needed its own version of the
+same fix, since `findPath`'s destination is always `target.pos` itself, so
+the final real BFS step toward a live target always **is** the target's
+tile. First attempt (discard the path, hold position instead of taking that
+last step) broke a real existing test: against a stationary target it works
+fine, but a target that relocates by exactly 1 tile every single tick,
+independent of the pursuer, is common in this codebase's own moving-target-
+pursuit tests — and a *stationary* pursuer waiting one diagonal tile short
+forever never gets a second chance to close the gap if the target's own
+motion never happens to walk back into range. Real fix: fall through to the
+same `stepToward(..., stopAdjacent=true)` guard instead of holding position
+— from a diagonal-adjacent tile this converges to a genuine Manhattan-1 tile
+in one hop.
+
+That in turn surfaced a second, narrower real edge case: an *actively
+repositioning* pursuer sidestepping every tick against a target moving by
+exactly 1 tile every tick, in a plain period-2 alternation precisely matched
+to the pursuer's own once-per-tick reaction, can lock into a stable,
+never-intersecting 2-cycle (confirmed via debug instrumentation — 297 of
+300 ticks stuck oscillating between the same two tile pairs). No real
+engine-driven behavior in this codebase moves like that (flee/wander/
+dispersal all have real randomness or genuinely converge) — this only shows
+up against a synthetic test double built to move on a fixed clock — so
+`predation.test.ts`'s and `reproduction.test.ts`'s own moving-target-
+pursuit tests had their synthetic prey/mate movement detuned from an exact
+period-2 pattern to period-3 (`[1, 1, -1][tick % 3]`), which still
+genuinely exercises "target keeps moving, forcing route recomputation"
+(the tests' actual point) without exactly matching the pursuer's reaction
+period. A real regression test was added alongside this
+(`predation.test.ts`, "never lands the hunter on the same tile as its prey
+… units in combat should never share a tile") asserting `hunter.pos` is
+never `toEqual` `target.pos` across a real chase-to-kill run, not just that
+the hunt eventually succeeds.
+
+**Broader follow-up: species-exclusive tile sharing, generally.**
+`occupancy.ts`'s `canEnterTile` previously only gated *how many* /
+*how heavy* the occupants of a tile could be — never *which species*.
+Direct follow-up ask, mid-investigation: "generally only units of the same
+species should share a space." Added: the `OccupancyIndex` now also tracks
+a `Set` of species present per tile (built in the same per-tick pass as the
+existing count/weight maps), and `canEnterTile` now blocks a newcomer whose
+species doesn't match every existing live occupant's, checked *before* the
+ordinary headcount/weight rules — on every tile except shelter, which
+explicitly keeps its own, already-documented universal (any-species) rule
+("only 2 units and an egg can share a single tile of shelter" was never
+species-restricted to begin with — see this file's shelter section). An
+already-empty tile still always admits any species first, same "never
+totally unable to stand anywhere" guarantee the weight rule already had.
+
+**Real-run finding — this is a movement-time gate, not a retroactive
+guarantee.** Ran a real 3000-tick seed-42 headless check sampling tile
+occupancy every 10 ticks: zero combat/hunt-pursuit overlaps (the movement-
+layer fix above holds), but 49 sampled snapshots still showed a handful of
+distinct different-species pairs stably co-located on the same non-shelter
+tile — e.g. an evolved `ivysaur` still sharing a tile with a `pidgey`, a
+`wartortle` still sharing a tile with its own hatched offspring. Root cause,
+confirmed by reading the actual code paths (not guessed): `canEnterTile` is
+only consulted when an agent *moves* onto a tile — it says nothing about an
+agent that's already standing somewhere and then either (a) evolves in
+place (`leveling.ts` mutates `Agent.species` directly, no movement, no
+occupancy check at all — a parent standing next to its own about-to-hatch
+egg can end up "different species" from a neighbor purely by evolving where
+it already stood), or (b) is a fresh immigrant spawned directly onto a
+`findWalkableNear` tile (`immigration.ts`) with no capacity/species check at
+all — a **deliberate**, already-documented exemption (immigration and
+hunt/mate pursuit are both intentionally capacity-blind; DESIGN.md's own
+"Tile capacity" section has the real-run regression numbers from when that
+gate was tried and reverted). Retrofitting species-exclusivity onto either
+of those two paths risks reintroducing that exact same regression and was
+not attempted here — flagged as a real, honest, scoped follow-up in
+TODO.md, not silently left undocumented.
+
+**Verification.** `pnpm -r typecheck` clean across all 4 packages; the full
+790-test engine suite (6 new tests: 3 occupancy species-exclusivity cases +
+1 shelter-stays-universal case + 1 hunt-never-shares-a-tile regression,
+alongside the 2 existing moving-target-pursuit tests' detuned synthetic
+movement) passed twice in a row to rule out flakiness. Real headless run
+(seed 42, 3000 ticks) confirmed zero combat-overlap violations and
+population health unaffected (16 alive at tick 3000, consistent with this
+seed's other documented runs this session).
+
+## "Silly simulated lighting stuff": per-tile vignette, faux shadows, warm shimmering lights
+
+**Direct asks, verbatim, back to back.** "Let's add some nice lighting. Like have some warm color lights kinda do aoe shimmering shit." Then: "I want radial light effects per tile, if possible. Faux shadows under the Pokémon. Just silly simulated lighting stuff." And, separately, mid-implementation: "Why is the ground tile on tile mode not the nice dirt ones we put in?" — a real, unrelated bug this pass also fixed.
+
+**Floor texture was basically invisible — fixed first.** The just-merged
+sibling branch's floor-texture pass (`getFloorTexture`, real cave-floor/
+dirt-path crops) drew at `0.05 + elevation * 0.03` opacity — 5-8% at most,
+so the "nice dirt tiles" the user was expecting were there in the code but
+essentially invisible in practice, just a faint tint under the existing "."
+glyph. Bumped to `Math.min(1, 0.82 + elevation * 0.18)` — the dirt art
+itself already has real tonal variation, so unlike a single flat color it
+doesn't need heavy fading to avoid looking like a loud solid fill.
+
+**Per-tile radial vignette.** New `vignetteStamp()` in `renderer.ts`: a
+20x20 offscreen canvas built once (module-level cache), radial gradient
+brighter-white center fading to a darker edge. Stamped via `drawImage` onto
+every tile in the tile-style render (`drawTileVignette`, called at all four
+tile-loop exit points — floor/tile-art/plant/fallback branches) rather than
+calling `createRadialGradient` fresh per tile: a real gradient object
+~5000+ times a frame across a full 90x60 map would be meaningfully more
+expensive than stamping one cached bitmap that many times. Modulated by the
+same `tileLight` per-tile pseudo-random ambient factor `drawWorldAscii`
+already uses for its "unevenly lit stone" look, so both render styles read
+as the same underlying lighting concept rather than two unrelated systems.
+Purely decorative, zero gameplay signal.
+
+**Faux shadows.** A flat dark ellipse (`rgba(0,0,0,~0.4)` scaled by the
+same corpse/fainted alpha the sprite itself uses) drawn at each agent's
+actual occupied tile — pinned to the tile, not the oversized sprite
+bounding box above it (see `SPRITE_SCALE`), so a tall sprite's shadow still
+reads as ground contact under its feet rather than under its head. Drawn
+first, before the sprite/fallback rect, so it sits underneath.
+
+**Warm shimmering AOE lights.** New `drawWarmLights`, called after the
+agent-drawing loop (so it can glow on top of sprites) and before
+`drawWeather`. Two source kinds, both already thematically warm in this
+codebase's own existing palette rather than invented colors: live fire-type
+agents (`TYPE_COLOR.fire`) and "sunbeam" terrain tiles (a permanent
+high-elevation light patch from `worldgen.ts`, `TERRAIN_FG.sunbeam`).
+Rendered with `globalCompositeOperation = "lighter"` (additive blending) so
+it reads as actual light brightening the scene — including punching
+through `drawDayNightTint`'s night-darkening the way a real light source
+should, rather than a colored shape painted flatly on top regardless of
+draw order. "Shimmer" is two overlapping sine waves at different, non-
+matching frequencies (a single sine reads as a steady metronome pulse; two
+together read as an organic flicker), phase-offset per source via a cheap
+position hash (`hashLightPhase` — same technique `sprites.ts`'s water-tile
+animation phase-offset already established) so multiple lights in view
+don't pulse in unison. Pure visual flourish — never touches `world.rng`,
+zero gameplay effect, scoped to the tile render style only (matches every
+other art-polish pass this session, which left ASCII mode untouched).
+
+**Verification.** `pnpm -r typecheck` clean across all 4 packages, the
+existing 790-test engine suite unaffected (this is `packages/web`-only —
+lighting has no gameplay effect to test). Real browser screenshots (seed
+42, tile style, various zoom levels): dirt floor texture now clearly
+visible instead of a faint tint; the per-tile vignette reads as a subtle
+"polka dot" ambient pattern across plain floor; a Charmander showed a real
+warm orange glow bleeding onto the tiles around it; faint dark shadow
+blobs visible under agent sprites' feet. Not independently verified: the
+shimmer's actual pulsing motion (a static screenshot can't show animation,
+same honest gap as the earlier movement-interpolation pass) and whether a
+"lighter"-blended `sunbeam` glow reads well against every terrain it can
+neighbor (only spot-checked a handful of real map tiles, not every
+adjacency).

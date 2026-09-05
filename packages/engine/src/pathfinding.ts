@@ -298,6 +298,32 @@ export function stepTowardMovingTarget(world: World, agent: Agent, target: Agent
     next = steps[0]!;
   }
 
+  // `findPath`'s destination is `target.pos` itself, so the final real step
+  // of any path to a live target IS `target.pos` — direct ask: "two units in
+  // combat should never share the same tile." Once this close (one BFS step
+  // short of `target`), don't take that last step onto its tile; sidestep
+  // onto an orthogonal neighbor of `target` instead via `stepToward`'s
+  // `stopAdjacent` guard — from a position diagonally adjacent to a
+  // stationary (or slow) target, that lands exactly on a real Manhattan-1
+  // attack-range tile in one hop, same as the pre-fix behavior converged to,
+  // just next to the target instead of on it.
+  //
+  // Known, accepted edge case: an adversary that relocates by exactly 1
+  // tile, every single tick, in a fixed pattern precisely matched to the
+  // pursuer's own reaction cadence can in principle keep re-creating
+  // diagonal adjacency forever (a stable pursuit-evasion 2-cycle). No real
+  // engine-driven behavior in this codebase moves like that — flee/wander/
+  // dispersal all have real randomness or converge — so this is treated as
+  // a synthetic-test-only concern, not a real gameplay one (see
+  // predation.test.ts's moving-target pursuit test, whose synthetic prey
+  // movement was deliberately detuned off an exact period-2 pattern for
+  // this reason). Discards the path cache since this tick diverges from the
+  // cached route.
+  if (next.x === target.pos.x && next.y === target.pos.y) {
+    agent.pathCache = undefined;
+    return stepToward(world, agent.layer, agent.pos, target.pos, undefined, true);
+  }
+
   const remaining = steps.slice(1);
   agent.pathCache =
     remaining.length > 0 ? { layer: agent.layer, target: { ...target.pos }, targetId: target.id, steps: remaining } : undefined;

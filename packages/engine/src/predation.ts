@@ -9,6 +9,7 @@ import { resolveShape } from "./moves.js";
 import type { MoveSpec } from "./moves.js";
 import { canBreed, grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
 import { FINISHING_POOL_FRACTION, applyAllyEffect, nearestAllyEffectTarget } from "./support.js";
+import { RAPPORT_MOB_DEFENSE_DELTA, strengthenRapportMutual } from "./rapport.js";
 import { isPathClear } from "./fov.js";
 import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt, setTile } from "./world.js";
@@ -638,7 +639,9 @@ function applyEggDefense(world: World, agent: Agent, ctx: LevelingContext | unde
     if (canAttackFromHere(world, agent, threat, distance)) {
       resolveHit(world, agent, threat, log, faintKind, ctx, distance, rng);
     } else {
-      agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
+      // stopAdjacent=true — combat approach never lands on the target's own
+      // tile (see stepToward's doc comment).
+      agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos, undefined, true);
     }
     log?.record({
       kind: "eggDefended",
@@ -1387,8 +1390,15 @@ export function applyPredationInstincts(
         agent.fightTarget = threat.id;
         if (canAttackFromHere(world, agent, threat, distance)) {
           resolveHit(world, agent, threat, log, "defeated", ctx, distance, rng);
+          // Rapport: joint mob-defense — `agent` just actually landed a hit
+          // defending `herdmate`, a real, risk-bearing act. Different
+          // guardians defending the same herdmate over multiple ticks/events
+          // is what makes this genuinely "joint" over a run. See
+          // rapport.ts's doc comment.
+          strengthenRapportMutual(world, agent, herdmate, RAPPORT_MOB_DEFENSE_DELTA, rng);
         } else {
-          agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
+          // stopAdjacent=true — see stepToward's doc comment.
+          agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos, undefined, true);
         }
         return true;
       }
@@ -1423,7 +1433,8 @@ export function applyPredationInstincts(
       if (canAttackFromHere(world, agent, threat, distance)) {
         resolveHit(world, agent, threat, log, "defeated", ctx, distance, rng);
       } else {
-        agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
+        // stopAdjacent=true — see stepToward's doc comment.
+        agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos, undefined, true);
       }
       return true;
     }

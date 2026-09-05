@@ -11,6 +11,23 @@ export type SpriteDirection = "up" | "down" | "left" | "right";
 
 const cache = new Map<string, HTMLImageElement | null>();
 
+/**
+ * A path like "/sprites/pikachu_down.png" resolves normally against the
+ * real dev server / built `packages/web/dist` (served from `public/`) —
+ * but the single-file observer artifact has no server behind that path at
+ * all, so it would silently 404 there. The artifact-splicing step embeds
+ * every referenced asset as a base64 data URI in a `window.__INLINE_ASSETS__`
+ * map (path -> data URI) injected as an inline `<script>` before this
+ * bundle; this indirection checks that map first and only falls back to the
+ * bare path (the normal dev/build case, where the map is simply absent)
+ * when it isn't there. Keeps the ordinary Vite dev/build flow completely
+ * unchanged.
+ */
+function resolveAssetUrl(path: string): string {
+  const inline = (window as unknown as { __INLINE_ASSETS__?: Record<string, string> }).__INLINE_ASSETS__;
+  return inline?.[path] ?? path;
+}
+
 function loadSprite(cacheKey: string, src: string): HTMLImageElement | null {
   const cached = cache.get(cacheKey);
   if (cached !== undefined) return cached;
@@ -19,14 +36,25 @@ function loadSprite(cacheKey: string, src: string): HTMLImageElement | null {
   cache.set(cacheKey, null);
   img.onload = () => cache.set(cacheKey, img);
   img.onerror = () => cache.set(cacheKey, null);
-  img.src = src;
+  img.src = resolveAssetUrl(src);
   return null;
 }
 
 export function getSprite(spriteKey: string, direction: SpriteDirection = "down"): HTMLImageElement | null {
-  const direct = loadSprite(`${spriteKey}_${direction}`, `/sprites/${spriteKey}_${direction}.png`);
+  // Real finding, checked at full resolution (a first pass mistakenly
+  // judged these from tiny scaled-down thumbnails and got it backwards —
+  // see DESIGN.md): "_left.png" and "_right.png" ARE genuine, correctly
+  // hand-drawn mirror images of each other — they're just swapped.
+  // "_left.png" actually depicts the pose facing right (eye/snout on the
+  // image's right side), "_right.png" actually depicts the pose facing
+  // left. Confirmed on pikachu and charizard at 10x scale. So the fix is
+  // just swapping which file loads for which requested direction — no
+  // canvas mirroring needed, the art is already correct once you ask for
+  // the right file.
+  const resolvedDirection = direction === "left" ? "right" : direction === "right" ? "left" : direction;
+  const direct = loadSprite(`${spriteKey}_${resolvedDirection}`, `/sprites/${spriteKey}_${resolvedDirection}.png`);
   if (direct) return direct;
-  if (direction === "down") return null;
+  if (resolvedDirection === "down") return null;
   // Still loading, or this species has no art for `direction` specifically
   // (an incomplete set) — the "down" sprite is always the safest fallback
   // rather than dropping straight to the letter while the real one loads.

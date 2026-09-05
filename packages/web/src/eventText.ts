@@ -12,7 +12,7 @@ import type { MoveSpec, SimEvent, World } from "@pokuelike/engine";
  * is what the ask ("show what was used and all its build modifiers") is
  * really after rather than a strict historical record.
  */
-function findMoveUsed(event: { attackerId: string; moveId: string }, world: World): MoveSpec | undefined {
+export function findMoveUsed(event: { attackerId: string; moveId: string }, world: World): MoveSpec | undefined {
   const attacker = world.agents.find((a) => a.id === event.attackerId);
   return attacker?.moves?.find((m) => m.id === event.moveId);
 }

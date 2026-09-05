@@ -84,6 +84,43 @@ describe("occupancy: surface weight-based tile capacity", () => {
   });
 });
 
+describe("occupancy: only same-species agents share a non-shelter tile", () => {
+  // Direct ask: "I think generally only units of the same species should
+  // share a space." Checked before the ordinary headcount/weight capacity
+  // rules on every non-shelter tile — shelter keeps its own, deliberately
+  // universal (any-species) rule (see the "shelter capacity" describe block
+  // below).
+  it("blocks a different-species newcomer even when there's plenty of weight/headcount capacity left", () => {
+    const world = createWorld(10, 10);
+    const pos = { x: 4, y: 4 };
+    world.agents = [makeAgent({ id: "a", species: "bulbasaur", pos, maxHp: 1 })];
+    const newcomer = makeAgent({ id: "b", species: "charmander", maxHp: 1 });
+    expect(canEnterTile(world, newcomer, "surface", pos)).toBe(false);
+  });
+
+  it("still admits a same-species newcomer, subject to the ordinary weight cap", () => {
+    const world = createWorld(10, 10);
+    const pos = { x: 4, y: 4 };
+    world.agents = [makeAgent({ id: "a", species: "bulbasaur", pos, maxHp: 1 })];
+    const newcomer = makeAgent({ id: "b", species: "bulbasaur", maxHp: 1 });
+    expect(canEnterTile(world, newcomer, "surface", pos)).toBe(true);
+  });
+
+  it("applies the same species rule on the flat-headcount underground/canopy layers too", () => {
+    const world = createWorld(10, 10);
+    const pos = { x: 2, y: 2 };
+    world.agents = [makeAgent({ id: "a", species: "diglett", pos, layer: "underground", maxHp: 1 })];
+    const newcomer = makeAgent({ id: "b", species: "sandshrew", layer: "underground", maxHp: 1 });
+    expect(canEnterTile(world, newcomer, "underground", pos)).toBe(false);
+  });
+
+  it("an empty tile still always admits any species — the species rule only applies once occupied", () => {
+    const world = createWorld(10, 10);
+    const newcomer = makeAgent({ id: "b", species: "charmander", maxHp: 1 });
+    expect(canEnterTile(world, newcomer, "surface", { x: 7, y: 7 })).toBe(true);
+  });
+});
+
 describe("occupancy: underground/canopy flat headcount cap", () => {
   it("admits up to FLAT_TILE_HEADCOUNT_CAP agents regardless of weight", () => {
     const world = createWorld(10, 10);
@@ -149,6 +186,14 @@ describe("occupancy: shelter capacity (2 adults + 1 egg per tile, adjacency-exte
     world.agents = [makeAgent({ id: "a", pos, maxHp: 9999 }), makeAgent({ id: "b", pos, maxHp: 9999 })];
     expect(canEnterShelter(world, "surface", pos)).toBe(false);
     expect(canEnterTile(world, makeAgent({ id: "c", maxHp: 9999 }), "surface", pos)).toBe(false);
+  });
+
+  it("shelter keeps its own universal, any-species rule — unlike ordinary tiles, a different species can share it", () => {
+    const world = createWorld(10, 10);
+    const pos = { x: 5, y: 5 };
+    setTile(world, "surface", 5, 5, "shelter");
+    world.agents = [makeAgent({ id: "a", species: "bulbasaur", pos, maxHp: 1 })];
+    expect(canEnterTile(world, makeAgent({ id: "b", species: "charmander", maxHp: 1 }), "surface", pos)).toBe(true);
   });
 
   it("a shelter tile with only 1 adult still admits a 2nd (weight is irrelevant on shelter terrain)", () => {
