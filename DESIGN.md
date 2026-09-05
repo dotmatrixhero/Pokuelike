@@ -9856,20 +9856,57 @@ in order:
    real seeded history ("there was once a great Hero here") instead of
    needing thousands of live-simulated ticks to ever produce its first
    notable — genuinely interesting, not scoped or designed further here.
-4. **Neighbor pass** — explicitly different in character from the first
-   three: not guaranteed to run immediately, "small and lightweight,"
-   triggered on demand and probably scoped by locality (e.g. only when a
-   player is actually near a boundary). It re-checks a zone against its
-   actual (by-then-possibly-generated) neighbors and tunes the zone toward
-   consistency with them. This is the real answer to the lazy-generation
-   edge-consistency risk flagged just above: rather than demanding perfect
-   one-shot consistency from overworld facts alone, a zone is allowed to be
-   "good enough" initially and gets reconciled with its neighbors
-   opportunistically once they actually exist nearby. Open question,
-   flagged but not resolved: if a zone was already visited and its terrain
-   remembered, can the neighbor pass still visibly change it later, or
-   should it be restricted to just the boundary ring rather than the
-   zone's interior? Not decided.
+4. **Neighbor consistency pass** — explicitly different in character from
+   the first three: not guaranteed to run immediately, "small and
+   lightweight," triggered on demand and probably scoped by locality (e.g.
+   only when a player is actually near a boundary). It re-checks a zone
+   against its actual (by-then-possibly-generated) neighbors and tunes the
+   zone toward consistency with them. This is the real answer to the
+   lazy-generation edge-consistency risk flagged just above: rather than
+   demanding perfect one-shot consistency from overworld facts alone, a
+   zone is allowed to be "good enough" initially and gets reconciled with
+   its neighbors opportunistically once they actually exist nearby.
+   **Resolved** (was an open question in an earlier pass of this doc, now
+   settled by direct follow-up: "I don't think it changes while they're
+   there"): this pass is strictly about *static, historical* geology
+   (does a river/elevation gradient line up across the boundary) — it
+   settles once, at generation/first-visit time, and does not keep quietly
+   re-editing a zone's terrain after a player has already seen it. Anything
+   that visibly changes a zone while someone is actually there is a
+   different mechanic entirely — see below.
+
+### A separate, distinct mechanic: dynamic cross-zone propagation (not a generation pass)
+
+Direct follow-up, explicitly distinguishing this from the neighbor
+consistency pass above: "let's say we added an avalanche... I'd want it to
+spill into neighbors. Or a cave collapse. Or a wildfire or flash flood. It
+needs to affect neighbors dynamically — in the 'present'. That is different
+than the historical neighbor pass... so maybe we split those two types of
+things up?" Confirmed as a real, correct split, not a variation of the same
+idea:
+
+- The neighbor consistency pass (above) is about **history settling once**
+  — did the generated geology agree at the seam.
+- Dynamic cross-zone propagation is about a **live, ongoing simulation
+  event actually crossing a boundary while it's happening** — an
+  avalanche, cave collapse, wildfire, or flash flood that starts in one
+  zone and spreads into a neighboring one in real (simulated) time. This
+  belongs with the live per-tick simulation, not the generation pipeline
+  at all — a fundamentally different system, triggered by in-sim events
+  rather than by world-generation or by a player approaching a boundary.
+- **A real precedent for this already exists in the codebase**:
+  `world.weatherCells` (see `weather.ts`) already sweep effects across a
+  single zone's map live. Cross-zone dynamic propagation is plausibly the
+  same underlying idea — a live effect with a position and a radius/spread
+  rule — just needing to cross a zone boundary into a neighboring zone's
+  own simulation instead of stopping at the current map's edge. Not
+  designed further here (how a zone that isn't currently being actively
+  simulated would even receive/apply an incoming effect from a
+  neighbor is a real, unresolved question — the whole "fake it" per-zone
+  model implies most neighboring zones aren't running a live tick loop at
+  all most of the time), just flagged as the natural extension point and a
+  real, concrete example list (avalanche, cave collapse, wildfire, flash
+  flood) to design against later.
 
 Not sequenced against the "first built slice" below or scoped into a build
 yet — still vision-stage, same as the rest of this section.
