@@ -179,6 +179,54 @@ export function tickCooldowns(agent: Agent, ticks = 1): void {
 export const MOVE_SCORE_TEMPO_WEIGHT = 0.15;
 
 /**
+ * How much longer, past a move's own `cooldownTicks`, its recency discount
+ * (below) keeps fading back to full strength — direct ask: "cooldown
+ * should play a part. So like you should cycle moves." `pickBestMove` used
+ * to be pure greedy-best with no memory at all, so against a fixed
+ * opponent it would spam the exact same top-scoring move every single
+ * time it came off cooldown; there was nothing pushing it toward the
+ * *other* moves in its kit. A window of `cooldownTicks * 2` means a
+ * fast-cooldown move gets real, sustained pressure toward rotating (its
+ * discount hasn't fully faded by the time it's usable again), while a
+ * slow, already-naturally-infrequent move doesn't get discounted for a
+ * disproportionately long time relative to its own pace. Floored at
+ * `MOVE_RECENCY_MIN_WINDOW_TICKS` so a 0-cooldown move (the window would
+ * otherwise collapse to 0, i.e. no discount at all — usable again the very
+ * next tick with its discount already fully faded) still gets real, if
+ * brief, rotation pressure instead of none.
+ */
+export const MOVE_RECENCY_WINDOW_MULTIPLIER = 2;
+export const MOVE_RECENCY_MIN_WINDOW_TICKS = 3;
+/**
+ * The score multiplier a move gets the INSTANT it's used (recovers
+ * linearly to 1 over the window above) — a real discount, not a ban: a
+ * genuinely superior move (e.g. 3x-effective STAB) stays the clear best
+ * pick even fresh off cooldown, and this only tips a genuinely close call
+ * toward a different move instead.
+ */
+export const MOVE_RECENCY_MIN_MULTIPLIER = 0.6;
+
+/**
+ * How much `move`'s score should be discounted for having been used
+ * recently — 1 (no discount) if it's never been used, or if `tick`/
+ * `lastUsedTick` isn't being tracked at all (every bare-scoring test
+ * caller that omits `tick` from `pickBestMove`). Ticks-based, not
+ * uses-based, per direct confirmation ("Ticks realtime"): this reads
+ * `Agent.moveLastUsedTick`, set by `useMove` below, and fades purely with
+ * real elapsed ticks — a long fight against one target still cycles back
+ * to the top move once enough real time passes, not only once some other
+ * move happens to get thrown first.
+ */
+function moveRecencyFactor(lastUsedTick: number | undefined, move: MoveSpec, tick: number | undefined): number {
+  if (tick === undefined || lastUsedTick === undefined) return 1;
+  const window = Math.max(MOVE_RECENCY_MIN_WINDOW_TICKS, move.cooldownTicks * MOVE_RECENCY_WINDOW_MULTIPLIER);
+  const ticksSinceUse = tick - lastUsedTick;
+  if (ticksSinceUse >= window) return 1;
+  const progress = Math.max(0, ticksSinceUse) / window;
+  return MOVE_RECENCY_MIN_MULTIPLIER + (1 - MOVE_RECENCY_MIN_MULTIPLIER) * progress;
+}
+
+/**
  * Picks the off-cooldown, in-range (when `distance` is given) move that does
  * the most expected damage per tick against `defenderTypes` — a simple
  * greedy heuristic, not full tactical planning. Undefined means nothing
@@ -194,8 +242,14 @@ export const MOVE_SCORE_TEMPO_WEIGHT = 0.15;
  * different owned move *was* in range — a real bug, not a hypothetical one,
  * fixed by filtering to reachable moves before scoring instead of scoring
  * first and checking range after.
+ *
+ * `tick` (typically `world.tick`) is optional, same shape as `distance` —
+ * omitted, the recency discount above is skipped entirely (every bare
+ * unit-test caller that doesn't pass it keeps getting pure greedy-best,
+ * unchanged). Every real combat call site should pass it, same as
+ * `distance`.
  */
-export function pickBestMove(attacker: Agent, defenderTypes: PokemonType[], distance?: number): MoveSpec | undefined {
+export function pickBestMove(attacker: Agent, defenderTypes: PokemonType[], distance?: number, tick?: number): MoveSpec | undefined {
   // `burrow` moves (a flee-only escape, resolved directly in predation.ts's
   // flee branch) never make sense as an attack, so they're excluded here.
   // `targetsAlly` moves are NOT excluded, on purpose: the ally-buff/heal
@@ -226,7 +280,8 @@ export function pickBestMove(attacker: Agent, defenderTypes: PokemonType[], dist
     let effectiveness = typeEffectiveness(move.type, defenderTypes);
     if (move.resistanceBreaker && effectiveness < 1) effectiveness = Math.min(1, effectiveness * move.resistanceBreaker.multiplier);
     const bonusVsType = move.bonusVsType && defenderTypes.includes(move.bonusVsType.type) ? move.bonusVsType.multiplier : 1;
-    const score = move.power * stab * effectiveness * tempo * avgHits * selfBonus * bonusVsType;
+    const recency = moveRecencyFactor(attacker.moveLastUsedTick?.[move.id], move, tick);
+    const score = move.power * stab * effectiveness * tempo * avgHits * selfBonus * bonusVsType * recency;
     if (score > bestScore) {
       bestScore = score;
       best = move;
@@ -235,12 +290,17 @@ export function pickBestMove(attacker: Agent, defenderTypes: PokemonType[], dist
   return best;
 }
 
-export function useMove(agent: Agent, move: MoveSpec): void {
+/** `tick` (typically `world.tick`) feeds `pickBestMove`'s recency discount via `Agent.moveLastUsedTick` — optional, same as everywhere else this file threads it through, so a caller with no tick handy just skips recording it (that move is then never discounted for recency, same as never having been used). */
+export function useMove(agent: Agent, move: MoveSpec, tick?: number): void {
   agent.moveCooldowns = agent.moveCooldowns ?? {};
   agent.moveCooldowns[move.id] = move.cooldownTicks;
   if (move.lockTicks) agent.actionLockTicks = (agent.actionLockTicks ?? 0) + move.lockTicks;
   agent.moveUseCounts = agent.moveUseCounts ?? {};
   agent.moveUseCounts[move.id] = (agent.moveUseCounts[move.id] ?? 0) + 1;
+  if (tick !== undefined) {
+    agent.moveLastUsedTick = agent.moveLastUsedTick ?? {};
+    agent.moveLastUsedTick[move.id] = tick;
+  }
 }
 
 /** Rolls a random hit count within `hits`' [min, max] range (inclusive) — undefined `hits` always means exactly 1 hit. */

@@ -690,7 +690,7 @@ export function applySupportMove(world: World, agent: Agent, log?: EventLog): bo
     const target = nearestAllyEffectTarget(world, agent, move);
     if (!target) continue;
 
-    useMove(agent, move);
+    useMove(agent, move, world.tick);
     applyAllyEffect(world, agent, target, move.allyEffect!, log);
     return true;
   }

@@ -313,6 +313,55 @@ describe("pickBestMove: range and tempo awareness", () => {
   });
 });
 
+describe("pickBestMove: recency discount (direct ask: \"cooldown should play a part... you should cycle moves\")", () => {
+  // Two same-power, same-cooldown, same-type moves — a real tie with no
+  // tempo/STAB/effectiveness reason to prefer either, so recency is the
+  // only thing that can break it.
+  const MOVE_A: MoveSpec = { ...TACKLE, id: "move-a", cooldownTicks: 2 };
+  const MOVE_B: MoveSpec = { ...TACKLE, id: "move-b", cooldownTicks: 2 };
+
+  it("without a tick, ignores recency entirely (backward-compatible) — a genuine tie picks the first move", () => {
+    const agent = makeAgent({ moves: [MOVE_A, MOVE_B], moveLastUsedTick: { "move-a": 100 } });
+    expect(pickBestMove(agent, ["normal"])).toBe(MOVE_A);
+  });
+
+  it("discounts a move used on THIS exact tick, so an equally-good alternative wins instead", () => {
+    const agent = makeAgent({ moves: [MOVE_A, MOVE_B], moveLastUsedTick: { "move-a": 50 } });
+    expect(pickBestMove(agent, ["normal"], undefined, 50)).toBe(MOVE_B);
+  });
+
+  it("the discount fades back out once enough real ticks have passed", () => {
+    const agent = makeAgent({ moves: [MOVE_A, MOVE_B], moveLastUsedTick: { "move-a": 0 } });
+    // Window is cooldownTicks(2) * MOVE_RECENCY_WINDOW_MULTIPLIER(2) = 4 ticks.
+    expect(pickBestMove(agent, ["normal"], undefined, 4)).toBe(MOVE_A);
+  });
+
+  it("a genuinely superior move still wins even fresh off cooldown — this is a discount, not a ban", () => {
+    const WEAK: MoveSpec = { ...TACKLE, id: "weak", power: 20, cooldownTicks: 2 };
+    const STRONG: MoveSpec = { ...TACKLE, id: "strong", power: 200, cooldownTicks: 2 };
+    const agent = makeAgent({ moves: [WEAK, STRONG], moveLastUsedTick: { strong: 10 } });
+    expect(pickBestMove(agent, ["normal"], undefined, 10)).toBe(STRONG);
+  });
+
+  it("a move that's never been used gets no discount at all", () => {
+    const agent = makeAgent({ moves: [MOVE_A, MOVE_B] }); // no moveLastUsedTick at all
+    expect(pickBestMove(agent, ["normal"], undefined, 999)).toBe(MOVE_A); // real tie, first wins
+  });
+
+  it("useMove records the tick it was used, feeding the next pickBestMove call", () => {
+    const agent = makeAgent({ moves: [MOVE_A, MOVE_B] });
+    useMove(agent, MOVE_A, 7);
+    expect(agent.moveLastUsedTick).toEqual({ "move-a": 7 });
+    expect(pickBestMove(agent, ["normal"], undefined, 7)).toBe(MOVE_B);
+  });
+
+  it("useMove without a tick leaves moveLastUsedTick untouched (backward-compatible)", () => {
+    const agent = makeAgent();
+    useMove(agent, TACKLE);
+    expect(agent.moveLastUsedTick).toBeUndefined();
+  });
+});
+
 describe("calculateDamage: defensePenetration", () => {
   it("ignores a fraction of the defender's relevant Defense stat", () => {
     const attacker = { level: 20, types: ["normal" as const], stats: calculateStats(BASE, 20) };

@@ -988,6 +988,23 @@ export interface Agent {
    */
   moveUseCounts?: Record<string, number>;
 
+  /**
+   * The `World.tick` each move (by `MoveSpec.id`) was last used, set
+   * alongside `moveUseCounts` in the same `useMove` call — direct ask:
+   * "cooldown should play a part. So like you should cycle moves." Read by
+   * `pickBestMove`'s recency scoring (see `MOVE_RECENCY_PENALTY_WINDOW_MULTIPLIER`
+   * in combat.ts) so a move that just came off cooldown doesn't
+   * automatically win again the instant it's usable — a real but
+   * deliberately small discount, not a ban, so a genuinely superior move
+   * (say a 3x-effective STAB hit) still wins immediately, and only a truly
+   * close call actually rotates to a different move. Absent == never used
+   * (no discount), same convention as `moveUseCounts`. Ticks-based, not
+   * uses-based, per direct confirmation ("Ticks realtime") — a long fight
+   * against one target can still cycle back to the top move once enough
+   * real time has passed, not just once some other move gets thrown.
+   */
+  moveLastUsedTick?: Record<string, number>;
+
   // --- Rapport: real agent-to-agent relationships (see rapport.ts, DESIGN.md's "Rapport" section) ---
 
   /**

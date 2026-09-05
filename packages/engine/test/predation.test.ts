@@ -196,6 +196,49 @@ describe("predation", () => {
 
     expect(world.agents).toHaveLength(2);
   });
+
+  it("real tickWorld combat cycles between two equally-good moves instead of spamming one — direct ask: \"cooldown should play a part... you should cycle moves\"", () => {
+    // Two moves, identical in every scoring dimension (power/type/cooldown) —
+    // a real, sustained tie with nothing but recency to break it. Before this
+    // feature, pickBestMove's greedy-best-with-ties-go-to-first-in-array
+    // behavior meant the SAME move (whichever came first in `agent.moves`)
+    // would win every single tick, forever — MOVE_B would never be used at
+    // all across an entire fight.
+    const MOVE_A: MoveSpec = { ...TEST_MOVE, id: "cycle-a" };
+    const MOVE_B: MoveSpec = { ...TEST_MOVE, id: "cycle-b" };
+
+    // A 2x1 world, not the usual 10x10 fixture: with only one other tile to
+    // possibly flee to (and the predator already standing on it), a
+    // cornered flee step is a real no-op every tick — the two agents stay
+    // adjacent for the whole test instead of the prey wandering out of
+    // range partway through (confirmed with the normal-size fixture: the
+    // prey just runs to the map's actual corner and stops there, which
+    // works too, but wastes most of a short test on the chase instead of
+    // the cycling this test actually cares about).
+    const world = createWorld(2, 1);
+    // maxHp large enough to comfortably outlast 30 ticks of FALLBACK_DAMAGE
+    // (1/hit, see this file's own fixture doc comment) without ever fainting
+    // — a faint/finish-off detour is a different mechanic this test isn't
+    // about. Predator's own maxHp raised to match: predation eligibility
+    // (isPreyOf/PREY_POWER_RATIO) is a real maxHp-ratio check, not just
+    // proximity — prey too durable relative to the predator's own default
+    // maxHp(20) stops counting as legitimate prey at all, and the predator
+    // falls back to ordinary need-driven behavior instead of hunting.
+    world.agents.push(
+      prey({ x: 0, y: 0 }, { hp: 40, maxHp: 40 }),
+      predator({ x: 1, y: 0 }, 0.1, { moves: [MOVE_A, MOVE_B], maxHp: 60 })
+    );
+    const log = new EventLog();
+
+    for (let i = 0; i < 30; i++) tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    const hunter = world.agents.find((a) => a.id === "scyther-0")!;
+    const counts = hunter.moveUseCounts ?? {};
+    // Real, roughly-even cycling — not "technically both nonzero." The old
+    // behavior would show up here as one count at ~30 and the other at 0.
+    expect(counts["cycle-a"] ?? 0).toBeGreaterThanOrEqual(10);
+    expect(counts["cycle-b"] ?? 0).toBeGreaterThanOrEqual(10);
+  });
 });
 
 describe("dynamic (size-based) predation — not a fixed species list", () => {
