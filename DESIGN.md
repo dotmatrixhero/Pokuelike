@@ -617,8 +617,8 @@ whether "promoted" agents pause the rest of the world or run in parallel.
 
 ## World scale: layers, elevation, and regions
 
-**Layers and elevation are built** (regions/world-graph are not — see
-below). What exists now in `packages/engine`:
+**Layers, elevation, and the region/world-graph are all built.** What
+exists now in `packages/engine`:
 
 **Three layers per region, sharing one x,y footprint:** Underground /
 Surface / Canopy (`Layer` in `types.ts`, `World.tiles` is one grid per
@@ -651,32 +651,102 @@ Open, still unresolved: whether Underground/Canopy get their own elevation
 too, and how a real combat resolver will actually consume the accuracy/
 evasion modifiers once one exists.
 
-**World graph, not one big map:** 3–5 regions to start, connected by
-migration edges, each region independently bounded (per the earlier scale
-discussion). This is where the promotion boundary concept turns out to
-apply **one level up**, not just at the agent/combat level:
+**World graph, not one big map — built (`packages/engine/src/overworld.ts`):**
+a small graph of `Region`s (each one an ordinary `World`, with its own three
+layers/elevation/terrain, unchanged) connected by `RegionEdge`s, one of them
+`focused` at a time. This is the promotion boundary concept applied **one
+level up**, not just at the agent/combat level:
 
-- A region being observed runs **full sim** — every agent, every tick,
-  across all three layers.
-- An unobserved region runs **abstracted**: aggregate counts per species,
-  average need levels, resource stock — advanced by cheap statistical
-  rules, occasionally emitting an event (boom, die-off, emigration along an
-  edge) without simulating individuals.
-- Crossing the graph edge (or the player/observer's attention moving to a
-  region) is a **region-level promotion/demotion**, symmetric with the
-  agent-level one already named above: full sim seeds the aggregate on
-  demotion, the aggregate seeds a plausible population on promotion.
+- The **focused** region runs **full sim** — every agent, every tick, across
+  all three layers, via the exact same `tickWorld` that already exists.
+  Nothing about single-region simulation changed to build this.
+- Every OTHER region runs **abstracted**: a `RegionAggregate` per species
+  (population, average hunger/thirst/energy, a resource-abundance index) is
+  advanced by cheap statistical rules (`advanceAbstractRegion`) —
+  O(species count in that region), not O(agent count) — occasionally
+  emitting a `regionPopulationBoom`/`regionDieOff`/`regionEmigrated` event,
+  with zero individual agents simulated at all.
+- Moving focus (`setFocusedRegion`) is a **region-level promotion/demotion**,
+  symmetric with the agent-level one already named above: `demoteRegion`
+  collapses the outgoing focused region's real agents into an aggregate and
+  empties `world.agents`; `promoteRegion` invents a fresh population from the
+  incoming region's aggregate. Promotion reuses `immigration.ts`'s existing
+  `ImmigrationContext` dependency-injection hook (roster + `spawnAgent`)
+  rather than a new context type — "invent a real agent of this species at
+  this position/level" is exactly the primitive immigration already needed.
 
 This is the piece that makes DF-scale time (simulate weeks/months, read a
 history afterward) affordable without simulating every agent in every
 region every tick forever — reuses a concept the design already has rather
 than inventing a second architecture for it.
 
-Open questions, unresolved: how the aggregate model reconciles back into
-individuals on promotion (do specific agents get invented with plausible
-stats, or does something get lost/smoothed over — probably fine for
-background regions, but worth being honest that promotion isn't lossless);
-whether elevation exists on Underground/Canopy too or only Surface.
+**Explicitly lossy — stated plainly, not glossed over:**
+- Demotion discards exactly which individuals existed (their nature/
+  disposition/rapport/notable-title/parentage/build history — all of it),
+  keeping only per-species population and average need levels. Promotion
+  invents a FRESH set of individuals matching those aggregate numbers, not
+  the ones that were there before — a region's own Hero or herd leader does
+  NOT come back as the same individual (or with any title/leadership at
+  all) once promoted again.
+- **A background region's terrain is frozen** — no `growFlora`/
+  `advanceWeather`/`decayShelters` runs against it while abstracted. The
+  aggregate's `resourceIndex` (measured once at demotion via
+  `foodStockNear`/`countTerrainNear`, drifted cheaply afterward) stands in
+  for "how the land is doing" instead of a real terrain tick, which is the
+  actual cost this system exists to avoid paying for every region every
+  tick.
+- **In-flight eggs are discarded on demotion** — only living, non-egg
+  agents fold into the aggregate.
+- **No cross-species interaction in the abstract tier** — each species
+  aggregate advances independently, so a background region can't have its
+  predator population actually suppress its prey population the way the
+  focused region's real `predation.ts` does. A real simplification of the
+  full sim's own dynamics.
+
+**Migration edges — only the cheap half is built.** `advanceAbstractRegion`'s
+`maybeEmigrate` moves a small population fraction between two regions that
+are BOTH currently abstract, no individuals involved — real, and validated
+below. What's genuinely NOT built: `dispersal.ts`'s real per-agent disperser
+actually walking off the edge of the FOCUSED region's map and landing as a
+promoted individual in a neighboring one. That's the harder stretch-goal
+half TODO.md originally asked for, left open (it would mean `dispersal.ts`
+knowing about region edges at all).
+
+**Real 3000-tick validation**
+(`pnpm --filter @pokuelike/runner exec tsx src/validateOverworld.ts <ticks>
+[switchTick] [switchToRegionId]`, against `packages/data/src/overworldScenario.ts`'s
+3-region chain, each region a full independently-seeded `createDemoWorld`
+map): with `region-a` focused for 1500 ticks then switching focus to
+`region-b`, `region-a` demoted with real per-species counts (`{bulbasaur: 3,
+venusaur: 2, scyther: 4, sandshrew: 2, onix: 3, pidgey: 2, spearow: 1,
+squirtle: 2, charmander: 2, magikarp: 1, tentacool: 1, mankey: 3}`, ~26
+individuals total, `mankey` a real mid-run immigrant) and `region-b` promoted
+with exactly 264 invented individuals — matching the sum of its own
+aggregate populations at that tick, the real consistency check this feature
+needed. Abstract-tier populations settled into a sane tens-not-hundreds
+range per species (~20-30, comparable to `region-a`'s real full-sim
+population of 20) — an earlier `CAPACITY_SCALE` guess let them run to
+several hundred instead, caught by this same validation run (see
+`overworld.ts`'s doc comments: deriving carrying capacity from a
+resource-abundance value that itself drifts toward "however much headroom
+is under capacity" chases 1 forever instead of settling; fixed by deriving
+capacity from a value frozen at demotion). A same-seed run twice produced
+byte-identical output — determinism intact. 14 new engine tests
+(`overworld.test.ts`) caught two real population-model bugs before the real
+run ever surfaced them: the capacity feedback loop above, and a starving-
+while-over-capacity sign flip in an early version of the growth formula that
+reported GROWTH instead of decline. Full 888/888 engine suite green.
+
+Real, open follow-ups, not attempted here: the full migration-edges stretch
+goal (see above); promoted individuals never reconstruct notable titles/
+herd leadership/rapport, even if the aggregate they came from was quietly
+this region's most accomplished lineage; `avgLevel` never advances while
+abstracted (no leveling model at the aggregate tier); only validated at 3
+regions and one focus switch — a larger graph, multiple simultaneous focus
+moves, or a much longer abstracted stretch (the DF-scale tens-of-thousands-
+of-ticks timescale this feature was originally motivated by) haven't been
+run; whether elevation exists on Underground/Canopy too or only Surface
+(pre-existing open question, unrelated to this feature).
 
 ## Player character: a fragile human, earning your first partner
 
@@ -9911,6 +9981,146 @@ idea:
 Not sequenced against the "first built slice" below or scoped into a build
 yet — still vision-stage, same as the rest of this section.
 
+### Habitat/settlement-site evaluation, and mate-following
+
+Direct ask, verbatim: "I'm thinking we'll want to imbue agents with the
+ability to identify a good zone for them. A place to settle and build
+shelter and such. And if they're moving, their mate should follow. Things
+like temperature and available food and water should play into it. That'll
+help cross zone travel migration."
+
+Two distinct pieces:
+- **A real site-quality scorer**, weighing temperature/climate fit, food
+  availability, and water availability together (existing per-tile pieces
+  of this already exist scattered across `dispersal.ts`/`herdMigration.ts`/
+  `shelter.ts`'s build-site picking, but not as one unified "is this a good
+  place to live" evaluation). Genuinely buildable **now**, at the current
+  single-zone scope — it doesn't need the overworld to exist first.
+- **Mate-following during relocation** — a real, checkable question (not
+  yet investigated): does a bonded mate currently get left behind when its
+  partner disperses or a herd migrates? If not, that's a real, scoped gap
+  to fix, independent of everything else here.
+
+The connection to the overworld vision: once built, the same site-quality
+scorer is the natural thing that later evaluates a *neighboring zone's*
+overworld-level summary data (climate, resource abundance) to decide
+whether relocating there is worth the trip, without needing to fully
+simulate that zone first. Building it now at single-zone scope is real
+groundwork for cross-zone travel later, not throwaway work. Not scoped into
+an actual build yet — captured here first, per this session's established
+pattern.
+
+### A toolbox of zone-generation techniques, beyond noise
+
+Direct ask: "I want zones to have sick generative algorithms... Can you
+list out some ways to make interesting zones? That feel more than just
+randomly. Places shit?" A real, curated list, not yet scoped into any
+specific build:
+
+**Structural/layout:**
+- **Binary Space Partitioning (BSP)** — recursively split a zone into
+  sub-regions; guarantees connectivity and distinct large areas/caverns
+  joined by corridors.
+- **Cellular automata** — random noise smoothed by iterative neighbor-count
+  rules (classic Game-of-Life-style); produces organic, non-rectangular
+  cave walls and lake shapes.
+- **BSP + CA combined** — direct ask, and a real, well-known combo: BSP
+  solves reachability/distinct-room structure, CA solves "doesn't look
+  geometric." Run BSP for the cavern skeleton, CA within/around each region
+  for organic texture; structured (pure-BSP) rooms can coexist with cave
+  rooms in the same generation for contrast (a ruin built into a cavern).
+- **Voronoi diagrams** — scatter seed points, partition by nearest-seed;
+  natural (non-grid-aligned) region boundaries, and a natural fit for
+  "sphere of influence" falloff around a point of interest.
+- **Poisson disk sampling** — even-but-irregular point spacing; the direct
+  answer to "interesting forests" — pure random placement clumps and gaps,
+  a grid looks robotic, this gives natural-feeling, evenly-distributed tree
+  placement.
+- **Domain-warped noise** — warp input coordinates through a second noise
+  field before sampling the first; turns raw-Perlin's obviously-algorithmic
+  blobs into organic coastlines/terrain features.
+- **L-systems** — branching-structure generation; cave tunnel networks,
+  root systems, paths radiating from a settlement.
+
+**Elevation-specific:**
+- **Simplified hydraulic erosion** — simulate rain droplets flowing
+  downhill, picking up/depositing sediment on top of base elevation; turns
+  smooth noise-bumps into real-feeling valleys/ridgelines — probably the
+  single biggest lever for "interesting forests with different elevations"
+  specifically.
+- **Ridge/Worley (cellular) noise** — real mountain ridgelines and
+  canyon-like patterns instead of smooth rounded hills.
+
+**Point-of-interest-organized** (the direct Xerneas-spring example given:
+"a particular magical spring created by Xerneas that the zone and
+surrounding zones are organized around"):
+- **Landmark-first generation** — pick the POI *before* generating anything
+  else, then make everything else a function of distance/relationship to
+  it: fertility/magical influence falling off radially, terrain naturally
+  oriented toward it, resource density boosted nearby. Structurally
+  different from "generate terrain, then sprinkle POIs on top" — this is
+  specifically why it reads as *designed around* something.
+- **Graph/MST-based anchor placement** — place a handful of anchor POIs
+  (possibly spanning neighboring zones, once the overworld exists), then
+  generate connective tissue (paths, gradients, transitions) between them
+  via a minimum-spanning-tree-style graph — a hub-and-spoke feel instead of
+  uniform scatter.
+- **Whittaker-diagram biome assignment** — a real temperature x moisture 2D
+  lookup table (the classic ecology-textbook/proc-gen approach) instead of
+  ad hoc thresholds — biome transitions that feel ecologically grounded
+  rather than arbitrary.
+
+### The Playability Pass: keeping emergent messiness fun, not broken
+
+Direct ask, verbatim, framed as a deliberate layer on top of everything
+above: "keeping player playability is important. Having unreachable places
+is bad... After the initial generation, we need another pass to like
+'imagine the player experience.' It'd suck to load a zone and only be able
+to access four tiles in the corner of it cuz the rest is blocked. Think
+about player journey, and the interesting parts of interacting with the
+sim. Like, emergent behavior and navigating difficult, dynamic, but not
+impossible situations. Try to index for that."
+
+This is a distinct, cross-cutting concern from the four generation passes
+already documented above — not another content-generating pass, but a
+**validation-and-touch-up pass that runs after them**, checking their
+combined output against real player-experience criteria and fixing what it
+finds, rather than generating new content of its own. Real precedent: this
+is standard practice in respected procedural-generation systems (roguelikes
+routinely run a post-generation connectivity/fairness check before
+accepting a generated level) — not a novel idea, but a real and important
+one to build deliberately rather than hope for by accident.
+
+Concrete checks this pass should perform:
+- **Reachability/connectivity audit**: flood-fill from real entry points
+  (zone-edge connections to neighbors, or a designated spawn point) and
+  measure what fraction of the zone's interesting content is actually
+  reachable. A zone that generates with a large sealed-off pocket (the
+  literal "only four tiles in a corner" example given) needs either a
+  carved connector (a passage/bridge/tunnel added specifically to fix it)
+  or an explicit, deliberate "this really is a secret/locked area" flag —
+  the failure mode being guarded against is an *accidental* unreachable
+  region, not the deliberate existence of hidden areas as a design choice.
+- **Interest pacing/distribution audit**: check that points of interest,
+  resource density, and terrain variety aren't accidentally clustered in a
+  way that leaves large boring dead zones between them — a real "player
+  journey" concern, not just a technical reachability one.
+- **Difficulty fairness, without neutering emergent danger**: the sim's
+  emergent chaos (real predator pressure, real resource scarcity, real
+  danger) is treated as a *feature* to preserve and even highlight, not
+  something to sand down — the direct ask is explicitly for "difficult,
+  dynamic, but not impossible" situations. This pass's job is narrower than
+  "make it safe": it's checking for genuinely degenerate/unfair outcomes
+  (a generated configuration where survival or progress is effectively
+  impossible by construction, not just hard) and fixing only those, while
+  leaving real difficulty and unpredictability alone.
+
+Not designed at the mechanism level yet (exactly how "fix a sealed-off
+pocket" or "detect degenerate difficulty" would work algorithmically isn't
+decided), and not scoped into a build — captured here as a firm, named
+principle that should shape how every generation pass above gets built,
+not an afterthought bolted on at the end.
+
 ## The first built slice: macro land/ocean elevation + rivers
 
 This is the "pick 2-3 processes for a first real build" step the section
@@ -10650,3 +10860,87 @@ feature — a re-run passed clean, per that test's own known-flaky status);
   above come entirely from immigration, not reproduction. A real same-species
   breeding pair for either (a second Magikarp of the opposite sex, say) was
   not added or validated this session.
+
+## Land spawns stranded mid-lake, and prey with nowhere left to run
+
+Direct user feedback on the live artifact: "there are non water Pokemon
+spawning in the middle of water which really makes them unable to do
+anything" and "a lot of battles are sorta just one Pokémon beating up
+another. Not so much fighting back."
+
+### Stranded spawns — a real, severe bug, confirmed on every seed tested
+
+Root cause, traced directly: `worldgen.ts`'s `findWalkableNear` (the ring-
+search primitive `createDemoWorld`'s `anchor()`, `findPosInBiome`,
+`herdMigration.ts`'s destination picker, and immigration.ts's non-obligate-
+aquatic arrival path all go through) only ever checked `tile.walkable` — and
+`waterBody.ts`'s own doc comment already says plainly that water tiles ARE
+walkable (`UNWALKABLE_TERRAIN` never lists "water"; only obstacles like
+boulders/trees are unwalkable). So a hand-placed starting agent, a
+biome-scored Charmander/immigrant, or a migrating herd's destination could
+all land dead-center in a large lake — a tile `waterBody.ts`'s `canEnterWater`
+then permanently refuses to let a non-water-type agent step off of, since
+every neighboring water tile fails the same shore check. Stranded from the
+moment it spawns, exactly as reported.
+
+Confirmed empirically, not just reasoned about: a small script placing every
+`createDemoWorld` starting agent and checking `canEnterWater` against its own
+spawn tile found real stranded agents on **every one of 7 tested seeds**,
+including the live demo seed (`20260903`, 4 stranded: 3 Bulbasaur + 1
+Venusaur) — 2 to 7 stranded agents per seed, hitting Bulbasaur, Venusaur,
+Scyther, and Charmander.
+
+Fix: `findWalkableNear` now also requires `canEnterWater(world, <plain land
+probe agent>, layer, pos)` — reusing the exact same check movement already
+enforces, rather than a second, duplicated water-body computation — so it
+never returns a tile that would immediately strand whoever lands there. This
+is NOT a behavior change for the placement functions that already
+intentionally seek real water (`findWaterNear` in `@pokuelike/data`'s
+scenario.ts, `findNearestIndexed(..., "water")` in immigration.ts's
+obligate-aquatic path) — neither goes through `findWalkableNear`. Re-running
+the same stranding check post-fix: **0 stranded agents on all 7 seeds.**
+
+### Cornered prey now fights back as a last resort
+
+Traced separately: a solo prey agent below `mobThreshold` (no herd-mates
+within striking distance of the threat) always chose `flee` over `fight`,
+every tick, unconditionally — by design, matching real prey behavior, and
+correctly documented elsewhere in this file as "mainline-accurate." But
+combined with the stranding bug above (and ordinary obstacles/map edges),
+`stepAway` frequently produced a no-op — the agent literally had nowhere
+left to flee to — and the engine's response to that was nothing: it just
+stood there and kept absorbing hits every tick until it fainted, with no
+counterattack ever thrown. That is almost certainly the concrete shape of
+what read as "one Pokémon just beating up another."
+
+Fix, in `predation.ts`'s `applyPredationInstincts`: when the computed flee
+step is a no-op (position unchanged — cornered by terrain, water, or a map
+edge) AND the agent's own best move can actually reach the threat from here,
+it turns and fights instead of standing still — same `resolveHit(...,
+"defeated", ...)` call the existing mob-fighting branch already uses, not a
+new combat path. An agent that still has anywhere to run always prefers to
+run, unchanged; this only fires in the genuine last-resort case.
+
+Confirmed with real instrumentation on a live 3000-tick run (seed 20260903):
+the cornered-fight branch fired 14 times across 2 separate encounters, and
+in one of them — `bulbasaur-3`, cornered by `scyther-3` from tick 1803 —
+repeated counterattacks over 8 ticks actually **defeated the Scyther**
+(`ivysaur (bulbasaur-3) defeated scyther-3` at tick 1829), an outcome that
+was structurally impossible before this fix (the Bulbasaur would have had no
+attack of its own in that exchange at all). Full suite (893 tests across
+engine+data) passes unchanged; the one intermittently-flaky pre-existing
+test in `predation.test.ts` (an unseeded-`Math.random` knockback test,
+~10% failure rate) was confirmed to fail at the same rate on the pre-fix
+code too — not a regression this change introduced.
+
+Real gap still open, flagged rather than fixed here: this only addresses
+the fully-cornered case. A prey agent that still has *some* escape route but
+is slower than its pursuer (speed isn't a real mechanic yet — see the
+"Movement/speed is still uniform" TODO item) still gets run down and takes
+free hits the whole way without ever landing one of its own, since it never
+stops being able to take *a* flee step even as the gap to the threat closes
+to zero. Fixing that fully needs either real speed-driven positioning or a
+distinct "the threat is now adjacent, not just nearby" retaliation
+threshold — not attempted here, since it changes the mob-threshold/flee
+balance TODO.md already documents as a deliberately separate, bigger lever
+("the lever is the level/stat gap, not the formula").

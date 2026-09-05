@@ -485,6 +485,43 @@ export type SimEvent =
       agentId: string;
       species: string;
       reason: "died" | "titleLost" | "herdChanged";
+    }
+  | {
+      kind: "regionDemoted";
+      tick: number;
+      regionId: string;
+      /** Per-species population folded into the aggregate, rounded — see overworld.ts's `demoteRegion`. */
+      speciesCounts: Record<string, number>;
+    }
+  | {
+      kind: "regionPromoted";
+      tick: number;
+      regionId: string;
+      /** Every invented individual's id — mirrors `immigrated`'s `agentIds` shape. */
+      agentIds: string[];
+    }
+  | {
+      kind: "regionPopulationBoom";
+      tick: number;
+      regionId: string;
+      species: string;
+      population: number;
+    }
+  | {
+      kind: "regionDieOff";
+      tick: number;
+      regionId: string;
+      species: string;
+      population: number;
+    }
+  | {
+      kind: "regionEmigrated";
+      tick: number;
+      fromRegionId: string;
+      toRegionId: string;
+      species: string;
+      /** Rounded head count that moved — see overworld.ts's abstract-tier emigration roll. */
+      population: number;
     };
 
 /**
