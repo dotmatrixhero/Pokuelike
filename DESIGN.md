@@ -9647,8 +9647,144 @@ designed here; flagging the connection so it isn't lost.
 - Sequencing/dependency order between processes (tectonics before rivers,
   rivers before forests, etc.) isn't decided.
 
+### Additional roster, added on direct follow-up ("did I miss any other
+geological features or cool Pokémon to explore?" -> "write it all")
+
+**Confirmed additions to the core seven:**
+- **Rayquaza** — the missing third of the Kyogre/Groudon lore trio
+  (canonically the mediator that calms their conflict, rules the sky/ozone
+  layer). A real, direct omission from the original seven given the other
+  two were already in — confirmed important by direct ask.
+- **Suicune** — canonically purifies water and travels with rain; pairs
+  with/extends the existing "rivers" process rather than replacing it,
+  giving rivers a caretaker figure the same way Xerneas/Celebi caretake
+  forests. Confirmed good by direct ask.
+- **Raikou + Entei**, added specifically *alongside* Suicune rather than as
+  independent processes, because the three share real, connected lore (all
+  three were born together at the Burned Tower fire in the mainline games)
+  — that gives a genuine three-act **disaster-and-renewal arc** for a
+  region instead of three unrelated roles: **Entei** is the eruption/fire
+  itself (the catastrophe — volcanic/fire scarring), **Raikou** is the
+  storm that follows (lightning-scarred ground, storm-driven erosion), and
+  **Suicune** is the purifying rain afterward (rivers, healing what the
+  other two scarred). This makes Suicune's river role causally *about*
+  something (healing a specific historical scar) rather than a standalone
+  water-placement pass, and gives a region a real origin story: catastrophe
+  -> scarring -> renewal, all from one connected trio.
+- **Regigigas** — lore has it literally dragging continents into place and
+  sculpting the Regi trio's golem bodies out of ice/rock/steel. A strong,
+  direct fit for the tectonics process specifically.
+- **Diancie** — born from Xerneas' life force, creates diamonds — a natural
+  "seeds mineral deposits/cave gems" analog to Xerneas' forest-seeding,
+  giving cave/mountain regions the same kind of legendary-seeded specialness
+  forests already get.
+
+**Considered, with a real open tension flagged rather than silently
+included:**
+- **Heatran** (lives inside volcanoes, a natural resident driving eruption/
+  geothermal activity) and the **weather trio** (Zapdos/Articuno/Moltres,
+  regional lightning/permafrost/fire scarring) were both raised, but likely
+  **overlap with Entei's fire/volcanic role and Raikou's lightning role**
+  from the beast-trio arc above. Not dropped, but flagged as a real,
+  unresolved redundancy — a future slicing pass should decide whether these
+  are alternates to offer per-region (different regions get different
+  "flavors" of eruption/storm legend) rather than all coexisting as
+  separate simultaneous processes.
+
+**Non-legendary geological features, not tied to a specific Pokémon:**
+- Caves/cave systems (erosion-driven, distinct from earthquake-driven
+  canyons)
+- Hot springs/geysers — smaller-scale geothermal activity, distinct from a
+  full volcanic-island-creation event
+- Fossil beds — a one-time historical *event* marker (an ancient die-off),
+  different in kind from the other ongoing/gradual processes
+- Swamps/marshland as their own biome, not just "low-lying forest"
+
+**A real scope note, not a constraint break**: several Pokémon in both the
+original seven and this expanded list (Xerneas, Celebi, Kyogre, Groudon,
+Rayquaza, Suicune, Raikou, Entei, Regigigas, Diancie) are outside the Kanto
+roster this codebase's `packages/data` currently implements. The vision
+already crossed that line from the start, so this isn't a new decision —
+just flagged honestly as a real data-scope question whenever this actually
+gets built (new species data, even if only used as one-time
+generation-phase actors rather than live simulated agents).
+
+### A separate, later phase: simulated human society
+
+Direct ask, explicitly sequenced *after* the geological/legendary phase
+above, not part of it: "I think we do need to simulate human society and
+stuff but we can do a separate pass for that. It's after the geological
+stuff." Captured here as a placeholder for a future vision-writing pass of
+its own — nothing about *what* this actually looks like (settlements,
+trainers, roads, towns, whatever form "human society" takes in this sim) has
+been discussed or designed yet. The only decided thing so far is the
+sequencing: geological/historical world-shape first, human society layered
+on top of an already-coherent world second, not simultaneously.
+
+### Dwarf-Fortress-style Z-levels within a region
+
+Direct ask, verbatim: "I want Dwarf Fortress style z levels in overworld so
+you can enter a zone and it's just like a cliff on the side of the
+mountain. And fallin down the side you can end up on a lower elevation of
+the same mountain." Explicitly framed by the user as scope creep, embraced
+anyway — and it's a genuinely coherent extension of the geological vision
+rather than an unrelated add-on: it's what makes the History phase's
+elevation data mean something spatially, not just cosmetic color-by-height.
+
+**A real precedent already exists in this codebase for the shape of this**:
+agents already move between `surface`/`underground`/`canopy` as distinct
+layers at the same (x, y) — see `Agent.layer` throughout `packages/engine`.
+Z-levels within an overworld region would be the natural generalization of
+that exact mechanic: instead of exactly 3 fixed named layers, a region's
+number of slices and their vertical connectivity would come from the real
+elevation the geological phase computed for it. A mountain region built by
+real (simulated) tectonics would have real height and real slices; a plains
+region would have effectively one. Entering a mountain region partway up
+its slope would drop you into whichever slice matches the elevation you
+approached it from — a literal cliff face on the side of a mountain the
+world actually "believes" is that tall, not a flat color gradient standing
+in for height.
+
+**Real, unsolved complexity, flagged honestly rather than glossed over**:
+- Today's `Agent.layer` is a flat 3-value enum, not a variable-depth stack
+  — generalizing to "however many slices this specific region's real
+  elevation implies" is a real structural change, not just adding a number.
+- "Falling" needs an actual resolution rule in a tick-based sim: drop one
+  slice per tick? Resolve instantly to the bottom? Real fall damage tied to
+  distance? None of this is decided.
+- Connectivity between slices (where can you actually climb/fall between
+  two adjacent Z-levels of the same region, vs. where is it a sheer,
+  impassable cliff) needs real rules, presumably derived from the same
+  elevation data rather than invented separately.
+- How this interacts with the existing `surface`/`underground`/`canopy`
+  layer concept — are those now sub-categories *within* a Z-level (a canopy
+  layer existing at each vertical slice that has forest) or an orthogonal
+  concept entirely — is a real open question, not answered here.
+
+**Not every slice needs to be a real, simulated place** — direct follow-up:
+"not every layer has to have a fleshed out thing. There would be zones of
+entire just rock. We can fill the simple ones in unless they're actually
+traveled to." This is the exact same "fake it" principle already captured
+for the horizontal overworld (a compact off-screen summary, expanded into a
+real live grid only once actually visited), just applied to the vertical
+axis too: most of a mountain's interior slices are just solid rock with
+nothing worth simulating and should stay an unexpanded placeholder (a
+"solid rock" marker, not a real generated sub-map) until something actually
+falls into or digs into that specific slice — at which point it gets
+expanded for real, the same lazy-expansion moment the horizontal case
+already describes. This meaningfully caps the real cost of Z-levels: the
+number of slices that ever need real generation is bounded by what's
+actually explored, not by a mountain's full real height.
+
+Not scoped or sequenced relative to the geological/legendary processes or
+the human-society phase yet — captured as a real, embraced piece of the
+overworld vision, to be placed in the build order once the first slice(s)
+of the geological phase actually prove the pipeline shape works.
+
 Next step, explicitly deferred per direct instruction ("note my vision
 first... then we pick a couple features and slice it out"): pick 2-3 of the
-seven processes above for a first real build, prove the "simulated history
--> coherent per-tile world" pipeline shape works end to end, before
-expanding to the rest of the roster.
+processes above (now an expanded roster, not just the original seven) for a
+first real build, prove the "simulated history -> coherent per-tile world"
+pipeline shape works end to end, before expanding further — and separately,
+whenever it's time, a dedicated vision pass for the human-society phase and
+for how Z-levels actually get built.
