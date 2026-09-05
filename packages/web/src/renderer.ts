@@ -1,7 +1,7 @@
 import type { Agent, TerrainKind, World } from "@pokuelike/engine";
 import { lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
-import { getFloorTexture, getFloraSprite, getFoodSprite, getSeedlingSprite, getSprite, getTileSprite, type SpriteDirection } from "./sprites.js";
+import { getFloorTexture, getFloraSprite, getFoodSprite, getSeedlingSprite, getSprite, getTileSprite, getWaterEdge, getWaterInterior, type SpriteDirection } from "./sprites.js";
 import type { ActivePopup } from "./eventPopups.js";
 import {
   FLAVOR_FG,
@@ -106,13 +106,43 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
         const texture = getFloorTexture(x, y);
         if (texture) {
           ctx.save();
-          ctx.globalAlpha = 0.05 + tile.elevation * 0.03;
+          ctx.globalAlpha = 0.1 + tile.elevation * 0.04;
           ctx.drawImage(texture, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
           ctx.restore();
         }
         ctx.fillStyle = rgbaToCss(shade([120, 128, 140], tile.elevation), 0.35);
         ctx.fillText(".", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
         continue;
+      }
+
+      // Water always draws the seamless interior fill, then overlays a
+      // sandy edge strip cropped from the bordered source art only on the
+      // side(s) that actually face a non-water neighbor — real per-side
+      // shorelines built by compositing, not a single all-or-nothing
+      // border (see sprites.ts's getWaterEdge for why there's no separate
+      // per-direction art to draw from instead). Off the edge of the map
+      // counts as a non-water neighbor too, so the map border gets a
+      // shore lip as well.
+      if (tile.terrain === "water") {
+        const interior = getWaterInterior(x, y);
+        if (interior) {
+          ctx.drawImage(interior, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          const isWater = (nx: number, ny: number) =>
+            nx >= 0 && nx < world.width && ny >= 0 && ny < world.height && surface[ny * world.width + nx]!.terrain === "water";
+          const edge = getWaterEdge(x, y);
+          if (edge) {
+            const src = edge.width; // bordered source is always square (48x48)
+            const strip = src / 6; // border ring is ~8px of a 48px tile
+            const dx = x * TILE_SIZE;
+            const dy = y * TILE_SIZE;
+            const dstStrip = TILE_SIZE / 6;
+            if (!isWater(x, y - 1)) ctx.drawImage(edge, 0, 0, src, strip, dx, dy, TILE_SIZE, dstStrip);
+            if (!isWater(x, y + 1)) ctx.drawImage(edge, 0, src - strip, src, strip, dx, dy + TILE_SIZE - dstStrip, TILE_SIZE, dstStrip);
+            if (!isWater(x - 1, y)) ctx.drawImage(edge, 0, 0, strip, src, dx, dy, dstStrip, TILE_SIZE);
+            if (!isWater(x + 1, y)) ctx.drawImage(edge, src - strip, 0, strip, src, dx + TILE_SIZE - dstStrip, dy, dstStrip, TILE_SIZE);
+          }
+          continue;
+        }
       }
 
       // Real tile art (see sprites.ts's getTileSprite) takes priority when it

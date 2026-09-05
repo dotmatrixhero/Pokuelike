@@ -51,58 +51,79 @@ function hashTile(x: number, y: number): number {
 
 /**
  * How many `<kind>_<n>.png` variants exist for a terrain kind that isn't
- * just a single `<kind>.png` file. "water" is animated rather than
- * per-tile-varied — see getTileSprite below — but still uses this count to
- * know how many frames it has.
+ * just a single `<kind>.png` file. Water is handled separately by
+ * getWaterSprite below (it needs a shore/interior flag, not just x/y).
  */
 const TILE_VARIANT_COUNTS: Record<string, number> = {
   tree: 7,
   boulder: 2,
   bush: 4,
   wall: 2,
-  water: 4,
 };
-
-const WATER_FRAME_MS = 300;
 
 export function getTileSprite(terrainKind: string, x: number, y: number): HTMLImageElement | null {
   const variants = TILE_VARIANT_COUNTS[terrainKind];
   if (!variants) return loadSprite(`tile_${terrainKind}`, `/tiles/${terrainKind}.png`);
-
-  let n: number;
-  if (terrainKind === "water") {
-    // Every water tile cycles through the same wave frames, but each tile's
-    // phase is offset by its own hash so the whole lake doesn't flash in
-    // unison — reads as a shimmer travelling across the surface instead.
-    const phase = hashTile(x, y) % variants;
-    n = ((Math.floor(performance.now() / WATER_FRAME_MS) + phase) % variants) + 1;
-  } else {
-    // Obstacles/walls just need stable-per-tile variety, not animation.
-    n = (hashTile(x, y) % variants) + 1;
-  }
+  // Obstacles/walls just need stable-per-tile variety, not animation.
+  const n = (hashTile(x, y) % variants) + 1;
   return loadSprite(`tile_${terrainKind}_${n}`, `/tiles/${terrainKind}_${n}.png`);
+}
+
+const WATER_FRAMES = 4;
+const WATER_FRAME_MS = 300;
+
+/**
+ * The current animation frame (1-based), shared by getWaterInterior/
+ * getWaterEdge so a given tile's two images (seamless base + bordered
+ * source for edge strips) always stay in sync with each other.
+ */
+function waterFrame(x: number, y: number): number {
+  const phase = hashTile(x, y) % WATER_FRAMES;
+  return ((Math.floor(performance.now() / WATER_FRAME_MS) + phase) % WATER_FRAMES) + 1;
+}
+
+/** The seamless, border-free water crop — used as every water tile's base fill regardless of its neighbors. */
+export function getWaterInterior(x: number, y: number): HTMLImageElement | null {
+  const n = waterFrame(x, y);
+  return loadSprite(`tile_water_${n}`, `/tiles/water_${n}.png`);
+}
+
+/**
+ * The full lake tile with its sandy border on all 4 sides. The source
+ * sheet only has this one bordered shape (no separate N/S/E/W edge
+ * pieces), so renderer.ts crops a strip off whichever side(s) of this
+ * image actually face a non-water neighbor and overlays just that strip
+ * on top of the interior fill — real per-side directional shorelines,
+ * built by compositing rather than needing dedicated edge art.
+ */
+export function getWaterEdge(x: number, y: number): HTMLImageElement | null {
+  const n = waterFrame(x, y);
+  return loadSprite(`tile_water_edge_${n}`, `/tiles/water_edge_${n}.png`);
 }
 
 /**
  * Plain "floor" has no fixed art of its own (see renderer.ts's faint "."
- * glyph) — these are real, previously-unused cave-floor textures from the
- * legacy sheets, drawn underneath that glyph at low opacity purely to give
- * open ground some varied texture/lighting instead of a flat wash.
+ * glyph) — these are real, previously-unused cave-floor/dirt-path textures
+ * from the legacy sheets, drawn underneath that glyph at low opacity
+ * purely to give open ground some texture/lighting instead of a flat
+ * wash.
  *
- * Only cave-floor and dirt-path variants are used here — all the same
- * brownish family — not the grass/stone textures also sitting in
- * public/tiles/: mixing hues that different produced a patchwork of
- * visibly clashing colored squares instead of a subtle surface, since
- * each is a small flat-color source crop with no blending between
- * neighbors. Picking a variant per 4x4 block of tiles (not per individual
- * tile) likewise avoids a "static" look — real cave floor reads as a few
- * big irregular patches, not per-tile noise.
+ * Went through two wrong extremes before landing here: picking among all
+ * 6 crops per 4x4-tile BLOCK made every block boundary a visible seam (a
+ * literal grid of differently-textured squares); dropping to a single
+ * texture for the whole map fixed the seams but then just looked like
+ * the same tile stamped over and over ("really try to make the floor
+ * varied and beautiful... same tile over and over can look bad"). This
+ * picks per INDIVIDUAL tile instead, at low opacity — real tilesets do
+ * exactly this (several near-identical floor variants scattered
+ * pseudo-randomly) specifically because at small scale and low contrast
+ * it reads as natural grain, not a patchwork; only a hard-edged multi-
+ * tile block of one texture read as "chunks" before.
  */
 const FLOOR_TEXTURES = ["floor_cave", "floor_cave_2", "floor_cave_3", "floor_dirt_1", "floor_dirt_2", "floor_dirt_3"];
-const FLOOR_PATCH_SIZE = 4;
 
 export function getFloorTexture(x: number, y: number): HTMLImageElement | null {
-  const name = FLOOR_TEXTURES[hashTile(Math.floor(x / FLOOR_PATCH_SIZE), Math.floor(y / FLOOR_PATCH_SIZE)) % FLOOR_TEXTURES.length]!;
+  const name = FLOOR_TEXTURES[hashTile(x, y) % FLOOR_TEXTURES.length]!;
   return loadSprite(`tile_${name}`, `/tiles/${name}.png`);
 }
 

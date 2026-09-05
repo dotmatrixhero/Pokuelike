@@ -2261,3 +2261,39 @@ not something this pathfinding pass itself caused or is positioned to fix.
       gray/rock-textured, not blue) — picked for visual distinctness
       instead, since the flavor names are this codebase's own internal
       labels, not a promise of canon fidelity.
+- [x] Web: three more visual polish passes, all direct asks. (1) Trees/
+      bushes had a flat colored ground-ellipse or full-square background
+      baked into the source crop, which read as a hard rectangle sitting
+      on top of the actual floor underneath instead of blending into it.
+      Fixed by exact-color-keying the shared 3-tone base-ellipse palette
+      ((108,203,112)/(74,176,81)/(43,139,53), confirmed identical across
+      every affected sprite) to transparent — safer than the geometric
+      row-cutoff/flood-fill attempts tried first, both of which either
+      left visible remnants or ate into the tree/trunk itself (tree_7
+      specifically: a fixed-fraction cutoff sliced straight through its
+      trunk since the trunk and base ellipse occupy the same row range).
+      Also caught mid-pass: `boulder_2` was never actually the boulder it
+      claimed to be — still the wrong crop (a tree/reed cluster on a flat
+      blue square) from an earlier session, re-extracted from the sheet's
+      real second boulder; `bush_2`/`bush_3` were a full square, flat-
+      green-background crop with no isolated ground patch to key out at
+      all, so they were swapped for a different pair of small trees from
+      elsewhere on the sheet that do have a proper keyable oval base.
+      (2) Water edges are now real per-side directional shorelines, not
+      the earlier binary "bordered vs. seamless" tile choice — the
+      seamless interior fill draws first, then a strip cropped from the
+      bordered source art (`getWaterEdge`) is composited on top of just
+      the side(s) whose actual neighbor isn't water (`renderer.ts`'s 4
+      cardinal `ctx.drawImage` calls with source-rect cropping), so a
+      tile inside a lake shows no border whatsoever and a shore tile only
+      shows sand on the side(s) actually facing land. (3) Floor texture
+      went through two wrong extremes before landing right: per-4x4-tile-
+      block variant selection made every block boundary a visible seam
+      ("random square chunks... don't feel like the beautiful biome
+      art"); reacting to that, a single map-wide texture removed the
+      seams but then just looked like the same tile stamped everywhere
+      ("same tile over and over can look bad"). Landed on per-INDIVIDUAL-
+      tile selection among the same 6 earthy crops at low opacity — real
+      tilesets do exactly this (scattered near-identical variants read as
+      natural grain at small scale/low contrast; only a hard-edged
+      multi-tile block of one texture reads as "chunks").
