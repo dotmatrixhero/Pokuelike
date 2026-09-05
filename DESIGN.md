@@ -11510,3 +11510,71 @@ visibly lighter (`[49,51,55]`-`[56,58,62]`), confirming both halves of the
 new `shade()` fire correctly and land in the intended subtle range. Full
 engine/data suites (898 + 19 tests) and a full `pnpm -r typecheck` stay
 green — this change touches no simulation logic, only render-time color math.
+
+## Overworld visualization: seeing the region graph in the live web app
+
+Direct ask: "I want to be able to see the overworld stuff... visualize
+overworld." The overworld/region-graph system (`packages/engine/src/overworld.ts`,
+merged into this branch from the sibling `overworld-regions` session) had
+zero UI before this — it only existed as an engine module and a runner
+validation script (`validateOverworld.ts`), never wired into `packages/web`
+at all.
+
+Built a real integration, not a separate mockup:
+
+- **New "Overworld: On/Off" toggle** in the header. Off (default): the app
+  behaves exactly as before — a single `World`, `tickWorld`, the seed
+  controls all live. On: `main.ts` builds a `createDemoOverworld()` graph
+  instead (`@pokuelike/data`'s existing 3-region chain, `region-a - region-b
+  - region-c`) and drives it with `tickOverworld` each step; the seed
+  controls are disabled (each region has its own fixed seed, a single "seed"
+  input doesn't mean anything for a graph of regions).
+- **`world` always mirrors whichever region is currently focused**
+  (`findRegion(overworld, overworld.focusedRegionId)!.world`) — every
+  existing single-map consumer (the tile/ASCII renderer, the Inspector
+  panel, the event log, Auto Camera, Battle Screen) needed zero changes at
+  all; they just keep reading `world` as they always have, now pointed at
+  whichever region happens to be live.
+- **New `overworldPanel.ts`**: a horizontal strip of region cards above the
+  canvas, one per region, connected in graph order. The focused region's
+  card is highlighted and shows its REAL per-species population straight
+  off `world.agents` (no `RegionAggregate` — it's actually simulated);
+  every other card shows its abstracted `RegionAggregate` numbers instead
+  (rounded population per species, average resource-index percentage) — the
+  card's content genuinely changes shape depending on focus, making the
+  promotion/demotion boundary itself visible rather than just narrated in
+  an event log line. Re-rendered every animation frame (same "cheap enough,
+  a handful of DOM nodes" idiom `battleScreenPanel.ts` already uses).
+- **Click a non-focused card to switch focus** — calls `setFocusedRegion`
+  (the real demote-current/promote-target transition), then re-points
+  `world` at the newly-focused region and runs the exact same
+  `resetUiForNewWorld` reset `loadWorld`/`loadOverworld` already use (every
+  tracked id from the old focused region — Auto Camera engagements, the
+  event log buffer, the current selection — is meaningless the instant
+  focus moves, exactly like loading a fresh seed).
+
+Confirmed live in the browser (Playwright): toggling Overworld on rendered
+3 region cards with real data (`region-a`, focused, "26 alive — full sim",
+correct per-species breakdown matching the Inspector panel's own "World
+overview"; `region-b`/`region-c` both "~31 (abstract) — resources ~50%"
+with plausible per-species aggregate counts); playing forward a few
+thousand ticks showed the abstract regions' numbers drifting independently;
+clicking `region-b`'s card switched focus — its card correctly gained the
+"Focused" badge and switched to a real "30 alive, 2 corpses" individual
+breakdown (a genuine promotion, not just a label change), `region-a`
+correctly demoted to "~30 (abstract)", and the canvas/Inspector switched to
+region-b's own (differently-seeded, differently-terrained) map. Toggling
+Overworld back off cleanly reverted to ordinary single-map mode (seed
+controls re-enabled, panel hidden). Zero console/page errors across the
+full sequence. Full 942-test suite unaffected (this is a `packages/web`-only
+integration, no engine changes), typecheck clean, real build succeeds.
+
+Honestly out of scope for this pass, real follow-ups:
+- The graph layout is a plain left-to-right strip matching the demo's own
+  chain topology — a real non-chain graph (a branch, a cycle) would need an
+  actual layout algorithm, not attempted since the only graph that exists
+  is a chain.
+- No visual indication of the migration-edge dispersal/emigration events
+  (`regionCrossed`/`regionEmigrated`) actually happening between cards
+  (e.g. an animated pulse along a connector) — they're visible in the event
+  log/Inspector, but not on the region-graph strip itself.

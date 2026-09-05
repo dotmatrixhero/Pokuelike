@@ -87,6 +87,46 @@
         -webkit-overflow-scrolling: touch;
         touch-action: pan-x pan-y;
       }
+
+      /* The overworld region graph — a horizontal strip above the canvas,
+         one card per region, a connector between consecutive ones (the
+         demo graph is a simple chain — see overworldScenario.ts). Direct
+         ask: "I want to be able to see the overworld stuff... visualize
+         overworld." Only shown while Overworld mode is on (see main.ts's
+         overworld-toggle handler); the canvas below it always shows
+         whichever region is currently focused, same renderer as the
+         single-map mode. */
+      #overworld-panel {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: stretch;
+        gap: 6px;
+        padding: 8px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 6px;
+      }
+      .region-card {
+        flex: 1 1 140px;
+        min-width: 130px;
+        border: 1px solid var(--panel-border);
+        border-radius: 5px;
+        padding: 7px 10px;
+        cursor: pointer;
+        background: #1b2129;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .region-card:hover { background: #232b36; }
+      .region-card.region-card-focused { border-color: var(--accent); background: #1a2740; cursor: default; }
+      .region-card-title { font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+      .region-card-badge { font-size: 9.5px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
+      .region-card-stat { font-size: 11px; color: var(--text-dim); }
+      .region-card-species { font-size: 10.5px; color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+      .region-connector { flex: 0 0 auto; align-self: center; color: var(--text-dim); font-size: 16px; }
       canvas { image-rendering: pixelated; cursor: pointer; border-radius: 3px; }
 
       /* Battle Screen — a second, differently-formatted view of whatever
@@ -439,10 +479,16 @@
         </div>
 
         <div class="divider"></div>
+        <div class="field-group">
+          <button id="overworld-toggle" title="Switch between one map and the overworld — several regions, only the focused one fully simulated, the rest cheaply abstracted">Overworld: Off</button>
+        </div>
+
+        <div class="divider"></div>
         <button id="toggle-drawer" title="Legend and event log">☰ Log</button>
       </header>
 
       <main>
+        <div id="overworld-panel" hidden></div>
         <div id="canvas-wrap">
           <canvas id="scene"></canvas>
         </div>
