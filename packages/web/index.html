@@ -2,17 +2,542 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Pokuelike</title>
     <style>
-      html, body { margin: 0; background: #10141a; color: #eee; font-family: monospace; }
-      #app { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; }
-      canvas { image-rendering: pixelated; border: 1px solid #333; }
+      :root {
+        color-scheme: dark;
+        --bg: #10141a;
+        --panel: #171c24;
+        --panel-border: #2a303c;
+        --text: #e8eaed;
+        --text-dim: #8b93a1;
+        --accent: #4a8cff;
+      }
+      html, body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      button, input, select {
+        font-family: inherit;
+        font-size: 13px;
+        background: #20262f;
+        color: var(--text);
+        border: 1px solid var(--panel-border);
+        border-radius: 4px;
+        padding: 5px 9px;
+      }
+      button { cursor: pointer; }
+      button:hover { background: #2a313d; }
+      button.playing { background: var(--accent); color: #06111f; border-color: var(--accent); }
+      input[type="number"] { width: 110px; }
+
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        padding: 10px;
+        gap: 10px;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 6px;
+      }
+      header h1 {
+        font-size: 15px;
+        margin: 0 8px 0 0;
+        white-space: nowrap;
+        color: var(--text-dim);
+        font-weight: 600;
+      }
+      .divider { width: 1px; height: 22px; background: var(--panel-border); margin: 0 4px; }
+      .field-group { display: flex; align-items: center; gap: 4px; }
+      #tick-label, #clock-label { font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 13px; }
+      #speed-label { min-width: 36px; text-align: center; font-variant-numeric: tabular-nums; }
+      #zoom-label { min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 13px; }
+      #auto-cam-toggle.playing { background: #c792ea; color: #1a0e24; border-color: #c792ea; }
+      #auto-cam-status { color: var(--text-dim); font-size: 12px; font-style: italic; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-height: 0;
+      }
+      #canvas-wrap {
+        flex: 1;
+        overflow: auto;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 6px;
+        display: flex;
+        align-items: flex-start;
+        justify-content: flex-start;
+        padding: 8px;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-x pan-y;
+      }
+
+      /* The overworld region graph — a horizontal strip above the canvas,
+         one card per region, a connector between consecutive ones (the
+         demo graph is a simple chain — see overworldScenario.ts). Direct
+         ask: "I want to be able to see the overworld stuff... visualize
+         overworld." Only shown while Overworld mode is on (see main.ts's
+         overworld-toggle handler); the canvas below it always shows
+         whichever region is currently focused, same renderer as the
+         single-map mode. */
+      #overworld-panel {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: stretch;
+        gap: 6px;
+        padding: 8px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 6px;
+      }
+      .region-card {
+        flex: 1 1 140px;
+        min-width: 130px;
+        border: 1px solid var(--panel-border);
+        border-radius: 5px;
+        padding: 7px 10px;
+        cursor: pointer;
+        background: #1b2129;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .region-card:hover { background: #232b36; }
+      .region-card.region-card-focused { border-color: var(--accent); background: #1a2740; cursor: default; }
+      .region-card-title { font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+      .region-card-badge { font-size: 9.5px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
+      .region-card-stat { font-size: 11px; color: var(--text-dim); }
+      .region-card-species { font-size: 10.5px; color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+      .region-connector { flex: 0 0 auto; align-self: center; color: var(--text-dim); font-size: 16px; }
+      canvas { image-rendering: pixelated; cursor: pointer; border-radius: 3px; }
+
+      /* Battle Screen — a second, differently-formatted view of whatever
+         Auto Camera is currently following, styled like a mainline Pokémon
+         battle text box (see DESIGN.md's "Battle Screen" section). Lives as
+         a second *tab* inside #inspector-panel (see .panel-tabs below)
+         rather than its own docked panel — a direct follow-up ask: the
+         standalone panel "obscures the map" by eating extra vertical space
+         under the canvas, so it now shares the Inspector's existing
+         footprint instead of adding to it. #inspector and #battle-screen are
+         siblings inside the same panel body; exactly one is un-hidden at a
+         time (see main.ts's `selectTab`), the same `[hidden]` convention the
+         drawer/legend toggles already use elsewhere in this file. */
+      #battle-screen { padding: 8px 12px; font-size: 12.5px; display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: hidden; }
+      /* `#inspector`/`#battle-screen` both set their own unconditional
+         `display` above/below (needed either way for their internal flex
+         layout) — an author `display` declaration otherwise always beats the
+         UA stylesheet's plain `[hidden] { display: none }`, so the inactive
+         tab's content div needs an explicit, higher-specificity override
+         here or toggling `.hidden` in main.ts's `selectTab` would do nothing
+         visually. */
+      #inspector[hidden], #battle-screen[hidden] { display: none; }
+      .battle-screen-empty { color: var(--text-dim); padding: 10px 4px; font-size: 12px; }
+      .battle-screen-vs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .battle-screen-combatant {
+        flex: 1 1 160px;
+        min-width: 130px;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        border-left: 3px solid transparent;
+        padding-left: 6px;
+      }
+      /* One row per combatant chip: a small sprite thumbnail next to its
+         (color-coded, see palette.ts's agentAccentColor) name — direct ask:
+         "add their hp to the battle log side and also color code them +
+         their sprite" for telling same-species combatants apart. */
+      .battle-screen-combatant-ident { display: flex; align-items: center; gap: 5px; }
+      .battle-screen-sprite { width: 20px; height: 20px; image-rendering: pixelated; flex: 0 0 auto; }
+      .battle-screen-name { font-weight: 700; font-size: 13px; }
+      .battle-screen-hp-track { height: 7px; border-radius: 4px; background: #232a34; overflow: hidden; }
+      .battle-screen-hp-fill { height: 100%; border-radius: 4px; transition: width 0.25s ease; }
+      .battle-screen-hp-value { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+      .battle-screen-vs-label { flex: 0 0 auto; color: var(--text-dim); font-weight: 700; font-size: 12px; }
+      .battle-screen-extra { flex: 0 0 auto; color: var(--text-dim); font-size: 11px; }
+      .battle-screen-log {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        border-top: 1px solid var(--panel-border);
+        padding-top: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-family: ui-monospace, "SF Mono", Consolas, monospace;
+      }
+      .battle-screen-line { line-height: 1.4; }
+      .battle-screen-line-intro, .battle-screen-line-scene { font-weight: 700; color: var(--text); }
+      .battle-screen-line-move { color: var(--text); }
+      .battle-screen-line-crit { color: #ff6b6b; font-weight: 700; }
+      .battle-screen-line-effective { color: #7be08a; font-weight: 700; }
+      .battle-screen-line-notvery { color: var(--text-dim); font-style: italic; }
+      .battle-screen-line-damage { color: #ff9d3c; font-weight: 600; }
+      .battle-screen-line-miss { color: var(--text-dim); font-style: italic; }
+      .battle-screen-line-retreat { color: #6ec6ff; }
+      .battle-screen-line-faint { color: #f5d76e; font-weight: 700; }
+      .battle-screen-line-conclusion { color: #ff6b6b; font-weight: 700; }
+      /* A brief CSS-only flash, applied only to the single newest line by
+         `BattleScreenPanel.render` (a `.battle-screen-line-newest` marker on
+         the last element, not on every crit/kill line every re-render) — the
+         whole log is rebuilt from scratch each dirty render, so without that
+         marker every past crit would replay the flash alongside the new one.
+         No JS animation framework, per the task's own constraint — this is
+         plain CSS on a freshly-created element. */
+      .battle-screen-line-newest { animation: battle-flash 0.5s ease-out; }
+      @keyframes battle-flash {
+        from { background: rgba(255, 107, 107, 0.35); }
+        to { background: transparent; }
+      }
+      #battle-screen.battle-screen-concluded .battle-screen-vs { opacity: 0.7; }
+
+      /* The legend + event log live in a drawer that floats over the canvas
+         from the right and slides off-screen when closed — makes narrow/
+         mobile viewports usable without permanently eating canvas width. */
+      #drawer-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(4, 6, 10, 0.5);
+        z-index: 39;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+      /* The dimming scrim is a mobile/narrow-viewport affordance only — on a
+         desktop-width screen the drawer is a floating side panel that never
+         covers the canvas, so darkening the rest of the page while it's open
+         reads as an unwanted, unrelated dimming rather than a modal cue. */
+      @media (max-width: 768px) {
+        #drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+      }
+
+      #sidebar {
+        position: fixed;
+        top: 0;
+        right: 0;
+        height: 100%;
+        width: min(380px, 88vw);
+        z-index: 40;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 10px;
+        background: var(--bg);
+        border-left: 1px solid var(--panel-border);
+        box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
+        transform: translateX(100%);
+        transition: transform 0.22s ease;
+      }
+      #sidebar.open { transform: translateX(0); }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .panel-header {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--panel-border);
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      /* Inspector/Battle Screen tab switcher — lives inside #inspector-panel's
+         own .panel-header, in place of the plain <span> title every other
+         panel-header uses, so it costs no extra vertical space of its own.
+         Small variants of the app's ordinary button/.playing convention
+         (see button.playing above) rather than a new visual language. */
+      .panel-tabs { display: flex; gap: 5px; }
+      .panel-tab-btn { padding: 3px 8px; font-size: 11px; font-weight: 600; }
+      #legend-panel { flex: 0 0 auto; max-height: 34%; overflow-y: auto; }
+      #legend { padding: 8px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px; }
+      .legend-group-title { color: var(--text-dim); text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.05em; margin-bottom: 3px; }
+      .legend-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 3px 8px; }
+      .legend-item { display: flex; align-items: center; gap: 5px; }
+      .legend-glyph { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-weight: 700; width: 1.4em; text-align: center; flex: 0 0 auto; }
+      .legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+
+      /*
+       * Real ask: "the actual battle log... needs to be scrollable on
+       * mobile. Or more expandable." `overflow-y: auto` alone was already
+       * here, but without `-webkit-overflow-scrolling: touch` a nested
+       * scrollable panel like this one (inside a fixed-position drawer —
+       * see #sidebar above) is a well-known iOS Safari trap where touch
+       * drags don't actually scroll it — same fix `#canvas-wrap` already
+       * needed for the same reason. `.panel-expanded` (toggled by the new
+       * expand button in the panel header, see .panel-tabs below and
+       * main.ts) is the "more expandable" half — a real, much taller
+       * reading mode instead of the fixed 46%-of-drawer-height default.
+       */
+      #inspector-panel { flex: 0 0 auto; max-height: 46%; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+      #inspector-panel.panel-expanded { max-height: 82%; }
+      #event-log-panel { flex: 1; min-height: 0; }
+      #event-log {
+        flex: 1;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 4px 8px;
+        font-family: ui-monospace, "SF Mono", Consolas, monospace;
+        font-size: 11.5px;
+        line-height: 1.5;
+      }
+      .log-row { display: flex; gap: 6px; padding: 1px 2px; border-radius: 3px; }
+      .log-row-minor { color: var(--text-dim); }
+      .log-row-story { font-weight: 600; padding: 2px; }
+      .log-icon { flex: 0 0 auto; width: 1.3em; text-align: center; }
+      .log-tick { flex: 0 0 auto; color: var(--text-dim); font-weight: 400; }
+      .log-row-story .log-tick { color: inherit; opacity: 0.7; }
+      .log-text { flex: 1; word-break: break-word; }
+      .log-empty, .log-note, .inspect-empty {
+        color: var(--text-dim);
+        padding: 10px 4px;
+        font-size: 12px;
+      }
+
+      #inspector { padding: 8px 12px; font-size: 12.5px; }
+      .inspect-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+      /* Label and value sit close together on the left, not spread across
+         the panel's full width — on a wide desktop inspector, space-between
+         put a lot of empty space between e.g. "Bulbasaur" and its count.
+         A fixed label width keeps every row's value lined up in a loose
+         column without needing the label to stretch to fill the row.
+         Scoped to #inspector specifically — .inspect-label/.inspect-row
+         are also reused (for text-color/spacing only) by the header's
+         Seed/Speed controls, which shouldn't get this fixed-width/left-
+         aligned treatment. */
+      .inspect-row { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; border-bottom: 1px dashed #232a34; }
+      .inspect-label { color: var(--text-dim); }
+      .inspect-value { text-align: right; }
+      #inspector .inspect-row { justify-content: flex-start; }
+      #inspector .inspect-label { flex: 0 0 auto; min-width: 130px; }
+      #inspector .inspect-value { text-align: left; }
+      /* Population/species-count rows in the world-overview panel: short
+         label, short number — the general 130px label column (sized for
+         longer per-agent field names) left a big gap between them. */
+      #inspector .inspect-row.inspect-row-compact { gap: 6px; }
+      #inspector .inspect-row.inspect-row-compact .inspect-label { min-width: 0; }
+
+      /* --- Grouped per-agent inspector layout ------------------------------
+         Groups reuse .panel-header/.legend-group-title's typographic
+         convention (uppercase, dim, small, letter-spaced) rather than
+         inventing a new heading style. */
+      .inspect-group {
+        border: 1px solid var(--panel-border);
+        border-radius: 5px;
+        padding: 7px 9px;
+        margin-bottom: 8px;
+        background: rgba(255, 255, 255, 0.015);
+      }
+      .inspect-group-title {
+        color: var(--text-dim);
+        text-transform: uppercase;
+        font-size: 10.5px;
+        letter-spacing: 0.05em;
+        font-weight: 600;
+        margin-bottom: 5px;
+      }
+      .inspect-group .inspect-row { border-bottom: none; padding: 1px 0; }
+
+      .inspect-identity-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 4px; }
+      .type-chip, .inspect-chip {
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 7px;
+        border-radius: 10px;
+        color: #0a0d12;
+        text-transform: capitalize;
+      }
+      .inspect-chip { background: #262c37; color: var(--text); text-transform: none; }
+      .inspect-sex { font-size: 15px; font-weight: 700; line-height: 1; padding: 0 2px; cursor: default; }
+      .inspect-sex-male { color: #4a8cff; }
+      .inspect-sex-female { color: #ff6fae; }
+
+      .inspect-meter-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+      .inspect-meter-label { flex: 0 0 auto; min-width: 76px; font-size: 11.5px; color: var(--text-dim); }
+      .inspect-meter-track {
+        flex: 1;
+        height: 7px;
+        border-radius: 4px;
+        background: #232a34;
+        overflow: hidden;
+      }
+      .inspect-meter-fill { height: 100%; border-radius: 4px; }
+      .inspect-meter-value { flex: 0 0 auto; min-width: 34px; text-align: right; font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+      /* --- Moves list + skill tree ------------------------------------------ */
+      .move-list { display: flex; flex-direction: column; gap: 3px; }
+      .move-row { border-bottom: 1px dashed #232a34; padding-bottom: 3px; }
+      .move-row:last-child { border-bottom: none; }
+      .move-row-header { display: flex; align-items: center; gap: 7px; padding: 3px 2px; border-radius: 4px; flex-wrap: wrap; }
+      .move-row-clickable { cursor: pointer; }
+      .move-row-clickable:hover { background: rgba(255, 255, 255, 0.04); }
+      .move-row-clickable:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+      .move-type-swatch { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+      .move-name { font-weight: 600; }
+      .move-summary { color: var(--text-dim); font-size: 11px; }
+      .move-use-count { color: var(--text-dim); font-size: 11px; margin-left: auto; font-variant-numeric: tabular-nums; }
+      .move-caret { color: var(--text-dim); font-size: 10px; width: 1em; text-align: center; }
+
+      .skilltree {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 8px 4px 6px 18px;
+        margin-top: 2px;
+        border-left: 2px solid var(--panel-border);
+      }
+      .skilltree-row { display: flex; flex-wrap: wrap; gap: 8px; }
+      .skilltree-node {
+        border: 1px solid var(--panel-border);
+        border-radius: 5px;
+        padding: 4px 8px;
+        min-width: 84px;
+        background: #1b2129;
+        cursor: default;
+      }
+      .skilltree-node-dim { opacity: 0.45; }
+      .skilltree-node-chosen { opacity: 1; background: #232b1f; }
+      .skilltree-node-name { font-size: 11.5px; font-weight: 600; }
+      .skilltree-node-cost { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
     </style>
   </head>
   <body>
     <div id="app">
-      <h1>Pokuelike</h1>
-      <canvas id="scene"></canvas>
+      <header>
+        <h1>Pokuelike — live observer</h1>
+
+        <div class="field-group">
+          <label for="seed-input" class="inspect-label" style="color: var(--text-dim); font-size: 12px;">Seed</label>
+          <input id="seed-input" type="number" step="1" />
+          <button id="load-seed">Load</button>
+          <button id="random-seed" title="Mint a fresh random seed and load it">Random</button>
+          <button id="copy-seed" title="Copy the current seed to the clipboard">Copy</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="field-group">
+          <button id="play-pause">Play</button>
+          <button id="step" title="Advance exactly one tick (pauses first)">Step</button>
+        </div>
+
+        <div class="field-group">
+          <span class="inspect-label" style="color: var(--text-dim); font-size: 12px;">Speed</span>
+          <input id="speed" type="range" step="1" />
+          <span id="speed-label"></span>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="field-group">
+          <button id="style-tile">Tile</button>
+          <button id="style-ascii" class="playing">ASCII</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="field-group">
+          <button id="zoom-out" title="Zoom out">−</button>
+          <span id="zoom-label"></span>
+          <button id="zoom-in" title="Zoom in">+</button>
+        </div>
+
+        <div class="divider"></div>
+        <span id="tick-label"></span>
+        <span id="clock-label"></span>
+
+        <div class="divider"></div>
+
+        <div class="field-group">
+          <button id="auto-cam-toggle" title="Follow notable events automatically — immigration, courtship/eggs, hatching, battles, evolution, deaths — zooming in and slowing down while each one plays out">Auto Camera: Off</button>
+          <span id="auto-cam-status"></span>
+        </div>
+
+        <div class="divider"></div>
+        <div class="field-group">
+          <button id="overworld-toggle" title="Switch between one map and the overworld — several regions, only the focused one fully simulated, the rest cheaply abstracted">Overworld: Off</button>
+        </div>
+
+        <div class="divider"></div>
+        <button id="toggle-drawer" title="Legend and event log">☰ Log</button>
+      </header>
+
+      <main>
+        <div id="overworld-panel" hidden></div>
+        <div id="canvas-wrap">
+          <canvas id="scene"></canvas>
+        </div>
+
+        <div class="panel" id="inspector-panel">
+          <div class="panel-header">
+            <div class="panel-tabs" role="tablist">
+              <button id="tab-inspector" class="panel-tab-btn playing" role="tab" aria-selected="true" title="Population stats and per-agent detail">Inspector</button>
+              <button id="tab-battle-screen" class="panel-tab-btn" role="tab" aria-selected="false" title="Pokémon-battle-textbox view of whatever Auto Camera is following">Battle Screen</button>
+            </div>
+            <button id="expand-panel" title="Expand this panel for easier reading, especially on mobile">⤢</button>
+            <button id="clear-selection" title="Clear selection">Clear</button>
+          </div>
+          <div id="inspector"></div>
+          <div id="battle-screen" hidden></div>
+        </div>
+      </main>
+
+      <div id="drawer-backdrop"></div>
+      <div id="sidebar">
+        <div class="panel" id="legend-panel">
+          <div class="panel-header">
+            <span>Legend</span>
+            <button id="toggle-legend" title="Show/hide">Hide</button>
+          </div>
+          <div id="legend"></div>
+        </div>
+
+        <div class="panel" id="event-log-panel">
+          <div class="panel-header">
+            <span>Event log</span>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <label class="inspect-label" style="display: flex; align-items: center; gap: 5px; font-size: 12px; text-transform: none; letter-spacing: normal; font-weight: 400;">
+                <input id="hide-noise" type="checkbox" checked style="width: auto; padding: 0;" />
+                Pokémon events only
+              </label>
+              <label class="inspect-label" style="display: flex; align-items: center; gap: 5px; font-size: 12px; text-transform: none; letter-spacing: normal; font-weight: 400;">
+                <input id="hide-levelups" type="checkbox" checked style="width: auto; padding: 0;" />
+                Hide level-ups
+              </label>
+              <label class="inspect-label" style="display: flex; align-items: center; gap: 5px; font-size: 12px; text-transform: none; letter-spacing: normal; font-weight: 400;" title="Only births, true deaths, and evolutions — for watching a long run without every fight/dispersal/shelter event">
+                <input id="headlines-only" type="checkbox" style="width: auto; padding: 0;" />
+                Quiet mode (births/deaths/evolutions)
+              </label>
+            </div>
+          </div>
+          <div id="event-log"></div>
+        </div>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

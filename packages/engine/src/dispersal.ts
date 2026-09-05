@@ -1,0 +1,343 @@
+import type { Agent, DispersalReason, Layer, Vec2, World } from "./types.js";
+import type { EventLog } from "./events.js";
+import { logBehaviorChange } from "./events.js";
+import { stepToward } from "./movement.js";
+import { findRandomWalkableTile } from "./migration.js";
+import { isMature } from "./reproduction.js";
+import { COHESION_DISTANCE } from "./herding.js";
+import { DISPERSAL_MIN_LEVEL } from "./leveling.js";
+import { effectiveDisposition } from "./herdLeadership.js";
+import { findWalkableNear } from "./worldgen.js";
+
+/**
+ * Natal dispersal — see DESIGN.md's "Natal dispersal: real biology's actual
+ * fix for the inbreeding bottleneck" section. A confirmed A/B test (seed 42,
+ * `isRelated` disabled vs. not) showed inbreeding avoidance genuinely
+ * starves the mate pool for the first ~1800 of a 3000-tick run with only 2
+ * founding pairs (population 65 vs. 98 at tick 3000, 9 vs. 40 by tick 1800).
+ * The fix isn't more genealogical bookkeeping — it's the real mechanism
+ * biology actually uses: a maturing individual leaves its birth group and
+ * finds mates elsewhere, so the mate pool isn't a single fixed population
+ * forever.
+ *
+ * Two triggers, both routed through the same relocate-then-join-or-found
+ * mechanism below:
+ * 1. `maybeTriggerDispersal`'s disposition-weighted roll, at the tick an
+ *    agent crosses `MATURITY_AGE` or the tick it evolves (leveling.ts sets
+ *    `Agent.pendingEvolutionDispersalCheck`) — the flavorful trait DESIGN.md
+ *    and TODO.md's original "Evolution as a dispersal trigger" pitch asked
+ *    for, reusing the existing boldness/sociability Disposition axes exactly
+ *    like predation.ts's flee/hunt thresholds and reproduction.ts's
+ *    mate-search radius already do.
+ * 2. The guaranteed fallback in that same function: an agent that's gone
+ *    `NO_MATES_DISPERSAL_TICKS` sustained ticks mature with zero eligible
+ *    mate candidates found nearby disperses regardless of the disposition
+ *    roll. This is the one that actually guarantees the mechanical
+ *    bottleneck gets solved even for a disposition roll that never favors
+ *    it (e.g. a fully timid, fully social agent scores 0 on trigger 1,
+ *    forever) — shipping only the flavorful trigger would fix the problem
+ *    by luck, not by design.
+ *
+ * Relocation reuses `migration.ts`'s existing "walk to a random distant
+ * point" utility (`findRandomWalkableTile`) rather than `herdMigration.ts`'s
+ * resource-aware `pickDestination` — that machinery is built and scored
+ * around a whole *herd's* shared centroid/abundance, whereas a single
+ * disperser leaving its herd behind has no herd-level resource context left
+ * to score against once it's alone; `migrate()`'s simpler "distant random
+ * point" is the actual fit for an individual (this module keeps its own
+ * `dispersalTarget` field rather than calling `migrate()` itself, since that
+ * function hardcodes `agent.behavior = "relocate"` and has no join-or-found
+ * step — see `Agent.dispersalTarget`'s doc comment).
+ */
+
+function manhattan(a: Vec2, b: Vec2): number {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
+/**
+ * Neutral (0.5 boldness / 0.5 sociability) per-occasion chance for trigger 1
+ * — see `dispersalChance`. Sim-original tuning guess, like every other magic
+ * number in this codebase: judge against a real run (see DESIGN.md), not
+ * canon. Picked high enough that a real fraction of a herd's matured/evolved
+ * individuals actually leave within a several-thousand-tick run rather than
+ * this reading as a never-fires flavor mechanic.
+ */
+export const DISPERSAL_BASE_CHANCE = 0.3;
+
+/**
+ * Disposition-weighted chance to disperse when trigger 1 fires (maturity
+ * crossing or evolving). Bolder, less-sociable individuals disperse more
+ * readily — real biology (bolder/more solitary temperaments are the ones
+ * that actually strike out from the group), and the same two Disposition
+ * axes already driving predation.ts's flee/hunt thresholds and
+ * reproduction.ts's mate-search radius, not a new parallel trait.
+ * `factor = boldness + (1 - sociability)` ranges 0..2: neutral (0.5/0.5)
+ * gives factor 1 -> exactly `DISPERSAL_BASE_CHANCE`; fully bold+solitary
+ * (1/0) gives factor 2 -> double that; fully timid+social (0/1) gives factor
+ * 0 -> this trigger never fires for that individual at all (it still has the
+ * guaranteed no-mates fallback below as a backstop). Sim-original mapping,
+ * explicitly flagged open in DESIGN.md — not canon.
+ */
+function dispersalChance(world: World, agent: Agent): number {
+  const disposition = effectiveDisposition(world, agent);
+  const factor = disposition.boldness + (1 - disposition.sociability);
+  return Math.min(1, DISPERSAL_BASE_CHANCE * factor);
+}
+
+/**
+ * Consecutive ticks a mature, sexed agent must go with zero eligible mate
+ * candidates found nearby (`Agent.ticksSinceEligibleMate`, maintained by
+ * reproduction.ts's `applyMateSeeking`) before the guaranteed fallback
+ * trigger fires regardless of the disposition roll. Mirrors this codebase's
+ * existing "sustained, not a single bad tick" pattern (e.g.
+ * `herdMigration.ts`'s `SCARCITY_SUSTAIN_TICKS`/`PREDATOR_PRESSURE_WINDOW_TICKS`,
+ * `needs.ts`'s `MIGRATE_AFTER_TICKS`) at a similar order of magnitude, judged
+ * against how long the confirmed A/B test showed the mate pool actually
+ * stays starved (up to ~1800 ticks) — 300 is short enough relative to that
+ * to matter across a real run's early game, not so short a single unlucky
+ * gap of candidates being briefly out of range triggers it. Sim-original
+ * tuning guess, explicitly flagged open in DESIGN.md.
+ */
+export const NO_MATES_DISPERSAL_TICKS = 1000;
+
+/**
+ * How close another same-species herd's member must land to a disperser's
+ * arrival point to count as "found nearby, join it" rather than "found
+ * nothing, found a new one." 3x `herding.ts`'s `COHESION_DISTANCE` — wide
+ * enough that landing genuinely within an existing herd's home range counts,
+ * without being so wide that a disperser five separate roaming groups away
+ * spuriously "joins" one it never actually encountered.
+ */
+/**
+ * Exported so `immigration.ts` can reuse the exact same "join a nearby
+ * existing herd, or found a new one" radius for a freshly-arrived
+ * immigrant's first member — see that module's `finishImmigrantHerd`, the
+ * same "landed near an existing herd" question a disperser asks on arrival.
+ */
+export const JOIN_HERD_RADIUS = 3 * COHESION_DISTANCE;
+
+/**
+ * Optional region-graph hook — lets a triggered natal dispersal target a
+ * NEIGHBORING REGION instead of a random point on this map, the harder half
+ * of the overworld's migration-edges stretch goal (`overworld.ts`'s
+ * `maybeEmigrate` already covers the cheap abstract-to-abstract half —
+ * see that module's top-of-file doc comment). Absent (every pre-existing
+ * caller, and any call against a bare single-region `World`) means
+ * dispersal behaves exactly as it always has. Supplied only for the
+ * currently-focused region's tick (`overworld.ts`'s `tickOverworld`) —
+ * only a focused region has real individual agents to disperse at all.
+ * Dispersal.ts never interprets `neighborRegionIds`' entries itself, only
+ * carries whichever one gets picked onto `Agent.crossingToRegionId` —
+ * region identity/lookup is `overworld.ts`'s concern, not this module's.
+ */
+export interface RegionDispersalContext {
+  neighborRegionIds: readonly string[];
+}
+
+/**
+ * Chance, ONCE a natal dispersal has already been triggered (either of
+ * `maybeTriggerDispersal`'s two existing triggers), that it targets a
+ * neighboring region instead of a random point on this map — only rolled
+ * at all when a `RegionDispersalContext` with at least one neighbor is
+ * supplied. Kept a minority outcome deliberately: most dispersal should
+ * still be the original within-map "join a nearby herd or found a new one"
+ * mechanic this sits on top of, not replace it. Sim-original tuning guess,
+ * judged against a real run like every other magic number in this
+ * codebase.
+ */
+export const REGION_DISPERSAL_CHANCE = 0.25;
+
+/**
+ * Random point on one of the four edges of `layer`'s grid — "leaving the
+ * map" needs a real boundary tile to walk toward, the same "arrives from
+ * outside" premise immigration.ts's own (unexported, so duplicated here at
+ * the same small scale) `pickEdgePos` uses in reverse. Surface only needs
+ * the walkability search (`findWalkableNear`) since it's the only layer
+ * with real obstacles/water — underground/canopy are flat, fully-walkable
+ * grids at every (x,y) (see worldgen.ts), so any raw edge point is already
+ * valid there.
+ */
+function pickMapEdgeTarget(world: World, layer: Layer, rng: () => number): Vec2 {
+  const edge = Math.floor(rng() * 4);
+  const t = rng();
+  const raw: Vec2 =
+    edge === 0
+      ? { x: Math.round(t * (world.width - 1)), y: 0 } // north
+      : edge === 1
+        ? { x: world.width - 1, y: Math.round(t * (world.height - 1)) } // east
+        : edge === 2
+          ? { x: Math.round(t * (world.width - 1)), y: world.height - 1 } // south
+          : { x: 0, y: Math.round(t * (world.height - 1)) }; // west
+  return layer === "surface" ? findWalkableNear(world, layer, raw.x, raw.y) : raw;
+}
+
+/**
+ * Checked once per action tick for every living, sexed agent not already
+ * dispersing (see needs.ts's `tickAgentAction`) — never re-rolls or
+ * re-triggers while `Agent.dispersalTarget` is already set, so an
+ * in-progress dispersal is never double-triggered. Genderless agents
+ * (`!agent.sex`) are skipped entirely — dispersal exists to solve a
+ * mate-finding problem, so it has nothing to do for an agent that never
+ * seeks a mate at all. Gated on `DISPERSAL_MIN_LEVEL` (leveling.ts) below
+ * that level, an agent just waits, same as it would have before this
+ * feature existed.
+ */
+export function maybeTriggerDispersal(world: World, agent: Agent, log: EventLog | undefined, rng: () => number, regionCtx?: RegionDispersalContext): void {
+  if (agent.dispersalTarget) return;
+  if (!agent.sex) return;
+  if (agent.level === undefined || agent.level < DISPERSAL_MIN_LEVEL) return;
+
+  // Trigger 1's evolution occasion — a one-tick flag set by leveling.ts's
+  // grantExp the instant an evolution happens, consumed here (win or lose)
+  // so an evolution always gets exactly one roll.
+  const justEvolved = agent.pendingEvolutionDispersalCheck === true;
+  agent.pendingEvolutionDispersalCheck = undefined;
+
+  // Trigger 1's other occasion — the tick this agent's level crosses
+  // DISPERSAL_MIN_LEVEL, a one-tick flag set by leveling.ts's `grantExp`
+  // (mirrors the evolution flag exactly, including why a flag rather than
+  // an exact equality check: a single `grantExp` call can jump several
+  // levels at once, so "level === DISPERSAL_MIN_LEVEL" could skip right
+  // past it). Originally this occasion fired on crossing MATURITY_AGE
+  // instead — replaced because gating the whole feature on level made that
+  // moot: MATURITY_AGE (200 ticks) is reached long before DISPERSAL_MIN_LEVEL
+  // (thousands of ticks, see leveling.ts's EXP_TRICKLE_PER_TICK doc comment)
+  // in practice, so an age-crossing check would almost never coincide with
+  // being level-eligible.
+  const justReachedDispersalLevel = agent.pendingLevelDispersalCheck === true;
+  agent.pendingLevelDispersalCheck = undefined;
+
+  if ((justReachedDispersalLevel || justEvolved) && rng() < dispersalChance(world, agent)) {
+    startDispersal(world, agent, "matured", rng, regionCtx);
+    return;
+  }
+
+  // Trigger 2, the guaranteed fallback — independent of whether trigger 1
+  // fired or even applies to this agent at all this tick.
+  if (isMature(agent) && (agent.ticksSinceEligibleMate ?? 0) >= NO_MATES_DISPERSAL_TICKS) {
+    startDispersal(world, agent, "no_eligible_mates", rng, regionCtx);
+  }
+}
+
+function startDispersal(world: World, agent: Agent, reason: DispersalReason, rng: () => number, regionCtx?: RegionDispersalContext): void {
+  if (regionCtx && regionCtx.neighborRegionIds.length > 0 && rng() < REGION_DISPERSAL_CHANCE) {
+    const targetRegionId = regionCtx.neighborRegionIds[Math.floor(rng() * regionCtx.neighborRegionIds.length)]!;
+    agent.dispersalTarget = pickMapEdgeTarget(world, agent.layer, rng);
+    agent.dispersalReason = reason;
+    agent.crossingToRegionId = targetRegionId;
+    // Same "fresh start" reasoning as the ordinary path below — the
+    // no-mates counter shouldn't immediately re-fire mid-walk.
+    agent.ticksSinceEligibleMate = 0;
+    return;
+  }
+
+  const target = findRandomWalkableTile(world, agent.layer, agent.pos, rng);
+  // Nowhere reachable to disperse to this tick (e.g. a fully boxed-in map) —
+  // stay put rather than getting stuck in a half-triggered state; trigger 1
+  // won't get another shot until the next maturity/evolution occasion (rare
+  // enough this doesn't need its own retry loop), and trigger 2 simply tries
+  // again on `agent`'s next action tick since `ticksSinceEligibleMate` isn't
+  // touched here.
+  if (!target) return;
+  agent.dispersalTarget = target;
+  agent.dispersalReason = reason;
+  // A fresh start — the no-mates counter shouldn't immediately re-fire
+  // mid-walk just because the agent hasn't found a mate while traveling.
+  agent.ticksSinceEligibleMate = 0;
+}
+
+/**
+ * Continues (or starts moving toward) an already-triggered dispersal — see
+ * needs.ts's `tickAgentAction`, which calls this whenever
+ * `Agent.dispersalTarget` is set, ahead of ordinary needs-driven behavior
+ * (ranked below survival instincts/carrying/looting/herd support, same
+ * priority slot `applyExploration`'s continuation occupies, but checked
+ * first since a dispersal in progress takes priority over idle exploring).
+ */
+export function applyDispersal(world: World, agent: Agent, log?: EventLog): void {
+  if (!agent.dispersalTarget) return;
+
+  logBehaviorChange(log, world, agent, "disperse");
+  agent.behavior = "disperse";
+
+  if (manhattan(agent.pos, agent.dispersalTarget) <= 1) {
+    agent.pos = agent.dispersalTarget;
+    agent.dispersalTarget = undefined;
+    finishDispersal(world, agent, log);
+    return;
+  }
+
+  agent.pos = stepToward(world, agent.layer, agent.pos, agent.dispersalTarget, agent);
+}
+
+/**
+ * Same-species, same-layer, living herd-mate-to-be within `JOIN_HERD_RADIUS`
+ * of the disperser's arrival point, if any — scans `world.agents` directly
+ * rather than any separate herd registry, matching how every other
+ * herd-aware system in this codebase (herdMigration.ts's
+ * `herdLayer`/`herdSpecies`/`herdSize`, herding.ts's `herdCentroid`) already
+ * derives its herd list: a brand new `herdId` this function assigns just
+ * works as a new entry the moment it's on an agent, no pre-registration
+ * needed anywhere.
+ */
+export function findNearbyOtherHerd(world: World, agent: Agent): string | undefined {
+  for (const other of world.agents) {
+    if (other.id === agent.id || other.alive === false) continue;
+    if (other.species !== agent.species || other.layer !== agent.layer) continue;
+    if (!other.herdId || other.herdId === agent.herdId) continue;
+    if (manhattan(agent.pos, other.pos) > JOIN_HERD_RADIUS) continue;
+    return other.herdId;
+  }
+  return undefined;
+}
+
+/**
+ * On arrival: join an existing other herd of this species found nearby, or
+ * found a brand new one. The new `herdId` (when founding) incorporates the
+ * agent's own id and the current tick, so it can't collide with any other
+ * herd, past or future, without needing a separate id-allocation registry —
+ * consistent with the "scan `world.agents`, no registry" derivation every
+ * other herd-aware system already relies on (see `findNearbyOtherHerd`'s
+ * doc comment). In the demo scenario specifically, there's only ever one
+ * herd per species at world-gen time (packages/data/src/scenario.ts), so in
+ * practice most dispersals found new herds rather than join one — expected
+ * and fine: that's exactly the "seed multiple independent lineages across
+ * the map" payoff DESIGN.md describes, not a sign joining is unreachable
+ * (two independently-founded herds of the same species can still end up
+ * close enough for a later disperser to join one, or for the existing
+ * territorial-displacement migration trigger to notice them).
+ */
+function finishDispersal(world: World, agent: Agent, log?: EventLog): void {
+  if (agent.crossingToRegionId) {
+    // Arrived at this map's edge, ready to leave it entirely — there is no
+    // same-map herd to join or found here. This module never touches
+    // `World.agents` or any region/aggregate state (it only ever sees one
+    // `World`), so the actual removal + destination-aggregate fold-in is
+    // owned by `overworld.ts`'s `tickOverworld`, which recognizes this exact
+    // state (`crossingToRegionId` set, `dispersalTarget` just cleared) once
+    // this tick's `tickWorld` call returns. Left as-is here on purpose —
+    // nothing left for this function to do.
+    return;
+  }
+
+  const fromHerd = agent.herdId;
+  const joinedHerd = findNearbyOtherHerd(world, agent);
+  const toHerd = joinedHerd ?? `${agent.species}-lineage-${agent.id}-${world.tick}`;
+  agent.herdId = toHerd;
+  // A founder's/joiner's new home range starts here, not wherever it was
+  // born — see `Agent.homePos`'s doc comment (carryAlly's rescue destination
+  // and a newborn's spawn anchor both already treat homePos as "where this
+  // agent's group currently calls home," not a birthplace that never moves).
+  agent.homePos = { ...agent.pos };
+  log?.record({
+    kind: "dispersed",
+    tick: world.tick,
+    agentId: agent.id,
+    species: agent.species,
+    fromHerd: fromHerd ?? "none",
+    toHerd,
+    outcome: joinedHerd ? "joined" : "founded",
+    reason: agent.dispersalReason ?? "matured",
+  });
+  agent.dispersalReason = undefined;
+}
