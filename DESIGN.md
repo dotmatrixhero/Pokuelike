@@ -10153,3 +10153,196 @@ times; `pnpm -r typecheck` clean across all 4 packages.
   above. A future pass could tune this more deliberately once more of the
   vision (e.g. a real multi-region overworld) makes "how much of one map
   should be ocean" a more load-bearing question than it is today.
+
+## Water-crossing restrictions: non-water types can't cross large bodies of water
+
+Direct ask: "non water Pokemon can't move across large bodies of water. Esp
+deep water, and esp certain typing like rock and fire. They still need water
+to drink, so they wade into maybe the first shore level, but anything
+deeper is no good." A direct, real consumer of the previous section's macro
+land/ocean generation: before this, `world.ts`'s `isWalkableTerrain`
+(`UNWALKABLE_TERRAIN = {"wall", "tree"}`) never included "water" at all, so
+every agent of every type could walk across any lake/ocean completely
+freely — the new ~44-52%-ocean maps made that gap actually matter for the
+first time.
+
+### Decided
+
+**The rule, uniformly for every non-water type (no Rock/Fire exception —
+see the correction below).** `waterBody.ts`'s new `canEnterWater(world,
+agent, layer, pos)`:
+- Water-type agents (`agent.types?.includes("water")`): unrestricted
+  everywhere, always `true`.
+- A water tile whose connected body is NOT "large" (`waterBody.ts`'s
+  pre-existing `waterBodySizeAt`/`isLargeWaterBody`, reused rather than
+  reinvented) — an ordinary pond/puddle/stream: unrestricted for everyone,
+  unchanged from before this feature. This is deliberately the common case
+  left alone, and it's also where a land Pokémon drinks freely.
+- A large water body's **shore** tile — a water tile with at least one
+  directly-adjacent (4-connected, matching `occupancy.ts`'s
+  `shelterCluster` adjacency shape) walkable non-water neighbor — stays
+  enterable for every non-water type, land types and Rock/Fire alike: this
+  is the "wade into the first shore level to drink" part of the ask.
+- Anything deeper into a large body (not touching land at all): impassable
+  for every non-water type. This is the actual "can't move across large
+  bodies of water" restriction.
+
+**Correction, direct user feedback, before this landed:** an earlier draft
+gave Rock/Fire a *stricter* rule — blocked from a large body's shore too,
+not just its interior, reading "esp certain typing like rock and fire" as a
+request for a separate harsher tier for those two types. Corrected: "esp
+rock and fire" was emphasis on how bad swimming is for those types, not a
+request for a stricter shore exclusion — the shore-wade rule applies
+uniformly to every non-water type, Rock/Fire included, no special case.
+
+**Always-on, not opt-in like the soft capacity gate.** `movement.ts`'s
+`stepToward`/`stepAway` and `pathfinding.ts`'s `findPath` already had an
+*optional* `mover?: Agent` parameter gating a soft, skippable capacity
+check — several real call sites (hunt/mate pursuit) deliberately omit it to
+stay capacity-blind, per this codebase's own documented real-run finding
+(see `pathfinding.ts`'s `stepTowardMovingTarget` doc comment: making
+pursuit capacity-aware tanked births ~90% on one seed by misreading normal
+herd density as "unreachable"). Water-crossing is a **hard physical
+constraint** — categorically different, and it must not be skippable the
+same way. So it got its own, separate, REQUIRED parameter instead of
+reusing that optional slot: `stepToward(world, layer, pos, target, agent,
+mover?, stopAdjacent?)` and the equivalent shapes for `stepAway`/`findPath`
+— `agent` (required) gates the hard water check; `mover` (still optional)
+ADDITIONALLY gates the soft capacity check, independently. Every real
+engine call site across `movement.ts`, `pathfinding.ts`, `predation.ts`,
+`dispersal.ts`, `herdConflict.ts`, `herding.ts`, `migration.ts`,
+`needs.ts`, `reproduction.ts`, `shelter.ts`, and `support.ts` now threads
+the moving `Agent` through for the water check — including the
+capacity-blind hunt/mate pursuit paths (`stepTowardMovingTarget`), which
+stay capacity-blind (no `mover`) while still being water-crossing-aware
+(real `agent`). `pathfinding.ts`'s `findPath`/`stepAlongPath` route every
+walkability check through a shared `isWalkableFor` helper (`tileAt(...)?
+.walkable && canEnterWater(...)`) so the constraint can't be forgotten at a
+new call site by accident the way a second, parallel `if` check could be.
+
+**The seekWater edge case: geometric "nearest" isn't the same as
+"reachable."** `needs.ts`'s `findNearestTerrain` is purely geometric
+(nearest water tile by Manhattan distance) — it has no idea `canEnterWater`
+can rule an otherwise-nearer tile out. Left unhandled, a thirsty land
+Pokémon near an irregular real coastline could keep re-targeting a
+nearer-but-unreachable interior tile forever, exactly the "silently
+unreachable, permanently stuck" bug class `pathfinding.ts`'s
+`stepTowardMovingTarget` doc comment already documents for hunt/mate
+pursuit — just for drinking instead. Fixed with a new
+`findReachableWaterTarget` in `needs.ts`: same nearest-tile lookup, but
+retrying past any `canEnterWater`-rejected candidate, bounded by
+`WATER_REACHABILITY_MAX_ATTEMPTS` (24 — see below for why not the smaller,
+pre-existing `MAX_BLOCKED_RESOURCE_MEMORY`), falling through to the
+pre-existing `ticksWithoutResource`/`migrate` escape valve when every
+attempt is exhausted (a type genuinely surrounded only by one huge lake
+with nothing reachable nearby has nothing to target — that's correct, not
+a bug to route further around).
+
+### Built, real-run findings
+
+**A real bug found and fixed by the real-run validation itself, not just
+unit tests.** The first version of `findReachableWaterTarget` reused
+`agent.blockedResourceTiles` (the existing transient capacity-wait
+exclusion list, capped at `MAX_BLOCKED_RESOURCE_MEMORY` = 4) for the
+water-reachability retry too. On the three real validation seeds below,
+this measurably increased thirst-starvation deaths versus a pre-feature
+baseline (seed 20260903 at 6000 ticks: population fell from a healthy
+33 to 12, with 6 of 10 starvation deaths thirst-caused, versus 0 thirst
+deaths in the baseline) — real friction from a real, irregular generated
+coastline (not a clean rectangle), where more than 4 geometrically-nearest
+water candidates can genuinely all be unreachable interior tiles before the
+real nearest reachable shore turns up. Splitting the water-reachability
+retry into its own, larger (24), non-persisted budget — rather than
+sharing the small list meant for "a crowded tile that might free up
+later" — fixed it: same seed 20260903 at 6000 ticks went from 12 final
+population back up to 22 (thirst deaths 6 -> 4), with no seed showing
+sustained decline toward collapse. This is exactly the regression class
+this session was warned to validate against (a real obstacle silently
+making a huge reachable area "unreachable" and starving resource-seeking),
+found and fixed the same way the codebase's own documented precedent
+(`stepTowardMovingTarget`'s capacity-blind pursuit) was: real headless
+runs, not just unit tests, because the failure mode only shows up against
+real, irregular generated terrain.
+
+**Multi-seed population health, seeds 42/7/20260903, 6000 ticks each, after
+the fix (pre-feature baseline in parentheses):**
+- Seed 42: final population 25 (baseline 18) — no decline; if anything
+  healthier, most likely a rng-chaos-sensitivity swing (see this file's
+  determinism section) rather than the feature itself. 2 thirst-starvation
+  deaths out of 18 total (baseline: 0 of 18).
+- Seed 7: final population 86 (baseline 20) — strong sustained growth
+  throughout the run (population samples climbing steadily from tick 3000
+  onward), no collapse. 1 thirst-starvation death out of 12 total (baseline:
+  1 of 23).
+- Seed 20260903: final population 22 (baseline 33) — a real but bounded
+  decline, population oscillating in the high-teens/low-20s for the back
+  half of the run rather than trending to zero; immigration (5 events)
+  kept contributing. 4 thirst-starvation deaths out of 5 total (baseline: 0
+  of 12).
+
+No seed showed the "landlocked pocket, population collapses toward zero"
+failure mode this session was specifically asked to check for. Some
+increase in thirst-driven death is an expected, real, direct consequence of
+this feature actually doing something (a land Pokémon that wanders far
+inland from any shore now sometimes can't get back before its thirst grace
+period runs out) rather than a bug — the fix above was about making sure
+that increase reflects real distance-to-reachable-water, not an
+artificially-low retry budget giving up early.
+
+**Confirmed thirsty land-type agents near a large lake still drink, via a
+worst-case synthetic test, not just real-run inference.** `needs.test.ts`'s
+"seekWater near a large lake" tests build a large lake walled in on every
+side except one deliberate gap, so the raw-nearest water tile from the
+wrong side is genuinely unreachable (its only "land" neighbor is an
+unwalkable wall) while the real shore sits behind the one gap, farther away
+by raw distance — exactly the trap `findReachableWaterTarget` exists for.
+Both a land-type and a Rock-type agent successfully drink within budget.
+
+**Determinism.** `canEnterWater`/`findReachableWaterTarget` touch no
+randomness at all — pure terrain/type lookups. `determinism.test.ts` is
+unmodified and passing; a same-seed-twice real `tickWorld` run (2000 ticks,
+seed 20260903) produced a byte-identical event log, and the full engine
+suite (863 tests, up from 850) ran clean twice in a row; `pnpm -r
+typecheck` clean across all 4 packages.
+
+### Tests
+
+- `waterBody.test.ts`: dedicated `canEnterWater` coverage — a land-type
+  agent blocked from a large body's interior but able to reach its shore; a
+  water-type agent unrestricted everywhere including the interior; Rock and
+  Fire types confirmed to get NO special stricter rule (shore yes, interior
+  no, same as any other non-water type) plus confirmed free entry to a
+  small pond; a land-type agent on a small (non-large) body fully
+  unrestricted (regression check — ordinary ponds unchanged).
+- `pathfinding.test.ts`: a dedicated "hard water-crossing constraint"
+  suite proving the capacity-blind hunt/mate pursuit path genuinely
+  respects this constraint — a land-type predator on one shore of a
+  full-map-width large lake band never crosses to reach prey on the far
+  shore (across 60 ticks, `findPath` directly confirmed `undefined`), while
+  a water-type pursuer of the same shape both finds a path and actually
+  reaches the prey.
+- `needs.test.ts`: the walled-lake reachability tests above (land-type and
+  Rock-type both confirmed to drink via the real shore, not the nearer
+  unreachable tile).
+
+### Explicitly not done here (see TODO.md)
+
+- **No graduated "wading depth" beyond a single shore-tile ring.** Every
+  large body has exactly two zones for a non-water type: shore (one tile
+  deep) and impassable. No intermediate "can wade two tiles in but no
+  further," no per-species wading depth.
+- **No swimming-speed penalty or bonus for water types**, or for anyone
+  wading onto a shore tile — entering water (where allowed) costs the same
+  one action tick as any other step, same as before this feature.
+- **No distinction between "large lake" and "ocean"** beyond the existing
+  `isLargeWaterBody` tile-count threshold — an ocean and a large landlocked
+  lake are treated identically by this rule.
+- **No new escape-hatch move or ability lets a non-water type cross
+  anyway** (no raft, no Fly-equivalent, no temporary water-walking) — the
+  restriction has no in-sim workaround yet.
+- **`findReachableWaterTarget`'s 24-attempt bound is empirically chosen
+  from this session's three validation seeds, not derived from map
+  geometry.** A future map with a much more convoluted coastline (or a much
+  larger `LARGE_WATER_BODY_MIN_SIZE` body) could in principle need more
+  attempts before finding a real reachable shore; this wasn't stress-tested
+  beyond the seeds validated here.

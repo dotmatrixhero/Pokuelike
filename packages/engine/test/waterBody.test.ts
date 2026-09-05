@@ -1,6 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { createWorld, setTile } from "../src/world.js";
-import { LARGE_WATER_BODY_MIN_SIZE, isLargeWaterBody, waterBodySizeAt } from "../src/waterBody.js";
+import { createNeeds } from "../src/needs.js";
+import { LARGE_WATER_BODY_MIN_SIZE, canEnterWater, isLargeWaterBody, waterBodySizeAt } from "../src/waterBody.js";
+import type { Agent, PokemonType } from "../src/types.js";
+
+function makeAgent(types?: PokemonType[]): Agent {
+  return {
+    id: "a1",
+    species: "test",
+    types,
+    pos: { x: 0, y: 0 },
+    layer: "surface",
+    homeLayer: "surface",
+    needs: createNeeds(),
+    behavior: "idle",
+  };
+}
+
+/** A 5x5 (25-tile, well above LARGE_WATER_BODY_MIN_SIZE=12) block of water surrounded by floor, x/y in [2,6]. (4,4) is the interior tile (no neighbor touches land); (2,4) is a shore tile (its x=1 neighbor is floor). */
+function buildLargeLake(world: ReturnType<typeof createWorld>): void {
+  for (let x = 2; x <= 6; x++) {
+    for (let y = 2; y <= 6; y++) setTile(world, "surface", x, y, "water");
+  }
+}
 
 describe("waterBodySizeAt", () => {
   it("is 0 for a non-water tile", () => {
@@ -102,5 +124,65 @@ describe("isLargeWaterBody", () => {
     expect(isLargeWaterBody(LARGE_WATER_BODY_MIN_SIZE)).toBe(true);
     expect(isLargeWaterBody(LARGE_WATER_BODY_MIN_SIZE + 50)).toBe(true);
     expect(isLargeWaterBody(0)).toBe(false);
+  });
+});
+
+describe("canEnterWater", () => {
+  it("is true unconditionally for non-water terrain, regardless of type", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "floor");
+    expect(canEnterWater(world, makeAgent(), "surface", { x: 5, y: 5 })).toBe(true);
+  });
+
+  it("a land-type agent can reach a large water body's shore but not its interior", () => {
+    const world = createWorld(10, 10);
+    buildLargeLake(world);
+    expect(waterBodySizeAt(world, { x: 4, y: 4 })).toBeGreaterThanOrEqual(LARGE_WATER_BODY_MIN_SIZE);
+
+    const land = makeAgent(["normal"]);
+    expect(canEnterWater(world, land, "surface", { x: 2, y: 4 })).toBe(true); // shore
+    expect(canEnterWater(world, land, "surface", { x: 4, y: 4 })).toBe(false); // interior
+  });
+
+  it("a water-type agent is unrestricted everywhere, including a large body's interior", () => {
+    const world = createWorld(10, 10);
+    buildLargeLake(world);
+    const swimmer = makeAgent(["water"]);
+    expect(canEnterWater(world, swimmer, "surface", { x: 2, y: 4 })).toBe(true);
+    expect(canEnterWater(world, swimmer, "surface", { x: 4, y: 4 })).toBe(true);
+  });
+
+  it("Rock and Fire types get no special stricter rule — they reach shore like any other non-water type, just not the interior", () => {
+    const world = createWorld(10, 10);
+    buildLargeLake(world);
+    const rock = makeAgent(["rock"]);
+    const fire = makeAgent(["fire"]);
+    for (const agent of [rock, fire]) {
+      expect(canEnterWater(world, agent, "surface", { x: 2, y: 4 })).toBe(true); // shore — same as land types
+      expect(canEnterWater(world, agent, "surface", { x: 4, y: 4 })).toBe(false); // interior — still blocked
+    }
+  });
+
+  it("Rock/Fire (and every other non-water type) can freely enter a small pond, unrestricted", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 8, 8, "water"); // isolated single-tile puddle, well below LARGE_WATER_BODY_MIN_SIZE
+    const rock = makeAgent(["rock"]);
+    const fire = makeAgent(["fire"]);
+    expect(canEnterWater(world, rock, "surface", { x: 8, y: 8 })).toBe(true);
+    expect(canEnterWater(world, fire, "surface", { x: 8, y: 8 })).toBe(true);
+  });
+
+  it("a land-type agent on a small (non-large) water body is fully unrestricted — regression check, ordinary ponds unchanged", () => {
+    const world = createWorld(10, 10);
+    // A 6-tile pond — real, but well under LARGE_WATER_BODY_MIN_SIZE (12).
+    for (let x = 0; x < 6; x++) setTile(world, "surface", x, 0, "water");
+    expect(waterBodySizeAt(world, { x: 0, y: 0 })).toBeLessThan(LARGE_WATER_BODY_MIN_SIZE);
+    const land = makeAgent(["grass"]);
+    for (let x = 0; x < 6; x++) expect(canEnterWater(world, land, "surface", { x, y: 0 })).toBe(true);
+  });
+
+  it("out of bounds is treated as non-water (true)", () => {
+    const world = createWorld(10, 10);
+    expect(canEnterWater(world, makeAgent(), "surface", { x: -1, y: 0 })).toBe(true);
   });
 });

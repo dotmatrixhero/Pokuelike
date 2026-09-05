@@ -2702,3 +2702,43 @@ not something this pathfinding pass itself caused or is positioned to fix.
       ocean mouth does) — see DESIGN.md's "Explicitly not done here" for
       this slice. Minor, but a real, named gap if lake shorelines matter
       later.
+
+## Water-crossing restrictions — built, see DESIGN.md
+
+- [x] `waterBody.ts`'s `canEnterWater`: non-water types can wade a large
+      water body's shore (to drink) but not cross its interior; small
+      ponds stay fully unrestricted for everyone; water types are always
+      unrestricted. No Rock/Fire-specific stricter tier (an earlier draft
+      had one, corrected by direct user feedback before landing). Always-on
+      across every real movement/pathfinding call site, including
+      capacity-blind hunt/mate pursuit. `needs.ts`'s `seekWater` gained a
+      bounded reachability-aware retry (`findReachableWaterTarget`) so a
+      thirsty land Pokémon targets a real reachable shore instead of a
+      geometrically-nearer-but-unreachable interior tile. 863 engine tests
+      (13 new) passing twice in a row, determinism intact, real 3-seed
+      6000-tick population-health check clean (no landlocked-collapse
+      regression after fixing a real bounded-retry bug the validation
+      itself surfaced).
+- [ ] **No graduated wading depth.** Every large body is exactly two zones
+      for a non-water type — shore (one tile) or impassable — never an
+      intermediate "can wade N tiles in." Could matter later for a
+      species-specific "strong wader" trait.
+- [ ] **No swimming-speed penalty/bonus.** Water types (and anyone wading
+      a shore tile) move through water at the same one-action-tick pace as
+      dry land. A real "water types move faster through water" mechanic
+      would be a natural, separate follow-up.
+- [ ] **No large-lake-vs-ocean distinction** beyond the existing
+      `isLargeWaterBody` tile-count threshold — treated identically by this
+      rule. Could matter if "landlocked lake" vs. "the ocean" ever needs to
+      mean something different gameplay-wise.
+- [ ] **No in-sim workaround for a non-water type stuck on the wrong
+      shore** — no raft, no temporary water-walking move/ability, nothing.
+      A real, intentional gap if "how does a stranded land Pokémon ever
+      cross" becomes a real question later.
+- [ ] `findReachableWaterTarget`'s retry bound (`WATER_REACHABILITY_MAX_ATTEMPTS`
+      = 24) was picked empirically against this session's three validation
+      seeds (42, 7, 20260903), not derived from real coastline geometry — a
+      much more convoluted coastline, or a much larger minimum "large water
+      body" threshold, could in principle need a higher bound before
+      finding a real reachable shore. Not stress-tested past the seeds used
+      here.

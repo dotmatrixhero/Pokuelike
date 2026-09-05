@@ -200,7 +200,7 @@ export function applyDispersal(world: World, agent: Agent, log?: EventLog): void
     return;
   }
 
-  agent.pos = stepToward(world, agent.layer, agent.pos, agent.dispersalTarget);
+  agent.pos = stepToward(world, agent.layer, agent.pos, agent.dispersalTarget, agent);
 }
 
 /**

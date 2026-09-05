@@ -652,7 +652,7 @@ function applyEggDefense(world: World, agent: Agent, ctx: LevelingContext | unde
     } else {
       // stopAdjacent=true — combat approach never lands on the target's own
       // tile (see stepToward's doc comment).
-      agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos, undefined, true);
+      agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos, agent, undefined, true);
     }
     log?.record({
       kind: "eggDefended",
@@ -1381,7 +1381,7 @@ export function applyPredationInstincts(
       logBehaviorChange(log, world, agent, "flee");
       agent.behavior = "flee";
       agent.huntTarget = undefined;
-      agent.pos = stepAway(world, agent.layer, agent.pos, attacker.pos);
+      agent.pos = stepAway(world, agent.layer, agent.pos, attacker.pos, agent);
       return true;
     }
   }
@@ -1421,7 +1421,7 @@ export function applyPredationInstincts(
           strengthenRapportMutual(world, agent, herdmate, RAPPORT_MOB_DEFENSE_DELTA, rng);
         } else {
           // stopAdjacent=true — see stepToward's doc comment.
-          agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos, undefined, true);
+          agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos, agent, undefined, true);
         }
         return true;
       }
@@ -1457,7 +1457,7 @@ export function applyPredationInstincts(
         resolveHit(world, agent, threat, log, "defeated", ctx, distance, rng);
       } else {
         // stopAdjacent=true — see stepToward's doc comment.
-        agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos, undefined, true);
+        agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos, agent, undefined, true);
       }
       return true;
     }
@@ -1482,7 +1482,7 @@ export function applyPredationInstincts(
       agent.layer = "underground";
       agent.burrowedTicksRemaining = burrowMove.burrow!.ticks;
     } else {
-      agent.pos = stepAway(world, agent.layer, agent.pos, threat.pos);
+      agent.pos = stepAway(world, agent.layer, agent.pos, threat.pos, agent);
     }
     return true;
   }

@@ -463,7 +463,7 @@ export function applyScavenging(world: World, agent: Agent, rules: HuntRules, lo
     return true;
   }
 
-  agent.pos = stepToward(world, agent.layer, agent.pos, corpse.pos);
+  agent.pos = stepToward(world, agent.layer, agent.pos, corpse.pos, agent);
   return true;
 }
 
@@ -569,7 +569,7 @@ export function applyHerdSupport(world: World, agent: Agent, log?: EventLog, nee
       }
       logBehaviorChange(log, world, agent, "deliverFood");
       agent.behavior = "deliverFood";
-      agent.pos = stepToward(world, agent.layer, agent.pos, target!.pos);
+      agent.pos = stepToward(world, agent.layer, agent.pos, target!.pos, agent);
       return true;
     }
 
@@ -589,7 +589,7 @@ export function applyHerdSupport(world: World, agent: Agent, log?: EventLog, nee
         }
         agent.inventory = [...(agent.inventory ?? []), { itemKey: FOOD_ITEM_KEY, weight: FOOD_ITEM_WEIGHT }];
       } else {
-        agent.pos = stepToward(world, agent.layer, agent.pos, foodTile);
+        agent.pos = stepToward(world, agent.layer, agent.pos, foodTile, agent);
       }
       return true;
     }
@@ -790,7 +790,7 @@ export function applyCarrying(world: World, agent: Agent, rules: HuntRules | und
 
   logBehaviorChange(log, world, agent, "carryAlly");
   agent.behavior = "carryAlly";
-  agent.pos = stepToward(world, agent.layer, agent.pos, home);
+  agent.pos = stepToward(world, agent.layer, agent.pos, home, agent);
   carried.pos = { ...agent.pos };
   carried.layer = agent.layer;
   return true;

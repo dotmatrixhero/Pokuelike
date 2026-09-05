@@ -151,6 +151,6 @@ export function applyHerdCohesion(world: World, agent: Agent, rules?: HuntRules)
   const distance = isGuardian ? GUARDIAN_COHESION_DISTANCE : COHESION_DISTANCE;
   if (!centroid || manhattan(agent.pos, centroid) <= distance) return false;
 
-  agent.pos = stepToward(world, agent.layer, agent.pos, centroid);
+  agent.pos = stepToward(world, agent.layer, agent.pos, centroid, agent);
   return true;
 }

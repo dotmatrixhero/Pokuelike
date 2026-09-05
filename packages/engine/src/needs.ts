@@ -33,6 +33,7 @@ import {
 import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
 import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
+import { canEnterWater } from "./waterBody.js";
 import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict } from "./herdConflict.js";
 import { thirstDecayMultiplier } from "./weather.js";
 import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
@@ -374,7 +375,7 @@ function applyExploration(world: World, agent: Agent, log: EventLog | undefined,
     agent.pos = agent.exploreTarget;
     agent.exploreTarget = undefined;
   } else {
-    agent.pos = stepToward(world, agent.layer, agent.pos, agent.exploreTarget, agent);
+    agent.pos = stepToward(world, agent.layer, agent.pos, agent.exploreTarget, agent, agent);
   }
 }
 
@@ -463,6 +464,55 @@ export function findNearestTerrain(
   exclude: readonly Vec2[] = []
 ): Vec2 | undefined {
   return findNearestIndexed(world, layer, from, terrain, exclude);
+}
+
+/**
+ * How many raw-nearest water candidates `findReachableWaterTarget` will
+ * reject-and-retry before giving up for this tick. `findNearestTerrain` is
+ * purely geometric ("nearest tile of this terrain kind") — it has no idea a
+ * large lake/ocean's interior is now off-limits to a non-water-type agent
+ * (`waterBody.ts`'s `canEnterWater`), so near an irregular real coastline
+ * (this session's macro land/ocean elevation + rivers worldgen, not a clean
+ * rectangle) the handful of geometrically-nearest water tiles can genuinely
+ * all be interior/unreachable before the actual nearest reachable shore
+ * tile turns up — a real, measured effect on real generated maps, not a
+ * hypothetical: an early, too-low bound here (`MAX_BLOCKED_RESOURCE_MEMORY`,
+ * 4 — reused from the transient capacity-wait exclusion list) measurably
+ * increased thirst-starvation deaths in a real multi-seed run before this
+ * was split out into its own, larger, non-persisted budget (see DESIGN.md's
+ * real-run findings for this feature). Deliberately NOT reusing
+ * `agent.blockedResourceTiles` for these exclusions — that field is small
+ * (capped at `MAX_BLOCKED_RESOURCE_MEMORY`) and meant for the *transient*
+ * capacity-wait case (a tile that might free up later); an unreachable-by-
+ * type tile never becomes reachable, so persisting it there would just
+ * evict real transient-crowding memory for no benefit. Recomputed fresh
+ * every tick instead: `findNearestIndexed`'s per-lookup cost is cheap
+ * (O(matching water tiles), no full-grid scan) and only thirsty agents near
+ * a large body's tricky-shaped coastline ever pay for more than one lookup.
+ */
+const WATER_REACHABILITY_MAX_ATTEMPTS = 24;
+
+/**
+ * `findNearestTerrain(..., "water", ...)`, additionally skipping any
+ * candidate this specific `agent` can't actually enter (`waterBody.ts`'s
+ * `canEnterWater`) — see `WATER_REACHABILITY_MAX_ATTEMPTS`'s doc comment for
+ * why this needs its own bound instead of reusing `seekWater`'s ordinary
+ * `exclude` list. Falls through to the pre-existing
+ * `ticksWithoutResource`/`migrate` escape valve (this function's only
+ * caller, below) when every attempt is exhausted — a Rock/Fire type (or any
+ * non-water type) surrounded only by one giant lake/ocean with no reachable
+ * shore or small pond anywhere nearby genuinely has nothing to target, and
+ * that's the correct outcome, not a bug to route around further.
+ */
+function findReachableWaterTarget(world: World, agent: Agent, baseExclude: readonly Vec2[]): Vec2 | undefined {
+  const exclude = [...baseExclude];
+  for (let attempts = 0; attempts < WATER_REACHABILITY_MAX_ATTEMPTS; attempts++) {
+    const candidate = findNearestIndexed(world, agent.layer, agent.pos, "water", exclude);
+    if (!candidate) return undefined;
+    if (canEnterWater(world, agent, agent.layer, candidate)) return candidate;
+    exclude.push(candidate);
+  }
+  return undefined;
 }
 
 /** Finds a layer other than `from` that has the given terrain, nearest (adjacent) layers first. */
@@ -982,7 +1032,10 @@ export function tickAgentAction(
   if (agent.behavior === "seekWater" || agent.behavior === "seekFood") {
     const terrain = agent.behavior === "seekWater" ? "water" : "food";
     const excluded = agent.blockedResourceTiles ?? [];
-    const target = findNearestTerrain(world, agent.layer, agent.pos, terrain, excluded);
+    const target =
+      agent.behavior === "seekWater"
+        ? findReachableWaterTarget(world, agent, excluded)
+        : findNearestTerrain(world, agent.layer, agent.pos, terrain, excluded);
 
     if (target) {
       agent.ticksWithoutResource = 0;

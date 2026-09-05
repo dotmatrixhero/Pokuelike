@@ -3,6 +3,7 @@ import type { ForcedMovement } from "./moves.js";
 import { tileAt } from "./world.js";
 import { isImmovable } from "./status.js";
 import { canEnterTile } from "./occupancy.js";
+import { canEnterWater } from "./waterBody.js";
 
 function candidatesToward(pos: Vec2, dx: number, dy: number): Vec2[] {
   return [
@@ -13,22 +14,33 @@ function candidatesToward(pos: Vec2, dx: number, dy: number): Vec2[] {
 }
 
 /**
- * `mover`, when given, gates a candidate on tile capacity
- * (`occupancy.ts`'s `canEnterTile`) in addition to plain walkability — a
- * tile at capacity is "blocked for entry" for movement purposes without
- * being a terrain/walkability change (direct ask: general crowding, every
- * step, not just resource-seeking). Optional and defaulted-away rather than
- * required: a handful of direct unit tests call `stepToward`/`stepAway`
- * with bare positions and no real `Agent` to check capacity against, and
- * every one of those predates this feature — they keep their exact
- * pre-existing behavior (capacity-blind) rather than being forced to
- * fabricate an agent just to compile.
+ * `agent` is the one actually being moved — REQUIRED (unlike `mover` below)
+ * because it gates `waterBody.ts`'s `canEnterWater`, a hard physical
+ * constraint (direct ask: "non water Pokemon can't move across large
+ * bodies of water") that must never be silently skippable the way the soft
+ * capacity gate is. Every real call site has a real `Agent` in scope (it's
+ * the thing whose `.pos` is being reassigned), so this costs real call
+ * sites nothing; only synthetic bare-position unit tests need to pass a
+ * placeholder `Agent`, which is a fine, one-time cost for closing off a
+ * whole class of "forgot to wire the water check" bugs by construction.
+ *
+ * `mover`, when given, ADDITIONALLY gates a candidate on tile capacity
+ * (`occupancy.ts`'s `canEnterTile`) — a tile at capacity is "blocked for
+ * entry" for movement purposes without being a terrain/walkability change
+ * (direct ask: general crowding, every step, not just resource-seeking).
+ * Optional and defaulted-away, unlike `agent`: a real, measured finding
+ * (see `pathfinding.ts`'s `stepTowardMovingTarget` doc comment) is that
+ * gating hunt/mate pursuit on tile capacity misreads ordinary herd density
+ * as "unreachable" and tanks births — those call sites deliberately omit
+ * `mover` to stay capacity-blind while still passing `agent` for the water
+ * check, which is exactly the split this second parameter exists to allow.
  */
-function firstWalkable(world: World, layer: Layer, pos: Vec2, candidates: Vec2[], mover?: Agent, avoid?: Vec2): Vec2 {
+function firstWalkable(world: World, layer: Layer, pos: Vec2, candidates: Vec2[], agent: Agent, mover?: Agent, avoid?: Vec2): Vec2 {
   for (const candidate of candidates) {
     if (candidate.x === pos.x && candidate.y === pos.y) continue;
     if (avoid && candidate.x === avoid.x && candidate.y === avoid.y) continue;
     if (!tileAt(world, layer, candidate.x, candidate.y)?.walkable) continue;
+    if (!canEnterWater(world, agent, layer, candidate)) continue;
     if (mover && !canEnterTile(world, mover, layer, candidate)) continue;
     return candidate;
   }
@@ -36,8 +48,10 @@ function firstWalkable(world: World, layer: Layer, pos: Vec2, candidates: Vec2[]
 }
 
 /**
- * Moves one step toward `target` using simple Manhattan stepping. `mover`,
- * if given, makes the step capacity-aware (see `firstWalkable`).
+ * Moves one step toward `target` using simple Manhattan stepping. `agent`
+ * (required — see `firstWalkable`'s doc comment) gates the step on the
+ * hard water-crossing constraint; `mover`, if given, ADDITIONALLY makes the
+ * step capacity-aware (see `firstWalkable`).
  *
  * `stopAdjacent`, when true, never lands exactly on `target`'s own tile —
  * direct ask: "two units in combat should never share the same tile."
@@ -49,17 +63,22 @@ function firstWalkable(world: World, layer: Layer, pos: Vec2, candidates: Vec2[]
  * a destination) genuinely want to arrive exactly on `target`, so this only
  * applies where a caller explicitly asks for "approach, don't occupy."
  */
-export function stepToward(world: World, layer: Layer, pos: Vec2, target: Vec2, mover?: Agent, stopAdjacent?: boolean): Vec2 {
+export function stepToward(world: World, layer: Layer, pos: Vec2, target: Vec2, agent: Agent, mover?: Agent, stopAdjacent?: boolean): Vec2 {
   const dx = Math.sign(target.x - pos.x);
   const dy = Math.sign(target.y - pos.y);
-  return firstWalkable(world, layer, pos, candidatesToward(pos, dx, dy), mover, stopAdjacent ? target : undefined);
+  return firstWalkable(world, layer, pos, candidatesToward(pos, dx, dy), agent, mover, stopAdjacent ? target : undefined);
 }
 
-/** Moves one step directly away from `threat`, deterministically tie-broken when already aligned. `mover`, if given, makes the step capacity-aware (see `firstWalkable`). */
-export function stepAway(world: World, layer: Layer, pos: Vec2, threat: Vec2, mover?: Agent): Vec2 {
+/**
+ * Moves one step directly away from `threat`, deterministically tie-broken
+ * when already aligned. `agent` (required — see `firstWalkable`'s doc
+ * comment) gates the step on the hard water-crossing constraint; `mover`,
+ * if given, ADDITIONALLY makes the step capacity-aware (see `firstWalkable`).
+ */
+export function stepAway(world: World, layer: Layer, pos: Vec2, threat: Vec2, agent: Agent, mover?: Agent): Vec2 {
   const dx = Math.sign(pos.x - threat.x) || 1;
   const dy = Math.sign(pos.y - threat.y) || 1;
-  return firstWalkable(world, layer, pos, candidatesToward(pos, dx, dy), mover);
+  return firstWalkable(world, layer, pos, candidatesToward(pos, dx, dy), agent, mover);
 }
 
 /**
@@ -91,6 +110,7 @@ export function applyForcedMovement(world: World, forced: ForcedMovement, attack
     // still combat, so it shouldn't be able to drag the mover onto the
     // other party's exact tile either. "away" can't land on `other` in the
     // first place (it's moving away from it), so no equivalent guard needed.
-    mover.pos = forced.direction === "closer" ? stepToward(world, mover.layer, mover.pos, other.pos, undefined, true) : stepAway(world, mover.layer, mover.pos, other.pos);
+    mover.pos =
+      forced.direction === "closer" ? stepToward(world, mover.layer, mover.pos, other.pos, mover, undefined, true) : stepAway(world, mover.layer, mover.pos, other.pos, mover);
   }
 }
