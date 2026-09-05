@@ -143,25 +143,37 @@ export function getWaterEdge(x: number, y: number): HTMLImageElement | null {
  *   then just looked like the same tile stamped over and over ("really
  *   try to make the floor varied and beautiful... same tile over and
  *   over can look bad").
- * - Per-INDIVIDUAL-tile selection (what this does now) fixed both —
- *   real tilesets scatter several near-identical variants exactly this
- *   way, since at small scale it reads as natural grain, not a
- *   patchwork — but the original 6-crop set had two real defects that
- *   only became obvious once it was actually the primary ground art
- *   (not a faint wash): `floor_cave` was a visibly different, more pink/
- *   saturated hue than the rest (a real "color matching isn't great"
- *   complaint — dropped, kept as a loose file), and `floor_cave_3` had a
- *   dark diagonal crack baked into the crop from a bad boundary that,
- *   repeated across many tiles, read as an unwanted embossed/beveled
- *   edge. Re-cropped `floor_cave_3` clean and added two more crops from
- *   the same source panel for real variety without the hue mismatch —
- *   all 7 average within a few RGB points of each other now (checked
- *   directly, not eyeballed).
+ * - Picking a different opaque crop per INDIVIDUAL tile fixed both, but
+ *   even with every crop hue-matched (`floor_cave` dropped as a visible
+ *   outlier, checked via actual mean RGB — see getFloorOverlay below for
+ *   the rest of that story) it was still N discrete full-strength
+ *   textures directly adjacent to each other, which is its own kind of
+ *   patchwork just with better-matched colors.
+ * - Landed here: ONE consistent base texture drawn at full strength
+ *   everywhere (real cohesion, zero seams — direct ask: "layer texture
+ *   atop the base tiles... semi-transparent texture to add balance and
+ *   variety"), with the other crops demoted to a sparse, semi-transparent
+ *   decal layer (getFloorOverlay) instead of competing base choices —
+ *   this is the standard real-tileset move (one solid ground tile, a
+ *   handful of detail decals scattered lightly on top) and reads as
+ *   organic variation rather than N-way competing patches.
  */
-const FLOOR_TEXTURES = ["floor_cave_2", "floor_cave_3", "floor_cave_4", "floor_cave_5", "floor_dirt_1", "floor_dirt_2", "floor_dirt_3"];
+const FLOOR_BASE = "floor_cave_2";
+const FLOOR_OVERLAYS = ["floor_cave_3", "floor_cave_4", "floor_cave_5", "floor_dirt_1", "floor_dirt_2", "floor_dirt_3"];
+/** Only this fraction of tiles get a decal at all — the rest are the plain base, so decals read as occasional detail, not a second competing pattern. */
+const FLOOR_OVERLAY_CHANCE = 4; // 1-in-N tiles
 
-export function getFloorTexture(x: number, y: number): HTMLImageElement | null {
-  const name = FLOOR_TEXTURES[hashTile(x, y) % FLOOR_TEXTURES.length]!;
+export function getFloorTexture(): HTMLImageElement | null {
+  return loadSprite(`tile_${FLOOR_BASE}`, `/tiles/${FLOOR_BASE}.png`);
+}
+
+/** A sparse, semi-transparent decal layered on top of the base floor texture for organic variety — see getFloorTexture's doc comment. Most tiles get none (null). */
+export function getFloorOverlay(x: number, y: number): HTMLImageElement | null {
+  // Offset hash coordinates so the "which tiles get a decal" pattern doesn't
+  // correlate with anything else keyed directly off (x, y).
+  const h = hashTile(x + 9973, y + 49999);
+  if (h % FLOOR_OVERLAY_CHANCE !== 0) return null;
+  const name = FLOOR_OVERLAYS[Math.floor(h / FLOOR_OVERLAY_CHANCE) % FLOOR_OVERLAYS.length]!;
   return loadSprite(`tile_${name}`, `/tiles/${name}.png`);
 }
 

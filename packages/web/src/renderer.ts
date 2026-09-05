@@ -1,7 +1,18 @@
 import type { Agent, TerrainKind, World } from "@pokuelike/engine";
 import { lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
-import { getFloorTexture, getFloraSprite, getFoodSprite, getSeedlingSprite, getSprite, getTileSprite, getWaterEdge, getWaterInterior, type SpriteDirection } from "./sprites.js";
+import {
+  getFloorOverlay,
+  getFloorTexture,
+  getFloraSprite,
+  getFoodSprite,
+  getSeedlingSprite,
+  getSprite,
+  getTileSprite,
+  getWaterEdge,
+  getWaterInterior,
+  type SpriteDirection,
+} from "./sprites.js";
 import type { ActivePopup } from "./eventPopups.js";
 import {
   FLAVOR_FG,
@@ -89,7 +100,7 @@ function drawTileVignette(ctx: CanvasRenderingContext2D, x: number, y: number): 
  * its own full-tile opaque surface, not an object standing on ground.
  */
 function drawGroundBacking(ctx: CanvasRenderingContext2D, x: number, y: number, elevation: number): void {
-  const texture = getFloorTexture(x, y);
+  const texture = getFloorTexture();
   if (texture) {
     ctx.save();
     ctx.globalAlpha = Math.min(1, 0.82 + elevation * 0.18);
@@ -98,6 +109,17 @@ function drawGroundBacking(ctx: CanvasRenderingContext2D, x: number, y: number, 
   } else {
     ctx.fillStyle = rgbToCss(shade(TERRAIN_BG.floor, elevation));
     ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+  }
+
+  // A sparse, semi-transparent decal on top of the consistent base — see
+  // sprites.ts's getFloorOverlay doc comment for why this replaced N
+  // competing full-strength base textures. Most tiles get none (null).
+  const overlay = getFloorOverlay(x, y);
+  if (overlay) {
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    ctx.drawImage(overlay, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    ctx.restore();
   }
 }
 

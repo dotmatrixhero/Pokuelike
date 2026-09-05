@@ -2490,3 +2490,16 @@ not something this pathfinding pass itself caused or is positioned to fix.
       from the same clean source panel added in its place so variety went
       up (5 -> 7) while every texture in the active pool now averages
       within a few RGB points of the others.
+- [x] Floor rendering redesigned again, direct ask: "layer texture atop
+      the base tiles... some of em have semi transparent texture to add
+      to balance and variety." Replaced N discrete full-strength floor
+      textures competing tile-to-tile (still its own kind of patchwork
+      even once hue-matched) with one consistent base texture
+      (`getFloorTexture`, now parameterless) drawn everywhere, plus a
+      sparse (1-in-4 tiles) semi-transparent decal on top
+      (`getFloorOverlay`, 0.35 alpha) picked from the other 6 crops —
+      the standard real-tileset move (solid ground + light scattered
+      detail) instead of several competing base choices. Applied in the
+      one shared `drawGroundBacking` helper, so floor/objects-on-ground/
+      food-flora-seedling all get the same base+decal treatment
+      consistently.
