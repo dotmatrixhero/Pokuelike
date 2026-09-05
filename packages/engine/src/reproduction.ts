@@ -1,10 +1,12 @@
-import type { Agent, Layer, Needs, Vec2, World } from "./types.js";
+import type { Agent, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt } from "./world.js";
-import { EXP_ON_BIRTH_PARENT, EXP_ON_MATE_ATTEMPT, canBreed, ensureCombatProfile, grantExp, type LevelingContext } from "./leveling.js";
-import { dispositionFromNature, dispositionSummary, randomNature } from "./nature.js";
-import { herdRank, herdSize } from "./herding.js";
+import { EXP_ON_BIRTH_PARENT, EXP_ON_MATE_ATTEMPT, canBreed, grantExp, type LevelingContext } from "./leveling.js";
+import { herdCentroid, herdRank, herdSize } from "./herding.js";
+import { hasNearbyShelter, SHELTER_SEARCH_RADIUS } from "./shelter.js";
+import { canLayEggAt, shelterCluster } from "./occupancy.js";
+import { spawnEgg } from "./eggs.js";
 
 /**
  * Ticks before an agent can mate. A single global constant for now — real
@@ -123,6 +125,7 @@ export const MATE_ISOLATION_TICKS = 200;
 
 function isEligibleMate(agent: Agent, candidate: Agent, ctx?: LevelingContext): boolean {
   if (candidate.id === agent.id || candidate.alive === false) return false;
+  if (candidate.isEgg) return false; // an unhatched egg is never a mate candidate
   if (candidate.fainted || candidate.beingCarriedBy) return false; // downed or being carried — not available to mate
   // Real mainline rule: species mate if they share an egg group, not only
   // with their own exact species — e.g. Bulbasaur and Charmander (both
@@ -203,100 +206,80 @@ function nearestMate(world: World, agent: Agent, candidates: Agent[]): Agent | u
   return best;
 }
 
-function freshNeeds(): Needs {
-  return { hunger: 1, thirst: 1, energy: 1, mateDrive: 0 };
+/**
+ * A shelter tile this agent's household (its own current position, or its
+ * herd's live centroid — same anchor `shelter.ts`'s
+ * `maybeTriggerShelterBuilding` uses) actually has access to right now, or
+ * `undefined` if none is within range. Point 4's gate for egg-laying: a
+ * bonded pair only produces an egg once this resolves to a real tile —
+ * before that, mating just bonds (see `applyMateSeeking`).
+ */
+function householdShelterTile(world: World, agent: Agent): Vec2 | undefined {
+  const anchor = agent.herdId ? (herdCentroid(world, agent.herdId, agent.layer) ?? agent.pos) : agent.pos;
+  if (!hasNearbyShelter(world, agent.layer, anchor, SHELTER_SEARCH_RADIUS)) return undefined;
+  // hasNearbyShelter only answers yes/no — find the actual nearest shelter
+  // tile (from the agent's own position, not the anchor, since that's where
+  // the egg needs to actually sit reachably) to hand to the capacity check
+  // and `spawnEgg`. A plain bounded scan, same shape as `hasNearbyShelter`
+  // itself — shelters are sparse, this is cheap.
+  let best: Vec2 | undefined;
+  let bestDist = Infinity;
+  for (let dy = -SHELTER_SEARCH_RADIUS; dy <= SHELTER_SEARCH_RADIUS; dy++) {
+    for (let dx = -SHELTER_SEARCH_RADIUS; dx <= SHELTER_SEARCH_RADIUS; dx++) {
+      const pos = { x: agent.pos.x + dx, y: agent.pos.y + dy };
+      if (tileAt(world, agent.layer, pos.x, pos.y)?.terrain !== "shelter") continue;
+      const dist = manhattan(agent.pos, pos);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = pos;
+      }
+    }
+  }
+  return best;
 }
-
-const SPAWN_OFFSETS: Vec2[] = [
-  { x: 0, y: -1 }, { x: 1, y: -1 }, { x: 1, y: 0 }, { x: 1, y: 1 },
-  { x: 0, y: 1 }, { x: -1, y: 1 }, { x: -1, y: 0 }, { x: -1, y: -1 },
-];
 
 /**
- * A tile next to the mother, not literally on top of her. Without this,
- * a herd whose cohesion has already pulled it into a tight cluster spawns
- * every new generation on the exact same tile as the last, and the whole
- * population collapses into a single stacked point within a few hundred
- * ticks (confirmed in a real run: 168 of 264 agents on one tile by tick
- * 2000). Falls back to the mother's own tile only if she's fully boxed in.
+ * A shelter tile in `anchor`'s cluster with room for one more egg
+ * (`canLayEggAt`), preferring `anchor` itself, otherwise the nearest
+ * cluster-mate with room. `undefined` if the whole cluster is already at its
+ * egg cap — a real, testable capacity gate (point 2), not just "a shelter
+ * exists somewhere."
  */
-function nearbySpawnTile(world: World, layer: Layer, origin: Vec2, rng: () => number): Vec2 {
-  const shuffled = [...SPAWN_OFFSETS].sort(() => rng() - 0.5);
-  for (const offset of shuffled) {
-    const candidate = { x: origin.x + offset.x, y: origin.y + offset.y };
-    if (tileAt(world, layer, candidate.x, candidate.y)?.walkable) return candidate;
+function pickEggTile(world: World, layer: Layer, anchor: Vec2): Vec2 | undefined {
+  if (canLayEggAt(world, layer, anchor)) return anchor;
+  for (const tile of shelterCluster(world, layer, anchor)) {
+    if (canLayEggAt(world, layer, tile)) return tile;
   }
-  return origin;
-}
-
-function spawnOffspring(world: World, mother: Agent, father: Agent, ctx?: LevelingContext, rng: () => number = Math.random): Agent {
-  // Was a module-level `let offspringSequence = 0` — a hidden global that
-  // leaked across separate `World` instances ticked in the same process
-  // (tests do this constantly, and so does any determinism check that runs
-  // the same seed twice in one process — confirmed a real bug this way: two
-  // fresh worlds seeded identically produced byte-different event logs
-  // purely because the second world's first newborn inherited whatever
-  // count the first world's run had already reached). Tracked on `World`
-  // instead — see `World.offspringSequence` — so it resets per world like
-  // every other piece of `World` state, matching this feature's own "no
-  // hidden global, thread everything through/on the World" requirement even
-  // though this particular piece of state isn't rng-derived at all.
-  world.offspringSequence = (world.offspringSequence ?? 0) + 1;
-  const offspringSequence = world.offspringSequence;
-  // Breeding always produces the base (pre-evolution) form, mainline-accurate:
-  // a bred Venusaur's offspring hatches as a Bulbasaur, never another
-  // Venusaur — Bulbasaur is the "child version," Venusaur just what an adult
-  // grows into, not a separately-bred species. See LevelingContext.baseSpeciesOf.
-  const species = ctx?.baseSpeciesOf?.(mother.species) ?? mother.species;
-  // Own random nature (and thus its own disposition), same as any spawned
-  // agent — never inherited from either parent, matching spawnAgent.
-  const nature = randomNature(rng);
-  const disposition = dispositionFromNature(nature, rng);
-  const child: Agent = {
-    id: `${species}-${world.tick}-${offspringSequence}`,
-    species,
-    pos: nearbySpawnTile(world, mother.layer, mother.pos, rng),
-    layer: mother.layer,
-    homeLayer: mother.homeLayer,
-    // Cheapest available "home range" stand-in for carryAlly's rescue destination
-    // (support.ts) — there's no richer herd-home-range concept in the engine yet.
-    // A newborn's home is simply where it was born, same as the mother's own
-    // homePos when she has one.
-    homePos: mother.homePos ?? { ...mother.pos },
-    needs: freshNeeds(),
-    behavior: "idle",
-    herdId: mother.herdId,
-    // 50/50 for now — real per-species gender ratios are a data-layer concern, see TODO.
-    sex: rng() < 0.5 ? "male" : "female",
-    age: 0,
-    level: 1,
-    exp: 0,
-    parentIds: [mother.id, father.id],
-    // Computed from the parents' own parentIds, not looked up live — an
-    // ancestor is easily long pruned from World.agents by the time this
-    // child matures. Empty for a first-generation child (founders have no
-    // parentIds of their own to combine).
-    grandparentIds: [...new Set([...(mother.parentIds ?? []), ...(father.parentIds ?? [])])],
-    nature,
-    disposition,
-  };
-  // Backfills stats/hp/types/moves for the base species at level 1 — without
-  // this a newborn had no combat profile at all (couldn't fight, and its
-  // guaranteed per-level-up skill point silently never fired, since
-  // `grantExp` reads `agent.types?.[0]`). No-op without `ctx` (bare tests).
-  ensureCombatProfile(child, ctx);
-  return child;
+  return undefined;
 }
 
 /**
  * Called when chooseBehavior has already picked "seekMate". Finds the
  * nearest eligible mate (same species/layer, normally same herd — see
  * `isEligibleMate`'s `MATE_ISOLATION_TICKS` escape hatch for the sustained-
- * isolation exception — opposite sex, mature) and
- * either closes distance or, once adjacent, produces an offspring — the
- * mother's turn triggers the birth so a pair doesn't double-spawn the same
- * tick. Both parents' mateDrive resets afterward, which is the sim's only
- * "cooldown": rebuilding it naturally takes a while (see needs.ts).
+ * isolation exception — opposite sex, mature) and either closes distance or,
+ * once adjacent, bonds/breeds — the mother's turn triggers this so a pair
+ * doesn't double-act the same tick.
+ *
+ * Direct instruction ("I will want eggs rather than them just spawning
+ * offspring... Pokemon can mate before shelter but that only means they
+ * bond and increase need for shelter... They don't lay egg until after
+ * shelter is created"): contact between an eligible pair no longer produces
+ * an instant newborn (see DESIGN.md's "Bonding, shelter, and eggs" section
+ * for the full design and real-run numbers):
+ * 1. First contact bonds the pair (`Agent.bondedPartnerId` on both) if not
+ *    already bonded to each other — a real, lasting state
+ *    `shelter.ts`'s `maybeTriggerShelterBuilding` biases toward resolving.
+ * 2. Every contact after that (bonded or not — an already-bonded pair meets
+ *    up again the same way) checks whether the household already has real
+ *    shelter access with egg-capacity room (`householdShelterTile`/
+ *    `pickEggTile`, occupancy.ts's shelter cluster cap) — only then does an
+ *    egg actually get laid (`eggs.ts`'s `spawnEgg`), at the shelter, not the
+ *    parents' own tile.
+ * Both parents' mateDrive resets on any contact either way (bonding-only or
+ * a real egg) — mating "happened," just not always with an egg to show for
+ * it yet, matching the direct ask that mating before shelter still means
+ * something (the bond + the shelter drive it feeds) rather than a no-op.
  */
 export function applyMateSeeking(
   world: World,
@@ -321,24 +304,46 @@ export function applyMateSeeking(
 
   if (manhattan(agent.pos, partner.pos) <= 1) {
     if (agent.sex === "female") {
-      const child = spawnOffspring(world, agent, partner, ctx, rng);
-      world.agents.push(child);
-      log?.record({
-        kind: "born",
-        tick: world.tick,
-        motherId: agent.id,
-        fatherId: partner.id,
-        childId: child.id,
-        species: child.species,
-        layer: child.layer,
-        pos: child.pos,
-        // Narrative color per DESIGN.md — e.g. "born-14 (Timid, low boldness)".
-        // Always present since spawnOffspring above always assigns both.
-        nature: child.nature!,
-        dispositionSummary: dispositionSummary(child.disposition!),
-      });
-      grantExp(world, agent, EXP_ON_BIRTH_PARENT, ctx, log, rng);
-      grantExp(world, partner, EXP_ON_BIRTH_PARENT, ctx, log, rng);
+      if (agent.bondedPartnerId !== partner.id) {
+        agent.bondedPartnerId = partner.id;
+        partner.bondedPartnerId = agent.id;
+        world.bondsFormed = (world.bondsFormed ?? 0) + 1;
+        log?.record({
+          kind: "bonded",
+          tick: world.tick,
+          agentId: agent.id,
+          species: agent.species,
+          partnerId: partner.id,
+          partnerSpecies: partner.species,
+          pos: { ...agent.pos },
+        });
+      }
+
+      const shelterTile = householdShelterTile(world, agent);
+      const eggTile = shelterTile ? pickEggTile(world, agent.layer, shelterTile) : undefined;
+      if (eggTile) {
+        world.offspringSequence = (world.offspringSequence ?? 0) + 1;
+        const egg = spawnEgg(world, agent, partner, eggTile, world.offspringSequence);
+        world.agents.push(egg);
+        world.eggsLaid = (world.eggsLaid ?? 0) + 1;
+        log?.record({
+          kind: "eggLaid",
+          tick: world.tick,
+          motherId: agent.id,
+          fatherId: partner.id,
+          eggId: egg.id,
+          species: egg.species,
+          layer: egg.layer,
+          pos: { ...egg.pos },
+        });
+        grantExp(world, agent, EXP_ON_BIRTH_PARENT, ctx, log, rng);
+        grantExp(world, partner, EXP_ON_BIRTH_PARENT, ctx, log, rng);
+      }
+      // No household shelter (or its cluster is already at egg capacity)
+      // yet — bonded (or already was), but no egg this contact. The pair
+      // just keeps meeting up until shelter access exists somewhere in
+      // range; shelter.ts's bonded comfort discount biases them toward
+      // resolving that sooner rather than later.
     }
     agent.needs.mateDrive = 0;
     partner.needs.mateDrive = 0;

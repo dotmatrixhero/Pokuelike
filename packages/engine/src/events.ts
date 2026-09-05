@@ -401,6 +401,55 @@ export type SimEvent =
       statusKind: StatusKind;
       /** Sleep's duration running out, or freeze's per-tick/fire-hit thaw. A faint (burn/poison DOT or any other cause) clears status silently — the "fainted" event itself narrates that, no separate reason needed here. */
       reason: "woke" | "thawed";
+    }
+  | {
+      kind: "bonded";
+      tick: number;
+      /** The pair that formed a `bondedPartnerId` link — see reproduction.ts's `applyMateSeeking`. Order matches the calling (female-turn) convention: `agentId` is the female, `partnerId` the male. */
+      agentId: string;
+      species: string;
+      partnerId: string;
+      partnerSpecies: string;
+      pos: Vec2;
+    }
+  | {
+      kind: "eggLaid";
+      tick: number;
+      motherId: string;
+      fatherId: string;
+      eggId: string;
+      species: string;
+      layer: Layer;
+      pos: Vec2;
+    }
+  | {
+      kind: "eggHatched";
+      tick: number;
+      agentId: string;
+      species: string;
+      layer: Layer;
+      pos: Vec2;
+    }
+  | {
+      kind: "eggEaten";
+      tick: number;
+      eaterId: string;
+      eaterSpecies: string;
+      eggId: string;
+      eggSpecies: string;
+      layer: Layer;
+      pos: Vec2;
+    }
+  | {
+      kind: "eggDefended";
+      tick: number;
+      /** The parent/herd-mate defending the egg. */
+      defenderId: string;
+      defenderSpecies: string;
+      eggId: string;
+      threatId: string;
+      threatSpecies: string;
+      pos: Vec2;
     };
 
 /**

@@ -2,7 +2,7 @@ import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Vec2, W
 import { otherLayers, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
-import { applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan } from "./predation.js";
+import { applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT, recordGrazing } from "./flora.js";
 import { tickCooldowns } from "./combat.js";
@@ -579,11 +579,13 @@ export function tickAgentNeeds(
   // ticks down regardless of `world`" shape as `digestingTicksRemaining` above.
   if ((agent.herdConflictCooldownTicks ?? 0) > 0) agent.herdConflictCooldownTicks = (agent.herdConflictCooldownTicks ?? 0) - 1;
   // "Incentivize the Pokémon to stay in it" — real, per-tick heal/needs-decay
-  // perks for a `buildsShelter` agent genuinely standing near its shelter,
-  // regardless of which behavior label happens to be set this tick (a fresh
-  // arrival, mid-rest, or just passing through all count) — see shelter.ts's
+  // perks for ANY agent genuinely standing near a shelter (universal now,
+  // per direct instruction — no longer gated on `agent.buildsShelter`, see
+  // shelter.ts's `maybeTriggerShelterBuilding` doc comment), regardless of
+  // which behavior label happens to be set this tick (a fresh arrival,
+  // mid-rest, or just passing through all count) — see shelter.ts's
   // "Incentive to actually stay" doc comment.
-  const nearShelter = world !== undefined && agent.buildsShelter === true && hasNearbyShelter(world, agent.layer, agent.pos, SHELTER_REST_RADIUS);
+  const nearShelter = world !== undefined && hasNearbyShelter(world, agent.layer, agent.pos, SHELTER_REST_RADIUS);
   decayNeeds(
     agent.needs,
     thirstMultiplier,
@@ -723,6 +725,16 @@ export function tickAgentAction(
   // without a single drink and died of thirst mid-search.
   const thirstIsUrgent = 1 - agent.needs.thirst > 0.3;
   if (rules && applyPredationInstincts(world, agent, rules, log, ctx, rng, thirstIsUrgent)) return;
+  // Egg-eating (point 5 — "eggs are highly edible... super desired as food
+  // by any Pokémon that does not share egg type... given the chance") — a
+  // real, opportunistic feeding source checked at the same priority tier as
+  // `applyScavenging` right below (both are fallback meals tried once
+  // ordinary hunting/fleeing/fighting found nothing to do), deliberately
+  // NOT gated on `rules` the way scavenging/hunting are: egg-eating is
+  // explicitly wider than the predator/prey `HuntRules` roster — see
+  // predation.ts's `applyEggEating` doc comment for why it's a separate
+  // mechanism entirely.
+  if (applyEggEating(world, agent, ctx, log, rng)) return;
   // A real fallback, not a last resort tacked on after everything else: a
   // hungry predator that had nothing to flee/fight/hunt this tick (solo or
   // pack — see predation.ts) checks for a nearby corpse to feed from
@@ -807,13 +819,23 @@ export function tickAgentAction(
   // already uses below, not dispersal's shape. The trigger itself is gated
   // the same way: only an agent that's currently satisfied goes to start a
   // build in the first place.
-  if (agent.shelterTarget) {
+  // Also paused (not triggered) while genuinely asleep — a sleeping agent
+  // doesn't start or continue any task on its own initiative, matching every
+  // other self-directed branch above/below this one. Without this guard, a
+  // sleeping agent's shelter-building trigger (now universal — see this
+  // block's own doc comment above) could silently hijack its action tick
+  // before ever reaching the sleep block just below, skipping the real
+  // wake-check machinery entirely (confirmed by a real test: a sleeping
+  // agent with full hunger/thirst, once shelter-building applied to every
+  // species, started walking to a build site instead of ever being checked
+  // for waking).
+  if (!agent.asleep && agent.shelterTarget) {
     if (chooseBehavior(agent.needs) === "idle") {
       applyShelterBuilding(world, agent, log);
       return;
     }
     // Paused, not abandoned — resumes on a later tick once satisfied again.
-  } else if (chooseBehavior(agent.needs) === "idle") {
+  } else if (!agent.asleep && chooseBehavior(agent.needs) === "idle") {
     maybeTriggerShelterBuilding(world, agent, rng);
     if (agent.shelterTarget) {
       applyShelterBuilding(world, agent, log);
@@ -937,7 +959,7 @@ export function tickAgentAction(
     return;
   }
 
-  if (agent.behavior === "seekFood" && agent.buildsShelter === true && maybeFeedFromShelterCache(world, agent, log)) {
+  if (agent.behavior === "seekFood" && maybeFeedFromShelterCache(world, agent, log)) {
     // A real safety net: this agent is genuinely hungry AND already home
     // (or close enough) with something stockpiled — eats from the cache
     // instead of trekking to a live patch. See shelter.ts's doc comment on
@@ -1141,12 +1163,13 @@ export function tickAgentAction(
   if (agent.behavior === "idle") {
     const drewBack = applyHerdCohesion(world, agent, rules);
     if (!drewBack) {
-      // "Incentivize the Pokémon to stay in it": a buildsShelter agent with
-      // a known shelter goes home and lingers there instead of wandering off
-      // exploring — see shelter.ts's `applyShelterResting`. Only ever a
-      // no-op (falls through to ordinary exploration) when this species'
-      // herd has no shelter anywhere findable yet.
-      const wentHome = agent.buildsShelter === true && applyShelterResting(world, agent, log);
+      // "Incentivize the Pokémon to stay in it": any agent (universal
+      // shelter now — see shelter.ts's doc comment) with a known shelter
+      // goes home and lingers there instead of wandering off exploring — see
+      // shelter.ts's `applyShelterResting`. Only ever a no-op (falls through
+      // to ordinary exploration) when this herd has no shelter anywhere
+      // findable yet.
+      const wentHome = applyShelterResting(world, agent, log);
       if (!wentHome) applyExploration(world, agent, log, rng);
     }
   }

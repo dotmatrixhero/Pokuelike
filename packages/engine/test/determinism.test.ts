@@ -10,6 +10,7 @@ import { growFlora, maybeDropSeed } from "../src/flora.js";
 import { advanceWaterCycle } from "../src/weather.js";
 import { grantExp } from "../src/leveling.js";
 import { applyMateSeeking } from "../src/reproduction.js";
+import { spawnEgg, tickEgg, EGG_INCUBATION_TICKS } from "../src/eggs.js";
 import type { Agent, HuntRules, World } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 
@@ -269,20 +270,38 @@ describe("reproduction.ts determinism", () => {
     expect(run(555)).toEqual(run(555));
   });
 
-  it("applyMateSeeking: different seeds can produce a different newborn nature/sex/position", () => {
+  it("applyMateSeeking: laying an egg (with real shelter access) is deterministic given the same seed, same as the instant-newborn flow it replaced", () => {
+    // Bonding/egg-laying (reproduction.ts) no longer produces an instant
+    // newborn on contact — see that module's own doc comment — and
+    // `pickEggTile`'s cluster-tile choice is deliberately deterministic
+    // (nearest tile with room first, no rng), so there's no lay-time
+    // randomness left to sweep across seeds the way the old instant-birth
+    // flow had. What matters here is that laying still goes through the
+    // shared `World.rng`/tick-sequence machinery without any stray
+    // `Math.random()` — two independent runs from the same seed produce a
+    // byte-identical egg.
     function run(seed: number) {
       const world = createWorld(10, 10, seed);
+      setTile(world, "surface", 5, 5, "shelter");
       const mother = agent("mother", { species: "bulbasaur", sex: "female", pos: { x: 5, y: 5 }, herdId: "h" });
       const father = agent("father", { species: "bulbasaur", sex: "male", pos: { x: 5, y: 6 }, herdId: "h" });
       world.agents.push(mother, father);
       applyMateSeeking(world, mother, undefined, undefined, world.rng);
-      const child = world.agents[2];
-      return child ? JSON.stringify({ nature: child.nature, sex: child.sex, pos: child.pos }) : undefined;
+      const egg = world.agents.find((a) => a.isEgg);
+      return egg ? JSON.stringify({ id: egg.id, pos: egg.pos }) : undefined;
     }
-    // Try a handful of seed pairs — natures/sex/spawn tile are drawn from a
-    // small discrete set, so any single pair has a real (if small) chance of
-    // coincidentally matching; requiring at least one differing pair out of
-    // several keeps this a real, non-flaky sanity check.
+    expect(run(42)).toEqual(run(42));
+  });
+
+  it("eggs.ts's tickEgg: different seeds produce a different hatchling nature/sex from the same egg", () => {
+    function run(seed: number) {
+      const world = createWorld(10, 10, seed);
+      const mother = agent("mother", { species: "bulbasaur", sex: "female", pos: { x: 5, y: 5 } });
+      const father = agent("father", { species: "bulbasaur", sex: "male", pos: { x: 5, y: 6 } });
+      const egg = spawnEgg(world, mother, father, { x: 5, y: 5 }, 1);
+      for (let i = 0; i < EGG_INCUBATION_TICKS; i++) tickEgg(world, egg, undefined, undefined, world.rng);
+      return JSON.stringify({ nature: egg.nature, sex: egg.sex });
+    }
     const outcomes = new Set([1, 2, 3, 4, 5].map(run));
     expect(outcomes.size).toBeGreaterThan(1);
   });

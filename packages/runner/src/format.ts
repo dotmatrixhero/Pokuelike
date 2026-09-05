@@ -90,6 +90,16 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.attackerSpecies} (${event.attackerId}) pack-hunts ${event.targetSpecies} (${event.targetId}) at (${event.pos.x},${event.pos.y}) with ${event.packmates} packmate${event.packmates === 1 ? "" : "s"}`;
     case "scavenged":
       return `[tick ${event.tick}] ${event.species} (${event.agentId}) scavenged a meal from ${event.corpseSpecies} (${event.corpseId}) at (${event.pos.x},${event.pos.y})`;
+    case "bonded":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) bonded with ${event.partnerSpecies} (${event.partnerId}) at (${event.pos.x},${event.pos.y})`;
+    case "eggLaid":
+      return `[tick ${event.tick}] ${event.species} (${event.motherId} x ${event.fatherId}) laid an egg (${event.eggId}) at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
+    case "eggHatched":
+      return `[tick ${event.tick}] ${event.species} egg (${event.agentId}) hatched at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
+    case "eggEaten":
+      return `[tick ${event.tick}] ${event.eaterSpecies} (${event.eaterId}) ate a ${event.eggSpecies} egg (${event.eggId}) at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
+    case "eggDefended":
+      return `[tick ${event.tick}] ${event.defenderSpecies} (${event.defenderId}) fought off ${event.threatSpecies} (${event.threatId}) to defend its egg at (${event.pos.x},${event.pos.y})`;
   }
 }
 

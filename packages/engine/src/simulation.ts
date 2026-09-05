@@ -3,6 +3,7 @@ import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import { growFlora, maybeDropSeed } from "./flora.js";
 import { decayShelters } from "./shelter.js";
+import { tickEgg } from "./eggs.js";
 import { updateHerdMigrations } from "./herdMigration.js";
 import { maybeImmigrate, type ImmigrationContext } from "./immigration.js";
 import type { LevelingContext } from "./leveling.js";
@@ -169,6 +170,15 @@ export function tickWorld(
   maybeImmigrate(world, immigration, log, rng);
   for (const agent of world.agents) {
     if (isDead(agent)) continue;
+    // Eggs (`Agent.isEgg`) are stationary and behavior-less — routed
+    // straight to `eggs.ts`'s `tickEgg` (incubation/hatch) instead of the
+    // ordinary needs-decay/action-economy pipeline, which would otherwise
+    // starve/move/act an egg the same as any other agent. See eggs.ts's
+    // top-of-file doc comment.
+    if (agent.isEgg) {
+      tickEgg(world, agent, log, ctx, rng);
+      continue;
+    }
 
     tickAgentNeeds(agent, world, ctx, log, rng);
 

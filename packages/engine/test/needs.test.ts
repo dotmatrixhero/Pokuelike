@@ -5,6 +5,21 @@ import { CONSUME_STOCK_AMOUNT } from "../src/flora.js";
 import { EventLog } from "../src/events.js";
 import type { Agent } from "../src/types.js";
 
+// A real leak this session already hit once (see vitest.config.ts's "forks"
+// pool comment, added for the cross-FILE version of this bug): a bare
+// `vi.spyOn(Math, "random")` a few tests down (the "no tagged preference"
+// exploration test) was never restored, so it silently pinned `Math.random`
+// to 0 for every test that ran after it in this same file/process —
+// harmless while shelter-building was species-gated (nothing else in this
+// file called unmocked `Math.random`), but a real, order-dependent flake
+// once shelter-building became universal (needs.ts's default `rng` param):
+// later "idle, comfortable" fixtures would deterministically (or not) walk
+// into `maybeTriggerShelterBuilding`'s `pickBuildSite` depending on whether
+// this mock was still active, purely a function of test execution order.
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
     id: "a1",

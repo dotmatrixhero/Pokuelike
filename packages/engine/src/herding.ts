@@ -53,7 +53,7 @@ export function herdRank(world: World, agent: Agent): number {
   if (!agent.herdId) return 1;
 
   const members = world.agents
-    .filter((other) => other.alive !== false && other.herdId === agent.herdId)
+    .filter((other) => other.alive !== false && !other.isEgg && other.herdId === agent.herdId)
     .sort((a, b) => (b.level ?? 1) - (a.level ?? 1) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   const index = members.findIndex((member) => member.id === agent.id);
@@ -62,7 +62,7 @@ export function herdRank(world: World, agent: Agent): number {
 
 /** Herd size backing `herdRank`'s denominator — living members sharing `herdId`, any layer. */
 export function herdSize(world: World, herdId: string): number {
-  return world.agents.filter((other) => other.alive !== false && other.herdId === herdId).length;
+  return world.agents.filter((other) => other.alive !== false && !other.isEgg && other.herdId === herdId).length;
 }
 
 /**
@@ -74,7 +74,7 @@ export function herdSize(world: World, herdId: string): number {
  */
 export function herdCentroid(world: World, herdId: string, layer: Layer): Vec2 | undefined {
   const members = world.agents.filter(
-    (other) => other.alive !== false && other.herdId === herdId && other.layer === layer
+    (other) => other.alive !== false && !other.isEgg && other.herdId === herdId && other.layer === layer
   );
   if (members.length === 0) return undefined;
 
@@ -95,7 +95,11 @@ export function herdCentroid(world: World, herdId: string, layer: Layer): Vec2 |
 function protectedHerdCentroid(world: World, herdId: string, layer: Layer, rules: HuntRules): Vec2 | undefined {
   const members = world.agents.filter(
     (other) =>
-      other.alive !== false && other.herdId === herdId && other.layer === layer && isPreyOfAnything(rules, world, other)
+      other.alive !== false &&
+      !other.isEgg &&
+      other.herdId === herdId &&
+      other.layer === layer &&
+      isPreyOfAnything(rules, world, other)
   );
   if (members.length === 0) return herdCentroid(world, herdId, layer);
 

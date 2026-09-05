@@ -77,7 +77,11 @@ function venusaur(pos: { x: number; y: number }, overrides: Partial<Agent> = {})
 describe("falling asleep", () => {
   it("falls asleep when idle, energy is low, and no threat is nearby", () => {
     const world = createWorld(10, 10);
-    const agent = bulbasaur({ x: 5, y: 5 }, { needs: createNeeds({ energy: ENERGY_SLEEP_THRESHOLD - 0.01 }) });
+    // hunger/thirst held just under shelter.ts's SHELTER_COMFORT_THRESHOLD
+    // (0.85) — shelter-building is universal now, so a plain fully-satisfied
+    // fixture would otherwise nondeterministically divert into that instead
+    // of ever reaching the sleep check.
+    const agent = bulbasaur({ x: 5, y: 5 }, { needs: createNeeds({ energy: ENERGY_SLEEP_THRESHOLD - 0.01, hunger: 0.8, thirst: 0.8 }) });
     world.agents.push(agent);
     const log = new EventLog();
 

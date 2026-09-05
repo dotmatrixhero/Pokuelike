@@ -126,7 +126,7 @@ function findRivalOccupant(world: World, agent: Agent, rules: HuntRules, target:
   let best: Agent | undefined;
   let bestDist = Infinity;
   for (const other of world.agents) {
-    if (other.id === agent.id || other.alive === false || other.fainted) continue;
+    if (other.id === agent.id || other.alive === false || other.fainted || other.isEgg) continue;
     if (other.layer !== agent.layer) continue;
     if (other.herdId !== undefined && other.herdId === agent.herdId) continue; // same herd — never a rival
     if (rules[agent.species] || rules[other.species]) continue; // predator on either side — out of scope, see doc comment

@@ -1953,3 +1953,109 @@ not something this pathfinding pass itself caused or is positioned to fix.
       dominating tile preference for a species that's almost always alone
       in guardian position — not a bug, but worth a closer look if herd
       cohesion and tile preference priority are ever revisited together.
+
+## Bonding, shelter, and eggs — built, see DESIGN.md
+
+- [x] Universal shelter: `SpeciesDef.buildsShelter`/`Agent.buildsShelter`
+      no longer gate any shelter mechanic in the engine (species-tied ->
+      universal, a deliberate reversal of the earlier direct instruction) —
+      the field is left in place, unused for gating, purely legacy/cosmetic
+      denormalization. Per-species visual variation instead:
+      `Tile.shelterOwnerSpecies` + `packages/web/src/palette.ts`'s new
+      `shelterOwnerTint` (deterministic per-species hue), wired into both
+      of `renderer.ts`'s draw paths.
+- [x] Real shelter-specific capacity: `occupancy.ts`'s
+      `SHELTER_TILE_ADULT_CAP` (2) / `SHELTER_TILE_EGG_CAP` (1), layered on
+      top of (not replacing) the existing weight/headcount tile-capacity
+      system — shelter terrain routes through a new
+      `canEnterShelter`/`canLayEggAt` pair instead. Adjacent shelter tiles
+      form one connected cluster (`shelterCluster`, 4-directional BFS)
+      whose capacity is the sum of its members' own caps, and household
+      members range across the whole cluster rather than being pinned to
+      one tile.
+- [x] Bonding replaces instant offspring: `reproduction.ts`'s
+      `applyMateSeeking` sets `Agent.bondedPartnerId` on first contact
+      instead of spawning a child; `spawnOffspring` deleted entirely (its
+      logic moved to `eggs.ts`'s hatch step). A bonded, shelterless agent
+      gets a real, unit-tested comfort-threshold discount
+      (`BOND_COMFORT_DISCOUNT`, 0.15) biasing it toward starting a shelter
+      build sooner than an unbonded agent at the same needs.
+- [x] Real eggs: new `eggs.ts` module (`spawnEgg`/`tickEgg`,
+      `EGG_INCUBATION_TICKS = 80`). Egg-laying only once the household has
+      real shelter access with egg-capacity room; the egg is a real `Agent`
+      (`isEgg: true`), stationary and behavior-less (routed straight to
+      `tickEgg` by `simulation.ts`, skipping the ordinary needs/action
+      pipeline entirely); nature/disposition/sex/stat-block assignment
+      moved from lay time to hatch time.
+- [x] Eggs as food: `predation.ts`'s `applyEggEating` — any species that
+      doesn't share an egg group with the egg (reusing `canBreed`) can eat
+      an adjacent egg once hungry enough (`EGG_EAT_HUNGER_THRESHOLD = 0.9`),
+      restoring hunger/granting exp via the exact same `grantKillExp`/
+      hunger-restore path a real kill uses. Deliberately NOT routed through
+      the `HuntRules` predator/prey pipeline — a real, explicit widening of
+      who eats what, independent of a species' predator/prey role.
+- [x] Extreme egg defense: `predation.ts`'s `applyEggDefense`, checked
+      first in `applyPredationInstincts` — ahead of the critically-hurt
+      flee check — overriding a defender's ordinary flee/self-preservation
+      entirely (and waking it if asleep) to fight a threat near its own/its
+      herd's egg, resolving via the real true-death combat path
+      (`resolveHit(..., "killed", ...)`). A real, explicit, documented
+      departure from herdConflict.ts's non-lethal rivalry model, not an
+      accidental softening of it.
+- [x] Fixed a real, latent bug this feature surfaced: universal
+      shelter-building didn't check `agent.asleep`, letting a sleeping
+      agent silently start a shelter task and skip the sleep wake-check
+      machinery entirely — now gated on `!agent.asleep`, same as every
+      other self-directed task in `needs.ts`'s `tickAgentAction`.
+- [x] Fixed a real, latent test-hygiene bug this feature surfaced: an
+      unrestored `vi.spyOn(Math, "random")` in `needs.test.ts` could pin
+      `Math.random` for every later test in the same file once shelter-
+      building's default `rng` param started actually calling it (it never
+      had before, since shelter-building was species-gated) — added a
+      file-level `afterEach(() => vi.restoreAllMocks())`.
+- [x] New tests: `eggs.test.ts` (hatch timing/profile backfill/
+      rng-determinism, egg-eating's full compatibility matrix, egg-defense
+      overriding ordinary flee), `occupancy.test.ts`'s new shelter-capacity
+      describe block, `shelter.test.ts`'s universal-triggering and
+      bonded-discount cases, a full rewrite of `reproduction.test.ts`'s
+      bonding/egg assertions, and a replaced `determinism.test.ts`
+      reproduction section (lay-time is now deterministic; hatch-time
+      nature/sex is the real rng-swept case). 720 total engine tests, all
+      passing, including the unmodified full-`tickWorld` determinism
+      acceptance suite.
+- [x] Real headless validation, seeds 42/7/20260903: a real, honestly-large
+      reduction vs. a completely-uninstrumented instant-birth baseline at
+      3000 ticks (298/332/294 living -> 23/19/24 living) — but a real,
+      GROWING curve, not a stalled one: seed 42 alone goes 23 -> 56 -> 94
+      living across 3000/6000/8000 ticks, with 88 eggs laid and 82 hatched
+      (93% survival) by tick 8000, zero starvation deaths at every tick
+      count on every seed, and egg-defense firing 181-187 times over the
+      longer runs — a real, frequently-exercised mechanic. See DESIGN.md
+      for the full numbers and the honest "the baseline itself is a
+      pathological comparison point" context.
+- [ ] **Open follow-up, not chased down**: the exact growth-rate pacing
+      (80-tick incubation, 0.85/0.70 shelter comfort thresholds, 0.9
+      egg-eating hunger gate) is a real, legitimate tuning target — the
+      population trend is proven growing and zero-starvation (the load-
+      bearing safety property), but whether it reaches this session's
+      previously-cited "healthy" 62-80ish range fast enough, or should grow
+      faster, wasn't further hand-tuned this pass. A longer (10000+ tick)
+      run, or a dedicated re-tuning pass on any of those three constants,
+      would be the way to actually chase this further.
+- [ ] **Open follow-up, not investigated**: dispersal interacting with a
+      bonded-but-shelterless pair — a disperser keeps a `bondedPartnerId`
+      pointing at an agent it may now be far away from (or that joined a
+      different herd), with nothing currently clearing or re-validating a
+      stale bond across a dispersal event.
+- [ ] **Open follow-up, not investigated**: egg-defense's interaction with
+      herd-conflict's non-lethal model — whether a rival-herd, same-egg-
+      group agent can ever get caught in both systems' overlapping radii on
+      the same tick.
+- [ ] **Open follow-up, not investigated**: adjacency-capacity edge cases
+      beyond the direct unit tests — a shelter cluster that grows or shrinks
+      (new tile built, or an existing one abandoned) while an egg is already
+      incubating inside it, against a real run rather than a synthetic test.
+- [ ] **Open follow-up, not done**: `packages/runner/src/ascii.ts`'s own
+      terrain palette (the headless CLI's rendering, separate from
+      `packages/web`) was not given the same per-species shelter tint —
+      real, known, cosmetic-only gap.

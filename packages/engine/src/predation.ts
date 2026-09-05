@@ -7,7 +7,7 @@ import { calculateDamage, pickBestMove, useMove, rollAccuracy, rollCritical, rol
 import type { Direction } from "./moves.js";
 import { resolveShape } from "./moves.js";
 import type { MoveSpec } from "./moves.js";
-import { grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
+import { canBreed, grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
 import { isPathClear } from "./fov.js";
 import { stepTowardMovingTarget } from "./pathfinding.js";
@@ -388,12 +388,22 @@ export function isHunterSpecies(rules: HuntRules, hunterCandidateSpecies: string
   return !!rules[hunterCandidateSpecies] && hunterCandidateSpecies !== ownSpecies;
 }
 
-/** Nearby living agents (fainted ones included — a fainted agent is still `alive !== false`, and remains a valid hunt/threat target). */
+/**
+ * Nearby living agents (fainted ones included — a fainted agent is still
+ * `alive !== false`, and remains a valid hunt/threat target). Eggs
+ * (`Agent.isEgg`) are deliberately excluded — the single choke point that
+ * keeps an egg out of every ordinary flee/hunt/mob/threat scan built on top
+ * of this function: eggs are only ever touched by `applyEggDefense`/
+ * `applyEggEating` below (a real, intentionally-widened predation-adjacent
+ * mechanic, not the ordinary predator/prey `HuntRules` pipeline — see those
+ * functions' own doc comments for why).
+ */
 export function agentsWithin(world: World, agent: Agent, radius: number): Agent[] {
   return world.agents.filter(
     (other) =>
       other.id !== agent.id &&
       other.alive !== false &&
+      !other.isEgg &&
       other.layer === agent.layer &&
       manhattan(other.pos, agent.pos) <= radius
   );
@@ -428,6 +438,7 @@ export function hasAwakeHerdmateNearby(world: World, agent: Agent): boolean {
       other.alive !== false &&
       !other.fainted &&
       !other.asleep &&
+      !other.isEgg &&
       other.herdId === agent.herdId &&
       other.layer === agent.layer &&
       manhattan(other.pos, agent.pos) <= SLEEP_WATCH_RADIUS
@@ -461,6 +472,7 @@ function countHerdAllies(world: World, excludeId: string, species: string, herdI
       other.id !== excludeId &&
       other.alive !== false &&
       !other.fainted &&
+      !other.isEgg &&
       other.species === species &&
       other.herdId === herdId &&
       other.layer === layer &&
@@ -477,6 +489,178 @@ function isProtectedByMob(world: World, candidate: Agent): boolean {
 function isCriticallyHurt(agent: Agent): boolean {
   if (agent.hp === undefined || agent.maxHp === undefined || agent.maxHp === 0) return false;
   return agent.hp / agent.maxHp <= retreatHpFraction(agent);
+}
+
+// --- Eggs: extreme defense and opportunistic eating (points 5 and 6 — see
+// eggs.ts's top-of-file doc comment for the egg entity itself, and
+// DESIGN.md's "Bonding, shelter, and eggs" section for the full design).
+// Both live here, not in eggs.ts, so they can reuse this file's existing
+// private combat primitives (`canAttackFromHere`/`resolveHit`/`nearest`)
+// exactly like the guardian-intervention branch above already does, rather
+// than exporting those primitives just to duplicate this logic elsewhere. ---
+
+/** How far (Manhattan) an agent will travel to defend an egg it's territorial about. */
+const EGG_DEFENSE_RADIUS = 8;
+/** How close a non-egg-group-compatible agent has to get to an egg before it counts as an active threat worth fighting over (as opposed to merely somewhere in the area). */
+const EGG_THREAT_RADIUS = 4;
+/**
+ * Hunger floor for *opportunistically* eating an egg — direct wording is
+ * "super desired... given the chance," not "only when literally starving."
+ * Set well above `chooseBehavior`'s 0.7 urgency cutoff (same relationship
+ * `SHELTER_COMFORT_THRESHOLD` has to it) so a genuinely comfortable agent
+ * still takes a free, easy, high-value meal sitting right next to it, not
+ * only a desperate one — matching "super desired," a real, standing
+ * preference, not a last resort.
+ */
+const EGG_EAT_HUNGER_THRESHOLD = 0.9;
+
+/**
+ * Every living, unhatched egg this agent is territorial about — its own
+ * herd's eggs (any species sharing `herdId`, matching how a guardian
+ * defends herd-mates it isn't related to either), or, for a herdless agent,
+ * only its own species' eggs — within `EGG_DEFENSE_RADIUS`.
+ */
+function nearbyOwnEggs(world: World, agent: Agent): Agent[] {
+  return world.agents.filter(
+    (other) =>
+      other.isEgg === true &&
+      other.alive !== false &&
+      other.layer === agent.layer &&
+      (agent.herdId ? other.herdId === agent.herdId : other.species === agent.species) &&
+      manhattan(agent.pos, other.pos) <= EGG_DEFENSE_RADIUS
+  );
+}
+
+/**
+ * "Pokemon are extremely territorial about their eggs. Will defend them to
+ * death" — direct instruction, and a real, explicit departure from
+ * herdConflict.ts's deliberately non-lethal rivalry model: this fights to a
+ * true kill (`resolveHit(..., "killed", ...)`), not herdConflict's
+ * retreat-before-fainting cap, and it overrides this agent's own flee
+ * reflex/self-preservation entirely — checked first in
+ * `applyPredationInstincts`, ahead of the critically-hurt flee check, so a
+ * defender can and does keep fighting (and can die) even at HP where it
+ * would otherwise flee. Also wakes a sleeping defender (unlike this
+ * function's sibling self-defense branches, which stay dormant while
+ * `agent.asleep` — a threat to the eggs is worth waking up for even though
+ * an ordinary threat to the sleeper itself isn't).
+ *
+ * A "threat" here is simply any nearby agent that doesn't share an egg
+ * group with the egg's species (`!canBreed`, the same egg-group
+ * compatibility `applyEggEating` uses to decide who's willing to eat it) —
+ * proximity alone is enough to provoke a defense, since an egg can't be
+ * gradually "attacked" the way a real prey animal can; the danger is simply
+ * an eater standing close enough to consume it (`applyEggEating`'s own
+ * `EGG_THREAT_RADIUS`-scale adjacency check). Same-herd agents are never
+ * treated as threats (a guardian of a different species than the egg's own
+ * still isn't hostile to it), independent of the egg-group check.
+ */
+function applyEggDefense(world: World, agent: Agent, ctx: LevelingContext | undefined, log: EventLog | undefined, rng: () => number): boolean {
+  if (agent.isEgg || agent.fainted || agent.beingCarriedBy) return false;
+  const eggs = nearbyOwnEggs(world, agent);
+  if (eggs.length === 0) return false;
+
+  for (const egg of eggs) {
+    const threats = world.agents.filter(
+      (other) =>
+        other.id !== agent.id &&
+        !other.isEgg &&
+        other.alive !== false &&
+        other.layer === egg.layer &&
+        !(other.herdId !== undefined && other.herdId === egg.herdId) &&
+        !canBreed(other.species, egg.species, ctx) &&
+        manhattan(other.pos, egg.pos) <= EGG_THREAT_RADIUS
+    );
+    const threat = nearest(egg, threats);
+    if (!threat) continue;
+
+    agent.asleep = false;
+    agent.sleepTicks = 0;
+    logBehaviorChange(log, world, agent, "fight");
+    agent.behavior = "fight";
+    agent.fightTarget = threat.id;
+    const distance = manhattan(agent.pos, threat.pos);
+    if (canAttackFromHere(world, agent, threat, distance)) {
+      resolveHit(world, agent, threat, log, "killed", ctx, distance, rng);
+    } else {
+      agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
+    }
+    log?.record({
+      kind: "eggDefended",
+      tick: world.tick,
+      defenderId: agent.id,
+      defenderSpecies: agent.species,
+      eggId: egg.id,
+      threatId: threat.id,
+      threatSpecies: threat.species,
+      pos: { ...agent.pos },
+    });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * "Eggs are highly edible. Super desired as food by any Pokémon that does
+ * not share egg type... Same species Pokémon will not eat eggs of same
+ * type. Eating an egg is the same bonuses as killing and eating prey" —
+ * direct instruction. Deliberately NOT routed through the ordinary
+ * `HuntRules`/`isPreyOf` predator/prey pipeline (`applyPredationInstincts`'s
+ * hunt branch): that system is keyed on predefined predator-prey species
+ * pairs, but this is explicitly wider — ANY species that doesn't share an
+ * egg group with the egg (`!canBreed`, reusing the exact compatibility
+ * check that already gates cross-species breeding eligibility in
+ * `reproduction.ts`) is willing to eat it, prey and non-prey species alike.
+ * A separate, simpler "opportunistic, instant" check is the better fit for
+ * that: an egg can't fight back or flee, so there's no real combat
+ * encounter to resolve the way a live hunt has one — eating an egg is a
+ * single action once adjacent, not a multi-hit fight.
+ *
+ * Reuses the real kill-exp/hunger-restore formulas verbatim (`grantKillExp`,
+ * `agent.needs.hunger = 1`) rather than inventing new numbers, per direct
+ * instruction ("same bonuses as killing and eating prey").
+ */
+/**
+ * `needs.ts`'s `tickAgentAction` calls this right after
+ * `applyPredationInstincts` (same tier as `applyScavenging`, another
+ * fallback feeding source checked once ordinary hunting/fleeing/fighting
+ * found nothing to do this tick), ahead of ordinary foraging: a real, highly
+ * desired opportunistic meal, per direct instruction ("super desired").
+ */
+export function applyEggEating(world: World, agent: Agent, ctx: LevelingContext | undefined, log: EventLog | undefined, rng: () => number = Math.random): boolean {
+  if (agent.isEgg || agent.fainted || agent.beingCarriedBy) return false;
+  if (agent.needs.hunger >= EGG_EAT_HUNGER_THRESHOLD) return false;
+
+  const candidates = world.agents.filter(
+    (other) =>
+      other.isEgg === true &&
+      other.alive !== false &&
+      other.layer === agent.layer &&
+      !canBreed(agent.species, other.species, ctx) &&
+      manhattan(agent.pos, other.pos) <= 1
+  );
+  const egg = nearest(agent, candidates);
+  if (!egg) return false;
+
+  grantKillExp(world, agent, egg, ctx, log, rng);
+  agent.needs.hunger = 1;
+  agent.digestingTicksRemaining = KILL_SATIATION_TICKS;
+  egg.alive = false;
+  egg.diedAtTick = world.tick;
+  world.eggsEaten = (world.eggsEaten ?? 0) + 1;
+  log?.record({
+    kind: "eggEaten",
+    tick: world.tick,
+    eaterId: agent.id,
+    eaterSpecies: agent.species,
+    eggId: egg.id,
+    eggSpecies: egg.species,
+    layer: egg.layer,
+    pos: { ...egg.pos },
+  });
+  logBehaviorChange(log, world, agent, "seekFood");
+  agent.behavior = "seekFood";
+  return true;
 }
 
 /**
@@ -1041,6 +1225,20 @@ export function applyPredationInstincts(
   rng: () => number = Math.random,
   thirstIsUrgent = false
 ): boolean {
+  // Egg defense (point 6 — direct instruction: "Pokemon are extremely
+  // territorial about their eggs. Will defend them to death"). Checked
+  // FIRST, ahead of even the critically-hurt flee check right below — the
+  // single highest priority in this whole function, deliberately overriding
+  // self-preservation, unlike every other branch here. A real, explicit
+  // departure from herdConflict.ts's non-lethal rivalry model: this can and
+  // does result in a real death (either side's — `resolveHit` below is
+  // called with `"killed"`, the same true-death path a real hunt uses, not
+  // herdConflict's retreat-before-fainting cap), and it wakes a sleeping
+  // defender (unlike this function's other self-defense branches, which
+  // stay silent while `agent.asleep`) — see `applyEggDefense`'s own doc
+  // comment.
+  if (applyEggDefense(world, agent, ctx, log, rng)) return true;
+
   if (!agent.asleep && isCriticallyHurt(agent)) {
     const attackers = agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter(
       (other) => other.behavior === "fight" && other.fightTarget === agent.id

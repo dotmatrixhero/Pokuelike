@@ -702,9 +702,17 @@ describe("bush concealment", () => {
     const ADULT_PREDATOR_AGE = 200;
 
     // Distance 4 is within HUNT_DETECT_RADIUS (5) normally.
+    // hunger/thirst held just under shelter.ts's SHELTER_COMFORT_THRESHOLD
+    // (0.85) — shelter-building is universal now and isn't gated on age/
+    // maturity the way exploration is, so a plain fully-satisfied prey()
+    // fixture would otherwise be free to wander off toward a build site on
+    // its own action tick (which ticks before the predator's, corrupting
+    // the exact distance this test depends on) despite `age: 0`.
+    const notShelterComfy = createNeeds({ hunger: 0.8, thirst: 0.8 });
+
     const openWorld = createWorld(20, 20);
     openWorld.agents.push(
-      prey({ x: 5, y: 5 }, { disposition: bold, age: 0 }),
+      prey({ x: 5, y: 5 }, { disposition: bold, age: 0, needs: notShelterComfy }),
       predator({ x: 9, y: 5 }, 0.1, { age: ADULT_PREDATOR_AGE })
     );
     tickWorld(openWorld, undefined, RULES, undefined, SAFE_RNG);
@@ -714,7 +722,7 @@ describe("bush concealment", () => {
     const bushWorld = createWorld(20, 20);
     setTile(bushWorld, "surface", 5, 5, "bush");
     bushWorld.agents.push(
-      prey({ x: 5, y: 5 }, { disposition: bold, age: 0 }),
+      prey({ x: 5, y: 5 }, { disposition: bold, age: 0, needs: createNeeds({ hunger: 0.8, thirst: 0.8 }) }),
       predator({ x: 9, y: 5 }, 0.1, { age: ADULT_PREDATOR_AGE })
     );
     tickWorld(bushWorld, undefined, RULES, undefined, SAFE_RNG);
