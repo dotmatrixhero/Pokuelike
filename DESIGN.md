@@ -7486,3 +7486,218 @@ earlier and left untouched: biasing `pickBuildSite` (shelter.ts) toward
 building adjacent to existing shelter, so clusters actually form and the
 existing "multiple adjacent shelter increases capacity" rule (part of
 the original spec) does real work on its own — see TODO.md.
+
+## Auto Camera: a toggleable director mode that follows notable events
+
+**Direct ask.** "I want to be able to see a battle happen in real time. So I
+want a toggle auto camera. Mode so that it follows interesting events. It
+would zoom in on them and slow down time if it was on 4x or higher down to
+2x temporarily while the event happens." Six named categories: immigration
+of new units; two mates finding each other/building a shelter/laying an
+egg; an egg hatching; a battle from first hit to death-or-retreat; an
+evolution; a death. Plus: "the log was auto filtered to all moves used by
+the things that are fighting, or which Pokémon hatched... make it more
+specific."
+
+**Decided: mapping each category to a real engine event.**
+
+- **Immigration** → `immigrated` (one event per 1-3-member arrival group).
+- **Courtship** → three *separate* camera moments, not one merged
+  storyline: `bonded`, `shelterBuilt`, `eggLaid`. These routinely share the
+  same pair's agent ids, but they're real, temporally separate beats (a
+  bonded pair might not build a shelter or lay an egg for hundreds of
+  ticks) — collapsing them into one followed "arc" would mean either
+  camera-locking on a pair for that whole gap (against the "don't stall the
+  queue" design goal below) or arbitrarily picking one of the three to
+  show and silently dropping the other two. Three real, distinct
+  `enqueueOneShot` calls is what "a real distinct camera move for each"
+  means in code.
+- **Egg hatching** → `eggHatched`.
+- **Battle** → started by a landed, damaging hit: `fought`, or a non-
+  `"missed"` `herdClash` (the non-lethal rivalry-fight mechanic — it deals
+  real damage via the same "used a move" shape, so it's structurally a
+  battle even though it can never end in a kill; see herdConflict.ts).
+  Concluded by whichever of three explicit signals fires first for either
+  participant: a true death (`killed`/`defeated`), a `fainted` (a knockout
+  ends the encounter even before the finishing blow lands, per DESIGN.md's
+  existing Faint/finish-off model), or a successful retreat
+  (`behaviorChanged` to `"flee"`, or `herdClash`'s own `"retreated"`
+  outcome). A fourth, fallback-only path (`BATTLE_STALE_TICKS` = 40 ticks
+  of silence between hits) catches the case where two agents just disengage
+  without producing any of those three clean signals — real fights can end
+  that way (one side just walks off having decided it's not worth it), and
+  the camera shouldn't get stuck locked onto a fight that's already over in
+  every practical sense.
+- **Evolution** → `evolved`. This event carries no `pos` field at all (only
+  `agentId`/species/level) — resolved via a live `world.agents.find` lookup
+  at the moment the event is observed, per the task brief's own guidance.
+- **Death** → `killed`, `defeated`, `starved`, `diedOfAge` — the same "true
+  death" set `eventText.ts`'s `HEADLINE_KINDS` already uses (`Agent.alive`
+  goes to `false`), deliberately excluding `fainted` (recoverable, not a
+  death — see predation.ts's faint/finishing-pool model, confirmed by
+  reading `resolveHitAgainstTarget`: a faint sets `alive` unchanged and
+  waits on a separate finishing-pool depletion before ever recording
+  `killed`/`defeated`). A death that's already the natural conclusion of an
+  active/queued battle for the same agent doesn't *also* get queued as a
+  separate one-shot "death" moment — the battle engagement's own short
+  epilogue hold covers exactly that beat, so the camera doesn't cut away and
+  immediately cut back to the same spot.
+
+**The state machine (`packages/web/src/autoCamera.ts`).** One `Engagement`
+is "active" at a time; everything else notable waits in a FIFO `queue`
+(capped at 20, oldest dropped on overflow). Two engagement shapes:
+
+1. **One-shot** (immigration/courtship/hatch/evolution/death): a fixed
+   `DWELL_TICKS` (24) camera hold, then it expires and the next queued
+   engagement (if any) takes over.
+2. **Continuous** (battle only): stays active tick-to-tick, kept alive by
+   every new `fought`/non-missed-`herdClash` hit naming either participant
+   (a widening `ids` set handles a pack-hunt assist joining mid-fight —
+   see `onBattleHit`), until one of the four conclusion paths above fires,
+   at which point it gets a short `BATTLE_EPILOGUE_TICKS` (16) hold on the
+   same view — long enough to actually see the kill/retreat land, short
+   enough not to stall the queue behind a fight that's already decided.
+
+**Queueing policy: FIFO, no interruption, real dwell — chosen specifically
+to avoid a jittery camera.** The brief flagged this as an open design call
+("let the current follow finish" vs. "most severe wins and interrupts").
+Went with strict FIFO + no interruption: a battle in progress is *never*
+cut away from for a fresh one-shot event (a battle is exactly the thing
+worth not whiplashing away from mid-fight), and one-shot events queue
+behind each other rather than competing for the same frame. The real cost
+of this choice is latency — a hatch that fires while a long battle plays out
+might wait a while for its turn — judged an acceptable tradeoff against a
+camera that visibly jumps around every time two things happen close
+together, which is worse for "watching a battle happen in real time" than
+a short queue delay on a lower-priority event.
+
+**Camera mechanics — reusing the existing zoom/pan primitives, not a new
+camera system.** `renderer.ts`/`main.ts` never had a real "viewport"
+concept: `zoom` is a CSS-only scale factor on the whole canvas element, and
+panning is just `#canvas-wrap`'s native `overflow: auto` scroll position.
+Auto Camera's "zoom in and pan" is built entirely on those two existing
+primitives — `focusCameraOn(pos)` sets `zoom` to a fixed `AUTO_CAM_ZOOM`
+(`ZOOM_MAX`, 200% — 2.5x the default 80%) and then sets `canvas-wrap`'s
+`scrollLeft`/`scrollTop` to center the target tile. For a multi-agent
+engagement (a battle, an immigrant group) the target is the *live* average
+position of every tracked id still present in `world.agents`, recomputed
+every frame — a real moving follow-cam, not a snapshot of where the event
+fired. A fixed zoom level (rather than a fit-to-both-combatants
+calculation) was a deliberate simplicity call: a moving multi-agent fight
+would invalidate a "fit" calculation on the very next frame anyway, and a
+single fixed level already reads as "genuinely closer" for every category
+from a lone hatchling to a three-agent immigrant group.
+
+**Speed control: saves/restores the viewer's actual prior value, not a
+fixed default.** The direct ask was explicit that this is temporary and
+relative to whatever the viewer had picked, not a hardcoded "always show at
+2x." `applySlowdownIfNeeded` only intervenes at all when the *current*
+speed is >= `SLOWDOWN_THRESHOLD_SPEED` (4x) and stores it in `savedSpeed`;
+`releaseSpeedOverride` restores exactly that value once nothing needs the
+slowdown any more. A second engagement starting while the first's slowdown
+is still in effect doesn't re-save (would silently overwrite the *real*
+original speed with the already-slowed 2x) — `applySlowdownIfNeeded` no-ops
+whenever `savedSpeed` is already set.
+
+**Manual override — a real, considered interaction, not an accidental
+race.** Two independent overrides:
+
+- **View (pan/zoom).** `noteManualViewChange()` sets a sticky
+  `viewerTookOver` flag the moment the viewer scrolls `canvas-wrap`
+  themselves or uses the zoom buttons/pinch gesture. While set, the *active*
+  engagement keeps running in every other respect (log filter stays scoped,
+  conclusion/dwell timers keep ticking) but the camera stops re-centering —
+  the viewer explicitly looked somewhere else, so auto-camera backs off
+  rather than snapping back every frame. A genuinely *new* engagement
+  (queue promotes) clears the flag and takes the camera back — a fresh
+  notable event is a deliberate new thing to look at, not a continuation of
+  whatever the viewer panned away from. Telling "auto-camera's own
+  `scrollLeft` assignment" apart from "the viewer's real scroll gesture" on
+  the one shared native `scroll` event is done by exact comparison against
+  the position auto-camera itself just set (`autoCamLastScroll` in
+  `main.ts`) — reliable specifically because auto-camera's own scrolls are
+  plain instant assignments, never smooth/animated, so there's no
+  intermediate-frame ambiguity to guess at.
+- **Speed.** `noteManualSpeedChange()` (wired to the speed slider's own
+  `input` listener, never fired by auto-camera's own `setSpeed` path)
+  clears `savedSpeed` outright — a manual speed change is taken as the
+  viewer's new intended speed, not something to be silently overwritten
+  when the current slowdown (if any) later releases.
+- **Restoring the view on full idle respects an in-progress manual
+  override too**: if the viewer already took the wheel before the last
+  engagement concluded, going idle does *not* snap back to the pre-auto-
+  camera "home" view — that would discard a deliberate manual pan the
+  instant the thing they panned away from finished, which is backwards.
+  The home-view snapshot/restore only fires when the viewer never
+  intervened during that run.
+- **Toggling off entirely** is treated as an explicit "stop," not "finish
+  this one first" — it releases the queue/active engagement, log filter,
+  speed override, and view immediately (see `AutoCameraController.reset`).
+
+**Log filtering — a new, more specific filter mode, not a variant of the
+existing per-agent one.** `EventLogPanel.setAutoCamFilter(ids)` takes a
+whole `Set<string>` of ids (both fighters, an egg plus both its parents,
+every member of an immigrant group) and — while set — overrides every other
+filter/toggle outright (`hideNoise`, `hideLevelUps`, `headlinesOnly`, and
+the manual single-agent `filterAgentId`), matching a curated view of
+exactly this moment's participants rather than a variant of the viewer's
+ambient log preferences. This matters concretely: a flee right before a
+kill is `behaviorChanged`, ordinarily in `NOISE_KINDS` and hidden by
+default, but it's exactly the context a followed battle should show, so the
+auto-cam filter bypasses `hideNoise` rather than inheriting it. Real fix
+found in `eventText.ts` while building this: `AGENT_ID_FIELDS` (the generic
+id-field list both the old single-agent filter and the new
+`eventNamesAnyOf` helper walk) was missing `partnerId`/`eggId`/`eaterId`/
+`threatId` — those event kinds (bonded/egg-*) postdate when that list was
+first written. Added them; this also makes the pre-existing single-agent
+click-to-filter behavior more complete (clicking a bonded partner now
+surfaces the `bonded` row).
+
+**Toggle UI.** `#auto-cam-toggle` in the header, reusing the existing
+`.playing` on/highlighted-background convention (`#style-tile`/
+`#style-ascii`/`#play-pause`) rather than inventing a new toggle affordance,
+plus a small `#auto-cam-status` label next to it showing the active
+engagement's short label (e.g. "scyther vs charmander fighting") or
+"watching…" once enabled with nothing currently notable.
+
+**Verification.** No browser test harness exists in this project (see
+TODO.md's standing note, and the Inspector redesign section's identical
+caveat) — Playwright itself, however, turned out to already be installed
+globally in this environment (`/opt/node22/lib/node_modules/playwright`,
+confirmed launchable), so this got *both* levels of verification, not just
+the hand-rolled-shim fallback:
+
+1. `pnpm -r typecheck`/`pnpm -r build` clean across all 4 packages.
+2. A throwaway (not shipped) script drove the real, compiled-at-runtime
+   `AutoCameraController` (via Node 22's built-in
+   `--experimental-transform-types`, no separate build step needed) against
+   a fake `AutoCameraHost` and hand-built `SimEvent` sequences, asserting on
+   the resulting state transitions across 7 scenarios: a battle from first
+   hit through a true kill and its epilogue hold, with speed/view save-and-
+   restore verified end to end; two one-shot events queuing FIFO without
+   interrupting each other; a battle concluding via a successful retreat
+   (not just death) inside its short epilogue window, not the long stale-
+   timeout fallback; a manual view override suppressing re-centering
+   without killing the underlying engagement; the bonded/shelterBuilt/
+   eggLaid courtship trio firing as three genuinely separate engagements
+   (this caught a real bug — the first version's dedup logic collapsed them
+   into one because it keyed on the shared `NotableCategory` rather than
+   the specific originating event kind, fixed by adding a `sourceKind`
+   field used only for de-duplication); the stale-timeout fallback actually
+   firing (and not before its 40-tick window) when no clean conclusion
+   signal ever arrives; and an immigration group's camera focus landing on
+   the live midpoint of the whole group, not just the first agent. All 7
+   scenarios pass.
+3. A real headless-browser run (Playwright/Chromium) against the actual
+   `pnpm --filter @pokuelike/web dev` server: loaded the page, set speed to
+   32x, toggled Auto Camera on, pressed Play, and watched the live DOM.
+   It engaged for real on an actual battle (`"scyther vs charmander
+   fighting"`), and confirmed in the live page: zoom snapped to 200%
+   (`AUTO_CAM_ZOOM`), speed clamped from 32x down to 2x, and the event-log
+   panel showed the scoped fight text ("scyther (scyther-1) used slash on
+   charmander (charmander-0)...") rather than the unfiltered full log or an
+   empty placeholder. It later returned to `32x`/`"watching…"` once the
+   engagement concluded and the queue drained. A simulated manual scroll
+   event and the off-toggle were also exercised with no console/page
+   errors the whole run. This is real-browser confirmation of the actual
+   wiring, not just the isolated state-machine logic from step 2.

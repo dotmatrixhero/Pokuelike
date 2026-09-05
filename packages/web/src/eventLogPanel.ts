@@ -1,5 +1,5 @@
 import type { SimEvent, World } from "@pokuelike/engine";
-import { HEADLINE_KINDS, NOISE_KINDS, STORY_COLOR, STORY_ICON, STORY_KINDS, eventNamesAgent, formatEvent } from "./eventText.js";
+import { HEADLINE_KINDS, NOISE_KINDS, STORY_COLOR, STORY_ICON, STORY_KINDS, eventNamesAgent, eventNamesAnyOf, formatEvent } from "./eventText.js";
 
 /**
  * A real scrollable event log, not a flat forever-growing dump: the in-memory
@@ -40,6 +40,16 @@ export class EventLogPanel {
    */
   private world: World | undefined;
   private filterAgentId: string | undefined;
+  /**
+   * Set while Auto Camera (autoCamera.ts) is actively following a notable
+   * event — overrides every other filter/toggle below with exactly the
+   * participants of *that specific moment* (both fighters in a battle, the
+   * one hatchling, the pair that bonded, ...), per the direct ask to make
+   * the log "more specific" than a generic per-agent filter. `undefined`
+   * when auto-camera is off or idle between moments, restoring whatever the
+   * viewer had manually selected.
+   */
+  private autoCamIds: Set<string> | undefined;
   /** On by default — most people watching the log want "the Pokemon stuff," not flora/weather/migration/behavior-switch chatter. */
   private hideNoise = true;
   /**
@@ -77,6 +87,18 @@ export class EventLogPanel {
   setFilter(agentId: string | undefined): void {
     if (this.filterAgentId === agentId) return;
     this.filterAgentId = agentId;
+    this.dirty = true;
+  }
+
+  /**
+   * Sets/clears the auto-camera filter (see `autoCamIds`'s doc comment).
+   * Deliberately doesn't early-return on an unchanged-looking `ids` — the
+   * caller mutates the very same `Set` in place as a battle gains a
+   * participant, so a reference-equal call still needs to mark the panel
+   * dirty for the next render to pick up the widened membership.
+   */
+  setAutoCamFilter(ids: Set<string> | undefined): void {
+    this.autoCamIds = ids;
     this.dirty = true;
   }
 
@@ -118,7 +140,15 @@ export class EventLogPanel {
     // Quiet mode reads from the never-trimmed headlineCache, not buffer —
     // see headlineCache's own doc comment for why.
     let source: SimEvent[];
-    if (this.headlinesOnly) {
+    if (this.autoCamIds) {
+      // Auto-camera's filter wins outright over hideNoise/hideLevelUps/
+      // headlinesOnly and the manual per-agent filter — this is a
+      // deliberately curated, temporary view of exactly one moment's
+      // participants, not a variant of the ambient log preferences (a flee
+      // right before a kill is `behaviorChanged`, ordinarily NOISE_KINDS,
+      // but it's exactly the context a followed battle should show).
+      source = this.buffer.filter((event) => eventNamesAnyOf(event, this.autoCamIds!));
+    } else if (this.headlinesOnly) {
       source = this.filterAgentId ? this.headlineCache.filter((event) => eventNamesAgent(event, this.filterAgentId!)) : this.headlineCache;
     } else {
       source = this.filterAgentId ? this.eventsForAgent(this.filterAgentId) : this.buffer;
@@ -139,7 +169,7 @@ export class EventLogPanel {
     if (shown.length === 0) {
       const empty = document.createElement("div");
       empty.className = "log-empty";
-      empty.textContent = this.filterAgentId ? "No events yet for this agent." : "No events yet — press Play.";
+      empty.textContent = this.autoCamIds ? "No events yet for this moment." : this.filterAgentId ? "No events yet for this agent." : "No events yet — press Play.";
       this.container.appendChild(empty);
       return;
     }

@@ -64,6 +64,8 @@
       #tick-label, #clock-label { font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 13px; }
       #speed-label { min-width: 36px; text-align: center; font-variant-numeric: tabular-nums; }
       #zoom-label { min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 13px; }
+      #auto-cam-toggle.playing { background: #c792ea; color: #1a0e24; border-color: #c792ea; }
+      #auto-cam-status { color: var(--text-dim); font-size: 12px; font-style: italic; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
       main {
         flex: 1;
@@ -329,6 +331,13 @@
         <div class="divider"></div>
         <span id="tick-label"></span>
         <span id="clock-label"></span>
+
+        <div class="divider"></div>
+
+        <div class="field-group">
+          <button id="auto-cam-toggle" title="Follow notable events automatically — immigration, courtship/eggs, hatching, battles, evolution, deaths — zooming in and slowing down while each one plays out">Auto Camera: Off</button>
+          <span id="auto-cam-status"></span>
+        </div>
 
         <div class="divider"></div>
         <button id="toggle-drawer" title="Legend and event log">☰ Log</button>

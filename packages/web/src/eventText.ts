@@ -307,10 +307,34 @@ export const AGENT_ID_FIELDS = [
   "receiverId",
   "targetId",
   "corpseId",
+  // Added alongside auto-camera's per-event log filtering (see autoCamera.ts)
+  // — these were always real agent/egg-id-shaped fields the original list
+  // just hadn't gotten to yet (bonded/egg events didn't exist when this list
+  // was first written); including them here makes the single-agent click-to-
+  // filter behavior more complete too, e.g. clicking a bonded partner now
+  // surfaces the "bonded" row it's named in.
+  "partnerId",
+  "eggId",
+  "eaterId",
+  "threatId",
 ] as const;
 
 /** Does this event name `agentId` in any of its id-shaped fields? Used to scope the log panel to one agent's history. */
 export function eventNamesAgent(event: SimEvent, agentId: string): boolean {
   const record = event as unknown as Record<string, unknown>;
   return AGENT_ID_FIELDS.some((field) => record[field] === agentId);
+}
+
+/**
+ * Does this event name ANY of `ids` in any id-shaped field, including the
+ * multi-id `agentIds` array (`immigrated`)? The generic-across-`ids` sibling
+ * of `eventNamesAgent` — auto-camera's "more specific" log filter (see
+ * `autoCamera.ts`) needs to match a small *set* of participants (both sides
+ * of a fight, an egg plus both its parents), not just one agent.
+ */
+export function eventNamesAnyOf(event: SimEvent, ids: ReadonlySet<string>): boolean {
+  const record = event as unknown as Record<string, unknown>;
+  if (AGENT_ID_FIELDS.some((field) => typeof record[field] === "string" && ids.has(record[field] as string))) return true;
+  const many = record["agentIds"];
+  return Array.isArray(many) && many.some((id) => ids.has(id as string));
 }

@@ -2083,3 +2083,57 @@ not something this pathfinding pass itself caused or is positioned to fix.
       terrain palette (the headless CLI's rendering, separate from
       `packages/web`) was not given the same per-species shelter tint —
       real, known, cosmetic-only gap.
+
+## Auto Camera — built, see DESIGN.md
+
+- [x] Toggleable "Auto Camera" mode (`packages/web/src/autoCamera.ts` +
+      `main.ts` wiring): follows immigration, courtship (bonded/
+      shelterBuilt/eggLaid as three separate moments), egg hatching,
+      battles (start-to-death-or-retreat), evolution, and true deaths;
+      zooms in, temporarily drops playback to 2x from 4x+, and scopes the
+      event log to exactly that moment's participants.
+- [ ] **No camera easing/animation.** Both the zoom change and the scroll
+      reposition are instant (a plain `scrollLeft`/`scrollTop` assignment,
+      no CSS transition) — a deliberate choice for this pass (see
+      DESIGN.md: instant assignment is what makes telling "our own scroll"
+      apart from "the viewer's real scroll" exact rather than a timing
+      guess), but it means the actual visual cut is a hard jump, not a pan/
+      zoom animation. A real fix would need a different manual-vs-auto
+      scroll detection strategy (e.g. a short "ignore scroll events for
+      N ms after we animate" window, or an `IntersectionObserver`-free
+      alternative) before smooth easing could be added safely.
+- [ ] **Battle camera doesn't account for multiple simultaneous fights.**
+      Two unrelated pairs fighting at the same time correctly become two
+      separate queued `Engagement`s (never merged — `findBattle` only
+      widens an existing engagement when a hit's ids actually overlap it),
+      but the *first* one to engage holds the camera/slowdown for its full
+      run before the second ever gets shown, even if the second is (by some
+      measure) the more dramatic fight. No "which fight is more interesting"
+      heuristic exists — first-come-first-served only, same as every other
+      queued engagement (see DESIGN.md's "no interruption" reasoning) — an
+      accepted simplicity tradeoff, not an oversight, but worth revisiting
+      if multi-fight scenes turn out to be common on the real demo map.
+- [ ] **The `BATTLE_STALE_TICKS`/`BATTLE_EPILOGUE_TICKS`/`DWELL_TICKS`
+      constants are reasoned-about but not empirically tuned** — chosen
+      from reading the relevant tick-rate/behavior code, not from watching
+      dozens of real runs and adjusting. A real live-observer session
+      (human, not headless) would be the way to tell if 24 ticks feels too
+      short/long for a one-shot moment, or whether 40 ticks of silence is
+      the right disengagement threshold for a real fight's actual pacing.
+- [ ] **Herd-vs-herd `herdClash` skirmishes with more than two active
+      participants** (a scrum, not a clean 1v1) aren't specially handled —
+      each `attacker`/`defender` pair that lands a hit becomes/extends one
+      `battle` engagement via `findBattle`'s overlap check, so a genuine
+      multi-agent brawl could end up as one engagement whose `ids` set
+      quietly grows to several agents (camera focus averages all of their
+      live positions) rather than being recognized as "a brawl" with its
+      own distinct camera treatment (e.g. zooming out slightly to fit more
+      combatants instead of staying at the fixed two-agent-appropriate
+      `AUTO_CAM_ZOOM`). Works, reads reasonably in practice (confirmed via
+      the throwaway verification's pack-hunt-adjacent scenario reasoning
+      in DESIGN.md), just not a bespoke "brawl" camera mode.
+- [ ] Real in-browser visual polish unverified beyond the one manual
+      Playwright smoke run recorded in DESIGN.md (a single seed, one
+      battle observed) — a longer real-time watch session across several
+      seeds, actually looking at the zoomed-in view rather than just
+      asserting on DOM state, would be the next real check.
