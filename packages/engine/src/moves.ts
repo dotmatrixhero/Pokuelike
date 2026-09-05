@@ -165,19 +165,37 @@ export interface MoveSpec {
   /**
    * This move ALSO gets a real ally-support use, on top of remaining an
    * ordinary attack — additive, not a replacement of its combat identity.
-   * The ally-buff/heal itself only ever resolves via `applySupportMove`
+   * The dedicated support use only ever resolves via `applySupportMove`
    * (support.ts) on the agent's own idle/support tick (which needs.ts only
-   * reaches once predation already gets first refusal that tick), never
-   * from `resolveHit`'s hostile hit-resolution path; `pickBestMove`
-   * (combat.ts) does NOT exclude a `targetsAlly` move from hostile
-   * selection, so the same move (with whatever power/accuracy/other
-   * combat deltas it's accumulated) is a genuine attack option whenever
-   * the agent is actually fighting. Meaningless without `allyEffect` set.
-   * Absent = an ordinary hostile-only move, the default.
+   * reaches once predation already gets first refusal that tick);
+   * `pickBestMove` (combat.ts) does NOT exclude a `targetsAlly` move from
+   * hostile selection, so the same move (with whatever power/accuracy/other
+   * combat deltas it's accumulated) is a genuine attack option whenever the
+   * agent is actually fighting. Meaningless without `allyEffect` set.
+   * Absent = an ordinary hostile-only move, the default. See
+   * `allyEffectOnAttack` for a second, independent way the ally-effect
+   * itself can also fire from a hostile attack.
    */
   targetsAlly?: boolean;
-  /** What a `targetsAlly` move does to the ally it resolves against — a heal, a buff, or both. */
+  /** What a `targetsAlly`/`allyEffectOnAttack` move does to the ally it resolves against — a heal, a buff, or both. */
   allyEffect?: { healFraction?: number; buff?: { stat: StatKey; stage: number; ticks?: number } };
+  /**
+   * A second, independent way `allyEffect` can fire, on top of (not instead
+   * of) `targetsAlly`'s dedicated idle-tick support use: every time this
+   * move is used against an enemy (`resolveHit`, predation.ts — the moment
+   * the move is used, same timing as `statChangeOnHit`'s self-side effect,
+   * independent of whether the attack itself lands), it ALSO checks for the
+   * nearest in-range, hurt-preferred herd-mate (`nearestAllyEffectTarget`,
+   * support.ts) and applies `allyEffect` to them too, at no extra cost — a
+   * real "as you strike the enemy, your ally nearby benefits too" effect,
+   * not a second attack. Meaningless without `allyEffect` set; works
+   * whether or not `targetsAlly` is also set (a move can auto-trigger on
+   * attack without ever being a dedicated idle-tick support move, or do
+   * both). Absent/false = the ally-effect never fires from a hostile
+   * attack, the default — a plain `targetsAlly` move stays exactly as
+   * before.
+   */
+  allyEffectOnAttack?: boolean;
   /**
    * Resolves against every living agent within the move's `shape` (not just
    * one picked target) via `resolveAreaHit` (predation.ts), which reuses
@@ -441,6 +459,7 @@ export interface MoveTreeNode {
     /** OR-merge, like a boolean flag being turned on for good once any node sets it. */
     positionSwap?: boolean;
     targetsAlly?: boolean;
+    allyEffectOnAttack?: boolean;
     hitsArea?: boolean;
     terrainBurn?: boolean;
     statusSpreads?: boolean;
@@ -609,6 +628,7 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       statChangeOnHit: delta.statChangeOnHit ?? result.statChangeOnHit,
       positionSwap: delta.positionSwap ?? result.positionSwap,
       targetsAlly: delta.targetsAlly ?? result.targetsAlly,
+      allyEffectOnAttack: delta.allyEffectOnAttack ?? result.allyEffectOnAttack,
       hitsArea: delta.hitsArea ?? result.hitsArea,
       terrainBurn: delta.terrainBurn ?? result.terrainBurn,
       statusSpreads: delta.statusSpreads ?? result.statusSpreads,

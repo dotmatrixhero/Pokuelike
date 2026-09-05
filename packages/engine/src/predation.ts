@@ -8,7 +8,7 @@ import type { Direction } from "./moves.js";
 import { resolveShape } from "./moves.js";
 import type { MoveSpec } from "./moves.js";
 import { canBreed, grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
-import { FINISHING_POOL_FRACTION } from "./support.js";
+import { FINISHING_POOL_FRACTION, applyAllyEffect, nearestAllyEffectTarget } from "./support.js";
 import { isPathClear } from "./fov.js";
 import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt, setTile } from "./world.js";
@@ -1182,6 +1182,15 @@ function resolveHit(
   // the move is used — see `MoveSpec.statChangeOnHit`'s own doc comment.
   if (move.statChangeOnHit?.target === "self") {
     applyStatStage(attacker, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
+  }
+
+  // `allyEffectOnAttack`: the ally-effect piggybacks on a hostile attack,
+  // additively — same "the moment the move is used" timing as the self-side
+  // stat change above, independent of whether this attack itself lands. A
+  // no-op if no eligible herd-mate is in range this tick.
+  if (move.allyEffectOnAttack && move.allyEffect) {
+    const ally = nearestAllyEffectTarget(world, attacker, move);
+    if (ally) applyAllyEffect(world, attacker, ally, move.allyEffect, log);
   }
 
   if (move.hitsArea) return resolveAreaHit(world, attacker, defender, move, log, faintKind, ctx, rng, accuracyBonusMultiplier);

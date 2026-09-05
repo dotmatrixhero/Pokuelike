@@ -266,6 +266,7 @@ describe("applyMoveTree: newer delta fields", () => {
           statChangeOnHit: { target: "defender", stat: "defense", stage: -1 },
           positionSwap: true,
           targetsAlly: true,
+          allyEffectOnAttack: true,
           hitsArea: true,
           terrainBurn: true,
           statusSpreads: true,
@@ -326,6 +327,7 @@ describe("applyMoveTree: newer delta fields", () => {
     expect(respec.terrainFill).toEqual({ terrain: "mud" });
     // Fields not touched by the second node keep the first node's value.
     expect(respec.positionSwap).toBe(true);
+    expect(respec.allyEffectOnAttack).toBe(true);
     expect(respec.targetsAlly).toBe(true);
     expect(respec.hitsArea).toBe(true);
     expect(respec.terrainBurn).toBe(true);

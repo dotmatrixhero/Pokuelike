@@ -2161,7 +2161,59 @@ describe("targetsAlly moves are additive, not a replacement — real combat use"
 
     // A real hostile hit landed using the targetsAlly move — its ally-heal
     // effect never fires here (that only ever resolves via applySupportMove,
-    // on a completely different tick with nothing hostile going on).
+    // on a completely different tick with nothing hostile going on) since
+    // this move doesn't also set allyEffectOnAttack (see the next describe
+    // block for that).
     expect(log.events.some((e) => e.kind === "fought" && (e as any).moveId === "ally-attack-move")).toBe(true);
+  });
+});
+
+describe("allyEffectOnAttack: the ally-effect ALSO piggybacks on a hostile attack", () => {
+  const CLEAVE_HEAL_MOVE: MoveSpec = { ...TEST_MOVE, id: "cleave-heal-move", allyEffect: { healFraction: 0.2 }, allyEffectOnAttack: true };
+
+  it("heals a nearby, hurt herd-mate the instant the move lands a hostile hit, at no extra cost", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { id: "scyther-0", herdId: "pack-1", moves: [CLEAVE_HEAL_MOVE] });
+    const packmate = predator({ x: 7, y: 5 }, undefined, { id: "scyther-1", herdId: "pack-1", hp: 10, maxHp: 100 });
+    world.agents.push(hunter, target, packmate);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    expect(log.events.some((e) => e.kind === "fought" && (e as any).moveId === "cleave-heal-move" && (e as any).attackerId === "scyther-0")).toBe(true);
+    expect(packmate.hp).toBeCloseTo(30); // 10 + 0.2*100, applied the same tick as the attack
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "supported", supporterId: "scyther-0", allyId: "scyther-1", healed: true }));
+    // The move's own cooldown is the only cost — no separate charge for the ally-effect.
+    expect(hunter.moveCooldowns?.["cleave-heal-move"]).toBe(CLEAVE_HEAL_MOVE.cooldownTicks);
+  });
+
+  it("still lands the hostile hit normally when no ally happens to be in range", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { id: "scyther-0", herdId: "pack-1", moves: [CLEAVE_HEAL_MOVE] });
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    expect(log.events.some((e) => e.kind === "fought" && (e as any).moveId === "cleave-heal-move")).toBe(true);
+    expect(log.events.some((e) => e.kind === "supported")).toBe(false);
+  });
+
+  it("does nothing extra without allyEffectOnAttack set — a plain targetsAlly move stays exactly as before", () => {
+    const PLAIN_ALLY_MOVE: MoveSpec = { ...TEST_MOVE, id: "plain-ally-move", targetsAlly: true, allyEffect: { healFraction: 0.2 } };
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { id: "scyther-0", herdId: "pack-1", moves: [PLAIN_ALLY_MOVE] });
+    const packmate = predator({ x: 7, y: 5 }, undefined, { id: "scyther-1", herdId: "pack-1", hp: 10, maxHp: 100 });
+    world.agents.push(hunter, target, packmate);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    expect(log.events.some((e) => e.kind === "fought" && (e as any).moveId === "plain-ally-move")).toBe(true);
+    expect(packmate.hp).toBe(10); // untouched
+    expect(log.events.some((e) => e.kind === "supported")).toBe(false);
   });
 });
