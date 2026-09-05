@@ -2202,16 +2202,32 @@ not something this pathfinding pass itself caused or is positioned to fix.
       across frames), animated water (4 real wave-animation frames found
       already drawn in the source sheet, phase-offset per tile so the
       whole lake doesn't flash in unison), and a subtle floor texture
-      (3 matching cave-floor crops, picked per 4x4 tile block, drawn under
-      the existing "." glyph at low opacity scaled by elevation) so plain
-      floor gets some varied lighting without becoming a loud fill. All
-      art from legacy-cpp's "building and lake sprites.png" plus a few
+      (cave-floor + dirt-path crops, picked per 4x4 tile block, drawn
+      under the existing "." glyph at low opacity scaled by elevation) so
+      plain floor gets some varied lighting without becoming a loud fill.
+      All art from legacy-cpp's "building and lake sprites.png" plus a few
       clean crops out of "biome sprites unripped.png" (a set of pre-
       composed scene panels, not a tile grid, so most of it isn't cleanly
       croppable — a low-color-variance auto-scan was used to find flat
       patches, then hand-verified since it initially grabbed a fake
       "lava" patch that was just a flat red background block, not real
       lava art).
+      **Two real mistakes caught mid-pass, not just the lava one**: (1) my
+      own index-to-pixel-coordinate transcription for several of the
+      building-sheet floor crops was simply wrong — `floor_cave`,
+      `floor_grass_1`, and `floor_grass_2` were all actually pointing at
+      the same tan brick "shop counter" prop (with little feet baked in),
+      not the pink cave-floor/green-grass/gray-stone tiles they were
+      named for; re-derived all three from a fresh pixel-precise grid
+      overlay and confirmed each visually before re-saving. (2) mixing
+      the (correctly-fixed) grass/stone crops into the floor variant pool
+      alongside cave/dirt reintroduced the original hue-clash problem
+      (green/gray patches next to brown ones), so they're deliberately
+      NOT in `FLOOR_TEXTURES` — kept as loose files for a possible future
+      biome-specific floor system instead. Direct ask ("we still need the
+      dirt floor tiles, there are plenty") added 3 real dirt-path crops
+      from the biome sheet's dirt/mushroom-forest panel to the pool
+      (same brownish family as the cave crops, so it blends).
 - [ ] **Open follow-up, not done**: shelters still render as a flat
       per-owner-species-tinted rect (`shelterOwnerTint` in palette.ts) —
       now visibly crude next to the real tile/tree/water art around them.

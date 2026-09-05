@@ -89,16 +89,16 @@ export function getTileSprite(terrainKind: string, x: number, y: number): HTMLIm
  * legacy sheets, drawn underneath that glyph at low opacity purely to give
  * open ground some varied texture/lighting instead of a flat wash.
  *
- * Only the (matching, brownish) cave-floor variants are used here, not the
- * grass/stone textures also sitting in public/tiles/ — mixing hues that
- * different produced a patchwork of visibly clashing colored squares
- * instead of a subtle surface, since each is a small flat-color source
- * crop with no blending between neighbors. Picking a variant per 4x4
- * block of tiles (not per individual tile) likewise avoids a "static"
- * look — real cave floor reads as a few big irregular patches, not
- * per-tile noise.
+ * Only cave-floor and dirt-path variants are used here — all the same
+ * brownish family — not the grass/stone textures also sitting in
+ * public/tiles/: mixing hues that different produced a patchwork of
+ * visibly clashing colored squares instead of a subtle surface, since
+ * each is a small flat-color source crop with no blending between
+ * neighbors. Picking a variant per 4x4 block of tiles (not per individual
+ * tile) likewise avoids a "static" look — real cave floor reads as a few
+ * big irregular patches, not per-tile noise.
  */
-const FLOOR_TEXTURES = ["floor_cave", "floor_cave_2", "floor_cave_3"];
+const FLOOR_TEXTURES = ["floor_cave", "floor_cave_2", "floor_cave_3", "floor_dirt_1", "floor_dirt_2", "floor_dirt_3"];
 const FLOOR_PATCH_SIZE = 4;
 
 export function getFloorTexture(x: number, y: number): HTMLImageElement | null {
