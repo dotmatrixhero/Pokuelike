@@ -3,6 +3,7 @@ import { biomeWeightsAt, lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import {
   getFertilePatch,
+  getFloorBaseName,
   getFloorOverlay,
   getFloorTexture,
   getFloraSprite,
@@ -159,6 +160,11 @@ function drawGroundBacking(ctx: CanvasRenderingContext2D, world: World, x: numbe
     ctx.drawImage(featheredOverlayStamp(overlay), x * TILE_SIZE, y * TILE_SIZE);
     ctx.restore();
   }
+
+  // Direct ask: "border edging around different tiles to blend would be
+  // nice" — see drawBiomeEdgeBlend's own doc comment for why this is a
+  // generated gradient blend rather than real edge art.
+  drawBiomeEdgeBlend(ctx, world, x, y, elevation, biome);
 }
 
 /**
@@ -194,6 +200,178 @@ function featheredOverlayStamp(img: HTMLImageElement): HTMLCanvasElement {
   octx.fill();
   featheredOverlayCache.set(img, canvas);
   return canvas;
+}
+
+/**
+ * A rounded-rect stamp like `featheredOverlayStamp` above, but only
+ * rounded on sides that DON'T continue into a matching neighbor tile —
+ * direct ask: "fertile ground next to each other can be contiguous
+ * grass." A run of adjacent fertile (food/flora/seedling) tiles should
+ * read as one blended meadow, not a chain of independent isolated blobs;
+ * the side(s) facing a matching neighbor are drawn flush to the tile edge
+ * (radius 0, no inset) so two adjacent stamps butt up against each other
+ * seamlessly, while any side facing something else still gets the usual
+ * soft rounded edge. Canvas's 4-radius `roundRect` overload
+ * ([topLeft, topRight, bottomRight, bottomLeft]) makes this a matter of
+ * zeroing the two corners touching each open side, not a from-scratch
+ * shape. Cached per (image, open-sides combo) — only 16 combos per image,
+ * same "build once, reuse forever" shape as the plain stamp above.
+ */
+/** Whether this terrain kind gets the green fertile-patch decal at all — the "which neighbors count as continuing the same patch" check for `contiguousPatchStamp` below. */
+function isFertileDecalTerrain(terrain: TerrainKind): boolean {
+  return terrain === "food" || terrain === "flora" || terrain === "seedling";
+}
+
+const contiguousStampCache = new Map<HTMLImageElement, Map<number, HTMLCanvasElement>>();
+function contiguousPatchStamp(img: HTMLImageElement, openUp: boolean, openDown: boolean, openLeft: boolean, openRight: boolean): HTMLCanvasElement {
+  const key = (openUp ? 8 : 0) | (openDown ? 4 : 0) | (openLeft ? 2 : 0) | (openRight ? 1 : 0);
+  let perImage = contiguousStampCache.get(img);
+  if (!perImage) {
+    perImage = new Map();
+    contiguousStampCache.set(img, perImage);
+  }
+  const cached = perImage.get(key);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE_SIZE;
+  canvas.height = TILE_SIZE;
+  const octx = canvas.getContext("2d")!;
+  octx.drawImage(img, 0, 0, TILE_SIZE, TILE_SIZE);
+  octx.globalCompositeOperation = "destination-in";
+  octx.filter = "blur(1.5px)";
+  const r = TILE_SIZE / 3;
+  const left = openLeft ? 0 : 1;
+  const top = openUp ? 0 : 1;
+  const right = TILE_SIZE - (openRight ? 0 : 1);
+  const bottom = TILE_SIZE - (openDown ? 0 : 1);
+  octx.beginPath();
+  octx.roundRect(left, top, right - left, bottom - top, [
+    openUp || openLeft ? 0 : r, // top-left
+    openUp || openRight ? 0 : r, // top-right
+    openDown || openRight ? 0 : r, // bottom-right
+    openDown || openLeft ? 0 : r, // bottom-left
+  ]);
+  octx.fillStyle = "black";
+  octx.fill();
+  perImage.set(key, canvas);
+  return canvas;
+}
+
+/**
+ * Procedural biome-floor edge blend — direct ask: "border edging around
+ * different tiles to blend would be nice." Unlike water's shoreline
+ * (`getWaterEdge`), there's no dedicated hand-drawn edge art for a
+ * desert-meets-cave or cave-meets-stone seam, so this generates the
+ * transition instead of cropping one: a linear alpha gradient, strongest
+ * at the tile edge and fading out over roughly 60% of the tile, masks the
+ * NEIGHBOR's own floor texture before it's drawn on top of this tile's
+ * base — same `destination-in` masking trick `featheredOverlayStamp`
+ * already uses, just with a directional gradient instead of a rounded
+ * rect. Two adjacent tiles on either side of a biome boundary each blend
+ * the other's texture in from their own edge, so the seam becomes a real
+ * two-tile-wide gradient rather than a hard cut. Gradients are cached per
+ * direction (only 4 ever exist); the masked result is cached per
+ * (texture image, direction) since there are only a handful of floor
+ * textures total.
+ */
+type EdgeDirection = "up" | "down" | "left" | "right";
+const EDGE_BLEND_REACH = 0.6; // fraction of the tile the gradient extends into
+const edgeGradientCache = new Map<EdgeDirection, HTMLCanvasElement>();
+function edgeGradientMask(direction: EdgeDirection): HTMLCanvasElement {
+  const cached = edgeGradientCache.get(direction);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE_SIZE;
+  canvas.height = TILE_SIZE;
+  const gctx = canvas.getContext("2d")!;
+  const reach = TILE_SIZE * EDGE_BLEND_REACH;
+  const grad =
+    direction === "left"
+      ? gctx.createLinearGradient(0, 0, reach, 0)
+      : direction === "right"
+        ? gctx.createLinearGradient(TILE_SIZE, 0, TILE_SIZE - reach, 0)
+        : direction === "up"
+          ? gctx.createLinearGradient(0, 0, 0, reach)
+          : gctx.createLinearGradient(0, TILE_SIZE, 0, TILE_SIZE - reach);
+  grad.addColorStop(0, "rgba(0,0,0,1)");
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  gctx.fillStyle = grad;
+  gctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+  edgeGradientCache.set(direction, canvas);
+  return canvas;
+}
+
+const edgeBlendStampCache = new Map<HTMLImageElement, Partial<Record<EdgeDirection, HTMLCanvasElement>>>();
+function edgeBlendStamp(texture: HTMLImageElement, direction: EdgeDirection): HTMLCanvasElement {
+  let perImage = edgeBlendStampCache.get(texture);
+  if (!perImage) {
+    perImage = {};
+    edgeBlendStampCache.set(texture, perImage);
+  }
+  const cached = perImage[direction];
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE_SIZE;
+  canvas.height = TILE_SIZE;
+  const octx = canvas.getContext("2d")!;
+  octx.drawImage(texture, 0, 0, TILE_SIZE, TILE_SIZE);
+  octx.globalCompositeOperation = "destination-in";
+  octx.drawImage(edgeGradientMask(direction), 0, 0);
+  perImage[direction] = canvas;
+  return canvas;
+}
+
+const EDGE_NEIGHBORS: readonly { dir: EdgeDirection; dx: number; dy: number }[] = [
+  { dir: "up", dx: 0, dy: -1 },
+  { dir: "down", dx: 0, dy: 1 },
+  { dir: "left", dx: -1, dy: 0 },
+  { dir: "right", dx: 1, dy: 0 },
+];
+
+/**
+ * Draws a soft blend of each cardinal neighbor's floor texture onto this
+ * tile wherever that neighbor's biome-driven ground art actually differs
+ * (`getFloorBaseName`) — see the doc comment above `edgeGradientMask` for
+ * why this is generated rather than real edge art. Skips a neighbor that's
+ * "water" (its own full-tile opaque surface with a dedicated shoreline
+ * system already) or off the map edge. Called from `drawGroundBacking`
+ * for every ground tile, so a boulder or plant sitting right on a biome
+ * boundary gets the same blended ground under it as plain floor does.
+ */
+function drawBiomeEdgeBlend(ctx: CanvasRenderingContext2D, world: World, x: number, y: number, elevation: number, ownBiome: string | undefined): void {
+  const ownBase = getFloorBaseName(ownBiome);
+  const surface = world.tiles.surface;
+  for (const { dir, dx, dy } of EDGE_NEIGHBORS) {
+    const nx = x + dx;
+    const ny = y + dy;
+    if (nx < 0 || ny < 0 || nx >= world.width || ny >= world.height) continue;
+    const neighbor = surface[ny * world.width + nx]!;
+    if (neighbor.terrain === "water") continue;
+    const neighborBiome = dominantBiomeAt(world, nx, ny);
+    if (getFloorBaseName(neighborBiome) === ownBase) continue;
+    const neighborTexture = getFloorTexture(neighborBiome);
+    if (!neighborTexture) continue;
+    // Only ONE flowing blend per tile — direct ask, after seeing this
+    // draw all 4 directions independently: "the gradient should flow in
+    // one direction... painted in layers like decals... I'm seeing a lot
+    // of cross gradient murkiness." A corner tile bordering two different
+    // biomes (say highland above, badlands to the right) was drawing BOTH
+    // directional gradients stacked on top of each other — two
+    // semi-transparent layers of two different textures compositing at
+    // the corner reads as a muddy cross, not a clean fade. Taking just
+    // the first differing neighbor in a fixed, stable direction order
+    // gives every tile a single directional fade instead, at the cost of
+    // a true four-biome corner only showing one of its two real
+    // boundaries — a real, deliberate trade for a much cleaner look.
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, 0.82 + elevation * 0.18);
+    ctx.drawImage(edgeBlendStamp(neighborTexture, dir), x * TILE_SIZE, y * TILE_SIZE);
+    ctx.restore();
+    return;
+  }
 }
 
 export type RenderStyle = "tile" | "ascii";
@@ -439,9 +617,19 @@ function drawWorldTiles(
         const fertilePatch = getFertilePatch();
         if (fertilePatch) {
           const fertility = tile.fertility ?? 1;
+          // Direct ask: "fertile ground next to each other can be
+          // contiguous grass" — a run of adjacent fertile tiles reads as
+          // one blended meadow instead of independent isolated blobs (see
+          // contiguousPatchStamp's own doc comment for how). "Open" means
+          // a same-decal neighbor continues the patch in that direction,
+          // so that side is drawn flush instead of rounded.
+          const openUp = y > 0 && isFertileDecalTerrain(surface[(y - 1) * world.width + x]!.terrain);
+          const openDown = y < world.height - 1 && isFertileDecalTerrain(surface[(y + 1) * world.width + x]!.terrain);
+          const openLeft = x > 0 && isFertileDecalTerrain(surface[y * world.width + (x - 1)]!.terrain);
+          const openRight = x < world.width - 1 && isFertileDecalTerrain(surface[y * world.width + (x + 1)]!.terrain);
           ctx.save();
           ctx.globalAlpha = 0.15 + fertility * 0.4;
-          ctx.drawImage(featheredOverlayStamp(fertilePatch), x * TILE_SIZE, y * TILE_SIZE);
+          ctx.drawImage(contiguousPatchStamp(fertilePatch, openUp, openDown, openLeft, openRight), x * TILE_SIZE, y * TILE_SIZE);
           ctx.restore();
         }
 

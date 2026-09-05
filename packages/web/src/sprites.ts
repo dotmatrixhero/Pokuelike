@@ -186,9 +186,13 @@ const BIOME_FLOOR: Record<string, { base: string; overlays: readonly string[] }>
   highland: { base: "floor_stone", overlays: [] },
 };
 
+/** Which base texture name a biome resolves to — exported so renderer.ts's edge-blend code can tell "same art, different biome name" (e.g. grassland vs. forest, both plain) apart from a real texture change (badlands vs. anything else) without duplicating this lookup. */
+export function getFloorBaseName(biome?: string): string {
+  return (biome && BIOME_FLOOR[biome]?.base) ?? FLOOR_BASE;
+}
+
 export function getFloorTexture(biome?: string): HTMLImageElement | null {
-  const base = (biome && BIOME_FLOOR[biome]?.base) ?? FLOOR_BASE;
-  return loadSprite(`tile_${base}`, `/tiles/${base}.png`);
+  return loadSprite(`tile_${getFloorBaseName(biome)}`, `/tiles/${getFloorBaseName(biome)}.png`);
 }
 
 /** A sparse, semi-transparent decal layered on top of the base floor texture for organic variety — see getFloorTexture's doc comment. Most tiles get none (null). */
