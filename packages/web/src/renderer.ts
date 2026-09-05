@@ -29,6 +29,45 @@ export const TILE_SIZE = 20;
  */
 const SPRITE_SCALE = 1.6;
 
+/**
+ * A tiny cached radial-gradient stamp, reused (via `drawImage`, not a fresh
+ * `createRadialGradient` per tile) across every tile in the tile-style
+ * render — direct ask: "radial light effects per tile, if possible... just
+ * silly simulated lighting stuff." A brighter center fading to a darker
+ * edge gives each tile a subtle "domed" look instead of a flat fill, at
+ * basically the cost of one extra `drawImage` per tile (an offscreen-canvas
+ * stamp is orders of magnitude cheaper per-draw than building a real
+ * gradient ~5000+ times a frame on a full map). Purely decorative — no
+ * gameplay signal, just texture. Modulated per-tile by `tileLight` (the
+ * same pseudo-random 0.65-1.35 ambient factor `drawWorldAscii` already uses
+ * for its "unevenly lit stone" look) so the two render styles read as the
+ * same underlying lighting concept.
+ */
+let vignetteTileCache: HTMLCanvasElement | undefined;
+function vignetteStamp(): HTMLCanvasElement {
+  if (vignetteTileCache) return vignetteTileCache;
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE_SIZE;
+  canvas.height = TILE_SIZE;
+  const vctx = canvas.getContext("2d")!;
+  const grad = vctx.createRadialGradient(TILE_SIZE / 2, TILE_SIZE / 2, 0, TILE_SIZE / 2, TILE_SIZE / 2, TILE_SIZE * 0.75);
+  grad.addColorStop(0, "rgba(255,255,255,0.10)");
+  grad.addColorStop(0.55, "rgba(255,255,255,0.0)");
+  grad.addColorStop(1, "rgba(0,0,0,0.18)");
+  vctx.fillStyle = grad;
+  vctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+  vignetteTileCache = canvas;
+  return canvas;
+}
+
+/** Stamps the per-tile radial vignette at `(x, y)`, modulated by the same ambient `tileLight` factor `drawWorldAscii` uses. Called once per tile, right before that tile's loop iteration ends. */
+function drawTileVignette(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save();
+  ctx.globalAlpha = 0.5 + tileLight(x, y) * 0.5;
+  ctx.drawImage(vignetteStamp(), x * TILE_SIZE, y * TILE_SIZE);
+  ctx.restore();
+}
+
 export type RenderStyle = "tile" | "ascii";
 
 /**
@@ -161,19 +200,23 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
       // a roguelike's open ground, deliberately ignoring elevation shading
       // (which is still visible on every non-floor terrain).
       if (tile.terrain === "floor") {
-        // A real texture (see sprites.ts's getFloorTexture — cave/grass/stone
-        // scraps previously left unused) at low, elevation-scaled opacity
-        // gives open ground some varied lighting without it becoming the
-        // loud, everything-else-drowning tile a full-strength fill would be.
+        // A real texture (see sprites.ts's getFloorTexture — cave-floor/
+        // dirt-path crops) drawn at near-full strength — direct follow-up
+        // ask after this was merged in at a barely-visible opacity: "why is
+        // the ground tile on tile mode not the nice dirt ones we put in?"
+        // The dirt art itself already has real tonal variation, so it
+        // doesn't need to be faded down to avoid looking like a flat loud
+        // fill the way a single solid color would.
         const texture = getFloorTexture(x, y);
         if (texture) {
           ctx.save();
-          ctx.globalAlpha = 0.05 + tile.elevation * 0.03;
+          ctx.globalAlpha = Math.min(1, 0.82 + tile.elevation * 0.18);
           ctx.drawImage(texture, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
           ctx.restore();
         }
         ctx.fillStyle = rgbaToCss(shade([120, 128, 140], tile.elevation), 0.35);
         ctx.fillText(".", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
+        drawTileVignette(ctx, x, y);
         continue;
       }
 
@@ -187,6 +230,7 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
         const sprite = getTileSprite(tile.terrain, x, y);
         if (sprite) {
           ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          drawTileVignette(ctx, x, y);
           continue;
         }
       }
@@ -212,12 +256,14 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
         const glyphAlpha = tile.stock !== undefined ? 0.3 + 0.5 * tile.stock : 0.55;
         ctx.fillStyle = rgbaToCss(accent, glyphAlpha);
         ctx.fillText(glyph, x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
+        drawTileVignette(ctx, x, y);
         continue;
       }
 
       const bg = shade(tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies) : TERRAIN_BG[tile.terrain], tile.elevation);
       ctx.fillStyle = rgbToCss(bg);
       ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+      drawTileVignette(ctx, x, y);
     }
   }
   ctx.restore();
@@ -233,6 +279,7 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
     drawAgent(ctx, agent, agent.id === selectedAgentId, dt);
   }
 
+  drawWarmLights(ctx, world);
   drawWeather(ctx, world);
 
   if (selectedAgentId) {
@@ -401,6 +448,20 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
   const sprite = def ? getSprite(def.spriteKey, direction) : null;
   const isCorpse = agent.alive === false;
 
+  // Faux drop shadow — direct ask: "faux shadows under the Pokémon, just
+  // silly simulated lighting stuff." A flat dark ellipse pinned to the
+  // agent's actual tile (not the oversized sprite box above it), so it
+  // reads as ground contact regardless of how tall/wide that species'
+  // sprite happens to be. Drawn before the sprite/fallback rect so it sits
+  // underneath, not on top.
+  ctx.save();
+  ctx.globalAlpha = (isCorpse ? 0.4 : agent.fainted ? 0.7 : 1) * 0.4;
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.ellipse(px + TILE_SIZE / 2, py + TILE_SIZE * 0.86, TILE_SIZE * 0.32, TILE_SIZE * 0.13, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
   ctx.save();
   ctx.globalAlpha = isCorpse ? 0.4 : agent.fainted ? 0.7 : 1;
 
@@ -459,6 +520,65 @@ function drawSelectionRing(ctx: CanvasRenderingContext2D, px: number, py: number
   ctx.strokeStyle = "#ffe066";
   ctx.lineWidth = 2;
   ctx.strokeRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+  ctx.restore();
+}
+
+/** Cheap deterministic per-position hash — gives each light source its own stable shimmer phase without touching `world.rng` (this is pure visual flourish, zero gameplay effect). Same technique sprites.ts's water-tile animation already uses. */
+function hashLightPhase(x: number, y: number): number {
+  let h = Math.floor(x * 92821) ^ Math.floor(y * 68917);
+  h = (h ^ (h >>> 13)) * 1274126177;
+  return ((h ^ (h >>> 16)) >>> 0) % 1000;
+}
+
+/**
+ * Warm, gently shimmering area-of-effect light glow — direct ask: "some warm
+ * color lights kinda do aoe shimmering shit." Two source kinds, both already
+ * thematically warm in this codebase's own palette rather than invented
+ * colors: live fire-type agents (`TYPE_COLOR.fire`) and "sunbeam" terrain
+ * tiles (`TERRAIN_FG.sunbeam` — a permanent high-elevation light patch, see
+ * worldgen.ts). Drawn with additive ("lighter") blending so it reads as
+ * light actually brightening the scene — including punching through
+ * `drawDayNightTint`'s darkening, the way a real light source should —
+ * rather than a colored shape painted on top. Shimmer is two overlapping
+ * sine waves at different frequencies (a single sine reads as a steady
+ * metronome pulse; two together read as an organic flicker), phase-offset
+ * per source via `hashLightPhase` so multiple lights don't pulse in unison.
+ */
+function drawWarmLights(ctx: CanvasRenderingContext2D, world: World): void {
+  const surface = world.tiles.surface;
+  const sources: { cx: number; cy: number; radiusTiles: number; color: [number, number, number]; strength: number; phase: number }[] = [];
+
+  for (let y = 0; y < world.height; y++) {
+    for (let x = 0; x < world.width; x++) {
+      if (surface[y * world.width + x]!.terrain === "sunbeam") {
+        sources.push({ cx: x + 0.5, cy: y + 0.5, radiusTiles: 2.1, color: TERRAIN_FG.sunbeam, strength: 0.35, phase: hashLightPhase(x, y) });
+      }
+    }
+  }
+  for (const agent of world.agents) {
+    if (agent.layer !== "surface" || agent.alive === false) continue;
+    if (!agent.types?.includes("fire")) continue;
+    const pos = renderPos.get(agent.id) ?? agent.pos;
+    sources.push({ cx: pos.x + 0.5, cy: pos.y + 0.5, radiusTiles: 2.5, color: TYPE_COLOR.fire, strength: 0.5, phase: hashLightPhase(pos.x, pos.y) + agent.id.length * 37 });
+  }
+  if (sources.length === 0) return;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const t = performance.now();
+  for (const src of sources) {
+    const shimmer = 0.82 + 0.1 * Math.sin(t / 340 + src.phase) + 0.08 * Math.sin(t / 130 + src.phase * 1.7);
+    const cx = src.cx * TILE_SIZE;
+    const cy = src.cy * TILE_SIZE;
+    const r = src.radiusTiles * TILE_SIZE * shimmer;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, rgbaToCss(src.color, src.strength * shimmer));
+    grad.addColorStop(1, rgbaToCss(src.color, 0));
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 

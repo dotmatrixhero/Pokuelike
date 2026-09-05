@@ -8858,3 +8858,69 @@ movement) passed twice in a row to rule out flakiness. Real headless run
 (seed 42, 3000 ticks) confirmed zero combat-overlap violations and
 population health unaffected (16 alive at tick 3000, consistent with this
 seed's other documented runs this session).
+
+## "Silly simulated lighting stuff": per-tile vignette, faux shadows, warm shimmering lights
+
+**Direct asks, verbatim, back to back.** "Let's add some nice lighting. Like have some warm color lights kinda do aoe shimmering shit." Then: "I want radial light effects per tile, if possible. Faux shadows under the Pokémon. Just silly simulated lighting stuff." And, separately, mid-implementation: "Why is the ground tile on tile mode not the nice dirt ones we put in?" — a real, unrelated bug this pass also fixed.
+
+**Floor texture was basically invisible — fixed first.** The just-merged
+sibling branch's floor-texture pass (`getFloorTexture`, real cave-floor/
+dirt-path crops) drew at `0.05 + elevation * 0.03` opacity — 5-8% at most,
+so the "nice dirt tiles" the user was expecting were there in the code but
+essentially invisible in practice, just a faint tint under the existing "."
+glyph. Bumped to `Math.min(1, 0.82 + elevation * 0.18)` — the dirt art
+itself already has real tonal variation, so unlike a single flat color it
+doesn't need heavy fading to avoid looking like a loud solid fill.
+
+**Per-tile radial vignette.** New `vignetteStamp()` in `renderer.ts`: a
+20x20 offscreen canvas built once (module-level cache), radial gradient
+brighter-white center fading to a darker edge. Stamped via `drawImage` onto
+every tile in the tile-style render (`drawTileVignette`, called at all four
+tile-loop exit points — floor/tile-art/plant/fallback branches) rather than
+calling `createRadialGradient` fresh per tile: a real gradient object
+~5000+ times a frame across a full 90x60 map would be meaningfully more
+expensive than stamping one cached bitmap that many times. Modulated by the
+same `tileLight` per-tile pseudo-random ambient factor `drawWorldAscii`
+already uses for its "unevenly lit stone" look, so both render styles read
+as the same underlying lighting concept rather than two unrelated systems.
+Purely decorative, zero gameplay signal.
+
+**Faux shadows.** A flat dark ellipse (`rgba(0,0,0,~0.4)` scaled by the
+same corpse/fainted alpha the sprite itself uses) drawn at each agent's
+actual occupied tile — pinned to the tile, not the oversized sprite
+bounding box above it (see `SPRITE_SCALE`), so a tall sprite's shadow still
+reads as ground contact under its feet rather than under its head. Drawn
+first, before the sprite/fallback rect, so it sits underneath.
+
+**Warm shimmering AOE lights.** New `drawWarmLights`, called after the
+agent-drawing loop (so it can glow on top of sprites) and before
+`drawWeather`. Two source kinds, both already thematically warm in this
+codebase's own existing palette rather than invented colors: live fire-type
+agents (`TYPE_COLOR.fire`) and "sunbeam" terrain tiles (a permanent
+high-elevation light patch from `worldgen.ts`, `TERRAIN_FG.sunbeam`).
+Rendered with `globalCompositeOperation = "lighter"` (additive blending) so
+it reads as actual light brightening the scene — including punching
+through `drawDayNightTint`'s night-darkening the way a real light source
+should, rather than a colored shape painted flatly on top regardless of
+draw order. "Shimmer" is two overlapping sine waves at different, non-
+matching frequencies (a single sine reads as a steady metronome pulse; two
+together read as an organic flicker), phase-offset per source via a cheap
+position hash (`hashLightPhase` — same technique `sprites.ts`'s water-tile
+animation phase-offset already established) so multiple lights in view
+don't pulse in unison. Pure visual flourish — never touches `world.rng`,
+zero gameplay effect, scoped to the tile render style only (matches every
+other art-polish pass this session, which left ASCII mode untouched).
+
+**Verification.** `pnpm -r typecheck` clean across all 4 packages, the
+existing 790-test engine suite unaffected (this is `packages/web`-only —
+lighting has no gameplay effect to test). Real browser screenshots (seed
+42, tile style, various zoom levels): dirt floor texture now clearly
+visible instead of a faint tint; the per-tile vignette reads as a subtle
+"polka dot" ambient pattern across plain floor; a Charmander showed a real
+warm orange glow bleeding onto the tiles around it; faint dark shadow
+blobs visible under agent sprites' feet. Not independently verified: the
+shimmer's actual pulsing motion (a static screenshot can't show animation,
+same honest gap as the earlier movement-interpolation pass) and whether a
+"lighter"-blended `sunbeam` glow reads well against every terrain it can
+neighbor (only spot-checked a handful of real map tiles, not every
+adjacency).
