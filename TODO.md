@@ -177,27 +177,103 @@ work resumes:
      founder's death leaving nobody to return to a specific shelter, or a
      herd relocating away (`herdMigration.ts`) and never coming back to an
      older one while a newer one gets built closer to the new range.
-3. **Overworld: the current map becomes one region in a larger graph** —
-   the "World scale: layers, elevation, and regions" section from early in
-   this project, finally built. Decided: full simulation for the focused/
-   observed region (every agent, every tick, exactly like today), every
-   other region abstracted (aggregate per-species population/need/resource
-   trends advanced by cheap statistical rules, occasional emitted events,
-   no individual agents) — matches the existing "promotion boundary"
-   concept one level up. Promotion (focus arrives) invents plausible
-   individuals from the aggregate; demotion (focus leaves) collapses
-   individuals back to aggregate stats — explicitly lossy, say so plainly
-   rather than pretending otherwise. Migration edges between regions are
-   the natural next home for the just-built individual dispersal mechanic
-   (a disperser could eventually target another region, not just a new
-   herd within the same map) — stretch goal, not required for a first cut.
-   Start with a small region count (3-4), not a large graph.
+3. ~~**Overworld: the current map becomes one region in a larger graph**~~ —
+   **built**, see "Overworld: region graph with promotion/demotion" below
+   and DESIGN.md's "World scale: layers, elevation, and regions" section for
+   the full design/real-run numbers.
 
 Not started — the user has something else to try first. Note: item (1)'s
 tree-growth/decay half is still not started, but its water-supply half is
 now partially covered by a separate, already-shipped piece — see "Stronger
 weather-driven flora/water dynamics" below — so (1) on resume should scope
-itself to tree lifecycle + biome drift only, not re-do water.
+itself to tree lifecycle + biome drift only, not re-do water. Items (2) and
+(3) are both done — see their own sections below.
+
+## Overworld: region graph with promotion/demotion — built, see DESIGN.md
+
+New `packages/engine/src/overworld.ts`: a small region graph (`Overworld`,
+`Region`, `RegionEdge`) where the focused region runs the ordinary full
+per-agent `tickWorld` unchanged, and every other region collapses to a
+per-species `RegionAggregate` (population, average needs, a resource
+abundance index) advanced by cheap statistical rules
+(`advanceAbstractRegion`) — O(species count), not O(agent count), per
+background region per tick. Demotion (`demoteRegion`) folds real agents
+into an aggregate and empties `world.agents`; promotion (`promoteRegion`)
+invents fresh individuals from an aggregate via the same `ImmigrationContext`
+dependency-injection hook `immigration.ts` already needed (no new context
+type). `packages/data/src/overworldScenario.ts`'s `createDemoOverworld`
+builds a 3-region chain (`region-a - region-b - region-c`), each a full
+independently-seeded `createDemoWorld` map — the cheapest way to get three
+genuinely different, fully-populated regions without touching
+`scenario.ts`/`worldgen.ts`'s own generation logic (both this session's
+sibling-session territory, in progress in parallel on
+`claude/biome-species-gen`).
+
+**Explicitly lossy, called out in DESIGN.md rather than glossed over**:
+demoting a region discards which individuals existed (nature/disposition/
+rapport/notable-title/parentage/build history, all of it) down to just
+per-species population and average needs; promoting invents a FRESH set of
+individuals matching those numbers, not the ones that were there before. Two
+more real simplifications: a background region's terrain is frozen (no
+`growFlora`/`advanceWeather` runs against it — the aggregate's
+`resourceIndex` stands in for "how the land is doing" instead), and
+in-flight eggs are silently discarded on demotion (not folded into the
+population count at all).
+
+**Migration edges (stretch goal) — only the cheap half is built.**
+`advanceAbstractRegion`'s `maybeEmigrate` moves a small population fraction
+between two regions that are BOTH currently abstract (no individuals
+involved) — real, validated, but not what the stretch goal actually asked
+for. The harder half — `dispersal.ts`'s real per-agent disperser walking off
+the edge of the FOCUSED region's map and landing as a promoted individual in
+a neighboring one — is genuinely not built; that would mean `dispersal.ts`
+(sibling-session territory this session stayed out of) knowing about region
+edges at all, a real, separate follow-up.
+
+**Real 3000-tick validation** (`packages/runner/src/validateOverworld.ts`,
+`pnpm --filter @pokuelike/runner exec tsx src/validateOverworld.ts <ticks>
+[switchTick] [switchToRegionId]`): with `region-a` focused for 1500 ticks
+then switching to `region-b`, `region-a` demoted with real per-species
+counts (`{bulbasaur: 3, venusaur: 2, scyther: 4, ...}`, ~26 individuals
+total) and `region-b` promoted with 264 invented individuals — matching the
+sum of its own aggregate populations at that exact tick, the real
+consistency check this feature needed. Abstract-tier populations settled
+into a sane tens-not-hundreds range per species (~20-30, comparable to
+`region-a`'s real full-sim population of 20) after retuning
+`CAPACITY_SCALE` down from an initial guess that let populations run to
+several hundred — see `overworld.ts`'s own doc comments for the specific
+feedback-loop bug this run caught (deriving carrying capacity from a
+resource-abundance value that itself drifts toward "however much headroom
+is under capacity" chases 1 forever instead of settling; fixed by deriving
+capacity from a value frozen at demotion instead). A same-seed run twice
+produced byte-identical output — determinism intact. 14 new engine tests
+(`overworld.test.ts`), full 888/888 engine suite green, both original
+population-model bugs (the capacity feedback loop, and a starving-while-
+over-capacity sign flip that reported growth instead of decline) were
+caught by this test suite before the real run ever surfaced them.
+
+Real, open follow-ups, not attempted here:
+- **The full migration-edges stretch goal** (a focused region's individual
+  disperser targeting another region) — see above.
+- **No cross-species interaction in the abstract tier.** Each species
+  aggregate advances independently — no abstract-tier predation, so a
+  background region can't have its Scyther population actually suppress its
+  Bulbasaur population the way the full sim's `predation.ts` does. A
+  real simplification of the full sim's own dynamics, not hidden.
+- **Promoted individuals have no notable titles/rapport/leadership.** A
+  region that goes abstract and comes back never reconstructs The Hero, a
+  herd leader, or any rapport edges — every promoted individual starts
+  completely blank on all of that, even if the aggregate's own population
+  was quietly this region's most accomplished lineage before it demoted.
+- **`avgLevel` never advances while abstracted** — no leveling model exists
+  at the aggregate tier, so a population that spends a long stretch
+  abstracted doesn't get any stronger, unlike a promoted region's real
+  agents would via the ordinary leveling system.
+- **Only ever validated at 3 regions, one focus switch.** TODO.md's "start
+  small" ask is satisfied, but a larger graph, multiple simultaneous focus
+  moves, or a much longer abstracted stretch (tens of thousands of ticks,
+  the DF-scale timescale this feature was originally motivated by) haven't
+  been run.
 
 ## Stronger weather-driven flora/water dynamics — built, see DESIGN.md
 
@@ -535,15 +611,27 @@ produce a real story before player mechanics are worth building further.
       (`fov.ts`) and elevation-delta combat modifiers (`elevation.ts`, not
       yet consumed by any combat resolver since one doesn't exist yet).
       Open: whether Underground/Canopy get their own elevation too.
-- [ ] World graph of 3–5 regions connected by migration edges, each
-      independently bounded.
-- [ ] Region-level promotion/demotion: observed region runs full per-agent
-      sim across all layers; unobserved region runs abstracted (aggregate
-      counts/needs/resources per species, occasional emitted events).
-      Symmetric with the existing agent-level promotion boundary concept.
-- [ ] Open: how aggregate-region state reconciles back into individual
-      agents on promotion — invented plausible agents, or something lossy
-      that's fine for background regions but worth being honest about.
+- [x] World graph of 3 regions (`region-a`/`region-b`/`region-c`, a chain
+      topology) connected by migration edges, each independently bounded —
+      see "Overworld: region graph with promotion/demotion" above and
+      DESIGN.md. Only the CHEAP half of migration-edge crossing is built
+      (abstract-tier population transfer); a focused region's individual
+      disperser actually targeting another region is a real, open follow-up
+      (see that section).
+- [x] Region-level promotion/demotion: the focused region runs full
+      per-agent sim across all layers; every other region runs abstracted
+      (aggregate counts/needs/resource-abundance per species, occasional
+      emitted boom/die-off/emigration events) — symmetric with the existing
+      agent-level promotion boundary concept, see `overworld.ts`.
+- [x] Resolved: aggregate-region state reconciles back into individuals on
+      promotion by inventing plausible agents from the aggregate's numbers
+      (population count, average needs, a jitter for individual variance) —
+      explicitly lossy (the SPECIFIC individuals that existed before
+      demotion are gone, not reconstructed), documented plainly rather than
+      pretended otherwise. See "Overworld: region graph with promotion/
+      demotion" above for the real-run numbers proving this actually
+      produces consistent counts (promoted individual count matches the
+      aggregate population it was invented from).
 
 ## Ecosystem sim
 - [x] Herd cohesion built (`packages/engine/src/herding.ts`) — idle agents
@@ -2437,11 +2525,14 @@ not something this pathfinding pass itself caused or is positioned to fix.
       narratable "critically hurt/near death" moment (nothing in the engine
       currently distinguishes this from an ordinary low-HP tick), and (b) a
       crafting/medicine system for the "heal it" half.
-- [ ] Overworld "faking"/region abstraction (simulate a compact per-region
-      summary off-screen, reconstruct a plausible live grid on visiting) and
-      the "notables vs. anonymous population" split it implies — still
-      fully deferred, not started; captured here only so the design
-      reasoning isn't lost.
+- [x] Overworld "faking"/region abstraction (simulate a compact per-region
+      summary off-screen, reconstruct a plausible live grid on visiting) —
+      **built**, see "Overworld: region graph with promotion/demotion" below
+      and DESIGN.md. The "notables vs. anonymous population" split this note
+      originally implied is NOT built: a promoted region invents fresh,
+      anonymous individuals from aggregate stats, with no notable
+      titles/rapport/parentage of their own — a real, honestly-flagged gap
+      relative to that original framing, not silently dropped.
 
 ## Combat/species tile-sharing (done — see DESIGN.md)
 

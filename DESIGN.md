@@ -617,8 +617,8 @@ whether "promoted" agents pause the rest of the world or run in parallel.
 
 ## World scale: layers, elevation, and regions
 
-**Layers and elevation are built** (regions/world-graph are not — see
-below). What exists now in `packages/engine`:
+**Layers, elevation, and the region/world-graph are all built.** What
+exists now in `packages/engine`:
 
 **Three layers per region, sharing one x,y footprint:** Underground /
 Surface / Canopy (`Layer` in `types.ts`, `World.tiles` is one grid per
@@ -651,32 +651,102 @@ Open, still unresolved: whether Underground/Canopy get their own elevation
 too, and how a real combat resolver will actually consume the accuracy/
 evasion modifiers once one exists.
 
-**World graph, not one big map:** 3–5 regions to start, connected by
-migration edges, each region independently bounded (per the earlier scale
-discussion). This is where the promotion boundary concept turns out to
-apply **one level up**, not just at the agent/combat level:
+**World graph, not one big map — built (`packages/engine/src/overworld.ts`):**
+a small graph of `Region`s (each one an ordinary `World`, with its own three
+layers/elevation/terrain, unchanged) connected by `RegionEdge`s, one of them
+`focused` at a time. This is the promotion boundary concept applied **one
+level up**, not just at the agent/combat level:
 
-- A region being observed runs **full sim** — every agent, every tick,
-  across all three layers.
-- An unobserved region runs **abstracted**: aggregate counts per species,
-  average need levels, resource stock — advanced by cheap statistical
-  rules, occasionally emitting an event (boom, die-off, emigration along an
-  edge) without simulating individuals.
-- Crossing the graph edge (or the player/observer's attention moving to a
-  region) is a **region-level promotion/demotion**, symmetric with the
-  agent-level one already named above: full sim seeds the aggregate on
-  demotion, the aggregate seeds a plausible population on promotion.
+- The **focused** region runs **full sim** — every agent, every tick, across
+  all three layers, via the exact same `tickWorld` that already exists.
+  Nothing about single-region simulation changed to build this.
+- Every OTHER region runs **abstracted**: a `RegionAggregate` per species
+  (population, average hunger/thirst/energy, a resource-abundance index) is
+  advanced by cheap statistical rules (`advanceAbstractRegion`) —
+  O(species count in that region), not O(agent count) — occasionally
+  emitting a `regionPopulationBoom`/`regionDieOff`/`regionEmigrated` event,
+  with zero individual agents simulated at all.
+- Moving focus (`setFocusedRegion`) is a **region-level promotion/demotion**,
+  symmetric with the agent-level one already named above: `demoteRegion`
+  collapses the outgoing focused region's real agents into an aggregate and
+  empties `world.agents`; `promoteRegion` invents a fresh population from the
+  incoming region's aggregate. Promotion reuses `immigration.ts`'s existing
+  `ImmigrationContext` dependency-injection hook (roster + `spawnAgent`)
+  rather than a new context type — "invent a real agent of this species at
+  this position/level" is exactly the primitive immigration already needed.
 
 This is the piece that makes DF-scale time (simulate weeks/months, read a
 history afterward) affordable without simulating every agent in every
 region every tick forever — reuses a concept the design already has rather
 than inventing a second architecture for it.
 
-Open questions, unresolved: how the aggregate model reconciles back into
-individuals on promotion (do specific agents get invented with plausible
-stats, or does something get lost/smoothed over — probably fine for
-background regions, but worth being honest that promotion isn't lossless);
-whether elevation exists on Underground/Canopy too or only Surface.
+**Explicitly lossy — stated plainly, not glossed over:**
+- Demotion discards exactly which individuals existed (their nature/
+  disposition/rapport/notable-title/parentage/build history — all of it),
+  keeping only per-species population and average need levels. Promotion
+  invents a FRESH set of individuals matching those aggregate numbers, not
+  the ones that were there before — a region's own Hero or herd leader does
+  NOT come back as the same individual (or with any title/leadership at
+  all) once promoted again.
+- **A background region's terrain is frozen** — no `growFlora`/
+  `advanceWeather`/`decayShelters` runs against it while abstracted. The
+  aggregate's `resourceIndex` (measured once at demotion via
+  `foodStockNear`/`countTerrainNear`, drifted cheaply afterward) stands in
+  for "how the land is doing" instead of a real terrain tick, which is the
+  actual cost this system exists to avoid paying for every region every
+  tick.
+- **In-flight eggs are discarded on demotion** — only living, non-egg
+  agents fold into the aggregate.
+- **No cross-species interaction in the abstract tier** — each species
+  aggregate advances independently, so a background region can't have its
+  predator population actually suppress its prey population the way the
+  focused region's real `predation.ts` does. A real simplification of the
+  full sim's own dynamics.
+
+**Migration edges — only the cheap half is built.** `advanceAbstractRegion`'s
+`maybeEmigrate` moves a small population fraction between two regions that
+are BOTH currently abstract, no individuals involved — real, and validated
+below. What's genuinely NOT built: `dispersal.ts`'s real per-agent disperser
+actually walking off the edge of the FOCUSED region's map and landing as a
+promoted individual in a neighboring one. That's the harder stretch-goal
+half TODO.md originally asked for, left open (it would mean `dispersal.ts`
+knowing about region edges at all).
+
+**Real 3000-tick validation**
+(`pnpm --filter @pokuelike/runner exec tsx src/validateOverworld.ts <ticks>
+[switchTick] [switchToRegionId]`, against `packages/data/src/overworldScenario.ts`'s
+3-region chain, each region a full independently-seeded `createDemoWorld`
+map): with `region-a` focused for 1500 ticks then switching focus to
+`region-b`, `region-a` demoted with real per-species counts (`{bulbasaur: 3,
+venusaur: 2, scyther: 4, sandshrew: 2, onix: 3, pidgey: 2, spearow: 1,
+squirtle: 2, charmander: 2, magikarp: 1, tentacool: 1, mankey: 3}`, ~26
+individuals total, `mankey` a real mid-run immigrant) and `region-b` promoted
+with exactly 264 invented individuals — matching the sum of its own
+aggregate populations at that tick, the real consistency check this feature
+needed. Abstract-tier populations settled into a sane tens-not-hundreds
+range per species (~20-30, comparable to `region-a`'s real full-sim
+population of 20) — an earlier `CAPACITY_SCALE` guess let them run to
+several hundred instead, caught by this same validation run (see
+`overworld.ts`'s doc comments: deriving carrying capacity from a
+resource-abundance value that itself drifts toward "however much headroom
+is under capacity" chases 1 forever instead of settling; fixed by deriving
+capacity from a value frozen at demotion). A same-seed run twice produced
+byte-identical output — determinism intact. 14 new engine tests
+(`overworld.test.ts`) caught two real population-model bugs before the real
+run ever surfaced them: the capacity feedback loop above, and a starving-
+while-over-capacity sign flip in an early version of the growth formula that
+reported GROWTH instead of decline. Full 888/888 engine suite green.
+
+Real, open follow-ups, not attempted here: the full migration-edges stretch
+goal (see above); promoted individuals never reconstruct notable titles/
+herd leadership/rapport, even if the aggregate they came from was quietly
+this region's most accomplished lineage; `avgLevel` never advances while
+abstracted (no leveling model at the aggregate tier); only validated at 3
+regions and one focus switch — a larger graph, multiple simultaneous focus
+moves, or a much longer abstracted stretch (the DF-scale tens-of-thousands-
+of-ticks timescale this feature was originally motivated by) haven't been
+run; whether elevation exists on Underground/Canopy too or only Surface
+(pre-existing open question, unrelated to this feature).
 
 ## Player character: a fragile human, earning your first partner
 
