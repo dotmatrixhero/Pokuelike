@@ -615,6 +615,60 @@ export function biomeWeightsAt(seeds: readonly BiomeSeedInfo[] | undefined, x: n
   return result;
 }
 
+/** `BIOMES` indexed by name, for the runtime (post-generation) lookups below — generation itself still walks the array directly. */
+const BIOME_BY_NAME: Readonly<Record<string, BiomeDef>> = Object.fromEntries(BIOMES.map((b) => [b.name, b]));
+
+/** The driest biome's own `waterDensity` — the fixed target every seed's own `effectiveWaterDensityAt` drifts toward under sustained local drought (see `World.biomeSeedDrift`'s doc comment). */
+const BADLANDS_WATER_DENSITY = BIOME_BY_NAME["badlands"]!.waterDensity;
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+/**
+ * A tile's real, moisture-field-aware water density at *runtime* — the
+ * missing piece TODO.md flagged: `generateWorld` above already blends each
+ * seed's `waterDensity` at generation time, but nothing after that ever
+ * re-reads it, so weather.ts's `advanceWaterCycle` (rain forming water,
+ * drought drying it) ran at one flat global rate everywhere regardless of
+ * which biome a tile actually sits in. This is the same nearest-`
+ * NEAREST_BIOME_SEEDS`-seeds inverse-distance-squared blend `biomeWeightsAt`
+ * uses (so a Wetland/Badlands boundary still reads as a smooth gradient, not
+ * a hard step), except each contributing seed's own `waterDensity` is first
+ * pulled toward `BADLANDS_WATER_DENSITY` by that seed's own
+ * `World.biomeSeedDrift` factor (0 = the seed's original biome, 1 = fully
+ * badlands-arid) — see weather.ts's `advanceBiomeDrift` for what actually
+ * moves that factor over time. A seed with no recorded drift (`drift`
+ * absent/0, including every seed on a world that predates this feature)
+ * behaves exactly as `blendBiomeParams`'s own `waterDensity` term always did.
+ *
+ * Returns `undefined` — not a guessed default — when there's no biome data
+ * to blend at all (`seeds` absent/empty, a bare `createWorld`/hand-built test
+ * world), matching `biomeWeightsAt`'s own "no data, don't pretend" contract;
+ * every real call site (weather.ts) documents its own biome-agnostic
+ * fallback for that case so existing biome-agnostic tests/worlds see zero
+ * behavior change.
+ */
+export function effectiveWaterDensityAt(seeds: readonly BiomeSeedInfo[] | undefined, drift: readonly number[] | undefined, x: number, y: number): number | undefined {
+  if (!seeds || seeds.length === 0) return undefined;
+
+  const nearest = seeds
+    .map((seed, index) => ({ seed, index, distSq: (seed.x - x) ** 2 + (seed.y - y) ** 2 }))
+    .sort((a, b) => a.distSq - b.distSq)
+    .slice(0, NEAREST_BIOME_SEEDS);
+
+  const weights = nearest.map(({ distSq }) => 1 / (distSq + 1));
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+
+  let density = 0;
+  nearest.forEach(({ seed, index }, i) => {
+    const base = BIOME_BY_NAME[seed.name]?.waterDensity ?? BADLANDS_WATER_DENSITY;
+    const seedDrift = drift?.[index] ?? 0;
+    density += lerp(base, BADLANDS_WATER_DENSITY, seedDrift) * (weights[i]! / totalWeight);
+  });
+  return density;
+}
+
 // ---------------------------------------------------------------------------
 // Generation
 // ---------------------------------------------------------------------------

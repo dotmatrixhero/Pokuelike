@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mulberry32, makeNoise2D, makeDensityField, generateWorld, generateMacroElevation, findWalkableNear, blendBiomeParams } from "../src/worldgen.js";
+import { mulberry32, makeNoise2D, makeDensityField, generateWorld, generateMacroElevation, findWalkableNear, blendBiomeParams, effectiveWaterDensityAt } from "../src/worldgen.js";
 import { tileAt, setTile } from "../src/world.js";
 
 describe("mulberry32 (seeded PRNG)", () => {
@@ -173,6 +173,52 @@ describe("biome blending", () => {
     const totalChange = samples[samples.length - 1]! - samples[0]!;
     const maxStep = Math.max(...samples.slice(1).map((v, i) => v - samples[i]!));
     expect(maxStep).toBeLessThan(totalChange * 0.5);
+  });
+});
+
+describe("effectiveWaterDensityAt: runtime-readable moisture field (TODO.md's flagged gap)", () => {
+  it("returns undefined with no biome seed data at all — no data, no guessed default", () => {
+    expect(effectiveWaterDensityAt(undefined, undefined, 5, 5)).toBeUndefined();
+    expect(effectiveWaterDensityAt([], undefined, 5, 5)).toBeUndefined();
+  });
+
+  it("a point surrounded only by same-named seeds reads as that biome's own water density, and differs by biome", () => {
+    // Same name at every nearby seed means the distance-weighted blend can't
+    // move the result away from that one biome's own value, whatever the
+    // weights are — this isolates "does the runtime lookup actually
+    // differentiate Wetland from Badlands" from the blending math itself.
+    const wetlandSeeds = [{ x: 10, y: 10, name: "wetland" }, { x: 10, y: 11, name: "wetland" }, { x: 11, y: 10, name: "wetland" }];
+    const badlandsSeeds = [{ x: 10, y: 10, name: "badlands" }, { x: 10, y: 11, name: "badlands" }, { x: 11, y: 10, name: "badlands" }];
+    const wetlandDensity = effectiveWaterDensityAt(wetlandSeeds, undefined, 10, 10)!;
+    const badlandsDensity = effectiveWaterDensityAt(badlandsSeeds, undefined, 10, 10)!;
+    expect(wetlandDensity).toBeGreaterThan(badlandsDensity);
+  });
+
+  it("blends gradually between two differently-named biomes across a boundary, not in a hard step", () => {
+    const seeds = [
+      { x: 0, y: 0, name: "wetland" },
+      { x: 100, y: 0, name: "badlands" },
+    ];
+    const samples = Array.from({ length: 11 }, (_, i) => effectiveWaterDensityAt(seeds, undefined, i * 10, 0)!);
+    for (let i = 1; i < samples.length; i++) {
+      expect(samples[i]).toBeLessThanOrEqual(samples[i - 1]!); // monotonically falling wetland -> badlands
+    }
+    expect(samples[0]).toBeGreaterThan(samples[samples.length - 1]!);
+  });
+
+  it("drift toward 1 pulls a seed's own contribution down to exactly the badlands-arid target; drift 0 leaves its original biome untouched", () => {
+    const wetlandSeeds = [{ x: 10, y: 10, name: "wetland" }, { x: 10, y: 11, name: "wetland" }, { x: 11, y: 10, name: "wetland" }];
+    const badlandsSeeds = [{ x: 10, y: 10, name: "badlands" }, { x: 10, y: 11, name: "badlands" }, { x: 11, y: 10, name: "badlands" }];
+    const undrifted = effectiveWaterDensityAt(wetlandSeeds, [0, 0, 0], 10, 10)!;
+    const fullyDrifted = effectiveWaterDensityAt(wetlandSeeds, [1, 1, 1], 10, 10)!;
+    const badlandsReference = effectiveWaterDensityAt(badlandsSeeds, undefined, 10, 10)!;
+    expect(undrifted).toBeGreaterThan(fullyDrifted);
+    expect(fullyDrifted).toBeCloseTo(badlandsReference, 10);
+  });
+
+  it("a partial or missing drift array reads as 0 ('no drift yet') for every seed past its end", () => {
+    const wetlandSeeds = [{ x: 10, y: 10, name: "wetland" }];
+    expect(effectiveWaterDensityAt(wetlandSeeds, undefined, 10, 10)).toBe(effectiveWaterDensityAt(wetlandSeeds, [], 10, 10));
   });
 });
 
