@@ -22,12 +22,15 @@ import {
   TERRAIN_FG,
   TERRAIN_GLYPH,
   TYPE_COLOR,
+  WATER_DEPTH_DARKEN_MAX,
   WEATHER_TINT,
   rgbToCss,
   rgbaToCss,
   shade,
   shelterOwnerTint,
   tileLight,
+  waterDepthFactor,
+  waterDepthShade,
 } from "./palette.js";
 
 export const TILE_SIZE = 20;
@@ -354,6 +357,17 @@ function drawWorldTiles(
             if (!isWater(x - 1, y)) ctx.drawImage(edge, 0, 0, strip, src, dx, dy, dstStrip, TILE_SIZE);
             if (!isWater(x + 1, y)) ctx.drawImage(edge, src - strip, 0, strip, src, dx + TILE_SIZE - dstStrip, dy, dstStrip, TILE_SIZE);
           }
+          // "Deep water is darker" — direct ask. The interior/edge sprites
+          // above are real art, not a flat fill `shade`/`waterDepthShade`
+          // could tint directly, so this composites a translucent black
+          // wash on top instead, scaled by the same body-size-based depth
+          // factor the ASCII render mode uses — a small puddle stays
+          // essentially untinted, a real lake/ocean reads visibly deeper.
+          const depth = waterDepthFactor(world, { x, y });
+          if (depth > 0) {
+            ctx.fillStyle = rgbaToCss([0, 0, 0], depth * WATER_DEPTH_DARKEN_MAX);
+            ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          }
           continue;
         }
       }
@@ -559,7 +573,13 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
       } else {
         // Everything else keeps a faint translucent wash of its own color —
         // Brogue's ground reads as lit stone, not a flat tile — plus its glyph.
-        const bg = shade(tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies) : TERRAIN_BG[tile.terrain], tile.elevation);
+        // "water" gets its own body-size-based depth darkening instead of
+        // elevation shading — see `waterDepthShade`'s doc comment for why
+        // elevation carries no usable depth signal for water tiles.
+        const bg =
+          tile.terrain === "water"
+            ? waterDepthShade(TERRAIN_BG.water, waterDepthFactor(world, { x, y }))
+            : shade(tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies) : TERRAIN_BG[tile.terrain], tile.elevation);
         ctx.fillStyle = rgbaToCss(bg, (tile.terrain === "floor" ? 0.25 : 0.55) * light);
         ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
         ctx.fillStyle = rgbaToCss(accent, (tile.terrain === "floor" ? 0.45 : 0.9) * light);

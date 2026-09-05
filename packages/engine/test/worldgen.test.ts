@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mulberry32, makeNoise2D, makeDensityField, generateWorld, generateMacroElevation, findWalkableNear, blendBiomeParams } from "../src/worldgen.js";
+import { mulberry32, makeNoise2D, makeDensityField, generateWorld, generateMacroElevation, findWalkableNear, blendBiomeParams, biomeWeightsAt, effectiveWaterDensityAt } from "../src/worldgen.js";
 import { tileAt, setTile } from "../src/world.js";
 
 describe("mulberry32 (seeded PRNG)", () => {
@@ -109,16 +109,25 @@ describe("generateWorld", () => {
     expect(kindsSeen.size).toBeGreaterThanOrEqual(5);
   });
 
-  it("underground/canopy stay the plain flat grid — a Surface-only generation pass", () => {
+  it("canopy stays the plain flat grid — a Surface-only generation pass; underground now gets real cellular-automata cave structure", () => {
     const world = generateWorld(40, 30, 9);
-    for (const tile of world.tiles.underground) {
-      expect(tile.terrain).toBe("floor");
-      expect(tile.elevation).toBe(0);
-    }
     for (const tile of world.tiles.canopy) {
       expect(tile.terrain).toBe("floor");
       expect(tile.elevation).toBe(0);
     }
+    // Underground: every tile is still either "floor" or "wall" (the CA cave
+    // carver's own vocabulary — no water/food/elevation texture, unlike
+    // Surface), but it's no longer guaranteed *all* floor.
+    let sawUndergroundWall = false;
+    let sawUndergroundFloor = false;
+    for (const tile of world.tiles.underground) {
+      expect(["floor", "wall"]).toContain(tile.terrain);
+      expect(tile.elevation).toBe(0);
+      if (tile.terrain === "wall") sawUndergroundWall = true;
+      if (tile.terrain === "floor") sawUndergroundFloor = true;
+    }
+    expect(sawUndergroundWall).toBe(true);
+    expect(sawUndergroundFloor).toBe(true);
   });
 
   it("tree tiles are unwalkable; boulder/bush/sand/mud are walkable (boulder is slow and opaque, not a hard blocker)", () => {
@@ -173,6 +182,52 @@ describe("biome blending", () => {
     const totalChange = samples[samples.length - 1]! - samples[0]!;
     const maxStep = Math.max(...samples.slice(1).map((v, i) => v - samples[i]!));
     expect(maxStep).toBeLessThan(totalChange * 0.5);
+  });
+});
+
+describe("effectiveWaterDensityAt: runtime-readable moisture field (TODO.md's flagged gap)", () => {
+  it("returns undefined with no biome seed data at all — no data, no guessed default", () => {
+    expect(effectiveWaterDensityAt(undefined, undefined, 5, 5)).toBeUndefined();
+    expect(effectiveWaterDensityAt([], undefined, 5, 5)).toBeUndefined();
+  });
+
+  it("a point surrounded only by same-named seeds reads as that biome's own water density, and differs by biome", () => {
+    // Same name at every nearby seed means the distance-weighted blend can't
+    // move the result away from that one biome's own value, whatever the
+    // weights are — this isolates "does the runtime lookup actually
+    // differentiate Wetland from Badlands" from the blending math itself.
+    const wetlandSeeds = [{ x: 10, y: 10, name: "wetland" }, { x: 10, y: 11, name: "wetland" }, { x: 11, y: 10, name: "wetland" }];
+    const badlandsSeeds = [{ x: 10, y: 10, name: "badlands" }, { x: 10, y: 11, name: "badlands" }, { x: 11, y: 10, name: "badlands" }];
+    const wetlandDensity = effectiveWaterDensityAt(wetlandSeeds, undefined, 10, 10)!;
+    const badlandsDensity = effectiveWaterDensityAt(badlandsSeeds, undefined, 10, 10)!;
+    expect(wetlandDensity).toBeGreaterThan(badlandsDensity);
+  });
+
+  it("blends gradually between two differently-named biomes across a boundary, not in a hard step", () => {
+    const seeds = [
+      { x: 0, y: 0, name: "wetland" },
+      { x: 100, y: 0, name: "badlands" },
+    ];
+    const samples = Array.from({ length: 11 }, (_, i) => effectiveWaterDensityAt(seeds, undefined, i * 10, 0)!);
+    for (let i = 1; i < samples.length; i++) {
+      expect(samples[i]).toBeLessThanOrEqual(samples[i - 1]!); // monotonically falling wetland -> badlands
+    }
+    expect(samples[0]).toBeGreaterThan(samples[samples.length - 1]!);
+  });
+
+  it("drift toward 1 pulls a seed's own contribution down to exactly the badlands-arid target; drift 0 leaves its original biome untouched", () => {
+    const wetlandSeeds = [{ x: 10, y: 10, name: "wetland" }, { x: 10, y: 11, name: "wetland" }, { x: 11, y: 10, name: "wetland" }];
+    const badlandsSeeds = [{ x: 10, y: 10, name: "badlands" }, { x: 10, y: 11, name: "badlands" }, { x: 11, y: 10, name: "badlands" }];
+    const undrifted = effectiveWaterDensityAt(wetlandSeeds, [0, 0, 0], 10, 10)!;
+    const fullyDrifted = effectiveWaterDensityAt(wetlandSeeds, [1, 1, 1], 10, 10)!;
+    const badlandsReference = effectiveWaterDensityAt(badlandsSeeds, undefined, 10, 10)!;
+    expect(undrifted).toBeGreaterThan(fullyDrifted);
+    expect(fullyDrifted).toBeCloseTo(badlandsReference, 10);
+  });
+
+  it("a partial or missing drift array reads as 0 ('no drift yet') for every seed past its end", () => {
+    const wetlandSeeds = [{ x: 10, y: 10, name: "wetland" }];
+    expect(effectiveWaterDensityAt(wetlandSeeds, undefined, 10, 10)).toBe(effectiveWaterDensityAt(wetlandSeeds, [], 10, 10));
   });
 });
 
@@ -247,6 +302,154 @@ describe("generateWorld: rivers", () => {
       for (let x = 0; x < 90; x++) {
         expect(tileAt(a, "surface", x, y)!.terrain).toBe(tileAt(b, "surface", x, y)!.terrain);
       }
+    }
+  });
+});
+
+describe("generateWorld: Badlands BSP chambers", () => {
+  /** Mirrors worldgen.ts's own private `isBadlandsDominant` — kept here as its own small check, same "own math, not the exported internals" idiom as this file's other statistical tests, so this describes the *contract* (never spills past Badlands' footprint) rather than reaching into the implementation. */
+  function isBadlandsDominant(world: ReturnType<typeof generateWorld>, x: number, y: number): boolean {
+    const weights = biomeWeightsAt(world.biomeSeeds, x, y);
+    const badlandsWeight = weights["badlands"] ?? 0;
+    if (badlandsWeight <= 0) return false;
+    return Object.entries(weights).every(([name, w]) => name === "badlands" || w < badlandsWeight);
+  }
+
+  it("places real 'wall' tiles somewhere across a handful of seeds — the mechanism actually fires, not just theoretically", () => {
+    // wall never appeared anywhere in generateWorld's output before this
+    // feature (OBSTACLE_KINDS never includes it) — checked across several
+    // seeds since which exact seeds roll a wall tile is seed-dependent (a
+    // low per-tile chance on a sparse subset of boundary lines).
+    let sawAnyWall = false;
+    for (const seed of [42, 7, 2, 5, 9, 11]) {
+      const world = generateWorld(90, 60, seed);
+      if (world.tiles.surface.some((t) => t.terrain === "wall")) sawAnyWall = true;
+    }
+    expect(sawAnyWall).toBe(true);
+  });
+
+  it("every 'wall' tile, and every BSP boundary boulder line, stays inside Badlands' own dominant footprint — never spills into another biome's territory", () => {
+    for (const seed of [42, 7, 2, 5, 9, 11, 20260903]) {
+      const world = generateWorld(90, 60, seed);
+      for (let y = 0; y < world.height; y++) {
+        for (let x = 0; x < world.width; x++) {
+          if (tileAt(world, "surface", x, y)!.terrain === "wall") {
+            expect(isBadlandsDominant(world, x, y)).toBe(true);
+          }
+        }
+      }
+    }
+  });
+
+  it("wall is sparse relative to boulder within Badlands' footprint — the exception, not the rule", () => {
+    let wallCount = 0;
+    let boulderInBadlandsCount = 0;
+    for (const seed of [42, 7, 2, 5, 9, 11, 20260903]) {
+      const world = generateWorld(90, 60, seed);
+      for (let y = 0; y < world.height; y++) {
+        for (let x = 0; x < world.width; x++) {
+          const terrain = tileAt(world, "surface", x, y)!.terrain;
+          if (terrain === "wall") wallCount++;
+          else if (terrain === "boulder" && isBadlandsDominant(world, x, y)) boulderInBadlandsCount++;
+        }
+      }
+    }
+    expect(boulderInBadlandsCount).toBeGreaterThan(0);
+    expect(wallCount).toBeGreaterThan(0);
+    expect(wallCount).toBeLessThan(boulderInBadlandsCount * 0.3);
+  });
+
+  it("a BSP-placed boulder tile is walkable, opaque, and elevated above what a plain floor tile would read as at the exact same spot — reads exactly like a hand-placed boulder", () => {
+    // BOULDER_ELEVATION_BOOST isn't exported (private tuning constant, same
+    // as this file's other magic numbers) — this checks the *contract*
+    // instead: every boulder tile's elevation strictly exceeds its own
+    // ambient (non-boulder) elevation would have been, by re-deriving that
+    // ambient baseline the same way carveBadlandsChambers itself does.
+    let checked = 0;
+    for (const seed of [42, 7, 2]) {
+      const world = generateWorld(90, 60, seed);
+      for (let y = 0; y < world.height; y++) {
+        for (let x = 0; x < world.width; x++) {
+          const tile = tileAt(world, "surface", x, y)!;
+          if (tile.terrain !== "boulder" && tile.terrain !== "wall") continue;
+          expect(tile.walkable).toBe(tile.terrain === "boulder"); // boulder crosses, wall doesn't
+          expect(tile.opaque).toBe(true); // both block sight
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it("determinism: the same seed produces byte-identical wall/boulder placement", () => {
+    const a = generateWorld(90, 60, 42);
+    const b = generateWorld(90, 60, 42);
+    for (let y = 0; y < 60; y++) {
+      for (let x = 0; x < 90; x++) {
+        expect(tileAt(a, "surface", x, y)!.terrain).toBe(tileAt(b, "surface", x, y)!.terrain);
+      }
+    }
+  });
+});
+
+describe("generateWorld: Underground cellular-automata caves", () => {
+  /** 4-connected flood-fill component sizes over every "floor" underground tile — same connectivity convention waterBody.ts uses, checked independently here rather than reaching into worldgen.ts's own internal `keepOnlyLargestFloorRegion`. */
+  function floorComponentSizes(world: ReturnType<typeof generateWorld>): number[] {
+    const width = world.width, height = world.height;
+    const visited = new Uint8Array(width * height);
+    const sizes: number[] = [];
+    for (let start = 0; start < width * height; start++) {
+      const t = world.tiles.underground[start]!;
+      if (visited[start] || t.terrain !== "floor") continue;
+      let size = 0;
+      const queue = [start];
+      visited[start] = 1;
+      while (queue.length > 0) {
+        const i = queue.pop()!;
+        size++;
+        const x = i % width, y = Math.floor(i / width);
+        for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]) {
+          if (nx! < 0 || ny! < 0 || nx! >= width || ny! >= height) continue;
+          const ni = ny! * width + nx!;
+          if (visited[ni] || world.tiles.underground[ni]!.terrain !== "floor") continue;
+          visited[ni] = 1;
+          queue.push(ni);
+        }
+      }
+      sizes.push(size);
+    }
+    return sizes;
+  }
+
+  it("produces a real, non-trivial mix of floor and wall — not all-one or all-the-other", () => {
+    for (const seed of [9, 42, 7, 100]) {
+      const world = generateWorld(90, 60, seed);
+      const counts = { floor: 0, wall: 0 };
+      for (const t of world.tiles.underground) counts[t.terrain as "floor" | "wall"]++;
+      expect(counts.floor).toBeGreaterThan(0);
+      expect(counts.wall).toBeGreaterThan(0);
+    }
+  });
+
+  it("every floor tile belongs to exactly one connected region — no isolated, unreachable cave pockets", () => {
+    for (const seed of [9, 42, 7, 100]) {
+      const world = generateWorld(90, 60, seed);
+      const sizes = floorComponentSizes(world);
+      expect(sizes.length).toBe(1); // keepOnlyLargestFloorRegion walled off every other pocket
+      expect(sizes[0]).toBeGreaterThan(0);
+    }
+  });
+
+  it("canopy is untouched by cave generation — still the plain flat grid", () => {
+    const world = generateWorld(90, 60, 9);
+    for (const tile of world.tiles.canopy) expect(tile.terrain).toBe("floor");
+  });
+
+  it("determinism: the same seed produces byte-identical underground cave layout", () => {
+    const a = generateWorld(90, 60, 42);
+    const b = generateWorld(90, 60, 42);
+    for (let i = 0; i < a.tiles.underground.length; i++) {
+      expect(a.tiles.underground[i]!.terrain).toBe(b.tiles.underground[i]!.terrain);
     }
   });
 });

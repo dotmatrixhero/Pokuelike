@@ -1,7 +1,7 @@
 import type { Layer, TerrainKind, Vec2, WeatherCell, WeatherType, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { setElevation, setTile, tileAt } from "./world.js";
-import { biomeWeightsAt } from "./worldgen.js";
+import { biomeWeightsAt, effectiveWaterDensityAt } from "./worldgen.js";
 import { LARGE_WATER_BODY_MIN_SIZE, isLargeWaterBody, waterBodySizeAt } from "./waterBody.js";
 
 /**
@@ -550,6 +550,64 @@ function isAdjacentToWater(world: World, pos: Vec2): boolean {
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// Biome-aware water-cycle rates — TODO.md's flagged gap: `generateWorld`
+// (worldgen.ts) blends a real, biome-specific `waterDensity` per tile at
+// generation time, but until this section every rate above applied flat and
+// uniform at runtime — a Badlands puddle dried and a Wetland puddle dried at
+// the exact same per-tick chance, and the same for rain forming new water.
+// This makes the water CYCLE itself read the same moisture field the terrain
+// was originally painted from, without touching the calibrated small/large/
+// form rate constants above (still the real per-tick "reference" rates,
+// preserved exactly for any world with no biome data at all — see
+// `biomeWaterRateMultiplier`'s own no-data branch).
+// ---------------------------------------------------------------------------
+
+/**
+ * The `waterDensity` a tile's rate multiplier is computed relative to —
+ * picked as this roster's own `seedCount`-weighted mean `waterDensity`
+ * across all five `BIOMES` (worldgen.ts), not an arbitrary round number: a
+ * tile at exactly this density gets multiplier 1 (identical to this file's
+ * pre-biome-aware behavior), and since real generated maps apportion area
+ * roughly in proportion to each biome's `seedCount`, the map-wide *average*
+ * multiplier stays close to 1 too — this redistributes where drying/forming
+ * happens (Badlands slower to refill, Wetland slower to dry, exactly the
+ * differentiation TODO.md asked for) without quietly re-opening the whole-
+ * map equilibrium question the constants above already spent real tuning
+ * passes on.
+ */
+export const BIOME_REFERENCE_WATER_DENSITY = 0.09;
+
+/**
+ * Hard clamp on how far a biome's own moisture can push a rate away from its
+ * flat reference — real differentiation (Wetland forms meaningfully faster,
+ * Badlands meaningfully slower) without letting an extreme biome's density
+ * ratio (Badlands's 0.015 is ~6x below the reference) blow the multiplier out
+ * to a magnitude nobody's tuned against. Sim-original guess, judged against a
+ * real run like every other constant in this section.
+ */
+export const BIOME_WATER_RATE_MULTIPLIER_MIN = 0.35;
+export const BIOME_WATER_RATE_MULTIPLIER_MAX = 2.5;
+
+/**
+ * How much a tile's local, drift-aware water density (`effectiveWaterDensityAt`)
+ * should scale a base per-tick water-cycle rate at `pos` — `invert: true` for
+ * a *drying* rate (a drier biome, lower density, should dry FASTER, i.e. the
+ * ratio flips: `reference / density`) and `false` for a *forming* rate (a
+ * wetter biome, higher density, should form faster: `density / reference`).
+ * Returns exactly 1 — the historical flat rate, unchanged — when there's no
+ * biome data at all (`world.biomeSeeds` absent/empty: a bare `createWorld` or
+ * any hand-built test world), matching every other biome-aware function in
+ * this codebase's "no data, no behavior change" contract; this is what keeps
+ * every pre-existing flat-rate unit test in this file passing unmodified.
+ */
+function biomeWaterRateMultiplier(world: World, pos: Vec2, invert: boolean): number {
+  const density = effectiveWaterDensityAt(world.biomeSeeds, world.biomeSeedDrift, pos.x, pos.y);
+  if (density === undefined) return 1;
+  const ratio = invert ? BIOME_REFERENCE_WATER_DENSITY / density : density / BIOME_REFERENCE_WATER_DENSITY;
+  return Math.max(BIOME_WATER_RATE_MULTIPLIER_MIN, Math.min(BIOME_WATER_RATE_MULTIPLIER_MAX, ratio));
+}
+
 /**
  * Once per world tick (called from simulation.ts's `tickWorld`, alongside
  * `growFlora` — same "world-level system, one full-grid pass" shape). Every
@@ -594,18 +652,94 @@ export function advanceWaterCycle(world: World, log?: EventLog, rng: () => numbe
       // The "never run out" hard floor — a large body already at or below
       // this size doesn't dry any further this tick, regardless of roll.
       if (large && bodySize <= LARGE_WATER_BODY_FLOOR_SIZE) continue;
-      const dryChance = large ? LARGE_WATER_BODY_DRY_CHANCE_PER_TICK : DROUGHT_WATER_DRY_CHANCE_PER_TICK;
+      const baseDryChance = large ? LARGE_WATER_BODY_DRY_CHANCE_PER_TICK : DROUGHT_WATER_DRY_CHANCE_PER_TICK;
+      const dryChance = baseDryChance * biomeWaterRateMultiplier(world, pos, true);
       if (rng() < dryChance) {
         setTile(world, "surface", pos.x, pos.y, DRIED_WATER_TERRAIN);
         log?.record({ kind: "terrainChanged", tick: world.tick, layer: "surface", pos, from: "water", to: DRIED_WATER_TERRAIN, cause: "drought" });
       }
     } else if (cell.type === "rain" && RAIN_CONVERTIBLE_TERRAIN.has(tile.terrain) && isAdjacentToWater(world, pos)) {
-      if (rng() < RAIN_WATER_FORM_CHANCE_PER_TICK) {
+      const formChance = RAIN_WATER_FORM_CHANCE_PER_TICK * biomeWaterRateMultiplier(world, pos, false);
+      if (rng() < formChance) {
         const from = tile.terrain;
         setTile(world, "surface", pos.x, pos.y, "water");
         setElevation(world, "surface", pos.x, pos.y, 0); // matches worldgen.ts's "a lakebed is flat" convention for freshly-formed water
         log?.record({ kind: "terrainChanged", tick: world.tick, layer: "surface", pos, from, to: "water", cause: "rain" });
       }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Biome drift — TODO.md's "Next up: terrain lifecycle" idea: "a biome seed
+// under sustained drought gradually shifts toward Badlands-like parameters
+// over a very long timescale (tens of thousands of ticks, a geological-
+// feeling process distinct from the fast weather-cell overlay), and vice
+// versa for sustained rain." A real, slow desertification/recovery cycle on
+// top of the fast weather-cell overlay above, not a replacement for it.
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-tick drift increment applied to a biome seed's `World.biomeSeedDrift`
+ * entry, for every tick that seed's own point sits inside an active
+ * drought/rain cell (see `advanceBiomeDrift` below) — NOT scaled by a random
+ * roll, unlike every rate above: this is a slow, deterministic accumulation
+ * (the same "plain counter, no rng" shape `herdStormExposureTicks` already
+ * uses elsewhere in this codebase), not a chance-based terrain mutation.
+ *
+ * Picked so continuous, uninterrupted exposure takes `1 / (1/30000) =
+ * 30000` ticks to fully drift a seed from its original biome (0) to fully
+ * badlands-arid (1) — squarely in the "tens of thousands of ticks" range
+ * the task brief asks for. In practice no seed sees anything close to
+ * continuous exposure: a single weather cell lives at most
+ * `WEATHER_LIFESPAN_MAX_TICKS` (500) ticks before dissipating, and a drifting
+ * cell only covers a given seed's exact point for a fraction of that — real
+ * drift accumulates in many small increments across a run's full weather
+ * history, not one sustained event, which is exactly the "geological, not
+ * a single storm" feel this was scoped for.
+ */
+export const BIOME_DRIFT_RATE_PER_TICK = 1 / 30000;
+
+/**
+ * Once per world tick (called from simulation.ts's `tickWorld`, alongside
+ * `advanceWaterCycle` — same "world-level system, one full-grid-of-seeds
+ * pass" shape, except this walks the handful of biome seeds, not every
+ * tile). For each seed in `world.biomeSeeds`, checks whether that exact
+ * point currently sits under an active drought or rain cell and nudges its
+ * `world.biomeSeedDrift` entry accordingly — drought increments toward 1
+ * (more badlands-arid), rain decrements toward 0 (back toward its original
+ * biome), clamped at both ends; any other weather type (storm/coldSnap) or
+ * no active cell at all leaves that seed's drift exactly where it was, no
+ * decay-to-baseline — matching `advanceWaterCycle`'s own "only touches what's
+ * actually under an active cell this tick" scope.
+ *
+ * A no-op on any world with no biome data (`world.biomeSeeds` absent/empty —
+ * a bare `createWorld`/hand-built test world), same "no data, no behavior"
+ * contract every other biome-aware function in this codebase follows.
+ * `world.biomeSeedDrift` is allocated here (at 0 for every seed), not up
+ * front by `generateWorld` — a freshly generated world has every seed
+ * implicitly at 0 until this function first runs on it, whether or not
+ * anything actually drifts that first tick.
+ */
+export function advanceBiomeDrift(world: World): void {
+  const seeds = world.biomeSeeds;
+  if (!seeds || seeds.length === 0) return;
+
+  let drift = world.biomeSeedDrift;
+  if (!drift || drift.length !== seeds.length) {
+    const carried = drift ?? [];
+    drift = seeds.map((_, i) => carried[i] ?? 0);
+    world.biomeSeedDrift = drift;
+  }
+
+  for (let i = 0; i < seeds.length; i++) {
+    const seed = seeds[i]!;
+    const cell = activeWeatherAt(world, seed);
+    if (!cell) continue;
+    if (cell.type === "drought") {
+      drift[i] = Math.min(1, drift[i]! + BIOME_DRIFT_RATE_PER_TICK);
+    } else if (cell.type === "rain") {
+      drift[i] = Math.max(0, drift[i]! - BIOME_DRIFT_RATE_PER_TICK);
     }
   }
 }

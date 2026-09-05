@@ -1,4 +1,5 @@
-import type { PokemonType, TerrainKind } from "@pokuelike/engine";
+import type { PokemonType, TerrainKind, Vec2, World } from "@pokuelike/engine";
+import { waterBodySizeAt } from "@pokuelike/engine";
 
 /**
  * Direct port of `packages/runner/src/ascii.ts`'s color tables — that file is
@@ -102,14 +103,88 @@ export const FLAVOR_GLYPH: Record<string, string> = {
   bloom: ";",
 };
 
-/** Same elevation-shading formula as ascii.ts's `shade`: lightens toward white as elevation rises. */
-export function shade(rgb: Rgb, elevation: number): Rgb {
-  const amount = Math.min(0.35, elevation * 0.07);
-  return rgb.map((c) => Math.round(c + (255 - c) * amount)) as Rgb;
-}
-
 export function mix(from: Rgb, to: Rgb, amount: number): Rgb {
   return from.map((c, i) => Math.round(c + (to[i]! - c) * amount)) as Rgb;
+}
+
+const BLACK: Rgb = [0, 0, 0];
+const WHITE: Rgb = [255, 255, 255];
+
+/**
+ * Below this elevation, `shade` darkens toward black instead of lightening —
+ * direct ask: "tiles with lower elevation are darker... subtle stuff." Most
+ * of a generated map's non-Highland terrain sits well under this (see
+ * worldgen.ts's `BIOMES` — Wetland/Grassland/Badlands' `elevationBase` +
+ * `elevationVariance` mostly land in [0, ~1]), so this is real, visible
+ * low-ground shading, not a corner case that rarely fires.
+ */
+const LOW_ELEVATION_DARKEN_THRESHOLD = 0.3;
+/** How dark the very lowest ground (elevation 0) gets — deliberately smaller than the existing high-elevation lighten cap (0.35) below, since "subtle" was the explicit ask. */
+const LOW_ELEVATION_DARKEN_MAX = 0.12;
+
+/**
+ * Elevation-based ground shading — same formula as ascii.ts's `shade` (keep
+ * both in sync, per this file's own top-of-file doc comment). Two
+ * symmetric halves around `LOW_ELEVATION_DARKEN_THRESHOLD`: below it,
+ * darkens toward black as elevation drops toward 0 (new); at/above it,
+ * lightens toward white as elevation rises (original behavior, byte-for-
+ * byte unchanged — no regression for Highland peaks or anything else that
+ * already read as "high ground").
+ *
+ * Deliberately NOT used for "water" depth — every water tile's elevation is
+ * permanently forced to 0 by `generateWorld`/`advanceWaterCycle` (worldgen.ts
+ * itself calls this "a lakebed is flat, not textured by the elevation
+ * field"), so this would just apply one flat darken to literally all water
+ * uniformly, telling a small puddle and a big lake apart not at all. See
+ * `waterDepthFactor`/`waterDepthShade` below for the real depth-ish signal
+ * this codebase actually has for water: body size, not elevation.
+ */
+export function shade(rgb: Rgb, elevation: number): Rgb {
+  if (elevation < LOW_ELEVATION_DARKEN_THRESHOLD) {
+    const amount = LOW_ELEVATION_DARKEN_MAX * (1 - elevation / LOW_ELEVATION_DARKEN_THRESHOLD);
+    return mix(rgb, BLACK, amount);
+  }
+  const amount = Math.min(0.35, elevation * 0.07);
+  return mix(rgb, WHITE, amount);
+}
+
+/**
+ * A body of this many tiles (or more) reads as "fully deep" for rendering
+ * purposes — well above `waterBody.ts`'s own `LARGE_WATER_BODY_MIN_SIZE`
+ * (12, "a real lake vs. a puddle" threshold for gameplay), picked instead so
+ * only a genuinely large lake/ocean reaches the maximum visual darkening;
+ * `LARGE_WATER_BODY_MIN_SIZE`-sized bodies still read as real but modest.
+ */
+const WATER_DEPTH_SIZE_CAP = 60;
+/**
+ * How dark the deepest (largest) water gets, mixed toward black — kept
+ * below the same order of magnitude as the elevation darkening above for a
+ * consistent "subtle" feel across the whole palette. Exported (not just
+ * used internally by `waterDepthShade`) because renderer.ts's tile-sprite
+ * water render draws real sprite art rather than a flat fill `waterDepthShade`
+ * could tint directly, so it composites its own translucent black overlay at
+ * `depthFactor * WATER_DEPTH_DARKEN_MAX` instead — same constant, same feel,
+ * different compositing mechanism.
+ */
+export const WATER_DEPTH_DARKEN_MAX = 0.22;
+
+/**
+ * "Deep water is darker" — direct ask. There's no real per-tile water depth
+ * concept in this engine (see `shade`'s own doc comment: every water tile's
+ * elevation is flat 0), so this uses `waterBody.ts`'s connected-component
+ * body *size* as the closest honest proxy: a small puddle reads close to 0
+ * (barely darkened, "shallow"), a real lake/ocean approaches 1 ("deep").
+ * Capped at `WATER_DEPTH_SIZE_CAP` tiles rather than growing unbounded, so
+ * an enormous ocean doesn't darken indefinitely past what still reads as
+ * "water" rather than "a black hole."
+ */
+export function waterDepthFactor(world: World, pos: Vec2): number {
+  return Math.min(1, waterBodySizeAt(world, pos) / WATER_DEPTH_SIZE_CAP);
+}
+
+/** Mixes `rgb` toward black by `depthFactor` (0..1, from `waterDepthFactor`) — the water-specific counterpart to `shade`'s elevation-based darkening. */
+export function waterDepthShade(rgb: Rgb, depthFactor: number): Rgb {
+  return mix(rgb, BLACK, WATER_DEPTH_DARKEN_MAX * depthFactor);
 }
 
 export function rgbToCss([r, g, b]: Rgb): string {
