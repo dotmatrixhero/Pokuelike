@@ -1,6 +1,7 @@
 import type { Agent, HuntRules, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
+import type { RegionDispersalContext } from "./dispersal.js";
 import { growFlora, maybeDropSeed } from "./flora.js";
 import { decayShelters } from "./shelter.js";
 import { tickEgg } from "./eggs.js";
@@ -10,7 +11,7 @@ import type { LevelingContext } from "./leveling.js";
 import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, canopySpeedMultiplier, coldSnapSpeedMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
 import { tileAt } from "./world.js";
 import { isNight, lightLevel } from "./daynight.js";
-import { advanceWaterCycle, advanceWeather } from "./weather.js";
+import { advanceBiomeDrift, advanceWaterCycle, advanceWeather } from "./weather.js";
 import { PARALYSIS_SPEED_MULTIPLIER, isParalyzed } from "./status.js";
 import { updateNotables } from "./notables.js";
 import { updateHerdLeadership } from "./herdLeadership.js";
@@ -130,6 +131,12 @@ function isDead(agent: Agent): boolean {
  * that want a different/fixed generator without touching `world.rng`
  * itself), matching the existing `log`/`rules`/`ctx` optional-override
  * convention.
+ *
+ * `regionDispersal` (absent for every plain single-`World` caller) lets a
+ * triggered natal dispersal target a neighboring region instead of a random
+ * point on this map — see dispersal.ts's `RegionDispersalContext`. Only
+ * `overworld.ts`'s `tickOverworld` ever supplies one, and only for the
+ * currently-focused region's own call.
  */
 export function tickWorld(
   world: World,
@@ -137,7 +144,8 @@ export function tickWorld(
   rules?: HuntRules,
   ctx?: LevelingContext,
   rng: () => number = world.rng,
-  immigration?: ImmigrationContext
+  immigration?: ImmigrationContext,
+  regionDispersal?: RegionDispersalContext
 ): void {
   const previousTick = world.tick;
   world.tick += 1;
@@ -190,7 +198,7 @@ export function tickWorld(
     const before = { x: agent.pos.x, y: agent.pos.y };
     const beforeLayer = agent.layer;
     const beforeElevation = tileAt(world, beforeLayer, before.x, before.y)?.elevation ?? 0;
-    tickAgentAction(world, agent, log, rules, ctx, rng);
+    tickAgentAction(world, agent, log, rules, ctx, rng, regionDispersal);
     if (!isDead(agent) && agent.layer === beforeLayer && (agent.pos.x !== before.x || agent.pos.y !== before.y)) {
       const afterTile = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
       agent.terrainSpeedFactor = movementSpeedFactor(beforeElevation, afterTile?.elevation ?? 0, afterTile?.terrain ?? "floor");
@@ -202,6 +210,11 @@ export function tickWorld(
   // shape as growFlora above: sustained drought/rain drying out or forming
   // water tiles (see weather.ts's `advanceWaterCycle` doc comment).
   advanceWaterCycle(world, log, rng);
+  // Once per tick, not once per agent — same "world-level system, one pass"
+  // shape as growFlora above, except a plain deterministic accumulator (no
+  // rng draw) rather than a chance roll — see weather.ts's `advanceBiomeDrift`
+  // doc comment.
+  advanceBiomeDrift(world);
   // Once per tick, not once per agent — same "world-level system, one pass"
   // shape as growFlora above (see shelter.ts's `decayShelters`).
   decayShelters(world, log);

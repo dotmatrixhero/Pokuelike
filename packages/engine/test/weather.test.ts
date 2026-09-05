@@ -23,9 +23,15 @@ import {
   RAIN_WATER_FORM_CHANCE_PER_TICK,
   LARGE_WATER_BODY_DRY_CHANCE_PER_TICK,
   LARGE_WATER_BODY_FLOOR_SIZE,
+  advanceBiomeDrift,
+  BIOME_DRIFT_RATE_PER_TICK,
+  BIOME_REFERENCE_WATER_DENSITY,
+  BIOME_WATER_RATE_MULTIPLIER_MIN,
+  BIOME_WATER_RATE_MULTIPLIER_MAX,
 } from "../src/weather.js";
+import { effectiveWaterDensityAt } from "../src/worldgen.js";
 import { LARGE_WATER_BODY_MIN_SIZE } from "../src/waterBody.js";
-import type { WeatherCell } from "../src/types.js";
+import type { BiomeSeedInfo, WeatherCell } from "../src/types.js";
 
 /** Deterministic seeded PRNG (mulberry32) — for statistical tests that must never flake. */
 function seededRng(seed: number): () => number {
@@ -502,5 +508,182 @@ describe("advanceWaterCycle: sustained drought/rain mutate real terrain", () => 
     }
 
     expect(run()).toBe(run());
+  });
+});
+
+/** Mirrors weather.ts's own private `biomeWaterRateMultiplier` clamp formula, computed here from the exported constants rather than hand-copying magic numbers, so these tests stay correct if the constants are ever retuned. */
+function expectedBiomeRateMultiplier(seeds: readonly BiomeSeedInfo[], x: number, y: number, invert: boolean): number {
+  const density = effectiveWaterDensityAt(seeds, undefined, x, y)!;
+  const ratio = invert ? BIOME_REFERENCE_WATER_DENSITY / density : density / BIOME_REFERENCE_WATER_DENSITY;
+  return Math.max(BIOME_WATER_RATE_MULTIPLIER_MIN, Math.min(BIOME_WATER_RATE_MULTIPLIER_MAX, ratio));
+}
+
+describe("advanceWaterCycle: biome-aware rates (TODO.md's flagged 'moisture field not used at runtime' gap)", () => {
+  // Three same-named seeds surrounding the point under test, exactly like
+  // worldgen.test.ts's effectiveWaterDensityAt tests — guarantees the nearest-
+  // seed blend can't be pulled toward any other biome, isolating "does this
+  // one named biome's own water density actually change the roll" from the
+  // blending math itself (already covered in worldgen.test.ts).
+  function singleBiomeSeeds(name: string): BiomeSeedInfo[] {
+    return [{ x: 10, y: 10, name }, { x: 10, y: 11, name }, { x: 11, y: 10, name }];
+  }
+
+  it("a badlands tile dries faster and forms water slower than a wetland tile under the exact same nominal rates", () => {
+    const wetlandSeeds = singleBiomeSeeds("wetland");
+    const badlandsSeeds = singleBiomeSeeds("badlands");
+
+    const dryMultiplierWetland = expectedBiomeRateMultiplier(wetlandSeeds, 10, 10, true);
+    const dryMultiplierBadlands = expectedBiomeRateMultiplier(badlandsSeeds, 10, 10, true);
+    expect(dryMultiplierBadlands).toBeGreaterThan(dryMultiplierWetland); // drier biome dries faster
+
+    const formMultiplierWetland = expectedBiomeRateMultiplier(wetlandSeeds, 10, 10, false);
+    const formMultiplierBadlands = expectedBiomeRateMultiplier(badlandsSeeds, 10, 10, false);
+    expect(formMultiplierWetland).toBeGreaterThan(formMultiplierBadlands); // wetter biome forms faster
+
+    // A fixed rng roll strictly between the two computed small-body dry
+    // chances: dries the badlands tile, leaves the wetland tile alone.
+    const dryChanceWetland = DROUGHT_WATER_DRY_CHANCE_PER_TICK * dryMultiplierWetland;
+    const dryChanceBadlands = DROUGHT_WATER_DRY_CHANCE_PER_TICK * dryMultiplierBadlands;
+    const dryRoll = (dryChanceWetland + dryChanceBadlands) / 2;
+    expect(dryChanceWetland).toBeLessThan(dryRoll);
+    expect(dryRoll).toBeLessThan(dryChanceBadlands);
+
+    const wetWorld = createWorld(20, 20);
+    wetWorld.biomeSeeds = wetlandSeeds;
+    setTile(wetWorld, "surface", 10, 10, "water");
+    wetWorld.weatherCells = [cell({ type: "drought", center: { x: 10, y: 10 }, radius: 5 })];
+    advanceWaterCycle(wetWorld, undefined, () => dryRoll);
+    expect(tileAt(wetWorld, "surface", 10, 10)!.terrain).toBe("water"); // roll beats the wetland (lower) chance
+
+    const dryWorld = createWorld(20, 20);
+    dryWorld.biomeSeeds = badlandsSeeds;
+    setTile(dryWorld, "surface", 10, 10, "water");
+    dryWorld.weatherCells = [cell({ type: "drought", center: { x: 10, y: 10 }, radius: 5 })];
+    advanceWaterCycle(dryWorld, undefined, () => dryRoll);
+    expect(tileAt(dryWorld, "surface", 10, 10)!.terrain).toBe("mud"); // roll beats the badlands (higher) chance
+
+    // Same idea for rain forming, roll strictly between the two form chances.
+    const formChanceWetland = RAIN_WATER_FORM_CHANCE_PER_TICK * formMultiplierWetland;
+    const formChanceBadlands = RAIN_WATER_FORM_CHANCE_PER_TICK * formMultiplierBadlands;
+    const formRoll = (formChanceWetland + formChanceBadlands) / 2;
+    expect(formChanceBadlands).toBeLessThan(formRoll);
+    expect(formRoll).toBeLessThan(formChanceWetland);
+
+    const formWetWorld = createWorld(20, 20);
+    formWetWorld.biomeSeeds = wetlandSeeds;
+    setTile(formWetWorld, "surface", 10, 10, "water");
+    setTile(formWetWorld, "surface", 11, 11, "floor");
+    formWetWorld.weatherCells = [cell({ type: "rain", center: { x: 10, y: 10 }, radius: 5 })];
+    advanceWaterCycle(formWetWorld, undefined, () => formRoll);
+    expect(tileAt(formWetWorld, "surface", 11, 11)!.terrain).toBe("water"); // roll beats the wetland (higher) chance
+
+    const formDryWorld = createWorld(20, 20);
+    formDryWorld.biomeSeeds = badlandsSeeds;
+    setTile(formDryWorld, "surface", 10, 10, "water");
+    setTile(formDryWorld, "surface", 11, 11, "floor");
+    formDryWorld.weatherCells = [cell({ type: "rain", center: { x: 10, y: 10 }, radius: 5 })];
+    advanceWaterCycle(formDryWorld, undefined, () => formRoll);
+    expect(tileAt(formDryWorld, "surface", 11, 11)!.terrain).toBe("floor"); // roll fails the badlands (lower) chance
+  });
+
+  it("falls back to exactly the flat, biome-agnostic rate on a world with no biome data — every pre-existing test above already exercises this, this just makes the contract explicit", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    world.weatherCells = [cell({ type: "drought", center: { x: 5, y: 5 }, radius: 5 })];
+    // A roll just above the flat rate fails to dry; just below succeeds — no
+    // biome multiplier is silently applied when there's no biome data.
+    advanceWaterCycle(world, undefined, () => DROUGHT_WATER_DRY_CHANCE_PER_TICK + 1e-9);
+    expect(tileAt(world, "surface", 5, 5)!.terrain).toBe("water");
+    advanceWaterCycle(world, undefined, () => DROUGHT_WATER_DRY_CHANCE_PER_TICK - 1e-9);
+    expect(tileAt(world, "surface", 5, 5)!.terrain).toBe("mud");
+  });
+});
+
+describe("advanceBiomeDrift: slow desertification/recovery under sustained local weather", () => {
+  function biomeWorld(seeds: BiomeSeedInfo[]) {
+    const world = createWorld(30, 30);
+    world.biomeSeeds = seeds;
+    return world;
+  }
+
+  it("is a no-op with no biome seed data at all", () => {
+    const world = createWorld(10, 10);
+    advanceBiomeDrift(world);
+    expect(world.biomeSeedDrift).toBeUndefined();
+  });
+
+  it("allocates the drift array at 0 for every seed the first time it runs on a world with biome data, even with no active weather yet", () => {
+    const world = biomeWorld([{ x: 5, y: 5, name: "wetland" }, { x: 25, y: 25, name: "badlands" }]);
+    advanceBiomeDrift(world);
+    expect(world.biomeSeedDrift).toEqual([0, 0]);
+
+    world.weatherCells = [cell({ type: "drought", center: { x: 5, y: 5 }, radius: 3 })];
+    advanceBiomeDrift(world);
+    expect(world.biomeSeedDrift).toEqual([BIOME_DRIFT_RATE_PER_TICK, 0]);
+  });
+
+  it("increments a seed's own drift toward 1 for every tick it sits under an active drought cell", () => {
+    const world = biomeWorld([{ x: 5, y: 5, name: "wetland" }]);
+    world.weatherCells = [cell({ type: "drought", center: { x: 5, y: 5 }, radius: 3 })];
+    for (let t = 0; t < 10; t++) advanceBiomeDrift(world);
+    expect(world.biomeSeedDrift![0]).toBeCloseTo(10 * BIOME_DRIFT_RATE_PER_TICK, 12);
+  });
+
+  it("decrements a previously-drifted seed's drift back toward 0 under sustained rain", () => {
+    const world = biomeWorld([{ x: 5, y: 5, name: "wetland" }]);
+    world.biomeSeedDrift = [0.5];
+    world.weatherCells = [cell({ type: "rain", center: { x: 5, y: 5 }, radius: 3 })];
+    for (let t = 0; t < 10; t++) advanceBiomeDrift(world);
+    expect(world.biomeSeedDrift![0]).toBeCloseTo(0.5 - 10 * BIOME_DRIFT_RATE_PER_TICK, 12);
+  });
+
+  it("clamps at 1 under continuous drought, and at 0 under continuous rain — never overshoots either end", () => {
+    const world = biomeWorld([{ x: 5, y: 5, name: "wetland" }]);
+    world.weatherCells = [cell({ type: "drought", center: { x: 5, y: 5 }, radius: 3 })];
+    const ticksToFullyDrift = Math.ceil(1 / BIOME_DRIFT_RATE_PER_TICK) + 10;
+    for (let t = 0; t < ticksToFullyDrift; t++) advanceBiomeDrift(world);
+    expect(world.biomeSeedDrift![0]).toBe(1);
+
+    world.weatherCells = [cell({ type: "rain", center: { x: 5, y: 5 }, radius: 3 })];
+    for (let t = 0; t < ticksToFullyDrift; t++) advanceBiomeDrift(world);
+    expect(world.biomeSeedDrift![0]).toBe(0);
+  });
+
+  it("leaves drift untouched under storm/coldSnap, or with no active cell covering the seed at all", () => {
+    const world = biomeWorld([{ x: 5, y: 5, name: "wetland" }]);
+    world.biomeSeedDrift = [0.3];
+
+    world.weatherCells = [cell({ type: "storm", center: { x: 5, y: 5 }, radius: 3 })];
+    advanceBiomeDrift(world);
+    expect(world.biomeSeedDrift[0]).toBe(0.3);
+
+    world.weatherCells = [cell({ type: "coldSnap", center: { x: 5, y: 5 }, radius: 3 })];
+    advanceBiomeDrift(world);
+    expect(world.biomeSeedDrift[0]).toBe(0.3);
+
+    world.weatherCells = [];
+    advanceBiomeDrift(world);
+    expect(world.biomeSeedDrift[0]).toBe(0.3);
+  });
+
+  it("only drifts a seed actually covered by an active cell — a seed outside every cell's radius is untouched", () => {
+    const world = biomeWorld([{ x: 5, y: 5, name: "wetland" }, { x: 25, y: 25, name: "badlands" }]);
+    world.weatherCells = [cell({ type: "drought", center: { x: 5, y: 5 }, radius: 3 })];
+    advanceBiomeDrift(world);
+    expect(world.biomeSeedDrift![0]).toBeGreaterThan(0);
+    expect(world.biomeSeedDrift![1]).toBe(0);
+  });
+
+  it("determinism: no rng consumed at all — a plain deterministic accumulator, not a chance roll", () => {
+    const world = biomeWorld([{ x: 5, y: 5, name: "wetland" }]);
+    world.weatherCells = [cell({ type: "drought", center: { x: 5, y: 5 }, radius: 3 })];
+    for (let t = 0; t < 5; t++) advanceBiomeDrift(world);
+    const first = world.biomeSeedDrift!.slice();
+
+    const world2 = biomeWorld([{ x: 5, y: 5, name: "wetland" }]);
+    world2.weatherCells = [cell({ type: "drought", center: { x: 5, y: 5 }, radius: 3 })];
+    for (let t = 0; t < 5; t++) advanceBiomeDrift(world2);
+
+    expect(world2.biomeSeedDrift).toEqual(first);
   });
 });

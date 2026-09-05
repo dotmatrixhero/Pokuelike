@@ -808,6 +808,22 @@ export interface Agent {
    * `dispersed` event is logged on arrival. See `DispersalReason`.
    */
   dispersalReason?: DispersalReason;
+  /**
+   * Set instead of the ordinary same-map join-or-found outcome when a
+   * triggered dispersal rolls to target a NEIGHBORING REGION rather than a
+   * random point on this map — the harder half of the overworld's
+   * migration-edges stretch goal (see overworld.ts's top-of-file doc
+   * comment and dispersal.ts's `RegionDispersalContext`). While set,
+   * `dispersalTarget` is a point on this map's edge rather than an interior
+   * herd-founding spot; once the agent arrives there (`dispersalTarget`
+   * clears), it's ready for `overworld.ts`'s `tickOverworld` to actually
+   * remove it from `world.agents` and fold it into the destination region's
+   * aggregate — dispersal.ts itself never touches `World.agents` or any
+   * region/aggregate state, only this one `World`. The region id named
+   * here, not interpreted by dispersal.ts at all (an opaque string from
+   * `RegionDispersalContext.neighborRegionIds`).
+   */
+  crossingToRegionId?: string;
 
   /**
    * When this agent's species prefers to be active — denormalized from
@@ -1292,6 +1308,29 @@ export interface World {
    * favoring one biome.
    */
   biomeSeeds?: BiomeSeedInfo[];
+  /**
+   * Parallel array to `biomeSeeds` (same index — absent or a shorter array
+   * reads as 0, "no drift yet," for any seed past its end): how far each
+   * individual biome seed's own generation parameters have drifted toward
+   * Badlands-like aridity under sustained *local* drought, 0 (its original
+   * biome, every seed's implicit starting value) to 1 (fully badlands-arid) —
+   * see weather.ts's `advanceBiomeDrift` (the only writer) and worldgen.ts's
+   * `effectiveWaterDensityAt` (the only reader so far) for the mechanism.
+   * TODO.md's "Next up: terrain lifecycle" biome-drift idea, deliberately
+   * scoped to just this one knob (water density) rather than every
+   * `BiomeDef` field — a real, slow, geological-feeling ("tens of thousands
+   * of ticks" for a full 0->1 shift under continuous exposure) desertification/
+   * recovery cycle, distinct from the fast weather-cell overlay itself.
+   * Sustained rain at the same seed drains this back toward 0 — never past
+   * it into some wetter-than-original extreme, matching the "and vice versa"
+   * framing this was scoped from: rain only ever undoes drought's own drift,
+   * it doesn't invent a new direction. Absent entirely on any world
+   * `advanceBiomeDrift` hasn't run on yet (every seed implicitly at 0), or
+   * one with no biome data at all — `advanceBiomeDrift` allocates it (at 0
+   * for every seed) the first time it runs on a world that has `biomeSeeds`,
+   * whether or not anything actually drifts that first tick.
+   */
+  biomeSeedDrift?: number[];
   /**
    * The tick `immigration.ts`'s `maybeImmigrate` last actually spawned a new
    * herd, or absent if none has happened yet this world's life — the

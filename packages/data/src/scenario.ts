@@ -51,22 +51,41 @@ function anchor(world: World, x: number, y: number) {
 }
 
 /**
- * Same scaling, for underground/canopy — those layers are always a plain
- * flat grid (no obstacles/elevation there, a Surface-only generation pass —
- * see worldgen.ts), so every tile is walkable and no `findWalkableNear`
- * search is needed. Was a real bug in an earlier pass of this feature:
- * these positions used to be computed directly against the *new*
- * SCENARIO_WIDTH/HEIGHT (e.g. `SCENARIO_WIDTH - 3`) while sharing anchors
- * with code still written in the old 24x16 frame, which put predator and
- * prey in opposite corners of the new, much bigger map — far outside
- * detection range of each other for the entire length of a real run,
- * confirmed by a 1000-tick run with zero "fought"/"killed" events on either
- * pair. Scaling from the *old* frame consistently, the same way `anchor`
- * does for the surface, keeps them exactly as close (relatively) as they
- * were on the original map.
+ * Same scaling, for Canopy — that layer is still always a plain flat grid
+ * (no obstacles/elevation there, a Surface-only generation pass — see
+ * worldgen.ts), so every tile is walkable and no `findWalkableNear` search is
+ * needed. Was a real bug in an earlier pass of this feature: these positions
+ * used to be computed directly against the *new* SCENARIO_WIDTH/HEIGHT (e.g.
+ * `SCENARIO_WIDTH - 3`) while sharing anchors with code still written in the
+ * old 24x16 frame, which put predator and prey in opposite corners of the
+ * new, much bigger map — far outside detection range of each other for the
+ * entire length of a real run, confirmed by a 1000-tick run with zero
+ * "fought"/"killed" events on either pair. Scaling from the *old* frame
+ * consistently, the same way `anchor` does for the surface, keeps them
+ * exactly as close (relatively) as they were on the original map.
+ *
+ * NOT used for Underground positions any more — see `undergroundAnchor`
+ * below for why that layer needs a real walkability search now too.
  */
 function scaledPos(x: number, y: number) {
   return { x: Math.round(x * SCALE_X), y: Math.round(y * SCALE_Y) };
+}
+
+/**
+ * Same idea as `anchor`, but for the Underground layer specifically. Real
+ * bug this closes: worldgen.ts's Underground layer used to always be a
+ * plain, fully-walkable flat grid (this file's own `scaledPos` doc comment
+ * used to say so), so a scaled-but-unchecked anchor was safe there — it no
+ * longer is now that `generateWorld` carves real cellular-automata cave
+ * structure (real "wall" tiles) into Underground too. A fixed anchor could
+ * otherwise land inside solid rock on some seeds, stranding a hand-placed
+ * founder from tick 0 (the exact same class of bug the Surface layer's
+ * large-water-body fix closed for `findWalkableNear` itself) — this reuses
+ * that same fixed `findWalkableNear`, just pointed at "underground" instead
+ * of "surface".
+ */
+function undergroundAnchor(world: World, x: number, y: number) {
+  return findWalkableNear(world, "underground", x * SCALE_X, y * SCALE_Y);
 }
 
 /**
@@ -200,28 +219,28 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
   // layer. Diglett/Sandshrew evolving into Dugtrio/Sandslash escapes
   // predation automatically — Onix's preysOn only lists the base species
   // ids, same trick as Venusaur guarding Bulbasaur (see species.ts).
-  // Underground is still the plain flat grid (no obstacles/elevation there
-  // — a Surface-only pass, see worldgen.ts), so every tile is walkable and
-  // these just need `scaledPos`, not the walkability search `anchor` does.
+  // Underground now carves real cellular-automata cave walls (worldgen.ts),
+  // so these route through `undergroundAnchor`'s walkability search, not the
+  // bare `scaledPos` this used before that feature existed.
   const undergroundColony = [
     {
-      ...spawnAgent("diglett", "diglett-0", scaledPos(OLD_WIDTH - 3, OLD_HEIGHT - 3), 5, world.rng),
+      ...spawnAgent("diglett", "diglett-0", undergroundAnchor(world, OLD_WIDTH - 3, OLD_HEIGHT - 3), 5, world.rng),
       needs: createNeeds({ hunger: 0.2 }),
       herdId: "underground-colony",
       sex: "male" as const,
     },
     {
-      ...spawnAgent("diglett", "diglett-1", scaledPos(OLD_WIDTH - 4, OLD_HEIGHT - 3), 5, world.rng),
+      ...spawnAgent("diglett", "diglett-1", undergroundAnchor(world, OLD_WIDTH - 4, OLD_HEIGHT - 3), 5, world.rng),
       herdId: "underground-colony",
       sex: "female" as const,
     },
     {
-      ...spawnAgent("sandshrew", "sandshrew-0", scaledPos(OLD_WIDTH - 3, OLD_HEIGHT - 4), 5, world.rng),
+      ...spawnAgent("sandshrew", "sandshrew-0", undergroundAnchor(world, OLD_WIDTH - 3, OLD_HEIGHT - 4), 5, world.rng),
       herdId: "underground-colony",
       sex: "male" as const,
     },
     {
-      ...spawnAgent("sandshrew", "sandshrew-1", scaledPos(OLD_WIDTH - 4, OLD_HEIGHT - 4), 5, world.rng),
+      ...spawnAgent("sandshrew", "sandshrew-1", undergroundAnchor(world, OLD_WIDTH - 4, OLD_HEIGHT - 4), 5, world.rng),
       herdId: "underground-colony",
       sex: "female" as const,
     },
@@ -232,17 +251,17 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
   // that wanders onto this layer — no species allowlist, see isPreyOf).
   const onixGroup = [
     {
-      ...spawnAgent("onix", "onix-0", scaledPos(2, OLD_HEIGHT - 2), 10, world.rng),
+      ...spawnAgent("onix", "onix-0", undergroundAnchor(world, 2, OLD_HEIGHT - 2), 10, world.rng),
       needs: createNeeds({ hunger: 0.3 }),
       sex: "male" as const,
     },
     {
-      ...spawnAgent("onix", "onix-1", scaledPos(3, OLD_HEIGHT - 3), 10, world.rng),
+      ...spawnAgent("onix", "onix-1", undergroundAnchor(world, 3, OLD_HEIGHT - 3), 10, world.rng),
       needs: createNeeds({ hunger: 0.3 }),
       sex: "female" as const,
     },
     {
-      ...spawnAgent("onix", "onix-2", scaledPos(2, OLD_HEIGHT - 4), 10, world.rng),
+      ...spawnAgent("onix", "onix-2", undergroundAnchor(world, 2, OLD_HEIGHT - 4), 10, world.rng),
       needs: createNeeds({ hunger: 0.3 }),
       sex: "male" as const,
     },

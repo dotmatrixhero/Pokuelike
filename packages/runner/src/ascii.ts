@@ -1,4 +1,5 @@
 import type { PokemonType, TerrainKind, World } from "@pokuelike/engine";
+import { waterBodySizeAt } from "@pokuelike/engine";
 
 export type Rgb = [number, number, number];
 
@@ -97,9 +98,56 @@ const FLAVOR_FG: Record<string, Rgb> = {
   bloom: [205, 125, 195],
 };
 
+function mix(from: Rgb, to: Rgb, amount: number): Rgb {
+  return from.map((c, i) => Math.round(c + (to[i]! - c) * amount)) as Rgb;
+}
+
+const BLACK: Rgb = [0, 0, 0];
+const WHITE: Rgb = [255, 255, 255];
+
+/**
+ * Below this elevation, `shade` darkens toward black instead of lightening —
+ * direct ask: "tiles with lower elevation are darker... subtle stuff." Most
+ * of a generated map's non-Highland terrain sits well under this (see
+ * worldgen.ts's `BIOMES` — Wetland/Grassland/Badlands' `elevationBase` +
+ * `elevationVariance` mostly land in [0, ~1]), so this is real, visible
+ * low-ground shading, not a corner case that rarely fires.
+ */
+const LOW_ELEVATION_DARKEN_THRESHOLD = 0.3;
+/** How dark the very lowest ground (elevation 0) gets — deliberately smaller than the existing high-elevation lighten cap (0.35) below, since "subtle" was the explicit ask. */
+const LOW_ELEVATION_DARKEN_MAX = 0.12;
+
+/**
+ * Elevation-based ground shading — same formula as `@pokuelike/web`'s
+ * `palette.ts`'s `shade` (kept in sync by hand, per that file's own doc
+ * comment on why these two aren't a shared import). Two symmetric halves
+ * around `LOW_ELEVATION_DARKEN_THRESHOLD`: below it, darkens toward black
+ * as elevation drops toward 0 (new); at/above it, lightens toward white as
+ * elevation rises (original behavior, byte-for-byte unchanged).
+ *
+ * Deliberately NOT used for "water" depth — every water tile's elevation is
+ * permanently forced to 0 (worldgen.ts: "a lakebed is flat, not textured by
+ * the elevation field"), so this would just apply one flat darken to
+ * literally all water uniformly. See `waterDepthShade` below for the real
+ * depth-ish signal this codebase actually has for water: body size.
+ */
 function shade(rgb: Rgb, elevation: number): Rgb {
+  if (elevation < LOW_ELEVATION_DARKEN_THRESHOLD) {
+    const amount = LOW_ELEVATION_DARKEN_MAX * (1 - elevation / LOW_ELEVATION_DARKEN_THRESHOLD);
+    return mix(rgb, BLACK, amount);
+  }
   const amount = Math.min(0.35, elevation * 0.07);
-  return rgb.map((c) => Math.round(c + (255 - c) * amount)) as Rgb;
+  return mix(rgb, WHITE, amount);
+}
+
+/** Same idea as `palette.ts`'s `WATER_DEPTH_SIZE_CAP`/`WATER_DEPTH_DARKEN_MAX` — a body this size or larger reads as "fully deep." */
+const WATER_DEPTH_SIZE_CAP = 60;
+const WATER_DEPTH_DARKEN_MAX = 0.22;
+
+/** "Deep water is darker" — see `palette.ts`'s `waterDepthFactor`/`waterDepthShade` doc comments for why body size (not elevation) is the signal used. */
+function waterDepthShade(rgb: Rgb, world: World, x: number, y: number): Rgb {
+  const depthFactor = Math.min(1, waterBodySizeAt(world, { x, y }) / WATER_DEPTH_SIZE_CAP);
+  return mix(rgb, BLACK, WATER_DEPTH_DARKEN_MAX * depthFactor);
 }
 
 export interface FrameCell {
@@ -132,7 +180,7 @@ export function captureTerrainGrid(world: World): FrameCell[][] {
       row.push({
         char: flavorGlyph ?? TERRAIN_GLYPH[tile.terrain],
         fg: flavorFg ?? TERRAIN_FG[tile.terrain],
-        bg: shade(TERRAIN_BG[tile.terrain], tile.elevation),
+        bg: tile.terrain === "water" ? waterDepthShade(TERRAIN_BG.water, world, x, y) : shade(TERRAIN_BG[tile.terrain], tile.elevation),
       });
     }
     cells.push(row);

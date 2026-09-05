@@ -21,6 +21,7 @@ export * from "./simulation.js";
 export * from "./leveling.js";
 export * from "./nature.js";
 export * from "./worldgen.js";
+export * from "./waterBody.js";
 export * from "./resourceIndex.js";
 export * from "./herdIndex.js";
 export * from "./daynight.js";

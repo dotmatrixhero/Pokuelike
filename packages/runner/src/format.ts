@@ -120,6 +120,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] region ${event.regionId}'s ${event.species} population is dying off (~${event.population})`;
     case "regionEmigrated":
       return `[tick ${event.tick}] ~${event.population} ${event.species} emigrated from region ${event.fromRegionId} to region ${event.toRegionId}`;
+    case "regionCrossed":
+      return `[tick ${event.tick}] ${event.species} (${event.agentId}) crossed from region ${event.fromRegionId} into region ${event.toRegionId}`;
   }
 }
 

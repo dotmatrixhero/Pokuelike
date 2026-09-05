@@ -703,14 +703,30 @@ than inventing a second architecture for it.
   focused region's real `predation.ts` does. A real simplification of the
   full sim's own dynamics.
 
-**Migration edges — only the cheap half is built.** `advanceAbstractRegion`'s
-`maybeEmigrate` moves a small population fraction between two regions that
-are BOTH currently abstract, no individuals involved — real, and validated
-below. What's genuinely NOT built: `dispersal.ts`'s real per-agent disperser
-actually walking off the edge of the FOCUSED region's map and landing as a
-promoted individual in a neighboring one. That's the harder stretch-goal
-half TODO.md originally asked for, left open (it would mean `dispersal.ts`
-knowing about region edges at all).
+**Migration edges — both halves are now built.**
+- The cheap abstract-to-abstract half: `advanceAbstractRegion`'s
+  `maybeEmigrate` moves a small population fraction between two regions
+  that are BOTH currently abstract, no individuals involved.
+- The individual half TODO.md originally flagged as the harder stretch
+  goal: `dispersal.ts`'s ordinary natal-dispersal trigger (see its new
+  `RegionDispersalContext`) can roll (`REGION_DISPERSAL_CHANCE`, 0.25 —
+  a minority outcome on top of dispersal's existing triggers, not a
+  replacement for them) to target a neighboring region instead of a random
+  point on the focused region's own map. The disperser walks to the map's
+  edge (`pickMapEdgeTarget`) instead of an interior herd-founding spot;
+  `dispersal.ts` itself never touches `World.agents` or any region state —
+  once the disperser arrives (`Agent.crossingToRegionId` set,
+  `dispersalTarget` just cleared), `overworld.ts`'s `tickOverworld` removes
+  it from `world.agents` and folds it into the destination region's
+  aggregate (`foldAgentIntoAggregate`, a population-weighted average of
+  needs/level so one new arrival can't swing a large aggregate
+  disproportionately), emitting a `regionCrossed` event. This composes
+  cleanly with the existing layering: only the FOCUSED region has real
+  individual agents to disperse from, so a crossing always originates from
+  focus and lands in an abstract neighbor — never abstract-to-abstract
+  (that's `maybeEmigrate`'s job) or abstract-to-focused (would mean
+  inventing a real individual mid-tick outside the normal promotion path,
+  not attempted).
 
 **Real 3000-tick validation**
 (`pnpm --filter @pokuelike/runner exec tsx src/validateOverworld.ts <ticks>
@@ -737,16 +753,42 @@ run ever surfaced them: the capacity feedback loop above, and a starving-
 while-over-capacity sign flip in an early version of the growth formula that
 reported GROWTH instead of decline. Full 888/888 engine suite green.
 
-Real, open follow-ups, not attempted here: the full migration-edges stretch
-goal (see above); promoted individuals never reconstruct notable titles/
-herd leadership/rapport, even if the aggregate they came from was quietly
-this region's most accomplished lineage; `avgLevel` never advances while
-abstracted (no leveling model at the aggregate tier); only validated at 3
-regions and one focus switch — a larger graph, multiple simultaneous focus
-moves, or a much longer abstracted stretch (the DF-scale tens-of-thousands-
-of-ticks timescale this feature was originally motivated by) haven't been
-run; whether elevation exists on Underground/Canopy too or only Surface
-(pre-existing open question, unrelated to this feature).
+**Real 16000-tick validation of the individual crossing half specifically**
+(same CLI, `region-a` focused the whole run, no focus switch): a real
+`squirtle` that had evolved into `wartortle` triggered its guaranteed
+no-eligible-mates dispersal fallback, rolled to cross regions, walked to the
+map's edge, and produced one real `regionCrossed` event at tick 8704
+(`region-a` -> `region-b`) — landing in `region-b`'s aggregate and settling
+into that region's normal ~20-30 population range for its species like any
+other. For context on base rate: an otherwise-identical single-region
+12000-tick run (seed 42, no region graph at all) produced 11 ordinary
+`dispersed` events — roughly consistent with `REGION_DISPERSAL_CHANCE`
+(0.25) applied to that same trigger frequency, given only one of them
+actually got the chance to roll in the 16000-tick region-graph run. Same-seed
+rerun produced byte-identical output — determinism intact through the
+crossing too. 11 new tests across `dispersal.test.ts` (region-crossing
+trigger selection, edge-target placement, `finishDispersal`'s early-return)
+and `overworld.test.ts` (extraction, aggregate fold-in with weighted
+averaging, a defensive "destination region not found" path, and a real
+forced-rng end-to-end `tickOverworld` loop), full 899/899 engine suite
+green.
+
+Real, open follow-ups, not attempted here: promoted individuals never
+reconstruct notable titles/herd leadership/rapport, even if the aggregate
+they came from was quietly this region's most accomplished lineage;
+`avgLevel` never advances while abstracted (no leveling model at the
+aggregate tier); a region-crossing disperser's own notable/rapport/lineage
+history is discarded on the fold-in, the same loss demotion already accepts
+elsewhere in this system, not a new gap unique to crossing; no cap or
+back-pressure on how many individuals can cross the same edge in one
+stretch (an edge to a species-poor neighbor could in principle drain the
+focused region faster than it repopulates — not observed in any real run
+here, but not guarded against either); only validated at 3 regions, a chain
+topology, and one focus switch — a larger/differently-shaped graph, multiple
+simultaneous focus moves, or a much longer abstracted stretch (the DF-scale
+tens-of-thousands-of-ticks timescale this feature was originally motivated
+by) haven't been run; whether elevation exists on Underground/Canopy too or
+only Surface (pre-existing open question, unrelated to this feature).
 
 ## Player character: a fragile human, earning your first partner
 
@@ -11145,3 +11187,326 @@ sequence (load, play, speed change, style switch, Auto Camera on/off, tab
 switch, canvas click, panel expand). `packages/web` still has no automated
 UI test suite (unchanged pre-existing gap, see TODO.md) — this was real
 browser validation, not a claim of automated coverage.
+
+## Underground/canopy agents stranding in surface water on layer-crossing
+
+Direct user report on the live artifact: "a buncha canopy and underground
+Pokémon are dying in water zones?"
+
+Root cause, traced directly: `needs.ts`'s `seekWater`/`seekFood` cross-layer
+branch (the path a Diglett/Sandshrew/Onix/Pidgey/Spearow — none of which
+have their own food or water underground/in the canopy — takes to reach the
+surface for either) flipped `agent.layer` to `"surface"` without ever
+touching `agent.pos`. That's safe in the OTHER direction (returning to
+Underground/Canopy, always a flat obstacle-free grid — see worldgen.ts's own
+doc comment), but crossing UP to Surface has no such guarantee: the exact
+same (x, y) coordinate could be the middle of a lake. A non-water-type agent
+landing there was exactly as stranded as the spawn-placement bug fixed
+earlier this session (`worldgen.ts`'s `findWalkableNear`) — same root cause
+(nothing checking `canEnterWater` before committing to a position), a
+different code path that fix didn't touch. `status.ts`'s `tickBurrow`
+(resurfacing after a burrow-escape) had the identical bug for the same
+reason — burrowing is triggered by fleeing a Surface threat, so resurfacing
+back to `burrowedFromLayer` almost always means "back to Surface, same
+untouched (x, y)."
+
+Confirmed empirically, not just reasoned about: a script re-checking every
+real `crossedLayer`-to-surface event from a 3000-tick run against
+`canEnterWater`'s actual rule (deep tile of a large water body, no
+non-water-type escape) found **6-8 stranded crossings per seed out of only
+15-31 total crossings-to-surface — roughly a quarter to nearly half of
+EVERY cross-layer trip ended in a stranding** on the pre-fix code, across
+all 5 tested seeds (20260903/42/7/12345/99). This is a large, high-frequency
+bug, not an edge case, and matches the user's report exactly ("a buncha...
+dying").
+
+Fix: both call sites (`needs.ts`'s cross-layer branch, `status.ts`'s
+`tickBurrow`) now relocate to `findWalkableNear(world, <new layer>, x, y)`
+immediately after flipping `agent.layer` — the exact same fix already built
+for the spawn-placement bug, reused rather than duplicated (a no-op
+ring-search on Underground/Canopy, already everywhere-walkable; a real one
+landing safely on Surface). Re-running the same stranding check post-fix:
+**0-1 stranded crossings per seed** (down from 6-8) — the one residual case
+(seed 99) traced to a real but separate, already-documented mechanic:
+weather-driven water formation (`weather.ts`'s rain-forms-water rule, see
+TODO.md's "no stable long-run water equilibrium" note) grew a nearby lake
+*after* the agent had already safely landed on a legitimately-safe tile,
+retroactively surrounding it — not a gap in this fix, a pre-existing,
+separately-scoped risk this session didn't set out to solve (an agent
+already standing somewhere getting slowly boxed in by expanding water over
+hundreds of ticks, versus this fix's actual scope of "don't teleport an
+agent into deep water in the first place").
+
+Full 907-test suite unaffected, typecheck clean, no circular-import issues
+introduced (`worldgen.ts`'s `findWalkableNear` has no dependency back on
+`needs.ts`/`status.ts`).
+## Biome-specific generation: the moisture field actually used at runtime, and slow weather-driven biome drift
+
+TODO.md flagged two real, concrete gaps in the biome generation pipeline
+(`worldgen.ts`) worth picking up: `generateWorld` blends a real per-biome
+`waterDensity` into every tile at map-gen time, but weather.ts's
+`advanceWaterCycle` (rain forming water, drought drying it) ran at one flat
+global rate everywhere afterward — the moisture field was never read again
+once generation finished. And the "Next up: terrain lifecycle" section's own
+biome-drift idea — a biome seed under sustained drought gradually shifting
+toward Badlands-like aridity over a very long timescale, and back under
+sustained rain — was never started.
+
+### Runtime moisture: `effectiveWaterDensityAt`
+
+`worldgen.ts` now exports `effectiveWaterDensityAt(seeds, drift, x, y)` — the
+same nearest-`NEAREST_BIOME_SEEDS`-seeds inverse-distance-squared blend
+`biomeWeightsAt` already uses (so a Wetland/Badlands boundary still reads as
+a smooth gradient, not a hard step), except it blends each seed's own
+`waterDensity` rather than just a name. `weather.ts`'s `advanceWaterCycle`
+scales its existing calibrated small-body-dry/large-body-dry/rain-form rates
+by a multiplier derived from this density: `density / referenceD` for
+forming (a Wetland tile forms water faster), `referenceD / density` for
+drying (a Badlands tile dries faster), clamped to `[0.35, 2.5]`.
+`referenceD` (0.09) is deliberately picked as this roster's own
+`seedCount`-weighted mean `waterDensity` across all five `BIOMES`, so a
+world's map-wide *average* rate stays close to the old flat rate — this
+redistributes *where* drying/forming happens rather than uniformly hiking
+the whole map's rate, which would re-open the "no stable long-run water
+equilibrium" question this file already flagged as fragile and
+deliberately not re-tuned here. Returns `undefined` (multiplier exactly 1,
+the historical flat rate) for any world with no biome data at all, so every
+pre-existing flat-rate unit test in `weather.test.ts` keeps passing
+unmodified.
+
+### Slow biome drift: `advanceBiomeDrift`
+
+Each biome seed gets its own `World.biomeSeedDrift` scalar, 0 (its original
+biome) to 1 (fully Badlands-arid). Once per tick (`advanceBiomeDrift`,
+called from `tickWorld` right after `advanceWaterCycle`), a seed's own point
+increments toward 1 by `BIOME_DRIFT_RATE_PER_TICK` (`1/30000`) for every
+tick it sits under an active drought cell, and decrements back toward 0
+under rain — a plain deterministic accumulator, not a chance roll, the same
+"plain counter, no rng" shape `herdStormExposureTicks` already uses
+elsewhere. `effectiveWaterDensityAt` lerps each contributing seed's own
+`waterDensity` toward Badlands' value by that seed's drift before blending,
+so a previously-lush seed under sustained local drought genuinely reads as
+drier over time, and recovers under sustained rain — never past its
+original biome into something wetter. At `1/30000` per continuous-exposure
+tick, a full 0->1 shift needs ~30,000 ticks of *uninterrupted* exposure —
+squarely the "tens of thousands of ticks, geological, not a single storm"
+timescale asked for — but since a real weather cell lives at most
+`WEATHER_LIFESPAN_MAX_TICKS` (500) ticks and only covers a given seed's
+exact point for a fraction of that, real drift accumulates in many small
+increments across a run's full weather history, not one sustained event.
+
+### Real-run findings
+
+A 3000-tick run per standard seed, terrain-only `terrainChanged` counts
+(before -> after this pass): seed 42, 142 -> 182 (+28%); seed 7, 63 -> 90
+(+43%); seed 20260903, 172 -> 134 (-22%) — genuinely mixed direction, not a
+uniform hike, exactly what redistributing rates by local biome (rather than
+scaling a single global constant) should produce: which direction a given
+seed moves depends on how much of its map reads as wetter vs. drier biome,
+not one fixed multiplier. Determinism (`downstream immigration/event counts
+shifting seed-to-seed`) is an expected, honest side effect flagged
+explicitly, not a bug: changing exactly which tiles roll `rng()` and when
+(a tile that's now adjacent to newly-formed water gets a roll it wouldn't
+have otherwise) shifts the shared rng stream's later draws, which can change
+which species immigrates and when on a given seed — the *same* seed still
+produces byte-identical output run-to-run (confirmed via the existing
+determinism test suite), it's just a different, still-fully-deterministic
+outcome than the pre-this-pass code would have produced for that seed.
+
+Drift itself, checked directly on a real 3000-tick run (seed 42, with live
+agents, not a synthetic terrain-only scenario): 8 of the map's 11 biome
+seeds show real nonzero drift by tick 3000 (max 0.009 of the full 0->1
+range) — small, as intended for a standard run length, but real and
+per-seed-differentiated (the two Badlands seeds themselves showed near-zero
+drift, since drought pushing an already-Badlands-arid seed further toward
+its own values is a near no-op; the Wetland/Grassland/Forest seeds showed
+the most movement). Confirming a seed actually reaches a *visually*
+desertified state would need a run one to two orders of magnitude longer
+than this project's standard 3000-tick validation length — not attempted
+here, flagged as the natural follow-up once a longer-run harness is
+worth the wall-clock cost (a 30,000-tick run with live agents did not
+finish in this session's time budget; a terrain-only run without agents,
+the same trick the water-dynamics pass above used for its own 10,000-tick
+validation, is the likely way to actually witness a full 0->1 shift).
+
+New engine tests for both pieces (`worldgen.test.ts`,`weather.test.ts`);
+full engine suite (889 tests at the time) green with zero behavior change
+on any biome-agnostic world.
+
+## Badlands BSP chambers/canyons
+
+Direct ask, with a concrete spec: partition each Badlands biome region into
+chambers/canyons via binary space partitioning, with chamber boundaries
+mostly "boulder" (already walkable-but-slow at 0.4x speed, already opaque —
+`support.ts`'s `terrainSpeedMultiplier`, `world.ts`'s `isOpaqueTerrain`)
+rather than hard "wall", so a boundary reads as rough, slow terrain to push
+through rather than a corridor maze — with a sparse fraction of "wall" tiles
+for occasional genuine chokepoints/dead-ends, the exception rather than the
+rule. Composes with, doesn't replace, the existing per-tile
+`terrainWeights`/`obstacleDensity` system and `blendBiomeParams`'s
+continuous cross-biome blending: a hard BSP grid needed to stay inside
+Badlands' own footprint, not fight the seamless transitions at its edges.
+
+### How it's masked to Badlands' own footprint
+
+`worldgen.ts`'s `carveBadlandsChambers` runs a classic recursive BSP split
+(`splitBspRect`) over the *entire* map rectangle — not scoped to a
+bounding box around the Badlands seeds specifically — then, for every
+resulting boundary line, paints a tile only if `isBadlandsDominant(seeds, x,
+y)` (that point reads as Badlands more strongly than every other biome in
+`biomeWeightsAt`'s blend, not merely "has some nonzero Badlands weight").
+This is what keeps the grid honestly inside Badlands' footprint: a boundary
+line simply stops being painted the moment it crosses into the continuous
+transition band at a biome edge, with no separate polygon-clipping logic
+needed. Runs after `carveSuicuneRivers` (skips any tile a river already
+carved to "water") specifically so it never has to reason about rivers at
+all beyond that one exclusion.
+
+Each boundary line reserves a "safe gap" (`BSP_SAFE_GAP_FRACTION`, 25% of
+the line's own length, at least 1 tile) that always paints boulder and is
+never eligible for the sparse `BSP_WALL_CHANCE` (8%) upgrade to real "wall"
+— since boulder itself is walkable, a chamber can never be fully sealed off
+by unlucky rolls regardless of how the rest of a line's tiles land.
+Boulder/wall tiles reuse `BOULDER_ELEVATION_BOOST` on top of whatever
+ambient elevation the main generation loop already gave that spot (undone
+first if the spot happened to already be boulder, so re-painting is a
+no-op, not a double boost) — BSP-placed boulder reads exactly like a
+hand-placed one.
+
+### Real-run findings
+
+An ASCII map dump (seed 42, 90x60) shows exactly the intended shape: long
+boulder partition lines cutting across the Badlands region, most fully
+crossable end-to-end, with 0-2 sparse `#` (wall) tiles per line reading as
+real chokepoints — e.g. one horizontal line `...OOOOOOOOOOO#OOOOOOOOOOOO...`
+with a single wall tile roughly in its middle. Across 5 tested seeds
+(42/7/20260903/1/2), Badlands-footprint boulder counts ranged 2-92 tiles
+(varies a lot with where the two Badlands seeds happen to land and how much
+of the map reads as Badlands-dominant) and wall counts 0-5 — sparse, as
+designed, and **zero wall tiles ever appeared outside Badlands' own
+dominant footprint on any tested seed**, confirming the masking works.
+
+A real 3000-tick run on all 3 standard seeds completes with no crashes and a
+normal-looking event distribution (no stuck-agent signature — movement/
+hunting/support event counts stay in the same ballpark as before this
+feature). Full engine suite (894 tests) green, including new determinism,
+footprint-containment, wall-sparsity, and walkable/opaque-contract tests.
+
+## Underground caves via cellular automata
+
+Underground has always been a flat, terrain-uniform grid — no biome,
+elevation, or moisture concept of its own (see worldgen.ts's own top-of-file
+doc comment). Direct ask: give it real generated structure via cellular
+automata, a deliberately different shape language from Badlands' angular
+BSP chambers above (an organic cave, not a carved chamber) — fitting for a
+layer with no biome geometry to draw a chamber grid against in the first
+place.
+
+### The generation itself
+
+`generateUndergroundCaves` is the standard "random fill + smoothing" CA
+recipe: every Underground tile starts "wall" with 40% independent
+probability, then 4 passes of the classic 5-rule (a cell becomes/stays wall
+this pass if 5 or more of its 8 Moore neighbors were wall last pass, off-map
+counting as wall so a cave never opens directly onto the world's border)
+smooth the initial static into organic, rounded cavern shapes. A real
+generation can still leave several disconnected floor pockets purely by
+chance; `keepOnlyLargestFloorRegion` flood-fills every floor region (4-
+connected, same convention `waterBody.ts` uses) and walls off every pocket
+except the single largest one, so every remaining floor tile is guaranteed
+reachable from every other one — no isolated, unreachable cave rooms.
+
+### The stranding bug this surfaced, and its fix
+
+`createDemoWorld`'s hand-placed Underground spawns (the Diglett/Sandshrew
+colony, the Onix trio) used a bare `scaledPos` with no walkability check at
+all — safe only because, before this feature, Underground was
+*unconditionally* fully walkable everywhere, so no check was ever needed.
+That assumption broke the instant real cave walls existed: a fixed anchor
+coordinate could now land directly inside solid rock on some seeds, the
+exact same stranding-bug shape the Surface layer's own large-water-body fix
+(see "Land spawns stranded mid-lake" above) already closed for that layer.
+Fix: a new `undergroundAnchor` helper (scenario.ts) routes through the same
+`findWalkableNear` the Surface layer's `anchor()` already uses, just pointed
+at `"underground"` — all 7 Underground spawn call sites switched to it.
+Canopy's own `scaledPos` calls are untouched; that layer is still always a
+flat, fully-walkable grid.
+
+### Real-run findings
+
+A direct check of `createDemoWorld()`'s output across 6 seeds
+(20260903/42/7/1/2/3) confirmed every one of the 7 hand-placed Underground
+agents lands on walkable ("floor") terrain, never inside a wall — the
+stranding bug this pass introduced-and-fixed never reaches a real player-
+visible world. A real 1000-tick run then surfaced something worth being
+honest about upfront rather than glossing over: the Underground
+Diglett/Sandshrew colony collapses hard under Onix predation on every
+tested seed (as low as 0/7 or 1/7 of the original 7 agents left alive by
+tick 1000). This is **not a regression this feature caused** — a byte-for-
+byte comparison of `undergroundAgentsAlive` at tick 1000, with and without
+cave generation, produced *identical* counts on all 3 tested seeds
+(20260903, 42, 7), confirming this is the same pre-existing
+Onix-crashes-the-colony predator/prey dynamic this file already documents
+elsewhere (see "Predators valued hunting too little relative to grazing"
+and the general predator-population-crash finding TODO.md tracks), not
+something the cave terrain made worse. A real 3000-tick run on all 3
+standard seeds completes with no crashes.
+
+New worldgen tests (non-trivial floor/wall mix, single-connected-region
+guarantee across seeds, canopy-untouched, determinism). Full engine (898
+tests) and data-package suites green.
+
+## Subtle rendering: low elevation darker, deep water darker
+
+Direct ask: "tiles with lower elevation are darker. Water that's deep is
+darker... subtle stuff, not too over the top." Two small, purely-cosmetic
+tweaks, same "no gameplay signal, no dedicated test suite, verified by
+typecheck + a real numeric/visual check" treatment this file's own "Silly
+simulated lighting stuff" section already established as this codebase's
+way of validating decorative-only rendering changes.
+
+**Elevation**: `shade()` (`packages/web/src/palette.ts`, mirrored by hand in
+`packages/runner/src/ascii.ts` per that pair's existing "keep in sync"
+convention) used to only ever lighten toward white as elevation rises,
+capped at 0.35 — elevation 0 (the map's most common value: most Wetland/
+Grassland/Badlands terrain sits under ~1, per `worldgen.ts`'s `BIOMES`) read
+as perfectly neutral, no shading at all. Now it's two symmetric halves: at
+or above 0.3 elevation, byte-for-byte the same lighten-toward-white behavior
+as before (zero regression for Highland peaks or anything else that already
+read as "high ground"); below 0.3, a new, smaller (capped 0.12, vs. the
+existing 0.35 lighten cap — "subtle" was explicit) darken toward black as
+elevation drops toward 0.
+
+**Water depth**: there's no real per-tile water depth concept in this
+engine — every water tile's elevation is permanently forced to 0
+(`generateWorld`/`advanceWaterCycle` both call this out: "a lakebed is
+flat, not textured by the elevation field"), so plugging water into the
+same elevation formula above would just apply one flat darken to literally
+all water uniformly, a puddle indistinguishable from an ocean. Used
+`waterBody.ts`'s connected-component body *size* instead — the actual
+signal this codebase already has for "how big/deep-feeling a body of water
+is" (the same one `isLargeWaterBody`/`canEnterWater` use) — newly exported
+from the engine's public `index.ts` (`waterBody.ts` was previously
+internal-only). `waterDepthFactor(world, pos)` normalizes size against a
+60-tile cap (well above `LARGE_WATER_BODY_MIN_SIZE`'s 12-tile "real lake"
+threshold, so only a genuinely large lake/ocean reaches full darkening) and
+`waterDepthShade` mixes toward black by up to 0.22 at that cap. The web
+tile-sprite render mode draws real water art (`getWaterInterior`/
+`getWaterEdge`), not a flat fill `shade`/`waterDepthShade` could tint
+directly, so that path composites its own translucent black overlay at the
+same `depthFactor * WATER_DEPTH_DARKEN_MAX` instead — same constant, same
+feel, different mechanism, since there was no flat color to mix there.
+
+Verified numerically on 3 seeds (42/7/20260903) rather than just by
+eyeballing an ANSI dump: a lone 1-tile puddle rendered at `[12,45,74]`
+(exactly the base water color — `depthFactor` ~0.017, invisible, correctly
+"barely darkened") next to the map's largest water body (1355-2353 tiles
+across the 3 seeds, every one comfortably over the 60-tile cap) rendering at
+`[9,35,58]` — exactly the math's own prediction (each channel × 0.78) at
+full `depthFactor = 1`. Elevation: the lowest-elevation floor tile on each
+seed (~0.09-0.13) rendered visibly darker (`[20,22,27]`-`[21,22,27]`) than
+the base floor color (`[22,24,29]`), the highest-elevation floor tile
+visibly lighter (`[49,51,55]`-`[56,58,62]`), confirming both halves of the
+new `shade()` fire correctly and land in the intended subtle range. Full
+engine/data suites (898 + 19 tests) and a full `pnpm -r typecheck` stay
+green — this change touches no simulation logic, only render-time color math.

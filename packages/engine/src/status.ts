@@ -4,6 +4,7 @@ import type { StatKey } from "./nature.js";
 import type { EventLog } from "./events.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
 import { herdMembers } from "./herdIndex.js";
+import { findWalkableNear } from "./worldgen.js";
 
 /** Chance a burn spreads to another nearby agent when `MoveSpec.statusSpreads` is set — rolled once per successful `maybeInflictStatus` call, not once per tick. Sim-original magnitude, not canon. */
 export const STATUS_SPREAD_CHANCE = 0.3;
@@ -174,7 +175,7 @@ export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rn
   tickStatStages(agent);
   tickActionLock(agent);
   tickRallyMark(agent);
-  tickBurrow(agent);
+  tickBurrow(agent, world);
   applyRegenPassive(agent);
   applyHealAuraPassive(agent, world);
 
@@ -256,12 +257,18 @@ function tickRallyMark(agent: Agent): void {
  * flee branch, predation.ts) — reaching 0 resurfaces the agent to
  * `burrowedFromLayer` and clears both fields. No-op on a corpse.
  */
-function tickBurrow(agent: Agent): void {
+function tickBurrow(agent: Agent, world: World): void {
   if (agent.alive === false || !agent.burrowedTicksRemaining) return;
   agent.burrowedTicksRemaining = Math.max(0, agent.burrowedTicksRemaining - 1);
   if (agent.burrowedTicksRemaining === 0 && agent.burrowedFromLayer) {
     agent.layer = agent.burrowedFromLayer;
     agent.burrowedFromLayer = undefined;
+    // Same real bug as needs.ts's seekWater/seekFood cross-layer fix: this
+    // agent's (x, y) hasn't moved since it burrowed, and resurfacing to
+    // Surface (the layer it almost always fled FROM) at that unchanged
+    // position has no guarantee it's not the middle of a lake. Reuses the
+    // identical relocate-to-nearest-safe-tile fix.
+    agent.pos = findWalkableNear(world, agent.layer, agent.pos.x, agent.pos.y);
   }
 }
 

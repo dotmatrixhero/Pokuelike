@@ -3,6 +3,28 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Underground/canopy agents stranding in surface water on layer-crossing — fixed, see DESIGN.md
+
+Direct user report: "a buncha canopy and underground Pokémon are dying in
+water zones?" Real, high-frequency bug: crossing to Surface to seek water/
+food (`needs.ts`) or resurfacing from a burrow-escape (`status.ts`) kept the
+agent's (x, y) completely unchanged, with no check that the landing tile was
+actually safe — a quarter to nearly half of every real cross-layer trip in a
+3000-tick run ended in the agent stranded mid-lake, confirmed across 5
+seeds. Fixed by reusing the exact `findWalkableNear` relocate-to-safety fix
+already built for the spawn-placement version of this same bug. See
+DESIGN.md's "Underground/canopy agents stranding in surface water on
+layer-crossing" section for the full before/after numbers.
+
+- [ ] Real, separate, honestly-flagged residual (not this fix's scope): an
+      agent that lands safely can still be slowly boxed in by weather-driven
+      water formation (`weather.ts`'s rain-forms-water rule) expanding a
+      nearby lake around it over hundreds of ticks. Confirmed as the cause
+      of the one still-flagged case (of 5 seeds) after this fix. A real
+      future fix would need periodic re-validation of an agent's own
+      standing tile, not just its landing tile — a bigger, different
+      mechanic than "don't teleport into deep water."
+
 ## Bonding: pairs don't stay together, and rapport is invisible in the UI (flagged, not built)
 
 Direct question, not a bug report, but worth tracking as a real, confirmed
@@ -174,6 +196,56 @@ the fix, 0 after; a cornered Bulbasaur actually defeated a Scyther in a real
       roster biome-driven, that's a real, separate, riskier change — not
       done here.
 
+## Biome generation: runtime moisture, biome drift, BSP badlands chambers, CA underground caves — built, see DESIGN.md
+
+- [x] Water formation/drying (`weather.ts`'s `advanceWaterCycle`) now scales
+      by each tile's real, drift-aware water density
+      (`worldgen.ts`'s`effectiveWaterDensityAt`) instead of one flat global
+      rate — the moisture field `generateWorld` blends at map-gen time is
+      finally read again at runtime. Slow biome drift (see "Next up: terrain
+      lifecycle" above) shares this same mechanism.
+- [x] Badlands regions now get real BSP-carved chambers/canyons (mostly
+      boulder boundaries, sparse wall chokepoints), masked to stay inside
+      Badlands' own dominant footprint so it never fights
+      `blendBiomeParams`'s continuous cross-biome blending at the edges.
+- [x] Underground — previously an unconditionally flat, fully-walkable grid
+      — now gets real cellular-automata cave structure (organic, not BSP's
+      angular chambers, since it has no biome geometry to draw a chamber
+      grid against). Surfaced and fixed a real stranding bug this
+      introduced: `createDemoWorld`'s hand-placed Underground spawns used a
+      bare `scaledPos` with no walkability check, safe only under the old
+      always-flat assumption — now routed through a new `undergroundAnchor`
+      (same `findWalkableNear` primitive the Surface layer's anchor already
+      uses).
+- [ ] **Open follow-up, not attempted here**: confirming a biome seed
+      actually reaches a *visually* desertified state under the new drift
+      mechanism needs a run one to two orders of magnitude longer than this
+      project's standard 3000-tick validation length — a 30,000-tick run
+      with live agents didn't finish inside this session's time budget. A
+      terrain-only run without agents (the same trick the "Stronger
+      weather-driven flora/water dynamics" section's own 10,000-tick
+      validation used) is the likely way to actually witness a full 0->1
+      shift end to end.
+- [ ] **Open follow-up, flagged rather than guessed at**: this pass's BSP
+      chambers only ever paint inside Badlands' *dominant* footprint by
+      design — a Badlands region that's small relative to the map (or one
+      whose seeds happen to land such that the global BSP split rarely
+      crosses it) can end up with very few or zero chamber boundary tiles
+      (seed 1 in this pass's own real-run check: 2 boulder tiles, 0 walls).
+      Not a bug (the masking is doing exactly what it's supposed to), but a
+      real seed-dependent variability worth knowing about — a future pass
+      wanting *guaranteed* chamber density per Badlands region regardless of
+      its size/shape would need to scope BSP to each region's own bounding
+      box rather than the whole map, a bigger change than this one attempted.
+- [ ] **Open follow-up: this pass's whole-starting-roster-biome-driven
+      question (flagged just above) is still open** — Underground now having
+      real terrain structure of its own (rather than "no obstacles, so
+      nothing to check") is a real argument *for* eventually routing every
+      hand-placed spawn (not just Underground's, which needed it for
+      correctness here) through a biome/terrain-aware placement primitive,
+      but that's still the same "real, separate, riskier change" flagged
+      above, not done in this pass either.
+
 ## Next up: terrain lifecycle + construction + overworld (one combined design, not started)
 
 Direct feedback: not enough dynamism in the environment — weather changes
@@ -184,12 +256,21 @@ work resumes:
 1. **Terrain lifecycle** — trees grow from saplings and age, storms can
    fell them (real map consequence for weather, not just FOV/accuracy/
    migration-triggering), reusing flora.ts's existing stock/growth/seed-
-   spread architecture rather than inventing new machinery. Also: a slow
-   weather-driven biome drift — a biome seed under sustained drought
-   gradually shifts toward Badlands-like parameters over a very long
-   timescale (tens of thousands of ticks, a geological-feeling process
-   distinct from the fast weather-cell overlay), and vice versa for
-   sustained rain. This is the foundation the other two build on.
+   spread architecture rather than inventing new machinery. This is the
+   foundation the other two build on.
+   ~~Also: a slow weather-driven biome drift...~~ — **built**, see
+   DESIGN.md's "Biome-specific generation" section: each biome seed's own
+   effective water density now drifts toward Badlands-arid under sustained
+   *local* drought and back under sustained rain (`World.biomeSeedDrift`,
+   weather.ts's `advanceBiomeDrift`), a plain deterministic accumulator
+   scoped to ~30,000 ticks for a full 0->1 shift under continuous exposure.
+   A real 3000-tick run showed real, small, per-seed-differentiated drift
+   (8/11 seeds nonzero, max 0.009 of the range) — confirming a seed
+   actually reaching a *visually* desertified state needs a run one to two
+   orders of magnitude longer than this project's standard validation
+   length, not attempted here (a 30,000-tick run with live agents didn't
+   finish inside this session's time budget). The tree growth/decay half of
+   this item is still not started.
 2. ~~**Construction/shelter-building**~~ — **built**, decoupled from this
    combined design after all (see DESIGN.md's "Shelter-building" section):
    it turned out to need only a new terrain kind + a construction behavior,
@@ -293,15 +374,23 @@ more real simplifications: a background region's terrain is frozen (no
 in-flight eggs are silently discarded on demotion (not folded into the
 population count at all).
 
-**Migration edges (stretch goal) — only the cheap half is built.**
+**Migration edges (stretch goal) — both halves now built.**
 `advanceAbstractRegion`'s `maybeEmigrate` moves a small population fraction
 between two regions that are BOTH currently abstract (no individuals
-involved) — real, validated, but not what the stretch goal actually asked
-for. The harder half — `dispersal.ts`'s real per-agent disperser walking off
-the edge of the FOCUSED region's map and landing as a promoted individual in
-a neighboring one — is genuinely not built; that would mean `dispersal.ts`
-(sibling-session territory this session stayed out of) knowing about region
-edges at all, a real, separate follow-up.
+involved) — the cheap half. The harder half the stretch goal actually asked
+for — `dispersal.ts`'s real per-agent disperser walking off the edge of the
+FOCUSED region's map and landing as a real individual in a neighboring
+one's aggregate — is now built too: dispersal's existing triggers gained an
+optional `RegionDispersalContext` (a minority `REGION_DISPERSAL_CHANCE`
+roll, 0.25, on top of the pre-existing trigger, not instead of it) that
+sends the disperser to the map's edge instead of an interior spot;
+`tickOverworld` recognizes an arrived crosser and folds it into the
+destination's aggregate (`foldAgentIntoAggregate`, weighted-averaging its
+needs/level in). `dispersal.ts` was NOT actually off-limits sibling
+territory (only `worldgen.ts`'s biome generation and `species.ts`'s
+roster/placement were) — an earlier write-up here conflated "chose not to
+touch it for a first cut" with "can't touch it"; corrected now that a real
+follow-up needed it.
 
 **Real 3000-tick validation** (`packages/runner/src/validateOverworld.ts`,
 `pnpm --filter @pokuelike/runner exec tsx src/validateOverworld.ts <ticks>
@@ -325,9 +414,21 @@ population-model bugs (the capacity feedback loop, and a starving-while-
 over-capacity sign flip that reported growth instead of decline) were
 caught by this test suite before the real run ever surfaced them.
 
+**Real 16000-tick validation of the individual crossing** (same CLI, no
+focus switch): a real `wartortle` (evolved from `squirtle`) triggered the
+guaranteed no-eligible-mates dispersal fallback, rolled to cross regions,
+walked to the map edge, and produced one real `regionCrossed` event at tick
+8704 (`region-a` -> `region-b`), settling into `region-b`'s normal
+~20-30-per-species population range afterward like any other aggregate
+entry. Base-rate sanity check: an otherwise-identical single-region
+12000-tick run (no region graph at all) produced 11 ordinary `dispersed`
+events, roughly consistent with `REGION_DISPERSAL_CHANCE` (0.25) applied to
+that trigger frequency over 16000 ticks. Same-seed rerun byte-identical —
+determinism holds through crossing too. 11 new tests (6 in
+`dispersal.test.ts`, 5 in `overworld.test.ts`, including a real forced-rng
+end-to-end `tickOverworld` loop), full 899/899 engine suite green.
+
 Real, open follow-ups, not attempted here:
-- **The full migration-edges stretch goal** (a focused region's individual
-  disperser targeting another region) — see above.
 - **No cross-species interaction in the abstract tier.** Each species
   aggregate advances independently — no abstract-tier predation, so a
   background region can't have its Scyther population actually suppress its
@@ -342,11 +443,19 @@ Real, open follow-ups, not attempted here:
   at the aggregate tier, so a population that spends a long stretch
   abstracted doesn't get any stronger, unlike a promoted region's real
   agents would via the ordinary leveling system.
-- **Only ever validated at 3 regions, one focus switch.** TODO.md's "start
-  small" ask is satisfied, but a larger graph, multiple simultaneous focus
-  moves, or a much longer abstracted stretch (tens of thousands of ticks,
-  the DF-scale timescale this feature was originally motivated by) haven't
-  been run.
+- **A region-crossing disperser's own notable/rapport/lineage history is
+  discarded on the fold-in** — the same loss ordinary demotion already
+  accepts elsewhere in this system (see above), not a new gap unique to
+  crossing.
+- **No cap or back-pressure on repeated crossings along the same edge** — an
+  edge to a species-poor neighbor could in principle drain the focused
+  region faster than it repopulates. Not observed in any real run here, but
+  not guarded against either.
+- **Only ever validated at 3 regions, a chain topology, and one focus
+  switch.** TODO.md's "start small" ask is satisfied, but a larger/
+  differently-shaped graph, multiple simultaneous focus moves, or a much
+  longer abstracted stretch (tens of thousands of ticks, the DF-scale
+  timescale this feature was originally motivated by) haven't been run.
 
 ## Stronger weather-driven flora/water dynamics — built, see DESIGN.md
 
@@ -687,10 +796,10 @@ produce a real story before player mechanics are worth building further.
 - [x] World graph of 3 regions (`region-a`/`region-b`/`region-c`, a chain
       topology) connected by migration edges, each independently bounded —
       see "Overworld: region graph with promotion/demotion" above and
-      DESIGN.md. Only the CHEAP half of migration-edge crossing is built
-      (abstract-tier population transfer); a focused region's individual
-      disperser actually targeting another region is a real, open follow-up
-      (see that section).
+      DESIGN.md. Both halves of migration-edge crossing are built: the
+      cheap abstract-tier population transfer, and a focused region's
+      individual disperser actually targeting another region (see that
+      section for the real-run numbers).
 - [x] Region-level promotion/demotion: the focused region runs full
       per-agent sim across all layers; every other region runs abstracted
       (aggregate counts/needs/resource-abundance per species, occasional

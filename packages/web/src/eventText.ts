@@ -190,6 +190,8 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `region ${event.regionId}'s ${event.species} population is dying off (~${event.population})`;
     case "regionEmigrated":
       return `~${event.population} ${event.species} emigrated from region ${event.fromRegionId} to region ${event.toRegionId}`;
+    case "regionCrossed":
+      return `${idLabel(world, event.agentId, event.species)} crossed from region ${event.fromRegionId} into region ${event.toRegionId}`;
   }
 }
 
@@ -231,6 +233,11 @@ export const STORY_KINDS = new Set<SimEvent["kind"]>([
   "regionDemoted",
   "regionPopulationBoom",
   "regionDieOff",
+  // The individual half of the migration-edges stretch goal — a real
+  // disperser leaving the map entirely, the cross-region analog of
+  // `dispersed` (already in this set) rather than `regionEmigrated`'s
+  // routine abstract-tier population-slice roll (NOISE_KINDS).
+  "regionCrossed",
 ]);
 
 /**

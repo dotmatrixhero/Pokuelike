@@ -8,6 +8,8 @@ import {
   DISPERSAL_BASE_CHANCE,
   maybeTriggerDispersal,
   NO_MATES_DISPERSAL_TICKS,
+  REGION_DISPERSAL_CHANCE,
+  type RegionDispersalContext,
 } from "../src/dispersal.js";
 import { DISPERSAL_MIN_LEVEL } from "../src/leveling.js";
 import { MATURITY_AGE } from "../src/reproduction.js";
@@ -378,5 +380,98 @@ describe("dispersal end-to-end via tickWorld", () => {
     }
 
     expect(a.dispersalTarget).toBeDefined(); // still mid-walk, not arrived yet
+  });
+});
+
+describe("region-crossing dispersal (RegionDispersalContext, the individual half of migration edges)", () => {
+  const REGION_CTX: RegionDispersalContext = { neighborRegionIds: ["region-b"] };
+
+  it("without a RegionDispersalContext, never sets crossingToRegionId even under a rigged always-succeed roll", () => {
+    const ALWAYS_SUCCEED = () => 0;
+    const world = createWorld(200, 200);
+    const a = agent("no-ctx", { age: 500, level: DISPERSAL_MIN_LEVEL, pendingLevelDispersalCheck: true });
+    world.agents.push(a);
+
+    maybeTriggerDispersal(world, a, undefined, ALWAYS_SUCCEED);
+
+    expect(a.dispersalTarget).toBeDefined(); // an ordinary dispersal still triggers...
+    expect(a.crossingToRegionId).toBeUndefined(); // ...but never a region crossing with no context supplied
+  });
+
+  it("a RegionDispersalContext with no neighbors also never crosses, same as no context at all", () => {
+    const ALWAYS_SUCCEED = () => 0;
+    const world = createWorld(200, 200);
+    const a = agent("no-neighbors", { age: 500, level: DISPERSAL_MIN_LEVEL, pendingLevelDispersalCheck: true });
+    world.agents.push(a);
+
+    maybeTriggerDispersal(world, a, undefined, ALWAYS_SUCCEED, { neighborRegionIds: [] });
+
+    expect(a.dispersalTarget).toBeDefined();
+    expect(a.crossingToRegionId).toBeUndefined();
+  });
+
+  it("rolls to cross into a neighboring region when a RegionDispersalContext with neighbors is supplied and the region-crossing roll succeeds", () => {
+    const ALWAYS_SUCCEED = () => 0; // wins every roll: trigger 1's disposition chance AND the region-crossing chance
+    const world = createWorld(200, 200);
+    const a = agent("crosser", { age: 500, level: DISPERSAL_MIN_LEVEL, pendingLevelDispersalCheck: true });
+    world.agents.push(a);
+
+    maybeTriggerDispersal(world, a, undefined, ALWAYS_SUCCEED, REGION_CTX);
+
+    expect(a.crossingToRegionId).toBe("region-b");
+    expect(a.dispersalTarget).toBeDefined();
+    // The target is a real point on the map's boundary, not an arbitrary interior spot.
+    const t = a.dispersalTarget!;
+    expect(t.x === 0 || t.x === world.width - 1 || t.y === 0 || t.y === world.height - 1).toBe(true);
+  });
+
+  it("still disperses within the same map when the region-crossing roll fails, despite a supplied context", () => {
+    // ALWAYS_SUCCEED wins trigger 1's own disposition roll, but a rigged rng
+    // that only ever returns a value >= REGION_DISPERSAL_CHANCE fails the
+    // region-crossing roll specifically.
+    const world = createWorld(200, 200);
+    const a = agent("stays-local", { age: 500, level: DISPERSAL_MIN_LEVEL, pendingLevelDispersalCheck: true, pos: { x: 100, y: 100 } });
+    world.agents.push(a);
+    let call = 0;
+    const rng = () => (call++ === 0 ? 0 : REGION_DISPERSAL_CHANCE); // 1st call: trigger-1 roll succeeds; 2nd call: region-crossing roll fails (not < chance)
+
+    maybeTriggerDispersal(world, a, undefined, rng, REGION_CTX);
+
+    expect(a.crossingToRegionId).toBeUndefined();
+    expect(a.dispersalTarget).toBeDefined();
+  });
+
+  it("the guaranteed no-eligible-mates fallback can also roll a region crossing", () => {
+    const ALWAYS_SUCCEED = () => 0;
+    const world = createWorld(200, 200);
+    const a = agent("lonely-crosser", { age: 500, level: DISPERSAL_MIN_LEVEL, ticksSinceEligibleMate: NO_MATES_DISPERSAL_TICKS });
+    world.agents.push(a);
+
+    maybeTriggerDispersal(world, a, undefined, ALWAYS_SUCCEED, REGION_CTX);
+
+    expect(a.crossingToRegionId).toBe("region-b");
+    expect(a.dispersalReason).toBe("no_eligible_mates");
+  });
+
+  it("finishDispersal (via applyDispersal, on arrival) does nothing further for a region-crossing agent — no herd join/found, no 'dispersed' event, and it stays in world.agents", () => {
+    const world = createWorld(50, 50);
+    const a = agent("arrived-crosser", {
+      pos: { x: 0, y: 24 },
+      dispersalTarget: { x: 0, y: 25 },
+      dispersalReason: "matured",
+      crossingToRegionId: "region-b",
+      herdId: "old-herd",
+    });
+    world.agents.push(a);
+    const log = new EventLog();
+
+    applyDispersal(world, a, log);
+
+    expect(a.pos).toEqual({ x: 0, y: 25 });
+    expect(a.dispersalTarget).toBeUndefined(); // arrived
+    expect(a.crossingToRegionId).toBe("region-b"); // left intact — this is overworld.ts's own "ready to fold in" signal
+    expect(a.herdId).toBe("old-herd"); // untouched — no same-map join/found happened
+    expect(log.events.some((e) => e.kind === "dispersed")).toBe(false);
+    expect(world.agents).toContain(a); // dispersal.ts never removes agents from World.agents itself
   });
 });
