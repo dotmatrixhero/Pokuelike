@@ -2087,3 +2087,113 @@ not something this pathfinding pass itself caused or is positioned to fix.
       terrain palette (the headless CLI's rendering, separate from
       `packages/web`) was not given the same per-species shelter tint —
       real, known, cosmetic-only gap.
+
+## Auto Camera — built, see DESIGN.md
+
+- [x] Toggleable "Auto Camera" mode (`packages/web/src/autoCamera.ts` +
+      `main.ts` wiring): follows immigration, courtship (bonded/
+      shelterBuilt/eggLaid as three separate moments), egg hatching,
+      battles (start-to-death-or-retreat), evolution, and true deaths;
+      zooms in, temporarily drops playback to 2x from 4x+, and scopes the
+      event log to exactly that moment's participants.
+- [ ] **No camera easing/animation.** Both the zoom change and the scroll
+      reposition are instant (a plain `scrollLeft`/`scrollTop` assignment,
+      no CSS transition) — a deliberate choice for this pass (see
+      DESIGN.md: instant assignment is what makes telling "our own scroll"
+      apart from "the viewer's real scroll" exact rather than a timing
+      guess), but it means the actual visual cut is a hard jump, not a pan/
+      zoom animation. A real fix would need a different manual-vs-auto
+      scroll detection strategy (e.g. a short "ignore scroll events for
+      N ms after we animate" window, or an `IntersectionObserver`-free
+      alternative) before smooth easing could be added safely.
+- [ ] **Battle camera doesn't account for multiple simultaneous fights.**
+      Two unrelated pairs fighting at the same time correctly become two
+      separate queued `Engagement`s (never merged — `findBattle` only
+      widens an existing engagement when a hit's ids actually overlap it),
+      but the *first* one to engage holds the camera/slowdown for its full
+      run before the second ever gets shown, even if the second is (by some
+      measure) the more dramatic fight. No "which fight is more interesting"
+      heuristic exists — first-come-first-served only, same as every other
+      queued engagement (see DESIGN.md's "no interruption" reasoning) — an
+      accepted simplicity tradeoff, not an oversight, but worth revisiting
+      if multi-fight scenes turn out to be common on the real demo map.
+- [ ] **The `BATTLE_STALE_TICKS`/`BATTLE_EPILOGUE_TICKS`/`DWELL_TICKS`
+      constants are reasoned-about but not empirically tuned** — chosen
+      from reading the relevant tick-rate/behavior code, not from watching
+      dozens of real runs and adjusting. A real live-observer session
+      (human, not headless) would be the way to tell if 24 ticks feels too
+      short/long for a one-shot moment, or whether 40 ticks of silence is
+      the right disengagement threshold for a real fight's actual pacing.
+- [ ] **Herd-vs-herd `herdClash` skirmishes with more than two active
+      participants** (a scrum, not a clean 1v1) aren't specially handled —
+      each `attacker`/`defender` pair that lands a hit becomes/extends one
+      `battle` engagement via `findBattle`'s overlap check, so a genuine
+      multi-agent brawl could end up as one engagement whose `ids` set
+      quietly grows to several agents (camera focus averages all of their
+      live positions) rather than being recognized as "a brawl" with its
+      own distinct camera treatment (e.g. zooming out slightly to fit more
+      combatants instead of staying at the fixed two-agent-appropriate
+      `AUTO_CAM_ZOOM`). Works, reads reasonably in practice (confirmed via
+      the throwaway verification's pack-hunt-adjacent scenario reasoning
+      in DESIGN.md), just not a bespoke "brawl" camera mode.
+- [ ] Real in-browser visual polish unverified beyond the one manual
+      Playwright smoke run recorded in DESIGN.md (a single seed, one
+      battle observed) — a longer real-time watch session across several
+      seeds, actually looking at the zoomed-in view rather than just
+      asserting on DOM state, would be the next real check.
+
+## Species-dependent shelter ease and egg-defense lethality — built, see DESIGN.md
+
+- [x] Predators (`Agent.isPredator`, newly denormalized from
+      `SpeciesDef.isPredator` at spawn/egg-lay) trigger shelter-building at a
+      lower comfort threshold (`PREDATOR_COMFORT_DISCOUNT`, 0.15, stacks with
+      the existing `BOND_COMFORT_DISCOUNT`) and finish construction in half
+      the ordinary time (`PREDATOR_BUILD_TICKS_MULTIPLIER`, 0.5, via new
+      `builderShelterTicks(agent)`) — direct ask: "predators should have it
+      easier to make shelter."
+- [x] A predator's own critically-hurt flee check now runs BEFORE
+      `applyEggDefense` in `applyPredationInstincts` (reverse of the
+      universal ordering every other species still gets) — a badly hurt
+      predator flees instead of unconditionally fighting to the death over
+      its egg; a predator that isn't critically hurt still defends normally
+      afterward. When a predator does fight, the outcome logs as
+      `"defeated"` instead of `"killed"` — direct ask: "maybe they don't
+      have the protect to death mentality with it."
+- [x] New tests (`shelter.test.ts`/`eggs.test.ts`): predator-vs-non-predator
+      trigger-threshold and build-tick comparisons, bonded-predator
+      double-discount stacking, non-predator-still-fights-to-real-death
+      baseline (unchanged), predator-fights-non-lethally-labeled,
+      critically-hurt-predator-flees-instead-of-fighting. 725 engine tests
+      pass, including the unmodified determinism acceptance suite (no new
+      `rng()` calls introduced). `pnpm -r typecheck`/`build` clean across
+      all 4 packages.
+- [x] Real headless validation, seeds 42/7/20260903, 3000/6000/8000 ticks:
+      predator population (Scyther/Onix/Spearow + evolutions) up on 6 of 9
+      seed/tick combinations, including every seed-42 checkpoint (1/0/1 ->
+      8/9/9) and seed 7's later ticks (2/0 -> 7/5) — flat or slightly down
+      on the other 3. Zero starvation deaths on every seed/tick after this
+      change (was 2/2/4 on seed 7 before). A real event-log check confirms
+      the new predator-specific egg-defense branch actually fires in real
+      runs (4/4 and 16/58 of that seed's total `eggDefended` events had a
+      predator defender). See DESIGN.md for the full table and the honest
+      "raw seed comparison isn't a clean isolated A/B in this chaotic
+      system" caveat.
+- [ ] **Real, honestly-reported side effect, not tuned against**: total/prey
+      population is meaningfully lower after this change on 2 of 3 seeds at
+      8000 ticks (a plausible, mechanistically-expected trade-off — more
+      surviving predators means more sustained hunting pressure — not a
+      bug). If a future pass judges this trade too aggressive, re-tuning
+      `PREDATOR_COMFORT_DISCOUNT`/`PREDATOR_BUILD_TICKS_MULTIPLIER` down is
+      the flagged next step, not reverting the feature.
+- [ ] **Open follow-up, not done**: a predator's `"defeated"` egg-defense
+      outcome only changes the EVENT LABEL today, not actual survivability —
+      `resolveHitAgainstTarget`'s death branch sets `alive = false`
+      regardless of `faintKind`. A genuinely can't-die predator egg-defense
+      fight would need to reuse `herdConflict.ts`'s separate, HP-floor-
+      clamped `resolveRivalryHit` resolver instead of `predation.ts`'s own
+      faint/finishing-pool combat — not attempted this pass.
+- [ ] **Open follow-up, not done**: no third lever (e.g. a shorter
+      `SHELTER_MIN_BUILD_DISTANCE` for predators) was added on top of the
+      two shipped (comfort discount + build-tick halving) — judged
+      sufficient and validated as such, but a real option if more predator
+      ease is wanted later.

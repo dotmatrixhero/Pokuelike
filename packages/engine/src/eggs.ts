@@ -123,6 +123,12 @@ export function spawnEgg(world: World, mother: Agent, father: Agent, pos: Vec2, 
     age: 0,
     parentIds: [mother.id, father.id],
     grandparentIds: [...new Set([...(mother.parentIds ?? []), ...(father.parentIds ?? [])])],
+    // Denormalized straight from the mother (same species family — an
+    // evolved/base-form pair still shares the same hunting temperament) so
+    // `applyEggDefense`'s species-conditional lethality check (predation.ts)
+    // has something to read the moment an egg exists, not only after it
+    // hatches.
+    isPredator: mother.isPredator,
   };
 }
 

@@ -377,6 +377,197 @@ describe("predation.ts: extreme egg defense overrides ordinary flee/self-preserv
   });
 });
 
+describe("predation.ts: species-dependent egg-defense lethality (direct ask: predators don't defend to the death)", () => {
+  const RULES: HuntRules = { scyther: true };
+
+  it("a non-predator defender still fights to a real, true kill ('killed', alive: false) — unchanged baseline", () => {
+    const world = createWorld(10, 10);
+    const egg = eggAgent({ pos: { x: 5, y: 5 }, herdId: "herd-a" });
+    const defender: Agent = {
+      id: "bulbasaur-defender",
+      species: "bulbasaur",
+      pos: { x: 5, y: 5 },
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds(),
+      behavior: "idle",
+      herdId: "herd-a",
+      moves: [TEST_MOVE],
+      level: 20,
+      hp: 100,
+      maxHp: 100,
+    };
+    const threat: Agent = {
+      id: "scyther-0",
+      species: "scyther",
+      pos: { x: 6, y: 5 },
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds(),
+      behavior: "idle",
+      moves: [TEST_MOVE],
+      level: 1,
+      hp: 0,
+      maxHp: 1,
+      // Already fainted, finishing pool exhausted -- the next landed hit is
+      // the real finishing blow that `logKillOrDefeat` actually fires on
+      // (a single hit that merely brings hp to 0 logs "fainted", not
+      // "killed"/"defeated" -- see predation.ts's `resolveHitAgainstTarget`).
+      fainted: true,
+      finishingPool: 0,
+    };
+    world.agents.push(egg, defender, threat);
+    const log = new EventLog();
+
+    applyPredationInstincts(world, defender, RULES, log, FAKE_CTX, () => 0);
+
+    expect(threat.alive).toBe(false);
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "killed", preyId: "scyther-0" }));
+  });
+
+  it("an isPredator defender's fight logs as 'defeated' (ordinary combat), never 'killed' (predation) — event-label distinction, not a survivability change", () => {
+    const world = createWorld(10, 10);
+    const egg = eggAgent({ pos: { x: 5, y: 5 }, herdId: "herd-a", isPredator: true });
+    const defender: Agent = {
+      id: "scyther-defender",
+      species: "scyther",
+      pos: { x: 5, y: 5 },
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds(),
+      behavior: "idle",
+      herdId: "herd-a",
+      moves: [TEST_MOVE],
+      level: 20,
+      hp: 100,
+      maxHp: 100,
+      isPredator: true,
+    };
+    const threat: Agent = {
+      id: "onix-0",
+      species: "onix",
+      pos: { x: 6, y: 5 },
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds(),
+      behavior: "idle",
+      moves: [TEST_MOVE],
+      level: 1,
+      hp: 0,
+      maxHp: 1,
+      // Already fainted, finishing pool exhausted -- see the sibling
+      // baseline test's comment for why this is required to actually reach
+      // `logKillOrDefeat` on this hit.
+      fainted: true,
+      finishingPool: 0,
+    };
+    world.agents.push(egg, defender, threat);
+    const log = new EventLog();
+
+    const handled = applyPredationInstincts(world, defender, RULES, log, FAKE_CTX, () => 0);
+
+    expect(handled).toBe(true);
+    expect(defender.behavior).toBe("fight");
+    // Still a real, engaged defense — the egg isn't left undefended, and
+    // the fight itself resolves exactly the same way mechanically (the
+    // current combat model has no separate "can't actually kill" mode
+    // outside herdConflict.ts's own distinct resolver — see predation.ts's
+    // `applyEggDefense` doc comment for the honest accounting of what this
+    // faintKind swap does and doesn't change).
+    expect(threat.alive).toBe(false);
+    // The real, meaningful difference is the EVENT LABEL — "defeated" (an
+    // ordinary combat loss) instead of "killed" (a predation kill) — which
+    // matters for anything reading the event log (e.g. TODO.md's own
+    // predator-population instrumentation) to tell "a predator died
+    // defending its egg" apart from "a predator was hunted."
+    expect(log.events.some((e) => e.kind === "killed")).toBe(false);
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "defeated", loserId: "onix-0" }));
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "eggDefended", defenderId: "scyther-defender" }));
+  });
+
+  it("a critically hurt isPredator defender flees instead of committing to egg defense (self-preservation runs first for predators)", () => {
+    const world = createWorld(10, 10);
+    const egg = eggAgent({ pos: { x: 5, y: 5 }, herdId: "herd-a", isPredator: true });
+    const defender: Agent = {
+      id: "scyther-defender",
+      species: "scyther",
+      pos: { x: 5, y: 5 },
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds(),
+      behavior: "fight",
+      herdId: "herd-a",
+      moves: [TEST_MOVE],
+      level: 5,
+      hp: 1,
+      maxHp: 100, // 1% hp -- deep past any ordinary retreat threshold
+      isPredator: true,
+    };
+    const attacker: Agent = {
+      id: "onix-0",
+      species: "onix",
+      pos: { x: 6, y: 5 },
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds(),
+      behavior: "fight",
+      fightTarget: "scyther-defender",
+      moves: [TEST_MOVE],
+      level: 20,
+    };
+    world.agents.push(egg, defender, attacker);
+    const log = new EventLog();
+
+    const handled = applyPredationInstincts(world, defender, RULES, log, FAKE_CTX, () => 0);
+
+    expect(handled).toBe(true);
+    // Fled rather than fighting for the egg -- a real behavioral difference
+    // from the non-predator case, not just a softer combat outcome.
+    expect(defender.behavior).toBe("flee");
+    expect(log.events.some((e) => e.kind === "eggDefended")).toBe(false);
+  });
+
+  it("an isPredator defender that ISN'T critically hurt still defends when no live attacker is fleeing from it", () => {
+    const world = createWorld(10, 10);
+    const egg = eggAgent({ pos: { x: 5, y: 5 }, herdId: "herd-a", isPredator: true });
+    const defender: Agent = {
+      id: "scyther-defender",
+      species: "scyther",
+      pos: { x: 5, y: 5 },
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds(),
+      behavior: "idle",
+      herdId: "herd-a",
+      moves: [TEST_MOVE],
+      level: 20,
+      hp: 100,
+      maxHp: 100,
+      isPredator: true,
+    };
+    const threat: Agent = {
+      id: "onix-0",
+      species: "onix",
+      pos: { x: 6, y: 5 },
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds(),
+      behavior: "idle",
+      moves: [TEST_MOVE],
+      level: 1,
+      hp: 1,
+      maxHp: 1,
+    };
+    world.agents.push(egg, defender, threat);
+    const log = new EventLog();
+
+    const handled = applyPredationInstincts(world, defender, RULES, log, FAKE_CTX, () => 0);
+
+    expect(handled).toBe(true);
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "eggDefended", defenderId: "scyther-defender" }));
+  });
+});
+
 describe("eggs never starve or die of thirst", () => {
   // Direct question, confirmed here rather than just by reading the code:
   // "can eggs die of starvation or thirst? that should not happen." An egg

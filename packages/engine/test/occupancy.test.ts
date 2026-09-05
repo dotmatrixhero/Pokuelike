@@ -210,8 +210,8 @@ describe("occupancy: shelter capacity (2 adults + 1 egg per tile, adjacency-exte
     expect(shelterCluster(world, "surface", { x: 2, y: 2 })).toEqual([{ x: 2, y: 2 }]);
   });
 
-  it("SHELTER_TILE_ADULT_CAP is the real per-tile number from the direct instruction (2 adults); SHELTER_TILE_EGG_CAP was raised from 1 to fit a full clutch on a single tile (direct follow-up)", () => {
+  it("SHELTER_TILE_ADULT_CAP/SHELTER_TILE_EGG_CAP are the real per-tile numbers from the direct instruction (2 adults + 1 egg) — briefly raised to 4 to un-stick clutches, reverted back to 1 by direct follow-up ask once the resulting growth was confirmed real but more than wanted", () => {
     expect(SHELTER_TILE_ADULT_CAP).toBe(2);
-    expect(SHELTER_TILE_EGG_CAP).toBe(4);
+    expect(SHELTER_TILE_EGG_CAP).toBe(1);
   });
 });

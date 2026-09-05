@@ -1,10 +1,11 @@
-import { EventLog, tickWorld, randomSeed, type Agent, type World } from "@pokuelike/engine";
+import { EventLog, tickWorld, randomSeed, type Agent, type Vec2, type World } from "@pokuelike/engine";
 import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawWorld, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { EventPopups } from "./eventPopups.js";
 import { renderInspector } from "./inspector.js";
 import { renderLegend } from "./legend.js";
+import { AutoCameraController, type AutoCameraHost } from "./autoCamera.js";
 
 /**
  * Ticks per real second at speed multiplier 1x. Multiplied by `SPEED_STEPS`
@@ -26,6 +27,15 @@ const ZOOM_MIN = 0.1;
 const ZOOM_MAX = 2;
 const ZOOM_BUTTON_FACTOR = 1.25;
 const DEFAULT_ZOOM = 0.8; // the whole demo map roughly fits a laptop viewport at this level
+/**
+ * Auto Camera's fixed close-in zoom — `ZOOM_MAX` itself (2.5x `DEFAULT_ZOOM`)
+ * rather than something scaled to fit exactly two combatants: a fixed level
+ * is simple, predictable, and already a genuinely closer view than default
+ * for every notable-event category (a lone hatchling, a two-agent battle, a
+ * three-agent immigration group) without per-category zoom-fit math that a
+ * moving multi-agent battle would immediately invalidate anyway.
+ */
+const AUTO_CAM_ZOOM = ZOOM_MAX;
 
 // --- DOM references -------------------------------------------------------
 
@@ -58,6 +68,8 @@ const toggleDrawerBtn = document.getElementById("toggle-drawer") as HTMLButtonEl
 const zoomOutBtn = document.getElementById("zoom-out") as HTMLButtonElement;
 const zoomInBtn = document.getElementById("zoom-in") as HTMLButtonElement;
 const zoomLabel = document.getElementById("zoom-label") as HTMLElement;
+const autoCamToggleBtn = document.getElementById("auto-cam-toggle") as HTMLButtonElement;
+const autoCamStatusEl = document.getElementById("auto-cam-status") as HTMLElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -75,6 +87,68 @@ let zoom = DEFAULT_ZOOM;
 const eventLogPanel = new EventLogPanel(eventLogEl);
 const eventPopups = new EventPopups();
 
+// --- Auto Camera -------------------------------------------------------------
+// See autoCamera.ts for the detection/state-machine design writeup (DESIGN.md
+// has the full decision record). This file supplies the DOM-facing half: the
+// actual camera (zoom + canvas-wrap scroll) and speed-slider control, plus
+// telling the controller apart a genuine user-driven pan/zoom/speed change
+// from auto-camera's own, so the two don't fight each other.
+
+/** The view (zoom + scroll) captured the moment auto-camera takes over from idle, restored once it lets go again. `undefined` whenever auto-camera isn't currently controlling the view. */
+let autoCamHomeView: { zoom: number; scrollLeft: number; scrollTop: number } | undefined;
+/**
+ * The exact scroll position auto-camera itself last set — compared against
+ * on the next real `scroll` event to tell "the browser fired this because
+ * WE moved it" apart from "the viewer dragged/scrolled it themselves,"
+ * without a fragile timing-based ignore-flag. Sharing one canvas-wrap scroll
+ * listener with a real user gesture only works because our own sets are
+ * exact (no smooth/animated scrolling — see `focusCameraOn`).
+ */
+let autoCamLastScroll: { left: number; top: number } | undefined;
+
+function focusCameraOn(pos: Vec2): void {
+  setZoom(AUTO_CAM_ZOOM);
+  const targetLeft = Math.max(0, (pos.x + 0.5) * TILE_SIZE * zoom - canvasWrap.clientWidth / 2);
+  const targetTop = Math.max(0, (pos.y + 0.5) * TILE_SIZE * zoom - canvasWrap.clientHeight / 2);
+  autoCamLastScroll = { left: targetLeft, top: targetTop };
+  canvasWrap.scrollLeft = targetLeft;
+  canvasWrap.scrollTop = targetTop;
+}
+
+const autoCamHost: AutoCameraHost = {
+  captureHomeView(): void {
+    autoCamHomeView = { zoom, scrollLeft: canvasWrap.scrollLeft, scrollTop: canvasWrap.scrollTop };
+  },
+  focusOn(pos: Vec2): void {
+    focusCameraOn(pos);
+  },
+  restoreHomeView(): void {
+    const home = autoCamHomeView;
+    autoCamHomeView = undefined;
+    if (!home) return;
+    setZoom(home.zoom);
+    autoCamLastScroll = { left: home.scrollLeft, top: home.scrollTop };
+    canvasWrap.scrollLeft = home.scrollLeft;
+    canvasWrap.scrollTop = home.scrollTop;
+  },
+  getSpeed(): number {
+    return SPEED_STEPS[speedIndex]!;
+  },
+  setSpeed(speed: number): void {
+    const index = SPEED_STEPS.indexOf(speed as (typeof SPEED_STEPS)[number]);
+    if (index < 0 || index === speedIndex) return;
+    speedIndex = index;
+    speedSlider.value = String(speedIndex);
+    speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
+    scheduleLoop();
+  },
+  setLogFilter(ids: Set<string> | undefined): void {
+    eventLogPanel.setAutoCamFilter(ids);
+  },
+};
+
+const autoCamera = new AutoCameraController(autoCamHost);
+
 function currentSeed(): number {
   return world.rngSeed;
 }
@@ -84,6 +158,7 @@ function loadWorld(seed: number): void {
   log = new EventLog();
   lastLoggedEventCount = 0;
   selectedAgentId = undefined;
+  autoCamera.reset(); // every tracked id from the old world is meaningless now
 
   canvas.width = world.width * TILE_SIZE;
   canvas.height = world.height * TILE_SIZE;
@@ -107,6 +182,7 @@ function step(): void {
   const newEvents = log.events.slice(lastLoggedEventCount);
   eventLogPanel.ingest(newEvents, world);
   eventPopups.ingest(newEvents, world);
+  autoCamera.ingest(newEvents, world);
   lastLoggedEventCount = log.events.length;
   // Always dirty, not just when something's selected — the no-selection
   // view is a live population/weather overview, not a static placeholder.
@@ -198,6 +274,10 @@ speedSlider.addEventListener("input", () => {
   speedIndex = Number(speedSlider.value);
   speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
   scheduleLoop();
+  // A real drag on the slider, not auto-camera's own `setSpeed` (that path
+  // never touches the DOM slider's `input` event) — take it as the viewer's
+  // new intended speed rather than something to snap back from later.
+  autoCamera.noteManualSpeedChange();
 });
 
 canvas.addEventListener("click", (event) => {
@@ -263,8 +343,26 @@ function setZoom(next: number): void {
 function applyZoom(): void {
   setZoom(zoom);
 }
-zoomOutBtn.addEventListener("click", () => setZoom(zoom / ZOOM_BUTTON_FACTOR));
-zoomInBtn.addEventListener("click", () => setZoom(zoom * ZOOM_BUTTON_FACTOR));
+zoomOutBtn.addEventListener("click", () => {
+  setZoom(zoom / ZOOM_BUTTON_FACTOR);
+  autoCamera.noteManualViewChange();
+});
+zoomInBtn.addEventListener("click", () => {
+  setZoom(zoom * ZOOM_BUTTON_FACTOR);
+  autoCamera.noteManualViewChange();
+});
+
+// canvas-wrap's native `scroll` event fires identically whether the browser
+// scrolled because the viewer dragged/wheeled it or because auto-camera just
+// set `scrollLeft`/`scrollTop` itself (`focusCameraOn`/`restoreHomeView`) —
+// tell them apart by comparing against the exact position auto-camera itself
+// last set (both are plain, non-smooth assignments, so this is exact, not a
+// timing-based guess).
+canvasWrap.addEventListener("scroll", () => {
+  const last = autoCamLastScroll;
+  if (last && Math.abs(canvasWrap.scrollLeft - last.left) < 1 && Math.abs(canvasWrap.scrollTop - last.top) < 1) return;
+  autoCamera.noteManualViewChange();
+});
 
 // Two-finger pinch to zoom, touch devices — canvas-wrap still scrolls with
 // a single finger (touch-action: pan-x pan-y in index.html), so pinch only
@@ -293,6 +391,7 @@ canvasWrap.addEventListener(
     if (event.touches.length !== 2 || pinchStartDistance === undefined) return;
     event.preventDefault();
     setZoom(pinchStartZoom * (touchDistance(event.touches) / pinchStartDistance));
+    autoCamera.noteManualViewChange();
   },
   { passive: false }
 );
@@ -304,6 +403,13 @@ canvasWrap.addEventListener(
   { passive: true }
 );
 
+autoCamToggleBtn.addEventListener("click", () => {
+  autoCamera.setEnabled(!autoCamera.isEnabled());
+  autoCamToggleBtn.textContent = `Auto Camera: ${autoCamera.isEnabled() ? "On" : "Off"}`;
+  autoCamToggleBtn.classList.toggle("playing", autoCamera.isEnabled());
+  if (!autoCamera.isEnabled()) autoCamStatusEl.textContent = "";
+});
+
 // --- Boot --------------------------------------------------------------------
 
 const seedParam = new URLSearchParams(location.search).get("seed");
@@ -314,6 +420,8 @@ speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
 function frame(): void {
   drawWorld(ctx, world, selectedAgentId, renderStyle);
   drawEventPopups(ctx, eventPopups.active());
+  autoCamera.update(world);
+  autoCamStatusEl.textContent = autoCamera.currentLabel() ?? (autoCamera.isEnabled() ? "watching…" : "");
   eventLogPanel.render();
   refreshSelection();
   requestAnimationFrame(frame);
