@@ -7433,3 +7433,29 @@ an agent that already has one nearby) is a real, separate, out-of-scope-
 for-this-ask follow-up — flagged in TODO.md — and is the actual next lever
 if the goal is still "raise the population ceiling without touching the
 pipeline's pacing."
+
+### Follow-up: raise SHELTER_TILE_EGG_CAP instead of fixing clustering
+
+Direct ask, after the clutch-inert finding above: "i think we increase the
+per tile thing to allow for more eggs" — the more direct fix (raise the
+per-tile cap) over the alternative discussed (bias shelter-building toward
+clustering). `SHELTER_TILE_EGG_CAP` (occupancy.ts) 1 -> `EGG_CLUTCH_MAX`
+(4), so a single, realistic one-tile household can now hold an entire
+clutch on its own, without needing a multi-tile cluster to ever form.
+
+**Real-run findings — this time a genuine, large effect:** 3000/6000/8000
+ticks, standard 3 seeds. Seed 42: pop 15/35/120, eggLaid 2/24/109 (was
+inert at cap=1). Seed 7: pop 33/162/(pending), eggLaid 17/166 — genuinely
+thriving. Seed 20260903: still 0 eggs laid at any tick count despite 9-15
+bonds forming — that seed's pairs never finish building a shelter at all
+(a real, separate, pre-existing shelter-building-pace issue, not something
+this cap change touches). Zero hunger-starvation deaths across every seed
+and tick count tested — the safety bar holds throughout.
+
+Several pre-existing tests hardcoded the old cap-of-1 behavior (either
+directly, or indirectly via real-rng clutch draws that used to always cap
+out at exactly 1 egg) — updated to check "at least one real egg with the
+right properties" or to pre-occupy known capacity rather than assume an
+exact count, per this file's established "fix a test if new real behavior
+invalidates an old assumption" convention. All 718 engine tests pass,
+including the unmodified determinism suite.

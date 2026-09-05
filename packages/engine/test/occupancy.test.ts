@@ -161,12 +161,15 @@ describe("occupancy: shelter capacity (2 adults + 1 egg per tile, adjacency-exte
     expect(canEnterTile(world, makeAgent({ id: "b", maxHp: TILE_WEIGHT_CAPACITY * 5 }), "surface", pos)).toBe(true);
   });
 
-  it("a lone shelter tile admits exactly 1 egg, then blocks a 2nd", () => {
+  it("a lone shelter tile admits up to SHELTER_TILE_EGG_CAP eggs, then blocks the next one", () => {
     const world = createWorld(10, 10);
     const pos = { x: 5, y: 5 };
     setTile(world, "surface", 5, 5, "shelter");
-    expect(canLayEggAt(world, "surface", pos)).toBe(true);
-    world.agents = [makeAgent({ id: "egg-1", pos, isEgg: true })];
+    world.agents = [];
+    for (let i = 0; i < SHELTER_TILE_EGG_CAP; i++) {
+      expect(canLayEggAt(world, "surface", pos)).toBe(true);
+      world.agents.push(makeAgent({ id: `egg-${i}`, pos, isEgg: true }));
+    }
     expect(canLayEggAt(world, "surface", pos)).toBe(false);
   });
 
@@ -207,8 +210,8 @@ describe("occupancy: shelter capacity (2 adults + 1 egg per tile, adjacency-exte
     expect(shelterCluster(world, "surface", { x: 2, y: 2 })).toEqual([{ x: 2, y: 2 }]);
   });
 
-  it("SHELTER_TILE_ADULT_CAP/SHELTER_TILE_EGG_CAP are the real per-tile numbers from the direct instruction (2 adults + 1 egg)", () => {
+  it("SHELTER_TILE_ADULT_CAP is the real per-tile number from the direct instruction (2 adults); SHELTER_TILE_EGG_CAP was raised from 1 to fit a full clutch on a single tile (direct follow-up)", () => {
     expect(SHELTER_TILE_ADULT_CAP).toBe(2);
-    expect(SHELTER_TILE_EGG_CAP).toBe(1);
+    expect(SHELTER_TILE_EGG_CAP).toBe(4);
   });
 });
