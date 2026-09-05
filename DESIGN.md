@@ -8526,3 +8526,124 @@ above.
   agent's rapport standing directly (e.g. an inspector panel showing "close
   bonds"/"grudges") is a real, separate follow-up, not attempted here —
   `packages/web` was out of scope for this task.
+
+## Auto Camera follow-up: battle priority + one-tick stepping
+
+**Direct ask, verbatim.** "One more battle log thingy I want to prioritize
+battles if there are multiple things goin on.. And step through them one
+tick at a time rather than super slow speed. It's too hard to follow."
+
+**Battle priority.** Auto Camera's queue was plain FIFO across all six
+notable categories — a battle that started while, say, an immigration
+one-shot was already on screen just waited its turn behind it. Two changes
+in `autoCamera.ts`:
+- `AutoCameraController.popNextEngagement` (replacing a bare `queue.shift()`
+  in `reconcile`) now scans the queue for any `category: "battle"` entry
+  and pops that first, falling back to plain FIFO among whatever's left. A
+  battle queued behind three other moments still jumps straight to the
+  front the instant it's this controller's turn to promote something.
+- `onBattleHit` now also preempts whatever's *currently active*, not just
+  what's queued: the moment a brand-new battle starts (not an existing one
+  widening via a new hit — that path already just extends the existing
+  engagement), if `this.active` is a non-battle one-shot, its
+  `expiresOrLastActiveTick` is stamped to the current tick. `reconcile`'s
+  existing `tick >= this.active.expiresOrLastActiveTick` check then retires
+  it on the very next pass and immediately promotes the battle — no new
+  expiry code path needed, just feeding the existing one an already-expired
+  deadline. A battle never preempts another battle (there's only ever one
+  battle engagement live; a second `fought`/`herdClash` pair widens or
+  starts its own queued entry, which the priority-pop above still surfaces
+  next).
+
+**One-tick stepping, not continuous slow-motion.** The `AUTO_CAM_BATTLE_SLOWDOWN_SPEED = 0.25` fixed-speed
+slow-motion from the previous pass (see "UI polish" section above) was
+still *continuous* — a `setInterval` firing every ~667ms at that speed,
+which is fast enough that several hits or a hit-plus-a-flee could still
+land close enough together to blur past a viewer, especially with the
+Battle Screen log's line-by-line flash animation competing for attention.
+Direct ask was explicit: step through it, don't just slow it down further.
+Replaced with a completely different mechanism rather than a smaller speed
+value:
+- `AutoCameraHost` gained two new methods, `enterBattleStep()`/
+  `exitBattleStep()`, replacing the battle branch's old `setSpeed`/
+  `getSpeed` calls entirely (non-battle categories still use the original
+  `setSpeed`-based 2x/4x-threshold slowdown, unchanged).
+- `main.ts` implements them with a new `battleStepMode` flag consulted at
+  the top of `scheduleLoop()`: while true, the ordinary speed-slider-driven
+  interval math is bypassed completely and ticking runs on its own fixed
+  `BATTLE_STEP_INTERVAL_MS = 650` timer instead — exactly one `step()` call
+  per beat, decoupled from whatever `speedIndex` the viewer had selected
+  before the battle started (and restored untouched once
+  `exitBattleStep()` fires). Still gated on the existing `playing` check in
+  `scheduleLoop` — if the viewer is paused, a battle starting doesn't
+  quietly un-pause the world for them, same as the old speed-override
+  behavior never did either.
+- `AutoCameraController` tracks this with a new `battleStepping` boolean
+  (mirroring `savedSpeed`'s "already applied, don't re-apply" guard, but as
+  its own flag since this path never touches `getSpeed`/`setSpeed` at all),
+  set in `applySlowdownIfNeeded` and cleared in `releaseSpeedOverride`
+  alongside the ordinary speed-restore logic — so `reset()` (world reload,
+  or the viewer toggling Auto Camera off mid-battle) still correctly hands
+  ticking back to the speed slider through the one existing cleanup path.
+
+**Not done here.** No manual "click to advance" control — `650ms` is a
+fixed, automatic cadence, not a step button the viewer has to press
+per-tick; the ask was "too hard to follow" at continuous slow motion, not
+"I want manual control," so automatic-but-discrete seemed like the right
+read. If `650ms` turns out too fast or slow once watched for real, it's a
+single named constant to retune, not a design change.
+
+## Player-recruitment design notes (exploratory — nothing built yet)
+
+Captured here so this ongoing design thread doesn't get lost between
+sessions; none of this has a mechanic behind it yet, and none of it was
+asked to be built now — the rapport *engine* above is the only piece of it
+that's actually implemented so far, as the deliberately player-agnostic
+foundation this would eventually build on.
+
+**"Faking" an overworld.** Direct exploratory question: can other biome
+tiles be faked rather than fully simulated while off-screen, the way
+Crusader Kings/RimWorld/Dwarf Fortress abstract regions the player isn't
+currently looking at? Recommendation discussed: yes — simulate a compact
+per-region summary (population counts, notable individuals, rough
+herd/rival state) between visits rather than ticking every agent on every
+unvisited grid every tick, and reconstruct a plausible-looking live grid
+the moment the player jumps there. This implies a **"notables vs. anonymous
+population" split**: a small number of individually-tracked, persistent
+agents (with real stories, moves, rapport edges) per region, with the rest
+of the population represented in aggregate until/unless something promotes
+one to notable (e.g. the player interacts with it directly). Follow-up
+question raised and answered: yes, an anonymous unit's "story" (its moves,
+its specific history) is effectively generated on the spot the moment it's
+promoted to a notable, not pre-simulated in full off-screen.
+
+**Player bonding verbs — locked in as four, not three:**
+1. **Feed** — reliable, slow, grindable. Repeated small positive nudges,
+   same shape as the existing `foodDelivered` rapport trigger already
+   built for herd-mates.
+2. **Fight alongside** — helping the target fight off a predator
+   threatening it (proactive assistance *before* a crisis lands), reusing
+   the existing joint mob-defense mechanic's shape. Rarer and riskier than
+   feeding.
+3. **Rescue** — the special, high-stakes one, added specifically because
+   "presence is nice but too passive... it has to feel special, intentional,
+   with a payoff... the Pokémon chooses you as much as you chose it."
+   Concretely: intervening when the target is critically hurt/dying (at or
+   near a death-branch moment, not just "in a fight") — either carrying it
+   to safety or applying/crafting medicine to heal it (the latter implying
+   a real item-crafting hook, not just a flag flip). Rare, unrepeatable-
+   feeling, and mutual in a way the other three aren't: the Pokémon
+   remembers being saved specifically by *you*, not generic assistance.
+4. **Presence** — patient, passive, time-invested; watching over a
+   vulnerable moment like sleep or egg incubation, reusing the existing
+   sleep-watch/incubation mechanics. Explicitly demoted to the fourth/
+   lowest-priority verb once "rescue" was proposed — presence alone was
+   judged too passive to be a primary path, but still worth keeping as one
+   option among several.
+
+**Open, unbuilt questions this raises for later:** what a "vulnerable
+moment" or "critically hurt" threshold actually reads as UI-side, whether
+rescue needs its own new `SimEvent` kind (a real death-branch near-miss
+isn't currently narrated as a distinct moment), and the crafting/medicine
+system rescue's second half implies — none of this has been scoped, let
+alone built.

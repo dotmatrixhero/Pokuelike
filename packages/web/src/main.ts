@@ -39,6 +39,16 @@ const DEFAULT_ZOOM = 0.8; // the whole demo map roughly fits a laptop viewport a
  * immediately invalidate anyway.
  */
 const AUTO_CAM_ZOOM = 1.5;
+/**
+ * Real ms per tick while a battle has taken over ticking (see
+ * `AutoCameraHost.enterBattleStep`) — a fixed, deliberate beat per tick
+ * rather than a speed multiplier. Direct follow-up ask: "step through them
+ * one tick at a time rather than super slow speed, it's too hard to
+ * follow" (0.25x was still continuous timer-driven ticking, which could
+ * still blur consecutive hits together). Chosen slow enough to read one
+ * battle-log line/HP change per beat without feeling like a stall.
+ */
+const BATTLE_STEP_INTERVAL_MS = 650;
 
 // --- DOM references -------------------------------------------------------
 
@@ -84,6 +94,8 @@ let log: EventLog;
 let playing = false;
 let speedIndex = DEFAULT_SPEED_INDEX;
 let intervalId: number | undefined;
+/** True while a battle owns ticking via its own fixed `BATTLE_STEP_INTERVAL_MS` cadence instead of the ordinary speed slider — see `scheduleLoop` and the `enterBattleStep`/`exitBattleStep` host methods below. */
+let battleStepMode = false;
 let selectedAgentId: string | undefined;
 let lastLoggedEventCount = 0;
 let inspectorDirty = true;
@@ -147,6 +159,16 @@ const autoCamHost: AutoCameraHost = {
     speedIndex = index;
     speedSlider.value = String(speedIndex);
     speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
+    scheduleLoop();
+  },
+  enterBattleStep(): void {
+    if (battleStepMode) return;
+    battleStepMode = true;
+    scheduleLoop();
+  },
+  exitBattleStep(): void {
+    if (!battleStepMode) return;
+    battleStepMode = false;
     scheduleLoop();
   },
   setLogFilter(ids: Set<string> | undefined): void {
@@ -219,6 +241,15 @@ function scheduleLoop(): void {
     intervalId = undefined;
   }
   if (!playing) return;
+
+  if (battleStepMode) {
+    // A battle owns ticking now — exactly one tick per fixed real-time beat,
+    // ignoring the speed slider entirely (see `BATTLE_STEP_INTERVAL_MS`'s
+    // doc comment). Still gated on `playing` above: if the viewer is
+    // paused, a battle starting shouldn't un-pause the world for them.
+    intervalId = window.setInterval(step, BATTLE_STEP_INTERVAL_MS);
+    return;
+  }
 
   const speed = SPEED_STEPS[speedIndex]!;
   const ticksPerSec = BASE_TICKS_PER_SEC * speed;

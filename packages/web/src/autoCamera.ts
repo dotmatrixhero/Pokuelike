@@ -40,17 +40,19 @@ export const AUTO_CAM_SLOWDOWN_SPEED = 2;
 /** Auto-camera only intervenes on speed at/above this for a non-battle event — below it, playback is already slow enough to watch without help. */
 const SLOWDOWN_THRESHOLD_SPEED = 4;
 /**
- * Playback speed a *battle* specifically drops to — real cinematic slow-
- * motion, deliberately slower than even normal 1x (direct ask: "slow down
- * battles to .25x"). Because this is slower than every other speed step
- * (including the 1x/2x/3x range `SLOWDOWN_THRESHOLD_SPEED` treats as "already
- * watchable"), a battle ignores that threshold entirely and always drops to
- * this the moment it starts, regardless of what speed the viewer was at —
- * the whole point is a guaranteed slow-motion fight, not just reining in an
- * already-fast playback speed. Every other notable category keeps the
- * unchanged ≥4x-only / 2x-target behavior above.
+ * A battle no longer just drops the *speed multiplier* to a slow-motion
+ * value (was 0.25x, real cinematic slow-motion) — direct follow-up ask:
+ * "step through them one tick at a time rather than super slow speed, it's
+ * too hard to follow." Continuous timer-driven ticking, even slow, still
+ * blurs several hits/log lines together before a viewer can react; a battle
+ * now instead pauses ordinary speed-driven ticking entirely and advances
+ * exactly one tick at a time on its own fixed real-time cadence (see
+ * `AutoCameraHost.enterBattleStep`/`exitBattleStep`, and `main.ts`'s
+ * `BATTLE_STEP_INTERVAL_MS`) — a deliberate, watchable beat per tick,
+ * regardless of what speed the viewer was previously at. Every other
+ * notable category keeps the unchanged ≥4x-only / 2x-target speed-slowdown
+ * behavior below.
  */
-export const AUTO_CAM_BATTLE_SLOWDOWN_SPEED = 0.25;
 
 interface Engagement {
   category: NotableCategory;
@@ -107,6 +109,16 @@ export interface AutoCameraHost {
   getSpeed(): number;
   /** Drive the speed slider to a specific `SPEED_STEPS` value. */
   setSpeed(speed: number): void;
+  /**
+   * Pause ordinary speed-driven ticking and start advancing exactly one tick
+   * per fixed real-time interval instead — called once, the moment a battle
+   * becomes the active engagement. See `AUTO_CAM_BATTLE_SLOWDOWN_SPEED`'s
+   * (now removed) doc comment above for why: continuous slow-motion was
+   * still too blurry to follow hit-by-hit.
+   */
+  enterBattleStep(): void;
+  /** Hand ticking back to the ordinary speed slider — called once, the moment a battle stops being the active engagement (concluded, or superseded). */
+  exitBattleStep(): void;
   /** Scope the event log to exactly these agent/egg ids, or `undefined` to clear the auto-cam filter. */
   setLogFilter(ids: Set<string> | undefined): void;
 }
@@ -125,6 +137,8 @@ export class AutoCameraController {
   private controllingView = false;
   /** Speed the viewer had selected before auto-camera's slowdown kicked in — restored once no engagement needs the slowdown any more, unless the viewer changed speed by hand in the meantime (see `noteManualSpeedChange`). */
   private savedSpeed: number | undefined;
+  /** True while a battle has ordinary ticking paused in favor of `host.enterBattleStep()`'s one-tick-at-a-time cadence — mirrors `savedSpeed`'s "already applied, don't re-apply" guard, but as its own flag since battle-step mode doesn't go through `getSpeed`/`setSpeed` at all. */
+  private battleStepping = false;
   /** Sticky "the viewer took the wheel" flag — set by `noteManualViewChange`, cleared whenever a *new* engagement becomes active. While set, the currently-active engagement keeps running (log filter, dwell/conclusion logic) but stops re-centering the camera; a fresh notable event still takes it back, since that's a deliberate new thing to look at, not a continuation of what the viewer already panned away from. */
   private viewerTookOver = false;
 
@@ -290,6 +304,18 @@ export class AutoCameraController {
       existing.expiresOrLastActiveTick = world.tick;
       return;
     }
+    // A battle is the single most important thing on screen — direct ask:
+    // "prioritize battles if there are multiple things going on." A brand
+    // new fight preempts whatever one-shot moment (immigration/courtship/
+    // hatch/evolution/death) is currently active instead of waiting for its
+    // own dwell timer to run out; expiring it now (rather than removing it
+    // outright) lets `reconcile` finish it through its normal path on the
+    // very next tick. Never preempts an *existing* battle — the `existing`
+    // check above already widens that one instead of racing a second, so
+    // `this.active` here is always non-battle whenever this branch runs.
+    if (this.active && this.active.category !== "battle") {
+      this.active.expiresOrLastActiveTick = world.tick;
+    }
     this.queue.push({ category: "battle", sourceKind: "fought", ids: new Set(ids), fallbackPos: pos, label, continuous: true, expiresOrLastActiveTick: world.tick, seq: this.nextSeq++ });
     if (this.queue.length > MAX_QUEUE) this.queue.shift();
   }
@@ -305,6 +331,20 @@ export class AutoCameraController {
     for (const id of ids) this.onBattleParticipantLeft(id);
     const coveredByBattle = (this.active?.category === "battle" && setsOverlap(this.active.ids, ids)) || this.queue.some((e) => e.category === "battle" && setsOverlap(e.ids, ids));
     if (!coveredByBattle) this.enqueueOneShot("death", sourceKind, ids, pos, label);
+  }
+
+  /**
+   * Pop the next engagement to show, preferring any queued *battle* over
+   * however long everything else has been waiting — direct ask: "prioritize
+   * battles if there are multiple things going on." Falls back to plain
+   * FIFO among non-battle categories (unchanged from before this method
+   * existed). A currently-*active* one-shot doesn't go through here at all —
+   * see `onBattleHit`'s own preemption of `this.active` for that half.
+   */
+  private popNextEngagement(): Engagement {
+    const battleIndex = this.queue.findIndex((e) => e.category === "battle");
+    if (battleIndex >= 0) return this.queue.splice(battleIndex, 1)[0]!;
+    return this.queue.shift()!;
   }
 
   private findBattle(ids: Set<string>): Engagement | undefined {
@@ -337,7 +377,7 @@ export class AutoCameraController {
     }
 
     if (!this.active && this.queue.length > 0) {
-      const next = this.queue.shift()!;
+      const next = this.popNextEngagement();
       if (!next.continuous) next.expiresOrLastActiveTick = tick + DWELL_TICKS;
       this.active = next;
       this.viewerTookOver = false; // a genuinely new thing to look at re-earns camera control even if the viewer panned away from the last one
@@ -373,19 +413,15 @@ export class AutoCameraController {
   }
 
   private applySlowdownIfNeeded(): void {
-    if (this.savedSpeed !== undefined) return; // already slowed down for a still-ongoing earlier engagement
-    const current = this.host.getSpeed();
     if (this.active?.category === "battle") {
-      // Cinematic slow-motion: always drop to it (even from 1x) — see
-      // `AUTO_CAM_BATTLE_SLOWDOWN_SPEED`'s doc comment for why the ≥4x gate
-      // below doesn't apply here. Skip only if the viewer is already exactly
-      // at the target (nothing to save/restore).
-      if (current !== AUTO_CAM_BATTLE_SLOWDOWN_SPEED) {
-        this.savedSpeed = current;
-        this.host.setSpeed(AUTO_CAM_BATTLE_SLOWDOWN_SPEED);
+      if (!this.battleStepping) {
+        this.battleStepping = true;
+        this.host.enterBattleStep();
       }
       return;
     }
+    if (this.savedSpeed !== undefined) return; // already slowed down for a still-ongoing earlier engagement
+    const current = this.host.getSpeed();
     if (current >= SLOWDOWN_THRESHOLD_SPEED) {
       this.savedSpeed = current;
       this.host.setSpeed(AUTO_CAM_SLOWDOWN_SPEED);
@@ -393,6 +429,10 @@ export class AutoCameraController {
   }
 
   private releaseSpeedOverride(): void {
+    if (this.battleStepping) {
+      this.battleStepping = false;
+      this.host.exitBattleStep();
+    }
     if (this.savedSpeed === undefined) return;
     this.host.setSpeed(this.savedSpeed);
     this.savedSpeed = undefined;

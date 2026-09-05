@@ -2311,3 +2311,30 @@ not something this pathfinding pass itself caused or is positioned to fix.
       breadcrumb for when that work starts; see also the "Player / bonding
       (deprioritized until sim depth lands)" section above, which this
       eventually supersedes/merges into once real UI work begins.
+
+## Auto Camera battle-log follow-up (done — see DESIGN.md)
+
+- [x] Prioritize a queued/starting battle over whatever else is active or
+      queued.
+- [x] Replace continuous 0.25x slow-motion with genuine one-tick-at-a-time
+      stepping (`BATTLE_STEP_INTERVAL_MS`).
+- [ ] Open: retune `BATTLE_STEP_INTERVAL_MS` (currently 650ms) once actually
+      watched for real — no real-run/visual feedback on this exact value
+      yet, it's a first guess.
+
+## Player-recruitment design notes (exploratory, unbuilt — see DESIGN.md)
+
+- [ ] Four bonding verbs locked in by direct discussion: feed, fight-
+      alongside, **rescue** (the new special/high-stakes one — carry to
+      safety or craft/apply medicine when the target is critically
+      hurt/dying), and presence (demoted to lowest-priority/fourth). None
+      of the four have any code yet — this is design-only.
+- [ ] Rescue implies two real, unscoped follow-ups if ever built: (a) a new
+      narratable "critically hurt/near death" moment (nothing in the engine
+      currently distinguishes this from an ordinary low-HP tick), and (b) a
+      crafting/medicine system for the "heal it" half.
+- [ ] Overworld "faking"/region abstraction (simulate a compact per-region
+      summary off-screen, reconstruct a plausible live grid on visiting) and
+      the "notables vs. anonymous population" split it implies — still
+      fully deferred, not started; captured here only so the design
+      reasoning isn't lost.
