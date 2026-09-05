@@ -536,6 +536,15 @@ export type SimEvent =
       species: string;
       /** Rounded head count that moved — see overworld.ts's abstract-tier emigration roll. */
       population: number;
+    }
+  | {
+      kind: "regionCrossed";
+      tick: number;
+      /** The individual disperser that actually left the focused region's map — see dispersal.ts's `RegionDispersalContext`/`Agent.crossingToRegionId`. */
+      agentId: string;
+      species: string;
+      fromRegionId: string;
+      toRegionId: string;
     };
 
 /**

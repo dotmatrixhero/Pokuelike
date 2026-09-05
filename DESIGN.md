@@ -703,14 +703,30 @@ than inventing a second architecture for it.
   focused region's real `predation.ts` does. A real simplification of the
   full sim's own dynamics.
 
-**Migration edges — only the cheap half is built.** `advanceAbstractRegion`'s
-`maybeEmigrate` moves a small population fraction between two regions that
-are BOTH currently abstract, no individuals involved — real, and validated
-below. What's genuinely NOT built: `dispersal.ts`'s real per-agent disperser
-actually walking off the edge of the FOCUSED region's map and landing as a
-promoted individual in a neighboring one. That's the harder stretch-goal
-half TODO.md originally asked for, left open (it would mean `dispersal.ts`
-knowing about region edges at all).
+**Migration edges — both halves are now built.**
+- The cheap abstract-to-abstract half: `advanceAbstractRegion`'s
+  `maybeEmigrate` moves a small population fraction between two regions
+  that are BOTH currently abstract, no individuals involved.
+- The individual half TODO.md originally flagged as the harder stretch
+  goal: `dispersal.ts`'s ordinary natal-dispersal trigger (see its new
+  `RegionDispersalContext`) can roll (`REGION_DISPERSAL_CHANCE`, 0.25 —
+  a minority outcome on top of dispersal's existing triggers, not a
+  replacement for them) to target a neighboring region instead of a random
+  point on the focused region's own map. The disperser walks to the map's
+  edge (`pickMapEdgeTarget`) instead of an interior herd-founding spot;
+  `dispersal.ts` itself never touches `World.agents` or any region state —
+  once the disperser arrives (`Agent.crossingToRegionId` set,
+  `dispersalTarget` just cleared), `overworld.ts`'s `tickOverworld` removes
+  it from `world.agents` and folds it into the destination region's
+  aggregate (`foldAgentIntoAggregate`, a population-weighted average of
+  needs/level so one new arrival can't swing a large aggregate
+  disproportionately), emitting a `regionCrossed` event. This composes
+  cleanly with the existing layering: only the FOCUSED region has real
+  individual agents to disperse from, so a crossing always originates from
+  focus and lands in an abstract neighbor — never abstract-to-abstract
+  (that's `maybeEmigrate`'s job) or abstract-to-focused (would mean
+  inventing a real individual mid-tick outside the normal promotion path,
+  not attempted).
 
 **Real 3000-tick validation**
 (`pnpm --filter @pokuelike/runner exec tsx src/validateOverworld.ts <ticks>
@@ -737,16 +753,42 @@ run ever surfaced them: the capacity feedback loop above, and a starving-
 while-over-capacity sign flip in an early version of the growth formula that
 reported GROWTH instead of decline. Full 888/888 engine suite green.
 
-Real, open follow-ups, not attempted here: the full migration-edges stretch
-goal (see above); promoted individuals never reconstruct notable titles/
-herd leadership/rapport, even if the aggregate they came from was quietly
-this region's most accomplished lineage; `avgLevel` never advances while
-abstracted (no leveling model at the aggregate tier); only validated at 3
-regions and one focus switch — a larger graph, multiple simultaneous focus
-moves, or a much longer abstracted stretch (the DF-scale tens-of-thousands-
-of-ticks timescale this feature was originally motivated by) haven't been
-run; whether elevation exists on Underground/Canopy too or only Surface
-(pre-existing open question, unrelated to this feature).
+**Real 16000-tick validation of the individual crossing half specifically**
+(same CLI, `region-a` focused the whole run, no focus switch): a real
+`squirtle` that had evolved into `wartortle` triggered its guaranteed
+no-eligible-mates dispersal fallback, rolled to cross regions, walked to the
+map's edge, and produced one real `regionCrossed` event at tick 8704
+(`region-a` -> `region-b`) — landing in `region-b`'s aggregate and settling
+into that region's normal ~20-30 population range for its species like any
+other. For context on base rate: an otherwise-identical single-region
+12000-tick run (seed 42, no region graph at all) produced 11 ordinary
+`dispersed` events — roughly consistent with `REGION_DISPERSAL_CHANCE`
+(0.25) applied to that same trigger frequency, given only one of them
+actually got the chance to roll in the 16000-tick region-graph run. Same-seed
+rerun produced byte-identical output — determinism intact through the
+crossing too. 11 new tests across `dispersal.test.ts` (region-crossing
+trigger selection, edge-target placement, `finishDispersal`'s early-return)
+and `overworld.test.ts` (extraction, aggregate fold-in with weighted
+averaging, a defensive "destination region not found" path, and a real
+forced-rng end-to-end `tickOverworld` loop), full 899/899 engine suite
+green.
+
+Real, open follow-ups, not attempted here: promoted individuals never
+reconstruct notable titles/herd leadership/rapport, even if the aggregate
+they came from was quietly this region's most accomplished lineage;
+`avgLevel` never advances while abstracted (no leveling model at the
+aggregate tier); a region-crossing disperser's own notable/rapport/lineage
+history is discarded on the fold-in, the same loss demotion already accepts
+elsewhere in this system, not a new gap unique to crossing; no cap or
+back-pressure on how many individuals can cross the same edge in one
+stretch (an edge to a species-poor neighbor could in principle drain the
+focused region faster than it repopulates — not observed in any real run
+here, but not guarded against either); only validated at 3 regions, a chain
+topology, and one focus switch — a larger/differently-shaped graph, multiple
+simultaneous focus moves, or a much longer abstracted stretch (the DF-scale
+tens-of-thousands-of-ticks timescale this feature was originally motivated
+by) haven't been run; whether elevation exists on Underground/Canopy too or
+only Surface (pre-existing open question, unrelated to this feature).
 
 ## Player character: a fragile human, earning your first partner
 

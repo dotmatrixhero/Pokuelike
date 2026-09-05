@@ -348,6 +348,171 @@ describe("createOverworld / setFocusedRegion", () => {
   });
 });
 
+describe("migration edges: individual region-crossing dispersal", () => {
+  it("tickOverworld extracts a disperser that just arrived at the map edge and folds it into the destination region's aggregate", () => {
+    const focusedWorld = createWorld(30, 30, 1);
+    const crosser = livingAgent("crosser", {
+      pos: { x: 28, y: 15 },
+      dispersalTarget: { x: 29, y: 15 }, // one tile away — arrives this very tick
+      dispersalReason: "matured",
+      crossingToRegionId: "b",
+      herdId: "old-herd",
+      needs: createNeeds(), // fully satisfied — chooseBehavior reads "idle" so applyDispersal actually runs (and arrives) this tick
+      level: 12,
+    });
+    const focused = makeRegion("a", focusedWorld);
+    focused.world.agents.push(crosser);
+
+    const destinationWorld = createWorld(30, 30, 2);
+    const destination = makeRegion("b", destinationWorld);
+    destination.aggregates = {}; // already abstract, no existing bulbasaur entry
+
+    const overworld = { regions: [focused, destination], edges: [{ a: "a", b: "b" }], focusedRegionId: "a", tick: 0 };
+    const log = new EventLog();
+
+    tickOverworld(overworld, log);
+
+    // Gone from the focused region entirely.
+    expect(focusedWorld.agents.find((a) => a.id === "crosser")).toBeUndefined();
+
+    // Folded into the destination's aggregate, matching the individual's own
+    // numbers — `toBeCloseTo` at coarse precision rather than an exact `1`,
+    // since `destination` (not focused this tick) also gets its own single
+    // `advanceAbstractRegion` tick applied in this same `tickOverworld` call,
+    // nudging the freshly-created population by that tick's own growth math.
+    const agg = destination.aggregates["bulbasaur"];
+    expect(agg).toBeDefined();
+    expect(agg!.population).toBeCloseTo(1, 1);
+    expect(agg!.avgLevel).toBe(12); // avgLevel is frozen — advanceAbstractRegion never touches it
+
+    const event = log.events.find((e) => e.kind === "regionCrossed");
+    expect(event).toBeDefined();
+    if (event?.kind === "regionCrossed") {
+      expect(event.agentId).toBe("crosser");
+      expect(event.fromRegionId).toBe("a");
+      expect(event.toRegionId).toBe("b");
+    }
+  });
+
+  it("folding a second individual of the same species into an existing aggregate averages needs in by population rather than overwriting", () => {
+    const focusedWorld = createWorld(30, 30, 1);
+    const crosser = livingAgent("crosser2", {
+      pos: { x: 28, y: 15 },
+      dispersalTarget: { x: 29, y: 15 },
+      dispersalReason: "matured",
+      crossingToRegionId: "b",
+      needs: createNeeds({ hunger: 1, thirst: 1, energy: 1 }),
+      level: 10,
+    });
+    const focused = makeRegion("a", focusedWorld);
+    focused.world.agents.push(crosser);
+
+    const destinationWorld = createWorld(30, 30, 2);
+    const destination = makeRegion("b", destinationWorld);
+    destination.aggregates = {
+      bulbasaur: {
+        species: "bulbasaur",
+        homeLayer: "surface",
+        population: 3,
+        avgHunger: 0.4,
+        avgThirst: 0.4,
+        avgEnergy: 0.4,
+        avgLevel: 6,
+        baseResourceIndex: 0.3,
+        resourceIndex: 0.3,
+        lastEventPopulation: 3,
+      },
+    };
+
+    const overworld = { regions: [focused, destination], edges: [{ a: "a", b: "b" }], focusedRegionId: "a", tick: 0 };
+    tickOverworld(overworld);
+
+    // Coarse precision throughout, not exact-float — `destination` (not
+    // focused this tick) also gets its own single `advanceAbstractRegion`
+    // tick applied in this same `tickOverworld` call, nudging population/
+    // avgHunger slightly away from the pure fold-in arithmetic below.
+    const agg = destination.aggregates["bulbasaur"]!;
+    expect(agg.population).toBeCloseTo(4, 1);
+    // Weighted average before that tick's own drift: (0.4*3 + 1*1) / 4 = 0.55
+    expect(agg.avgHunger).toBeCloseTo(0.55, 1);
+    // avgLevel is frozen — advanceAbstractRegion never touches it, so this
+    // one IS exact: (6*3 + 10*1) / 4 = 7
+    expect(agg.avgLevel).toBeCloseTo(7, 5);
+  });
+
+  it("a disperser mid-walk toward the edge (not yet arrived) is left alone, not extracted", () => {
+    const focusedWorld = createWorld(30, 30, 1);
+    const stillWalking = livingAgent("mid-walk", {
+      pos: { x: 5, y: 15 },
+      dispersalTarget: { x: 29, y: 15 }, // far away — won't arrive this tick
+      dispersalReason: "matured",
+      crossingToRegionId: "b",
+    });
+    const focused = makeRegion("a", focusedWorld);
+    focused.world.agents.push(stillWalking);
+    const destination = makeRegion("b", createWorld(30, 30, 2));
+    destination.aggregates = {};
+
+    const overworld = { regions: [focused, destination], edges: [{ a: "a", b: "b" }], focusedRegionId: "a", tick: 0 };
+    tickOverworld(overworld);
+
+    expect(focusedWorld.agents.find((a) => a.id === "mid-walk")).toBeDefined();
+    expect(destination.aggregates["bulbasaur"]).toBeUndefined();
+  });
+
+  it("puts the agent back rather than discarding it if crossingToRegionId names a region not in the graph (defensive)", () => {
+    const focusedWorld = createWorld(30, 30, 1);
+    const crosser = livingAgent("orphan-crosser", {
+      pos: { x: 28, y: 15 },
+      dispersalTarget: { x: 29, y: 15 },
+      dispersalReason: "matured",
+      crossingToRegionId: "nonexistent-region",
+    });
+    const focused = makeRegion("a", focusedWorld);
+    focused.world.agents.push(crosser);
+
+    const overworld = { regions: [focused], edges: [], focusedRegionId: "a", tick: 0 };
+    tickOverworld(overworld);
+
+    expect(focusedWorld.agents.find((a) => a.id === "orphan-crosser")).toBeDefined();
+  });
+
+  it("end-to-end: a rigged-to-always-disperse agent in a real tickOverworld loop eventually leaves the focused region and shows up in a neighbor's aggregate", () => {
+    // Force every RNG draw in the whole tick to succeed the maximally
+    // relevant path (dispersal trigger, region-crossing roll, neighbor
+    // pick) — deterministic, not a statistical/flaky test.
+    const alwaysZero = () => 0;
+    const focusedWorld = createWorld(40, 40, 1);
+    focusedWorld.rng = alwaysZero;
+    const disperser = livingAgent("eager", {
+      pos: { x: 20, y: 20 },
+      age: 500,
+      level: 999999, // comfortably above DISPERSAL_MIN_LEVEL
+      pendingLevelDispersalCheck: true,
+      sex: "female",
+      needs: createNeeds(), // fully satisfied — chooseBehavior reads "idle" the whole walk, never paused
+    });
+    const focused = makeRegion("a", focusedWorld);
+    focused.world.agents.push(disperser);
+    const destination = makeRegion("b", createWorld(40, 40, 2));
+    destination.aggregates = {};
+
+    const overworld = { regions: [focused, destination], edges: [{ a: "a", b: "b" }], focusedRegionId: "a", tick: 0 };
+    const log = new EventLog();
+
+    // Edge target lands near (0,0) under an always-0 rng (see the trigger's
+    // own math) — Chebyshev distance from (20,20) is 20 tiles; generous
+    // margin below in case a weather effect slows its pace along the way.
+    for (let i = 0; i < 60 && focusedWorld.agents.some((a) => a.id === "eager"); i++) {
+      tickOverworld(overworld, log);
+    }
+
+    expect(focusedWorld.agents.find((a) => a.id === "eager")).toBeUndefined();
+    expect(destination.aggregates["bulbasaur"]).toBeDefined();
+    expect(log.events.some((e) => e.kind === "regionCrossed")).toBe(true);
+  });
+});
+
 describe("migration edges (emigration stretch goal)", () => {
   it("moves a population slice from one abstract region to a connected abstract neighbor", () => {
     const worldA = createWorld(20, 20, 1);

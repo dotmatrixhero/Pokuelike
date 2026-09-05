@@ -374,15 +374,23 @@ more real simplifications: a background region's terrain is frozen (no
 in-flight eggs are silently discarded on demotion (not folded into the
 population count at all).
 
-**Migration edges (stretch goal) — only the cheap half is built.**
+**Migration edges (stretch goal) — both halves now built.**
 `advanceAbstractRegion`'s `maybeEmigrate` moves a small population fraction
 between two regions that are BOTH currently abstract (no individuals
-involved) — real, validated, but not what the stretch goal actually asked
-for. The harder half — `dispersal.ts`'s real per-agent disperser walking off
-the edge of the FOCUSED region's map and landing as a promoted individual in
-a neighboring one — is genuinely not built; that would mean `dispersal.ts`
-(sibling-session territory this session stayed out of) knowing about region
-edges at all, a real, separate follow-up.
+involved) — the cheap half. The harder half the stretch goal actually asked
+for — `dispersal.ts`'s real per-agent disperser walking off the edge of the
+FOCUSED region's map and landing as a real individual in a neighboring
+one's aggregate — is now built too: dispersal's existing triggers gained an
+optional `RegionDispersalContext` (a minority `REGION_DISPERSAL_CHANCE`
+roll, 0.25, on top of the pre-existing trigger, not instead of it) that
+sends the disperser to the map's edge instead of an interior spot;
+`tickOverworld` recognizes an arrived crosser and folds it into the
+destination's aggregate (`foldAgentIntoAggregate`, weighted-averaging its
+needs/level in). `dispersal.ts` was NOT actually off-limits sibling
+territory (only `worldgen.ts`'s biome generation and `species.ts`'s
+roster/placement were) — an earlier write-up here conflated "chose not to
+touch it for a first cut" with "can't touch it"; corrected now that a real
+follow-up needed it.
 
 **Real 3000-tick validation** (`packages/runner/src/validateOverworld.ts`,
 `pnpm --filter @pokuelike/runner exec tsx src/validateOverworld.ts <ticks>
@@ -406,9 +414,21 @@ population-model bugs (the capacity feedback loop, and a starving-while-
 over-capacity sign flip that reported growth instead of decline) were
 caught by this test suite before the real run ever surfaced them.
 
+**Real 16000-tick validation of the individual crossing** (same CLI, no
+focus switch): a real `wartortle` (evolved from `squirtle`) triggered the
+guaranteed no-eligible-mates dispersal fallback, rolled to cross regions,
+walked to the map edge, and produced one real `regionCrossed` event at tick
+8704 (`region-a` -> `region-b`), settling into `region-b`'s normal
+~20-30-per-species population range afterward like any other aggregate
+entry. Base-rate sanity check: an otherwise-identical single-region
+12000-tick run (no region graph at all) produced 11 ordinary `dispersed`
+events, roughly consistent with `REGION_DISPERSAL_CHANCE` (0.25) applied to
+that trigger frequency over 16000 ticks. Same-seed rerun byte-identical —
+determinism holds through crossing too. 11 new tests (6 in
+`dispersal.test.ts`, 5 in `overworld.test.ts`, including a real forced-rng
+end-to-end `tickOverworld` loop), full 899/899 engine suite green.
+
 Real, open follow-ups, not attempted here:
-- **The full migration-edges stretch goal** (a focused region's individual
-  disperser targeting another region) — see above.
 - **No cross-species interaction in the abstract tier.** Each species
   aggregate advances independently — no abstract-tier predation, so a
   background region can't have its Scyther population actually suppress its
@@ -423,11 +443,19 @@ Real, open follow-ups, not attempted here:
   at the aggregate tier, so a population that spends a long stretch
   abstracted doesn't get any stronger, unlike a promoted region's real
   agents would via the ordinary leveling system.
-- **Only ever validated at 3 regions, one focus switch.** TODO.md's "start
-  small" ask is satisfied, but a larger graph, multiple simultaneous focus
-  moves, or a much longer abstracted stretch (tens of thousands of ticks,
-  the DF-scale timescale this feature was originally motivated by) haven't
-  been run.
+- **A region-crossing disperser's own notable/rapport/lineage history is
+  discarded on the fold-in** — the same loss ordinary demotion already
+  accepts elsewhere in this system (see above), not a new gap unique to
+  crossing.
+- **No cap or back-pressure on repeated crossings along the same edge** — an
+  edge to a species-poor neighbor could in principle drain the focused
+  region faster than it repopulates. Not observed in any real run here, but
+  not guarded against either.
+- **Only ever validated at 3 regions, a chain topology, and one focus
+  switch.** TODO.md's "start small" ask is satisfied, but a larger/
+  differently-shaped graph, multiple simultaneous focus moves, or a much
+  longer abstracted stretch (tens of thousands of ticks, the DF-scale
+  timescale this feature was originally motivated by) haven't been run.
 
 ## Stronger weather-driven flora/water dynamics — built, see DESIGN.md
 
@@ -768,10 +796,10 @@ produce a real story before player mechanics are worth building further.
 - [x] World graph of 3 regions (`region-a`/`region-b`/`region-c`, a chain
       topology) connected by migration edges, each independently bounded —
       see "Overworld: region graph with promotion/demotion" above and
-      DESIGN.md. Only the CHEAP half of migration-edge crossing is built
-      (abstract-tier population transfer); a focused region's individual
-      disperser actually targeting another region is a real, open follow-up
-      (see that section).
+      DESIGN.md. Both halves of migration-edge crossing are built: the
+      cheap abstract-tier population transfer, and a focused region's
+      individual disperser actually targeting another region (see that
+      section for the real-run numbers).
 - [x] Region-level promotion/demotion: the focused region runs full
       per-agent sim across all layers; every other region runs abstracted
       (aggregate counts/needs/resource-abundance per species, occasional
