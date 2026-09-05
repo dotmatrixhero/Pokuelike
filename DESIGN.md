@@ -8655,3 +8655,86 @@ rescue needs its own new `SimEvent` kind (a real death-branch near-miss
 isn't currently narrated as a distinct moment), and the crafting/medicine
 system rescue's second half implies — none of this has been scoped, let
 alone built.
+
+## Sprite/tile art polish: bigger sprites, a real facing-mirror bug, muted plants, movement interpolation
+
+Four direct, rapid-fire follow-ups on the newly-merged sprite/tile art (see
+the merge commit bringing in `claude/pokemon-roguelike-sim-5rje5a`'s real
+tile art and Pokémon sprites): "Pokemon sprites are tiny make em bigger,"
+"they don't face the right direction, like they face left and move right,
+might have to mirror sprite," "plant tiles are too colorful, make em match
+the ascii," and "give the Pokémon some interpolated animation too."
+
+**Bigger sprites.** `renderer.ts`'s `drawAgent` used to squeeze the sprite
+into an exact `TILE_SIZE` (20px) box. New `SPRITE_SCALE = 1.6` constant:
+sprites now draw at `TILE_SIZE * SPRITE_SCALE` and are bottom-anchored (feet
+on the actual occupied tile, body/head overflowing upward into the tile
+above) rather than centered in the box — the natural way an overworld sprite
+larger than its tile is normally drawn. A first-guess constant, not derived
+from anything; retune if it still reads wrong once watched for real.
+
+**Real facing-mirror bug, found and fixed.** Checked visually (via a real
+headless-browser screenshot comparison, not assumption) across several
+species — pikachu, charizard, squirtle: the ripped `_right.png` sprite frame
+for every species is *not* actually mirrored from `_left.png`, it's the same
+left-facing pose duplicated into the wrong slot. An agent walking right was
+visually still facing/leading with its left side. Fix, in two files:
+- `sprites.ts`'s `getSprite` now resolves `direction: "right"` to the same
+  `_left` image entirely (the broken `_right` asset is never loaded at all
+  any more).
+- `renderer.ts`'s `drawAgent` draws that image through a canvas
+  `translate`+`scale(-1, 1)` transform when the agent's real facing is
+  `"right"`, producing a genuinely mirrored, correctly-oriented sprite.
+  Verified directly: a synthetic canvas test drawing `charmander_left.png`
+  both plain and through this exact transform side by side confirmed the
+  flipped copy has its snout on the right and tail/flame trailing left —
+  the mirror is correct, not just "different."
+
+**Muted plant tiles, matching ASCII.** The tile-style renderer used to fill
+an entire food/flora/seedling tile with a near-solid wash of its flavor's
+full-saturation `FLAVOR_FG` accent (colors like a vivid pink `[255,140,190]`
+meant as small ASCII-glyph foregrounds, not full-tile fills) — direct
+complaint: too colorful. The ASCII render style never had this problem: a
+plant tile there gets the same faint ground wash every other tile gets, plus
+a small colored *glyph* standing on top, not a full-tile color fill. Ported
+that same treatment into the tile style instead of the old
+`mix(TERRAIN_BG.floor, accent, tile.stock)`-to-near-full-color fill: a faint
+35%-alpha floor wash, plus the tile's real `TERRAIN_GLYPH`/`FLAVOR_GLYPH`
+character drawn in the accent color, fading from 30% to 80% alpha with
+`tile.stock` (same "fades toward nothing as it depletes" idea the old fill
+had, just applied to a glyph's alpha instead of a whole-tile color mix).
+
+**Movement interpolation.** The engine has no sub-tick position — an agent
+occupies exactly one integer tile per tick (see `facingOf`'s doc comment) —
+so a real sprite used to visibly teleport one tile at a time every tick,
+which reads far worse with actual art than it ever did with a single ASCII
+letter. Purely a client-side rendering illusion, `renderer.ts`:
+`interpolatedPos` keeps a per-agent `renderPos` (separate from the engine's
+real `agent.pos`) and eases it a `dt`-scaled fraction of the way toward the
+real tile position every animation frame (`1 - Math.exp(-ANIM_CATCHUP_RATE
+* dt)`, frame-rate-independent since `dt` is real elapsed seconds, tracked
+by a module-level `frameDeltaSeconds()` clamped to 0.25s so a backgrounded
+tab regaining focus can't produce one huge catch-up slide). A jump of
+`TELEPORT_SNAP_TILES` (3) or more in one tick — a real relocation/dispersal/
+fresh spawn, not a walk — snaps instantly instead of sliding across the map.
+Scoped to the sprite/tile render style only: ASCII mode deliberately
+collapses to exactly one glyph per grid cell (`drawWorldAscii`'s `agentAt`
+map), which a fractional/interpolated position would break, so it's left
+untouched.
+
+**Verification (real browser, Playwright against `pnpm --filter web dev`).**
+- Loaded seed 42 in tile style, pressed Play, screenshotted at 156%/200%
+  zoom — real sprite art (Bulbasaur, water/grass tile art) rendering
+  correctly, noticeably larger than one tile, standing on their tiles.
+- Plant tiles read as faint dots/small colored glyphs (a purple `&`, a pink
+  `%`) on a near-black wash, not colorful filled squares — matches the
+  ASCII style's look as asked.
+- The synthetic mirror-transform test described above, confirming the
+  facing fix is a real correct mirror and not just "looks different."
+- `pnpm -r typecheck` clean across all 4 packages; `packages/engine`'s full
+  784-test suite passed (untouched by this pass — sprite/tile rendering is
+  `packages/web`-only).
+- Not independently re-verified live in a browser: the interpolation easing
+  itself (a static screenshot can't show smoothness) — the math is
+  straightforward frame-rate-independent exponential easing and passed
+  typecheck, but nobody has watched it move in a real running session yet.

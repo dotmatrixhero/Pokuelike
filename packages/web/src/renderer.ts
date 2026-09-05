@@ -11,7 +11,6 @@ import {
   TERRAIN_GLYPH,
   TYPE_COLOR,
   WEATHER_TINT,
-  mix,
   rgbToCss,
   rgbaToCss,
   shade,
@@ -20,6 +19,15 @@ import {
 } from "./palette.js";
 
 export const TILE_SIZE = 20;
+/**
+ * Real sprite art is drawn larger than one tile and bottom-anchored (feet on
+ * the tile, head/body overflowing upward into the tile above) rather than
+ * squeezed into an exact TILE_SIZE box — direct ask: "Pokemon sprites are
+ * tiny make em bigger." A plain fixed multiplier, not per-species-fitted;
+ * tune this one constant if it still reads too small/large once watched for
+ * real.
+ */
+const SPRITE_SCALE = 1.6;
 
 export type RenderStyle = "tile" | "ascii";
 
@@ -59,8 +67,58 @@ function pruneStaleFacings(world: World): void {
     if (!liveIds.has(id)) {
       lastPos.delete(id);
       lastFacing.delete(id);
+      renderPos.delete(id);
     }
   }
+}
+
+/**
+ * Smooth per-agent movement — direct ask: "give the Pokémon some
+ * interpolated animation." The engine has no sub-tick position at all (an
+ * agent occupies exactly one integer tile each tick — see the big comment on
+ * `facingOf` above); without this, a real sprite visibly teleports one tile
+ * at a time every tick, which reads much worse with real art than it ever
+ * did with a single ASCII letter. Purely a rendering-layer illusion: each
+ * frame eases the drawn position a fraction of the way from wherever it was
+ * last drawn toward the agent's real current tile, at a rate independent of
+ * frame rate (via `dt`, real elapsed seconds since the last frame) so it
+ * looks the same whether the browser is doing 30fps or 144fps. Only used by
+ * the sprite/tile render style (`drawAgent`) — ASCII mode deliberately
+ * collapses to exactly one glyph per grid cell (see `drawWorldAscii`'s
+ * `agentAt` map), which a fractional/interpolated position would break.
+ */
+const renderPos = new Map<string, { x: number; y: number }>();
+/** How fast the drawn position catches up to the real one — higher is snappier/closer to instant, lower is floatier. Tuned by eye, not derived from tick rate. */
+const ANIM_CATCHUP_RATE = 10;
+/**
+ * A jump at or beyond this many tiles in one tick is a real teleport (a
+ * predator relocation, dispersal, or fresh spawn), not a walk — sliding the
+ * sprite smoothly across half the map would look like a hallucination, not
+ * an animation. Snap instantly instead.
+ */
+const TELEPORT_SNAP_TILES = 3;
+
+function interpolatedPos(agent: Agent, dt: number): { x: number; y: number } {
+  const target = agent.pos;
+  const prev = renderPos.get(agent.id);
+  if (!prev || Math.hypot(target.x - prev.x, target.y - prev.y) >= TELEPORT_SNAP_TILES) {
+    const snapped = { x: target.x, y: target.y };
+    renderPos.set(agent.id, snapped);
+    return snapped;
+  }
+  const factor = 1 - Math.exp(-ANIM_CATCHUP_RATE * dt);
+  const next = { x: prev.x + (target.x - prev.x) * factor, y: prev.y + (target.y - prev.y) * factor };
+  renderPos.set(agent.id, next);
+  return next;
+}
+
+/** Real elapsed seconds since the last call, clamped so a backgrounded tab regaining focus (or a long GC pause) can't produce one huge catch-up jump — see `interpolatedPos`. */
+let lastFrameTimeMs: number | undefined;
+function frameDeltaSeconds(): number {
+  const now = performance.now();
+  const dt = lastFrameTimeMs === undefined ? 0 : (now - lastFrameTimeMs) / 1000;
+  lastFrameTimeMs = now;
+  return Math.min(dt, 0.25);
 }
 
 /**
@@ -75,11 +133,15 @@ export function drawWorld(
   selectedAgentId: string | undefined,
   style: RenderStyle = "tile"
 ): void {
+  // Always advance the animation clock, even in ASCII mode (which ignores
+  // `dt` entirely) — so switching from ASCII back to tile mode doesn't hand
+  // `interpolatedPos` one huge accumulated `dt` and produce a visible warp.
+  const dt = frameDeltaSeconds();
   if (style === "ascii") return drawWorldAscii(ctx, world, selectedAgentId);
-  return drawWorldTiles(ctx, world, selectedAgentId);
+  return drawWorldTiles(ctx, world, selectedAgentId, dt);
 }
 
-function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAgentId: string | undefined): void {
+function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAgentId: string | undefined, dt: number): void {
   const surface = world.tiles.surface;
 
   ctx.fillStyle = rgbToCss(TERRAIN_BG.floor);
@@ -106,9 +168,10 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
 
       // Real tile art (see sprites.ts's getTileSprite) takes priority when it
       // exists for this terrain kind. "shelter" keeps its dynamic per-owner
-      // tint and "food"/"flora"/"seedling" their stock-based color fade —
-      // neither has a fixed piece of art to swap in — so those three always
-      // fall through to the flat-color rect below regardless of availability.
+      // tint and "food"/"flora"/"seedling" get the muted glyph-on-faint-wash
+      // treatment right below instead — neither has a fixed piece of art to
+      // swap in — so those always fall through here regardless of art
+      // availability.
       if (tile.terrain !== "shelter" && tile.terrain !== "food" && tile.terrain !== "flora" && tile.terrain !== "seedling") {
         const sprite = getTileSprite(tile.terrain);
         if (sprite) {
@@ -117,19 +180,32 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
         }
       }
 
-      let bg = shade(tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies) : TERRAIN_BG[tile.terrain], tile.elevation);
-      // A depleted food/flora patch fades from its flavor accent back toward plain floor as stock runs out —
-      // same idea as the original renderer's mixColor, now mixing ascii.ts's actual FLAVOR_FG/TERRAIN_BG tables.
-      const isPlant = tile.terrain === "food" || tile.terrain === "flora" || tile.terrain === "seedling";
-      if ((tile.terrain === "food" || tile.terrain === "flora") && tile.stock !== undefined) {
-        const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_BG[tile.terrain];
-        bg = mix(TERRAIN_BG.floor, accent, tile.stock);
+      // Plant tiles (food/flora/seedling) used to fill the *entire* tile with
+      // a near-solid wash of their flavor's full-saturation accent color
+      // (FLAVOR_FG values like a vivid [255,140,190] pink) — direct ask:
+      // "plant tiles are too colorful, make em match the ascii." The ASCII
+      // render mode (drawWorldAscii below) never does this: a plant tile
+      // there gets the same faint ground wash every other tile gets, plus a
+      // small colored *glyph* standing on it, not a colorful full-tile fill.
+      // Ported that same treatment here instead of the old mix-to-full-color
+      // fill.
+      if (tile.terrain === "food" || tile.terrain === "flora" || tile.terrain === "seedling") {
+        const groundBg = shade(TERRAIN_BG.floor, tile.elevation);
+        ctx.fillStyle = rgbaToCss(groundBg, 0.35);
+        ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+        const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_FG[tile.terrain];
+        const glyph = (tile.flavor && FLAVOR_GLYPH[tile.flavor]) || TERRAIN_GLYPH[tile.terrain];
+        // Same "fades back toward nothing as stock runs out" idea the old
+        // full-tile fill had, just applied to the glyph's own alpha instead
+        // of a whole-tile color mix.
+        const glyphAlpha = tile.stock !== undefined ? 0.3 + 0.5 * tile.stock : 0.55;
+        ctx.fillStyle = rgbaToCss(accent, glyphAlpha);
+        ctx.fillText(glyph, x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
+        continue;
       }
 
-      // Living plant matter reads a bit more translucent than solid terrain
-      // — direct ask: "plants and flora should always be a little more
-      // transparent."
-      ctx.fillStyle = isPlant ? rgbaToCss(bg, 0.75) : rgbToCss(bg);
+      const bg = shade(tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies) : TERRAIN_BG[tile.terrain], tile.elevation);
+      ctx.fillStyle = rgbToCss(bg);
       ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
     }
   }
@@ -143,14 +219,21 @@ function drawWorldTiles(ctx: CanvasRenderingContext2D, world: World, selectedAge
   pruneStaleFacings(world);
   for (const agent of world.agents) {
     if (agent.layer !== "surface") continue;
-    drawAgent(ctx, agent, agent.id === selectedAgentId);
+    drawAgent(ctx, agent, agent.id === selectedAgentId, dt);
   }
 
   drawWeather(ctx, world);
 
   if (selectedAgentId) {
     const selected = world.agents.find((a) => a.id === selectedAgentId);
-    if (selected && selected.layer === "surface") drawSelectionRing(ctx, selected);
+    if (selected && selected.layer === "surface") {
+      // Drawn again on top of weather so a storm/etc. doesn't obscure the
+      // ring — reads the same interpolated position `drawAgent`'s own pass
+      // above just set for this frame (not a fresh interpolation step) so
+      // the two draws land in exactly the same place.
+      const pos = renderPos.get(selected.id) ?? selected.pos;
+      drawSelectionRing(ctx, pos.x * TILE_SIZE, pos.y * TILE_SIZE);
+    }
   }
 }
 
@@ -298,18 +381,39 @@ function drawAgentGlyph(ctx: CanvasRenderingContext2D, agent: Agent, cx: number,
   }
 }
 
-function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: boolean): void {
-  const px = agent.pos.x * TILE_SIZE;
-  const py = agent.pos.y * TILE_SIZE;
+function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: boolean, dt: number): void {
+  const pos = interpolatedPos(agent, dt);
+  const px = pos.x * TILE_SIZE;
+  const py = pos.y * TILE_SIZE;
   const def = SPECIES[agent.species];
-  const sprite = def ? getSprite(def.spriteKey, facingOf(agent)) : null;
+  const direction = facingOf(agent);
+  const sprite = def ? getSprite(def.spriteKey, direction) : null;
   const isCorpse = agent.alive === false;
 
   ctx.save();
   ctx.globalAlpha = isCorpse ? 0.4 : agent.fainted ? 0.7 : 1;
 
   if (sprite) {
-    ctx.drawImage(sprite, px, py, TILE_SIZE, TILE_SIZE);
+    // Bigger than one tile (see SPRITE_SCALE) and bottom-anchored so the
+    // sprite's feet sit on its actual tile instead of the whole thing being
+    // centered/squished into TILE_SIZE.
+    const w = TILE_SIZE * SPRITE_SCALE;
+    const h = TILE_SIZE * SPRITE_SCALE;
+    const dx = px + TILE_SIZE / 2 - w / 2;
+    const dy = py + TILE_SIZE - h;
+    if (direction === "right") {
+      // getSprite already resolved "right" to the same "_left" art (see its
+      // doc comment — the ripped "_right" frame isn't actually mirrored) —
+      // flip it here via a canvas transform to get a real rightward-facing
+      // sprite instead of one that's still visually facing left.
+      ctx.save();
+      ctx.translate(dx + w, dy);
+      ctx.scale(-1, 1);
+      ctx.drawImage(sprite, 0, 0, w, h);
+      ctx.restore();
+    } else {
+      ctx.drawImage(sprite, dx, dy, w, h);
+    }
   } else {
     const primaryType = agent.types?.[0];
     const fill = isCorpse ? [90, 90, 90] : primaryType ? TYPE_COLOR[primaryType] : ([200, 200, 200] as const);
@@ -328,7 +432,7 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
 
   ctx.restore();
 
-  if (isSelected) drawSelectionRing(ctx, agent);
+  if (isSelected) drawSelectionRing(ctx, px, py);
 }
 
 /** A brief icon floating up and fading out over an event's own tile — see eventPopups.ts. */
@@ -348,9 +452,7 @@ export function drawEventPopups(ctx: CanvasRenderingContext2D, popups: readonly 
   ctx.restore();
 }
 
-function drawSelectionRing(ctx: CanvasRenderingContext2D, agent: Agent): void {
-  const px = agent.pos.x * TILE_SIZE;
-  const py = agent.pos.y * TILE_SIZE;
+function drawSelectionRing(ctx: CanvasRenderingContext2D, px: number, py: number): void {
   ctx.save();
   ctx.strokeStyle = "#ffe066";
   ctx.lineWidth = 2;

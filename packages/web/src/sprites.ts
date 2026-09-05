@@ -41,9 +41,17 @@ function loadSprite(cacheKey: string, src: string): HTMLImageElement | null {
 }
 
 export function getSprite(spriteKey: string, direction: SpriteDirection = "down"): HTMLImageElement | null {
-  const direct = loadSprite(`${spriteKey}_${direction}`, `/sprites/${spriteKey}_${direction}.png`);
+  // Real finding, checked visually across several species (pikachu,
+  // charizard, squirtle): the ripped "_right.png" frame isn't actually
+  // mirrored from "_left.png" — it's the same left-facing pose again, just
+  // duplicated into the wrong slot. Rather than trust that broken asset,
+  // "right" always resolves to the same canonical "_left" image; the
+  // renderer (see drawAgent in renderer.ts) draws it flipped horizontally
+  // via a canvas transform to get an actually-rightward-facing sprite.
+  const resolvedDirection = direction === "right" ? "left" : direction;
+  const direct = loadSprite(`${spriteKey}_${resolvedDirection}`, `/sprites/${spriteKey}_${resolvedDirection}.png`);
   if (direct) return direct;
-  if (direction === "down") return null;
+  if (resolvedDirection === "down") return null;
   // Still loading, or this species has no art for `direction` specifically
   // (an incomplete set) — the "down" sprite is always the safest fallback
   // rather than dropping straight to the letter while the real one loads.
