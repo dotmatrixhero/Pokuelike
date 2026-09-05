@@ -101,6 +101,56 @@ the fix, 0 after; a cornered Bulbasaur actually defeated a Scyther in a real
       roster biome-driven, that's a real, separate, riskier change — not
       done here.
 
+## Biome generation: runtime moisture, biome drift, BSP badlands chambers, CA underground caves — built, see DESIGN.md
+
+- [x] Water formation/drying (`weather.ts`'s `advanceWaterCycle`) now scales
+      by each tile's real, drift-aware water density
+      (`worldgen.ts`'s`effectiveWaterDensityAt`) instead of one flat global
+      rate — the moisture field `generateWorld` blends at map-gen time is
+      finally read again at runtime. Slow biome drift (see "Next up: terrain
+      lifecycle" above) shares this same mechanism.
+- [x] Badlands regions now get real BSP-carved chambers/canyons (mostly
+      boulder boundaries, sparse wall chokepoints), masked to stay inside
+      Badlands' own dominant footprint so it never fights
+      `blendBiomeParams`'s continuous cross-biome blending at the edges.
+- [x] Underground — previously an unconditionally flat, fully-walkable grid
+      — now gets real cellular-automata cave structure (organic, not BSP's
+      angular chambers, since it has no biome geometry to draw a chamber
+      grid against). Surfaced and fixed a real stranding bug this
+      introduced: `createDemoWorld`'s hand-placed Underground spawns used a
+      bare `scaledPos` with no walkability check, safe only under the old
+      always-flat assumption — now routed through a new `undergroundAnchor`
+      (same `findWalkableNear` primitive the Surface layer's anchor already
+      uses).
+- [ ] **Open follow-up, not attempted here**: confirming a biome seed
+      actually reaches a *visually* desertified state under the new drift
+      mechanism needs a run one to two orders of magnitude longer than this
+      project's standard 3000-tick validation length — a 30,000-tick run
+      with live agents didn't finish inside this session's time budget. A
+      terrain-only run without agents (the same trick the "Stronger
+      weather-driven flora/water dynamics" section's own 10,000-tick
+      validation used) is the likely way to actually witness a full 0->1
+      shift end to end.
+- [ ] **Open follow-up, flagged rather than guessed at**: this pass's BSP
+      chambers only ever paint inside Badlands' *dominant* footprint by
+      design — a Badlands region that's small relative to the map (or one
+      whose seeds happen to land such that the global BSP split rarely
+      crosses it) can end up with very few or zero chamber boundary tiles
+      (seed 1 in this pass's own real-run check: 2 boulder tiles, 0 walls).
+      Not a bug (the masking is doing exactly what it's supposed to), but a
+      real seed-dependent variability worth knowing about — a future pass
+      wanting *guaranteed* chamber density per Badlands region regardless of
+      its size/shape would need to scope BSP to each region's own bounding
+      box rather than the whole map, a bigger change than this one attempted.
+- [ ] **Open follow-up: this pass's whole-starting-roster-biome-driven
+      question (flagged just above) is still open** — Underground now having
+      real terrain structure of its own (rather than "no obstacles, so
+      nothing to check") is a real argument *for* eventually routing every
+      hand-placed spawn (not just Underground's, which needed it for
+      correctness here) through a biome/terrain-aware placement primitive,
+      but that's still the same "real, separate, riskier change" flagged
+      above, not done in this pass either.
+
 ## Next up: terrain lifecycle + construction + overworld (one combined design, not started)
 
 Direct feedback: not enough dynamism in the environment — weather changes
@@ -111,12 +161,21 @@ work resumes:
 1. **Terrain lifecycle** — trees grow from saplings and age, storms can
    fell them (real map consequence for weather, not just FOV/accuracy/
    migration-triggering), reusing flora.ts's existing stock/growth/seed-
-   spread architecture rather than inventing new machinery. Also: a slow
-   weather-driven biome drift — a biome seed under sustained drought
-   gradually shifts toward Badlands-like parameters over a very long
-   timescale (tens of thousands of ticks, a geological-feeling process
-   distinct from the fast weather-cell overlay), and vice versa for
-   sustained rain. This is the foundation the other two build on.
+   spread architecture rather than inventing new machinery. This is the
+   foundation the other two build on.
+   ~~Also: a slow weather-driven biome drift...~~ — **built**, see
+   DESIGN.md's "Biome-specific generation" section: each biome seed's own
+   effective water density now drifts toward Badlands-arid under sustained
+   *local* drought and back under sustained rain (`World.biomeSeedDrift`,
+   weather.ts's `advanceBiomeDrift`), a plain deterministic accumulator
+   scoped to ~30,000 ticks for a full 0->1 shift under continuous exposure.
+   A real 3000-tick run showed real, small, per-seed-differentiated drift
+   (8/11 seeds nonzero, max 0.009 of the range) — confirming a seed
+   actually reaching a *visually* desertified state needs a run one to two
+   orders of magnitude longer than this project's standard validation
+   length, not attempted here (a 30,000-tick run with live agents didn't
+   finish inside this session's time budget). The tree growth/decay half of
+   this item is still not started.
 2. ~~**Construction/shelter-building**~~ — **built**, decoupled from this
    combined design after all (see DESIGN.md's "Shelter-building" section):
    it turned out to need only a new terrain kind + a construction behavior,
