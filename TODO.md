@@ -2654,3 +2654,51 @@ not something this pathfinding pass itself caused or is positioned to fix.
       from this new effect, since it hand-builds a tile without going
       through `growFlora`'s maturation path. Full repo suite green
       (845/845 engine, 19/19 data).
+
+## Generative History phase: macro elevation + rivers — built, see DESIGN.md
+
+- [x] `worldgen.ts`: replaced the old small-scale noise-based `elevation`
+      field with `generateMacroElevation` (seeded uplift/basin influence
+      points, distance falloff, normalized + percentile-calibrated sea
+      level) for real land/ocean/mountain-range coherence, plus
+      `carveSuicuneRivers` (steepest-descent flow from real elevation
+      maxima to the coast, forming beaches or inland lakes). First built
+      slice of the "Overworld generation vision" section — two processes
+      out of the full documented list. 819 engine tests (5 new) passing,
+      determinism intact, real 3-seed 6000-tick population-health check
+      clean.
+- [ ] **Next slice candidates**, in the order they'd most naturally build on
+      what's here now (not a commitment, just the honest "what's next" per
+      the vision doc's own sequencing note):
+  - **Tectonics/glaciers** — the vision's next listed process, and the most
+        natural literal extension of macro elevation: mountain *ranges*
+        with real linear/arc structure (a plate-boundary shape) instead of
+        today's radially-symmetric uplift blobs. Would plug into the exact
+        same `generateMacroElevation` seam this slice built.
+  - **Forest-seeding (Xerneas/Celebi)** — the first "a route/path is the
+        causal reason a biome exists here" process, structurally similar to
+        this slice's river-carving (a path-walk that leaves a lasting mark
+        on the tile grid), so the river-carving machinery
+        (`carveRiver`/`NEIGHBOR_OFFSETS`/steepest-descent-shaped walks) may
+        be directly reusable/adaptable rather than written from scratch.
+  - Both of these are real candidates, not decided — picking 2-3 for an
+        actual next slice is a separate deliberate step, same as this one
+        was.
+- [ ] **A real blocker for anything built directly on top of this**: this
+      slice generates one single map exactly as before — it does not touch
+      the "multi-region overworld" system the vision describes at all.
+      Any future process whose vision write-up assumes multiple stitched
+      regions (most of them, past the land/ocean + rivers pair built here)
+      will need that system to exist first, or will need to be scoped down
+      to "one region" the same way this slice was.
+- [ ] `MACRO_INFLUENCE_RADIUS_FRACTION` (0.22) and `OCEAN_FRACTION` (0.44)
+      were tuned only by "does it look like real coherent continents" +
+      "does the sim stay healthy," the same ad hoc standard every other
+      tuning constant in this codebase gets on a first pass — a real
+      dedicated tuning pass (more seeds, maybe a numeric "does this look
+      speckled vs. blobby vs. coherent" metric instead of eyeballing ASCII
+      dumps) is still open.
+- [ ] River-terminated-in-an-inland-lake gets no beach marker (only a true
+      ocean mouth does) — see DESIGN.md's "Explicitly not done here" for
+      this slice. Minor, but a real, named gap if lake shorelines matter
+      later.

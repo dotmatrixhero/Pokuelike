@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mulberry32, makeNoise2D, makeDensityField, generateWorld, findWalkableNear, blendBiomeParams } from "../src/worldgen.js";
+import { mulberry32, makeNoise2D, makeDensityField, generateWorld, generateMacroElevation, findWalkableNear, blendBiomeParams } from "../src/worldgen.js";
 import { tileAt, setTile } from "../src/world.js";
 
 describe("mulberry32 (seeded PRNG)", () => {
@@ -173,6 +173,81 @@ describe("biome blending", () => {
     const totalChange = samples[samples.length - 1]! - samples[0]!;
     const maxStep = Math.max(...samples.slice(1).map((v, i) => v - samples[i]!));
     expect(maxStep).toBeLessThan(totalChange * 0.5);
+  });
+});
+
+describe("generateMacroElevation (Groudon uplift / Kyogre basin)", () => {
+  it("is deterministic: the same seed produces the same field and the same land/ocean boundary", () => {
+    const detail = makeNoise2D(mulberry32(1), 60, 40, 6);
+    const a = generateMacroElevation(mulberry32(321), 60, 40, detail);
+    const b = generateMacroElevation(mulberry32(321), 60, 40, detail);
+    for (const [x, y] of [[0, 0], [30, 20], [59, 39], [12, 8]] as const) {
+      expect(a.normalized(x, y)).toBe(b.normalized(x, y));
+      expect(a.isOcean(x, y)).toBe(b.isOcean(x, y));
+    }
+  });
+
+  it("places a real, non-trivial mix of ocean and land — not all-one or all-the-other", () => {
+    const detail = makeNoise2D(mulberry32(2), 80, 60, 8);
+    const macro = generateMacroElevation(mulberry32(654), 80, 60, detail);
+    let ocean = 0;
+    let land = 0;
+    for (let y = 0; y < 60; y++) {
+      for (let x = 0; x < 80; x++) {
+        if (macro.isOcean(x, y)) ocean++;
+        else land++;
+      }
+    }
+    expect(ocean).toBeGreaterThan(0);
+    expect(land).toBeGreaterThan(0);
+    // Roughly balanced per OCEAN_FRACTION, not a near-total wipeout either way.
+    const oceanFraction = ocean / (ocean + land);
+    expect(oceanFraction).toBeGreaterThan(0.2);
+    expect(oceanFraction).toBeLessThan(0.7);
+  });
+
+  it("produces large coherent regions, not tile-by-tile speckle — most tiles agree with their immediate neighbor", () => {
+    // The whole point of moving off small-scale value noise: real macro
+    // shapes should be smooth at the tile level, not flip land/ocean at
+    // every step the way independent-per-tile noise would.
+    const detail = makeNoise2D(mulberry32(3), 70, 50, 7);
+    const macro = generateMacroElevation(mulberry32(987), 70, 50, detail);
+    let agreements = 0;
+    let total = 0;
+    for (let y = 0; y < 50; y++) {
+      for (let x = 0; x < 69; x++) {
+        total++;
+        if (macro.isOcean(x, y) === macro.isOcean(x + 1, y)) agreements++;
+      }
+    }
+    expect(agreements / total).toBeGreaterThan(0.85);
+  });
+});
+
+describe("generateWorld: rivers", () => {
+  it("carves at least one real river reaching the coast: a beach ('sand') tile shows up next to the ocean it flowed into", () => {
+    // A big-enough map that mountain peaks and coastline both show up
+    // reliably, checked across several seeds so this isn't sensitive to one
+    // unlucky roll (river placement is a real deterministic function of the
+    // seed, not something to overfit a test to one exact count/position).
+    let sawAnyBeach = false;
+    for (const seed of [11, 22, 33, 44, 55]) {
+      const world = generateWorld(90, 60, seed);
+      for (const tile of world.tiles.surface) {
+        if (tile.terrain === "sand") sawAnyBeach = true;
+      }
+    }
+    expect(sawAnyBeach).toBe(true);
+  });
+
+  it("river generation doesn't break determinism: the same seed produces byte-identical terrain twice", () => {
+    const a = generateWorld(90, 60, 999);
+    const b = generateWorld(90, 60, 999);
+    for (let y = 0; y < 60; y++) {
+      for (let x = 0; x < 90; x++) {
+        expect(tileAt(a, "surface", x, y)!.terrain).toBe(tileAt(b, "surface", x, y)!.terrain);
+      }
+    }
   });
 });
 

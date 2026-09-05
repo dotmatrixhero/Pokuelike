@@ -9788,3 +9788,246 @@ first real build, prove the "simulated history -> coherent per-tile world"
 pipeline shape works end to end, before expanding further — and separately,
 whenever it's time, a dedicated vision pass for the human-society phase and
 for how Z-levels actually get built.
+
+## The first built slice: macro land/ocean elevation + rivers
+
+This is the "pick 2-3 processes for a first real build" step the section
+above explicitly deferred. Two processes only, on purpose — not the whole
+vision: **land/ocean boundary + macro elevation** ("Kyogre/Groudon"-flavored)
+and **rivers** ("Suicune"-flavored). Everything else in the vision above
+(tectonics/glaciers, forest-seeding, volcanic islands, earthquakes, deserts,
+the expanded roster, human society, Z-levels) is still exactly where it was
+— untouched, not built here. The goal of this slice was narrower than "build
+part of the vision": prove the actual pipeline shape (a one-time
+seed-derived generation pass produces coherent upstream data that the
+existing per-tile terrain logic consumes) works end to end, on real code,
+checked with a real run — not just plausible on paper.
+
+### Decided
+
+**Where this plugs in.** `worldgen.ts`'s `generateWorld` used to derive
+`elevation` from `elevationNoise`, a 2-octave smoothed value-noise field —
+plausible small-scale texture, but with zero large-scale coherence: no real
+continents, no real mountain ranges, just locally-varying bumps (see this
+file's own "Environmental generation" section for that original design).
+This slice replaces *only* that one noise source. Every existing downstream
+consumer — `blendBiomeParams`'s biome blending, the per-tile
+`elevationBase`/`elevationVariance` formula, moisture/obstacle/food density
+fields, the sunbeam-elevation threshold — is completely untouched; they just
+now receive a coherent macro-scale elevation value instead of small-scale
+noise wherever `elevationNoise(x, y)` used to go. This is the "keep the
+interface unchanged" constraint from the task, and it held up in practice —
+zero changes needed anywhere outside `worldgen.ts` and the two files this
+section names below.
+
+**Land/ocean + macro elevation, algorithmically.** `generateMacroElevation`
+places `UPLIFT_POINT_COUNT` (6) "Groudon" points and `BASIN_POINT_COUNT` (6)
+"Kyogre" points at random seeded locations, each with its own randomized
+strength and falloff radius. Every tile's raw macro value is the sum of
+every point's contribution — a smoothstepped falloff from 1 at a point's
+center to 0 at/beyond its radius (`macroFalloff`), positive for uplift,
+negative for basin — plus a small amount (`MACRO_DETAIL_WEIGHT`, 0.16) of
+the existing small-scale noise mixed in for coastline roughness, so
+coastlines aren't perfect circle arcs. The whole grid is then normalized to
+0..1, and a sea-level threshold is calibrated by exact percentile (sort the
+full grid, take the value at the `OCEAN_FRACTION` position) so a
+predictable, tunable fraction of the map ends up ocean — the same
+exact-calibration idea `makeDensityField` already used for
+food/water/obstacle density, just over the full grid instead of a Monte
+Carlo sample (cheap to do exactly, since the grid's already materialized).
+A tile below sea level becomes real ocean water, overriding the per-biome
+water-density roll entirely; a tile above it gets its elevation from the
+same normalized macro value fed into the *existing* unmodified
+`elevationBase + (macro - 0.5) * 2 * elevationVariance` formula, so
+mountain ranges (Highland biome seeds sitting near an uplift point) now
+inherit real large-scale height instead of one biome's independent local
+noise.
+
+This is deliberately **algorithmic, not a literal multi-agent Kyogre-vs-
+Groudon simulation** — the vision section above flagged "how literally
+simulated does each process need to be" as a real per-process open
+question, not answered the same way for all seven; for this first slice the
+answer is a deterministic seeded pass, narratively flavored in naming
+(`applyGroudonUplift`/`applyKyogreBasin`-shaped naming in the doc comments;
+the actual functions are `generateMacroElevation` and its helpers) and
+comments rather than actual simulated `Agent` entities.
+
+**Rivers, algorithmically.** `carveSuicuneRivers` runs once, after the full
+land/ocean/biome/obstacle grid already exists (real final elevations to
+work from). `selectRiverSources` picks `riverCountFor(width, height)` river
+sources — real local elevation maxima among plain "floor"/"sunbeam" land
+tiles, sorted descending, greedily kept if at least `minSpacing` away from
+every already-chosen source (spreads rivers across different high ground
+instead of clustering on one peak). Each source then walks steepest descent
+(`carveRiver`): move to whichever of the 8 neighbors has the lowest
+elevation, marking every tile crossed as "water," until one of three things
+happens — it reaches a tile bordering true ocean (marked "sand," a real
+beach at the river mouth, not another water tile, so the coastline stays
+visually readable as a coastline); it flows into a tile that's already water
+(a pre-existing biome-density pond, or another river already carved this
+pass) and silently merges as a tributary; or it finds no lower neighbor
+anywhere adjacent and pools into a brand-new lake right there — the literal
+"forms a lake where a river's flow can't find a lower neighbor before
+reaching the sea" case from the task description.
+
+### Real-run findings — two real bugs, found only by looking at the actual output
+
+Both of the real problems here were invisible on paper and only showed up
+once the generated map was actually rendered and inspected (via a new
+`packages/runner/src/dump-map.ts` — `generateWorld` -> `captureTerrainGrid`
+-> ANSI/plain-glyph dump, no sim ticks needed, the fastest way to just look
+at a map) — confirming the task's own instruction that this needed real
+looking, not just trusting the algorithm.
+
+**Bug 1 — influence radius too big, one giant blob instead of continents.**
+The first pass used `MACRO_INFLUENCE_RADIUS_FRACTION = 0.45` (roughly half
+the map). With 6 uplift + 6 basin points at that radius, nearly every basin
+overlapped every other basin, so instead of several distinct oceans and
+continents the whole map collapsed into one giant merged ocean covering
+roughly half the map with land as a thin fringe around the edges — not
+remotely "continents/oceans/mountain ranges," just one big blob. Dropping it
+to `0.22` fixed it immediately: enough overlap for 2-3 nearby same-sign
+points to still merge into one bigger landmass/ocean (which is the actual
+"coherent continent" look), but enough separation that distinct landmasses
+and distinct water bodies both show up.
+
+**Bug 2 — rivers were terminating after ~1-2 steps regardless of terrain.**
+The very first working version of `carveRiver` read the *live* `tile.elevation`
+off the world to decide each step's steepest-descent neighbor. But the
+current tile gets carved to `elevation: 0` water *before* that neighbor
+search runs — so on the very next step, the river's own just-carved previous
+tile (now sitting at elevation 0) was almost always the "lowest" neighbor
+available, and the `visited` guard then caught the revisit on the following
+iteration and terminated the river. Every single river on every seed tested
+stopped after essentially one real step, independent of the surrounding
+terrain — confirmed by an actual debug dump: 5 river sources produced 7-10
+total carved tiles combined (~1.5 tiles/river) even from genuine, well-
+separated inland mountain peaks. The fix: freeze a `Float64Array` snapshot
+of every tile's elevation once, *before* any carving starts, and have
+`carveRiver`'s descent search read only that frozen snapshot — never the
+live, being-mutated tile grid. After the fix, the same seeds produced 17-56
+total tiles across 5 rivers per map (roughly 3-11 tiles per river,
+seed-dependent) — real winding paths, not single-step stubs.
+
+A smaller, related fix found in the same debugging pass: `selectRiverSources`
+originally scored candidates using the *finalized* `tile.elevation`
+including the flat `BOULDER_ELEVATION_BOOST` (+0.8) applied wherever the
+independent obstacle-kind noise happened to roll "boulder" — a completely
+unrelated noise field to the macro elevation shape. This let scattered
+coastal boulder outcrops regularly outrank real inland highland terrain for
+"tallest point on the map," so river sources kept landing on essentially
+random boulder tiles instead of real mountain ranges. Restricting candidates
+to plain "floor"/"sunbeam" terrain (excluding every obstacle kind) fixed it.
+
+### What the map actually looks like now (real ASCII dumps, not a description from memory)
+
+Terrain counts for the fixed demo-world seed (`SCENARIO_SEED = 20260903`,
+90x60): **before** (old noise-based elevation) — `water: 472` (8.7% of the
+map, all small biome-density ponds, no true ocean at all) scattered as
+isolated 1-3-tile speckles across an otherwise uniform "floor" background,
+with `boulder: 218` similarly speckled everywhere with no pattern. **After**
+(this slice) — `water: 2682` (49.7% of the map — real ocean plus rivers plus
+the still-present small biome ponds), `sand: 71` (up from 165 under the old
+generation, but now meaningfully placed at real river mouths and coastlines
+rather than pure badlands-biome speckle), `boulder: 68` (down, since
+obstacle density is now evaluated per-tile against the same calibrated
+fields as before, just with fewer floor tiles left to place obstacles on
+now that half the map is ocean).
+
+Looking at the actual `dump-map.ts` output (seed 42, a clearly readable
+example): a large ocean basin fills the eastern half to two-thirds of the
+map as one single contiguous body (not the old speckle), a western
+landmass carries a real badlands region (`:` glyphs) with scattered boulder
+clusters, and — the thing this slice was specifically checking for — a
+visibly winding diagonal line of open water cuts from an interior point
+around (19, 22) down and to the right through otherwise-solid land for
+roughly a dozen tiles before merging into the eastern ocean, with a `sand`
+tile marking the exact spot it meets the sea. That is a real, visually
+confirmable river reaching the coast, not a claim taken on faith.
+
+### Multi-seed sim-health check (the real concern: does more ocean tank the population structurally)
+
+Ran `packages/runner/src/validate.ts` (`createDemoWorld` -> 6000 ticks ->
+population/event counts) on three seeds, specifically watching for the
+failure mode the task called out by name — a map that's mostly ocean with
+population collapsing for reasons that are about the terrain, not the sim's
+own tuning:
+
+| seed | final population | bonds formed | eggs laid/hatched | killed | starved | immigrated |
+|---|---|---|---|---|---|---|
+| 20260903 (demo seed) | 48 | 71 | 36 / 35 | 14 | 2 | 6 |
+| 1 | 34 | 26 | 9 / 9 | 2 | 0 | 8 |
+| 777 | 36 | 32 | 14 / 12 | 15 | 0 | 8 |
+
+All three seeds show a healthy, non-collapsing population with real ongoing
+reproduction, hunting, and immigration after 6000 ticks — despite the map
+now running ~44-52% ocean by tile count, up from ~9% before. `findWalkableNear`
+already treats "water" as walkable (an existing, unrelated design choice —
+aquatic movement isn't specially modeled, water just costs nothing extra to
+stand on), so `createDemoWorld`'s scaled hand-picked anchors kept landing on
+usable tiles even with far more ocean on the map; nothing needed to change
+there.
+
+### Tests
+
+Added to `worldgen.test.ts`, none weakening the existing suite (which
+needed **zero** changes — every existing assertion there is aggregate/
+structural, e.g. "at least 5 distinct terrain kinds appear," not a hardcoded
+per-tile expectation, so it kept passing unmodified against the genuinely
+different generated output):
+- `generateMacroElevation` determinism (same seed -> identical field and
+  land/ocean boundary).
+- A real land/ocean mix exists (not all-one-or-all-the-other), within a
+  sane 20-70% ocean-fraction band.
+- Land/ocean is spatially coherent — adjacent tiles agree on land-vs-ocean
+  more than 85% of the time, the actual, checked difference from the old
+  per-tile-independent-noise speckle.
+- River generation doesn't break `generateWorld`'s existing determinism
+  guarantee (byte-identical terrain across two runs of the same seed).
+- At least one river reaches the coast and leaves a real "sand" beach tile
+  behind, checked across five different seeds (not asserted on one exact
+  seed/position, since the exact river path is a real function of the seed
+  that shouldn't be pinned to one lucky roll).
+
+Full engine suite (819 tests, up from 814) run twice in a row, clean both
+times; `pnpm -r typecheck` clean across all 4 packages.
+
+### Explicitly not done here (see TODO.md)
+
+- **Every other process from the vision list above** — tectonics/glaciers,
+  forest-seeding (Xerneas/Celebi), volcanic islands, earthquakes, deserts,
+  the whole expanded roster (Rayquaza, the beast trio, Regigigas, Diancie,
+  caves, hot springs, fossil beds, swamps). This slice is two processes out
+  of a much longer documented list, on purpose.
+- **The multi-region overworld system itself.** This slice still generates
+  one single map, the same as before — it does not build the "many
+  regions/maps stitched together" overworld travel layer the vision section
+  describes. Land/ocean/rivers are a real upstream improvement to the one
+  map that already exists, not the overworld system.
+- **Z-levels.** Elevation is now real and macro-coherent, which the
+  Z-levels section above calls out as the actual precondition for that
+  feature to mean anything spatially — but no vertical-slice mechanic was
+  touched here.
+- **Human society**, per its own explicitly-separate, explicitly-later
+  sequencing already decided above.
+- **Literal simulated legendary agents.** Both processes here are
+  deterministic algorithmic passes with narrative-flavored naming/comments,
+  not actual `Agent` entities that move, act, or leave any trace outside the
+  one-time generation pass — matching the "algorithmic, not literal" answer
+  this slice picked for the open "how literally simulated" question, not a
+  claim that every future slice should answer it the same way.
+- **Lakes formed by a river pooling get no beach marker** — only a river
+  reaching *true ocean* gets the "sand" treatment (checked via the same
+  `MacroElevation.isOcean` the land/ocean pass itself used); a river that
+  dead-ends into a brand-new inland lake, or merges into a pre-existing
+  biome-density pond, just becomes plain "water" with no beach tile. A
+  reasonable simplification for this slice, not a deliberate design
+  decision to revisit.
+- **No tuning pass on `OCEAN_FRACTION`/river count beyond "looks coherent
+  and the sim stays healthy."** 44% target (landing at ~44-52% actual, once
+  biome-density ponds are added on top) was picked to roughly match Kyogre/
+  Groudon's canonical even split, nudged slightly toward more ocean — not
+  validated against anything more rigorous than the real-run findings
+  above. A future pass could tune this more deliberately once more of the
+  vision (e.g. a real multi-region overworld) makes "how much of one map
+  should be ocean" a more load-bearing question than it is today.

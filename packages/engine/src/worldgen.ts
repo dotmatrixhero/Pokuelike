@@ -120,6 +120,313 @@ export function makeDensityField(seed: number, width: number, height: number, ba
 }
 
 // ---------------------------------------------------------------------------
+// Macro elevation: land/ocean boundary and mountain ranges — "Kyogre/Groudon",
+// algorithmic, not literally simulated ------------------------------------
+// ---------------------------------------------------------------------------
+//
+// See DESIGN.md's "Overworld generation vision" section — this is the first
+// *built* slice of it. Before this, `elevation` was a small-scale 2-octave
+// value-noise field (`makeNoise2D` above): plausible-looking speckle, but
+// with no large-scale coherence — no real continents, no real mountain
+// ranges, just locally-varying bumps. This section replaces *only* that one
+// noise source with a coherent macro-scale field, built the same way real
+// procedural-terrain tools commonly do it: a handful of seeded "influence
+// points" each push elevation up or down within a falloff radius, and the
+// tile's final macro elevation is the sum of every point's contribution,
+// normalized across the whole map. A small number of points with a wide
+// falloff radius is what produces large, continuous landmass/mountain
+// shapes instead of speckle — that's the entire trick.
+//
+// Named `applyGroudonUplift`/`applyKyogreBasin` per DESIGN.md's own framing
+// of "how literally simulated does each process need to be" — for this
+// first slice the answer is "algorithmic, narratively flavored," not a
+// literal multi-agent tug-of-war between two simulated Pokémon.
+
+interface MacroInfluencePoint {
+  x: number;
+  y: number;
+  /** Positive for an uplift point, negative for a basin point — baked in so both kinds sum the same way. */
+  strength: number;
+  /** Influence radius in tiles; contributes 0 at/beyond this distance. */
+  radius: number;
+}
+
+/** How many uplift ("Groudon") and basin ("Kyogre") points seed the macro elevation field. Few points + wide radius = large coherent shapes, not speckle. */
+const UPLIFT_POINT_COUNT = 6;
+const BASIN_POINT_COUNT = 6;
+
+/**
+ * Each point's falloff radius, as a fraction of the map's larger dimension.
+ * Real-run tuning note: the first pass here used 0.45 (roughly half the map)
+ * and it was too big — with 6+6 points at that radius nearly every basin
+ * overlapped every other basin, so instead of several distinct oceans and
+ * continents the map collapsed into one giant merged ocean blob covering
+ * most of the map (confirmed by an actual ASCII dump, not just eyeballing
+ * the algorithm — see DESIGN.md's real-run findings). 0.22 gives each point
+ * real individual shape while still letting 2-3 nearby points of the same
+ * sign merge into one bigger landmass/ocean, which is the actual "coherent
+ * continents" look this is going for.
+ */
+const MACRO_INFLUENCE_RADIUS_FRACTION = 0.22;
+
+/** How much of the final macro field is small-scale detail noise (coastline roughness) vs. the pure point-influence shape — kept low so the macro shape dominates. */
+const MACRO_DETAIL_WEIGHT = 0.16;
+
+/** Target fraction of the map that ends up below sea level — roughly matching Kyogre/Groudon's canonical even split, tuned slightly toward more ocean than land per the real-run findings (see DESIGN.md). */
+const OCEAN_FRACTION = 0.44;
+
+/**
+ * Smooth falloff from 1 at the influence point's center to 0 at/beyond its
+ * radius (a smoothstep of the linear falloff, not a raw linear ramp, so
+ * points blend into each other without a visible cone-shaped crease where
+ * two points' circles overlap).
+ */
+function macroFalloff(distance: number, radius: number): number {
+  if (distance >= radius) return 0;
+  const t = 1 - distance / radius;
+  return t * t * (3 - 2 * t);
+}
+
+function placeMacroInfluencePoints(rng: () => number, width: number, height: number, count: number, sign: 1 | -1): MacroInfluencePoint[] {
+  const baseRadius = Math.max(width, height) * MACRO_INFLUENCE_RADIUS_FRACTION;
+  const points: MacroInfluencePoint[] = [];
+  for (let i = 0; i < count; i++) {
+    points.push({
+      x: rng() * width,
+      y: rng() * height,
+      // +/-30% strength variance and +/-30% radius variance so points don't
+      // all look identical — some uplifts are bigger mountain ranges than
+      // others, some basins are deeper ocean trenches than others.
+      strength: sign * (0.7 + 0.6 * rng()),
+      radius: baseRadius * (0.7 + 0.6 * rng()),
+    });
+  }
+  return points;
+}
+
+export interface MacroElevation {
+  /** Normalized (0..1) macro elevation at an integer tile — the coherent, large-scale component that per-biome elevationBase/elevationVariance rides on top of. */
+  normalized: (x: number, y: number) => number;
+  /** True if this tile fell below the generated sea level in the Groudon/Kyogre tug-of-war — Kyogre won here. */
+  isOcean: (x: number, y: number) => boolean;
+}
+
+/**
+ * `applyGroudonUplift` + `applyKyogreBasin`, blended: places a few uplift
+ * and basin points, sums every point's falloff-weighted contribution at
+ * every tile (plus a little detail noise for coastline roughness), then
+ * normalizes the whole grid to 0..1 and calibrates a sea-level threshold so
+ * roughly `OCEAN_FRACTION` of the map ends up ocean — the same
+ * exact-percentile calibration idea `makeDensityField` uses above, just
+ * computed over the full grid (already materialized here) rather than a
+ * Monte Carlo sample. This is the one function that decides the land/ocean
+ * boundary; `generateWorld` below feeds its `.normalized` output into the
+ * existing per-biome elevation formula (unchanged) wherever the old
+ * `elevationNoise` used to go, and uses `.isOcean` directly to place true
+ * ocean tiles, overriding the per-biome water-density roll (which still
+ * independently places small in-land ponds/wetland water — see the tile
+ * loop below).
+ */
+export function generateMacroElevation(rng: () => number, width: number, height: number, detailNoise: (x: number, y: number) => number): MacroElevation {
+  const upliftPoints = placeMacroInfluencePoints(rng, width, height, UPLIFT_POINT_COUNT, 1);
+  const basinPoints = placeMacroInfluencePoints(rng, width, height, BASIN_POINT_COUNT, -1);
+  const allPoints = [...upliftPoints, ...basinPoints];
+
+  const raw = new Float64Array(width * height);
+  let min = Infinity;
+  let max = -Infinity;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let v = 0;
+      for (const p of allPoints) {
+        const d = Math.hypot(p.x - x, p.y - y);
+        v += p.strength * macroFalloff(d, p.radius);
+      }
+      // Detail noise centered on 0 so it can push the field either way, same
+      // (-0.5)*2 recentering the tile loop below already uses elsewhere.
+      v += (detailNoise(x, y) - 0.5) * 2 * MACRO_DETAIL_WEIGHT;
+      raw[y * width + x] = v;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+  }
+
+  const range = max - min || 1;
+  const sorted = Float64Array.from(raw).sort();
+  const seaLevel = sorted[Math.min(sorted.length - 1, Math.floor(OCEAN_FRACTION * sorted.length))]!;
+
+  return {
+    normalized: (x: number, y: number) => Math.max(0, Math.min(1, (raw[y * width + x]! - min) / range)),
+    isOcean: (x: number, y: number) => raw[y * width + x]! < seaLevel,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Rivers: steepest-descent flow from mountain peaks — "Suicune's purifying
+// path," algorithmic, not literally simulated ------------------------------
+// ---------------------------------------------------------------------------
+
+/** 8-directional neighbor offsets, used by both river carving and its steepest-descent search. */
+const NEIGHBOR_OFFSETS: readonly (readonly [number, number])[] = [
+  [-1, -1], [0, -1], [1, -1],
+  [-1, 0], [1, 0],
+  [-1, 1], [0, 1], [1, 1],
+];
+
+/** How many rivers carve the map — a light function of map size, not a fixed count, so a bigger map gets proportionally more rivers. */
+function riverCountFor(width: number, height: number): number {
+  return Math.max(3, Math.round(Math.max(width, height) / 18));
+}
+
+/** Minimum spacing enforced between two river sources, as a fraction of the map's larger dimension — keeps rivers from all starting on the same mountain. */
+const RIVER_SOURCE_MIN_SPACING_FRACTION = 0.12;
+
+/** Hard cap on how many tiles a single river walks — a real safety bound, not expected to bite (steepest descent is monotonically decreasing, so it can't cycle), but cheap insurance against a pathological flat plateau. */
+function maxRiverSteps(width: number, height: number): number {
+  return width + height;
+}
+
+/**
+ * Picks `count` distinct local elevation maxima on land (never ocean) as
+ * river sources — real mountain peaks in the just-generated elevation, not
+ * random points. Greedily takes the highest remaining candidate that's at
+ * least `minSpacing` away from every already-chosen source, so rivers start
+ * spread across different mountain ranges instead of clustering on the
+ * single tallest peak.
+ */
+function selectRiverSources(world: World, width: number, height: number, count: number, minSpacing: number): Vec2[] {
+  const candidates: { x: number; y: number; elevation: number }[] = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const tile = tileAt(world, "surface", x, y)!;
+      // Only plain "floor"/"sunbeam" tiles reflect the real biome+macro
+      // elevation cleanly. "boulder" gets a flat +BOULDER_ELEVATION_BOOST
+      // bump wherever it happens to roll (see the tile loop above) — a real
+      // bug found on the first real-run ASCII dump: boulders dominated
+      // every top-elevation slot regardless of where they landed, so rivers
+      // kept sourcing from scattered coastal boulder outcrops instead of
+      // real inland mountain ranges, producing near-zero-length "rivers"
+      // that hit the coast in 1-2 steps. Excluding obstacle terrain from
+      // candidacy entirely fixes it — a mountain peak here is real high
+      // ground, not wherever the independent obstacle-kind noise happened
+      // to roll "boulder".
+      if (tile.terrain !== "floor" && tile.terrain !== "sunbeam") continue;
+      candidates.push({ x, y, elevation: tile.elevation });
+    }
+  }
+  candidates.sort((a, b) => b.elevation - a.elevation);
+
+  const chosen: Vec2[] = [];
+  for (const c of candidates) {
+    if (chosen.length >= count) break;
+    if (chosen.every((p) => Math.hypot(p.x - c.x, p.y - c.y) >= minSpacing)) {
+      chosen.push({ x: c.x, y: c.y });
+    }
+  }
+  return chosen;
+}
+
+/**
+ * Walks one river from a mountain-peak source via steepest descent: at each
+ * step, move to whichever of the 8 neighbors has the lowest elevation
+ * (strictly lower than the current tile), marking every tile it crosses as
+ * "water" — Suicune's path, purifying the land it crosses. Ends one of three
+ * ways: it reaches a tile bordering the ocean (marked "sand" — a real beach
+ * at the river mouth, not another water tile, so the coastline stays
+ * visually readable); it flows into a tile that's already water (a
+ * pre-existing biome-density pond, or another river already carved this
+ * pass) and simply merges as a tributary, no extra marking needed; or it
+ * finds no lower neighbor anywhere nearby and pools into a brand-new lake
+ * right there — the literal "forming a lake where a river's flow can't find
+ * a lower neighbor before reaching the sea" case from the task description.
+ * `visited` is shared across every river carved this generation pass, both
+ * so two rivers don't redundantly re-walk the same tiles and as a hard
+ * guard against ever revisiting a tile (steepest descent is monotonically
+ * decreasing so this should never fire, but it's cheap insurance).
+ */
+function carveRiver(
+  world: World,
+  width: number,
+  height: number,
+  source: Vec2,
+  oceanMask: MacroElevation,
+  visited: Set<string>,
+  elevationSnapshot: Float64Array
+): void {
+  let x = source.x;
+  let y = source.y;
+  const steps = maxRiverSteps(width, height);
+
+  for (let step = 0; step < steps; step++) {
+    const key = `${x},${y}`;
+    if (visited.has(key)) return;
+    const tile = tileAt(world, "surface", x, y);
+    if (!tile || tile.terrain === "water") return; // flowed straight into existing water — a silent tributary merge
+    visited.add(key);
+
+    const touchesOcean = NEIGHBOR_OFFSETS.some(([dx, dy]) => {
+      const nx = x + dx;
+      const ny = y + dy;
+      return nx >= 0 && ny >= 0 && nx < width && ny < height && oceanMask.isOcean(nx, ny);
+    });
+    if (touchesOcean) {
+      // Suicune's purifying rain meets the sea — a real beach, not another
+      // water tile, so a river mouth actually reads as a river mouth.
+      setTile(world, "surface", x, y, "sand", tile.elevation);
+      return;
+    }
+
+    setTile(world, "surface", x, y, "water", 0);
+
+    // Steepest-descent search reads `elevationSnapshot` — the terrain's
+    // elevation as generated, frozen before any river started carving —
+    // never the live `tile.elevation` a carved-to-water tile now reports (a
+    // real bug found on the first real-run ASCII dump: every river was
+    // finding its OWN just-carved previous tile, freshly zeroed by the
+    // `setTile(..., "water", 0)` two lines up, as the "lowest neighbor" and
+    // immediately flowing back into itself — which the `visited` check then
+    // caught on the very next iteration, terminating every river after
+    // essentially one step regardless of the real surrounding terrain).
+    let bestX = -1;
+    let bestY = -1;
+    let bestElevation = elevationSnapshot[y * width + x]!;
+    for (const [dx, dy] of NEIGHBOR_OFFSETS) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+      const neighborElevation = elevationSnapshot[ny * width + nx]!;
+      if (neighborElevation < bestElevation) {
+        bestElevation = neighborElevation;
+        bestX = nx;
+        bestY = ny;
+      }
+    }
+
+    if (bestX === -1) return; // no lower ground anywhere adjacent — pools into a new lake right here
+    x = bestX;
+    y = bestY;
+  }
+}
+
+/** Carves every river for this map — see `carveRiver`'s doc comment for the per-river rule. Runs once, after the full terrain grid (land/ocean/biome/obstacle) is already in place, so steepest descent has real final elevations to work from. */
+function carveSuicuneRivers(world: World, width: number, height: number, macroElevation: MacroElevation): void {
+  const count = riverCountFor(width, height);
+  const minSpacing = Math.max(width, height) * RIVER_SOURCE_MIN_SPACING_FRACTION;
+  const sources = selectRiverSources(world, width, height, count, minSpacing);
+
+  // Frozen once, before any carving — see carveRiver's doc comment for why.
+  const elevationSnapshot = new Float64Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      elevationSnapshot[y * width + x] = tileAt(world, "surface", x, y)!.elevation;
+    }
+  }
+
+  const visited = new Set<string>();
+  for (const source of sources) carveRiver(world, width, height, source, macroElevation, visited, elevationSnapshot);
+}
+
+// ---------------------------------------------------------------------------
 // Biomes: data + distance-weighted blending
 // ---------------------------------------------------------------------------
 
@@ -356,7 +663,15 @@ export function generateWorld(width: number, height: number, seed: number): Worl
   world.biomeSeeds = seeds.map((s) => ({ x: s.x, y: s.y, name: s.biome.name }));
 
   const noiseScale = Math.max(width, height);
-  const elevationNoise = makeNoise2D(mulberry32(seed ^ 0x9e3779b9), width, height, noiseScale / 6);
+  // Macro elevation (land/ocean boundary + mountain ranges) replaces the old
+  // small-scale `elevationNoise` value-noise field entirely — see the
+  // "Macro elevation" section above. `macroDetailNoise` feeds it as the tiny
+  // coastline-roughness detail component (MACRO_DETAIL_WEIGHT), reusing the
+  // same xor constant the old elevation noise used since it plays the same
+  // "elevation-ish detail texture" role.
+  const macroDetailNoise = makeNoise2D(mulberry32(seed ^ 0x9e3779b9), width, height, noiseScale / 10);
+  const macroPointsRng = mulberry32(seed ^ 0x51c48a7d);
+  const macroElevation = generateMacroElevation(macroPointsRng, width, height, macroDetailNoise);
   const moistureField = makeDensityField(seed ^ 0x85ebca6b, width, height, noiseScale / 8);
   const obstacleField = makeDensityField(seed ^ 0xc2b2ae35, width, height, 4);
   const foodField = makeDensityField(seed ^ 0x27d4eb2f, width, height, 3);
@@ -373,8 +688,18 @@ export function generateWorld(width: number, height: number, seed: number): Worl
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
+      // True ocean: Kyogre won the tug-of-war here (see `generateMacroElevation`).
+      // This overrides the per-biome water-density roll below entirely —
+      // that roll still independently places small in-land ponds/wetland
+      // water on LAND tiles, but a tile the macro field placed below sea
+      // level is ocean regardless of which biome it blends toward.
+      if (macroElevation.isOcean(x, y)) {
+        setTile(world, "surface", x, y, "water", 0);
+        continue;
+      }
+
       const params = blendBiomeParams(seeds, x, y);
-      const elevation = Math.max(0, params.elevationBase + (elevationNoise(x, y) - 0.5) * 2 * params.elevationVariance);
+      const elevation = Math.max(0, params.elevationBase + (macroElevation.normalized(x, y) - 0.5) * 2 * params.elevationVariance);
 
       // Water: a smooth, calibrated moisture field thresholded by this
       // tile's own blended waterDensity — a Wetland-leaning tile has a much
@@ -425,6 +750,10 @@ export function generateWorld(width: number, height: number, seed: number): Worl
       }
     }
   }
+
+  // Rivers run last, once the full land/ocean/biome/obstacle grid (and its
+  // real final elevations) already exists for steepest descent to work from.
+  carveSuicuneRivers(world, width, height, macroElevation);
 
   return world;
 }
