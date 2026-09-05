@@ -9,6 +9,7 @@ import { resolveShape } from "./moves.js";
 import type { MoveSpec } from "./moves.js";
 import { canBreed, grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
+import { RAPPORT_MOB_DEFENSE_DELTA, strengthenRapportMutual } from "./rapport.js";
 import { isPathClear } from "./fov.js";
 import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt, setTile } from "./world.js";
@@ -1324,6 +1325,12 @@ export function applyPredationInstincts(
         agent.fightTarget = threat.id;
         if (canAttackFromHere(world, agent, threat, distance)) {
           resolveHit(world, agent, threat, log, "defeated", ctx, distance, rng);
+          // Rapport: joint mob-defense — `agent` just actually landed a hit
+          // defending `herdmate`, a real, risk-bearing act. Different
+          // guardians defending the same herdmate over multiple ticks/events
+          // is what makes this genuinely "joint" over a run. See
+          // rapport.ts's doc comment.
+          strengthenRapportMutual(world, agent, herdmate, RAPPORT_MOB_DEFENSE_DELTA, rng);
         } else {
           agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos);
         }

@@ -878,6 +878,41 @@ export interface Agent {
    * on this type.
    */
   moveUseCounts?: Record<string, number>;
+
+  // --- Rapport: real agent-to-agent relationships (see rapport.ts, DESIGN.md's "Rapport" section) ---
+
+  /**
+   * Sparse, keyed by the OTHER agent's id — absence means neutral/
+   * unacquainted, not a stored zero (this is a real relationship graph, not
+   * a dense NxN matrix: most agents never interact with most other agents,
+   * so most pairs should cost nothing at all). Score ranges -1 (a real
+   * grudge) to 1 (a real bond) — deliberately signed, not just a friendship
+   * counter, so the same structure can represent both `herdClash` rivalries
+   * and `bonded`/food-delivery/mob-defense goodwill. `lastInteractionTick`
+   * anchors rapport.ts's lazy, read-time decay toward 0 (see
+   * `decayedRapportScore`) — the same "computed from elapsed ticks on
+   * read/touch, not swept every tick for every agent" shape as
+   * `Tile.grazingPressure`'s decay, chosen here specifically because unlike
+   * a tile grid (a fixed, already-iterated set), a per-agent relationship
+   * map has no existing global per-tick scan to piggyback on, and this
+   * structure needs to stay genuinely sparse under real interaction volume
+   * — see `RAPPORT_MAX_EDGES_PER_AGENT`'s doc comment for the hard cap that
+   * backs the same guarantee even before decay/pruning would otherwise have
+   * cleaned things up. Built as the foundation for a future
+   * player-recruitment mechanic (a herd becomes the player's team, but which
+   * individuals actually want to join tracks their real rapport, not just
+   * herd membership) — see DESIGN.md and TODO.md; nothing player-facing is
+   * built yet, this is the general agent-to-agent version only.
+   */
+  rapport?: Record<string, RapportEdge>;
+}
+
+/** One directed edge of `Agent.rapport` — see that field's doc comment. */
+export interface RapportEdge {
+  /** -1 (grudge) .. 1 (bond). */
+  score: number;
+  /** `World.tick` this edge was last created or touched — anchors `rapport.ts`'s lazy decay. */
+  lastInteractionTick: number;
 }
 
 /**

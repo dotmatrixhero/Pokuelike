@@ -4,6 +4,7 @@ import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt } from "./world.js";
 import { EXP_ON_BIRTH_PARENT, EXP_ON_MATE_ATTEMPT, canBreed, grantExp, type LevelingContext } from "./leveling.js";
 import { herdCentroid, herdRank, herdSize } from "./herding.js";
+import { RAPPORT_BONDING_DELTA, rapportScore, strengthenRapportMutual } from "./rapport.js";
 import { hasNearbyShelter, SHELTER_SEARCH_RADIUS } from "./shelter.js";
 import { canLayEggAt, shelterCluster } from "./occupancy.js";
 import { pickClutchSize, spawnEgg } from "./eggs.js";
@@ -168,6 +169,32 @@ function isEligibleMate(agent: Agent, candidate: Agent, ctx?: LevelingContext): 
 const STATUS_DISTANCE_BONUS = 2;
 
 /**
+ * Rapport-aware mate preference — the other half of `mateScore`'s
+ * composition, added alongside (not replacing) `STATUS_DISTANCE_BONUS`
+ * above: an agent with an existing positive rapport edge to a candidate (a
+ * herd-mate it's repeatedly food-delivered to, fought alongside in a
+ * mob-defense, or simply already bonded to before — re-encountering an
+ * already-bonded partner is exactly this path too) is worth walking a little
+ * farther for than a stranger at the same distance/rank, same "discount off
+ * effective distance, distance still dominates a real gap" shape
+ * `STATUS_DISTANCE_BONUS` already established, reused rather than a parallel
+ * mechanism. Set slightly above `STATUS_DISTANCE_BONUS` (3 vs. 2) — a real,
+ * earned relationship (which for a full 1.0 score most realistically means
+ * an already-bonded partner) is a stronger signal than relative herd rank,
+ * but both remain small next to `mateSearchRadius`'s ~3-7 tile range, so
+ * this still only ever tips a close call, never overrides a real distance
+ * gap. Only the *positive* half of the -1..1 range attracts here — a
+ * negative (grudge) rapport doesn't repel mate choice on its own; that's
+ * `herdConflict.ts`'s targeting concern, not this one.
+ */
+const RAPPORT_DISTANCE_BONUS = 3;
+
+/** 0 (no/negative rapport) .. 1 (a full, earned bond) — how much of `RAPPORT_DISTANCE_BONUS` a candidate earns. */
+function rapportAdvantage(agent: Agent, candidate: Agent, tick: number): number {
+  return Math.max(0, rapportScore(agent, candidate.id, tick));
+}
+
+/**
  * 0 (lowest-ranked herd-mate) .. 1 (highest-ranked, rank 1) — how much of
  * `STATUS_DISTANCE_BONUS` a candidate earns. A solitary candidate (herd size
  * 1, e.g. no herdId) is trivially top-ranked but there's no one to outrank,
@@ -188,8 +215,12 @@ function statusAdvantage(world: World, candidate: Agent): number {
  * above). Lower is more attractive, same sense as the old pure-distance
  * comparison this replaces.
  */
-function mateScore(world: World, candidate: Agent, distance: number): number {
-  return distance - statusAdvantage(world, candidate) * STATUS_DISTANCE_BONUS;
+function mateScore(world: World, agent: Agent, candidate: Agent, distance: number): number {
+  return (
+    distance -
+    statusAdvantage(world, candidate) * STATUS_DISTANCE_BONUS -
+    rapportAdvantage(agent, candidate, world.tick) * RAPPORT_DISTANCE_BONUS
+  );
 }
 
 function nearestMate(world: World, agent: Agent, candidates: Agent[]): Agent | undefined {
@@ -197,7 +228,7 @@ function nearestMate(world: World, agent: Agent, candidates: Agent[]): Agent | u
   let bestScore = Infinity;
   for (const candidate of candidates) {
     const dist = manhattan(agent.pos, candidate.pos);
-    const score = mateScore(world, candidate, dist);
+    const score = mateScore(world, agent, candidate, dist);
     if (score < bestScore) {
       bestScore = score;
       best = candidate;
@@ -308,6 +339,11 @@ export function applyMateSeeking(
         agent.bondedPartnerId = partner.id;
         partner.bondedPartnerId = agent.id;
         world.bondsFormed = (world.bondsFormed ?? 0) + 1;
+        // Rapport: a real, immediate jump — bonding is already a deliberate,
+        // rare, significant event (fires once per pair, never incrementally
+        // repeated), so it carries a much bigger single jump than an
+        // ordinary interaction's small nudge. See rapport.ts's doc comment.
+        strengthenRapportMutual(world, agent, partner, RAPPORT_BONDING_DELTA, rng);
         log?.record({
           kind: "bonded",
           tick: world.tick,

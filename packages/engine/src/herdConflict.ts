@@ -4,6 +4,7 @@ import { calculateDamage, pickBestMove, rollAccuracy, rollCritical, useMove } fr
 import { stepAway } from "./movement.js";
 import { stormAccuracyMultiplier } from "./weather.js";
 import { FALLBACK_MAX_HP, manhattan } from "./predation.js";
+import { RAPPORT_HERD_CLASH_DELTA, rapportScore, strengthenRapportMutual } from "./rapport.js";
 
 /**
  * Herd-vs-herd resource conflict — the direct ask ("I think escalated
@@ -76,6 +77,20 @@ export const HERD_CONFLICT_MIN_BLOCKED_TICKS = 8;
 const RIVAL_DETECT_RADIUS = 1;
 
 /**
+ * Rival-selection half of the grudge bias (see `HERD_CONFLICT_GRUDGE_SCALE`
+ * for the escalation-chance half): when more than one eligible rival is
+ * actually contesting the tile at once, `findRivalOccupant` prefers a
+ * specific individual `agent` already has a real grudge against over a
+ * merely-nearer stranger, same "distance minus a scaled discount" scoring
+ * composition `reproduction.ts`'s `mateScore` already established for this
+ * codebase (reused here rather than a parallel mechanism) — a full -1.0
+ * grudge is worth this many tiles of "closer," which at
+ * `RIVAL_DETECT_RADIUS` = 1 is enough to flip a genuine tie but never to
+ * reach past a rival that's meaningfully farther inside the detect radius.
+ */
+const RAPPORT_TARGET_BIAS_TILES = 1;
+
+/**
  * Base unscaled per-tick roll once every other gate (blocked long enough,
  * rival present, non-predator both sides, comparable power, off cooldown)
  * already holds — see herdMigration.ts's `WANDERLUST_BASE_CHANCE` for the
@@ -86,6 +101,21 @@ const RIVAL_DETECT_RADIUS = 1;
 const HERD_CONFLICT_BASE_CHANCE = 0.03;
 /** How much combined boldness+aggression (0..1) scales the base chance — at courage 1.0 the per-tick chance is base + this. */
 const HERD_CONFLICT_DISPOSITION_SCALE = 0.4;
+
+/**
+ * Rapport consumer #2 (see reproduction.ts's `RAPPORT_DISTANCE_BONUS` for
+ * consumer #1): how much an existing grudge (a strongly negative rapport
+ * edge toward the specific rival occupying the contested tile, from a past
+ * `herdClash` between exactly these two) scales the per-tick escalation
+ * chance on top of disposition — at a full -1.0 rapport, the per-tick chance
+ * gets `HERD_CONFLICT_GRUDGE_SCALE` added, same order of magnitude as
+ * `HERD_CONFLICT_DISPOSITION_SCALE` so a real grudge is a comparably strong
+ * driver of re-escalation as raw boldness/aggression, not a token nudge —
+ * this is the direct mechanism for "re-escalating against a specific
+ * individual with an existing grudge, not treating every contest as if the
+ * two parties were strangers."
+ */
+const HERD_CONFLICT_GRUDGE_SCALE = 0.4;
 
 /** A rival occupant this much weaker (or more) than the acting agent isn't worth fighting for it to be "comparably matched, confident" rather than a hopeless mismatch — see this module's doc comment. Symmetric: also refuses if the agent itself is this much weaker than the rival. */
 export const HERD_CONFLICT_MIN_POWER_RATIO = 0.6;
@@ -111,8 +141,16 @@ function courageOf(agent: Agent): number {
   return (boldness + aggression) / 2;
 }
 
-function herdConflictChance(agent: Agent): number {
-  return HERD_CONFLICT_BASE_CHANCE + courageOf(agent) * HERD_CONFLICT_DISPOSITION_SCALE;
+/**
+ * `grudge` is the agent's own rapport score toward the specific rival being
+ * considered (-1..1, positive values contribute nothing — only an existing
+ * grudge biases escalation, a positive relationship never suppresses it
+ * below the plain disposition-driven baseline, matching the "biased toward,
+ * doesn't invent a new suppression path" scope of this consumer).
+ */
+function herdConflictChance(agent: Agent, grudge: number): number {
+  const grudgeBonus = Math.max(0, -grudge) * HERD_CONFLICT_GRUDGE_SCALE;
+  return HERD_CONFLICT_BASE_CHANCE + courageOf(agent) * HERD_CONFLICT_DISPOSITION_SCALE + grudgeBonus;
 }
 
 /**
@@ -124,7 +162,7 @@ function herdConflictChance(agent: Agent): number {
  */
 function findRivalOccupant(world: World, agent: Agent, rules: HuntRules, target: Vec2): Agent | undefined {
   let best: Agent | undefined;
-  let bestDist = Infinity;
+  let bestScore = Infinity;
   for (const other of world.agents) {
     if (other.id === agent.id || other.alive === false || other.fainted || other.isEgg) continue;
     if (other.layer !== agent.layer) continue;
@@ -132,8 +170,10 @@ function findRivalOccupant(world: World, agent: Agent, rules: HuntRules, target:
     if (rules[agent.species] || rules[other.species]) continue; // predator on either side — out of scope, see doc comment
     const dist = manhattan(other.pos, target);
     if (dist > RIVAL_DETECT_RADIUS) continue;
-    if (dist < bestDist) {
-      bestDist = dist;
+    const grudge = Math.max(0, -rapportScore(agent, other.id, world.tick));
+    const score = dist - grudge * RAPPORT_TARGET_BIAS_TILES;
+    if (score < bestScore) {
+      bestScore = score;
       best = other;
     }
   }
@@ -192,6 +232,13 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
 
   const retreated = defender.hp / defender.maxHp <= HERD_CONFLICT_RETREAT_HP_FRACTION;
 
+  // Rapport: a real, negative shift between exactly these two individuals —
+  // never a species-/herd-level effect — for a hit that actually landed
+  // (never for "missed", which never connected). This is the grudge
+  // `HERD_CONFLICT_GRUDGE_SCALE`/`RAPPORT_TARGET_BIAS_TILES` above read back
+  // on a later contested tile. See rapport.ts's doc comment.
+  strengthenRapportMutual(world, attacker, defender, RAPPORT_HERD_CLASH_DELTA, rng);
+
   log?.record({
     kind: "herdClash",
     tick: world.tick,
@@ -235,7 +282,8 @@ export function applyHerdRivalryConflict(world: World, agent: Agent, rules: Hunt
   const ratio = powerOf(agent) / powerOf(rival);
   if (ratio < HERD_CONFLICT_MIN_POWER_RATIO || ratio > 1 / HERD_CONFLICT_MIN_POWER_RATIO) return false;
 
-  if (rng() >= herdConflictChance(agent)) return false;
+  const grudge = rapportScore(agent, rival.id, world.tick);
+  if (rng() >= herdConflictChance(agent, grudge)) return false;
 
   resolveRivalryHit(world, agent, rival, log, rng);
   return true;
