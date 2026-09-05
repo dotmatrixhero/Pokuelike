@@ -2801,12 +2801,38 @@ not something this pathfinding pass itself caused or is positioned to fix.
       Would need actual shelter/hut sprite art (not yet extracted) plus a
       way to apply the existing owner tint on top of a sprite instead of a
       solid fill.
-- [ ] **Not wired up, sitting in public/tiles/ for later**: `floor_desert`
-      and `floor_snow` — clean, real textures pulled from the biome sheet's
-      desert/snow scene panels, but there's no desert/snow `TerrainKind`
-      or biome system yet, so nothing selects them today. `floor_lava` was
-      also attempted from the same sheet but turned out to be a fake — a
-      flat solid-red background block, not textured lava art — and was
+- [x] **Follow-up, resolved**: `floor_desert` and `floor_stone` are now
+      actually wired up, now that worldgen.ts's real biome system (merged
+      from the sibling branch) exists to select them by. Direct ask: real
+      bug report on plain `sand` terrain ("I don't love how sand looks.
+      Green bordered") + "we got more biomes an shit [do more fun art
+      cutout]." Two real, separate things fixed in one pass: (1) `sand.png`
+      itself was a bad crop — the whole 144x144 source image was a real
+      desert scene panel (cacti, paths) with its surrounding green
+      background never cropped out, so a visible green fringe showed on
+      every "sand" terrain tile; re-cropped a genuinely clean 32x32 patch
+      of open sand from the same biome-sheet desert panel, no decorations
+      or background bleed. (2) `renderer.ts`'s `drawGroundBacking` now
+      looks up each tile's dominant biome (new `dominantBiomeAt`, using
+      worldgen's `biomeWeightsAt`, memoized per `World` object since biome
+      seed placement never changes mid-sim — real work once per tile ever,
+      not once per tile per frame) and passes it to `sprites.ts`'s
+      `getFloorTexture`/`getFloorOverlay`, which now take an optional
+      biome name and swap in a per-biome texture set (new `BIOME_FLOOR`
+      map): "badlands" gets the (now-clean) desert family (`floor_desert`
+      base + `sand` decal, same tan palette so they blend), "highland"
+      gets `floor_stone`'s real cobble/brick crop (previously unused).
+      Any other biome, or a world with no biome data at all (bare test
+      fixtures), falls straight through to the original cave/dirt pool —
+      purely additive, nothing about the existing look changed for
+      grassland/forest/wetland. Verified live in the browser (Tile mode,
+      Playwright screenshot): the desert patch shows clean tan sand with
+      no green fringe, and a highland patch shows the distinct gray stone
+      texture, both visibly different from the surrounding brown cave
+      floor. `floor_snow` is still unused — no biome maps to "snow" yet.
+      `floor_lava` was also attempted from the same sheet a while back but
+      turned out to be a fake — a flat solid-red background block, not
+      textured lava art — and was
       deleted rather than used.
 - [x] Web: real berry-plant art for "food"/"flora"/"seedling" tiles, direct
       ask ("do we have any berries? or other plants?"). Ripped from
@@ -3141,3 +3167,42 @@ not something this pathfinding pass itself caused or is positioned to fix.
       reproduction. A real same-species breeding pair (e.g. a second
       Magikarp of the opposite sex) was not added or validated this
       session.
+- [x] Both queued visual follow-ups from the previous entry, built. Direct
+      ask on how to source the art: "Your gonna have to rip and freestyle
+      the art though" — no dedicated edge-art source exists for these (the
+      biome sheet has no desert-meets-cave transition panel the way it has
+      a real bordered lake tile), so both are generated rather than
+      cropped. (1) **Biome floor-texture edging**: "Hmm border edging
+      around different tiles to blend would be nice." New
+      `drawBiomeEdgeBlend` in renderer.ts: a cached, procedurally-drawn
+      linear alpha gradient per cardinal direction (`edgeGradientMask`)
+      masks a neighbor tile's own floor texture (`destination-in`,
+      `edgeBlendStamp`) before compositing it onto this tile wherever the
+      neighbor's `getFloorBaseName` (new export, sprites.ts) actually
+      differs — same shape as `getWaterEdge`'s directional compositing,
+      just generated instead of cropped. First pass drew every differing
+      cardinal side at once, which stacked two overlapping (sometimes
+      two-different-texture) gradients into a muddy cross at any corner
+      tile bordering two biomes at once — real, visible follow-up finding
+      from a live screenshot: "the gradient should flow in one
+      direction... painted in layers like decals... a lot of cross
+      gradient murkiness." Fixed by taking only the first differing
+      neighbor in a fixed direction order per tile (one clean directional
+      fade, never stacked) — a deliberate trade: a true four-biome corner
+      only shows one of its two real boundaries, in exchange for the
+      "flowing decal" look actually asked for. (2) **Contiguous
+      fertile-ground decals**: "Maybe fertile ground next to each other
+      can be contiguous grass." New `contiguousPatchStamp` in renderer.ts:
+      the same rounded-rect+blur shape `featheredOverlayStamp` already
+      uses for the general floor-overlay decals, but canvas's 4-radius
+      `roundRect` overload zeroes the two corners touching any side that
+      faces a matching fertile (food/flora/seedling) neighbor — that side
+      draws flush to the tile edge instead of rounded, so two adjacent
+      fertile tiles' decals butt up seamlessly into one blob instead of
+      two independent rounded stamps with a visible gap/seam between them.
+      Both cached (per direction, and per image+open-sides combo
+      respectively) the same "build once, reuse forever" way every other
+      stamp in this file already is. Verified live via Playwright
+      screenshots at several biome-boundary seeds; full suite still green
+      (888/888 engine, 19/19 data) since neither change touches engine
+      code at all, purely renderer.ts/sprites.ts.

@@ -163,17 +163,47 @@ const FLOOR_OVERLAYS = ["floor_cave_3", "floor_cave_4", "floor_cave_5", "floor_d
 /** Only this fraction of tiles get a decal at all — the rest are the plain base, so decals read as occasional detail, not a second competing pattern. Direct ask after the first pass looked good: "let's add like double the amt" (was 1-in-4). */
 const FLOOR_OVERLAY_CHANCE = 2; // 1-in-N tiles
 
-export function getFloorTexture(): HTMLImageElement | null {
-  return loadSprite(`tile_${FLOOR_BASE}`, `/tiles/${FLOOR_BASE}.png`);
+/**
+ * Per-biome ground textures — `floor_desert` and `floor_stone` were real,
+ * clean crops pulled from the biome sheet a while back but sat unused,
+ * because there was no biome concept to actually select them by (see
+ * TODO.md's "not wired up, sitting in public/tiles/ for later"). Wired up
+ * now that worldgen.ts's biome system (badlands/highland/etc, blended
+ * per-tile via `biomeWeightsAt`) is real — direct ask: "we got more biomes
+ * an shit [do more]". `renderer.ts` looks up the dominant biome per tile
+ * and passes its name in here; any biome not listed (or no biome data at
+ * all, e.g. a bare test-fixture world) falls through to the plain
+ * `FLOOR_BASE`/`FLOOR_OVERLAYS` pair above, so this is purely additive.
+ * `floor_snow` is still unused — no biome maps to "snow" yet.
+ */
+const BIOME_FLOOR: Record<string, { base: string; overlays: readonly string[] }> = {
+  // Same tan-sand family as the freshly re-cropped `sand.png` (see its own
+  // extraction note) — desert ground gets to actually look like desert
+  // ground instead of the general-purpose cave/dirt pool.
+  badlands: { base: "floor_desert", overlays: ["sand"] },
+  // Real cobble/brick texture, already visually busy enough on its own —
+  // no overlay decal needed (a dirt/cave decal on top would just clash).
+  highland: { base: "floor_stone", overlays: [] },
+};
+
+/** Which base texture name a biome resolves to — exported so renderer.ts's edge-blend code can tell "same art, different biome name" (e.g. grassland vs. forest, both plain) apart from a real texture change (badlands vs. anything else) without duplicating this lookup. */
+export function getFloorBaseName(biome?: string): string {
+  return (biome && BIOME_FLOOR[biome]?.base) ?? FLOOR_BASE;
+}
+
+export function getFloorTexture(biome?: string): HTMLImageElement | null {
+  return loadSprite(`tile_${getFloorBaseName(biome)}`, `/tiles/${getFloorBaseName(biome)}.png`);
 }
 
 /** A sparse, semi-transparent decal layered on top of the base floor texture for organic variety — see getFloorTexture's doc comment. Most tiles get none (null). */
-export function getFloorOverlay(x: number, y: number): HTMLImageElement | null {
+export function getFloorOverlay(x: number, y: number, biome?: string): HTMLImageElement | null {
+  const overlays = (biome ? BIOME_FLOOR[biome]?.overlays : undefined) ?? FLOOR_OVERLAYS;
+  if (overlays.length === 0) return null;
   // Offset hash coordinates so the "which tiles get a decal" pattern doesn't
   // correlate with anything else keyed directly off (x, y).
   const h = hashTile(x + 9973, y + 49999);
   if (h % FLOOR_OVERLAY_CHANCE !== 0) return null;
-  const name = FLOOR_OVERLAYS[Math.floor(h / FLOOR_OVERLAY_CHANCE) % FLOOR_OVERLAYS.length]!;
+  const name = overlays[Math.floor(h / FLOOR_OVERLAY_CHANCE) % overlays.length]!;
   return loadSprite(`tile_${name}`, `/tiles/${name}.png`);
 }
 
