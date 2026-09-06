@@ -1,5 +1,5 @@
 import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Tile, Vec2, World } from "./types.js";
-import { otherLayers, tileAt } from "./world.js";
+import { otherLayers, setTile, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
 import { applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan } from "./predation.js";
@@ -652,6 +652,15 @@ const FEEDING_PRIORITY_STOCK_THRESHOLD = 2 * CONSUME_STOCK_AMOUNT;
 
 /** Herbs' own real hook (CROPS_DESIGN.md) — deliberately well under Safeguard's 60-tick grant, and self-only (no herd-radius aura like Safeguard's), so it reads as "the humble remedy," not a strictly-better food. */
 const HERBS_STATUS_IMMUNE_TICKS = 20;
+
+/**
+ * Real process-time cost to dig a brand-new spring — CROPS_DESIGN.md's
+ * water rework. Same order of magnitude as `DIG_TICKS_DEFAULT`/the real
+ * `dig` move's own `burrow.ticks` (20) — this literally is that move's own
+ * canonical duration, since digging a spring is a more literal read of
+ * "Dig" than uncovering an existing crop is.
+ */
+const SPRING_DIG_TICKS = 20;
 
 /**
  * How much extra `Agent.digTicksAccrued` a single successful use of an
@@ -1368,6 +1377,38 @@ export function tickAgentAction(
     // against its own starvation grace period.
     if (somethingExistsNearby) {
       agent.ticksWithoutResource = MIGRATE_AFTER_TICKS;
+    }
+
+    // Dig a spring — CROPS_DESIGN.md's water rework, the real last resort
+    // once water genuinely doesn't exist anywhere reachable on any layer at
+    // all (`!somethingExistsNearby` — the same-layer check above and the
+    // cross-layer check just above that both already failed to find even
+    // an EXCLUDED candidate). Deliberately NOT triggered just because every
+    // known water tile is currently crowded (`somethingExistsNearby` true
+    // but every instance excluded) — that's a real, different, temporary
+    // situation the existing wait/relocate escape valve below already
+    // handles; digging a whole new spring is for when water is genuinely
+    // absent, not merely contested. Dig right where it's standing instead
+    // of only ever migrating away. Real, multi-tick process cost
+    // (SPRING_DIG_TICKS), same accrue-then-complete shape as crop digging,
+    // sped up the same way by an off-cooldown `dig` move. Only on real bare
+    // ground (`floor`) — never carves through an obstacle or another
+    // water/food tile.
+    if (!somethingExistsNearby && agent.behavior === "seekWater" && tileAt(world, agent.layer, agent.pos.x, agent.pos.y)?.terrain === "floor") {
+      const digMove = (agent.moves ?? []).find((move) => move.burrow && !agent.moveCooldowns?.[move.id]);
+      if (digMove) {
+        useMove(agent, digMove, world.tick);
+        agent.springDigTicksAccrued = (agent.springDigTicksAccrued ?? 0) + DIG_MOVE_BURST_TICKS;
+      } else {
+        agent.springDigTicksAccrued = (agent.springDigTicksAccrued ?? 0) + 1;
+      }
+      if (agent.springDigTicksAccrued >= SPRING_DIG_TICKS) {
+        setTile(world, agent.layer, agent.pos.x, agent.pos.y, "water", 0);
+        agent.springDigTicksAccrued = undefined;
+        agent.ticksWithoutResource = 0;
+        log?.record({ kind: "terrainChanged", tick: world.tick, layer: agent.layer, pos: agent.pos, from: "floor", to: "water", cause: "dug" });
+      }
+      return;
     }
 
     // No layer has the resource at all — this agent isn't starving-immediately

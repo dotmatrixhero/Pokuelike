@@ -600,6 +600,42 @@ isn't. Also not built: `digTicksAccrued` isn't reset on interruption (a
 different tile/behavior doesn't lose accrued progress) — a real, minor,
 currently-unaddressed edge case, not a correctness-breaking one.
 
+**Dig a spring — built** (`Agent.springDigTicksAccrued`, `SPRING_DIG_TICKS`,
+needs.ts, `events.ts`'s widened `terrainChanged.cause`): reuses the exact
+same accrue-then-complete shape as crop digging, as its own independent
+counter (not shared with `digTicksAccrued`, to avoid one dig's progress
+bleeding into the other). When an agent's `seekWater` search finds *no*
+water anywhere reachable at all — same-layer or cross-layer — and it is
+standing on diggable "floor" terrain, it starts digging a spring in place
+(`SPRING_DIG_TICKS = 20`), sped up by an off-cooldown `burrow` move the same
+way crop-digging is. On completion the tile itself becomes real "water"
+terrain (`setTile`, elevation 0) and logs a `terrainChanged` event with the
+new `cause: "dug"`. A real gating bug was caught and fixed here: the first
+version fired whenever the ordinary water search returned nothing, which
+included the case where water tiles exist but are merely crowded/excluded
+— this broke a pre-existing regression test ("does not infinite-loop
+between two mutually-crowded tiles — eventually relocates instead of
+oscillating forever"), because the agent started digging a brand-new spring
+instead of falling through to the existing wait/relocate escape valve.
+Fixed by requiring `!somethingExistsNearby` — digging now only triggers
+when water is genuinely absent, never merely contested. Two pre-existing
+starvation tests ("records a starved event with the right cause", "gives
+thirst its own, longer grace period") had to be reconciled with this new,
+real behavior: their bare hand-built test worlds have zero water anywhere
+and no obstruction, so the agent that was supposed to die of unrecoverable
+thirst instead survived by digging a spring — a correct, intended
+consequence of the new mechanic, not a bug, but one that broke those
+tests' original premise. Fixed by placing a boulder on the agent's own
+tile so it has nothing diggable under it, preserving each test's real
+intent elsewhere. Validated two ways: 4 targeted unit tests exercise the
+mechanic directly (a real spring dug over real time, the crowded-water
+non-trigger, boulder blocking, and the `burrow` move speeding it up), and
+`validateDigASpring.ts` ran it over a real 8000-tick `createDemoWorld` run
+— an honest 0-trigger result, because the demo world's rivers, lakes, and
+the now-guaranteed underground water pocket already give agents real water
+within reach everywhere, so this last-resort mechanic correctly never had
+to fire there.
+
 ### Open questions
 
 - Whether "most damage moves" (the pitch's own phrase) can dig/process, or

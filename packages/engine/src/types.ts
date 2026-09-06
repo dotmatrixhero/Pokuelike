@@ -472,6 +472,19 @@ export interface Agent {
    */
   digTicksAccrued?: number;
   /**
+   * Ticks spent digging a brand-new spring at the agent's own position —
+   * CROPS_DESIGN.md's water rework, the real last resort once an agent's
+   * `seekWater` search finds no reachable water anywhere on any layer
+   * (after the ordinary same-layer and cross-layer checks both fail): dig
+   * right where it's standing instead of only ever migrating away. Same
+   * accrue-then-complete shape as `digTicksAccrued`, kept as a genuinely
+   * separate counter rather than reused — digging for a crop and digging
+   * for water are two different real actions an agent could in principle
+   * need mid-episode of each other, and sharing one field would let
+   * progress on one silently count toward the other.
+   */
+  springDigTicksAccrued?: number;
+  /**
    * Speed-driven action-economy accumulator (see simulation.ts). Gains the
    * agent's real Speed stat every world tick; once it crosses
    * `ACTION_THRESHOLD` the agent takes one action and the threshold is

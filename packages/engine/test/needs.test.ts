@@ -150,18 +150,20 @@ describe("tickAgent", () => {
   });
 });
 
+/** Real, reusable test fixture for a `burrow`-flagged move — shared by the digging and dig-a-spring describe blocks below, since both real mechanics reuse the same move-speedup hook. */
+const DIG_MOVE: MoveSpec = {
+  id: "test-dig",
+  name: "Test Dig",
+  shape: { kind: "point" },
+  type: "ground",
+  category: "status",
+  power: 0,
+  accuracy: 100,
+  cooldownTicks: 15,
+  burrow: { ticks: 20 },
+};
+
 describe("layer-gated crop access + digging (CROPS_DESIGN.md)", () => {
-  const DIG_MOVE: MoveSpec = {
-    id: "test-dig",
-    name: "Test Dig",
-    shape: { kind: "point" },
-    type: "ground",
-    category: "status",
-    power: 0,
-    accuracy: 100,
-    cooldownTicks: 15,
-    burrow: { ticks: 20 },
-  };
 
   it("a surface agent can't eat an underground-native crop (Potato) instantly — it has to dig first", () => {
     const world = createWorld(5, 1);
@@ -232,6 +234,69 @@ describe("layer-gated crop access + digging (CROPS_DESIGN.md)", () => {
 
     expect(agent.digTicksAccrued).toBeGreaterThan(1);
     expect(agent.moveCooldowns?.[DIG_MOVE.id]).toBe(DIG_MOVE.cooldownTicks); // real cooldown applied — can't spam every tick
+  });
+});
+
+describe("dig a spring (CROPS_DESIGN.md water rework: real last resort when water genuinely doesn't exist anywhere)", () => {
+  it("an agent with no reachable water anywhere digs a real new spring at its own position, over real time", () => {
+    const world = createWorld(3, 1); // no water anywhere on any layer
+    const agent = makeAgent({ pos: { x: 1, y: 0 }, needs: createNeeds({ thirst: 0.3 }) });
+
+    let dugTick: number | undefined;
+    for (let t = 0; t < 25 && dugTick === undefined; t++) {
+      tickAgent(world, agent);
+      agent.needs.thirst = Math.max(agent.needs.thirst, 0.05); // isolate from starvation
+      if (tileAt(world, "surface", 1, 0)!.terrain === "water") dugTick = t;
+    }
+
+    expect(dugTick).toBeDefined();
+    expect(dugTick!).toBeGreaterThanOrEqual(19); // SPRING_DIG_TICKS = 20, real multi-tick cost
+    expect(agent.springDigTicksAccrued).toBeUndefined(); // reset once finished
+  });
+
+  it("does NOT dig a spring while known water tiles exist but are merely crowded — falls through to the ordinary wait/relocate path instead", () => {
+    const world = createWorld(10, 3);
+    setTile(world, "surface", 2, 1, "water");
+    // Crowd it to capacity.
+    world.agents = [
+      makeAgent({ id: "c1", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c2", pos: { x: 2, y: 1 }, maxHp: 30 }),
+      makeAgent({ id: "c3", pos: { x: 2, y: 1 }, maxHp: 30 }),
+    ];
+    const agent = makeAgent({ id: "thirsty", pos: { x: 0, y: 1 }, maxHp: 30, needs: createNeeds({ thirst: 0.1 }) });
+    world.agents.push(agent);
+
+    for (let t = 0; t < 60; t++) {
+      tickAgentAction(world, agent);
+      agent.needs.thirst = Math.max(agent.needs.thirst, 0.1);
+    }
+
+    expect(agent.springDigTicksAccrued).toBeUndefined();
+    expect(tileAt(world, "surface", 0, 1)!.terrain).not.toBe("water");
+  });
+
+  it("never carves through an obstacle — only real bare 'floor'", () => {
+    const world = createWorld(3, 1); // no water anywhere
+    setTile(world, "surface", 1, 0, "boulder");
+    const agent = makeAgent({ pos: { x: 1, y: 0 }, needs: createNeeds({ thirst: 0.3 }) });
+
+    for (let t = 0; t < 30; t++) {
+      tickAgent(world, agent);
+      agent.needs.thirst = Math.max(agent.needs.thirst, 0.05);
+    }
+
+    expect(tileAt(world, "surface", 1, 0)!.terrain).toBe("boulder"); // never dug
+    expect(agent.springDigTicksAccrued).toBeUndefined();
+  });
+
+  it("an off-cooldown dig move speeds up digging a spring the same way it speeds up crop-digging", () => {
+    const world = createWorld(3, 1);
+    const agent = makeAgent({ pos: { x: 1, y: 0 }, needs: createNeeds({ thirst: 0.3 }), moves: [DIG_MOVE] });
+
+    tickAgent(world, agent);
+
+    expect(agent.springDigTicksAccrued).toBeGreaterThan(1);
+    expect(agent.moveCooldowns?.[DIG_MOVE.id]).toBe(DIG_MOVE.cooldownTicks);
   });
 });
 
@@ -313,6 +378,11 @@ describe("starvation", () => {
 
   it("records a starved event with the right cause", () => {
     const world = createWorld(3, 1);
+    // Real, undiggable trap: no floor at the agent's own position, so the
+    // dig-a-spring last resort (CROPS_DESIGN.md's water rework) can't
+    // rescue it — this test is specifically about genuine, unrecoverable
+    // thirst-starvation death, not "does digging save it."
+    setTile(world, "surface", 0, 0, "boulder");
     const agent = makeAgent({ needs: createNeeds({ thirst: 0, hunger: 1 }) });
     const log = new EventLog();
 
@@ -337,6 +407,9 @@ describe("starvation", () => {
     // THIRST_STARVATION_GRACE_TICKS (150) from hunger's STARVATION_GRACE_TICKS
     // (100) — confirms thirst does NOT die at the old shared 100-tick
     // threshold, and DOES die once its own longer window actually runs out.
+    // Real, undiggable trap (see the previous test's own comment) so
+    // dig-a-spring can't rescue this agent before the grace period runs out.
+    setTile(world, "surface", 0, 0, "boulder");
     const agent = makeAgent({ needs: createNeeds({ thirst: 0, hunger: 1 }) });
 
     for (let i = 0; i < 149; i++) {
