@@ -284,8 +284,24 @@ const OCEAN_RESOURCE_INDEX_ESTIMATE = 0.6;
  * `createDemoWorld`-sized map lands around ~0.5) — a sim-original guess,
  * judged against a real large-grid run like every other tuning constant in
  * this codebase (see DESIGN.md).
+ *
+ * Recalibrated from 2 (real bug, found while validating overworld.ts's
+ * abstract-region recovery fix): at 2, grassland/forest/badlands/highland
+ * ALL landed under `overworld.ts`'s `DEATH_HEALTH_THRESHOLD` (0.3) —
+ * wetland (0.64 pre-fix) was the only land biome whose estimate could ever
+ * support a surviving abstracted population at all, regardless of species
+ * fit. That's a real miscalibration against this constant's own stated
+ * intent above ("roughly the same ~0.5 typical"), not an accident of biome
+ * design — grassland/forest are meant to read as perfectly ordinary,
+ * moderately-provisioned habitats, not ones every abstracted population
+ * eventually starves out of on principle. At 4, grassland (~0.52) and
+ * forest (~0.4) land comfortably above the threshold, matching that
+ * original intent, while genuinely sparse biomes (badlands ~0.12, highland
+ * ~0.2) stay a real, harsher habitat rather than an ordinary one — the
+ * "barren, but for a real biome-fit reason" distinction this fix is for,
+ * rather than "yes/no does a background population survive at all."
  */
-const RESOURCE_ESTIMATE_SCALE = 2;
+const RESOURCE_ESTIMATE_SCALE = 4;
 
 /** A never-visited zone's estimated `RegionAggregate.baseResourceIndex` — see `RESOURCE_ESTIMATE_SCALE`'s doc comment for why this is only an estimate, not a measurement. */
 export function estimateZoneResourceIndex(zone: MacroZone): number {
@@ -321,15 +337,26 @@ const SEED_POPULATION_VARIANCE = 10;
  * ocean-zone promotion test in this codebase's own web-app smoke check
  * caught directly.
  */
+/**
+ * Whether `species` could plausibly live in `zone` at all — obligate-aquatic
+ * agrees with ocean-ness, and (land zones only) its `biomes` list, if it has
+ * one, includes this zone's biome. Extracted from `estimateZoneSpecies`'s
+ * own per-species filter (see that function's doc comment for the ocean
+ * special-case reasoning) so `overworld.ts`'s abstract-region resource-
+ * baseline recovery can reuse the identical "is this the right habitat"
+ * check instead of a second, possibly-diverging one.
+ */
+export function speciesFitsZone(species: ImmigrationSpeciesInfo, zone: MacroZone): boolean {
+  const isAquatic = species.obligateAquatic === true;
+  if (isAquatic !== zone.isOcean) return false;
+  if (zone.isOcean) return true;
+  return !species.biomes || species.biomes.length === 0 || species.biomes.includes(zone.biome);
+}
+
 export function estimateZoneSpecies(zone: MacroZone, roster: readonly ImmigrationSpeciesInfo[], rng: () => number): ZoneSpeciesEstimate[] {
   const estimates: ZoneSpeciesEstimate[] = [];
   for (const species of roster) {
-    const isAquatic = species.obligateAquatic === true;
-    if (isAquatic !== zone.isOcean) continue;
-    if (!zone.isOcean) {
-      const matchesBiome = !species.biomes || species.biomes.length === 0 || species.biomes.includes(zone.biome);
-      if (!matchesBiome) continue;
-    }
+    if (!speciesFitsZone(species, zone)) continue;
     estimates.push({ speciesId: species.id, homeLayer: species.homeLayer, population: SEED_POPULATION_BASE + rng() * SEED_POPULATION_VARIANCE });
   }
   return estimates;

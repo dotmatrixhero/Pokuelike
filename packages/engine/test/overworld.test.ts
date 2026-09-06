@@ -75,6 +75,17 @@ function makeGrid(rows: number, cols: number): MacroGrid {
   return { rows, cols, zones };
 }
 
+/** Same as `makeGrid` but wetland — real terrain-recovery timescales differ enough by biome potential (`estimateZoneResourceIndex`) that a couple of `advanceAbstractRegion` tests below specifically need to match a real live run's own zone, not just "any land biome." */
+function makeWetlandGrid(rows: number, cols: number): MacroGrid {
+  const zones: MacroZone[] = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      zones.push({ row, col, elevation: 0.5, isOcean: false, biome: "wetland", coastEdges: [], riverEdges: [], isRiverSource: false, isLake: false });
+    }
+  }
+  return { rows, cols, zones };
+}
+
 function makeRegion(row: number, col: number, world?: World): Region {
   return { key: zoneKey(row, col), row, col, world };
 }
@@ -305,6 +316,96 @@ describe("advanceAbstractRegion", () => {
     const mw = makeMacroWorld(makeGrid(3, 3), [region], 0, 0, seededRng(1));
     advanceAbstractRegion(mw, region);
     expect(world.agents.length).toBe(1);
+  });
+
+  it("recovers a population pinned by an unlucky low baseResourceIndex snapshot instead of dying forever", () => {
+    // Real bug this guards against, exactly as found via a real overworld
+    // run (validateOverworld.ts): a zone demoted right as its TERRAIN
+    // happened to be freshly foraged-down measured a depressed
+    // baseResourceIndex even though the population living there was
+    // otherwise doing fine — and since a demoted zone's World never ticks
+    // again to let its terrain regrow, that measurement was frozen forever,
+    // eventually starving out the whole zone regardless of species fit.
+    // Numbers below (0.42 hunger, 0.23-ish resourceIndex, population just
+    // above 5) are the real values a live run's demoted squirtle population
+    // (a real wetland-fitting species, matching squirtle's own `biomes`)
+    // actually had ~50 ticks after demotion — not a hypothetical worst
+    // case, an observed one. A wetland zone's real potential (`makeWetlandGrid`,
+    // `estimateZoneResourceIndex`) is ~1.0, matching the live run's own
+    // zone; the species roster below tags this species for wetland the same
+    // way squirtle's own `biomes` does.
+    const roster: ImmigrationContext["speciesRoster"] = [{ id: "bulbasaur", homeLayer: "surface", biomes: ["wetland"] }];
+    const world = createWorld(20, 20, 1);
+    const region = makeRegion(0, 0, world);
+    region.aggregates = {
+      bulbasaur: {
+        species: "bulbasaur",
+        homeLayer: "surface",
+        population: 5.5,
+        avgHunger: 0.42,
+        avgThirst: 0.42,
+        avgEnergy: 0.5,
+        avgLevel: 5,
+        baseResourceIndex: 0.23,
+        resourceIndex: 0.23,
+        lastEventPopulation: 5.5,
+      },
+    };
+    const mw = makeMacroWorld(makeWetlandGrid(3, 3), [region], 1, 1, seededRng(11));
+
+    let minPopulation = Infinity;
+    for (let i = 0; i < 6000; i++) {
+      mw.tick += 1;
+      advanceAbstractRegion(mw, region, undefined, roster);
+      const agg = region.aggregates["bulbasaur"];
+      if (!agg) break;
+      minPopulation = Math.min(minPopulation, agg.population);
+    }
+
+    const agg = region.aggregates["bulbasaur"];
+    expect(agg).toBeDefined();
+    // A real mid-run dip (matching the live run this test is modeled on) is
+    // expected and fine — the bug this guards against is the dip never
+    // reversing, so the real assertion is recovery PAST the starting point,
+    // not a monotonic climb the whole way.
+    expect(minPopulation).toBeGreaterThan(0);
+    expect(agg!.baseResourceIndex).toBeGreaterThan(0.5);
+    expect(agg!.population).toBeGreaterThan(5.5);
+  });
+
+  it("still lets a genuine biome mismatch decline toward extinction, even with the recovery drift", () => {
+    // The other half of the fix above: recovery is real, but only up to a
+    // species' actual habitat fit — a species tagged for a biome this
+    // all-grassland test grid doesn't have should still trend toward
+    // extinction, so a demoted zone's die-off stays a real ecological
+    // signal rather than becoming unconditional. Starting numbers are the
+    // real values a live run's mismatched onix population actually had
+    // (see the "recovers" test above) shortly before it died out for real.
+    const roster: ImmigrationContext["speciesRoster"] = [{ id: "onix", homeLayer: "surface", biomes: ["badlands"] }];
+    const world = createWorld(20, 20, 1);
+    const region = makeRegion(0, 0, world);
+    region.aggregates = {
+      onix: {
+        species: "onix",
+        homeLayer: "surface",
+        population: 1.2,
+        avgHunger: 0.3,
+        avgThirst: 0.3,
+        avgEnergy: 0.5,
+        avgLevel: 5,
+        baseResourceIndex: 0.22,
+        resourceIndex: 0.22,
+        lastEventPopulation: 1.2,
+      },
+    };
+    const mw = makeMacroWorld(makeGrid(3, 3), [region], 1, 1, seededRng(11));
+
+    for (let i = 0; i < 2000; i++) {
+      mw.tick += 1;
+      advanceAbstractRegion(mw, region, undefined, roster);
+    }
+
+    expect(region.aggregates["onix"]).toBeUndefined();
   });
 });
 

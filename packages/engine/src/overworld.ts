@@ -1,13 +1,13 @@
 import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import type { LevelingContext } from "./leveling.js";
-import type { ImmigrationContext } from "./immigration.js";
+import type { ImmigrationContext, ImmigrationSpeciesInfo } from "./immigration.js";
 import type { RegionDispersalContext } from "./dispersal.js";
 import { tickWorld } from "./simulation.js";
 import { findPosInBiome, findWalkableNear, generateWorld } from "./worldgen.js";
 import { countTerrainNear, findNearestIndexed, foodStockNear } from "./resourceIndex.js";
 import { mulberry32 } from "./rng.js";
-import { type MacroGrid, zoneAt, zoneKey, parseZoneKey, zoneNeighbors, biasForZone, estimateZoneResourceIndex, estimateZoneSpecies } from "./macroGrid.js";
+import { type MacroGrid, type MacroZone, zoneAt, zoneKey, parseZoneKey, zoneNeighbors, biasForZone, estimateZoneResourceIndex, estimateZoneSpecies, speciesFitsZone } from "./macroGrid.js";
 
 /**
  * The overworld system — a macro grid of thousands of zone-cells (see
@@ -95,16 +95,41 @@ export interface RegionAggregate {
   /** Frozen at whatever the aggregate was last built/measured from — abstracted zones do NOT advance this (no leveling model exists at the aggregate tier). */
   avgLevel: number;
   /**
-   * Fixed abundance baseline, 0-1 — measured from real terrain
-   * (`measureResourceIndex`) once a zone HAS a `World`, or estimated from
-   * macro-grid facts alone (`estimateZoneResourceIndex`) when it doesn't yet
-   * — see `regionResourceBaseline`. Never drifted afterward. Carrying
-   * capacity (`advanceAbstractRegion`) is derived from THIS, not from the
-   * dynamic `resourceIndex` below — deriving capacity from a value that
-   * itself drifts toward "however much headroom is left under capacity" is
-   * a feedback loop that chases 1 forever (confirmed by this module's own
-   * real-run validation, back when it was the named-region version — see
-   * DESIGN.md) rather than settling anywhere.
+   * Abundance baseline, 0-1 — starts at whatever `regionResourceBaseline`
+   * measured/estimated at the moment this aggregate was created (a real
+   * terrain snapshot via `measureResourceIndex` for a just-demoted zone, or
+   * `estimateZoneResourceIndex`'s macro-grid-facts guess for a zone that's
+   * never had a `World`). Carrying capacity (`advanceAbstractRegion`) is
+   * derived from THIS, not from the dynamic `resourceIndex` below —
+   * deriving capacity from a value that itself drifts toward "however much
+   * headroom is left under capacity" is a feedback loop that chases 1
+   * forever (confirmed by this module's own real-run validation, back when
+   * it was the named-region version — see DESIGN.md).
+   *
+   * It DOES slowly drift afterward, though — toward the zone's static,
+   * population-independent biome potential (`estimateZoneResourceIndex`,
+   * scaled down for a species whose `biomes` don't match this zone's — see
+   * `BASELINE_RECOVERY_RATE`/`BIOME_MISMATCH_FACTOR`), which is safe from
+   * the feedback loop above since that target never depends on this
+   * aggregate's own population or `resourceIndex`. Without this, a zone
+   * demoted while its terrain happened to be freshly foraged-down (a normal
+   * moment-to-moment dip a focused, ticking zone would recover from on its
+   * own) froze that unlucky snapshot forever — since a demoted zone's
+   * `World` never ticks again, its measured resourceIndex literally cannot
+   * change on its own. A real run surfaced this directly: a zone demoted
+   * mid-dip went to total extinction (every species, not just a poor
+   * habitat fit) over the next 3000 ticks, because `baseResourceIndex` sat
+   * pinned below `DEATH_HEALTH_THRESHOLD` with no way back up. A biome-
+   * appropriate species now recovers toward that biome's real long-run
+   * potential regardless of what the zone's resources looked like at the
+   * exact instant it went abstract; a genuine mismatch (e.g. a wetland
+   * species left in a badlands zone) recovers only to a
+   * `BIOME_MISMATCH_FACTOR`-scaled ceiling that (at realistic biome
+   * potentials) still sits under `DEATH_HEALTH_THRESHOLD` — a real,
+   * habitat-driven decline toward local extinction, not thriving-but-
+   * diminished. The difference from before: that decline now traces to an
+   * actual bad fit, not to whatever the zone's resources happened to
+   * measure at the unlucky instant it went abstract.
    */
   baseResourceIndex: number;
   /** Current abundance, bounded to [0, `baseResourceIndex`] — drifts down under grazing pressure and recovers back toward the fixed baseline otherwise. */
@@ -388,6 +413,40 @@ const MIN_CAPACITY = 3;
 const RESOURCE_ADAPT_RATE = 0.0005;
 const EVENT_REFIRE_RATIO = 1.5;
 
+/**
+ * How much of the gap between an aggregate's `baseResourceIndex` and its
+ * (fit-scaled) biome-potential target closes per tick — see
+ * `baseResourceIndex`'s own doc comment for why this specific target is
+ * safe from the "chases 1 forever" feedback loop `RESOURCE_ADAPT_RATE`
+ * above was built to avoid. Slower than `RESOURCE_ADAPT_RATE` on purpose —
+ * this represents a demoted zone's terrain-level condition (foraged-down
+ * patches regrowing, water refilling) fading back to its biome's real
+ * long-run norm, not the moment-to-moment grazing-pressure response
+ * `resourceIndex` itself already models.
+ */
+const BASELINE_RECOVERY_RATE = 0.0002;
+/**
+ * A species whose `biomes` don't include this zone's still recovers toward
+ * SOME baseline (a wetland species stranded in a badlands zone isn't
+ * instantly deleted the moment it's demoted there) — just a small fraction
+ * of the zone's real potential, low enough to stay under
+ * `DEATH_HEALTH_THRESHOLD` even for the RICHEST biome
+ * (`estimateZoneResourceIndex`'s wetland estimate maxes out the 0..1 range
+ * at `RESOURCE_ESTIMATE_SCALE`'s current calibration) — otherwise a
+ * mismatch in an unusually rich zone could still clear the survival bar by
+ * sheer abundance, undermining the whole point of this factor. A real
+ * habitat mismatch, not an unlucky demotion-instant measurement, is what
+ * should actually doom a population.
+ */
+const BIOME_MISMATCH_FACTOR = 0.25;
+
+/** `roster` is only used to judge species-biome fit for the recovery target above — `undefined` (no `ImmigrationContext` supplied) or a species missing from it just skips that check, recovering toward the zone's full, unscaled potential rather than guessing at a fit it has no data for. */
+function biomeRecoveryTarget(zone: MacroZone, speciesId: string, biomePotential: number, roster?: readonly ImmigrationSpeciesInfo[]): number {
+  const info = roster?.find((s) => s.id === speciesId);
+  const fits = !info || speciesFitsZone(info, zone);
+  return fits ? biomePotential : biomePotential * BIOME_MISMATCH_FACTOR;
+}
+
 function maybeEmitPopulationEvent(region: Region, aggregate: RegionAggregate, mw: MacroWorld, log?: EventLog): void {
   if (aggregate.lastEventPopulation <= 0) {
     aggregate.lastEventPopulation = Math.max(1, aggregate.population);
@@ -474,11 +533,27 @@ function maybeEmigrate(mw: MacroWorld, region: Region, log?: EventLog): void {
  * in this zone), never touches individual agents or the zone's own terrain.
  * Called once per tracked non-focused zone per `tickMacroWorld` call.
  */
-export function advanceAbstractRegion(mw: MacroWorld, region: Region, log?: EventLog): void {
+export function advanceAbstractRegion(mw: MacroWorld, region: Region, log?: EventLog, roster?: readonly ImmigrationSpeciesInfo[]): void {
   const aggregates = region.aggregates;
   if (!aggregates) return;
 
+  const zone = zoneAt(mw.grid, region.row, region.col)!;
+  const biomePotential = estimateZoneResourceIndex(zone);
+
   for (const aggregate of Object.values(aggregates)) {
+    // One-directional on purpose: this represents a demoted zone's terrain
+    // healing back toward its biome's real potential over time, not the
+    // biome estimate somehow being more authoritative than an actual
+    // measured baseline. A zone whose real snapshot already sits AT or
+    // ABOVE its target (the common case for a healthy, well-fit
+    // population) must not get pulled back down toward the generic
+    // estimate — that would undermine real observed abundance instead of
+    // just healing an unlucky low one.
+    const recoveryTarget = biomeRecoveryTarget(zone, aggregate.species, biomePotential, roster);
+    if (aggregate.baseResourceIndex < recoveryTarget) {
+      aggregate.baseResourceIndex += (recoveryTarget - aggregate.baseResourceIndex) * BASELINE_RECOVERY_RATE;
+    }
+
     aggregate.avgHunger = clamp01(aggregate.avgHunger + (aggregate.resourceIndex - aggregate.avgHunger) * NEED_ADAPT_RATE);
     aggregate.avgThirst = clamp01(aggregate.avgThirst + (aggregate.resourceIndex - aggregate.avgThirst) * NEED_ADAPT_RATE);
 
@@ -614,7 +689,7 @@ export function tickMacroWorld(mw: MacroWorld, log?: EventLog, rules?: HuntRules
       tickWorld(world, log, rules, ctx, world.rng, immigration, regionDispersal);
       applyRegionCrossings(mw, region, log);
     } else {
-      advanceAbstractRegion(mw, region, log);
+      advanceAbstractRegion(mw, region, log, immigration?.speciesRoster);
     }
   }
 }

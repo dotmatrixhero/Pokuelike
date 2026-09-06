@@ -21,6 +21,59 @@ See DESIGN.md's "Overworld rearchitecture: a real macro zone grid" section
 for the full design, real numbers (a 1,000,000-zone grid generates in
 ~2.5s), and browser-validated screenshots-in-prose.
 
+- [x] **Background (non-focused) zones were a one-way ratchet toward empty,
+      not a living ecosystem — real bug, found by actually running the sim
+      and looking, per direct ask ("run some sims, examine the zones...
+      it's missing something")**: demoted a zone with 5 squirtle + 1 onix,
+      let it run ~3000 more ticks unfocused, and it went to total
+      extinction — every species, not just a poor habitat fit. Root cause:
+      `RegionAggregate.baseResourceIndex` was measured once at demotion
+      (real terrain snapshot, or a macro-grid biome guess) and frozen
+      forever — since a demoted zone's `World` never ticks again, an
+      unlucky snapshot (freshly foraged-down terrain, the normal moment-to-
+      moment dip a focused zone recovers from on its own) could permanently
+      cap capacity below whatever population was already living there, with
+      no way back up, dooming the WHOLE zone regardless of species fit.
+      Fixed in `overworld.ts`: `baseResourceIndex` now drifts (slowly,
+      `BASELINE_RECOVERY_RATE`, one-directional — never pulls a real
+      healthy snapshot back DOWN) toward the zone's static, population-
+      independent biome potential (`estimateZoneResourceIndex`), scaled
+      down (`BIOME_MISMATCH_FACTOR`) for a species whose `biomes` don't
+      match this zone's — so a genuine mismatch (a wetland species stranded
+      in badlands) still correctly declines toward extinction, but a
+      biome-appropriate population recovers instead of dying on a
+      technicality. Direct ask this also serves: "It should constantly have
+      more Pokémon thriving... can be more barren but there should be
+      reason for it then" — barren now means a real habitat mismatch, not
+      demotion-timing bad luck.
+      Also found and fixed while validating this: `macroGrid.ts`'s
+      `RESOURCE_ESTIMATE_SCALE` (feeds `estimateZoneResourceIndex`, the
+      biome-name-based guess used for zones with no real terrain measurement
+      yet) was miscalibrated against its own stated intent ("roughly the
+      same ~0.5 typical" a real generated map measures) — at the old value,
+      grassland/forest/badlands/highland ALL landed under
+      `DEATH_HEALTH_THRESHOLD` (0.3), so wetland was the only land biome
+      whose full potential could ever sustain an abstracted population at
+      all, independent of species fit. Rescaled so grassland (~0.52) and
+      forest (~0.4) land safely above the threshold like the ordinary,
+      moderately-provisioned habitats they're meant to be, while badlands
+      (~0.12) and highland (~0.2) stay genuinely harsher.
+      Real-run validated (`validateOverworld.ts`, 8000 ticks): the same
+      demoted zone that used to go fully extinct now recovers squirtle to
+      40 individuals, spreads (via ordinary emigration) into a real cluster
+      of 8 tracked neighboring zones — several hitting the population cap —
+      while onix (the actual habitat mismatch) still correctly dies out.
+      43 population-boom events, 0 die-offs, vs. the pre-fix run's handful
+      of booms and a silent total collapse. 2 new regression tests
+      (`overworld.test.ts`) lock in both halves: recovery for a fit
+      species, continued decline for a genuine mismatch.
+- [ ] **Real follow-up, not attempted here**: still just ONE demoted zone
+      recovering/spreading per real run — cross-zone migration itself
+      remains rare (`EMIGRATION_CHANCE_PER_TICK`), so "thousands of zones"
+      is still mostly a static, uninhabited backdrop around whichever
+      handful a population happens to spread into. Direct ask for the
+      actual next layer here: "zones talking to each other would be great
+      ... cross zone migration patterns."
 - [x] **Web UI, direct follow-up**: "single pannable canvas — one canvas the
       viewer pans/zooms around, not a separate macro-overview-plus-
       neighborhood-panel split." The 3-card strip below is gone; one canvas
@@ -42,6 +95,64 @@ for the full design, real numbers (a 1,000,000-zone grid generates in
       land) across different seed/scale combinations tried.
 - [ ] `MacroWorld.regions` only ever grows, never prunes — cheap per entry,
       genuinely unbounded over a very long session.
+
+## World-content roadmap (flagged, not started) — direct asks after a "zoom out, what's missing" review
+
+Asked for a high-level assessment of the project; answered it by actually
+running real sims (`validateOverworld.ts`) and reading zones rather than
+guessing, which surfaced the abstract-region extinction bug fixed just
+above plus a broader "content depth" gap (17 hand-curated species with real
+ecological roles vs. 151 with sprite art vs. 1083 with only raw dex stats —
+most of what a player could actually reach via evolution has numbers but no
+personality). Explicit response, roughly in the user's own stated order —
+none of this is built yet, this section is purely to not lose the thread:
+
+- [ ] **More species, more behaviors** — grow the curated `SPECIES` roster
+      (species.ts) past its current 17, and give more of them real
+      ecological roles (`buildsShelter`, `preferredTerrain`,
+      `obligateAquatic`, biome list) rather than leaving most of the dex's
+      1083 species as stats-only fallback with no personality once an
+      agent evolves onto one.
+- [ ] **Cross-zone migration patterns** — direct follow-up to the extinction
+      fix's own remaining gap (see the `[ ]` right above it): raise
+      `EMIGRATION_CHANCE_PER_TICK`/rework the trigger so populations
+      actually spread and interact across the macro grid as a matter of
+      course, not a rare (~1-in-thousands-of-ticks) event. "Zones talking
+      to each other would be great."
+- [ ] **Larger, multi-zone weather patterns.** Current `weather.ts` weather
+      is per-zone and small-scale ("like small circles in a zone"). Direct
+      ask: a cold snap that slowly crosses the OVERWORLD grid over many
+      zones at once, reducing plant growth and freezing water as it moves
+      through, forcing real migration pressure; a drought that visibly
+      kills existing plants and shrinks water bodies dramatically, not just
+      a minor abundance dip. This is a macro-grid-scale weather system
+      layered on top of (not replacing) the existing per-tile one — doesn't
+      exist yet in any form.
+- [ ] **Badlands BSP terrain reads too room-like.** Direct ask: keep BSP as
+      the starting structure, but make the result "more organic, wobbly,
+      rock shelf like" instead of rigid rectangular chambers — a
+      post-process/erosion pass over the current BSP output, not a
+      replacement generator.
+- [ ] **More terrain-generation variety at the zone/regional scale** — large
+      contiguous stretches that mean something (a real desert spanning
+      several zones, islands), not just per-tile biome noise. Direct ask:
+      "having sections of zones mean something... stretches of desert or
+      something like that would be cool. Islands."
+- [ ] **Species-specific environmental interactions, "derive habitats from
+      species."** Concrete examples given: water-type Pokémon should be
+      able to find food directly in pools of water by random chance
+      (algae/krill stand-in — no foraging-in-water mechanic exists today,
+      `foodStockNear`/flora tiles are the only food source currently
+      modeled); water types' shelter should be deliberately easy to build,
+      making them breed more easily than the current uniform
+      `buildsShelter` difficulty. General direction: look at each
+      species/type and ask what real environmental affordance would flesh
+      it out, rather than one uniform ruleset for all species.
+- [ ] **Snowy mountaintop habitat for ice/dragon-type species** — no cold/
+      alpine terrain or biome exists yet above `highland`; would need both
+      a new terrain/biome (worldgen.ts) and species tagged for it
+      (species.ts's `biomes`), likely feeding off whatever the multi-zone
+      weather system above eventually models for "cold."
 
 ## Overworld visualization — SUPERSEDED, see above and "Overworld rearchitecture" above
 
