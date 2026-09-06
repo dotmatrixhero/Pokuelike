@@ -22,6 +22,11 @@ export type Direction = "N" | "S" | "E" | "W";
  * status, for a move that only cares about its own signature effect), and
  * `"targetStatused"` (any of the five `StatusKind`s — a predator finishing
  * off something already weakened, not fussy about the cause) are all new.
+ * `"rallyMarked"` (the defender currently has an active
+ * `rallyMarkTicksRemaining` — see `MoveSpec.rallyCall`) is the connective
+ * primitive MOVES_DESIGN.md's "deeper crosslinks" pass asked for: a real
+ * payoff for following up on a Sociability branch's own mark, instead of
+ * the two mechanics merely coexisting.
  */
 export type SituationalCondition =
   | "targetLowHp"
@@ -34,7 +39,8 @@ export type SituationalCondition =
   | "drought"
   | "rain"
   | "targetBurning"
-  | "targetStatused";
+  | "targetStatused"
+  | "rallyMarked";
 
 export type MoveShape =
   | { kind: "point" }

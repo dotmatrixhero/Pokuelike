@@ -237,6 +237,16 @@
     text-align: center;
     line-height: 1.35;
   }
+  .range-grid-note {
+    font-size: 10px;
+    color: var(--warn, #c9a227);
+    max-width: 160px;
+    text-align: center;
+    line-height: 1.35;
+    border-top: 1px solid var(--border-soft);
+    padding-top: 4px;
+    margin-top: 2px;
+  }
 
   .flag-btn {
     font-family: "Rajdhani", sans-serif;
@@ -486,6 +496,7 @@
         <svg class="range-grid" id="rangeGrid" role="img" aria-label="Range and area of effect"></svg>
         <div class="range-grid-legend" id="rangeGridLegend"></div>
         <div class="range-grid-caption" id="rangeGridCaption">Base shape shown — some tree nodes change it (see the graph).</div>
+        <div class="range-grid-note" id="rangeGridNote" hidden></div>
       </div>
       <div class="build-controls">
         <div class="eyebrow">Build</div>
@@ -1534,8 +1545,30 @@
     var legend = document.getElementById("rangeGridLegend");
     legend.innerHTML =
       '<span class="item"><span class="swatch" style="background:var(--text)"></span>user</span>' +
-      '<span class="item"><span class="swatch" style="background:' + typeColor + ';opacity:.3"></span>in range</span>' +
-      '<span class="item"><span class="swatch" style="background:' + typeColor + '"></span>' + (move.hitsArea ? "hits (AoE)" : "target tile") + "</span>";
+      '<span class="item"><span class="swatch" style="background:' + typeColor + ';opacity:.3"></span>in range (any direction)</span>' +
+      '<span class="item"><span class="swatch" style="background:' + typeColor + '"></span>' + (move.hitsArea ? "hits (AoE, once fired)" : "target tile") + "</span>";
+
+    // Direct ask, after this looked contradictory in review: range (the
+    // faint diamond — how far a target can be for the attacker to *decide*
+    // to fire, any direction) and the shape's own footprint (the solid
+    // tiles — what the resolved attack actually reaches, fixed to this
+    // move's own `shape.length`/`radius` once facing is chosen) are two
+    // real, independent engine concepts (`moveRange`/`withinMoveRange` vs.
+    // `resolveShape`, combat.ts/moves.ts) — not a rendering bug, but genuinely
+    // confusing without saying so. Called out explicitly whenever range
+    // reaches farther than the shape does, since that's the case where a
+    // "+Range" node doesn't actually widen what gets hit.
+    var noteEl = document.getElementById("rangeGridNote");
+    if (rangeMax > shapeReach) {
+      noteEl.hidden = false;
+      noteEl.textContent =
+        "Range (" + rangeMax + ") reaches farther than this shape does (" + shapeReach +
+        "). A target at the edge of range can make the attacker fire, but won't " +
+        "necessarily end up inside the solid footprint above — only a node that " +
+        "changes the shape itself widens what actually gets hit.";
+    } else {
+      noteEl.hidden = true;
+    }
   }
 
   // ---------- Selection / navigation ----------

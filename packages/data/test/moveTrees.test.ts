@@ -186,6 +186,11 @@ describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () =>
     expect(respec.lockTicks).toBeUndefined();
   });
 
+  it("Marked Advantage deepens Rolling Thunder further via the shared rallyMarked primitive", () => {
+    const respec = applyMoveTree(rockThrow, ["pinning_impact", "tremor_call", "rolling_thunder", "marked_advantage"]);
+    expect(respec.situationalBonus).toEqual({ condition: "rallyMarked", multiplier: 1.3 });
+  });
+
   it("Hobbling Throw only needs one prior node, not both Cracked Joint and Dead Aim together", () => {
     const viaCrackedJointOnly = applyMoveTree(rockThrow, ["pinning_impact", "cracked_joint", "hobbling_throw"]);
     const viaDeadAimOnly = applyMoveTree(rockThrow, ["pinning_impact", "dead_aim", "hobbling_throw"]);
@@ -331,12 +336,37 @@ describe("Hydro Pump tree: v3 redesign — overwhelming, genuinely hard to aim",
       "pump_conditioning",
       "overwhelm_footing",
       "bursting_main",
+      "flooding_wake",
       "widening_main",
       "overwhelm_surge",
       "undertow_pull",
     ]);
     expect(viaNuke.positionSwap).toBe(true);
     expect(viaNuke.positionSwapPull).toBe(1);
+  });
+
+  it("Flooding Wake leaves real standing water via the already-shipped terrainFill primitive", () => {
+    const respec = applyMoveTree(hydroPump, ["building_pressure", "pump_conditioning", "overwhelm_footing", "bursting_main", "flooding_wake"]);
+    expect(respec.terrainFill).toEqual({ terrain: "water" });
+  });
+
+  it("Marked Undertow needs both Wake Rally's mark and Undertow Pull's drag — a real cross-branch dependency", () => {
+    const respec = applyMoveTree(hydroPump, [
+      "pod_current",
+      "pod_footing",
+      "wake_footing",
+      "wake_rally",
+      "building_pressure",
+      "pump_conditioning",
+      "overwhelm_footing",
+      "bursting_main",
+      "flooding_wake",
+      "widening_main",
+      "overwhelm_surge",
+      "undertow_pull",
+      "marked_undertow",
+    ]);
+    expect(respec.situationalBonus).toEqual({ condition: "rallyMarked", multiplier: 1.3 });
   });
 
   it("Tidal Bastion is a real two-passive keystone, distinct from Water Gun's own resistanceBreaker", () => {
@@ -481,5 +511,11 @@ describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to rea
   it("Sanctuary Quake keystone is a real, ongoing herd payoff", () => {
     const node = earthquake.tree!.sanctuary_quake;
     expect(node.grantsPassive).toEqual({ kind: "healAura", value: 0.015 });
+  });
+
+  it("Marked Rupture deepens Coordinated Tremor's own mark via the shared rallyMarked primitive", () => {
+    const respec = applyMoveTree(earthquake, ["herdsafe_trigger", "fault_trigger", "coordinated_tremor", "marked_rupture"]);
+    expect(respec.rallyCall).toEqual({ ticks: 20 });
+    expect(respec.situationalBonus).toEqual({ condition: "rallyMarked", multiplier: 1.3 });
   });
 });

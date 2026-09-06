@@ -850,6 +850,8 @@ function situationalMultiplier(world: World, attacker: Agent, defender: Agent, m
       return isBurned(defender) ? bonus.multiplier : 1;
     case "targetStatused":
       return defender.status !== undefined ? bonus.multiplier : 1;
+    case "rallyMarked":
+      return (defender.rallyMarkTicksRemaining ?? 0) > 0 ? bonus.multiplier : 1;
   }
 }
 

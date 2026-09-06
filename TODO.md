@@ -4030,3 +4030,32 @@ not something this pathfinding pass itself caused or is positioned to fix.
       "Bedrock Breaker" tree under the old triangle-treatment section)
       marked superseded rather than left silently contradicting the v3
       writeup. Atlas artifact rebuilt and republished.
+- [x] **Made "deeper crosslinks" real, fixed a genuine range-labeling bug,
+      added Hydro Pump's "spawns water," clarified two real sources of
+      confusion** — direct follow-up after publishing round-2 crosslink
+      *proposals* only as design-doc text: "I'm not seeing any deeper
+      crosslinks tho." Shipped for real: a new `SituationalCondition:
+      "rallyMarked"` primitive (defender has an active
+      `rallyMarkTicksRemaining`, engine-tested in predation.test.ts) and
+      three crosslink nodes that use it — Earthquake's *Marked Rupture*,
+      Hydro Pump's *Marked Undertow* (needs BOTH Wake Rally's mark AND
+      Undertow Pull's drag — a real cross-branch prereq), Rock Throw's
+      *Marked Advantage*. Also found and fixed a real, separate bug: every
+      "+Range" filler node across Earthquake/Hydro Pump/Solar Beam was
+      named "+10 Range" regardless of its actual value (really +1 or +2) —
+      corrected. Added Hydro Pump's *Flooding Wake* (real `terrainFill:
+      "water"`, the already-shipped primitive — direct ask: "not seeing
+      anything about... spawning water"). Two things flagged as
+      "confusing" turned out to be real, worth documenting permanently
+      (MOVES_DESIGN.md's new "Two things that read as confusing in review"
+      section): (1) range and shape are genuinely decoupled — an
+      `hitsArea` move's "+Range" filler doesn't widen what actually gets
+      hit unless the shape itself also grows, now called out live in the
+      Atlas's grid whenever range exceeds shape reach; (2) movement
+      effects (`forcedMovement` beforeHit/onHit, `positionSwap`,
+      `positionSwapPull`) resolve in one fixed real order documented
+      explicitly, not simultaneously or build-order-dependent. Impact
+      splash and the "stand still and keep spraying" Duration idea remain
+      genuinely NOT built (real new engine primitives, not faked). Full
+      suite green (182/182 data, 992/992 engine); Atlas artifact rebuilt
+      (template + data) and republished at its existing URL.

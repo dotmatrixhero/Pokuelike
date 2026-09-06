@@ -1387,7 +1387,7 @@ pick up directly):
   "Aggression sniper build" archetype — accuracy investment becomes a real
   build identity, not just a filler stat.
 
-### Deeper crosslinks — round 2 (proposed, not yet built)
+### Deeper crosslinks — round 2 (first installment Shipped, rest proposed)
 
 Direct follow-up: "we didn't come up with specific ideas but just the idea
 [of deeper crosslinks]." Fleshing that out for real, per move, rather than
@@ -1397,24 +1397,28 @@ Hydro Pump's *Steadfast Tide* and Solar Beam's *Shared Shade* are both
 "Boldness↔Sociability, shared `regen`," the same mechanic copy-pasted
 across two trees. The proposals below are deliberately never that: each
 one combines the two specific branches' own *distinct* mechanics on that
-move, not a generic shared passive, and none of them are implemented yet.
+move, not a generic shared passive.
 
-One new connective primitive threads through several of these — worth
-building once, reused everywhere `rallyCall` already exists (Earthquake,
-Rock Throw):
-- **`SituationalCondition: "rallyMarked"`** — the defender currently has
-  an active `rallyMarkTicksRemaining`. Same one-line-enum-addition pattern
-  as `"flanking"`/`"targetLowHp"`. Turns "the herd calls out a target"
-  from a pure awareness effect into a real payoff for whoever follows up —
-  Aggression branches get an honest reason to want the mark to land
-  *before* their own big hit, not just tolerate co-existing with it.
+Direct follow-up feedback caught that a doc-only proposal isn't the same as
+a real crosslink you can actually spec into — the connective primitive and
+three of the crosslinks below are now **Shipped**; the rest are still
+proposals:
+
+- **`SituationalCondition: "rallyMarked"` (Shipped)** — the defender
+  currently has an active `rallyMarkTicksRemaining`. Same one-line-
+  enum-addition pattern as `"flanking"`/`"targetLowHp"`
+  (`moves.ts`/`predation.ts`'s `situationalMultiplier`, engine test in
+  `predation.test.ts`). Turns "the herd calls out a target" from a pure
+  awareness effect into a real payoff for whoever follows up — Aggression
+  branches get an honest reason to want the mark to land *before* their
+  own big hit, not just tolerate co-existing with it.
 
 - **Earthquake**
-  - *Marked Rupture* (Sociability↔Aggression) — Overload's own power gets
-    a real `situationalBonus: "rallyMarked"` bonus: call out a target with
-    Herdsafe Trigger, then bury it with the AoE-size fork. Replaces
-    *Coordinated Tremor*'s plain `rallyCall` grant (redundant once the
-    opener already sets it) with an actual payoff for the combo.
+  - *Marked Rupture* (Sociability↔Aggression, **Shipped**) — a new node
+    built directly on *Coordinated Tremor*'s own mark (not a replacement —
+    the mark still has to be granted by something): `situationalBonus:
+    "rallyMarked"`, a real payoff for calling out a target with Herdsafe
+    Trigger, then burying it with the AoE-size fork.
   - *Braced Convergence* (Boldness↔Sociability) — the stillness Fissure
     Grip's brace fork already costs (`lockTicks`) buys a real payoff on
     the *other* branch: a much longer `rallyCall.ticks` window, since not
@@ -1440,11 +1444,15 @@ Rock Throw):
     the user a real `statChangeOnHit` self Defense buff — bracing exactly
     as you create the distance, instead of a passive that runs regardless
     of which positional fork got picked.
-  - *Marked Undertow* (Sociability↔Aggression) — the same `"rallyMarked"`
-    condition as Earthquake: a target the herd has already flagged gets
-    pulled in harder — bonus `positionSwapPull` distance on Undertow Pull
-    against a marked target, so the herd's call-out and the nuke branch's
-    own drag mechanic actually compound.
+  - *Marked Undertow* (Sociability↔Aggression, **Shipped**) — needs BOTH
+    *Wake Rally* (the mark) AND *Undertow Pull* (the drag), a real
+    cross-branch dependency rather than a single-prereq node: `situationalBonus:
+    "rallyMarked"` — the current pulls hardest at whatever the pod has
+    already flagged. (The pitched version — extra `positionSwapPull`
+    distance specifically — isn't buildable from `situationalBonus` alone,
+    since that only scales damage; a distance bonus keyed off a condition
+    would need its own new field. Shipped the damage version instead of
+    faking the distance one.)
 
 - **Solar Beam** (no `rallyCall` in this tree — Grove's own fork is the
   ally-effect choice instead, so its crosslinks lean on *that* mechanic)
@@ -1475,11 +1483,12 @@ Rock Throw):
     add a real reduction to Quarry Break's own `lockTicks` cost when
     Bedrock Stance is already taken, the same "position/setup pays down a
     later branch's time cost" shape as Hydro Pump's *Anchored Surge*.
-  - *Rolling Thunder* (Sociability↔Aggression) — already deepens the
-    Aggression pin once a target is marked (fixed from an earlier
-    `lockTicks` self-lock bug — see the v3 writeup above); once the shared
-    `"rallyMarked"` condition exists, layer a real damage bonus on top of
-    the debuff too, instead of the Speed stage being the only payoff.
+  - *Rolling Thunder* (Sociability↔Aggression) deepens the Aggression pin
+    once a target is marked (fixed from an earlier `lockTicks` self-lock
+    bug — see the v3 writeup above). *Marked Advantage* (**Shipped**)
+    builds on it directly: a new node using `"rallyMarked"` to add a real
+    damage bonus on top of the debuff, instead of the Speed stage being
+    the only payoff.
   - *Grounded Signal* (Boldness↔Sociability, new) — Unshakeable's
     `immovable` passive is at its best exactly when the herd has already
     been called in (Tremor Call): grant a real, temporary
@@ -1542,6 +1551,60 @@ not assumed:
   "Skill-tree lever brainstorm" below — spend 2x PP per use in exchange for
   a real power/effect spike, distinct from every existing cost lever
   (`selfCostPerUse` spends energy/hunger, not PP).
+
+### Two things that read as confusing in review, and what's actually true
+
+Both flagged directly against the Atlas artifact — worth a permanent home
+here rather than re-explaining from scratch next time either comes up.
+
+**Range and shape are genuinely decoupled, not a rendering bug.**
+`MoveRange.max` (`moves.ts`) is how far away a target can be for the
+attacker to *decide* to fire (`moveRange`/`withinMoveRange`, combat.ts) —
+checked in any direction from the attacker. The move's `shape` (resolved
+by `resolveShape` once facing is chosen) is what the attack *actually
+hits*, always starting from the attacker's own tile, at a fixed
+`length`/`radius` independent of how far away the triggering target was.
+For a single-target move (no `hitsArea`) these two numbers are usually
+kept in lockstep on purpose (Peck's *Extended Wingspan* bumps `shape` and
+`range` together) — genuinely extending reach. For an `hitsArea` move
+(Earthquake, Hydro Pump), though, several "+Range" filler nodes (Hydro
+Pump's *Widening Main*, Earthquake's *Cracking Footing*/*Tremor Reach*)
+only ever bumped `range.max`, never the shape itself — so a target at the
+new, farther edge of range can make the attacker fire, but isn't
+guaranteed to actually be *inside* the resolved AoE footprint once it
+does. That's real, current engine behavior, not a mistake to silently
+patch — but it was genuinely confusing without saying so. Fixed two ways:
+(1) the Atlas's range/footprint grid now shows an explicit warning
+whenever a move's range reaches farther than its shape does, naming both
+numbers; (2) `widening_main`'s own code comment in `moves.ts` now states
+the caveat directly. Also fixed in the same pass: every "+Range" node in
+Earthquake/Hydro Pump/Solar Beam was mislabeled `"+10 Range"` regardless
+of its real value — corrected to the actual increment (`+1` for
+Earthquake/Hydro Pump, `+2` for Solar Beam, which reaches its own stated
+"up to 7" cap correctly).
+
+**Movement effects resolve in one fixed, real order — not simultaneously,
+and not build-order-dependent.** A single move can carry a `beforeHit`
+`forcedMovement` (a lunge/retreat), an `onHit` `forcedMovement` (a
+drag/knockback), `positionSwap`, and `positionSwapPull` all at once (Hydro
+Pump's Bastion+Aggression combo is a real example), and it wasn't obvious
+what order they'd actually apply in. They're not simultaneous — the real
+pipeline (`predation.ts`'s `resolveHitAgainstTarget`) is:
+1. `forcedMovement` with `timing: "beforeHit"` — the attacker (or
+   defender) moves *before* the accuracy roll. Doesn't change whether this
+   specific hit lands (range was already checked before this function was
+   even called) — only where the mover ends up standing for whatever
+   comes next.
+2. The hit resolves (accuracy roll, damage).
+3. On a landed, *non-killing* hit only: status effects, the defender-side
+   `statChangeOnHit`, then `forcedMovement` with `timing: "onHit"`, then
+   `positionSwap` (attacker and defender's tiles swap), then
+   `positionSwapPull` (an *additional* push, applied right after the swap,
+   from the attacker's new post-swap position).
+   A killing hit skips this whole block — none of these fire on a kill.
+This is fully deterministic regardless of which order the tree nodes were
+*chosen* in — it's the move's own final, merged spec that's evaluated,
+always in this fixed pipeline order, every time the move is used.
 
 ## Move Tree Atlas: how to keep it updated
 

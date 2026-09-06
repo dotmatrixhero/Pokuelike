@@ -1546,6 +1546,26 @@ describe("new situational conditions wired into real combat", () => {
     // targetStatused fires on ANY status (paralysis here), not just burn.
     expect(foughtDamage(paralyzedLog.events)).toBeGreaterThan(foughtDamage(unstatusedLog.events));
   });
+
+  it("rallyMarked keys off the defender's own active rallyCall mark, not any other agent's", () => {
+    const RALLY_MARKED_MOVE: MoveSpec = { ...TEST_MOVE, id: "rally-marked-move", situationalBonus: { condition: "rallyMarked", multiplier: 3 } };
+
+    const markedWorld = createWorld(10, 10);
+    const markedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [RALLY_MARKED_MOVE] });
+    const markedVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS }, rallyMarkTicksRemaining: 5 });
+    markedWorld.agents.push(markedAttacker, markedVictim);
+    const markedLog = new EventLog();
+    tickWorld(markedWorld, markedLog, RULES);
+
+    const unmarkedWorld = createWorld(10, 10);
+    const unmarkedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [RALLY_MARKED_MOVE] });
+    const unmarkedVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    unmarkedWorld.agents.push(unmarkedAttacker, unmarkedVictim);
+    const unmarkedLog = new EventLog();
+    tickWorld(unmarkedWorld, unmarkedLog, RULES);
+
+    expect(foughtDamage(markedLog.events)).toBeGreaterThan(foughtDamage(unmarkedLog.events));
+  });
 });
 
 describe("preferMarked (rally-call focus fire)", () => {

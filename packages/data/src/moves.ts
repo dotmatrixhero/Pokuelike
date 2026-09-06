@@ -2079,6 +2079,18 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -2, ticks: 24 } },
       },
+      // Deeper crosslink, building on Rolling Thunder: a pinned, marked
+      // target is exactly what the herd's own convergence should punish
+      // hardest, using the same `"rallyMarked"` primitive Earthquake and
+      // Hydro Pump's own deeper crosslinks now share.
+      marked_advantage: {
+        id: "marked_advantage",
+        name: "Marked Advantage",
+        cost: 1,
+        prerequisites: ["rolling_thunder"],
+        leaning: "aggression",
+        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.3 } },
+      },
     },
   },
   water_gun: {
@@ -2461,12 +2473,33 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { defensePenetration: 0.3 },
       },
-      widening_main: {
-        id: "widening_main",
-        name: "+10 Range",
+      flooding_wake: {
+        id: "flooding_wake",
+        name: "Flooding Wake",
         cost: 1,
         prerequisites: ["bursting_main"],
         leaning: "aggression",
+        // A real, already-shipped primitive (see Water Gun's own use of it):
+        // a landed, non-killing hit leaves standing water where it struck.
+        // Direct ask, answered with what's actually buildable now: the
+        // fuller "it also slows non-Water types" version needs
+        // `terrainSpeedMultiplier` (support.ts) to become type-aware, which
+        // it isn't yet — flagged in MOVES_DESIGN.md, not built this pass.
+        delta: { terrainFill: { terrain: "water" } },
+      },
+      widening_main: {
+        id: "widening_main",
+        name: "+1 Range",
+        cost: 1,
+        prerequisites: ["flooding_wake"],
+        leaning: "aggression",
+        // Honest caveat, not hidden: this move's own cone footprint is
+        // fixed at `shape.length` (4) regardless of `range.max` — range
+        // only governs how far away a target can be for the attacker to
+        // *decide* to fire (`moveRange`/`withinMoveRange`, combat.ts), not
+        // how far the resolved blast itself reaches. A target at the new,
+        // farther edge of range won't necessarily end up inside the cone.
+        // See MOVES_DESIGN.md's "range vs. shape are decoupled" note.
         delta: { range: { max: 5 } },
       },
       overwhelm_surge: {
@@ -2552,7 +2585,7 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       channel_grip: {
         id: "channel_grip",
-        name: "+10 Range",
+        name: "+1 Range",
         cost: 1,
         prerequisites: ["undertow_anchor"],
         leaning: "boldness",
@@ -2645,7 +2678,7 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       pod_reach: {
         id: "pod_reach",
-        name: "+10 Range",
+        name: "+1 Range",
         cost: 1,
         prerequisites: ["wake_rally"],
         leaning: "sociability",
@@ -2728,6 +2761,18 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { critRateStage: 1 },
       },
+      // Deeper crosslink: needs BOTH branches' own real mechanics —
+      // Wake Rally's mark and Undertow Pull's drag — not just a shared
+      // passive. Uses the new `"rallyMarked"` primitive: the current
+      // pulls hardest at whatever the pod has already flagged.
+      marked_undertow: {
+        id: "marked_undertow",
+        name: "Marked Undertow",
+        cost: 1,
+        prerequisites: ["wake_rally", "undertow_pull"],
+        leaning: "aggression",
+        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.3 } },
+      },
     },
   },
   surf: {
@@ -2806,7 +2851,7 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       widening_beam: {
         id: "widening_beam",
-        name: "+10 Range",
+        name: "+2 Range",
         cost: 1,
         prerequisites: ["piercing_ray"],
         leaning: "aggression",
@@ -2893,7 +2938,7 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       deepening_roots: {
         id: "deepening_roots",
-        name: "+10 Range",
+        name: "+2 Range",
         cost: 1,
         prerequisites: ["steadfast_bloom"],
         leaning: "boldness",
@@ -2968,7 +3013,7 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       grove_reach: {
         id: "grove_reach",
-        name: "+10 Range",
+        name: "+2 Range",
         cost: 1,
         prerequisitesAnyOf: [["grove_footing"], ["shared_shade"], ["territorial_flare"]],
         leaning: "sociability",
@@ -3201,7 +3246,7 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       cracking_footing: {
         id: "cracking_footing",
-        name: "+10 Range",
+        name: "+1 Range",
         cost: 1,
         prerequisitesAnyOf: [["bedrock_footing_2"], ["cracking_momentum"], ["fractured_warning"]],
         leaning: "boldness",
@@ -3307,7 +3352,7 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       tremor_reach: {
         id: "tremor_reach",
-        name: "+10 Range",
+        name: "+1 Range",
         cost: 1,
         prerequisites: ["bracing_call"],
         leaning: "sociability",
@@ -3393,6 +3438,19 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["herdsafe_trigger", "fault_trigger"],
         leaning: "sociability",
         delta: { rallyCall: { ticks: 20 } },
+      },
+      // Deeper crosslink, building on Coordinated Tremor's own mark: a real
+      // payoff for following up on it, via the new `"rallyMarked"`
+      // `SituationalCondition` (see moves.ts's own doc comment) — the herd
+      // converging on something is worth more once the quake actually
+      // lands on it too.
+      marked_rupture: {
+        id: "marked_rupture",
+        name: "Marked Rupture",
+        cost: 1,
+        prerequisites: ["coordinated_tremor"],
+        leaning: "aggression",
+        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.3 } },
       },
     },
   },
