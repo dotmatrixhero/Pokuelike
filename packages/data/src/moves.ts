@@ -1734,98 +1734,120 @@ export const MOVES: Record<string, MoveSpec> = {
     // effect like terrainBurn. The boulder tile reverts to floor either way
     // once thrown; a clean miss doesn't waste it (accuracy is rolled first).
     consumesOwnTerrain: { terrain: "boulder", damageMultiplier: 3 },
-    // v2 full triangle (MOVES_DESIGN.md's "Rock Throw" writeup): Aggression
-    // ("Landslide") throws heavier for more, at a real energy cost; Boldness
-    // ("Bedrock") plants and shrugs off retaliation; Sociability
-    // ("Tremor Call") turns the throw's own tremor into herd buffs. Note:
-    // Onix/Spearow/the wild Squirtle pair carry no herdId in scenario.ts
-    // today, so this branch is real, shipped content that's currently inert
-    // for those specific individuals — see MOVES_DESIGN.md.
+    // v3 redesign (MOVES_DESIGN.md's "Rock Throw v3" writeup): the fantasy is
+    // the reach a lumbering, heavy, slow body wouldn't otherwise have.
+    // Aggression ("Denial") isn't bigger-numbers escalation — it's partial
+    // crowd control: a throw that catches a leg or wing joint and makes
+    // fleeing harder, not impossible. Boldness ("Bedrock") is a tank/counter
+    // fantasy — plant, shrug off retaliation, punish whatever hasn't turned
+    // to face it yet. Sociability ("Tremor Rally") finally uses the real
+    // `rallyCall` primitive instead of another flat ally stat buff: the
+    // impact's tremor marks exactly where the fight is, so herd-mates'
+    // own independent hunt/threat picks converge on it, same as a "focus
+    // fire" call. Note: Onix/Spearow/the wild Squirtle pair carry no herdId
+    // in scenario.ts today, so this branch is real, shipped content that's
+    // currently inert for those specific individuals — see MOVES_DESIGN.md.
     tree: {
-      heavy_stones: {
-        id: "heavy_stones",
-        name: "Heavy Stones",
+      // --- Aggression: Denial (pin, don't just out-damage) ---
+      pinning_impact: {
+        id: "pinning_impact",
+        name: "Pinning Impact",
         cost: 1,
         leaning: "aggression",
-        delta: { power: 10, accuracy: -5 },
+        // Not a stun — a real but partial slow, so a cornered target can
+        // still struggle away eventually. Denial, not a lockdown.
+        delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -1, ticks: 16 } },
       },
-      boulder_momentum: {
-        id: "boulder_momentum",
-        name: "+5 Power",
+      cracked_joint: {
+        id: "cracked_joint",
+        name: "+8 Power",
         cost: 1,
-        prerequisites: ["heavy_stones"],
+        prerequisites: ["pinning_impact"],
         leaning: "aggression",
-        delta: { power: 5 },
+        delta: { power: 8 },
       },
-      landslide_footing: {
-        id: "landslide_footing",
-        name: "+5 Accuracy",
+      dead_aim: {
+        id: "dead_aim",
+        name: "+8 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["boulder_momentum"], ["grinding_advance"], ["rolling_thunder"]],
+        prerequisites: ["pinning_impact"],
         leaning: "aggression",
-        delta: { accuracy: 5 },
+        delta: { accuracy: 8 },
       },
-      crushing_weight: {
-        id: "crushing_weight",
-        name: "Crushing Weight",
+      hobbling_throw: {
+        id: "hobbling_throw",
+        name: "Hobbling Throw",
         cost: 1,
-        prerequisites: ["landslide_footing"],
+        prerequisitesAnyOf: [["cracked_joint", "dead_aim"], ["grinding_advance"]],
         leaning: "aggression",
-        delta: { defensePenetration: 0.3 },
+        // A second, harder catch — the slow stacks worse the more of these land.
+        delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -1, ticks: 20 } },
       },
-      avalanche_force: {
-        id: "avalanche_force",
-        name: "+5 Power",
+      broken_stride: {
+        id: "broken_stride",
+        name: "+8 Power",
         cost: 1,
-        prerequisites: ["crushing_weight"],
+        prerequisites: ["hobbling_throw"],
         leaning: "aggression",
-        delta: { power: 5 },
+        delta: { power: 8 },
       },
-      overhand_heave: {
-        id: "overhand_heave",
-        name: "Overhand Heave",
-        cost: 1,
-        prerequisites: ["avalanche_force"],
-        excludes: ["measured_toss"],
+      relentless_barrage: {
+        id: "relentless_barrage",
+        name: "Relentless Barrage",
+        cost: 2,
+        prerequisites: ["broken_stride"],
+        excludes: ["crippling_snare"],
         leaning: "aggression",
-        // Throws as hard as it can manage — a real bite out of its own
-        // energy for the extra weight behind it.
-        delta: { power: 15, selfCostPerUse: { need: "energy", amount: 0.05 } },
+        // Keeps throwing, one after another — no window for the target to
+        // recover its footing between hits.
+        delta: { power: 15 },
       },
-      measured_toss: {
-        id: "measured_toss",
-        name: "Measured Toss",
-        cost: 1,
-        prerequisites: ["avalanche_force"],
-        excludes: ["overhand_heave"],
+      crippling_snare: {
+        id: "crippling_snare",
+        name: "Crippling Snare",
+        cost: 2,
+        prerequisites: ["broken_stride"],
+        excludes: ["relentless_barrage"],
         leaning: "aggression",
-        delta: { accuracy: 15 },
+        // Widens the throw into a real spread — a whole line of fleeing
+        // targets gets caught by the same denial, not just the one in front.
+        delta: { shape: { kind: "cone", length: 3, width: 2 } },
       },
       skyfall: {
         id: "skyfall",
         name: "Skyfall",
         cost: 2,
-        prerequisitesAnyOf: [["overhand_heave"], ["measured_toss"]],
+        prerequisitesAnyOf: [["relentless_barrage"], ["crippling_snare"], ["rolling_thunder"]],
         leaning: "aggression",
         // Arcs it down out of the sky — a real problem for anything flying.
         delta: { bonusVsType: { type: "flying", multiplier: 1.5 } },
       },
-      rockslide_precision: {
-        id: "rockslide_precision",
-        name: "+5 Accuracy",
+      dead_weight_finisher: {
+        id: "dead_weight_finisher",
+        name: "+8 Accuracy",
         cost: 1,
         prerequisites: ["skyfall"],
         leaning: "aggression",
-        delta: { accuracy: 5 },
+        delta: { accuracy: 8 },
       },
-      cave_in: {
-        id: "cave_in",
-        name: "Cave-In",
+      quarry_break: {
+        id: "quarry_break",
+        name: "Quarry Break",
         cost: 2,
-        prerequisites: ["rockslide_precision"],
+        prerequisites: ["dead_weight_finisher"],
         leaning: "aggression",
-        delta: { power: 15, critRateStage: 2 },
+        // Wrenches a whole slab straight out of the ground before it
+        // throws — the real "boulder charge-up" fantasy, approximated with
+        // the primitives this pass has: a costly beat of committed downtime
+        // (lockTicks) buys a genuinely bigger, armor-punching hit. The
+        // richer version — only pay the lockTicks cost when there's no
+        // `consumesOwnTerrain` boulder already underfoot to just throw for
+        // free — needs a new "conditional on terrain presence" branch in
+        // that same check (predation.ts's `applySingleDamageInstance`);
+        // flagged in MOVES_DESIGN.md, not built this pass.
+        delta: { lockTicks: 2, power: 25, defensePenetration: 0.3 },
       },
+      // --- Boldness: Bedrock (plant, shrug off, punish) ---
       bedrock_stance: {
         id: "bedrock_stance",
         name: "Bedrock Stance",
@@ -1842,27 +1864,27 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { power: 5 },
       },
-      bedrock_footing: {
-        id: "bedrock_footing",
-        name: "+5 Accuracy",
+      granite_grip: {
+        id: "granite_grip",
+        name: "+8 Accuracy",
         cost: 1,
         prerequisitesAnyOf: [["weathered_slab"], ["grinding_advance"], ["warning_tremor"]],
         leaning: "boldness",
-        delta: { accuracy: 5 },
+        delta: { accuracy: 8 },
       },
       unshakeable: {
         id: "unshakeable",
         name: "Unshakeable",
         cost: 1,
-        prerequisites: ["bedrock_footing"],
+        prerequisites: ["granite_grip"],
         leaning: "boldness",
         // Plants and refuses to be moved — no drag, knockback, or lunge so
         // much as budges it.
         grantsPassive: { kind: "immovable", value: 1 },
         delta: {},
       },
-      granite_grip: {
-        id: "granite_grip",
+      bedrock_footing: {
+        id: "bedrock_footing",
         name: "+5 Power",
         cost: 1,
         prerequisites: ["unshakeable"],
@@ -1873,17 +1895,18 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "aftershock_counter",
         name: "Aftershock Counter",
         cost: 1,
-        prerequisites: ["granite_grip"],
+        prerequisites: ["bedrock_footing"],
         excludes: ["granite_ward"],
         leaning: "boldness",
-        // Hits hardest at whatever hasn't turned to face the threat yet.
+        // Hits hardest at whatever hasn't turned to face the threat yet —
+        // the payoff for standing your ground instead of chasing.
         delta: { situationalBonus: { condition: "flanking", multiplier: 1.4 } },
       },
       granite_ward: {
         id: "granite_ward",
         name: "Granite Ward",
         cost: 1,
-        prerequisites: ["granite_grip"],
+        prerequisites: ["bedrock_footing"],
         excludes: ["aftershock_counter"],
         leaning: "boldness",
         grantsPassive: { kind: "damageReduction", value: 0.05 },
@@ -1914,72 +1937,83 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["bedrock_resolve"],
         leaning: "boldness",
         // Thrown hard enough that even a real resistance barely slows it.
+        // The other capstone this branch was pitched as — the throw's own
+        // power scaling with damage the user just absorbed, a real "stored
+        // retaliation loop" instead of another flat passive — needs a new
+        // primitive: `SituationalCondition` doesn't yet have a
+        // "recentlyDamaged" (self took a hit within the last N ticks) entry.
+        // That's a one-line addition to the same enum/check `"targetLowHp"`
+        // already uses (moves.ts / predation.ts's `situationalMultiplier`),
+        // flagged in MOVES_DESIGN.md as the concrete next step, not built
+        // this pass.
         delta: { resistanceBreaker: { multiplier: 2 } },
       },
-      tremor_signal: {
-        id: "tremor_signal",
-        name: "Tremor Signal",
+      // --- Sociability: Tremor Rally (real shared awareness, not a flat buff) ---
+      tremor_call: {
+        id: "tremor_call",
+        name: "Tremor Call",
         cost: 1,
         leaning: "sociability",
-        // The impact's own tremor doubles as a warning the herd can brace to.
-        delta: { targetsAlly: true, allyEffect: { buff: { stat: "defense", stage: 1, ticks: 20 } } },
+        // The impact's tremor doesn't just warn the herd it happened — it
+        // marks exactly where. Every herd-mate's own, independently-run
+        // hunt/threat pick converges on the same target, same as if they'd
+        // seen it themselves (see `Agent.rallyMarkTicksRemaining`'s own doc
+        // comment). This is the real answer to "does it make allies aware
+        // and bring them in" — yes, via the shipped `rallyCall` primitive,
+        // not a new one.
+        delta: { rallyCall: { ticks: 20 } },
       },
-      colony_footing: {
-        id: "colony_footing",
-        name: "+5 Accuracy",
+      sure_footing: {
+        id: "sure_footing",
+        name: "+8 Accuracy",
         cost: 1,
-        prerequisites: ["tremor_signal"],
+        prerequisites: ["tremor_call"],
         leaning: "sociability",
-        delta: { accuracy: 5 },
+        delta: { accuracy: 8 },
       },
-      tremor_footing: {
-        id: "tremor_footing",
-        name: "+5 Power",
+      carrying_weight: {
+        id: "carrying_weight",
+        name: "+8 Power",
         cost: 1,
-        prerequisitesAnyOf: [["colony_footing"], ["warning_tremor"], ["rolling_thunder"]],
+        prerequisitesAnyOf: [["sure_footing"], ["warning_tremor"], ["rolling_thunder"]],
         leaning: "sociability",
-        delta: { power: 5 },
+        delta: { power: 8 },
       },
-      seismic_rally: {
-        id: "seismic_rally",
-        name: "Seismic Rally",
+      deep_tremor: {
+        id: "deep_tremor",
+        name: "Deep Tremor",
         cost: 1,
-        prerequisites: ["tremor_footing"],
+        prerequisites: ["carrying_weight"],
         leaning: "sociability",
-        delta: { targetsAlly: true, allyEffect: { buff: { stat: "attack", stage: 1, ticks: 20 } } },
+        // Rides deeper into the rock — the mark reaches, and holds, much
+        // farther out. Overwrites, rather than stacks with, Tremor Call's
+        // own ticks (same merge semantics every other overwrite field uses).
+        delta: { rallyCall: { ticks: 35 } },
       },
-      tremor_precision: {
-        id: "tremor_precision",
-        name: "+5 Accuracy",
+      vanguard_call: {
+        id: "vanguard_call",
+        name: "Vanguard Call",
         cost: 1,
-        prerequisites: ["seismic_rally"],
+        prerequisites: ["deep_tremor"],
+        excludes: ["bulwark_call"],
         leaning: "sociability",
-        delta: { accuracy: 5 },
+        delta: { power: 10, jamCooldownTicks: 1 },
       },
-      bulwark_coil: {
-        id: "bulwark_coil",
-        name: "Bulwark Coil",
+      bulwark_call: {
+        id: "bulwark_call",
+        name: "Bulwark Call",
         cost: 1,
-        prerequisites: ["tremor_precision"],
-        excludes: ["vanguard_tunneler"],
+        prerequisites: ["deep_tremor"],
+        excludes: ["vanguard_call"],
         leaning: "sociability",
         grantsPassive: { kind: "damageReduction", value: 0.05 },
         delta: { power: -5 },
-      },
-      vanguard_tunneler: {
-        id: "vanguard_tunneler",
-        name: "Vanguard Tunneler",
-        cost: 1,
-        prerequisites: ["tremor_precision"],
-        excludes: ["bulwark_coil"],
-        leaning: "sociability",
-        delta: { power: 10, jamCooldownTicks: 1 },
       },
       colony_watch: {
         id: "colony_watch",
         name: "Colony Watch",
         cost: 2,
-        prerequisitesAnyOf: [["bulwark_coil"], ["vanguard_tunneler"]],
+        prerequisitesAnyOf: [["vanguard_call"], ["bulwark_call"]],
         leaning: "sociability",
         grantsPassive: { kind: "regen", value: 0.03 },
         delta: {},
@@ -1992,13 +2026,16 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { accuracy: 5 },
       },
-      seismic_lockdown: {
-        id: "seismic_lockdown",
-        name: "Seismic Lockdown",
+      full_convergence: {
+        id: "full_convergence",
+        name: "Full Convergence",
         cost: 2,
         prerequisites: ["tremor_focus"],
         leaning: "sociability",
-        delta: { jamCooldownTicks: 3 },
+        // The mark holds long enough, and the herd converges hard enough on
+        // it, that recovering afterward gets steadily harder for whatever's
+        // been struck.
+        delta: { rallyCall: { ticks: 60 }, jamCooldownTicks: 3 },
       },
       // Crosslink: Aggression <-> Boldness — a heavier hit off an already
       // grounded, braced throw.
@@ -2006,7 +2043,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "grinding_advance",
         name: "Grinding Advance",
         cost: 1,
-        prerequisites: ["heavy_stones", "bedrock_stance"],
+        prerequisites: ["pinning_impact", "bedrock_stance"],
         leaning: "aggression",
         delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 12 } },
       },
@@ -2016,18 +2053,18 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "warning_tremor",
         name: "Warning Tremor",
         cost: 1,
-        prerequisites: ["bedrock_stance", "tremor_signal"],
+        prerequisites: ["bedrock_stance", "tremor_call"],
         leaning: "boldness",
         grantsPassive: { kind: "damageReduction", value: 0.05 },
         delta: {},
       },
-      // Crosslink: Sociability <-> Aggression — the herd's own call turns a
-      // hurled rock into a stunning one.
+      // Crosslink: Sociability <-> Aggression — a marked target that's
+      // already hobbled gets outright stunned, not just slowed further.
       rolling_thunder: {
         id: "rolling_thunder",
         name: "Rolling Thunder",
         cost: 1,
-        prerequisites: ["tremor_signal", "heavy_stones"],
+        prerequisites: ["tremor_call", "pinning_impact"],
         leaning: "sociability",
         delta: { lockTicks: 2 },
       },
