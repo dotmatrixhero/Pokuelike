@@ -54,6 +54,18 @@ const BATTLE_STALE_TICKS = 40;
 const CLASH_STALE_TICKS = 8;
 /** `CLASH_STALE_TICKS`'s own real-ms epilogue counterpart — see `BATTLE_EPILOGUE_MS`'s doc comment for why this is wall-clock, not ticks. Proportionally shorter than a real battle's, same "it's over, move on" reasoning. */
 const CLASH_EPILOGUE_MS = 400;
+/**
+ * How many ticks a `herdClash` pair's own first landed hit stays "pending" —
+ * eligible to be confirmed into a real camera engagement by a genuine
+ * follow-up (a second hit, or a retreat) — before it's forgotten as a real,
+ * one-off, inconclusive skirmish instead. Direct follow-up ask, after
+ * territorial guarding made these far more frequent: a single hit is real
+ * (a move genuinely landed), but reads as noise, not "a fight," on its own.
+ * Wide enough to comfortably cover an ordinary move's real cooldown (every
+ * curated attack move now floors at `cooldownTicks: 2`) without holding the
+ * bar open indefinitely for a pair that's plainly moved on.
+ */
+const CLASH_ESCALATION_WINDOW_TICKS = 20;
 /** Hard cap on queued-but-not-yet-shown engagements — a chaotic tick (mass death event, say) shouldn't grow this unboundedly; overflow drops the oldest still-queued entries first. */
 const MAX_QUEUE = 20;
 /**
@@ -183,6 +195,21 @@ export class AutoCameraController {
   private battleStepping = false;
   /** Sticky "the viewer took the wheel" flag — set by `noteManualViewChange`, cleared whenever a *new* engagement becomes active. While set, the currently-active engagement keeps running (log filter, dwell/conclusion logic) but stops re-centering the camera; a fresh notable event still takes it back, since that's a deliberate new thing to look at, not a continuation of what the viewer already panned away from. */
   private viewerTookOver = false;
+  /**
+   * Pair-key -> tick of a `herdClash` pair's own first landed hit, held back
+   * from actually becoming a camera-worthy "clash" engagement — direct
+   * follow-up ask, after territorial guarding made `herdClash` far more
+   * frequent: "a lot more clashing now. But they aren't fighting... let's
+   * [raise the bar, not] auto cam to them... until they actually intend to
+   * use a move" refined into "only once a skirmish shows real escalation."
+   * A single opening hit is real (a move genuinely landed — see
+   * `CLASH_ESCALATION_WINDOW_TICKS`'s own doc comment for why that alone
+   * still isn't enough), but reads as noise rather than "a fight" on its
+   * own; a second hit (or an outright retreat, real resolution on its own)
+   * within a real short window is what actually earns the camera. See
+   * `maybeEscalateClash`.
+   */
+  private clashPendingFirstHit = new Map<string, number>();
 
   constructor(private readonly host: AutoCameraHost) {}
 
@@ -248,6 +275,7 @@ export class AutoCameraController {
   reset(): void {
     this.queue = [];
     this.active = undefined;
+    this.clashPendingFirstHit.clear();
     this.releaseControl();
   }
 
@@ -390,9 +418,22 @@ export class AutoCameraController {
         // direct ask: real fights ("fought") are the dramatic thing worth a
         // hard one-tick-at-a-time pause; a non-lethal herd resource
         // skirmish isn't. See `CLASH_STALE_TICKS`/`CLASH_EPILOGUE_MS`'s own
-        // doc comments.
+        // doc comments. `outcome !== "missed"` alone used to be enough to
+        // engage the camera — direct follow-up, once territorial guarding
+        // made real hits far more frequent: a lone opening hit reads as
+        // noise, not "a fight" — see `maybeEscalateClash`'s own real
+        // escalation bar (a second hit, or a retreat).
         if (event.outcome !== "missed") {
-          this.onBattleHit("clash", new Set([event.attackerId, event.defenderId]), event.pos, `${idLabel(world, event.attackerId, event.attackerSpecies)} vs ${idLabel(world, event.defenderId, event.defenderSpecies)} clashing`, world);
+          this.maybeEscalateClash(
+            event.tick,
+            event.attackerId,
+            event.defenderId,
+            event.outcome,
+            new Set([event.attackerId, event.defenderId]),
+            event.pos,
+            `${idLabel(world, event.attackerId, event.attackerSpecies)} vs ${idLabel(world, event.defenderId, event.defenderSpecies)} clashing`,
+            world
+          );
         }
         if (event.outcome === "retreated") this.onBattleParticipantLeft(event.defenderId);
         return;
@@ -443,6 +484,45 @@ export class AutoCameraController {
     if (this.queue.some((e) => e.sourceKind === sourceKind && setsOverlap(e.ids, ids))) return;
     this.queue.push({ category, sourceKind, ids, fallbackPos: pos, label, continuous: false, expiresOrLastActiveTick: 0, seq: this.nextSeq++ });
     if (this.queue.length > MAX_QUEUE) this.queue.shift();
+  }
+
+  /**
+   * The real escalation gate a `herdClash` pair's own hit has to clear
+   * before it's allowed to become (or extend) a camera-worthy "clash"
+   * engagement — see `clashPendingFirstHit`'s own doc comment for the
+   * direct ask this exists for. A pair already mid-engagement (widening an
+   * existing one, e.g. a third hit, or this exact pair already active from
+   * an earlier escalated exchange) always qualifies immediately — the bar
+   * is specifically for a pair's OWN first hit, not every hit forever.
+   * `outcome === "retreated"` is real resolution on its own regardless of
+   * hit count (the defender crossing the retreat threshold is already a
+   * meaningful, concluded skirmish), so it always qualifies too.
+   */
+  private maybeEscalateClash(
+    tick: number,
+    attackerId: string,
+    defenderId: string,
+    outcome: "hit" | "retreated",
+    ids: Set<string>,
+    pos: Vec2,
+    label: string,
+    world: World
+  ): void {
+    const pairKey = [attackerId, defenderId].sort().join("|");
+    if (outcome === "retreated" || this.findContinuous(ids)) {
+      this.clashPendingFirstHit.delete(pairKey);
+      this.onBattleHit("clash", ids, pos, label, world);
+      return;
+    }
+    const pendingSinceTick = this.clashPendingFirstHit.get(pairKey);
+    if (pendingSinceTick !== undefined && tick - pendingSinceTick <= CLASH_ESCALATION_WINDOW_TICKS) {
+      this.clashPendingFirstHit.delete(pairKey);
+      this.onBattleHit("clash", ids, pos, label, world);
+      return;
+    }
+    // First hit for this pair (or the earlier one aged out) — real, but not
+    // camera-worthy on its own yet. Remembered, not escalated.
+    this.clashPendingFirstHit.set(pairKey, tick);
   }
 
   /**
@@ -532,6 +612,15 @@ export class AutoCameraController {
 
   private reconcile(world: World): void {
     const tick = world.tick;
+
+    // Forget any clash pair's pending first hit once it's aged out of
+    // `CLASH_ESCALATION_WINDOW_TICKS` without a real follow-up — otherwise a
+    // pair that hits once and never escalates again would sit in this map
+    // forever, and (worse) could wrongly "confirm" an unrelated much-later
+    // hit between the same two agents as if it were the same skirmish.
+    for (const [pairKey, sinceTick] of this.clashPendingFirstHit) {
+      if (tick - sinceTick > CLASH_ESCALATION_WINDOW_TICKS) this.clashPendingFirstHit.delete(pairKey);
+    }
 
     // Stamp any continuous engagement marked-concluded-this-batch (see onBattleParticipantLeft's -1 sentinel) with a real epilogue deadline now that we know the tick — and the real-ms clock its own epilogue duration actually counts against.
     for (const e of [this.active, ...this.queue]) {
