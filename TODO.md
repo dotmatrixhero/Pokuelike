@@ -4067,3 +4067,19 @@ not something this pathfinding pass itself caused or is positioned to fix.
       `position: fixed` panel pinned to the viewport's bottom-right corner
       (not the scrollable node canvas) under the existing `max-width: 980px`
       media query, shrunk to fit. Rebuilt and republished the artifact.
+- [x] **Range panel: move stats + drag-to-reposition + collapse-to-button**
+      — direct follow-up to the mobile overlap fix: "put the stats of the
+      move into range visualizer, then make it easy to collapse to a
+      single button and/or reposition on screen." The panel now always
+      renders `position: fixed` (on every screen size, not just mobile —
+      removed the now-redundant mobile-only override) with its own compact
+      type/power/accuracy/cooldown/range/shape readout
+      (`renderStageStats` now writes to both the header and the panel).
+      A head bar doubles as a drag handle (pointerdown/move/up, clamped to
+      the viewport) and a toggle button; tapping the head (when it wasn't
+      a drag) or the toggle collapses the whole panel to a single round
+      button, leaving just the tree graph visible. Position and collapsed
+      state persist in localStorage (`moveTreeAtlas.panel.v1`), same
+      pattern as the existing notes/flags/build features. Verified the
+      inline script's syntax directly (`new Function(...)` on the
+      extracted block) before rebuilding. Atlas rebuilt and republished.

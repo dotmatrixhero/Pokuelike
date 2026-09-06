@@ -85,28 +85,11 @@
     }
     body { overflow-y: auto; }
 
-    /* Direct ask: on mobile the range/footprint grid sat inline in the
-       sticky stage header, wide enough to cover real nodes underneath it.
-       Pulled out of that flow and pinned as a small floating corner panel
-       instead — fixed to the viewport (not the scrollable node canvas), so
-       it's always reachable but never sits on top of the graph itself. */
-    .range-grid-wrap {
-      position: fixed;
-      bottom: 12px;
-      right: 12px;
-      top: auto;
-      z-index: 20;
-      max-width: 130px;
-      padding: 6px;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
-    }
+    /* The range/footprint panel is always position: fixed now (see its
+       base rule) — no mobile-specific override needed here any more,
+       it's already a floating, draggable, collapsible panel everywhere. */
     .range-grid-wrap .eyebrow { font-size: 9px; }
-    svg.range-grid { max-width: 90px; max-height: 90px; width: auto; height: auto; }
-    .range-grid-legend { flex-direction: column; gap: 2px; }
-    .range-grid-caption, .range-grid-note { max-width: 118px; }
+    svg.range-grid { max-width: 90px; max-height: 90px; }
   }
 
   header.top {
@@ -230,23 +213,97 @@
   }
   .stage-head .move-stats b { color: var(--text); font-weight: 500; }
 
+  /* A floating, draggable, collapsible panel — always position: fixed, on
+     every screen size, rather than living inline in the sticky stage
+     header. Direct fix for it covering real tree nodes on mobile; the
+     drag handle and collapse toggle are a direct follow-up ask so it can
+     get out of the way anywhere, not just a fixed corner. */
   .range-grid-wrap {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-width: 150px;
+    padding: 6px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  }
+  .range-grid-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: move;
+    user-select: none;
+    touch-action: none;
+  }
+  .rg-toggle-btn {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    line-height: 1;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: var(--panel-2);
+    color: var(--text-dim);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .rg-toggle-btn:hover { color: var(--text); }
+  .range-grid-wrap.collapsed {
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+  }
+  .range-grid-wrap.collapsed .range-grid-head {
+    cursor: pointer;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  }
+  .range-grid-wrap.collapsed .range-grid-head .eyebrow { display: none; }
+  .range-grid-wrap.collapsed .rg-toggle-btn {
+    width: 40px;
+    height: 40px;
+    border: none;
+    font-size: 18px;
+  }
+  .range-grid-wrap.collapsed .range-grid-body { display: none; }
+  .range-grid-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  .range-grid-stats b { color: var(--text); font-weight: 500; }
+  .range-grid-body {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 4px;
-    flex: none;
   }
-  .range-grid-wrap .eyebrow { align-self: flex-start; }
   svg.range-grid {
     display: block;
-    background: var(--panel);
+    background: var(--panel-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
+    max-width: 100%;
+    height: auto;
   }
   .range-grid-legend {
     display: flex;
-    gap: 10px;
+    flex-direction: column;
+    gap: 2px;
     font-family: "IBM Plex Mono", monospace;
     font-size: 10px;
     color: var(--text-faint);
@@ -256,14 +313,14 @@
   .range-grid-caption {
     font-size: 10px;
     color: var(--text-faint);
-    max-width: 150px;
+    max-width: 135px;
     text-align: center;
     line-height: 1.35;
   }
   .range-grid-note {
     font-size: 10px;
     color: var(--warn, #c9a227);
-    max-width: 160px;
+    max-width: 135px;
     text-align: center;
     line-height: 1.35;
     border-top: 1px solid var(--border-soft);
@@ -514,12 +571,18 @@
         <h2 id="stageTitle">—</h2>
         <div class="move-stats" id="stageStats"></div>
       </div>
-      <div class="range-grid-wrap">
-        <div class="eyebrow">Range &amp; footprint</div>
-        <svg class="range-grid" id="rangeGrid" role="img" aria-label="Range and area of effect"></svg>
-        <div class="range-grid-legend" id="rangeGridLegend"></div>
-        <div class="range-grid-caption" id="rangeGridCaption">Base shape shown — some tree nodes change it (see the graph).</div>
-        <div class="range-grid-note" id="rangeGridNote" hidden></div>
+      <div class="range-grid-wrap" id="rangeGridWrap">
+        <div class="range-grid-head" id="rangeGridHead" title="Drag to move">
+          <span class="eyebrow">Range &amp; footprint</span>
+          <button class="rg-toggle-btn" id="rangeGridToggleBtn" type="button" aria-label="Collapse range panel">–</button>
+        </div>
+        <div class="range-grid-body" id="rangeGridBody">
+          <div class="range-grid-stats" id="rangeGridStats"></div>
+          <svg class="range-grid" id="rangeGrid" role="img" aria-label="Range and area of effect"></svg>
+          <div class="range-grid-legend" id="rangeGridLegend"></div>
+          <div class="range-grid-caption" id="rangeGridCaption">Base shape shown — some tree nodes change it (see the graph).</div>
+          <div class="range-grid-note" id="rangeGridNote" hidden></div>
+        </div>
       </div>
       <div class="build-controls">
         <div class="eyebrow">Build</div>
@@ -1606,14 +1669,27 @@
   function renderStageStats(displayMove) {
     var baseMove = TREES[state.moveId];
     var nodeCount = Object.keys(baseMove.tree).length;
-    var stats = document.getElementById("stageStats");
-    stats.innerHTML =
+    var shapeStr =
+      displayMove.shape.kind + (displayMove.shape.length ? " " + displayMove.shape.length : "") +
+      (displayMove.shape.radius != null ? " r" + displayMove.shape.radius : "") +
+      (displayMove.shape.width ? "×" + displayMove.shape.width : "");
+    var rangeStr = displayMove.range ? displayMove.range.min + "–" + displayMove.range.max : String(shapeStr);
+
+    // Wide, one-line layout for the stage header.
+    document.getElementById("stageStats").innerHTML =
       "<span><b>" + displayMove.type + "</b> " + displayMove.category + "</span>" +
       "<span>pwr <b>" + displayMove.power + "</b></span>" +
       "<span>acc <b>" + displayMove.accuracy + "</b></span>" +
       "<span>cd <b>" + displayMove.cooldownTicks + "</b></span>" +
-      "<span>shape <b>" + displayMove.shape.kind + (displayMove.shape.length ? " " + displayMove.shape.length : "") + (displayMove.shape.radius != null ? " r" + displayMove.shape.radius : "") + (displayMove.shape.width ? "×" + displayMove.shape.width : "") + "</b></span>" +
+      "<span>shape <b>" + shapeStr + "</b></span>" +
       "<span><b>" + nodeCount + "</b> nodes</span>";
+
+    // Direct ask: the same stats, right on the floating range panel too, so
+    // it's a self-contained readout wherever it ends up on screen.
+    document.getElementById("rangeGridStats").innerHTML =
+      "<span><b>" + displayMove.type + "</b> " + displayMove.category + "</span>" +
+      "<span>pwr <b>" + displayMove.power + "</b> · acc <b>" + displayMove.accuracy + "</b> · cd <b>" + displayMove.cooldownTicks + "</b></span>" +
+      "<span>range <b>" + rangeStr + "</b> · shape <b>" + shapeStr + "</b></span>";
   }
 
   function selectMove(moveId) {
@@ -1739,9 +1815,103 @@
       "<span>" + totalTrees + " trees</span><span>" + totalNodes + " nodes</span>";
   }
 
+  /**
+   * The range/footprint panel is a floating, draggable, collapsible
+   * widget (direct ask, after it covered real tree nodes on mobile) —
+   * drag its head bar to reposition anywhere on screen, tap the toggle
+   * (or the head bar itself once collapsed) to shrink it to a single
+   * round button. Position and collapsed state persist in localStorage
+   * (`moveTreeAtlas.panel.v1`), same pattern as the notes/flags/build
+   * features already use, so it stays where you left it across reloads
+   * and across switching moves.
+   */
+  function setupRangeGridPanel() {
+    var wrap = document.getElementById("rangeGridWrap");
+    var head = document.getElementById("rangeGridHead");
+    var toggleBtn = document.getElementById("rangeGridToggleBtn");
+    var STORE_KEY = "moveTreeAtlas.panel.v1";
+
+    function load() {
+      try { return JSON.parse(localStorage.getItem(STORE_KEY) || "{}"); } catch (e) { return {}; }
+    }
+    function save(s) {
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch (e) {}
+    }
+
+    var panelState = load();
+
+    function applyCollapsed() {
+      wrap.classList.toggle("collapsed", !!panelState.collapsed);
+      toggleBtn.textContent = panelState.collapsed ? "▦" : "–";
+      toggleBtn.setAttribute("aria-label", panelState.collapsed ? "Expand range panel" : "Collapse range panel");
+    }
+    function applyPosition() {
+      if (panelState.left == null || panelState.top == null) return;
+      var maxLeft = Math.max(0, window.innerWidth - 40);
+      var maxTop = Math.max(0, window.innerHeight - 40);
+      wrap.style.left = Math.min(panelState.left, maxLeft) + "px";
+      wrap.style.top = Math.min(panelState.top, maxTop) + "px";
+      wrap.style.right = "auto";
+      wrap.style.bottom = "auto";
+    }
+    applyCollapsed();
+    applyPosition();
+
+    var dragging = false, moved = false, startX = 0, startY = 0, origLeft = 0, origTop = 0;
+
+    function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+    head.addEventListener("pointerdown", function (e) {
+      dragging = true;
+      moved = false;
+      var rect = wrap.getBoundingClientRect();
+      origLeft = rect.left;
+      origTop = rect.top;
+      startX = e.clientX;
+      startY = e.clientY;
+      try { head.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+    window.addEventListener("pointermove", function (e) {
+      if (!dragging) return;
+      var dx = e.clientX - startX, dy = e.clientY - startY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+      if (!moved) return;
+      var rect = wrap.getBoundingClientRect();
+      var newLeft = clamp(origLeft + dx, 4, window.innerWidth - rect.width - 4);
+      var newTop = clamp(origTop + dy, 4, window.innerHeight - rect.height - 4);
+      wrap.style.left = newLeft + "px";
+      wrap.style.top = newTop + "px";
+      wrap.style.right = "auto";
+      wrap.style.bottom = "auto";
+    });
+    window.addEventListener("pointerup", function () {
+      if (!dragging) return;
+      dragging = false;
+      if (moved) {
+        var rect = wrap.getBoundingClientRect();
+        panelState.left = rect.left;
+        panelState.top = rect.top;
+        save(panelState);
+      }
+    });
+
+    // A real drag vs. a tap-to-toggle are disambiguated by whether the
+    // pointer actually moved past the threshold above.
+    head.addEventListener("click", function (e) {
+      if (moved) { moved = false; return; }
+      panelState.collapsed = !panelState.collapsed;
+      save(panelState);
+      applyCollapsed();
+    });
+    toggleBtn.addEventListener("click", function (e) {
+      e.stopPropagation(); // avoid double-toggling via the bubbled head click above
+    });
+  }
+
   buildPicker();
   buildLegend();
   buildHeaderCounts();
+  setupRangeGridPanel();
   selectMove(MOVE_ORDER[1].ids[0]);
 })();
 </script>
