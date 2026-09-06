@@ -4097,3 +4097,24 @@ not something this pathfinding pass itself caused or is positioned to fix.
       by removing something it depended on, and re-seeded from a saved
       build's last entry when switching moves. Verified the inline
       script's syntax before rebuilding. Atlas rebuilt and republished.
+- [x] **Deeper crosslinks, corrected: bridges, not dead-end leaves (pilot
+      shipped)** — direct correction: "deeper cross links are not working.
+      What I meant was... you take a cross link and then you can invest in
+      a filler + one notable and from that deeper node you can have a
+      shortcut to deeper up the trees." Piloted on Earthquake: *Coordinated
+      Tremor* (crosslink) → *Marked Rupture* (filler) → new *Converged
+      Ruin* (notable), which is wired into `total_collapse`/
+      `focused_rupture`'s own `prerequisitesAnyOf` as a real alternate
+      route — reaches the Aggression branch's AoE-size fork without ever
+      walking that branch's own five-node filler chain. Two rules
+      recorded for extending this pattern later: shortcut the grind, never
+      the fork/decision itself; no new engine primitive needed, pure
+      `prerequisitesAnyOf` authoring. Also fixed, same pass: Earthquake's
+      `overload_footing` ("+10% Recoil") was a real bug — a full skill
+      point spent on `recoilFraction` alone with zero offsetting benefit,
+      unlike every other recoil use in the roster. Paired it with +10
+      power, renamed to "Reckless Overload." Two new tests added
+      (moveTrees.test.ts); full suite green (184/184 data). Not yet rolled
+      out to the other three crosslinks in Earthquake or to Hydro Pump/
+      Solar Beam/Rock Throw — this was a single pilot, checked before
+      repeating. Atlas rebuilt and republished.

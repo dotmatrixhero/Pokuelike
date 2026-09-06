@@ -14,6 +14,106 @@ here to avoid stepping on it. A couple of ideas below (Sandstorm as a
 *local* hazard, not a weather state) are noted as deferred/reframed for
 the same reason.
 
+## Guide for future Claude: principles learned building this system
+
+Written on direct request, after several rounds of real feedback on real
+mistakes — a distillation, not a rehash. Read this before touching a move
+tree. Each principle names the mistake it was learned from so it doesn't
+read as generic advice.
+
+**1. Fantasy first, then mechanics — never the reverse.** The original
+sin of the pre-v3 trees: three branches built by copying another move's
+kit and swapping numbers ("the design looks like you just copied over
+effects from other trees"). The fix that actually worked was starting
+from "why does *this* species use *this* move" before opening the delta
+schema at all — Rock Throw's "Denial" branch (a lumbering body's borrowed
+reach, pinning rather than escalating power) came from that question, not
+from a lever list. If a branch's mechanic could be copy-pasted onto a
+different move/species with only the numbers changed, it's a template,
+not a fantasy — that's the test, not a vibe check.
+
+**2. Extending the user's idea is not the same as originating one.**
+Direct, important feedback: "you're echoing a lot of my ideas... I'm
+worried you're not UNDERSTANDING and learning how to create your own
+based on the fantasy." Costing out a suggestion into real primitives is
+useful but it's translation, not design. The bar: pitch something for a
+move *nobody asked about yet*, reasoning from its fantasy alone. Do this
+regularly, not once as a one-time proof.
+
+**3. Every mechanic must cite the real code path that runs it, not an
+assumption.** Every "is this buildable" question in this whole effort was
+answered by grepping the actual engine function, never by guessing from
+the field name. This caught real, load-bearing facts late guessing would
+have missed — `lockTicks` locks the *user*, not the defender (a crosslink
+was shipped believing the opposite, described as "stuns outright," and
+had to be fixed); `range.max` and `shape` are fully decoupled fields
+(moveRange gates *whether to fire*, `resolveShape` decides *what actually
+gets hit* — conflating them produced a mechanic — "+Range" on an AoE —
+that silently didn't do what its name promised). When a design idea
+depends on how a system works, read that system before proposing the
+mechanic, not after.
+
+**4. A lever that's pure downside with no offsetting benefit is a bug,
+not a design choice.** Found twice, independently, in review: Earthquake's
+`overload_footing` cost a real skill point for `recoilFraction: 0.1`
+alone — a player would never buy pure self-damage. (The `"+10% Recoil"`
+label was itself the tell — read as `recoilFraction * 100`, not as
+"reads plausible so it must be intentional.") Every delta-only filler
+node deserves this check before shipping: does taking it, on its own,
+make the move strictly better for *someone*? If a lever is genuinely a
+tradeoff, the benefit half lives in the *same node*, not a different one
+several steps away that a build might never reach.
+
+**5. Say the numbers, don't paraphrase them.** Every "+10 Range" node
+across three trees was mislabeled — the real deltas were +1 or +2, not
++10. A generic label ("+10 Range") copy-pasted across nodes with
+different real values is exactly how this kind of error survives review:
+nothing about the label itself was ever cross-checked against the actual
+number in the same object. When a node name states a magnitude, compute
+it from the code, don't carry a boilerplate string forward.
+
+**6. Widen a branch's *allowed* flavor before widening its mechanics.**
+Boldness locked to "defensive," Aggression locked to "raw power" forces
+every move's version of that branch back toward the same template — the
+real unlock was permitting Boldness to be earned aggression and Aggression
+to be hunting/stealth or clashing depending on move+species. Do this
+once, explicitly, in the doc (see "Skill-tree template v3" below), not
+implicitly per-move as an exception each time.
+
+**7. Deeper crosslinks means a bridge, not a longer dead end.** First
+attempt at "deeper crosslinks" just added one more single-effect leaf
+node hanging off a crosslink (*Marked Rupture* et al.) — real, but not
+what "deeper" meant. The actual ask: crosslink → filler → notable, where
+that notable becomes a genuine alternate `prerequisitesAnyOf` route
+*into* a main branch, letting a build skip that branch's own linear
+filler grind by investing across two branches instead. Corollary learned
+building the pilot: shortcut the grind, never the fork/decision itself —
+a bridge that skips a branch's one meaningful choice point trivializes
+it rather than offering a real alternate path to it.
+
+**8. A proposal in the doc is not a shipped mechanic — say which one
+something is, always.** Confusion arose twice from writing "proposed"
+crosslinks in prose without marking them clearly enough as unbuilt: "I'm
+not seeing any deeper crosslinks tho." Every mechanic in this doc now
+gets an explicit **Shipped**/proposed/flagged tag, checked against
+whether it's actually in `packages/data/src/moves.ts` — not inferred from
+how confidently it reads.
+
+**9. When a UI element's own visualization looks contradictory, check
+whether it's actually wrong, not just confusing.** The range/shape grid
+looking odd for a cone move ("if max range, do you not do a cone?") led
+to discovering the fillers themselves didn't do what their names claimed
+— genuinely inconsistent-looking output is worth tracing to a root cause
+before writing it off as "just needs a caption."
+
+**10. Design approvals first — proposed once, holds for the rest of the
+session.** Standing rule after an artifact got built before its design
+was ever presented: pitch the design in text, wait for explicit
+"go ahead"/"try it out" before writing code. A pilot on one move/one
+crosslink before rolling a new pattern out everywhere (rule 7's bridge
+pattern) is the same instinct applied to structural changes, not just
+new features.
+
 ## Engine primitives needed — running checklist
 
 Every tree/lever in this doc that isn't marked "live" is blocked on one of
@@ -1404,6 +1504,43 @@ a real crosslink you can actually spec into — the connective primitive and
 three of the crosslinks below are now **Shipped**; the rest are still
 proposals:
 
+#### Crosslinks as bridges, not dead-end leaves (the real ask, corrected)
+
+A second round of feedback corrected the direction of this whole effort:
+"deeper crosslinks" didn't mean "one more single-effect node between two
+branches" (which is all *Marked Rupture*/*Marked Undertow*/*Marked
+Advantage* above are) — it meant a crosslink should be a real **bridge**:
+take the crosslink, invest a filler and a notable *off of it*, and that
+notable becomes a genuine shortcut deeper into one of the two parent
+branches, skipping that branch's own linear filler grind.
+
+**Pattern, piloted on Earthquake (Shipped)**: *Coordinated Tremor*
+(crosslink) → *Marked Rupture* (filler) → *Converged Ruin* (notable). That
+notable is then added to `total_collapse`/`focused_rupture`'s own
+`prerequisitesAnyOf` — a REAL alternate route into the branch, not just
+another leaf hanging off the crosslink. Two rules that came out of
+building this one, worth keeping for every future bridge:
+- **Shortcut the grind, never the decision.** The fork itself
+  (`total_collapse` vs. `focused_rupture`) is still mutually exclusive and
+  still has to be chosen — the bridge only skips the *linear filler* nodes
+  leading up to it. A bridge that let you skip the fork itself, or land
+  straight on a capstone, would trivialize the branch's own real content
+  instead of offering a genuine alternate path to it.
+- **No new engine primitive needed.** This is pure tree authoring —
+  `prerequisitesAnyOf` already supports "any one of several alternative
+  sets," so adding a crosslink-rooted node as one more alternative is
+  exactly what that field is for. There's already a smaller-scale
+  precedent for this in the roster (Earthquake's own `overload_footing`
+  already listed `coordinated_tremor` itself as an alternate early-filler
+  prerequisite) — this pilot is that same idea, deliberately pushed
+  farther down the branch, to a real decision point instead of an early
+  filler.
+
+Not yet done: rolling this same bridge pattern out to the other
+crosslinks in Earthquake, or to Hydro Pump/Solar Beam/Rock Throw at all —
+this was a single pilot, built to be checked before repeating the
+pattern everywhere.
+
 - **`SituationalCondition: "rallyMarked"` (Shipped)** — the defender
   currently has an active `rallyMarkTicksRemaining`. Same one-line-
   enum-addition pattern as `"flanking"`/`"targetLowHp"`
@@ -1419,6 +1556,16 @@ proposals:
     the mark still has to be granted by something): `situationalBonus:
     "rallyMarked"`, a real payoff for calling out a target with Herdsafe
     Trigger, then burying it with the AoE-size fork.
+  - *Converged Ruin* (**Shipped** — the "deeper crosslinks" pilot, see
+    "Crosslinks as bridges" below) — extends that same chain one node
+    further: *Coordinated Tremor* → *Marked Rupture* → *Converged Ruin*.
+    Converged Ruin is wired into `total_collapse`/`focused_rupture`'s own
+    `prerequisitesAnyOf` as a real alternate route — a build that took the
+    Sociability opener plus this 3-node crosslink chain reaches the
+    Aggression branch's AoE-size fork without ever touching Aggression's
+    own five-node filler grind (Fault Trigger through Seismic Feed). The
+    fork itself is still a real, mutually-exclusive choice either way —
+    the shortcut skips the filler, not the decision.
   - *Braced Convergence* (Boldness↔Sociability) — the stillness Fissure
     Grip's brace fork already costs (`lockTicks`) buys a real payoff on
     the *other* branch: a much longer `rallyCall.ticks` window, since not

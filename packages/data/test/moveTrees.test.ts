@@ -493,6 +493,31 @@ describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to rea
     expect(narrow.shape).toEqual({ kind: "burst", radius: 1 });
   });
 
+  it("Overload Footing's Reckless Overload pairs its recoil with real power, not recoil alone", () => {
+    const respec = applyMoveTree(earthquake, ["fault_trigger", "shaking_ground", "overload_footing"]);
+    expect(respec.power).toBe(earthquake.power + 10);
+    expect(respec.recoilFraction).toBeCloseTo(0.1);
+  });
+
+  it("the crosslink bridge (Coordinated Tremor -> Marked Rupture -> Converged Ruin) reaches the Aggression fork without Aggression's own filler chain", () => {
+    const viaBridge = applyMoveTree(earthquake, [
+      "herdsafe_trigger",
+      "fault_trigger",
+      "coordinated_tremor",
+      "marked_rupture",
+      "converged_ruin",
+      "total_collapse",
+    ]);
+    expect(viaBridge.shape).toEqual({ kind: "burst", radius: 3 });
+    // None of the branch's own linear filler chain was ever chosen.
+    expect(viaBridge.recoilFraction).toBeUndefined();
+
+    // The fork itself is still a real, mutually-exclusive choice either way.
+    expect(() =>
+      applyMoveTree(earthquake, ["herdsafe_trigger", "fault_trigger", "coordinated_tremor", "marked_rupture", "converged_ruin", "total_collapse", "focused_rupture"])
+    ).toThrow(/conflicts with already-chosen/);
+  });
+
   it("Ruinous Ground keystone fixes Ground's real Grass/Bug resists", () => {
     const respec = applyMoveTree(earthquake, [
       "fissure_grip",

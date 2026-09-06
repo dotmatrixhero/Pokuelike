@@ -3189,7 +3189,10 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "total_collapse",
         name: "Total Collapse",
         cost: 1,
-        prerequisites: ["seismic_feed"],
+        // Reachable the normal way (walk the branch's own filler chain to
+        // Seismic Feed) OR via the Coordinated Tremor -> Marked Rupture ->
+        // Converged Ruin crosslink bridge — see that node's own comment.
+        prerequisitesAnyOf: [["seismic_feed"], ["converged_ruin"]],
         excludes: ["focused_rupture"],
         leaning: "aggression",
         // Widens the blast itself — a real AoE-size decision point, not
@@ -3200,7 +3203,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "focused_rupture",
         name: "Focused Rupture",
         cost: 1,
-        prerequisites: ["seismic_feed"],
+        prerequisitesAnyOf: [["seismic_feed"], ["converged_ruin"]],
         excludes: ["total_collapse"],
         leaning: "aggression",
         // Pulls the blast back in tight and puts everything into what it
@@ -3456,6 +3459,25 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["coordinated_tremor"],
         leaning: "aggression",
         delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.3 } },
+      },
+      // Pilot: a crosslink that's a real bridge, not a dead-end leaf.
+      // Coordinated Tremor -> Marked Rupture -> Converged Ruin is its own
+      // short filler+notable tail, and Converged Ruin is wired as a real
+      // alternate route into the Aggression branch's own AoE-size fork
+      // (see `total_collapse`/`focused_rupture`'s `prerequisitesAnyOf`
+      // below) — a build that invested in the Sociability opener plus this
+      // short crosslink chain reaches that fork without also walking
+      // Aggression's own five-node filler grind (Fault Trigger through
+      // Seismic Feed). The fork itself — the branch's one real, meaningful
+      // decision — still has to be made either way; this only shortcuts
+      // the filler grind leading up to it, not the decision.
+      converged_ruin: {
+        id: "converged_ruin",
+        name: "Converged Ruin",
+        cost: 2,
+        prerequisites: ["marked_rupture"],
+        leaning: "aggression",
+        delta: { defensePenetration: 0.2 },
       },
     },
   },
