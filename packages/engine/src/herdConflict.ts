@@ -213,6 +213,7 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
       defenderId: defender.id,
       defenderSpecies: defender.species,
       defenderHerdId: defender.herdId,
+      moveId: move.id,
       pos: defender.pos,
       outcome: "missed",
     });
@@ -254,6 +255,7 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
     defenderId: defender.id,
     defenderSpecies: defender.species,
     defenderHerdId: defender.herdId,
+    moveId: move.id,
     damage: damageDealt,
     defenderHpRemaining: defender.hp,
     critical: isCritical,

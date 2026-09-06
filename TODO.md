@@ -3694,3 +3694,38 @@ not something this pathfinding pass itself caused or is positioned to fix.
       confirmed clean ~50/50 alternation over 30 real attack ticks, versus
       the old code's 100/0 spam). 8 new unit tests (combat.test.ts) plus
       that one full-integration test; full suite green (931/931 engine).
+- [x] Three Auto Camera UI follow-ups, all direct asks. (1) **Battle
+      epilogue is real wall-clock time now, not ticks**: "It's lingering a
+      long time in step level speed after fight is over. After hp hits 0,
+      just cut away back to full speed after 1000ms." The old
+      `BATTLE_EPILOGUE_TICKS` (6 ticks at battle-step's ~650ms cadence,
+      ~3.9s) was really just a proxy for real time anyway; new
+      `BATTLE_EPILOGUE_MS` (1000) reads `performance.now()` directly via a
+      new `Engagement.concludedAtRealMs`, stamped the same moment
+      `concludedAtTick` gets its real value. `reconcile()` already runs
+      every animation frame (not just once per tick), so this check fires
+      promptly regardless of the battle-step tick cadence. Verified live: a
+      3-Onix pack fight's final `defeated` event was followed by a clean
+      speed-slider recovery to 32x within about 700ms in one clean trace.
+      (2) **Non-battle slowdown target raised 2x -> 8x**: "Maybe for
+      evolutions. And stuff make it be x8. Not x2" —
+      `AUTO_CAM_SLOWDOWN_SPEED` bumped, `SLOWDOWN_THRESHOLD_SPEED` raised
+      4 -> 16 to match (kept strictly above the new target so this can
+      never accidentally speed play back up instead of slowing it down).
+      Confirmed live: sampled speed-label transitions during an evolution/
+      hatch/death one-shot consistently showed 32x -> 8x, never 2x. (3)
+      **`herdClash` events now carry the move used**: "I am not seeing
+      moves being used in 'clash'. Just hp being lost. Better logs
+      please." Unlike `fought` (which always had `moveId`), `herdClash`
+      never carried one at all. Added `moveId: string` to the event
+      (events.ts), populated from `resolveRivalryHit`'s already-in-scope
+      `move` (herdConflict.ts), and `eventText.ts`'s herdClash formatting
+      now reads "used `<moveId>` on..." — the exact same convention (and
+      live-moveset `describeMoveModifiers` lookup) `fought`/`missed`
+      already use, instead of the old moveless "clashed with... over a
+      resource" phrasing. Verified live: a real clash line now reads
+      "bulbasaur used vine_whip on pidgey over a resource for 6 (hp left:
+      25) (herd bulbasaur-herd vs pidgey-flock)". One new unit test
+      (herdConflict.test.ts asserting `moveId` on a real clash event); full
+      suite still green (970/970 engine, 104/104 data) since none of these
+      three touch engine combat math, only event data/UI timing.

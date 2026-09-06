@@ -100,6 +100,11 @@ describe("applyHerdRivalryConflict", () => {
     expect(log.events.some((e) => e.kind === "herdClash")).toBe(true);
     // Real damage from the shared combat pipeline — rival's hp actually moved.
     expect(rival.hp).toBeLessThan(40);
+    // Direct ask: "I am not seeing moves being used in 'clash'... better
+    // logs please" — herdClash now carries the same real moveId a "fought"
+    // event always has.
+    const clash = log.events.find((e) => e.kind === "herdClash");
+    expect(clash).toMatchObject({ moveId: "shove" });
   });
 
   it("same-species herds can fight too — not restricted to cross-species", () => {

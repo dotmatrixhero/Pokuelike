@@ -22,13 +22,18 @@ export type NotableCategory = "immigration" | "courtship" | "hatch" | "battle" |
 const DWELL_TICKS = 24;
 /**
  * A concluded battle gets a short "epilogue" hold on the same view before the
- * camera releases — long enough to actually see the kill/retreat land,
- * short enough not to stall the queue behind a fight that's already over.
- * At battle-step's fixed ~650ms/tick cadence (`BATTLE_STEP_INTERVAL_MS` in
- * main.ts), this is ~3.9s — trimmed down from an original 16 (~10.4s) per
- * direct feedback that it "lingers a bit too long after battle is over."
+ * camera releases — long enough to actually see the kill/retreat land, short
+ * enough not to stall the queue behind a fight that's already over. Real
+ * wall-clock ms, not ticks — direct follow-up ask after the tick-based
+ * version (6 ticks at battle-step's ~650ms/tick cadence, ~3.9s) still
+ * "lingered a long time in step-level speed after the fight was over": "After
+ * hp hits 0, just cut away back to full speed after 1000ms." Ticks-based
+ * timing here was really just a proxy for real time anyway (nothing about
+ * the epilogue cares how many ticks passed), so this reads `performance.now()`
+ * directly instead of waiting for however many battle-step ticks happen to
+ * land in that window.
  */
-const BATTLE_EPILOGUE_TICKS = 6;
+const BATTLE_EPILOGUE_MS = 1000;
 /**
  * A battle with no new `fought`/`missed`/`herdClash` hit involving either
  * participant for this many ticks is treated as silently disengaged (one
@@ -39,10 +44,26 @@ const BATTLE_EPILOGUE_TICKS = 6;
 const BATTLE_STALE_TICKS = 40;
 /** Hard cap on queued-but-not-yet-shown engagements — a chaotic tick (mass death event, say) shouldn't grow this unboundedly; overflow drops the oldest still-queued entries first. */
 const MAX_QUEUE = 20;
-/** Playback speed (the `SPEED_STEPS` value, not an index) auto-camera holds a followed *non-battle* event to. */
-export const AUTO_CAM_SLOWDOWN_SPEED = 2;
-/** Auto-camera only intervenes on speed at/above this for a non-battle event — below it, playback is already slow enough to watch without help. */
-const SLOWDOWN_THRESHOLD_SPEED = 4;
+/**
+ * Playback speed (the `SPEED_STEPS` value, not an index) auto-camera holds a
+ * followed *non-battle* event (immigration/courtship/hatch/evolution/death)
+ * to. Direct ask: "Maybe for evolutions. And stuff make it be x8. Not x2" —
+ * these are quick, self-contained visual moments (unlike a battle, which
+ * needs `enterBattleStep`'s one-tick-at-a-time precision to actually read
+ * hit-by-hit), so pinning all the way down to 2x read as too sluggish; 8x
+ * keeps things snappier while still well below a fast viewer's likely
+ * 16x/32x. Raised `SLOWDOWN_THRESHOLD_SPEED` to match — see its own doc
+ * comment for why the two have to move together.
+ */
+export const AUTO_CAM_SLOWDOWN_SPEED = 8;
+/**
+ * Auto-camera only intervenes on speed at/above this for a non-battle event
+ * — below it, playback is already at or under `AUTO_CAM_SLOWDOWN_SPEED`, so
+ * "slowing down" to it would actually speed play back up. Kept strictly
+ * above `AUTO_CAM_SLOWDOWN_SPEED` for exactly that reason: this is only ever
+ * a genuine slowdown, never an accidental speedup.
+ */
+const SLOWDOWN_THRESHOLD_SPEED = 16;
 /**
  * A battle no longer just drops the *speed multiplier* to a slow-motion
  * value (was 0.25x, real cinematic slow-motion) — direct follow-up ask:
@@ -79,8 +100,10 @@ interface Engagement {
   continuous: boolean;
   /** Tick this engagement should stop being displayed (for a one-shot) or was last kept alive by a relevant hit (for a continuous battle, compared against `BATTLE_STALE_TICKS`). */
   expiresOrLastActiveTick: number;
-  /** Set once conclusion fires on a continuous engagement — it keeps a short epilogue hold rather than vanishing on the same tick as the kill/retreat. */
+  /** Set once conclusion fires on a continuous engagement — it keeps a short epilogue hold rather than vanishing on the same tick as the kill/retreat. Still used for the -1 "marked, not yet stamped" sentinel (see `onBattleParticipantLeft`) and by `BATTLE_STALE_TICKS`'s own tick-based check; the actual epilogue hold duration is real-ms, via `concludedAtRealMs` below. */
   concludedAtTick?: number;
+  /** `performance.now()` at the same moment `concludedAtTick` gets its real (non-sentinel) value — what `BATTLE_EPILOGUE_MS` actually counts against, since the epilogue hold is real wall-clock time, not ticks (see `BATTLE_EPILOGUE_MS`'s own doc comment for why). */
+  concludedAtRealMs?: number;
   /**
    * A monotonically increasing id, one per real `Engagement` object (assigned
    * once, at construction, in `nextSeq`) — lets a consumer like
@@ -465,9 +488,12 @@ export class AutoCameraController {
   private reconcile(world: World): void {
     const tick = world.tick;
 
-    // Stamp any battle marked-concluded-this-batch (see onBattleParticipantLeft's -1 sentinel) with a real epilogue deadline now that we know the tick.
+    // Stamp any battle marked-concluded-this-batch (see onBattleParticipantLeft's -1 sentinel) with a real epilogue deadline now that we know the tick — and the real-ms clock BATTLE_EPILOGUE_MS actually counts against.
     for (const e of [this.active, ...this.queue]) {
-      if (e && e.category === "battle" && e.concludedAtTick === -1) e.concludedAtTick = tick;
+      if (e && e.category === "battle" && e.concludedAtTick === -1) {
+        e.concludedAtTick = tick;
+        e.concludedAtRealMs = performance.now();
+      }
     }
 
     if (this.active) {
@@ -475,8 +501,9 @@ export class AutoCameraController {
         if (this.active.concludedAtTick === undefined && tick - this.active.expiresOrLastActiveTick > BATTLE_STALE_TICKS) {
           // Fallback path: no explicit death/flee/retreat signal, but nothing's landed a hit in a while either — treat as disengaged.
           this.active.concludedAtTick = tick;
+          this.active.concludedAtRealMs = performance.now();
         }
-        if (this.active.concludedAtTick !== undefined && tick - this.active.concludedAtTick >= BATTLE_EPILOGUE_TICKS) {
+        if (this.active.concludedAtRealMs !== undefined && performance.now() - this.active.concludedAtRealMs >= BATTLE_EPILOGUE_MS) {
           this.finishActive(world);
         }
       } else if (tick >= this.active.expiresOrLastActiveTick) {
