@@ -128,10 +128,12 @@ function isDead(agent: Agent): boolean {
  * elements — harmless, just means a same-tick newborn can already be at
  * age 1 by the time this returns.
  *
- * Speed-driven action economy (see DESIGN.md): need decay/aging/cooldowns
+ * Speed-driven action economy (see DESIGN.md): need decay/aging
  * (`tickAgentNeeds`) run for every living agent every tick regardless of
- * Speed; behavior choice, movement, and attacks (`tickAgentAction`) only run
- * on an agent's action tick, gated by `accumulateActionEnergy`.
+ * Speed; behavior choice, movement, attacks, and move-cooldown recovery
+ * (`tickAgentAction`) only run on an agent's own action tick, gated by
+ * `accumulateActionEnergy` — a move's `cooldownTicks` counts down in that
+ * agent's own turns, not world ticks.
  */
 /**
  * `rng` defaults to `world.rng` (the seeded generator `createWorld`/

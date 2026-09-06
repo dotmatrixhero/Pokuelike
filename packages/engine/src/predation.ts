@@ -1136,7 +1136,12 @@ function facingToward(from: Vec2, to: Vec2): Direction {
 /**
  * Resolves a `MoveSpec.hitsArea` move: every living agent standing on a
  * tile the move's `shape` covers (facing derived from attacker toward
- * `primaryTarget` via `facingToward`), attacker itself excluded — a
+ * `primaryTarget` via `facingToward`), attacker itself excluded, and —
+ * only when the move also sets `excludesAllies` — same-herd agents
+ * excluded too. Without that flag a same-herd agent caught in the blast
+ * takes the hit exactly like an enemy would, real and deliberate default
+ * behavior for a reckless area move (see MOVES_DESIGN.md's Earthquake
+ * writeup) — a
  * Growl/Ring-of-Fire-style blast, not just the one deliberately-picked
  * target. `primaryTarget` still gets the primary-target-only hooks (status,
  * `statChangeOnHit`'s defender side, forced movement, position swap);
@@ -1163,7 +1168,12 @@ function resolveAreaHit(
   const tiles = resolveShape(move.shape, attacker.pos, facing);
   const tileSet = new Set(tiles.map((t) => `${t.x},${t.y}`));
   const targets = world.agents.filter(
-    (other) => other.id !== attacker.id && other.alive !== false && other.layer === attacker.layer && tileSet.has(`${other.pos.x},${other.pos.y}`)
+    (other) =>
+      other.id !== attacker.id &&
+      other.alive !== false &&
+      other.layer === attacker.layer &&
+      tileSet.has(`${other.pos.x},${other.pos.y}`) &&
+      !(move.excludesAllies && other.herdId != null && other.herdId === attacker.herdId)
   );
 
   let primaryDied = false;

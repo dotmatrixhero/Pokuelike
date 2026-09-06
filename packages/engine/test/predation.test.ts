@@ -1179,6 +1179,50 @@ describe("multi-target/AoE resolution wired into real combat (resolveHit)", () =
     // naturally (~0.01), never jumped to a full-restore-on-kill.
     expect(hunter.needs.hunger).toBeLessThan(0.95);
   });
+
+  it("excludesAllies spares a same-herd agent caught in the blast, but not an unrelated bystander", () => {
+    const EARTHQUAKE_LIKE_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "earthquake-like-move",
+      shape: { kind: "burst", radius: 1 },
+      hitsArea: true,
+      excludesAllies: true,
+    };
+    const world = createWorld(10, 10);
+    const primaryTarget = prey({ x: 6, y: 5 }, { id: "bulbasaur-primary", hp: 10 });
+    const ally = prey({ x: 5, y: 6 }, { id: "bulbasaur-ally", hp: 10, herdId: "herd-a" });
+    const bystander = prey({ x: 4, y: 5 }, { id: "bulbasaur-bystander", hp: 10 });
+    const hunter = predator({ x: 5, y: 5 }, undefined, { herdId: "herd-a", moves: [EARTHQUAKE_LIKE_MOVE] });
+    world.agents.push(hunter, primaryTarget, ally, bystander);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    const foughtDefenders = log.events.filter((e) => e.kind === "fought").map((e) => (e as { defenderId: string }).defenderId);
+    expect(foughtDefenders).toContain("bulbasaur-primary");
+    expect(foughtDefenders).toContain("bulbasaur-bystander");
+    expect(foughtDefenders).not.toContain("bulbasaur-ally");
+  });
+
+  it("without excludesAllies, a same-herd agent caught in the blast takes the hit exactly like an enemy would", () => {
+    const REGULAR_AOE_MOVE: MoveSpec = {
+      ...TEST_MOVE,
+      id: "regular-aoe-move",
+      shape: { kind: "burst", radius: 1 },
+      hitsArea: true,
+    };
+    const world = createWorld(10, 10);
+    const primaryTarget = prey({ x: 6, y: 5 }, { id: "bulbasaur-primary", hp: 10 });
+    const ally = prey({ x: 5, y: 6 }, { id: "bulbasaur-ally", hp: 10, herdId: "herd-a" });
+    const hunter = predator({ x: 5, y: 5 }, undefined, { herdId: "herd-a", moves: [REGULAR_AOE_MOVE] });
+    world.agents.push(hunter, primaryTarget, ally);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES);
+
+    const foughtDefenders = log.events.filter((e) => e.kind === "fought").map((e) => (e as { defenderId: string }).defenderId);
+    expect(foughtDefenders).toContain("bulbasaur-ally");
+  });
 });
 
 const ATTACKER_STATS = { maxHp: 100, attack: 50, defense: 30, spAttack: 30, spDefense: 30, speed: 40 };
@@ -1303,10 +1347,13 @@ describe("jamCooldownTicks/terrainBurn/statusSpreads wired into real combat", ()
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [JAM_MOVE] });
     world.agents.push(hunter, target);
     tickWorld(world, undefined, RULES);
-    // 2 (start) + 3 (jam, applied during the hunter's own action tick) - 1
-    // (target's own tickAgentNeeds/tickCooldowns, which runs later this same
-    // tickWorld iteration since it's processed after the hunter) = 4.
-    expect(target.moveCooldowns?.["some-move"]).toBe(4);
+    // 2 (start) + 3 (jam, applied directly from the hunter's landed hit,
+    // independent of either side's own action-tick timing) = 5. The
+    // target's own cooldowns only tick down on ITS own action tick
+    // (tickAgentAction) — not simply "later in the same tickWorld
+    // iteration" — and its default Speed doesn't cross ACTION_THRESHOLD
+    // this same tick, so no further decrement happens here.
+    expect(target.moveCooldowns?.["some-move"]).toBe(5);
   });
 
   it("terrainBurn reverts a bush tile the defender stands on to floor", () => {

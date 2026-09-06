@@ -208,6 +208,17 @@ export interface MoveSpec {
    */
   hitsArea?: boolean;
   /**
+   * Meaningful only alongside `hitsArea`: excludes the attacker's own
+   * herd-mates from the resolved-shape hit — see `resolveAreaHit`
+   * (predation.ts), whose target filter otherwise checks only that a
+   * living agent shares the attacker's layer and stands in the shape,
+   * genuinely not distinguishing ally from enemy. Absent/false = a
+   * same-herd agent caught in the blast takes the hit exactly like an
+   * enemy would, the default (and the real, current behavior every AoE
+   * move had before this field existed).
+   */
+  excludesAllies?: boolean;
+  /**
    * Bonus power scaling with the attacker's own bulk (`agent.maxHp`, the
    * sim's existing weight proxy — see support.ts's `bodyWeightOf` for the
    * same proxy used elsewhere), added on top of `power` at the moment of the
@@ -495,6 +506,7 @@ export interface MoveTreeNode {
     targetsAlly?: boolean;
     allyEffectOnAttack?: boolean;
     hitsArea?: boolean;
+    excludesAllies?: boolean;
     terrainBurn?: boolean;
     statusSpreads?: boolean;
     /** Overwrite, like `shape`. */
@@ -664,6 +676,7 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       targetsAlly: delta.targetsAlly ?? result.targetsAlly,
       allyEffectOnAttack: delta.allyEffectOnAttack ?? result.allyEffectOnAttack,
       hitsArea: delta.hitsArea ?? result.hitsArea,
+      excludesAllies: delta.excludesAllies ?? result.excludesAllies,
       terrainBurn: delta.terrainBurn ?? result.terrainBurn,
       statusSpreads: delta.statusSpreads ?? result.statusSpreads,
       allyEffect: delta.allyEffect ?? result.allyEffect,

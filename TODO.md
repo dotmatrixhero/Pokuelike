@@ -64,6 +64,234 @@ detail in DESIGN.md's "Natural landmarks" section. Flagged follow-ups:
   in text (e.g. "Great Lake") — currently only the macro map's own colored
   marker (`macroMap.ts`) surfaces it visually.
 
+## New standard: every attack move starts at cooldownTicks 2 minimum
+
+Direct follow-up to the cooldown-timing fix above: "let's move all Moves
+up. To like default cool down of 2 as a base. That'll be our standard to
+start." Bumped every curated attack move sitting below 2
+(Tackle/Slash/Vine Whip/Peck/Scratch/Water Gun/Poison Sting: 0→2;
+Ember/Rock Throw/Twineedle: 1→2) in `packages/data/src/moves.ts`.
+Everything already at 2+ (Sludge, Psybeam, Wing Attack, Body Slam, and
+every move at 3+) is untouched, and utility/status moves (Growth, Rain
+Dance, etc., already 30-150) are unaffected — never part of the bug.
+Documented as a real, going-forward authoring standard in
+MOVES_DESIGN.md's template section: 2 is the new floor for a basic
+attack move, not a target — stronger/rarer moves should still cost more.
+Typecheck + full 991 engine / 171 data tests confirmed green (engine
+tests use their own hand-rolled MoveSpec fixtures, not the curated
+roster, so this data-only change didn't ripple into them).
+
+## Fixed: cooldowns now count down on the unit's own tick, not real time
+
+Direct ask after noticing "a lot of stuff is 0 cd" and asking whether that
+meant a move could be used every single world tick. Traced it down with
+the user: cooldowns were ticking down in `tickAgentNeeds`, which runs for
+every living agent every world tick regardless of Speed — deliberately
+"real-time, orthogonal to Speed" per DESIGN.md's original Action Economy
+writeup. In practice that made `cooldownTicks` nearly decorative: world
+ticks pass far more often than a normal agent's own action ticks (gated
+by Speed vs. `ACTION_THRESHOLD`), so a `cooldownTicks: 1`/`2` move was
+already back off cooldown before all but the fastest agents got a second
+turn. Direct instruction: "I want cooldown to be the unit's tick." Moved
+the `tickCooldowns` call from `tickAgentNeeds` to the top of
+`tickAgentAction` (needs.ts) — it now decrements once per the agent's own
+real action tick, ahead of every early-return (fainted/carried/asleep/
+frozen/paralysis-skip) so it still recovers on a tick that ends up doing
+nothing else, same as before. Sleep's existing 2x recovery speed carries
+over unchanged, just measured against the agent's own turns now. Updated
+DESIGN.md's Action Economy section (which explicitly documented the old,
+now-reversed reasoning) rather than leaving it stale. Fixed 3 tests that
+asserted the old real-time behavior, added a new end-to-end test proving
+`cooldownTicks` now genuinely gates reuse across an uneven action cadence
+(Speed 20, acting every other world tick). 991 engine tests green.
+
+**Real balance follow-up, not done here**: with cooldown now meaning
+something, `cooldownTicks: 0`/`1` on basic moves (Tackle/Peck/Scratch's
+base form, etc.) may deserve a real second look — those values are still
+close to "no gate at all" (available again the agent's very next turn
+either way). Flagged, not decided.
+
+**Also noticed, unrelated, not fixed**: `reproduction.test.ts`'s "an egg's
+parentIds/grandparentIds are recorded correctly" test calls
+`createWorld(10, 10)` with no seed (defaults to a real random seed) and
+expects an egg to exist after exactly one `tickWorld` call — a
+probabilistic single-tick check that's flaky independent of anything in
+this session's work (reproduced failing and passing across repeated runs
+before this fix existed). Worth a real look — either seed that world
+deterministically or loop a few ticks — but out of scope here.
+
+## Move Tree Atlas: interactive build mode — click nodes on/off live
+
+Direct ask right after the range grid shipped: "needs to change based on
+the notable/skill I have selected. I should be able to flip em on and
+have it modify the damage and stats and the range." Added a real
+respec-builder to the artifact: each node's detail panel now has an
+Add/Remove-from-build button (disabled with a plain-English reason when
+its prerequisites aren't met or it's excluded by something already
+chosen — confirmed "prevent excludes" rather than let you click into a
+conflict and see an error); the stage's power/accuracy/cooldown/shape
+readout and the range/AoE grid both recompute live from the actual
+chosen set. The math is a faithful line-for-line port of the real
+`applyMoveTree` (same additive-vs-overwrite field list), not an
+approximation — verified against real tree data before publishing
+(Earthquake's fork exclusion + cascade-remove-on-uncheck, Hydro Pump's
+crosslink correctly zeroing out its own branch's `lockTicks` cost).
+Removing a node cascades: anything that depended on it gets dropped too,
+re-validated from scratch each time. Build-in-progress persists per move
+in localStorage (mirrors the existing redesign-notes mechanism), with a
+"Reset build" button and a running points-spent readout. Template edited
+directly (the real, versioned source per the standardized process above)
+and republished through the same two-script pipeline.
+
+## Move Tree Atlas: range/AoE grid added, artifact process standardized
+
+Direct ask: add a range/AoE grid preview per move, republish, and — since
+the first version got rebuilt by hand from scratch — "add some
+documentation on building that artifact in move design. Just to keep the
+artifact consistent... build on it rather than from scratch every time."
+Added the grid (ported straight from `resolveShape`, fixed facing "up" —
+the real footprint, not an approximation) to the artifact and republished
+to the same URL. Then made the whole thing real, checked-in tooling
+instead of a one-off: `packages/data/scripts/export-move-trees.ts` (dumps
+every move-with-a-tree as JSON from the real `MOVES` export),
+`packages/data/scripts/build-move-tree-atlas.mjs` (injects that JSON into
+`packages/data/scripts/move-tree-atlas.template.html`, the versioned page
+shell), documented as a 3-step process in MOVES_DESIGN.md's new "Move
+Tree Atlas: how to keep it updated" section (which also records the
+artifact's live URL). Verified end-to-end: running the two scripts
+reproduces the published artifact byte-for-byte.
+
+## Real in-game move-tree visualizer + range/AoE preview — not started
+
+Direct ask, after seeing the Move Tree Atlas artifact (a standalone HTML
+design-review tool, not part of the actual game): "I think we will want
+to build a web visualizer for the skill tree eventually... I want it to
+be an interacting tree much like the one in your design doc. And a range
+visualizer would be great for that too." Current state, for real:
+`packages/web/src/inspector.ts` already has a functional but plain
+click-to-expand skill-tree view (`layerNodes`/`renderSkillTree`) — simple
+depth-ordered rows with the agent's actually-chosen nodes lit up, no
+branch layout, no crosslink lines, no positional graph at all. The ask is
+to upgrade that into a real interactive node-graph view (branches
+radiating from a hub, crosslinks drawn as real connecting lines, forks
+and `excludes` shown explicitly) — essentially porting the Move Tree
+Atlas artifact's own layout algorithm and rendering into
+`packages/web`'s real UI, live-data-driven (the actual agent's chosen
+nodes and available points, not a static reference view) instead of a
+one-off review tool. Bundle in the range/AoE grid preview from that same
+artifact work (small grid showing a move's real `range`/`shape` footprint
+from the user's tile) as part of the same pass, in-game, for the
+currently-selected agent's actual moveset. Not started — this is a real
+web/UI feature, scoped as its own follow-up, not a quick add-on to the
+current move-tree redesign work.
+
+## Hydro Pump/Solar Beam/Earthquake redesigned against v3 principles — built
+
+Direct follow-up to the v3 principles below: "go ahead and redesign all
+three." Rebuilt all three flagship trees in `packages/data/src/moves.ts`
+from scratch against their own actual fantasy instead of the reused v2
+kit — see MOVES_DESIGN.md's new "Hydro Pump / Solar Beam / Earthquake —
+v3 redesign" writeup for the full per-branch reasoning. One genuinely new
+engine primitive shipped along the way, not just prose: `MoveSpec.
+excludesAllies` (+ the matching `MoveTreeNode.delta` field), wired into
+`resolveAreaHit`'s target filter (predation.ts) so an AoE move can
+actually spare same-herd agents — Earthquake's *Herdsafe Trigger* is the
+first real content. New tests: 2 in predation.test.ts (excludesAllies
+spares an ally but not an unrelated bystander; without the flag, an ally
+still takes the hit exactly like before), 1 fixture update in
+moves.test.ts, plus rewritten move-specific assertions in
+moveTrees.test.ts for all three redesigned trees (the generic per-move
+structural suite re-validated them automatically). Full suite green: 990
+engine + 171 data tests. Next: update the Move Tree Atlas artifact with
+the new trees, plus a small grid visualization showing each move's real
+range/AoE footprint from the user's position — requested alongside this
+redesign, not yet built as of this entry.
+
+## Move-tree redesign: start from the fantasy — principles written, trees pending
+
+Direct critique after reviewing the shipped trees in the Move Tree Atlas
+artifact: "the design looks like you just copied over effects from other
+trees. That's uninspired... we have to do better. Think laterally." Fair —
+every tree so far shares not just the v2 template's structure (sound, kept)
+but largely the same node *content*: the same fork shapes, the same
+ally-buff opener, the same `resistanceBreaker` keystone, repeated across
+10 trees. Wrote up three concrete principles in MOVES_DESIGN.md's new
+"Skill-tree template v3 — start from the fantasy" section, worked through
+against the user's own Earthquake example (an uncontrolled self-centered
+blast that today genuinely does hit allies per `resolveAreaHit` — no herd
+filter exists — which is real design space, not a bug to just fix): (1)
+write each move's actual fantasy in 2-4 sentences before laying out any
+branch, and let each branch answer what Aggression/Boldness/Sociability
+specifically means for *that* fantasy, not a re-skin of the last move's
+answer; (2) filler nodes should draw from the whole lever list (cooldown,
+range, defensePenetration, lifesteal/recoil, crit rate, jam cooldown —
+not just power/accuracy on repeat), while shape/AoE changes stay
+notable/keystone-tier, never filler; (3) positional/movement levers
+(forcedMovement, positionSwap, terrain interaction) deserve real per-move
+design thought, not the same "fork A pushes, fork B pulls" shape reused
+everywhere. Flagged two genuinely new primitives Earthquake's own
+redesign would need (AoE ally-exemption, hazard terrain stronger than the
+existing terrainBurn/terrainFill) rather than pretending they already
+exist. Next: actually redesign the flagged trees against these principles,
+per move, starting with whichever ones get flagged in the atlas.
+
+## Twelve advanced moves + 3 more flagship trees — built, see MOVES_DESIGN.md
+
+Direct ask, right after the move-tree batch below: "We need more moves
+actually. Like... More skill trees. More advanced moves should be... More
+range, more aoe." Scoped via a quick question rather than guessing: went
+with the largest option offered ("everything at once" for moves — real
+type-gap coverage plus evolved-line finishers — "2-3 flagship trees" for
+new skill trees). Shipped 12 real gen-1 moves (`moveCanon`-sourced, same
+standard as every move before them) in `packages/data/src/moves.ts`, each
+given a real `shape`/`range` instead of staying a point-blank stab: Hydro
+Pump/Surf (Water AoE cone/ring), Solar Beam (Grass, long single-target
+line — proof AoE isn't the only kind of "advanced"), Earthquake/Rock Slide
+(Ground/Rock self-centered burst AoE), Sludge/Poison Sting/Twineedle
+(Poison/Bug), Ice Beam (Ice line), Psybeam (Psychic line), Wing Attack
+(Flying cone AoE), Body Slam (Normal point, real paralysis payoff). Updated
+movesets for the ~25 species that actually learn each one, checked against
+real gen-1 movepools where practical. Three got full 33-node flagship
+trees — Hydro Pump, Solar Beam, Earthquake — each following the same
+Tackle/Peck template, each Boldness keystone a `resistanceBreaker` fixing
+that move's own real multi-type resist. New tree-specific tests added to
+the existing generic `moveTrees.test.ts` suite (which auto-covers any move
+with a tree, so these three were validated structurally for free).
+Explicitly out of scope, flagged rather than silently skipped: most of the
+45+ species roster still knows only Tackle or one other move; Fire has no
+AoE move yet; Bug/Dragon/beach-biome species are still thin. Real follow-up
+candidates, not a "todo eventually and never revisit."
+
+## Rock Throw/Peck/Scratch/Water Gun move trees — built, see MOVES_DESIGN.md
+
+Direct ask, after noticing the gap: "Did you never implement the move
+trees for peck and stuff? And water gun?" — confirmed these four had a
+full design in MOVES_DESIGN.md's "full triangle treatment" section but had
+never actually shipped in `packages/data/src/moves.ts` (each was still a
+plain stub). Follow-up: "Yes, build all four." All four now have real,
+live 33-node trees (3 branches × 10 nodes + 3 crosslinks each), following
+Tackle/Slash's own established structural template exactly. Each move got
+its own real hook instead of a reshuffled generic kit: Rock Throw
+(`selfCostPerUse`, `bonusVsType` vs. Flying, a denial-flavored support
+keystone); Peck (the roster's first `positionSwap`+`positionSwapPull` and
+first `critCooldownReset`, plus the only tree that changes a move's own
+`shape` mid-build — point-blank to a real 2-tile line); Scratch (the
+roster's first non-Ember status inflicter — Scratch's base spec stays
+clean, poison is entirely tree-earned via *Envenomed* — its only
+two-passive keystone, and the roster's first `rallyCall`); Water Gun
+(`resistanceBreaker` fixing its real Grass/Water/Dragon 0.5x resists,
+instead of a redundant Fire bonus it never needed). New test coverage in
+`packages/data/test/moveTrees.test.ts`: generic structural checks across
+every treed move (no dangling prerequisite ids, every `excludes` pair
+genuinely mutually exclusive, every node reachable in some valid order)
+plus specific tests for each new tree's signature keystone mechanic.
+Known, accepted, non-blocking limitation carried over from Slash's own
+precedent: Onix, Spearow, and the Squirtle pair have no `herdId` in
+`packages/data/src/scenario.ts` today, so each move's Sociability branch is
+real, shipped content that's currently inert for those specific spawned
+individuals (Sandshrew is the one exception, already sharing
+`"underground-colony"` with Diglett).
+
 ## Environmental/utility moves — first batch built, see MOVES_DESIGN.md
 
 Direct ask: "moves that affect the environment... pull it all in." 13 real,

@@ -211,7 +211,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "diglett",
     placeholderColor: "#966037",
     homeLayer: "underground",
-    moves: ["tackle", "dig"],
+    moves: ["tackle", "dig", "earthquake"],
     // The archetypal burrowing mole — avoids the surface (and its daylight)
     // entirely, most active well after dark. The task brief's own example.
     activityPattern: "nocturnal",
@@ -234,7 +234,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "venusaur",
     placeholderColor: "#4a8f3c",
     homeLayer: "surface",
-    moves: ["tackle", "vine_whip", "leech_seed", "sweet_scent"],
+    moves: ["tackle", "vine_whip", "leech_seed", "sweet_scent", "solar_beam"],
     // Deliberately left cathemeral (the default), not diurnal like its
     // pre-evolution: this is the herd's guardian (nothing preys on it — see
     // predation.ts), and a guardian that only watches half the clock isn't
@@ -248,7 +248,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "pidgey",
     placeholderColor: "#a89060",
     homeLayer: "canopy",
-    moves: ["tackle", "roost"],
+    // Wing Attack is a real early level move for Pidgey.
+    moves: ["tackle", "roost", "wing_attack"],
     // An ordinary daytime bird — diurnal, the task brief's own example.
     activityPattern: "diurnal",
     // Canopy has no biome of its own (a flat grid, same as underground) —
@@ -282,7 +283,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Not prey/predator itself — coexists with Diglett underground and
     // shares its Field egg group (see EGG_GROUPS_BY_BASE_KEY in
     // leveling.ts), a real cross-species breeding pair.
-    moves: ["scratch", "dig", "agility"],
+    moves: ["scratch", "dig", "agility", "earthquake"],
     // A desert dweller that mainline flavor text has curling up and hiding
     // from daytime heat — nocturnal, foraging once it cools off.
     activityPattern: "nocturnal",
@@ -305,7 +306,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Actual targets (Diglett, Sandshrew, or opportunistically anything
     // else small enough on a layer Onix visits) are dynamic — see isPreyOf.
     isPredator: true,
-    moves: ["tackle", "rock_throw"],
+    moves: ["tackle", "rock_throw", "rock_slide", "earthquake"],
     // Left cathemeral (the default): it tunnels through solid rock deep
     // underground, where the surface day/night cycle has no real bearing —
     // there's no "daylight" down there to be diurnal or nocturnal about.
@@ -346,7 +347,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Real cross-species breeding pair with Onix — both Mineral egg group
     // (see leveling.ts's EGG_GROUPS_BY_BASE_KEY), the first actual pairing
     // that table's existing Onix-is-alone-in-Mineral comment anticipated.
-    moves: ["rock_throw", "tackle", "defense_curl"],
+    moves: ["rock_throw", "tackle", "defense_curl", "rock_slide", "earthquake"],
     // A living boulder that mainline flavor text has rolling down
     // mountainsides — badlands/highland, both rock-and-boulder-heavy biomes
     // (see worldgen.ts's BIOMES boulder terrainWeights).
@@ -462,7 +463,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "ivysaur",
     placeholderColor: "#5cae5c",
     homeLayer: "surface",
-    moves: ["tackle", "vine_whip", "leech_seed", "sweet_scent"],
+    moves: ["tackle", "vine_whip", "leech_seed", "sweet_scent", "solar_beam"],
     // Same sun-grazing temperament as Bulbasaur — the bulb (now a bud)
     // still needs light to keep growing toward its eventual bloom.
     activityPattern: "diurnal",
@@ -499,7 +500,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "wartortle",
     placeholderColor: "#4a80c0",
     homeLayer: "surface",
-    moves: ["tackle", "water_gun", "withdraw"],
+    moves: ["tackle", "water_gun", "withdraw", "surf"],
     biomes: ["wetland"],
     preferredTerrain: ["water"],
   }),
@@ -507,11 +508,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "blastoise",
     placeholderColor: "#3868a8",
     homeLayer: "surface",
-    // The roster's strongest curated Water move is still Water Gun (no
-    // Hydro Pump in the small `MOVES` set yet) — Tackle stays alongside it
-    // rather than being dropped, the same "keep the pre-evolution's kit,
-    // don't strip it down" approach every entry in this batch takes.
-    moves: ["tackle", "water_gun", "withdraw"],
+    // Its real signature finisher, now shipped in the curated `MOVES` set —
+    // Tackle/Water Gun stay alongside it, same "keep the pre-evolution's
+    // kit, don't strip it down" approach every entry in this batch takes.
+    moves: ["tackle", "water_gun", "withdraw", "hydro_pump", "surf"],
     biomes: ["wetland"],
     preferredTerrain: ["water"],
   }),
@@ -533,7 +533,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // water-locked instead of staying stuck with Magikarp's restriction
     // forever.
     isPredator: true,
-    moves: ["tackle", "rain_dance"],
+    moves: ["tackle", "rain_dance", "hydro_pump"],
     biomes: ["wetland"],
     preferredTerrain: ["water"],
   }),
@@ -542,7 +542,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     placeholderColor: "#7860a8",
     homeLayer: "surface",
     isPredator: true,
-    moves: ["water_gun"],
+    moves: ["water_gun", "sludge"],
     // Genuinely obligate-aquatic in mainline flavor text too (Tentacool's
     // own comment above already notes this isn't a real mismatch) — unlike
     // Gyarados, this one legitimately keeps the tag on evolving.
@@ -559,7 +559,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "seel",
     placeholderColor: "#a0d8ef",
     homeLayer: "surface",
-    moves: ["tackle", "water_gun", "safeguard"],
+    moves: ["tackle", "water_gun", "safeguard", "ice_beam"],
     // Canonically an arctic pinniped that hauls out on ice and swims in
     // frigid water — snow as primary habitat, wetland as the closest
     // "open water" secondary this roster's biome set has.
@@ -633,7 +633,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "ekans",
     placeholderColor: "#a89060",
     homeLayer: "surface",
-    moves: ["tackle"],
+    // Poison Sting is Ekans's real level-1 move.
+    moves: ["tackle", "poison_sting"],
     // "Moves silently and stealthily... eats bird eggs whole" per mainline
     // flavor text — a nocturnal ambush hunter's hours, even though it isn't
     // tagged `isPredator` here (see this batch's top comment).
@@ -644,7 +645,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "arbok",
     placeholderColor: "#785888",
     homeLayer: "surface",
-    moves: ["tackle"],
+    moves: ["tackle", "poison_sting", "sludge"],
     activityPattern: "nocturnal",
     biomes: ["grassland", "jungle"],
   }),
@@ -682,7 +683,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "weedle",
     placeholderColor: "#c8b820",
     homeLayer: "surface",
-    moves: ["tackle"],
+    // Poison Sting is a real early level move for Weedle.
+    moves: ["tackle", "poison_sting"],
     activityPattern: "diurnal",
     biomes: ["jungle", "forest"],
     preferredTerrain: ["bush"],
@@ -700,7 +702,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "beedrill",
     placeholderColor: "#f8d030",
     homeLayer: "surface",
-    moves: ["tackle", "agility"],
+    // Twineedle is Beedrill's real signature level move.
+    moves: ["tackle", "agility", "twineedle"],
     biomes: ["jungle", "forest"],
   }),
   oddish: speciesFromDex("ODDISH", {
@@ -761,7 +764,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "psyduck",
     placeholderColor: "#f8d868",
     homeLayer: "surface",
-    moves: ["tackle", "water_gun"],
+    // Psybeam is a real level-up move for Psyduck.
+    moves: ["tackle", "water_gun", "psybeam"],
     biomes: ["beach", "wetland"],
     preferredTerrain: ["water"],
   }),
@@ -769,7 +773,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "golduck",
     placeholderColor: "#7098c8",
     homeLayer: "surface",
-    moves: ["tackle", "water_gun"],
+    moves: ["tackle", "water_gun", "psybeam", "surf"],
     biomes: ["beach", "wetland"],
     preferredTerrain: ["water"],
   }),
@@ -795,7 +799,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "snorlax",
     placeholderColor: "#a8b090",
     homeLayer: "surface",
-    moves: ["tackle", "defense_curl"],
+    // Body Slam is Snorlax's real iconic level move.
+    moves: ["tackle", "defense_curl", "body_slam"],
     // Eats, then sleeps, regardless of time of day per mainline flavor text
     // — deliberately left cathemeral (the default), same reasoning as
     // Venusaur/Charizard above.
@@ -805,7 +810,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "lapras",
     placeholderColor: "#a0c8e8",
     homeLayer: "surface",
-    moves: ["tackle", "water_gun", "safeguard"],
+    moves: ["tackle", "water_gun", "safeguard", "surf", "ice_beam"],
     // A gentle arctic reptile that ferries riders across icy seas per
     // mainline flavor text — Snow as primary, Wetland as the closest "open
     // water" secondary this roster's biome set has, same pairing Seel above
@@ -817,7 +822,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "jynx",
     placeholderColor: "#f8b8d8",
     homeLayer: "surface",
-    moves: ["tackle"],
+    moves: ["tackle", "ice_beam", "psybeam"],
     // "Lives in frigid areas" per mainline flavor text — a direct, literal
     // Snow-biome fit, Highland as the nearest secondary "cold mountain" this
     // roster's biome set has.
@@ -831,7 +836,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Diglett/Onix, and a genuinely better flavor fit than the open-treetop
     // Canopy layer Pidgey/Spearow use.
     homeLayer: "underground",
-    moves: ["tackle"],
+    // Poison Sting is Zubat's real level-1 move.
+    moves: ["tackle", "poison_sting"],
     // Avoids daylight entirely per mainline flavor text.
     activityPattern: "nocturnal",
     biomes: ["highland", "badlands"],
@@ -840,7 +846,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "golbat",
     placeholderColor: "#6848a0",
     homeLayer: "underground",
-    moves: ["tackle"],
+    moves: ["tackle", "poison_sting", "wing_attack"],
     activityPattern: "nocturnal",
     // Real further evolution (Crobat) needs a FRIENDSHIP condition, not a
     // plain level — same "never evolves in-sim" limitation as Growlithe/

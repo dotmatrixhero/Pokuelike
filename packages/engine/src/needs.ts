@@ -201,7 +201,7 @@ export const SLEEP_ENERGY_RESTORE_RATE = 0.02;
  */
 export const SLEEP_HEAL_MULTIPLIER = 3;
 
-/** Move-cooldown ticks (combat.ts's `tickCooldowns`) consumed per world tick while asleep — double speed, DESIGN.md's "pp" (cooldown) recovery ask. */
+/** Move-cooldown ticks (combat.ts's `tickCooldowns`) consumed per action tick while asleep — double speed, DESIGN.md's "pp" (cooldown) recovery ask. */
 export const SLEEP_COOLDOWN_TICKS = 2;
 
 /**
@@ -734,15 +734,17 @@ function yieldsToHigherRankedFeeder(world: World, agent: Agent, tileStock: numbe
 
 /**
  * The part of an agent's tick that happens every world tick regardless of
- * the Speed-driven action economy (see simulation.ts): aging, cooldown
- * countdown (real-time, deliberately orthogonal to Speed — see DESIGN.md),
- * need decay, and the passive exp trickle (tiny, per-tick, for every living
- * agent — deliberately in this always-runs path rather than the action-
- * gated one, consistent with the rest of the action-economy split: surviving
- * doesn't pause because you're slow). `world`/`ctx`/`log` are optional so
- * callers without a leveling context (bare fixtures, anything that predates
- * this feature) keep working — no world/ctx means the trickle simply isn't
- * granted (nothing to log a tick number against).
+ * the Speed-driven action economy (see simulation.ts): aging, need decay,
+ * and the passive exp trickle (tiny, per-tick, for every living agent —
+ * deliberately in this always-runs path rather than the action-gated one,
+ * consistent with the rest of the action-economy split: surviving doesn't
+ * pause because you're slow). Move-cooldown countdown is deliberately NOT
+ * here — see `tickAgentAction`'s own doc comment on why it ticks down on
+ * the agent's own action tick instead, same as everything else a move's
+ * `cooldownTicks` is meant to be measured against. `world`/`ctx`/`log` are
+ * optional so callers without a leveling context (bare fixtures, anything
+ * that predates this feature) keep working — no world/ctx means the
+ * trickle simply isn't granted (nothing to log a tick number against).
  *
  * Heal-over-time and faint-recovery (support.ts) also live here, for the
  * same reason: a fainted agent still needs-decays and heals every tick even
@@ -764,7 +766,6 @@ export function tickAgentNeeds(
 ): void {
   if (agent.alive === false) return;
   if (agent.age !== undefined) agent.age += 1;
-  tickCooldowns(agent, agent.asleep ? SLEEP_COOLDOWN_TICKS : 1);
   if (world) tickStatusEffects(agent, world, log, rng);
   // "tilling/planting it via grass type help" — a live Grass-type agent
   // gradually enriches the ground it's standing on, every tick, no move
@@ -909,6 +910,16 @@ export function tickAgentAction(
   regionDispersal?: RegionDispersalContext
 ): void {
   if (agent.alive === false) return;
+  // Cooldowns tick down once per real action tick this agent gets — its own
+  // clock, not the world's (see this function's own doc comment on Speed-
+  // driven action economy) — not once per world tick regardless of Speed,
+  // which is what this lived as before: a move with `cooldownTicks: 1` was
+  // effectively always off-cooldown for anything slower than the action
+  // threshold itself, since world ticks pass far more often than a normal
+  // agent's own turns. Placed ahead of every early-return below (fainted/
+  // carried/asleep/frozen/paralysis-skip) so it still recovers on a tick
+  // that ends up doing nothing else, same as it always has.
+  tickCooldowns(agent, agent.asleep ? SLEEP_COOLDOWN_TICKS : 1);
   if (agent.fainted) return;
   if (agent.beingCarriedBy) return;
   if (isAsleep(agent) || isFrozen(agent)) return;
