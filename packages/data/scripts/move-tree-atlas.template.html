@@ -317,16 +317,17 @@
     text-align: center;
     line-height: 1.35;
   }
-  .range-grid-note {
-    font-size: 10px;
-    color: var(--warn, #c9a227);
+  .range-grid-effect {
+    font-size: 10.5px;
+    color: var(--text-dim);
     max-width: 135px;
-    text-align: center;
-    line-height: 1.35;
+    text-align: left;
+    line-height: 1.4;
     border-top: 1px solid var(--border-soft);
     padding-top: 4px;
     margin-top: 2px;
   }
+  .range-grid-effect b { color: var(--text); font-weight: 500; }
 
   .flag-btn {
     font-family: "Rajdhani", sans-serif;
@@ -581,7 +582,7 @@
           <svg class="range-grid" id="rangeGrid" role="img" aria-label="Range and area of effect"></svg>
           <div class="range-grid-legend" id="rangeGridLegend"></div>
           <div class="range-grid-caption" id="rangeGridCaption">Base shape shown — some tree nodes change it (see the graph).</div>
-          <div class="range-grid-note" id="rangeGridNote" hidden></div>
+          <div class="range-grid-effect" id="rangeGridEffect">Add a node below to see its plain-English effect here.</div>
         </div>
       </div>
       <div class="build-controls">
@@ -626,7 +627,7 @@
   var BRANCH_COLOR_HEX = { aggression: "#ef6448", boldness: "#4c95e6", sociability: "#43cf95" };
   var CROSS_HEX = "#e0ac3f";
 
-  var state = { moveId: null, selectedNode: null, hoverNode: null };
+  var state = { moveId: null, selectedNode: null, hoverNode: null, lastAllocatedNode: null };
 
   // ---------- Layout: derive branch/depth/fork/crosslink structure from data ----------
 
@@ -996,10 +997,12 @@
     if (idx >= 0) {
       ids.splice(idx, 1);
       ids = pruneInvalid(tree, ids); // cascades to anything that depended on it
+      if (ids.indexOf(state.lastAllocatedNode) < 0) state.lastAllocatedNode = null;
     } else {
       var chosenSet = new Set(ids);
       if (!checkEligible(tree, chosenSet, nodeId)) return; // guard — the button should already be disabled
       ids.push(nodeId);
+      state.lastAllocatedNode = nodeId;
     }
     setChosen(moveId, ids);
     refreshBuildUI(moveId);
@@ -1019,6 +1022,7 @@
     var chosenSet = new Set(ids);
     if (!checkEligible(tree, chosenSet, nodeId)) return;
     ids.push(nodeId);
+    state.lastAllocatedNode = nodeId;
     setChosen(moveId, ids);
     refreshBuildUI(moveId);
   }
@@ -1051,8 +1055,35 @@
     });
 
     document.getElementById("buildPoints").innerHTML = "<b>" + totalCost(tree, ids) + "</b> pts spent";
+    renderRangeGridEffect(moveId);
 
     if (state.selectedNode) renderDetail(moveId, state.selectedNode);
+  }
+
+  /**
+   * Shows the plain-English effect of the most recently *allocated* node
+   * (added to the build — not just clicked to inspect) right on the
+   * floating range panel, via the same `describePassive`/`describeDelta`
+   * translators the detail panel's own "In plain English" block uses.
+   * Direct ask: replaces what used to be a static range-vs-shape
+   * disclaimer here (moved to MOVES_DESIGN.md's own permanent writeup
+   * instead — see "Two things that read as confusing in review").
+   */
+  function renderRangeGridEffect(moveId) {
+    var el = document.getElementById("rangeGridEffect");
+    var nodeId = state.lastAllocatedNode;
+    var node = nodeId && TREES[moveId].tree[nodeId];
+    if (!node) {
+      el.textContent = "Add a node below to see its plain-English effect here.";
+      return;
+    }
+    var passives = [];
+    if (node.grantsPassive) passives.push(node.grantsPassive);
+    if (node.grantsPassives) passives = passives.concat(node.grantsPassives);
+    var lines = passives.map(describePassive).concat(describeDelta(node.delta || {}));
+    el.innerHTML =
+      "<b>" + node.name + "</b>" +
+      (lines.length ? ": " + lines.join(" ") : " — structural node only, no move-spec change on its own.");
   }
 
   // ---------- SVG rendering ----------
@@ -1633,28 +1664,6 @@
       '<span class="item"><span class="swatch" style="background:var(--text)"></span>user</span>' +
       '<span class="item"><span class="swatch" style="background:' + typeColor + ';opacity:.3"></span>in range (any direction)</span>' +
       '<span class="item"><span class="swatch" style="background:' + typeColor + '"></span>' + (move.hitsArea ? "hits (AoE, once fired)" : "target tile") + "</span>";
-
-    // Direct ask, after this looked contradictory in review: range (the
-    // faint diamond — how far a target can be for the attacker to *decide*
-    // to fire, any direction) and the shape's own footprint (the solid
-    // tiles — what the resolved attack actually reaches, fixed to this
-    // move's own `shape.length`/`radius` once facing is chosen) are two
-    // real, independent engine concepts (`moveRange`/`withinMoveRange` vs.
-    // `resolveShape`, combat.ts/moves.ts) — not a rendering bug, but genuinely
-    // confusing without saying so. Called out explicitly whenever range
-    // reaches farther than the shape does, since that's the case where a
-    // "+Range" node doesn't actually widen what gets hit.
-    var noteEl = document.getElementById("rangeGridNote");
-    if (rangeMax > shapeReach) {
-      noteEl.hidden = false;
-      noteEl.textContent =
-        "Range (" + rangeMax + ") reaches farther than this shape does (" + shapeReach +
-        "). A target at the edge of range can make the attacker fire, but won't " +
-        "necessarily end up inside the solid footprint above — only a node that " +
-        "changes the shape itself widens what actually gets hit.";
-    } else {
-      noteEl.hidden = true;
-    }
   }
 
   // ---------- Selection / navigation ----------
@@ -1695,6 +1704,12 @@
   function selectMove(moveId) {
     state.moveId = moveId;
     state.selectedNode = null;
+    // A prior move's last-allocated node id is meaningless once its own
+    // build was already restored from getChosen — re-seed it from that
+    // build's own most-recently-added entry instead of just clearing it,
+    // so the panel isn't blank on a move that already has a saved build.
+    var savedIds = getChosen(moveId);
+    state.lastAllocatedNode = savedIds.length ? savedIds[savedIds.length - 1] : null;
     var move = TREES[moveId];
 
     document.querySelectorAll(".move-btn").forEach(function (b) {

@@ -4083,3 +4083,17 @@ not something this pathfinding pass itself caused or is positioned to fix.
       pattern as the existing notes/flags/build features. Verified the
       inline script's syntax directly (`new Function(...)` on the
       extracted block) before rebuilding. Atlas rebuilt and republished.
+- [x] **Range panel: swapped the range-vs-shape disclaimer for the last-
+      allocated node's plain-English effect** — direct ask: "remove the
+      range disclaimer text the yellow stuff and have it just be the node
+      effect explanation you most recently allocated." Removed the yellow
+      warning entirely from `renderRangeGrid` (the underlying explanation
+      is now permanent-only in MOVES_DESIGN.md). The same panel slot now
+      shows whichever node was most recently *added* to the build (not
+      just clicked to inspect), reusing the exact `describePassive`/
+      `describeDelta` translators the detail panel's own "In plain
+      English" block already uses — `state.lastAllocatedNode`, updated by
+      `toggleNode`/`lockInNode` on add, cleared if that node gets pruned
+      by removing something it depended on, and re-seeded from a saved
+      build's last entry when switching moves. Verified the inline
+      script's syntax before rebuilding. Atlas rebuilt and republished.

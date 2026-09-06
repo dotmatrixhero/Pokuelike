@@ -1573,12 +1573,14 @@ only ever bumped `range.max`, never the shape itself — so a target at the
 new, farther edge of range can make the attacker fire, but isn't
 guaranteed to actually be *inside* the resolved AoE footprint once it
 does. That's real, current engine behavior, not a mistake to silently
-patch — but it was genuinely confusing without saying so. Fixed two ways:
-(1) the Atlas's range/footprint grid now shows an explicit warning
-whenever a move's range reaches farther than its shape does, naming both
-numbers; (2) `widening_main`'s own code comment in `moves.ts` now states
-the caveat directly. Also fixed in the same pass: every "+Range" node in
-Earthquake/Hydro Pump/Solar Beam was mislabeled `"+10 Range"` regardless
+patch — but it was genuinely confusing without saying so. Documented
+here permanently, and in `widening_main`'s own code comment in
+`moves.ts`. (The Atlas's range panel briefly showed this as a live
+warning too; direct follow-up asked for that removed in favor of the
+panel showing the plain-English effect of whatever node was most
+recently added to the build instead — see the Atlas's own "how to keep
+it updated" section below.) Also fixed in the same pass: every "+Range"
+node in Earthquake/Hydro Pump/Solar Beam was mislabeled `"+10 Range"` regardless
 of its real value — corrected to the actual increment (`+1` for
 Earthquake/Hydro Pump, `+2` for Solar Beam, which reaches its own stated
 "up to 7" cap correctly).
