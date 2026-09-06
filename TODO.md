@@ -3,6 +3,33 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Twelve advanced moves + 3 more flagship trees — built, see MOVES_DESIGN.md
+
+Direct ask, right after the move-tree batch below: "We need more moves
+actually. Like... More skill trees. More advanced moves should be... More
+range, more aoe." Scoped via a quick question rather than guessing: went
+with the largest option offered ("everything at once" for moves — real
+type-gap coverage plus evolved-line finishers — "2-3 flagship trees" for
+new skill trees). Shipped 12 real gen-1 moves (`moveCanon`-sourced, same
+standard as every move before them) in `packages/data/src/moves.ts`, each
+given a real `shape`/`range` instead of staying a point-blank stab: Hydro
+Pump/Surf (Water AoE cone/ring), Solar Beam (Grass, long single-target
+line — proof AoE isn't the only kind of "advanced"), Earthquake/Rock Slide
+(Ground/Rock self-centered burst AoE), Sludge/Poison Sting/Twineedle
+(Poison/Bug), Ice Beam (Ice line), Psybeam (Psychic line), Wing Attack
+(Flying cone AoE), Body Slam (Normal point, real paralysis payoff). Updated
+movesets for the ~25 species that actually learn each one, checked against
+real gen-1 movepools where practical. Three got full 33-node flagship
+trees — Hydro Pump, Solar Beam, Earthquake — each following the same
+Tackle/Peck template, each Boldness keystone a `resistanceBreaker` fixing
+that move's own real multi-type resist. New tree-specific tests added to
+the existing generic `moveTrees.test.ts` suite (which auto-covers any move
+with a tree, so these three were validated structurally for free).
+Explicitly out of scope, flagged rather than silently skipped: most of the
+45+ species roster still knows only Tackle or one other move; Fire has no
+AoE move yet; Bug/Dragon/beach-biome species are still thin. Real follow-up
+candidates, not a "todo eventually and never revisit."
+
 ## Rock Throw/Peck/Scratch/Water Gun move trees — built, see MOVES_DESIGN.md
 
 Direct ask, after noticing the gap: "Did you never implement the move

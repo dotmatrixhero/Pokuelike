@@ -261,3 +261,91 @@ describe("Water Gun tree: resistanceBreaker fixes the real weakness", () => {
     expect(bubbleShield.statChangeOnHit).toEqual({ target: "self", stat: "defense", stage: 1, ticks: 20 });
   });
 });
+
+describe("Hydro Pump tree: raw overwhelming force", () => {
+  const hydroPump = MOVES.hydro_pump;
+
+  it("Tidal Devastation keystone is reachable through the Aggression fork", () => {
+    const respec = applyMoveTree(hydroPump, [
+      "pressurized_core",
+      "surging_jets",
+      "deluge_footing",
+      "overwhelming_flow",
+      "torrent_conditioning",
+      "concentrated_blast",
+      "torrential_downpour",
+      "current_precision",
+      "tidal_devastation",
+    ]);
+    expect(respec.critRateStage).toBe(2);
+  });
+
+  it("Abyssal Pressure keystone fixes the real Grass/Water/Dragon resist", () => {
+    const respec = applyMoveTree(hydroPump, [
+      "grounded_stance",
+      "steady_flow",
+      "undertow_footing",
+      "steady_current",
+      "current_grip",
+      "measured_flow",
+      "eroding_current",
+      "current_resolve",
+      "abyssal_pressure",
+    ]);
+    expect(respec.resistanceBreaker).toEqual({ multiplier: 2 });
+  });
+});
+
+describe("Solar Beam tree: real long reach, single target", () => {
+  const solarBeam = MOVES.solar_beam;
+
+  it("has no hitsArea by default — Solar Beam stays a single-target beam, just with real range", () => {
+    expect(solarBeam.hitsArea).toBeUndefined();
+    expect(solarBeam.shape).toEqual({ kind: "line", length: 5 });
+  });
+
+  it("Photosynthetic Ward keystone fixes Grass's real multi-type resists", () => {
+    const respec = applyMoveTree(solarBeam, [
+      "steady_roots",
+      "deepening_roots",
+      "rooted_footing",
+      "unwavering_stance",
+      "canopy_grip",
+      "piercing_focus",
+      "withering_grasp",
+      "root_resolve",
+      "photosynthetic_ward",
+    ]);
+    expect(respec.resistanceBreaker).toEqual({ multiplier: 2 });
+    expect(respec.statChangeOnHit).toEqual({ target: "defender", stat: "spAttack", stage: -1, ticks: 20 });
+  });
+});
+
+describe("Earthquake tree: self-centered burst AoE", () => {
+  const earthquake = MOVES.earthquake;
+
+  it("is a real self-centered AoE by default, not just a single-target hit", () => {
+    expect(earthquake.hitsArea).toBe(true);
+    expect(earthquake.shape).toEqual({ kind: "burst", radius: 2 });
+  });
+
+  it("Fault Line grants the defenseBoost passive, diversifying away from flat damageReduction", () => {
+    const node = earthquake.tree!.fault_line;
+    expect(node.grantsPassive).toEqual({ kind: "defenseBoost", value: 0.1 });
+  });
+
+  it("Tectonic Shield keystone fixes Ground's real Grass/Bug resists", () => {
+    const respec = applyMoveTree(earthquake, [
+      "anchored_stance",
+      "bedrock_momentum",
+      "anchor_footing",
+      "immovable_ground",
+      "tectonic_grip",
+      "steady_tremor",
+      "fault_line",
+      "bedrock_resolve",
+      "tectonic_shield",
+    ]);
+    expect(respec.resistanceBreaker).toEqual({ multiplier: 2 });
+  });
+});

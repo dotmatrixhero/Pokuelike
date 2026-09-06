@@ -971,6 +971,67 @@ here, not done.
     Tide* (Sociability↔Aggression, `critRateStage` — a shared burst of
     coordinated ferocity, not another flanking check).
 
+### Twelve advanced moves, real range/AoE (Shipped)
+
+Direct ask: "we need more moves actually... more advanced moves should be...
+more range, more aoe." Twelve real gen-1 moves, `moveCanon`-sourced same as
+every move before them, each given a real `shape`/`range` instead of
+staying a point-blank stab — `packages/data/src/moves.ts`:
+
+- **Hydro Pump** (Water, special) — `cone` length 4/width 2, `hitsArea`.
+  Blastoise/Gyarados/Lapras's signature blast.
+- **Surf** (Water, special) — `ring` radius 2, `hitsArea` — the classic
+  "hits everyone adjacent" spread move. Wartortle/Blastoise/Lapras/Golduck.
+- **Solar Beam** (Grass, special) — `line` length 5, no `hitsArea`
+  (deliberately single-target — mainline's own signature is raw reach/
+  power, not a spread effect; the "gathering light" turn is approximated as
+  a longer cooldown, this sim having no charge-turn mechanic). Venusaur/
+  Ivysaur.
+- **Earthquake** (Ground, physical) — self-centered `burst` radius 2,
+  `hitsArea`. Onix/Geodude/Sandshrew/Diglett.
+- **Rock Slide** (Rock, physical) — self-centered `burst` radius 1 (tighter
+  spread than Earthquake's), `hitsArea`. Onix/Geodude.
+- **Sludge** (Poison, special) — `cone` length 2/width 2, `hitsArea`,
+  `statusChance: 0.3`/`statusKind: "poison"`. Arbok/Tentacruel.
+- **Poison Sting** (Poison, physical) — `point`, `statusChance: 0.3`/
+  poison. Ekans/Weedle/Zubat's real level-1 moves.
+- **Twineedle** (Bug, physical) — `point`, `hits: {2,2}`, `statusChance:
+  0.2`/poison. Beedrill's real signature.
+- **Ice Beam** (Ice, special) — `line` length 3, `statusChance: 0.1`/
+  `"freeze"`. Seel/Lapras/Jynx.
+- **Psybeam** (Psychic, special) — `line` length 2. Mainline's own
+  confusion chance isn't representable (no such `StatusKind` exists) so
+  this is a clean hit with real reach, no status roll. Jynx/Psyduck/
+  Golduck (Psyduck's real level move).
+- **Wing Attack** (Flying, physical) — `cone` length 2/width 2, `hitsArea`.
+  Pidgey/Golbat.
+- **Body Slam** (Normal, physical) — `point`, `statusChance: 0.3`/
+  `"paralysis"`. Snorlax's real iconic level move — proof not every
+  "advanced" move needs AoE, just real power and a real payoff.
+
+Three got the full flagship triangle treatment (33 nodes each, same
+template as Tackle/Peck/Rock Throw/etc.) — **Hydro Pump**, **Solar Beam**,
+**Earthquake**. Each Boldness branch keystone is a `resistanceBreaker`
+fixing that move's own real multi-type resist (Hydro Pump: Grass/Water/
+Dragon; Solar Beam: Fire/Grass/Poison/Flying/Bug/Dragon; Earthquake:
+Grass/Bug), same "fix the real weakness, not a redundant bonus" standard
+Water Gun's own tree set. Earthquake's Boldness notable (*Fault Line*)
+uses the `defenseBoost` passive instead of another flat `damageReduction`,
+per this doc's own note on diversifying that lever. Structural integrity
+and each keystone's mechanic are covered by
+`packages/data/test/moveTrees.test.ts` (which validates every treed move
+generically, so these three were checked by the same suite the first four
+trees added, with a few new move-specific assertions on top).
+
+Real, honest scope note: the roster has grown to 45+ curated species (most
+of the growth came from elsewhere, not this pass) and most still know only
+Tackle or one other move — this batch targeted evolved-line finishers and
+real type gaps (Ground/Rock/Poison/Ice/Psychic/Flying all had zero curated
+moves before it), not a full pass across every species. A good next
+follow-up, not done here: Fire's still Ember/Flamethrower-only (no AoE fire
+move yet), and most Bug/Dragon/beach-biome species still have nothing past
+Tackle.
+
 ## Build order recommendation, across everything above
 
 1. **Rock Throw / Peck / Scratch / Water Gun** — designed above, zero new
