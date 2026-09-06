@@ -87,6 +87,10 @@
         -webkit-overflow-scrolling: touch;
         touch-action: pan-x pan-y;
       }
+      /* The bare `display: flex` above outranks the UA's `[hidden] { display: none }`
+         by specificity, so #canvas-wrap's own `hidden` attribute (used by the
+         Overworld-mode view toggle) would otherwise be silently ignored. */
+      #canvas-wrap[hidden] { display: none; }
 
       /* The overworld macro grid — ONE pannable/zoomable canvas covering the
          whole grid (thousands of zone-cells), not a strip of cards. Direct
@@ -496,6 +500,7 @@
               <button id="macro-map-zoom-in" title="Zoom in">+</button>
             </div>
             <span id="macro-map-hint">Click a zone to focus/promote it</span>
+            <button id="macro-view-toggle" title="Overworld and the focused zone's tile view otherwise render stacked, which is cramped on a phone — hide the tile view and give the map the full area instead">Overworld Only</button>
           </div>
           <div id="macro-map-scroll">
             <canvas id="macro-map-canvas"></canvas>

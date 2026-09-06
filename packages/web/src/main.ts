@@ -110,6 +110,7 @@ const macroMapZoomLabel = document.getElementById("macro-map-zoom-label") as HTM
 const macroMapZoomInBtn = document.getElementById("macro-map-zoom-in") as HTMLButtonElement;
 const macroMapZoomOutBtn = document.getElementById("macro-map-zoom-out") as HTMLButtonElement;
 const macroMapScrollEl = document.getElementById("macro-map-scroll") as HTMLElement;
+const macroViewToggleBtn = document.getElementById("macro-view-toggle") as HTMLButtonElement;
 const macroMapView = new MacroMapView(macroMapCanvas, macroMapZoomLabel, focusZone);
 let log: EventLog;
 let playing = false;
@@ -661,6 +662,12 @@ autoCamToggleBtn.addEventListener("click", () => {
   syncAutoCamToggleButton();
 });
 
+/** Overworld mode stacks the macro map above the focused zone's tile view — fine on desktop, cramped on a phone (direct ask: they were "competing too much on mobile"). `macro-view-toggle` (only visible inside `#macro-map-wrap`, so already hidden outside Overworld mode) lets the viewer hide the tile view and give the macro map the full area instead, then bring it back. */
+function setOverworldOnly(only: boolean): void {
+  canvasWrap.hidden = only;
+  macroViewToggleBtn.textContent = only ? "Show Both" : "Overworld Only";
+}
+
 overworldToggleBtn.addEventListener("click", () => {
   const enabling = !macroWorld;
   // The seed controls don't mean anything in Overworld mode (the macro grid
@@ -673,8 +680,17 @@ overworldToggleBtn.addEventListener("click", () => {
   macroMapWrapEl.hidden = !enabling;
   overworldToggleBtn.textContent = `Overworld: ${enabling ? "On" : "Off"}`;
   overworldToggleBtn.classList.toggle("playing", enabling);
+  // Reset to "both visible" (the default either way) whether entering a
+  // fresh Overworld session or leaving it back to ordinary single-map mode —
+  // canvas-wrap is the only view there, so it must never stay hidden from a
+  // stale "Overworld Only" choice left over from a previous session.
+  setOverworldOnly(false);
   if (enabling) loadMacroWorld();
   else loadWorld(SCENARIO_SEED);
+});
+
+macroViewToggleBtn.addEventListener("click", () => {
+  setOverworldOnly(!canvasWrap.hidden);
 });
 
 macroMapZoomInBtn.addEventListener("click", () => {
