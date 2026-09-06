@@ -1,4 +1,4 @@
-name: Deploy web to Cloudflare Pages
+name: Deploy web to Cloudflare Workers
 
 on:
   push:
@@ -42,11 +42,10 @@ jobs:
       - name: Build web app
         run: pnpm --filter @pokuelike/web build
 
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: pokuelike
-          directory: packages/web/dist
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          workingDirectory: packages/web
+          command: deploy
