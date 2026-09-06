@@ -5604,6 +5604,55 @@ zero behavior change to anything that doesn't opt in.
   `POP_HARD_CAP`) is unit-tested but not yet exercised by a real multi-
   thousand-tick run that actually reaches it — see TODO.md.
 
+### Immigrant levels: evolution-aware and randomized, not a flat constant
+
+Direct ask, after noticing every immigrant arrived at the exact same level
+regardless of species: "why does everything spawn at lv5. Especially
+evolved Pokémon they should be higher distributed. Some randomness in
+starting rolls would be good." The bug was real and total: `IMMIGRANT_LEVEL`
+was a single flat constant (5) applied to every roster species —
+`IMMIGRATION_CONTEXT`'s roster is `Object.values(SPECIES)`, every roster
+species including fully-evolved ones, so an evolved final-stage Pokémon
+could immigrate in at exactly the same level as a freshly-hatched base
+form, with zero variance run to run.
+
+**Built**: `packages/data/src/leveling.ts`'s `naturalMinLevelFor(speciesId)`
+— a real reverse-of-the-dex lookup (same construction idiom as the
+existing `PREVO_KEY_BY_KEY` reverse map just above it) returning the real
+level threshold a species' own most-recent evolution required, or 1 for an
+unevolved base form. Only needs its own single (highest) threshold, not a
+sum along the whole chain — reaching evolution N already implies clearing
+every earlier, lower-numbered stage's threshold first. Deliberately shares
+the exact same level-gated-only filter (`level !== undefined && no
+conditions`) `computeProfileFromDexEntry`'s own `evolutions` field already
+uses, so this never floors a species at a threshold reachable only via an
+item/trade evolution this sim doesn't track (Vileplume, Ninetales, etc.
+correctly read back as 1 — an honest reflection of "not modeled," not a
+bug). `ImmigrationSpeciesInfo` (engine/immigration.ts) gained an optional
+`minLevel` field, populated per roster entry in
+`packages/data/src/immigration.ts`. `rollImmigrantLevel` replaces the flat
+constant: `Math.max(IMMIGRANT_BASE_LEVEL_FLOOR (5), species.minLevel ?? 1)
++ Math.floor(rng() * IMMIGRANT_LEVEL_JITTER (8))` — an unclassified/base
+species keeps its old 5-12 range unchanged (the `max` against 5 preserves
+today's floor), while a genuinely evolved species floors at its own real
+threshold instead. Exported (like `accumulateActionEnergy`) purely so it's
+directly, deterministically unit-testable without reverse-engineering
+`maybeImmigrate`'s own internal rng call order.
+
+7 new engine tests (5 on `rollImmigrantLevel` directly, 2 through
+`maybeImmigrate`'s public surface) plus the pre-existing determinism suite,
+all green. Validated via `validateImmigrantLevels.ts` over a real
+8000-tick demo-world run, wrapping `spawnAgent` to capture the level
+actually rolled at spawn time (reading `agent.level` off `world.agents` at
+the end of the run would be misleading — a still-living immigrant keeps
+leveling up from ordinary exp gain long after arriving, unrelated to what
+it spawned at): base-form species (cubone, caterpie, oddish, vulpix,
+sandshrew, scyther, ponyta) land within the expected 5-12 range with real
+variety; `metapod` (real dex threshold: evolves from Caterpie at level 7)
+floors at exactly 7-11; `blastoise` (fully evolved, dex threshold 36)
+spawned at 39 — its own real floor plus jitter, not anywhere near the old
+flat 5.
+
 ## Real confirmed bug: dying of thirst standing on water, fourth instance of "commits no matter what"
 
 Direct report: "I just watched bulbasaurs die of thirst while in water." Not

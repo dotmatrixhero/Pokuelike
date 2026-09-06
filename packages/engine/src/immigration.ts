@@ -42,6 +42,15 @@ export interface ImmigrationSpeciesInfo {
    * moment they arrive. Absent/false = unchanged existing behavior.
    */
   obligateAquatic?: boolean;
+  /**
+   * The lowest level a real specimen of this species could plausibly exist
+   * at — 1 for a base form, or its own real evolution-level threshold
+   * otherwise (`@pokuelike/data`'s `naturalMinLevelFor`). Absent = treated
+   * as 1, the safe "no evolution data available" fallback (bare-engine
+   * tests that build a roster by hand). See `rollImmigrantLevel`'s own doc
+   * comment for how this actually turns into a spawn level.
+   */
+  minLevel?: number;
 }
 
 export interface ImmigrationContext {
@@ -113,8 +122,41 @@ function immigrationScale(livingCount: number): number {
 const MIN_GROUP_SIZE = 1;
 const MAX_GROUP_SIZE = 3;
 
-/** The level immigrant agents arrive at — matches `createDemoWorld`'s own starting-agent level for the roster's non-guardian species (bulbasaur/diglett/sandshrew/pidgey/squirtle/charmander all spawn at 5), so an immigrant isn't mechanically distinguishable from a hand-placed starter. */
-const IMMIGRANT_LEVEL = 5;
+/**
+ * Floor level for a base-form immigrant (no real evolution threshold of its
+ * own) — matches `createDemoWorld`'s own starting-agent level for the
+ * roster's non-guardian base-form species (bulbasaur/diglett/sandshrew/
+ * pidgey/squirtle/charmander all spawn at 5), preserved as the low end of
+ * the roll below rather than changed outright.
+ */
+const IMMIGRANT_BASE_LEVEL_FLOOR = 5;
+/**
+ * Real spread on top of a species' own floor — direct ask: "some randomness
+ * in starting rolls would be good." `rng() * this`, floored, added to the
+ * floor below — e.g. a base-form immigrant now arrives anywhere from 5 to
+ * 12, not a single fixed value every time.
+ */
+const IMMIGRANT_LEVEL_JITTER = 8;
+
+/**
+ * A real, species-aware immigrant level — direct ask, after noticing every
+ * immigrant arrived at the exact same flat level regardless of species:
+ * "why does everything spawn at lv5. Especially evolved Pokémon they should
+ * be higher distributed." `species.minLevel` (`ImmigrationSpeciesInfo`,
+ * `@pokuelike/data`'s `naturalMinLevelFor`) is the real floor an already-
+ * evolved species could plausibly exist at — `Math.max` against the
+ * ordinary base-form floor so an unclassified/base species keeps its
+ * existing 5+ range unchanged, while a genuinely evolved species floors
+ * meaningfully higher (its own real evolution-level threshold) before the
+ * same real jitter on top. Exported (like `accumulateActionEnergy` in
+ * simulation.ts) so it's directly, deterministically testable without
+ * needing to reverse-engineer `maybeImmigrate`'s own internal rng call
+ * order just to isolate this one roll.
+ */
+export function rollImmigrantLevel(species: ImmigrationSpeciesInfo, rng: () => number): number {
+  const floor = Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, species.minLevel ?? 1);
+  return floor + Math.floor(rng() * IMMIGRANT_LEVEL_JITTER);
+}
 
 /**
  * Picks a random point on one of the four map edges — "arrives from
@@ -258,7 +300,7 @@ export function maybeImmigrate(world: World, ctx: ImmigrationContext | undefined
   const newAgents: Agent[] = [];
   for (let i = 0; i < groupSize; i++) {
     const pos = nextArrivalPos(i);
-    const agent = ctx.spawnAgent(species.id, `${species.id}-immigrant-${world.tick}-${i}`, pos, IMMIGRANT_LEVEL, rng);
+    const agent = ctx.spawnAgent(species.id, `${species.id}-immigrant-${world.tick}-${i}`, pos, rollImmigrantLevel(species, rng), rng);
     agent.sex = rng() < 0.5 ? "male" : "female";
     newAgents.push(agent);
   }

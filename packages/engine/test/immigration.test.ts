@@ -5,11 +5,13 @@ import { EventLog } from "../src/events.js";
 import { tickWorld } from "../src/simulation.js";
 import {
   maybeImmigrate,
+  rollImmigrantLevel,
   IMMIGRATION_BASE_CHANCE,
   MIN_TICKS_BETWEEN_IMMIGRATIONS,
   POP_HARD_CAP,
   POP_SOFT_CAP,
   type ImmigrationContext,
+  type ImmigrationSpeciesInfo,
 } from "../src/immigration.js";
 import type { Agent, Vec2, World } from "../src/types.js";
 
@@ -177,6 +179,27 @@ describe("maybeImmigrate", () => {
     expect(world.agents.every((a) => a.species === "onix")).toBe(true);
   });
 
+  it("an evolved species (real minLevel) spawns at/above its own evolution floor, not the flat base default — direct ask: \"everything spawn[s] at lv5\"", () => {
+    const world = createWorld(40, 40, 1);
+    const ctx: ImmigrationContext = {
+      speciesRoster: [{ id: "ivysaur", homeLayer: "surface", minLevel: 16 }],
+      spawnAgent: stubSpawnAgent,
+    };
+    maybeImmigrate(world, ctx, undefined, ALWAYS_FIRE);
+    expect(world.agents.length).toBeGreaterThan(0);
+    for (const a of world.agents) expect(a.level).toBeGreaterThanOrEqual(16);
+  });
+
+  it("a base-form species (no minLevel) still spawns within the ordinary base floor/jitter range, unchanged", () => {
+    const world = createWorld(40, 40, 1);
+    maybeImmigrate(world, SURFACE_CTX, undefined, ALWAYS_FIRE);
+    expect(world.agents.length).toBeGreaterThan(0);
+    for (const a of world.agents) {
+      expect(a.level).toBeGreaterThanOrEqual(5);
+      expect(a.level).toBeLessThan(13); // 5 + IMMIGRANT_LEVEL_JITTER (8)
+    }
+  });
+
   it("rng determinism: the same seed produces byte-identical immigration outcomes across two independent runs", () => {
     function run(): { agentCount: number; species: string[]; positions: string[]; eventCount: number } {
       const world = createWorld(50, 50, 777);
@@ -228,5 +251,39 @@ describe("immigration data plumbing (bare-engine roster)", () => {
     // Confirms both roster species can actually get picked over enough trials (biome + representation weighting isn't a de facto ban on one of them).
     const speciesSeen = new Set(world.agents.map((a) => a.species));
     expect(speciesSeen.size).toBeGreaterThan(0);
+  });
+});
+
+describe("rollImmigrantLevel (direct ask: \"why does everything spawn at lv5... some randomness in starting rolls would be good\")", () => {
+  const BASE_FORM: ImmigrationSpeciesInfo = { id: "bulbasaur", homeLayer: "surface" };
+  const EVOLVED: ImmigrationSpeciesInfo = { id: "venusaur", homeLayer: "surface", minLevel: 32 };
+
+  it("a base-form species (no minLevel) floors at the ordinary base default with zero jitter", () => {
+    expect(rollImmigrantLevel(BASE_FORM, () => 0)).toBe(5);
+  });
+
+  it("a base-form species gets real jitter on top of the base default", () => {
+    expect(rollImmigrantLevel(BASE_FORM, () => 0.99)).toBe(5 + 7); // floor(0.99 * 8) = 7
+  });
+
+  it("an evolved species floors at its own real evolution level, not the flat base default", () => {
+    expect(rollImmigrantLevel(EVOLVED, () => 0)).toBe(32);
+    expect(rollImmigrantLevel(EVOLVED, () => 0.99)).toBe(32 + 7);
+  });
+
+  it("an evolved species below the base default still floors at the base default (max, not additive)", () => {
+    const barelyEvolved: ImmigrationSpeciesInfo = { id: "metapod", homeLayer: "surface", minLevel: 3 };
+    expect(rollImmigrantLevel(barelyEvolved, () => 0)).toBe(5); // base default (5) wins over minLevel (3)
+  });
+
+  it("real randomness: repeated rolls for the same species aren't all identical", () => {
+    const levels = new Set<number>();
+    let seed = 1;
+    const rng = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+    for (let i = 0; i < 20; i++) levels.add(rollImmigrantLevel(BASE_FORM, rng));
+    expect(levels.size).toBeGreaterThan(1);
   });
 });

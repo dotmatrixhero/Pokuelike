@@ -14,11 +14,44 @@ const SPECIES_KEY_BY_ID: Record<number, string> = Object.fromEntries(SPECIES_DEX
  * every species' evolutions and recording the target's prevo.
  */
 const PREVO_KEY_BY_KEY: Record<string, string> = {};
+/**
+ * Same reverse-of-the-dex construction as `PREVO_KEY_BY_KEY` immediately
+ * above, but recording the real level threshold instead of just the prevo's
+ * identity — dex key -> the level at which it evolved INTO this exact form.
+ * A species reachable via more than one path (shouldn't happen in this
+ * dex, but defensive) keeps the highest threshold seen, since "evolved
+ * into" is a floor, not an exact value. Same level-gated-only filter
+ * `computeProfileFromDexEntry`'s own `evolutions` field uses (PokeRogue
+ * stamps a `level: 1` placeholder on trade evolutions too — see that
+ * function's own doc comment on Onix -> Steelix) — this must agree with
+ * that filter, or `naturalMinLevelFor` could floor a species below a level
+ * it could only reach via a real level-gated path.
+ */
+const MIN_LEVEL_BY_KEY: Record<string, number> = {};
 for (const species of SPECIES_DEX) {
   for (const evo of species.evolutions) {
     const targetKey = SPECIES_KEY_BY_ID[evo.target];
     if (targetKey) PREVO_KEY_BY_KEY[targetKey] = species.key;
+    if (targetKey && evo.level !== undefined && Object.keys(evo.conditions).length === 0) {
+      MIN_LEVEL_BY_KEY[targetKey] = Math.max(MIN_LEVEL_BY_KEY[targetKey] ?? 0, evo.level);
+    }
   }
+}
+
+/**
+ * The lowest level a real specimen of `speciesId` could plausibly exist at
+ * — 1 for a base form (nothing had to evolve into it), or the real level
+ * threshold its own most-recent evolution required otherwise. Direct ask,
+ * after noticing every immigrant spawns at a flat level regardless of
+ * species: "everything spawn[s] at lv5. Especially evolved Pokémon they
+ * should be higher distributed." An evolution chain's minimum only ever
+ * needs its OWN (highest, since evolution levels increase per stage by
+ * mainline design) threshold, not a sum along the whole chain — reaching
+ * evolution N already implies having passed every earlier stage's own
+ * (lower) threshold first.
+ */
+export function naturalMinLevelFor(speciesId: string): number {
+  return MIN_LEVEL_BY_KEY[speciesId.toUpperCase()] ?? 1;
 }
 
 /**

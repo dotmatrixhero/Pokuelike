@@ -1,6 +1,7 @@
 import type { ImmigrationContext } from "@pokuelike/engine";
 import { SPECIES } from "./species.js";
 import { spawnAgent } from "./spawn.js";
+import { naturalMinLevelFor } from "./leveling.js";
 
 /**
  * Wires `@pokuelike/engine`'s `immigration.ts` up to this package's actual
@@ -17,6 +18,10 @@ export const IMMIGRATION_CONTEXT: ImmigrationContext = {
     homeLayer: species.homeLayer,
     biomes: species.biomes,
     obligateAquatic: species.obligateAquatic,
+    // Real evolution-stage-aware floor — direct ask: "everything spawn[s]
+    // at lv5. Especially evolved Pokémon they should be higher
+    // distributed." See `naturalMinLevelFor`'s own doc comment.
+    minLevel: naturalMinLevelFor(species.id),
   })),
   spawnAgent,
 };
