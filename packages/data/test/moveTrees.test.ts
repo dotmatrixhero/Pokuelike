@@ -105,22 +105,33 @@ describe("every move tree in the curated roster is internally consistent", () =>
   }
 });
 
-describe("Rock Throw tree: Aggression keystone and Flying matchup", () => {
+describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () => {
   const rockThrow = MOVES.rock_throw;
 
-  it("Cave-In keystone is reachable through the Aggression fork and boosts crit rate", () => {
+  it("Pinning Impact applies a real but partial Speed debuff, not a stun", () => {
+    const respec = applyMoveTree(rockThrow, ["pinning_impact"]);
+    expect(respec.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -1, ticks: 16 });
+  });
+
+  it("Crippling Snare widens the throw into a real cone, catching a spread of fleeing targets", () => {
+    const respec = applyMoveTree(rockThrow, ["pinning_impact", "cracked_joint", "dead_aim", "hobbling_throw", "broken_stride", "crippling_snare"]);
+    expect(respec.shape).toEqual({ kind: "cone", length: 3, width: 2 });
+  });
+
+  it("Quarry Break capstone trades lockTicks for a real power/penetration spike", () => {
     const respec = applyMoveTree(rockThrow, [
-      "heavy_stones",
-      "boulder_momentum",
-      "landslide_footing",
-      "crushing_weight",
-      "avalanche_force",
-      "overhand_heave",
+      "pinning_impact",
+      "cracked_joint",
+      "dead_aim",
+      "hobbling_throw",
+      "broken_stride",
+      "relentless_barrage",
       "skyfall",
-      "rockslide_precision",
-      "cave_in",
+      "dead_weight_finisher",
+      "quarry_break",
     ]);
-    expect(respec.critRateStage).toBe(2);
+    expect(respec.lockTicks).toBe(2);
+    expect(respec.defensePenetration).toBeCloseTo(0.3);
     expect(respec.bonusVsType).toEqual({ type: "flying", multiplier: 1.5 });
   });
 
@@ -128,15 +139,47 @@ describe("Rock Throw tree: Aggression keystone and Flying matchup", () => {
     const respec = applyMoveTree(rockThrow, [
       "bedrock_stance",
       "weathered_slab",
-      "bedrock_footing",
-      "unshakeable",
       "granite_grip",
+      "unshakeable",
+      "bedrock_footing",
       "granite_ward",
       "fracturing_blow",
       "bedrock_resolve",
       "bedrock_breaker",
     ]);
     expect(respec.resistanceBreaker).toEqual({ multiplier: 2 });
+  });
+
+  it("Tremor Call marks the target via the real rallyCall primitive, not a flat ally buff", () => {
+    const respec = applyMoveTree(rockThrow, ["tremor_call"]);
+    expect(respec.rallyCall).toEqual({ ticks: 20 });
+  });
+
+  it("Deep Tremor overwrites (doesn't stack with) Tremor Call's own mark duration", () => {
+    const respec = applyMoveTree(rockThrow, ["tremor_call", "sure_footing", "carrying_weight", "deep_tremor"]);
+    expect(respec.rallyCall).toEqual({ ticks: 35 });
+  });
+
+  it("Full Convergence capstone extends the mark further and adds a real jam", () => {
+    const respec = applyMoveTree(rockThrow, [
+      "tremor_call",
+      "sure_footing",
+      "carrying_weight",
+      "deep_tremor",
+      "vanguard_call",
+      "colony_watch",
+      "tremor_focus",
+      "full_convergence",
+    ]);
+    expect(respec.rallyCall).toEqual({ ticks: 60 });
+    // jamCooldownTicks is additive across nodes (Vanguard Call's own +1 plus
+    // Full Convergence's +3), not an overwrite — see applyMoveTree's merge.
+    expect(respec.jamCooldownTicks).toBe(4);
+  });
+
+  it("Rolling Thunder crosslink stuns outright once a target is already marked and pinned", () => {
+    const respec = applyMoveTree(rockThrow, ["pinning_impact", "tremor_call", "rolling_thunder"]);
+    expect(respec.lockTicks).toBe(2);
   });
 });
 

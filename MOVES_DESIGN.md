@@ -1305,6 +1305,146 @@ on each move has the full reasoning; this is the summary.
     `regen`) · *Territorial Flare* (Sociability↔Aggression, `flanking`
     situational bonus off the herd's own warning).
 
+### Meta: what "start from the fantasy" actually means, in practice
+
+Direct, important feedback mid-session: "You're echoing a lot of my ideas
+which I like. But I'm worried you're not UNDERSTANDING and learning how to
+create your own based on the fantasy." Recording the standard so it
+survives past this conversation, not just this reply:
+
+- Costing out the user's own suggestion into real engine primitives is
+  useful, but it isn't originating — it's translation. The bar is
+  reasoning from "why does *this* species use *this* move" to a genuinely
+  new mechanic *before* the user has proposed one for that move, the same
+  way the Rock Throw v3 branches below were built: nobody asked for a pin,
+  a stored-retaliation loop, or a vibration-based rally before they existed
+  as pitches.
+- A useful self-check before shipping a branch idea: could this exact
+  mechanic get copy-pasted onto a different move/species with only the
+  numbers changed? If yes, it's a template, not a fantasy. ("+ATK on hit"
+  fits anything; "the herd converges on where you just marked the ground"
+  only fits a species/move where a tremor is a real signal.)
+- Widening a branch's allowed flavor (Boldness can be defensive *or*
+  earned aggression; Aggression can be raw power, hunting/stealth, *or*
+  clashing depending on move+species — see the widened-semantics note
+  above) is what makes room for this in the first place — a branch locked
+  to one fixed verb forces every move's version of it back toward the
+  same template.
+
+### Rock Throw v3 redesign (Shipped) — "the reach a lumbering body wouldn't have"
+
+Built as a from-scratch demonstration of the above, not requested for this
+specific move first. Core fantasy: Onix/Geodude-type bodies are heavy and
+slow — Rock Throw is the reach that body wouldn't otherwise have. All
+three branches below ship using only primitives the engine already had;
+see `packages/data/src/moves.ts`'s own tree comment for the short version.
+
+- **Aggression ("Denial")** — not bigger-rock power escalation. *Pinning
+  Impact* (opener) and *Hobbling Throw* apply a real but **partial**
+  `statChangeOnHit` Speed debuff (stage -1, not a stun) — "prevents fleeing
+  to an extent," per direct confirmation this reads right. Fork:
+  *Relentless Barrage* (sustained power) vs. *Crippling Snare* (widens the
+  shape to a cone — the notable tier is where shape/AoE changes are earned,
+  per template v3's rule 2) so a whole line of fleeing targets gets pinned,
+  not just the one in front. Capstone *Quarry Break* trades a real
+  `lockTicks` cost for a big `power`/`defensePenetration` spike — the
+  closest buildable approximation, this pass, of the pitched "burrows a
+  boulder out of the ground first if none is already underfoot" capstone
+  (see the flagged primitive below for the real version).
+- **Boldness ("Bedrock")** — plant, shrug off, punish. Kept and reframed
+  the existing tank/counter kit (`immovable`, flanking `situationalBonus`,
+  `resistanceBreaker` capstone) rather than discard working content for
+  novelty's own sake. The pitched "stored retaliation loop" (the throw's
+  own power scaling with damage just absorbed) is real and liked ("I like
+  boldness, kinda cool") but needs a new primitive — flagged below, not
+  faked with the wrong mechanic.
+- **Sociability ("Tremor Rally")** — direct answer to "does it just mean
+  allies become aware and come to help": yes, and the engine already has
+  the exact primitive for it. Opener *Tremor Call* sets `rallyCall`, which
+  marks the target so every herd-mate's own, independently-run threat/hunt
+  pick converges on it — real shared awareness, not a broadcast stat buff.
+  This replaces the old branch's flat `allyEffect` buff spam entirely.
+  Capstone *Full Convergence* extends the mark's radius-in-time
+  (`rallyCall.ticks`) and adds `jamCooldownTicks`.
+- **Crosslinks** deepened per template v3's rule 3: *Rolling Thunder*
+  (Sociability↔Aggression) stuns outright, on top of the pin, once a
+  target is already marked — a real compounding payoff, not just a shared
+  passive.
+
+Newly flagged primitives from this pass (not built, concrete enough to
+pick up directly):
+- **Conditional `lockTicks`/bonus on terrain presence** — extend the same
+  check `consumesOwnTerrain` already does (is the attacker standing on a
+  boulder tile?) so a move can apply a *different* delta depending on the
+  answer, instead of always paying the same cost. Unlocks the literal
+  "spend time digging one out only if there isn't one already" capstone.
+- **`SituationalCondition: "recentlyDamaged"`** — self took a hit within
+  the last N ticks; a one-line addition to the same enum/check
+  `"targetLowHp"` already uses. Unlocks a real "stored retaliation" branch
+  for Boldness (here and elsewhere) instead of another flat passive.
+- **Distance-based accuracy falloff** — a new `accuracyFalloffPerTile`
+  `MoveSpec` field, subtracted per tile beyond some baseline in the
+  accuracy roll (`resolveHitAgainstTarget`, predation.ts). Pitched
+  specifically to pair with range investment on Rock Throw as an
+  "Aggression sniper build" archetype — accuracy investment becomes a real
+  build identity, not just a filler stat.
+
+### Pending brainstorm — Earthquake / Hydro Pump / Solar Beam (not yet built)
+
+Consolidated here so none of this is lost to context compaction — these
+were pushed hard in discussion after the three trees above shipped, and
+none of them are implemented yet. Each is evaluated against the real code,
+not assumed:
+
+- **Hydro Pump — impact splash.** A burst centered on the *struck* tile,
+  not the attacker's tile — distinct from `hitsArea` (always
+  attacker-centered, via `resolveAreaHit`). New primitive: a second shape
+  resolved against the defender's landed position after the hit.
+- **Hydro Pump's puddle slows non-Water types.** Today
+  `terrainSpeedMultiplier` (support.ts) keys only off terrain kind
+  (`sand`/`mud`/`boulder`), with water at neutral 1x for everyone — making
+  it type-conditional (water only slows non-Water agents) is new, scoped
+  work: thread the mover's own type into that lookup.
+- **Hydro Pump — rooted/stationary Duration variant.** The user's own
+  proposal, and the simpler of the two Duration variants below (fixed
+  origin, no per-tick recompute) — recommended as the one to build first
+  if Duration gets picked up, precisely because it validates the primitive
+  without the harder roaming case.
+- **Solar Beam — piercing multiple targets.** Already cheap: flip
+  `hitsArea` on the existing line shape. No new primitive needed.
+- **Solar Beam — escalating pierce (each hit makes the next stronger).**
+  Needs per-target damage/power scaling *within* a single
+  `resolveAreaHit` resolution, which today resolves every target off the
+  same flat `power`. New, scoped primitive.
+- **Solar Beam — skip the charge requirement in `drought`.** Already
+  cheap once primitive (1) below exists: `situationalBonus`-style
+  condition check, reusing the already-wired `"drought"` `WeatherType`.
+- **Solar Beam — genuine multi-tick charge-up, unless already in
+  `drought`.** The real gating primitive everything else here depends on:
+  a new "mid-commit" agent state (charging, can't act normally, resolves
+  N ticks later) — the single biggest unbuilt piece in this list.
+- **Solar Beam — sunlight capstone lets nearby Venusaurs cast for free.**
+  Depends on the charge primitive existing first, plus a new temporary
+  agent-level "skip your charge requirement this window" buff, grantable
+  to nearby allies.
+- **Solar Beam — destroys rock terrain.** Distinct from the existing
+  single-tile `terrainBurn`: walk every tile in the resolved shape (not
+  just the defender's own tile) and revert any `"boulder"` terrain found
+  to floor.
+- **Solar Beam — range up to 7 tiles.** Currently earned as a filler in
+  all three branches, not a base stat — open question, not yet answered by
+  the user, on whether it should move to base instead.
+- **Duration lever (general).** Already written up under "Skill-tree lever
+  brainstorm" below — a self-refreshing AoE pulse tied to the user's own
+  live position (Earthquake's "roaming" version, harder — recompute origin
+  every tick) or a fixed origin (Hydro Pump's "rooted" version, simpler).
+  Cooldown freezes until the pulse ends either way. New primitive either
+  way; rooted is the cheaper one to prototype.
+- **Double-PP-for-big-effect lever.** Also already written up under
+  "Skill-tree lever brainstorm" below — spend 2x PP per use in exchange for
+  a real power/effect spike, distinct from every existing cost lever
+  (`selfCostPerUse` spends energy/hunger, not PP).
+
 ## Move Tree Atlas: how to keep it updated
 
 **Live URL: https://claude.ai/code/artifact/a089c885-1361-4004-8734-286a50c1d020**

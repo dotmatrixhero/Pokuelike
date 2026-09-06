@@ -3978,3 +3978,28 @@ not something this pathfinding pass itself caused or is positioned to fix.
       before. The "maybe a minimap" idea in the same message was
       explicitly hedged ("Idk") — not built, not decided, a real open
       option if ever wanted later rather than a silent scope-cut.
+- [x] **Rock Throw v3 redesign + meta thought-process writeup** — direct
+      feedback ("you're echoing my ideas... worried you're not
+      UNDERSTANDING and learning how to create your own based on the
+      fantasy") answered by originating a full from-scratch tree nobody had
+      asked for yet: Aggression="Denial" (partial Speed-debuff pin, notable-
+      tier cone widen), Boldness="Bedrock" (kept/reframed the existing tank/
+      counter kit), Sociability="Tremor Rally" (finally uses the real,
+      shipped `rallyCall` primitive — direct answer to "does it make allies
+      aware and come help": yes). Full writeup, the "start from the
+      fantasy" meta-standard, and a consolidated brainstorm dump of every
+      unbuilt idea from the Earthquake/Hydro Pump/Solar Beam discussion
+      (impact splash, type-conditional terrain slow, escalating pierce,
+      charge-up-unless-drought, sunlight-lets-allies-cast-free, destroys
+      rock terrain, Duration lever, double-PP lever) are now in
+      MOVES_DESIGN.md so none of it is lost to context compaction — the
+      direct trigger for writing this: "Can you just make sure you didn't
+      lose all our good ideas?" after a compaction. Also flags three new,
+      concretely-scoped engine primitives for later: conditional
+      `lockTicks`/bonus on terrain presence, a `"recentlyDamaged"`
+      `SituationalCondition`, and a distance-based `accuracyFalloffPerTile`
+      field (paired with range investment as an "Aggression sniper build").
+      `moveTrees.test.ts`'s Rock Throw block rewritten for the new node
+      names; full suite green (177/177 data). Move Tree Atlas artifact
+      rebuilt via the standardized pipeline and republished in place at its
+      existing URL.
