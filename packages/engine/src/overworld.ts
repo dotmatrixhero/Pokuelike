@@ -63,10 +63,13 @@ import { type MacroGrid, type MacroZone, zoneAt, zoneKey, parseZoneKey, zoneNeig
  *
  * Every other simplification the old named-region version documented still
  * applies unchanged: demoting a zone discards exactly which individuals
- * existed (not just their species); promoting invents a FRESH set matching
- * the aggregate numbers, not the same individuals back; a background zone's
- * terrain is frozen (no `growFlora`/`advanceWeather` runs against it) once
- * it HAS terrain; in-flight eggs are discarded on demotion.
+ * existed (not just their species); promoting invents a FRESH set of
+ * individuals matching the aggregate numbers, not the same individuals back;
+ * a background zone's terrain is frozen (no `growFlora`/`advanceWeather`
+ * runs against it) once it HAS terrain; in-flight eggs are discarded on
+ * demotion. One exception, direct ask ("keep track of herd through zones"):
+ * the HERD identity those fresh individuals join is no longer invented from
+ * scratch every promotion — see `RegionAggregate.herdId`.
  *
  * **Migration**, generalized to grid neighbors:
  * - Abstract-to-abstract (`maybeEmigrate`): a background zone can move a
@@ -136,6 +139,22 @@ export interface RegionAggregate {
   resourceIndex: number;
   /** Population level the last `regionPopulationBoom`/`regionDieOff` event fired at — prevents re-firing every single tick once a threshold is technically crossed. */
   lastEventPopulation: number;
+  /**
+   * Direct ask: "keep track of herd through zones." The one herd identity
+   * this species-slice of the zone traces back to — carried forward through
+   * `demoteRegion` (the majority herd among the agents actually folded in),
+   * `maybeEmigrate`/`foldAgentIntoAggregate` (a migrating slice keeps the
+   * herd it left with), and `promoteZone` (invented individuals rejoin
+   * THIS herd rather than a fresh one). Only a single id per species per
+   * zone, same granularity limit `RegionAggregate` already has everywhere
+   * else — two distinct herds of the same species sharing one abstracted
+   * zone still collapse into one number and one herd id, majority-vote
+   * broken by whichever the demotion loop happened to see first. A
+   * genuinely fresh zone (no real history yet) invents one the same way
+   * `promoteZone` always used to, for every species: `${speciesId}-zone-
+   * ${zoneKey}`.
+   */
+  herdId: string;
 }
 
 export interface Region {
@@ -227,6 +246,11 @@ function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
+/** A brand-new herd identity for a species that has no real history to inherit yet — same naming shape `promoteZone` always used, now also the fallback every other `RegionAggregate`-creating site reaches for once there's genuinely nothing to carry forward. */
+function freshHerdId(speciesId: string, regionKey: string): string {
+  return `${speciesId}-zone-${regionKey}`;
+}
+
 /** Ensures a `Region` shell exists in `mw.regions` for (row, col), without seeding any aggregate data — used by migration paths that already have (or are about to build) exactly the one species entry they need, so they don't need the full roster-driven `estimateInitialAggregates` a fresh promotion does. */
 function ensureTrackedRegion(mw: MacroWorld, row: number, col: number): Region {
   const key = zoneKey(row, col);
@@ -263,6 +287,7 @@ function estimateInitialAggregates(mw: MacroWorld, row: number, col: number, ctx
       baseResourceIndex: resourceIndex,
       resourceIndex,
       lastEventPopulation: estimate.population,
+      herdId: freshHerdId(estimate.speciesId, zoneKey(row, col)),
     };
   }
   return aggregates;
@@ -279,22 +304,35 @@ function estimateInitialAggregates(mw: MacroWorld, row: number, col: number, ctx
 export function demoteRegion(region: Region, mw: MacroWorld, log?: EventLog): void {
   const world = region.world!;
   const resourceIndex = measureResourceIndex(world);
-  const totals = new Map<string, { count: number; hunger: number; thirst: number; energy: number; level: number; homeLayer: Layer }>();
+  const totals = new Map<string, { count: number; hunger: number; thirst: number; energy: number; level: number; homeLayer: Layer; herdCounts: Map<string, number> }>();
 
   for (const agent of world.agents) {
     if (agent.alive === false || agent.isEgg) continue;
-    const entry = totals.get(agent.species) ?? { count: 0, hunger: 0, thirst: 0, energy: 0, level: 0, homeLayer: agent.homeLayer };
+    const entry = totals.get(agent.species) ?? { count: 0, hunger: 0, thirst: 0, energy: 0, level: 0, homeLayer: agent.homeLayer, herdCounts: new Map<string, number>() };
     entry.count += 1;
     entry.hunger += agent.needs.hunger;
     entry.thirst += agent.needs.thirst;
     entry.energy += agent.needs.energy;
     entry.level += agent.level ?? 5;
+    // Majority vote, not "whichever agent happened to be first in the
+    // array" — the zone's per-species aggregate can only carry ONE herd id
+    // forward, so when two herds of the same species share a zone, the
+    // bigger one wins rather than iteration order deciding arbitrarily.
+    if (agent.herdId) entry.herdCounts.set(agent.herdId, (entry.herdCounts.get(agent.herdId) ?? 0) + 1);
     totals.set(agent.species, entry);
   }
 
   const aggregates: Record<string, RegionAggregate> = {};
   const speciesCounts: Record<string, number> = {};
   for (const [species, entry] of totals) {
+    let herdId = freshHerdId(species, region.key);
+    let bestCount = 0;
+    for (const [candidate, count] of entry.herdCounts) {
+      if (count > bestCount) {
+        herdId = candidate;
+        bestCount = count;
+      }
+    }
     aggregates[species] = {
       species,
       homeLayer: entry.homeLayer,
@@ -306,6 +344,7 @@ export function demoteRegion(region: Region, mw: MacroWorld, log?: EventLog): vo
       baseResourceIndex: resourceIndex,
       resourceIndex,
       lastEventPopulation: entry.count,
+      herdId,
     };
     speciesCounts[species] = entry.count;
   }
@@ -379,7 +418,11 @@ export function promoteZone(mw: MacroWorld, row: number, col: number, ctx: Immig
     const speciesInfo = ctx.speciesRoster.find((s) => s.id === aggregate.species);
     if (!speciesInfo) continue;
 
-    const herdId = `${aggregate.species}-zone-${region.key}`;
+    // Rejoins the herd this aggregate already belongs to (real history, or
+    // `estimateInitialAggregates`'s freshly-invented one for a genuinely
+    // never-visited zone) — no longer invented fresh on every promotion, see
+    // `RegionAggregate.herdId`.
+    const herdId = aggregate.herdId;
     for (let i = 0; i < count; i++) {
       const pos = placeInvented(world, speciesInfo, mw.rng);
       const level = Math.max(1, Math.round(aggregate.avgLevel));
@@ -521,6 +564,10 @@ function maybeEmigrate(mw: MacroWorld, region: Region, log?: EventLog): void {
     const destAggregates = destination.aggregates;
     const existing = destAggregates[aggregate.species];
     if (existing) {
+      // The destination's own herd (already tracked there, possibly from an
+      // earlier, different-herd wave) wins — deliberately NOT overwritten
+      // with the incoming slice's herdId, same "one herd id per species per
+      // zone, majority-ish" limit `demoteRegion` already accepts.
       existing.population += moving;
     } else {
       // A freshly measured/estimated baseline for the destination, not the
@@ -538,6 +585,9 @@ function maybeEmigrate(mw: MacroWorld, region: Region, log?: EventLog): void {
         baseResourceIndex: destBaseline,
         resourceIndex: Math.min(aggregate.resourceIndex, destBaseline),
         lastEventPopulation: moving,
+        // The migrating slice's own herd travels with it into brand-new
+        // territory — direct ask: "keep track of herd through zones."
+        herdId: aggregate.herdId,
       };
     }
 
@@ -548,6 +598,7 @@ function maybeEmigrate(mw: MacroWorld, region: Region, log?: EventLog): void {
       toRegionId: destination.key,
       species: aggregate.species,
       population: Math.round(moving),
+      herdId: aggregate.herdId,
     });
   }
 }
@@ -746,7 +797,8 @@ export function advanceAbstractRegion(mw: MacroWorld, region: Region, log?: Even
  * comes from (`regionResourceBaseline`, since the destination might not
  * have real terrain yet).
  */
-function foldAgentIntoAggregate(mw: MacroWorld, destination: Region, agent: Agent): void {
+/** Returns the herd id the fold ended up filed under — the destination's existing herd if one was already there (same "the local aggregate's herd wins" rule `maybeEmigrate` uses), otherwise the crosser's own (or a fresh one, for an agent that somehow has none). */
+function foldAgentIntoAggregate(mw: MacroWorld, destination: Region, agent: Agent): string {
   if (!destination.aggregates) destination.aggregates = {};
   const aggregates = destination.aggregates;
   const existing = aggregates[agent.species];
@@ -757,21 +809,24 @@ function foldAgentIntoAggregate(mw: MacroWorld, destination: Region, agent: Agen
     existing.avgEnergy = (existing.avgEnergy * existing.population + agent.needs.energy) / totalAfter;
     existing.avgLevel = (existing.avgLevel * existing.population + (agent.level ?? existing.avgLevel)) / totalAfter;
     existing.population = totalAfter;
-  } else {
-    const baseline = regionResourceBaseline(destination, mw.grid);
-    aggregates[agent.species] = {
-      species: agent.species,
-      homeLayer: agent.homeLayer,
-      population: 1,
-      avgHunger: agent.needs.hunger,
-      avgThirst: agent.needs.thirst,
-      avgEnergy: agent.needs.energy,
-      avgLevel: agent.level ?? 5,
-      baseResourceIndex: baseline,
-      resourceIndex: baseline,
-      lastEventPopulation: 1,
-    };
+    return existing.herdId;
   }
+  const baseline = regionResourceBaseline(destination, mw.grid);
+  const herdId = agent.herdId ?? freshHerdId(agent.species, destination.key);
+  aggregates[agent.species] = {
+    species: agent.species,
+    homeLayer: agent.homeLayer,
+    population: 1,
+    avgHunger: agent.needs.hunger,
+    avgThirst: agent.needs.thirst,
+    avgEnergy: agent.needs.energy,
+    avgLevel: agent.level ?? 5,
+    baseResourceIndex: baseline,
+    resourceIndex: baseline,
+    lastEventPopulation: 1,
+    herdId,
+  };
+  return herdId;
 }
 
 /**
@@ -814,7 +869,7 @@ function applyRegionCrossings(mw: MacroWorld, region: Region, log?: EventLog): v
       continue;
     }
     const destination = ensureTrackedRegion(mw, row, col);
-    foldAgentIntoAggregate(mw, destination, agent);
+    const herdId = foldAgentIntoAggregate(mw, destination, agent);
     log?.record({
       kind: "regionCrossed",
       tick: mw.tick,
@@ -822,6 +877,7 @@ function applyRegionCrossings(mw: MacroWorld, region: Region, log?: EventLog): v
       species: agent.species,
       fromRegionId: region.key,
       toRegionId: destination.key,
+      herdId,
     });
   }
 }

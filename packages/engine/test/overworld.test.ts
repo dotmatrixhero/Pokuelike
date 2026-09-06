@@ -162,6 +162,10 @@ describe("promoteZone", () => {
         baseResourceIndex: 0.3,
         resourceIndex: 0.3,
         lastEventPopulation: 4,
+        // A real herd this population belonged to before it was demoted —
+        // direct ask: "keep track of herd through zones." promoteZone
+        // should rejoin THIS herd, not invent a fresh one.
+        herdId: "bulbasaur-migrated-herd",
       },
     };
     const mw = makeMacroWorld(makeGrid(3, 3), [region], 1, 1, seededRng(42));
@@ -179,6 +183,7 @@ describe("promoteZone", () => {
       expect(agent.sex === "male" || agent.sex === "female").toBe(true);
       expect(agent.needs.hunger).toBeGreaterThanOrEqual(0);
       expect(agent.needs.hunger).toBeLessThanOrEqual(1);
+      expect(agent.herdId).toBe("bulbasaur-migrated-herd");
     }
     const event = log.events.find((e) => e.kind === "regionPromoted");
     expect(event).toBeDefined();
@@ -202,6 +207,7 @@ describe("promoteZone", () => {
         baseResourceIndex: 0.2,
         resourceIndex: 0.2,
         lastEventPopulation: 3,
+        herdId: "test-herd",
       },
     };
     const mw = makeMacroWorld(makeGrid(3, 3), [region], 1, 1, seededRng(1));
@@ -268,6 +274,7 @@ describe("advanceAbstractRegion", () => {
         baseResourceIndex: 0.9,
         resourceIndex: 0.9,
         lastEventPopulation: 10,
+        herdId: "test-herd",
       },
     };
     const mw = makeMacroWorld(makeGrid(3, 3), [region], 1, 1, seededRng(7));
@@ -298,6 +305,7 @@ describe("advanceAbstractRegion", () => {
         baseResourceIndex: 0.0,
         resourceIndex: 0.0,
         lastEventPopulation: 20,
+        herdId: "test-herd",
       },
     };
     const mw = makeMacroWorld(makeGrid(3, 3), [region], 1, 1, seededRng(3));
@@ -352,6 +360,7 @@ describe("advanceAbstractRegion", () => {
         baseResourceIndex: 0.23,
         resourceIndex: 0.23,
         lastEventPopulation: 5.5,
+        herdId: "test-herd",
       },
     };
     const mw = makeMacroWorld(makeWetlandGrid(3, 3), [region], 1, 1, seededRng(11));
@@ -399,6 +408,7 @@ describe("advanceAbstractRegion", () => {
         baseResourceIndex: 0.22,
         resourceIndex: 0.22,
         lastEventPopulation: 1.2,
+        herdId: "test-herd",
       },
     };
     const mw = makeMacroWorld(makeGrid(3, 3), [region], 1, 1, seededRng(11));
@@ -437,6 +447,7 @@ describe("tickMacroWorld", () => {
         baseResourceIndex: 0.5,
         resourceIndex: 0.5,
         lastEventPopulation: 5,
+        herdId: "test-herd",
       },
     };
 
@@ -575,6 +586,7 @@ describe("migration: individual zone-crossing dispersal", () => {
         baseResourceIndex: 0.3,
         resourceIndex: 0.3,
         lastEventPopulation: 3,
+        herdId: "test-herd",
       },
     };
 
@@ -667,6 +679,7 @@ describe("migration: abstract-to-abstract emigration", () => {
         baseResourceIndex: 0.6,
         resourceIndex: 0.6,
         lastEventPopulation: 50,
+        herdId: "test-herd",
       },
     };
     const alwaysFire = () => 0;
@@ -706,6 +719,7 @@ describe("migration: abstract-to-abstract emigration", () => {
         baseResourceIndex: 0.6,
         resourceIndex: 0.6,
         lastEventPopulation: 50,
+        herdId: "test-herd",
       },
     };
     // A 1x2 grid: regionA's only neighbor is the focused regionB — nowhere else to emigrate to.
@@ -757,6 +771,7 @@ describe("macro weather fronts", () => {
         baseResourceIndex: 0.9, // already healthy, above what any front-scaled target would be
         resourceIndex: 0.6,
         lastEventPopulation: 20,
+        herdId: "test-herd",
       },
     };
     const mw = makeMacroWorld(makeGrid(20, 20), [region], 0, 0, seededRng(1));
@@ -791,6 +806,7 @@ describe("macro weather fronts", () => {
         baseResourceIndex: 0.23, // drought-suppressed low value
         resourceIndex: 0.23,
         lastEventPopulation: 6,
+        herdId: "test-herd",
       },
     };
     const mw = makeMacroWorld(makeGrid(20, 20), [region], 0, 0, seededRng(1));
@@ -818,6 +834,7 @@ describe("macro weather fronts", () => {
         baseResourceIndex: 0.3,
         resourceIndex: 0.3,
         lastEventPopulation: 2,
+        herdId: "test-herd",
       },
     };
     // rng just above the ordinary emigration chance, but below the weather-boosted one.
@@ -868,5 +885,156 @@ describe("macro weather fronts", () => {
     expect(ended).toBeDefined();
     // Drifted at least a little before dissipating (unless drift happened to land exactly back on the start, astronomically unlikely for a random angle).
     expect(front.row === startRow && front.col === startCol).toBe(false);
+  });
+});
+
+describe("herd identity persists across zones", () => {
+  it("demoteRegion picks the majority herd when two herds of the same species share a zone", () => {
+    const world = createWorld(20, 20, 1);
+    world.agents.push(
+      livingAgent("a0", { herdId: "big-herd" }),
+      livingAgent("a1", { herdId: "big-herd" }),
+      livingAgent("a2", { herdId: "big-herd" }),
+      livingAgent("a3", { herdId: "small-herd" })
+    );
+    const region = makeRegion(0, 0, world);
+    const mw = makeMacroWorld(makeGrid(3, 3), [region], 0, 0);
+
+    demoteRegion(region, mw);
+
+    expect(region.aggregates!["bulbasaur"]!.herdId).toBe("big-herd");
+  });
+
+  it("demoteRegion invents a fresh herd id when the folded agents have none at all (defensive)", () => {
+    const world = createWorld(20, 20, 1);
+    world.agents.push(livingAgent("herdless"));
+    const region = makeRegion(2, 3, world);
+    const mw = makeMacroWorld(makeGrid(5, 5), [region], 0, 0);
+
+    demoteRegion(region, mw);
+
+    expect(region.aggregates!["bulbasaur"]!.herdId).toBe(`bulbasaur-zone-${zoneKey(2, 3)}`);
+  });
+
+  it("maybeEmigrate carries the source herd's own id into a brand-new destination aggregate", () => {
+    const regionA = makeRegion(1, 1);
+    regionA.aggregates = {
+      bulbasaur: {
+        species: "bulbasaur",
+        homeLayer: "surface",
+        population: 50,
+        avgHunger: 0.8,
+        avgThirst: 0.8,
+        avgEnergy: 0.8,
+        avgLevel: 5,
+        baseResourceIndex: 0.6,
+        resourceIndex: 0.6,
+        lastEventPopulation: 50,
+        herdId: "wandering-herd",
+      },
+    };
+    const alwaysFire = () => 0;
+    const mw = makeMacroWorld(makeGrid(5, 5), [regionA], 3, 3, alwaysFire);
+
+    mw.tick += 1;
+    advanceAbstractRegion(mw, regionA);
+
+    const grown = [...mw.regions.values()].find((r) => r !== regionA)!;
+    expect(grown.aggregates!["bulbasaur"]!.herdId).toBe("wandering-herd");
+  });
+
+  it("maybeEmigrate does NOT overwrite a destination's own already-established herd with an incoming slice's herd", () => {
+    const regionA = makeRegion(1, 1);
+    regionA.aggregates = {
+      bulbasaur: {
+        species: "bulbasaur",
+        homeLayer: "surface",
+        population: 50,
+        avgHunger: 0.8,
+        avgThirst: 0.8,
+        avgEnergy: 0.8,
+        avgLevel: 5,
+        baseResourceIndex: 0.6,
+        resourceIndex: 0.6,
+        lastEventPopulation: 50,
+        herdId: "incoming-herd",
+      },
+    };
+    const regionB = makeRegion(0, 1); // regionA's N neighbor — zoneNeighbors visits N first, and the rigged rng below always picks index 0
+    regionB.aggregates = {
+      bulbasaur: {
+        species: "bulbasaur",
+        homeLayer: "surface",
+        population: 5,
+        avgHunger: 0.5,
+        avgThirst: 0.5,
+        avgEnergy: 0.5,
+        avgLevel: 5,
+        baseResourceIndex: 0.4,
+        resourceIndex: 0.4,
+        lastEventPopulation: 5,
+        herdId: "resident-herd",
+      },
+    };
+    // rng: fails the emigration chance roll except when it needs to pick a
+    // neighbor — rigged just enough to force regionA -> regionB specifically.
+    let call = 0;
+    const rng = () => {
+      call++;
+      if (call === 1) return 0; // clears the emigration chance check
+      return 0; // picks the first neighbor in the list
+    };
+    const mw = makeMacroWorld(makeGrid(5, 5), [regionA, regionB], 3, 3, rng);
+
+    mw.tick += 1;
+    advanceAbstractRegion(mw, regionA);
+
+    expect(regionB.aggregates["bulbasaur"]!.herdId).toBe("resident-herd");
+  });
+
+  it("regionEmigrated/regionCrossed events carry the herd id, and a real promote/demote/emigrate round trip keeps one herd's identity intact end to end", () => {
+    const focusedWorld = createWorld(30, 30, 1);
+    // At least EMIGRATION_MIN_POPULATION (4) individuals — a single founder
+    // would never clear the emigration population bar below.
+    const founders = [
+      livingAgent("founder-0", { herdId: "the-og-herd" }),
+      livingAgent("founder-1", { herdId: "the-og-herd" }),
+      livingAgent("founder-2", { herdId: "the-og-herd" }),
+      livingAgent("founder-3", { herdId: "the-og-herd" }),
+    ];
+    const focused = makeRegion(1, 1, focusedWorld);
+    focused.world!.agents.push(...founders);
+    const mw = makeMacroWorld(makeGrid(5, 5), [focused], 1, 1, seededRng(3));
+    const log = new EventLog();
+
+    // Demote the focused zone (real herd folded into an aggregate)...
+    demoteRegion(focused, mw, log);
+    expect(focused.aggregates!["bulbasaur"]!.herdId).toBe("the-og-herd");
+    // `createWorld` (unlike `generateWorld`) has no real terrain features, so
+    // `measureResourceIndex` reads a bare 0 here — enough to starve this
+    // population below the emigration bar in a single `advanceAbstractRegion`
+    // tick, which isn't what this test is after. Give it a healthy resource
+    // baseline instead, same realistic value the other emigration tests
+    // above already use.
+    focused.aggregates!["bulbasaur"]!.baseResourceIndex = 0.6;
+    focused.aggregates!["bulbasaur"]!.resourceIndex = 0.6;
+
+    // ...then emigrate it into a neighbor via the real abstract-tier path...
+    const alwaysFire = () => 0;
+    const emigratingMw = makeMacroWorld(makeGrid(5, 5), [focused], 3, 3, alwaysFire);
+    emigratingMw.tick += 1;
+    advanceAbstractRegion(emigratingMw, focused, log);
+    const destination = [...emigratingMw.regions.values()].find((r) => r !== focused)!;
+    expect(destination.aggregates!["bulbasaur"]!.herdId).toBe("the-og-herd");
+
+    // ...then promote the destination for real: invented individuals rejoin the SAME herd.
+    promoteZone(emigratingMw, destination.row, destination.col, CTX, log);
+    expect(destination.world!.agents.every((a) => a.herdId === "the-og-herd")).toBe(true);
+
+    const emigratedEvent = log.events.find((e) => e.kind === "regionEmigrated");
+    expect(emigratedEvent).toBeDefined();
+    if (emigratedEvent?.kind === "regionEmigrated") {
+      expect(emigratedEvent.herdId).toBe("the-og-herd");
+    }
   });
 });

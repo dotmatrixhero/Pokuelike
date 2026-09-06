@@ -191,9 +191,9 @@ export function formatEvent(event: SimEvent, world?: World): string {
     case "regionDieOff":
       return `region ${event.regionId}'s ${event.species} population is dying off (~${event.population})`;
     case "regionEmigrated":
-      return `~${event.population} ${event.species} emigrated from region ${event.fromRegionId} to region ${event.toRegionId}`;
+      return `~${event.population} ${event.species} of herd ${event.herdId} emigrated from region ${event.fromRegionId} to region ${event.toRegionId}`;
     case "regionCrossed":
-      return `${idLabel(world, event.agentId, event.species)} crossed from region ${event.fromRegionId} into region ${event.toRegionId}`;
+      return `${idLabel(world, event.agentId, event.species)} crossed from region ${event.fromRegionId} into region ${event.toRegionId}, joining herd ${event.herdId}`;
   }
 }
 

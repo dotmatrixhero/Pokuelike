@@ -191,6 +191,34 @@ none of this is built yet, this section is purely to not lose the thread:
       afterward. Bridging the two systems (spawning/weighting the focused
       zone's own `WeatherCell`s toward whatever macro front, if any, is
       overhead) is real future work, not done in this pass.
+- [x] **Cross-zone herd tracking — direct follow-up, "keep track of herd
+      through zones."** Previously, a herd's identity was purely a
+      focused-zone concept: `demoteRegion` folded every agent into a
+      per-species number with no herd field at all, and `promoteZone`
+      invented a brand-new `${species}-zone-${regionKey}` herd id on EVERY
+      promotion — so a herd that got demoted, migrated, and re-promoted
+      elsewhere came back as a stranger to itself, not the same herd having
+      moved. `RegionAggregate` now carries a `herdId` that survives the
+      whole lifecycle: `demoteRegion` picks the majority herd among the real
+      agents it folds in (ties/no-herd fall back to the same invented-id
+      shape as before); `maybeEmigrate`/`foldAgentIntoAggregate` carry that
+      id into a brand-new destination aggregate (an existing destination
+      aggregate's own herd wins instead, rather than getting overwritten by
+      whichever wave of migrants happened to arrive); `promoteZone` rejoins
+      that SAME herd rather than inventing a fresh one. `regionEmigrated`/
+      `regionCrossed` events now carry `herdId` too, so the whole path is
+      visible in the log, not just inferred from before/after aggregate
+      state. Real per-species-per-zone granularity limit, same as
+      everywhere else `RegionAggregate` already has one: two distinct herds
+      of the same species sharing one abstracted zone still collapse into a
+      single number and a single (majority) herd id — this tracks ONE
+      lineage of herd identity through the grid, not a full multi-herd
+      population model. Verified live (`validateHerdMigration.ts`, a real
+      6000-tick `createDemoMacroWorld` run): a herd born `pidgey-zone-32,32`
+      (species since evolved to Pidgeotto) shows up under that SAME id
+      across a real chain of zone hops — 33,32 → 33,31 → 33,33 → 33,30 →
+      34,31 → back to 33,32 — a real, continuous, trackable migration
+      pattern across the grid, not a one-off move.
 - [x] **Badlands BSP terrain now wobbles instead of reading as rigid
       rectangular chambers.** Direct ask: keep BSP as the starting structure
       (still the same recursive rectangle split, still

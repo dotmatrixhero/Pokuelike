@@ -549,6 +549,8 @@ export type SimEvent =
       species: string;
       /** Rounded head count that moved — see overworld.ts's abstract-tier emigration roll. */
       population: number;
+      /** The herd this slice belongs to — see overworld.ts's `RegionAggregate.herdId`; direct ask, "keep track of herd through zones." */
+      herdId: string;
     }
   | {
       kind: "regionCrossed";
@@ -558,6 +560,8 @@ export type SimEvent =
       species: string;
       fromRegionId: string;
       toRegionId: string;
+      /** The herd this crosser ended up filed under at the destination — see overworld.ts's `foldAgentIntoAggregate`. */
+      herdId: string;
     };
 
 /**
