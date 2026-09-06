@@ -461,9 +461,21 @@ function maybeEmitPopulationEvent(region: Region, aggregate: RegionAggregate, mw
   }
 }
 
-const EMIGRATION_CHANCE_PER_TICK = 0.0005;
+/**
+ * Direct ask: "zones talking to each other would be great... cross zone
+ * migration patterns." Real-run finding (`validateOverworld.ts`): at the
+ * original 0.0005, only a handful of emigrations fired across ~8000 ticks
+ * even from a healthy, recovering source population — "thousands of zones"
+ * stayed a mostly-static backdrop around whichever one or two a population
+ * happened to reach. Raised 4x so a recovering zone spreads into its
+ * neighbors as a matter of course over a normal-length run, not a rare
+ * event; still per-species-per-tick, so a population with several species
+ * doesn't multiply its own effective spread rate.
+ */
+const EMIGRATION_CHANCE_PER_TICK = 0.002;
 const EMIGRATION_FRACTION = 0.1;
-const EMIGRATION_MIN_POPULATION = 6;
+/** Lowered alongside the rate above — the overworld extinction fix's own recovering populations often sit in the 5-6 range for a long stretch (see overworld.test.ts), which used to miss this bar entirely and never spread until a population had grown well past its initial recovery. */
+const EMIGRATION_MIN_POPULATION = 4;
 
 /**
  * The cheap abstract-tier stand-in for a real individual disperser
