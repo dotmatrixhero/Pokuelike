@@ -3,6 +3,32 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Natural landmarks on the macro grid — built, see DESIGN.md
+
+Direct ask: "more character, more points of interest," refined through "stay
+away from the human civilization pass, just natural places" and finally "I
+want particularly unique zone gen for them... make em interesting to look at
+and form interesting points of conflict and emergent stuff." Ten real,
+naturalized landmark types shipped (Great Lake, Fertile Basin, Sacred
+Spring, Geothermal Vent, Meteor Crater, Deep Cavern, Tunnel Warren, Bone
+Grounds, Frozen Grotto, Crossroads) — mainline Pokémon location archetypes
+(Mt. Moon, Cerulean Cave, Diglett's Cave, Lavender Tower, Seafoam Islands)
+with every human-built structure filtered out, each still carrying a real
+mechanical hook. Full writeup, rarity numbers, and the mechanical-hooks
+detail in DESIGN.md's "Natural landmarks" section. Flagged follow-ups:
+
+- Rarity (`LANDMARK_DEFS`' `chancePerEligibleZone`/`maxCount`) is a
+  sim-original guess checked once against a 400x400 real grid
+  (`validateLandmarks.ts`) — revisit if landmarks read too sparse/common
+  once more of the game is actually played on a real map.
+- Bone Grounds' resource richness is deliberately left at zero bonus for now
+  (see `LANDMARK_RESOURCE_BONUS`'s doc comment) — it's meant to be earned
+  through the not-yet-built corpse-decomposition-enriches-soil passive
+  (itself still a pitched idea in MOVES_DESIGN.md), not handed out for free.
+- No dedicated zone-info panel exists yet to name a focused zone's landmark
+  in text (e.g. "Great Lake") — currently only the macro map's own colored
+  marker (`macroMap.ts`) surfaces it visually.
+
 ## Environmental/utility moves — first batch built, see MOVES_DESIGN.md
 
 Direct ask: "moves that affect the environment... pull it all in." 13 real,

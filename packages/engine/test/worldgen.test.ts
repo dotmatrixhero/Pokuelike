@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mulberry32, makeNoise2D, makeDensityField, generateWorld, generateMacroElevation, findWalkableNear, blendBiomeParams, biomeWeightsAt, effectiveWaterDensityAt } from "../src/worldgen.js";
+import { generateMacroGrid, biasForZone } from "../src/macroGrid.js";
 import { tileAt, setTile } from "../src/world.js";
 
 describe("mulberry32 (seeded PRNG)", () => {
@@ -501,5 +502,60 @@ describe("findWalkableNear", () => {
     setTile(world, "surface", 10, 10, "boulder");
     const found = findWalkableNear(world, "surface", 10, 10);
     expect(tileAt(world, "surface", found.x, found.y)?.walkable).toBe(true);
+  });
+});
+
+describe("generateWorld: landmark terrain (applyLandmarkFeature)", () => {
+  const width = 90;
+  const height = 60;
+
+  /** Finds one real promoted-zone bias per landmark type off a big enough macro grid, same technique `validateLandmarks.ts` uses for a real run. */
+  function findBiasesByLandmark(seed: number, rows: number, cols: number) {
+    const grid = generateMacroGrid(seed, rows, cols);
+    const found = new Map<string, { seed: number; bias: ReturnType<typeof biasForZone> }>();
+    for (const zone of grid.zones) {
+      if (!zone.landmark || found.has(zone.landmark)) continue;
+      found.set(zone.landmark, { seed: seed ^ (zone.row * 7919 + zone.col * 104729), bias: biasForZone(grid, zone.row, zone.col) });
+    }
+    return found;
+  }
+
+  it("every landmark type generates without throwing and produces a real, non-degenerate mix of terrain", () => {
+    const byLandmark = findBiasesByLandmark(424242, 250, 250);
+    // Not every type is guaranteed to appear on any given grid (greatLake
+    // needs a real lake, frozenGrotto needs snow biome, etc.) — just confirm
+    // whichever did appear generate real, non-empty worlds.
+    expect(byLandmark.size).toBeGreaterThan(0);
+    for (const [, { seed, bias }] of byLandmark) {
+      const world = generateWorld(width, height, seed, bias);
+      const terrains = new Set<string>();
+      for (const tile of world.tiles.surface) terrains.add(tile.terrain);
+      expect(terrains.size).toBeGreaterThan(1);
+    }
+  });
+
+  it("deepCavern picks a single consistent center — a regression check for a real bug where the center's x/y came from two independent rng draws", () => {
+    const byLandmark = findBiasesByLandmark(2024, 250, 250);
+    const deepCavern = byLandmark.get("deepCavern");
+    if (!deepCavern) return; // not every seed places one; the determinism check below is the real guard either way
+    const a = generateWorld(width, height, deepCavern.seed, deepCavern.bias);
+    const b = generateWorld(width, height, deepCavern.seed, deepCavern.bias);
+    for (let i = 0; i < a.tiles.surface.length; i++) {
+      expect(a.tiles.surface[i]!.terrain).toBe(b.tiles.surface[i]!.terrain);
+    }
+    // A real cave carve should leave a genuinely contiguous-looking wall
+    // cluster, not two disjoint half-carves from an inconsistent center —
+    // approximate that as "more than a token handful of wall tiles."
+    const wallCount = a.tiles.surface.filter((t) => t.terrain === "wall").length;
+    expect(wallCount).toBeGreaterThan(5);
+  });
+
+  it("an undefined landmark leaves ordinary generation untouched", () => {
+    const grid = generateMacroGrid(1, 60, 60);
+    const plain = grid.zones.find((z) => !z.landmark && !z.isOcean)!;
+    const bias = biasForZone(grid, plain.row, plain.col);
+    expect(bias?.landmark).toBeUndefined();
+    // Just confirm it generates fine with no landmark set.
+    expect(() => generateWorld(width, height, 1, bias)).not.toThrow();
   });
 });

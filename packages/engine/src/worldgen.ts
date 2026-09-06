@@ -4,6 +4,7 @@ import { FOOD_FLAVORS } from "./flora.js";
 import { mulberry32 } from "./rng.js";
 import { canEnterWater } from "./waterBody.js";
 import type { ZoneDirection } from "./directions.js";
+import type { LandmarkType } from "./landmarks.js";
 
 /**
  * Stand-in for `canEnterWater`'s `agent` parameter — an ordinary land
@@ -1169,6 +1170,234 @@ function generateUndergroundCaves(world: World, width: number, height: number, r
 }
 
 // ---------------------------------------------------------------------------
+// Landmark terrain — direct ask: "particularly unique zone gen" and "make
+// 'em interesting to look at." Each landmark carves a real, spatially
+// localized feature (a bounded patch, not the whole zone) on top of the
+// zone's ordinary biome-blended generation, run last (after rivers/BSP/
+// caves) so it always wins. Reuses this file's own existing primitives
+// (the CA cave algorithm above, `setTile`) rather than inventing per-
+// landmark generation from scratch — same "one small carving pass, same
+// shape as the others" idiom `carveBadlandsChambers` already established.
+// ---------------------------------------------------------------------------
+
+/** How far in from a zone's edge a landmark's center can land — keeps the feature from getting clipped by the map border. */
+const LANDMARK_EDGE_MARGIN = 8;
+
+function pickLandmarkCenter(rng: () => number, width: number, height: number): Vec2 {
+  const margin = Math.min(LANDMARK_EDGE_MARGIN, Math.floor(Math.min(width, height) / 3));
+  return {
+    x: margin + Math.floor(rng() * Math.max(1, width - margin * 2)),
+    y: margin + Math.floor(rng() * Math.max(1, height - margin * 2)),
+  };
+}
+
+/** A filled circle (Euclidean, with a little per-tile edge jitter so it doesn't read as a perfect compass-drawn ring) — the shared shape underneath Great Lake/Sacred Spring/Meteor Crater's floor. */
+function forEachTileInJitteredCircle(center: Vec2, radius: number, width: number, height: number, rng: () => number, fn: (x: number, y: number, distFrac: number) => void): void {
+  const r = Math.round(radius);
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const x = center.x + dx;
+      const y = center.y + dy;
+      if (x < 0 || y < 0 || x >= width || y >= height) continue;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const jitter = (rng() - 0.5) * 1.5;
+      if (dist + jitter > radius) continue;
+      fn(x, y, dist / radius);
+    }
+  }
+}
+
+const GREAT_LAKE_RADIUS = 7;
+function applyGreatLake(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  forEachTileInJitteredCircle(center, GREAT_LAKE_RADIUS, width, height, rng, (x, y) => {
+    setTile(world, "surface", x, y, "water", 0);
+  });
+}
+
+const SACRED_SPRING_RADIUS = 2;
+function applySacredSpring(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  // Small and deliberate — a real spring, not another lake; the surrounding
+  // ring gets a food-stock bump (real oasis-adjacent growth), not more water.
+  forEachTileInJitteredCircle(center, SACRED_SPRING_RADIUS, width, height, rng, (x, y) => {
+    setTile(world, "surface", x, y, "water", 0);
+  });
+  forEachTileInJitteredCircle(center, SACRED_SPRING_RADIUS + 3, width, height, rng, (x, y, distFrac) => {
+    if (distFrac < 0.5) return; // the water ring itself, already handled above
+    const tile = tileAt(world, "surface", x, y);
+    if (tile?.terrain === "floor" && rng() < 0.4) setTile(world, "surface", x, y, "food", 0.8);
+  });
+}
+
+const METEOR_CRATER_RADIUS = 6;
+function applyMeteorCrater(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  forEachTileInJitteredCircle(center, METEOR_CRATER_RADIUS, width, height, rng, (x, y, distFrac) => {
+    const tile = tileAt(world, "surface", x, y);
+    if (!tile || tile.terrain === "water") return;
+    if (distFrac > 0.8) {
+      // The rim — real impact debris, a ring of boulders thrown up by the strike.
+      setTile(world, "surface", x, y, "boulder", tile.elevation + BOULDER_ELEVATION_BOOST);
+    } else {
+      // The crater floor — cleared and, per real "impact site enriches the
+      // ground" flavor, unusually food-rich.
+      setTile(world, "surface", x, y, rng() < 0.35 ? "food" : "floor", Math.max(0, tile.elevation - 0.3));
+    }
+  });
+}
+
+/** A local, bounded cellular-automata cave patch — same recipe `generateUndergroundCaves` uses (random fill + neighbor-majority smoothing + keep-largest-region), just sized to one landmark's footprint instead of a whole layer. Returns which local cells are "wall" (1) vs. "floor" (0). */
+function carveOrganicCavePatch(diameter: number, rng: () => number): Uint8Array {
+  const grid = new Uint8Array(diameter * diameter);
+  for (let i = 0; i < grid.length; i++) grid[i] = rng() < CAVE_INITIAL_WALL_CHANCE ? 1 : 0;
+  for (let iter = 0; iter < CAVE_SMOOTHING_ITERATIONS; iter++) {
+    const next = new Uint8Array(grid.length);
+    for (let y = 0; y < diameter; y++) {
+      for (let x = 0; x < diameter; x++) {
+        next[y * diameter + x] = countWallNeighbors(grid, diameter, diameter, x, y) >= CAVE_WALL_NEIGHBOR_THRESHOLD ? 1 : 0;
+      }
+    }
+    grid.set(next);
+  }
+  keepOnlyLargestFloorRegion(grid, diameter, diameter);
+  return grid;
+}
+
+const DEEP_CAVERN_RADIUS = 9;
+function applyDeepCavern(world: World, width: number, height: number, rng: () => number): void {
+  const diameter = DEEP_CAVERN_RADIUS * 2 + 1;
+  const patch = carveOrganicCavePatch(diameter, rng);
+  const centerPick = pickLandmarkCenter(rng, width, height);
+  const origin: Vec2 = { x: Math.min(width - diameter, Math.max(0, centerPick.x - DEEP_CAVERN_RADIUS)), y: Math.min(height - diameter, Math.max(0, centerPick.y - DEEP_CAVERN_RADIUS)) };
+  for (let y = 0; y < diameter; y++) {
+    for (let x = 0; x < diameter; x++) {
+      const wx = origin.x + x;
+      const wy = origin.y + y;
+      const tile = tileAt(world, "surface", wx, wy);
+      if (!tile || tile.terrain === "water") continue;
+      if (patch[y * diameter + x]) setTile(world, "surface", wx, wy, "wall", tile.elevation + BOULDER_ELEVATION_BOOST);
+    }
+  }
+}
+
+/** Frozen Grotto's own version of Deep Cavern's cave shape — "boulder" (climbable icy rock) instead of "wall" (a real blocking cliff face), a softer, more traversable cave befitting an ice cave you can wander into rather than a sealed cavern. */
+function applyFrozenGrotto(world: World, width: number, height: number, rng: () => number): void {
+  const diameter = DEEP_CAVERN_RADIUS * 2 + 1;
+  const patch = carveOrganicCavePatch(diameter, rng);
+  const centerPick = pickLandmarkCenter(rng, width, height);
+  const origin: Vec2 = { x: Math.min(width - diameter, Math.max(0, centerPick.x - DEEP_CAVERN_RADIUS)), y: Math.min(height - diameter, Math.max(0, centerPick.y - DEEP_CAVERN_RADIUS)) };
+  for (let y = 0; y < diameter; y++) {
+    for (let x = 0; x < diameter; x++) {
+      const wx = origin.x + x;
+      const wy = origin.y + y;
+      const tile = tileAt(world, "surface", wx, wy);
+      if (!tile || tile.terrain === "water") continue;
+      if (patch[y * diameter + x]) setTile(world, "surface", wx, wy, "boulder", tile.elevation + BOULDER_ELEVATION_BOOST);
+    }
+  }
+}
+
+const TUNNEL_WARREN_RADIUS = 8;
+/** How many separate burrow-entrance clusters get scattered across the warren's footprint. */
+const TUNNEL_WARREN_BURROW_COUNT = 6;
+function applyTunnelWarren(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  // The colony's own dug ground — a wide patch of loose sand/mud, real digging
+  // material, not rock (distinct from Deep Cavern's carved-rock read).
+  forEachTileInJitteredCircle(center, TUNNEL_WARREN_RADIUS, width, height, rng, (x, y) => {
+    const tile = tileAt(world, "surface", x, y);
+    if (tile?.terrain === "floor" && rng() < 0.5) setTile(world, "surface", x, y, rng() < 0.5 ? "sand" : "mud", tile.elevation);
+  });
+  // Several distinct burrow-entrance clusters (small boulder rings marking a
+  // real dug-out mound) scattered through that footprint — many separate
+  // holes, not one single den.
+  for (let i = 0; i < TUNNEL_WARREN_BURROW_COUNT; i++) {
+    const angle = rng() * Math.PI * 2;
+    const dist = rng() * TUNNEL_WARREN_RADIUS * 0.8;
+    const bx = Math.round(center.x + Math.cos(angle) * dist);
+    const by = Math.round(center.y + Math.sin(angle) * dist);
+    forEachTileInJitteredCircle({ x: bx, y: by }, 1, width, height, rng, (x, y) => {
+      const tile = tileAt(world, "surface", x, y);
+      if (tile && tile.terrain !== "water") setTile(world, "surface", x, y, "mud", tile.elevation);
+    });
+  }
+}
+
+const BONE_GROUNDS_RADIUS = 6;
+function applyBoneGrounds(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  // A real "elephant graveyard" clearing — starkly open ground, almost every
+  // obstacle stripped away, nothing planted here on purpose; whatever life
+  // this patch gets comes only from what's died and decayed on it.
+  forEachTileInJitteredCircle(center, BONE_GROUNDS_RADIUS, width, height, rng, (x, y) => {
+    const tile = tileAt(world, "surface", x, y);
+    if (tile && tile.terrain !== "water" && tile.terrain !== "floor") setTile(world, "surface", x, y, "floor", tile.elevation);
+  });
+}
+
+const GEOTHERMAL_VENT_RADIUS = 5;
+function applyGeothermalVent(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  // A real cluster of "sunbeam" tiles (worldgen.ts's own rare warmth terrain,
+  // elsewhere only a scattered 3% roll on high ground) — reliably dense here
+  // instead of incidental, so this genuinely reads as a warm spot on the map.
+  forEachTileInJitteredCircle(center, GEOTHERMAL_VENT_RADIUS, width, height, rng, (x, y) => {
+    const tile = tileAt(world, "surface", x, y);
+    if (tile?.terrain === "floor" && rng() < 0.6) setTile(world, "surface", x, y, "sunbeam", tile.elevation);
+  });
+}
+
+const CROSSROADS_RADIUS = 7;
+function applyCrossroads(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  // A real geographic junction reads as open ground — obstacles thinned out,
+  // wide sightlines, the paths that actually converge here left legible
+  // instead of choked with whatever the ordinary biome would have scattered.
+  forEachTileInJitteredCircle(center, CROSSROADS_RADIUS, width, height, rng, (x, y) => {
+    const tile = tileAt(world, "surface", x, y);
+    if (tile && tile.terrain !== "water" && tile.terrain !== "floor" && rng() < 0.7) setTile(world, "surface", x, y, "floor", tile.elevation);
+  });
+}
+
+/** Fertile Basin's own signature — real overgrowth, denser bush/tree cover than the zone's ordinary biome blend would place on its own, read as a lush hollow rather than just "grassland, but higher numbers underneath." */
+const FERTILE_BASIN_RADIUS = 7;
+function applyFertileBasin(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  forEachTileInJitteredCircle(center, FERTILE_BASIN_RADIUS, width, height, rng, (x, y) => {
+    const tile = tileAt(world, "surface", x, y);
+    if (tile?.terrain === "floor" && rng() < 0.5) setTile(world, "surface", x, y, rng() < 0.6 ? "bush" : "food", tile.elevation);
+  });
+}
+
+function applyLandmarkFeature(world: World, width: number, height: number, rng: () => number, landmark: LandmarkType | undefined): void {
+  switch (landmark) {
+    case "greatLake":
+      return applyGreatLake(world, width, height, rng);
+    case "fertileBasin":
+      return applyFertileBasin(world, width, height, rng);
+    case "sacredSpring":
+      return applySacredSpring(world, width, height, rng);
+    case "geothermalVent":
+      return applyGeothermalVent(world, width, height, rng);
+    case "meteorCrater":
+      return applyMeteorCrater(world, width, height, rng);
+    case "deepCavern":
+      return applyDeepCavern(world, width, height, rng);
+    case "tunnelWarren":
+      return applyTunnelWarren(world, width, height, rng);
+    case "boneGrounds":
+      return applyBoneGrounds(world, width, height, rng);
+    case "frozenGrotto":
+      return applyFrozenGrotto(world, width, height, rng);
+    case "crossroads":
+      return applyCrossroads(world, width, height, rng);
+    case undefined:
+      return;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Generation
 // ---------------------------------------------------------------------------
 
@@ -1219,6 +1448,8 @@ export interface ZoneGenerationBias {
   elevation: MacroElevationBias;
   /** A `BIOME_NAMES` entry to bias this zone's biome-seed scatter toward — absent (or a name `generateWorld` doesn't recognize, e.g. "ocean") leaves biome placement exactly as unbiased `placeBiomeSeeds` would. */
   dominantBiome?: string;
+  /** This zone's `MacroZone.landmark`, if any — carves genuinely distinct terrain on top of the ordinary biome-blended generation above (`applyLandmarkFeature`, run last, after rivers/BSP/caves). Absent = an ordinary zone, ordinary terrain. */
+  landmark?: LandmarkType;
 }
 
 /** How many extra seeds of `ZoneGenerationBias.dominantBiome` get scattered on top of the ordinary biome mix — enough to make it genuinely dominate the blend (see `blendBiomeParams`'s nearest-`NEAREST_BIOME_SEEDS` weighting) without completely erasing the variety a real zone should still have. Sim-original guess, judge against a real promoted zone like every other tuning constant in this file. */
@@ -1347,6 +1578,12 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   // same "distinct xor'd seed per generation concern" pattern as every other
   // noise field in this function.
   generateUndergroundCaves(world, width, height, mulberry32(seed ^ 0x27220a95));
+
+  // Landmark terrain runs last of all — it deliberately overwrites whatever
+  // ordinary biome/river/cave generation already placed on top of a
+  // promoted zone's footprint, same "distinct xor'd seed per generation
+  // concern" pattern as every other step above.
+  applyLandmarkFeature(world, width, height, mulberry32(seed ^ 0x1b873593), bias?.landmark);
 
   return world;
 }

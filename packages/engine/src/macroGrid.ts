@@ -2,6 +2,7 @@ import type { Layer } from "./types.js";
 import type { ImmigrationSpeciesInfo } from "./immigration.js";
 import { generateMacroElevation, makeNoise2D, mulberry32, biomeFoodWaterDensity, type MacroElevationBias, type ZoneGenerationBias } from "./worldgen.js";
 import { DIRECTIONS, DIRECTION_DELTA, OPPOSITE_DIRECTION, type ZoneDirection } from "./directions.js";
+import { placeLandmarks, type LandmarkType } from "./landmarks.js";
 
 /**
  * The macro-scale zone grid — DESIGN.md's "Correction: overworld and zone are
@@ -40,6 +41,17 @@ export interface MacroZone {
   isRiverSource: boolean;
   /** True if a river carved into this zone found no lower neighbor and pooled here instead of reaching the ocean. */
   isLake: boolean;
+  /**
+   * A rare, real, named point of interest — direct ask: "more character,
+   * more points of interest." See `landmarks.ts` for the full list, real
+   * mechanical hooks (resource/population/species-mix overrides, all
+   * REAL numbers other systems read, not flavor text), and the terrain
+   * that makes each one visually distinct once its zone is promoted
+   * (`worldgen.ts`'s `applyLandmarkFeature`). Absent = an ordinary zone,
+   * the overwhelming majority — every landmark type is placed sparsely
+   * (`placeLandmarks`), a handful per whole grid, not a per-tile decoration.
+   */
+  landmark?: LandmarkType;
 }
 
 export interface MacroGrid {
@@ -392,6 +404,9 @@ export function generateMacroGrid(seed: number, rows: number, cols: number): Mac
   applyBeachReclassification(zones);
 
   carveMacroRivers(grid, mulberry32(seed ^ 0x27220a95));
+  // After rivers/lakes — Great Lake specifically wants to know `isLake`,
+  // and Crossroads wants final `coastEdges`-adjusted land shape.
+  placeLandmarks(grid, mulberry32(seed ^ 0x7ed55d16));
   return grid;
 }
 
@@ -427,7 +442,7 @@ export function biasForZone(grid: MacroGrid, row: number, col: number): ZoneGene
     highEdges,
   };
 
-  return { elevation, dominantBiome: zone.isOcean ? undefined : zone.biome };
+  return { elevation, dominantBiome: zone.isOcean ? undefined : zone.biome, landmark: zone.landmark };
 }
 
 // ---------------------------------------------------------------------------
@@ -465,12 +480,31 @@ const OCEAN_RESOURCE_INDEX_ESTIMATE = 0.6;
  */
 const RESOURCE_ESTIMATE_SCALE = 4;
 
+/**
+ * A flat top-up to a landmark zone's resource estimate, on top of its
+ * ordinary biome-driven baseline above — the genuinely food/water-rich
+ * landmarks (a real lake, an overgrown basin, a spring) read as a real
+ * abundance spike a population would actually be drawn to, not just
+ * distinct scenery. `boneGrounds` gets none here: per `landmarks.ts`'s own
+ * doc comment, any richness there is meant to be earned through the
+ * not-yet-built corpse-decomposition passive, not handed out for free by
+ * this estimate. Every other landmark is left at 0 (no bonus, no penalty)
+ * — their draw is about species congregation (`LANDMARK_POPULATION_MULTIPLIER`
+ * below), not raw resource abundance.
+ */
+const LANDMARK_RESOURCE_BONUS: Partial<Record<LandmarkType, number>> = {
+  greatLake: 0.25,
+  fertileBasin: 0.3,
+  sacredSpring: 0.15,
+};
+
 /** A never-visited zone's estimated `RegionAggregate.baseResourceIndex` — see `RESOURCE_ESTIMATE_SCALE`'s doc comment for why this is only an estimate, not a measurement. */
 export function estimateZoneResourceIndex(zone: MacroZone): number {
   if (zone.isOcean) return OCEAN_RESOURCE_INDEX_ESTIMATE;
   const density = biomeFoodWaterDensity(zone.biome);
-  if (!density) return 0.5;
-  return Math.min(1, Math.max(0, (density.foodDensity + density.waterDensity) * RESOURCE_ESTIMATE_SCALE));
+  const base = density ? (density.foodDensity + density.waterDensity) * RESOURCE_ESTIMATE_SCALE : 0.5;
+  const bonus = zone.landmark ? (LANDMARK_RESOURCE_BONUS[zone.landmark] ?? 0) : 0;
+  return Math.min(1, Math.max(0, base + bonus));
 }
 
 export interface ZoneSpeciesEstimate {
@@ -515,11 +549,32 @@ export function speciesFitsZone(species: ImmigrationSpeciesInfo, zone: MacroZone
   return !species.biomes || species.biomes.length === 0 || species.biomes.includes(zone.biome);
 }
 
+/**
+ * A per-species population multiplier for landmark zones that read as a
+ * real congregation point rather than an ordinary patch of habitat — a
+ * meteor crater, a warren's dug ground, a deep cavern all draw MULTIPLE
+ * species onto the same limited real estate instead of thinning any one
+ * out. This is deliberately a multiplier on every fitting species (not a
+ * pick-one-winner boost), so the actual emergent payoff — several
+ * populations packed onto the landmark's small footprint — is real
+ * pressure on the same scarce tiles once promoted, exactly the setup
+ * `herdConflict.ts`'s existing cross-species rivalry trigger already fires
+ * on for free. Landmarks not listed here (springs, basins, lakes) are left
+ * at 1 — richness there is about abundance, not crowding.
+ */
+const LANDMARK_POPULATION_MULTIPLIER: Partial<Record<LandmarkType, number>> = {
+  meteorCrater: 1.6,
+  tunnelWarren: 1.5,
+  deepCavern: 1.4,
+  crossroads: 1.3,
+};
+
 export function estimateZoneSpecies(zone: MacroZone, roster: readonly ImmigrationSpeciesInfo[], rng: () => number): ZoneSpeciesEstimate[] {
   const estimates: ZoneSpeciesEstimate[] = [];
+  const multiplier = zone.landmark ? (LANDMARK_POPULATION_MULTIPLIER[zone.landmark] ?? 1) : 1;
   for (const species of roster) {
     if (!speciesFitsZone(species, zone)) continue;
-    estimates.push({ speciesId: species.id, homeLayer: species.homeLayer, population: SEED_POPULATION_BASE + rng() * SEED_POPULATION_VARIANCE });
+    estimates.push({ speciesId: species.id, homeLayer: species.homeLayer, population: (SEED_POPULATION_BASE + rng() * SEED_POPULATION_VARIANCE) * multiplier });
   }
   return estimates;
 }

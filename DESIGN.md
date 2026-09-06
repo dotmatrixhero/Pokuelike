@@ -11849,3 +11849,109 @@ tests) green throughout; web production build succeeds.
   Z-levels, the life/notable-history generation passes, dynamic cross-zone
   propagation — is still exactly where it was: real, vision-stage, not
   built.
+
+## Natural landmarks on the macro grid, built
+
+Direct follow-up to "how do we get more character, more points of interest"
+on the macro grid above. Landed on real mainline Pokémon location
+archetypes (Mt. Moon, Cerulean Cave, Diglett's Cave, Lavender Town/Pokémon
+Tower, Seafoam Islands) as the well to draw from, but a hard constraint
+narrowed it: "stay away from the human civilization pass for now, just
+natural places" — every one of those is naturalized into something a real
+place could be without implying anyone built it (a meteorite impact instead
+of a tower on a hill, a colony's own dug burrows instead of a pre-existing
+cave network, a species' own "return here to die" instinct instead of a
+graveyard). Final direct ask: "I want particularly unique zone gen for
+them... make em interesting to look at and form interesting points of
+conflict and emergent stuff."
+
+Ten types shipped, one new module (`landmarks.ts`) plus real hooks into
+three existing ones:
+
+- **Placement** (`landmarks.ts`'s `placeLandmarks`, called from
+  `generateMacroGrid` right after river carving): one independent scatter
+  pass per type over the whole zone grid, each zone getting at most one
+  landmark. `LANDMARK_DEFS` gates eligibility per type — `requiresLake`
+  (Great Lake reuses the real, previously-dead `MacroZone.isLake` flag),
+  `eligibleBiomes`, `minLandNeighbors` (Crossroads: a real geographic
+  junction, at least 3 non-ocean orthogonal neighbors) — then rolls an
+  independent, deliberately tiny `chancePerEligibleZone` per zone, capped by
+  a hard `maxCount` so a huge grid doesn't drown in "rare" landmarks. Every
+  number here is a sim-original guess, same as every other tuning table in
+  this codebase, checked once against a real 400x400 (160,000-zone) grid via
+  `validateLandmarks.ts` rather than calibrated against anything — all ten
+  types placed at least once, roughly per their intended rarity order.
+- **Unique terrain generation** (`worldgen.ts`'s ten `apply<Name>` functions
+  plus the `applyLandmarkFeature` dispatcher, run last of all in
+  `generateWorld`, after rivers/BSP chambers/underground caves, so a
+  landmark's footprint deliberately overwrites whatever ordinary biome
+  generation already put there): each type gets its own genuinely distinct
+  stamp, not just a name on an otherwise-ordinary tile — a real water circle
+  for Great Lake/Sacred Spring, a boulder-rimmed cleared crater floor for
+  Meteor Crater, a proper cellular-automata cave patch (the same
+  random-fill-then-smooth-then-keep-largest-region recipe
+  `generateUndergroundCaves` already uses, generalized into a local, scoped
+  `carveOrganicCavePatch` helper) for Deep Cavern (walls) and Frozen Grotto
+  (boulders — the softer, wanderable-into read), several small
+  burrow-entrance clusters scattered through a wide sand/mud patch for
+  Tunnel Warren, a starkly stripped-bare clearing for Bone Grounds (nothing
+  planted here on purpose — whatever grows comes only from what's died and
+  decayed on it), a dense sunbeam-tile cluster for Geothermal Vent (the
+  existing warmth terrain, elsewhere only a scattered 3% roll on high
+  ground), thinned-out open ground for Crossroads, and denser bush/food
+  overgrowth for Fertile Basin.
+- **Real mechanical hooks** (`macroGrid.ts`'s `estimateZoneResourceIndex`/
+  `estimateZoneSpecies`, the same never-visited-zone guesses a promotion or
+  received migrants already read): `LANDMARK_RESOURCE_BONUS` gives the
+  genuinely abundant landmarks (Great Lake, Fertile Basin, Sacred Spring) a
+  flat top-up over their ordinary biome-driven baseline; `LANDMARK_
+  POPULATION_MULTIPLIER` gives the congregation-shaped landmarks (Meteor
+  Crater, Tunnel Warren, Deep Cavern, Crossroads) a multiplier applied to
+  EVERY fitting species' seed population, not a pick-one-winner boost — the
+  deliberate mechanism for "points of conflict and emergent stuff": several
+  species' populations packed onto the same small, scarce footprint is
+  exactly the setup `herdConflict.ts`'s existing cross-species
+  resource-contention rivalry trigger (a sustained blocked/crowded-tile
+  standoff, already fully built, needs no new code) fires more of on its
+  own. Bone Grounds deliberately gets no resource bonus here — its richness
+  is meant to be earned through the not-yet-built corpse-decomposition
+  passive, not handed out for free.
+- **Visible on the map** (`macroMap.ts`): a small, saturated, per-type
+  colored marker drawn at a landmark zone's center, deliberately off the
+  biome color palette so it reads as "something unusual is here" at a
+  glance even at a flat-block zoom level, not blended into its host biome's
+  own color.
+
+Validated via `validateLandmarks.ts` (a real 400x400 grid: all ten types
+placed; resource-index/population estimates measurably higher than a plain
+zone of the same biome where intended; each promoted zone's terrain
+genuinely distinct) and a dedicated `landmarks.test.ts` plus additions to
+`macroGrid.test.ts`/`worldgen.test.ts` (placement determinism/eligibility/
+caps, the resource and population hooks, real terrain generation for every
+reachable type, and a regression test for a real bug caught along the way:
+`applyDeepCavern` originally called its own center-picking helper twice —
+once for x, once for y — producing an inconsistent center from two
+independent rng draws instead of one consistent point, fixed to call it
+once and reuse both coordinates, matching `applyFrozenGrotto`'s
+already-correct pattern right below it). Full engine suite (1002 tests) and
+data suite (104 tests) green throughout.
+
+### What's honestly still open
+
+- **The emergent-conflict payoff is mechanically wired but not yet observed
+  in a real run** — the population multiplier moves the seed numbers
+  `estimateZoneSpecies` produces, but nothing here has yet measured whether
+  a promoted, congregation-biased landmark actually produces more
+  `herdConflict.ts` rivalry events than an ordinary zone over a real
+  multi-thousand-tick run.
+- **No zone-info text panel names a focused zone's landmark** — currently
+  only the macro map's own colored marker surfaces it; clicking a landmark
+  zone doesn't (yet) show "Great Lake" anywhere as text.
+- **Bone Grounds' real richness (corpse decomposition enriching the ground)
+  isn't built** — MOVES_DESIGN.md's own pitched "decayed corpse enriches
+  soil" passive is the real mechanism this was written to eventually plug
+  into; until then Bone Grounds is terrain-distinct but resource-neutral.
+- **Rarity is a single guess, not tuned** — `chancePerEligibleZone`/
+  `maxCount` were judged against one real grid and left as-is; genuinely
+  playing the game on a real map may reveal some types read too sparse or
+  too common.

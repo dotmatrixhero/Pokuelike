@@ -1,4 +1,4 @@
-import { zoneAt, type MacroWorld, type World } from "@pokuelike/engine";
+import { zoneAt, type LandmarkType, type MacroWorld, type World } from "@pokuelike/engine";
 import { shade, rgbToCss, type Rgb } from "./palette.js";
 import { drawRegionThumbnail } from "./overworldMap.js";
 
@@ -57,6 +57,43 @@ const DEFAULT_BIOME_COLOR: Rgb = MACRO_BIOME_COLOR["grassland"]!;
 const FOCUSED_OUTLINE = "rgb(255, 209, 102)";
 const TRACKED_OUTLINE = "rgba(255, 255, 255, 0.35)";
 
+/**
+ * One saturated, high-contrast marker color per landmark type — deliberately
+ * NOT tied to the biome palette above (a landmark should read as "something
+ * unusual is here" at a glance, even at a flat-block zoom level, not blend
+ * into its host biome's own color). Drawn as a small dot over the zone's
+ * ordinary color/inset, per the direct ask that landmarks be "interesting to
+ * look at," not just a mechanical flag other systems read.
+ */
+const LANDMARK_MARKER_COLOR: Record<LandmarkType, Rgb> = {
+  greatLake: [64, 200, 255],
+  fertileBasin: [140, 230, 90],
+  sacredSpring: [220, 170, 255],
+  geothermalVent: [255, 120, 40],
+  meteorCrater: [255, 60, 60],
+  deepCavern: [90, 70, 140],
+  tunnelWarren: [190, 140, 70],
+  boneGrounds: [235, 230, 210],
+  frozenGrotto: [150, 230, 240],
+  crossroads: [255, 220, 50],
+};
+
+/** Small circular marker centered on a landmark zone's block, radius scaled to zoom but floored so it's still visible zoomed all the way out. */
+function drawLandmarkMarker(ctx: CanvasRenderingContext2D, landmark: LandmarkType, px: number, py: number, blockPx: number): void {
+  const cx = px + blockPx / 2;
+  const cy = py + blockPx / 2;
+  const radius = Math.max(1.5, blockPx * 0.28);
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fillStyle = rgbToCss(LANDMARK_MARKER_COLOR[landmark]);
+  ctx.fill();
+  if (blockPx >= 6) {
+    ctx.lineWidth = Math.max(1, blockPx * 0.06);
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.stroke();
+  }
+}
+
 /** Native px/zone at/above which a promoted zone's real terrain thumbnail is legible enough to draw instead of a flat color block. */
 const INSET_MIN_BLOCK_PX = 14;
 
@@ -95,6 +132,10 @@ export function drawMacroMap(canvas: HTMLCanvasElement, mw: MacroWorld, blockPx:
         const [r, g, b] = shade(MACRO_BIOME_COLOR[zone.biome] ?? DEFAULT_BIOME_COLOR, zone.elevation);
         ctx.fillStyle = rgbToCss([r, g, b]);
         ctx.fillRect(px, py, blockPx, blockPx);
+      }
+
+      if (zone.landmark) {
+        drawLandmarkMarker(ctx, zone.landmark, px, py, blockPx);
       }
 
       if (key === mw.focusedKey) {

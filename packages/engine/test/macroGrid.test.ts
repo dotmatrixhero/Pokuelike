@@ -276,4 +276,29 @@ describe("estimateZoneResourceIndex / estimateZoneSpecies", () => {
     expect(oceanMatches.has("grassland-only")).toBe(false);
     expect(oceanMatches.has("no-preference")).toBe(false); // no-preference isn't obligate-aquatic, so it's excluded from an ocean zone
   });
+
+  it("gives a resource-rich landmark (Fertile Basin) a higher estimate than a plain zone of the same biome", () => {
+    const grid = generateMacroGrid(2024, 200, 200);
+    const basin = grid.zones.find((z) => z.landmark === "fertileBasin")!;
+    const plain = grid.zones.find((z) => !z.landmark && !z.isOcean && z.biome === basin.biome)!;
+    expect(estimateZoneResourceIndex(basin)).toBeGreaterThan(estimateZoneResourceIndex(plain));
+  });
+
+  it("gives a congregation landmark (Meteor Crater) a higher total estimated population than a plain zone of the same biome", () => {
+    const grid = generateMacroGrid(2024, 200, 200);
+    const crater = grid.zones.find((z) => z.landmark === "meteorCrater")!;
+    const plain = grid.zones.find((z) => !z.landmark && !z.isOcean && z.biome === crater.biome)!;
+    const roster = [{ id: "generalist", homeLayer: "surface" as const }];
+    const rng = () => 0.5;
+    const craterPop = estimateZoneSpecies(crater, roster, rng).reduce((s, e) => s + e.population, 0);
+    const plainPop = estimateZoneSpecies(plain, roster, rng).reduce((s, e) => s + e.population, 0);
+    expect(craterPop).toBeGreaterThan(plainPop);
+  });
+
+  it("leaves a non-bonus landmark's (Bone Grounds) resource estimate unchanged from a plain zone of the same biome", () => {
+    const grid = generateMacroGrid(2024, 200, 200);
+    const boneGrounds = grid.zones.find((z) => z.landmark === "boneGrounds")!;
+    const plain = grid.zones.find((z) => !z.landmark && !z.isOcean && z.biome === boneGrounds.biome)!;
+    expect(estimateZoneResourceIndex(boneGrounds)).toBeCloseTo(estimateZoneResourceIndex(plain), 5);
+  });
 });
