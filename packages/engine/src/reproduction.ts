@@ -21,16 +21,22 @@ const MATE_SEARCH_RADIUS = 5;
 /** How far sociability can push the search radius from baseline in either direction. */
 const MATE_SEARCH_SPREAD = 2;
 
+/** `Agent.matingRadiusBoostTicksRemaining`'s fixed effect size — see that field's own doc comment (types.ts) for why this is a flat constant rather than a per-agent stored value. */
+export const MATING_RADIUS_BOOST_MULTIPLIER = 2;
+
 /**
  * More sociable agents search farther/more readily for a mate; less sociable
  * ones are choosier about proximity. Deliberately the *only* sociability
  * hook for now — full herd cohesion is still unbuilt, see DESIGN.md. Absent
  * disposition (hand-built fixtures) reads as neutral (0.5), reproducing the
- * original fixed 5-tile radius exactly.
+ * original fixed 5-tile radius exactly. `matingRadiusBoostTicksRemaining`
+ * (`MoveSpec.matingRadiusBoost`, e.g. Sweet Scent) multiplies the result on
+ * top, applied after the sociability spread rather than instead of it.
  */
 function mateSearchRadius(world: World, agent: Agent): number {
   const sociability = effectiveDisposition(world, agent).sociability;
-  return MATE_SEARCH_RADIUS + (sociability - 0.5) * (2 * MATE_SEARCH_SPREAD);
+  const base = MATE_SEARCH_RADIUS + (sociability - 0.5) * (2 * MATE_SEARCH_SPREAD);
+  return agent.matingRadiusBoostTicksRemaining ? base * MATING_RADIUS_BOOST_MULTIPLIER : base;
 }
 
 function manhattan(a: Vec2, b: Vec2): number {

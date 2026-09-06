@@ -22,6 +22,25 @@ export function moveCanon(
 }
 
 /**
+ * The status-move counterpart to `moveCanon` above, for the `utilityMove`-
+ * flagged roster below (Growth, Agility, Rain Dance, etc.) — every one of
+ * these is a real mainline status move (`category: "status"`, `power: 0`),
+ * which `moveCanon` deliberately refuses to look up (see its own doc
+ * comment). Still sources real type/accuracy from the dex rather than
+ * hand-copying them; only `category`/`power` are asserted directly, since
+ * a status move's dex `power` is always 0 anyway. A dex accuracy of -1
+ * (mainline's "always hits" convention for most status moves) reads as 100
+ * here — this engine doesn't consume accuracy at all yet (see `MoveSpec.
+ * accuracy`'s own doc comment), so this is purely for a faithful display
+ * value, not a gameplay effect.
+ */
+function statusMoveCanon(dexKey: string): Pick<MoveSpec, "type" | "category" | "power" | "accuracy"> {
+  const entry = MOVE_DEX_BY_KEY[dexKey];
+  if (!entry) throw new Error(`statusMoveCanon: no dex entry for key "${dexKey}" (packages/data/src/dex/moves.generated.ts)`);
+  return { type: entry.type, category: "status", power: 0, accuracy: entry.accuracy < 0 ? 100 : entry.accuracy };
+}
+
+/**
  * Base move definitions. Type/category/power/accuracy come from the canon dex
  * via `moveCanon`; shape/cooldownTicks/statusChance are sim-specific tuning —
  * shape is still the spec'able axis for later leveling (see DESIGN.md), e.g.
@@ -1151,5 +1170,187 @@ export const MOVES: Record<string, MoveSpec> = {
     // cooldown — unlike an ordinary flee step, which costs nothing and can
     // be repeated every tick, this can't be spammed.
     burrow: { ticks: 20 },
+  },
+
+  // --- Environmental/utility moves below. Direct ask: "moves that affect
+  // the environment... [pull in] moves that all these Pokémon already
+  // learn over time." Every one of these is a REAL move already in the
+  // curated roster's own canonical dex movepool (checked directly against
+  // dex/species.generated.ts's levelMoves — not invented), and every one is
+  // a genuine mainline status move (power 0), the reason none of them could
+  // use `moveCanon` — see `statusMoveCanon` above. All flagged
+  // `utilityMove: true`, resolved by the engine's new `utilityMoves.ts` on
+  // an agent's own idle tick (see that file's own doc comment for why this
+  // needed a third trigger path alongside the hostile/ally-support ones).
+  growth: {
+    id: "growth",
+    name: "Growth",
+    shape: { kind: "point" },
+    ...statusMoveCanon("GROWTH"),
+    cooldownTicks: 30,
+    utilityMove: true,
+    // Real canonical move (bulbasaur/ivysaur/venusaur, oddish/gloom all
+    // learn it) — directly enriches the ground the caster stands on
+    // (flora.ts's real fertility mechanic), rather than Bulb Seed's own
+    // Round 3 in-house description tying it to seedling maturation. Own
+    // tile only (radius 0) — Grassy Terrain below is the wider version.
+    fertilityBoost: { amount: 0.3, radius: 0 },
+  },
+  grassy_terrain: {
+    id: "grassy_terrain",
+    name: "Grassy Terrain",
+    shape: { kind: "point" },
+    ...statusMoveCanon("GRASSY_TERRAIN"),
+    cooldownTicks: 60,
+    utilityMove: true,
+    // Oddish/Gloom's own real canonical move — the AoE sibling to Growth
+    // above, a smaller per-tile boost spread over real ground around the
+    // caster instead of a bigger one on just its own tile.
+    fertilityBoost: { amount: 0.15, radius: 2 },
+  },
+  synthesis: {
+    id: "synthesis",
+    name: "Synthesis",
+    shape: { kind: "point" },
+    ...statusMoveCanon("SYNTHESIS"),
+    cooldownTicks: 40,
+    utilityMove: true,
+    // Real canonical move (bulbasaur/ivysaur/venusaur) — mainline heals more
+    // in harsh sunlight; reused here as a flat self-heal with a real bonus
+    // near a "sunbeam" tile (flora.ts's own terrain-scaled-healing idiom,
+    // already driving germination odds, reused for HP instead).
+    selfHeal: { fraction: 0.15, sunbeamBonus: 0.15 },
+  },
+  moonlight: {
+    id: "moonlight",
+    name: "Moonlight",
+    shape: { kind: "point" },
+    ...statusMoveCanon("MOONLIGHT"),
+    cooldownTicks: 40,
+    utilityMove: true,
+    // Oddish/Gloom's own real canonical move — Synthesis's mechanical
+    // twin under a different mainline name/type, same reasoning.
+    selfHeal: { fraction: 0.15, sunbeamBonus: 0.15 },
+  },
+  roost: {
+    id: "roost",
+    name: "Roost",
+    shape: { kind: "point" },
+    ...statusMoveCanon("ROOST"),
+    cooldownTicks: 30,
+    utilityMove: true,
+    // Real canonical move (pidgey/spearow) — a flat, reliable self-heal, no
+    // terrain scaling (mainline Roost isn't weather/terrain-conditional,
+    // unlike Synthesis/Moonlight above).
+    selfHeal: { fraction: 0.25 },
+  },
+  agility: {
+    id: "agility",
+    name: "Agility",
+    shape: { kind: "point" },
+    ...statusMoveCanon("AGILITY"),
+    cooldownTicks: 50,
+    utilityMove: true,
+    // Real canonical move for a big chunk of the roster (scyther, pidgey,
+    // spearow, sandshrew, dratini, growlithe, ponyta, rapidash, beedrill).
+    // Reuses `MoveSpec.statChangeOnHit`'s existing self-buff field — the
+    // same primitive a landed hit's self-side effect already uses — just
+    // applied from the idle path instead. First real consumer of the
+    // "speed" StatKey outside nature.ts flavor: `simulation.ts`'s
+    // `actionSpeedOf` now folds the stat-stage multiplier in, so this
+    // actually makes the caster act more often for a while, not just a
+    // cosmetic number.
+    statChangeOnHit: { target: "self", stat: "speed", stage: 2, ticks: 40 },
+  },
+  harden: {
+    id: "harden",
+    name: "Harden",
+    shape: { kind: "point" },
+    ...statusMoveCanon("HARDEN"),
+    cooldownTicks: 40,
+    utilityMove: true,
+    // Real canonical move (metapod, kakuna, krabby, kingler, shellder) —
+    // mainline's flat +1 Defense, same self-buff primitive as Agility.
+    statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 50 },
+  },
+  withdraw: {
+    id: "withdraw",
+    name: "Withdraw",
+    shape: { kind: "point" },
+    ...statusMoveCanon("WITHDRAW"),
+    cooldownTicks: 40,
+    utilityMove: true,
+    // Real canonical move (squirtle/wartortle/blastoise, shellder) —
+    // mainline's own +1 Defense, mechanically identical to Harden above
+    // under a Water-flavored name, same as the real games.
+    statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 50 },
+  },
+  defense_curl: {
+    id: "defense_curl",
+    name: "Defense Curl",
+    shape: { kind: "point" },
+    ...statusMoveCanon("DEFENSE_CURL"),
+    cooldownTicks: 40,
+    utilityMove: true,
+    // Real canonical move (sandshrew, geodude, snorlax) — same +1 Defense
+    // family as Harden/Withdraw above.
+    statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 50 },
+  },
+  safeguard: {
+    id: "safeguard",
+    name: "Safeguard",
+    shape: { kind: "point" },
+    ...statusMoveCanon("SAFEGUARD"),
+    cooldownTicks: 80,
+    utilityMove: true,
+    // Real canonical move (seel, dratini, vulpix, butterfree, lapras) —
+    // mainline blocks status conditions for the caster's whole side; here,
+    // the caster plus every living same-herd ally within radius get a real
+    // window of new-status immunity (Agent.statusImmuneTicksRemaining).
+    statusImmunityAura: { ticks: 60, radius: 4 },
+  },
+  rain_dance: {
+    id: "rain_dance",
+    name: "Rain Dance",
+    shape: { kind: "point" },
+    ...statusMoveCanon("RAIN_DANCE"),
+    // Long cooldown on purpose — this is a real, rare weather-triggering
+    // event (weather.ts's own rain mechanics: flora decay slows, thirst
+    // decays slower, dry ground near water can convert to real puddles),
+    // not an ambient buff to spam.
+    cooldownTicks: 150,
+    utilityMove: true,
+    // Real canonical move (squirtle line, gyarados, dratini, lapras) —
+    // spawns (or refreshes) a genuine rain WeatherCell centered on the
+    // caster, reusing weather.ts's own cell shape/lifecycle rather than a
+    // second invented weather concept.
+    spawnsRain: true,
+  },
+  sweet_scent: {
+    id: "sweet_scent",
+    name: "Sweet Scent",
+    shape: { kind: "point" },
+    ...statusMoveCanon("SWEET_SCENT"),
+    cooldownTicks: 100,
+    utilityMove: true,
+    // Real canonical move (bulbasaur/ivysaur/venusaur, oddish/gloom) —
+    // mainline lures wild Pokémon/lowers evasion; reused here as "more
+    // findable as a mate for a while" (reproduction.ts's own mate-search
+    // radius, doubled via `MATING_RADIUS_BOOST_MULTIPLIER`).
+    matingRadiusBoost: { multiplier: 2, ticks: 60 },
+  },
+  leech_seed: {
+    id: "leech_seed",
+    name: "Leech Seed",
+    shape: { kind: "point" },
+    ...statusMoveCanon("LEECH_SEED"),
+    cooldownTicks: 30,
+    utilityMove: true,
+    // Real canonical move (bulbasaur/ivysaur/venusaur) — mainline drains HP
+    // from an opponent every turn; reused here as a one-off hunger transfer
+    // from the nearest non-herd agent in range, real resource theft rather
+    // than a sustained drain (this sim has no per-turn "planted seed"
+    // concept to tick down).
+    drainNeeds: { need: "hunger", amount: 0.15, radius: 4 },
   },
 };

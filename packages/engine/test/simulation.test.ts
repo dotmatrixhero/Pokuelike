@@ -80,6 +80,23 @@ describe("actionSpeedOf: paralysis halves effective Speed", () => {
   });
 });
 
+describe("actionSpeedOf: a real Speed stat-stage grant (e.g. Agility) actually changes action frequency", () => {
+  it("an agent with a +2 speed stage acts noticeably more often than the same agent without one", () => {
+    const world = createWorld(5, 1);
+    const baseline = makeAgent({ stats: { maxHp: 50, attack: 10, defense: 10, spAttack: 10, spDefense: 10, speed: 20 }, hp: 50, maxHp: 50 });
+    const hasted = makeAgent({
+      stats: { maxHp: 50, attack: 10, defense: 10, spAttack: 10, spDefense: 10, speed: 20 },
+      hp: 50,
+      maxHp: 50,
+      statStages: [{ stat: "speed", stage: 2, ticksRemaining: 40 }],
+    });
+    // Before this feature, "speed" was a real computed stat with zero consumer
+    // beyond nature.ts flavor — this is the actual regression check that
+    // actionSpeedOf now folds a Speed stage into its multiplier stack.
+    expect(actionSpeedOf(world, hasted, 0)).toBeGreaterThan(actionSpeedOf(world, baseline, 0));
+  });
+});
+
 describe("action economy via tickWorld", () => {
   it("needs still decay every tick even for an agent that doesn't act that tick", () => {
     const world = createWorld(5, 1);

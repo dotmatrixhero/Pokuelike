@@ -16,7 +16,8 @@ export const FLORA_FLAVORS = ["moss", "fern", "bloom"] as const;
 /** Sun-loving berries — favored when a seedling matures near a sunbeam tile. */
 const SUN_FOOD_FLAVORS = ["sitrus", "cheri"] as const;
 /** How far (Chebyshev distance) counts as "near" a sunbeam for germination purposes. */
-const SUNBEAM_RADIUS = 3;
+/** Also read directly by utilityMoves.ts's `selfHeal`'s `sunbeamBonus` — same "how close counts as near" radius germination already uses. */
+export const SUNBEAM_RADIUS = 3;
 /** Chance a maturing seedling becomes edible food vs. decorative flora, normally. */
 const FOOD_CHANCE = 0.55;
 /** Same, but boosted near a sunbeam — sun-loving berries do better in the light. */
@@ -26,7 +27,8 @@ function pickFlavor<T extends readonly string[]>(flavors: T, rng: () => number):
   return flavors[Math.floor(rng() * flavors.length)]!;
 }
 
-function isNearSunbeam(world: World, pos: Vec2): boolean {
+/** Also read directly by utilityMoves.ts's `selfHeal`'s `sunbeamBonus` (Synthesis/Moonlight) — same terrain-scaled-healing idea this already drives for germination, reused for self-heal instead. */
+export function isNearSunbeam(world: World, pos: Vec2): boolean {
   for (let dy = -SUNBEAM_RADIUS; dy <= SUNBEAM_RADIUS; dy++) {
     for (let dx = -SUNBEAM_RADIUS; dx <= SUNBEAM_RADIUS; dx++) {
       if (tileAt(world, "surface", pos.x + dx, pos.y + dy)?.terrain === "sunbeam") return true;
@@ -242,8 +244,8 @@ const FERTILITY_WATER_BOOST = 0.35;
 /** Per tick a Grass-type agent spends standing on a tile — slower than watering's one-off boost, but sustained presence adds up ("tilling/planting it"). */
 const FERTILITY_TEND_PER_TICK = 0.02;
 
-/** Bumps this tile's fertility (capped at 1) — shared by waterSoil/tendSoil below and the harvest-recovery reset in growFlora. */
-function raiseFertility(tile: Tile | undefined, amount: number): void {
+/** Bumps this tile's fertility (capped at 1) — shared by waterSoil/tendSoil below, the harvest-recovery reset in growFlora, and utilityMoves.ts's `fertilityBoost` effect (Growth/Grassy Terrain). */
+export function raiseFertility(tile: Tile | undefined, amount: number): void {
   if (!tile) return;
   tile.fertility = Math.min(1, (tile.fertility ?? 1) + amount);
 }

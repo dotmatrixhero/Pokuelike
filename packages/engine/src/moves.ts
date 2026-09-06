@@ -68,7 +68,8 @@ export interface MoveSpec {
   name: string;
   shape: MoveShape;
   type: PokemonType;
-  category: "physical" | "special";
+  /** `"status"` is real (a genuine mainline status-move category, e.g. Growth/Agility/Rain Dance), but only ever meaningful on a `utilityMove`-flagged spec — `calculateDamage` (combat.ts) only ever branches on `"physical"` vs. anything else, and a utility move's `power` is always 0 anyway, so this never actually reaches that branch in practice. */
+  category: "physical" | "special" | "status";
   /** Mainline-scale base power (Tackle 40, Flamethrower 90, etc.). */
   power: number;
   /** 0-100. Not yet consumed by combat.ts — every move currently hits; see TODO. */
@@ -337,6 +338,39 @@ export interface MoveSpec {
    * Absent = this move never lets its user burrow, the default.
    */
   burrow?: { ticks: number };
+  /**
+   * Marks this move as usable stand-alone, with no enemy or ally target at
+   * all — Growth, Agility, Rain Dance, etc. Real structural gap this closes:
+   * every move before this one either rides the hostile hit pipeline
+   * (`resolveHit`, predation.ts) or the ally-support pipeline
+   * (`applySupportMove`, support.ts), both of which need a real other agent
+   * in range. `utilityMoves.ts`'s `maybeUseUtilityMove` is the new,
+   * separate trigger path for this — checked during the same idle-tick slot
+   * `applyExploration` (needs.ts) occupies, since a self/tile-effect move
+   * doesn't fit either existing target-driven pipeline (see MOVES_DESIGN.md's
+   * "why status effects and environmental moves are two different systems").
+   * `pickBestMove` (combat.ts) excludes any move with this set from hostile
+   * selection, same as `burrow` — it's exclusive, not additive, since none
+   * of these effects make sense as a reaction to being attacked. Which
+   * specific effect(s) fire is driven by whichever of `selfHeal`/
+   * `fertilityBoost`/`statChangeOnHit`/`statusImmunityAura`/`spawnsRain`/
+   * `matingRadiusBoost`/`drainNeeds` the move also sets — this flag only
+   * marks eligibility for the idle path, it carries no effect of its own.
+   * Absent = never eligible for idle/stand-alone use, the default.
+   */
+  utilityMove?: boolean;
+  /** Heals this fraction of the user's own maxHp — `sunbeamBonus`, if set, adds an extra fraction when used within `flora.ts`'s `SUNBEAM_RADIUS` of a real "sunbeam" tile (reuses the same terrain-scaled-healing idea `isNearSunbeam` already drives for germination). Requires `utilityMove`. Absent = no self-heal, the default. */
+  selfHeal?: { fraction: number; sunbeamBonus?: number };
+  /** Bumps the fertility (`flora.ts`'s `bumpFertility`) of every tile within `radius` (Chebyshev distance; 0 = just the user's own tile) of the user's position by `amount`. Requires `utilityMove`. Absent = no fertility effect, the default. */
+  fertilityBoost?: { amount: number; radius: number };
+  /** Grants the user (and, within `radius`, every living same-herd ally) `ticks` of new-status immunity — see `Agent.statusImmuneTicksRemaining`'s own doc comment. Requires `utilityMove`. Absent = no immunity aura, the default. */
+  statusImmunityAura?: { ticks: number; radius: number };
+  /** Spawns (or refreshes) a real rain `WeatherCell` (weather.ts) centered on the user's own position — a move-driven weather trigger, not a passive spawn roll. Requires `utilityMove`. Absent/false = no weather effect, the default. */
+  spawnsRain?: boolean;
+  /** Multiplies the user's own mate-search radius (`reproduction.ts`'s `MATE_SEARCH_RADIUS`) by `multiplier` for `ticks` — see `Agent.matingRadiusBoostTicksRemaining`'s own doc comment. Requires `utilityMove`. Absent = no boost, the default. */
+  matingRadiusBoost?: { multiplier: number; ticks: number };
+  /** On use, finds the nearest living, non-same-herd agent within `radius` and transfers `amount` of the user's target `need` from them to the user — real resource theft, distinct from any hostile hit. A no-op (still goes on cooldown) if no such agent is in range. Requires `utilityMove`. Absent = no drain effect, the default. */
+  drainNeeds?: { need: "hunger" | "thirst"; amount: number; radius: number };
   /**
    * Optional respec DAG (see `applyMoveTree`). Each node is a delta applied
    * on top of the base spec, gated by a point cost and prerequisite node

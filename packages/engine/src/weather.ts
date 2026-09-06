@@ -136,10 +136,14 @@ export function pickWeatherType(world: World, x: number, y: number, rng: () => n
   return WEATHER_TYPES[WEATHER_TYPES.length - 1]!; // floating-point fallback, shouldn't normally be reached
 }
 
-function spawnWeatherCell(world: World, log: EventLog | undefined, rng: () => number): void {
-  const x = rng() * world.width;
-  const y = rng() * world.height;
-  const type = pickWeatherType(world, x, y, rng);
+/**
+ * Builds and registers one real `WeatherCell` at `(x, y)` — shared by the
+ * ordinary random-position spawn roll below and `utilityMoves.ts`'s
+ * `spawnsRain` effect (Rain Dance), which needs the exact same cell shape
+ * but at the caster's own position with a forced type instead of a rolled
+ * one. Exported for that second caller.
+ */
+export function spawnWeatherCellAt(world: World, log: EventLog | undefined, x: number, y: number, type: WeatherType, rng: () => number): void {
   const radius = WEATHER_RADIUS_MIN + rng() * (WEATHER_RADIUS_MAX - WEATHER_RADIUS_MIN);
   const lifespanTicks = Math.round(WEATHER_LIFESPAN_MIN_TICKS + rng() * (WEATHER_LIFESPAN_MAX_TICKS - WEATHER_LIFESPAN_MIN_TICKS));
   const angle = rng() * 2 * Math.PI;
@@ -164,6 +168,13 @@ function spawnWeatherCell(world: World, log: EventLog | undefined, rng: () => nu
     center: { x: Math.round(x), y: Math.round(y) },
     radius: Math.round(radius),
   });
+}
+
+function spawnWeatherCell(world: World, log: EventLog | undefined, rng: () => number): void {
+  const x = rng() * world.width;
+  const y = rng() * world.height;
+  const type = pickWeatherType(world, x, y, rng);
+  spawnWeatherCellAt(world, log, x, y, type, rng);
 }
 
 /**

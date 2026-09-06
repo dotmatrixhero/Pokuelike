@@ -12,7 +12,8 @@ import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, canopySpeedMultiplier
 import { tileAt } from "./world.js";
 import { isNight, lightLevel } from "./daynight.js";
 import { advanceBiomeDrift, advanceWaterCycle, advanceWeather } from "./weather.js";
-import { PARALYSIS_SPEED_MULTIPLIER, isParalyzed } from "./status.js";
+import { PARALYSIS_SPEED_MULTIPLIER, isParalyzed, getStatStage } from "./status.js";
+import { statStageMultiplier } from "./combat.js";
 import { updateNotables } from "./notables.js";
 import { updateHerdLeadership } from "./herdLeadership.js";
 
@@ -92,7 +93,13 @@ export function actionSpeedOf(world: World, agent: Agent, tick: number): number 
     activityScheduleMultiplier(agent.activityPattern, tick) *
     coldSnapSpeedMultiplier(world, agent.layer, agent.pos) *
     canopySpeedMultiplier(agent.layer) *
-    (isParalyzed(agent) ? PARALYSIS_SPEED_MULTIPLIER : 1);
+    (isParalyzed(agent) ? PARALYSIS_SPEED_MULTIPLIER : 1) *
+    // A temporary Speed stat-stage grant (e.g. `MoveSpec.statChangeOnHit`'s
+    // self-side effect, or utilityMoves.ts's Agility) composes here, same
+    // machinery `calculateDamage`'s Attack/Defense stages already use
+    // (combat.ts's `statStageMultiplier`) — until this line, "speed" was a
+    // real computed stat with no consumer at all beyond nature.ts flavor.
+    statStageMultiplier(getStatStage(agent, "speed"));
   return effectiveSpeed(agent, baseSpeed);
 }
 

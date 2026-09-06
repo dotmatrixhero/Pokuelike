@@ -155,7 +155,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "bulbasaur",
     placeholderColor: "#78c850",
     homeLayer: "surface",
-    moves: ["tackle", "vine_whip"],
+    moves: ["tackle", "vine_whip", "leech_seed", "sweet_scent"],
     // The bulb on its back needs sunlight to grow (mainline flavor text) —
     // basks and grazes by day, same reasoning as its evolutions below.
     activityPattern: "diurnal",
@@ -173,7 +173,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     placeholderColor: "#4fbf8c",
     homeLayer: "surface",
     isPredator: true,
-    moves: ["slash"],
+    moves: ["slash", "agility"],
     // A stealthy ambush predator ("moves silently... vanishes like a
     // ninja" per mainline flavor text) — crepuscular, striking at the
     // low-light edges of the day rather than in full daylight or full dark.
@@ -234,7 +234,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "venusaur",
     placeholderColor: "#4a8f3c",
     homeLayer: "surface",
-    moves: ["tackle", "vine_whip"],
+    moves: ["tackle", "vine_whip", "leech_seed", "sweet_scent"],
     // Deliberately left cathemeral (the default), not diurnal like its
     // pre-evolution: this is the herd's guardian (nothing preys on it — see
     // predation.ts), and a guardian that only watches half the clock isn't
@@ -248,7 +248,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "pidgey",
     placeholderColor: "#a89060",
     homeLayer: "canopy",
-    moves: ["tackle"],
+    moves: ["tackle", "roost"],
     // An ordinary daytime bird — diurnal, the task brief's own example.
     activityPattern: "diurnal",
     // Canopy has no biome of its own (a flat grid, same as underground) —
@@ -265,7 +265,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // isPreyOf), so a hungry Spearow that's crossed onto the surface layer
     // to feed will just as happily take a small enough Bulbasaur.
     isPredator: true,
-    moves: ["peck"],
+    moves: ["peck", "roost"],
     // A small, aggressive hunting bird — crepuscular, like many real-world
     // raptors/shrikes that hunt at dawn/dusk. Deliberately mismatched with
     // its diurnal prey (Pidgey): the predator is most dangerous exactly at
@@ -282,7 +282,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Not prey/predator itself — coexists with Diglett underground and
     // shares its Field egg group (see EGG_GROUPS_BY_BASE_KEY in
     // leveling.ts), a real cross-species breeding pair.
-    moves: ["scratch", "dig"],
+    moves: ["scratch", "dig", "agility"],
     // A desert dweller that mainline flavor text has curling up and hiding
     // from daytime heat — nocturnal, foraging once it cools off.
     activityPattern: "nocturnal",
@@ -321,7 +321,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // giving the map's own ponds a resident. Real cross-species breeding
     // pair with Bulbasaur/Charmander (all three starters share the
     // Monster egg group in the real games) as well as Water 1.
-    moves: ["tackle", "water_gun"],
+    moves: ["tackle", "water_gun", "withdraw"],
     // The obvious fit — a Water-type drawn to `worldgen.ts`'s highest
     // water-density biome.
     biomes: ["wetland"],
@@ -346,7 +346,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Real cross-species breeding pair with Onix — both Mineral egg group
     // (see leveling.ts's EGG_GROUPS_BY_BASE_KEY), the first actual pairing
     // that table's existing Onix-is-alone-in-Mineral comment anticipated.
-    moves: ["rock_throw", "tackle"],
+    moves: ["rock_throw", "tackle", "defense_curl"],
     // A living boulder that mainline flavor text has rolling down
     // mountainsides — badlands/highland, both rock-and-boulder-heavy biomes
     // (see worldgen.ts's BIOMES boulder terrainWeights).
@@ -360,7 +360,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "growlithe",
     placeholderColor: "#e07850",
     homeLayer: "surface",
-    moves: ["ember"],
+    moves: ["ember", "agility"],
     // A loyal, territory-patrolling dog per mainline flavor text — diurnal,
     // an active daytime patroller rather than a night hunter.
     activityPattern: "diurnal",
@@ -462,7 +462,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "ivysaur",
     placeholderColor: "#5cae5c",
     homeLayer: "surface",
-    moves: ["tackle", "vine_whip"],
+    moves: ["tackle", "vine_whip", "leech_seed", "sweet_scent"],
     // Same sun-grazing temperament as Bulbasaur — the bulb (now a bud)
     // still needs light to keep growing toward its eventual bloom.
     activityPattern: "diurnal",
@@ -499,7 +499,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "wartortle",
     placeholderColor: "#4a80c0",
     homeLayer: "surface",
-    moves: ["tackle", "water_gun"],
+    moves: ["tackle", "water_gun", "withdraw"],
     biomes: ["wetland"],
     preferredTerrain: ["water"],
   }),
@@ -511,7 +511,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Hydro Pump in the small `MOVES` set yet) — Tackle stays alongside it
     // rather than being dropped, the same "keep the pre-evolution's kit,
     // don't strip it down" approach every entry in this batch takes.
-    moves: ["tackle", "water_gun"],
+    moves: ["tackle", "water_gun", "withdraw"],
     biomes: ["wetland"],
     preferredTerrain: ["water"],
   }),
@@ -533,7 +533,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // water-locked instead of staying stuck with Magikarp's restriction
     // forever.
     isPredator: true,
-    moves: ["tackle"],
+    moves: ["tackle", "rain_dance"],
     biomes: ["wetland"],
     preferredTerrain: ["water"],
   }),
@@ -559,7 +559,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "seel",
     placeholderColor: "#a0d8ef",
     homeLayer: "surface",
-    moves: ["tackle", "water_gun"],
+    moves: ["tackle", "water_gun", "safeguard"],
     // Canonically an arctic pinniped that hauls out on ice and swims in
     // frigid water — snow as primary habitat, wetland as the closest
     // "open water" secondary this roster's biome set has.
@@ -573,7 +573,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // No curated Dragon-type move exists yet (small `MOVES` roster) —
     // Tackle, same off-type-move acceptance this file already makes for
     // several other species (e.g. Onix's Tackle/Rock Throw).
-    moves: ["tackle"],
+    moves: ["tackle", "rain_dance"],
     // A real creative liberty, flagged rather than quietly asserted as
     // canon: mainline Dratini's own flavor text places it in lakes/rivers,
     // not snowy peaks — grouped here anyway per this feature's own direct
@@ -604,7 +604,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "vulpix",
     placeholderColor: "#ee9090",
     homeLayer: "surface",
-    moves: ["ember"],
+    moves: ["ember", "safeguard"],
     // A warmth-loving fire fox — diurnal, same reasoning as Charmander/
     // Growlithe above.
     activityPattern: "diurnal",
@@ -666,7 +666,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Real mainline moveset is just Harden (a stat move, not curated) — kept
     // Tackle rather than inventing a new curated move, same off-type reuse
     // acceptance this file already makes elsewhere (e.g. Onix/Dratini).
-    moves: ["tackle"],
+    moves: ["tackle", "harden"],
     activityPattern: "diurnal",
     biomes: ["jungle", "forest"],
     preferredTerrain: ["bush"],
@@ -675,7 +675,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "butterfree",
     placeholderColor: "#a890f0",
     homeLayer: "surface",
-    moves: ["tackle"],
+    moves: ["tackle", "safeguard"],
     biomes: ["jungle", "forest"],
   }),
   weedle: speciesFromDex("WEEDLE", {
@@ -691,7 +691,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "kakuna",
     placeholderColor: "#e0c020",
     homeLayer: "surface",
-    moves: ["tackle"],
+    moves: ["tackle", "harden"],
     activityPattern: "diurnal",
     biomes: ["jungle", "forest"],
     preferredTerrain: ["bush"],
@@ -700,14 +700,14 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "beedrill",
     placeholderColor: "#f8d030",
     homeLayer: "surface",
-    moves: ["tackle"],
+    moves: ["tackle", "agility"],
     biomes: ["jungle", "forest"],
   }),
   oddish: speciesFromDex("ODDISH", {
     spriteKey: "oddish",
     placeholderColor: "#8878c8",
     homeLayer: "surface",
-    moves: ["tackle"],
+    moves: ["tackle", "growth", "grassy_terrain"],
     // "During the day it stays motionless... starts to move around at
     // night" per mainline flavor text — a literal, direct nocturnal fit.
     activityPattern: "nocturnal",
@@ -718,7 +718,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "gloom",
     placeholderColor: "#a878c0",
     homeLayer: "surface",
-    moves: ["tackle"],
+    moves: ["tackle", "growth", "grassy_terrain"],
     activityPattern: "nocturnal",
     biomes: ["jungle", "forest"],
     preferredTerrain: ["flora"],
@@ -727,7 +727,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "krabby",
     placeholderColor: "#f08030",
     homeLayer: "surface",
-    moves: ["tackle", "water_gun"],
+    moves: ["tackle", "water_gun", "harden"],
     // "Digs holes in beaches to live in" per mainline flavor text — a real,
     // literal burrower, same standard Diglett/Sandshrew's own callouts use.
     buildsShelter: true,
@@ -738,7 +738,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "kingler",
     placeholderColor: "#e85838",
     homeLayer: "surface",
-    moves: ["tackle", "water_gun"],
+    moves: ["tackle", "water_gun", "harden"],
     buildsShelter: true,
     biomes: ["beach", "wetland"],
     preferredTerrain: ["water"],
@@ -747,7 +747,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "shellder",
     placeholderColor: "#c8d8f0",
     homeLayer: "surface",
-    moves: ["tackle"],
+    moves: ["tackle", "harden"],
     // "Usually stays in the sea, but sometimes washes up on the shore" per
     // mainline flavor text — genuinely at home on a real Beach biome, but
     // NOT tagged `obligateAquatic`: unlike Magikarp/Tentacool, its own
@@ -777,7 +777,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "ponyta",
     placeholderColor: "#f8d0b0",
     homeLayer: "surface",
-    moves: ["ember"],
+    moves: ["ember", "agility"],
     activityPattern: "diurnal",
     biomes: ["grassland", "highland"],
     preferredTerrain: ["sunbeam"],
@@ -786,7 +786,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "rapidash",
     placeholderColor: "#f0a048",
     homeLayer: "surface",
-    moves: ["tackle", "ember"],
+    moves: ["tackle", "ember", "agility"],
     activityPattern: "diurnal",
     biomes: ["grassland", "highland"],
     preferredTerrain: ["sunbeam"],
@@ -795,7 +795,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "snorlax",
     placeholderColor: "#a8b090",
     homeLayer: "surface",
-    moves: ["tackle"],
+    moves: ["tackle", "defense_curl"],
     // Eats, then sleeps, regardless of time of day per mainline flavor text
     // — deliberately left cathemeral (the default), same reasoning as
     // Venusaur/Charizard above.
@@ -805,7 +805,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "lapras",
     placeholderColor: "#a0c8e8",
     homeLayer: "surface",
-    moves: ["tackle", "water_gun"],
+    moves: ["tackle", "water_gun", "safeguard"],
     // A gentle arctic reptile that ferries riders across icy seas per
     // mainline flavor text — Snow as primary, Wetland as the closest "open
     // water" secondary this roster's biome set has, same pairing Seel above

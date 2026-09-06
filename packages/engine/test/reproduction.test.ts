@@ -569,6 +569,35 @@ describe("sociability-driven mate-seeking radius", () => {
   });
 });
 
+describe("matingRadiusBoostTicksRemaining (e.g. Sweet Scent) doubles the real mate-search radius", () => {
+  it("a boosted neutral agent closes distance on a mate a plain neutral agent wouldn't even detect", () => {
+    const world = createWorld(20, 20);
+    // Distance 8 — beyond the neutral 5-tile radius, within a boosted (x2 -> ~10-tile) one.
+    world.agents.push(
+      parent("mother", "female", { x: 2, y: 2 }, { matingRadiusBoostTicksRemaining: 10 }),
+      parent("father", "male", { x: 10, y: 2 })
+    );
+
+    tickWorld(world);
+
+    const mother = world.agents.find((a) => a.id === "mother")!;
+    expect(mother.pos.x).toBeGreaterThan(2);
+  });
+
+  it("the same distant mate goes undetected once the boost has expired", () => {
+    const world = createWorld(20, 20);
+    world.agents.push(
+      parent("mother", "female", { x: 2, y: 2 }, { matingRadiusBoostTicksRemaining: 0 }),
+      parent("father", "male", { x: 10, y: 2 })
+    );
+
+    tickWorld(world);
+
+    const mother = world.agents.find((a) => a.id === "mother")!;
+    expect(mother.pos.x).toBe(2);
+  });
+});
+
 describe("herd-status-driven mate preference", () => {
   // All three fixtures below share one herd (herd-a, from `parent`'s default),
   // which is exactly what makes the level spread on the two suitors resolve
