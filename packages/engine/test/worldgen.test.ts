@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mulberry32, makeNoise2D, makeDensityField, generateWorld, generateMacroElevation, findWalkableNear, blendBiomeParams, biomeWeightsAt, effectiveWaterDensityAt, type MacroElevationBias } from "../src/worldgen.js";
 import { generateMacroGrid, biasForZone } from "../src/macroGrid.js";
 import { tileAt, setTile } from "../src/world.js";
+import { CANOPY_APPLE_RIPEN_TICKS } from "../src/crops.js";
 
 describe("mulberry32 (seeded PRNG)", () => {
   it("is deterministic: the same seed produces the same sequence", () => {
@@ -147,6 +148,27 @@ describe("generateWorld", () => {
     expect(sawUndergroundWall).toBe(true);
     expect(sawUndergroundFloor).toBe(true);
     expect(sawUndergroundWater).toBe(true);
+  });
+
+  it("canopy Apple tiles are a real mix of already-ripe (real stock) and unripe-and-staggered (stock 0, real growth < CANOPY_APPLE_RIPEN_TICKS) — growth-stage rendering (CROPS_DESIGN.md)", () => {
+    const world = generateWorld(90, 60, 9);
+    let sawRipe = false;
+    let sawUnripe = false;
+    for (const tile of world.tiles.canopy) {
+      if (tile.terrain !== "food") continue;
+      expect(tile.flavor).toBe("apple");
+      if ((tile.stock ?? 0) > 0) {
+        expect(tile.growth).toBeUndefined(); // ripe tiles carry no leftover growth counter
+        sawRipe = true;
+      } else {
+        expect(tile.growth).toBeDefined();
+        expect(tile.growth!).toBeGreaterThanOrEqual(0);
+        expect(tile.growth!).toBeLessThan(CANOPY_APPLE_RIPEN_TICKS);
+        sawUnripe = true;
+      }
+    }
+    expect(sawRipe).toBe(true);
+    expect(sawUnripe).toBe(true);
   });
 
   it("tree tiles are unwalkable; boulder/bush/sand/mud are walkable (boulder is slow and opaque, not a hard blocker)", () => {

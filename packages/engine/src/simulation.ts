@@ -2,7 +2,7 @@ import type { Agent, HuntRules, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import type { RegionDispersalContext } from "./dispersal.js";
-import { growFlora, maybeDropSeed } from "./flora.js";
+import { growCanopyFood, growFlora, maybeDropSeed } from "./flora.js";
 import { decayShelters } from "./shelter.js";
 import { tickEgg } from "./eggs.js";
 import { updateHerdMigrations } from "./herdMigration.js";
@@ -218,6 +218,11 @@ export function tickWorld(
     }
   }
   growFlora(world, log, rng);
+  // Once per tick, not once per agent — same "world-level system, one pass"
+  // shape as growFlora above, its own much smaller Canopy-only counterpart
+  // (real growth-stage rendering, CROPS_DESIGN.md) — see flora.ts's own doc
+  // comment on why this is a genuinely separate pass, not growFlora reused.
+  growCanopyFood(world);
   // Once per tick, not once per agent — same "world-level system, one pass"
   // shape as growFlora above: sustained drought/rain drying out or forming
   // water tiles (see weather.ts's `advanceWaterCycle` doc comment).

@@ -669,10 +669,26 @@ function drawWorldTiles(
                 ? getSeedlingSprite(x, y)
                 : null;
         const cropEmoji = tile.terrain === "food" && tile.flavor ? CROP_EMOJI[tile.flavor] : undefined;
+        // Real growth-stage rendering (CROPS_DESIGN.md: a canopy Apple tree
+        // "reading as 'growing' before 'ready to pick'") — a food tile
+        // placed unripe (`worldgen.ts`'s canopy Apple placement, `stock: 0`
+        // with a real `Tile.growth` counting up — see flora.ts's
+        // `growCanopyFood`) isn't actually harvestable yet, so it shouldn't
+        // read as the same ready-to-eat fruit emoji, just faded. A small
+        // sprout stands in for "still growing" until `growCanopyFood` flips
+        // it over to real stock and clears `growth`, at which point this
+        // tile falls straight through to the ordinary `cropEmoji` branch.
+        const unripe = tile.terrain === "food" && (tile.stock ?? 0) <= 0 && tile.growth !== undefined;
         if (plantSprite) {
           ctx.save();
           ctx.globalAlpha = tile.terrain === "seedling" ? 0.7 : 0.4 + (tile.stock ?? 1) * 0.6;
           ctx.drawImage(plantSprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          ctx.restore();
+        } else if (unripe) {
+          ctx.save();
+          ctx.globalAlpha = 0.55;
+          ctx.font = `${TILE_SIZE * 0.55}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+          ctx.fillText("🌱", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
           ctx.restore();
         } else if (cropEmoji) {
           // Real emoji art for the 8 new crops (direct ask: "do them for

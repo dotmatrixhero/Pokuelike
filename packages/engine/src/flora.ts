@@ -4,7 +4,7 @@ import { tileAt } from "./world.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
 import { floraDecayDivisor } from "./weather.js";
 import { dominantBiomeAt, effectiveWaterDensityAt } from "./worldgen.js";
-import { FOOD_CROPS, WINTER_NON_HARDY_FOOD_CHANCE_MULTIPLIER, pickCrop, seasonalMultiplier, seasonName, type CropId } from "./crops.js";
+import { CANOPY_APPLE_RIPEN_TICKS, FOOD_CROPS, WINTER_NON_HARDY_FOOD_CHANCE_MULTIPLIER, pickCrop, seasonalMultiplier, seasonName, type CropId } from "./crops.js";
 
 /**
  * What a seedling can mature into — a real, biome/moisture/season-gated
@@ -418,6 +418,34 @@ export function maybeDropSeed(world: World, layer: Layer, pos: Vec2, log?: Event
   tile.terrain = "seedling";
   tile.growth = 0;
   log?.record({ kind: "floraChanged", tick: world.tick, layer, pos, stage: "seeded" });
+}
+
+/**
+ * Advances every unripe Canopy Apple tile toward real harvestability — a
+ * genuinely separate, much smaller pass from `growFlora` below, not a
+ * generalization of it: `maybeDropSeed`'s own doc comment ("flora is a
+ * surface-layer thing for now") still holds, Canopy never gets seedlings,
+ * germination, or regrowth. A tile placed unripe at generation time
+ * (`worldgen.ts`'s `deriveCanopyFromSurface`, `stock: 0`) is the only way
+ * one exists — nothing here creates new unripe tiles, it only ever finishes
+ * ones worldgen already started. Call once per tick, same as `growFlora`.
+ */
+export function growCanopyFood(world: World): void {
+  const tiles = world.tiles.canopy;
+  for (let i = 0; i < tiles.length; i++) {
+    const tile = tiles[i]!;
+    if (tile.terrain !== "food" || tile.flavor !== "apple" || (tile.stock ?? 0) > 0) continue;
+    tile.growth = (tile.growth ?? 0) + 1;
+    if (tile.growth >= CANOPY_APPLE_RIPEN_TICKS) {
+      tile.stock = FOOD_MAX_STOCK;
+      tile.growth = undefined;
+      // No `invalidateResourceIndex` needed — the tile was already indexed
+      // as real "food" terrain kind the whole time (`resourceIndex.ts` only
+      // tracks kind, not live stock; `findNearestIndexed` already re-checks
+      // `stock > 0` itself), the same reason ordinary eating (`consume` in
+      // needs.ts) never invalidates the index on every stock change either.
+    }
+  }
 }
 
 /** Advances every seedling toward maturity and regrows every food patch's stock. Call once per tick. */

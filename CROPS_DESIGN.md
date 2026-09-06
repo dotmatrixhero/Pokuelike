@@ -614,6 +614,41 @@ coincidence.
   repurposed `growth` continuing to count past maturation, gating which
   glyph/emoji renders) — real but small, same shape as the seedling
   mechanic already uses.
+
+  **Built** (`Tile.growth` repurposed post-maturity,
+  `CANOPY_APPLE_RIPEN_TICKS` in crops.ts, `growCanopyFood` in flora.ts,
+  `worldgen.ts`'s canopy Apple placement, a new `"🌱"` render state in
+  renderer.ts): scoped to Canopy Apple specifically (the crop this session's
+  own Canopy work actually built a real resource for), not every crop
+  generally. A freshly placed canopy Apple tile is either already-ripe
+  (real stock, a third of placements — the map shouldn't be 100% bare fruit
+  at generation) or unripe: `stock: 0`, `growth` seeded to a random point
+  along `CANOPY_APPLE_RIPEN_TICKS` (200) so tiles ripen staggered across
+  real time instead of all flipping on the exact same tick. `growCanopyFood`
+  (a genuinely separate, much smaller pass from `growFlora` — Canopy still
+  gets no seedlings/germination/regrowth, only this one post-placement
+  ripening clock) advances `growth` by 1/tick and flips the tile to real
+  `FOOD_MAX_STOCK` once it reaches the threshold, clearing `growth`. No new
+  gating logic was needed in needs.ts at all: an unripe tile's `stock: 0`
+  already excludes it from `findNearestIndexed`'s existing `stock > 0` check
+  (`resourceIndex.ts`), so it's simply never offered as a food target until
+  real — a direct reuse of an existing hook, not new plumbing. Rendering: an
+  unripe tile (`stock <= 0` with `growth` still defined) shows a small faded
+  sprout (`🌱`) instead of the crop's own emoji, falling through to the
+  ordinary `cropEmoji` branch automatically once ripening finishes.
+  Validated via 4 targeted unit tests (`growCanopyFood`
+  advancing/completing/leaving-ripe-tiles-alone/ignoring-non-Apple-Canopy-
+  food) plus a dedicated worldgen.test.ts case (both ripe and unripe tiles
+  present at generation, unripe ones bounded within
+  `[0, CANOPY_APPLE_RIPEN_TICKS)`) and `validateGrowthStage.ts` against the
+  real demo scenario: 26 unripe tiles at start, 0 left after 700 real
+  ticks — a real, live-observed ripening cycle, not just a passing unit
+  test. Honestly NOT built: Corn-on-stalks growth-stage rendering — Corn
+  never became a real layer-gated crop this session (still ordinary
+  Surface-native, per this doc's own "Canopy is derived, not independent"
+  section), so there's no Corn-specific placement pass to seed an unripe
+  sub-state onto in the first place.
+
 - **Underground-crop surface inaccessibility, and vice versa.** Nothing
   today gates "which layer can eat from this specific food tile" — any
   agent that can path to a tile's (x, y) on its own layer eats from it, full

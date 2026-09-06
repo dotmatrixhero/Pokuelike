@@ -122,6 +122,23 @@ export interface FoodCropDef {
 export const DIG_TICKS_DEFAULT = 15;
 
 /**
+ * Real ticks an unripe Canopy Apple tile needs before it's actually
+ * harvestable — CROPS_DESIGN.md's "growth-stage rendering" pitch: "a canopy
+ * Apple tree... reading as 'growing' before 'ready to pick'." Not the same
+ * clock as `flora.ts`'s `MATURATION_TICKS` (that's seedling-to-food,
+ * Surface-only) — this is a new post-placement sub-state that clock never
+ * had, a repurposed `Tile.growth` continuing to count instead of a whole
+ * new field, same "reuse what's already there" idiom the seedling mechanic
+ * itself set. Lives here (not flora.ts, where the actual ripening tick —
+ * `growCanopyFood` — runs) so `worldgen.ts` can read it too without a real
+ * worldgen.ts <-> flora.ts import cycle (flora.ts already imports FROM
+ * worldgen.ts), same reasoning `SEASON_LENGTH` above is a shared crops.ts
+ * constant rather than living in whichever single file happens to consume
+ * it first.
+ */
+export const CANOPY_APPLE_RIPEN_TICKS = 200;
+
+/**
  * CROPS_DESIGN.md's tier ladder: the harder a crop's real gate is to
  * satisfy, the higher its nutrition multiplier, so scarcity and payoff
  * reinforce each other. Every number here is a sim-original guess, same

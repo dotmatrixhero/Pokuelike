@@ -1,6 +1,6 @@
 import type { Agent, BiomeSeedInfo, Layer, Vec2, World } from "./types.js";
 import { createWorld, setElevation, setTile, tileAt } from "./world.js";
-import { pickCrop } from "./crops.js";
+import { CANOPY_APPLE_RIPEN_TICKS, pickCrop } from "./crops.js";
 import { mulberry32 } from "./rng.js";
 import { canEnterWater } from "./waterBody.js";
 import type { ZoneDirection } from "./directions.js";
@@ -1534,6 +1534,9 @@ function isNearMassifWall(world: World, seeds: readonly BiomeSeedInfo[], x: numb
  */
 const CANOPY_APPLE_DENSITY = 0.12;
 
+/** Fraction of newly-placed canopy Apple tiles that start already ripe (real stock) rather than unripe and staggered along `CANOPY_APPLE_RIPEN_TICKS` — see the call site's own doc comment. */
+const CANOPY_APPLE_ALREADY_RIPE_FRACTION = 1 / 3;
+
 /**
  * Writes real structure onto `world.tiles.canopy`, reading Surface (already
  * fully generated, massifs included, by the time this runs) rather than
@@ -1556,6 +1559,20 @@ function deriveCanopyFromSurface(world: World, width: number, height: number, fo
       if (treeIsland) {
         if (foodRng() < CANOPY_APPLE_DENSITY) {
           setTile(world, "canopy", x, y, "food", 0, "apple");
+          // Real growth-stage rendering (CROPS_DESIGN.md): "a canopy Apple
+          // tree... reading as 'growing' before 'ready to pick'" — a
+          // freshly generated map shouldn't already be 100% instantly
+          // harvestable trees. A third start already ripe (real stock,
+          // `Tile.growth` left unset) so the map isn't bare of real canopy
+          // food at tick 0; the rest start unripe (`stock: 0`) at a
+          // staggered random point in their real ripening clock
+          // (`growCanopyFood`, flora.ts) rather than all flipping ripe on
+          // the exact same tick.
+          if (foodRng() >= CANOPY_APPLE_ALREADY_RIPE_FRACTION) {
+            const tile = tileAt(world, "canopy", x, y)!;
+            tile.stock = 0;
+            tile.growth = Math.floor(foodRng() * CANOPY_APPLE_RIPEN_TICKS);
+          }
         } else {
           setTile(world, "canopy", x, y, "floor", 0);
         }

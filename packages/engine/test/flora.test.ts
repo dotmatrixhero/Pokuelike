@@ -3,6 +3,7 @@ import { createWorld, setTile, tileAt } from "../src/world.js";
 import {
   maybeDropSeed,
   growFlora,
+  growCanopyFood,
   recordGrazing,
   waterSoil,
   tendSoil,
@@ -12,7 +13,7 @@ import {
   FLORA_FLAVORS,
   MATURATION_TICKS,
 } from "../src/flora.js";
-import { seasonalMultiplier, FOOD_CROPS, SEASON_LENGTH } from "../src/crops.js";
+import { seasonalMultiplier, FOOD_CROPS, SEASON_LENGTH, CANOPY_APPLE_RIPEN_TICKS } from "../src/crops.js";
 import { EventLog } from "../src/events.js";
 
 afterEach(() => {
@@ -920,5 +921,63 @@ describe("crop maturation (CROPS_DESIGN.md: real biome/moisture/season-gated cro
     // ...but Potato is spared most of that penalty relative to a
     // non-drought-resistant crop under the identical drought.
     expect(potatoDrought).toBeGreaterThan(herbsDrought);
+  });
+});
+
+describe("growCanopyFood (CROPS_DESIGN.md: real growth-stage rendering, unripe canopy Apple before it's actually harvestable)", () => {
+  it("advances an unripe canopy Apple tile's growth by 1 per tick, never touching Surface flora", () => {
+    const world = createWorld(3, 1);
+    setTile(world, "canopy", 1, 0, "food", 0, "apple");
+    const tile = tileAt(world, "canopy", 1, 0)!;
+    tile.stock = 0;
+    tile.growth = 0;
+    setTile(world, "surface", 1, 0, "food", 0, "corn"); // untouched control — growCanopyFood is Canopy-only
+    const surfaceTile = tileAt(world, "surface", 1, 0)!;
+    const surfaceStockBefore = surfaceTile.stock;
+
+    growCanopyFood(world);
+
+    expect(tile.growth).toBe(1);
+    expect(tile.stock).toBe(0); // not ripe yet
+    expect(surfaceTile.stock).toBe(surfaceStockBefore); // untouched
+  });
+
+  it("flips to real harvestable stock once growth reaches CANOPY_APPLE_RIPEN_TICKS, clearing the growth counter", () => {
+    const world = createWorld(3, 1);
+    setTile(world, "canopy", 1, 0, "food", 0, "apple");
+    const tile = tileAt(world, "canopy", 1, 0)!;
+    tile.stock = 0;
+    tile.growth = CANOPY_APPLE_RIPEN_TICKS - 1;
+
+    growCanopyFood(world);
+
+    expect(tile.stock).toBe(FOOD_MAX_STOCK);
+    expect(tile.growth).toBeUndefined();
+  });
+
+  it("never touches an already-ripe canopy Apple tile (real stock) — growCanopyFood only advances unripe ones", () => {
+    const world = createWorld(3, 1);
+    setTile(world, "canopy", 1, 0, "food", 0, "apple");
+    const tile = tileAt(world, "canopy", 1, 0)!;
+    const ripeStock = tile.stock;
+
+    growCanopyFood(world);
+
+    expect(tile.stock).toBe(ripeStock);
+    expect(tile.growth).toBeUndefined();
+  });
+
+  it("never touches a non-Apple canopy food tile or a plain canopy floor tile", () => {
+    const world = createWorld(3, 1);
+    setTile(world, "canopy", 0, 0, "floor");
+    setTile(world, "canopy", 1, 0, "food", 0, "corn"); // hypothetical non-canopy-native flavor on canopy — shouldn't happen in real worldgen, but growCanopyFood should still ignore it safely
+    const cornTile = tileAt(world, "canopy", 1, 0)!;
+    cornTile.stock = 0;
+    cornTile.growth = 0;
+
+    growCanopyFood(world);
+
+    expect(tileAt(world, "canopy", 0, 0)!.growth).toBeUndefined();
+    expect(cornTile.growth).toBe(0); // untouched — only flavor "apple" is ever advanced
   });
 });
