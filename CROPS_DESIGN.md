@@ -453,6 +453,17 @@ real:
   guaranteed pixel-for-pixel stitch, same honesty DESIGN.md already applies
   to the river gap.
 
+**Both built.** `riverEdges` (river cross-zone contiguity): retuned once
+against a real sample — the first pass was a near-total wash (4/8 samples
+favoring the marked edge), strengthened to 6-7/8. Mountains: `carveMountain
+Massifs` now takes `highEdges` and boosts initial CA fill chance near the
+marked edge (same "narrow band via `edgeCloseness` raised to an exponent"
+technique as the river trench, `MASSIF_EDGE_SEED_BOOST`/`_EXPONENT`).
+Validated via `validateMassifEdges.ts` and a dedicated worldgen.test.ts
+case, both against a real macro grid: 12 of 15 sampled Highland/Snow zones
+with a real `highEdges` fact showed denser massif wall on the marked side,
+aggregate ~1.67x (0.327 vs 0.196) — a real, working bias.
+
 ### Underground informed by surface water — a real, currently-zero coupling
 
 Direct ask: "places with deep water (underground springs, rivers, lakes,

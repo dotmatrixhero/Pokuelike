@@ -573,6 +573,54 @@ describe("generateWorld: Mountain massifs (direct question: 'do we have solid wa
       }
     }
   });
+
+  it("cross-zone contiguity: a highEdges-marked boundary gets real, denser massif wall near that edge than the opposite one", () => {
+    // Real macro-grid integration, same technique validateMassifEdges.ts
+    // uses for a full-scale run — a promoted Highland/Snow zone with a real
+    // highEdges fact (a neighbor at higher macro elevation) should show
+    // measurably more massif near that specific edge, a bias not a
+    // guarantee (see MASSIF_EDGE_SEED_BOOST's own doc comment).
+    const rows = 40, cols = 40, seed = 909;
+    const grid = generateMacroGrid(seed, rows, cols);
+    const width = 90, height = 60;
+    const bandWidth = Math.round(width * 0.2);
+    const bandHeight = Math.round(height * 0.2);
+    const bandPredicate: Record<string, (x: number, y: number) => boolean> = {
+      N: (x, y) => y < bandHeight,
+      S: (x, y) => y >= height - bandHeight,
+      W: (x, y) => x < bandWidth,
+      E: (x, y) => x >= width - bandWidth,
+    };
+    const opposite: Record<string, string> = { N: "S", S: "N", W: "E", E: "W" };
+
+    function wallFraction(world: ReturnType<typeof generateWorld>, predicate: (x: number, y: number) => boolean): number {
+      let wall = 0, total = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (!predicate(x, y)) continue;
+          total++;
+          if (tileAt(world, "surface", x, y)!.terrain === "wall") wall++;
+        }
+      }
+      return total > 0 ? wall / total : 0;
+    }
+
+    const candidates = grid.zones.filter((z) => !z.isOcean && (z.biome === "highland" || z.biome === "snow"));
+    let markedSum = 0, oppositeSum = 0, sampled = 0;
+    for (const zone of candidates) {
+      if (sampled >= 20) break;
+      const bias = biasForZone(grid, zone.row, zone.col);
+      if (bias.elevation.highEdges.length === 0) continue;
+      const world = generateWorld(width, height, seed ^ (zone.row * 7919 + zone.col * 104729), bias);
+      const dir = bias.elevation.highEdges[0]!;
+      markedSum += wallFraction(world, bandPredicate[dir]!);
+      oppositeSum += wallFraction(world, bandPredicate[opposite[dir]!]!);
+      sampled++;
+    }
+
+    expect(sampled).toBeGreaterThan(0);
+    expect(markedSum / sampled).toBeGreaterThan(oppositeSum / sampled);
+  });
 });
 
 describe("generateWorld: Underground cellular-automata caves", () => {

@@ -1260,6 +1260,19 @@ const MASSIF_WALL_NEIGHBOR_THRESHOLD = 5;
 const MASSIF_MIN_COMPONENT_SIZE = 12;
 /** Deliberately bigger than `BOULDER_ELEVATION_BOOST` (0.8) — a real mountain massif should read taller than an ordinary boulder outcrop, not the same height. */
 const MASSIF_ELEVATION_BOOST = 1.6;
+/**
+ * How much extra initial-fill chance a `highEdges`-marked boundary band
+ * gets, on top of `MASSIF_INITIAL_WALL_CHANCE` — cross-zone contiguity for
+ * mountains, the same "even if it doesn't perfectly line up" bias
+ * `riverEdges`' trench already established for rivers: a zone whose macro
+ * neighbor across this edge is also elevated gets more raw wall material
+ * seeded near that specific edge, so a real massif is more likely to
+ * actually grow toward (and plausibly abut) whatever the neighboring zone
+ * generates on its own side — a nudge, not a guaranteed stitch.
+ */
+const MASSIF_EDGE_SEED_BOOST = 0.3;
+/** Same idea as `RIVER_EDGE_TRENCH_EXPONENT` — keeps the seed-chance boost a real narrow band near the edge, not a whole-zone-wide bump. */
+const MASSIF_EDGE_SEED_EXPONENT = 2;
 
 /**
  * True if `(x, y)` reads as Highland or Snow more strongly than every other
@@ -1328,8 +1341,11 @@ function clearSmallWallComponents(grid: Uint8Array, width: number, height: numbe
  * ordering `carveBadlandsChambers` already established, for the same
  * reason: simpler for this pass to skip the handful of tiles a river
  * already claimed than for river carving to have to reason about massifs.
+ * `highEdges` (from `ZoneGenerationBias.elevation`, when this zone has one)
+ * biases extra initial wall material toward those specific edges — cross-
+ * zone mountain contiguity, see `MASSIF_EDGE_SEED_BOOST`'s doc comment.
  */
-function carveMountainMassifs(world: World, width: number, height: number, rng: () => number): void {
+function carveMountainMassifs(world: World, width: number, height: number, rng: () => number, highEdges: readonly ZoneDirection[] = []): void {
   const seeds = world.biomeSeeds;
   if (!seeds || seeds.length === 0) return;
 
@@ -1340,7 +1356,11 @@ function carveMountainMassifs(world: World, width: number, height: number, rng: 
       const tile = tileAt(world, "surface", x, y);
       if (!tile || tile.terrain === "water" || !isMassifBiomeDominant(seeds, x, y)) continue;
       dominant[y * width + x] = 1;
-      grid[y * width + x] = rng() < MASSIF_INITIAL_WALL_CHANCE ? 1 : 0;
+      let fillChance = MASSIF_INITIAL_WALL_CHANCE;
+      for (const dir of highEdges) {
+        fillChance += edgeCloseness(dir, x, y, width, height) ** MASSIF_EDGE_SEED_EXPONENT * MASSIF_EDGE_SEED_BOOST;
+      }
+      grid[y * width + x] = rng() < Math.min(0.95, fillChance) ? 1 : 0;
     }
   }
 
@@ -1793,7 +1813,7 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   // Badlands BSP chambers just above — its own derived rng sub-stream, same
   // "distinct xor'd seed per generation concern" pattern as every other
   // noise field in this function.
-  carveMountainMassifs(world, width, height, mulberry32(seed ^ 0xbb67ae85));
+  carveMountainMassifs(world, width, height, mulberry32(seed ^ 0xbb67ae85), bias?.elevation.highEdges);
 
   // Underground caves are independent of everything Surface-only above (no
   // biome/elevation/moisture data to read) — its own derived rng sub-stream,
