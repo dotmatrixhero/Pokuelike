@@ -663,41 +663,30 @@ autoCamToggleBtn.addEventListener("click", () => {
 });
 
 /**
- * Overworld mode stacks the macro map above the focused zone's tile view —
- * fine on desktop, cramped on a phone (direct ask: "they are competing too
- * much on mobile... press a button to just turn zone map to overworld").
- * `macro-view-toggle` (only visible inside `#macro-map-wrap`, so already
- * hidden outside Overworld mode) drives which of the two shows.
+ * Overworld mode has two views — the macro map and the focused zone's tile
+ * view — but only room to show one well at a time (direct ask, after first
+ * shipping them stacked: "they are competing too much... I want one map on
+ * the screen at a time", then a direct follow-up to make desktop match the
+ * mobile-only version of that fix: "let's make desktop match mobile, where
+ * the whole map is either overworld or zone"). `macro-view-toggle` (only
+ * visible inside `#macro-map-wrap`, so already hidden outside Overworld
+ * mode) swaps which one shows — same strict either/or on every viewport
+ * size now, no desktop-only "show both" carve-out.
  *
- * Desktop keeps the original "both, or overworld alone" choice — there's
- * room for both, so hiding the tile view is an opt-in bonus, not the
- * default. Mobile instead treats it as a strict either/or: only one view
- * ever shows, defaulting to the overworld map, with the button purely
- * swapping which one — never both, since neither fits well at phone width.
  * `.force-hide` (not the plain `hidden` attribute) is what actually hides
  * either wrap: both set an unconditional `display: flex` of their own, an
  * author rule that always outranks the browser's default `[hidden]` styling
  * regardless of selector specificity, so only an `!important` class reliably
  * wins here.
  */
-type OverworldSubView = "both" | "overworld" | "zone";
-let overworldSubView: OverworldSubView = "both";
-
-function isMobileViewport(): boolean {
-  return window.matchMedia("(max-width: 768px)").matches;
-}
+type OverworldSubView = "overworld" | "zone";
+let overworldSubView: OverworldSubView = "overworld";
 
 function applyOverworldSubView(view: OverworldSubView): void {
   overworldSubView = view;
   canvasWrap.classList.toggle("force-hide", view === "overworld");
   macroMapWrapEl.classList.toggle("force-hide", view === "zone");
-  macroViewToggleBtn.textContent = isMobileViewport()
-    ? view === "zone"
-      ? "Show Overworld"
-      : "Show Zone View"
-    : view === "overworld"
-      ? "Show Both"
-      : "Overworld Only";
+  macroViewToggleBtn.textContent = view === "zone" ? "Show Overworld" : "Show Zone View";
 }
 
 overworldToggleBtn.addEventListener("click", () => {
@@ -714,11 +703,10 @@ overworldToggleBtn.addEventListener("click", () => {
   overworldToggleBtn.textContent = `Overworld: ${enabling ? "On" : "Off"}`;
   overworldToggleBtn.classList.toggle("playing", enabling);
   if (enabling) {
-    // Fresh entry into Overworld mode: default to the mobile-appropriate
-    // single view on a narrow screen, both views on a wide one — rather than
-    // carrying over a stale sub-view choice from a previous session in this
-    // mode (or from before the viewport was last resized).
-    applyOverworldSubView(isMobileViewport() ? "overworld" : "both");
+    // Fresh entry into Overworld mode always defaults to the macro map,
+    // rather than carrying over a stale sub-view choice from a previous
+    // session in this mode.
+    applyOverworldSubView("overworld");
     loadMacroWorld();
   } else {
     // Leaving Overworld mode entirely — canvas-wrap is the only view in
@@ -731,11 +719,7 @@ overworldToggleBtn.addEventListener("click", () => {
 });
 
 macroViewToggleBtn.addEventListener("click", () => {
-  if (isMobileViewport()) {
-    applyOverworldSubView(overworldSubView === "zone" ? "overworld" : "zone");
-  } else {
-    applyOverworldSubView(overworldSubView === "overworld" ? "both" : "overworld");
-  }
+  applyOverworldSubView(overworldSubView === "zone" ? "overworld" : "zone");
 });
 
 macroMapZoomInBtn.addEventListener("click", () => {
