@@ -381,6 +381,8 @@ export type SimEvent =
       defenderId: string;
       defenderSpecies: string;
       defenderHerdId?: string;
+      /** The move actually used — same field/reasoning as "fought"'s own `moveId` (predation.ts's `resolveHit`); herdConflict.ts's `resolveRivalryHit` already has it in scope from the same `pickBestMove` call. Direct ask: "I am not seeing moves being used in 'clash'. Just hp being lost. Better logs please" — this event carried no move info at all before, unlike `fought`. */
+      moveId: string;
       /** Absent on a "missed" outcome (see below) — no damage was dealt. */
       damage?: number;
       /** Absent on a "missed" outcome. */

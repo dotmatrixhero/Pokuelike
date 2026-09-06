@@ -151,10 +151,17 @@ export function formatEvent(event: SimEvent, world?: World): string {
     case "supported":
       return `${idLabel(world, event.supporterId, event.supporterSpecies)} supported ${idLabel(world, event.allyId, event.allySpecies)}${event.healed ? " (healed)" : ""}${event.buffed ? " (buffed)" : ""}`;
     case "herdClash": {
+      // Direct ask: "I am not seeing moves being used in 'clash'. Just hp
+      // being lost. Better logs please" — same "used <moveId>" convention
+      // (and live-moveset lookup for its build modifiers) as "fought"/
+      // "missed" above, which herdClash never had of its own until now.
+      const move = world ? findMoveUsed(event, world) : undefined;
       const rival = event.attackerHerdId && event.defenderHerdId && event.attackerHerdId !== event.defenderHerdId ? ` (herd ${event.attackerHerdId} vs ${event.defenderHerdId})` : "";
-      if (event.outcome === "missed") return `${idLabel(world, event.attackerId, event.attackerSpecies)} clashed with ${idLabel(world, event.defenderId, event.defenderSpecies)} over a resource and missed${rival}`;
+      if (event.outcome === "missed") {
+        return `${idLabel(world, event.attackerId, event.attackerSpecies)} used ${event.moveId} on ${idLabel(world, event.defenderId, event.defenderSpecies)} over a resource and missed${move ? describeMoveModifiers(move) : ""}${rival}`;
+      }
       const retreat = event.outcome === "retreated" ? `, ${idLabel(world, event.defenderId, event.defenderSpecies)} backs off` : "";
-      return `${idLabel(world, event.attackerId, event.attackerSpecies)} clashed with ${idLabel(world, event.defenderId, event.defenderSpecies)} over a resource for ${event.damage}${event.critical ? " (crit!)" : ""}${retreat}${rival}`;
+      return `${idLabel(world, event.attackerId, event.attackerSpecies)} used ${event.moveId} on ${idLabel(world, event.defenderId, event.defenderSpecies)} over a resource for ${event.damage}${event.critical ? " (crit!)" : ""} (hp left: ${event.defenderHpRemaining})${move ? describeMoveModifiers(move) : ""}${retreat}${rival}`;
     }
     case "packHunt":
       return `${idLabel(world, event.attackerId, event.attackerSpecies)} pack-hunts ${idLabel(world, event.targetId, event.targetSpecies)} with ${event.packmates} packmate${event.packmates === 1 ? "" : "s"}`;
