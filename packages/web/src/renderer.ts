@@ -17,6 +17,7 @@ import {
 } from "./sprites.js";
 import type { ActivePopup } from "./eventPopups.js";
 import {
+  CROP_EMOJI,
   FLAVOR_FG,
   FLAVOR_GLYPH,
   TERRAIN_BG,
@@ -514,7 +515,11 @@ function drawWorldTiles(
   ctx.fillRect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
 
   ctx.save();
-  ctx.font = `${TILE_SIZE * 0.55}px monospace`;
+  // Emoji fonts appended as fallback, not a replacement — plain ASCII
+  // terrain glyphs still render via "monospace" same as always; only a
+  // character "monospace" itself can't draw (a crop emoji, see
+  // CROP_EMOJI below) falls through to these.
+  ctx.font = `${TILE_SIZE * 0.55}px monospace, "Segoe UI Emoji", "Noto Color Emoji"`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (let y = 0; y < world.height; y++) {
@@ -663,10 +668,23 @@ function drawWorldTiles(
               : tile.terrain === "seedling"
                 ? getSeedlingSprite(x, y)
                 : null;
+        const cropEmoji = tile.terrain === "food" && tile.flavor ? CROP_EMOJI[tile.flavor] : undefined;
         if (plantSprite) {
           ctx.save();
           ctx.globalAlpha = tile.terrain === "seedling" ? 0.7 : 0.4 + (tile.stock ?? 1) * 0.6;
           ctx.drawImage(plantSprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          ctx.restore();
+        } else if (cropEmoji) {
+          // Real emoji art for the 8 new crops (direct ask: "do them for
+          // tile mode at least") — no dedicated pixel art of their own yet,
+          // so this is their actual look until some exists, same role the
+          // colored-letter glyph plays for everything else below. Emoji
+          // carry their own real color, so no fillStyle tint — just the
+          // same stock-based fade every other plant-tile visual gets.
+          ctx.save();
+          ctx.globalAlpha = tile.stock !== undefined ? 0.4 + 0.6 * tile.stock : 0.9;
+          ctx.font = `${TILE_SIZE * 0.7}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+          ctx.fillText(cropEmoji, x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
           ctx.restore();
         } else {
           const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_FG[tile.terrain];

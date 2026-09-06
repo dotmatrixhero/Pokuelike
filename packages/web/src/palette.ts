@@ -97,6 +97,29 @@ export const FLAVOR_FG: Record<string, Rgb> = {
   bloom: [205, 125, 195],
 };
 
+/**
+ * Real emoji art for the 8 new crops, tile-render-mode only (direct ask:
+ * "do them for tile mode at least") — the ASCII render mode
+ * (`drawWorldAscii`/ascii.ts) stays plain letters, its whole point being a
+ * monospace classic look. The 4 original berries keep their real hand-drawn
+ * sprite art (`getFoodSprite`) instead, so they're deliberately absent
+ * here — this is only for crops that don't have dedicated pixel art of
+ * their own yet. "honey" is included even though that crop isn't built yet
+ * (CROPS_DESIGN.md's own deferred second cut) — a harmless, ready-to-use
+ * entry once it exists, not read by anything until then.
+ */
+export const CROP_EMOJI: Partial<Record<string, string>> = {
+  wheat: "🌾",
+  tomato: "🍅",
+  corn: "🌽",
+  rice: "🍚",
+  apple: "🍎",
+  potato: "🥔",
+  pumpkin: "🎃",
+  herbs: "🌿",
+  honey: "🍯",
+};
+
 /** Direct port of ascii.ts's TERRAIN_GLYPH/FLAVOR_GLYPH — the "ASCII classic" render mode's glyph set, Brogue-style. */
 export const TERRAIN_GLYPH: Record<TerrainKind, string> = {
   floor: ".",
