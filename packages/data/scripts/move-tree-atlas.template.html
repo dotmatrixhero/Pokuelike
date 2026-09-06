@@ -908,6 +908,24 @@
     refreshBuildUI(moveId);
   }
 
+  /**
+   * One-directional version of `toggleNode` for clicking a node directly on
+   * the graph — locks it in if it's eligible and not already chosen, but
+   * (unlike the detail panel's explicit button) never removes an
+   * already-chosen node, so casually clicking through the tree to inspect
+   * nodes can't accidentally undo a build.
+   */
+  function lockInNode(moveId, nodeId) {
+    var tree = TREES[moveId].tree;
+    var ids = getChosen(moveId);
+    if (ids.indexOf(nodeId) >= 0) return;
+    var chosenSet = new Set(ids);
+    if (!checkEligible(tree, chosenSet, nodeId)) return;
+    ids.push(nodeId);
+    setChosen(moveId, ids);
+    refreshBuildUI(moveId);
+  }
+
   function totalCost(tree, ids) {
     return ids.reduce(function (sum, id) { return sum + (tree[id] ? tree[id].cost : 0); }, 0);
   }
@@ -1093,7 +1111,10 @@
         nodesLayer.appendChild(costLbl);
       }
 
-      g.addEventListener("click", function () { selectNode(moveId, id); });
+      g.addEventListener("click", function () {
+        selectNode(moveId, id);
+        lockInNode(moveId, id); // refreshBuildUI re-renders the now-selected detail panel too
+      });
       g.addEventListener("mouseenter", function () { hoverNode(id, true); });
       g.addEventListener("mouseleave", function () { hoverNode(id, false); });
       nodeEls[id] = { g: g, label: lbl };
