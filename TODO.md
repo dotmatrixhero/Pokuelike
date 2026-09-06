@@ -3,6 +3,26 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Environmental/utility moves — first batch built, see MOVES_DESIGN.md
+
+Direct ask: "moves that affect the environment... pull it all in." 13 real,
+already-canonical moves shipped (Growth, Grassy Terrain, Synthesis,
+Moonlight, Roost, Agility, Harden, Withdraw, Defense Curl, Safeguard, Rain
+Dance, Sweet Scent, Leech Seed), each a genuine mainline move the curated
+roster already learns per the real dex, not invented — full writeup,
+real-run validation numbers, and the two deliberately-deferred items
+(persistent hazard tiles, a Sandstorm weather type — both need a genuinely
+new mechanism, not just another `MoveSpec` field) in MOVES_DESIGN.md's
+"Environmental utility moves" section. Real structural addition along the
+way: a third move-trigger path (`utilityMoves.ts`) for moves with no enemy
+or ally target, alongside the existing hostile-hit and ally-support
+pipelines — and a real bug found via this feature's own validation script:
+gating that new trigger on `agent.behavior === "idle"` badly under-fired
+(an agent mid-exploration-walk can go many ticks with fully satisfied needs
+but a stale non-idle behavior label), fixed by gating on
+`chooseBehavior(agent.needs) === "idle"` instead — the real "needs
+satisfied right now" signal.
+
 ## Overworld rearchitecture: a real macro zone grid — built, see DESIGN.md
 
 Direct correction after seeing the region-graph visualization below: "I

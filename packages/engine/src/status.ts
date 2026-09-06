@@ -85,6 +85,7 @@ export function maybeInflictStatus(
 ): void {
   if (!move.statusKind || !move.statusChance) return;
   if (defender.status) return;
+  if (defender.statusImmuneTicksRemaining) return;
   if (isImmuneToStatus(defender.types, move.statusKind)) return;
   if (rng() >= move.statusChance) return;
 
@@ -175,6 +176,8 @@ export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rn
   tickStatStages(agent);
   tickActionLock(agent);
   tickRallyMark(agent);
+  tickStatusImmunity(agent);
+  tickMatingRadiusBoost(agent);
   tickBurrow(agent, world);
   applyRegenPassive(agent);
   applyHealAuraPassive(agent, world);
@@ -250,6 +253,18 @@ function tickActionLock(agent: Agent): void {
 function tickRallyMark(agent: Agent): void {
   if (agent.alive === false || !agent.rallyMarkTicksRemaining) return;
   agent.rallyMarkTicksRemaining = Math.max(0, agent.rallyMarkTicksRemaining - 1);
+}
+
+/** Ticks down a `MoveSpec.statusImmunityAura` grant (`maybeInflictStatus`'s early guard above). No-op on a corpse. */
+function tickStatusImmunity(agent: Agent): void {
+  if (agent.alive === false || !agent.statusImmuneTicksRemaining) return;
+  agent.statusImmuneTicksRemaining = Math.max(0, agent.statusImmuneTicksRemaining - 1);
+}
+
+/** Ticks down a `MoveSpec.matingRadiusBoost` grant (`reproduction.ts`'s mate search). No-op on a corpse. */
+function tickMatingRadiusBoost(agent: Agent): void {
+  if (agent.alive === false || !agent.matingRadiusBoostTicksRemaining) return;
+  agent.matingRadiusBoostTicksRemaining = Math.max(0, agent.matingRadiusBoostTicksRemaining - 1);
 }
 
 /**

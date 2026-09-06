@@ -640,6 +640,28 @@ export interface Agent {
   burrowedTicksRemaining?: number;
   /** The layer this agent burrowed *from* — see `burrowedTicksRemaining`. Absent whenever not currently burrowed. */
   burrowedFromLayer?: Layer;
+  /**
+   * Ticks remaining during which this agent (and, per `MoveSpec.
+   * statusImmunityAura`'s `radius`, any living same-herd ally within it)
+   * cannot be newly inflicted with a status effect — set by a move with
+   * `statusImmunityAura` (`utilityMoves.ts`'s `maybeUseUtilityMove`),
+   * checked by `maybeInflictStatus` (status.ts) as an early no-op guard,
+   * same shape as every other tick-down counter here. Ticked down every
+   * tick regardless of action (`tickStatusEffects`). Absent/0 = no
+   * immunity, the default for every agent and every move that doesn't
+   * grant it.
+   */
+  statusImmuneTicksRemaining?: number;
+  /**
+   * Ticks remaining during which this agent's own mate-search radius
+   * (`reproduction.ts`'s `MATE_SEARCH_RADIUS`) is multiplied by a fixed
+   * constant (`MATING_RADIUS_BOOST_MULTIPLIER`, `utilityMoves.ts`) — set by
+   * a move with `MoveSpec.matingRadiusBoost`. A single fixed multiplier
+   * rather than a per-agent stored value, since only one curated move
+   * grants this today; ticked down every tick regardless of action
+   * (`tickStatusEffects`). Absent/0 = no boost, the default.
+   */
+  matingRadiusBoostTicksRemaining?: number;
   /** General item slots — simple food units and/or ITEM_DEX entries, each carrying its own weight. Capped by `carryCapacityOf` (support.ts). */
   inventory?: InventoryItem[];
   /** The id of a fully-fainted ally this agent is currently carrying, if any. Mutually exclusive in practice with `beingCarriedBy` on the same agent. */

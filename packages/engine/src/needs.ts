@@ -36,6 +36,7 @@ import { canEnterTile } from "./occupancy.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
 import { findWalkableNear } from "./worldgen.js";
 import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict } from "./herdConflict.js";
+import { maybeUseUtilityMove } from "./utilityMoves.js";
 import { thirstDecayMultiplier } from "./weather.js";
 import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
 
@@ -1041,6 +1042,18 @@ export function tickAgentAction(
     log?.record({ kind: "fellAsleep", tick: world.tick, agentId: agent.id, species: agent.species, pos: agent.pos });
     return;
   }
+
+  // Real finding from this feature's own real-run validation: gating this
+  // on `agent.behavior === "idle"` (checked further below, where that field
+  // gets its final value for the tick) badly under-fired — an agent
+  // mid-`exploreTarget` walk (which can run for many consecutive ticks)
+  // returns out of the branch right below THIS one every single one of
+  // those ticks, so it never even reaches that later check despite its
+  // needs being perfectly satisfied the whole time. `chooseBehavior`
+  // (not the `agent.behavior` label, which can lag a walk in progress) is
+  // the real "needs satisfied right now" signal, so this is checked here,
+  // before an in-progress exploration walk gets first refusal.
+  if (chooseBehavior(agent.needs) === "idle" && maybeUseUtilityMove(world, agent, log, rng)) return;
 
   // Continue an in-progress exploration walk as long as nothing more urgent
   // has come up since it started (checked fresh, not read from the stale

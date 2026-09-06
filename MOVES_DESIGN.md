@@ -55,6 +55,7 @@ grepping for "needs" across the whole file.
 | Multi-target/AoE resolution (apply a move to every agent within its resolved shape, not one target) | Growl (its entire premise), Firestorm, Ring of Fire's full fantasy, Boulder Toss/Skipping Stone | **Shipped** — `MoveSpec.hitsArea`, resolved by `resolveAreaHit` (predation.ts): facing derived from attacker->primary-target direction, `resolveShape` finds every living agent in the move's footprint, each gets its own accuracy roll and damage instance; only the deliberately-picked primary target gets status/stat-change/forced-movement/position-swap hooks, incidental targets just take the raw hit. Confirmed in a real fight: a ring-shaped move centered on the attacker landed on both the picked target and an unrelated bystander standing on the same ring. Growl itself still isn't built — see below |
 | Persistent stat stages (`Agent`-level Attack/Defense/etc. modifiers, settable by a move, lasting until cured — distinct from burn's one-off computed halving, which just derives a stage from `agent.status` fresh at each `calculateDamage` call rather than storing one) | Growl specifically (`statStageMultiplier` already exists in combat.ts as a pure function; burn now calls it, but from a computed value, not a stored `Agent.statStages` field) | **Shipped** — `Agent.statStages` (an array of `{stat, stage, ticksRemaining?}` entries, `status.ts`'s `applyStatStage`/`getStatStage`), fed into `calculateDamage`'s existing stat-stage machinery for both attacker and defender, and composing additively with burn's own -2 Attack. `MoveSpec.statChangeOnHit` is the move-level lever: `target: "self"` applies the instant the move is used, `target: "defender"` only on a landed, non-killing hit. **Growl itself is still not built** — it needs this primitive plus multi-target/AoE (both now shipped) plus a no-damage/status-move representation, which remains the one open piece |
 | Status-effect system (burn/poison DOT, paralysis/sleep/freeze) | Ember's/Flamethrower's burn chance, previously idle | **Shipped** — see DESIGN.md's "Status effects" section. Constrict's designed root effect still needs a sixth `StatusKind` (`"root"`), not modeled yet |
+| Idle/opportunistic utility-move trigger (`MoveSpec.utilityMove` + `utilityMoves.ts`'s `maybeUseUtilityMove`) | Growth, Agility, Rain Dance, and every other self/tile-effect move on this whole list — the real gap this section's own "why status effects and environmental moves are two different systems" note predicted | **Shipped** — the third trigger path, alongside the hostile hit pipeline and the ally-support one, checked whenever `chooseBehavior(agent.needs) === "idle"` (needs.ts, NOT `agent.behavior === "idle"` — see this section's own note on why that gate under-fired in a real run). `pickBestMove` excludes `utilityMove`-flagged moves from hostile selection, same as `burrow`. First real content: 13 curated moves, see "Environmental utility moves" above |
 
 Every primitive on this list is now shipped and unit-tested (a 4000-tick full-sim run with the extended roster confirms no regressions). What's left is real content: no shipped move tree grants a passive, uses multi-hit, defense penetration, a situational/self-state bonus, position-swap, an ally-targeting effect, weight scaling, lifesteal/recoil/thorns/heal-aura, cooldown-jamming, a type-matchup lever, a needs-based cost, terrain burn, status spread, or an AoE shape yet — and Growl itself still needs a no-damage/status-move representation (nothing in this sim can currently be "used" without a damage roll) before it can actually be built.
 
@@ -89,17 +90,80 @@ trigger paths, not one unified "use a move" abstraction:
 
 ## Environmental utility moves
 
-A hand-curated `ENVIRONMENTAL_EFFECT_BY_MOVE` table (packages/data, same
-pattern as the status one) maps real moves to effects. First batch, in
-recommended build order (cheapest/safest first — each reuses something
-that already exists):
+**First batch shipped** — real content, not just the primitive, direct ask
+("moves that affect the environment... pull it all in"). No
+`ENVIRONMENTAL_EFFECT_BY_MOVE` table as originally sketched below — instead,
+each effect is its own typed `MoveSpec` field (`selfHeal`/`fertilityBoost`/
+`statusImmunityAura`/`spawnsRain`/`matingRadiusBoost`/`drainNeeds`, plus
+reusing the existing `statChangeOnHit` self-side field), matching this
+codebase's own established "one small typed field per mechanic" convention
+(`terrainBurn`/`terrainFill`/`consumesOwnTerrain` already set that
+precedent) rather than a lookup table keyed by move name. The real missing
+piece this section correctly anticipated — a move with no enemy or ally
+target needs its own trigger path, distinct from the hostile hit pipeline
+and the ally-support one — is now `packages/engine/src/utilityMoves.ts`'s
+`maybeUseUtilityMove`, checked whenever `chooseBehavior(agent.needs) ===
+"idle"` (needs.ts), same real-run-tuned placement note as everywhere else
+in this codebase: an earlier attempt gated on `agent.behavior === "idle"`
+(a narrower, laggier signal — an agent mid-exploration-walk can go many
+ticks with needs fully satisfied but a stale non-idle `behavior` label)
+badly under-fired in a real run, confirmed via a dedicated validation
+script before landing on the `chooseBehavior` gate instead.
+
+13 real, curated moves shipped, every one a genuine mainline move the
+current roster already learns canonically (checked directly against
+dex/species.generated.ts's own `levelMoves`, not invented): **Growth**/
+**Grassy Terrain** (fertility, not seedling-maturation as first floated
+below — flora.ts's real `raiseFertility`, exported for this), **Synthesis**/
+**Moonlight**/**Roost** (self-heal, the first two terrain-scaled near a
+`sunbeam` tile), **Agility**/**Harden**/**Withdraw**/**Defense Curl** (self
+stat-stage buffs via the existing `statChangeOnHit` field — the base
+"speed" stat already drove the real action economy (`actionSpeedOf`'s
+whole job), but nothing ever read a temporary Speed STAGE the way
+`calculateDamage` already does for Attack/Defense; Agility is the first
+move to actually grant one, `actionSpeedOf` now folding it into its
+multiplier stack so it really does change how often its user acts, not
+just a cosmetic number), **Safeguard** (temporary new-status immunity, self +
+nearby herd-mates), **Rain Dance** (spawns a real `WeatherCell` at the
+caster's position — `weather.ts`'s `spawnWeatherCellAt`, extracted from the
+existing random-spawn roll), **Sweet Scent** (doubles the caster's own
+mate-search radius for a duration — `reproduction.ts`'s `mateSearchRadius`),
+and **Leech Seed** (real resource theft: transfers hunger from the nearest
+non-herd agent in range, the one genuinely new agent-to-agent mechanic on
+this whole list, matching this section's own original prediction). 24
+species got at least one of these added to their curated moveset. Real-run
+validated (`validateUtilityMoves.ts`): an 8000-tick `createDemoWorld` run
+confirmed Growth, Leech Seed, Agility, Withdraw, and Safeguard all firing
+live; Rain Dance/Sweet Scent/Moonlight/Grassy Terrain/Harden/Defense
+Curl's learners (dratini/gyarados, oddish/gloom, geodude/snorlax/metapod/
+kakuna/krabby/kingler/shellder) aren't part of that particular fixed
+single-map scenario's starting roster, so those five are unit-tested
+directly (`test/utilityMoves.test.ts`) rather than also confirmed in that
+specific real run.
+
+**Not built, deliberately deferred** (both need a genuinely new mechanism,
+not just another field on the existing pattern): **Stockpile**'s buried,
+later-retrievable personal food cache, and the whole hazard-tile family
+(**Stealth Rock**/**Toxic Spikes**/**Spikes**/**Rapid Spin**) — a laid,
+persistent tile that damages/poisons/etc. whoever crosses it later is a
+real new `Tile` concept this pass didn't attempt. **Sandstorm** stays
+undesigned too — Diglett/Sandshrew/Onix/Geodude all canonically know it, a
+real signal a sandstorm weather type (alongside rain/storm/drought/
+coldSnap) is worth adding someday, but that's a new `WeatherType`, not a
+move-level change.
+
+Below this point is the ORIGINAL brainstorm this batch drew from — kept
+for its own reasoning/precedent value, not all of it shipped as originally
+sketched (Growth's own description below, "force-matures a seedling," is
+the clearest example: the real shipped version uses fertility instead,
+noted above):
 
 | Move (real) | Effect | What it touches |
 |---|---|---|
 | Sunny Day | Plants a temporary `sunbeam` tile at the caster's position | flora.ts's `isNearSunbeam`/`FOOD_CHANCE_NEAR_SUNBEAM` — zero new terrain code |
 | Dig | Instantly crosses the user to the layer below, at the same (x,y) | Reuses the existing cross-layer mechanic (needs.ts) as an emergency escape. **Stronger variant floated, not yet designed or built** — see "Dig as temporary invulnerability" below instead of shipping the plain instant-escape version |
-| Leech Seed | Transfers a fixed amount of hunger/thirst from target to caster | Direct `Needs` field manipulation — the one genuinely new mechanic (resource transfer between two agents) |
-| Growth | Force-matures a nearby `seedling` early, or shortens its `MATURATION_TICKS` | Direct hook into flora.ts's existing growth timer |
+| Leech Seed | Transfers a fixed amount of hunger/thirst from target to caster | Direct `Needs` field manipulation — the one genuinely new mechanic (resource transfer between two agents). **Shipped, see above** — hunger only, not thirst, and a one-off transfer rather than a sustained per-tick drain |
+| Growth | Force-matures a nearby `seedling` early, or shortens its `MATURATION_TICKS` | Direct hook into flora.ts's existing growth timer. **Shipped, see above, but via fertility instead** |
 | Water Gun | Converts an adjacent dry `floor` tile into a temporary puddle, or restores a real `water` tile that's been drying/receding | New but minimal — a short-lived stock-bearing water tile; the "restore" half reuses whatever water tiles already track once anything does (currently they don't dry up at all, so this waits on that first) |
 | Ember (opportunistic, not on-hit) | Burns an adjacent `flora`/`food` tile back to `floor` | Real terraforming, double-edged (clears a blocker, destroys a resource) |
 | Rock Throw (**own-terrain consumption, own spec — floated, not yet built**) | While standing on a real `boulder` tile (already a real, generated `TerrainKind` — `worldgen.ts`'s Highland-leaning obstacle kind, currently just unwalkable scenery), throws *that* boulder instead of a generic rock: the boulder tile reverts to `floor` (consumed, like `terrainBurn` but on the attacker's own tile instead of the defender's) and the hit deals roughly triple damage. Its own tree node, not baked into the base move — most Rock Throw uses are the ordinary version; this is the payoff for actually standing on real terrain when you use it | Closer to buildable than it looks: `terrainBurn` is the exact same shape (revert one tile, consequence attached to a landed hit) already proven in the engine, just checked against the *attacker's* tile instead of the *defender's*, and gated on `terrain === "boulder"` specifically rather than any landed hit. Needs one new field (e.g. `MoveSpec.consumesOwnTerrain?: { terrain: TerrainKind; damageMultiplier: number }`), checked at the top of the hit-resolution path (before damage, since it changes the damage itself) rather than in the existing post-hit hook block |

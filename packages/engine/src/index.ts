@@ -37,3 +37,4 @@ export * from "./herdLeadership.js";
 export * from "./directions.js";
 export * from "./macroGrid.js";
 export * from "./overworld.js";
+export * from "./utilityMoves.js";
