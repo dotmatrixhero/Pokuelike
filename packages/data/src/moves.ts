@@ -3157,12 +3157,17 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       overload_footing: {
         id: "overload_footing",
-        name: "+10% Recoil",
+        name: "Reckless Overload",
         cost: 1,
         prerequisitesAnyOf: [["shaking_ground"], ["cracking_momentum"], ["coordinated_tremor"]],
         leaning: "aggression",
-        // The ground doesn't spare the one shaking it, either.
-        delta: { recoilFraction: 0.1 },
+        // Fixed a real bug here: this node used to be `recoilFraction: 0.1`
+        // alone — a full skill point spent on nothing but self-damage, no
+        // tradeoff at all. Recoil is a real lever everywhere else in the
+        // roster (Cataclysm below, Tackle's own keystones, Ember's Pyroclasm)
+        // ONLY when paired with the power it's buying in the same node.
+        // Paired here to match.
+        delta: { power: 10, recoilFraction: 0.1 },
       },
       aftershock_barrage: {
         id: "aftershock_barrage",
