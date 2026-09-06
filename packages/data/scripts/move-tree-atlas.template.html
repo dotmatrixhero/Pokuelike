@@ -299,6 +299,45 @@
   .edge-lit { opacity: 1 !important; stroke-width: 2.2 !important; }
   .node-dim { opacity: 0.28; }
   .node-lit circle.ring { filter: brightness(1.4); }
+  .node-chosen circle.ring { stroke-width: 3.4; filter: drop-shadow(0 0 3px currentColor); }
+  .node-chosen .node-check { opacity: 1; }
+  .node-locked { opacity: 0.32; }
+  .node-locked circle:not(.ring) { opacity: 0.35 !important; }
+  .node-check { opacity: 0; pointer-events: none; }
+
+  .build-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+  }
+  .build-controls .eyebrow { align-self: flex-start; }
+  .build-points {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .build-points b { color: var(--cross); font-weight: 500; }
+
+  .build-toggle-btn {
+    width: 100%;
+    font-family: "Rajdhani", sans-serif;
+    font-weight: 700;
+    font-size: 13.5px;
+    letter-spacing: 0.02em;
+    border: 1px solid var(--soc);
+    background: var(--soc-soft);
+    color: var(--soc);
+    padding: 9px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+  .build-toggle-btn:hover:not(:disabled) { filter: brightness(1.2); }
+  .build-toggle-btn.remove { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+  .build-toggle-btn:disabled { border-color: var(--border); background: var(--panel-2); color: var(--text-faint); cursor: not-allowed; }
+  .build-lock-reason { font-size: 11.5px; color: var(--text-faint); margin-top: 6px; line-height: 1.4; }
 
   /* ---------- Detail panel ---------- */
 
@@ -446,7 +485,12 @@
         <div class="eyebrow">Range &amp; footprint</div>
         <svg class="range-grid" id="rangeGrid" role="img" aria-label="Range and area of effect"></svg>
         <div class="range-grid-legend" id="rangeGridLegend"></div>
-        <div class="range-grid-caption">Base shape shown — some tree nodes change it (see the graph).</div>
+        <div class="range-grid-caption" id="rangeGridCaption">Base shape shown — some tree nodes change it (see the graph).</div>
+      </div>
+      <div class="build-controls">
+        <div class="eyebrow">Build</div>
+        <div class="build-points" id="buildPoints"><b>0</b> pts spent</div>
+        <button class="flag-btn" id="resetBuildBtn" type="button">Reset build</button>
       </div>
       <button class="flag-btn" id="flagBtn" type="button">Flag for redesign</button>
     </div>
@@ -711,6 +755,191 @@
   }
   function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
+  // ---------- Interactive build: a faithful port of applyMoveTree ----------
+
+  /**
+   * Ports `applyMoveTree` (packages/engine/src/moves.ts) exactly — same
+   * field list, same additive-vs-overwrite rules — so a build made here
+   * produces the identical MoveSpec the real engine would. Assumes
+   * `chosenIds` is already a validly-ordered, conflict-free sequence
+   * (guaranteed by `checkEligible`/`pruneInvalid` below, which gate every
+   * mutation), so unlike the engine original this doesn't need to throw.
+   */
+  function applyBuildJS(base, chosenIds) {
+    var tree = base.tree;
+    var result = Object.assign({}, base, { range: base.range ? Object.assign({}, base.range) : undefined });
+    chosenIds.forEach(function (nodeId) {
+      var node = tree[nodeId];
+      if (!node) return;
+      var delta = node.delta || {};
+      var has = function (k) { return delta[k] !== undefined; };
+      result = Object.assign({}, result, {
+        shape: has("shape") ? delta.shape : result.shape,
+        power: has("power") ? result.power + delta.power : result.power,
+        accuracy: has("accuracy") ? result.accuracy + delta.accuracy : result.accuracy,
+        cooldownTicks: has("cooldownTicks") ? Math.max(0, result.cooldownTicks + delta.cooldownTicks) : result.cooldownTicks,
+        statusChance: has("statusChance") ? (result.statusChance || 0) + delta.statusChance : result.statusChance,
+        range: has("range") ? { min: delta.range.min != null ? delta.range.min : (result.range ? result.range.min : 0) || 0, max: delta.range.max != null ? delta.range.max : (result.range ? result.range.max : 1) } : result.range,
+        forcedMovement: has("forcedMovement") ? delta.forcedMovement : result.forcedMovement,
+        defensePenetration: has("defensePenetration") ? (result.defensePenetration || 0) + delta.defensePenetration : result.defensePenetration,
+        hits: has("hits") ? delta.hits : result.hits,
+        lockTicks: has("lockTicks") ? (result.lockTicks || 0) + delta.lockTicks : result.lockTicks,
+        situationalBonus: has("situationalBonus") ? delta.situationalBonus : result.situationalBonus,
+        selfStateBonus: has("selfStateBonus") ? delta.selfStateBonus : result.selfStateBonus,
+        statChangeOnHit: has("statChangeOnHit") ? delta.statChangeOnHit : result.statChangeOnHit,
+        positionSwap: has("positionSwap") ? delta.positionSwap : result.positionSwap,
+        targetsAlly: has("targetsAlly") ? delta.targetsAlly : result.targetsAlly,
+        allyEffectOnAttack: has("allyEffectOnAttack") ? delta.allyEffectOnAttack : result.allyEffectOnAttack,
+        hitsArea: has("hitsArea") ? delta.hitsArea : result.hitsArea,
+        excludesAllies: has("excludesAllies") ? delta.excludesAllies : result.excludesAllies,
+        terrainBurn: has("terrainBurn") ? delta.terrainBurn : result.terrainBurn,
+        statusSpreads: has("statusSpreads") ? delta.statusSpreads : result.statusSpreads,
+        allyEffect: has("allyEffect") ? delta.allyEffect : result.allyEffect,
+        weightScaling: has("weightScaling") ? delta.weightScaling : result.weightScaling,
+        critRateStage: has("critRateStage") ? (result.critRateStage || 0) + delta.critRateStage : result.critRateStage,
+        lifestealFraction: has("lifestealFraction") ? (result.lifestealFraction || 0) + delta.lifestealFraction : result.lifestealFraction,
+        recoilFraction: has("recoilFraction") ? (result.recoilFraction || 0) + delta.recoilFraction : result.recoilFraction,
+        jamCooldownTicks: has("jamCooldownTicks") ? (result.jamCooldownTicks || 0) + delta.jamCooldownTicks : result.jamCooldownTicks,
+        bonusVsType: has("bonusVsType") ? delta.bonusVsType : result.bonusVsType,
+        resistanceBreaker: has("resistanceBreaker") ? delta.resistanceBreaker : result.resistanceBreaker,
+        selfCostPerUse: has("selfCostPerUse") ? delta.selfCostPerUse : result.selfCostPerUse,
+        rallyCall: has("rallyCall") ? delta.rallyCall : result.rallyCall,
+        critCooldownReset: has("critCooldownReset") ? delta.critCooldownReset : result.critCooldownReset,
+        positionSwapPull: has("positionSwapPull") ? (result.positionSwapPull || 0) + delta.positionSwapPull : result.positionSwapPull,
+        statusSeverity: has("statusSeverity") ? delta.statusSeverity : result.statusSeverity,
+        consumesOwnTerrain: has("consumesOwnTerrain") ? delta.consumesOwnTerrain : result.consumesOwnTerrain,
+        terrainFill: has("terrainFill") ? delta.terrainFill : result.terrainFill,
+      });
+    });
+    return result;
+  }
+
+  /** Same three rules `applyMoveTree` validates: prerequisites, prerequisitesAnyOf, excludes — against a candidate chosen-so-far set. */
+  function checkEligible(tree, chosenSet, nodeId) {
+    var node = tree[nodeId];
+    var missing = (node.prerequisites || []).some(function (p) { return !chosenSet.has(p); });
+    if (missing) return false;
+    if (node.prerequisitesAnyOf && node.prerequisitesAnyOf.length) {
+      var satisfied = node.prerequisitesAnyOf.some(function (set) { return set.every(function (p) { return chosenSet.has(p); }); });
+      if (!satisfied) return false;
+    }
+    var conflict = false;
+    chosenSet.forEach(function (cid) {
+      if ((node.excludes || []).indexOf(cid) >= 0) conflict = true;
+      var cNode = tree[cid];
+      if (cNode && (cNode.excludes || []).indexOf(nodeId) >= 0) conflict = true;
+    });
+    return !conflict;
+  }
+
+  /** Explains, in short human terms, why a not-yet-chosen node can't be added right now. */
+  function whyLocked(tree, chosenSet, nodeId) {
+    var node = tree[nodeId];
+    var missing = (node.prerequisites || []).filter(function (p) { return !chosenSet.has(p); });
+    if (missing.length) return "Requires " + missing.map(function (p) { return tree[p] ? tree[p].name : p; }).join(", ") + " first.";
+    if (node.prerequisitesAnyOf && node.prerequisitesAnyOf.length) {
+      var satisfied = node.prerequisitesAnyOf.some(function (set) { return set.every(function (p) { return chosenSet.has(p); }); });
+      if (!satisfied) {
+        var options = node.prerequisitesAnyOf.map(function (set) { return set.map(function (p) { return tree[p] ? tree[p].name : p; }).join(" + "); }).join(", or ");
+        return "Requires one of: " + options + ".";
+      }
+    }
+    var conflictWith = null;
+    chosenSet.forEach(function (cid) {
+      if ((node.excludes || []).indexOf(cid) >= 0) conflictWith = cid;
+      var cNode = tree[cid];
+      if (cNode && (cNode.excludes || []).indexOf(nodeId) >= 0) conflictWith = cid;
+    });
+    if (conflictWith) return "Excluded by your choice of " + (tree[conflictWith] ? tree[conflictWith].name : conflictWith) + " — that fork is permanent.";
+    return "";
+  }
+
+  /** Re-validates an ordered chosen-id list from scratch, dropping (and cascading) anything no longer eligible — e.g. after removing a prerequisite. */
+  function pruneInvalid(tree, orderedIds) {
+    var ids = orderedIds.slice();
+    var changed = true;
+    while (changed) {
+      changed = false;
+      var chosen = new Set();
+      var kept = [];
+      ids.forEach(function (id) {
+        if (tree[id] && checkEligible(tree, chosen, id)) {
+          chosen.add(id);
+          kept.push(id);
+        } else {
+          changed = true;
+        }
+      });
+      ids = kept;
+    }
+    return ids;
+  }
+
+  var BUILD_STORAGE_KEY = "moveTreeAtlas.build.v1";
+  function loadBuilds() {
+    try { return JSON.parse(localStorage.getItem(BUILD_STORAGE_KEY) || "{}"); } catch (e) { return {}; }
+  }
+  function saveBuilds(all) {
+    try { localStorage.setItem(BUILD_STORAGE_KEY, JSON.stringify(all)); } catch (e) {}
+  }
+  function getChosen(moveId) {
+    var all = loadBuilds();
+    return Array.isArray(all[moveId]) ? all[moveId].slice() : [];
+  }
+  function setChosen(moveId, ids) {
+    var all = loadBuilds();
+    all[moveId] = ids;
+    saveBuilds(all);
+  }
+
+  function toggleNode(moveId, nodeId) {
+    var tree = TREES[moveId].tree;
+    var ids = getChosen(moveId);
+    var idx = ids.indexOf(nodeId);
+    if (idx >= 0) {
+      ids.splice(idx, 1);
+      ids = pruneInvalid(tree, ids); // cascades to anything that depended on it
+    } else {
+      var chosenSet = new Set(ids);
+      if (!checkEligible(tree, chosenSet, nodeId)) return; // guard — the button should already be disabled
+      ids.push(nodeId);
+    }
+    setChosen(moveId, ids);
+    refreshBuildUI(moveId);
+  }
+
+  function totalCost(tree, ids) {
+    return ids.reduce(function (sum, id) { return sum + (tree[id] ? tree[id].cost : 0); }, 0);
+  }
+
+  /** Re-renders everything a build change touches: stage stats, the range/AoE grid, node visuals, the points readout, and the open detail panel (if any). */
+  function refreshBuildUI(moveId) {
+    var move = TREES[moveId];
+    var tree = move.tree;
+    var ids = getChosen(moveId);
+    var chosenSet = new Set(ids);
+    var respec = applyBuildJS(move, ids);
+
+    renderStageStats(respec);
+    renderRangeGrid(respec);
+    document.getElementById("rangeGridCaption").textContent = ids.length
+      ? "Shows your current build (" + ids.length + " node" + (ids.length === 1 ? "" : "s") + " chosen)."
+      : "Base shape shown — pick nodes below to see how they change it.";
+
+    var svg = document.getElementById("treeSvg");
+    var nodeEls = svg._nodeEls || {};
+    Object.keys(nodeEls).forEach(function (id) {
+      var isChosen = chosenSet.has(id);
+      var isLocked = !isChosen && !checkEligible(tree, chosenSet, id);
+      nodeEls[id].g.classList.toggle("node-chosen", isChosen);
+      nodeEls[id].g.classList.toggle("node-locked", isLocked);
+    });
+
+    document.getElementById("buildPoints").innerHTML = "<b>" + totalCost(tree, ids) + "</b> pts spent";
+
+    if (state.selectedNode) renderDetail(moveId, state.selectedNode);
+  }
+
   // ---------- SVG rendering ----------
 
   var SVGNS = "http://www.w3.org/2000/svg";
@@ -828,6 +1057,17 @@
       }
       g.appendChild(el("circle", { class: "ring", r: r, fill: "#0c1015", stroke: color, "stroke-width": 2.2 }));
       g.appendChild(el("circle", { r: r - 5, fill: color, opacity: node.grantsPassive || node.grantsPassives ? 0.95 : 0.55 }));
+      // Chosen-build badge — offset to the node's upper-right corner so it
+      // never collides with the cost number or a passive's own fill.
+      var badgeX = r * 0.72, badgeY = -r * 0.72;
+      var checkGroup = el("g", { class: "node-check" });
+      checkGroup.appendChild(el("circle", { cx: badgeX, cy: badgeY, r: 6, fill: "var(--soc)", stroke: "#0c1015", "stroke-width": 1.2 }));
+      var check = el("text", {
+        x: badgeX, y: badgeY + 3, "text-anchor": "middle", fill: "#0c1015", "font-size": 8.5, "font-weight": "700",
+      });
+      check.textContent = "✓";
+      checkGroup.appendChild(check);
+      g.appendChild(checkGroup);
 
       var labelY = p.y < 0 ? -(r + 9) : r + 15;
       var label = el("text", {
@@ -948,6 +1188,30 @@
     costLine.className = "cost-line";
     costLine.textContent = "id: " + nodeId + "  ·  cost: " + node.cost + " skill point" + (node.cost === 1 ? "" : "s");
     card.appendChild(costLine);
+
+    var chosenSet = new Set(getChosen(moveId));
+    var isChosen = chosenSet.has(nodeId);
+    var eligible = isChosen || checkEligible(tree, chosenSet, nodeId);
+    var buildBlock = document.createElement("div");
+    buildBlock.className = "field-block";
+    var buildBtn = document.createElement("button");
+    buildBtn.type = "button";
+    buildBtn.className = "build-toggle-btn" + (isChosen ? " remove" : "");
+    buildBtn.disabled = !eligible;
+    buildBtn.textContent = isChosen
+      ? "Remove from build (−" + node.cost + " pt" + (node.cost === 1 ? "" : "s") + ")"
+      : eligible
+      ? "Add to build (+" + node.cost + " pt" + (node.cost === 1 ? "" : "s") + ")"
+      : "Locked";
+    buildBtn.addEventListener("click", function () { toggleNode(moveId, nodeId); });
+    buildBlock.appendChild(buildBtn);
+    if (!isChosen && !eligible) {
+      var reason = document.createElement("div");
+      reason.className = "build-lock-reason";
+      reason.textContent = whyLocked(tree, chosenSet, nodeId);
+      buildBlock.appendChild(reason);
+    }
+    card.appendChild(buildBlock);
 
     if (node.prerequisites && node.prerequisites.length) {
       var block = document.createElement("div");
@@ -1262,6 +1526,19 @@
     if (svg._applyFocus) svg._applyFocus(nodeId);
   }
 
+  function renderStageStats(displayMove) {
+    var baseMove = TREES[state.moveId];
+    var nodeCount = Object.keys(baseMove.tree).length;
+    var stats = document.getElementById("stageStats");
+    stats.innerHTML =
+      "<span><b>" + displayMove.type + "</b> " + displayMove.category + "</span>" +
+      "<span>pwr <b>" + displayMove.power + "</b></span>" +
+      "<span>acc <b>" + displayMove.accuracy + "</b></span>" +
+      "<span>cd <b>" + displayMove.cooldownTicks + "</b></span>" +
+      "<span>shape <b>" + displayMove.shape.kind + (displayMove.shape.length ? " " + displayMove.shape.length : "") + (displayMove.shape.radius != null ? " r" + displayMove.shape.radius : "") + (displayMove.shape.width ? "×" + displayMove.shape.width : "") + "</b></span>" +
+      "<span><b>" + nodeCount + "</b> nodes</span>";
+  }
+
   function selectMove(moveId) {
     state.moveId = moveId;
     state.selectedNode = null;
@@ -1272,18 +1549,9 @@
     });
 
     document.getElementById("stageTitle").textContent = move.name;
-    var stats = document.getElementById("stageStats");
-    var nodeCount = Object.keys(move.tree).length;
-    stats.innerHTML =
-      "<span><b>" + move.type + "</b> " + move.category + "</span>" +
-      "<span>pwr <b>" + move.power + "</b></span>" +
-      "<span>acc <b>" + move.accuracy + "</b></span>" +
-      "<span>cd <b>" + move.cooldownTicks + "</b></span>" +
-      "<span>shape <b>" + move.shape.kind + (move.shape.length ? " " + move.shape.length : "") + (move.shape.radius != null ? " r" + move.shape.radius : "") + (move.shape.width ? "×" + move.shape.width : "") + "</b></span>" +
-      "<span><b>" + nodeCount + "</b> nodes</span>";
 
     renderTree(moveId);
-    renderRangeGrid(move);
+    refreshBuildUI(moveId);
     clearDetail();
     updateFlagBtn();
     document.getElementById("treeSvg").addEventListener("click", function (e) {
@@ -1308,6 +1576,11 @@
     setNote(state.moveId, { flagged: !note.flagged });
     updateFlagBtn();
     refreshPickerFlags();
+  });
+
+  document.getElementById("resetBuildBtn").addEventListener("click", function () {
+    setChosen(state.moveId, []);
+    refreshBuildUI(state.moveId);
   });
 
   function refreshPickerFlags() {

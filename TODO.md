@@ -3,6 +3,29 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Move Tree Atlas: interactive build mode — click nodes on/off live
+
+Direct ask right after the range grid shipped: "needs to change based on
+the notable/skill I have selected. I should be able to flip em on and
+have it modify the damage and stats and the range." Added a real
+respec-builder to the artifact: each node's detail panel now has an
+Add/Remove-from-build button (disabled with a plain-English reason when
+its prerequisites aren't met or it's excluded by something already
+chosen — confirmed "prevent excludes" rather than let you click into a
+conflict and see an error); the stage's power/accuracy/cooldown/shape
+readout and the range/AoE grid both recompute live from the actual
+chosen set. The math is a faithful line-for-line port of the real
+`applyMoveTree` (same additive-vs-overwrite field list), not an
+approximation — verified against real tree data before publishing
+(Earthquake's fork exclusion + cascade-remove-on-uncheck, Hydro Pump's
+crosslink correctly zeroing out its own branch's `lockTicks` cost).
+Removing a node cascades: anything that depended on it gets dropped too,
+re-validated from scratch each time. Build-in-progress persists per move
+in localStorage (mirrors the existing redesign-notes mechanism), with a
+"Reset build" button and a running points-spent readout. Template edited
+directly (the real, versioned source per the standardized process above)
+and republished through the same two-script pipeline.
+
 ## Move Tree Atlas: range/AoE grid added, artifact process standardized
 
 Direct ask: add a range/AoE grid preview per move, republish, and — since
