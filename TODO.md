@@ -127,21 +127,57 @@ none of this is built yet, this section is purely to not lose the thread:
       Still open: this only closes evolution gaps on the CURRENT roster —
       growing the roster with genuinely new base-form lines (past these 24)
       wasn't attempted this pass.
-- [ ] **Cross-zone migration patterns** — direct follow-up to the extinction
-      fix's own remaining gap (see the `[ ]` right above it): raise
-      `EMIGRATION_CHANCE_PER_TICK`/rework the trigger so populations
-      actually spread and interact across the macro grid as a matter of
-      course, not a rare (~1-in-thousands-of-ticks) event. "Zones talking
-      to each other would be great."
-- [ ] **Larger, multi-zone weather patterns.** Current `weather.ts` weather
-      is per-zone and small-scale ("like small circles in a zone"). Direct
-      ask: a cold snap that slowly crosses the OVERWORLD grid over many
-      zones at once, reducing plant growth and freezing water as it moves
-      through, forcing real migration pressure; a drought that visibly
-      kills existing plants and shrinks water bodies dramatically, not just
-      a minor abundance dip. This is a macro-grid-scale weather system
-      layered on top of (not replacing) the existing per-tile one — doesn't
-      exist yet in any form.
+- [x] **Cross-zone migration patterns — direct follow-up to the extinction
+      fix's own remaining gap.** `EMIGRATION_CHANCE_PER_TICK` raised 4x
+      (0.0005 → 0.002) and `EMIGRATION_MIN_POPULATION` lowered (6 → 4) —
+      real-run finding (`validateOverworld.ts`): at the original rate, only
+      a handful of emigrations fired across ~8000 ticks even from a healthy,
+      recovering source population, so "thousands of zones" stayed a mostly
+      static backdrop around whichever one or two a population happened to
+      reach. The lowered population bar matters too: the extinction fix's
+      own recovering populations often sit in the 5-6 range for a long
+      stretch, which used to miss the old bar entirely. "Zones talking to
+      each other would be great."
+- [x] **Larger, multi-zone weather patterns.** Direct ask: a cold snap that
+      slowly crosses the OVERWORLD grid over many zones at once, reducing
+      plant growth and freezing water as it moves through, forcing real
+      migration pressure; a drought that visibly kills existing plants and
+      shrinks water bodies dramatically, not just a minor abundance dip.
+      Built as a genuinely separate, macro-grid-scale system layered on top
+      of (not replacing) the existing per-tile `weather.ts` — that one stays
+      scoped to small, fast-moving cells inside whichever ONE zone is
+      currently focused; this new one (`overworld.ts`'s `MacroWeatherFront`)
+      is a slow front drifting across the whole grid in zone units,
+      `coldSnap`/`drought` only (the two kinds with a real cross-zone habitat
+      consequence). Rare on purpose (a handful of fronts per run, not
+      constant churn), radius 4-10 zones, drift ~0.015 zones/tick (crosses a
+      60-zone-wide grid in a few thousand ticks), lifespan 1500-4000 ticks.
+      While a front is overhead, an abstracted zone's `baseResourceIndex`
+      drifts (both directions, unlike the one-way baseline-recovery drift
+      above) toward a much-reduced target — droughts scale the zone's real
+      potential down to 15%, cold snaps to 50%, matching the user's own
+      framing that droughts should hit harder — and emigration chance/
+      population-bar are both relaxed 5x, so an affected zone's population
+      visibly flees rather than just declining in place. Recovers back
+      toward the biome's real potential via the ordinary one-way drift once
+      the front moves on. New `macroWeatherChanged` `SimEvent` (`began`/
+      `ended`, mirroring `weatherChanged`'s own convention). Scoped
+      deliberately to the abstracted background-zone math only for this
+      pass — a front passing over the currently-focused zone doesn't yet
+      reach into that zone's own live per-tile `weather.ts` simulation (see
+      the open follow-up right below). Verified live
+      (`validateMacroWeather.ts`, a real `createDemoMacroWorld` run):
+      fronts spawn, drift, and dissipate on their own schedule, logging
+      matched began/ended event pairs, and a tracked zone caught under a
+      front shows its `baseResourceIndex` visibly pulled down while active.
+- [ ] **Open follow-up, not attempted here**: a macro weather front passing
+      over the currently-FOCUSED zone has no effect on that zone's own live
+      `weather.ts` simulation — a player standing in a zone a drought is
+      crossing sees no in-zone sign of it (no forced dry spell, no visible
+      water shrinkage) until/unless that zone gets demoted and re-measured
+      afterward. Bridging the two systems (spawning/weighting the focused
+      zone's own `WeatherCell`s toward whatever macro front, if any, is
+      overhead) is real future work, not done in this pass.
 - [x] **Badlands BSP terrain now wobbles instead of reading as rigid
       rectangular chambers.** Direct ask: keep BSP as the starting structure
       (still the same recursive rectangle split, still

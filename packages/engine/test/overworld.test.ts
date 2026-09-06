@@ -6,6 +6,7 @@ import type { Agent, Vec2, World } from "../src/types.js";
 import type { ImmigrationContext } from "../src/immigration.js";
 import { zoneKey, type MacroGrid, type MacroZone } from "../src/macroGrid.js";
 import {
+  activeMacroWeatherAt,
   advanceAbstractRegion,
   createMacroWorld,
   demoteRegion,
@@ -100,6 +101,8 @@ function makeMacroWorld(grid: MacroGrid, regions: Region[], focusedRow: number, 
     worldSeed: 1,
     zoneWidth: 30,
     zoneHeight: 30,
+    weatherFronts: [],
+    nextWeatherFrontId: 0,
   };
 }
 
@@ -717,5 +720,153 @@ describe("migration: abstract-to-abstract emigration", () => {
 
     expect(log.events.filter((e) => e.kind === "regionEmigrated")).toEqual([]);
     expect(worldB.agents.length).toBe(1);
+  });
+});
+
+describe("macro weather fronts", () => {
+  it("activeMacroWeatherAt finds a front covering (row, col) and nothing outside its radius", () => {
+    const mw = makeMacroWorld(makeGrid(20, 20), [], 0, 0);
+    mw.weatherFronts.push({ id: 1, kind: "coldSnap", row: 10, col: 10, radius: 3, driftRow: 0, driftCol: 0, ticksRemaining: 100 });
+
+    expect(activeMacroWeatherAt(mw, 10, 10)?.kind).toBe("coldSnap");
+    expect(activeMacroWeatherAt(mw, 10, 12)?.kind).toBe("coldSnap"); // within radius 3
+    expect(activeMacroWeatherAt(mw, 10, 20)).toBeUndefined(); // well outside
+  });
+
+  it("prefers drought over an overlapping coldSnap when a zone sits under both", () => {
+    const mw = makeMacroWorld(makeGrid(20, 20), [], 0, 0);
+    mw.weatherFronts.push(
+      { id: 1, kind: "coldSnap", row: 10, col: 10, radius: 5, driftRow: 0, driftCol: 0, ticksRemaining: 100 },
+      { id: 2, kind: "drought", row: 10, col: 10, radius: 5, driftRow: 0, driftCol: 0, ticksRemaining: 100 }
+    );
+
+    expect(activeMacroWeatherAt(mw, 10, 10)?.kind).toBe("drought");
+  });
+
+  it("an active front pulls a healthy zone's baseResourceIndex down toward a much lower target, faster than ordinary baseline recovery", () => {
+    const region = makeRegion(5, 5);
+    region.aggregates = {
+      bulbasaur: {
+        species: "bulbasaur",
+        homeLayer: "surface",
+        population: 20,
+        avgHunger: 0.8,
+        avgThirst: 0.8,
+        avgEnergy: 0.8,
+        avgLevel: 5,
+        baseResourceIndex: 0.9, // already healthy, above what any front-scaled target would be
+        resourceIndex: 0.6,
+        lastEventPopulation: 20,
+      },
+    };
+    const mw = makeMacroWorld(makeGrid(20, 20), [region], 0, 0, seededRng(1));
+    mw.weatherFronts.push({ id: 1, kind: "drought", row: 5, col: 5, radius: 5, driftRow: 0, driftCol: 0, ticksRemaining: 5000 });
+
+    const before = region.aggregates["bulbasaur"]!.baseResourceIndex;
+    for (let i = 0; i < 200; i++) {
+      mw.tick += 1;
+      advanceAbstractRegion(mw, region, undefined, CTX.speciesRoster);
+    }
+
+    expect(region.aggregates["bulbasaur"]!.baseResourceIndex).toBeLessThan(before);
+  });
+
+  it("recovers back toward the biome's real potential once the front has moved on", () => {
+    // Realistic drought-survivor numbers (same shape as overworld.test.ts's
+    // own "recovers a population pinned by an unlucky low baseResourceIndex
+    // snapshot" case above) — not an invented worst case: `resourceIndex`
+    // needs to sit high enough relative to `baseResourceIndex` that
+    // avgHunger/avgThirst don't starve the population to extinction before
+    // the baseline has a chance to climb back.
+    const region = makeRegion(5, 5);
+    region.aggregates = {
+      bulbasaur: {
+        species: "bulbasaur",
+        homeLayer: "surface",
+        population: 6,
+        avgHunger: 0.42,
+        avgThirst: 0.42,
+        avgEnergy: 0.5,
+        avgLevel: 5,
+        baseResourceIndex: 0.23, // drought-suppressed low value
+        resourceIndex: 0.23,
+        lastEventPopulation: 6,
+      },
+    };
+    const mw = makeMacroWorld(makeGrid(20, 20), [region], 0, 0, seededRng(1));
+    // No active front this time — the front has already moved off (row 5, col 5).
+
+    for (let i = 0; i < 6000; i++) {
+      mw.tick += 1;
+      advanceAbstractRegion(mw, region, undefined, CTX.speciesRoster);
+    }
+
+    expect(region.aggregates["bulbasaur"]!.baseResourceIndex).toBeGreaterThan(0.23);
+  });
+
+  it("boosts emigration chance and lowers the population bar for a zone under an active front", () => {
+    const regionUnderWeather = makeRegion(1, 1);
+    regionUnderWeather.aggregates = {
+      bulbasaur: {
+        species: "bulbasaur",
+        homeLayer: "surface",
+        population: 2, // below the ordinary EMIGRATION_MIN_POPULATION, above the weather-forced one
+        avgHunger: 0.5,
+        avgThirst: 0.5,
+        avgEnergy: 0.5,
+        avgLevel: 5,
+        baseResourceIndex: 0.3,
+        resourceIndex: 0.3,
+        lastEventPopulation: 2,
+      },
+    };
+    // rng just above the ordinary emigration chance, but below the weather-boosted one.
+    const rng = () => 0.005;
+    const mw = makeMacroWorld(makeGrid(5, 5), [regionUnderWeather], 3, 3, rng);
+    mw.weatherFronts.push({ id: 1, kind: "coldSnap", row: 1, col: 1, radius: 3, driftRow: 0, driftCol: 0, ticksRemaining: 1000 });
+
+    mw.tick += 1;
+    advanceAbstractRegion(mw, regionUnderWeather);
+
+    expect(regionUnderWeather.aggregates["bulbasaur"]!.population).toBeLessThan(2);
+    const grown = [...mw.regions.values()].find((r) => r !== regionUnderWeather);
+    expect(grown?.aggregates?.["bulbasaur"]).toBeDefined();
+  });
+
+  it("spawns, drifts, and dissipates a front over a real tickMacroWorld loop, logging macroWeatherChanged began/ended events", () => {
+    // A rng rigged to always clear the spawn-chance roll on the very first
+    // call each tick, then behave normally for everything after — enough to
+    // force a front into existence deterministically without needing
+    // thousands of real ticks to hit the (deliberately rare) natural spawn
+    // chance.
+    let callCount = 0;
+    const rng = () => {
+      callCount++;
+      if (callCount === 1) return 0; // guarantees the spawn-chance check fires
+      return seededRng(7)();
+    };
+    const focusedWorld = createWorld(20, 20, 1);
+    const focused = makeRegion(10, 10, focusedWorld);
+    const mw = makeMacroWorld(makeGrid(20, 20), [focused], 10, 10, rng);
+    const log = new EventLog();
+
+    tickMacroWorld(mw, log, undefined, undefined, CTX);
+
+    expect(mw.weatherFronts.length).toBe(1);
+    const began = log.events.find((e) => e.kind === "macroWeatherChanged" && e.phase === "began");
+    expect(began).toBeDefined();
+
+    const front = mw.weatherFronts[0]!;
+    const startRow = front.row;
+    const startCol = front.col;
+    front.ticksRemaining = 1; // force dissipation on the very next tick
+
+    tickMacroWorld(mw, log, undefined, undefined, CTX);
+
+    expect(mw.weatherFronts.length).toBe(0);
+    const ended = log.events.find((e) => e.kind === "macroWeatherChanged" && e.phase === "ended");
+    expect(ended).toBeDefined();
+    // Drifted at least a little before dissipating (unless drift happened to land exactly back on the start, astronomically unlikely for a random angle).
+    expect(front.row === startRow && front.col === startCol).toBe(false);
   });
 });

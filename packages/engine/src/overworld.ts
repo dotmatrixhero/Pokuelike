@@ -182,6 +182,10 @@ export interface MacroWorld {
   /** Every promoted zone's full-resolution map uses these same dimensions. */
   zoneWidth: number;
   zoneHeight: number;
+  /** Traveling macro-scale weather fronts currently in flight — see `MacroWeatherFront`. */
+  weatherFronts: MacroWeatherFront[];
+  /** Monotonically increasing id source for `MacroWeatherFront.id`, so event records can name a specific front across its "began"/"ended" pair. */
+  nextWeatherFrontId: number;
 }
 
 export function findRegion(mw: MacroWorld, key: string): Region | undefined {
@@ -496,9 +500,17 @@ function maybeEmigrate(mw: MacroWorld, region: Region, log?: EventLog): void {
   const neighborCoords = zoneNeighbors(mw.grid, region.row, region.col).filter((n) => zoneKey(n.row, n.col) !== mw.focusedKey);
   if (neighborCoords.length === 0) return;
 
+  // A front overhead forces migration, per the user's own ask — lower the
+  // population bar and raise the roll chance so even a modest population
+  // flees a zone under an active cold snap or drought, not just a
+  // thriving one spreading into new territory.
+  const underWeather = activeMacroWeatherAt(mw, region.row, region.col) !== undefined;
+  const minPopulation = underWeather ? MACRO_WEATHER_EMIGRATION_MIN_POPULATION : EMIGRATION_MIN_POPULATION;
+  const chance = underWeather ? EMIGRATION_CHANCE_PER_TICK * MACRO_WEATHER_EMIGRATION_MULTIPLIER : EMIGRATION_CHANCE_PER_TICK;
+
   for (const aggregate of Object.values(aggregates)) {
-    if (aggregate.population < EMIGRATION_MIN_POPULATION) continue;
-    if (mw.rng() >= EMIGRATION_CHANCE_PER_TICK) continue;
+    if (aggregate.population < minPopulation) continue;
+    if (mw.rng() >= chance) continue;
 
     const target = neighborCoords[Math.floor(mw.rng() * neighborCoords.length)]!;
     const destination = ensureTrackedRegion(mw, target.row, target.col);
@@ -541,6 +553,127 @@ function maybeEmigrate(mw: MacroWorld, region: Region, log?: EventLog): void {
 }
 
 /**
+ * A traveling macro-scale weather front spanning many zones — direct ask:
+ * "more in depth and larger weather patterns... a cold snap slowly moving
+ * across the overworld... droughts really killing existing plants and
+ * shrinking water dramatically." Deliberately a *different* system from
+ * `weather.ts`'s existing `WeatherCell`s, not a scaled-up version of them:
+ * those are small, fast-moving, per-tile phenomena scoped to whichever ONE
+ * zone is currently focused (rain/storm included), while this is a slow
+ * front drifting across the macro grid in zone units, and only ever
+ * `coldSnap`/`drought` — the two kinds with a real cross-zone habitat
+ * consequence the user actually asked for. The two systems don't interact;
+ * a macro front passing over the focused zone doesn't (yet — see TODO.md)
+ * reach into that zone's own live `weather.ts` simulation, only into the
+ * abstracted background zones' aggregate math (`advanceAbstractRegion`).
+ */
+export type MacroWeatherKind = "coldSnap" | "drought";
+
+export interface MacroWeatherFront {
+  id: number;
+  kind: MacroWeatherKind;
+  /** Front center, in fractional zone (row, col) — fractional so a slow sub-1-zone/tick drift accumulates smoothly instead of snapping between whole zones. */
+  row: number;
+  col: number;
+  /** Radius in zones — a zone counts as "under" this front when its distance from center is within this. */
+  radius: number;
+  /** Zones/tick, fixed for the front's whole lifespan — picked once at spawn so a front reads as one coherent system crossing the map, not a jittering blob. */
+  driftRow: number;
+  driftCol: number;
+  ticksRemaining: number;
+}
+
+/**
+ * Rare on purpose — this is a rare, dramatic, whole-region event, not
+ * ambient background weather; a run should see a handful of these over its
+ * whole lifetime, not a constant churn of overlapping fronts.
+ */
+const MACRO_WEATHER_SPAWN_CHANCE_PER_TICK = 0.00006;
+const MACRO_WEATHER_MAX_ACTIVE_FRONTS = 3;
+const MACRO_WEATHER_RADIUS_MIN = 4;
+const MACRO_WEATHER_RADIUS_MAX = 10;
+/** Long-lived at macro-grid timescales — long enough for a slow drift to actually cross a meaningful stretch of the grid, and for the resource-decay effect below to visibly bite before the front dissipates. */
+const MACRO_WEATHER_LIFESPAN_MIN = 1500;
+const MACRO_WEATHER_LIFESPAN_MAX = 4000;
+/** Zones/tick — slow enough that "slowly moving across the overworld" reads as true even on a large grid (a 60-zone-wide grid takes ~2000-6000 ticks to fully cross at this speed). */
+const MACRO_WEATHER_DRIFT_SPEED = 0.015;
+/** Cold snaps skew far more common than droughts — matches the user's own framing (cold snap first, more casually; drought called out as the more severe, rarer extreme). */
+const MACRO_WEATHER_DROUGHT_CHANCE = 0.3;
+
+/** The strongest front covering (row, col), if any — a zone under two overlapping fronts is judged by whichever hits it harder (drought over coldSnap), not just whichever was found first. */
+export function activeMacroWeatherAt(mw: MacroWorld, row: number, col: number): MacroWeatherFront | undefined {
+  let best: MacroWeatherFront | undefined;
+  for (const front of mw.weatherFronts) {
+    const dist = Math.hypot(row - front.row, col - front.col);
+    if (dist > front.radius) continue;
+    if (!best || (front.kind === "drought" && best.kind !== "drought")) best = front;
+  }
+  return best;
+}
+
+function spawnMacroWeatherFront(mw: MacroWorld): MacroWeatherFront {
+  const kind: MacroWeatherKind = mw.rng() < MACRO_WEATHER_DROUGHT_CHANCE ? "drought" : "coldSnap";
+  const angle = mw.rng() * Math.PI * 2;
+  return {
+    id: mw.nextWeatherFrontId++,
+    kind,
+    row: mw.rng() * mw.grid.rows,
+    col: mw.rng() * mw.grid.cols,
+    radius: MACRO_WEATHER_RADIUS_MIN + mw.rng() * (MACRO_WEATHER_RADIUS_MAX - MACRO_WEATHER_RADIUS_MIN),
+    driftRow: Math.sin(angle) * MACRO_WEATHER_DRIFT_SPEED,
+    driftCol: Math.cos(angle) * MACRO_WEATHER_DRIFT_SPEED,
+    ticksRemaining: Math.round(MACRO_WEATHER_LIFESPAN_MIN + mw.rng() * (MACRO_WEATHER_LIFESPAN_MAX - MACRO_WEATHER_LIFESPAN_MIN)),
+  };
+}
+
+/**
+ * Spawns, drifts, and dissipates macro weather fronts — called once per
+ * `tickMacroWorld` call, independent of how many zones are actually
+ * tracked (a front exists over the whole grid, tracked or not; only
+ * `advanceAbstractRegion`'s per-zone check below cares whether anything is
+ * there to feel it).
+ */
+function advanceMacroWeatherFronts(mw: MacroWorld, log?: EventLog): void {
+  if (mw.weatherFronts.length < MACRO_WEATHER_MAX_ACTIVE_FRONTS && mw.rng() < MACRO_WEATHER_SPAWN_CHANCE_PER_TICK) {
+    const front = spawnMacroWeatherFront(mw);
+    mw.weatherFronts.push(front);
+    log?.record({ kind: "macroWeatherChanged", tick: mw.tick, weatherType: front.kind, phase: "began", row: Math.round(front.row), col: Math.round(front.col), radius: Math.round(front.radius) });
+  }
+
+  const remaining: MacroWeatherFront[] = [];
+  for (const front of mw.weatherFronts) {
+    front.row += front.driftRow;
+    front.col += front.driftCol;
+    front.ticksRemaining -= 1;
+    if (front.ticksRemaining <= 0) {
+      log?.record({ kind: "macroWeatherChanged", tick: mw.tick, weatherType: front.kind, phase: "ended", row: Math.round(front.row), col: Math.round(front.col), radius: Math.round(front.radius) });
+    } else {
+      remaining.push(front);
+    }
+  }
+  mw.weatherFronts = remaining;
+}
+
+/**
+ * How hard an active front scales a zone's biome potential down — droughts
+ * "really killing existing plants and shrinking water dramatically" hit
+ * far harder than a cold snap "reducing plant growth and freezing water."
+ */
+const MACRO_WEATHER_COLDSNAP_RESOURCE_FACTOR = 0.5;
+const MACRO_WEATHER_DROUGHT_RESOURCE_FACTOR = 0.15;
+/**
+ * Two-directional, unlike `BASELINE_RECOVERY_RATE` — a front actively kills
+ * off standing resources while it's overhead, not just caps how far they
+ * can recover. Faster than the baseline recovery rate on purpose: this is a
+ * dramatic weather event, not gradual terrain healing, and needs to visibly
+ * bite within a front's few-thousand-tick lifespan.
+ */
+const MACRO_WEATHER_RESOURCE_DECAY_RATE = 0.002;
+/** A zone under an active front sees migration pressure spike — "forcing migration" was the user's own explicit ask, not an incidental side effect. */
+const MACRO_WEATHER_EMIGRATION_MULTIPLIER = 5;
+const MACRO_WEATHER_EMIGRATION_MIN_POPULATION = 2;
+
+/**
  * Advances one background zone's aggregates by one tick — O(species count
  * in this zone), never touches individual agents or the zone's own terrain.
  * Called once per tracked non-focused zone per `tickMacroWorld` call.
@@ -550,7 +683,11 @@ export function advanceAbstractRegion(mw: MacroWorld, region: Region, log?: Even
   if (!aggregates) return;
 
   const zone = zoneAt(mw.grid, region.row, region.col)!;
-  const biomePotential = estimateZoneResourceIndex(zone);
+  const activeWeather = activeMacroWeatherAt(mw, region.row, region.col);
+  let biomePotential = estimateZoneResourceIndex(zone);
+  if (activeWeather) {
+    biomePotential *= activeWeather.kind === "drought" ? MACRO_WEATHER_DROUGHT_RESOURCE_FACTOR : MACRO_WEATHER_COLDSNAP_RESOURCE_FACTOR;
+  }
 
   for (const aggregate of Object.values(aggregates)) {
     // One-directional on purpose: this represents a demoted zone's terrain
@@ -560,9 +697,15 @@ export function advanceAbstractRegion(mw: MacroWorld, region: Region, log?: Even
     // ABOVE its target (the common case for a healthy, well-fit
     // population) must not get pulled back down toward the generic
     // estimate — that would undermine real observed abundance instead of
-    // just healing an unlucky low one.
+    // just healing an unlucky low one. An active weather front is the one
+    // exception: it drifts `baseResourceIndex` toward its (much lower)
+    // target in BOTH directions, since a front is meant to actively kill
+    // off standing resources, not just cap recovery — normal one-
+    // directional healing resumes as soon as the front moves on.
     const recoveryTarget = biomeRecoveryTarget(zone, aggregate.species, biomePotential, roster);
-    if (aggregate.baseResourceIndex < recoveryTarget) {
+    if (activeWeather) {
+      aggregate.baseResourceIndex += (recoveryTarget - aggregate.baseResourceIndex) * MACRO_WEATHER_RESOURCE_DECAY_RATE;
+    } else if (aggregate.baseResourceIndex < recoveryTarget) {
       aggregate.baseResourceIndex += (recoveryTarget - aggregate.baseResourceIndex) * BASELINE_RECOVERY_RATE;
     }
 
@@ -693,6 +836,7 @@ function applyRegionCrossings(mw: MacroWorld, region: Region, log?: EventLog): v
  */
 export function tickMacroWorld(mw: MacroWorld, log?: EventLog, rules?: HuntRules, ctx?: LevelingContext, immigration?: ImmigrationContext): void {
   mw.tick += 1;
+  advanceMacroWeatherFronts(mw, log);
   for (const region of mw.regions.values()) {
     if (region.key === mw.focusedKey) {
       const neighborIds = zoneNeighbors(mw.grid, region.row, region.col).map((n) => zoneKey(n.row, n.col));
@@ -756,6 +900,8 @@ export function createMacroWorld(
     worldSeed,
     zoneWidth,
     zoneHeight,
+    weatherFronts: [],
+    nextWeatherFrontId: 0,
   };
   promoteZone(mw, focusedRow, focusedCol, ctx, log);
   return mw;

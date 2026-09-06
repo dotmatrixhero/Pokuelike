@@ -263,6 +263,19 @@ export type SimEvent =
       radius: number;
     }
   | {
+      kind: "macroWeatherChanged";
+      tick: number;
+      /** Only the two types with real cross-zone effects — see overworld.ts's `MacroWeatherKind`; rain/storm aren't part of the macro-scale system. */
+      weatherType: "coldSnap" | "drought";
+      /** Same "began"/"ended" narrative-color convention as `weatherChanged` above, one level up: a macro front spanning many zones, not weather.ts's single-map cells. */
+      phase: "began" | "ended";
+      /** Rounded front center, in zone (row, col) — not tile coordinates. */
+      row: number;
+      col: number;
+      /** Radius in zones. */
+      radius: number;
+    }
+  | {
       kind: "dispersed";
       tick: number;
       agentId: string;

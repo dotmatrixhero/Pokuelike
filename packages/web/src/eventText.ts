@@ -130,6 +130,8 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `day breaks (light ${event.lightLevel.toFixed(2)})`;
     case "weatherChanged":
       return `${event.weatherType} ${event.phase === "began" ? "moves in" : "clears"} near (${event.center.x},${event.center.y})`;
+    case "macroWeatherChanged":
+      return `a macro ${event.weatherType} ${event.phase === "began" ? "front forms" : "front dissipates"} around zone (${event.row},${event.col}), radius ${event.radius}`;
     case "dispersed":
       return `${event.species} (${event.agentId}) left ${event.fromHerd} and ${event.outcome === "joined" ? `joined ${event.toHerd}` : `founded ${event.toHerd}`} (${event.reason})`;
     case "shelterBuilt":
@@ -238,6 +240,11 @@ export const STORY_KINDS = new Set<SimEvent["kind"]>([
   // `dispersed` (already in this set) rather than `regionEmigrated`'s
   // routine abstract-tier population-slice roll (NOISE_KINDS).
   "regionCrossed",
+  // Deliberately rare and dramatic (see `MACRO_WEATHER_SPAWN_CHANCE_PER_TICK`
+  // in overworld.ts) — a handful per run, not ambient churn, so it earns a
+  // story beat rather than joining `weatherChanged`'s own per-tile-scale
+  // entry in NOISE_KINDS below.
+  "macroWeatherChanged",
 ]);
 
 /**
