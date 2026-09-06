@@ -1,11 +1,14 @@
 import type { Agent, HuntRules, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { calculateDamage, pickBestMove, rollAccuracy, rollCritical, useMove } from "./combat.js";
-import { stepAway } from "./movement.js";
+import { stepAway, stepToward } from "./movement.js";
 import { stormAccuracyMultiplier } from "./weather.js";
 import { FALLBACK_MAX_HP, manhattan } from "./predation.js";
 import { RAPPORT_HERD_CLASH_DELTA, rapportScore, strengthenRapportMutual } from "./rapport.js";
 import { effectiveDisposition } from "./herdLeadership.js";
+import { SCARCITY_SCORE_THRESHOLD } from "./herdMigration.js";
+import { foodStockNear, countTerrainNear } from "./resourceIndex.js";
+import { canBreed, type LevelingContext } from "./leveling.js";
 
 /**
  * Herd-vs-herd resource conflict — the direct ask ("I think escalated
@@ -152,11 +155,21 @@ function courageOf(world: World, agent: Agent): number {
  * considered (-1..1, positive values contribute nothing — only an existing
  * grudge biases escalation, a positive relationship never suppresses it
  * below the plain disposition-driven baseline, matching the "biased toward,
- * doesn't invent a new suppression path" scope of this consumer).
+ * doesn't invent a new suppression path" scope of this consumer). `baseChance`/
+ * `dispositionScale` default to this module's own resource-contention tuning
+ * (`HERD_CONFLICT_BASE_CHANCE`/`HERD_CONFLICT_DISPOSITION_SCALE`) — the
+ * proactive territorial-guard trigger below passes its own, slightly
+ * different tuning instead of reusing these defaults unchanged.
  */
-function herdConflictChance(world: World, agent: Agent, grudge: number): number {
+function herdConflictChance(
+  world: World,
+  agent: Agent,
+  grudge: number,
+  baseChance = HERD_CONFLICT_BASE_CHANCE,
+  dispositionScale = HERD_CONFLICT_DISPOSITION_SCALE
+): number {
   const grudgeBonus = Math.max(0, -grudge) * HERD_CONFLICT_GRUDGE_SCALE;
-  return HERD_CONFLICT_BASE_CHANCE + courageOf(world, agent) * HERD_CONFLICT_DISPOSITION_SCALE + grudgeBonus;
+  return baseChance + courageOf(world, agent) * dispositionScale + grudgeBonus;
 }
 
 /**
@@ -164,9 +177,13 @@ function herdConflictChance(world: World, agent: Agent, grudge: number): number 
  * at/adjacent to `target` — the "who's actually contesting this tile"
  * candidate. `undefined` if nothing eligible is there (the tile might just
  * be crowded with the agent's own herd-mates, or with a predator, neither of
- * which this trigger touches).
+ * which this trigger touches). `radius` defaults to `RIVAL_DETECT_RADIUS`
+ * (melee-range, resource-contention's own scope) — the territorial-guard
+ * trigger below passes a much wider radius, since it's scanning a whole
+ * claimed area around a herd's centroid, not just who's standing on one
+ * specific contested tile.
  */
-function findRivalOccupant(world: World, agent: Agent, rules: HuntRules, target: Vec2): Agent | undefined {
+function findRivalOccupant(world: World, agent: Agent, rules: HuntRules, target: Vec2, radius = RIVAL_DETECT_RADIUS): Agent | undefined {
   let best: Agent | undefined;
   let bestScore = Infinity;
   for (const other of world.agents) {
@@ -175,7 +192,7 @@ function findRivalOccupant(world: World, agent: Agent, rules: HuntRules, target:
     if (other.herdId !== undefined && other.herdId === agent.herdId) continue; // same herd — never a rival
     if (rules[agent.species] || rules[other.species]) continue; // predator on either side — out of scope, see doc comment
     const dist = manhattan(other.pos, target);
-    if (dist > RIVAL_DETECT_RADIUS) continue;
+    if (dist > radius) continue;
     const grudge = Math.max(0, -rapportScore(agent, other.id, world.tick));
     const score = dist - grudge * RAPPORT_TARGET_BIAS_TILES;
     if (score < bestScore) {
@@ -294,5 +311,145 @@ export function applyHerdRivalryConflict(world: World, agent: Agent, rules: Hunt
   if (rng() >= herdConflictChance(world, agent, grudge)) return false;
 
   resolveRivalryHit(world, agent, rival, log, rng);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Territorial guarding — direct follow-up ask: "more territorial behavior.
+// Around guarding resources," refined to proactive patrol/chase-off (any
+// herd with a claimed home area, not just species flagged as guardians)
+// rather than the resource-contention trigger above, which only ever fires
+// once an agent is already stuck `HERD_CONFLICT_MIN_BLOCKED_TICKS` deep
+// waiting on one specific crowded tile. `applyTerritorialGuard` below is
+// checked every action tick, for every eligible agent, regardless of
+// whether it's currently trying to reach a resource at all — the exact
+// "extending the territorial trigger to escalate into combat" follow-up
+// this module's own top doc comment already flagged as future work.
+//
+// Deliberately symmetric rather than "owner vs. intruder": there's no
+// separate herd-territory-center concept to check "is this MY land" against
+// (this codebase's only per-agent equivalent, `Agent.homePos`, is
+// individual-scoped and set once at spawn — not a herd-level claim). Instead
+// this checks "is there a different-herd agent, not tolerated, standing near
+// me somewhere with real resources" — which reads correctly from EITHER
+// side's own tick: a resident whose turf a stranger wandered into chases it
+// off; that same stranger, on ITS OWN turn, is equally free to stand its
+// ground and fight back for a foothold instead of retreating, if it judges
+// it can win. Direct ask: "the unit wandering into a territorial space
+// would... be incentivized to try to fight and take over resources... if
+// they thought they could win" — `HERD_CONFLICT_MIN_POWER_RATIO` already
+// encodes "thought they could win"; the trigger chance below additionally
+// factors in the acting agent's own hunger/thirst, so a genuinely needy
+// invader is more willing to risk it than one just passing through well-fed.
+// ---------------------------------------------------------------------------
+
+/** How far from the acting agent this trigger looks for a different-herd rival — deliberately wider than `RIVAL_DETECT_RADIUS` (melee-range, "who's on this exact tile"), since this is scanning a whole nearby area for an intruder/rival, not one contested tile. */
+const TERRITORY_GUARD_RADIUS = 4;
+
+/**
+ * Real resource abundance a rival has to actually be standing near before
+ * territorial guarding bothers with them at all — same formula
+ * herdMigration.ts's own `abundanceAt` composes (`foodStockNear` +
+ * `countTerrainNear(..., "water", ...)`), reimplemented locally rather than
+ * imported (that helper is private to herdMigration.ts, and its own
+ * scarcity-vs-migration framing doesn't need to leak into a resource-
+ * guarding decision) — but sharing herdMigration.ts's own real, already-
+ * calibrated `SCARCITY_SCORE_THRESHOLD` as the cutoff rather than a second,
+ * redundant number.
+ */
+function territoryAbundanceAt(world: World, layer: Agent["layer"], pos: Vec2, radius: number): number {
+  return foodStockNear(world, layer, pos, radius) + countTerrainNear(world, layer, pos, "water", radius);
+}
+
+/**
+ * 0 (comfortably abundant) .. 1 (barely worth fighting over at all) — the
+ * real "how scarce is it right now" read tolerance erodes against, direct
+ * ask: "if food or water became scarce that tolerance may lessen." Scaled
+ * against `territoryAbundanceAt`'s own real range, not a flat 0-to-max: the
+ * caller only ever reaches this once abundance already clears
+ * `SCARCITY_SCORE_THRESHOLD` (the "worth guarding at all" floor just above),
+ * so pinning `scarcity = 1` there — not at literal zero abundance, which
+ * this function would otherwise never actually see — is what lets full
+ * scarcity (and its "no more exceptions" consequence, `isToleratedIntruder`)
+ * genuinely happen. Bottoms out at `scarcity = 0` once abundance reaches 3x
+ * the threshold — "comfortably plentiful," not literally infinite.
+ */
+function scarcityFactor(abundance: number): number {
+  const comfortable = SCARCITY_SCORE_THRESHOLD * 3;
+  return 1 - Math.min(1, Math.max(0, (abundance - SCARCITY_SCORE_THRESHOLD) / (comfortable - SCARCITY_SCORE_THRESHOLD)));
+}
+
+/** A real, positive relationship (mate, past mutual-defense ally — `rapport.ts`) still earns tolerance, but only up to a bar that itself falls as `scarcity` rises — at full scarcity even a bonded pair from different herds stops being exempt. */
+const TOLERATED_RAPPORT_AT_ABUNDANCE = 0.2;
+
+/** How unaggressive a same-egg-group (mainline-real breeding-kin, `leveling.ts`'s `canBreed`) stranger's own current disposition has to read before it's tolerated on species grounds alone — same erosion-with-scarcity treatment as the rapport exemption above. */
+const TOLERATED_KIN_AGGRESSION_AT_ABUNDANCE = 0.3;
+
+/**
+ * Whether `other` gets a pass from territorial guarding rather than being
+ * treated as a fair-game rival — direct ask: "units who have developed
+ * relationships (known safe) or bonded or species that are esp not
+ * aggressive/same egg type... could be tolerated. But new outsiders would
+ * not be." Both exemptions shrink toward nothing as `scarcity` (0..1, see
+ * `scarcityFactor`) rises — "that tolerance may lessen" — so a genuinely
+ * hard-times territory stops making exceptions even for a bonded kin agent.
+ */
+function isToleratedIntruder(world: World, agent: Agent, other: Agent, scarcity: number, ctx: LevelingContext | undefined): boolean {
+  const tolerance = 1 - scarcity;
+  if (rapportScore(agent, other.id, world.tick) >= TOLERATED_RAPPORT_AT_ABUNDANCE * tolerance) return true;
+  if (tolerance > 0 && canBreed(agent.species, other.species, ctx) && effectiveDisposition(world, other).aggression < TOLERATED_KIN_AGGRESSION_AT_ABUNDANCE * tolerance) {
+    return true;
+  }
+  return false;
+}
+
+/** How much of `courageOf`'s own (0..1-ish) scale the acting agent's own hunger/thirst urgency additionally contributes — a needy agent is a more willing invader than a well-fed one just passing through, same order of magnitude as `HERD_CONFLICT_DISPOSITION_SCALE` so neither dwarfs the other. */
+const GUARD_NEED_URGENCY_SCALE = 0.4;
+/** `herdConflictChance`'s own resource-contention `HERD_CONFLICT_BASE_CHANCE`/`_DISPOSITION_SCALE`, at a slightly lower base — this trigger runs unconditionally every tick (not gated behind a sustained multi-tick standoff first), so a much higher per-tick rate would escalate far more often overall despite the smaller base. */
+const GUARD_BASE_CHANCE = 0.015;
+const GUARD_DISPOSITION_SCALE = 0.4;
+
+/** Whichever of hunger/thirst is currently more pressing — the real "hungry/thirsty enough to risk a fight for it" signal the direct ask calls for. */
+function needUrgencyOf(agent: Agent): number {
+  return Math.max(1 - agent.needs.hunger, 1 - agent.needs.thirst);
+}
+
+/**
+ * Checked every action tick (needs.ts), for every non-predator, herded
+ * agent not already on this mechanic's shared cooldown — see this section's
+ * own doc comment for why this is symmetric ("am I near a non-tolerated
+ * rival somewhere worth fighting for") rather than an owner/intruder split.
+ * Returns true if the tick was spent chasing/attacking (caller should treat
+ * it as consumed, same contract as `applyHerdRivalryConflict`).
+ */
+export function applyTerritorialGuard(world: World, agent: Agent, rules: HuntRules, log: EventLog | undefined, rng: () => number, ctx?: LevelingContext): boolean {
+  if ((agent.herdConflictCooldownTicks ?? 0) > 0) return false;
+  if (rules[agent.species]) return false; // predator — out of scope, see this module's top doc comment
+  if (!agent.herdId) return false; // no herd, nothing to be territorial about
+
+  const rival = findRivalOccupant(world, agent, rules, agent.pos, TERRITORY_GUARD_RADIUS);
+  if (!rival) return false;
+
+  const abundance = territoryAbundanceAt(world, agent.layer, rival.pos, TERRITORY_GUARD_RADIUS);
+  const scarcity = scarcityFactor(abundance);
+  if (abundance < SCARCITY_SCORE_THRESHOLD) return false; // nothing worth fighting over here
+
+  if (isToleratedIntruder(world, agent, rival, scarcity, ctx)) return false;
+
+  const ratio = powerOf(agent) / powerOf(rival);
+  if (ratio < HERD_CONFLICT_MIN_POWER_RATIO || ratio > 1 / HERD_CONFLICT_MIN_POWER_RATIO) return false;
+
+  const grudge = rapportScore(agent, rival.id, world.tick);
+  const chance = herdConflictChance(world, agent, grudge, GUARD_BASE_CHANCE, GUARD_DISPOSITION_SCALE) + needUrgencyOf(agent) * GUARD_NEED_URGENCY_SCALE;
+  if (rng() >= chance) return false;
+
+  agent.behavior = "fight";
+  agent.fightTarget = rival.id;
+  if (manhattan(agent.pos, rival.pos) <= 1) {
+    resolveRivalryHit(world, agent, rival, log, rng);
+  } else {
+    // stopAdjacent=true — see stepToward's doc comment.
+    agent.pos = stepToward(world, agent.layer, agent.pos, rival.pos, agent, undefined, true);
+  }
   return true;
 }

@@ -1843,16 +1843,19 @@ produce a real story before player mechanics are worth building further.
       level this file already documents elsewhere — no new predator-specific
       regression observed, and by construction (predators excluded from the
       trigger entirely) this mechanic cannot be the cause of one.
-- [ ] **Real follow-up, deliberately not built this pass**: extending
-      herdMigration.ts's existing same-species territorial-rivalry trigger
-      (today it always resolves by the smaller herd relocating away) to
-      sometimes escalate into a real fight instead, using the same
-      non-lethal `herdConflict.ts` resolution machinery. This was the other
-      real candidate trigger from the original design brief — resource
-      contention (built) was judged the more concrete, better-motivated
-      mechanism given the user's own "fight over resources" phrasing and
-      occupancy.ts's real, frequent tile-capacity contention, but territorial
-      escalation is a real, reasonable second half worth a future pass.
+- [x] **Proactive territorial guarding — built, see DESIGN.md's "Territorial
+      guarding" section.** Direct follow-up: "more territorial behavior...
+      guarding resources," refined into a full symmetric invader/defender
+      design. Not literally an extension of herdMigration.ts's centroid-based
+      trigger as first sketched below — `applyTerritorialGuard`
+      (herdConflict.ts) instead checks every action tick for a nearby,
+      non-tolerated, different-herd agent near real resources, so a
+      resident chasing off an intruder and that same intruder fighting for a
+      foothold on its own turn are the same code path, not two mechanisms.
+      Real tolerance exceptions (bonded/high-rapport, same-egg-group and
+      unaggressive) erode as local resources get scarcer. Validated over a
+      real 8000-tick run: 696 herdClash events (well above the
+      resource-contention trigger's own 19-90-per-3000-ticks baseline).
 - [ ] **Real follow-up, deliberately scoped out for predator-fragility
       safety**: herd conflict currently excludes predator species entirely,
       on both sides of a potential fight (no predator-vs-predator rivalry,

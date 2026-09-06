@@ -6485,6 +6485,105 @@ Nothing in these 9 runs reads as a *new* predator die-off pattern, and by
 construction (decision #2 above) this mechanic structurally cannot be the
 cause of one — predators never appear on either side of a `herdClash`.
 
+### Territorial guarding — direct follow-up: proactive, not just reactive
+
+Direct follow-up ask: "I think I want more territorial behavior. Around
+guarding resources" — refined through two more messages into a full
+proactive-invasion design, not just a defender-side tweak: "the unit
+wandering into a territorial space would... be incentivized to try to fight
+and take over resources... that's why they would go in to keep fighting if
+they thought they could win," plus real tolerance exceptions ("units who
+have developed relationships (known safe) or bonded or species that are esp
+not aggressive/same egg type... could be tolerated. But new outsiders would
+not be. And if food or water became scarce that tolerance may lessen").
+
+**Decided:**
+
+1. **Proactive, not gated behind a stuck resource-block.** The
+   resource-contention trigger above only ever fires once an agent has
+   already been stuck `HERD_CONFLICT_MIN_BLOCKED_TICKS` (8) deep waiting on
+   one specific crowded tile — a real gap for "patrol/chase off an intruder
+   before it even gets that far." `applyTerritorialGuard` (herdConflict.ts)
+   is checked every action tick instead, for every eligible agent, whether
+   or not it's currently even trying to reach a resource.
+2. **Symmetric, not owner-vs-intruder.** This codebase has no herd-level
+   "claimed territory" concept to check "is this MY land" against —
+   `Agent.homePos` is individual-scoped, set once at spawn. Rather than
+   inventing one, the trigger checks "is there a different-herd, non-
+   tolerated agent near me, somewhere with real resources" — which reads
+   correctly from either side's own action tick: a resident whose turf a
+   stranger wandered into chases it off; that same stranger, on its own
+   turn, is equally free to stand its ground and fight for a foothold
+   instead of retreating. This is what makes "the wandering unit is
+   incentivized to fight and take over" fall out for free, rather than
+   needing a whole separate invader-side mechanic: both sides run through
+   the exact same function.
+3. **"If they thought they could win" is the existing power-ratio gate,
+   reused unchanged** (`HERD_CONFLICT_MIN_POWER_RATIO`) — a genuinely
+   confident, comparably-matched agent (either side) engages; a hopeless
+   mismatch doesn't, regardless of which side initiated. On top of that, the
+   acting agent's own hunger/thirst urgency now additionally raises the
+   trigger chance (`GUARD_NEED_URGENCY_SCALE`) — a hungry/thirsty agent is a
+   more willing invader than a well-fed one just passing through, the direct
+   "why they would go in" motivator the ask called for.
+4. **Real tolerance, real erosion under scarcity.** `isToleratedIntruder`
+   exempts two real cases from being treated as a fair-game rival at all: a
+   genuinely positive rapport (`rapport.ts` — a bonded mate, a past
+   mutual-defense ally) above a threshold, and a same-egg-group stranger
+   (`leveling.ts`'s real mainline-breeding-compatible `canBreed`, the "same
+   egg type" ask) whose own current effective disposition reads as
+   sufficiently unaggressive. Both thresholds are scaled by a real,
+   continuous `scarcityFactor` (0 at comfortably-plentiful local resources,
+   1 right at the "barely worth guarding at all" floor) — "if food or water
+   became scarce that tolerance may lessen" is a literal shrinking bar, not
+   a hard cutoff, and at genuine scarcity even a bonded pair from different
+   herds stops being exempt.
+5. **Same non-lethal resolution, same shared cooldown, same everything else
+   this module already established** — `resolveRivalryHit`,
+   `HERD_CONFLICT_HP_FLOOR_FRACTION`/`_RETREAT_HP_FRACTION`,
+   `Agent.herdConflictCooldownTicks` (shared with the reactive trigger, so a
+   pair that just fought via either path doesn't immediately re-engage via
+   the other). Predators stay fully out of scope, unchanged. No new
+   `SimEvent` kind — a proactive engagement still resolves through
+   `resolveRivalryHit` and still logs the same `herdClash` shape.
+
+**Built, real-run findings:** `applyTerritorialGuard` (herdConflict.ts),
+called from needs.ts's `tickAgentAction` at the same "survival/feeding
+instinct" priority tier as `applyScavenging` — deliberately NOT gated behind
+`needsAreUrgent` (unlike `applySupportMove`/dispersal below it), since a
+hungry/thirsty agent is exactly who this mechanic means to let fight for a
+foothold rather than wander off looking elsewhere. `findRivalOccupant` and
+`herdConflictChance` (both pre-existing, private to this module) were
+generalized with an optional radius/base-chance-and-scale parameter rather
+than duplicated, so both triggers share one real rival-detection/chance
+implementation. 10 new engine tests (`herdConflict.test.ts`) cover: no rival
+nearby, herd-mates never counted, predators excluded either side, nothing
+worth guarding (no real food/water) refusing to engage, a bold confident
+agent engaging a real cross-species rival near real resources, a badly
+outmatched agent refusing (same confidence gate), a timid agent's
+disposition gate holding, a bonded/high-rapport rival tolerated while
+resources are plentiful, a hungry agent engaging where an otherwise-
+identical well-fed one doesn't (the need-urgency bonus, isolated via a rigged
+rng value between the two agents' real computed chances), and the shared
+cooldown gate. All 1061 engine tests pass, determinism acceptance test
+included. Validated via `validateTerritorialGuard.ts` over a real 8000-tick
+demo-world run: 696 `herdClash` events total (well above the 19-90-per-3000-
+ticks baseline the resource-contention trigger alone produced), and 4330
+ticks showed a living, non-predator, herded agent actively chasing/engaging
+a different-herd target while its own `ticksBlockedFromResource` sat below
+the reactive trigger's own 8-tick prerequisite — the real, distinguishing
+signature that this is genuinely the new proactive path firing, not just
+the pre-existing reactive one under a different name.
+
+**Honestly not built:** no herd-level "claimed territory" concept exists
+even now (decision #2 deliberately worked around needing one) — a real
+follow-up would give a herd an actual home-range polygon/radius rather than
+inferring "worth defending" purely from what's physically nearby whoever's
+current action tick is running. `scarcityFactor`/tolerance thresholds are
+sim-original guesses, same "judge against a real run" discipline as every
+other tuning constant in this codebase, not yet separately validated for
+"does tolerance visibly erode during a real drought."
+
 **Single-seed before/after comparison was attempted and explicitly
 discarded as unreliable**, not glossed over: disabling the feature's call
 site and re-running the same 3 seeds (42/7/20260903) produced wildly

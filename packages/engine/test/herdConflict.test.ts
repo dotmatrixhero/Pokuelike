@@ -6,6 +6,7 @@ import {
   HERD_CONFLICT_MIN_BLOCKED_TICKS,
   HERD_CONFLICT_MIN_POWER_RATIO,
   applyHerdRivalryConflict,
+  applyTerritorialGuard,
 } from "../src/herdConflict.js";
 import type { Agent, HuntRules } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
@@ -186,5 +187,141 @@ describe("applyHerdRivalryConflict", () => {
     expect(rival.pos).not.toEqual(before);
     expect(rival.herdConflictCooldownTicks).toBeGreaterThan(0);
     expect(a.herdConflictCooldownTicks).toBeGreaterThan(0);
+  });
+});
+
+describe("applyTerritorialGuard (proactive patrol/chase-off, CROPS_DESIGN.md-style direct ask: \"more territorial behavior... guarding resources\")", () => {
+  function withResources(world: ReturnType<typeof createWorld>, pos: { x: number; y: number }): void {
+    // Two real water tiles near the rival — territoryAbundanceAt sums food
+    // stock + water-tile count, so this alone clears SCARCITY_SCORE_THRESHOLD
+    // (1.5) without needing to fuss with partial food stock values.
+    setTile(world, "surface", pos.x, pos.y, "water");
+    setTile(world, "surface", pos.x + 1, pos.y, "water");
+  }
+
+  it("does nothing when no rival is nearby", () => {
+    const world = createWorld(20, 20);
+    const a = agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD });
+    world.agents.push(a);
+    withResources(world, { x: 4, y: 5 });
+
+    expect(applyTerritorialGuard(world, a, RULES, undefined, ALWAYS_FIGHT)).toBe(false);
+  });
+
+  it("does nothing when the nearby agent is the same herd", () => {
+    const world = createWorld(20, 20);
+    const a = agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD });
+    const mate = agent("b", "bulbasaur", "herd-a", { x: 5, y: 5 });
+    world.agents.push(a, mate);
+    withResources(world, mate.pos);
+
+    expect(applyTerritorialGuard(world, a, RULES, undefined, ALWAYS_FIGHT)).toBe(false);
+  });
+
+  it("does nothing when either side is a predator species (out of scope)", () => {
+    const world = createWorld(20, 20);
+    const a = agent("a", "scyther", "herd-a", { x: 4, y: 5 }, { disposition: BOLD });
+    const rival = agent("b", "bulbasaur", "herd-b", { x: 5, y: 5 });
+    world.agents.push(a, rival);
+    withResources(world, rival.pos);
+
+    expect(applyTerritorialGuard(world, a, RULES, undefined, ALWAYS_FIGHT)).toBe(false);
+  });
+
+  it("does nothing when there's nothing worth guarding nearby (no real food/water)", () => {
+    const world = createWorld(20, 20);
+    const a = agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD });
+    const rival = agent("b", "pidgey", "herd-b", { x: 5, y: 5 });
+    world.agents.push(a, rival);
+    // No setTile calls — bare world, nothing worth fighting over.
+
+    expect(applyTerritorialGuard(world, a, RULES, undefined, ALWAYS_FIGHT)).toBe(false);
+  });
+
+  it("a bold, confident agent chases (or engages) a real cross-species rival near real resources", () => {
+    const world = createWorld(20, 20);
+    const log = new EventLog();
+    const a = agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD });
+    const rival = agent("b", "pidgey", "herd-b", { x: 5, y: 5 });
+    world.agents.push(a, rival);
+    withResources(world, rival.pos);
+
+    const engaged = applyTerritorialGuard(world, a, RULES, log, ALWAYS_FIGHT);
+
+    expect(engaged).toBe(true);
+    expect(a.behavior).toBe("fight");
+    expect(a.fightTarget).toBe(rival.id);
+  });
+
+  it("a badly outmatched agent doesn't engage — same confidence gate as the reactive trigger", () => {
+    const world = createWorld(20, 20);
+    const a = agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD, maxHp: 10, hp: 10 });
+    const rival = agent("b", "pidgey", "herd-b", { x: 5, y: 5 }, { maxHp: 100, hp: 100 });
+    world.agents.push(a, rival);
+    withResources(world, rival.pos);
+
+    expect(applyTerritorialGuard(world, a, RULES, undefined, ALWAYS_FIGHT)).toBe(false);
+  });
+
+  it("a timid agent's disposition gate holds even with resources and a beatable rival present", () => {
+    const world = createWorld(20, 20);
+    const a = agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: TIMID, needs: createNeeds() });
+    const rival = agent("b", "pidgey", "herd-b", { x: 5, y: 5 });
+    world.agents.push(a, rival);
+    withResources(world, rival.pos);
+
+    expect(applyTerritorialGuard(world, a, RULES, undefined, NEVER_ROLL)).toBe(false);
+  });
+
+  it("a bonded/high-rapport rival is tolerated — no fight — while resources are plentiful", () => {
+    const world = createWorld(20, 20);
+    const a = agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD });
+    const rival = agent("b", "pidgey", "herd-b", { x: 5, y: 5 });
+    world.agents.push(a, rival);
+    // Plentiful resources (well above the "comfortable" ceiling) plus a real
+    // positive rapport score — both required for the tolerance exemption to
+    // actually hold at this abundance level.
+    setTile(world, "surface", rival.pos.x, rival.pos.y, "water");
+    setTile(world, "surface", rival.pos.x + 1, rival.pos.y, "water");
+    setTile(world, "surface", rival.pos.x - 1, rival.pos.y, "water");
+    setTile(world, "surface", rival.pos.x, rival.pos.y + 1, "water");
+    setTile(world, "surface", rival.pos.x, rival.pos.y - 1, "water");
+    a.rapport = { b: { score: 0.9, lastInteractionTick: 0 } };
+
+    expect(applyTerritorialGuard(world, a, RULES, undefined, ALWAYS_FIGHT)).toBe(false);
+  });
+
+  it("a hungry agent is a more willing invader than a well-fed one — need urgency raises the trigger chance", () => {
+    // Rig rng to land strictly between the well-fed chance and the hungry
+    // chance so only the hungry agent's roll succeeds.
+    const wellFed = agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD, needs: createNeeds({ hunger: 1, thirst: 1 }) });
+    const hungry = agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD, needs: createNeeds({ hunger: 0, thirst: 1 }) });
+    const rivalFor = (id: string) => agent(id, "pidgey", "herd-b", { x: 5, y: 5 });
+
+    function tryEngage(actor: Agent, rng: () => number): boolean {
+      const world = createWorld(20, 20);
+      const rival = rivalFor("b");
+      world.agents.push(actor, rival);
+      withResources(world, rival.pos);
+      return applyTerritorialGuard(world, actor, RULES, undefined, rng);
+    }
+
+    // A roll that clears BOLD's own disposition-only chance (0.015 + 1.0 *
+    // 0.4 = 0.415) but not the extra hunger-urgency bonus on top of it
+    // (+1.0 * 0.4 = 0.815 for a maximally hungry agent) — the hungry agent
+    // should still engage where the well-fed one doesn't.
+    const rng = () => 0.6;
+    expect(tryEngage(wellFed, rng)).toBe(false);
+    expect(tryEngage(hungry, rng)).toBe(true);
+  });
+
+  it("respects the shared herdConflictCooldownTicks — no engagement while on cooldown", () => {
+    const world = createWorld(20, 20);
+    const a = agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD, herdConflictCooldownTicks: 10 });
+    const rival = agent("b", "pidgey", "herd-b", { x: 5, y: 5 });
+    world.agents.push(a, rival);
+    withResources(world, rival.pos);
+
+    expect(applyTerritorialGuard(world, a, RULES, undefined, ALWAYS_FIGHT)).toBe(false);
   });
 });

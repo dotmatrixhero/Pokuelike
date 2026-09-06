@@ -36,7 +36,7 @@ import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
 import { findWalkableNear } from "./worldgen.js";
-import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict } from "./herdConflict.js";
+import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict, applyTerritorialGuard } from "./herdConflict.js";
 import { maybeUseUtilityMove } from "./utilityMoves.js";
 import { thirstDecayMultiplier } from "./weather.js";
 import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
@@ -960,6 +960,17 @@ export function tickAgentAction(
   // refusal, same "survival/feeding instincts before routine behavior"
   // ordering every other step in this function already follows).
   if (rules && applyScavenging(world, agent, rules, log)) return;
+  // Territorial guarding (herdConflict.ts) — direct ask: "more territorial
+  // behavior. Around guarding resources," refined to proactive patrol/
+  // chase-off. Deliberately NOT gated on `needsAreUrgent` below (unlike
+  // `applySupportMove`/dispersal) — a hungry/thirsty agent is exactly who
+  // this mechanic means to let fight for a foothold rather than just wander
+  // off looking elsewhere, direct ask: "incentivize[d] to try to fight and
+  // take over resources... if they thought they could win." Sits at the
+  // same "survival/feeding instinct" tier as `applyScavenging` right above —
+  // after predation/egg-eating already got first refusal, ahead of routine
+  // carrying/looting/support/dispersal.
+  if (rules && applyTerritorialGuard(world, agent, rules, log, rng, ctx)) return;
   if (maybeStartCarrying(world, agent, log)) return;
   if (applyLooting(world, agent, log)) return;
   // Real confirmed death case: a zero-cooldown ally-buff move (reachable via
