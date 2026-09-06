@@ -3,6 +3,30 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Real in-game move-tree visualizer + range/AoE preview — not started
+
+Direct ask, after seeing the Move Tree Atlas artifact (a standalone HTML
+design-review tool, not part of the actual game): "I think we will want
+to build a web visualizer for the skill tree eventually... I want it to
+be an interacting tree much like the one in your design doc. And a range
+visualizer would be great for that too." Current state, for real:
+`packages/web/src/inspector.ts` already has a functional but plain
+click-to-expand skill-tree view (`layerNodes`/`renderSkillTree`) — simple
+depth-ordered rows with the agent's actually-chosen nodes lit up, no
+branch layout, no crosslink lines, no positional graph at all. The ask is
+to upgrade that into a real interactive node-graph view (branches
+radiating from a hub, crosslinks drawn as real connecting lines, forks
+and `excludes` shown explicitly) — essentially porting the Move Tree
+Atlas artifact's own layout algorithm and rendering into
+`packages/web`'s real UI, live-data-driven (the actual agent's chosen
+nodes and available points, not a static reference view) instead of a
+one-off review tool. Bundle in the range/AoE grid preview from that same
+artifact work (small grid showing a move's real `range`/`shape` footprint
+from the user's tile) as part of the same pass, in-game, for the
+currently-selected agent's actual moveset. Not started — this is a real
+web/UI feature, scoped as its own follow-up, not a quick add-on to the
+current move-tree redesign work.
+
 ## Hydro Pump/Solar Beam/Earthquake redesigned against v3 principles — built
 
 Direct follow-up to the v3 principles below: "go ahead and redesign all
