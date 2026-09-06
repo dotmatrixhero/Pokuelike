@@ -4118,3 +4118,24 @@ not something this pathfinding pass itself caused or is positioned to fix.
       out to the other three crosslinks in Earthquake or to Hydro Pump/
       Solar Beam/Rock Throw — this was a single pilot, checked before
       repeating. Atlas rebuilt and republished.
+- [x] **Made the crosslink bridge actually visible in the Atlas** — direct
+      report: "I don't understand visually the cross link thing in
+      earthquake. I can't see what you did it's all kinda hard to see."
+      Root cause, found by reading the actual rendering code rather than
+      guessing: `isCrosslink()` only recognizes a node with exactly 2
+      direct prerequisites, so Marked Rupture and Converged Ruin (single-
+      prereq descendants of the real crosslink root) rendered as
+      ordinary orange Aggression fillers with plain faint edges — the
+      whole bridge was visually indistinguishable from the branch's normal
+      filler chain, and its shortcut edge into the fork used the same
+      faint dashed style as every other ordinary any-of convergence
+      already in the graph. Added `isCrosslinkChainMember()` (a pure
+      visualization concept, walks single-prereq chains back to a real
+      crosslink root — doesn't touch `leaning`, tier classification, or
+      layout) and used it to: give every node in a crosslink's own chain a
+      dashed gold ring (nested outside the existing cost-2 ring), and
+      style any `prerequisitesAnyOf` edge whose source is a chain member
+      as a thicker, gold "bridge" edge distinct from ordinary any-of
+      shortcuts. Added a legend entry explaining the new gold-ring/bridge-
+      edge convention. Verified the inline script's syntax before
+      rebuilding. Atlas rebuilt and republished.

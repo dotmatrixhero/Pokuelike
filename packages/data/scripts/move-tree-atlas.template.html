@@ -386,6 +386,7 @@
   .edge-normal { stroke-width: 1.4; opacity: 0.55; }
   .edge-anyof { stroke-width: 1.3; stroke-dasharray: 2 4; opacity: 0.55; }
   .edge-cross { stroke-width: 1.6; opacity: 0.8; }
+  .edge-bridge { stroke-width: 2; stroke-dasharray: 4 3; opacity: 0.9; }
   .edge-dim { opacity: 0.12 !important; }
   .edge-lit { opacity: 1 !important; stroke-width: 2.2 !important; }
   .node-dim { opacity: 0.28; }
@@ -633,6 +634,32 @@
 
   function isCrosslink(node) {
     return Array.isArray(node.prerequisites) && node.prerequisites.length === 2;
+  }
+
+  /**
+   * True for a crosslink's own root node AND for any node reached from it
+   * through an unbroken single-prerequisite chain — e.g. Earthquake's
+   * Coordinated Tremor (the crosslink root) -> Marked Rupture -> Converged
+   * Ruin are all "in the chain," even though only Coordinated Tremor
+   * itself satisfies `isCrosslink`. Purely a visualization concept (see
+   * the "crosslink bridge" edge/ring styling below) — doesn't touch
+   * `leaning`, tier classification, or layout positioning, so it can't
+   * change where anything's placed or how points are tallied by branch.
+   * Direct ask, after a real crosslink bridge (Earthquake's
+   * Converged Ruin pilot) was genuinely hard to spot in the graph: "I
+   * can't see what you did, it's all kinda hard to see."
+   */
+  function isCrosslinkChainMember(tree, id, seen) {
+    seen = seen || {};
+    if (seen[id]) return false; // cycle guard — trees are acyclic, but stay defensive
+    seen[id] = true;
+    var node = tree[id];
+    if (!node) return false;
+    if (isCrosslink(node)) return true;
+    if (Array.isArray(node.prerequisites) && node.prerequisites.length === 1) {
+      return isCrosslinkChainMember(tree, node.prerequisites[0], seen);
+    }
+    return false;
   }
 
   function firstAnyOfParent(node) {
@@ -1158,7 +1185,13 @@
       }
       if (node.prerequisitesAnyOf) {
         node.prerequisitesAnyOf.forEach(function (set) {
-          addEdge(set[set.length - 1], id, "edge-anyof");
+          var srcId = set[set.length - 1];
+          // A "bridge" alternative — its source traces back to a crosslink
+          // root through an unbroken chain — gets the same gold, thicker
+          // treatment as a crosslink edge, instead of blending into the
+          // many ordinary same-branch anyOf shortcuts already in the graph.
+          var isBridge = isCrosslinkChainMember(tree, srcId);
+          addEdge(srcId, id, isBridge ? "edge-bridge" : "edge-anyof", isBridge ? CROSS_HEX : null);
         });
       }
     });
@@ -1200,6 +1233,25 @@
 
       if (node.cost >= 2 && !isCrosslink(node)) {
         g.appendChild(el("circle", { class: "ring", r: r + 4, fill: "none", stroke: color, "stroke-width": 1, opacity: 0.5 }));
+      }
+      // A dashed gold ring marks every node in a crosslink's own chain
+      // (the root itself is already solid gold via nodeColor/isCrosslink) —
+      // nested outside the cost-2 ring above when both apply, so a bridge
+      // like Earthquake's Coordinated Tremor -> Marked Rupture -> Converged
+      // Ruin reads as one continuous gold thread instead of blending into
+      // its branch's ordinary fillers.
+      if (!isCrosslink(node) && isCrosslinkChainMember(tree, id)) {
+        g.appendChild(
+          el("circle", {
+            class: "ring",
+            r: r + (node.cost >= 2 ? 8 : 4),
+            fill: "none",
+            stroke: CROSS_HEX,
+            "stroke-width": 1.4,
+            "stroke-dasharray": "2 2",
+            opacity: 0.85,
+          })
+        );
       }
       g.appendChild(el("circle", { class: "ring", r: r, fill: "#0c1015", stroke: color, "stroke-width": 2.2 }));
       g.appendChild(el("circle", { r: r - 5, fill: color, opacity: node.grantsPassive || node.grantsPassives ? 0.95 : 0.55 }));
@@ -1804,6 +1856,7 @@
       { swatch: "#e0ac3f", label: "Crosslink" },
       { line: "solid", label: "prerequisite" },
       { line: "dashed", label: "any-of shortcut" },
+      { line: "bridge", label: "crosslink bridge (dashed gold ring = in the chain)" },
       { line: "excl", label: "× mutually exclusive" },
     ];
     items.forEach(function (it) {
@@ -1813,6 +1866,8 @@
         span.innerHTML = '<span class="swatch" style="background:' + it.swatch + '"></span>' + it.label;
       } else if (it.line === "excl") {
         span.innerHTML = '<span class="line-sample dashed" style="border-color:var(--danger)"></span>' + it.label;
+      } else if (it.line === "bridge") {
+        span.innerHTML = '<span class="line-sample dashed" style="border-color:' + CROSS_HEX + '"></span>' + it.label;
       } else {
         span.innerHTML = '<span class="line-sample' + (it.line === "dashed" ? " dashed" : "") + '"></span>' + it.label;
       }
