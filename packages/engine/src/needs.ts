@@ -649,6 +649,9 @@ function tryForageFromWater(world: World, agent: Agent, log: EventLog | undefine
  */
 const FEEDING_PRIORITY_STOCK_THRESHOLD = 2 * CONSUME_STOCK_AMOUNT;
 
+/** Herbs' own real hook (CROPS_DESIGN.md) — deliberately well under Safeguard's 60-tick grant, and self-only (no herd-radius aura like Safeguard's), so it reads as "the humble remedy," not a strictly-better food. */
+const HERBS_STATUS_IMMUNE_TICKS = 20;
+
 function yieldsToHigherRankedFeeder(world: World, agent: Agent, tileStock: number | undefined): boolean {
   if (!agent.herdId) return false;
   if (tileStock === undefined || tileStock >= FEEDING_PRIORITY_STOCK_THRESHOLD) return false;
@@ -1160,6 +1163,16 @@ export function tickAgentAction(
           if (targetTile?.stock !== undefined) {
             targetTile.stock = Math.max(0, targetTile.stock - CONSUME_STOCK_AMOUNT);
             recordGrazing(targetTile); // real self-feeding grazing event — see flora.ts's "Grazing scars"
+          }
+          // Herbs' own real hook (CROPS_DESIGN.md): "the humble remedy" — a
+          // short status-immunity grant on eat, well under Safeguard's own
+          // 60-tick/herd-radius grant (self-only here, no aura), reusing the
+          // exact field/tick-down mechanism Safeguard already established
+          // (status.ts's `statusImmuneTicksRemaining`) rather than a second
+          // one. Makes the deliberately weak Filler tier a real choice
+          // (nutrition vs. a minor status hedge), not just a tier to skip.
+          if (targetTile?.flavor === "herbs") {
+            agent.statusImmuneTicksRemaining = HERBS_STATUS_IMMUNE_TICKS;
           }
         }
         grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);

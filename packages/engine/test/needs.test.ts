@@ -107,6 +107,29 @@ describe("tickAgent", () => {
     expect(secondAgent.behavior).toBe("seekFood");
   });
 
+  it("eating Herbs grants a real, short status-immunity window — CROPS_DESIGN.md's own 'humble remedy' hook, reusing Safeguard's field", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    tileAt(world, "surface", 2, 0)!.flavor = "herbs";
+    const agent = makeAgent({ pos: { x: 2, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
+    expect(agent.statusImmuneTicksRemaining).toBeUndefined();
+
+    tickAgent(world, agent);
+
+    expect(agent.statusImmuneTicksRemaining).toBeGreaterThan(0);
+  });
+
+  it("eating a real nutrition crop (not Herbs) does not grant status immunity", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    tileAt(world, "surface", 2, 0)!.flavor = "pumpkin";
+    const agent = makeAgent({ pos: { x: 2, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
+
+    tickAgent(world, agent);
+
+    expect(agent.statusImmuneTicksRemaining).toBeUndefined();
+  });
+
   it("eating a high-quality patch restores noticeably more hunger than eating a low-quality one — direct ask: \"fully fertile plant gives super higher quality berries\"", () => {
     function hungerRestored(quality: number): number {
       const world = createWorld(5, 1);

@@ -3,6 +3,37 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Food crops (Corn/Wheat/Rice/Tomato/Apple/Potato/Pumpkin/Herbs) — built, see CROPS_DESIGN.md
+
+Direct ask: "more kinds of food, not just berries... nutrition dense, grow
+in certain regions and seasons, and be heavily contested," refined into
+"make it so they keep you full for longer, and also are affected by zone
+and climate and season." Real biome/moisture/season-gated crops replace the
+old purely-cosmetic berry flavors (`FOOD_FLAVORS`, confirmed zero gameplay
+effect before this) — full scope, tier table, and built-vs-scoped delta in
+CROPS_DESIGN.md. Two real calibration bugs caught by sampling a real
+generated world before shipping (Rice's moisture gate and Tomato's sunbeam
+gate were both unreachable as first drafted) — see CROPS_DESIGN.md's own
+"Built — real-run findings" section for the numbers. Confirmed via
+`validateCrops.ts` over a real 8000-tick run: all 8 crops appear, Winter
+cuts average live food tiles from ~66.6 to ~1.7. Flagged follow-ups:
+
+- The "heavily contested" half of the ask rests on `herdConflict.ts`'s
+  existing generic resource-blocking trigger, not on any crop-specific
+  contest-seeking behavior (agents still just `seekFood` their nearest
+  option) — the validation run couldn't actually confirm rare crops draw
+  more clashes than common ones; see CROPS_DESIGN.md for the honest
+  breakdown of why and what a real test of this would need (larger
+  population, and/or `herdClash` events recording the contested tile's own
+  position instead of wherever the skirmish itself happens).
+- Honey is deferred, not built — CROPS_DESIGN.md scopes a real
+  pollinator-adjacency design (a `bloom` tile timer + Butterfree/Beedrill
+  proximity) but it needs new per-tile state none of the 8 shipped crops
+  needed, so it was sequenced out of this pass.
+- No dedicated sprite art exists for any of the 8 crops yet — they render
+  via the existing colored-glyph fallback (`palette.ts`/`ascii.ts`), same
+  path any flavor without real art already used.
+
 ## Natural landmarks on the macro grid — built, see DESIGN.md
 
 Direct ask: "more character, more points of interest," refined through "stay

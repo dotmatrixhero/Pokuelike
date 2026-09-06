@@ -74,25 +74,34 @@ const TERRAIN_FG: Record<TerrainKind, Rgb> = {
 };
 
 /**
- * Per-flavor overrides for "food"/"flora" tiles (see flora.ts's
- * FOOD_FLAVORS/FLORA_FLAVORS) — cute, distinct glyph+color per specific
- * plant instead of every berry bush looking identical.
+ * Per-flavor overrides for "food"/"flora" tiles — "food" flavors are real
+ * `crops.ts` `CropId`s (CROPS_DESIGN.md), "flora" flavors are still
+ * `flora.ts`'s purely decorative `FLORA_FLAVORS` — cute, distinct
+ * glyph+color per specific plant instead of every patch looking identical.
  */
 const FLAVOR_GLYPH: Record<string, string> = {
-  oran: "%",
-  sitrus: "&",
-  pecha: "*",
-  cheri: "+",
+  herbs: "h",
+  wheat: "w",
+  tomato: "t",
+  corn: "c",
+  rice: "r",
+  apple: "a",
+  potato: "p",
+  pumpkin: "P",
   moss: "`",
   fern: "'",
   bloom: ";",
 };
 
 const FLAVOR_FG: Record<string, Rgb> = {
-  oran: [90, 140, 255],
-  sitrus: [250, 176, 60],
-  pecha: [255, 140, 190],
-  cheri: [230, 70, 70],
+  herbs: [150, 190, 120],
+  wheat: [222, 184, 94],
+  tomato: [214, 64, 50],
+  corn: [235, 200, 60],
+  rice: [235, 230, 205],
+  apple: [200, 40, 40],
+  potato: [150, 110, 70],
+  pumpkin: [230, 130, 30],
   moss: [120, 165, 100],
   fern: [80, 130, 80],
   bloom: [205, 125, 195],

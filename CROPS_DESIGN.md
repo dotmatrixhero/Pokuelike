@@ -1,0 +1,270 @@
+# Food crops — built (8-crop table; Honey deferred, see below)
+
+Direct ask, following the landmarks work: "I wonder if we need more kinds of
+food, not just berries... corn and wheat and rice, tomatoes, apples, herbs,
+honey, potato, pumpkin. They can be more nutrition dense, grow in certain
+regions and seasons and be heavily contested?" Follow-up: "make it so they
+keep you full for longer, and also are affected by zone and climate and
+season."
+
+This is a scope, not an implementation — grounded in what's actually already
+built (see "Existing hooks" below) so every piece below reuses a real
+mechanism instead of inventing a parallel one.
+
+## The real gap today
+
+`flora.ts`'s `FOOD_FLAVORS` (`oran`/`sitrus`/`pecha`/`cheri`) is **purely
+cosmetic** — a glyph/color pick at maturation, confirmed by its own doc
+comment ("No gameplay effects yet") and a full usage audit (only
+rendering/tests read it). Every food tile restores hunger by the same flat
+formula regardless of flavor:
+
+```ts
+// needs.ts
+const CONSUME_RATE = { seekFood: { need: "hunger", amount: 0.4 }, ... };
+function consume(needs, behavior, qualityMultiplier = 1) {
+  needs[need] = Math.min(1, needs[need] + amount * qualityMultiplier);
+}
+```
+
+`qualityMultiplier` here is `foodNutritionFactor(tile)` (flora.ts), which
+only reads the tile's frozen `quality` (0.7–1.0x, set from local fertility at
+maturation) — nothing crop-specific exists to multiply against. This is
+exactly the seam a crop system plugs into.
+
+## Existing hooks to reuse (not invent)
+
+- **Nutrition density → "keep you full longer"**: the `amount`/
+  `qualityMultiplier` chain above already IS the "how much one bite restores"
+  lever. A nutrition-dense crop just needs a bigger per-crop multiplier here
+  — no new satiation-timer mechanism required. Hunger decays at a fixed
+  per-tick rate elsewhere in `needs.ts`, so a bigger one-shot restore
+  directly means more ticks pass before the next feeding trip — literally
+  "full for longer," for free, from the existing decay math.
+- **Region**: biomes are already real and per-tile (`BIOME_NAMES`:
+  grassland, forest, jungle, wetland, beach, badlands, desert, highland,
+  snow — `worldgen.ts`), with a distinct per-zone/per-tile **moisture**
+  field separate from biome name (`macroGrid.ts`'s moisture thresholds,
+  `worldgen.ts`'s own per-tile moisture field). A crop's `eligibleBiomes` +
+  optional moisture-band gate is the same pattern `landmarks.ts`'s
+  `LANDMARK_DEFS.eligibleBiomes` already established — reused, not new.
+- **Season**: `flora.ts` already runs a second, slower independent sine
+  cycle purely for decay (`SEASON_LENGTH = 1000` ticks, `seasonalMultiplier`)
+  — there is no calendar/year system, just this one cheap wave. A crop's
+  "harvest window" is a phase-of-that-same-wave gate (e.g., only sprouts
+  when `seasonalMultiplier`'s underlying phase sits in some arc), not a new
+  clock.
+- **Climate/weather**: `weather.ts`'s per-zone `WeatherCell`s
+  (rain/storm/drought/coldSnap) already drive `floraDecayDivisor`, which
+  `flora.ts` already calls for food-tile decay/spread. A crop's
+  weather-sensitivity (e.g., rice thriving in rain, potato shrugging off
+  drought) is a per-crop multiplier composed into that same existing call,
+  not a new coupling.
+- **Contested**: `herdConflict.ts`'s rivalry trigger
+  (`HERD_CONFLICT_MIN_BLOCKED_TICKS = 8`, already fires for ANY blocked food
+  or water tile, cross-species) needs zero new code. A nutrition-dense,
+  region/season-locked crop becomes "heavily contested" automatically, the
+  same way landmarks did: make it rare and valuable enough that agents queue
+  for it, and the existing trigger does the rest. The only real design lever
+  is tuning `stock`/`maxStock` low enough relative to its nutrition payoff
+  that multiple agents actually compete for one tile's yield.
+
+## Naming the season — a real derived value, not a new clock
+
+`seasonalMultiplier(tick) = 0.5 + 0.5*sin(2π·tick/SEASON_LENGTH)` already
+exists (`flora.ts`, `SEASON_LENGTH = 1000`), currently used only as a raw
+0..1 decay multiplier with no name attached to where in the cycle it is.
+Refinement: derive a `seasonPhase(tick) = (tick % SEASON_LENGTH) /
+SEASON_LENGTH` and split it into four named quartiles — pure naming over an
+existing wave, zero new tracking:
+
+| Phase | Range | Character |
+|---|---|---|
+| Spring | 0.00–0.25 | growth resuming; wide-window crops sprout freely |
+| Summer | 0.25–0.50 | peak growth; sunbeam-bonus crops (Tomato) do best here |
+| Autumn | 0.50–0.75 | the real harvest window — Apple and Pumpkin's narrow gates both sit here (see below) |
+| Winter | 0.75–1.00 | scarcity — only hardy, wide-window/drought-tolerant crops (Potato, and the wide-window staples at reduced yield) mature reliably |
+
+Winter is the deliberate payoff for "affected by season": for one quarter of
+the cycle, most crops stop maturing at all, and whatever still grows (Potato
+above all) becomes the only real food source — a natural, recurring,
+world-wide version of the same contested-scarcity dynamic a single rare
+landmark gives locally, without any new mechanism beyond the phase gate
+itself.
+
+## Proposed crop table
+
+Each crop = a `FOOD_FLAVORS`-like tag, but with real fields instead of a
+cosmetic one. Refinement over the first pass: nutrition tiers are now a
+**deliberate ladder tied to restriction** — the harder a crop's
+biome/moisture/season gate is to satisfy, the higher its nutrition
+multiplier, so scarcity and payoff reinforce each other instead of being
+picked independently. Sim-original guesses (rough relative tiers, not final
+numbers — same "judge against a real generated run" discipline as every
+other tuning table in this codebase).
+
+| Tier | Crop | Eligible biome(s) | Moisture/climate note | Season window | Nutrition (vs. today's flat 0.4) | Notes |
+|---|---|---|---|---|---|---|
+| 1 — Filler | Herbs | any biome, low density | — | wide (all four phases) | 1.0x, **but see the new Herbs hook below** | intentionally weak on nutrition — a real "always available" tier, not a min-max target |
+| 2 — Common | Wheat | grassland, highland | low–moderate | wide | 1.15x | widest eligibility of the real crops — the true default replacement for today's flat berries |
+| 2 — Common | Tomato | grassland, jungle | sun-loving (reuses `SUN_FOOD_FLAVORS`'s existing sunbeam-proximity bonus) | Summer only | 1.2x | first crop with a real season gate, still common biome-wise |
+| 2 — Common | Corn | grassland | moderate | wide | 1.25x | the "reliable staple" — slightly denser than Wheat for slightly narrower moisture tolerance |
+| 3 — Dense | Rice | wetland, jungle | high moisture only | wide | 1.35x | real climate gate (moisture-band, not just biome name) is what earns the density bump over Corn |
+| 3 — Dense | Apple | forest | moderate | **Autumn, first half (0.50–0.62)** | 1.4x | narrowest biome + a real season window — "grows on a tree, once a year" |
+| 4 — Hardy | Potato | badlands, highland, desert, **and available in Winter when nothing else is** | drought-tolerant (little/no `floraDecayDivisor` penalty under drought) | wide, including Winter | 1.5x | the actual "survival staple" — its density is earned by being the one reliable Winter food, not by rarity alone |
+| 5 — Rare/contested | Pumpkin | grassland, jungle | moderate | **Autumn, second half (0.62–0.75)**, offset from Apple | 1.65x | the deliberately scarce one — narrow biome-season overlap, small `maxStock`, big payoff |
+
+## Herbs get a real second hook, not just weak filler
+
+Refinement: instead of Herbs being nutrition-tier filler with nothing else
+going for it, give them a genuine (small) utility on eat — a short
+`statusImmuneTicksRemaining` grant, reusing the exact field/mechanism
+`utilityMoves.ts`'s Safeguard already sets (`status.ts`). Kept deliberately
+brief (well under Safeguard's own duration) so Herbs read as "the humble
+remedy," not a strictly-better food. This makes the Filler tier a real
+choice (nutrition vs. a minor status hedge) instead of a tier that exists
+only to be skipped.
+
+## Honey — a real first-cut design, not just deferred
+
+Refinement over "revisit later": honey doesn't fit the seedling-grows-into-
+food model, but it does fit a **pollinator-adjacency** model that's real
+enough to scope now, using pieces that already exist:
+
+- A `bloom`-flavored `FLORA_FLAVORS` tile (already decorative-only, no
+  gameplay effect — same "clean unused slot" `FOOD_FLAVORS` was) gains one
+  new field: `pollinatedTicksRemaining`, set to a short window whenever an
+  agent from a real pollinator-tagged species (Butterfree/Beedrill are
+  already on the curated roster) is adjacent to it — the same
+  "near"-distance-check idiom `isNearSunbeam` already established.
+- While that timer is active, the bloom tile gets a small chance per tick to
+  spawn a `honey` food-stock pocket directly on itself (reusing `flora.ts`'s
+  existing stock/decay fields, not a new tile type) — rare, small `maxStock`,
+  very high nutrition multiplier (tentatively 2.0x — the single richest
+  food in the sim, matching honey's real-world reputation).
+- This is still a second-cut item relative to the 8-crop table above — it
+  needs one new per-tile field and a species-tag adjacency check that
+  doesn't exist yet, vs. every crop above reusing fields/checks that already
+  exist. Sequence it after the main crop table lands, not alongside it.
+
+## What actually needs building
+
+1. **Data model**: replace `FOOD_FLAVORS: readonly string[]` with a real
+   `FoodCropDef` registry (id, `eligibleBiomes`, optional moisture band,
+   optional season-phase window, `nutritionMultiplier`, maybe a
+   `maxStock`/`yieldFactor` override for rarity tiers) — same shape as
+   `LANDMARK_DEFS`, not a new pattern.
+2. **Placement gating**: `flora.ts`'s seedling-maturation path
+   (`maybeDropSeed`/`trySpread`/the flavor-pick at maturation) needs to pick
+   a crop based on the maturing tile's actual biome + current season phase +
+   local moisture, instead of a uniform random flavor pick.
+3. **Nutrition hookup**: `foodNutritionFactor` (or a sibling function) needs
+   to read the tile's crop id and apply `nutritionMultiplier` on top of the
+   existing `quality`-based factor — `consume()`'s signature doesn't need to
+   change at all, just what feeds `qualityMultiplier`.
+4. **Season naming**: add `seasonPhase(tick)` (a pure derived function over
+   the existing `SEASON_LENGTH` wave, per the quartile table above) —
+   zero new state, just a name for where in the cycle `world.tick` sits.
+5. **Weather/season interaction**: extend the existing `floraDecayDivisor`
+   call site with a per-crop weather-sensitivity multiplier (drought-hardy
+   Potato vs. rain-loving Rice), and gate maturation-into-that-crop on the
+   crop's season-phase window from step 4.
+6. **Herbs' status hook**: on eating a Herbs tile, grant a short
+   `statusImmuneTicksRemaining`, reusing `status.ts`'s existing field
+   (already set/consumed by Safeguard) — no new field, just a second real
+   caller of it.
+7. **Rendering**: new glyphs/colors per crop in `sprites.ts`/`palette.ts`
+   (mechanical, same pattern as the existing 4 flavors — the cheap part).
+8. **Validation**: a dedicated `validateCrops.ts` runner script (this
+   session's own established discipline) confirming crops actually appear
+   in their intended biomes/seasons on a real generated world, nutrition
+   deltas are measurable, Winter genuinely thins out which crops mature,
+   and — the actual "heavily contested" payoff — `herdConflict.ts` rivalry
+   events measurably increase around a rare high-value crop (Pumpkin) vs.
+   an ordinary one (Wheat) over a real multi-thousand-tick run.
+9. **Tests**: crop eligibility/season-gating determinism, nutrition-multiplier
+   correctness, the Herbs status-immunity grant, and a regression guard that
+   `consume()`'s own math is untouched (only its input changed).
+10. **Honey (second cut, after the above lands)**: the `pollinatedTicksRemaining`
+    field on `bloom` tiles, the pollinator-species adjacency check, and the
+    honey stock-pocket spawn chance — sequenced after the main crop table
+    since it needs new per-tile state the rest of this scope doesn't.
+
+## Open questions
+
+- Exact `nutritionMultiplier`/season-window-width/`maxStock` numbers are all
+  guesses to be judged against a real generated run, same as every other
+  tuning constant in this codebase — not meant to be final. The one
+  structural claim worth stress-testing early: does the tier-vs-restriction
+  ladder (harder to get → more nutrition-dense) actually produce visibly
+  different contest behavior in a real run, or do the gates need to be
+  tightened/loosened once seen live?
+- Herbs' status-immunity duration needs to be short enough that it doesn't
+  make Herbs a strictly-better pick over a real nutrition crop whenever
+  status risk is nonzero — a real balance question, not just a number.
+- Honey's 2.0x nutrition figure is a placeholder reflecting "richest food in
+  the sim" — worth confirming that reads as a reward rather than trivializing
+  hunger once a colony has reliable access to a bloom patch.
+
+## Built — real-run findings and two real calibration bugs caught
+
+The 8-crop table above shipped as scoped: `crops.ts` (the `FoodCropDef`
+registry, `pickCrop`, `seasonPhase`/`seasonName`), wired into `flora.ts`'s
+maturation path and `foodNutritionFactor`, `worldgen.ts`'s initial
+placement, and needs.ts's Herbs status-immunity grant. Rendering got real
+per-crop glyphs/colors in `palette.ts`/`ascii.ts` (no dedicated sprite art
+yet — falls back cleanly to the colored-glyph path, same as any other
+flavor without art). Validated end-to-end with a dedicated
+`validateCrops.ts` runner script over a real 8000-tick `createDemoWorld`
+run, plus `crops.test.ts` and additions to `flora.test.ts`/`needs.test.ts`.
+
+**Two real, sampling-confirmed calibration bugs caught before shipping** —
+exactly the "judge against a real run, don't guess" discipline this
+codebase holds every tuning constant to, applied here for the first time to
+a crop gate rather than a single constant:
+
+- **Rice's moisture gate was unreachable.** The first draft used
+  `moistureRange: [0.6, 1]`, picked without checking the real distribution.
+  A direct sample of `effectiveWaterDensityAt` across a real generated world
+  showed the true range tops out at ~0.28 (Wetland's own base
+  `waterDensity`) — Rice could never have matured once shipped. Rescaled to
+  `[0.1, 1]`, calibrated against that real sampled distribution (excludes
+  the driest ~half of Jungle and a thin slice of Wetland — still a genuine
+  restriction, now an achievable one).
+- **Tomato's `sunLoving` hard gate was unreachable.** Sunbeam tiles only
+  ever generate above `SUNBEAM_ELEVATION_THRESHOLD` (1.5), but Tomato's own
+  Grassland/Jungle biomes never exceed ~1.15 in real generated elevation —
+  confirmed by direct sampling, not assumed. A hard "near sunbeam or
+  ineligible" gate would have made Tomato permanently unreachable in its own
+  assigned biomes. Changed `sunLoving` from a hard requirement to a
+  doubled-weight preference (matching the original pre-crop-system
+  `SUN_FOOD_FLAVORS` idiom, which was always "favor, don't require") — real,
+  reachable, and it still means something when it does occur.
+
+After both fixes, a real 8000-tick run produced every one of the 8 crops at
+least once (`cropIdsNeverSeen: []`), and the headline seasonal claim held up
+strongly: **1.7 average food tiles alive during Winter samples vs. 66.6
+outside Winter** — a real, measured, order-of-magnitude scarcity swing, not
+a marginal one.
+
+**What the same run could NOT confirm — reported honestly, not glossed
+over**: `herdClashEventsOnFoodTilesByCrop` came back empty despite 56 real
+clashes over the run. Two real reasons, not a broken mechanism: (1) a
+`herdClash` event's `pos` is wherever the two contesting agents' skirmish
+actually happens, which isn't guaranteed to be the exact contested tile's
+coordinates at that instant; and (2) unlike landmarks (which got a real
+`LANDMARK_POPULATION_MULTIPLIER` biasing multiple species toward the same
+tiles), crops have no analogous mechanism yet pulling extra population
+toward a rare crop specifically — an agent's `seekFood` still just goes to
+its nearest reachable food tile, so a rare crop (Pumpkin matured only 3
+times across the whole run) only gets "contested" if it happens to be
+several agents' nearest option at once, which a small demo-scenario
+population may simply not have produced in this one run. The "heavily
+contested" claim rests entirely on `herdConflict.ts`'s existing generic
+resource-blocking trigger doing its job under real scarcity, not on any
+crop-specific contest-seeking behavior — which is what CROPS_DESIGN.md
+proposed, but this run didn't have the population density to actually
+observe it firing on a crop tile specifically. Worth a longer/larger-
+population validation run, or a closer look at whether `herdClash`'s `pos`
+should instead record the contested resource tile's own coordinates, before
+calling this half of the ask fully confirmed.

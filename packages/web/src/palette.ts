@@ -65,12 +65,26 @@ export const TERRAIN_FG: Record<TerrainKind, Rgb> = {
   shelter: [196, 158, 108],
 };
 
-/** Per-flavor overrides for "food"/"flora" tiles — see flora.ts's FOOD_FLAVORS/FLORA_FLAVORS. */
+/**
+ * Per-flavor overrides for "food"/"flora" tiles. "food" flavors are real
+ * `crops.ts` `CropId`s now (CROPS_DESIGN.md) rather than the old purely
+ * cosmetic berry names — deliberately saturated, off the ordinary terrain
+ * palette so a rare crop like Pumpkin reads as "something special grew
+ * here," same intent as `macroMap.ts`'s own landmark markers. No dedicated
+ * sprite art exists for these yet (see sprites.ts's `getFoodSprite`), so
+ * this glyph/color IS the crop's real look until art is added — falls back
+ * cleanly, not to a broken image (see renderer.ts's `plantSprite` check).
+ * "flora" flavors are still purely decorative, unchanged.
+ */
 export const FLAVOR_FG: Record<string, Rgb> = {
-  oran: [90, 140, 255],
-  sitrus: [250, 176, 60],
-  pecha: [255, 140, 190],
-  cheri: [230, 70, 70],
+  herbs: [150, 190, 120],
+  wheat: [222, 184, 94],
+  tomato: [214, 64, 50],
+  corn: [235, 200, 60],
+  rice: [235, 230, 205],
+  apple: [200, 40, 40],
+  potato: [150, 110, 70],
+  pumpkin: [230, 130, 30],
   moss: [120, 165, 100],
   fern: [80, 130, 80],
   bloom: [205, 125, 195],
@@ -94,10 +108,14 @@ export const TERRAIN_GLYPH: Record<TerrainKind, string> = {
 };
 
 export const FLAVOR_GLYPH: Record<string, string> = {
-  oran: "%",
-  sitrus: "&",
-  pecha: "*",
-  cheri: "+",
+  herbs: "h",
+  wheat: "w",
+  tomato: "t",
+  corn: "c",
+  rice: "r",
+  apple: "a",
+  potato: "p",
+  pumpkin: "P",
   moss: "`",
   fern: "'",
   bloom: ";",

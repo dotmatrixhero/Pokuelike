@@ -13,6 +13,7 @@ export * from "./events.js";
 export * from "./predation.js";
 export * from "./reproduction.js";
 export * from "./flora.js";
+export * from "./crops.js";
 export * from "./herding.js";
 export * from "./herdMigration.js";
 export * from "./migration.js";

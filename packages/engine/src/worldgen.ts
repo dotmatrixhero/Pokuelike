@@ -1,6 +1,6 @@
 import type { Agent, BiomeSeedInfo, Layer, Vec2, World } from "./types.js";
 import { createWorld, setElevation, setTile, tileAt } from "./world.js";
-import { FOOD_FLAVORS } from "./flora.js";
+import { pickCrop } from "./crops.js";
 import { mulberry32 } from "./rng.js";
 import { canEnterWater } from "./waterBody.js";
 import type { ZoneDirection } from "./directions.js";
@@ -998,6 +998,29 @@ function isBadlandsDominant(seeds: readonly BiomeSeedInfo[], x: number, y: numbe
 }
 
 /**
+ * The single highest-weight biome name at (x, y) in `biomeWeightsAt`'s
+ * blend — undefined on a world with no biome data at all
+ * (`biomeWeightsAt` returns `{}`). Used by `flora.ts`'s crop-maturation
+ * pick (`crops.ts`'s `pickCrop`) to decide which real crop a maturing
+ * seedling is even eligible to become — a general "what biome is this,
+ * really" helper, generalized out of `isBadlandsDominant`'s own
+ * single-biome check just above rather than duplicating the same
+ * highest-weight scan for a second purpose.
+ */
+export function dominantBiomeAt(seeds: readonly BiomeSeedInfo[] | undefined, x: number, y: number): string | undefined {
+  const weights = biomeWeightsAt(seeds, x, y);
+  let best: string | undefined;
+  let bestWeight = 0;
+  for (const [name, weight] of Object.entries(weights)) {
+    if (weight > bestWeight) {
+      bestWeight = weight;
+      best = name;
+    }
+  }
+  return best;
+}
+
+/**
  * Carves BSP chamber/canyon boundaries into every Badlands-dominant tile —
  * see this section's doc comment. A no-op on a world with no biome data at
  * all (`world.biomeSeeds` absent/empty), same contract every other biome-
@@ -1551,8 +1574,18 @@ export function generateWorld(width: number, height: number, seed: number, bias?
       }
 
       if (foodField.sample(x, y) < foodField.thresholdFor(params.foodDensity)) {
-        const flavor = FOOD_FLAVORS[Math.floor(flavorRng() * FOOD_FLAVORS.length)]!;
-        setTile(world, "surface", x, y, "food", elevation, flavor);
+        // Real biome/moisture-gated crop pick (crops.ts's pickCrop), same
+        // runtime biome-blend/moisture-proxy functions flora.ts's own
+        // maturation pick reuses — nearSun is always false here since
+        // sunbeam tiles aren't placed until after this loop runs (see
+        // below). Tomato (sunLoving) can still be picked here at its base
+        // rate — nearSun only doubles its odds, it was never a hard
+        // requirement (see crops.ts's own doc comment on why one would be
+        // unreachable in Tomato's assigned biomes anyway).
+        const biome = dominantBiomeAt(world.biomeSeeds, x, y);
+        const moisture = effectiveWaterDensityAt(world.biomeSeeds, world.biomeSeedDrift, x, y);
+        const crop = pickCrop(biome, moisture, world.tick, false, flavorRng);
+        setTile(world, "surface", x, y, "food", elevation, crop);
         continue;
       }
 
@@ -1583,7 +1616,7 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   // ordinary biome/river/cave generation already placed on top of a
   // promoted zone's footprint, same "distinct xor'd seed per generation
   // concern" pattern as every other step above.
-  applyLandmarkFeature(world, width, height, mulberry32(seed ^ 0x1b873593), bias?.landmark);
+  applyLandmarkFeature(world, width, height, mulberry32(seed ^ 0x9e3779b1), bias?.landmark);
 
   return world;
 }

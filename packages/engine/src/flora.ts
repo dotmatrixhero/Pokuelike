@@ -3,25 +3,32 @@ import type { EventLog } from "./events.js";
 import { tileAt } from "./world.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
 import { floraDecayDivisor } from "./weather.js";
+import { dominantBiomeAt, effectiveWaterDensityAt } from "./worldgen.js";
+import { FOOD_CROPS, WINTER_NON_HARDY_FOOD_CHANCE_MULTIPLIER, pickCrop, seasonalMultiplier, seasonName, type CropId } from "./crops.js";
 
 /**
- * What a seedling can mature into — purely cosmetic flavors of "food"
- * (edible, has stock) or "flora" (decorative only, not edible, just a
- * nicer/comfier tile than bare floor). No gameplay effects yet — just a
- * distinct glyph/color per flavor in the renderer. Real Pokémon berry
- * names for the edible ones since this is, after all, a Pokémon sim.
+ * What a seedling can mature into — a real, biome/moisture/season-gated
+ * `CropId` (`crops.ts`) for "food" (edible, has stock, a real nutrition
+ * multiplier), or a purely cosmetic decorative flavor for "flora"
+ * (decorative only, not edible, just a nicer/comfier tile than bare floor —
+ * unchanged, `FLORA_FLAVORS` never needed to be more than cosmetic).
  */
-export const FOOD_FLAVORS = ["oran", "sitrus", "pecha", "cheri"] as const;
 export const FLORA_FLAVORS = ["moss", "fern", "bloom"] as const;
-/** Sun-loving berries — favored when a seedling matures near a sunbeam tile. */
-const SUN_FOOD_FLAVORS = ["sitrus", "cheri"] as const;
 /** How far (Chebyshev distance) counts as "near" a sunbeam for germination purposes. */
 /** Also read directly by utilityMoves.ts's `selfHeal`'s `sunbeamBonus` — same "how close counts as near" radius germination already uses. */
 export const SUNBEAM_RADIUS = 3;
 /** Chance a maturing seedling becomes edible food vs. decorative flora, normally. */
 const FOOD_CHANCE = 0.55;
-/** Same, but boosted near a sunbeam — sun-loving berries do better in the light. */
+/** Same, but boosted near a sunbeam — sun-loving crops (Tomato) do better in the light. */
 const FOOD_CHANCE_NEAR_SUNBEAM = 0.8;
+/**
+ * How much a drought-resistant crop's (Potato's) decay is spared from a
+ * drought's usual penalty — pulls the weather divisor this fraction of the
+ * way back toward 1 (neutral) whenever it's below 1 (a real drought
+ * in effect), rather than eliminating the penalty outright ("drought-
+ * tolerant," not "drought-immune").
+ */
+const DROUGHT_RESISTANCE_DAMPING = 0.7;
 
 function pickFlavor<T extends readonly string[]>(flavors: T, rng: () => number): T[number] {
   return flavors[Math.floor(rng() * flavors.length)]!;
@@ -67,8 +74,6 @@ const GERMINATION_CHANCE = 0.65;
  * on), not a reason to also slow down replacement.
  */
 export const MATURATION_TICKS = 20;
-/** Ticks per full season cycle — a slow abundant/lean rhythm on decay and spread. */
-const SEASON_LENGTH = 1000;
 /**
  * How much a single feeding depletes a food patch's stock. Was 0.2, then
  * briefly 0.5 (reverted — a real run showed 0.5 stacks with natural decay
@@ -301,10 +306,22 @@ function decayFactor(quality: number): number {
  * the same quality->benefit curve instead of duplicating it.
  */
 const QUALITY_NUTRITION_SWING = 0.3;
-/** How much hunger-restoration a feeding from this tile is worth, relative to a baseline (quality-1) feeding — 1 for an unset/quality-1 tile. */
+/**
+ * How much hunger-restoration a feeding from this tile is worth, relative
+ * to a baseline (quality-1, Herbs-tier) feeding — composes two independent
+ * factors: the tile's own founding `quality` (unchanged from before crops
+ * existed) and its `CropId`'s `nutritionMultiplier` (`crops.ts`) — a
+ * nutrition-dense crop (Pumpkin) restores meaningfully more per bite than a
+ * filler one (Herbs) even at identical quality, which is the real "keep you
+ * full for longer" ask: a bigger one-shot restore means more ticks pass
+ * before the next feeding trip, straight out of `needs.ts`'s existing
+ * flat-per-tick hunger decay.
+ */
 export function foodNutritionFactor(tile: Tile | undefined): number {
-  if (!tile || tile.quality === undefined) return 1;
-  return 1 + QUALITY_NUTRITION_SWING * (2 * tile.quality - 1);
+  if (!tile) return 1;
+  const qualityFactor = tile.quality === undefined ? 1 : 1 + QUALITY_NUTRITION_SWING * (2 * tile.quality - 1);
+  const cropMultiplier = tile.flavor !== undefined && tile.flavor in FOOD_CROPS ? FOOD_CROPS[tile.flavor as CropId].nutritionMultiplier : 1;
+  return qualityFactor * cropMultiplier;
 }
 
 /** Records a real grazing event at these tile coordinates — call from every place stock is actually consumed. */
@@ -347,11 +364,6 @@ const NEIGHBOR_OFFSETS: Vec2[] = [
   { x: 0, y: -1 }, { x: 1, y: -1 }, { x: 1, y: 0 }, { x: 1, y: 1 },
   { x: 0, y: 1 }, { x: -1, y: 1 }, { x: -1, y: 0 }, { x: -1, y: -1 },
 ];
-
-/** 0..1 multiplier on decay/spread: a slow sine cycle, never fully zeroing out. */
-export function seasonalMultiplier(tick: number): number {
-  return 0.5 + 0.5 * Math.sin((2 * Math.PI * tick) / SEASON_LENGTH);
-}
 
 /**
  * Tries to seed one open neighbor of a living food patch — how it
@@ -433,7 +445,16 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
       tile.growth = (tile.growth ?? 0) + (tile.overgrazed ? OVERGRAZED_GROWTH_MULTIPLIER : 1);
       if (tile.growth >= MATURATION_TICKS) {
         const nearSun = isNearSunbeam(world, pos);
-        const becomesFood = rng() < (nearSun ? FOOD_CHANCE_NEAR_SUNBEAM : FOOD_CHANCE);
+        // Real biome/moisture-gated crop pick (crops.ts) — the same runtime
+        // biome-blend/moisture-proxy functions weather.ts's own Phase 3
+        // biome-influenced weather already reuses, not a new biome concept.
+        const biome = dominantBiomeAt(world.biomeSeeds, pos.x, pos.y);
+        const moisture = effectiveWaterDensityAt(world.biomeSeeds, world.biomeSeedDrift, pos.x, pos.y);
+        const crop = pickCrop(biome, moisture, world.tick, nearSun, rng);
+        // Winter thins out which crops mature into real food at all — see
+        // crops.ts's own doc comment; Potato (winterHardy) is exempt.
+        const winterPenalty = seasonName(world.tick) === "winter" && !FOOD_CROPS[crop].winterHardy ? WINTER_NON_HARDY_FOOD_CHANCE_MULTIPLIER : 1;
+        const becomesFood = rng() < (nearSun ? FOOD_CHANCE_NEAR_SUNBEAM : FOOD_CHANCE) * winterPenalty;
         // Frozen onto the new patch as its `quality` — the tile's own
         // `fertility` keeps moving after this, but this plant's yield/
         // lifespan/nutrition are set for its whole life right here.
@@ -443,7 +464,7 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
         if (becomesFood) {
           tile.terrain = "food";
           tile.stock = FOOD_MAX_STOCK * yieldFactor(quality);
-          tile.flavor = nearSun ? pickFlavor(SUN_FOOD_FLAVORS, rng) : pickFlavor(FOOD_FLAVORS, rng);
+          tile.flavor = crop;
           invalidateResourceIndex(world); // a new "food" tile — resourceIndex.ts's cache needs rebuilding
         } else {
           tile.terrain = "flora";
@@ -473,7 +494,16 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
       // less) — see `floraDecayDivisor`'s doc comment for why decay/spread
       // modulation, not a direct stock top-up, is this system's closest
       // equivalent to "boosts/suppresses regrowth."
-      const weatherDivisor = floraDecayDivisor(world, "surface", pos);
+      let weatherDivisor = floraDecayDivisor(world, "surface", pos);
+      // Drought-resistant crops (Potato) shrug off most of a drought's
+      // usual decay penalty — pulls a below-1 (drought) divisor this
+      // fraction of the way back toward 1 (neutral), "drought-tolerant,"
+      // not "drought-immune." No effect on rain/neutral weather, and no
+      // effect on non-drought-resistant crops at all.
+      const crop = tile.flavor !== undefined && tile.flavor in FOOD_CROPS ? FOOD_CROPS[tile.flavor as CropId] : undefined;
+      if (crop?.droughtResistant && weatherDivisor < 1) {
+        weatherDivisor += (1 - weatherDivisor) * DROUGHT_RESISTANCE_DAMPING;
+      }
       tile.stock -= (NATURAL_DECAY_PER_TICK * (1.5 - season) * decayFactor(tile.quality ?? 1)) / weatherDivisor;
 
       if (tile.stock <= 0) {
