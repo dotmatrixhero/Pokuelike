@@ -246,13 +246,26 @@ function loadWorld(seed: number): void {
   history.replaceState(null, "", url);
 }
 
-/** Direct ask: "I want to be able to see the overworld stuff... visualize overworld." See macroMap.ts for the single pannable/zoomable canvas this drives. */
-function loadMacroWorld(): void {
-  macroWorld = createDemoMacroWorld();
+/**
+ * Direct ask: "I want to be able to see the overworld stuff... visualize
+ * overworld." See macroMap.ts for the single pannable/zoomable canvas this
+ * drives. `seed` (default: the same `SCENARIO_SEED` `createDemoMacroWorld`
+ * itself defaults to) lets Load/Random regenerate the whole macro grid with
+ * a different seed — direct follow-up: "can overworld be regenerated based
+ * on random seed" — mirroring `loadWorld`'s own seed-input/URL sync so the
+ * seed field and the "Copy" button stay meaningful in Overworld mode too.
+ */
+function loadMacroWorld(seed: number = SCENARIO_SEED): void {
+  macroWorld = createDemoMacroWorld(seed);
   world = findRegion(macroWorld, macroWorld.focusedKey)!.world!;
   log = new EventLog();
   resetUiForNewWorld();
   macroMapView.render(macroWorld, true);
+
+  seedInput.value = String(seed);
+  const url = new URL(location.href);
+  url.searchParams.set("seed", String(seed));
+  history.replaceState(null, "", url);
 }
 
 /** The macro grid's own promotion/demotion transition, triggered by clicking a zone on the macro map — see macroMap.ts. A no-op if `(row, col)` is out of the grid's bounds (macroMap.ts's click handler doesn't itself bounds-check). */
@@ -431,11 +444,13 @@ function maybeAutoSwitchTab(): void {
 loadSeedBtn.addEventListener("click", () => {
   const value = Number(seedInput.value);
   if (!Number.isFinite(value)) return;
-  loadWorld(value);
+  if (macroWorld) loadMacroWorld(value);
+  else loadWorld(value);
 });
 
 randomSeedBtn.addEventListener("click", () => {
-  loadWorld(randomSeed());
+  if (macroWorld) loadMacroWorld(randomSeed());
+  else loadWorld(randomSeed());
 });
 
 copySeedBtn.addEventListener("click", () => {
@@ -691,13 +706,6 @@ function applyOverworldSubView(view: OverworldSubView): void {
 
 overworldToggleBtn.addEventListener("click", () => {
   const enabling = !macroWorld;
-  // The seed controls don't mean anything in Overworld mode (the macro grid
-  // has its own seed — see overworldScenario.ts's createDemoMacroWorld) —
-  // disabled rather than left to silently drop the viewer out of Overworld
-  // mode if clicked.
-  seedInput.disabled = enabling;
-  loadSeedBtn.disabled = enabling;
-  randomSeedBtn.disabled = enabling;
   macroMapWrapEl.hidden = !enabling;
   macroViewToggleBtn.hidden = !enabling;
   overworldToggleBtn.textContent = `Overworld: ${enabling ? "On" : "Off"}`;
