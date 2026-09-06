@@ -1,6 +1,33 @@
 import type { Agent, NotableTitleId, World } from "@pokuelike/engine";
 
 /**
+ * Real agent/egg ids are internal bookkeeping strings, not display text —
+ * `"bulbasaur-immigrant-1523-0"`, `"egg-cubone-1204-3"` — and the battle log
+ * was printing them in full, direct ask: "shrink the Id and origin... pretty
+ * print two words at most... like cubone (32, immigrant)." Every id this
+ * codebase generates (`scenario.ts`'s `${species}-${i}`, `immigration.ts`'s
+ * `${species}-immigrant-${tick}-${i}`, `overworld.ts`'s
+ * `${species}-${region}-invented-${tick}-${i}`, `eggs.ts`'s
+ * `egg-${species}-${tick}-${seq}`) ends in a real per-batch index that's
+ * already small — pulling just the TRAILING digits (not the whole id) skips
+ * right past the large embedded tick number in the middle, giving a short,
+ * stable-enough-to-recognize number without ever needing to know which of
+ * these four shapes a given id actually is.
+ */
+export function shortId(id: string): string {
+  const match = /(\d+)$/.exec(id);
+  return match ? match[1]! : id;
+}
+
+/** The "origin" word the battle log's `(id, origin)` pairing wants — `undefined` for an ordinary founding-population agent, which gets no second word at all. */
+function originWord(id: string): string | undefined {
+  if (id.startsWith("egg-")) return "born";
+  if (id.includes("-immigrant-")) return "immigrant";
+  if (id.includes("-invented-")) return "invented";
+  return undefined;
+}
+
+/**
  * `"Species (id)"` for an ordinary agent, or `"The Hero (Species)"` for a
  * current title-holder — the shared "look up an id, render its display
  * identity" helper every consumer that only has a bare id/species pair on
@@ -9,14 +36,17 @@ import type { Agent, NotableTitleId, World } from "@pokuelike/engine";
  * agent rather than two independent conventions. `world` is optional —
  * without it, this always falls back to the plain `"Species (id)"` form
  * (the same "no world, same plain text as before" contract `eventText.ts`'s
- * `formatEvent` already established).
+ * `formatEvent` already established). The `(id)` part itself is now the
+ * short `(shortId)` / `(shortId, origin)` form — see `shortId`/`originWord`
+ * above — never the full raw id.
  */
 export function idLabel(world: World | undefined, id: string, species: string): string {
   const agent = world?.agents.find((a) => a.id === id);
   const leader = agent ? leaderPrefix(agent) : "";
   if (agent?.notableTitle) return `${leader}${TITLE_DISPLAY_NAME[agent.notableTitle]} (${species})`;
-  if (leader) return `${leader}${species} (${id})`;
-  return `${species} (${id})`;
+  const origin = originWord(id);
+  const suffix = origin ? `${shortId(id)}, ${origin}` : shortId(id);
+  return `${leader}${species} (${suffix})`;
 }
 
 /**
