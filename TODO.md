@@ -80,6 +80,20 @@ for the full design, real numbers (a 1,000,000-zone grid generates in
       (`packages/web/src/macroMap.ts`) now covers the whole macro grid,
       native-resolution zoom, promoted zones showing a real terrain inset
       once zoomed in enough. Confirmed live in the browser end to end.
+- [x] **Scroll-wheel zoom, Google Maps-style — direct ask.** Both the tile
+      view and the macro map already had +/- buttons and pinch-to-zoom;
+      wheel/trackpad scrolling over either now zooms in/out too, anchored to
+      the cursor position (whatever content point is under the pointer stays
+      under the pointer, rather than the viewport just drifting after a
+      naive zoom). One shared `zoomAtPoint` helper (`main.ts`) does this for
+      both — it reads `getBoundingClientRect` before/after the zoom mutation
+      and adjusts the scroll container's `scrollLeft`/`scrollTop` by the
+      delta, which works regardless of whether the resize came from the tile
+      view's CSS-scale zoom or the macro map's native-resolution redraw.
+      Confirmed live via a Playwright-driven browser session: repeated wheel
+      events over an off-center point zoomed both canvases in (80% → 171%
+      tile view; 8px/zone → 14px/zone macro map) while keeping that same
+      content point within ~2px of the cursor.
 - [ ] **No true edge-blending between neighboring zones' tiles** — DESIGN.md's
       own "neighbor consistency pass" from the original vision write-up,
       designed but not built. Two adjacent zones are both biased from the

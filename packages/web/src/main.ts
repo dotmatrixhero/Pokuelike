@@ -577,6 +577,42 @@ zoomInBtn.addEventListener("click", () => {
   autoCamera.noteManualViewChange();
 });
 
+/**
+ * Google Maps-style scroll-wheel zoom: whatever content point sits under the
+ * cursor stays under the cursor after `applyZoomFn` changes `canvasEl`'s
+ * rendered size, rather than the naive "zoom, then leave scroll position
+ * alone" a plain `setZoom`/`zoomIn` call would do (which visibly drifts the
+ * content out from under the pointer). Generic over which canvas/scroll pair
+ * it's zooming — reused for both the tile view and the macro overworld map
+ * below, since `getBoundingClientRect` before/after is layout-agnostic (works
+ * whether the resize came from a CSS `style.width/height` scale like the
+ * tile view uses, or a native backing-buffer resize like the macro map's
+ * own zoom does).
+ */
+function zoomAtPoint(scrollEl: HTMLElement, canvasEl: HTMLCanvasElement, clientX: number, clientY: number, applyZoomFn: () => void): void {
+  const before = canvasEl.getBoundingClientRect();
+  const fracX = before.width > 0 ? (clientX - before.left) / before.width : 0.5;
+  const fracY = before.height > 0 ? (clientY - before.top) / before.height : 0.5;
+  applyZoomFn();
+  const after = canvasEl.getBoundingClientRect();
+  scrollEl.scrollLeft += after.left + fracX * after.width - clientX;
+  scrollEl.scrollTop += after.top + fracY * after.height - clientY;
+}
+
+/** Per-wheel-notch zoom step — gentler than the +/- buttons' 1.25x jump since a wheel/trackpad fires many events in quick succession for one gesture. */
+const WHEEL_ZOOM_FACTOR = 1.1;
+
+canvasWrap.addEventListener(
+  "wheel",
+  (event) => {
+    event.preventDefault();
+    const factor = event.deltaY < 0 ? WHEEL_ZOOM_FACTOR : 1 / WHEEL_ZOOM_FACTOR;
+    zoomAtPoint(canvasWrap, canvas, event.clientX, event.clientY, () => setZoom(zoom * factor));
+    autoCamera.noteManualViewChange();
+  },
+  { passive: false }
+);
+
 // canvas-wrap's native `scroll` event fires identically whether the browser
 // scrolled because the viewer dragged/wheeled it or because auto-camera just
 // set `scrollLeft`/`scrollTop` itself (`focusCameraOn`/`restoreHomeView`) —
@@ -736,6 +772,22 @@ macroMapZoomInBtn.addEventListener("click", () => {
 macroMapZoomOutBtn.addEventListener("click", () => {
   if (macroWorld) macroMapView.zoomOut(macroWorld);
 });
+
+// Same Google Maps-style cursor-anchored wheel zoom as the tile view above,
+// reusing `zoomAtPoint` — `zoomTo`'s ratio parameter (built for the pinch
+// gesture's absolute start/current distance ratio) doubles perfectly as a
+// per-notch relative factor here: `currentBlockPx() * factor` is exactly
+// "the new size relative to right now."
+macroMapScrollEl.addEventListener(
+  "wheel",
+  (event) => {
+    if (!macroWorld) return;
+    event.preventDefault();
+    const factor = event.deltaY < 0 ? WHEEL_ZOOM_FACTOR : 1 / WHEEL_ZOOM_FACTOR;
+    zoomAtPoint(macroMapScrollEl, macroMapCanvas, event.clientX, event.clientY, () => macroMapView.zoomTo(macroWorld!, macroMapView.currentBlockPx(), factor));
+  },
+  { passive: false }
+);
 
 // --- Boot --------------------------------------------------------------------
 
