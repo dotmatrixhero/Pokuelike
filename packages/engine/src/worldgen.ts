@@ -262,10 +262,36 @@ export interface MacroElevationBias {
   lowEdges: readonly ZoneDirection[];
   /** Edges of the tile grid to pull elevation UP toward — the mirror of `lowEdges`, for a neighbor the macro grid marked as higher elevation. */
   highEdges: readonly ZoneDirection[];
+  /**
+   * Edges the macro grid recorded a river actually crossing at
+   * (`MacroZone.riverEdges`, carved by `carveMacroRivers`) — real macro-level
+   * fact that used to exist and go completely unread by per-zone generation
+   * (see DESIGN.md's own "still open" list). Carves a narrow low-elevation
+   * trench near just that edge (see `RIVER_EDGE_TRENCH_STRENGTH`'s doc
+   * comment for why this is deliberately narrower than `lowEdges`' whole-zone
+   * tilt), so a real river reaching this zone is measurably more likely to
+   * actually route out through the specific edge the macro grid marked —
+   * a bias, not a guaranteed pixel-for-pixel stitch across the zone
+   * boundary, same honesty every other lossy macro-to-zone fact in this file
+   * already holds itself to.
+   */
+  riverEdges: readonly ZoneDirection[];
 }
 
 /** How strongly `lowEdges`/`highEdges` pull the raw macro field toward/away from a tile-grid edge — a linear gradient from 1 at the named edge to 0 at the opposite one, scaled by this. Tuned against a real generated zone (see DESIGN.md) so a coastline reliably lands on the biased edge without flattening the rest of the zone's own local variety. */
 const EDGE_BIAS_STRENGTH = 0.6;
+/**
+ * `riverEdges`' own version of `EDGE_BIAS_STRENGTH` — deliberately applied
+ * to `edgeCloseness(...)` raised to `RIVER_EDGE_TRENCH_EXPONENT` rather than
+ * the raw linear gradient `lowEdges`/`highEdges` use, so the pull is a real
+ * narrow trench near just the marked edge instead of a whole-zone tilt (a
+ * whole-zone tilt is exactly right for "this zone borders ocean," but wrong
+ * for "a river happens to cross here" — most of the zone shouldn't read as
+ * lowland just because one river passes through one edge of it).
+ */
+const RIVER_EDGE_TRENCH_STRENGTH = 1.4;
+/** Higher = the river-edge trench decays faster moving away from the marked edge, keeping it a narrow band rather than spanning the zone. */
+const RIVER_EDGE_TRENCH_EXPONENT = 2;
 
 /** How much of `.normalized()`'s reported value is pulled toward `MacroElevationBias.elevationShift` vs. this zone's own locally generated shape — kept well under 1 so a highland zone still has real local peaks/valleys, not a flat plateau at the target height. */
 const ELEVATION_SHIFT_WEIGHT = 0.35;
@@ -323,6 +349,7 @@ export function generateMacroElevation(
       if (bias) {
         for (const dir of bias.lowEdges) v -= edgeCloseness(dir, x, y, width, height) * EDGE_BIAS_STRENGTH;
         for (const dir of bias.highEdges) v += edgeCloseness(dir, x, y, width, height) * EDGE_BIAS_STRENGTH;
+        for (const dir of bias.riverEdges) v -= edgeCloseness(dir, x, y, width, height) ** RIVER_EDGE_TRENCH_EXPONENT * RIVER_EDGE_TRENCH_STRENGTH;
       }
       raw[y * width + x] = v;
       if (v < min) min = v;

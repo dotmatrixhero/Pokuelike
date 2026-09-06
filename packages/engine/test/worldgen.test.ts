@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mulberry32, makeNoise2D, makeDensityField, generateWorld, generateMacroElevation, findWalkableNear, blendBiomeParams, biomeWeightsAt, effectiveWaterDensityAt } from "../src/worldgen.js";
+import { mulberry32, makeNoise2D, makeDensityField, generateWorld, generateMacroElevation, findWalkableNear, blendBiomeParams, biomeWeightsAt, effectiveWaterDensityAt, type MacroElevationBias } from "../src/worldgen.js";
 import { generateMacroGrid, biasForZone } from "../src/macroGrid.js";
 import { tileAt, setTile } from "../src/world.js";
 
@@ -277,6 +277,32 @@ describe("generateMacroElevation (Groudon uplift / Kyogre basin)", () => {
       }
     }
     expect(agreements / total).toBeGreaterThan(0.85);
+  });
+
+  it("riverEdges carves a narrow low-elevation trench near just the marked edge — a real gradient, not a whole-zone tilt", () => {
+    // Within-map comparison, not biased-vs-unbiased deltas: both fields get
+    // their own independent global min/max normalization, so a purely local
+    // change near one edge can shift the whole field's normalized range in
+    // ways that make a cross-map delta an unreliable signal. Comparing the
+    // marked edge against the opposite edge WITHIN the same biased map (and
+    // checking that same comparison is much flatter in an unbiased control)
+    // isolates the real effect instead.
+    const detail = makeNoise2D(mulberry32(4), 60, 40, 6);
+    const biasN: MacroElevationBias = { elevationShift: 0, oceanFraction: 0.3, lowEdges: [], highEdges: [], riverEdges: ["N"] };
+    const biased = generateMacroElevation(mulberry32(111), 60, 40, detail, biasN);
+    const unbiased = generateMacroElevation(mulberry32(111), 60, 40, detail);
+
+    function avg(field: ReturnType<typeof generateMacroElevation>, y: number): number {
+      let sum = 0;
+      for (let x = 0; x < 60; x++) sum += field.normalized(x, y);
+      return sum / 60;
+    }
+
+    const biasedGap = avg(biased, 37) - avg(biased, 2); // S (far) minus N (marked, near-edge trench)
+    const unbiasedGap = avg(unbiased, 37) - avg(unbiased, 2);
+    // The marked N edge should read measurably lower relative to the
+    // opposite S edge than the same comparison does with no bias at all.
+    expect(biasedGap).toBeGreaterThan(unbiasedGap);
   });
 });
 

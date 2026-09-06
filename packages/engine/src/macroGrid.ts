@@ -440,6 +440,7 @@ export function biasForZone(grid: MacroGrid, row: number, col: number): ZoneGene
     oceanFraction,
     lowEdges,
     highEdges,
+    riverEdges: zone.riverEdges,
   };
 
   return { elevation, dominantBiome: zone.isOcean ? undefined : zone.biome, landmark: zone.landmark };
