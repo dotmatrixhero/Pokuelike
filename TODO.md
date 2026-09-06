@@ -4059,3 +4059,11 @@ not something this pathfinding pass itself caused or is positioned to fix.
       genuinely NOT built (real new engine primitives, not faked). Full
       suite green (182/182 data, 992/992 engine); Atlas artifact rebuilt
       (template + data) and republished at its existing URL.
+- [x] **Move Tree Atlas: mobile layout fix** — direct report: "the range
+      visualizer needs to go the bottom right of the chart or something
+      it's obscuring the nodes on mobile." The grid lived inline in the
+      stage's sticky header, which on the mobile single-column layout sat
+      wide enough to cover real nodes underneath it. Moved to a small
+      `position: fixed` panel pinned to the viewport's bottom-right corner
+      (not the scrollable node canvas) under the existing `max-width: 980px`
+      media query, shrunk to fit. Rebuilt and republished the artifact.

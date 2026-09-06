@@ -84,6 +84,29 @@
       overflow: visible;
     }
     body { overflow-y: auto; }
+
+    /* Direct ask: on mobile the range/footprint grid sat inline in the
+       sticky stage header, wide enough to cover real nodes underneath it.
+       Pulled out of that flow and pinned as a small floating corner panel
+       instead — fixed to the viewport (not the scrollable node canvas), so
+       it's always reachable but never sits on top of the graph itself. */
+    .range-grid-wrap {
+      position: fixed;
+      bottom: 12px;
+      right: 12px;
+      top: auto;
+      z-index: 20;
+      max-width: 130px;
+      padding: 6px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+    }
+    .range-grid-wrap .eyebrow { font-size: 9px; }
+    svg.range-grid { max-width: 90px; max-height: 90px; width: auto; height: auto; }
+    .range-grid-legend { flex-direction: column; gap: 2px; }
+    .range-grid-caption, .range-grid-note { max-width: 118px; }
   }
 
   header.top {
