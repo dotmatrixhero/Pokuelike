@@ -542,6 +542,32 @@ and each branch's mechanics should be a specific answer to "what does
 Aggression/Boldness/Sociability mean for *this* fantasy" — not a re-skin
 of the same three answers every other move already gave.
 
+**Widen what each Disposition axis is allowed to mean, per feedback.**
+`leaning` is fixed to nature.ts's three real axes (aggression/boldness/
+sociability) — that doesn't change — but a branch's *mechanical* identity
+on any given move shouldn't be locked to one default per axis. Boldness
+being defensive is still completely legitimate when that's the right fit
+(a thick-shelled species' Boldness branch earning more `damageReduction`
+is a real, earned answer, not a cop-out) — the redesign note isn't "ban
+tankiness," it's "don't reach for it out of habit on every single tree
+regardless of fit," the same way Earthquake's own Boldness branch below
+reaches for terraforming instead because THIS move's fantasy calls for it.
+Aggression is the same story, widened further: raw power is one real
+answer, but **hunting/stealth** (an ambush lean — already has full
+mechanical grounding via `situationalBonus`'s `concealed`/`flanking`/
+`night`/`elevation` conditions, no new primitive needed) and **clashing**
+(built around contesting a resource with a rival, not a hunt-to-the-death —
+grounded in the real, shipped `herdConflict.ts` system, whose
+`resolveRivalryHit` already calls the attacker's own `pickBestMove`, so a
+tree node tuned for that context is mechanically real today, though there's
+no first-class "this hit is part of a resource clash" `situationalBonus`
+condition yet to hook a bonus to specifically — a real, flaggable gap, not
+assumed solved) are just as legitimate. Which flavor fits which axis is a
+per-move, per-species call — a nocturnal ambush predator's Aggression
+branch reads as hunting/stealth; a herd herbivore's reads as clashing over
+a grazing patch; a raw brawler's reads as power. Pick deliberately from
+this wider set instead of defaulting to the same one every time.
+
 Worked example, direct from feedback — **Earthquake**: a self-centered
 shockwave radiating out from the user in every direction. It's not a
 precision tool — it's reckless area denial that doesn't distinguish friend
@@ -581,6 +607,13 @@ built, same discipline as everything already on it:
   currently lets a move punch a temporary opening between layers; today
   every layer transition is agent-initiated, never move-caused. Worth its
   own design pass later, not assumed away here.
+- **A "resource clash" situational condition**, for the Aggression-as-
+  clashing flavor above — a new `SituationalCondition` (e.g.
+  `"rivalConflict"`) checked from `herdConflict.ts`'s own call site so a
+  tree node can read "this specific hit is part of a resource standoff"
+  the same way one already reads `"flanking"` or `"targetLowHp"`. Not
+  needed for hunting/stealth (that's fully covered by existing
+  conditions already).
 
 ### 2. Filler nodes: use the whole lever list, not just power/accuracy/cooldown
 
