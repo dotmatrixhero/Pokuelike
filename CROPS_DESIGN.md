@@ -299,3 +299,132 @@ sample — plausible variance for the deliberately rarest crop now sharing its
 eligible pool with 4 more always-available competitors, not a new gate bug
 (its own eligibility logic is unchanged); worth a longer run if it's ever
 suspiciously absent across several seeds.
+
+## Layer-gated access, digging, canopy harvest, growth stages, water rework (pitched, not built)
+
+Direct follow-up, a genuinely bigger pitch than the crop table itself:
+underground crops (Potato, Pumpkin) should be effortless for underground
+agents but cost surface agents real "digging" time; canopy crops (Apple,
+Corn) should be harvested by *damage* — attack moves, not walking up to a
+tile — with range giving an edge; every crop gets a real per-crop process
+time (Rice/Wheat/Herbs/Tomato fastest for surface agents); an unripe crop
+should render differently from a harvestable one; and water should get the
+same "always exists somewhere, costs effort to reach if not already there"
+treatment — guaranteed underground, drought can zero out the surface,
+digging (Dig itself, and "most damage moves" generally) creates a spring.
+
+This is a scope, not an implementation, and a bigger one than the crop
+table — it touches `movement.ts`'s layer model, `combat.ts`'s move-targeting
+pipeline, and `worldgen.ts`'s underground/canopy generation, not just
+`flora.ts`/`crops.ts`. Same discipline as before: every piece below is
+checked against what's actually already built first.
+
+### The real blocker: canopy has no terrain at all
+
+Before Apple-on-trees or Corn-on-stalks can mean anything, canopy needs to
+exist as a real layer. Right now it doesn't: `worldgen.ts`'s own doc
+comment states plainly that "Underground/canopy are untouched (still the
+plain flat grid `createWorld` always produces) — this is a Surface-only
+pass." No food, no trees, no obstacles, nothing — every canopy tile is bare
+floor, on every world, always. The web renderer doesn't even draw agents
+standing on canopy today (`renderer.ts`: "an agent on underground/canopy
+simply isn't drawn"). This is the real prerequisite the whole
+"apple/corn are canopy crops" idea sits on top of — not a small gap to
+patch alongside the rest, but its own real generation pass (canopy tree
+crowns, at minimum) that has to land first. Scoping it fully is out of
+this pass's depth; flagging it as the genuine blocker rather than quietly
+assuming canopy terrain "just exists" once crops are layer-aware.
+
+### Real hooks to reuse
+
+- **Cross-layer access, structurally**: there's no general "walk to a
+  neighboring layer" mechanic today — only `LAYER_ORDER`'s adjacency rule
+  (`underground <-> surface <-> canopy`, `types.ts`) and one narrow existing
+  precedent: Diglett's own `burrow` move. A fleeing agent with an off-cooldown
+  `burrow`-flagged move (`MoveSpec.burrow: { ticks }`) sets `agent.layer =
+  "underground"` for a countdown (`agent.burrowedTicksRemaining`, ticked
+  down in `status.ts`'s `tickBurrow`), then restores its original layer.
+  Real, already-built, but purely a *flee/concealment* action today, not an
+  offense-on-a-resource action. Directly relevant: `packages/data/src/moves.ts`
+  already defines a real, currently-unused-for-this-purpose `dig` move —
+  `burrow: { ticks: 20 }`, `range: { min: 0, max: 1 }`, `cooldownTicks: 15` —
+  with its own doc comment admitting cooldown/range are "set anyway for
+  MoveSpec's sake, not because either is ever read for this move's real
+  use." Digging out a Potato is thematically exactly what this move already
+  claims to do; reusing (or extending) `dig`/`burrow` for real extraction
+  instead of only fleeing is the obvious hook, not a new mechanic layered on
+  top of an unrelated one.
+- **Multi-tick "channel then reward"**: no such thing exists for
+  eating/drinking (both instant on arrival, confirmed by `needs.ts`'s own
+  doc comment: "consuming never actually depended on how much stock was
+  left... always grants the full flat need-restore amount"). But
+  `shelter.ts`'s construction mechanic is exactly this pattern, real and
+  already built: `SHELTER_BUILD_TICKS`, a per-agent `Agent.shelterBuildTicks`
+  counter incremented once per tick spent at the build site, completing at
+  a threshold, cancelable if interrupted by a more urgent need, and already
+  supporting real multipliers (`WATER_BUILD_TICKS_MULTIPLIER`,
+  `PREDATOR_BUILD_TICKS_MULTIPLIER`). "Process time" for digging out a
+  layer-mismatched crop is a direct reuse of this exact shape — an
+  `Agent.digTicks` counter, a per-crop base duration, a move-driven
+  multiplier — not a new kind of mechanic for this codebase.
+- **Range for canopy harvest advantage**: `MoveSpec.range?: { min, max }`
+  already exists and is real (`moveRange()`/`withinMoveRange()`, combat.ts)
+  — a ranged move's `max` is a real, already-consumed number. "Higher range
+  gives a canopy-harvest advantage" is a direct, cheap reuse: score/gate
+  canopy-crop eligibility by the acting move's own `range.max` instead of
+  inventing a second range concept.
+- **Water digging vs. `Dig`/damage moves**: no underground water exists at
+  all today — `generateUndergroundCaves` is strictly wall/floor cellular
+  automata, no water tile-kind ever placed. A guaranteed underground water
+  pocket per zone is new generation work, but a small, bounded addition to
+  that same function (the same "stamp something rare and guaranteed" idea
+  `landmarks.ts` already established, just mandatory instead of sparse).
+
+### What's genuinely new, not a reuse
+
+- **Damage applied to a tile/resource instead of a living agent.** Every
+  existing terrain-mutating move field (`terrainBurn`, `terrainFill`,
+  `consumesOwnTerrain`) triggers off a landed hit against a *living
+  defender* and mutates that defender's *own occupied tile* — none of them
+  let a move target a food/tree tile directly the way "canopy foods
+  processed by damage" needs. This is real new plumbing: a move needs a
+  target-a-tile-instead-of-an-agent mode, and a food tile needs something
+  analogous to HP (stock already exists — reusable) that damage can reduce
+  as "processing progress" instead of (or alongside) an agent standing
+  there accumulating channel-ticks.
+- **Growth-stage rendering** (unripe vs. harvestable): the closest existing
+  thing is `Tile.growth` (seedling-to-maturity, `flora.ts`), but that ends
+  the moment a tile becomes real "food" terrain — there's no post-maturity
+  "still ripening" sub-state today. A canopy Apple tree or Corn stalk
+  reading as "growing" before "ready to pick" needs a new field (or a
+  repurposed `growth` continuing to count past maturation, gating which
+  glyph/emoji renders) — real but small, same shape as the seedling
+  mechanic already uses.
+- **Underground-crop surface inaccessibility, and vice versa.** Nothing
+  today gates "which layer can eat from this specific food tile" — any
+  agent that can path to a tile's (x, y) on its own layer eats from it, full
+  stop. Real new logic needed: a crop's `FoodCropDef` gaining a notion of
+  "native layer" (Potato/Pumpkin = underground, Apple/Corn = canopy,
+  everything else = surface, as today) and `needs.ts`'s target-selection
+  path respecting it instead of layer-blind pathfinding to the nearest food.
+
+### Open questions
+
+- Whether "most damage moves" (the pitch's own phrase) can dig/process, or
+  only `Dig`-flagged ones — the broader version needs a real per-move-type
+  rule (e.g. any move with `category !== "status"`), the narrower version
+  is a straightforward `burrow`/new-field check. Worth deciding before
+  implementing since it changes how many existing moves suddenly do double
+  duty as extraction tools.
+- Whether canopy terrain generation is scoped as part of this feature or
+  genuinely its own prerequisite pass first — given the size of that gap
+  (an entire unbuilt layer of worldgen), doing it "alongside" risks the
+  canopy-crop half of this pitch shipping on top of placeholder flat floor,
+  which would read as broken rather than unfinished.
+- How "process time" composes with the existing feeding-priority/grazing
+  mechanics (`needs.ts`'s `yieldsToHigherRankedFeeder`, `flora.ts`'s
+  grazing-pressure scars) — a slow-to-dig Potato patch with multiple hungry
+  agents queued on it is exactly the kind of scarcity `herdConflict.ts`
+  already turns into rivalry; worth confirming that composition is
+  desirable before building it, since it stacks two "real, but slow"
+  systems on the same tile.
