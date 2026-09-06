@@ -46,10 +46,10 @@ describe("generateMacroGrid", () => {
     expect(fraction).toBeLessThan(0.6);
   });
 
-  it("produces every one of the 5 land biome names across a large-enough grid, not just one", () => {
+  it("produces every one of the 6 land biome names across a large-enough grid, not just one", () => {
     const grid = generateMacroGrid(55, 100, 100);
     const biomes = new Set(grid.zones.filter((z) => !z.isOcean).map((z) => z.biome));
-    for (const name of ["grassland", "forest", "wetland", "badlands", "highland"]) {
+    for (const name of ["grassland", "forest", "wetland", "badlands", "highland", "snow"]) {
       expect(biomes.has(name)).toBe(true);
     }
   });

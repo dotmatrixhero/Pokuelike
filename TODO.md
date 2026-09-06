@@ -209,11 +209,27 @@ none of this is built yet, this section is purely to not lose the thread:
       the better real fit anyway. 6 new unit tests (needs.test.ts,
       shelter.test.ts) lock in both halves plus the narrower gate; full
       suite green (973/973).
-- [ ] **Snowy mountaintop habitat for ice/dragon-type species** — no cold/
-      alpine terrain or biome exists yet above `highland`; would need both
-      a new terrain/biome (worldgen.ts) and species tagged for it
-      (species.ts's `biomes`), likely feeding off whatever the multi-zone
-      weather system above eventually models for "cold."
+- [x] **Snowy mountaintop habitat, built — a real 6th biome.** Direct ask:
+      "snowy mountain tops where ice Pokemon and dragon live." New "snow"
+      `BiomeDef` (worldgen.ts) — harsher than even Badlands
+      (food/water 0.01/0.02), overwhelmingly boulder (icy rock/snowdrift),
+      elevation-based higher than Highland's own range. At the macro-grid
+      tier this is a REAL elevation gate (`SNOW_ELEVATION_THRESHOLD`,
+      checked before Highland in `macroBiomeFor`) — the tile-level
+      per-biome seed placement itself is elevation-agnostic like every
+      other biome there, same as Highland already is; only the macro
+      classification genuinely caps one biome above another. `floor_snow.png`
+      (public/tiles/) had sat unused since an earlier pass specifically for
+      lack of a biome to map it to — wired up now (sprites.ts's
+      `BIOME_FLOOR`), plus a macro-map color (macroMap.ts). Two new
+      residents (species.ts): Seel (real mainline arctic pinniped — a
+      clean fit) and Dratini (a real, flagged creative liberty: mainline
+      Dratini actually lives in lakes/rivers, grouped into snow anyway
+      since the direct ask named "ice... and dragon" together). Real-run
+      validated: snow zones appear reliably (64-344 zones per 100x100 grid
+      across 10 seeds) and promoting one spawns both new species, confirmed
+      across 4 seeds. 1 updated regression test (6 biome names, was 5);
+      full suite green (976/976).
 
 ## Overworld visualization — SUPERSEDED, see above and "Overworld rearchitecture" above
 

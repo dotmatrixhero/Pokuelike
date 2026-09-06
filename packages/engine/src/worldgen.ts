@@ -535,11 +535,21 @@ interface BiomeDef {
 }
 
 /**
- * Five biomes per DESIGN.md's list. Every numeric value here is a
- * sim-original guess to be judged against a real run, exactly like every
- * other tuning constant in this codebase — not remotely canon, not
- * validated against anything but "does the generated map look/feel varied,"
- * see DESIGN.md's real-run findings for this feature.
+ * Six biomes: the original five per DESIGN.md's list, plus "snow" — direct
+ * ask: "snowy mountain tops where ice Pokemon and dragon live." Elevation-
+ * gated ABOVE Highland (see macroGrid.ts's `SNOW_ELEVATION_THRESHOLD`), the
+ * same "one biome sits above another" idea Highland itself already uses
+ * relative to the other four — a snowy peak literally caps the tallest
+ * mountains, it doesn't compete with them for territory the way the other
+ * four biomes' seed-scatter does. `floor_snow.png` (public/tiles/) already
+ * existed unused before this — sprites.ts's own doc comment flagged it as
+ * "no biome maps to snow yet."
+ *
+ * Every numeric value here is a sim-original guess to be judged against a
+ * real run, exactly like every other tuning constant in this codebase —
+ * not remotely canon, not validated against anything but "does the
+ * generated map look/feel varied," see DESIGN.md's real-run findings for
+ * this feature.
  */
 const BIOMES: readonly BiomeDef[] = [
   {
@@ -591,6 +601,29 @@ const BIOMES: readonly BiomeDef[] = [
     elevationBase: 2.2,
     elevationVariance: 1.3,
     terrainWeights: { tree: 0.4, boulder: 4, bush: 0.25, sand: 0.15, mud: 0.1 },
+  },
+  {
+    name: "snow",
+    // 1, not 2 like every other biome — a snowcap should read as the rare
+    // tip of the tallest peaks, not a whole region competing for territory
+    // the way Highland/Badlands/etc. do (see this section's top doc
+    // comment: elevation-gated above Highland, not scattered independently).
+    seedCount: 1,
+    // Harsher than even Badlands (0.015/0.015) — a real "barren, for a
+    // reason" habitat (see the overworld extinction fix's own doc comment
+    // for that same standard applied one level up, at the macro-grid tier).
+    foodDensity: 0.01,
+    waterDensity: 0.02,
+    obstacleDensity: 0.2,
+    // Above Highland's own 2.2 base (and comfortably above its 2.2+1.3=3.5
+    // max range floor) — only the genuine tip of a tall mountain clears
+    // this, same "one biome literally caps another" idea Highland already
+    // established relative to the other four.
+    elevationBase: 3.6,
+    elevationVariance: 0.6,
+    // Overwhelmingly boulder (icy rock/snowdrift) — barely any of the
+    // others; a snowcap isn't wooded or sandy.
+    terrainWeights: { tree: 0.05, boulder: 6, bush: 0.05, sand: 0.1, mud: 0.05 },
   },
 ];
 

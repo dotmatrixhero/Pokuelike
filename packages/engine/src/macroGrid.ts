@@ -88,7 +88,20 @@ export function zoneNeighbors(grid: MacroGrid, row: number, col: number): MacroZ
 // biome names worldgen.ts's per-tile BIOMES table uses (plus "ocean").
 // ---------------------------------------------------------------------------
 
-/** Elevation at/above this reads as Highland — see `macroBiomeFor`. Sim-original guess; validated against a real generated grid's biome distribution (see DESIGN.md), not canon. */
+/**
+ * Elevation at/above this reads as Snow — direct ask: "snowy mountain tops
+ * where ice Pokemon and dragon live." Checked BEFORE Highland below, so
+ * this is genuinely the tallest-peak tier ABOVE it, not a competing
+ * same-tier biome — the real elevation-gating `worldgen.ts`'s own six-biome
+ * doc comment describes (unlike that file's per-tile seed placement, which
+ * is elevation-agnostic; this macro classification is a real threshold
+ * check against actual macro elevation). Sim-original guess, comfortably
+ * above `HIGHLAND_ELEVATION_THRESHOLD` so only genuine mountain tips
+ * qualify — judged against a real generated grid's biome distribution like
+ * every other constant here.
+ */
+const SNOW_ELEVATION_THRESHOLD = 0.9;
+/** Elevation at/above this (but below Snow) reads as Highland — see `macroBiomeFor`. Sim-original guess; validated against a real generated grid's biome distribution (see DESIGN.md), not canon. */
 const HIGHLAND_ELEVATION_THRESHOLD = 0.72;
 /** Moisture below this reads as Badlands. */
 const BADLANDS_MOISTURE_THRESHOLD = 0.35;
@@ -98,6 +111,7 @@ const WETLAND_MOISTURE_THRESHOLD = 0.65;
 const FOREST_MOISTURE_THRESHOLD = 0.5;
 
 function macroBiomeFor(elevation: number, moisture: number): string {
+  if (elevation >= SNOW_ELEVATION_THRESHOLD) return "snow";
   if (elevation >= HIGHLAND_ELEVATION_THRESHOLD) return "highland";
   if (moisture < BADLANDS_MOISTURE_THRESHOLD) return "badlands";
   if (moisture >= WETLAND_MOISTURE_THRESHOLD) return "wetland";

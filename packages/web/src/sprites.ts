@@ -174,7 +174,8 @@ const FLOOR_OVERLAY_CHANCE = 2; // 1-in-N tiles
  * and passes its name in here; any biome not listed (or no biome data at
  * all, e.g. a bare test-fixture world) falls through to the plain
  * `FLOOR_BASE`/`FLOOR_OVERLAYS` pair above, so this is purely additive.
- * `floor_snow` is still unused — no biome maps to "snow" yet.
+ * `floor_snow` sat unused for the same reason until worldgen.ts grew a real
+ * "snow" biome (direct ask: "snowy mountain tops") — wired up here now too.
  */
 const BIOME_FLOOR: Record<string, { base: string; overlays: readonly string[] }> = {
   // Same tan-sand family as the freshly re-cropped `sand.png` (see its own
@@ -184,6 +185,9 @@ const BIOME_FLOOR: Record<string, { base: string; overlays: readonly string[] }>
   // Real cobble/brick texture, already visually busy enough on its own —
   // no overlay decal needed (a dirt/cave decal on top would just clash).
   highland: { base: "floor_stone", overlays: [] },
+  // Same "busy enough on its own, no decal" call as highland above — an icy
+  // mountaintop's own texture already reads as varied.
+  snow: { base: "floor_snow", overlays: [] },
 };
 
 /** Which base texture name a biome resolves to — exported so renderer.ts's edge-blend code can tell "same art, different biome name" (e.g. grassland vs. forest, both plain) apart from a real texture change (badlands vs. anything else) without duplicating this lookup. */

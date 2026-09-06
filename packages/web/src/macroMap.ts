@@ -38,6 +38,9 @@ const MACRO_BIOME_COLOR: Record<string, Rgb> = {
   wetland: [64, 128, 116],
   badlands: [172, 134, 80],
   highland: [146, 132, 120],
+  // Pale icy blue-white — reads as a real snowcap even at this zoomed-out,
+  // flat-color-block scale, distinct from Highland's own grey-brown.
+  snow: [220, 232, 238],
 };
 const DEFAULT_BIOME_COLOR: Rgb = MACRO_BIOME_COLOR["grassland"]!;
 

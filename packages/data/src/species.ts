@@ -549,4 +549,36 @@ export const SPECIES: Record<string, SpeciesDef> = {
     biomes: ["wetland"],
     preferredTerrain: ["water"],
   }),
+
+  // --- Snow-biome residents below. Direct ask: "snowy mountain tops where
+  // ice Pokemon and dragon live" — worldgen.ts/macroGrid.ts grew a real
+  // "snow" biome (elevation-gated above Highland) for this session's
+  // regional-terrain pass; these are its first two real residents.
+  seel: speciesFromDex("SEEL", {
+    spriteKey: "seel",
+    placeholderColor: "#a0d8ef",
+    homeLayer: "surface",
+    moves: ["tackle", "water_gun"],
+    // Canonically an arctic pinniped that hauls out on ice and swims in
+    // frigid water — snow as primary habitat, wetland as the closest
+    // "open water" secondary this roster's biome set has.
+    biomes: ["snow", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  dratini: speciesFromDex("DRATINI", {
+    spriteKey: "dratini",
+    placeholderColor: "#7ba8c8",
+    homeLayer: "surface",
+    // No curated Dragon-type move exists yet (small `MOVES` roster) —
+    // Tackle, same off-type-move acceptance this file already makes for
+    // several other species (e.g. Onix's Tackle/Rock Throw).
+    moves: ["tackle"],
+    // A real creative liberty, flagged rather than quietly asserted as
+    // canon: mainline Dratini's own flavor text places it in lakes/rivers,
+    // not snowy peaks — grouped here anyway per this feature's own direct
+    // ask naming "ice... and dragon" together as snow-biome residents.
+    // Wetland kept as a secondary nod to its actual mainline habitat.
+    biomes: ["snow", "wetland"],
+    preferredTerrain: ["water"],
+  }),
 };
