@@ -1184,6 +1184,67 @@ function keepOnlyLargestFloorRegion(grid: Uint8Array, width: number, height: num
 }
 
 /**
+ * Radius of the guaranteed underground water pocket — deliberately modest,
+ * a real spring/pool, not a lake swallowing a big share of the one
+ * connected cave region every underground creature needs to keep using.
+ */
+const UNDERGROUND_WATER_POCKET_RADIUS = 3;
+/**
+ * Among the real floor cells in the (already-finalized, single-connected)
+ * cave region, how large a top slice (by real surface water-density proxy)
+ * counts as "wet enough" to be a candidate center — kept well under 1 so
+ * the pocket lands somewhere genuinely correlated with real surface water,
+ * not anywhere in the cave at random, while still leaving real seed-to-seed
+ * variety in exactly where within that wet region it lands.
+ */
+const UNDERGROUND_WATER_CANDIDATE_TOP_FRACTION = 0.15;
+
+/**
+ * Picks the real underground cells a guaranteed water pocket occupies —
+ * direct ask: "places with deep water... needs to be reflected in the
+ * underground as well; the surface also influences how the underground
+ * is." Before this, underground generation had zero awareness of Surface
+ * at all (`generateUndergroundCaves`' own doc comment: "independent of
+ * everything Surface-only above"). The center is picked from real floor
+ * cells (never inside solid rock), weighted toward whichever (x, y)
+ * columns Surface's own `effectiveWaterDensityAt` already reads as
+ * wettest — a real vertical correlation, not two independent rng draws
+ * that happen to share a footprint by coincidence. Always returns a
+ * non-empty set when the cave has any floor at all — "100% will always
+ * spawn at least some [water] underground," per the direct ask, is a hard
+ * guarantee here, not a sparse roll the way landmarks are.
+ */
+function pickUndergroundWaterPocket(world: World, width: number, height: number, grid: Uint8Array, rng: () => number): Set<number> {
+  const candidates: { i: number; density: number }[] = [];
+  for (let i = 0; i < grid.length; i++) {
+    if (grid[i]) continue; // wall
+    const x = i % width;
+    const y = Math.floor(i / width);
+    const density = effectiveWaterDensityAt(world.biomeSeeds, world.biomeSeedDrift, x, y) ?? 0;
+    candidates.push({ i, density });
+  }
+  if (candidates.length === 0) return new Set();
+
+  candidates.sort((a, b) => b.density - a.density);
+  const topSlice = candidates.slice(0, Math.max(1, Math.ceil(candidates.length * UNDERGROUND_WATER_CANDIDATE_TOP_FRACTION)));
+  const seedIndex = topSlice[Math.floor(rng() * topSlice.length)]!.i;
+  const center: Vec2 = { x: seedIndex % width, y: Math.floor(seedIndex / width) };
+
+  const pocket = new Set<number>();
+  forEachTileInJitteredCircle(center, UNDERGROUND_WATER_POCKET_RADIUS, width, height, rng, (x, y) => {
+    const i = y * width + x;
+    if (!grid[i]) pocket.add(i); // never carve water through solid rock
+  });
+  // The jittered circle can, in principle, land entirely on cells the
+  // jitter itself excluded (a real but rare edge case) — the center cell is
+  // always real floor by construction (drawn from `candidates` above), so
+  // falling back to just that one tile keeps the "always non-empty" promise
+  // even in that unlucky case.
+  if (pocket.size === 0) pocket.add(seedIndex);
+  return pocket;
+}
+
+/**
  * Generates cellular-automata cave structure for the Underground layer — see
  * this section's doc comment. Deterministic for a given rng, same contract
  * as every other generation step in this file.
@@ -1212,9 +1273,16 @@ function generateUndergroundCaves(world: World, width: number, height: number, r
 
   keepOnlyLargestFloorRegion(grid, width, height);
 
+  const waterCells = pickUndergroundWaterPocket(world, width, height, grid, rng);
+
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      if (grid[y * width + x]) setTile(world, "underground", x, y, "wall");
+      const i = y * width + x;
+      if (grid[i]) {
+        setTile(world, "underground", x, y, "wall");
+      } else if (waterCells.has(i)) {
+        setTile(world, "underground", x, y, "water", 0);
+      }
     }
   }
 }

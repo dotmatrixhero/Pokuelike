@@ -485,6 +485,26 @@ columns where Surface is wettest — a real vertical correlation, "what's
 above tends to inform what's below," not two fully independent RNG draws
 that happen to occupy the same (x, y) footprint by coincidence.
 
+**Built** (`pickUndergroundWaterPocket`, called from `generateUndergroundCaves`):
+underground gained a real third terrain kind ("water," alongside its old
+wall/floor-only vocabulary) for the first time. Every real floor cell in
+the already-finalized single connected cave region is scored by Surface's
+own `effectiveWaterDensityAt` at that (x, y); the pocket's center is drawn
+from the top 15% wettest candidates (real variety within a genuinely wet
+area, not always literally the single wettest point), then a small
+(`UNDERGROUND_WATER_POCKET_RADIUS` = 3) jittered-circle pocket is carved —
+guaranteed every generation, never sparse. A real connectivity risk this
+surfaced and fixed: the underground caves' own reachability test checked
+"floor" tiles only, which a water pocket carved out of floor could in
+principle fragment; fixed the test (and confirmed via the real generation
+code) to treat floor+water together as the real walkable region, since
+water is real walkable terrain (`UNWALKABLE_TERRAIN` is only wall/tree),
+not an obstacle. Validated via `validateUndergroundWater.ts` over 30 real
+worlds: 30/30 guaranteed a pocket, and underground water sits at surface
+locations averaging ~2.1x the water density of a random underground floor
+tile (0.182 vs 0.085) — a real, strong vertical correlation, not
+coincidence.
+
 ### Real hooks to reuse
 
 - **Cross-layer access, structurally**: there's no general "walk to a

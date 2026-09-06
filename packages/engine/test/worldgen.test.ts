@@ -116,19 +116,23 @@ describe("generateWorld", () => {
       expect(tile.terrain).toBe("floor");
       expect(tile.elevation).toBe(0);
     }
-    // Underground: every tile is still either "floor" or "wall" (the CA cave
-    // carver's own vocabulary — no water/food/elevation texture, unlike
-    // Surface), but it's no longer guaranteed *all* floor.
+    // Underground: every tile is "floor", "wall" (the CA cave carver's own
+    // vocabulary), or "water" (a real, guaranteed pocket biased toward
+    // wherever Surface is wettest — see pickUndergroundWaterPocket) — no
+    // elevation texture beyond that, unlike Surface.
     let sawUndergroundWall = false;
     let sawUndergroundFloor = false;
+    let sawUndergroundWater = false;
     for (const tile of world.tiles.underground) {
-      expect(["floor", "wall"]).toContain(tile.terrain);
+      expect(["floor", "wall", "water"]).toContain(tile.terrain);
       expect(tile.elevation).toBe(0);
       if (tile.terrain === "wall") sawUndergroundWall = true;
       if (tile.terrain === "floor") sawUndergroundFloor = true;
+      if (tile.terrain === "water") sawUndergroundWater = true;
     }
     expect(sawUndergroundWall).toBe(true);
     expect(sawUndergroundFloor).toBe(true);
+    expect(sawUndergroundWater).toBe(true);
   });
 
   it("tree tiles are unwalkable; boulder/bush/sand/mud are walkable (boulder is slow and opaque, not a hard blocker)", () => {
@@ -624,14 +628,25 @@ describe("generateWorld: Mountain massifs (direct question: 'do we have solid wa
 });
 
 describe("generateWorld: Underground cellular-automata caves", () => {
-  /** 4-connected flood-fill component sizes over every "floor" underground tile — same connectivity convention waterBody.ts uses, checked independently here rather than reaching into worldgen.ts's own internal `keepOnlyLargestFloorRegion`. */
-  function floorComponentSizes(world: ReturnType<typeof generateWorld>): number[] {
+  /**
+   * 4-connected flood-fill component sizes over every real WALKABLE
+   * underground tile ("floor" or "water" — both real ground an agent can
+   * stand on/path across, only "wall" actually blocks) — same connectivity
+   * convention waterBody.ts uses, checked independently here rather than
+   * reaching into worldgen.ts's own internal `keepOnlyLargestFloorRegion`.
+   * Treats water as walkable rather than floor-only now that a guaranteed
+   * water pocket (`pickUndergroundWaterPocket`) can carve a real hole out
+   * of what was previously always "floor" — the real reachability
+   * invariant is "floor+water is one region," not "floor alone is."
+   */
+  function walkableComponentSizes(world: ReturnType<typeof generateWorld>): number[] {
     const width = world.width, height = world.height;
+    const isWalkable = (t: { terrain: string }) => t.terrain === "floor" || t.terrain === "water";
     const visited = new Uint8Array(width * height);
     const sizes: number[] = [];
     for (let start = 0; start < width * height; start++) {
       const t = world.tiles.underground[start]!;
-      if (visited[start] || t.terrain !== "floor") continue;
+      if (visited[start] || !isWalkable(t)) continue;
       let size = 0;
       const queue = [start];
       visited[start] = 1;
@@ -642,7 +657,7 @@ describe("generateWorld: Underground cellular-automata caves", () => {
         for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]) {
           if (nx! < 0 || ny! < 0 || nx! >= width || ny! >= height) continue;
           const ni = ny! * width + nx!;
-          if (visited[ni] || world.tiles.underground[ni]!.terrain !== "floor") continue;
+          if (visited[ni] || !isWalkable(world.tiles.underground[ni]!)) continue;
           visited[ni] = 1;
           queue.push(ni);
         }
@@ -655,19 +670,26 @@ describe("generateWorld: Underground cellular-automata caves", () => {
   it("produces a real, non-trivial mix of floor and wall — not all-one or all-the-other", () => {
     for (const seed of [9, 42, 7, 100]) {
       const world = generateWorld(90, 60, seed);
-      const counts = { floor: 0, wall: 0 };
-      for (const t of world.tiles.underground) counts[t.terrain as "floor" | "wall"]++;
+      const counts = { floor: 0, wall: 0, water: 0 };
+      for (const t of world.tiles.underground) counts[t.terrain as "floor" | "wall" | "water"]++;
       expect(counts.floor).toBeGreaterThan(0);
       expect(counts.wall).toBeGreaterThan(0);
     }
   });
 
-  it("every floor tile belongs to exactly one connected region — no isolated, unreachable cave pockets", () => {
+  it("every walkable (floor or water) tile belongs to exactly one connected region — no isolated, unreachable cave pockets", () => {
     for (const seed of [9, 42, 7, 100]) {
       const world = generateWorld(90, 60, seed);
-      const sizes = floorComponentSizes(world);
-      expect(sizes.length).toBe(1); // keepOnlyLargestFloorRegion walled off every other pocket
+      const sizes = walkableComponentSizes(world);
+      expect(sizes.length).toBe(1); // keepOnlyLargestFloorRegion walled off every other pocket; the guaranteed water pocket only ever carves INTO that one region, never splits it
       expect(sizes[0]).toBeGreaterThan(0);
+    }
+  });
+
+  it("a real underground water pocket is guaranteed every generation — direct ask: '100% will always spawn at least some [water] underground'", () => {
+    for (const seed of [9, 42, 7, 100, 20260906, 1, 2, 3]) {
+      const world = generateWorld(90, 60, seed);
+      expect(world.tiles.underground.some((t) => t.terrain === "water")).toBe(true);
     }
   });
 
