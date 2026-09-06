@@ -514,6 +514,8 @@ export interface ZoneSpeciesEstimate {
   population: number;
   /** Carried straight from the roster entry's own `ImmigrationSpeciesInfo.minLevel` — see that field's doc comment. Absent/undefined reads as "no evolution data," same fallback `rollImmigrantLevel` already uses. */
   minLevel?: number;
+  /** Carried straight from the roster entry's own `ImmigrationSpeciesInfo.singleStage` — see that field's doc comment. */
+  singleStage?: boolean;
 }
 
 /** Lower/upper bound (before the `estimateZoneResourceIndex`-scaled nudge below) on a never-visited zone's guessed starting population per matching species — settles toward the abstract tier's own capacity-driven equilibrium (`advanceAbstractRegion`) after a few ticks regardless, so this only needs to be in the right ballpark. */
@@ -582,6 +584,7 @@ export function estimateZoneSpecies(zone: MacroZone, roster: readonly Immigratio
       homeLayer: species.homeLayer,
       population: (SEED_POPULATION_BASE + rng() * SEED_POPULATION_VARIANCE) * multiplier,
       minLevel: species.minLevel,
+      singleStage: species.singleStage,
     });
   }
   return estimates;

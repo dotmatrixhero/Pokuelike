@@ -1,7 +1,7 @@
 import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import type { LevelingContext } from "./leveling.js";
-import { IMMIGRANT_BASE_LEVEL_FLOOR, type ImmigrationContext, type ImmigrationSpeciesInfo } from "./immigration.js";
+import { IMMIGRANT_BASE_LEVEL_FLOOR, IMMIGRANT_LEVEL_JITTER, SINGLE_STAGE_LEVEL_JITTER, type ImmigrationContext, type ImmigrationSpeciesInfo } from "./immigration.js";
 import type { RegionDispersalContext } from "./dispersal.js";
 import { tickWorld } from "./simulation.js";
 import { findPosInBiome, findWalkableNear, generateWorld } from "./worldgen.js";
@@ -283,14 +283,21 @@ function estimateInitialAggregates(mw: MacroWorld, row: number, col: number, ctx
       avgHunger: 0.5,
       avgThirst: 0.5,
       avgEnergy: 0.5,
-      // Same real evolution-aware floor `immigration.ts`'s `rollImmigrantLevel`
-      // uses — direct ask: "why does everything spawn at lv5. Especially
-      // evolved Pokemon they should be higher distributed." A never-visited
-      // zone's estimated population is exactly as real a "spawn" as an
-      // immigrant group; a flat `5` here was the same bug under a different
-      // name, just for a species this codebase's own macro-grid ever
-      // *guesses* already lives somewhere instead of walking in from an edge.
-      avgLevel: Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, estimate.minLevel ?? 1),
+      // Same real evolution-aware floor (+ jitter) `immigration.ts`'s
+      // `rollImmigrantLevel` uses — direct ask: "why does everything spawn
+      // at lv5. Especially evolved Pokemon they should be higher
+      // distributed." A never-visited zone's estimated population is
+      // exactly as real a "spawn" as an immigrant group; a flat `5` here
+      // was the same bug under a different name, just for a species this
+      // codebase's own macro-grid ever *guesses* already lives somewhere
+      // instead of walking in from an edge. Wider jitter
+      // (`SINGLE_STAGE_LEVEL_JITTER`) for a `singleStage` species — direct
+      // ask: "make all Pokémon with just base form have a wider range of
+      // base level" — so a fresh zone's guessed population age spread
+      // varies zone to zone, not just the later per-individual jitter below.
+      avgLevel:
+        Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, estimate.minLevel ?? 1) +
+        Math.floor(mw.rng() * (estimate.singleStage ? SINGLE_STAGE_LEVEL_JITTER : IMMIGRANT_LEVEL_JITTER)),
       baseResourceIndex: resourceIndex,
       resourceIndex,
       lastEventPopulation: estimate.population,
@@ -437,7 +444,12 @@ export function promoteZone(mw: MacroWorld, row: number, col: number, ctx: Immig
       // good." The aggregate average itself stays the real center (a whole
       // population invented at once shouldn't all drift together), just no
       // longer every single individual landing on the exact same level.
-      const level = Math.max(1, Math.round(aggregate.avgLevel + (mw.rng() - 0.5) * 4));
+      // Wider spread for a `singleStage` species (never evolves, so a wild
+      // population plausibly spans its whole adult lifespan rather than
+      // clustering near "just hatched") — same direct ask as the aggregate's
+      // own wider jitter in `estimateInitialAggregates`.
+      const individualSpread = speciesInfo.singleStage ? 16 : 4;
+      const level = Math.max(1, Math.round(aggregate.avgLevel + (mw.rng() - 0.5) * individualSpread));
       const agent: Agent = ctx.spawnAgent(aggregate.species, `${aggregate.species}-${region.key}-invented-${mw.tick}-${i}`, pos, level, mw.rng);
       agent.needs = {
         hunger: jitteredNeed(aggregate.avgHunger, mw.rng),

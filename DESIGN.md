@@ -5701,6 +5701,75 @@ species land well clear of the old flat 5 and show real spread: `charizard`
 34-38, `golbat` 20-24, `jynx` 28-32, `gloom` 19-23; base forms stay low with
 real per-individual variance (`caterpie`, `zubat`, `snorlax` etc. 3-7).
 
+### Single-stage species get a wider base-level range
+
+Direct ask: "make all Pokémon with just base form have a wider range of
+base level." A species partway through a multi-stage line (Bulbasaur) is
+realistically "young" at the immigrant/invented-population floor — it
+hasn't had time to evolve yet, so clustering near the floor makes sense.
+A species with only one form EVER (Tauros, Farfetch'd, Lapras, Snorlax,
+Jynx, Ditto) has no such tell: a wild population of it plausibly spans its
+whole adult lifespan, so a narrow 5-12-ish spread undersells it.
+
+**Built**: `packages/data/src/leveling.ts`'s new `isSingleStageSpecies
+(speciesId)` — true when the dex's raw `evolutions` list is empty (no
+forward evolution at all, even an unmodeled item/trade one — a species that
+evolves only via a mechanic this sim doesn't track, like Scyther -> Scizor,
+still isn't "just base form") AND it isn't itself evolved from another real
+ROSTER species (checked against `PREVO_KEY_BY_KEY` gated by `SPECIES`, not
+the raw dex — Snorlax's raw dex prevo is Munchlax, a later-gen baby form
+nothing in this sim ever spawns or breeds into, so that prevo edge alone
+shouldn't disqualify it). `ImmigrationSpeciesInfo`/`ZoneSpeciesEstimate`
+gained a `singleStage` field carrying this through both spawn paths.
+`immigration.ts`'s `rollImmigrantLevel` uses a much wider jitter
+(`SINGLE_STAGE_LEVEL_JITTER = 30`, vs. the ordinary `IMMIGRANT_LEVEL_JITTER
+= 8`) for a `singleStage` species; `overworld.ts`'s `estimateInitialAggregates`
+and `promoteZone`'s per-individual variance do the same for the macro-grid
+path.
+
+Live-validated via `validateInventedLevels.ts`: Lapras now spans 1-39,
+Snorlax 1-27, Jynx 24-62 (all `singleStage`), while a multi-stage base form
+like Bulbasaur stays in its original narrower 7-14 range and an unmodeled-
+evolution species like Scyther correctly stays narrow too (it does have a
+real, if unmodeled, further evolution). Full suite (1077 + 177 tests) green.
+
+### Real bug: spawned agents knew moves far above their level (lv10 Sandshrew with Earthquake)
+
+Direct report: "Any reason why a lv ten sandshrew knows earthquake?" Real
+and total: `packages/data/src/spawn.ts`'s `spawnAgent` granted every move in
+a species' hand-curated `SpeciesDef.moves` list unconditionally, regardless
+of spawn level — that list carries no level annotation of its own, unlike
+the real, already-level-gated learnset already used elsewhere in this
+codebase (`leveling.ts`'s `grantExp`/`ensureCombatProfile`, which correctly
+gate a newborn's or leveling agent's moves off the dex's own `levelMoves`).
+Auditing the whole roster against the real dex thresholds found this wasn't
+Sandshrew-specific: Venusaur/Ivysaur knew Solar Beam (real threshold 54-65)
+from level 1, Blastoise knew Hydro Pump (49) from level 1, Onix/Geodude both
+had Earthquake (52/34) unconditionally, etc. — a systemic gap, not one
+species' curated list being wrong.
+
+**Built**: `spawn.ts` gained `moveUnlockLevel(speciesId, moveId)`, a direct
+cross-reference against the imported dex's real `levelMoves` for that exact
+species (lowest level if a move somehow appears more than once, defensive).
+`spawnAgent` now filters `species.moves` down to only the moves whose real
+threshold is `<= level` before building `knownMoves`/`moves` — a higher-tier
+move still in the curated list is picked up naturally later via `grantExp`
+once the agent's real level actually crosses that threshold, the same path
+a naturally-leveled agent already uses, so nothing is permanently lost, just
+correctly delayed. A move with no entry in the dex's own learnset (a
+curated move that isn't a real level-up move for this species, if that ever
+happens) reads as level 1 — nothing to gate against — and stays available
+from spawn, unchanged from before. Falls back to the single
+lowest-threshold move if every one of a species' curated moves would
+otherwise be gated out at a very low spawn level, so a newly-spawned agent
+is never left with zero moves.
+
+Verified live: a Sandshrew now spawns knowing only Scratch at levels 1-20,
+and doesn't pick up Dig/Agility/Earthquake until its real level (30/28/46)
+crosses each threshold — exactly the same species that prompted the report.
+Full suite (1077 + 177 tests) green; no existing test asserted the old
+unconditional-move behavior.
+
 ## Real confirmed bug: dying of thirst standing on water, fourth instance of "commits no matter what"
 
 Direct report: "I just watched bulbasaurs die of thirst while in water." Not

@@ -1,7 +1,7 @@
 import type { ImmigrationContext } from "@pokuelike/engine";
 import { SPECIES } from "./species.js";
 import { spawnAgent } from "./spawn.js";
-import { naturalMinLevelFor } from "./leveling.js";
+import { naturalMinLevelFor, isSingleStageSpecies } from "./leveling.js";
 
 /**
  * Wires `@pokuelike/engine`'s `immigration.ts` up to this package's actual
@@ -22,6 +22,9 @@ export const IMMIGRATION_CONTEXT: ImmigrationContext = {
     // at lv5. Especially evolved Pokémon they should be higher
     // distributed." See `naturalMinLevelFor`'s own doc comment.
     minLevel: naturalMinLevelFor(species.id),
+    // Direct ask: "make all Pokémon with just base form have a wider range
+    // of base level." See `isSingleStageSpecies`'s own doc comment.
+    singleStage: isSingleStageSpecies(species.id),
   })),
   spawnAgent,
 };

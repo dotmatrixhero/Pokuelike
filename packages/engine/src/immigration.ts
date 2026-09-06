@@ -51,6 +51,19 @@ export interface ImmigrationSpeciesInfo {
    * comment for how this actually turns into a spawn level.
    */
   minLevel?: number;
+  /**
+   * True for a species that never evolves at all AND isn't itself an
+   * evolved form (`@pokuelike/data`'s `isSingleStageSpecies`) — e.g. Tauros,
+   * Farfetch'd, Lapras, Scyther, Snorlax. Direct ask: "make all Pokémon with
+   * just base form have a wider range of base level." A species partway
+   * through a multi-stage line (Bulbasaur) is realistically "young" at its
+   * floor — it hasn't had time to evolve yet — but a species with only one
+   * form ever has no such tell: a wild population of it plausibly spans its
+   * entire adult lifespan, so its spawn range should reflect that instead of
+   * the same narrow just-hatched spread every base form gets. Absent/false =
+   * unchanged existing behavior. See `rollImmigrantLevel`.
+   */
+  singleStage?: boolean;
 }
 
 export interface ImmigrationContext {
@@ -140,7 +153,18 @@ export const IMMIGRANT_BASE_LEVEL_FLOOR = 5;
  * floor below — e.g. a base-form immigrant now arrives anywhere from 5 to
  * 12, not a single fixed value every time.
  */
-const IMMIGRANT_LEVEL_JITTER = 8;
+export const IMMIGRANT_LEVEL_JITTER = 8;
+/**
+ * Jitter used instead of `IMMIGRANT_LEVEL_JITTER` for a `singleStage`
+ * species — direct ask: "make all Pokémon with just base form have a wider
+ * range of base level." A species that never evolves has no "still young,
+ * hasn't evolved yet" reason to cluster near the floor, so its spawn range
+ * spans something closer to a real wild population's full adult spread
+ * (floor 5 to ~35) instead of the same narrow 5-12 every base form gets.
+ * Exported for the same direct-testability reason as `IMMIGRANT_LEVEL_
+ * JITTER`.
+ */
+export const SINGLE_STAGE_LEVEL_JITTER = 30;
 
 /**
  * A real, species-aware immigrant level — direct ask, after noticing every
@@ -151,15 +175,18 @@ const IMMIGRANT_LEVEL_JITTER = 8;
  * evolved species could plausibly exist at — `Math.max` against the
  * ordinary base-form floor so an unclassified/base species keeps its
  * existing 5+ range unchanged, while a genuinely evolved species floors
- * meaningfully higher (its own real evolution-level threshold) before the
- * same real jitter on top. Exported (like `accumulateActionEnergy` in
- * simulation.ts) so it's directly, deterministically testable without
- * needing to reverse-engineer `maybeImmigrate`'s own internal rng call
- * order just to isolate this one roll.
+ * meaningfully higher (its own real evolution-level threshold) before a
+ * real jitter on top — wider (`SINGLE_STAGE_LEVEL_JITTER`) for a species
+ * that never evolves at all (`species.singleStage`), narrower otherwise.
+ * Exported (like `accumulateActionEnergy` in simulation.ts) so it's
+ * directly, deterministically testable without needing to
+ * reverse-engineer `maybeImmigrate`'s own internal rng call order just to
+ * isolate this one roll.
  */
 export function rollImmigrantLevel(species: ImmigrationSpeciesInfo, rng: () => number): number {
   const floor = Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, species.minLevel ?? 1);
-  return floor + Math.floor(rng() * IMMIGRANT_LEVEL_JITTER);
+  const jitter = species.singleStage ? SINGLE_STAGE_LEVEL_JITTER : IMMIGRANT_LEVEL_JITTER;
+  return floor + Math.floor(rng() * jitter);
 }
 
 /**
