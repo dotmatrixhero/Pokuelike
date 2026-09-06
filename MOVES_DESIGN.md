@@ -68,6 +68,14 @@ than something to fold in here. `selfCostPerUse` (shipped above) covers the
 "costs something to use" fantasy via the sim's *existing* needs axes in the
 meantime.
 
+A real lever to build on top of Max PP once it exists, not just a bigger
+pool: a node that spends **2x (or Nx) PP in one use for a proportionally
+bigger effect** — more power, a wider AoE, whatever fits the move — a real
+"burn resources faster for a spike" tradeoff distinct from a plain
++max-PP node. Direct note: "I feel like we're underutilizing PP too."
+Flagged here alongside the rest of the PP brainstorm rather than
+implemented, since it's still gated on Max PP itself landing first.
+
 ## Why status effects and environmental moves are two different systems
 
 A damaging move's status chance is a side effect of an existing "attack
@@ -740,6 +748,32 @@ it):
   moving in a straight line toward the target before it can trigger, or a
   finisher that repositions the user to a specific tile after landing
   (e.g. flanking, or into the middle of the AoE it just created).
+
+**Duration — a lingering, self-refreshing pulse tied to the user, not the
+target (new primitive, not built).** Direct idea, Earthquake's own
+worked example: a capstone/deep-crosslink version of the move that, once
+triggered, keeps re-pulsing its own AoE around the user's *current*
+position for several more ticks after the initial cast — following the
+user as they move, not anchored to the tile it was first cast from. Two
+things make this a real new primitive, not just "cooldown but bigger":
+1. It needs genuine persistent state on the agent (which move, ticks of
+   pulsing left, re-resolve the hit fresh against wherever the user is
+   standing *this* tick) — nothing today re-fires a move's own resolution
+   without the agent explicitly choosing to use it again.
+2. **The move's own cooldown must not start counting down until the
+   pulsing effect actually ends** — each pulse re-arms/refreshes the
+   cooldown, so it can't just be cast once and be back up while still
+   actively running. This is the detail that makes it a real commitment
+   (you're threatening an area for several turns straight, at the cost of
+   this move being fully unavailable to recast the whole time) rather than
+   a disguised power bump.
+Distinct from "grows the longer you channel it" above (charging *up* to
+one hit) — this is one cast producing several pulses after the fact. A
+natural home for this is a capstone or a deep crosslink (see the redesign
+notes on wanting crosslinks to reach further into a tree for real
+hybridization payoffs), since the tradeoff (this move is now unavailable
+for its whole pulsing duration) is a real build-defining commitment, not
+filler.
 
 **Needs the not-yet-built multi-target/AoE resolution first** (see "The
 sim/combat boundary" investigation in DESIGN.md — nothing today applies a
