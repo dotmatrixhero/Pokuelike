@@ -1220,6 +1220,162 @@ function generateUndergroundCaves(world: World, width: number, height: number, r
 }
 
 // ---------------------------------------------------------------------------
+// Mountain massifs — Surface's own version of the underground caves' CA
+// technique just above, reused rather than reinvented: direct question "do
+// we have solid wall chunks yet like mountain terrain?" Answer at the time
+// this was written: no — Highland/Snow were elevation-biased *scatter*
+// (each obstacle tile independently rolled from its own noise field), never
+// a real contiguous landform. This carves one: random-fill-then-smooth
+// cellular automata, scoped strictly to Highland/Snow-dominant tiles (the
+// same `dominantBiomeAt`-driven gating `carveBadlandsChambers` already
+// established for its own biome-scoped generation), keeping only genuinely
+// large connected wall components — real solid massifs, not speckle — as
+// distinct from Badlands' own BSP chambers (thin carved corridor dividers,
+// most of the biome stays open) or ordinary boulder scatter (independent
+// single tiles, no landform). A massif's own outer rim is exactly what a
+// later canopy-derivation pass reads as a "ridge" (CROPS_DESIGN.md).
+// ---------------------------------------------------------------------------
+
+/**
+ * Same shape as `CAVE_INITIAL_WALL_CHANCE`, but deliberately ABOVE 0.5, not
+ * mirroring its value — a real, sampled-and-caught bug: `CAVE_INITIAL_WALL_
+ * CHANCE` (0.4) works for underground caves because *floor* is what needs
+ * to survive and consolidate into one big region there, and under this
+ * majority-vote smoothing rule, whichever phase starts as the majority is
+ * the one that reliably consolidates — wall being the minority phase is
+ * exactly why caves stay mostly open. This generator wants the opposite
+ * outcome (wall consolidates, floor stays open), so wall has to start as
+ * the majority, not the same-looking-but-wrong 0.45 an initial pass used
+ * (confirmed by real sampling: only 7/20 generated worlds had ANY massif at
+ * all, averaging ~11 wall tiles against an ~867-tile Highland/Snow
+ * footprint — the CA was shrinking wall away almost everywhere, same
+ * mechanism that makes caves mostly floor, just not what a massif needs).
+ */
+const MASSIF_INITIAL_WALL_CHANCE = 0.58;
+/** Same recipe as the cave CA — random fill settles into smooth-edged blobs after a few neighbor-majority passes. */
+const MASSIF_SMOOTHING_ITERATIONS = 4;
+/** Same rule as `CAVE_WALL_NEIGHBOR_THRESHOLD`, but off-footprint neighbors (a tile that isn't Highland/Snow-dominant) are NOT forced to count as wall the way underground's off-map edge is — a massif should taper naturally at its own biome boundary, not wall itself off from the surrounding land the way a cave never opens onto the world border. */
+const MASSIF_WALL_NEIGHBOR_THRESHOLD = 5;
+/** A connected wall component smaller than this many tiles reads as leftover CA speckle, not a real massif — cleared back to open ground rather than left as scattered single-tile noise. */
+const MASSIF_MIN_COMPONENT_SIZE = 12;
+/** Deliberately bigger than `BOULDER_ELEVATION_BOOST` (0.8) — a real mountain massif should read taller than an ordinary boulder outcrop, not the same height. */
+const MASSIF_ELEVATION_BOOST = 1.6;
+
+/**
+ * True if `(x, y)` reads as Highland or Snow more strongly than every other
+ * biome in `biomeWeightsAt`'s blend — the same *dominant*, not merely
+ * nonzero-weight, standard `isBadlandsDominant` already established, so a
+ * massif stays inside its own biome's real footprint instead of spilling
+ * into the cross-biome transition band at its edges.
+ */
+function isMassifBiomeDominant(seeds: readonly BiomeSeedInfo[], x: number, y: number): boolean {
+  const weights = biomeWeightsAt(seeds, x, y);
+  let bestName: string | undefined;
+  let bestWeight = 0;
+  for (const [name, weight] of Object.entries(weights)) {
+    if (weight > bestWeight) {
+      bestWeight = weight;
+      bestName = name;
+    }
+  }
+  return bestName === "highland" || bestName === "snow";
+}
+
+/**
+ * Clears (sets to floor/0) every 4-connected wall component smaller than
+ * `MASSIF_MIN_COMPONENT_SIZE` — the massif's own version of
+ * `keepOnlyLargestFloorRegion`, but the mirror concern: that function keeps
+ * exactly one open region and walls off every smaller pocket (an
+ * underground cave must stay fully reachable); this keeps every
+ * sufficiently large WALL mass (a real generated world can and should have
+ * more than one separate mountain range) and clears only the small leftover
+ * speckle CA smoothing didn't fully resolve.
+ */
+function clearSmallWallComponents(grid: Uint8Array, width: number, height: number, minSize: number): void {
+  const visited = new Uint8Array(grid.length);
+
+  for (let start = 0; start < grid.length; start++) {
+    if (visited[start] || !grid[start]) continue; // already visited, or already floor
+    const component: number[] = [start];
+    visited[start] = 1;
+    const queue = [start];
+    while (queue.length > 0) {
+      const i = queue.pop()!;
+      const x = i % width;
+      const y = Math.floor(i / width);
+      for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]) {
+        if (nx! < 0 || ny! < 0 || nx! >= width || ny! >= height) continue;
+        const ni = ny! * width + nx!;
+        if (visited[ni] || !grid[ni]) continue;
+        visited[ni] = 1;
+        queue.push(ni);
+        component.push(ni);
+      }
+    }
+    if (component.length < minSize) {
+      for (const i of component) grid[i] = 0;
+    }
+  }
+}
+
+/**
+ * Carves real, contiguous mountain-massif wall structure into every
+ * Highland/Snow-dominant tile — see this section's doc comment. A no-op on
+ * a world with no biome data at all (`world.biomeSeeds` absent/empty), same
+ * contract every other biome-aware function in this file follows. Runs
+ * after `carveSuicuneRivers` (skips any tile a river already carved to
+ * "water" via the `tile.terrain === "water"` check below) — the same
+ * ordering `carveBadlandsChambers` already established, for the same
+ * reason: simpler for this pass to skip the handful of tiles a river
+ * already claimed than for river carving to have to reason about massifs.
+ */
+function carveMountainMassifs(world: World, width: number, height: number, rng: () => number): void {
+  const seeds = world.biomeSeeds;
+  if (!seeds || seeds.length === 0) return;
+
+  const dominant = new Uint8Array(width * height);
+  const grid = new Uint8Array(width * height); // 1 = wall (massif), 0 = floor
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const tile = tileAt(world, "surface", x, y);
+      if (!tile || tile.terrain === "water" || !isMassifBiomeDominant(seeds, x, y)) continue;
+      dominant[y * width + x] = 1;
+      grid[y * width + x] = rng() < MASSIF_INITIAL_WALL_CHANCE ? 1 : 0;
+    }
+  }
+
+  for (let iter = 0; iter < MASSIF_SMOOTHING_ITERATIONS; iter++) {
+    const next = new Uint8Array(grid.length);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = y * width + x;
+        // Off the massif's own biome footprint entirely — never a wall,
+        // regardless of how many wall neighbors it has, so a massif tapers
+        // to its real biome boundary instead of bleeding into Grassland.
+        if (!dominant[i]) continue;
+        next[i] = countWallNeighbors(grid, width, height, x, y) >= MASSIF_WALL_NEIGHBOR_THRESHOLD ? 1 : 0;
+      }
+    }
+    grid.set(next);
+  }
+
+  clearSmallWallComponents(grid, width, height, MASSIF_MIN_COMPONENT_SIZE);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      if (!grid[i]) continue;
+      const tile = tileAt(world, "surface", x, y)!;
+      // Undo any existing BOULDER_ELEVATION_BOOST first (same "re-painting
+      // is a no-op, not a double boost" pattern carveBadlandsChambers
+      // already uses) before applying the massif's own, taller boost.
+      const ambientElevation = tile.terrain === "boulder" ? tile.elevation - BOULDER_ELEVATION_BOOST : tile.elevation;
+      setTile(world, "surface", x, y, "wall", ambientElevation + MASSIF_ELEVATION_BOOST);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Landmark terrain — direct ask: "particularly unique zone gen" and "make
 // 'em interesting to look at." Each landmark carves a real, spatially
 // localized feature (a bounded patch, not the whole zone) on top of the
@@ -1632,6 +1788,12 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   // xor'd seed per generation concern" pattern as every other noise field
   // above.
   carveBadlandsChambers(world, width, height, mulberry32(seed ^ 0x2545f491));
+
+  // Mountain massifs, same "after rivers, skip existing water" ordering as
+  // Badlands BSP chambers just above — its own derived rng sub-stream, same
+  // "distinct xor'd seed per generation concern" pattern as every other
+  // noise field in this function.
+  carveMountainMassifs(world, width, height, mulberry32(seed ^ 0xbb67ae85));
 
   // Underground caves are independent of everything Surface-only above (no
   // biome/elevation/moisture data to read) — its own derived rng sub-stream,

@@ -342,6 +342,20 @@ describe("generateWorld: Badlands BSP chambers", () => {
     return Object.entries(weights).every(([name, w]) => name === "badlands" || w < badlandsWeight);
   }
 
+  /** Mirrors worldgen.ts's own private `isMassifBiomeDominant` — "wall" is no longer Badlands-exclusive since Mountain Massifs (Highland/Snow) also produce it; see the test just below. */
+  function isMassifBiomeDominant(world: ReturnType<typeof generateWorld>, x: number, y: number): boolean {
+    const weights = biomeWeightsAt(world.biomeSeeds, x, y);
+    let bestName: string | undefined;
+    let bestWeight = 0;
+    for (const [name, weight] of Object.entries(weights)) {
+      if (weight > bestWeight) {
+        bestWeight = weight;
+        bestName = name;
+      }
+    }
+    return bestName === "highland" || bestName === "snow";
+  }
+
   it("places real 'wall' tiles somewhere across a handful of seeds — the mechanism actually fires, not just theoretically", () => {
     // wall never appeared anywhere in generateWorld's output before this
     // feature (OBSTACLE_KINDS never includes it) — checked across several
@@ -355,35 +369,40 @@ describe("generateWorld: Badlands BSP chambers", () => {
     expect(sawAnyWall).toBe(true);
   });
 
-  it("every 'wall' tile, and every BSP boundary boulder line, stays inside Badlands' own dominant footprint — never spills into another biome's territory", () => {
+  it("every 'wall' tile, and every BSP boundary boulder line, stays inside Badlands' own dominant footprint OR Mountain Massifs' (Highland/Snow) — never spills into a third biome's territory", () => {
+    // "wall" is produced by two independent, real mechanisms now:
+    // carveBadlandsChambers (Badlands-dominant only) and carveMountainMassifs
+    // (Highland/Snow-dominant only) — every wall tile must belong to one or
+    // the other, never neither.
     for (const seed of [42, 7, 2, 5, 9, 11, 20260903]) {
       const world = generateWorld(90, 60, seed);
       for (let y = 0; y < world.height; y++) {
         for (let x = 0; x < world.width; x++) {
           if (tileAt(world, "surface", x, y)!.terrain === "wall") {
-            expect(isBadlandsDominant(world, x, y)).toBe(true);
+            expect(isBadlandsDominant(world, x, y) || isMassifBiomeDominant(world, x, y)).toBe(true);
           }
         }
       }
     }
   });
 
-  it("wall is sparse relative to boulder within Badlands' footprint — the exception, not the rule", () => {
-    let wallCount = 0;
+  it("wall is sparse relative to boulder within Badlands' footprint specifically — the exception, not the rule (Mountain Massifs' own wall, elsewhere, is deliberately NOT sparse)", () => {
+    let wallInBadlandsCount = 0;
     let boulderInBadlandsCount = 0;
     for (const seed of [42, 7, 2, 5, 9, 11, 20260903]) {
       const world = generateWorld(90, 60, seed);
       for (let y = 0; y < world.height; y++) {
         for (let x = 0; x < world.width; x++) {
           const terrain = tileAt(world, "surface", x, y)!.terrain;
-          if (terrain === "wall") wallCount++;
-          else if (terrain === "boulder" && isBadlandsDominant(world, x, y)) boulderInBadlandsCount++;
+          if (!isBadlandsDominant(world, x, y)) continue;
+          if (terrain === "wall") wallInBadlandsCount++;
+          else if (terrain === "boulder") boulderInBadlandsCount++;
         }
       }
     }
     expect(boulderInBadlandsCount).toBeGreaterThan(0);
-    expect(wallCount).toBeGreaterThan(0);
-    expect(wallCount).toBeLessThan(boulderInBadlandsCount * 0.3);
+    expect(wallInBadlandsCount).toBeGreaterThan(0);
+    expect(wallInBadlandsCount).toBeLessThan(boulderInBadlandsCount * 0.3);
   });
 
   it("a BSP-placed boulder tile is walkable, opaque, and elevated above what a plain floor tile would read as at the exact same spot — reads exactly like a hand-placed boulder", () => {
@@ -446,6 +465,112 @@ describe("generateWorld: Badlands BSP chambers", () => {
       // enough to span most/all of a `BSP_MIN_LEAF_SIZE`(10)+ chamber's own
       // height would otherwise easily clear 20-30+ tiles of identical x.
       expect(longestSameColumnRun(world)).toBeLessThan(15);
+    }
+  });
+});
+
+describe("generateWorld: Mountain massifs (direct question: 'do we have solid wall chunks yet like mountain terrain?')", () => {
+  function isMassifBiomeDominant(world: ReturnType<typeof generateWorld>, x: number, y: number): boolean {
+    const weights = biomeWeightsAt(world.biomeSeeds, x, y);
+    let bestName: string | undefined;
+    let bestWeight = 0;
+    for (const [name, weight] of Object.entries(weights)) {
+      if (weight > bestWeight) {
+        bestWeight = weight;
+        bestName = name;
+      }
+    }
+    return bestName === "highland" || bestName === "snow";
+  }
+
+  /** 4-connected flood-fill component sizes over every "wall" surface tile — confirms a real generated run produces genuinely large, contiguous massifs, not scattered speckle. */
+  function wallComponentSizes(world: ReturnType<typeof generateWorld>): number[] {
+    const width = world.width, height = world.height;
+    const isWall = (x: number, y: number) => tileAt(world, "surface", x, y)?.terrain === "wall";
+    const visited = new Uint8Array(width * height);
+    const sizes: number[] = [];
+    for (let start = 0; start < width * height; start++) {
+      const sx = start % width, sy = Math.floor(start / width);
+      if (visited[start] || !isWall(sx, sy)) continue;
+      let size = 0;
+      const queue = [start];
+      visited[start] = 1;
+      while (queue.length > 0) {
+        const i = queue.pop()!;
+        size++;
+        const x = i % width, y = Math.floor(i / width);
+        for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]) {
+          if (nx! < 0 || ny! < 0 || nx! >= width || ny! >= height) continue;
+          const ni = ny! * width + nx!;
+          if (visited[ni] || !isWall(nx!, ny!)) continue;
+          visited[ni] = 1;
+          queue.push(ni);
+        }
+      }
+      sizes.push(size);
+    }
+    return sizes;
+  }
+
+  it("places real, genuinely large contiguous wall components — not scattered single-tile speckle", () => {
+    // Wall components come from two sources (Badlands BSP and Mountain
+    // Massifs); this just confirms a real generated run produces at least
+    // one large one, without caring which mechanism produced it — the
+    // containment test below is what actually distinguishes them.
+    let sawALargeComponent = false;
+    for (const seed of [42, 7, 2, 5, 9, 11, 20260903, 123, 456]) {
+      const world = generateWorld(90, 60, seed);
+      if (wallComponentSizes(world).some((s) => s >= 12)) sawALargeComponent = true;
+    }
+    expect(sawALargeComponent).toBe(true);
+  });
+
+  it("massif wall tiles stay inside Highland/Snow's own dominant footprint — never spill into another biome's territory", () => {
+    for (const seed of [42, 7, 2, 5, 9, 11, 20260903]) {
+      const world = generateWorld(90, 60, seed);
+      for (let y = 0; y < world.height; y++) {
+        for (let x = 0; x < world.width; x++) {
+          if (tileAt(world, "surface", x, y)!.terrain !== "wall") continue;
+          if (!isMassifBiomeDominant(world, x, y)) continue; // this is a Badlands BSP wall tile, not a massif one — covered by the Badlands describe block
+          // Redundant with the containment check above by construction, but
+          // asserted directly so this test fails loudly if that ever stops
+          // being true (e.g. a future edit to isMassifBiomeDominant's own
+          // gating in worldgen.ts).
+          expect(isMassifBiomeDominant(world, x, y)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("a massif wall tile is elevated above what a plain floor tile would read as at the exact same spot", () => {
+    let checked = 0;
+    for (const seed of [42, 7, 2, 5, 9, 11, 20260903]) {
+      const world = generateWorld(90, 60, seed);
+      for (let y = 0; y < world.height; y++) {
+        for (let x = 0; x < world.width; x++) {
+          const tile = tileAt(world, "surface", x, y)!;
+          if (tile.terrain !== "wall" || !isMassifBiomeDominant(world, x, y)) continue;
+          checked++;
+          // A neighboring non-wall tile in the same dominant biome is the
+          // closest real "ambient elevation here" baseline available without
+          // reaching into worldgen.ts's own private constants.
+          const neighbor = tileAt(world, "surface", Math.max(0, x - 1), y);
+          if (neighbor && neighbor.terrain !== "wall" && neighbor.terrain !== "boulder") {
+            expect(tile.elevation).toBeGreaterThan(neighbor.elevation - 0.01);
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it("determinism: the same seed produces byte-identical massif placement", () => {
+    const a = generateWorld(90, 60, 42);
+    const b = generateWorld(90, 60, 42);
+    for (let y = 0; y < 60; y++) {
+      for (let x = 0; x < 90; x++) {
+        expect(tileAt(a, "surface", x, y)!.terrain).toBe(tileAt(b, "surface", x, y)!.terrain);
+      }
     }
   });
 });

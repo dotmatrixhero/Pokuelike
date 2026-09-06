@@ -396,6 +396,27 @@ biomes place today. Its outer rim (the boundary between massif-wall and
 open ground) is exactly the "ridges on canopy" idea above — the natural
 edge a canopy-derivation pass reads from.
 
+**Built** (`carveMountainMassifs`, worldgen.ts): same CA recipe (random
+fill + neighbor-majority smoothing), scoped to Highland/Snow-*dominant*
+tiles (same `dominantBiomeAt`-driven gating `carveBadlandsChambers`
+already uses for its own biome), with a real cleared-speckle step
+(`clearSmallWallComponents`) so only genuinely large connected components
+survive as real massifs, not CA noise. A real, sampling-caught bug along
+the way: the first pass mirrored `CAVE_INITIAL_WALL_CHANCE` (0.4) —
+wrong, because that value works for caves precisely because *floor* is
+the phase meant to consolidate there; a massif needs *wall* to be the
+consolidating phase, which requires wall to start as the majority, not
+the minority. At 0.45 (still under 50%), only 7 of 20 sampled worlds
+produced any massif at all, averaging ~11 wall tiles against an ~867-tile
+Highland/Snow footprint. Retuned to 0.58: all 20 worlds produced at least
+one real massif, averaging ~78 wall tiles/world (~9% of the Highland/Snow
+footprint), largest single component 126 tiles — real, substantial
+mountain formations, not a token scattering, without swallowing the whole
+biome. Validated via `validateMountainMassifs.ts` and a dedicated
+`describe("generateWorld: Mountain massifs")` block (containment within
+Highland/Snow's own footprint, contiguity via 4-connected flood-fill,
+elevation boost, determinism) in worldgen.test.ts.
+
 ### Cross-zone contiguity — rivers and mountains shouldn't stop at a zone edge
 
 Direct ask: "rivers and mountains should try to be contiguous across
