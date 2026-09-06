@@ -1389,6 +1389,106 @@ pick up directly):
   "Aggression sniper build" archetype — accuracy investment becomes a real
   build identity, not just a filler stat.
 
+### Deeper crosslinks — round 2 (proposed, not yet built)
+
+Direct follow-up: "we didn't come up with specific ideas but just the idea
+[of deeper crosslinks]." Fleshing that out for real, per move, rather than
+leaving it as a stated principle with no content. Two of the *shipped*
+crosslinks above are the exact problem template v3 was written to avoid —
+Hydro Pump's *Steadfast Tide* and Solar Beam's *Shared Shade* are both
+"Boldness↔Sociability, shared `regen`," the same mechanic copy-pasted
+across two trees. The proposals below are deliberately never that: each
+one combines the two specific branches' own *distinct* mechanics on that
+move, not a generic shared passive, and none of them are implemented yet.
+
+One new connective primitive threads through several of these — worth
+building once, reused everywhere `rallyCall` already exists (Earthquake,
+Rock Throw):
+- **`SituationalCondition: "rallyMarked"`** — the defender currently has
+  an active `rallyMarkTicksRemaining`. Same one-line-enum-addition pattern
+  as `"flanking"`/`"targetLowHp"`. Turns "the herd calls out a target"
+  from a pure awareness effect into a real payoff for whoever follows up —
+  Aggression branches get an honest reason to want the mark to land
+  *before* their own big hit, not just tolerate co-existing with it.
+
+- **Earthquake**
+  - *Marked Rupture* (Sociability↔Aggression) — Overload's own power gets
+    a real `situationalBonus: "rallyMarked"` bonus: call out a target with
+    Herdsafe Trigger, then bury it with the AoE-size fork. Replaces
+    *Coordinated Tremor*'s plain `rallyCall` grant (redundant once the
+    opener already sets it) with an actual payoff for the combo.
+  - *Braced Convergence* (Boldness↔Sociability) — the stillness Fissure
+    Grip's brace fork already costs (`lockTicks`) buys a real payoff on
+    the *other* branch: a much longer `rallyCall.ticks` window, since not
+    moving is exactly when giving the herd time to arrive matters most.
+    Replaces the generic `jamCooldownTicks` *Fractured Warning*.
+  - *Rubble Lunge* (Aggression↔Boldness) — keep *Cracking Momentum*'s
+    shape (a lunge into the rubble Fracture's own hazard terrain just
+    created) but make the payoff explicit: bonus `defensePenetration`
+    specifically while standing in `Fissure Grip`'s own `terrainFill`
+    tile, tying two branches' actual battlefield-altering mechanics
+    together instead of just "moving is now allowed."
+
+- **Hydro Pump**
+  - *Anchored Surge* (Aggression↔Boldness) — Bastion's positional opener
+    (*Wading Advance*, close the distance first) pays down Overwhelm's own
+    windup cost: closing to melee range before unleashing removes
+    *Building Pressure*'s `lockTicks`, not just the flat `-1` *Surge and
+    Brace* already grants. Position substitutes for time, a genuine
+    tradeoff between two branches' opposite verbs (patient tank vs. nuke).
+  - *Tidal Anchor* (Boldness↔Sociability) — replaces the reused *Steadfast
+    Tide* `regen`. Fires specifically off Pod Tide's push-away option
+    (*Undertow Guard*): shoving the threat away from the herd also grants
+    the user a real `statChangeOnHit` self Defense buff — bracing exactly
+    as you create the distance, instead of a passive that runs regardless
+    of which positional fork got picked.
+  - *Marked Undertow* (Sociability↔Aggression) — the same `"rallyMarked"`
+    condition as Earthquake: a target the herd has already flagged gets
+    pulled in harder — bonus `positionSwapPull` distance on Undertow Pull
+    against a marked target, so the herd's call-out and the nuke branch's
+    own drag mechanic actually compound.
+
+- **Solar Beam** (no `rallyCall` in this tree — Grove's own fork is the
+  ally-effect choice instead, so its crosslinks lean on *that* mechanic)
+  - *Sunlit Advance* (Aggression↔Boldness) — replaces the generic
+    `defensePenetration` *Rooted Assault*. Ties Bulwark's `elevation`
+    situational fork directly into Dominance's clashing fantasy: fighting
+    from the higher ground Guardian's Ground already rewards also boosts
+    *Claim the Grove*'s `bonusVsType` vs. Grass — asserting dominance over
+    a rival grazer specifically hits harder from a real position of
+    advantage, not just in general.
+  - *Canopy Cover* (Boldness↔Sociability) — replaces the reused *Shared
+    Shade* `regen`. Whichever Bulwark passive the user actually invested
+    in (`thorns` from *Verdant Wall* or the `elevation` bonus from
+    *Guardian's Ground*) gets extended, briefly, to whoever Grove's own
+    fork (*Vital Bloom*/*Steadfast Bloom*) targets — allies borrow the
+    guardian's own bulk for a moment instead of a flat shared number.
+  - *Territorial Flare* (Sociability↔Aggression) — kept, deepened: the
+    herd's own warning (the `flanking` situational bonus it already
+    grants) is framed explicitly as *the same rival-detection read* Claim
+    the Grove needs to land its Grass-vs-Grass bonus — the herd spotting
+    the intruder is what lets the dominance display actually connect.
+
+- **Rock Throw** (already has 3 real crosslinks post-v3 — deepening two of
+  them rather than adding redundant new ones)
+  - *Grinding Advance* (Aggression↔Boldness) — extend it: bracing first
+    (Bedrock Stance) should be what makes *Quarry Break*'s ground-tearing
+    capstone survivable, not just an unrelated self-Attack buff on hit —
+    add a real reduction to Quarry Break's own `lockTicks` cost when
+    Bedrock Stance is already taken, the same "position/setup pays down a
+    later branch's time cost" shape as Hydro Pump's *Anchored Surge*.
+  - *Rolling Thunder* (Sociability↔Aggression) — already the strongest of
+    the three (stuns outright once marked-and-pinned); once the shared
+    `"rallyMarked"` condition exists, layer a real damage bonus on top of
+    the stun using the same primitive the other trees now share, instead
+    of `lockTicks` being the only payoff.
+  - *Grounded Signal* (Boldness↔Sociability, new) — Unshakeable's
+    `immovable` passive is at its best exactly when the herd has already
+    been called in (Tremor Call): grant a real, temporary
+    `damageReduction` bump specifically while a `rallyCall` mark is
+    active, rewarding holding ground once support is genuinely on the way
+    rather than immovability being valuable in every fight equally.
+
 ### Pending brainstorm — Earthquake / Hydro Pump / Solar Beam (not yet built)
 
 Consolidated here so none of this is lost to context compaction — these
