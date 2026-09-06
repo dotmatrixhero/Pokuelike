@@ -52,7 +52,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Tackle",
     shape: { kind: "point" },
     ...moveCanon("TACKLE"),
-    cooldownTicks: 0,
+    cooldownTicks: 2,
     range: { min: 0, max: 1 },
     // v2 — Vine Whip's full treatment (MOVES_DESIGN.md's "Tackle" writeup):
     // three branches (Aggression/Boldness/Sociability — Tackle is the most-
@@ -394,7 +394,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Slash",
     shape: { kind: "line", length: 1 },
     ...moveCanon("SLASH"),
-    cooldownTicks: 0,
+    cooldownTicks: 2,
     range: { min: 0, max: 1 },
     // v2 — scaled up to the same triangle as Tackle: Ferocity (Aggression),
     // Precision (Boldness), and a slimmer Pack Instinct (Sociability) — even
@@ -752,7 +752,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Vine Whip",
     shape: { kind: "line", length: 2 },
     ...moveCanon("VINE_WHIP"),
-    cooldownTicks: 0,
+    cooldownTicks: 2,
     range: { min: 0, max: 2 },
   },
   ember: {
@@ -760,7 +760,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Ember",
     shape: { kind: "point" },
     ...moveCanon("EMBER"),
-    cooldownTicks: 1,
+    cooldownTicks: 2,
     statusChance: 0.1,
     statusKind: "burn",
     range: { min: 0, max: 1 },
@@ -1111,7 +1111,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Peck",
     shape: { kind: "point" },
     ...moveCanon("PECK"),
-    cooldownTicks: 0,
+    cooldownTicks: 2,
     range: { min: 0, max: 1 },
     // v2 full triangle (MOVES_DESIGN.md's "Peck" writeup): the roster's first
     // positionSwap+positionSwapPull and first critCooldownReset live here,
@@ -1412,7 +1412,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Scratch",
     shape: { kind: "point" },
     ...moveCanon("SCRATCH"),
-    cooldownTicks: 0,
+    cooldownTicks: 2,
     range: { min: 0, max: 1 },
     // A real Sandshrew doesn't canonically have venom glands, so unlike
     // Ember's baked-in burn this poison is entirely tree-earned — `statusKind`
@@ -1725,7 +1725,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Rock Throw",
     shape: { kind: "line", length: 3 },
     ...moveCanon("ROCK_THROW"),
-    cooldownTicks: 1,
+    cooldownTicks: 2,
     range: { min: 0, max: 3 },
     // Standing on a real "boulder" tile (worldgen.ts's Highland-leaning
     // obstacle kind) lets this throw consume it for real, ~3x damage —
@@ -2038,7 +2038,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Water Gun",
     shape: { kind: "line", length: 2 },
     ...moveCanon("WATER_GUN"),
-    cooldownTicks: 0,
+    cooldownTicks: 2,
     range: { min: 0, max: 2 },
     // A landed, non-killing hit leaves a real puddle where it struck —
     // converts a dry floor/sand/mud tile at the defender's position into
@@ -3375,7 +3375,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Poison Sting",
     shape: { kind: "point" },
     ...moveCanon("POISON_STING"),
-    cooldownTicks: 0,
+    cooldownTicks: 2,
     range: { min: 0, max: 1 },
     statusChance: 0.3,
     statusKind: "poison",
@@ -3385,7 +3385,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Twineedle",
     shape: { kind: "point" },
     ...moveCanon("TWINEEDLE"),
-    cooldownTicks: 1,
+    cooldownTicks: 2,
     range: { min: 0, max: 1 },
     hits: { min: 2, max: 2 },
     statusChance: 0.2,

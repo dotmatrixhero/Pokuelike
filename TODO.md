@@ -3,6 +3,23 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## New standard: every attack move starts at cooldownTicks 2 minimum
+
+Direct follow-up to the cooldown-timing fix above: "let's move all Moves
+up. To like default cool down of 2 as a base. That'll be our standard to
+start." Bumped every curated attack move sitting below 2
+(Tackle/Slash/Vine Whip/Peck/Scratch/Water Gun/Poison Sting: 0→2;
+Ember/Rock Throw/Twineedle: 1→2) in `packages/data/src/moves.ts`.
+Everything already at 2+ (Sludge, Psybeam, Wing Attack, Body Slam, and
+every move at 3+) is untouched, and utility/status moves (Growth, Rain
+Dance, etc., already 30-150) are unaffected — never part of the bug.
+Documented as a real, going-forward authoring standard in
+MOVES_DESIGN.md's template section: 2 is the new floor for a basic
+attack move, not a target — stronger/rarer moves should still cost more.
+Typecheck + full 991 engine / 171 data tests confirmed green (engine
+tests use their own hand-rolled MoveSpec fixtures, not the curated
+roster, so this data-only change didn't ripple into them).
+
 ## Fixed: cooldowns now count down on the unit's own tick, not real time
 
 Direct ask after noticing "a lot of stuff is 0 cd" and asking whether that

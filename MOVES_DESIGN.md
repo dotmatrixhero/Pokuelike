@@ -509,6 +509,20 @@ of the next tier's base power (current dex numbers: Ember 40, Flamethrower
 keeps Flamethrower an obvious power upgrade while Ember's cooldown/utility
 lead is what earns it a permanent slot in the moveset anyway).
 
+**Base cooldown standard: `cooldownTicks: 2` minimum for every real attack
+move, starting point.** Set once cooldown was fixed to actually count down
+on the *unit's own* action tick instead of real world-tick time (see
+DESIGN.md's Action Economy section) — before that fix, `cooldownTicks: 0`
+or `1` were both functionally "no cooldown at all," so the whole roster
+had drifted there by default. Direct instruction once cooldown started
+meaning something: "let's move all Moves up to like default cooldown of 2
+as a base. That'll be our standard to start." Every curated attack move
+(Tackle through Body Slam) was bumped to at least 2; utility/status moves
+(Growth, Rain Dance, etc.) are unaffected — their cooldowns were already
+real (30-150) and were never part of this bug. A stronger or rarer move
+should still cost *more* than 2, same as before; 2 is the new floor for
+"basic," not a target for everything.
+
 **Every node has a `leaning`.** Unleaned nodes still work (weighted
 neutrally in `maybeAutoRespec`) but a tree that's all unleaned wastes the
 whole point of tying this to Disposition — tag deliberately.
