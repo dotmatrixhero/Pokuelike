@@ -1257,7 +1257,55 @@ on each move has the full reasoning; this is the summary.
     `regen`) · *Territorial Flare* (Sociability↔Aggression, `flanking`
     situational bonus off the herd's own warning).
 
-## Build order recommendation, across everything above
+## Move Tree Atlas: how to keep it updated
+
+**Live URL: https://claude.ai/code/artifact/a089c885-1361-4004-8734-286a50c1d020**
+— always update this one in place (see step 3 below); if this URL ever
+stops resolving, use the Artifact tool's `list` action to find its
+replacement and correct this line, don't just publish a fresh one and
+leave this line stale.
+
+The Move Tree Atlas is a standalone HTML artifact (not part of the actual
+game — see TODO.md's "Real in-game move-tree visualizer" entry for the
+eventual live-data, in-game version) used to review every shipped move
+tree as a real, browsable node graph: branches, crosslinks, forks, and —
+per direct ask — a small range/AoE grid preview per move (ported straight
+from `resolveShape` in moves.ts, fixed to facing "up," so it's the real
+footprint, not an approximation). Direct ask, after the first version got
+rebuilt by hand from scratch: keep this process standardized so every
+future update builds on the existing tool instead of re-deriving it.
+
+**The process, in order:**
+
+1. `npx tsx packages/data/scripts/export-move-trees.ts > /tmp/trees.json`
+   — dumps every move with a `tree` (id, name, type/category/power/
+   accuracy/cooldown, `shape`, `range`, `hitsArea`, and the full `tree`
+   object) as one JSON blob, straight from the real `MOVES` export so it's
+   never hand-transcribed.
+2. `node packages/data/scripts/build-move-tree-atlas.mjs /tmp/trees.json /tmp/tree_atlas.html`
+   — injects that JSON into `packages/data/scripts/move-tree-atlas.template.html`
+   (the checked-in page shell: layout, the branch/depth/crosslink layout
+   algorithm, the plain-English node-effect describer, the range/AoE grid
+   renderer, the redesign-notes/flag localStorage feature — everything
+   except the data) in place of its `__TREE_DATA__` placeholder.
+3. Publish `/tmp/tree_atlas.html` with the Artifact tool, passing the
+   artifact's existing URL (ask the user for it, or `list` artifacts, if
+   it's not already in context) so it **updates the same artifact in
+   place** rather than creating a duplicate.
+
+**When the template itself needs a real change** (a new layout idea, a
+new field to visualize, a UI fix) — edit
+`packages/data/scripts/move-tree-atlas.template.html` directly, keep its
+`__TREE_DATA__` placeholder exactly as-is, and re-run the same three steps.
+The template is real, versioned source (checked into the repo, reviewed
+and edited like any other file) — never regenerate it from a screenshot or
+from memory of what the artifact looked like; that's exactly the
+"scratch every time" failure mode this process exists to avoid. Sanity-
+check any template edit the same way this process itself was verified:
+run the two build steps and confirm the output's embedded JSON still
+parses and every node still has a `leaning` (a quick Python/Node one-
+liner, same as this file's own move-tree redesigns were checked before
+publishing).
 
 1. **Rock Throw / Peck / Scratch / Water Gun** — designed above, zero new
    primitives needed, purely porting work identical to what Tackle/Slash/

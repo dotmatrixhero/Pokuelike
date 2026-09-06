@@ -3,6 +3,24 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Move Tree Atlas: range/AoE grid added, artifact process standardized
+
+Direct ask: add a range/AoE grid preview per move, republish, and — since
+the first version got rebuilt by hand from scratch — "add some
+documentation on building that artifact in move design. Just to keep the
+artifact consistent... build on it rather than from scratch every time."
+Added the grid (ported straight from `resolveShape`, fixed facing "up" —
+the real footprint, not an approximation) to the artifact and republished
+to the same URL. Then made the whole thing real, checked-in tooling
+instead of a one-off: `packages/data/scripts/export-move-trees.ts` (dumps
+every move-with-a-tree as JSON from the real `MOVES` export),
+`packages/data/scripts/build-move-tree-atlas.mjs` (injects that JSON into
+`packages/data/scripts/move-tree-atlas.template.html`, the versioned page
+shell), documented as a 3-step process in MOVES_DESIGN.md's new "Move
+Tree Atlas: how to keep it updated" section (which also records the
+artifact's live URL). Verified end-to-end: running the two scripts
+reproduces the published artifact byte-for-byte.
+
 ## Real in-game move-tree visualizer + range/AoE preview — not started
 
 Direct ask, after seeing the Move Tree Atlas artifact (a standalone HTML

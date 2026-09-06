@@ -1,0 +1,1397 @@
+<title>Move Tree Atlas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0c1015;
+    --panel: #12171f;
+    --panel-2: #171e28;
+    --border: #262f3c;
+    --border-soft: #1c2430;
+    --text: #e7ecf3;
+    --text-dim: #90a0b7;
+    --text-faint: #56637a;
+    --agg: #ef6448;
+    --agg-soft: #ef644822;
+    --bold: #4c95e6;
+    --bold-soft: #4c95e622;
+    --soc: #43cf95;
+    --soc-soft: #43cf9522;
+    --cross: #e0ac3f;
+    --cross-soft: #e0ac3f22;
+    --danger: #e0507a;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    font-family: "Barlow", -apple-system, "Segoe UI", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, .display {
+    font-family: "Rajdhani", "Barlow", sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+
+  .eyebrow {
+    font-family: "Rajdhani", sans-serif;
+    font-weight: 600;
+    font-size: 11.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  a { color: inherit; }
+
+  /* ---------- Page shell ---------- */
+
+  .app {
+    display: grid;
+    grid-template-columns: 250px 1fr 320px;
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      "header header header"
+      "nav stage detail";
+    height: 100vh;
+    max-height: 100vh;
+    overflow: hidden;
+  }
+
+  @media (max-width: 980px) {
+    .app {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto 55vh auto;
+      grid-template-areas:
+        "header"
+        "nav"
+        "stage"
+        "detail";
+      height: auto;
+      max-height: none;
+      overflow: visible;
+    }
+    body { overflow-y: auto; }
+  }
+
+  header.top {
+    grid-area: header;
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    padding: 16px 22px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, var(--panel), var(--bg));
+  }
+
+  header.top h1 {
+    font-size: 21px;
+    color: var(--text);
+  }
+
+  header.top .subtitle {
+    font-family: "Barlow", sans-serif;
+    font-size: 13px;
+    color: var(--text-dim);
+    flex: 1;
+  }
+
+  header.top .counts {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: var(--text-faint);
+    display: flex;
+    gap: 14px;
+  }
+
+  /* ---------- Nav (move picker) ---------- */
+
+  nav.picker {
+    grid-area: nav;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 14px 10px 20px;
+    background: var(--panel);
+  }
+
+  .picker-group + .picker-group { margin-top: 18px; }
+
+  .picker-group .eyebrow { padding: 0 8px 6px; }
+
+  .move-btn {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    text-align: left;
+    padding: 8px 9px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-dim);
+    font-family: "Rajdhani", sans-serif;
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+
+  .move-btn:hover { background: var(--panel-2); color: var(--text); }
+
+  .move-btn.active {
+    background: var(--panel-2);
+    border-color: var(--border);
+    color: var(--text);
+  }
+
+  .move-btn .type-chip {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: none;
+  }
+
+  .move-btn .flag-dot {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--danger);
+    opacity: 0;
+  }
+  .move-btn.flagged .flag-dot { opacity: 1; }
+
+  /* ---------- Stage (SVG canvas) ---------- */
+
+  .stage-wrap {
+    grid-area: stage;
+    position: relative;
+    overflow: auto;
+    background:
+      radial-gradient(circle at 50% 46%, #131a24 0%, var(--bg) 70%);
+  }
+
+  .stage-head {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 16px 20px 10px;
+    background: linear-gradient(180deg, var(--bg) 60%, transparent);
+    pointer-events: none;
+  }
+  .stage-head > * { pointer-events: auto; }
+
+  .stage-head h2 { font-size: 24px; }
+  .stage-head .move-stats {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+  }
+  .stage-head .move-stats b { color: var(--text); font-weight: 500; }
+
+  .range-grid-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    flex: none;
+  }
+  .range-grid-wrap .eyebrow { align-self: flex-start; }
+  svg.range-grid {
+    display: block;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .range-grid-legend {
+    display: flex;
+    gap: 10px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    color: var(--text-faint);
+  }
+  .range-grid-legend .item { display: flex; align-items: center; gap: 4px; }
+  .range-grid-legend .swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .range-grid-caption {
+    font-size: 10px;
+    color: var(--text-faint);
+    max-width: 150px;
+    text-align: center;
+    line-height: 1.35;
+  }
+
+  .flag-btn {
+    font-family: "Rajdhani", sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text-dim);
+    padding: 7px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .flag-btn:hover { border-color: var(--text-faint); color: var(--text); }
+  .flag-btn.on {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #1a0910;
+  }
+
+  svg.tree-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    min-width: 640px;
+  }
+
+  .legend {
+    grid-area: stage;
+    align-self: end;
+    justify-self: start;
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+    padding: 10px 20px 14px;
+    background: linear-gradient(0deg, var(--bg) 55%, transparent);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    pointer-events: none;
+  }
+  .legend .item { display: flex; align-items: center; gap: 6px; }
+  .legend .swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .legend .line-sample { width: 18px; height: 0; border-top: 1.5px solid var(--text-faint); }
+  .legend .line-sample.dashed { border-top-style: dashed; }
+
+  /* node visuals (applied via JS-set classes/attrs, kept here for hover states) */
+  .node-hit { cursor: pointer; }
+  .node-hit:hover circle.ring { filter: brightness(1.35); }
+  .node-label { font-family: "Rajdhani", sans-serif; font-weight: 600; pointer-events: none; }
+  .node-cost { font-family: "IBM Plex Mono", monospace; font-weight: 500; pointer-events: none; }
+  .edge-normal { stroke-width: 1.4; opacity: 0.55; }
+  .edge-anyof { stroke-width: 1.3; stroke-dasharray: 2 4; opacity: 0.55; }
+  .edge-cross { stroke-width: 1.6; opacity: 0.8; }
+  .edge-dim { opacity: 0.12 !important; }
+  .edge-lit { opacity: 1 !important; stroke-width: 2.2 !important; }
+  .node-dim { opacity: 0.28; }
+  .node-lit circle.ring { filter: brightness(1.4); }
+
+  /* ---------- Detail panel ---------- */
+
+  aside.detail {
+    grid-area: detail;
+    border-left: 1px solid var(--border);
+    background: var(--panel);
+    overflow-y: auto;
+    padding: 18px 18px 24px;
+  }
+
+  aside.detail .placeholder {
+    color: var(--text-faint);
+    font-size: 13.5px;
+    line-height: 1.6;
+    margin-top: 10px;
+  }
+
+  .node-card .kind-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .node-card .kind-pill {
+    font-family: "Rajdhani", sans-serif;
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+  }
+  .node-card h3 { font-size: 20px; margin-bottom: 2px; }
+  .node-card .cost-line {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 14px;
+  }
+  .field-block { margin-top: 14px; }
+  .field-block .eyebrow { margin-bottom: 6px; }
+  .field-block .rel-list { display: flex; flex-direction: column; gap: 5px; }
+  .rel-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    cursor: pointer;
+    width: fit-content;
+  }
+  .rel-chip:hover { border-color: var(--text-faint); }
+  .rel-chip .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .anyof-set { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 3px 0; }
+  .anyof-or { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--text-faint); }
+
+  dl.delta-list {
+    margin: 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 5px 12px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+  }
+  dl.delta-list dt { color: var(--text-faint); white-space: nowrap; }
+  dl.delta-list dd { margin: 0; color: var(--text); word-break: break-word; }
+
+  .passive-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    background: var(--panel-2);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+  }
+
+  .notes-box {
+    margin-top: 22px;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
+  .notes-box textarea {
+    width: 100%;
+    min-height: 90px;
+    resize: vertical;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: "Barlow", sans-serif;
+    font-size: 13px;
+    padding: 8px 10px;
+    margin-top: 8px;
+  }
+  .notes-box textarea:focus { outline: 1px solid var(--text-faint); }
+  .notes-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .notes-actions button {
+    font-family: "Rajdhani", sans-serif;
+    font-weight: 600;
+    font-size: 12.5px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text-dim);
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+  .notes-actions button:hover { color: var(--text); border-color: var(--text-faint); }
+  .save-tick { font-size: 11px; color: var(--soc); font-family: "IBM Plex Mono", monospace; opacity: 0; transition: opacity 0.2s; align-self: center; }
+  .save-tick.show { opacity: 1; }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+</style>
+
+<div class="app">
+  <header class="top">
+    <h1>Move Tree Atlas</h1>
+    <div class="subtitle">Every shipped move respec tree, laid out for review — pick a move, click any node.</div>
+    <div class="counts" id="headerCounts"></div>
+  </header>
+
+  <nav class="picker" id="picker"></nav>
+
+  <div class="stage-wrap">
+    <div class="stage-head">
+      <div>
+        <h2 id="stageTitle">—</h2>
+        <div class="move-stats" id="stageStats"></div>
+      </div>
+      <div class="range-grid-wrap">
+        <div class="eyebrow">Range &amp; footprint</div>
+        <svg class="range-grid" id="rangeGrid" role="img" aria-label="Range and area of effect"></svg>
+        <div class="range-grid-legend" id="rangeGridLegend"></div>
+        <div class="range-grid-caption">Base shape shown — some tree nodes change it (see the graph).</div>
+      </div>
+      <button class="flag-btn" id="flagBtn" type="button">Flag for redesign</button>
+    </div>
+    <svg class="tree-svg" id="treeSvg" role="img" aria-label="Move respec tree"></svg>
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <aside class="detail" id="detail">
+    <div class="eyebrow">Node detail</div>
+    <div class="placeholder">Click a node in the tree to see its cost, prerequisites, and exact effect.</div>
+  </aside>
+</div>
+
+<script id="tree-data" type="application/json">__TREE_DATA__</script>
+<script>
+(function () {
+  "use strict";
+
+  var TREES = JSON.parse(document.getElementById("tree-data").textContent);
+
+  var MOVE_ORDER = [
+    { group: "Legacy (pre-template)", ids: ["ember"] },
+    { group: "Full triangle", ids: ["tackle", "slash", "peck", "scratch", "rock_throw", "water_gun"] },
+    { group: "Flagship (evolved-line)", ids: ["hydro_pump", "solar_beam", "earthquake"] },
+  ];
+
+  var TYPE_COLOR = {
+    normal: "#b7b7a6", fire: "#ef6448", water: "#4c95e6", grass: "#5fbf5f",
+    electric: "#e8cf3a", ice: "#7fd6e0", fighting: "#c25b3a", poison: "#a15fb0",
+    ground: "#c9a86a", flying: "#9db4e0", psychic: "#e8608f", bug: "#a3c23a",
+    rock: "#b9a558", ghost: "#6a5b9c", dragon: "#7a5be0", dark: "#6a5b4c",
+    steel: "#a8b3bf", fairy: "#e6a4d0",
+  };
+
+  var BRANCH_COLOR = { aggression: "var(--agg)", boldness: "var(--bold)", sociability: "var(--soc)" };
+  var BRANCH_COLOR_HEX = { aggression: "#ef6448", boldness: "#4c95e6", sociability: "#43cf95" };
+  var CROSS_HEX = "#e0ac3f";
+
+  var state = { moveId: null, selectedNode: null, hoverNode: null };
+
+  // ---------- Layout: derive branch/depth/fork/crosslink structure from data ----------
+
+  function isCrosslink(node) {
+    return Array.isArray(node.prerequisites) && node.prerequisites.length === 2;
+  }
+
+  function firstAnyOfParent(node) {
+    if (node.prerequisitesAnyOf && node.prerequisitesAnyOf.length) {
+      return node.prerequisitesAnyOf[0][node.prerequisitesAnyOf[0].length - 1];
+    }
+    return null;
+  }
+
+  function computeLayout(tree) {
+    var ids = Object.keys(tree);
+    var branches = { aggression: [], boldness: [], sociability: [] };
+    var crosslinks = [];
+
+    ids.forEach(function (id) {
+      var node = tree[id];
+      if (isCrosslink(node)) crosslinks.push(id);
+      else if (branches[node.leaning]) branches[node.leaning].push(id);
+    });
+
+    // depth within a branch: 0 for an opener (no prereqs at all), else 1 + depth of
+    // its single normal prerequisite, or 1 + depth of the first prerequisitesAnyOf
+    // alternative (the "keep following the branch's own chain" option).
+    var depth = {};
+    function depthOf(id) {
+      if (depth[id] !== undefined) return depth[id];
+      var node = tree[id];
+      var parent = null;
+      if (node.prerequisites && node.prerequisites.length === 1) parent = node.prerequisites[0];
+      else if (!node.prerequisites || node.prerequisites.length === 0) parent = firstAnyOfParent(node);
+      if (parent == null) { depth[id] = 0; return 0; }
+      var d = depthOf(parent) + 1;
+      depth[id] = d;
+      return d;
+    }
+    ids.forEach(depthOf);
+
+    var positions = {};
+    var angleFor = { aggression: -90, boldness: 30, sociability: 150 };
+    var R0 = 64, RSTEP = 56, FORK_OFFSET = 34;
+
+    Object.keys(branches).forEach(function (branchName) {
+      var angle = angleFor[branchName] * Math.PI / 180;
+      var perp = angle + Math.PI / 2;
+      var nodesAtDepth = {};
+      branches[branchName].forEach(function (id) {
+        var d = depth[id];
+        (nodesAtDepth[d] = nodesAtDepth[d] || []).push(id);
+      });
+      Object.keys(nodesAtDepth).forEach(function (dKey) {
+        var d = +dKey;
+        var group = nodesAtDepth[dKey];
+        var r = R0 + d * RSTEP;
+        var cx = Math.cos(angle) * r, cy = Math.sin(angle) * r;
+        if (group.length === 1) {
+          positions[group[0]] = { x: cx, y: cy, branch: branchName, depth: d };
+        } else {
+          // fork: spread perpendicular to the spoke
+          var n = group.length;
+          group.forEach(function (id, i) {
+            var offset = (i - (n - 1) / 2) * FORK_OFFSET;
+            positions[id] = {
+              x: cx + Math.cos(perp) * offset,
+              y: cy + Math.sin(perp) * offset,
+              branch: branchName,
+              depth: d,
+            };
+          });
+        }
+      });
+    });
+
+    // crosslinks: sit at the angular midpoint between the two branches they bridge,
+    // at a small radius, forming a triangle around the hub.
+    crosslinks.forEach(function (id) {
+      var node = tree[id];
+      var parents = node.prerequisites.map(function (p) { return tree[p]; }).filter(Boolean);
+      var branchesTouched = parents.map(function (p) { return p.leaning; });
+      var a1 = angleFor[branchesTouched[0]] != null ? angleFor[branchesTouched[0]] : angleFor[node.leaning];
+      var a2 = angleFor[branchesTouched[1]] != null ? angleFor[branchesTouched[1]] : a1 + 120;
+      // pick the midpoint that is the SHORT way around (they're always 120 deg apart)
+      var mid = (a1 + a2) / 2;
+      if (Math.abs(a1 - a2) > 180) mid += 180;
+      var rad = mid * Math.PI / 180;
+      var r = R0 * 1.42;
+      positions[id] = { x: Math.cos(rad) * r, y: Math.sin(rad) * r, branch: "cross", depth: 0 };
+    });
+
+    var maxR = 0;
+    Object.keys(positions).forEach(function (id) {
+      var p = positions[id];
+      maxR = Math.max(maxR, Math.abs(p.x), Math.abs(p.y));
+    });
+
+    return { positions: positions, crosslinks: crosslinks, maxR: maxR + FORK_OFFSET + 30 };
+  }
+
+  // A generic "+5 Power" / "-1 Cooldown" / "+5% status chance" filler name —
+  // these are already self-explanatory as-is, so they're the one tier that
+  // does NOT get a plain-English rewrite.
+  var FILLER_NAME = /^[+\-]\d/;
+
+  /**
+   * Classifies every node in a tree as "crosslink", "capstone" (a branch's
+   * own terminal/highest-depth node), "filler" (a generic stat nudge, by
+   * name), or "notable" (everything else with a real, distinctive name —
+   * openers, fork options, and the two named notables in between).
+   */
+  function classifyNodes(tree, layout) {
+    var kinds = {};
+    var branchMaxDepth = {};
+    Object.keys(layout.positions).forEach(function (id) {
+      var p = layout.positions[id];
+      if (p.branch === "cross") return;
+      branchMaxDepth[p.branch] = Math.max(branchMaxDepth[p.branch] || 0, p.depth);
+    });
+    Object.keys(tree).forEach(function (id) {
+      var node = tree[id];
+      var p = layout.positions[id];
+      if (isCrosslink(node)) { kinds[id] = "crosslink"; return; }
+      if (p && p.branch !== "cross" && p.depth === branchMaxDepth[p.branch]) { kinds[id] = "capstone"; return; }
+      kinds[id] = FILLER_NAME.test(node.name) ? "filler" : "notable";
+    });
+    return kinds;
+  }
+
+  var STAT_LABEL = { attack: "Attack", defense: "Defense", spAttack: "Sp. Attack", spDefense: "Sp. Defense", speed: "Speed" };
+  var PASSIVE_LABEL = {
+    damageReduction: function (v) { return "Passive — takes " + pct(v) + " less damage from every hit."; },
+    immovable: function () { return "Passive — can't be dragged, knocked back, or lunged at by anything."; },
+    regen: function (v) { return "Passive — heals " + pct(v) + " of max HP every tick, on its own."; },
+    thorns: function (v) { return "Passive — reflects " + pct(v) + " of incoming damage back onto the attacker."; },
+    healAura: function (v) { return "Passive — heals every nearby herd-mate (itself included) " + pct(v) + " of max HP every tick."; },
+    defenseBoost: function (v) { return "Passive — permanently raises its own Defense stat-stage by " + v + "."; },
+  };
+
+  function pct(v) { return Math.round(v * 1000) / 10 + "%"; }
+  function signed(v) { return (v > 0 ? "+" : "") + v; }
+
+  function describePassive(p) {
+    var fn = PASSIVE_LABEL[p.kind];
+    return fn ? fn(p.value) : "Passive — " + p.kind + " " + p.value + ".";
+  }
+
+  /** Turns one node's raw `delta` object into short, plain-English bullet lines. */
+  function describeDelta(delta) {
+    var lines = [];
+    function has(k) { return delta[k] !== undefined; }
+
+    if (has("power")) lines.push(signed(delta.power) + " power.");
+    if (has("accuracy")) lines.push(signed(delta.accuracy) + " accuracy.");
+    if (has("cooldownTicks")) lines.push(signed(delta.cooldownTicks) + " tick" + (Math.abs(delta.cooldownTicks) === 1 ? "" : "s") + " cooldown.");
+    if (has("defensePenetration")) lines.push("Ignores " + pct(delta.defensePenetration) + " of the target's Defense/Sp. Defense.");
+    if (has("hits")) lines.push("Strikes " + (delta.hits.min === delta.hits.max ? delta.hits.min + " times" : delta.hits.min + "–" + delta.hits.max + " times") + " per use.");
+    if (has("lockTicks")) lines.push("Locks the user out of acting " + signed(delta.lockTicks) + " extra tick" + (Math.abs(delta.lockTicks) === 1 ? "" : "s") + " after use.");
+    if (has("situationalBonus")) lines.push("×" + delta.situationalBonus.multiplier + " damage when the target is " + conditionLabel(delta.situationalBonus.condition) + ".");
+    if (has("selfStateBonus")) lines.push("Scored higher in move-picking when the user itself is at or below half HP.");
+    if (has("statChangeOnHit")) {
+      var sc = delta.statChangeOnHit;
+      var who = sc.target === "self" ? "its own" : "the target's";
+      lines.push((sc.stage > 0 ? "Raises " : "Lowers ") + who + " " + (STAT_LABEL[sc.stat] || sc.stat) + " by " + Math.abs(sc.stage) + " stage" + (Math.abs(sc.stage) === 1 ? "" : "s") + (sc.ticks ? " for " + sc.ticks + " ticks" : " permanently") + (sc.target === "self" ? " the instant it's used" : " on a landed, non-killing hit") + ".");
+    }
+    if (has("positionSwap") && delta.positionSwap) lines.push("Swaps places with the target on a landed, non-killing hit.");
+    if (has("positionSwapPull")) lines.push("Hauls the target " + delta.positionSwapPull + " extra tile" + (delta.positionSwapPull === 1 ? "" : "s") + " past the swap.");
+    if (has("targetsAlly") && delta.targetsAlly) lines.push("Gains a dedicated support use on a nearby ally, on top of staying a real attack.");
+    if (has("allyEffect")) {
+      var ae = delta.allyEffect;
+      var parts = [];
+      if (ae.healFraction) parts.push("heals " + pct(ae.healFraction) + " of max HP");
+      if (ae.buff) parts.push("buffs " + (STAT_LABEL[ae.buff.stat] || ae.buff.stat) + " +" + ae.buff.stage + " stage" + (ae.buff.stage === 1 ? "" : "s") + (ae.buff.ticks ? " for " + ae.buff.ticks + " ticks" : ""));
+      lines.push("That ally effect: " + parts.join(" and ") + ".");
+    }
+    if (has("allyEffectOnAttack") && delta.allyEffectOnAttack) lines.push("The ally effect also fires for free whenever this move lands on an enemy, no extra cost.");
+    if (has("hitsArea") && delta.hitsArea) lines.push("Hits everyone caught in the move's shape, not just the one target picked.");
+    if (has("weightScaling")) lines.push("Adds " + pct(delta.weightScaling.factor) + " of the user's own max HP as bonus power (heavier users hit harder).");
+    if (has("critRateStage")) lines.push(signed(delta.critRateStage) + " crit-rate stage" + (Math.abs(delta.critRateStage) === 1 ? "" : "s") + ".");
+    if (has("lifestealFraction")) lines.push("Heals the user " + pct(delta.lifestealFraction) + " of the damage a landed hit dealt.");
+    if (has("recoilFraction")) lines.push("Costs the user " + pct(delta.recoilFraction) + " of the damage a landed hit dealt, as recoil.");
+    if (has("jamCooldownTicks")) lines.push("On a landed hit, adds " + delta.jamCooldownTicks + " tick" + (delta.jamCooldownTicks === 1 ? "" : "s") + " to every cooldown the target already has running.");
+    if (has("bonusVsType")) lines.push("×" + delta.bonusVsType.multiplier + " damage specifically against " + capitalize(delta.bonusVsType.type) + "-type targets.");
+    if (has("resistanceBreaker")) lines.push("Partially ignores its own type resist — a resisted hit claws back up toward neutral (×" + delta.resistanceBreaker.multiplier + ", capped there, never becomes super-effective).");
+    if (has("selfCostPerUse")) lines.push("Costs the user " + pct(delta.selfCostPerUse.amount) + " " + delta.selfCostPerUse.need + " every time it's used.");
+    if (has("rallyCall")) lines.push("On a landed, non-killing hit, marks the target as a priority for every nearby ally for " + delta.rallyCall.ticks + " ticks.");
+    if (has("critCooldownReset") && delta.critCooldownReset) lines.push("A landed critical hit resets this move's own cooldown to 0.");
+    if (has("statusSeverity")) lines.push("×" + delta.statusSeverity + " status severity (a stronger damage-over-time, not a longer one).");
+    if (has("statusChance")) lines.push(signed(Math.round(delta.statusChance * 100)) + "% status chance.");
+    if (has("statusSpreads") && delta.statusSpreads) lines.push("A landed status has a chance to also jump to one other nearby target.");
+    if (has("consumesOwnTerrain")) lines.push("×" + delta.consumesOwnTerrain.damageMultiplier + " damage while standing on " + delta.consumesOwnTerrain.terrain + " terrain (consumed either way).");
+    if (has("terrainFill")) lines.push("Leaves " + delta.terrainFill.terrain + " terrain where it lands a hit.");
+    if (has("forcedMovement")) {
+      var fm = delta.forcedMovement;
+      var mover = fm.mover === "attacker" ? "The user" : "The target";
+      var dir = fm.direction === "closer" ? "toward the other side" : "away from the other side";
+      var timing = fm.timing === "beforeHit" ? "before the hit resolves" : "on a landed, non-killing hit";
+      lines.push(mover + " moves " + fm.tiles + " tile" + (fm.tiles === 1 ? "" : "s") + " " + dir + ", " + timing + ".");
+    }
+    if (has("shape")) lines.push("Changes its own shape to " + shapeLabel(delta.shape) + ".");
+    if (has("range")) lines.push("Changes its max reach to " + (delta.range.max != null ? delta.range.max + " tiles" : JSON.stringify(delta.range)) + ".");
+    return lines;
+  }
+
+  function conditionLabel(c) {
+    var labels = {
+      targetLowHp: "at or below half HP", flanking: "caught off guard (flanking)", night: "it's night",
+      elevation: "the user is standing higher up", concealed: "the user is concealed in a bush",
+      coldSnap: "there's a cold snap", storm: "there's a storm", drought: "there's a drought",
+      rain: "it's raining", targetBurning: "the target is burning", targetStatused: "the target is already statused",
+    };
+    return labels[c] || c;
+  }
+  function shapeLabel(shape) {
+    if (shape.kind === "point") return "a point-blank hit";
+    if (shape.kind === "line") return "a " + shape.length + "-tile line";
+    if (shape.kind === "cone") return "a " + shape.length + "-tile cone (width " + shape.width + ")";
+    if (shape.kind === "ring") return "a ring at radius " + shape.radius;
+    if (shape.kind === "burst") return "a burst of radius " + shape.radius;
+    return shape.kind;
+  }
+  function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+  // ---------- SVG rendering ----------
+
+  var SVGNS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs) {
+    var e = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  function nodeRadius(node, tree) {
+    var isKeystoneOrFlagship = node.cost >= 2 && !isCrosslink(node);
+    return isKeystoneOrFlagship ? 15 : 11;
+  }
+
+  function nodeColor(node) {
+    if (isCrosslink(node)) return CROSS_HEX;
+    return BRANCH_COLOR_HEX[node.leaning] || "#8a93a3";
+  }
+
+  function formatDeltaValue(v) {
+    if (v && typeof v === "object") {
+      return Object.keys(v).map(function (k) { return k + ": " + JSON.stringify(v[k]); }).join(", ");
+    }
+    return JSON.stringify(v);
+  }
+
+  function renderTree(moveId) {
+    var move = TREES[moveId];
+    var tree = move.tree;
+    var layout = computeLayout(tree);
+    var pos = layout.positions;
+    var svg = document.getElementById("treeSvg");
+    svg.innerHTML = "";
+
+    var pad = 26;
+    var half = layout.maxR;
+    var W = half * 2, H = half * 2;
+    svg.setAttribute("viewBox", (-half - pad) + " " + (-half - pad) + " " + (W + pad * 2) + " " + (H + pad * 2));
+    svg.setAttribute("aria-label", move.name + " respec tree, three branches plus crosslinks");
+
+    var edgesLayer = el("g", { class: "edges" });
+    var nodesLayer = el("g", { class: "nodes" });
+    svg.appendChild(edgesLayer);
+    svg.appendChild(nodesLayer);
+
+    // center hub marker
+    svg.insertBefore(el("circle", { cx: 0, cy: 0, r: 5, fill: "none", stroke: "var(--border)", "stroke-width": 1.5 }), nodesLayer);
+
+    var edgeIndex = {}; // nodeId -> [edge elements] for hover highlighting
+
+    function addEdge(fromId, toId, cls, colorOverride) {
+      if (!pos[fromId] || !pos[toId]) return;
+      var a = pos[fromId], b = pos[toId];
+      var line = el("line", {
+        x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+        class: cls,
+        stroke: colorOverride || "var(--text-faint)",
+      });
+      edgesLayer.appendChild(line);
+      (edgeIndex[fromId] = edgeIndex[fromId] || []).push(line);
+      (edgeIndex[toId] = edgeIndex[toId] || []).push(line);
+    }
+
+    Object.keys(tree).forEach(function (id) {
+      var node = tree[id];
+      if (node.prerequisites) {
+        node.prerequisites.forEach(function (p) {
+          addEdge(p, id, isCrosslink(node) ? "edge-cross" : "edge-normal", isCrosslink(node) ? CROSS_HEX : null);
+        });
+      }
+      if (node.prerequisitesAnyOf) {
+        node.prerequisitesAnyOf.forEach(function (set) {
+          addEdge(set[set.length - 1], id, "edge-anyof");
+        });
+      }
+    });
+
+    // exclusion connectors (fork pairs)
+    var seenExcl = {};
+    Object.keys(tree).forEach(function (id) {
+      var node = tree[id];
+      (node.excludes || []).forEach(function (otherId) {
+        var key = [id, otherId].sort().join("|");
+        if (seenExcl[key]) return;
+        seenExcl[key] = true;
+        if (!pos[id] || !pos[otherId]) return;
+        var a = pos[id], b = pos[otherId];
+        var line = el("line", {
+          x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+          stroke: "var(--danger)", "stroke-width": 1.3, "stroke-dasharray": "1 3.5", opacity: 0.55,
+        });
+        edgesLayer.appendChild(line);
+        var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        var label = el("text", {
+          x: mx, y: my, "text-anchor": "middle", "dominant-baseline": "middle",
+          class: "mono", fill: "var(--danger)", "font-size": 9,
+        });
+        label.textContent = "×";
+        edgesLayer.appendChild(label);
+      });
+    });
+
+    var nodeEls = {};
+    Object.keys(tree).forEach(function (id) {
+      var node = tree[id];
+      var p = pos[id];
+      if (!p) return;
+      var r = nodeRadius(node, tree);
+      var color = nodeColor(node);
+
+      var g = el("g", { class: "node-hit", "data-id": id, transform: "translate(" + p.x + "," + p.y + ")" });
+
+      if (node.cost >= 2 && !isCrosslink(node)) {
+        g.appendChild(el("circle", { class: "ring", r: r + 4, fill: "none", stroke: color, "stroke-width": 1, opacity: 0.5 }));
+      }
+      g.appendChild(el("circle", { class: "ring", r: r, fill: "#0c1015", stroke: color, "stroke-width": 2.2 }));
+      g.appendChild(el("circle", { r: r - 5, fill: color, opacity: node.grantsPassive || node.grantsPassives ? 0.95 : 0.55 }));
+
+      var labelY = p.y < 0 ? -(r + 9) : r + 15;
+      var label = el("text", {
+        x: p.x, y: labelY + (p.y < 0 ? 0 : 0),
+        "text-anchor": "middle", class: "node-label", fill: "var(--text)", "font-size": 11.5,
+      });
+      // place label text via separate non-transformed element for readability
+      nodesLayer.appendChild(g);
+
+      var lbl = el("text", {
+        x: p.x, y: p.y < 0 ? p.y - r - 8 : p.y + r + 15,
+        "text-anchor": "middle", class: "node-label", fill: "var(--text)", "font-size": 11,
+      });
+      lbl.textContent = node.name;
+      nodesLayer.appendChild(lbl);
+
+      var costLbl = el("text", {
+        x: p.x, y: p.y + 3.5,
+        "text-anchor": "middle", class: "node-cost", fill: "#0c1015", "font-size": 9.5,
+      });
+      if (!(node.grantsPassive || node.grantsPassives)) {
+        costLbl.textContent = node.cost;
+        nodesLayer.appendChild(costLbl);
+      }
+
+      g.addEventListener("click", function () { selectNode(moveId, id); });
+      g.addEventListener("mouseenter", function () { hoverNode(id, true); });
+      g.addEventListener("mouseleave", function () { hoverNode(id, false); });
+      nodeEls[id] = { g: g, label: lbl };
+    });
+
+    svg._nodeEls = nodeEls;
+    svg._edgeIndex = edgeIndex;
+
+    function hoverNode(id, on) {
+      if (state.selectedNode) return; // selection takes priority
+      applyFocus(on ? id : null);
+    }
+
+    function applyFocus(id) {
+      Object.keys(nodeEls).forEach(function (nid) {
+        nodeEls[nid].g.classList.toggle("node-dim", !!id && nid !== id);
+        nodeEls[nid].g.classList.toggle("node-lit", nid === id);
+      });
+      Object.keys(edgeIndex).forEach(function (nid) {
+        edgeIndex[nid].forEach(function (line) {
+          if (!id) { line.classList.remove("edge-dim", "edge-lit"); return; }
+          line.classList.toggle("edge-lit", nid === id);
+        });
+      });
+      if (id) {
+        Object.keys(edgeIndex).forEach(function (nid) {
+          if (nid !== id) edgeIndex[nid].forEach(function (line) { if (!line.classList.contains("edge-lit")) line.classList.add("edge-dim"); });
+        });
+      }
+    }
+    svg._applyFocus = applyFocus;
+  }
+
+  // ---------- Detail panel ----------
+
+  function relChip(moveId, id, tree) {
+    var n = tree[id];
+    var color = n ? nodeColor(n) : "#8a93a3";
+    var chip = document.createElement("span");
+    chip.className = "rel-chip";
+    chip.innerHTML = '<span class="dot" style="background:' + color + '"></span>' + (n ? n.name : id);
+    chip.addEventListener("click", function () { selectNode(moveId, id); });
+    return chip;
+  }
+
+  function renderDetail(moveId, nodeId) {
+    var move = TREES[moveId];
+    var tree = move.tree;
+    var node = tree[nodeId];
+    var kind = classifyNodes(tree, computeLayout(tree))[nodeId];
+    var detail = document.getElementById("detail");
+    detail.innerHTML = "";
+
+    var eyebrow = document.createElement("div");
+    eyebrow.className = "eyebrow";
+    eyebrow.textContent = "Node detail";
+    detail.appendChild(eyebrow);
+
+    var card = document.createElement("div");
+    card.className = "node-card";
+    card.style.marginTop = "10px";
+
+    var kindRow = document.createElement("div");
+    kindRow.className = "kind-row";
+    var pill = document.createElement("span");
+    pill.className = "kind-pill";
+    var color = nodeColor(node);
+    pill.style.color = color;
+    pill.textContent = isCrosslink(node) ? "Crosslink" : (node.leaning || "—");
+    kindRow.appendChild(pill);
+    if (node.excludes && node.excludes.length) {
+      var forkPill = document.createElement("span");
+      forkPill.className = "kind-pill";
+      forkPill.style.color = "var(--danger)";
+      forkPill.textContent = "Fork";
+      kindRow.appendChild(forkPill);
+    }
+    if (kind === "capstone" || kind === "notable") {
+      var tierPill = document.createElement("span");
+      tierPill.className = "kind-pill";
+      tierPill.style.color = "var(--text-dim)";
+      tierPill.textContent = kind === "capstone" ? "Capstone" : "Notable";
+      kindRow.appendChild(tierPill);
+    }
+    card.appendChild(kindRow);
+
+    var h3 = document.createElement("h3");
+    h3.textContent = node.name;
+    card.appendChild(h3);
+
+    var costLine = document.createElement("div");
+    costLine.className = "cost-line";
+    costLine.textContent = "id: " + nodeId + "  ·  cost: " + node.cost + " skill point" + (node.cost === 1 ? "" : "s");
+    card.appendChild(costLine);
+
+    if (node.prerequisites && node.prerequisites.length) {
+      var block = document.createElement("div");
+      block.className = "field-block";
+      block.innerHTML = '<div class="eyebrow">Requires' + (node.prerequisites.length > 1 ? " (all of)" : "") + '</div>';
+      var list = document.createElement("div");
+      list.className = "rel-list";
+      node.prerequisites.forEach(function (p) { list.appendChild(relChip(moveId, p, tree)); });
+      block.appendChild(list);
+      card.appendChild(block);
+    }
+
+    if (node.prerequisitesAnyOf && node.prerequisitesAnyOf.length) {
+      var block2 = document.createElement("div");
+      block2.className = "field-block";
+      block2.innerHTML = '<div class="eyebrow">Requires (any one path)</div>';
+      node.prerequisitesAnyOf.forEach(function (set, i) {
+        if (i > 0) {
+          var orLbl = document.createElement("div");
+          orLbl.className = "anyof-or";
+          orLbl.textContent = "— or —";
+          block2.appendChild(orLbl);
+        }
+        var row = document.createElement("div");
+        row.className = "anyof-set";
+        set.forEach(function (p) { row.appendChild(relChip(moveId, p, tree)); });
+        block2.appendChild(row);
+      });
+      card.appendChild(block2);
+    }
+
+    if (node.excludes && node.excludes.length) {
+      var block3 = document.createElement("div");
+      block3.className = "field-block";
+      block3.innerHTML = '<div class="eyebrow">Mutually exclusive with</div>';
+      var list3 = document.createElement("div");
+      list3.className = "rel-list";
+      node.excludes.forEach(function (p) { list3.appendChild(relChip(moveId, p, tree)); });
+      block3.appendChild(list3);
+      card.appendChild(block3);
+    }
+
+    var passives = [];
+    if (node.grantsPassive) passives.push(node.grantsPassive);
+    if (node.grantsPassives) passives = passives.concat(node.grantsPassives);
+    if (passives.length) {
+      var block4 = document.createElement("div");
+      block4.className = "field-block";
+      block4.innerHTML = '<div class="eyebrow">Grants passive' + (passives.length > 1 ? "s" : "") + '</div>';
+      passives.forEach(function (ps) {
+        var pcard = document.createElement("div");
+        pcard.className = "passive-card";
+        pcard.style.marginBottom = "6px";
+        pcard.textContent = ps.kind + ": " + ps.value;
+        block4.appendChild(pcard);
+      });
+      card.appendChild(block4);
+    }
+
+    var deltaKeys = Object.keys(node.delta || {});
+    if (deltaKeys.length) {
+      var block5 = document.createElement("div");
+      block5.className = "field-block";
+      block5.innerHTML = '<div class="eyebrow">Move-spec delta</div>';
+      var dl = document.createElement("dl");
+      dl.className = "delta-list";
+      deltaKeys.forEach(function (k) {
+        var dt = document.createElement("dt");
+        dt.textContent = k;
+        var dd = document.createElement("dd");
+        dd.textContent = formatDeltaValue(node.delta[k]);
+        dl.appendChild(dt);
+        dl.appendChild(dd);
+      });
+      block5.appendChild(dl);
+      card.appendChild(block5);
+    } else if (!passives.length) {
+      var none = document.createElement("div");
+      none.className = "field-block";
+      none.style.color = "var(--text-faint)";
+      none.style.fontSize = "12.5px";
+      none.textContent = "No move-spec change on its own — structural node only.";
+      card.appendChild(none);
+    }
+
+    if (kind === "notable" || kind === "capstone") {
+      var prettyLines = passives.map(describePassive).concat(describeDelta(node.delta || {}));
+      if (prettyLines.length) {
+        var block6 = document.createElement("div");
+        block6.className = "field-block";
+        block6.innerHTML = '<div class="eyebrow">In plain English</div>';
+        var ul = document.createElement("ul");
+        ul.style.margin = "0";
+        ul.style.paddingLeft = "18px";
+        ul.style.fontSize = "13px";
+        ul.style.lineHeight = "1.55";
+        prettyLines.forEach(function (line) {
+          var li = document.createElement("li");
+          li.textContent = line;
+          ul.appendChild(li);
+        });
+        block6.appendChild(ul);
+        card.appendChild(block6);
+      }
+    }
+
+    detail.appendChild(card);
+    detail.appendChild(buildNotesBox(moveId));
+  }
+
+  function clearDetail() {
+    var detail = document.getElementById("detail");
+    detail.innerHTML = '<div class="eyebrow">Node detail</div><div class="placeholder">Click a node in the tree to see its cost, prerequisites, and exact effect.</div>';
+    var move = TREES[state.moveId];
+    if (move) detail.appendChild(buildNotesBox(state.moveId));
+  }
+
+  // ---------- Redesign flags + notes (localStorage) ----------
+
+  var STORAGE_KEY = "moveTreeAtlas.notes.v1";
+  function loadNotes() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch (e) { return {}; }
+  }
+  function saveNotes(all) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(all)); } catch (e) {}
+  }
+  function getNote(moveId) {
+    var all = loadNotes();
+    return all[moveId] || { flagged: false, text: "" };
+  }
+  function setNote(moveId, patch) {
+    var all = loadNotes();
+    all[moveId] = Object.assign({ flagged: false, text: "" }, all[moveId], patch);
+    saveNotes(all);
+    return all[moveId];
+  }
+
+  function buildNotesBox(moveId) {
+    var box = document.createElement("div");
+    box.className = "notes-box";
+    var note = getNote(moveId);
+    box.innerHTML =
+      '<div class="eyebrow">Redesign notes — ' + TREES[moveId].name + '</div>' +
+      '<textarea placeholder="What needs to change about this tree...">' + escapeHtml(note.text) + '</textarea>' +
+      '<div class="notes-actions">' +
+        '<button type="button" data-act="save">Save note</button>' +
+        '<button type="button" data-act="export">Export all flagged as text</button>' +
+        '<span class="save-tick" id="saveTick">saved</span>' +
+      '</div>';
+    var textarea = box.querySelector("textarea");
+    box.querySelector('[data-act="save"]').addEventListener("click", function () {
+      setNote(moveId, { text: textarea.value });
+      var tick = box.querySelector("#saveTick");
+      tick.classList.add("show");
+      setTimeout(function () { tick.classList.remove("show"); }, 1400);
+    });
+    box.querySelector('[data-act="export"]').addEventListener("click", exportFlagged);
+    return box;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function exportFlagged() {
+    var all = loadNotes();
+    var lines = [];
+    Object.keys(TREES).forEach(function (id) {
+      var n = all[id];
+      if (n && (n.flagged || (n.text && n.text.trim()))) {
+        lines.push("## " + TREES[id].name + (n.flagged ? " — FLAGGED FOR REDESIGN" : ""));
+        if (n.text && n.text.trim()) lines.push(n.text.trim());
+        lines.push("");
+      }
+    });
+    var text = lines.length ? lines.join("\n") : "No trees flagged or noted yet.";
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(ta);
+    alert("Copied to clipboard:\n\n" + text.slice(0, 800) + (text.length > 800 ? "\n..." : ""));
+  }
+
+  // ---------- Range/AoE grid ----------
+
+  /**
+   * Ports `resolveShape` (packages/engine/src/moves.ts) exactly, fixed to
+   * facing "up" (north) for this static preview — real combat derives
+   * facing from attacker->target direction, but a fixed facing is enough
+   * to show the shape's true footprint relative to the user.
+   */
+  function shapeTiles(shape) {
+    var tiles = [];
+    var forward = { x: 0, y: -1 };
+    var perp = { x: -forward.y, y: forward.x };
+    if (shape.kind === "point") {
+      tiles.push({ x: 0, y: 0 });
+    } else if (shape.kind === "line") {
+      for (var i = 1; i <= shape.length; i++) tiles.push({ x: forward.x * i, y: forward.y * i });
+    } else if (shape.kind === "cone") {
+      for (var depth = 1; depth <= shape.length; depth++) {
+        var spread = Math.floor((depth * shape.width) / shape.length);
+        for (var s = -spread; s <= spread; s++) {
+          tiles.push({ x: forward.x * depth + perp.x * s, y: forward.y * depth + perp.y * s });
+        }
+      }
+    } else if (shape.kind === "ring") {
+      for (var dx = -shape.radius; dx <= shape.radius; dx++) {
+        for (var dy = -shape.radius; dy <= shape.radius; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) === shape.radius) tiles.push({ x: dx, y: dy });
+        }
+      }
+    } else if (shape.kind === "burst") {
+      for (var bx = -shape.radius; bx <= shape.radius; bx++) {
+        for (var by = -shape.radius; by <= shape.radius; by++) {
+          if (Math.abs(bx) + Math.abs(by) <= shape.radius) tiles.push({ x: bx, y: by });
+        }
+      }
+    }
+    return tiles;
+  }
+
+  function renderRangeGrid(move) {
+    var svg = document.getElementById("rangeGrid");
+    svg.innerHTML = "";
+
+    var rangeMax = move.range ? move.range.max : 1;
+    var shapeReach =
+      move.shape.kind === "point" ? 0 : move.shape.kind === "line" || move.shape.kind === "cone" ? move.shape.length : move.shape.radius;
+    var gridRadius = Math.max(rangeMax, shapeReach, 1);
+    gridRadius = Math.min(gridRadius, 8); // keep the preview small even for Solar Beam's 7-tile reach
+
+    var dim = gridRadius * 2 + 1;
+    var cell = Math.max(8, Math.min(18, Math.floor(150 / dim)));
+    var size = dim * cell;
+    svg.setAttribute("viewBox", "0 0 " + size + " " + size);
+    svg.setAttribute("width", size);
+    svg.setAttribute("height", size);
+
+    var typeColor = TYPE_COLOR[move.type] || "#8a93a3";
+    var hits = shapeTiles(move.shape);
+    var hitSet = {};
+    hits.forEach(function (t) {
+      hitSet[t.x + "," + t.y] = true;
+    });
+
+    function toPx(gx, gy) {
+      return { x: (gx + gridRadius) * cell, y: (gy + gridRadius) * cell };
+    }
+
+    for (var gx = -gridRadius; gx <= gridRadius; gx++) {
+      for (var gy = -gridRadius; gy <= gridRadius; gy++) {
+        var p = toPx(gx, gy);
+        var inRange = Math.abs(gx) + Math.abs(gy) <= rangeMax;
+        var isHit = !!hitSet[gx + "," + gy];
+        var isUser = gx === 0 && gy === 0;
+        var fill = "none";
+        var opacity = 1;
+        if (isHit) {
+          fill = typeColor;
+          opacity = move.hitsArea ? 0.85 : 0.6;
+        } else if (inRange) {
+          fill = typeColor;
+          opacity = 0.14;
+        }
+        svg.appendChild(
+          el("rect", {
+            x: p.x + 0.5,
+            y: p.y + 0.5,
+            width: cell - 1,
+            height: cell - 1,
+            fill: fill,
+            "fill-opacity": opacity,
+            stroke: "var(--border-soft)",
+            "stroke-width": 1,
+          })
+        );
+        if (isUser) {
+          var cx = p.x + cell / 2,
+            cy = p.y + cell / 2;
+          svg.appendChild(el("circle", { cx: cx, cy: cy, r: Math.max(2.5, cell * 0.22), fill: "var(--text)" }));
+          // facing arrow, pointing up (the fixed facing this preview uses)
+          svg.appendChild(
+            el("polygon", {
+              points: cx + "," + (cy - cell * 0.55) + " " + (cx - cell * 0.16) + "," + (cy - cell * 0.28) + " " + (cx + cell * 0.16) + "," + (cy - cell * 0.28),
+              fill: "var(--text)",
+            })
+          );
+        }
+      }
+    }
+
+    var legend = document.getElementById("rangeGridLegend");
+    legend.innerHTML =
+      '<span class="item"><span class="swatch" style="background:var(--text)"></span>user</span>' +
+      '<span class="item"><span class="swatch" style="background:' + typeColor + ';opacity:.3"></span>in range</span>' +
+      '<span class="item"><span class="swatch" style="background:' + typeColor + '"></span>' + (move.hitsArea ? "hits (AoE)" : "target tile") + "</span>";
+  }
+
+  // ---------- Selection / navigation ----------
+
+  function selectNode(moveId, nodeId) {
+    state.selectedNode = nodeId;
+    renderDetail(moveId, nodeId);
+    var svg = document.getElementById("treeSvg");
+    if (svg._applyFocus) svg._applyFocus(nodeId);
+  }
+
+  function selectMove(moveId) {
+    state.moveId = moveId;
+    state.selectedNode = null;
+    var move = TREES[moveId];
+
+    document.querySelectorAll(".move-btn").forEach(function (b) {
+      b.classList.toggle("active", b.getAttribute("data-move") === moveId);
+    });
+
+    document.getElementById("stageTitle").textContent = move.name;
+    var stats = document.getElementById("stageStats");
+    var nodeCount = Object.keys(move.tree).length;
+    stats.innerHTML =
+      "<span><b>" + move.type + "</b> " + move.category + "</span>" +
+      "<span>pwr <b>" + move.power + "</b></span>" +
+      "<span>acc <b>" + move.accuracy + "</b></span>" +
+      "<span>cd <b>" + move.cooldownTicks + "</b></span>" +
+      "<span>shape <b>" + move.shape.kind + (move.shape.length ? " " + move.shape.length : "") + (move.shape.radius != null ? " r" + move.shape.radius : "") + (move.shape.width ? "×" + move.shape.width : "") + "</b></span>" +
+      "<span><b>" + nodeCount + "</b> nodes</span>";
+
+    renderTree(moveId);
+    renderRangeGrid(move);
+    clearDetail();
+    updateFlagBtn();
+    document.getElementById("treeSvg").addEventListener("click", function (e) {
+      if (e.target === document.getElementById("treeSvg")) {
+        state.selectedNode = null;
+        var svg = document.getElementById("treeSvg");
+        if (svg._applyFocus) svg._applyFocus(null);
+        clearDetail();
+      }
+    });
+  }
+
+  function updateFlagBtn() {
+    var note = getNote(state.moveId);
+    var btn = document.getElementById("flagBtn");
+    btn.classList.toggle("on", !!note.flagged);
+    btn.textContent = note.flagged ? "Flagged for redesign ✕" : "Flag for redesign";
+  }
+
+  document.getElementById("flagBtn").addEventListener("click", function () {
+    var note = getNote(state.moveId);
+    setNote(state.moveId, { flagged: !note.flagged });
+    updateFlagBtn();
+    refreshPickerFlags();
+  });
+
+  function refreshPickerFlags() {
+    document.querySelectorAll(".move-btn").forEach(function (b) {
+      var id = b.getAttribute("data-move");
+      b.classList.toggle("flagged", !!getNote(id).flagged);
+    });
+  }
+
+  // ---------- Build picker ----------
+
+  function buildPicker() {
+    var picker = document.getElementById("picker");
+    MOVE_ORDER.forEach(function (group) {
+      var g = document.createElement("div");
+      g.className = "picker-group";
+      var eyebrow = document.createElement("div");
+      eyebrow.className = "eyebrow";
+      eyebrow.textContent = group.group;
+      g.appendChild(eyebrow);
+      group.ids.forEach(function (id) {
+        if (!TREES[id]) return;
+        var move = TREES[id];
+        var btn = document.createElement("button");
+        btn.className = "move-btn";
+        btn.type = "button";
+        btn.setAttribute("data-move", id);
+        var chip = document.createElement("span");
+        chip.className = "type-chip";
+        chip.style.background = TYPE_COLOR[move.type] || "#8a93a3";
+        btn.appendChild(chip);
+        var label = document.createElement("span");
+        label.textContent = move.name;
+        btn.appendChild(label);
+        var flagDot = document.createElement("span");
+        flagDot.className = "flag-dot";
+        flagDot.textContent = "●";
+        btn.appendChild(flagDot);
+        btn.addEventListener("click", function () { selectMove(id); });
+        g.appendChild(btn);
+      });
+      picker.appendChild(g);
+    });
+    refreshPickerFlags();
+  }
+
+  function buildLegend() {
+    var legend = document.getElementById("legend");
+    var items = [
+      { swatch: "#ef6448", label: "Aggression branch" },
+      { swatch: "#4c95e6", label: "Boldness branch" },
+      { swatch: "#43cf95", label: "Sociability branch" },
+      { swatch: "#e0ac3f", label: "Crosslink" },
+      { line: "solid", label: "prerequisite" },
+      { line: "dashed", label: "any-of shortcut" },
+      { line: "excl", label: "× mutually exclusive" },
+    ];
+    items.forEach(function (it) {
+      var span = document.createElement("span");
+      span.className = "item";
+      if (it.swatch) {
+        span.innerHTML = '<span class="swatch" style="background:' + it.swatch + '"></span>' + it.label;
+      } else if (it.line === "excl") {
+        span.innerHTML = '<span class="line-sample dashed" style="border-color:var(--danger)"></span>' + it.label;
+      } else {
+        span.innerHTML = '<span class="line-sample' + (it.line === "dashed" ? " dashed" : "") + '"></span>' + it.label;
+      }
+      legend.appendChild(span);
+    });
+  }
+
+  function buildHeaderCounts() {
+    var totalNodes = 0, totalTrees = 0;
+    Object.keys(TREES).forEach(function (id) {
+      totalTrees++;
+      totalNodes += Object.keys(TREES[id].tree).length;
+    });
+    document.getElementById("headerCounts").innerHTML =
+      "<span>" + totalTrees + " trees</span><span>" + totalNodes + " nodes</span>";
+  }
+
+  buildPicker();
+  buildLegend();
+  buildHeaderCounts();
+  selectMove(MOVE_ORDER[1].ids[0]);
+})();
+</script>
