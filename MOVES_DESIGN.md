@@ -117,10 +117,13 @@ dex/species.generated.ts's own `levelMoves`, not invented): **Growth**/
 below — flora.ts's real `raiseFertility`, exported for this), **Synthesis**/
 **Moonlight**/**Roost** (self-heal, the first two terrain-scaled near a
 `sunbeam` tile), **Agility**/**Harden**/**Withdraw**/**Defense Curl** (self
-stat-stage buffs via the existing `statChangeOnHit` field — Agility is also
-the first real consumer of the "speed" `StatKey` outside nature.ts flavor:
-`simulation.ts`'s `actionSpeedOf` now folds a Speed stage into its
-multiplier stack), **Safeguard** (temporary new-status immunity, self +
+stat-stage buffs via the existing `statChangeOnHit` field — the base
+"speed" stat already drove the real action economy (`actionSpeedOf`'s
+whole job), but nothing ever read a temporary Speed STAGE the way
+`calculateDamage` already does for Attack/Defense; Agility is the first
+move to actually grant one, `actionSpeedOf` now folding it into its
+multiplier stack so it really does change how often its user acts, not
+just a cosmetic number), **Safeguard** (temporary new-status immunity, self +
 nearby herd-mates), **Rain Dance** (spawns a real `WeatherCell` at the
 caster's position — `weather.ts`'s `spawnWeatherCellAt`, extracted from the
 existing random-spawn roll), **Sweet Scent** (doubles the caster's own

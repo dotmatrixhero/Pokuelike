@@ -1255,10 +1255,13 @@ export const MOVES: Record<string, MoveSpec> = {
     // spearow, sandshrew, dratini, growlithe, ponyta, rapidash, beedrill).
     // Reuses `MoveSpec.statChangeOnHit`'s existing self-buff field — the
     // same primitive a landed hit's self-side effect already uses — just
-    // applied from the idle path instead. First real consumer of the
-    // "speed" StatKey outside nature.ts flavor: `simulation.ts`'s
-    // `actionSpeedOf` now folds the stat-stage multiplier in, so this
-    // actually makes the caster act more often for a while, not just a
+    // applied from the idle path instead. The base "speed" stat already
+    // drove the real action economy (`actionSpeedOf`'s whole job); what's
+    // new is `actionSpeedOf` also folding in a temporary Speed STAGE
+    // (`simulation.ts`'s `statStageMultiplier(getStatStage(agent,
+    // "speed"))`) — `calculateDamage` already read a stage for Attack/
+    // Defense, but nothing read one for Speed before this, so this move
+    // actually makes its caster act more often for a while, not just a
     // cosmetic number.
     statChangeOnHit: { target: "self", stat: "speed", stage: 2, ticks: 40 },
   },

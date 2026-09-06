@@ -97,8 +97,13 @@ export function actionSpeedOf(world: World, agent: Agent, tick: number): number 
     // A temporary Speed stat-stage grant (e.g. `MoveSpec.statChangeOnHit`'s
     // self-side effect, or utilityMoves.ts's Agility) composes here, same
     // machinery `calculateDamage`'s Attack/Defense stages already use
-    // (combat.ts's `statStageMultiplier`) — until this line, "speed" was a
-    // real computed stat with no consumer at all beyond nature.ts flavor.
+    // (combat.ts's `statStageMultiplier`). The base "speed" STAT was
+    // already the real input to this whole function (and has been since
+    // `actionSpeedOf` existed) — what's new is the temporary STAGE on top
+    // of it: `getStatStage`/`statStageMultiplier` had a real consumer for
+    // Attack/Defense before this line, but nothing ever read a Speed stage
+    // specifically, so a landed Agility (or any other speed-stage grant)
+    // had no way to actually change how often its user acts.
     statStageMultiplier(getStatStage(agent, "speed"));
   return effectiveSpeed(agent, baseSpeed);
 }
