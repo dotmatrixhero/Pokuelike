@@ -148,8 +148,17 @@ export function calculateDamage(
   return { damage, effectiveness, stab, critical: isCritical };
 }
 
-/** Cooldowns tick down for every agent that has any, regardless of what it does this tick. */
 /**
+ * Called from `tickAgentAction` (needs.ts), once per real action tick an
+ * agent gets — its own clock (Speed-driven, via `accumulateActionEnergy`),
+ * not the world's. `cooldownTicks: N` on a move means "unusable for N of
+ * this agent's own turns," the same way a mainline move's own recharge
+ * reads, regardless of how many world ticks pass between those turns for a
+ * slower agent. (Previously this ran from `tickAgentNeeds` every world
+ * tick unconditionally — meaning a `cooldownTicks: 1` move was already
+ * back off cooldown before all but the very fastest agents ever got a
+ * second turn, a real bug this call site fixes.)
+ *
  * `ticks` (default 1) is how many cooldown ticks to subtract this call —
  * needs.ts's sleep effects pass a larger value so cooldowns (this sim's
  * real stand-in for mainline PP) recover faster while an agent sleeps, the

@@ -3,6 +3,45 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Fixed: cooldowns now count down on the unit's own tick, not real time
+
+Direct ask after noticing "a lot of stuff is 0 cd" and asking whether that
+meant a move could be used every single world tick. Traced it down with
+the user: cooldowns were ticking down in `tickAgentNeeds`, which runs for
+every living agent every world tick regardless of Speed — deliberately
+"real-time, orthogonal to Speed" per DESIGN.md's original Action Economy
+writeup. In practice that made `cooldownTicks` nearly decorative: world
+ticks pass far more often than a normal agent's own action ticks (gated
+by Speed vs. `ACTION_THRESHOLD`), so a `cooldownTicks: 1`/`2` move was
+already back off cooldown before all but the fastest agents got a second
+turn. Direct instruction: "I want cooldown to be the unit's tick." Moved
+the `tickCooldowns` call from `tickAgentNeeds` to the top of
+`tickAgentAction` (needs.ts) — it now decrements once per the agent's own
+real action tick, ahead of every early-return (fainted/carried/asleep/
+frozen/paralysis-skip) so it still recovers on a tick that ends up doing
+nothing else, same as before. Sleep's existing 2x recovery speed carries
+over unchanged, just measured against the agent's own turns now. Updated
+DESIGN.md's Action Economy section (which explicitly documented the old,
+now-reversed reasoning) rather than leaving it stale. Fixed 3 tests that
+asserted the old real-time behavior, added a new end-to-end test proving
+`cooldownTicks` now genuinely gates reuse across an uneven action cadence
+(Speed 20, acting every other world tick). 991 engine tests green.
+
+**Real balance follow-up, not done here**: with cooldown now meaning
+something, `cooldownTicks: 0`/`1` on basic moves (Tackle/Peck/Scratch's
+base form, etc.) may deserve a real second look — those values are still
+close to "no gate at all" (available again the agent's very next turn
+either way). Flagged, not decided.
+
+**Also noticed, unrelated, not fixed**: `reproduction.test.ts`'s "an egg's
+parentIds/grandparentIds are recorded correctly" test calls
+`createWorld(10, 10)` with no seed (defaults to a real random seed) and
+expects an egg to exist after exactly one `tickWorld` call — a
+probabilistic single-tick check that's flaky independent of anything in
+this session's work (reproduced failing and passing across repeated runs
+before this fix existed). Worth a real look — either seed that world
+deterministically or loop a few ticks — but out of scope here.
+
 ## Move Tree Atlas: interactive build mode — click nodes on/off live
 
 Direct ask right after the range grid shipped: "needs to change based on

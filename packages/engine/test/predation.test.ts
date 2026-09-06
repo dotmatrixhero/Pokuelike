@@ -1347,10 +1347,13 @@ describe("jamCooldownTicks/terrainBurn/statusSpreads wired into real combat", ()
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [JAM_MOVE] });
     world.agents.push(hunter, target);
     tickWorld(world, undefined, RULES);
-    // 2 (start) + 3 (jam, applied during the hunter's own action tick) - 1
-    // (target's own tickAgentNeeds/tickCooldowns, which runs later this same
-    // tickWorld iteration since it's processed after the hunter) = 4.
-    expect(target.moveCooldowns?.["some-move"]).toBe(4);
+    // 2 (start) + 3 (jam, applied directly from the hunter's landed hit,
+    // independent of either side's own action-tick timing) = 5. The
+    // target's own cooldowns only tick down on ITS own action tick
+    // (tickAgentAction) — not simply "later in the same tickWorld
+    // iteration" — and its default Speed doesn't cross ACTION_THRESHOLD
+    // this same tick, so no further decrement happens here.
+    expect(target.moveCooldowns?.["some-move"]).toBe(5);
   });
 
   it("terrainBurn reverts a bush tile the defender stands on to floor", () => {

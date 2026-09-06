@@ -954,13 +954,28 @@ later.
   (behavior choice, movement, attacks, cooldown-gated move use). That split
   doesn't exist today; it's the real architectural surgery here, not the
   accumulator math itself.
-- **Cooldowns stay real-time**, counting down every world tick regardless of
-  whether the owner acted that tick — deliberately orthogonal to Speed.
-  Speed governs how many chances an agent gets to act; cooldown governs how
-  often one specific move is available regardless of how fast its wielder
-  is. Together these are the sim's actual translation of Pokémon's
-  simultaneous-turn Speed stat into a real-time tactics-grid game, rather
-  than a literal port of turn order from a format this sim isn't using.
+- **Cooldowns count down on the owner's own action tick, not in real
+  world-tick time** — reversed from this section's original real-time
+  design after a direct correction: "I want cooldown to be the unit's
+  tick." The original reasoning (cooldown "deliberately orthogonal to
+  Speed," ticking down every world tick regardless of whether the owner
+  acted) turned out to make `cooldownTicks` nearly meaningless in practice
+  — world ticks pass far more often than a normal agent's own turns, so a
+  `cooldownTicks: 1`/`2` move was already back off cooldown before all but
+  the very fastest agents got a second action at all, confirmed directly:
+  "I'm noticing a lot of stuff is 0 cd. Does that mean you can use it every
+  single tick?" It didn't (that's still gated by Speed vs.
+  `ACTION_THRESHOLD`), but the cooldown number itself was doing almost
+  nothing. Fixed in `tickAgentAction` (needs.ts) instead of
+  `tickAgentNeeds` — `cooldownTicks: N` now means "unusable for N of this
+  agent's own turns," the same way a mainline move's recharge reads,
+  regardless of how many world ticks separate those turns for a slower
+  agent. Speed still governs how many chances an agent gets to act at all;
+  cooldown now genuinely governs how often one specific move comes back
+  within that agent's own action cadence, instead of a mostly-decorative
+  number. Sleep's existing `SLEEP_COOLDOWN_TICKS` (double-speed recovery)
+  carries over unchanged, just measured against the agent's own action
+  ticks now instead of world ticks.
 - **Move range becomes its own field**, not just inferred from AoE shape:
   `MoveSpec` gets explicit `range: { min, max }` (max replaces what
   `moveRange()` in `combat.ts` currently derives solely from `shape`; min

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createWorld, setTile } from "../src/world.js";
-import { createNeeds, tickAgentNeeds } from "../src/needs.js";
+import { createNeeds, tickAgentNeeds, tickAgentAction } from "../src/needs.js";
 import { tickWorld, accumulateActionEnergy, actionSpeedOf, ACTION_THRESHOLD } from "../src/simulation.js";
 import { useMove, tickCooldowns } from "../src/combat.js";
 import { EventLog } from "../src/events.js";
@@ -115,7 +115,7 @@ describe("action economy via tickWorld", () => {
     expect(slowAgent.needs.thirst).toBeLessThan(thirstBefore);
   });
 
-  it("cooldowns count down in real time independent of the owner's action-tick status", () => {
+  it("cooldowns count down on the owner's own action tick, not in real world-tick time", () => {
     const world = createWorld(5, 1);
     const move: MoveSpec = {
       id: "slow-move",
@@ -140,20 +140,67 @@ describe("action economy via tickWorld", () => {
     tickWorld(world);
     tickWorld(world);
 
-    // Three world ticks passed; the agent never acted (speed 1), but the
-    // cooldown still counted down three times in real time.
-    expect(agent.moveCooldowns?.[move.id]).toBe(2);
+    // Three world ticks passed, but Speed 1 never crossed ACTION_THRESHOLD —
+    // this agent never got an action tick of its own, so its cooldown never
+    // moved. A move's cooldownTicks is measured in the owner's own turns,
+    // the same fix that stops a fast-recharging move from already being
+    // off-cooldown before a slow agent's very first reuse opportunity.
+    expect(agent.moveCooldowns?.[move.id]).toBe(5);
   });
 
-  it("tickAgentNeeds alone still ticks cooldowns down without touching behavior", () => {
+  it("tickAgentAction ticks cooldowns down once per real action tick; tickAgentNeeds no longer touches them", () => {
     const agent = makeAgent();
     agent.moveCooldowns = { x: 2 };
+
+    // tickAgentNeeds is the always-runs-every-world-tick half of an agent's
+    // tick — cooldown recovery deliberately isn't there any more (see its
+    // own doc comment on why), so it must leave this alone.
     tickAgentNeeds(agent);
+    expect(agent.moveCooldowns?.x).toBe(2);
+
+    // tickAgentAction only ever runs on the agent's own action tick — this
+    // is where cooldowns actually recover now.
+    tickAgentAction(createWorld(3, 1), agent);
     expect(agent.moveCooldowns?.x).toBe(1);
+
     // tickCooldowns itself is exercised directly elsewhere (combat.test.ts);
-    // this just confirms tickAgentNeeds wires it in.
+    // this just confirms tickAgentAction wires it in.
     tickCooldowns(agent);
     expect(agent.moveCooldowns?.x).toBeUndefined();
+  });
+
+  it("end-to-end: cooldownTicks genuinely gates reuse across the owner's own action ticks, not world ticks", () => {
+    // Speed 20 crosses ACTION_THRESHOLD (40) every other world tick: 20, 40
+    // (acts, remainder 0), 20, 40 (acts), ... — a real, uneven action cadence
+    // to prove the gate tracks the agent's own turns through it.
+    const world = createWorld(5, 1);
+    const move: MoveSpec = {
+      id: "gated-move",
+      name: "Gated Move",
+      shape: { kind: "point" },
+      type: "normal",
+      category: "physical",
+      power: 10,
+      accuracy: 100,
+      cooldownTicks: 2,
+      range: { min: 0, max: 1 },
+    };
+    const agent = makeAgent({
+      moves: [move],
+      stats: { maxHp: 1, attack: 1, defense: 1, spAttack: 1, spDefense: 1, speed: 20 },
+    });
+    useMove(agent, move); // simulates the agent having just used it on its own first action tick
+    world.agents.push(agent);
+
+    expect(agent.moveCooldowns?.[move.id]).toBe(2);
+    tickWorld(world); // world tick 1: no action tick (energy 20 < 40) — untouched
+    expect(agent.moveCooldowns?.[move.id]).toBe(2);
+    tickWorld(world); // world tick 2: action tick (energy crosses 40) — decrements once
+    expect(agent.moveCooldowns?.[move.id]).toBe(1);
+    tickWorld(world); // world tick 3: no action tick — untouched
+    expect(agent.moveCooldowns?.[move.id]).toBe(1);
+    tickWorld(world); // world tick 4: action tick — decrements to 0, off cooldown
+    expect(agent.moveCooldowns?.[move.id]).toBeUndefined();
   });
 
   it("a fast agent moves toward its goal in fewer world ticks than a slow one", () => {
