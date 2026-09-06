@@ -1506,6 +1506,7 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Toxic Spread",
         cost: 2,
         prerequisites: ["claw_precision"],
+        leaning: "aggression",
         // The branch's payoff for actually committing to the venom line —
         // the poison jumps to whoever's standing next to the target too.
         delta: { statusSpreads: true },
@@ -2133,6 +2134,7 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Overwhelming Current",
         cost: 2,
         prerequisites: ["jet_focus"],
+        leaning: "aggression",
         // Water Gun is resisted by Grass, Water, and Dragon — this fixes a
         // real, printed weakness instead of padding an already-favorable
         // matchup vs. Fire.
@@ -2218,6 +2220,7 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Tidal Retreat",
         cost: 2,
         prerequisites: ["tidal_precision"],
+        leaning: "boldness",
         // A real, always-usable panic-button retreat for the sim's most
         // fragile spawned agent.
         delta: { forcedMovement: { mover: "attacker", direction: "away", tiles: 3, timing: "onHit" } },
