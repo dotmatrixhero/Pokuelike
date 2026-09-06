@@ -3,6 +3,36 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Rock Throw/Peck/Scratch/Water Gun move trees — built, see MOVES_DESIGN.md
+
+Direct ask, after noticing the gap: "Did you never implement the move
+trees for peck and stuff? And water gun?" — confirmed these four had a
+full design in MOVES_DESIGN.md's "full triangle treatment" section but had
+never actually shipped in `packages/data/src/moves.ts` (each was still a
+plain stub). Follow-up: "Yes, build all four." All four now have real,
+live 33-node trees (3 branches × 10 nodes + 3 crosslinks each), following
+Tackle/Slash's own established structural template exactly. Each move got
+its own real hook instead of a reshuffled generic kit: Rock Throw
+(`selfCostPerUse`, `bonusVsType` vs. Flying, a denial-flavored support
+keystone); Peck (the roster's first `positionSwap`+`positionSwapPull` and
+first `critCooldownReset`, plus the only tree that changes a move's own
+`shape` mid-build — point-blank to a real 2-tile line); Scratch (the
+roster's first non-Ember status inflicter — Scratch's base spec stays
+clean, poison is entirely tree-earned via *Envenomed* — its only
+two-passive keystone, and the roster's first `rallyCall`); Water Gun
+(`resistanceBreaker` fixing its real Grass/Water/Dragon 0.5x resists,
+instead of a redundant Fire bonus it never needed). New test coverage in
+`packages/data/test/moveTrees.test.ts`: generic structural checks across
+every treed move (no dangling prerequisite ids, every `excludes` pair
+genuinely mutually exclusive, every node reachable in some valid order)
+plus specific tests for each new tree's signature keystone mechanic.
+Known, accepted, non-blocking limitation carried over from Slash's own
+precedent: Onix, Spearow, and the Squirtle pair have no `herdId` in
+`packages/data/src/scenario.ts` today, so each move's Sociability branch is
+real, shipped content that's currently inert for those specific spawned
+individuals (Sandshrew is the one exception, already sharing
+`"underground-colony"` with Diglett).
+
 ## Environmental/utility moves — first batch built, see MOVES_DESIGN.md
 
 Direct ask: "moves that affect the environment... pull it all in." 13 real,
