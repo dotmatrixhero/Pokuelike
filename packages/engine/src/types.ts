@@ -457,6 +457,21 @@ export interface Agent {
    */
   blockedResourceTiles?: Vec2[];
   /**
+   * Ticks spent standing on a layer-mismatched crop's tile actually digging
+   * it out (CROPS_DESIGN.md's "layer-gated crop access" pitch) — the real
+   * multi-tick process-time cost a surface agent pays for an
+   * underground-native crop (Potato, Pumpkin), reusing `shelter.ts`'s own
+   * `shelterBuildTicks` shape (accrue while standing there, consume once a
+   * threshold is crossed, reset on interruption). Absent/0 while not
+   * currently digging. Never accrues for an agent already on the crop's own
+   * `FoodCropDef.nativeLayer` — that access is free, no digging tax at all.
+   * (An underground agent still has to physically path up to the surface
+   * tile to reach it today — the deeper "never has to leave its own layer"
+   * version of the ask is a real, separate, not-yet-built refinement; see
+   * CROPS_DESIGN.md.)
+   */
+  digTicksAccrued?: number;
+  /**
    * Speed-driven action-economy accumulator (see simulation.ts). Gains the
    * agent's real Speed stat every world tick; once it crosses
    * `ACTION_THRESHOLD` the agent takes one action and the threshold is

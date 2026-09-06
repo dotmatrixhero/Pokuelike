@@ -1,11 +1,12 @@
-import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Vec2, World } from "./types.js";
+import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Tile, Vec2, World } from "./types.js";
 import { otherLayers, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
 import { applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing, tendSoil } from "./flora.js";
-import { tickCooldowns } from "./combat.js";
+import { tickCooldowns, useMove } from "./combat.js";
+import { DIG_TICKS_DEFAULT, FOOD_CROPS, type CropId } from "./crops.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
 import { migrate } from "./migration.js";
 import { applyDispersal, maybeTriggerDispersal, type RegionDispersalContext } from "./dispersal.js";
@@ -652,6 +653,36 @@ const FEEDING_PRIORITY_STOCK_THRESHOLD = 2 * CONSUME_STOCK_AMOUNT;
 /** Herbs' own real hook (CROPS_DESIGN.md) — deliberately well under Safeguard's 60-tick grant, and self-only (no herd-radius aura like Safeguard's), so it reads as "the humble remedy," not a strictly-better food. */
 const HERBS_STATUS_IMMUNE_TICKS = 20;
 
+/**
+ * How much extra `Agent.digTicksAccrued` a single successful use of an
+ * off-cooldown `burrow`-flagged move (the real `dig` move, currently the
+ * only one) grants, on top of the ordinary +1/tick — "moves can be used to
+ * dig faster... like dig," CROPS_DESIGN.md's own pitch. Deliberately a real
+ * multi-tick burst (a third of `DIG_TICKS_DEFAULT`), not a token nudge, so
+ * actually knowing Dig is worth something concrete here, gated by the
+ * move's own real cooldown (`useMove`) so it can't be spammed every tick.
+ * Scoped to `burrow`-flagged moves only for now — CROPS_DESIGN.md's own
+ * "most damage moves" phrasing is flagged there as a real open question,
+ * not decided here.
+ */
+const DIG_MOVE_BURST_TICKS = 5;
+
+/**
+ * How many more `Agent.digTicksAccrued` this crop still needs before an
+ * agent on a mismatched layer can actually eat from it — undefined when no
+ * digging is required at all (the crop has no `nativeLayer`, or this agent
+ * is already on it). CROPS_DESIGN.md's "layer-gated crop access": Potato/
+ * Pumpkin are underground-native, so a surface agent pays this real
+ * process-time tax while an underground agent standing on the same tile
+ * pays nothing.
+ */
+function cropDigThreshold(tile: Tile | undefined, agentLayer: Layer): number | undefined {
+  if (!tile?.flavor || !(tile.flavor in FOOD_CROPS)) return undefined;
+  const def = FOOD_CROPS[tile.flavor as CropId];
+  if (!def.nativeLayer || def.nativeLayer === agentLayer) return undefined;
+  return def.digTicks ?? DIG_TICKS_DEFAULT;
+}
+
 function yieldsToHigherRankedFeeder(world: World, agent: Agent, tileStock: number | undefined): boolean {
   if (!agent.herdId) return false;
   if (tileStock === undefined || tileStock >= FEEDING_PRIORITY_STOCK_THRESHOLD) return false;
@@ -1158,6 +1189,22 @@ export function tickAgentAction(
         agent.ticksBlockedFromResource = 0;
         const need = agent.behavior === "seekWater" ? "thirst" : "hunger";
         const targetTile = agent.behavior === "seekFood" ? tileAt(world, agent.layer, target.x, target.y) : undefined;
+
+        if (agent.behavior === "seekFood") {
+          const digThreshold = cropDigThreshold(targetTile, agent.layer);
+          if (digThreshold !== undefined) {
+            const digMove = (agent.moves ?? []).find((move) => move.burrow && !agent.moveCooldowns?.[move.id]);
+            if (digMove) {
+              useMove(agent, digMove, world.tick);
+              agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + DIG_MOVE_BURST_TICKS;
+            } else {
+              agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + 1;
+            }
+            if (agent.digTicksAccrued < digThreshold) return; // still digging — no consume this tick
+            agent.digTicksAccrued = undefined; // done — a fresh dig next time, not a lingering surplus
+          }
+        }
+
         consume(agent.needs, agent.behavior, agent.behavior === "seekFood" ? foodNutritionFactor(targetTile) : 1);
         if (agent.behavior === "seekFood") {
           if (targetTile?.stock !== undefined) {

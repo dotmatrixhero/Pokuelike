@@ -578,6 +578,28 @@ coincidence.
   everything else = surface, as today) and `needs.ts`'s target-selection
   path respecting it instead of layer-blind pathfinding to the nearest food.
 
+**Digging — built** (`FoodCropDef.nativeLayer`/`digTicks`, `Agent.
+digTicksAccrued`, `cropDigThreshold`, needs.ts): Potato/Pumpkin now carry
+`nativeLayer: "underground"`. An agent standing on the food tile whose
+layer doesn't match pays a real, multi-tick digging tax
+(`DIG_TICKS_DEFAULT = 15`, the real `dig` move's own `burrow.ticks` order
+of magnitude) before it can actually consume — reusing `shelter.ts`'s
+exact accrue-then-complete shape, not a new mechanism. An agent already on
+the crop's native layer pays nothing. The real `dig` move (`MoveSpec.
+burrow`) speeds this up when known and off-cooldown: a real burst
+(`DIG_MOVE_BURST_TICKS = 5`) instead of the ordinary +1/tick, respecting
+its own cooldown via the existing `useMove` pipeline — a real second use
+for a move that was previously flee-only. Scoped to `burrow`-flagged moves
+only, not "most damage moves" — CROPS_DESIGN.md's own open question below
+is left open, not decided by default. Validated via `validateDigging.ts`
+over a real 8000-tick run: 7548/8000 ticks had at least one agent actively
+digging, 7 real completions. What's honestly NOT built: an underground
+agent still has to physically path up to the surface tile to reach a
+Potato/Pumpkin — "no dig tax" is real, "never has to leave its own layer"
+isn't. Also not built: `digTicksAccrued` isn't reset on interruption (a
+different tile/behavior doesn't lose accrued progress) — a real, minor,
+currently-unaddressed edge case, not a correctness-breaking one.
+
 ### Open questions
 
 - Whether "most damage moves" (the pitch's own phrase) can dig/process, or

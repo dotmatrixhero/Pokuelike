@@ -1,3 +1,5 @@
+import type { Layer } from "./types.js";
+
 /**
  * Real food crops — CROPS_DESIGN.md's direct ask: "more kinds of food, not
  * just berries... nutrition dense, grow in certain regions and seasons, and
@@ -11,10 +13,12 @@
  * `biomeWeightsAt`/`effectiveWaterDensityAt`, `flora.ts`'s own decay-only
  * season wave, `herdConflict.ts`'s already-built rivalry trigger for the
  * "heavily contested" payoff) rather than inventing parallel mechanisms.
- * Deliberately dependency-free (no imports from `flora.ts`/`worldgen.ts`) so
- * both of those can import from here without a circular import —
- * `worldgen.ts` used to import `FOOD_FLAVORS` from `flora.ts` for exactly
- * this reason; this module replaces that need.
+ * Deliberately dependency-free of `flora.ts`/`worldgen.ts` (a type-only
+ * import of `Layer` from `types.js` is the one exception — a leaf type, not
+ * a value, so it can't create a real circular import) so both of those can
+ * import from here without one — `worldgen.ts` used to import
+ * `FOOD_FLAVORS` from `flora.ts` for exactly this reason; this module
+ * replaces that need.
  */
 
 export const CROP_IDS = ["herbs", "oran", "pecha", "sitrus", "cheri", "wheat", "tomato", "corn", "rice", "apple", "potato", "pumpkin"] as const;
@@ -87,7 +91,30 @@ export interface FoodCropDef {
   droughtResistant?: boolean;
   /** Multiplies hunger restored per feeding, on top of `foodNutritionFactor`'s existing quality-based factor — 1.0 is the old flat baseline every berry flavor gave. */
   nutritionMultiplier: number;
+  /**
+   * The layer this crop really "belongs to" — absent means Surface, same as
+   * every crop before this field existed. An agent already on this layer
+   * gets free access (no `digTicksAccrued` tax at all); an agent on a
+   * different layer has to dig it out first (`DIG_TICKS_DEFAULT`, or this
+   * crop's own `digTicks` override) before it can actually eat from the
+   * tile — CROPS_DESIGN.md's "layer-gated crop access" pitch. Currently
+   * only `"underground"` (Potato, Pumpkin); Apple/Corn's canopy-harvest
+   * mechanic is a different, damage-based system, not digging.
+   */
+  nativeLayer?: Layer;
+  /** Overrides `DIG_TICKS_DEFAULT` for this specific crop — absent = use the default. */
+  digTicks?: number;
 }
+
+/**
+ * Base process-time cost (in accrued `Agent.digTicksAccrued`) to dig a
+ * layer-mismatched crop out, absent a per-crop `FoodCropDef.digTicks`
+ * override — the same order of magnitude as the real `dig` move's own
+ * `burrow: { ticks: 20 }` (`packages/data/src/moves.ts`), not an arbitrary
+ * unrelated number, since digging out a crop is thematically the same real
+ * action Diglett's own move already claims to do.
+ */
+export const DIG_TICKS_DEFAULT = 15;
 
 /**
  * CROPS_DESIGN.md's tier ladder: the harder a crop's real gate is to
@@ -167,12 +194,14 @@ export const FOOD_CROPS: Record<CropId, FoodCropDef> = {
     winterHardy: true,
     droughtResistant: true,
     nutritionMultiplier: 1.5,
+    nativeLayer: "underground",
   },
   pumpkin: {
     name: "Pumpkin",
     eligibleBiomes: ["grassland", "jungle"],
     seasonWindow: AUTUMN_SECOND_HALF,
     nutritionMultiplier: 1.65,
+    nativeLayer: "underground",
   },
 };
 

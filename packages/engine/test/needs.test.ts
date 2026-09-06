@@ -4,6 +4,7 @@ import { ageMortalityChance, createNeeds, decayNeeds, tickAgent, tickAgentAction
 import { CONSUME_STOCK_AMOUNT, FOOD_MAX_STOCK } from "../src/flora.js";
 import { EventLog } from "../src/events.js";
 import type { Agent } from "../src/types.js";
+import type { MoveSpec } from "../src/moves.js";
 
 // A real leak this session already hit once (see vitest.config.ts's "forks"
 // pool comment, added for the cross-FILE version of this bug): a bare
@@ -122,7 +123,10 @@ describe("tickAgent", () => {
   it("eating a real nutrition crop (not Herbs) does not grant status immunity", () => {
     const world = createWorld(5, 1);
     setTile(world, "surface", 2, 0, "food");
-    tileAt(world, "surface", 2, 0)!.flavor = "pumpkin";
+    // corn, not pumpkin — pumpkin is underground-native and would require
+    // digging (see the "layer-gated crop access" describe block below),
+    // which is unrelated to what this test is actually checking.
+    tileAt(world, "surface", 2, 0)!.flavor = "corn";
     const agent = makeAgent({ pos: { x: 2, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
 
     tickAgent(world, agent);
@@ -143,6 +147,91 @@ describe("tickAgent", () => {
     }
 
     expect(hungerRestored(1)).toBeGreaterThan(hungerRestored(0));
+  });
+});
+
+describe("layer-gated crop access + digging (CROPS_DESIGN.md)", () => {
+  const DIG_MOVE: MoveSpec = {
+    id: "test-dig",
+    name: "Test Dig",
+    shape: { kind: "point" },
+    type: "ground",
+    category: "status",
+    power: 0,
+    accuracy: 100,
+    cooldownTicks: 15,
+    burrow: { ticks: 20 },
+  };
+
+  it("a surface agent can't eat an underground-native crop (Potato) instantly — it has to dig first", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    const tile = tileAt(world, "surface", 2, 0)!;
+    tile.flavor = "potato";
+    const startingStock = tile.stock;
+    const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }) });
+
+    tickAgent(world, agent);
+
+    expect(tile.stock).toBe(startingStock); // no real consume happened yet
+    expect(agent.digTicksAccrued).toBe(1);
+  });
+
+  it("digging completes after enough real ticks standing there, then the agent actually eats", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    const tile = tileAt(world, "surface", 2, 0)!;
+    tile.flavor = "potato";
+    const startingStock = tile.stock!;
+    const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }) });
+
+    let completedTick: number | undefined;
+    for (let t = 0; t < 20 && completedTick === undefined; t++) {
+      tickAgent(world, agent);
+      if (tile.stock! < startingStock) completedTick = t; // a real consume actually happened
+    }
+
+    expect(completedTick).toBeDefined();
+    // Completes once digTicksAccrued crosses DIG_TICKS_DEFAULT (15) — real
+    // multi-tick cost, not instant, and not wildly off that number either.
+    expect(completedTick!).toBeGreaterThanOrEqual(14);
+    expect(completedTick!).toBeLessThan(20);
+  });
+
+  it("an agent already on the crop's native layer pays no dig tax at all — eats immediately", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "underground", 2, 0, "food");
+    tileAt(world, "underground", 2, 0)!.flavor = "potato";
+    const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "underground", homeLayer: "underground", needs: createNeeds({ hunger: 0.1 }) });
+
+    tickAgent(world, agent);
+
+    expect(agent.needs.hunger).toBeGreaterThan(0.1); // ate immediately, no digging
+    expect(agent.digTicksAccrued).toBeUndefined();
+  });
+
+  it("an ordinary surface-native crop (Corn) is never gated by digging, on any layer", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    tileAt(world, "surface", 2, 0)!.flavor = "corn";
+    const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }) });
+
+    tickAgent(world, agent);
+
+    expect(agent.needs.hunger).toBeGreaterThan(0.1);
+    expect(agent.digTicksAccrued).toBeUndefined();
+  });
+
+  it("an off-cooldown dig move grants a real burst of dig progress, not just +1/tick", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    tileAt(world, "surface", 2, 0)!.flavor = "potato";
+    const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }), moves: [DIG_MOVE] });
+
+    tickAgent(world, agent);
+
+    expect(agent.digTicksAccrued).toBeGreaterThan(1);
+    expect(agent.moveCooldowns?.[DIG_MOVE.id]).toBe(DIG_MOVE.cooldownTicks); // real cooldown applied — can't spam every tick
   });
 });
 
