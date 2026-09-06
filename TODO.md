@@ -3755,3 +3755,24 @@ not something this pathfinding pass itself caused or is positioned to fix.
       (herdConflict.test.ts asserting `moveId` on a real clash event); full
       suite still green (970/970 engine, 104/104 data) since none of these
       three touch engine combat math, only event data/UI timing.
+- [x] Default view is now Overworld-on-and-zoomed-into-the-focused-zone,
+      direct ask: "make the default view just overworld on, zone view
+      show? The dual view is useless imo... default just one big view
+      pls." The old boot path (`loadWorld`) landed on a flat single map
+      with Overworld mode entirely off — reaching the actually-useful
+      "Overworld mode, but looking at one detailed zone" state took two
+      manual clicks (the toggle, then "Show Zone View", since a fresh
+      manual toggle-on itself still defaults to the more abstract macro
+      map). New `enterOverworldMode(seed, subView)` — the "enabling" half
+      of the toggle's click handler, pulled out so boot can call it
+      directly — lets boot ask for `"zone"` specifically while the manual
+      toggle keeps its own existing `"overworld"` default (a deliberate,
+      separate choice, not touched). Web has no test infra (typecheck-only
+      package), so verified live via Playwright: confirms `#overworld-
+      toggle` reads "Overworld: On" and the zone tile view is showing (not
+      the macro map) from the very first frame, "Show Overworld"/"Show
+      Zone View" still swap cleanly between the two, and "Overworld: Off"
+      still returns to the original flat single-map mode exactly as
+      before. The "maybe a minimap" idea in the same message was
+      explicitly hedged ("Idk") — not built, not decided, a real open
+      option if ever wanted later rather than a silent scope-cut.
