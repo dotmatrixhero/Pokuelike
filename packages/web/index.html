@@ -87,10 +87,13 @@
         -webkit-overflow-scrolling: touch;
         touch-action: pan-x pan-y;
       }
-      /* The bare `display: flex` above outranks the UA's `[hidden] { display: none }`
-         by specificity, so #canvas-wrap's own `hidden` attribute (used by the
-         Overworld-mode view toggle) would otherwise be silently ignored. */
-      #canvas-wrap[hidden] { display: none; }
+      /* Author-origin declarations always outrank the browser's own default
+         `[hidden] { display: none }` regardless of selector specificity, so
+         #canvas-wrap and #macro-map-wrap's own unconditional `display: flex`
+         above would silently defeat the plain `hidden` attribute. The
+         Overworld-mode view toggle (main.ts) uses this `!important` class
+         instead, which — same-origin, higher importance tier — reliably wins. */
+      .force-hide { display: none !important; }
 
       /* The overworld macro grid — ONE pannable/zoomable canvas covering the
          whole grid (thousands of zone-cells), not a strip of cards. Direct
@@ -485,6 +488,13 @@
         <div class="divider"></div>
         <div class="field-group">
           <button id="overworld-toggle" title="Switch between one map and the overworld — several regions, only the focused one fully simulated, the rest cheaply abstracted">Overworld: Off</button>
+          <!-- Lives here rather than inside #macro-map-wrap's own toolbar so
+               switching to "Zone View" can't hide the very button needed to
+               switch back — it stays reachable regardless of which of the
+               two views is currently showing. Only meaningful in Overworld
+               mode, so `hidden` outside it (main.ts's overworld-toggle
+               handler). -->
+          <button id="macro-view-toggle" title="Overworld and the focused zone's tile view otherwise render stacked, which is cramped on a phone — show one full-size at a time instead" hidden>Overworld Only</button>
         </div>
 
         <div class="divider"></div>
@@ -500,7 +510,6 @@
               <button id="macro-map-zoom-in" title="Zoom in">+</button>
             </div>
             <span id="macro-map-hint">Click a zone to focus/promote it</span>
-            <button id="macro-view-toggle" title="Overworld and the focused zone's tile view otherwise render stacked, which is cramped on a phone — hide the tile view and give the map the full area instead">Overworld Only</button>
           </div>
           <div id="macro-map-scroll">
             <canvas id="macro-map-canvas"></canvas>

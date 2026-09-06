@@ -662,10 +662,42 @@ autoCamToggleBtn.addEventListener("click", () => {
   syncAutoCamToggleButton();
 });
 
-/** Overworld mode stacks the macro map above the focused zone's tile view — fine on desktop, cramped on a phone (direct ask: they were "competing too much on mobile"). `macro-view-toggle` (only visible inside `#macro-map-wrap`, so already hidden outside Overworld mode) lets the viewer hide the tile view and give the macro map the full area instead, then bring it back. */
-function setOverworldOnly(only: boolean): void {
-  canvasWrap.hidden = only;
-  macroViewToggleBtn.textContent = only ? "Show Both" : "Overworld Only";
+/**
+ * Overworld mode stacks the macro map above the focused zone's tile view —
+ * fine on desktop, cramped on a phone (direct ask: "they are competing too
+ * much on mobile... press a button to just turn zone map to overworld").
+ * `macro-view-toggle` (only visible inside `#macro-map-wrap`, so already
+ * hidden outside Overworld mode) drives which of the two shows.
+ *
+ * Desktop keeps the original "both, or overworld alone" choice — there's
+ * room for both, so hiding the tile view is an opt-in bonus, not the
+ * default. Mobile instead treats it as a strict either/or: only one view
+ * ever shows, defaulting to the overworld map, with the button purely
+ * swapping which one — never both, since neither fits well at phone width.
+ * `.force-hide` (not the plain `hidden` attribute) is what actually hides
+ * either wrap: both set an unconditional `display: flex` of their own, an
+ * author rule that always outranks the browser's default `[hidden]` styling
+ * regardless of selector specificity, so only an `!important` class reliably
+ * wins here.
+ */
+type OverworldSubView = "both" | "overworld" | "zone";
+let overworldSubView: OverworldSubView = "both";
+
+function isMobileViewport(): boolean {
+  return window.matchMedia("(max-width: 768px)").matches;
+}
+
+function applyOverworldSubView(view: OverworldSubView): void {
+  overworldSubView = view;
+  canvasWrap.classList.toggle("force-hide", view === "overworld");
+  macroMapWrapEl.classList.toggle("force-hide", view === "zone");
+  macroViewToggleBtn.textContent = isMobileViewport()
+    ? view === "zone"
+      ? "Show Overworld"
+      : "Show Zone View"
+    : view === "overworld"
+      ? "Show Both"
+      : "Overworld Only";
 }
 
 overworldToggleBtn.addEventListener("click", () => {
@@ -678,19 +710,32 @@ overworldToggleBtn.addEventListener("click", () => {
   loadSeedBtn.disabled = enabling;
   randomSeedBtn.disabled = enabling;
   macroMapWrapEl.hidden = !enabling;
+  macroViewToggleBtn.hidden = !enabling;
   overworldToggleBtn.textContent = `Overworld: ${enabling ? "On" : "Off"}`;
   overworldToggleBtn.classList.toggle("playing", enabling);
-  // Reset to "both visible" (the default either way) whether entering a
-  // fresh Overworld session or leaving it back to ordinary single-map mode —
-  // canvas-wrap is the only view there, so it must never stay hidden from a
-  // stale "Overworld Only" choice left over from a previous session.
-  setOverworldOnly(false);
-  if (enabling) loadMacroWorld();
-  else loadWorld(SCENARIO_SEED);
+  if (enabling) {
+    // Fresh entry into Overworld mode: default to the mobile-appropriate
+    // single view on a narrow screen, both views on a wide one — rather than
+    // carrying over a stale sub-view choice from a previous session in this
+    // mode (or from before the viewport was last resized).
+    applyOverworldSubView(isMobileViewport() ? "overworld" : "both");
+    loadMacroWorld();
+  } else {
+    // Leaving Overworld mode entirely — canvas-wrap is the only view in
+    // ordinary single-map mode, so nothing here may leave it (or the now-
+    // irrelevant macro map) force-hidden.
+    canvasWrap.classList.remove("force-hide");
+    macroMapWrapEl.classList.remove("force-hide");
+    loadWorld(SCENARIO_SEED);
+  }
 });
 
 macroViewToggleBtn.addEventListener("click", () => {
-  setOverworldOnly(!canvasWrap.hidden);
+  if (isMobileViewport()) {
+    applyOverworldSubView(overworldSubView === "zone" ? "overworld" : "zone");
+  } else {
+    applyOverworldSubView(overworldSubView === "overworld" ? "both" : "overworld");
+  }
 });
 
 macroMapZoomInBtn.addEventListener("click", () => {
