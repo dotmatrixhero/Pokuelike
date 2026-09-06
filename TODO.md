@@ -159,11 +159,30 @@ none of this is built yet, this section is purely to not lose the thread:
       (ASCII dump + a live Tile-mode screenshot at seed 42: genuinely jagged
       terrain-boundary steps, not straight edges). Full suite green
       (974/974).
-- [ ] **More terrain-generation variety at the zone/regional scale** — large
-      contiguous stretches that mean something (a real desert spanning
-      several zones, islands), not just per-tile biome noise. Direct ask:
-      "having sections of zones mean something... stretches of desert or
-      something like that would be cool. Islands."
+- [x] **Regional terrain features: real desert stretches and cleaned-up
+      islands, both at the macro-grid scale.** Direct ask: "having sections
+      of zones mean something... stretches of desert or something like that
+      would be cool. Islands." (1) **Desert stretches**: `macroGrid.ts`'s
+      moisture-noise scale (feeds `macroBiomeFor`) widened from `/6` to
+      `/2.5` — same overall biome mix, but now clustered into real
+      macro-scale regions instead of small patches. Real-run measured:
+      badlands regions now commonly span 100-600+ zones (seed 42: a single
+      614-zone stretch), up from small speckled patches. (2) **Islands**:
+      turned out to already exist structurally — `generateMacroElevation`'s
+      multi-uplift-point design genuinely produces separate landmasses (a
+      real connected-component analysis found secondary islands up to
+      460 zones on some seeds) — but the same analysis found the bulk of
+      what it produced were 1-4 zone noise flecks, barely distinguishable
+      from a rendering artifact. New `pruneNoiseSpeckIslands` (same
+      flood-fill idiom `worldgen.ts`'s underground-cave
+      `keepOnlyLargestFloorRegion` already uses, but pruning small-not-
+      smallest components so a real secondary island survives) converts any
+      land component under `MIN_ISLAND_ZONES` (10) back to ocean — cleans
+      up the noise without inventing a new "always place N islands"
+      generator that would fight the elevation field's own already-working
+      structure. Visually confirmed live (a real seed's overworld map shows
+      one clean, large contiguous desert region, not speckled dots). 2 new
+      regression tests; full suite green (976/976).
 - [x] **Species-specific environmental interactions — the two named
       examples, built.** (1) **Water-graze foraging** (needs.ts's
       `tryForageFromWater`/`isWaterForager`): a hungry agent whose species is

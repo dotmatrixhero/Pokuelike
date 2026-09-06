@@ -198,6 +198,66 @@ function carveMacroRivers(grid: MacroGrid, rng: () => number): void {
  * rows, cols), same contract every other generation function in this
  * codebase follows.
  */
+/**
+ * A land component (4-connected, flood-filled) below this many zones reads
+ * as noise, not a real island — direct ask: "Islands [would be cool]." The
+ * elevation field's own multi-uplift-point design (`generateMacroElevation`)
+ * already produces genuinely separate landmasses sometimes (confirmed via a
+ * real connected-component analysis across several seeds: alongside one
+ * dominant continent, secondary components ranging anywhere from single-
+ * digit specks up to several-hundred-zone islands), but the bulk of what
+ * that analysis actually found were 1-4 zone flecks — a stray tile or two
+ * clearing sea level near a basin's edge, not a real, explorable landmass.
+ * Pruning those (converting them back to ocean, see
+ * `pruneNoiseSpeckIslands`) makes whatever land IS left away from the main
+ * continent read as a deliberate island rather than map-generation noise —
+ * without inventing a new "always place N islands" generator, which would
+ * fight the elevation field's own already-working multi-peak structure
+ * instead of just cleaning up its edge cases.
+ */
+const MIN_ISLAND_ZONES = 10;
+
+/**
+ * Flood-fills every land (non-ocean) component of the grid and flips any
+ * component smaller than `MIN_ISLAND_ZONES` to ocean — same 4-connected
+ * flood-fill idiom `worldgen.ts`'s `keepOnlyLargestFloorRegion` already
+ * uses for underground caves, just pruning small-but-not-smallest
+ * components instead of keeping only the single biggest (a real island
+ * should stay an island, not get merged away just because it isn't the
+ * largest landmass on the map).
+ */
+function pruneNoiseSpeckIslands(zones: MacroZone[], rows: number, cols: number): void {
+  const visited = new Uint8Array(rows * cols);
+  for (let start = 0; start < zones.length; start++) {
+    if (visited[start] || zones[start]!.isOcean) continue;
+    const component: number[] = [start];
+    visited[start] = 1;
+    const stack = [start];
+    while (stack.length > 0) {
+      const i = stack.pop()!;
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      for (const dir of DIRECTIONS) {
+        const delta = DIRECTION_DELTA[dir];
+        const nr = row + delta.dr;
+        const nc = col + delta.dc;
+        if (nr < 0 || nc < 0 || nr >= rows || nc >= cols) continue;
+        const ni = nr * cols + nc;
+        if (visited[ni] || zones[ni]!.isOcean) continue;
+        visited[ni] = 1;
+        stack.push(ni);
+        component.push(ni);
+      }
+    }
+    if (component.length < MIN_ISLAND_ZONES) {
+      for (const i of component) {
+        zones[i]!.isOcean = true;
+        zones[i]!.biome = "ocean";
+      }
+    }
+  }
+}
+
 export function generateMacroGrid(seed: number, rows: number, cols: number): MacroGrid {
   const noiseScale = Math.max(rows, cols);
   const detailNoise = makeNoise2D(mulberry32(seed ^ 0x9e3779b9), cols, rows, noiseScale / 10);
@@ -207,7 +267,18 @@ export function generateMacroGrid(seed: number, rows: number, cols: number): Mac
   // and every zone samples it at its own integer (col, row) — the exact same
   // "Groudon/Kyogre" uplift-and-basin algorithm, one level up.
   const macro = generateMacroElevation(macroPointsRng, cols, rows, detailNoise);
-  const moistureNoise = makeNoise2D(mulberry32(seed ^ 0x2545f491), cols, rows, noiseScale / 6);
+  // Direct ask: "having sections of zones mean something... stretches of
+  // desert or something like that would be cool." At the old /6 scale,
+  // biome regions were noticeably smaller than the macro elevation field's
+  // own continents/oceans (/1) — real, contiguous stretches of a single
+  // biome, but modest ones, more "patch" than "region." Widened to /2.5 so
+  // a desert (or wetland, or forest) reads as a real macro-scale feature
+  // spanning a meaningful chunk of a continent, closer to the elevation
+  // field's own scale of coherence, while still varying enough within one
+  // continent to keep multiple biomes represented (not one flat color per
+  // landmass) — judged against a real generated grid's biome-region sizes,
+  // same convention as every other macro-grid tuning constant here.
+  const moistureNoise = makeNoise2D(mulberry32(seed ^ 0x2545f491), cols, rows, noiseScale / 2.5);
 
   const zones: MacroZone[] = new Array(rows * cols);
   for (let row = 0; row < rows; row++) {
@@ -218,6 +289,8 @@ export function generateMacroGrid(seed: number, rows: number, cols: number): Mac
       zones[row * cols + col] = { row, col, elevation, isOcean, biome, coastEdges: [], riverEdges: [], isRiverSource: false, isLake: false };
     }
   }
+  pruneNoiseSpeckIslands(zones, rows, cols);
+
   const grid: MacroGrid = { rows, cols, zones };
 
   for (const zone of zones) {

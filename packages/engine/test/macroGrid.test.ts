@@ -99,6 +99,77 @@ describe("generateMacroGrid", () => {
     // quadratic-blowup regression.
     expect(elapsedMs).toBeLessThan(10000);
   });
+
+  /** 4-connected flood-fill component sizes matching `predicate` — same idiom this file's own "generates a real, large grid" style tests use, independent of any internal pruning/grouping the generator does. */
+  function componentSizes(grid: ReturnType<typeof generateMacroGrid>, predicate: (row: number, col: number) => boolean): number[] {
+    const { rows, cols } = grid;
+    const visited = new Uint8Array(rows * cols);
+    const sizes: number[] = [];
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const idx = row * cols + col;
+        if (visited[idx] || !predicate(row, col)) continue;
+        let size = 0;
+        const stack = [[row, col]];
+        visited[idx] = 1;
+        while (stack.length > 0) {
+          const [r, c] = stack.pop()!;
+          size++;
+          for (const [dr, dc] of [
+            [-1, 0],
+            [1, 0],
+            [0, -1],
+            [0, 1],
+          ] as const) {
+            const nr = r + dr;
+            const nc = c + dc;
+            if (nr < 0 || nc < 0 || nr >= rows || nc >= cols) continue;
+            const ni = nr * cols + nc;
+            if (visited[ni] || !predicate(nr, nc)) continue;
+            visited[ni] = 1;
+            stack.push([nr, nc]);
+          }
+        }
+        sizes.push(size);
+      }
+    }
+    return sizes;
+  }
+
+  it("islands: no tiny 1-9 zone land specks survive, but real secondary landmasses do — direct ask: 'Islands'", () => {
+    // Real finding this guards against, from an actual connected-component
+    // analysis across several seeds: alongside one dominant continent, the
+    // elevation field's multi-uplift-point design already produces
+    // secondary landmasses ranging from single-digit noise flecks up to
+    // several-hundred-zone real islands — this only prunes the former.
+    for (const seed of [1, 2, 3, 42, 20260903]) {
+      const grid = generateMacroGrid(seed, 64, 64);
+      const land = componentSizes(grid, (r, c) => !zoneAt(grid, r, c)!.isOcean);
+      expect(Math.min(...land)).toBeGreaterThanOrEqual(10); // MIN_ISLAND_ZONES
+    }
+    // At least one seed in this batch keeps a real, meaningfully-sized
+    // secondary landmass (not just the one dominant continent) — otherwise
+    // this "feature" would just be deleting islands, not cleaning them up.
+    const withRealIsland = [1, 2, 3, 42, 20260903].some((seed) => {
+      const grid = generateMacroGrid(seed, 64, 64);
+      const land = componentSizes(grid, (r, c) => !zoneAt(grid, r, c)!.isOcean).sort((a, b) => b - a);
+      return land.length > 1 && land[1]! >= 50;
+    });
+    expect(withRealIsland).toBe(true);
+  });
+
+  it("biome regions read as real macro-scale stretches, not per-tile speckle — direct ask: 'stretches of desert... would be cool'", () => {
+    // A single-digit-zone biome patch is barely distinguishable from noise;
+    // a real "stretch" should span dozens of zones at minimum on a
+    // reasonably large grid. Checked for badlands specifically (the direct
+    // ask's own named example) across several seeds.
+    for (const seed of [1, 2, 3, 42, 20260903]) {
+      const grid = generateMacroGrid(seed, 64, 64);
+      const badlands = componentSizes(grid, (r, c) => zoneAt(grid, r, c)!.biome === "badlands").sort((a, b) => b - a);
+      expect(badlands.length).toBeGreaterThan(0);
+      expect(badlands[0]!).toBeGreaterThan(20);
+    }
+  });
 });
 
 describe("biasForZone", () => {
