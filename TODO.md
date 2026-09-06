@@ -152,16 +152,32 @@ none of this is built yet, this section is purely to not lose the thread:
       several zones, islands), not just per-tile biome noise. Direct ask:
       "having sections of zones mean something... stretches of desert or
       something like that would be cool. Islands."
-- [ ] **Species-specific environmental interactions, "derive habitats from
-      species."** Concrete examples given: water-type Pokémon should be
-      able to find food directly in pools of water by random chance
-      (algae/krill stand-in — no foraging-in-water mechanic exists today,
-      `foodStockNear`/flora tiles are the only food source currently
-      modeled); water types' shelter should be deliberately easy to build,
-      making them breed more easily than the current uniform
-      `buildsShelter` difficulty. General direction: look at each
-      species/type and ask what real environmental affordance would flesh
-      it out, rather than one uniform ruleset for all species.
+- [x] **Species-specific environmental interactions — the two named
+      examples, built.** (1) **Water-graze foraging** (needs.ts's
+      `tryForageFromWater`/`isWaterForager`): a hungry agent whose species is
+      obligate-aquatic OR simply prefers water (`SpeciesDef.preferredTerrain`)
+      gets a real per-tick chance, while already standing on a water tile, to
+      graze something incidental (algae/krill stand-in) for a partial hunger
+      restore — no travel, no real "food" tile required at all. Real gap this
+      closes, not just flavor: `findReachableFoodTarget`'s own doc comment
+      already flags that `worldgen.ts` only places "food" terrain on LAND
+      tiles, so an obligate-aquatic agent could only ever reach one at the
+      shore ring. Real-run validated: 42 water-affiliated hunger-consume
+      events over a 5000-tick run. (2) **Easier shelter for water types**
+      (shelter.ts): an `obligateAquatic` species gets the same "comfort
+      threshold" discount and build-time halving predators already had,
+      stacking multiplicatively (an obligate-aquatic predator builds in a
+      quarter the ordinary time). Deliberately narrower than the foraging
+      gate — restricted to `obligateAquatic` specifically, not the broader
+      water-preferring case — because at the same 0.15 discount magnitude
+      already used for predators, the broader gate collided exactly with
+      `chooseBehavior`'s own idle threshold (both land on 0.70), which would
+      have made the entire Squirtle line attempt shelter-building on every
+      single idle tick; a genuinely obligate-aquatic species (no
+      conventional home to speak of at all) is where "trivial to build" is
+      the better real fit anyway. 6 new unit tests (needs.test.ts,
+      shelter.test.ts) lock in both halves plus the narrower gate; full
+      suite green (973/973).
 - [ ] **Snowy mountaintop habitat for ice/dragon-type species** — no cold/
       alpine terrain or biome exists yet above `highland`; would need both
       a new terrain/biome (worldgen.ts) and species tagged for it

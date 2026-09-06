@@ -571,6 +571,52 @@ function consume(needs: Needs, behavior: "seekWater" | "seekFood", qualityMultip
 }
 
 /**
+ * Chance, per action tick a water-affiliated agent spends `seekFood` while
+ * already standing on a water tile, of grazing something incidental right
+ * there (algae/krill stand-in) instead of needing to reach a real "food"
+ * tile at all. Direct ask: "water type Pokémon should be able to find food
+ * in pools of water by random chance, simulating algae or krill." Real gap
+ * this closes, not just flavor: `findReachableFoodTarget`'s own doc comment
+ * already notes `worldgen.ts` only ever places "food" terrain on LAND
+ * tiles, so an obligate-aquatic agent (`waterBody.ts`'s `canEnterLand`) can
+ * only ever reach a food tile sitting on the shore ring directly touching
+ * water — this gives it (and any species that simply prefers water,
+ * amphibious or not) a real food source that doesn't depend on shore
+ * geometry at all.
+ */
+const WATER_FORAGE_CHANCE_PER_TICK = 0.05;
+/** A light snack, not a full meal — `WATER_FORAGE_CHANCE_PER_TICK` firing often enough on its own to matter (roughly one hit every 20 ticks while sitting in water) already adds up; a real "food" tile should still be the better, more deliberate meal for a species that has one reachable at all. */
+const WATER_FORAGE_QUALITY = 0.4;
+
+/**
+ * Whether `agent`'s species is meaningfully water-affiliated for foraging
+ * purposes — genuinely obligate-aquatic (Magikarp, Tentacruel, ...) or one
+ * that simply prefers water tiles once idle (`SpeciesDef.preferredTerrain`,
+ * e.g. the Squirtle line) — either reads as "at home enough in water to
+ * graze it," not just the narrower obligate-aquatic case alone.
+ */
+export function isWaterForager(agent: Agent): boolean {
+  return agent.obligateAquatic === true || agent.preferredTerrain?.includes("water") === true;
+}
+
+/**
+ * Tries the incidental water-graze above; returns true (and applies the
+ * partial hunger restore + a `consumed` event, same shape every other
+ * consumption path in this file already logs) exactly when it fires. Purely
+ * opportunistic — only rolled while the agent is ALREADY sitting on a water
+ * tile this tick, never a reason to travel anywhere on its own.
+ */
+function tryForageFromWater(world: World, agent: Agent, log: EventLog | undefined, rng: () => number): boolean {
+  if (!isWaterForager(agent)) return false;
+  if (tileAt(world, agent.layer, agent.pos.x, agent.pos.y)?.terrain !== "water") return false;
+  if (rng() >= WATER_FORAGE_CHANCE_PER_TICK) return false;
+
+  consume(agent.needs, "seekFood", WATER_FORAGE_QUALITY);
+  log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
+  return true;
+}
+
+/**
  * DESIGN.md's "Herd status" payoff 1 — feeding priority. **Real contention
  * finding**: same-tick, same-tile contention over a food patch's dwindling
  * `stock` genuinely happens in this codebase's model — `tickWorld`'s
@@ -1049,6 +1095,15 @@ export function tickAgentAction(
 
   if (agent.behavior === "seekMate") {
     applyMateSeeking(world, agent, log, ctx, rng);
+    return;
+  }
+
+  if (agent.behavior === "seekFood" && tryForageFromWater(world, agent, log, rng)) {
+    // Opportunistic incidental graze (algae/krill stand-in) — tried before
+    // the shelter cache/real-food-tile search below since it costs nothing
+    // to check and, when it fires, needs neither a stockpile nor a
+    // reachable food tile to exist at all. See `tryForageFromWater`'s own
+    // doc comment for why this only ever helps a water-affiliated species.
     return;
   }
 

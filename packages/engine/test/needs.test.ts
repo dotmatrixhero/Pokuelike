@@ -452,6 +452,55 @@ describe("tile preference (Agent.preferredTerrain, applyExploration)", () => {
   });
 });
 
+describe("water-graze foraging (Agent.obligateAquatic / preferredTerrain water)", () => {
+  it("a hungry water-affiliated agent standing on water can feed without any 'food' tile existing anywhere", () => {
+    const world = createWorld(10, 10); // no "food" terrain placed anywhere
+    setTile(world, "surface", 5, 5, "water");
+    const agent = makeAgent({ pos: { x: 5, y: 5 }, obligateAquatic: true, needs: createNeeds({ hunger: 0.3 }) });
+
+    vi.spyOn(Math, "random").mockReturnValue(0); // always wins the WATER_FORAGE_CHANCE_PER_TICK roll
+    tickAgentAction(world, agent);
+
+    expect(agent.needs.hunger).toBeGreaterThan(0.3);
+    expect(agent.pos).toEqual({ x: 5, y: 5 }); // never had to travel anywhere
+  });
+
+  it("a merely water-preferring (not obligate-aquatic) agent standing on water also gets the graze", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    const agent = makeAgent({ pos: { x: 5, y: 5 }, preferredTerrain: ["water"], needs: createNeeds({ hunger: 0.3 }) });
+
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    tickAgentAction(world, agent);
+
+    expect(agent.needs.hunger).toBeGreaterThan(0.3);
+  });
+
+  it("never fires for a water-affiliated agent standing on dry land", () => {
+    const world = createWorld(10, 10); // no water anywhere
+    const agent = makeAgent({ pos: { x: 5, y: 5 }, obligateAquatic: true, needs: createNeeds({ hunger: 0.3 }) });
+
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    tickAgentAction(world, agent);
+
+    // Falls through to the ordinary (here fruitless, no food tile) seekFood
+    // search instead — hunger stays exactly where it was, not restored by
+    // the water graze.
+    expect(agent.needs.hunger).toBe(0.3);
+  });
+
+  it("never fires for an ordinary (non-water-affiliated) agent even when standing on water", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    const agent = makeAgent({ pos: { x: 5, y: 5 }, needs: createNeeds({ hunger: 0.3 }) }); // no obligateAquatic, no water preference
+
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    tickAgentAction(world, agent);
+
+    expect(agent.needs.hunger).toBe(0.3);
+  });
+});
+
 describe("decayNeeds: thirstMultiplier composes with the flat decay rate (Phase 3 weather)", () => {
   it("defaults to the original flat rate when no multiplier is passed", () => {
     const needs = createNeeds();
