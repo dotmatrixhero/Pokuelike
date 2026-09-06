@@ -84,8 +84,12 @@ export function zoneNeighbors(grid: MacroGrid, row: number, col: number): MacroZ
 
 // ---------------------------------------------------------------------------
 // Biome classification — elevation (already computed by generateMacroElevation)
-// plus one extra macro-scale moisture field, thresholded into the same 5
-// biome names worldgen.ts's per-tile BIOMES table uses (plus "ocean").
+// plus one extra macro-scale moisture field, thresholded into the same 9
+// land biome names worldgen.ts's per-tile BIOMES table uses (plus "ocean").
+// Beach is the one exception: applied as a coastline post-process
+// (`applyBeachReclassification`) rather than a moisture/elevation band of
+// its own, since "coastal strip" isn't expressible as a threshold on either
+// field alone.
 // ---------------------------------------------------------------------------
 
 /**
@@ -103,20 +107,90 @@ export function zoneNeighbors(grid: MacroGrid, row: number, col: number): MacroZ
 const SNOW_ELEVATION_THRESHOLD = 0.9;
 /** Elevation at/above this (but below Snow) reads as Highland — see `macroBiomeFor`. Sim-original guess; validated against a real generated grid's biome distribution (see DESIGN.md), not canon. */
 const HIGHLAND_ELEVATION_THRESHOLD = 0.72;
-/** Moisture below this reads as Badlands. */
+/**
+ * Moisture below this reads as Desert — the driest possible extreme, carved
+ * out of what used to be Badlands' own low end. Direct ask: "looking at more
+ * other types of terrain generation... stretches of desert." Deliberately a
+ * DIFFERENT character from Badlands, not just a renamed copy of it: Badlands
+ * keeps its rocky BSP-carved canyon structure (`worldgen.ts`'s
+ * `carveBadlandsChambers` checks `isBadlandsDominant` by name, so a Desert
+ * zone never gets chamber-carved), while Desert is open sand dunes — see
+ * `worldgen.ts`'s own "desert" `BiomeDef` for the terrain-weight difference.
+ *
+ * `makeNoise2D`'s own doc comment (worldgen.ts) already flags why this
+ * needed real calibration, not a guessed round number: multi-octave value
+ * noise clusters toward the middle of its range rather than spreading
+ * evenly, so a naive "the bottom 15%" guess (0.15) badly under-fired —
+ * checked directly across 12 seeds at this module's own 100x100 test scale,
+ * it produced zero Desert zones in 9 of them. 0.32 was chosen by directly
+ * sampling the real moisture field across those same 12 seeds and picking
+ * the lowest threshold that reliably produced at least SOME Desert in every
+ * one of them, while Badlands' own share (still real, just thinner than
+ * before) stayed nonzero in all 12 too.
+ */
+const DESERT_MOISTURE_THRESHOLD = 0.32;
+/** Moisture below this (but at/above Desert) reads as Badlands. */
 const BADLANDS_MOISTURE_THRESHOLD = 0.35;
 /** Moisture at/above this reads as Wetland. */
 const WETLAND_MOISTURE_THRESHOLD = 0.65;
-/** Moisture at/above this (but below Wetland) reads as Forest; below it, Grassland. */
+/**
+ * Moisture at/above this (but below Wetland) reads as Jungle — carved out of
+ * what used to be Forest's own high end, same "split the wettest/driest
+ * extreme off into its own named biome" move as Desert above. Same direct
+ * ask ("more other types of terrain generation") plus the "knock out more
+ * species habitats" follow-up — a dense, humid jungle is a real, distinct
+ * habitat from a temperate Forest, not just a green recolor of it.
+ */
+const JUNGLE_MOISTURE_THRESHOLD = 0.58;
+/** Moisture at/above this (but below Jungle) reads as Forest; below it, Grassland. */
 const FOREST_MOISTURE_THRESHOLD = 0.5;
 
 function macroBiomeFor(elevation: number, moisture: number): string {
   if (elevation >= SNOW_ELEVATION_THRESHOLD) return "snow";
   if (elevation >= HIGHLAND_ELEVATION_THRESHOLD) return "highland";
+  if (moisture < DESERT_MOISTURE_THRESHOLD) return "desert";
   if (moisture < BADLANDS_MOISTURE_THRESHOLD) return "badlands";
   if (moisture >= WETLAND_MOISTURE_THRESHOLD) return "wetland";
+  if (moisture >= JUNGLE_MOISTURE_THRESHOLD) return "jungle";
   if (moisture >= FOREST_MOISTURE_THRESHOLD) return "forest";
   return "grassland";
+}
+
+/**
+ * How close to THIS grid's own lowest land elevation a coastal zone must sit
+ * to read as Beach instead of whatever `macroBiomeFor` classified it as — a
+ * real, low-lying shoreline strip between ocean and inland terrain, applied
+ * as a post-process (needs `coastEdges`, computed after the main
+ * elevation/moisture pass below) rather than a fourth input to
+ * `macroBiomeFor` itself.
+ *
+ * Deliberately RELATIVE to this specific grid's own land-elevation floor,
+ * not a fixed absolute cutoff — `worldgen.ts`'s elevation field normalizes
+ * per-instance (min/max of THAT seed's own raw values), so "0.4" means a
+ * completely different real height from one seed to the next. Confirmed via
+ * direct measurement across a dozen seeds: a coastal zone's own elevation
+ * always clusters extremely tightly just above whatever that grid's actual
+ * land minimum happens to be (e.g. one seed's coastal band sat at
+ * 0.407-0.464, another's at 0.645-0.695 — wildly different absolute numbers,
+ * same "just above local sea level" relative position) — a fixed absolute
+ * threshold picked up beaches in some seeds and silently produced zero in
+ * others. `HIGHLAND_ELEVATION_THRESHOLD` is an extra belt-and-suspenders
+ * ceiling, not something this band is ever expected to actually reach in
+ * practice (a genuinely coastal zone is never also a highland peak) — it
+ * just makes that invariant explicit in code rather than merely observed.
+ */
+const BEACH_ELEVATION_BAND = 0.08;
+
+function applyBeachReclassification(zones: readonly MacroZone[]): void {
+  let landMin = Infinity;
+  for (const zone of zones) {
+    if (!zone.isOcean && zone.elevation < landMin) landMin = zone.elevation;
+  }
+  const beachCeiling = Math.min(landMin + BEACH_ELEVATION_BAND, HIGHLAND_ELEVATION_THRESHOLD);
+  for (const zone of zones) {
+    if (zone.isOcean || zone.coastEdges.length === 0) continue;
+    if (zone.elevation <= beachCeiling) zone.biome = "beach";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +389,7 @@ export function generateMacroGrid(seed: number, rows: number, cols: number): Mac
       if (neighbor?.isOcean) zone.coastEdges.push(dir);
     }
   }
+  applyBeachReclassification(zones);
 
   carveMacroRivers(grid, mulberry32(seed ^ 0x27220a95));
   return grid;

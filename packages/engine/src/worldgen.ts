@@ -535,15 +535,22 @@ interface BiomeDef {
 }
 
 /**
- * Six biomes: the original five per DESIGN.md's list, plus "snow" — direct
- * ask: "snowy mountain tops where ice Pokemon and dragon live." Elevation-
- * gated ABOVE Highland (see macroGrid.ts's `SNOW_ELEVATION_THRESHOLD`), the
- * same "one biome sits above another" idea Highland itself already uses
- * relative to the other four — a snowy peak literally caps the tallest
- * mountains, it doesn't compete with them for territory the way the other
- * four biomes' seed-scatter does. `floor_snow.png` (public/tiles/) already
- * existed unused before this — sprites.ts's own doc comment flagged it as
- * "no biome maps to snow yet."
+ * Nine biomes: the original five per DESIGN.md's list, plus "snow" (direct
+ * ask: "snowy mountain tops where ice Pokemon and dragon live"), plus
+ * "jungle"/"beach"/"desert" (direct follow-up ask: "more other types of
+ * terrain generation... stretches of desert... islands... variance that
+ * really helps flesh the world out"). "Snow" is elevation-gated ABOVE
+ * Highland (see macroGrid.ts's `SNOW_ELEVATION_THRESHOLD`) — a snowy peak
+ * literally caps the tallest mountains, it doesn't compete with the others
+ * for territory the way ordinary seed-scatter does. `floor_snow.png`
+ * (public/tiles/) already existed unused before this — sprites.ts's own doc
+ * comment flagged it as "no biome maps to snow yet." "Jungle" and "desert"
+ * are carved out of Forest's/Badlands' own moisture extremes respectively
+ * (see macroGrid.ts's `JUNGLE_MOISTURE_THRESHOLD`/`DESERT_MOISTURE_
+ * THRESHOLD`) rather than competing head-on for the same moisture range;
+ * "beach" is different again — a coastline post-process
+ * (`applyBeachReclassification`), not a moisture/elevation band at all,
+ * since "coastal strip" isn't expressible as a threshold on either field.
  *
  * Every numeric value here is a sim-original guess to be judged against a
  * real run, exactly like every other tuning constant in this codebase —
@@ -573,6 +580,22 @@ const BIOMES: readonly BiomeDef[] = [
     terrainWeights: { tree: 5, boulder: 0.4, bush: 2.5, sand: 0.05, mud: 0.3 },
   },
   {
+    // Carved out of Forest's own wettest end (see macroGrid.ts's
+    // `JUNGLE_MOISTURE_THRESHOLD`) — denser canopy, more food (real
+    // rainforest-floor abundance), and noticeably more water than plain
+    // Forest, but still land-dominant unlike Wetland below it.
+    name: "jungle",
+    seedCount: 2,
+    foodDensity: 0.045,
+    waterDensity: 0.12,
+    obstacleDensity: 0.28,
+    elevationBase: 0.55,
+    elevationVariance: 0.6,
+    // Heavier tree/bush than even Forest — a real dense-canopy feel — with a
+    // touch of mud (humid, damp undergrowth) Forest itself barely has.
+    terrainWeights: { tree: 6, boulder: 0.2, bush: 3.5, sand: 0.05, mud: 0.6 },
+  },
+  {
     name: "wetland",
     seedCount: 2,
     foodDensity: 0.04,
@@ -583,6 +606,23 @@ const BIOMES: readonly BiomeDef[] = [
     terrainWeights: { tree: 0.5, boulder: 0.1, bush: 1.5, sand: 0.2, mud: 4 },
   },
   {
+    // A real, low-lying coastal strip — see macroGrid.ts's
+    // `applyBeachReclassification` for how a zone actually lands here (a
+    // coastal-adjacent, low-elevation post-process, not a moisture band).
+    // Overwhelmingly sand, almost no obstacles or food of its own — the
+    // point of a beach zone is the water access right next to it
+    // (`biasForZone`'s own coastal ocean-fraction boost already handles
+    // that), not standalone habitat richness.
+    name: "beach",
+    seedCount: 2,
+    foodDensity: 0.01,
+    waterDensity: 0.06,
+    obstacleDensity: 0.03,
+    elevationBase: 0.08,
+    elevationVariance: 0.1,
+    terrainWeights: { tree: 0.05, boulder: 0.1, bush: 0.1, sand: 8, mud: 0.05 },
+  },
+  {
     name: "badlands",
     seedCount: 2,
     foodDensity: 0.015,
@@ -591,6 +631,25 @@ const BIOMES: readonly BiomeDef[] = [
     elevationBase: 0.35,
     elevationVariance: 0.5,
     terrainWeights: { tree: 0.1, boulder: 1.5, bush: 0.15, sand: 5, mud: 0.05 },
+  },
+  {
+    // Carved out of Badlands' own driest end (see macroGrid.ts's
+    // `DESERT_MOISTURE_THRESHOLD`) — deliberately NOT another rocky-canyon
+    // biome: `carveBadlandsChambers`'s `isBadlandsDominant` check is keyed by
+    // name, so Desert tiles never get BSP chamber-carved, staying open sand
+    // dunes instead. Harsher than Badlands on every resource axis — the
+    // driest possible extreme of the whole biome set.
+    name: "desert",
+    seedCount: 2,
+    foodDensity: 0.008,
+    waterDensity: 0.008,
+    obstacleDensity: 0.04,
+    elevationBase: 0.3,
+    elevationVariance: 0.4,
+    // Almost entirely sand dunes with the rare boulder outcrop — no BSP
+    // structure, so this is the raw terrain-weight profile doing all the
+    // "open desert, not canyon" work on its own.
+    terrainWeights: { tree: 0.02, boulder: 0.3, bush: 0.05, sand: 9, mud: 0.02 },
   },
   {
     name: "highland",

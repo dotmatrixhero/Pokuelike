@@ -44,8 +44,9 @@ export interface SpeciesDef {
   buildsShelter?: boolean;
   /**
    * Which of worldgen.ts's `BIOMES` names ("grassland" | "forest" |
-   * "wetland" | "badlands" | "highland") this species is naturally found
-   * in - best-effort flavor-driven tagging (same judged-per-species
+   * "wetland" | "badlands" | "highland" | "snow" | "desert" | "jungle" |
+   * "beach") this species is naturally found in - best-effort flavor-driven
+   * tagging (same judged-per-species
    * standard as `isPredator`/`buildsShelter`), not a hard requirement:
    * nothing prevents an agent from existing outside its tagged biomes (a
    * herd can migrate anywhere, a hand-placed starting position isn't
@@ -580,5 +581,270 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Wetland kept as a secondary nod to its actual mainline habitat.
     biomes: ["snow", "wetland"],
     preferredTerrain: ["water"],
+  }),
+
+  // --- New base species below: direct ask ("more species? more biome
+  // types???") following the new desert/jungle/beach biomes (worldgen.ts/
+  // macroGrid.ts) — real residents for all three, plus a few more for the
+  // existing roster's thinner biomes (grassland/highland/snow). All 14 keep
+  // this batch's own predator-guild caution from the badlands/highland pass
+  // above: none tagged `isPredator` (Zubat/Golbat's real "drains life
+  // energy" flavor would qualify, but the existing predator guild already
+  // crashes toward extinction in a real run per TODO.md — adding another
+  // hunter to an already-struggling guild isn't this batch's problem to
+  // solve). Each evolution reachable purely by in-sim leveling (checked
+  // against the dex's own `evolutions` data, `conditions: {}` only — same
+  // bar `leveling.ts`'s `computeProfileFromDexEntry` itself uses) gets its
+  // own curated entry too, same "don't let an evolved agent quietly lose
+  // its personality" standard as this file's earlier evolution-completion
+  // pass. Every egg group already has real headroom in `leveling.ts`'s
+  // `EGG_GROUPS_BY_BASE_KEY` — no leveling.ts changes needed for any of
+  // these.
+  vulpix: speciesFromDex("VULPIX", {
+    spriteKey: "vulpix",
+    placeholderColor: "#ee9090",
+    homeLayer: "surface",
+    moves: ["ember"],
+    // A warmth-loving fire fox — diurnal, same reasoning as Charmander/
+    // Growlithe above.
+    activityPattern: "diurnal",
+    // Its only mainline evolution (Ninetales) needs a Fire Stone — same
+    // accepted "never evolves in-sim" limitation as Growlithe above, not a
+    // bug.
+    biomes: ["desert", "badlands"],
+    preferredTerrain: ["sunbeam"],
+  }),
+  cubone: speciesFromDex("CUBONE", {
+    spriteKey: "cubone",
+    placeholderColor: "#d8c8a8",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    // Mainline flavor text: "cries within its shell... [at night]" — a
+    // genuinely nocturnal, mournful loner.
+    activityPattern: "nocturnal",
+    // Both this dex's evolution options (to Marowak or Alolan Marowak) carry
+    // a TIME condition, not a plain level — excluded by `leveling.ts`'s own
+    // "conditions must be empty" bar, same as Growlithe/Vulpix's item-locked
+    // cases above. Never evolves in-sim; an accepted existing limitation,
+    // not a new gap.
+    biomes: ["desert", "badlands"],
+  }),
+  ekans: speciesFromDex("EKANS", {
+    spriteKey: "ekans",
+    placeholderColor: "#a89060",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    // "Moves silently and stealthily... eats bird eggs whole" per mainline
+    // flavor text — a nocturnal ambush hunter's hours, even though it isn't
+    // tagged `isPredator` here (see this batch's top comment).
+    activityPattern: "nocturnal",
+    biomes: ["grassland", "jungle"],
+  }),
+  arbok: speciesFromDex("ARBOK", {
+    spriteKey: "arbok",
+    placeholderColor: "#785888",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    activityPattern: "nocturnal",
+    biomes: ["grassland", "jungle"],
+  }),
+  caterpie: speciesFromDex("CATERPIE", {
+    spriteKey: "caterpie",
+    placeholderColor: "#a8c848",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    activityPattern: "diurnal",
+    biomes: ["jungle", "forest"],
+    // A leaf-eating larva that hides among foliage (mainline flavor text) —
+    // same concealment-seeking idiom as Scyther above.
+    preferredTerrain: ["bush"],
+  }),
+  metapod: speciesFromDex("METAPOD", {
+    spriteKey: "metapod",
+    placeholderColor: "#78a838",
+    homeLayer: "surface",
+    // Real mainline moveset is just Harden (a stat move, not curated) — kept
+    // Tackle rather than inventing a new curated move, same off-type reuse
+    // acceptance this file already makes elsewhere (e.g. Onix/Dratini).
+    moves: ["tackle"],
+    activityPattern: "diurnal",
+    biomes: ["jungle", "forest"],
+    preferredTerrain: ["bush"],
+  }),
+  butterfree: speciesFromDex("BUTTERFREE", {
+    spriteKey: "butterfree",
+    placeholderColor: "#a890f0",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    biomes: ["jungle", "forest"],
+  }),
+  weedle: speciesFromDex("WEEDLE", {
+    spriteKey: "weedle",
+    placeholderColor: "#c8b820",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    activityPattern: "diurnal",
+    biomes: ["jungle", "forest"],
+    preferredTerrain: ["bush"],
+  }),
+  kakuna: speciesFromDex("KAKUNA", {
+    spriteKey: "kakuna",
+    placeholderColor: "#e0c020",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    activityPattern: "diurnal",
+    biomes: ["jungle", "forest"],
+    preferredTerrain: ["bush"],
+  }),
+  beedrill: speciesFromDex("BEEDRILL", {
+    spriteKey: "beedrill",
+    placeholderColor: "#f8d030",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    biomes: ["jungle", "forest"],
+  }),
+  oddish: speciesFromDex("ODDISH", {
+    spriteKey: "oddish",
+    placeholderColor: "#8878c8",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    // "During the day it stays motionless... starts to move around at
+    // night" per mainline flavor text — a literal, direct nocturnal fit.
+    activityPattern: "nocturnal",
+    biomes: ["jungle", "forest"],
+    preferredTerrain: ["flora"],
+  }),
+  gloom: speciesFromDex("GLOOM", {
+    spriteKey: "gloom",
+    placeholderColor: "#a878c0",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    activityPattern: "nocturnal",
+    biomes: ["jungle", "forest"],
+    preferredTerrain: ["flora"],
+  }),
+  krabby: speciesFromDex("KRABBY", {
+    spriteKey: "krabby",
+    placeholderColor: "#f08030",
+    homeLayer: "surface",
+    moves: ["tackle", "water_gun"],
+    // "Digs holes in beaches to live in" per mainline flavor text — a real,
+    // literal burrower, same standard Diglett/Sandshrew's own callouts use.
+    buildsShelter: true,
+    biomes: ["beach", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  kingler: speciesFromDex("KINGLER", {
+    spriteKey: "kingler",
+    placeholderColor: "#e85838",
+    homeLayer: "surface",
+    moves: ["tackle", "water_gun"],
+    buildsShelter: true,
+    biomes: ["beach", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  shellder: speciesFromDex("SHELLDER", {
+    spriteKey: "shellder",
+    placeholderColor: "#c8d8f0",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    // "Usually stays in the sea, but sometimes washes up on the shore" per
+    // mainline flavor text — genuinely at home on a real Beach biome, but
+    // NOT tagged `obligateAquatic`: unlike Magikarp/Tentacool, its own
+    // flavor text implies it survives fine when it does wash ashore, so the
+    // literal "can't survive out of water at all" bar this file holds that
+    // flag to isn't met.
+    biomes: ["beach", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  psyduck: speciesFromDex("PSYDUCK", {
+    spriteKey: "psyduck",
+    placeholderColor: "#f8d868",
+    homeLayer: "surface",
+    moves: ["tackle", "water_gun"],
+    biomes: ["beach", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  golduck: speciesFromDex("GOLDUCK", {
+    spriteKey: "golduck",
+    placeholderColor: "#7098c8",
+    homeLayer: "surface",
+    moves: ["tackle", "water_gun"],
+    biomes: ["beach", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  ponyta: speciesFromDex("PONYTA", {
+    spriteKey: "ponyta",
+    placeholderColor: "#f8d0b0",
+    homeLayer: "surface",
+    moves: ["ember"],
+    activityPattern: "diurnal",
+    biomes: ["grassland", "highland"],
+    preferredTerrain: ["sunbeam"],
+  }),
+  rapidash: speciesFromDex("RAPIDASH", {
+    spriteKey: "rapidash",
+    placeholderColor: "#f0a048",
+    homeLayer: "surface",
+    moves: ["tackle", "ember"],
+    activityPattern: "diurnal",
+    biomes: ["grassland", "highland"],
+    preferredTerrain: ["sunbeam"],
+  }),
+  snorlax: speciesFromDex("SNORLAX", {
+    spriteKey: "snorlax",
+    placeholderColor: "#a8b090",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    // Eats, then sleeps, regardless of time of day per mainline flavor text
+    // — deliberately left cathemeral (the default), same reasoning as
+    // Venusaur/Charizard above.
+    biomes: ["forest", "jungle"],
+  }),
+  lapras: speciesFromDex("LAPRAS", {
+    spriteKey: "lapras",
+    placeholderColor: "#a0c8e8",
+    homeLayer: "surface",
+    moves: ["tackle", "water_gun"],
+    // A gentle arctic reptile that ferries riders across icy seas per
+    // mainline flavor text — Snow as primary, Wetland as the closest "open
+    // water" secondary this roster's biome set has, same pairing Seel above
+    // already uses.
+    biomes: ["snow", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  jynx: speciesFromDex("JYNX", {
+    spriteKey: "jynx",
+    placeholderColor: "#f8b8d8",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    // "Lives in frigid areas" per mainline flavor text — a direct, literal
+    // Snow-biome fit, Highland as the nearest secondary "cold mountain" this
+    // roster's biome set has.
+    biomes: ["snow", "highland"],
+  }),
+  zubat: speciesFromDex("ZUBAT", {
+    spriteKey: "zubat",
+    placeholderColor: "#7860a8",
+    // Roosts in permanently dark places per mainline flavor text — the same
+    // "no biome of its own, tagged by the surface above" reasoning as
+    // Diglett/Onix, and a genuinely better flavor fit than the open-treetop
+    // Canopy layer Pidgey/Spearow use.
+    homeLayer: "underground",
+    moves: ["tackle"],
+    // Avoids daylight entirely per mainline flavor text.
+    activityPattern: "nocturnal",
+    biomes: ["highland", "badlands"],
+  }),
+  golbat: speciesFromDex("GOLBAT", {
+    spriteKey: "golbat",
+    placeholderColor: "#6848a0",
+    homeLayer: "underground",
+    moves: ["tackle"],
+    activityPattern: "nocturnal",
+    // Real further evolution (Crobat) needs a FRIENDSHIP condition, not a
+    // plain level — same "never evolves in-sim" limitation as Growlithe/
+    // Vulpix/Cubone above, just a different condition kind.
+    biomes: ["highland", "badlands"],
   }),
 };

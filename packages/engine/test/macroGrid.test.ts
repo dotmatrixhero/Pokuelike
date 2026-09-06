@@ -46,12 +46,37 @@ describe("generateMacroGrid", () => {
     expect(fraction).toBeLessThan(0.6);
   });
 
-  it("produces every one of the 6 land biome names across a large-enough grid, not just one", () => {
+  it("produces every one of the 9 land biome names across a large-enough grid, not just one", () => {
     const grid = generateMacroGrid(55, 100, 100);
     const biomes = new Set(grid.zones.filter((z) => !z.isOcean).map((z) => z.biome));
-    for (const name of ["grassland", "forest", "wetland", "badlands", "highland", "snow"]) {
+    for (const name of ["grassland", "forest", "wetland", "badlands", "highland", "snow", "desert", "jungle", "beach"]) {
       expect(biomes.has(name)).toBe(true);
     }
+  });
+
+  it("every Beach zone is genuinely coastal and near this grid's own land-elevation floor, not just a random moisture-band match", () => {
+    const grid = generateMacroGrid(55, 100, 100);
+    const land = grid.zones.filter((z) => !z.isOcean);
+    const landMin = Math.min(...land.map((z) => z.elevation));
+    let beachCount = 0;
+    for (const zone of grid.zones) {
+      if (zone.biome !== "beach") continue;
+      beachCount++;
+      expect(zone.coastEdges.length).toBeGreaterThan(0);
+      // Generous slack above the real BEACH_ELEVATION_BAND (0.08) — this
+      // just confirms "near the floor," not the exact tuned constant, which
+      // could change independently of this test's own intent.
+      expect(zone.elevation).toBeLessThanOrEqual(landMin + 0.15);
+    }
+    expect(beachCount).toBeGreaterThan(0);
+  });
+
+  it("Desert zones never get Badlands' own BSP-chamber-carving treatment (a real, different biome, not a recolor) — checked via biasForZone's dominantBiome, since that's what a promoted zone's terrain generation actually keys off", () => {
+    const grid = generateMacroGrid(55, 100, 100);
+    const desertZone = grid.zones.find((z) => z.biome === "desert");
+    expect(desertZone).toBeDefined();
+    const bias = biasForZone(grid, desertZone!.row, desertZone!.col);
+    expect(bias.dominantBiome).toBe("desert");
   });
 
   it("coastEdges are symmetric with the grid's own isOcean facts: a land zone's coastEdge always points at a real ocean neighbor", () => {
@@ -161,13 +186,23 @@ describe("generateMacroGrid", () => {
   it("biome regions read as real macro-scale stretches, not per-tile speckle — direct ask: 'stretches of desert... would be cool'", () => {
     // A single-digit-zone biome patch is barely distinguishable from noise;
     // a real "stretch" should span dozens of zones at minimum on a
-    // reasonably large grid. Checked for badlands specifically (the direct
-    // ask's own named example) across several seeds.
+    // reasonably large grid. Checked for desert specifically (the direct
+    // ask's own literal named example, now a real biome of its own) across
+    // several seeds, plus badlands+desert together (the two arid biomes
+    // carved from the same original moisture band, and real geographic
+    // neighbors — see macroGrid.ts's threshold ordering) at a lower bar:
+    // splitting one wide moisture band into two narrower ones necessarily
+    // shrinks each sub-biome's OWN largest component versus the old
+    // single-badlands baseline, even though the arid territory as a whole
+    // is still one real contiguous stretch.
     for (const seed of [1, 2, 3, 42, 20260903]) {
       const grid = generateMacroGrid(seed, 64, 64);
-      const badlands = componentSizes(grid, (r, c) => zoneAt(grid, r, c)!.biome === "badlands").sort((a, b) => b - a);
-      expect(badlands.length).toBeGreaterThan(0);
-      expect(badlands[0]!).toBeGreaterThan(20);
+      const desert = componentSizes(grid, (r, c) => zoneAt(grid, r, c)!.biome === "desert").sort((a, b) => b - a);
+      expect(desert.length).toBeGreaterThan(0);
+      expect(desert[0]!).toBeGreaterThan(20);
+
+      const arid = componentSizes(grid, (r, c) => ["badlands", "desert"].includes(zoneAt(grid, r, c)!.biome)).sort((a, b) => b - a);
+      expect(arid[0]!).toBeGreaterThan(50);
     }
   });
 });

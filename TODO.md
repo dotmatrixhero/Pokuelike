@@ -321,6 +321,94 @@ none of this is built yet, this section is purely to not lose the thread:
       across 10 seeds) and promoting one spawns both new species, confirmed
       across 4 seeds. 1 updated regression test (6 biome names, was 5);
       full suite green (976/976).
+- [x] **Three more biomes (desert/jungle/beach) plus a real species batch —
+      direct ask: "more species? more biome types???"** Nine land biomes now,
+      up from six:
+      - **Desert** (`worldgen.ts`) — carved out of Badlands' own driest
+        moisture extreme (`macroGrid.ts`'s `DESERT_MOISTURE_THRESHOLD`),
+        deliberately a DIFFERENT character, not a recolor: open sand dunes,
+        no BSP chamber-carving (`carveBadlandsChambers`'s
+        `isBadlandsDominant` check is keyed by name, so Desert tiles never
+        get it).
+      - **Jungle** — carved out of Forest's own wettest extreme
+        (`JUNGLE_MOISTURE_THRESHOLD`): denser canopy, more food/water than
+        plain Forest, still land-dominant.
+      - **Beach** — a genuinely different kind of biome from the other
+        eight: a coastline post-process (`applyBeachReclassification`), not
+        a moisture/elevation band. Real calibration finding: the elevation
+        field normalizes PER-SEED (min/max of that seed's own raw values),
+        so a fixed absolute elevation cutoff picked up beaches in some seeds
+        and silently produced zero in others — fixed by making the
+        threshold relative to each grid's own measured land-elevation floor
+        instead (confirmed via direct sampling: one seed's real coastal band
+        sat at 0.407-0.464, another's at 0.645-0.695 — very different
+        absolute numbers, same relative position).
+      - Desert's own moisture threshold needed the same real-distribution
+        calibration this codebase's other biome constants already went
+        through: a naive "bottom 15%" guess produced zero Desert zones in
+        9 of 12 sampled seeds (`makeNoise2D`'s own doc comment already flags
+        why — multi-octave value noise clusters toward the middle, so a
+        small raw threshold badly under-fires). Recalibrated to 0.32 by
+        directly sampling the real moisture field, chosen as the lowest
+        value that reliably produced Desert in all 12 seeds while Badlands'
+        own (now thinner) share stayed nonzero everywhere too.
+      - 14 new base species curated (`species.ts`): Vulpix/Cubone (desert),
+        Ekans (grassland/jungle), Caterpie/Weedle/Oddish/Snorlax (jungle/
+        forest), Krabby/Shellder/Psyduck (beach/wetland), Ponyta (grassland/
+        highland), Lapras/Jynx (snow), Zubat (highland/badlands) — plus
+        every evolution reachable purely by in-sim leveling among them
+        (Arbok/Metapod/Butterfree/Kakuna/Beedrill/Kingler/Golduck/Rapidash/
+        Golbat/Gloom — checked against the dex's own `conditions: {}` bar,
+        same standard `leveling.ts` itself uses), same "don't let an evolved
+        agent quietly lose its personality" standard as the earlier
+        evolution-completion pass. None tagged `isPredator` — the existing
+        predator guild already struggles per this file's own extinction-fix
+        history, so this batch stays out of that problem.
+      - **Real bug found (not introduced) while adding this batch, fixed**:
+        `leveling.ts`'s `baseSpeciesOf` correctly walks a species back to its
+        true dex-root prevo, but Snorlax's/Jynx's real roots are LATER-gen
+        baby forms (Munchlax/Smoochum) this codebase's hand-curated egg-group
+        table never had entries for — so either species silently resolved to
+        `eggGroups: []` the moment it was added to the roster. Fixed by
+        giving both babies their line's real egg group, the correct fix
+        (breeding a Jynx really does produce a Smoochum in the real games),
+        not a workaround.
+      - **Real, more significant finding, NOT fixed here (pre-existing, not
+        introduced by this batch)**: tested in isolation (promoted, then
+        immediately demoted with zero ticks elapsed), Desert's real measured
+        `baseResourceIndex` came back ~0.153 and Badlands' ~0.118 — both
+        below `DEATH_HEALTH_THRESHOLD` (0.3), so a species population
+        confined to just ONE isolated zone of either biome is mathematically
+        certain to decline toward local extinction over time; the
+        extinction-fix's own recovery-target drift can't rescue this,
+        because the recovery TARGET itself (`estimateZoneResourceIndex`,
+        both biomes' analytic estimate lands in the same sub-0.3 range) is
+        just as low. This is NOT new — Badlands' own existing residents
+        (Charmander/Diglett/Onix/Geodude/Growlithe/Mankey line) have always
+        had this same property, just never directly measured/flagged before
+        now. In the real, full multi-zone simulation this reads less like a
+        bug and more like a real "source, not sink" habitat: Krabby/
+        Shellder/Golduck founded in a real promoted Beach zone (real-run
+        validation, `validateNewBiomesAndSpecies.ts`) spread outward and
+        thrived in multiple neighboring Grassland/Ocean zones over 4000
+        ticks even as the beach zone's own isolated population dropped to
+        zero — populations are born there and disperse rather than settling
+        permanently, which is a coherent story, just not the one "give
+        Desert some real residents" was originally asking for. Real
+        underlying gap: the recovery-target mechanism only guarantees "don't
+        get stuck below your OWN biome's ceiling forever" and "a mismatched
+        species declines" — it never guaranteed every biome's OWN ceiling
+        clears the survival bar to begin with. Fixing this properly (either
+        a survivable-floor guarantee under `estimateZoneResourceIndex`, or
+        accepting harsh biomes as deliberately migration-fed rather than
+        self-sustaining and building real support for that framing) is real
+        future work, flagged rather than attempted here.
+      - Real-run validated (`validateNewBiomesAndSpecies.ts`, a real
+        `createDemoMacroWorld` run): Jungle promoted for real produced a
+        living, evolving population — Ekans→Arbok, Caterpie→Metapod
+        (→Butterfree), Weedle→Kakuna→Beedrill all occurred in-sim from a
+        single 4000-tick run, not just theoretically reachable. Full suite
+        green (1074/1074 across engine+data), all packages typecheck clean.
 
 ## Overworld visualization — SUPERSEDED, see above and "Overworld rearchitecture" above
 

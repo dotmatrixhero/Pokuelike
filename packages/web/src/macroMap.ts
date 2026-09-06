@@ -41,6 +41,16 @@ const MACRO_BIOME_COLOR: Record<string, Rgb> = {
   // Pale icy blue-white — reads as a real snowcap even at this zoomed-out,
   // flat-color-block scale, distinct from Highland's own grey-brown.
   snow: [220, 232, 238],
+  // Bright golden sand — deliberately lighter/more saturated than Badlands'
+  // own muddy tan so the two read as genuinely different biomes at a glance,
+  // not just two shades of "brown."
+  desert: [214, 178, 108],
+  // Deep, saturated green — noticeably darker/richer than both Grassland and
+  // Forest's own greens, reading as "denser" at a glance.
+  jungle: [24, 84, 40],
+  // Pale cream — lighter than Desert's own gold, reading as a thin coastal
+  // strip rather than a full desert region.
+  beach: [230, 214, 170],
 };
 const DEFAULT_BIOME_COLOR: Rgb = MACRO_BIOME_COLOR["grassland"]!;
 

@@ -188,6 +188,19 @@ const BIOME_FLOOR: Record<string, { base: string; overlays: readonly string[] }>
   // Same "busy enough on its own, no decal" call as highland above — an icy
   // mountaintop's own texture already reads as varied.
   snow: { base: "floor_snow", overlays: [] },
+  // Same tan-sand texture as Badlands — both are fundamentally "sandy
+  // ground," differentiated by terrain-weight/obstacle-density profile
+  // (worldgen.ts) and species tagging, not by floor art. No dedicated
+  // desert-dune or beach-sand crop exists in public/tiles/ yet, so this
+  // reuses the closest real match rather than falling through to the
+  // general-purpose cave/dirt default, which would read as visually wrong
+  // for ground this arid/sandy.
+  desert: { base: "floor_desert", overlays: ["sand"] },
+  beach: { base: "floor_desert", overlays: ["sand"] },
+  // No dedicated jungle floor crop exists either — falls through to the
+  // plain `FLOOR_BASE`/`FLOOR_OVERLAYS` default, same as grassland/forest
+  // already do. Flagged in TODO.md rather than silently reusing a
+  // mismatched texture.
 };
 
 /** Which base texture name a biome resolves to — exported so renderer.ts's edge-blend code can tell "same art, different biome name" (e.g. grassland vs. forest, both plain) apart from a real texture change (badlands vs. anything else) without duplicating this lookup. */
