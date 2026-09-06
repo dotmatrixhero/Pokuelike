@@ -268,6 +268,7 @@ describe("applyMoveTree: newer delta fields", () => {
           targetsAlly: true,
           allyEffectOnAttack: true,
           hitsArea: true,
+          excludesAllies: true,
           terrainBurn: true,
           statusSpreads: true,
           weightScaling: { factor: 0.5 },
@@ -330,6 +331,7 @@ describe("applyMoveTree: newer delta fields", () => {
     expect(respec.allyEffectOnAttack).toBe(true);
     expect(respec.targetsAlly).toBe(true);
     expect(respec.hitsArea).toBe(true);
+    expect(respec.excludesAllies).toBe(true);
     expect(respec.terrainBurn).toBe(true);
     expect(respec.statusSpreads).toBe(true);
     expect(respec.statChangeOnHit).toEqual({ target: "defender", stat: "defense", stage: -1 });

@@ -262,41 +262,52 @@ describe("Water Gun tree: resistanceBreaker fixes the real weakness", () => {
   });
 });
 
-describe("Hydro Pump tree: raw overwhelming force", () => {
+describe("Hydro Pump tree: v3 redesign — overwhelming, genuinely hard to aim", () => {
   const hydroPump = MOVES.hydro_pump;
 
-  it("Tidal Devastation keystone is reachable through the Aggression fork", () => {
-    const respec = applyMoveTree(hydroPump, [
-      "pressurized_core",
-      "surging_jets",
-      "deluge_footing",
-      "overwhelming_flow",
-      "torrent_conditioning",
-      "concentrated_blast",
-      "torrential_downpour",
-      "current_precision",
-      "tidal_devastation",
-    ]);
-    expect(respec.critRateStage).toBe(2);
+  it("Building Pressure is a real wind-up cost (lockTicks), not a free power bump", () => {
+    const respec = applyMoveTree(hydroPump, ["building_pressure"]);
+    expect(respec.power).toBe(hydroPump.power + 15);
+    expect(respec.lockTicks).toBe(1);
   });
 
-  it("Abyssal Pressure keystone fixes the real Grass/Water/Dragon resist", () => {
-    const respec = applyMoveTree(hydroPump, [
-      "grounded_stance",
-      "steady_flow",
-      "undertow_footing",
-      "steady_current",
-      "current_grip",
-      "measured_flow",
-      "eroding_current",
-      "current_resolve",
-      "abyssal_pressure",
+  it("Undertow Pull is reachable through either Aggression fork and drags the target on a swap", () => {
+    const viaNuke = applyMoveTree(hydroPump, [
+      "building_pressure",
+      "pump_conditioning",
+      "overwhelm_footing",
+      "bursting_main",
+      "widening_main",
+      "overwhelm_surge",
+      "undertow_pull",
     ]);
-    expect(respec.resistanceBreaker).toEqual({ multiplier: 2 });
+    expect(viaNuke.positionSwap).toBe(true);
+    expect(viaNuke.positionSwapPull).toBe(1);
+  });
+
+  it("Tidal Bastion is a real two-passive keystone, distinct from Water Gun's own resistanceBreaker", () => {
+    const node = hydroPump.tree!.tidal_bastion;
+    expect(node.grantsPassives).toEqual([
+      { kind: "defenseBoost", value: 0.1 },
+      { kind: "regen", value: 0.02 },
+    ]);
+    expect(node.delta.resistanceBreaker).toBeUndefined();
+  });
+
+  it("Sociability's fork is a real positional choice (push the threat back vs. interpose yourself), not the reused damageReduction/jam template", () => {
+    const guard = hydroPump.tree!.undertow_guard;
+    const charge = hydroPump.tree!.riptide_charge;
+    expect(guard.delta.forcedMovement).toEqual({ mover: "defender", direction: "away", tiles: 1, timing: "onHit" });
+    expect(charge.delta.forcedMovement).toEqual({ mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" });
+  });
+
+  it("the Aggression<->Boldness crosslink directly answers the wind-up cost its own branch introduces", () => {
+    const respec = applyMoveTree(hydroPump, ["building_pressure", "wading_advance", "surge_and_brace"]);
+    expect(respec.lockTicks).toBe(0); // +1 from Building Pressure, -1 from the crosslink
   });
 });
 
-describe("Solar Beam tree: real long reach, single target", () => {
+describe("Solar Beam tree: v3 redesign — a guardian's dominance display", () => {
   const solarBeam = MOVES.solar_beam;
 
   it("has no hitsArea by default — Solar Beam stays a single-target beam, just with real range", () => {
@@ -304,48 +315,117 @@ describe("Solar Beam tree: real long reach, single target", () => {
     expect(solarBeam.shape).toEqual({ kind: "line", length: 5 });
   });
 
-  it("Photosynthetic Ward keystone fixes Grass's real multi-type resists", () => {
-    const respec = applyMoveTree(solarBeam, [
-      "steady_roots",
-      "deepening_roots",
-      "rooted_footing",
-      "unwavering_stance",
-      "canopy_grip",
-      "piercing_focus",
-      "withering_grasp",
-      "root_resolve",
-      "photosynthetic_ward",
+  it("Claim the Grove is a real clashing-flavored bonus vs. a rival Grass-type, reachable through either Aggression fork", () => {
+    const viaGlare = applyMoveTree(solarBeam, [
+      "gathering_light",
+      "focusing_lens",
+      "dominance_footing",
+      "piercing_ray",
+      "widening_beam",
+      "withering_glare",
+      "claim_the_grove",
     ]);
-    expect(respec.resistanceBreaker).toEqual({ multiplier: 2 });
-    expect(respec.statChangeOnHit).toEqual({ target: "defender", stat: "spAttack", stage: -1, ticks: 20 });
+    expect(viaGlare.bonusVsType).toEqual({ type: "grass", multiplier: 1.5 });
+  });
+
+  it("Ancient Grove is a real two-passive keystone (thorns + regen), distinct from the resistanceBreaker every other move's Boldness branch reaches for", () => {
+    const node = solarBeam.tree!.ancient_grove;
+    expect(node.grantsPassives).toEqual([
+      { kind: "thorns", value: 0.1 },
+      { kind: "regen", value: 0.02 },
+    ]);
+    expect(node.delta.resistanceBreaker).toBeUndefined();
+  });
+
+  it("Sociability's fork makes the ally-effect overwrite an explicit, deliberate choice (heal the grove vs. steel it), not an emergent quirk", () => {
+    const healed = applyMoveTree(solarBeam, ["grove_ward", "grove_footing", "grove_reach", "grove_muster", "grove_precision", "vital_bloom"]);
+    expect(healed.allyEffect).toEqual({ healFraction: 0.25 });
+
+    const steeled = applyMoveTree(solarBeam, [
+      "grove_ward",
+      "grove_footing",
+      "grove_reach",
+      "grove_muster",
+      "grove_precision",
+      "steadfast_bloom_ally",
+    ]);
+    expect(steeled.allyEffect).toEqual({ buff: { stat: "defense", stage: 2, ticks: 20 } });
+  });
+
+  it("rejects choosing both sides of the ally-effect fork", () => {
+    expect(() =>
+      applyMoveTree(solarBeam, [
+        "grove_ward",
+        "grove_footing",
+        "grove_reach",
+        "grove_muster",
+        "grove_precision",
+        "vital_bloom",
+        "steadfast_bloom_ally",
+      ])
+    ).toThrow(/conflicts with already-chosen/);
   });
 });
 
-describe("Earthquake tree: self-centered burst AoE", () => {
+describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to read", () => {
   const earthquake = MOVES.earthquake;
 
   it("is a real self-centered AoE by default, not just a single-target hit", () => {
     expect(earthquake.hitsArea).toBe(true);
     expect(earthquake.shape).toEqual({ kind: "burst", radius: 2 });
+    // The base move never exempts allies on its own — that's earned.
+    expect(earthquake.excludesAllies).toBeUndefined();
   });
 
-  it("Fault Line grants the defenseBoost passive, diversifying away from flat damageReduction", () => {
-    const node = earthquake.tree!.fault_line;
-    expect(node.grantsPassive).toEqual({ kind: "defenseBoost", value: 0.1 });
+  it("Herdsafe Trigger is the Sociability opener that turns on excludesAllies immediately", () => {
+    const respec = applyMoveTree(earthquake, ["herdsafe_trigger"]);
+    expect(respec.excludesAllies).toBe(true);
   });
 
-  it("Tectonic Shield keystone fixes Ground's real Grass/Bug resists", () => {
+  it("Fissure Grip (Boldness opener) leaves real hazard terrain, live from the first point spent", () => {
+    const respec = applyMoveTree(earthquake, ["fissure_grip"]);
+    expect(respec.terrainFill).toEqual({ terrain: "mud" });
+  });
+
+  it("the Aggression fork is a real AoE-size decision: Total Collapse widens the blast, Focused Rupture narrows it", () => {
+    const widen = applyMoveTree(earthquake, [
+      "fault_trigger",
+      "shaking_ground",
+      "overload_footing",
+      "aftershock_barrage",
+      "seismic_feed",
+      "total_collapse",
+    ]);
+    expect(widen.shape).toEqual({ kind: "burst", radius: 3 });
+
+    const narrow = applyMoveTree(earthquake, [
+      "fault_trigger",
+      "shaking_ground",
+      "overload_footing",
+      "aftershock_barrage",
+      "seismic_feed",
+      "focused_rupture",
+    ]);
+    expect(narrow.shape).toEqual({ kind: "burst", radius: 1 });
+  });
+
+  it("Ruinous Ground keystone fixes Ground's real Grass/Bug resists", () => {
     const respec = applyMoveTree(earthquake, [
-      "anchored_stance",
-      "bedrock_momentum",
-      "anchor_footing",
-      "immovable_ground",
-      "tectonic_grip",
-      "steady_tremor",
-      "fault_line",
-      "bedrock_resolve",
-      "tectonic_shield",
+      "fissure_grip",
+      "bedrock_footing_2",
+      "cracking_footing",
+      "bedrock_anchor",
+      "deepening_fissure",
+      "grounding_brace",
+      "rubble_wall",
+      "fracture_precision",
+      "ruinous_ground",
     ]);
     expect(respec.resistanceBreaker).toEqual({ multiplier: 2 });
+  });
+
+  it("Sanctuary Quake keystone is a real, ongoing herd payoff", () => {
+    const node = earthquake.tree!.sanctuary_quake;
+    expect(node.grantsPassive).toEqual({ kind: "healAura", value: 0.015 });
   });
 });

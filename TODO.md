@@ -3,6 +3,28 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Hydro Pump/Solar Beam/Earthquake redesigned against v3 principles — built
+
+Direct follow-up to the v3 principles below: "go ahead and redesign all
+three." Rebuilt all three flagship trees in `packages/data/src/moves.ts`
+from scratch against their own actual fantasy instead of the reused v2
+kit — see MOVES_DESIGN.md's new "Hydro Pump / Solar Beam / Earthquake —
+v3 redesign" writeup for the full per-branch reasoning. One genuinely new
+engine primitive shipped along the way, not just prose: `MoveSpec.
+excludesAllies` (+ the matching `MoveTreeNode.delta` field), wired into
+`resolveAreaHit`'s target filter (predation.ts) so an AoE move can
+actually spare same-herd agents — Earthquake's *Herdsafe Trigger* is the
+first real content. New tests: 2 in predation.test.ts (excludesAllies
+spares an ally but not an unrelated bystander; without the flag, an ally
+still takes the hit exactly like before), 1 fixture update in
+moves.test.ts, plus rewritten move-specific assertions in
+moveTrees.test.ts for all three redesigned trees (the generic per-move
+structural suite re-validated them automatically). Full suite green: 990
+engine + 171 data tests. Next: update the Move Tree Atlas artifact with
+the new trees, plus a small grid visualization showing each move's real
+range/AoE footprint from the user's position — requested alongside this
+redesign, not yet built as of this entry.
+
 ## Move-tree redesign: start from the fantasy — principles written, trees pending
 
 Direct critique after reviewing the shipped trees in the Move Tree Atlas

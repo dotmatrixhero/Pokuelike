@@ -53,6 +53,7 @@ grepping for "needs" across the whole file.
 | Cross-agent effects (a move's hit affects an ally, not just the target) | Vine Link, Nurturing Vines, Rally Charge, Warning Lash | **Shipped** — `MoveSpec.targetsAlly`/`allyEffect` (heal and/or buff), resolved by `applySupportMove` (support.ts) from the agent's own idle/support tick — a genuinely separate path from `resolveHit`'s hostile resolution, as this doc's own "why status effects and environmental moves are two different systems" section predicted a cross-agent effect would need. **Refined per feedback**: `targetsAlly` no longer excludes a move from hostile selection either — `pickBestMove` (combat.ts) treats it as an ordinary attack option too (using whatever power/accuracy/other combat deltas it's accumulated), so every real "ally-opener" node (Colony Call, Flock Call, Shared Current, etc.) is additive to that move's combat identity, not a trade-off against it. The two effects never fire in the same tick (predation gets first refusal every tick before `applySupportMove` even runs, and both share the same cooldown via `useMove`) |
 | Ally-effect piggybacking on an attack (`MoveSpec.allyEffectOnAttack`) | "Make it so some of 'em not only do it as a separate target but also auto trigger if using against an enemy while ally is in range too" — a second, independent way the ally-effect fires, on top of (not instead of) `targetsAlly`'s dedicated idle-tick use | **Shipped** — checked in `resolveHit` (predation.ts) the instant the move is used against an enemy, same timing as `statChangeOnHit`'s self-side effect, independent of whether the attack itself lands: finds the nearest in-range, hurt-preferred herd-mate (`nearestAllyEffectTarget`, support.ts — the same "who gets it" rule `applySupportMove` uses, pulled out so both share it) and applies `allyEffect` to them too, at no extra cost. Works with or without `targetsAlly` also set — a move can auto-trigger on attack without ever being a dedicated idle-tick support move, or do both. First real content: Scratch's *Colony Call* and Water Gun's *Shared Current* (see below) |
 | Multi-target/AoE resolution (apply a move to every agent within its resolved shape, not one target) | Growl (its entire premise), Firestorm, Ring of Fire's full fantasy, Boulder Toss/Skipping Stone | **Shipped** — `MoveSpec.hitsArea`, resolved by `resolveAreaHit` (predation.ts): facing derived from attacker->primary-target direction, `resolveShape` finds every living agent in the move's footprint, each gets its own accuracy roll and damage instance; only the deliberately-picked primary target gets status/stat-change/forced-movement/position-swap hooks, incidental targets just take the raw hit. Confirmed in a real fight: a ring-shaped move centered on the attacker landed on both the picked target and an unrelated bystander standing on the same ring. Growl itself still isn't built — see below |
+| AoE ally-exemption (`MoveSpec.excludesAllies`) | A reckless AoE (Earthquake) that a drilled herd learns not to get caught in | **Shipped** — one extra condition in `resolveAreaHit`'s existing target filter, skipping agents whose `herdId` matches the attacker's when the move sets this flag. Without it (the default, and every AoE move's real behavior before this field existed), a same-herd agent caught in the blast takes the hit exactly like an enemy would. First real content: Earthquake's *Herdsafe Trigger* (see below) |
 | Persistent stat stages (`Agent`-level Attack/Defense/etc. modifiers, settable by a move, lasting until cured — distinct from burn's one-off computed halving, which just derives a stage from `agent.status` fresh at each `calculateDamage` call rather than storing one) | Growl specifically (`statStageMultiplier` already exists in combat.ts as a pure function; burn now calls it, but from a computed value, not a stored `Agent.statStages` field) | **Shipped** — `Agent.statStages` (an array of `{stat, stage, ticksRemaining?}` entries, `status.ts`'s `applyStatStage`/`getStatStage`), fed into `calculateDamage`'s existing stat-stage machinery for both attacker and defender, and composing additively with burn's own -2 Attack. `MoveSpec.statChangeOnHit` is the move-level lever: `target: "self"` applies the instant the move is used, `target: "defender"` only on a landed, non-killing hit. **Growl itself is still not built** — it needs this primitive plus multi-target/AoE (both now shipped) plus a no-damage/status-move representation, which remains the one open piece |
 | Status-effect system (burn/poison DOT, paralysis/sleep/freeze) | Ember's/Flamethrower's burn chance, previously idle | **Shipped** — see DESIGN.md's "Status effects" section. Constrict's designed root effect still needs a sixth `StatusKind` (`"root"`), not modeled yet |
 | Idle/opportunistic utility-move trigger (`MoveSpec.utilityMove` + `utilityMoves.ts`'s `maybeUseUtilityMove`) | Growth, Agility, Rain Dance, and every other self/tile-effect move on this whole list — the real gap this section's own "why status effects and environmental moves are two different systems" note predicted | **Shipped** — the third trigger path, alongside the hostile hit pipeline and the ally-support one, checked whenever `chooseBehavior(agent.needs) === "idle"` (needs.ts, NOT `agent.behavior === "idle"` — see this section's own note on why that gate under-fired in a real run). `pickBestMove` excludes `utilityMove`-flagged moves from hostile selection, same as `burrow`. First real content: 13 curated moves, see "Environmental utility moves" above |
@@ -1147,17 +1148,16 @@ staying a point-blank stab — `packages/data/src/moves.ts`:
 
 Three got the full flagship triangle treatment (33 nodes each, same
 template as Tackle/Peck/Rock Throw/etc.) — **Hydro Pump**, **Solar Beam**,
-**Earthquake**. Each Boldness branch keystone is a `resistanceBreaker`
-fixing that move's own real multi-type resist (Hydro Pump: Grass/Water/
-Dragon; Solar Beam: Fire/Grass/Poison/Flying/Bug/Dragon; Earthquake:
-Grass/Bug), same "fix the real weakness, not a redundant bonus" standard
-Water Gun's own tree set. Earthquake's Boldness notable (*Fault Line*)
-uses the `defenseBoost` passive instead of another flat `damageReduction`,
-per this doc's own note on diversifying that lever. Structural integrity
-and each keystone's mechanic are covered by
-`packages/data/test/moveTrees.test.ts` (which validates every treed move
-generically, so these three were checked by the same suite the first four
-trees added, with a few new move-specific assertions on top).
+**Earthquake**. ~~Each Boldness branch keystone is a `resistanceBreaker`
+fixing that move's own real multi-type resist~~ — **superseded, see the
+"v3 redesign" writeups below**: direct critique that this first pass read
+as copy-pasted (the same fork shapes, the same `resistanceBreaker`
+keystone, three times over) led to "Skill-tree template v3 — start from
+the fantasy" above and a full redesign of all three trees against it.
+Structural integrity and each tree's signature mechanics are covered by
+`packages/data/test/moveTrees.test.ts` (the generic per-move suite
+re-validates any redesign automatically; each tree also got new
+move-specific assertions matching its actual v3 mechanics).
 
 Real, honest scope note: the roster has grown to 45+ curated species (most
 of the growth came from elsewhere, not this pass) and most still know only
@@ -1167,6 +1167,95 @@ moves before it), not a full pass across every species. A good next
 follow-up, not done here: Fire's still Ember/Flamethrower-only (no AoE fire
 move yet), and most Bug/Dragon/beach-biome species still have nothing past
 Tackle.
+
+### Hydro Pump / Solar Beam / Earthquake — v3 redesign (Shipped)
+
+Direct critique of the original three flagship trees above: "the design
+looks like you just copied over effects from other trees. That's
+uninspired." Rebuilt against "Skill-tree template v3 — start from the
+fantasy," each with a real, distinct fantasy driving its three branches
+instead of a reused kit. `packages/data/src/moves.ts`'s own comment block
+on each move has the full reasoning; this is the summary.
+
+- **Earthquake** — a self-centered shockwave that doesn't distinguish
+  friend from foe (real, per `resolveAreaHit`'s lack of a herd filter
+  before this pass).
+  - **Aggression ("Overload")**: stays power-archetype on purpose — loud,
+    obvious destruction isn't a stealth fantasy. *Fault Trigger*
+    (`weightScaling`) → a real AoE-size fork, *Total Collapse* (widens the
+    burst to radius 3) vs. *Focused Rupture* (narrows to radius 1, more
+    power/penetration) → *Cataclysm* (power + `recoilFraction` — the
+    ground doesn't spare the one shaking it either).
+  - **Boldness ("Fracture")**: reshapes the battlefield instead of
+    defaulting to flat tankiness — *Fissure Grip* leaves real hazard
+    terrain (`terrainFill: "mud"`) from the very first point spent, a
+    fork between widening the rift further or bracing at the cost of a
+    real `lockTicks`, and *Rubble Wall* physically shoves anyone standing
+    in the rubble away. Keystone *Ruinous Ground* still fixes Ground's
+    real Grass/Bug resist — the objectively correct answer for this
+    move's own type chart, kept rather than swapped out for novelty's own
+    sake.
+  - **Sociability ("Herdsafe Ground")**: turns the move's flaw into its
+    payoff — opener *Herdsafe Trigger* turns on the new `excludesAllies`
+    primitive immediately (see the primitives checklist above), and *Rally
+    Quake* auto-buffs a nearby ally on every attack. Keystone *Sanctuary
+    Quake* (`healAura`) is the herd's actual reward for standing close to
+    something that used to be dangerous to them.
+  - **Crosslinks**: *Cracking Momentum* (Aggression↔Boldness, a real lunge
+    into the rubble the move just created) · *Fractured Warning*
+    (Boldness↔Sociability, `jamCooldownTicks`) · *Coordinated Tremor*
+    (Sociability↔Aggression, `rallyCall`).
+
+- **Hydro Pump** — an overwhelming, genuinely hard-to-aim current (the
+  dex's own 80 accuracy is the fantasy, not a flaw to filler away).
+  - **Aggression ("Overwhelm")**: power-archetype, deliberately — Hydro
+    Pump's whole mainline identity is the biggest blast, not an ambush or
+    a territorial squabble. *Building Pressure* is a real wind-up cost
+    (`lockTicks`), not a free power bump; the fork (*Overwhelm* vs.
+    *Relentless Surge*) is nuke-vs-sustained; keystone *Undertow Pull* is
+    the roster's second `positionSwap`+`positionSwapPull` use, its own
+    backwash literally dragging the target.
+  - **Boldness ("Bastion")**: genuinely defensive, and earned — a bulky
+    tank (Blastoise/Lapras) channeling a controlled deluge. *Wading
+    Advance* is a positional opener (closes distance before unleashing,
+    not just a stat bump); keystone *Tidal Bastion* is a two-passive
+    (`defenseBoost`+`regen`) payoff, deliberately not another
+    `resistanceBreaker` — Water Gun already owns that exact fix for this
+    type family.
+  - **Sociability ("Pod Tide")**: the fork is a real positional choice —
+    *Undertow Guard* (push the threat away from the herd) vs. *Riptide
+    Charge* (surge forward to meet it first) — instead of the
+    damageReduction/jamCooldown template reused everywhere else.
+  - **Crosslinks**: *Surge and Brace* (Aggression↔Boldness, `lockTicks:
+    -1` — directly answers the cost Building Pressure itself introduces,
+    not just flavor) · *Steadfast Tide* (Boldness↔Sociability, shared
+    `regen`) · *Wake of Violence* (Sociability↔Aggression, `critRateStage`
+    off a rallied target).
+
+- **Solar Beam** — concentrated sunlight gathered into one overwhelming,
+  precise beam; Venusaur's own real guardian role (see species.ts) drives
+  this tree directly instead of a generic power-move shape.
+  - **Aggression ("Dominance")**: the widened design space's *clashing*
+    flavor — a territorial grazer asserting dominance, not just raw
+    damage. Keystone-adjacent *Claim the Grove* uses `bonusVsType` vs.
+    Grass — a real rival of the user's own kind gets punished hardest,
+    the mechanically correct expression of "clashing" (Grass resists
+    Grass 0.5x).
+  - **Boldness ("Bulwark")**: genuinely tanky, earned by the species —
+    fork between *Guardian's Ground* (`elevation` situational bonus) and
+    *Verdant Wall* (`thorns` passive); keystone *Ancient Grove* pairs
+    `thorns`+`regen`, distinct from every other move's Boldness keystone
+    in this batch.
+  - **Sociability ("Grove")**: makes explicit, via a real `excludes` fork,
+    a mechanic the engine already had implicitly — a later `allyEffect`
+    node overwrites an earlier one (true since Tackle's own tree).
+    *Vital Bloom* (heal the grove) vs. *Steadfast Bloom* (steel it) is now
+    a deliberate choice with its own dedicated fork instead of an
+    emergent quirk of node order.
+  - **Crosslinks**: *Rooted Assault* (Aggression↔Boldness,
+    `defensePenetration`) · *Shared Shade* (Boldness↔Sociability, shared
+    `regen`) · *Territorial Flare* (Sociability↔Aggression, `flanking`
+    situational bonus off the herd's own warning).
 
 ## Build order recommendation, across everything above
 
