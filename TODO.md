@@ -107,12 +107,26 @@ most of what a player could actually reach via evolution has numbers but no
 personality). Explicit response, roughly in the user's own stated order —
 none of this is built yet, this section is purely to not lose the thread:
 
-- [ ] **More species, more behaviors** — grow the curated `SPECIES` roster
-      (species.ts) past its current 17, and give more of them real
-      ecological roles (`buildsShelter`, `preferredTerrain`,
-      `obligateAquatic`, biome list) rather than leaving most of the dex's
-      1083 species as stats-only fallback with no personality once an
-      agent evolves onto one.
+- [x] **More species, more behaviors — evolution lines completed.** Every
+      evolution reachable from the existing 17-species roster (Ivysaur,
+      Charmeleon/Charizard, Wartortle/Blastoise, Gyarados, Tentacruel) now
+      has its own curated `SpeciesDef` — 24 species now, up from 17 — with
+      real biomes/preferredTerrain/moves rather than falling back to
+      generic dex stats with no personality the instant an agent evolved.
+      Sprite art already existed for all of them (public/sprites/ covers
+      the full Gen 1 dex). Real bonus fix: Gyarados curated with
+      `obligateAquatic` correctly OMITTED (mainline Gyarados leaves water
+      routinely) resolves Magikarp's own "doesn't reset on evolution" gap
+      for this specific case, since `computeProfileFromDexEntry` reads the
+      CURRENT species' own tag, not an inherited one. Verified live: a real
+      5000-tick run produced Ivysaur, Charmeleon, Charizard, and Gyarados
+      via ordinary in-sim evolution, all correctly reflecting their new
+      curated behavior. Automatically picked up by immigration's species
+      roster (`Object.values(SPECIES)`) and this session's own biome-fit
+      recovery mechanic, no extra wiring needed.
+      Still open: this only closes evolution gaps on the CURRENT roster —
+      growing the roster with genuinely new base-form lines (past these 24)
+      wasn't attempted this pass.
 - [ ] **Cross-zone migration patterns** — direct follow-up to the extinction
       fix's own remaining gap (see the `[ ]` right above it): raise
       `EMIGRATION_CHANCE_PER_TICK`/rework the trigger so populations

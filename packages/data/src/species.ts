@@ -442,4 +442,111 @@ export const SPECIES: Record<string, SpeciesDef> = {
     biomes: ["wetland"],
     preferredTerrain: ["water"],
   }),
+
+  // --- Evolution-line completions below. Direct follow-up to a "what's
+  // missing" review: every evolution above was reachable purely through
+  // in-sim leveling, but `SPECIES[agent.species]` — the ONLY source for
+  // ecological behavior (biomes/preferredTerrain/buildsShelter/
+  // obligateAquatic; see leveling.ts's `computeProfileFromDexEntry`) — had
+  // no entry for any of them, so an evolved agent quietly lost all
+  // personality the instant it evolved (also why its sprite briefly stopped
+  // rendering too, before that separate renderer.ts fallback fix). Sprite
+  // art for every one of these already exists (public/sprites/) and was
+  // spot-checked rendering correctly. Each keeps its pre-evolution's own
+  // flavor/behavior tags rather than reinventing them, upgrading only what
+  // a real evolution plausibly changes (a stronger move once one exists in
+  // the small curated `MOVES` roster; broader activity for a former prey
+  // species that's outgrown most of its predators).
+  ivysaur: speciesFromDex("IVYSAUR", {
+    spriteKey: "ivysaur",
+    placeholderColor: "#5cae5c",
+    homeLayer: "surface",
+    moves: ["tackle", "vine_whip"],
+    // Same sun-grazing temperament as Bulbasaur — the bulb (now a bud)
+    // still needs light to keep growing toward its eventual bloom.
+    activityPattern: "diurnal",
+    biomes: ["grassland", "forest"],
+    preferredTerrain: ["flora"],
+  }),
+  charmeleon: speciesFromDex("CHARMELEON", {
+    spriteKey: "charmeleon",
+    placeholderColor: "#f5701c",
+    homeLayer: "surface",
+    // Bigger flame, same fuel source — "scratch" as a real physical attack
+    // alongside Ember now that it's grown claws worth using, rather than
+    // just a hotter Charmander.
+    moves: ["scratch", "ember"],
+    activityPattern: "diurnal",
+    biomes: ["badlands"],
+    preferredTerrain: ["sunbeam"],
+  }),
+  charizard: speciesFromDex("CHARIZARD", {
+    spriteKey: "charizard",
+    placeholderColor: "#e8712c",
+    homeLayer: "surface",
+    // The roster's one curated Flamethrower user — its tail flame is
+    // "said to burn even more intensely" per mainline flavor text, so the
+    // upgrade from Ember is the whole point of finally reaching this stage.
+    moves: ["slash", "flamethrower"],
+    // Deliberately left cathemeral (the default), same reasoning as
+    // Venusaur above — by this stage it's an apex flyer/predator design in
+    // the mainline games, not a creature still keeping a grazer's hours.
+    biomes: ["badlands", "highland"],
+    preferredTerrain: ["sunbeam"],
+  }),
+  wartortle: speciesFromDex("WARTORTLE", {
+    spriteKey: "wartortle",
+    placeholderColor: "#4a80c0",
+    homeLayer: "surface",
+    moves: ["tackle", "water_gun"],
+    biomes: ["wetland"],
+    preferredTerrain: ["water"],
+  }),
+  blastoise: speciesFromDex("BLASTOISE", {
+    spriteKey: "blastoise",
+    placeholderColor: "#3868a8",
+    homeLayer: "surface",
+    // The roster's strongest curated Water move is still Water Gun (no
+    // Hydro Pump in the small `MOVES` set yet) — Tackle stays alongside it
+    // rather than being dropped, the same "keep the pre-evolution's kit,
+    // don't strip it down" approach every entry in this batch takes.
+    moves: ["tackle", "water_gun"],
+    biomes: ["wetland"],
+    preferredTerrain: ["water"],
+  }),
+  gyarados: speciesFromDex("GYARADOS", {
+    spriteKey: "gyarados",
+    placeholderColor: "#4060a8",
+    homeLayer: "surface",
+    // Real fix, not just a new entry: Magikarp's own doc comment above
+    // flags that `obligateAquatic` "doesn't reset on evolution" as an
+    // accepted gap, since it's denormalized once at spawn from whatever
+    // species an agent WAS — but `computeProfileFromDexEntry` actually
+    // reads `SPECIES[speciesId]` for the agent's CURRENT species every
+    // time, so simply curating Gyarados here with its own (real, accurate)
+    // tag resolves that specific case: mainline Gyarados is a
+    // Water/Flying rampaging serpent capable of leaving water entirely
+    // (thrashing on land, breaking free of it, is a recurring anime/manga
+    // beat), so `obligateAquatic` is correctly omitted rather than
+    // inherited — an evolved Gyarados now genuinely stops being
+    // water-locked instead of staying stuck with Magikarp's restriction
+    // forever.
+    isPredator: true,
+    moves: ["tackle"],
+    biomes: ["wetland"],
+    preferredTerrain: ["water"],
+  }),
+  tentacruel: speciesFromDex("TENTACRUEL", {
+    spriteKey: "tentacruel",
+    placeholderColor: "#7860a8",
+    homeLayer: "surface",
+    isPredator: true,
+    moves: ["water_gun"],
+    // Genuinely obligate-aquatic in mainline flavor text too (Tentacool's
+    // own comment above already notes this isn't a real mismatch) — unlike
+    // Gyarados, this one legitimately keeps the tag on evolving.
+    obligateAquatic: true,
+    biomes: ["wetland"],
+    preferredTerrain: ["water"],
+  }),
 };
