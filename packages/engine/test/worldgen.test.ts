@@ -390,6 +390,37 @@ describe("generateWorld: Badlands BSP chambers", () => {
       }
     }
   });
+
+  it("boundary lines meander instead of tracing a mathematically straight edge — direct ask: 'less rigidly room like... more organic, wobbly, rock shelf like'", () => {
+    // A raw (pre-wobble) BspBoundary line holds one coordinate perfectly
+    // constant along its whole length — e.g. a vertical line's every tile
+    // shares the exact same x, for up to the map's own height. The real,
+    // checkable signature of that rigidity: a long unbroken run of
+    // boulder/wall tiles sharing the same x (scanning down a column) or
+    // same y (scanning across a row). Post-wobble, the actual painted
+    // column/row should drift within a few tiles well before any such run
+    // gets anywhere near map-spanning length.
+    function longestSameColumnRun(world: ReturnType<typeof generateWorld>): number {
+      let longest = 0;
+      for (let x = 0; x < world.width; x++) {
+        let run = 0;
+        for (let y = 0; y < world.height; y++) {
+          const terrain = tileAt(world, "surface", x, y)!.terrain;
+          run = terrain === "boulder" || terrain === "wall" ? run + 1 : 0;
+          longest = Math.max(longest, run);
+        }
+      }
+      return longest;
+    }
+
+    for (const seed of [42, 7, 2, 5, 9, 11]) {
+      const world = generateWorld(90, 60, seed);
+      // Well under the map's own height (60) — a straight vertical line long
+      // enough to span most/all of a `BSP_MIN_LEAF_SIZE`(10)+ chamber's own
+      // height would otherwise easily clear 20-30+ tiles of identical x.
+      expect(longestSameColumnRun(world)).toBeLessThan(15);
+    }
+  });
 });
 
 describe("generateWorld: Underground cellular-automata caves", () => {

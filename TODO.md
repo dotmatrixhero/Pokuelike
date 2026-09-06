@@ -142,11 +142,23 @@ none of this is built yet, this section is purely to not lose the thread:
       a minor abundance dip. This is a macro-grid-scale weather system
       layered on top of (not replacing) the existing per-tile one — doesn't
       exist yet in any form.
-- [ ] **Badlands BSP terrain reads too room-like.** Direct ask: keep BSP as
-      the starting structure, but make the result "more organic, wobbly,
-      rock shelf like" instead of rigid rectangular chambers — a
-      post-process/erosion pass over the current BSP output, not a
-      replacement generator.
+- [x] **Badlands BSP terrain now wobbles instead of reading as rigid
+      rectangular chambers.** Direct ask: keep BSP as the starting structure
+      (still the same recursive rectangle split, still
+      `BSP_MIN_LEAF_SIZE`+ chambers), just paint it differently — each
+      boundary line's actual painted position now offsets a few tiles
+      perpendicular to its own direction (`BSP_WOBBLE_AMPLITUDE`, worldgen.ts),
+      driven by the same smooth value-noise (`makeNoise2D`) this file already
+      uses elsewhere, sampled per-line so every boundary meanders
+      independently rather than in lockstep. A mathematically straight
+      dungeon wall now reads as an eroded rock shelf. New regression test
+      (`worldgen.test.ts`) directly measures this: longest unbroken
+      same-column run of boulder/wall tiles, confirmed to fail (18+ tiles)
+      with the wobble disabled and pass (<15) with it on — a real, checkable
+      difference, not just an eyeballed screenshot. Visually confirmed too
+      (ASCII dump + a live Tile-mode screenshot at seed 42: genuinely jagged
+      terrain-boundary steps, not straight edges). Full suite green
+      (974/974).
 - [ ] **More terrain-generation variety at the zone/regional scale** — large
       contiguous stretches that mean something (a real desert spanning
       several zones, islands), not just per-tile biome noise. Direct ask:

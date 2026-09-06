@@ -821,6 +821,33 @@ const BSP_WALL_CHANCE = 0.08;
  */
 const BSP_SAFE_GAP_FRACTION = 0.25;
 
+/**
+ * Direct ask: "the badlands bsp is cool, but needs to be less rigidly room
+ * like... more organic, wobbly, rock shelf like." A raw `BspBoundary` is a
+ * mathematically perfect straight line — this is the fix, not a
+ * replacement generator: keep BSP's actual room layout (still splits into
+ * `BSP_MIN_LEAF_SIZE`+ rectangular chambers, still the same recursive
+ * partition), but PAINT each line with a smooth per-tile offset
+ * perpendicular to its own direction instead of tracing it exactly, so a
+ * chamber wall meanders like a real eroded rock shelf rather than reading
+ * as a ruler-straight dungeon wall. `BSP_WOBBLE_AMPLITUDE` tiles either
+ * side is a real, visible waver without threatening `BSP_MIN_LEAF_SIZE`
+ * chambers' own floor space (a chamber's interior is never wobbled, only
+ * its boundary lines are).
+ */
+const BSP_WOBBLE_AMPLITUDE = 3;
+
+/**
+ * How slowly the wobble noise varies along a line's length — a bigger
+ * number reads as a long, lazy meander (the "rock shelf" look actually
+ * asked for); a small one would just look like jittery static, closer to
+ * per-tile independent noise than an eroded edge. Comparable to
+ * `BSP_MIN_LEAF_SIZE` so a wobble's own "wavelength" is on the same visual
+ * scale as the chambers it's carving, rather than either much shorter
+ * (busy/noisy) or much longer (barely visible over one line's length).
+ */
+const BSP_WOBBLE_NOISE_SCALE = 12;
+
 interface BspBoundary {
   /** "vertical": a line of constant `x`, spanning `y` in `[y, y + length)`. "horizontal": constant `y`, spanning `x` in `[x, x + length)`. */
   orientation: "vertical" | "horizontal";
@@ -896,13 +923,20 @@ function carveBadlandsChambers(world: World, width: number, height: number, rng:
   const boundaries: BspBoundary[] = [];
   splitBspRect(rng, 0, 0, width, height, boundaries);
 
+  // Sampled at (position-along-line, this-line's-own-fixed-coordinate) below
+  // — the fixed coordinate differs per line, so every boundary automatically
+  // gets its own independent-looking noise "row" with no extra bookkeeping,
+  // while still varying smoothly along any single line's length.
+  const wobbleNoise = makeNoise2D(rng, Math.max(width, height), Math.max(width, height), BSP_WOBBLE_NOISE_SCALE);
+
   for (const boundary of boundaries) {
     const safeGapLength = Math.max(1, Math.round(boundary.length * BSP_SAFE_GAP_FRACTION));
     const safeGapStart = Math.floor(rng() * Math.max(1, boundary.length - safeGapLength));
 
     for (let i = 0; i < boundary.length; i++) {
-      const x = boundary.orientation === "vertical" ? boundary.x : boundary.x + i;
-      const y = boundary.orientation === "vertical" ? boundary.y + i : boundary.y;
+      const wobble = Math.round((wobbleNoise(i, boundary.orientation === "vertical" ? boundary.x : boundary.y) - 0.5) * 2 * BSP_WOBBLE_AMPLITUDE);
+      const x = boundary.orientation === "vertical" ? boundary.x + wobble : boundary.x + i;
+      const y = boundary.orientation === "vertical" ? boundary.y + i : boundary.y + wobble;
       if (x < 0 || y < 0 || x >= width || y >= height) continue;
 
       const tile = tileAt(world, "surface", x, y);
