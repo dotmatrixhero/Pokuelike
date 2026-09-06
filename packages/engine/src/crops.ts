@@ -1,19 +1,23 @@
 /**
  * Real food crops — CROPS_DESIGN.md's direct ask: "more kinds of food, not
  * just berries... nutrition dense, grow in certain regions and seasons, and
- * be heavily contested." Replaces `flora.ts`'s old `FOOD_FLAVORS` (a purely
- * cosmetic glyph/color pick with zero gameplay effect) with a real registry
- * gated on biome, runtime moisture, and season — reusing existing hooks
- * (`worldgen.ts`'s `biomeWeightsAt`/`effectiveWaterDensityAt`,
- * `flora.ts`'s own decay-only season wave, `herdConflict.ts`'s already-built
- * rivalry trigger for the "heavily contested" payoff) rather than inventing
- * parallel mechanisms. Deliberately dependency-free (no imports from
- * `flora.ts`/`worldgen.ts`) so both of those can import from here without
- * a circular import — `worldgen.ts` used to import `FOOD_FLAVORS` from
- * `flora.ts` for exactly this reason; this module replaces that need.
+ * be heavily contested." Direct follow-up correction: "I think we need to
+ * keep berry as food sources tho" — the four original berries (Oran, Sitrus,
+ * Pecha, Cheri) are real entries in this same registry, not replaced by the
+ * new crops; `flora.ts`'s old `FOOD_FLAVORS` list itself is what's gone (it
+ * was a purely cosmetic glyph/color pick with zero gameplay effect), not the
+ * berries it named. Every crop here — new and berry alike — is gated on
+ * biome, runtime moisture, and season, reusing existing hooks (`worldgen.ts`'s
+ * `biomeWeightsAt`/`effectiveWaterDensityAt`, `flora.ts`'s own decay-only
+ * season wave, `herdConflict.ts`'s already-built rivalry trigger for the
+ * "heavily contested" payoff) rather than inventing parallel mechanisms.
+ * Deliberately dependency-free (no imports from `flora.ts`/`worldgen.ts`) so
+ * both of those can import from here without a circular import —
+ * `worldgen.ts` used to import `FOOD_FLAVORS` from `flora.ts` for exactly
+ * this reason; this module replaces that need.
  */
 
-export const CROP_IDS = ["herbs", "wheat", "tomato", "corn", "rice", "apple", "potato", "pumpkin"] as const;
+export const CROP_IDS = ["herbs", "oran", "pecha", "sitrus", "cheri", "wheat", "tomato", "corn", "rice", "apple", "potato", "pumpkin"] as const;
 export type CropId = (typeof CROP_IDS)[number];
 
 export type SeasonName = "spring" | "summer" | "autumn" | "winter";
@@ -95,6 +99,30 @@ export interface FoodCropDef {
 export const FOOD_CROPS: Record<CropId, FoodCropDef> = {
   herbs: {
     name: "Herbs",
+    nutritionMultiplier: 1.0,
+  },
+  // The four original berries — real, ungated (any biome, any season) food
+  // sources exactly like before this feature, just now real `CropId`s in
+  // the same registry instead of a separate cosmetic-only flavor list.
+  // Oran/Pecha were always the plain, no-preference pair; Sitrus/Cheri were
+  // already `SUN_FOOD_FLAVORS` (favored near a sunbeam) — `sunLoving` here
+  // ports that exact original behavior forward unchanged.
+  oran: {
+    name: "Oran Berry",
+    nutritionMultiplier: 1.0,
+  },
+  pecha: {
+    name: "Pecha Berry",
+    nutritionMultiplier: 1.0,
+  },
+  sitrus: {
+    name: "Sitrus Berry",
+    sunLoving: true,
+    nutritionMultiplier: 1.0,
+  },
+  cheri: {
+    name: "Cheri Berry",
+    sunLoving: true,
     nutritionMultiplier: 1.0,
   },
   wheat: {

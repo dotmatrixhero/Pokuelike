@@ -81,6 +81,10 @@ const TERRAIN_FG: Record<TerrainKind, Rgb> = {
  */
 const FLAVOR_GLYPH: Record<string, string> = {
   herbs: "h",
+  oran: "%",
+  sitrus: "&",
+  pecha: "*",
+  cheri: "+",
   wheat: "w",
   tomato: "t",
   corn: "c",
@@ -95,6 +99,10 @@ const FLAVOR_GLYPH: Record<string, string> = {
 
 const FLAVOR_FG: Record<string, Rgb> = {
   herbs: [150, 190, 120],
+  oran: [90, 140, 255],
+  sitrus: [250, 176, 60],
+  pecha: [255, 140, 190],
+  cheri: [230, 70, 70],
   wheat: [222, 184, 94],
   tomato: [214, 64, 50],
   corn: [235, 200, 60],

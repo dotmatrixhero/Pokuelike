@@ -32,16 +32,24 @@ describe("seasonPhase / seasonName", () => {
 describe("pickCrop", () => {
   const alwaysFirst = () => 0;
 
-  it("falls back to Herbs when nothing else is eligible (no biome data at all)", () => {
+  it("picks Herbs (the first ungated crop) when rng always favors the first option and nothing biome-gated is eligible", () => {
     expect(pickCrop(undefined, undefined, 0, false, alwaysFirst)).toBe("herbs");
   });
 
+  it("with no biome data at all, only the ungated crops (Herbs and the four original berries) are ever eligible", () => {
+    for (let i = 0; i < 50; i++) {
+      const crop = pickCrop(undefined, undefined, 0, false, () => i / 50);
+      expect(["herbs", "oran", "pecha", "sitrus", "cheri"]).toContain(crop);
+    }
+  });
+
   it("never picks a biome-gated crop for a biome it doesn't list", () => {
-    // Badlands has no crop of its own besides Potato — confirm Wheat/Corn/etc
-    // (grassland-only) never show up here across many rolls.
+    // Badlands has no crop of its own besides Potato, plus the ungated
+    // Herbs/berries — confirm Wheat/Corn/etc (grassland-only) never show up
+    // here across many rolls.
     for (let i = 0; i < 50; i++) {
       const crop = pickCrop("badlands", undefined, 0, false, () => i / 50);
-      expect(["herbs", "potato"]).toContain(crop);
+      expect(["herbs", "oran", "pecha", "sitrus", "cheri", "potato"]).toContain(crop);
     }
   });
 

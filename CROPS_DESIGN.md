@@ -1,11 +1,16 @@
-# Food crops — built (8-crop table; Honey deferred, see below)
+# Food crops — built (12-crop table: 4 original berries kept + 8 new crops; Honey deferred, see below)
 
 Direct ask, following the landmarks work: "I wonder if we need more kinds of
 food, not just berries... corn and wheat and rice, tomatoes, apples, herbs,
 honey, potato, pumpkin. They can be more nutrition dense, grow in certain
 regions and seasons and be heavily contested?" Follow-up: "make it so they
 keep you full for longer, and also are affected by zone and climate and
-season."
+season." Direct correction after the first build: "I think we need to keep
+berry as food sources tho" — the four original berries (Oran, Sitrus, Pecha,
+Cheri) are real entries in the same crop registry now, not replaced by the
+new crops. What's actually gone is `FOOD_FLAVORS`, the old purely-cosmetic
+flavor list — the berries it named are still real, ungated food sources,
+just alongside 8 new ones instead of on their own.
 
 This is a scope, not an implementation — grounded in what's actually already
 built (see "Existing hooks" below) so every piece below reuses a real
@@ -105,6 +110,8 @@ other tuning table in this codebase).
 
 | Tier | Crop | Eligible biome(s) | Moisture/climate note | Season window | Nutrition (vs. today's flat 0.4) | Notes |
 |---|---|---|---|---|---|---|
+| 0 — Berries (kept) | Oran, Pecha | any biome, no gate | — | wide | 1.0x | the original plain berry pair, unchanged behavior, now real `CropId`s instead of cosmetic flavors |
+| 0 — Berries (kept) | Sitrus, Cheri | any biome, no gate | sun-loving (favored, not required, near a sunbeam) | wide | 1.0x | the original `SUN_FOOD_FLAVORS` pair — same favor-near-sunbeam behavior, ported forward unchanged |
 | 1 — Filler | Herbs | any biome, low density | — | wide (all four phases) | 1.0x, **but see the new Herbs hook below** | intentionally weak on nutrition — a real "always available" tier, not a min-max target |
 | 2 — Common | Wheat | grassland, highland | low–moderate | wide | 1.15x | widest eligibility of the real crops — the true default replacement for today's flat berries |
 | 2 — Common | Tomato | grassland, jungle | sun-loving (reuses `SUN_FOOD_FLAVORS`'s existing sunbeam-proximity bonus) | Summer only | 1.2x | first crop with a real season gate, still common biome-wise |
@@ -268,3 +275,27 @@ observe it firing on a crop tile specifically. Worth a longer/larger-
 population validation run, or a closer look at whether `herdClash`'s `pos`
 should instead record the contested resource tile's own coordinates, before
 calling this half of the ask fully confirmed.
+
+## Berries restored — direct correction
+
+Direct follow-up: "I think we need to keep berry as food sources tho" — the
+first build accidentally read as a replacement (the doc's own original
+framing, "Replaces `flora.ts`'s old `FOOD_FLAVORS`," was ambiguous about
+whether it meant the list or what it named). Fixed: `CROP_IDS`/`FOOD_CROPS`
+now carry Oran/Pecha/Sitrus/Cheri as real, ungated entries (Tier 0 above) —
+Oran/Pecha with no gate at all, Sitrus/Cheri with the exact original
+`SUN_FOOD_FLAVORS` near-sunbeam preference, all at a neutral 1.0x nutrition
+matching their original (no-op) behavior before this whole feature. Real
+sprite art (`sprites.ts`'s `getFoodSprite`) that already existed for these
+four flavor names now actually loads again too — it was never removed, just
+briefly unreachable while the berries themselves were.
+
+Re-validated with the same `validateCrops.ts` script: all four berries
+appear immediately and dominate the food-tile population (as the only
+fully-ungated options, expected), the 8 new crops still appear alongside
+them, and Winter thinning still holds (76.0 avg outside Winter vs. 3.9
+inside, this run). Pumpkin didn't mature at all in this particular 8000-tick
+sample — plausible variance for the deliberately rarest crop now sharing its
+eligible pool with 4 more always-available competitors, not a new gate bug
+(its own eligibility logic is unchanged); worth a longer run if it's ever
+suspiciously absent across several seeds.

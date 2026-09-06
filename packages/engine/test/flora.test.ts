@@ -866,11 +866,11 @@ describe("crop maturation (CROPS_DESIGN.md: real biome/moisture/season-gated cro
       const t = tileAt(w, "surface", 5, 5)!;
       if (t.terrain === "food") seen.add(t.flavor!);
     }
-    // Grassland-eligible crops are herbs/wheat/tomato(sun-gated, excluded
-    // here since no sunbeam)/corn/pumpkin(autumn-gated, excluded at tick 0)
-    // — expect real variety beyond just "herbs" every time.
+    // Grassland-at-Spring-eligible crops: herbs, all four berries (ungated),
+    // wheat, corn — Tomato (Summer-only) and Pumpkin (Autumn-only) are
+    // excluded by their season window at tick 0 regardless of biome.
     expect(seen.size).toBeGreaterThan(1);
-    for (const flavor of seen) expect(["herbs", "wheat", "corn"]).toContain(flavor);
+    for (const flavor of seen) expect(["herbs", "oran", "pecha", "sitrus", "cheri", "wheat", "corn"]).toContain(flavor);
   });
 
   it("Winter cuts a non-hardy crop's real chance of maturing into food at all (vs. decorative flora)", () => {
