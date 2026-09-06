@@ -450,7 +450,11 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
         // biome-influenced weather already reuses, not a new biome concept.
         const biome = dominantBiomeAt(world.biomeSeeds, pos.x, pos.y);
         const moisture = effectiveWaterDensityAt(world.biomeSeeds, world.biomeSeedDrift, pos.x, pos.y);
-        const crop = pickCrop(biome, moisture, world.tick, nearSun, rng);
+        // This loop is Surface-only (see `maybeDropSeed`'s own "flora is a
+        // surface-layer thing for now" doc comment) — Apple (canopy-native)
+        // is excluded from what a Surface seedling can mature into, same
+        // reasoning as worldgen.ts's own initial-placement exclusion.
+        const crop = pickCrop(biome, moisture, world.tick, nearSun, rng, ["canopy"]);
         // Winter thins out which crops mature into real food at all — see
         // crops.ts's own doc comment; Potato (winterHardy) is exempt.
         const winterPenalty = seasonName(world.tick) === "winter" && !FOOD_CROPS[crop].winterHardy ? WINTER_NON_HARDY_FOOD_CHANCE_MULTIPLIER : 1;

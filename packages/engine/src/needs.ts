@@ -677,6 +677,28 @@ const SPRING_DIG_TICKS = 20;
 const DIG_MOVE_BURST_TICKS = 5;
 
 /**
+ * `Agent.digTicksAccrued` burst a single off-cooldown damage-dealing move
+ * grants toward processing a canopy-native crop (Apple) out — the "canopy
+ * foods processed by damage" half of the pitch, `DIG_MOVE_BURST_TICKS`'s
+ * own counterpart for Canopy instead of Underground. Any move with real
+ * `power` and a non-`"status"` `category` qualifies (Tackle, Peck, ...) —
+ * deliberately not scoped to `burrow`-flagged moves the way digging is,
+ * since knocking fruit down is a damage action, not an extraction one.
+ */
+const CANOPY_HARVEST_MOVE_BASE_BURST = 3;
+
+/**
+ * Extra burst per point of a damage move's own `range.max` beyond 1 (melee)
+ * — "higher range gives advantage," a direct, cheap reuse of `MoveSpec.
+ * range` (already real and consumed by combat.ts's `moveRange`/
+ * `withinMoveRange`) rather than inventing a second range concept just for
+ * this. A move with no explicit `range` set falls back to 1 (melee), same
+ * as `CANOPY_HARVEST_MOVE_BASE_BURST` alone — no accidental bonus for specs
+ * that predate the `range` field.
+ */
+const CANOPY_HARVEST_RANGE_BONUS_PER_POINT = 2;
+
+/**
  * How many more `Agent.digTicksAccrued` this crop still needs before an
  * agent on a mismatched layer can actually eat from it — undefined when no
  * digging is required at all (the crop has no `nativeLayer`, or this agent
@@ -1202,15 +1224,31 @@ export function tickAgentAction(
         if (agent.behavior === "seekFood") {
           const digThreshold = cropDigThreshold(targetTile, agent.layer);
           if (digThreshold !== undefined) {
-            const digMove = (agent.moves ?? []).find((move) => move.burrow && !agent.moveCooldowns?.[move.id]);
-            if (digMove) {
-              useMove(agent, digMove, world.tick);
-              agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + DIG_MOVE_BURST_TICKS;
+            const cropDef = targetTile?.flavor && targetTile.flavor in FOOD_CROPS ? FOOD_CROPS[targetTile.flavor as CropId] : undefined;
+            if (cropDef?.nativeLayer === "canopy") {
+              // "Canopy foods can also be processed by damage, with higher
+              // range giving advantage" — a damage move substitutes for the
+              // ordinary dig move, its own `range.max` scaling the burst
+              // instead of a flat bonus.
+              const harvestMove = (agent.moves ?? []).find((move) => move.power > 0 && move.category !== "status" && !agent.moveCooldowns?.[move.id]);
+              if (harvestMove) {
+                useMove(agent, harvestMove, world.tick);
+                const rangeMax = harvestMove.range?.max ?? 1;
+                agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + CANOPY_HARVEST_MOVE_BASE_BURST + Math.max(0, rangeMax - 1) * CANOPY_HARVEST_RANGE_BONUS_PER_POINT;
+              } else {
+                agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + 1;
+              }
             } else {
-              agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + 1;
+              const digMove = (agent.moves ?? []).find((move) => move.burrow && !agent.moveCooldowns?.[move.id]);
+              if (digMove) {
+                useMove(agent, digMove, world.tick);
+                agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + DIG_MOVE_BURST_TICKS;
+              } else {
+                agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + 1;
+              }
             }
-            if (agent.digTicksAccrued < digThreshold) return; // still digging — no consume this tick
-            agent.digTicksAccrued = undefined; // done — a fresh dig next time, not a lingering surplus
+            if (agent.digTicksAccrued < digThreshold) return; // still processing — no consume this tick
+            agent.digTicksAccrued = undefined; // done — a fresh dig/harvest next time, not a lingering surplus
           }
         }
 

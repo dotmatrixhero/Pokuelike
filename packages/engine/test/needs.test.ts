@@ -237,6 +237,109 @@ describe("layer-gated crop access + digging (CROPS_DESIGN.md)", () => {
   });
 });
 
+/** Real, low-power melee attack move — for canopy-harvest-by-damage tests. */
+const MELEE_ATTACK_MOVE: MoveSpec = {
+  id: "test-melee",
+  name: "Test Tackle",
+  shape: { kind: "point" },
+  type: "normal",
+  category: "physical",
+  power: 40,
+  accuracy: 100,
+  cooldownTicks: 5,
+  range: { min: 0, max: 1 },
+};
+
+/** Same, but with a much longer range — for the "higher range gives advantage" assertion. */
+const RANGED_ATTACK_MOVE: MoveSpec = {
+  id: "test-ranged",
+  name: "Test Peck",
+  shape: { kind: "point" },
+  type: "flying",
+  category: "physical",
+  power: 35,
+  accuracy: 100,
+  cooldownTicks: 5,
+  range: { min: 0, max: 4 },
+};
+
+describe("canopy harvest by damage (CROPS_DESIGN.md: \"canopy foods can also be processed by damage, with higher range giving advantage\")", () => {
+  it("a non-canopy agent can't eat a canopy-native crop (Apple) instantly — it has to process it out first", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    const tile = tileAt(world, "surface", 2, 0)!;
+    tile.flavor = "apple";
+    const startingStock = tile.stock;
+    const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }) });
+
+    tickAgent(world, agent);
+
+    expect(tile.stock).toBe(startingStock);
+    expect(agent.digTicksAccrued).toBe(1); // no move known — falls back to +1/tick, same as digging's own fallback
+  });
+
+  it("an off-cooldown damage move (not a dig/burrow move) processes an Apple out over real time", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    const tile = tileAt(world, "surface", 2, 0)!;
+    tile.flavor = "apple";
+    const startingStock = tile.stock!;
+    const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }), moves: [MELEE_ATTACK_MOVE] });
+
+    let completedTick: number | undefined;
+    for (let t = 0; t < 20 && completedTick === undefined; t++) {
+      tickAgent(world, agent);
+      if (tile.stock! < startingStock) completedTick = t;
+    }
+
+    expect(completedTick).toBeDefined();
+    expect(agent.needs.hunger).toBeGreaterThan(0.1); // it actually ate once processing finished
+  });
+
+  it("a higher-range damage move processes an Apple out faster than a melee-only one — \"higher range giving advantage\"", () => {
+    function ticksToHarvest(move: MoveSpec): number {
+      const world = createWorld(5, 1);
+      setTile(world, "surface", 2, 0, "food");
+      const tile = tileAt(world, "surface", 2, 0)!;
+      tile.flavor = "apple";
+      const startingStock = tile.stock!;
+      const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }), moves: [move] });
+
+      for (let t = 0; t < 20; t++) {
+        tickAgent(world, agent);
+        if (tile.stock! < startingStock) return t;
+      }
+      throw new Error("never completed");
+    }
+
+    expect(ticksToHarvest(RANGED_ATTACK_MOVE)).toBeLessThan(ticksToHarvest(MELEE_ATTACK_MOVE));
+  });
+
+  it("a status move (real power 0) never substitutes for a damage move — falls back to +1/tick", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    tileAt(world, "surface", 2, 0)!.flavor = "apple";
+    const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }), moves: [DIG_MOVE] }); // DIG_MOVE is category "status", power 0
+
+    tickAgent(world, agent);
+
+    expect(agent.digTicksAccrued).toBe(1); // no damage-move bonus, and burrow doesn't count for Canopy either
+    expect(agent.moveCooldowns?.[DIG_MOVE.id]).toBeUndefined(); // never actually used
+  });
+
+  it("a canopy agent already on the crop's native layer pays no processing tax at all — eats immediately", () => {
+    const world = createWorld(5, 1);
+    setTile(world, "canopy", 2, 0, "food");
+    tileAt(world, "canopy", 2, 0)!.flavor = "apple";
+    const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "canopy", homeLayer: "canopy", needs: createNeeds({ hunger: 0.1 }) });
+
+    tickAgent(world, agent);
+
+    expect(agent.needs.hunger).toBeGreaterThan(0.1);
+    expect(agent.digTicksAccrued).toBeUndefined();
+  });
+});
+
 describe("dig a spring (CROPS_DESIGN.md water rework: real last resort when water genuinely doesn't exist anywhere)", () => {
   it("an agent with no reachable water anywhere digs a real new spring at its own position, over real time", () => {
     const world = createWorld(3, 1); // no water anywhere on any layer

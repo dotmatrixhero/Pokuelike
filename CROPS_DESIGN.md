@@ -680,14 +680,51 @@ the now-guaranteed underground water pocket already give agents real water
 within reach everywhere, so this last-resort mechanic correctly never had
 to fire there.
 
+**Canopy harvest by damage — built** (Apple's own `nativeLayer: "canopy"`,
+`CANOPY_HARVEST_MOVE_BASE_BURST`/`CANOPY_HARVEST_RANGE_BONUS_PER_POINT`,
+needs.ts): the same `cropDigThreshold`/`Agent.digTicksAccrued` shape
+digging already uses, but for a canopy-native crop the substitute move is
+any off-cooldown move with real `power` and a non-`"status"` `category` —
+deliberately broader than digging's `burrow`-only gate, resolving this
+section's own former open question ("most damage moves" vs. `Dig`-only) in
+Canopy's favor specifically, since knocking fruit down really is a damage
+action, not an extraction one; Underground digging stays `burrow`-scoped,
+unchanged. "Higher range gives advantage" is a direct, cheap reuse of the
+move's own real `range.max` (already consumed by combat.ts) scaling the
+burst, rather than a new range concept. This surfaced the real prerequisite
+CROPS_DESIGN.md already flagged in "What's genuinely new, not a reuse"
+above (an actual Apple resource on the Canopy grid, not just a gate) —
+without it, tagging Apple `nativeLayer: "canopy"` would have been actively
+backwards, taxing canopy-native birds for a resource that only ever existed
+on Surface. Closed it with real new Canopy food placement instead of
+punting: `deriveCanopyFromSurface` now also stamps real Apple `"food"`
+tiles (`CANOPY_APPLE_DENSITY = 0.12`) onto tree-linked canopy floor
+(never ridge tiles — a massif rim is bare rock, not an orchard), and Apple
+is symmetrically excluded from Surface's own crop pool at both of its real
+placement sites (`worldgen.ts`'s initial food loop, `flora.ts`'s seedling
+maturation — both via `pickCrop`'s new `excludeLayers` parameter) so it's
+genuinely Canopy-exclusive, not duplicated. Honestly NOT built: Canopy food
+never regrows — `flora.ts`'s whole seedling/regrowth cycle is explicitly
+"a surface-layer thing for now" (`maybeDropSeed`'s own doc comment), so a
+Canopy Apple tile placed at generation time is a fixed initial population,
+consumed down and never replenished, unlike Surface's own food. Validated
+via 5 targeted unit tests (no-move fallback, real completion over time,
+range-advantage timing comparison, a status move never substituting,
+native-layer free access) and `validateCanopyHarvest.ts` against the real
+demo scenario: an honest 0-trigger result over 8000 ticks, because the
+demo roster's only Canopy-native species (Pidgey) already eats Apple for
+free, and no Surface/Underground species in this small roster ever gets
+hungry enough to cross layers for it when Surface has plenty of its own
+food — the same "honestly rare, not broken" shape `validateDigASpring.ts`
+already reported for the water rework, not a sign the mechanic doesn't
+work (the unit tests exercise it directly and pass).
+
 ### Open questions
 
-- Whether "most damage moves" (the pitch's own phrase) can dig/process, or
-  only `Dig`-flagged ones — the broader version needs a real per-move-type
-  rule (e.g. any move with `category !== "status"`), the narrower version
-  is a straightforward `burrow`/new-field check. Worth deciding before
-  implementing since it changes how many existing moves suddenly do double
-  duty as extraction tools.
+- ~~Whether "most damage moves"... can dig/process, or only `Dig`-flagged
+  ones~~ — resolved above ("Canopy harvest by damage — built"): Canopy uses
+  any real damage move, Underground stays `burrow`-only. Not a single
+  global rule, decided per-layer instead.
 - Whether canopy terrain generation is scoped as part of this feature or
   genuinely its own prerequisite pass first — given the size of that gap
   (an entire unbuilt layer of worldgen), doing it "alongside" risks the

@@ -95,11 +95,16 @@ export interface FoodCropDef {
    * The layer this crop really "belongs to" — absent means Surface, same as
    * every crop before this field existed. An agent already on this layer
    * gets free access (no `digTicksAccrued` tax at all); an agent on a
-   * different layer has to dig it out first (`DIG_TICKS_DEFAULT`, or this
-   * crop's own `digTicks` override) before it can actually eat from the
-   * tile — CROPS_DESIGN.md's "layer-gated crop access" pitch. Currently
-   * only `"underground"` (Potato, Pumpkin); Apple/Corn's canopy-harvest
-   * mechanic is a different, damage-based system, not digging.
+   * different layer has to process it out first before it can actually eat
+   * from the tile — CROPS_DESIGN.md's "layer-gated crop access" pitch,
+   * `needs.ts`'s `cropDigThreshold`/`Agent.digTicksAccrued`. `"underground"`
+   * (Potato, Pumpkin) accrues via digging — an off-cooldown `burrow`-flagged
+   * move speeds it up. `"canopy"` (Apple) accrues via an off-cooldown
+   * damage-dealing move instead — a real read of "canopy foods processed by
+   * damage, higher range giving advantage": the move's own `range.max`
+   * scales how much progress one hit grants. Both share the exact same
+   * counter/threshold shape (`DIG_TICKS_DEFAULT`/`digTicks`), only the move
+   * kind and per-use bonus differ.
    */
   nativeLayer?: Layer;
   /** Overrides `DIG_TICKS_DEFAULT` for this specific crop — absent = use the default. */
@@ -187,6 +192,7 @@ export const FOOD_CROPS: Record<CropId, FoodCropDef> = {
     eligibleBiomes: ["forest"],
     seasonWindow: AUTUMN_FIRST_HALF,
     nutritionMultiplier: 1.4,
+    nativeLayer: "canopy",
   },
   potato: {
     name: "Potato",
@@ -223,17 +229,32 @@ function inWindow(phase: number, window: readonly [number, number]): boolean {
  * whose real gates (biome, moisture, season) this position/tick currently
  * satisfies — same "pick uniformly among options" idiom `flora.ts`'s own
  * `pickFlavor` already uses. Herbs has no gates at all, so the eligible set
- * is never actually empty; the `?? "herbs"` fallback below is a pure safety
+ * is never actually empty (unless `excludeLayers` itself excludes Herbs,
+ * which no caller does); the `?? "herbs"` fallback below is a pure safety
  * net. `sunLoving` crops (favored, not required, near a sunbeam — see
  * `FoodCropDef.sunLoving`'s doc comment) get a second entry in the pool
  * when `nearSun` is true, doubling their odds without ever excluding them
- * otherwise.
+ * otherwise. `excludeLayers` skips any crop whose `nativeLayer` falls in
+ * that set — used to keep Apple (canopy-native, CROPS_DESIGN.md) out of
+ * Surface's own food placement now that it has its own dedicated Canopy
+ * placement pass (`deriveCanopyFromSurface`'s food step); Potato/Pumpkin
+ * (underground-native) are deliberately NOT excluded from Surface this way
+ * — they're still only ever placed there, same as before this parameter
+ * existed, just layer-gated to eat rather than layer-placed.
  */
-export function pickCrop(biome: string | undefined, moisture: number | undefined, tick: number, nearSun: boolean, rng: () => number): CropId {
+export function pickCrop(
+  biome: string | undefined,
+  moisture: number | undefined,
+  tick: number,
+  nearSun: boolean,
+  rng: () => number,
+  excludeLayers?: readonly Layer[]
+): CropId {
   const phase = seasonPhase(tick);
   const eligible: CropId[] = [];
   for (const id of CROP_IDS) {
     const def = FOOD_CROPS[id];
+    if (def.nativeLayer && excludeLayers?.includes(def.nativeLayer)) continue;
     if (def.eligibleBiomes && (!biome || !def.eligibleBiomes.includes(biome))) continue;
     if (def.moistureRange && moisture !== undefined && (moisture < def.moistureRange[0] || moisture > def.moistureRange[1])) continue;
     if (def.seasonWindow && !inWindow(phase, def.seasonWindow)) continue;

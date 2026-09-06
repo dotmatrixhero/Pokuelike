@@ -117,13 +117,19 @@ describe("generateWorld", () => {
     // real biome variety should show both.
     let sawCanopyFloor = false;
     let sawCanopyWall = false;
+    let sawCanopyApple = false;
     for (const tile of world.tiles.canopy) {
-      expect(["floor", "wall"]).toContain(tile.terrain);
+      expect(["floor", "wall", "food"]).toContain(tile.terrain);
       if (tile.terrain === "floor") sawCanopyFloor = true;
       if (tile.terrain === "wall") sawCanopyWall = true;
+      if (tile.terrain === "food") {
+        expect(tile.flavor).toBe("apple");
+        sawCanopyApple = true;
+      }
     }
     expect(sawCanopyFloor).toBe(true);
     expect(sawCanopyWall).toBe(true);
+    expect(sawCanopyApple).toBe(true);
     // Underground: every tile is "floor", "wall" (the CA cave carver's own
     // vocabulary), or "water" (a real, guaranteed pocket biased toward
     // wherever Surface is wettest — see pickUndergroundWaterPocket) — no
@@ -701,9 +707,9 @@ describe("generateWorld: Underground cellular-automata caves", () => {
     }
   });
 
-  it("canopy is untouched by cave generation — its own terrain vocabulary is floor/wall only, never underground's water", () => {
+  it("canopy is untouched by cave generation — its own terrain vocabulary is floor/wall/food only, never underground's water", () => {
     const world = generateWorld(90, 60, 9);
-    for (const tile of world.tiles.canopy) expect(["floor", "wall"]).toContain(tile.terrain);
+    for (const tile of world.tiles.canopy) expect(["floor", "wall", "food"]).toContain(tile.terrain);
   });
 
   it("determinism: the same seed produces byte-identical underground cave layout", () => {

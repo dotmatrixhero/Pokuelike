@@ -1525,15 +1525,28 @@ function isNearMassifWall(world: World, seeds: readonly BiomeSeedInfo[], x: numb
 }
 
 /**
+ * Fraction of tree-linked canopy floor tiles (never ridge tiles — a massif
+ * rim is bare rock, not an orchard) that get a real Apple food tile at
+ * generation time — CROPS_DESIGN.md's "Apples should form on tree." Apple
+ * is deliberately excluded from Surface's own `pickCrop` placement
+ * (`excludeLayers: ["canopy"]` at both call sites) so this is genuinely
+ * its only real source, not a duplicate.
+ */
+const CANOPY_APPLE_DENSITY = 0.12;
+
+/**
  * Writes real structure onto `world.tiles.canopy`, reading Surface (already
  * fully generated, massifs included, by the time this runs) rather than
  * generating anything independently — see this section's own doc comment.
  * A no-op effect for a world with no biome data (`isNearMassifWall` simply
  * never returns true) still runs the tree-linking half fine, so this doesn't
  * need the same early-return guard `carveMountainMassifs`/
- * `carveBadlandsChambers` use.
+ * `carveBadlandsChambers` use. `foodRng` is its own derived sub-stream (see
+ * `generateWorld`'s xor-constant convention) — deriving structure from
+ * Surface doesn't mean this pass can't roll its own dice for what grows on
+ * top of that structure.
  */
-function deriveCanopyFromSurface(world: World, width: number, height: number): void {
+function deriveCanopyFromSurface(world: World, width: number, height: number, foodRng: () => number): void {
   const seeds = world.biomeSeeds ?? [];
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -1541,7 +1554,11 @@ function deriveCanopyFromSurface(world: World, width: number, height: number): v
       const onTree = surfaceTile.terrain === "tree";
       const treeIsland = onTree || countTreesNearby(world, x, y, CANOPY_TREE_LINK_RADIUS) >= CANOPY_TREE_LINK_MIN_NEIGHBORS;
       if (treeIsland) {
-        setTile(world, "canopy", x, y, "floor", 0);
+        if (foodRng() < CANOPY_APPLE_DENSITY) {
+          setTile(world, "canopy", x, y, "food", 0, "apple");
+        } else {
+          setTile(world, "canopy", x, y, "floor", 0);
+        }
         continue;
       }
       const ridge = seeds.length > 0 && isNearMassifWall(world, seeds, x, y, CANOPY_RIDGE_RADIUS);
@@ -1946,7 +1963,11 @@ export function generateWorld(width: number, height: number, seed: number, bias?
         // unreachable in Tomato's assigned biomes anyway).
         const biome = dominantBiomeAt(world.biomeSeeds, x, y);
         const moisture = effectiveWaterDensityAt(world.biomeSeeds, world.biomeSeedDrift, x, y);
-        const crop = pickCrop(biome, moisture, world.tick, false, flavorRng);
+        // Apple (canopy-native) is deliberately excluded here — it gets its
+        // own dedicated placement on the Canopy grid instead, right below
+        // (`deriveCanopyFromSurface`'s food step) — see `pickCrop`'s own doc
+        // comment on `excludeLayers`.
+        const crop = pickCrop(biome, moisture, world.tick, false, flavorRng, ["canopy"]);
         setTile(world, "surface", x, y, "food", elevation, crop);
         continue;
       }
@@ -1978,7 +1999,7 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   // own generation — including massifs just above — is fully settled; see
   // "Canopy — derived from Surface" section doc comment. No rng of its own:
   // every pixel it reads already came from a real generation step above.
-  deriveCanopyFromSurface(world, width, height);
+  deriveCanopyFromSurface(world, width, height, mulberry32(seed ^ 0x38b34ae5));
 
   // Underground caves are independent of everything Surface-only above (no
   // biome/elevation/moisture data to read) — its own derived rng sub-stream,
