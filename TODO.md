@@ -166,10 +166,23 @@ none of this is built yet, this section is purely to not lose the thread:
       pass — a front passing over the currently-focused zone doesn't yet
       reach into that zone's own live per-tile `weather.ts` simulation (see
       the open follow-up right below). Verified live
-      (`validateMacroWeather.ts`, a real `createDemoMacroWorld` run):
-      fronts spawn, drift, and dissipate on their own schedule, logging
-      matched began/ended event pairs, and a tracked zone caught under a
-      front shows its `baseResourceIndex` visibly pulled down while active.
+      (`validateMacroWeather.ts`, a real `createDemoMacroWorld` run — natural
+      spawns are rare by design, so the script rigs a drought onto a real
+      migrated-to zone the same "rig the rng, run a real loop" way
+      `overworld.test.ts`'s own end-to-end tests already do, rather than
+      waiting out the natural spawn odds): a zone holding a healthy 24-strong
+      Pidgeotto population (`baseResourceIndex` 0.52) put under a drought for
+      1800 ticks saw its emigration rate jump from 3 departures/6000 ticks
+      baseline to 12 departures/1800 ticks under the front (~13x), and the
+      local Pidgeotto population hit 0 by the end of that window — a real
+      combination of "fled" and "starved," not a synthetic number. Forcing
+      the front's dissipation logged a real `ended` event at the drifted
+      (not injection-point) row/col, confirming drift actually ran; the same
+      8000-tick window also produced one fully organic natural spawn
+      (`began`, a separate drought elsewhere on the grid) on top of the
+      injected one, confirming the ordinary rare-spawn path fires too, not
+      just the rigged one this script forces for a fast, deterministic
+      check.
 - [ ] **Open follow-up, not attempted here**: a macro weather front passing
       over the currently-FOCUSED zone has no effect on that zone's own live
       `weather.ts` simulation — a player standing in a zone a drought is
