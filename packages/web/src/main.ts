@@ -740,22 +740,43 @@ function applyOverworldSubView(view: OverworldSubView): void {
   macroViewToggleBtn.textContent = view === "zone" ? "Show Overworld" : "Show Zone View";
 }
 
+/**
+ * The "enabling" half of the overworld-toggle click handler, pulled out so
+ * boot can reuse it directly instead of simulating a click — direct ask:
+ * "make the default view just overworld on, zone view show... the dual
+ * view is useless." Overworld mode (the macro grid, migration, the whole
+ * region system) is now on from the very first frame, no manual toggle
+ * needed, landing straight on the focused zone's own tile view (`subView`
+ * lets boot ask for "zone" specifically) rather than the more abstract
+ * macro map — that's the one detailed, actually-useful view per the direct
+ * ask, with the macro map still one click away via `macroViewToggleBtn`
+ * for whenever the big picture is what's wanted instead.
+ */
+function enterOverworldMode(seed: number, subView: OverworldSubView): void {
+  macroMapWrapEl.hidden = false;
+  macroViewToggleBtn.hidden = false;
+  overworldToggleBtn.textContent = "Overworld: On";
+  overworldToggleBtn.classList.add("playing");
+  applyOverworldSubView(subView);
+  loadMacroWorld(seed);
+}
+
 overworldToggleBtn.addEventListener("click", () => {
   const enabling = !macroWorld;
-  macroMapWrapEl.hidden = !enabling;
-  macroViewToggleBtn.hidden = !enabling;
-  overworldToggleBtn.textContent = `Overworld: ${enabling ? "On" : "Off"}`;
-  overworldToggleBtn.classList.toggle("playing", enabling);
   if (enabling) {
-    // Fresh entry into Overworld mode always defaults to the macro map,
-    // rather than carrying over a stale sub-view choice from a previous
-    // session in this mode.
-    applyOverworldSubView("overworld");
-    loadMacroWorld();
+    // Fresh entry into Overworld mode via the manual toggle always defaults
+    // to the macro map, rather than carrying over a stale sub-view choice
+    // from a previous session in this mode — boot's own default (see
+    // `enterOverworldMode`'s call below) is a separate, deliberate choice.
+    enterOverworldMode(SCENARIO_SEED, "overworld");
   } else {
     // Leaving Overworld mode entirely — canvas-wrap is the only view in
     // ordinary single-map mode, so nothing here may leave it (or the now-
     // irrelevant macro map) force-hidden.
+    macroMapWrapEl.hidden = true;
+    macroViewToggleBtn.hidden = true;
+    overworldToggleBtn.textContent = "Overworld: Off";
+    overworldToggleBtn.classList.remove("playing");
     canvasWrap.classList.remove("force-hide");
     macroMapWrapEl.classList.remove("force-hide");
     loadWorld(SCENARIO_SEED);
@@ -793,7 +814,12 @@ macroMapScrollEl.addEventListener(
 
 const seedParam = new URLSearchParams(location.search).get("seed");
 const initialSeed = seedParam !== null && seedParam !== "" ? Number(seedParam) : SCENARIO_SEED;
-loadWorld(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED);
+// Direct ask: "make the default view just overworld on, zone view show" —
+// boots straight into Overworld mode's focused-zone tile view instead of
+// the old flat single-map default (see `enterOverworldMode`'s own doc
+// comment for the reasoning). The plain `loadWorld` path (no macro grid at
+// all) is still reachable any time via the "Overworld: Off" toggle.
+enterOverworldMode(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED, "zone");
 speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
 
 function frame(): void {
