@@ -6605,9 +6605,10 @@ than showing a new predator-specific regression.
 
 ### Explicitly not done here (see TODO.md)
 
-- Extending herdMigration.ts's territorial trigger to escalate into combat
-  instead of always relocating — the other real candidate trigger mechanism
-  from the original design brief, deliberately not built (see decision #1).
+- ~~Extending herdMigration.ts's territorial trigger to escalate into combat
+  instead of always relocating~~ — built, see "Territorial guarding" above
+  (a different implementation than literally extending herdMigration.ts's
+  own centroid-based trigger, but the same real gap it names).
 - Predator involvement of any kind (predator-vs-predator rivalry, or a
   predator contesting a resource with a non-predator) — deliberately scoped
   out entirely (decision #2), not a partial/softer version of it.
@@ -6617,7 +6618,65 @@ than showing a new predator-specific regression.
   conflict is a much bigger new death-risk surface to validate safely, and
   the individual-pair version already satisfies the direct ask.
 
-## Grazing scars: sustained heavy grazing degrades a tile beyond ordinary depletion
+### Retaliation — direct follow-up: "there isn't any fighting back, is there?"
+
+After territorial guarding made `herdClash` far more frequent, a real gap
+surfaced: `resolveRivalryHit` is one-directional — whoever's action tick is
+running picks a move and hits the other side; the defender doesn't swing
+back in that same exchange. The only way it ever hit back before this was
+by independently re-clearing the WHOLE ordinary trigger gate (cooldown,
+tolerance, abundance, disposition roll) on its own later tick, which
+usually just didn't line up — real rivalry fights read as one hit, then
+nothing. Refined through a follow-up message into a real, but not
+unconditional, response: "they should retaliate to see strength. From
+there, if it looks like they'll lose they can make a decision to leave...
+if they recognize their foe is much more powerful than them they can back
+out without retaliation. But against relatively equal level +/-5, they
+should retaliate."
+
+**Decided:**
+
+1. **A direct response to a specific hit, not a fresh escalation decision.**
+   `resolveRivalryHit` now sets `Agent.retaliateAgainstId` on the defender
+   the instant a real hit lands and it *doesn't* cross the retreat threshold
+   (a defender that's already backing off isn't retaliating — the two are
+   mutually exclusive outcomes of the same hit). `applyRivalryRetaliation`
+   spends this flag on the defender's own very next action tick — checked
+   ahead of scavenging/territorial-guarding in needs.ts's priority chain, so
+   a real "I was just hit" response outranks a fresh, unrelated decision to
+   escalate elsewhere.
+2. **Sizing up the specific foe by level, not the reactive/proactive
+   triggers' own maxHp-ratio confidence gate.** `HERD_CONFLICT_MIN_POWER_RATIO`
+   (a comparably-matched-stats gate) already governs whether a fight starts
+   in the first place; retaliation asks a simpler, more legible question
+   about the specific individual that just landed a hit — "is this
+   opponent's level within `RETALIATION_LEVEL_TOLERANCE` (5) of mine?" A
+   foe more than 5 levels stronger gets backed away from instead (a real
+   `stepAway` + the same `HERD_CONFLICT_COOLDOWN_TICKS` cooldown
+   `resolveRivalryHit`'s own retreat branch already uses) — a real, felt
+   de-escalation, not a coin-flip refusal. A comparable (or weaker) foe gets
+   hit back immediately, no fresh roll needed.
+3. **One evaluation opportunity, always consumed.** `retaliateAgainstId` is
+   cleared the instant `applyRivalryRetaliation` checks it, regardless of
+   outcome (target gone, out of range, predator, on cooldown, or a real
+   swing/back-away) — this is a one-shot response to one specific hit, never
+   a standing grudge that lingers or re-fires later.
+
+**Built, real-run findings:** `applyRivalryRetaliation` (herdConflict.ts),
+`Agent.retaliateAgainstId` (types.ts), 8 new engine tests covering: no
+pending retaliation (no-op), a comparable-level target hit right back (flag
+consumed), backing away from a much-stronger foe (no attack logged, real
+position change, real cooldown applied), the exact `+5` boundary still
+counting as "comparable," a vanished/fainted target (flag still consumed,
+no crash), predator exclusion, the shared cooldown gate, and confirming
+`resolveRivalryHit` itself only sets the flag on a genuine non-retreating
+hit (never on a miss, never on a retreat). All 1069 engine tests pass.
+Validated via `validateRivalryRetaliation.ts` over a real 8000-tick
+demo-world run: of 103 distinct rivalry pairs that exchanged at least one
+real hit, 54 (~52%) showed genuine back-and-forth — both sides actually
+landing a hit on each other — versus what was structurally impossible to
+measure as anything but coincidental before this feature (the old
+mechanism had no notion of "responding" at all, only independent re-rolls).
 
 Direct user pitch, approved directly ("Yeah that sounds good"): world-shaping
 behavior beyond shelter-building — species that leave a real, lasting mark on

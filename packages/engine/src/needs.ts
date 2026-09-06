@@ -36,7 +36,7 @@ import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
 import { findWalkableNear } from "./worldgen.js";
-import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict, applyTerritorialGuard } from "./herdConflict.js";
+import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict, applyRivalryRetaliation, applyTerritorialGuard } from "./herdConflict.js";
 import { maybeUseUtilityMove } from "./utilityMoves.js";
 import { thirstDecayMultiplier } from "./weather.js";
 import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
@@ -951,6 +951,14 @@ export function tickAgentAction(
   // predation.ts's `applyEggEating` doc comment for why it's a separate
   // mechanism entirely.
   if (applyEggEating(world, agent, ctx, log, rng)) return;
+  // Retaliation (herdConflict.ts) — direct follow-up: "there isn't any
+  // fighting back, is there?" Checked ahead of scavenging/territorial
+  // guarding below (same tier, but a direct response to just having been
+  // hit outranks a fresh decision to escalate) — spends `Agent.
+  // retaliateAgainstId` the instant it's set, regardless of `rules` gating
+  // being met (the function itself re-checks predator exclusion), same
+  // "checked here regardless" shape `applyEggEating` right above uses.
+  if (applyRivalryRetaliation(world, agent, rules ?? {}, log, rng)) return;
   // A real fallback, not a last resort tacked on after everything else: a
   // hungry predator that had nothing to flee/fight/hunt this tick (solo or
   // pack — see predation.ts) checks for a nearby corpse to feed from

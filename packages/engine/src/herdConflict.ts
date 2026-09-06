@@ -284,6 +284,14 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
     defender.pos = stepAway(world, defender.layer, defender.pos, attacker.pos, defender, defender);
     defender.herdConflictCooldownTicks = HERD_CONFLICT_COOLDOWN_TICKS;
     attacker.herdConflictCooldownTicks = HERD_CONFLICT_COOLDOWN_TICKS;
+  } else {
+    // A real hit landed and the defender is still standing its ground —
+    // direct ask: "there isn't any fighting back, is there?" A retreating
+    // defender is backing off, not retaliating, so this is deliberately the
+    // `else` of that branch, not unconditional. See `Agent.
+    // retaliateAgainstId`'s own doc comment for what happens with this on
+    // the defender's own next action tick.
+    defender.retaliateAgainstId = attacker.id;
   }
 }
 
@@ -311,6 +319,57 @@ export function applyHerdRivalryConflict(world: World, agent: Agent, rules: Hunt
   if (rng() >= herdConflictChance(world, agent, grudge)) return false;
 
   resolveRivalryHit(world, agent, rival, log, rng);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Retaliation — direct follow-up ask, after noticing herd rivalry fights
+// read as one-sided: "there isn't any fighting back, is there?" Neither
+// `applyHerdRivalryConflict` nor `applyTerritorialGuard` above give a
+// defender any special response to just having been hit — the only way it
+// ever hits back is by independently re-clearing the WHOLE ordinary trigger
+// gate (cooldown, tolerance, abundance, disposition roll) on its own later
+// tick, which usually just doesn't line up. `Agent.retaliateAgainstId` (set
+// by `resolveRivalryHit` on a real, non-retreating hit) closes that gap with
+// a direct, one-shot response instead of a fresh escalation decision.
+// ---------------------------------------------------------------------------
+
+/** How close in level counts as "relatively equal" for retaliation purposes — direct ask: "against relatively equal level +/-5, they should retaliate." A real, symmetric level-gap check, not the reactive/proactive triggers' own maxHp-ratio confidence gate (`HERD_CONFLICT_MIN_POWER_RATIO`) — sizing up a specific foe you were just hit by is a simpler, more legible read than a stat-derived ratio. */
+export const RETALIATION_LEVEL_TOLERANCE = 5;
+
+/**
+ * Checked at the very top of the same priority tier `applyHerdRivalryConflict`/
+ * `applyTerritorialGuard` occupy (needs.ts) — spends `agent.retaliateAgainstId`
+ * the instant it's set, regardless of outcome, so this is always a one-shot
+ * response to a specific hit, never a standing grudge that lingers across
+ * many ticks. Returns true if the tick was spent responding (retaliating or
+ * backing away) — caller should treat it as consumed, same contract as the
+ * other two herdConflict.ts triggers.
+ */
+export function applyRivalryRetaliation(world: World, agent: Agent, rules: HuntRules, log: EventLog | undefined, rng: () => number): boolean {
+  const targetId = agent.retaliateAgainstId;
+  if (!targetId) return false;
+  agent.retaliateAgainstId = undefined; // one evaluation opportunity, consumed regardless of what happens below
+
+  if ((agent.herdConflictCooldownTicks ?? 0) > 0) return false;
+  if (rules[agent.species]) return false; // predator — out of scope, see this module's top doc comment
+
+  const target = world.agents.find((a) => a.id === targetId && a.alive !== false && !a.fainted && !a.isEgg);
+  if (!target || target.layer !== agent.layer) return false;
+  if (manhattan(agent.pos, target.pos) > RIVAL_DETECT_RADIUS) return false; // already out of reach — nothing left to respond to
+
+  // "If they recognize their foe is much more powerful than them they can
+  // back out without retaliation" — a real, felt de-escalation (steps away,
+  // gets a real cooldown, same shape `resolveRivalryHit`'s own retreat
+  // branch uses) rather than a coin-flip refusal.
+  const outmatched = (target.level ?? 0) - (agent.level ?? 0) > RETALIATION_LEVEL_TOLERANCE;
+  if (outmatched) {
+    agent.pos = stepAway(world, agent.layer, agent.pos, target.pos, agent, agent);
+    agent.herdConflictCooldownTicks = HERD_CONFLICT_COOLDOWN_TICKS;
+    return true;
+  }
+
+  resolveRivalryHit(world, agent, target, log, rng);
   return true;
 }
 

@@ -442,6 +442,24 @@ export interface Agent {
    */
   herdConflictCooldownTicks?: number;
   /**
+   * Set to the attacker's id the instant a `herdConflict.ts` rivalry hit
+   * actually lands on this agent (never on a miss, never when the hit made
+   * it retreat instead) — direct follow-up ask, after noticing herd rivalry
+   * fights read as one-sided: "there isn't any fighting back, is there?"
+   * Real, but not unconditional: on this agent's own very next action tick,
+   * `applyRivalryRetaliation` spends this (whether or not anything happens)
+   * to size the attacker up — "if it looks like they'll lose they can make
+   * a decision to leave... if they recognize their foe is much more
+   * powerful... they can back out without retaliation. But against
+   * relatively equal level +/-5, they should retaliate." A comparable (or
+   * weaker) attacker gets hit right back, no fresh disposition/tolerance
+   * roll needed (this is a direct response, not a new decision to
+   * escalate); a much stronger one gets backed away from instead — a real,
+   * felt de-escalation, not a coin flip. Absent = nothing to size up, the
+   * default.
+   */
+  retaliateAgainstId?: string;
+  /**
    * Rolling memory of resource tiles (same terrain kind as the current
    * seekWater/seekFood target) found crowded during the current seeking
    * episode — excluded from the next nearest-tile pick once

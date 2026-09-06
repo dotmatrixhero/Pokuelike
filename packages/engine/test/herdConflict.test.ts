@@ -5,7 +5,9 @@ import {
   HERD_CONFLICT_HP_FLOOR_FRACTION,
   HERD_CONFLICT_MIN_BLOCKED_TICKS,
   HERD_CONFLICT_MIN_POWER_RATIO,
+  RETALIATION_LEVEL_TOLERANCE,
   applyHerdRivalryConflict,
+  applyRivalryRetaliation,
   applyTerritorialGuard,
 } from "../src/herdConflict.js";
 import type { Agent, HuntRules } from "../src/types.js";
@@ -323,5 +325,104 @@ describe("applyTerritorialGuard (proactive patrol/chase-off, CROPS_DESIGN.md-sty
     withResources(world, rival.pos);
 
     expect(applyTerritorialGuard(world, a, RULES, undefined, ALWAYS_FIGHT)).toBe(false);
+  });
+});
+
+describe("applyRivalryRetaliation (direct ask: \"there isn't any fighting back, is there?\")", () => {
+  it("does nothing when there's no pending retaliation flag", () => {
+    const world = createWorld(20, 20);
+    const a = agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 });
+    world.agents.push(a);
+
+    expect(applyRivalryRetaliation(world, a, RULES, undefined, ALWAYS_FIGHT)).toBe(false);
+  });
+
+  it("a comparable-level target gets hit right back, and the flag is consumed", () => {
+    const world = createWorld(20, 20);
+    const log = new EventLog();
+    const a = agent("a", "bulbasaur", "herd-a", { x: 5, y: 5 }, { retaliateAgainstId: "b", level: 10 });
+    const rival = agent("b", "pidgey", "herd-b", { x: 5, y: 6 }, { level: 12 }); // within +/-5
+    world.agents.push(a, rival);
+
+    const engaged = applyRivalryRetaliation(world, a, RULES, log, ALWAYS_FIGHT);
+
+    expect(engaged).toBe(true);
+    expect(a.retaliateAgainstId).toBeUndefined();
+    expect(log.events.some((e) => e.kind === "herdClash" && e.attackerId === "a" && e.defenderId === "b")).toBe(true);
+  });
+
+  it("backs away instead of retaliating against a much stronger (level) foe", () => {
+    const world = createWorld(20, 20);
+    const log = new EventLog();
+    const a = agent("a", "bulbasaur", "herd-a", { x: 5, y: 5 }, { retaliateAgainstId: "b", level: 5 });
+    const strongRival = agent("b", "pidgey", "herd-b", { x: 5, y: 6 }, { level: 5 + RETALIATION_LEVEL_TOLERANCE + 1 });
+    world.agents.push(a, strongRival);
+
+    const before = { ...a.pos };
+    const engaged = applyRivalryRetaliation(world, a, RULES, log, ALWAYS_FIGHT);
+
+    expect(engaged).toBe(true); // the tick was spent backing away, not a no-op
+    expect(a.pos).not.toEqual(before);
+    expect(a.herdConflictCooldownTicks).toBeGreaterThan(0);
+    expect(log.events.some((e) => e.kind === "herdClash")).toBe(false); // no attack was actually made
+  });
+
+  it("still retaliates against a foe within the level tolerance, right at the boundary", () => {
+    const world = createWorld(20, 20);
+    const log = new EventLog();
+    const a = agent("a", "bulbasaur", "herd-a", { x: 5, y: 5 }, { retaliateAgainstId: "b", level: 5 });
+    const boundaryRival = agent("b", "pidgey", "herd-b", { x: 5, y: 6 }, { level: 5 + RETALIATION_LEVEL_TOLERANCE });
+    world.agents.push(a, boundaryRival);
+
+    expect(applyRivalryRetaliation(world, a, RULES, log, ALWAYS_FIGHT)).toBe(true);
+    expect(log.events.some((e) => e.kind === "herdClash")).toBe(true);
+  });
+
+  it("does nothing (but still consumes the flag) when the target is gone/fainted", () => {
+    const world = createWorld(20, 20);
+    const a = agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { retaliateAgainstId: "ghost" });
+    world.agents.push(a);
+
+    expect(applyRivalryRetaliation(world, a, RULES, undefined, ALWAYS_FIGHT)).toBe(false);
+    expect(a.retaliateAgainstId).toBeUndefined();
+  });
+
+  it("does nothing when either side is a predator species (out of scope)", () => {
+    const world = createWorld(20, 20);
+    const a = agent("a", "scyther", "herd-a", { x: 5, y: 5 }, { retaliateAgainstId: "b", level: 10 });
+    const rival = agent("b", "pidgey", "herd-b", { x: 5, y: 6 }, { level: 10 });
+    world.agents.push(a, rival);
+
+    expect(applyRivalryRetaliation(world, a, RULES, undefined, ALWAYS_FIGHT)).toBe(false);
+  });
+
+  it("respects the shared herdConflictCooldownTicks — no retaliation while on cooldown", () => {
+    const world = createWorld(20, 20);
+    const a = agent("a", "bulbasaur", "herd-a", { x: 5, y: 5 }, { retaliateAgainstId: "b", level: 10, herdConflictCooldownTicks: 10 });
+    const rival = agent("b", "pidgey", "herd-b", { x: 5, y: 6 }, { level: 10 });
+    world.agents.push(a, rival);
+
+    expect(applyRivalryRetaliation(world, a, RULES, undefined, ALWAYS_FIGHT)).toBe(false);
+  });
+
+  it("resolveRivalryHit sets retaliateAgainstId on a real hit, but not on a retreat or a miss", () => {
+    // Real hit, defender still standing — should carry the flag forward.
+    // Same default 40/40 hp fixture the "comparably-matched agent fights"
+    // test above already confirms takes real-but-partial damage from one
+    // hit at this power (well short of the 60% retreat threshold).
+    const hitWorld = createWorld(20, 20);
+    const attacker = agent("atk", "bulbasaur", "herd-a", { x: 5, y: 5 });
+    const defender = agent("def", "pidgey", "herd-b", { x: 5, y: 6 });
+    hitWorld.agents.push(attacker, defender);
+    applyHerdRivalryConflict(hitWorld, bumpedUp(attacker), RULES, defender.pos, undefined, ALWAYS_FIGHT);
+    expect(defender.retaliateAgainstId).toBe("atk");
+
+    // A hit that crosses the retreat threshold — the defender is backing off, not retaliating.
+    const retreatWorld = createWorld(20, 20);
+    const bigAttacker = agent("atk2", "bulbasaur", "herd-a", { x: 5, y: 5 }, { moves: [{ ...TEST_MOVE, power: 200 }] });
+    const weakDefender = agent("def2", "pidgey", "herd-b", { x: 5, y: 6 });
+    retreatWorld.agents.push(bigAttacker, weakDefender);
+    applyHerdRivalryConflict(retreatWorld, bumpedUp(bigAttacker), RULES, weakDefender.pos, undefined, ALWAYS_FIGHT);
+    expect(weakDefender.retaliateAgainstId).toBeUndefined();
   });
 });
