@@ -7,7 +7,7 @@ import { renderInspector } from "./inspector.js";
 import { renderLegend } from "./legend.js";
 import { AutoCameraController, type AutoCameraHost } from "./autoCamera.js";
 import { BattleScreenPanel } from "./battleScreenPanel.js";
-import { MacroMapView } from "./macroMap.js";
+import { MacroMapView, MACRO_MAP_DEFAULT_BLOCK_PX } from "./macroMap.js";
 
 /**
  * Ticks per real second at speed multiplier 1x. Multiplied by `SPEED_STEPS`
@@ -109,6 +109,7 @@ const macroMapCanvas = document.getElementById("macro-map-canvas") as HTMLCanvas
 const macroMapZoomLabel = document.getElementById("macro-map-zoom-label") as HTMLElement;
 const macroMapZoomInBtn = document.getElementById("macro-map-zoom-in") as HTMLButtonElement;
 const macroMapZoomOutBtn = document.getElementById("macro-map-zoom-out") as HTMLButtonElement;
+const macroMapScrollEl = document.getElementById("macro-map-scroll") as HTMLElement;
 const macroMapView = new MacroMapView(macroMapCanvas, macroMapZoomLabel, focusZone);
 let log: EventLog;
 let playing = false;
@@ -607,6 +608,43 @@ canvasWrap.addEventListener(
   "touchend",
   (event) => {
     if (event.touches.length < 2) pinchStartDistance = undefined;
+  },
+  { passive: true }
+);
+
+// Same pinch-to-zoom idiom, mirrored onto the macro map: `#macro-map-scroll`
+// already sets `touch-action: pan-x pan-y` (so a single finger still scrolls
+// it natively), which as a side effect also blocks the browser's own native
+// pinch-zoom there — but nothing filled in a replacement, so pinching over
+// the overworld map used to just do nothing. Direct follow-up to "can't
+// click or zoom the overworld map" on mobile: the +/- buttons did work, just
+// small; this is the gesture a phone user reaches for first.
+let macroPinchStartDistance: number | undefined;
+let macroPinchStartBlockPx = MACRO_MAP_DEFAULT_BLOCK_PX;
+
+macroMapScrollEl.addEventListener(
+  "touchstart",
+  (event) => {
+    if (event.touches.length === 2) {
+      macroPinchStartDistance = touchDistance(event.touches);
+      macroPinchStartBlockPx = macroMapView.currentBlockPx();
+    }
+  },
+  { passive: true }
+);
+macroMapScrollEl.addEventListener(
+  "touchmove",
+  (event) => {
+    if (event.touches.length !== 2 || macroPinchStartDistance === undefined || !macroWorld) return;
+    event.preventDefault();
+    macroMapView.zoomTo(macroWorld, macroPinchStartBlockPx, touchDistance(event.touches) / macroPinchStartDistance);
+  },
+  { passive: false }
+);
+macroMapScrollEl.addEventListener(
+  "touchend",
+  (event) => {
+    if (event.touches.length < 2) macroPinchStartDistance = undefined;
   },
   { passive: true }
 );

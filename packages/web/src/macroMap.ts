@@ -154,6 +154,17 @@ export class MacroMapView {
     this.render(mw, true);
   }
 
+  /** Current px/zone, so a pinch gesture can scale relative to where it started rather than the (possibly stale-by-then) value at gesture start. */
+  currentBlockPx(): number {
+    return this.blockPx;
+  }
+
+  /** Continuous zoom for pinch gestures — sets px/zone directly to `startBlockPx * ratio` rather than the fixed 1.5x step `zoomIn`/`zoomOut` use, so the map tracks finger spread smoothly. */
+  zoomTo(mw: MacroWorld, startBlockPx: number, ratio: number): void {
+    this.setBlockPx(startBlockPx * ratio);
+    this.render(mw, true);
+  }
+
   /** Renders the whole grid at the current zoom level. Throttled to a modest cadence unless `force` (a focus change, a zoom change, or a fresh overworld load) — macro biome/elevation data never changes and background aggregate populations drift slowly, so redrawing every animation frame like the old per-region card strip did would be wasted `fillRect` work at real grid scale. */
   render(mw: MacroWorld, force = false): void {
     const RENDER_THROTTLE_MS = 500;

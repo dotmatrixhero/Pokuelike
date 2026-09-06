@@ -219,6 +219,14 @@
          reads as an unwanted, unrelated dimming rather than a modal cue. */
       @media (max-width: 768px) {
         #drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+
+        /* Direct follow-up to "can't click or zoom the overworld map" on
+           mobile: these buttons' hit area was just the text glyph's own
+           box, well under the ~44px a thumb can reliably land on. */
+        #macro-map-zoom-in, #macro-map-zoom-out, #zoom-in, #zoom-out {
+          min-width: 44px;
+          min-height: 44px;
+        }
       }
 
       #sidebar {
