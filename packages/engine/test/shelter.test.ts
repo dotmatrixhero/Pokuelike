@@ -245,6 +245,19 @@ describe("applyShelterBuilding: real spatial task, three real steps", () => {
     expect(log.events.some((e) => e.kind === "shelterBuilt")).toBe(true);
   });
 
+  it("an obligate-aquatic species also finishes construction in half the ordinary time (direct ask: water types' shelter should be super easy to build)", () => {
+    expect(builderShelterTicks(agent("fish", { obligateAquatic: true }))).toBe(SHELTER_BUILD_TICKS / 2);
+    // A merely water-PREFERRING (not obligate-aquatic) species deliberately
+    // does NOT get this discount — see WATER_COMFORT_DISCOUNT's own doc
+    // comment in shelter.ts for why that's a real, load-bearing distinction
+    // (an amphibious species like the Squirtle line still has an ordinary
+    // land-capable home in mainline flavor, and including it here would
+    // also collide with chooseBehavior's own idle threshold).
+    expect(builderShelterTicks(agent("amphibious", { preferredTerrain: ["water"] }))).toBe(SHELTER_BUILD_TICKS);
+    // Stacks with the predator discount rather than replacing it.
+    expect(builderShelterTicks(agent("predatory-fish", { obligateAquatic: true, isPredator: true }))).toBe(SHELTER_BUILD_TICKS / 4);
+  });
+
   it("cancels (without building) if the site stopped being bare floor before this agent arrived", () => {
     const world = createWorld(100, 100);
     setTile(world, "surface", 10, 10, "water"); // something else claimed it

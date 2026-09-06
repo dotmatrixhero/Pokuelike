@@ -884,7 +884,18 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
   const py = pos.y * TILE_SIZE;
   const def = SPECIES[agent.species];
   const direction = facingOf(agent);
-  const sprite = def ? getSprite(def.spriteKey, direction) : null;
+  // `def` only exists for the small hand-curated roster (species.ts) — an
+  // evolved mid-stage form reachable purely through leveling (e.g. Ivysaur,
+  // Wartortle) has no entry there at all, even though its own sprite files
+  // exist (public/sprites/ivysaur_*.png etc.) and every curated entry's own
+  // spriteKey is just its lowercased species name anyway (leveling.ts's
+  // `Agent.species` doc comment: always the lowercased dex key, the same
+  // convention sprite filenames use). Falling back to `agent.species`
+  // itself here — rather than dropping straight to the letter fallback —
+  // lets any species with real art render it, curated or not; getSprite
+  // already degrades to null (and drawAgent to the letter) for a species
+  // with genuinely no art.
+  const sprite = getSprite(def?.spriteKey ?? agent.species, direction);
   const isCorpse = agent.alive === false;
 
   // Faux drop shadow — direct ask: "faux shadows under the Pokémon, just

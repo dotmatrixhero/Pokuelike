@@ -1,0 +1,51 @@
+name: Deploy web to Cloudflare Workers
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "packages/web/**"
+      - "packages/engine/**"
+      - "packages/data/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Secrets set on a GitHub Environment (Settings > Environments) are only
+    # visible to a job that declares that environment here — without this,
+    # secrets.CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID resolve to empty
+    # even though they're real and correctly set, which is exactly the
+    # "Input required and not supplied: apiToken" failure this fixes.
+    environment: Prod
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web app
+        run: pnpm --filter @pokuelike/web build
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: packages/web
+          command: deploy

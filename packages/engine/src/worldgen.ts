@@ -3,6 +3,7 @@ import { createWorld, setElevation, setTile, tileAt } from "./world.js";
 import { FOOD_FLAVORS } from "./flora.js";
 import { mulberry32 } from "./rng.js";
 import { canEnterWater } from "./waterBody.js";
+import type { ZoneDirection } from "./directions.js";
 
 /**
  * Stand-in for `canEnterWater`'s `agent` parameter — an ordinary land
@@ -233,6 +234,52 @@ export interface MacroElevation {
 }
 
 /**
+ * Optional steering for `generateMacroElevation`, used ONLY when generating a
+ * single zone's full-resolution map as a promoted cell of a larger
+ * `macroGrid.ts` macro grid (see that module's `biasForZone`) — every
+ * existing caller that omits this (a bare `generateWorld(width, height,
+ * seed)`, exactly as `createDemoWorld` still calls it) gets byte-identical
+ * behavior to before this existed. The whole point: a promoted zone's
+ * terrain should read as "the zoomed-in version of that macro spot," not an
+ * independent reroll — see DESIGN.md's "overworld and zone are two distinct
+ * levels" correction.
+ */
+export interface MacroElevationBias {
+  /**
+   * Where this zone's macro elevation sits, roughly -1 (deep basin) to 1
+   * (high uplift) — re-centers `.normalized()`'s reported value so a
+   * highland-marked zone's per-tile elevation actually reads as
+   * higher/mountainous, not just independently re-rolled. Does NOT move the
+   * land/ocean boundary itself (that's `oceanFraction`/`lowEdges`/
+   * `highEdges` below) — this only biases the reported elevation *within*
+   * whatever land this zone generates.
+   */
+  elevationShift: number;
+  /** Overrides the fixed `OCEAN_FRACTION` percentile target — a zone the macro grid marked as ocean should generate mostly ocean, a fully inland zone almost none. */
+  oceanFraction: number;
+  /** Edges of the tile grid to pull elevation DOWN toward — a zone with an ocean neighbor in this direction should form its own coastline on the matching edge, not a random one. */
+  lowEdges: readonly ZoneDirection[];
+  /** Edges of the tile grid to pull elevation UP toward — the mirror of `lowEdges`, for a neighbor the macro grid marked as higher elevation. */
+  highEdges: readonly ZoneDirection[];
+}
+
+/** How strongly `lowEdges`/`highEdges` pull the raw macro field toward/away from a tile-grid edge — a linear gradient from 1 at the named edge to 0 at the opposite one, scaled by this. Tuned against a real generated zone (see DESIGN.md) so a coastline reliably lands on the biased edge without flattening the rest of the zone's own local variety. */
+const EDGE_BIAS_STRENGTH = 0.6;
+
+/** How much of `.normalized()`'s reported value is pulled toward `MacroElevationBias.elevationShift` vs. this zone's own locally generated shape — kept well under 1 so a highland zone still has real local peaks/valleys, not a flat plateau at the target height. */
+const ELEVATION_SHIFT_WEIGHT = 0.35;
+
+/** 1 at the named tile-grid edge, 0 at the opposite edge, linear in between — the gradient `lowEdges`/`highEdges` ride on. */
+function edgeCloseness(dir: ZoneDirection, x: number, y: number, width: number, height: number): number {
+  switch (dir) {
+    case "N": return 1 - y / height;
+    case "S": return y / height;
+    case "W": return 1 - x / width;
+    case "E": return x / width;
+  }
+}
+
+/**
  * `applyGroudonUplift` + `applyKyogreBasin`, blended: places a few uplift
  * and basin points, sums every point's falloff-weighted contribution at
  * every tile (plus a little detail noise for coastline roughness), then
@@ -248,7 +295,13 @@ export interface MacroElevation {
  * independently places small in-land ponds/wetland water — see the tile
  * loop below).
  */
-export function generateMacroElevation(rng: () => number, width: number, height: number, detailNoise: (x: number, y: number) => number): MacroElevation {
+export function generateMacroElevation(
+  rng: () => number,
+  width: number,
+  height: number,
+  detailNoise: (x: number, y: number) => number,
+  bias?: MacroElevationBias
+): MacroElevation {
   const upliftPoints = placeMacroInfluencePoints(rng, width, height, UPLIFT_POINT_COUNT, 1);
   const basinPoints = placeMacroInfluencePoints(rng, width, height, BASIN_POINT_COUNT, -1);
   const allPoints = [...upliftPoints, ...basinPoints];
@@ -266,6 +319,10 @@ export function generateMacroElevation(rng: () => number, width: number, height:
       // Detail noise centered on 0 so it can push the field either way, same
       // (-0.5)*2 recentering the tile loop below already uses elsewhere.
       v += (detailNoise(x, y) - 0.5) * 2 * MACRO_DETAIL_WEIGHT;
+      if (bias) {
+        for (const dir of bias.lowEdges) v -= edgeCloseness(dir, x, y, width, height) * EDGE_BIAS_STRENGTH;
+        for (const dir of bias.highEdges) v += edgeCloseness(dir, x, y, width, height) * EDGE_BIAS_STRENGTH;
+      }
       raw[y * width + x] = v;
       if (v < min) min = v;
       if (v > max) max = v;
@@ -274,10 +331,15 @@ export function generateMacroElevation(rng: () => number, width: number, height:
 
   const range = max - min || 1;
   const sorted = Float64Array.from(raw).sort();
-  const seaLevel = sorted[Math.min(sorted.length - 1, Math.floor(OCEAN_FRACTION * sorted.length))]!;
+  const oceanFraction = bias?.oceanFraction ?? OCEAN_FRACTION;
+  const seaLevel = sorted[Math.min(sorted.length - 1, Math.floor(oceanFraction * sorted.length))]!;
+  const shiftTarget = bias ? (bias.elevationShift + 1) / 2 : 0;
 
   return {
-    normalized: (x: number, y: number) => Math.max(0, Math.min(1, (raw[y * width + x]! - min) / range)),
+    normalized: (x: number, y: number) => {
+      const n = Math.max(0, Math.min(1, (raw[y * width + x]! - min) / range));
+      return bias ? n * (1 - ELEVATION_SHIFT_WEIGHT) + shiftTarget * ELEVATION_SHIFT_WEIGHT : n;
+    },
     isOcean: (x: number, y: number) => raw[y * width + x]! < seaLevel,
   };
 }
@@ -473,11 +535,28 @@ interface BiomeDef {
 }
 
 /**
- * Five biomes per DESIGN.md's list. Every numeric value here is a
- * sim-original guess to be judged against a real run, exactly like every
- * other tuning constant in this codebase — not remotely canon, not
- * validated against anything but "does the generated map look/feel varied,"
- * see DESIGN.md's real-run findings for this feature.
+ * Nine biomes: the original five per DESIGN.md's list, plus "snow" (direct
+ * ask: "snowy mountain tops where ice Pokemon and dragon live"), plus
+ * "jungle"/"beach"/"desert" (direct follow-up ask: "more other types of
+ * terrain generation... stretches of desert... islands... variance that
+ * really helps flesh the world out"). "Snow" is elevation-gated ABOVE
+ * Highland (see macroGrid.ts's `SNOW_ELEVATION_THRESHOLD`) — a snowy peak
+ * literally caps the tallest mountains, it doesn't compete with the others
+ * for territory the way ordinary seed-scatter does. `floor_snow.png`
+ * (public/tiles/) already existed unused before this — sprites.ts's own doc
+ * comment flagged it as "no biome maps to snow yet." "Jungle" and "desert"
+ * are carved out of Forest's/Badlands' own moisture extremes respectively
+ * (see macroGrid.ts's `JUNGLE_MOISTURE_THRESHOLD`/`DESERT_MOISTURE_
+ * THRESHOLD`) rather than competing head-on for the same moisture range;
+ * "beach" is different again — a coastline post-process
+ * (`applyBeachReclassification`), not a moisture/elevation band at all,
+ * since "coastal strip" isn't expressible as a threshold on either field.
+ *
+ * Every numeric value here is a sim-original guess to be judged against a
+ * real run, exactly like every other tuning constant in this codebase —
+ * not remotely canon, not validated against anything but "does the
+ * generated map look/feel varied," see DESIGN.md's real-run findings for
+ * this feature.
  */
 const BIOMES: readonly BiomeDef[] = [
   {
@@ -501,6 +580,22 @@ const BIOMES: readonly BiomeDef[] = [
     terrainWeights: { tree: 5, boulder: 0.4, bush: 2.5, sand: 0.05, mud: 0.3 },
   },
   {
+    // Carved out of Forest's own wettest end (see macroGrid.ts's
+    // `JUNGLE_MOISTURE_THRESHOLD`) — denser canopy, more food (real
+    // rainforest-floor abundance), and noticeably more water than plain
+    // Forest, but still land-dominant unlike Wetland below it.
+    name: "jungle",
+    seedCount: 2,
+    foodDensity: 0.045,
+    waterDensity: 0.12,
+    obstacleDensity: 0.28,
+    elevationBase: 0.55,
+    elevationVariance: 0.6,
+    // Heavier tree/bush than even Forest — a real dense-canopy feel — with a
+    // touch of mud (humid, damp undergrowth) Forest itself barely has.
+    terrainWeights: { tree: 6, boulder: 0.2, bush: 3.5, sand: 0.05, mud: 0.6 },
+  },
+  {
     name: "wetland",
     seedCount: 2,
     foodDensity: 0.04,
@@ -509,6 +604,23 @@ const BIOMES: readonly BiomeDef[] = [
     elevationBase: 0.1,
     elevationVariance: 0.15,
     terrainWeights: { tree: 0.5, boulder: 0.1, bush: 1.5, sand: 0.2, mud: 4 },
+  },
+  {
+    // A real, low-lying coastal strip — see macroGrid.ts's
+    // `applyBeachReclassification` for how a zone actually lands here (a
+    // coastal-adjacent, low-elevation post-process, not a moisture band).
+    // Overwhelmingly sand, almost no obstacles or food of its own — the
+    // point of a beach zone is the water access right next to it
+    // (`biasForZone`'s own coastal ocean-fraction boost already handles
+    // that), not standalone habitat richness.
+    name: "beach",
+    seedCount: 2,
+    foodDensity: 0.01,
+    waterDensity: 0.06,
+    obstacleDensity: 0.03,
+    elevationBase: 0.08,
+    elevationVariance: 0.1,
+    terrainWeights: { tree: 0.05, boulder: 0.1, bush: 0.1, sand: 8, mud: 0.05 },
   },
   {
     name: "badlands",
@@ -521,6 +633,25 @@ const BIOMES: readonly BiomeDef[] = [
     terrainWeights: { tree: 0.1, boulder: 1.5, bush: 0.15, sand: 5, mud: 0.05 },
   },
   {
+    // Carved out of Badlands' own driest end (see macroGrid.ts's
+    // `DESERT_MOISTURE_THRESHOLD`) — deliberately NOT another rocky-canyon
+    // biome: `carveBadlandsChambers`'s `isBadlandsDominant` check is keyed by
+    // name, so Desert tiles never get BSP chamber-carved, staying open sand
+    // dunes instead. Harsher than Badlands on every resource axis — the
+    // driest possible extreme of the whole biome set.
+    name: "desert",
+    seedCount: 2,
+    foodDensity: 0.008,
+    waterDensity: 0.008,
+    obstacleDensity: 0.04,
+    elevationBase: 0.3,
+    elevationVariance: 0.4,
+    // Almost entirely sand dunes with the rare boulder outcrop — no BSP
+    // structure, so this is the raw terrain-weight profile doing all the
+    // "open desert, not canyon" work on its own.
+    terrainWeights: { tree: 0.02, boulder: 0.3, bush: 0.05, sand: 9, mud: 0.02 },
+  },
+  {
     name: "highland",
     seedCount: 2,
     foodDensity: 0.02,
@@ -529,6 +660,29 @@ const BIOMES: readonly BiomeDef[] = [
     elevationBase: 2.2,
     elevationVariance: 1.3,
     terrainWeights: { tree: 0.4, boulder: 4, bush: 0.25, sand: 0.15, mud: 0.1 },
+  },
+  {
+    name: "snow",
+    // 1, not 2 like every other biome — a snowcap should read as the rare
+    // tip of the tallest peaks, not a whole region competing for territory
+    // the way Highland/Badlands/etc. do (see this section's top doc
+    // comment: elevation-gated above Highland, not scattered independently).
+    seedCount: 1,
+    // Harsher than even Badlands (0.015/0.015) — a real "barren, for a
+    // reason" habitat (see the overworld extinction fix's own doc comment
+    // for that same standard applied one level up, at the macro-grid tier).
+    foodDensity: 0.01,
+    waterDensity: 0.02,
+    obstacleDensity: 0.2,
+    // Above Highland's own 2.2 base (and comfortably above its 2.2+1.3=3.5
+    // max range floor) — only the genuine tip of a tall mountain clears
+    // this, same "one biome literally caps another" idea Highland already
+    // established relative to the other four.
+    elevationBase: 3.6,
+    elevationVariance: 0.6,
+    // Overwhelmingly boulder (icy rock/snowdrift) — barely any of the
+    // others; a snowcap isn't wooded or sandy.
+    terrainWeights: { tree: 0.05, boulder: 6, bush: 0.05, sand: 0.1, mud: 0.05 },
   },
 ];
 
@@ -639,6 +793,23 @@ export function biomeWeightsAt(seeds: readonly BiomeSeedInfo[] | undefined, x: n
 /** `BIOMES` indexed by name, for the runtime (post-generation) lookups below — generation itself still walks the array directly. */
 const BIOME_BY_NAME: Readonly<Record<string, BiomeDef>> = Object.fromEntries(BIOMES.map((b) => [b.name, b]));
 
+/** Every real per-tile biome name this module knows how to generate — `macroGrid.ts` picks a zone's dominant biome from exactly this list (plus its own "ocean" for a zone the macro elevation pass marked below sea level, which isn't a `BiomeDef` at all). */
+export const BIOME_NAMES: readonly string[] = BIOMES.map((b) => b.name);
+
+/**
+ * A biome's raw food/water density parameters, for `macroGrid.ts`'s cheap
+ * per-zone resource-abundance estimate (`estimateResourceIndexForZone`) —
+ * used ONLY to seed a never-visited zone's `RegionAggregate.baseResourceIndex`
+ * before any real tiles exist to `measureResourceIndex` from (see
+ * `overworld.ts`). Returns `undefined` for an unknown name (e.g. "ocean",
+ * which isn't a `BiomeDef` — callers handle that case with their own ocean
+ * estimate) rather than guessing.
+ */
+export function biomeFoodWaterDensity(name: string): { foodDensity: number; waterDensity: number } | undefined {
+  const biome = BIOME_BY_NAME[name];
+  return biome ? { foodDensity: biome.foodDensity, waterDensity: biome.waterDensity } : undefined;
+}
+
 /** The driest biome's own `waterDensity` — the fixed target every seed's own `effectiveWaterDensityAt` drifts toward under sustained local drought (see `World.biomeSeedDrift`'s doc comment). */
 const BADLANDS_WATER_DENSITY = BIOME_BY_NAME["badlands"]!.waterDensity;
 
@@ -742,6 +913,33 @@ const BSP_WALL_CHANCE = 0.08;
  */
 const BSP_SAFE_GAP_FRACTION = 0.25;
 
+/**
+ * Direct ask: "the badlands bsp is cool, but needs to be less rigidly room
+ * like... more organic, wobbly, rock shelf like." A raw `BspBoundary` is a
+ * mathematically perfect straight line — this is the fix, not a
+ * replacement generator: keep BSP's actual room layout (still splits into
+ * `BSP_MIN_LEAF_SIZE`+ rectangular chambers, still the same recursive
+ * partition), but PAINT each line with a smooth per-tile offset
+ * perpendicular to its own direction instead of tracing it exactly, so a
+ * chamber wall meanders like a real eroded rock shelf rather than reading
+ * as a ruler-straight dungeon wall. `BSP_WOBBLE_AMPLITUDE` tiles either
+ * side is a real, visible waver without threatening `BSP_MIN_LEAF_SIZE`
+ * chambers' own floor space (a chamber's interior is never wobbled, only
+ * its boundary lines are).
+ */
+const BSP_WOBBLE_AMPLITUDE = 3;
+
+/**
+ * How slowly the wobble noise varies along a line's length — a bigger
+ * number reads as a long, lazy meander (the "rock shelf" look actually
+ * asked for); a small one would just look like jittery static, closer to
+ * per-tile independent noise than an eroded edge. Comparable to
+ * `BSP_MIN_LEAF_SIZE` so a wobble's own "wavelength" is on the same visual
+ * scale as the chambers it's carving, rather than either much shorter
+ * (busy/noisy) or much longer (barely visible over one line's length).
+ */
+const BSP_WOBBLE_NOISE_SCALE = 12;
+
 interface BspBoundary {
   /** "vertical": a line of constant `x`, spanning `y` in `[y, y + length)`. "horizontal": constant `y`, spanning `x` in `[x, x + length)`. */
   orientation: "vertical" | "horizontal";
@@ -817,13 +1015,20 @@ function carveBadlandsChambers(world: World, width: number, height: number, rng:
   const boundaries: BspBoundary[] = [];
   splitBspRect(rng, 0, 0, width, height, boundaries);
 
+  // Sampled at (position-along-line, this-line's-own-fixed-coordinate) below
+  // — the fixed coordinate differs per line, so every boundary automatically
+  // gets its own independent-looking noise "row" with no extra bookkeeping,
+  // while still varying smoothly along any single line's length.
+  const wobbleNoise = makeNoise2D(rng, Math.max(width, height), Math.max(width, height), BSP_WOBBLE_NOISE_SCALE);
+
   for (const boundary of boundaries) {
     const safeGapLength = Math.max(1, Math.round(boundary.length * BSP_SAFE_GAP_FRACTION));
     const safeGapStart = Math.floor(rng() * Math.max(1, boundary.length - safeGapLength));
 
     for (let i = 0; i < boundary.length; i++) {
-      const x = boundary.orientation === "vertical" ? boundary.x : boundary.x + i;
-      const y = boundary.orientation === "vertical" ? boundary.y + i : boundary.y;
+      const wobble = Math.round((wobbleNoise(i, boundary.orientation === "vertical" ? boundary.x : boundary.y) - 0.5) * 2 * BSP_WOBBLE_AMPLITUDE);
+      const x = boundary.orientation === "vertical" ? boundary.x + wobble : boundary.x + i;
+      const y = boundary.orientation === "vertical" ? boundary.y + i : boundary.y + wobble;
       if (x < 0 || y < 0 || x >= width || y >= height) continue;
 
       const tile = tileAt(world, "surface", x, y);
@@ -1000,10 +1205,38 @@ const BOULDER_ELEVATION_BOOST = 0.8;
  */
 const BEHAVIOR_RNG_SEED_XOR = 0x632be5ab;
 
-export function generateWorld(width: number, height: number, seed: number): World {
+/**
+ * Optional steering for `generateWorld`, threaded straight into
+ * `generateMacroElevation` (see `MacroElevationBias`'s own doc comment) plus
+ * one more per-tile concern that lives at this level instead: which biome
+ * should actually dominate this zone's land, so a promoted zone matches its
+ * macro grid cell's own dominant biome rather than whatever the ordinary
+ * random biome-seed scatter happens to roll. Absent entirely for every
+ * existing caller (`createDemoWorld`'s plain `generateWorld(w, h, seed)`) —
+ * zero behavior change there.
+ */
+export interface ZoneGenerationBias {
+  elevation: MacroElevationBias;
+  /** A `BIOME_NAMES` entry to bias this zone's biome-seed scatter toward — absent (or a name `generateWorld` doesn't recognize, e.g. "ocean") leaves biome placement exactly as unbiased `placeBiomeSeeds` would. */
+  dominantBiome?: string;
+}
+
+/** How many extra seeds of `ZoneGenerationBias.dominantBiome` get scattered on top of the ordinary biome mix — enough to make it genuinely dominate the blend (see `blendBiomeParams`'s nearest-`NEAREST_BIOME_SEEDS` weighting) without completely erasing the variety a real zone should still have. Sim-original guess, judge against a real promoted zone like every other tuning constant in this file. */
+const DOMINANT_BIOME_EXTRA_SEEDS = 8;
+
+function addDominantBiomeSeeds(seeds: BiomeSeed[], biomeName: string | undefined, rng: () => number, width: number, height: number): void {
+  const biome = biomeName ? BIOME_BY_NAME[biomeName] : undefined;
+  if (!biome) return;
+  for (let i = 0; i < DOMINANT_BIOME_EXTRA_SEEDS; i++) {
+    seeds.push({ x: rng() * width, y: rng() * height, biome });
+  }
+}
+
+export function generateWorld(width: number, height: number, seed: number, bias?: ZoneGenerationBias): World {
   const world = createWorld(width, height, seed ^ BEHAVIOR_RNG_SEED_XOR);
   const placementRng = mulberry32(seed);
   const seeds = placeBiomeSeeds(placementRng, width, height);
+  addDominantBiomeSeeds(seeds, bias?.dominantBiome, mulberry32(seed ^ 0x6a09e667), width, height);
   // Name-only projection persisted on the World — see types.ts's
   // `BiomeSeedInfo` doc comment for why weather.ts needs this and can't just
   // reuse the full internal `BiomeSeed[]` (private to this module's own
@@ -1019,7 +1252,7 @@ export function generateWorld(width: number, height: number, seed: number): Worl
   // "elevation-ish detail texture" role.
   const macroDetailNoise = makeNoise2D(mulberry32(seed ^ 0x9e3779b9), width, height, noiseScale / 10);
   const macroPointsRng = mulberry32(seed ^ 0x51c48a7d);
-  const macroElevation = generateMacroElevation(macroPointsRng, width, height, macroDetailNoise);
+  const macroElevation = generateMacroElevation(macroPointsRng, width, height, macroDetailNoise, bias?.elevation);
   const moistureField = makeDensityField(seed ^ 0x85ebca6b, width, height, noiseScale / 8);
   const obstacleField = makeDensityField(seed ^ 0xc2b2ae35, width, height, 4);
   const foodField = makeDensityField(seed ^ 0x27d4eb2f, width, height, 3);

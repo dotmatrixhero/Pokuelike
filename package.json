@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": ["esbuild", "workerd"]
   },
   "scripts": {
     "dev": "pnpm --filter @pokuelike/web dev",

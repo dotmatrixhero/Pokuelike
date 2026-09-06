@@ -1,5 +1,5 @@
-import { EventLog, tickWorld, tickOverworld, setFocusedRegion, findRegion, randomSeed, type Agent, type Overworld, type Vec2, type World } from "@pokuelike/engine";
-import { createDemoWorld, createDemoOverworld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
+import { EventLog, tickWorld, tickMacroWorld, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World } from "@pokuelike/engine";
+import { createDemoWorld, createDemoMacroWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { EventPopups } from "./eventPopups.js";
@@ -7,7 +7,7 @@ import { renderInspector } from "./inspector.js";
 import { renderLegend } from "./legend.js";
 import { AutoCameraController, type AutoCameraHost } from "./autoCamera.js";
 import { BattleScreenPanel } from "./battleScreenPanel.js";
-import { renderOverworldPanel } from "./overworldPanel.js";
+import { MacroMapView, MACRO_MAP_DEFAULT_BLOCK_PX } from "./macroMap.js";
 
 /**
  * Ticks per real second at speed multiplier 1x. Multiplied by `SPEED_STEPS`
@@ -95,16 +95,23 @@ const tabBattleScreenBtn = document.getElementById("tab-battle-screen") as HTMLB
 let world: World;
 /**
  * Set only while Overworld mode is on — `world` above always mirrors
- * whatever region is currently focused (`findRegion(overworld,
- * overworld.focusedRegionId)!.world`), so every existing single-map
- * consumer (renderer, inspector, event log, auto camera, ...) keeps working
+ * whatever zone is currently focused (`findRegion(macroWorld,
+ * macroWorld.focusedKey)!.world`), so every existing single-map consumer
+ * (renderer, inspector, event log, auto camera, ...) keeps working
  * completely unchanged; this is purely what `step()`/the overworld-toggle
- * handler need to drive the region graph itself. `undefined` in ordinary
+ * handler need to drive the macro grid itself. `undefined` in ordinary
  * single-map mode.
  */
-let overworld: Overworld | undefined;
-const overworldPanelEl = document.getElementById("overworld-panel") as HTMLElement;
+let macroWorld: MacroWorld | undefined;
+const macroMapWrapEl = document.getElementById("macro-map-wrap") as HTMLElement;
 const overworldToggleBtn = document.getElementById("overworld-toggle") as HTMLButtonElement;
+const macroMapCanvas = document.getElementById("macro-map-canvas") as HTMLCanvasElement;
+const macroMapZoomLabel = document.getElementById("macro-map-zoom-label") as HTMLElement;
+const macroMapZoomInBtn = document.getElementById("macro-map-zoom-in") as HTMLButtonElement;
+const macroMapZoomOutBtn = document.getElementById("macro-map-zoom-out") as HTMLButtonElement;
+const macroMapScrollEl = document.getElementById("macro-map-scroll") as HTMLElement;
+const macroViewToggleBtn = document.getElementById("macro-view-toggle") as HTMLButtonElement;
+const macroMapView = new MacroMapView(macroMapCanvas, macroMapZoomLabel, focusZone);
 let log: EventLog;
 let playing = false;
 let speedIndex = DEFAULT_SPEED_INDEX;
@@ -228,7 +235,7 @@ function resetUiForNewWorld(): void {
 }
 
 function loadWorld(seed: number): void {
-  overworld = undefined;
+  macroWorld = undefined;
   world = createDemoWorld(seed);
   log = new EventLog();
   resetUiForNewWorld();
@@ -239,34 +246,47 @@ function loadWorld(seed: number): void {
   history.replaceState(null, "", url);
 }
 
-/** Direct ask: "I want to be able to see the overworld stuff... visualize overworld." See overworldPanel.ts for the region-graph strip this drives. */
-function loadOverworld(): void {
-  overworld = createDemoOverworld();
-  world = findRegion(overworld, overworld.focusedRegionId)!.world;
+/**
+ * Direct ask: "I want to be able to see the overworld stuff... visualize
+ * overworld." See macroMap.ts for the single pannable/zoomable canvas this
+ * drives. `seed` (default: the same `SCENARIO_SEED` `createDemoMacroWorld`
+ * itself defaults to) lets Load/Random regenerate the whole macro grid with
+ * a different seed — direct follow-up: "can overworld be regenerated based
+ * on random seed" — mirroring `loadWorld`'s own seed-input/URL sync so the
+ * seed field and the "Copy" button stay meaningful in Overworld mode too.
+ */
+function loadMacroWorld(seed: number = SCENARIO_SEED): void {
+  macroWorld = createDemoMacroWorld(seed);
+  world = findRegion(macroWorld, macroWorld.focusedKey)!.world!;
   log = new EventLog();
   resetUiForNewWorld();
-  renderOverworldPanel(overworldPanelEl, overworld, focusRegion);
+  macroMapView.render(macroWorld, true);
+
+  seedInput.value = String(seed);
+  const url = new URL(location.href);
+  url.searchParams.set("seed", String(seed));
+  history.replaceState(null, "", url);
 }
 
-/** The region-graph's own promotion/demotion transition, triggered by clicking an unfocused region card — see overworldPanel.ts. */
-function focusRegion(regionId: string): void {
-  if (!overworld) return;
-  setFocusedRegion(overworld, regionId, IMMIGRATION_CONTEXT, world.rng, log);
-  world = findRegion(overworld, overworld.focusedRegionId)!.world;
+/** The macro grid's own promotion/demotion transition, triggered by clicking a zone on the macro map — see macroMap.ts. A no-op if `(row, col)` is out of the grid's bounds (macroMap.ts's click handler doesn't itself bounds-check). */
+function focusZone(row: number, col: number): void {
+  if (!macroWorld) return;
+  setFocusedZone(macroWorld, row, col, IMMIGRATION_CONTEXT, log);
+  world = findRegion(macroWorld, macroWorld.focusedKey)!.world!;
   resetUiForNewWorld();
-  renderOverworldPanel(overworldPanelEl, overworld, focusRegion);
+  macroMapView.render(macroWorld, true);
 }
 
 function step(): void {
-  if (overworld) {
-    // tickOverworld runs the focused region's ordinary tickWorld internally
-    // (unchanged) plus cheap per-species advancement for every other region
-    // — see overworld.ts's own doc comment. `world` is re-synced right after
-    // in case this tick's `regionCrossed`/emigration bookkeeping mattered,
-    // though focus itself only ever changes via `focusRegion` (a region
-    // card click), never mid-tick.
-    tickOverworld(overworld, log, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT);
-    world = findRegion(overworld, overworld.focusedRegionId)!.world;
+  if (macroWorld) {
+    // tickMacroWorld runs the focused zone's ordinary tickWorld internally
+    // (unchanged) plus cheap per-species advancement for every other tracked
+    // zone — see overworld.ts's own doc comment. `world` is re-synced right
+    // after in case this tick's `regionCrossed`/emigration bookkeeping
+    // mattered, though focus itself only ever changes via `focusZone` (a
+    // macro-map click), never mid-tick.
+    tickMacroWorld(macroWorld, log, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT);
+    world = findRegion(macroWorld, macroWorld.focusedKey)!.world!;
   } else {
     tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
   }
@@ -424,11 +444,13 @@ function maybeAutoSwitchTab(): void {
 loadSeedBtn.addEventListener("click", () => {
   const value = Number(seedInput.value);
   if (!Number.isFinite(value)) return;
-  loadWorld(value);
+  if (macroWorld) loadMacroWorld(value);
+  else loadWorld(value);
 });
 
 randomSeedBtn.addEventListener("click", () => {
-  loadWorld(randomSeed());
+  if (macroWorld) loadMacroWorld(randomSeed());
+  else loadWorld(randomSeed());
 });
 
 copySeedBtn.addEventListener("click", () => {
@@ -555,6 +577,42 @@ zoomInBtn.addEventListener("click", () => {
   autoCamera.noteManualViewChange();
 });
 
+/**
+ * Google Maps-style scroll-wheel zoom: whatever content point sits under the
+ * cursor stays under the cursor after `applyZoomFn` changes `canvasEl`'s
+ * rendered size, rather than the naive "zoom, then leave scroll position
+ * alone" a plain `setZoom`/`zoomIn` call would do (which visibly drifts the
+ * content out from under the pointer). Generic over which canvas/scroll pair
+ * it's zooming — reused for both the tile view and the macro overworld map
+ * below, since `getBoundingClientRect` before/after is layout-agnostic (works
+ * whether the resize came from a CSS `style.width/height` scale like the
+ * tile view uses, or a native backing-buffer resize like the macro map's
+ * own zoom does).
+ */
+function zoomAtPoint(scrollEl: HTMLElement, canvasEl: HTMLCanvasElement, clientX: number, clientY: number, applyZoomFn: () => void): void {
+  const before = canvasEl.getBoundingClientRect();
+  const fracX = before.width > 0 ? (clientX - before.left) / before.width : 0.5;
+  const fracY = before.height > 0 ? (clientY - before.top) / before.height : 0.5;
+  applyZoomFn();
+  const after = canvasEl.getBoundingClientRect();
+  scrollEl.scrollLeft += after.left + fracX * after.width - clientX;
+  scrollEl.scrollTop += after.top + fracY * after.height - clientY;
+}
+
+/** Per-wheel-notch zoom step — gentler than the +/- buttons' 1.25x jump since a wheel/trackpad fires many events in quick succession for one gesture. */
+const WHEEL_ZOOM_FACTOR = 1.1;
+
+canvasWrap.addEventListener(
+  "wheel",
+  (event) => {
+    event.preventDefault();
+    const factor = event.deltaY < 0 ? WHEEL_ZOOM_FACTOR : 1 / WHEEL_ZOOM_FACTOR;
+    zoomAtPoint(canvasWrap, canvas, event.clientX, event.clientY, () => setZoom(zoom * factor));
+    autoCamera.noteManualViewChange();
+  },
+  { passive: false }
+);
+
 // canvas-wrap's native `scroll` event fires identically whether the browser
 // scrolled because the viewer dragged/wheeled it or because auto-camera just
 // set `scrollLeft`/`scrollTop` itself (`focusCameraOn`/`restoreHomeView`) —
@@ -606,6 +664,43 @@ canvasWrap.addEventListener(
   { passive: true }
 );
 
+// Same pinch-to-zoom idiom, mirrored onto the macro map: `#macro-map-scroll`
+// already sets `touch-action: pan-x pan-y` (so a single finger still scrolls
+// it natively), which as a side effect also blocks the browser's own native
+// pinch-zoom there — but nothing filled in a replacement, so pinching over
+// the overworld map used to just do nothing. Direct follow-up to "can't
+// click or zoom the overworld map" on mobile: the +/- buttons did work, just
+// small; this is the gesture a phone user reaches for first.
+let macroPinchStartDistance: number | undefined;
+let macroPinchStartBlockPx = MACRO_MAP_DEFAULT_BLOCK_PX;
+
+macroMapScrollEl.addEventListener(
+  "touchstart",
+  (event) => {
+    if (event.touches.length === 2) {
+      macroPinchStartDistance = touchDistance(event.touches);
+      macroPinchStartBlockPx = macroMapView.currentBlockPx();
+    }
+  },
+  { passive: true }
+);
+macroMapScrollEl.addEventListener(
+  "touchmove",
+  (event) => {
+    if (event.touches.length !== 2 || macroPinchStartDistance === undefined || !macroWorld) return;
+    event.preventDefault();
+    macroMapView.zoomTo(macroWorld, macroPinchStartBlockPx, touchDistance(event.touches) / macroPinchStartDistance);
+  },
+  { passive: false }
+);
+macroMapScrollEl.addEventListener(
+  "touchend",
+  (event) => {
+    if (event.touches.length < 2) macroPinchStartDistance = undefined;
+  },
+  { passive: true }
+);
+
 /** Keeps the toggle button's label/style in sync with `autoCamera.isEnabled()` — needed both from the button's own click handler and from clicking a passive engagement box (which can turn Auto Camera on without going through the button at all). */
 function syncAutoCamToggleButton(): void {
   autoCamToggleBtn.textContent = `Auto Camera: ${autoCamera.isEnabled() ? "On" : "Off"}`;
@@ -618,21 +713,81 @@ autoCamToggleBtn.addEventListener("click", () => {
   syncAutoCamToggleButton();
 });
 
+/**
+ * Overworld mode has two views — the macro map and the focused zone's tile
+ * view — but only room to show one well at a time (direct ask, after first
+ * shipping them stacked: "they are competing too much... I want one map on
+ * the screen at a time", then a direct follow-up to make desktop match the
+ * mobile-only version of that fix: "let's make desktop match mobile, where
+ * the whole map is either overworld or zone"). `macro-view-toggle` (only
+ * visible inside `#macro-map-wrap`, so already hidden outside Overworld
+ * mode) swaps which one shows — same strict either/or on every viewport
+ * size now, no desktop-only "show both" carve-out.
+ *
+ * `.force-hide` (not the plain `hidden` attribute) is what actually hides
+ * either wrap: both set an unconditional `display: flex` of their own, an
+ * author rule that always outranks the browser's default `[hidden]` styling
+ * regardless of selector specificity, so only an `!important` class reliably
+ * wins here.
+ */
+type OverworldSubView = "overworld" | "zone";
+let overworldSubView: OverworldSubView = "overworld";
+
+function applyOverworldSubView(view: OverworldSubView): void {
+  overworldSubView = view;
+  canvasWrap.classList.toggle("force-hide", view === "overworld");
+  macroMapWrapEl.classList.toggle("force-hide", view === "zone");
+  macroViewToggleBtn.textContent = view === "zone" ? "Show Overworld" : "Show Zone View";
+}
+
 overworldToggleBtn.addEventListener("click", () => {
-  const enabling = !overworld;
-  // The seed controls don't mean anything in Overworld mode (each region
-  // has its own fixed seed — see overworldScenario.ts's OVERWORLD_REGION_SEEDS)
-  // — disabled rather than left to silently drop the viewer out of
-  // Overworld mode if clicked.
-  seedInput.disabled = enabling;
-  loadSeedBtn.disabled = enabling;
-  randomSeedBtn.disabled = enabling;
-  overworldPanelEl.hidden = !enabling;
+  const enabling = !macroWorld;
+  macroMapWrapEl.hidden = !enabling;
+  macroViewToggleBtn.hidden = !enabling;
   overworldToggleBtn.textContent = `Overworld: ${enabling ? "On" : "Off"}`;
   overworldToggleBtn.classList.toggle("playing", enabling);
-  if (enabling) loadOverworld();
-  else loadWorld(SCENARIO_SEED);
+  if (enabling) {
+    // Fresh entry into Overworld mode always defaults to the macro map,
+    // rather than carrying over a stale sub-view choice from a previous
+    // session in this mode.
+    applyOverworldSubView("overworld");
+    loadMacroWorld();
+  } else {
+    // Leaving Overworld mode entirely — canvas-wrap is the only view in
+    // ordinary single-map mode, so nothing here may leave it (or the now-
+    // irrelevant macro map) force-hidden.
+    canvasWrap.classList.remove("force-hide");
+    macroMapWrapEl.classList.remove("force-hide");
+    loadWorld(SCENARIO_SEED);
+  }
 });
+
+macroViewToggleBtn.addEventListener("click", () => {
+  applyOverworldSubView(overworldSubView === "zone" ? "overworld" : "zone");
+});
+
+macroMapZoomInBtn.addEventListener("click", () => {
+  if (macroWorld) macroMapView.zoomIn(macroWorld);
+});
+macroMapZoomOutBtn.addEventListener("click", () => {
+  if (macroWorld) macroMapView.zoomOut(macroWorld);
+});
+
+// Same Google Maps-style cursor-anchored wheel zoom as the tile view above,
+// reusing `zoomAtPoint` — `zoomTo`'s ratio parameter (built for the pinch
+// gesture's absolute start/current distance ratio) doubles perfectly as a
+// per-notch relative factor here: `currentBlockPx() * factor` is exactly
+// "the new size relative to right now."
+macroMapScrollEl.addEventListener(
+  "wheel",
+  (event) => {
+    if (!macroWorld) return;
+    event.preventDefault();
+    const factor = event.deltaY < 0 ? WHEEL_ZOOM_FACTOR : 1 / WHEEL_ZOOM_FACTOR;
+    zoomAtPoint(macroMapScrollEl, macroMapCanvas, event.clientX, event.clientY, () => macroMapView.zoomTo(macroWorld!, macroMapView.currentBlockPx(), factor));
+  },
+  { passive: false }
+);
 
 // --- Boot --------------------------------------------------------------------
 
@@ -669,11 +824,10 @@ function frame(): void {
   battleScreenPanel.render(world);
   eventLogPanel.render();
   refreshSelection();
-  // Region populations/resources drift every tick — re-render is cheap
-  // (a handful of DOM nodes, same reasoning battleScreenPanel's own
-  // every-frame render already uses) and keeps the strip live without
-  // needing its own dirty-tracking.
-  if (overworld) renderOverworldPanel(overworldPanelEl, overworld, focusRegion);
+  // Not forced — macroMapView.render internally throttles redraws (see its
+  // own doc comment) since the macro grid's data doesn't change fast enough
+  // to justify a full redraw every animation frame at real grid scale.
+  if (macroWorld) macroMapView.render(macroWorld);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

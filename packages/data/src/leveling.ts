@@ -170,6 +170,19 @@ const EGG_GROUPS_BY_BASE_KEY: Record<string, string[]> = {
   // Undiscovered-group legendaries, can't breed at all — same effect as an
   // explicit empty array via this map's `?? []` fallback, just without a
   // redundant entry.
+
+  // --- Real bug found (not introduced) while curating the desert/jungle/
+  // beach species batch (species.ts): `baseSpeciesOf` walks `PREVO_KEY_BY_
+  // KEY` all the way to a line's true dex root, which for a handful of Gen 1
+  // species is a LATER-gen baby form (Smoochum/Munchlax, generations 2/4)
+  // that this table never had an entry for — so `SNORLAX`/`JYNX` silently
+  // resolved to `eggGroups: []` the moment either was added to the roster,
+  // even though their OWN entries above are correct. The walk itself is
+  // right (breeding a Jynx really does produce a Smoochum in the real
+  // games) — the fix is simply giving these babies their line's real group,
+  // same as every other entry in this table.
+  SMOOCHUM: ["human-like"],
+  MUNCHLAX: ["monster"],
 };
 
 /**

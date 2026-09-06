@@ -83,6 +83,97 @@ describe("charmander: now a real spawnable roster member", () => {
   });
 });
 
+/**
+ * The desert/jungle/beach biome batch — real residents for the three new
+ * biomes worldgen.ts/macroGrid.ts grew, plus a few more for existing
+ * biomes, plus every reachable-by-plain-leveling evolution among them (same
+ * "don't let an evolved agent quietly lose its personality" bar as the
+ * earlier evolution-completion pass). See species.ts's own top-of-batch
+ * comment for the full reasoning.
+ */
+const NEW_BIOME_BATCH_BASE_SPECIES = [
+  "vulpix",
+  "cubone",
+  "ekans",
+  "caterpie",
+  "weedle",
+  "oddish",
+  "krabby",
+  "shellder",
+  "psyduck",
+  "ponyta",
+  "snorlax",
+  "lapras",
+  "jynx",
+  "zubat",
+] as const;
+
+const NEW_BIOME_BATCH_EVOLUTIONS: Record<string, string> = {
+  arbok: "ekans",
+  metapod: "caterpie",
+  butterfree: "metapod",
+  kakuna: "weedle",
+  beedrill: "kakuna",
+  gloom: "oddish",
+  kingler: "krabby",
+  golduck: "psyduck",
+  rapidash: "ponyta",
+  golbat: "zubat",
+};
+
+const ALL_BIOME_NAMES = ["grassland", "forest", "wetland", "badlands", "highland", "snow", "desert", "jungle", "beach"];
+
+describe("desert/jungle/beach species batch", () => {
+  for (const id of [...NEW_BIOME_BATCH_BASE_SPECIES, ...Object.keys(NEW_BIOME_BATCH_EVOLUTIONS)]) {
+    it(`${id} has a real SPECIES entry that spawns without crashing`, () => {
+      const species = SPECIES[id];
+      expect(species).toBeDefined();
+      expect(species!.baseStats.hp).toBeGreaterThan(0);
+      expect(() => spawnAgent(id, `${id}-test`, { x: 0, y: 0 }, 5, () => 0.5)).not.toThrow();
+    });
+
+    it(`${id} has real egg groups wired through LevelingContext.getProfile`, () => {
+      const profile = LEVELING_CONTEXT.getProfile(id);
+      expect(profile).toBeDefined();
+      expect(profile!.eggGroups.length).toBeGreaterThan(0);
+    });
+
+    it(`${id} is tagged with real worldgen.ts biome names`, () => {
+      const species = SPECIES[id]!;
+      expect(species.biomes && species.biomes.length).toBeTruthy();
+      for (const biome of species.biomes!) {
+        expect(ALL_BIOME_NAMES).toContain(biome);
+      }
+    });
+  }
+
+  for (const [evolvedId, baseId] of Object.entries(NEW_BIOME_BATCH_EVOLUTIONS)) {
+    it(`${baseId} has a real level-only evolution resolving to ${evolvedId}, a known curated species`, () => {
+      const profile = LEVELING_CONTEXT.getProfile(baseId)!;
+      const targetIds = profile.evolutions.map((e) => e.targetSpeciesId);
+      expect(targetIds).toContain(evolvedId);
+      expect(SPECIES[evolvedId]).toBeDefined();
+    });
+  }
+
+  it("cubone's evolutions are TIME-conditioned, not plain level, so it correctly has zero level-only evolutions", () => {
+    const profile = LEVELING_CONTEXT.getProfile("cubone")!;
+    expect(profile.evolutions.length).toBe(0);
+  });
+
+  it("golbat's further evolution (Crobat) needs FRIENDSHIP, not a plain level, so it correctly has zero level-only evolutions", () => {
+    const profile = LEVELING_CONTEXT.getProfile("golbat")!;
+    expect(profile.evolutions.length).toBe(0);
+  });
+
+  it("desert, jungle, and beach each have at least one real resident now", () => {
+    const roster = Object.values(SPECIES);
+    for (const biome of ["desert", "jungle", "beach"]) {
+      expect(roster.filter((s) => s.biomes?.includes(biome)).length).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe("IMMIGRATION_CONTEXT wiring", () => {
   it("carries every roster species with its homeLayer, and can spawn each one via the shared spawnAgent", () => {
     expect(IMMIGRATION_CONTEXT.speciesRoster.length).toBe(Object.keys(SPECIES).length);

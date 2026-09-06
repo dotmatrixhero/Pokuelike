@@ -158,6 +158,33 @@ const BOND_COMFORT_DISCOUNT = 0.15;
 const PREDATOR_COMFORT_DISCOUNT = 0.15;
 
 /**
+ * Direct ask: "[water-type Pokémon's] shelter is super easy to build so
+ * they can breed easier." Same magnitude and same stacking rule as
+ * `PREDATOR_COMFORT_DISCOUNT` — an independent, additive reason to be more
+ * eager to build (a bonded, obligate-aquatic predator would stack all
+ * three).
+ *
+ * Deliberately gated on `agent.obligateAquatic` specifically, NOT the
+ * broader "obligate-aquatic OR simply prefers water" test needs.ts's
+ * `isWaterForager` uses for water-graze foraging — a merely
+ * water-preferring species (e.g. the amphibious Squirtle line) still has an
+ * ordinary land-capable home to speak of in mainline flavor text, while a
+ * genuinely obligate-aquatic one (Magikarp, "can only splash around in
+ * water" per its own dex entry) has no conventional shelter concept at all,
+ * making "trivial to build" a much better fit specifically there. This also
+ * sidesteps a real threshold collision: `SHELTER_COMFORT_THRESHOLD` (0.85)
+ * minus a 0.15 discount lands at exactly 0.70, the same cutoff
+ * `chooseBehavior` itself uses to call a need "idle" (score `1 - need <=
+ * 0.3` i.e. need >= 0.7) — stacked onto every water-PREFERRING species too,
+ * every idle tick would also qualify for a shelter attempt, collapsing the
+ * "idle but not yet build-comfortable" state out of existence for the
+ * entire Squirtle line. Restricting to the narrower, rarer
+ * `obligateAquatic` tag keeps this a real, deliberate exception rather than
+ * swallowing an entire common behavior state.
+ */
+const WATER_COMFORT_DISCOUNT = 0.15;
+
+/**
  * Real multi-tick time investment once standing at the build site, before
  * the tile actually completes — sim-original tuning guess, same order of
  * magnitude as `flora.ts`'s `MATURATION_TICKS` (20): long enough to read as
@@ -184,13 +211,28 @@ export const SHELTER_BUILD_TICKS = 40;
 const PREDATOR_BUILD_TICKS_MULTIPLIER = 0.5;
 
 /**
+ * Same lever, same magnitude, for an obligate-aquatic builder — direct
+ * ask's own wording ("shelter is super easy to build") calls out actual
+ * build speed, not just eagerness to start. Same `obligateAquatic`-only
+ * gate as `WATER_COMFORT_DISCOUNT` above (see its doc comment for why the
+ * broader water-preferring case is deliberately excluded here). Stacks
+ * multiplicatively with the predator discount (an obligate-aquatic predator
+ * builds at 0.5 x 0.5 = 0.25x, 10 ticks) the same way `builderShelterTicks`
+ * already composes multiple independent discounts elsewhere in this file.
+ */
+const WATER_BUILD_TICKS_MULTIPLIER = 0.5;
+
+/**
  * The real number of build ticks this specific agent needs to invest —
- * `SHELTER_BUILD_TICKS`, halved for a predator. Exported so tests can assert
- * the exact predator-vs-non-predator difference directly instead of
- * re-deriving it.
+ * `SHELTER_BUILD_TICKS`, halved for a predator and/or an obligate-aquatic
+ * species. Exported so tests can assert the exact per-category differences
+ * directly instead of re-deriving them.
  */
 export function builderShelterTicks(agent: Agent): number {
-  return agent.isPredator ? Math.round(SHELTER_BUILD_TICKS * PREDATOR_BUILD_TICKS_MULTIPLIER) : SHELTER_BUILD_TICKS;
+  let ticks = SHELTER_BUILD_TICKS;
+  if (agent.isPredator) ticks *= PREDATOR_BUILD_TICKS_MULTIPLIER;
+  if (agent.obligateAquatic) ticks *= WATER_BUILD_TICKS_MULTIPLIER;
+  return Math.round(ticks);
 }
 
 /**
@@ -278,6 +320,7 @@ export function maybeTriggerShelterBuilding(world: World, agent: Agent, rng: () 
   let threshold = SHELTER_COMFORT_THRESHOLD;
   if (agent.bondedPartnerId) threshold -= BOND_COMFORT_DISCOUNT;
   if (agent.isPredator) threshold -= PREDATOR_COMFORT_DISCOUNT;
+  if (agent.obligateAquatic) threshold -= WATER_COMFORT_DISCOUNT;
   if (agent.needs.hunger < threshold || agent.needs.thirst < threshold) return;
 
   const anchor = agent.herdId ? (herdCentroid(world, agent.herdId, agent.layer) ?? agent.pos) : agent.pos;

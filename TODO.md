@@ -3,7 +3,420 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
-## Overworld visualization — built, see DESIGN.md
+## Overworld rearchitecture: a real macro zone grid — built, see DESIGN.md
+
+Direct correction after seeing the region-graph visualization below: "I
+meant like overworld is like... all these previews put together... Did the
+overworld we create not do the rivers and mountains and land and ocean
+over[all] as large swaths of positionally specific zones? That was the
+whole point. To have it contiguous." The 3-named-region graph (see
+"Overworld: region graph with promotion/demotion" further down, now marked
+superseded) is replaced by a real coarse grid of thousands of zone-cells
+with actual 2D adjacency — `packages/engine/src/macroGrid.ts` generates
+coherent macro elevation/ocean/biome/coastline/river facts for every cell up
+front (reusing the existing tile-level macro-elevation/river algorithms one
+level up), and `overworld.ts` promotes zones lazily and sparsely by grid
+position instead of eagerly generating a fixed handful of named regions.
+See DESIGN.md's "Overworld rearchitecture: a real macro zone grid" section
+for the full design, real numbers (a 1,000,000-zone grid generates in
+~2.5s), and browser-validated screenshots-in-prose.
+
+- [x] **Background (non-focused) zones were a one-way ratchet toward empty,
+      not a living ecosystem — real bug, found by actually running the sim
+      and looking, per direct ask ("run some sims, examine the zones...
+      it's missing something")**: demoted a zone with 5 squirtle + 1 onix,
+      let it run ~3000 more ticks unfocused, and it went to total
+      extinction — every species, not just a poor habitat fit. Root cause:
+      `RegionAggregate.baseResourceIndex` was measured once at demotion
+      (real terrain snapshot, or a macro-grid biome guess) and frozen
+      forever — since a demoted zone's `World` never ticks again, an
+      unlucky snapshot (freshly foraged-down terrain, the normal moment-to-
+      moment dip a focused zone recovers from on its own) could permanently
+      cap capacity below whatever population was already living there, with
+      no way back up, dooming the WHOLE zone regardless of species fit.
+      Fixed in `overworld.ts`: `baseResourceIndex` now drifts (slowly,
+      `BASELINE_RECOVERY_RATE`, one-directional — never pulls a real
+      healthy snapshot back DOWN) toward the zone's static, population-
+      independent biome potential (`estimateZoneResourceIndex`), scaled
+      down (`BIOME_MISMATCH_FACTOR`) for a species whose `biomes` don't
+      match this zone's — so a genuine mismatch (a wetland species stranded
+      in badlands) still correctly declines toward extinction, but a
+      biome-appropriate population recovers instead of dying on a
+      technicality. Direct ask this also serves: "It should constantly have
+      more Pokémon thriving... can be more barren but there should be
+      reason for it then" — barren now means a real habitat mismatch, not
+      demotion-timing bad luck.
+      Also found and fixed while validating this: `macroGrid.ts`'s
+      `RESOURCE_ESTIMATE_SCALE` (feeds `estimateZoneResourceIndex`, the
+      biome-name-based guess used for zones with no real terrain measurement
+      yet) was miscalibrated against its own stated intent ("roughly the
+      same ~0.5 typical" a real generated map measures) — at the old value,
+      grassland/forest/badlands/highland ALL landed under
+      `DEATH_HEALTH_THRESHOLD` (0.3), so wetland was the only land biome
+      whose full potential could ever sustain an abstracted population at
+      all, independent of species fit. Rescaled so grassland (~0.52) and
+      forest (~0.4) land safely above the threshold like the ordinary,
+      moderately-provisioned habitats they're meant to be, while badlands
+      (~0.12) and highland (~0.2) stay genuinely harsher.
+      Real-run validated (`validateOverworld.ts`, 8000 ticks): the same
+      demoted zone that used to go fully extinct now recovers squirtle to
+      40 individuals, spreads (via ordinary emigration) into a real cluster
+      of 8 tracked neighboring zones — several hitting the population cap —
+      while onix (the actual habitat mismatch) still correctly dies out.
+      43 population-boom events, 0 die-offs, vs. the pre-fix run's handful
+      of booms and a silent total collapse. 2 new regression tests
+      (`overworld.test.ts`) lock in both halves: recovery for a fit
+      species, continued decline for a genuine mismatch.
+- [ ] **Real follow-up, not attempted here**: still just ONE demoted zone
+      recovering/spreading per real run — cross-zone migration itself
+      remains rare (`EMIGRATION_CHANCE_PER_TICK`), so "thousands of zones"
+      is still mostly a static, uninhabited backdrop around whichever
+      handful a population happens to spread into. Direct ask for the
+      actual next layer here: "zones talking to each other would be great
+      ... cross zone migration patterns."
+- [x] **Web UI, direct follow-up**: "single pannable canvas — one canvas the
+      viewer pans/zooms around, not a separate macro-overview-plus-
+      neighborhood-panel split." The 3-card strip below is gone; one canvas
+      (`packages/web/src/macroMap.ts`) now covers the whole macro grid,
+      native-resolution zoom, promoted zones showing a real terrain inset
+      once zoomed in enough. Confirmed live in the browser end to end.
+- [x] **Scroll-wheel zoom, Google Maps-style — direct ask.** Both the tile
+      view and the macro map already had +/- buttons and pinch-to-zoom;
+      wheel/trackpad scrolling over either now zooms in/out too, anchored to
+      the cursor position (whatever content point is under the pointer stays
+      under the pointer, rather than the viewport just drifting after a
+      naive zoom). One shared `zoomAtPoint` helper (`main.ts`) does this for
+      both — it reads `getBoundingClientRect` before/after the zoom mutation
+      and adjusts the scroll container's `scrollLeft`/`scrollTop` by the
+      delta, which works regardless of whether the resize came from the tile
+      view's CSS-scale zoom or the macro map's native-resolution redraw.
+      Confirmed live via a Playwright-driven browser session: repeated wheel
+      events over an off-center point zoomed both canvases in (80% → 171%
+      tile view; 8px/zone → 14px/zone macro map) while keeping that same
+      content point within ~2px of the cursor.
+- [ ] **No true edge-blending between neighboring zones' tiles** — DESIGN.md's
+      own "neighbor consistency pass" from the original vision write-up,
+      designed but not built. Two adjacent zones are both biased from the
+      same macro data (confirmed close, ~3x more water on a coastal zone's
+      macro-marked edge than the opposite one) but nothing reconciles their
+      actual tile-level edges against each other after the fact.
+- [ ] **Macro river/lake facts aren't fed into zone promotion bias at all
+      yet** — only elevation/ocean/biome are. A zone the macro grid marked
+      as river-crossing isn't guaranteed to actually show a river once
+      promoted.
+- [ ] Biome-threshold constants (`macroGrid.ts`) are un-tuned sim-original
+      guesses — real distributions varied noticeably (badlands ~3%-14% of
+      land) across different seed/scale combinations tried.
+- [ ] `MacroWorld.regions` only ever grows, never prunes — cheap per entry,
+      genuinely unbounded over a very long session.
+
+## World-content roadmap (flagged, not started) — direct asks after a "zoom out, what's missing" review
+
+Asked for a high-level assessment of the project; answered it by actually
+running real sims (`validateOverworld.ts`) and reading zones rather than
+guessing, which surfaced the abstract-region extinction bug fixed just
+above plus a broader "content depth" gap (17 hand-curated species with real
+ecological roles vs. 151 with sprite art vs. 1083 with only raw dex stats —
+most of what a player could actually reach via evolution has numbers but no
+personality). Explicit response, roughly in the user's own stated order —
+none of this is built yet, this section is purely to not lose the thread:
+
+- [x] **More species, more behaviors — evolution lines completed.** Every
+      evolution reachable from the existing 17-species roster (Ivysaur,
+      Charmeleon/Charizard, Wartortle/Blastoise, Gyarados, Tentacruel) now
+      has its own curated `SpeciesDef` — 24 species now, up from 17 — with
+      real biomes/preferredTerrain/moves rather than falling back to
+      generic dex stats with no personality the instant an agent evolved.
+      Sprite art already existed for all of them (public/sprites/ covers
+      the full Gen 1 dex). Real bonus fix: Gyarados curated with
+      `obligateAquatic` correctly OMITTED (mainline Gyarados leaves water
+      routinely) resolves Magikarp's own "doesn't reset on evolution" gap
+      for this specific case, since `computeProfileFromDexEntry` reads the
+      CURRENT species' own tag, not an inherited one. Verified live: a real
+      5000-tick run produced Ivysaur, Charmeleon, Charizard, and Gyarados
+      via ordinary in-sim evolution, all correctly reflecting their new
+      curated behavior. Automatically picked up by immigration's species
+      roster (`Object.values(SPECIES)`) and this session's own biome-fit
+      recovery mechanic, no extra wiring needed.
+      Still open: this only closes evolution gaps on the CURRENT roster —
+      growing the roster with genuinely new base-form lines (past these 24)
+      wasn't attempted this pass.
+- [x] **Cross-zone migration patterns — direct follow-up to the extinction
+      fix's own remaining gap.** `EMIGRATION_CHANCE_PER_TICK` raised 4x
+      (0.0005 → 0.002) and `EMIGRATION_MIN_POPULATION` lowered (6 → 4) —
+      real-run finding (`validateOverworld.ts`): at the original rate, only
+      a handful of emigrations fired across ~8000 ticks even from a healthy,
+      recovering source population, so "thousands of zones" stayed a mostly
+      static backdrop around whichever one or two a population happened to
+      reach. The lowered population bar matters too: the extinction fix's
+      own recovering populations often sit in the 5-6 range for a long
+      stretch, which used to miss the old bar entirely. "Zones talking to
+      each other would be great."
+- [x] **Larger, multi-zone weather patterns.** Direct ask: a cold snap that
+      slowly crosses the OVERWORLD grid over many zones at once, reducing
+      plant growth and freezing water as it moves through, forcing real
+      migration pressure; a drought that visibly kills existing plants and
+      shrinks water bodies dramatically, not just a minor abundance dip.
+      Built as a genuinely separate, macro-grid-scale system layered on top
+      of (not replacing) the existing per-tile `weather.ts` — that one stays
+      scoped to small, fast-moving cells inside whichever ONE zone is
+      currently focused; this new one (`overworld.ts`'s `MacroWeatherFront`)
+      is a slow front drifting across the whole grid in zone units,
+      `coldSnap`/`drought` only (the two kinds with a real cross-zone habitat
+      consequence). Rare on purpose (a handful of fronts per run, not
+      constant churn), radius 4-10 zones, drift ~0.015 zones/tick (crosses a
+      60-zone-wide grid in a few thousand ticks), lifespan 1500-4000 ticks.
+      While a front is overhead, an abstracted zone's `baseResourceIndex`
+      drifts (both directions, unlike the one-way baseline-recovery drift
+      above) toward a much-reduced target — droughts scale the zone's real
+      potential down to 15%, cold snaps to 50%, matching the user's own
+      framing that droughts should hit harder — and emigration chance/
+      population-bar are both relaxed 5x, so an affected zone's population
+      visibly flees rather than just declining in place. Recovers back
+      toward the biome's real potential via the ordinary one-way drift once
+      the front moves on. New `macroWeatherChanged` `SimEvent` (`began`/
+      `ended`, mirroring `weatherChanged`'s own convention). Scoped
+      deliberately to the abstracted background-zone math only for this
+      pass — a front passing over the currently-focused zone doesn't yet
+      reach into that zone's own live per-tile `weather.ts` simulation (see
+      the open follow-up right below). Verified live
+      (`validateMacroWeather.ts`, a real `createDemoMacroWorld` run — natural
+      spawns are rare by design, so the script rigs a drought onto a real
+      migrated-to zone the same "rig the rng, run a real loop" way
+      `overworld.test.ts`'s own end-to-end tests already do, rather than
+      waiting out the natural spawn odds): a zone holding a healthy 24-strong
+      Pidgeotto population (`baseResourceIndex` 0.52) put under a drought for
+      1800 ticks saw its emigration rate jump from 3 departures/6000 ticks
+      baseline to 12 departures/1800 ticks under the front (~13x), and the
+      local Pidgeotto population hit 0 by the end of that window — a real
+      combination of "fled" and "starved," not a synthetic number. Forcing
+      the front's dissipation logged a real `ended` event at the drifted
+      (not injection-point) row/col, confirming drift actually ran; the same
+      8000-tick window also produced one fully organic natural spawn
+      (`began`, a separate drought elsewhere on the grid) on top of the
+      injected one, confirming the ordinary rare-spawn path fires too, not
+      just the rigged one this script forces for a fast, deterministic
+      check.
+- [ ] **Open follow-up, not attempted here**: a macro weather front passing
+      over the currently-FOCUSED zone has no effect on that zone's own live
+      `weather.ts` simulation — a player standing in a zone a drought is
+      crossing sees no in-zone sign of it (no forced dry spell, no visible
+      water shrinkage) until/unless that zone gets demoted and re-measured
+      afterward. Bridging the two systems (spawning/weighting the focused
+      zone's own `WeatherCell`s toward whatever macro front, if any, is
+      overhead) is real future work, not done in this pass.
+- [x] **Cross-zone herd tracking — direct follow-up, "keep track of herd
+      through zones."** Previously, a herd's identity was purely a
+      focused-zone concept: `demoteRegion` folded every agent into a
+      per-species number with no herd field at all, and `promoteZone`
+      invented a brand-new `${species}-zone-${regionKey}` herd id on EVERY
+      promotion — so a herd that got demoted, migrated, and re-promoted
+      elsewhere came back as a stranger to itself, not the same herd having
+      moved. `RegionAggregate` now carries a `herdId` that survives the
+      whole lifecycle: `demoteRegion` picks the majority herd among the real
+      agents it folds in (ties/no-herd fall back to the same invented-id
+      shape as before); `maybeEmigrate`/`foldAgentIntoAggregate` carry that
+      id into a brand-new destination aggregate (an existing destination
+      aggregate's own herd wins instead, rather than getting overwritten by
+      whichever wave of migrants happened to arrive); `promoteZone` rejoins
+      that SAME herd rather than inventing a fresh one. `regionEmigrated`/
+      `regionCrossed` events now carry `herdId` too, so the whole path is
+      visible in the log, not just inferred from before/after aggregate
+      state. Real per-species-per-zone granularity limit, same as
+      everywhere else `RegionAggregate` already has one: two distinct herds
+      of the same species sharing one abstracted zone still collapse into a
+      single number and a single (majority) herd id — this tracks ONE
+      lineage of herd identity through the grid, not a full multi-herd
+      population model. Verified live (`validateHerdMigration.ts`, a real
+      6000-tick `createDemoMacroWorld` run): a herd born `pidgey-zone-32,32`
+      (species since evolved to Pidgeotto) shows up under that SAME id
+      across a real chain of zone hops — 33,32 → 33,31 → 33,33 → 33,30 →
+      34,31 → back to 33,32 — a real, continuous, trackable migration
+      pattern across the grid, not a one-off move.
+- [x] **Badlands BSP terrain now wobbles instead of reading as rigid
+      rectangular chambers.** Direct ask: keep BSP as the starting structure
+      (still the same recursive rectangle split, still
+      `BSP_MIN_LEAF_SIZE`+ chambers), just paint it differently — each
+      boundary line's actual painted position now offsets a few tiles
+      perpendicular to its own direction (`BSP_WOBBLE_AMPLITUDE`, worldgen.ts),
+      driven by the same smooth value-noise (`makeNoise2D`) this file already
+      uses elsewhere, sampled per-line so every boundary meanders
+      independently rather than in lockstep. A mathematically straight
+      dungeon wall now reads as an eroded rock shelf. New regression test
+      (`worldgen.test.ts`) directly measures this: longest unbroken
+      same-column run of boulder/wall tiles, confirmed to fail (18+ tiles)
+      with the wobble disabled and pass (<15) with it on — a real, checkable
+      difference, not just an eyeballed screenshot. Visually confirmed too
+      (ASCII dump + a live Tile-mode screenshot at seed 42: genuinely jagged
+      terrain-boundary steps, not straight edges). Full suite green
+      (974/974).
+- [x] **Regional terrain features: real desert stretches and cleaned-up
+      islands, both at the macro-grid scale.** Direct ask: "having sections
+      of zones mean something... stretches of desert or something like that
+      would be cool. Islands." (1) **Desert stretches**: `macroGrid.ts`'s
+      moisture-noise scale (feeds `macroBiomeFor`) widened from `/6` to
+      `/2.5` — same overall biome mix, but now clustered into real
+      macro-scale regions instead of small patches. Real-run measured:
+      badlands regions now commonly span 100-600+ zones (seed 42: a single
+      614-zone stretch), up from small speckled patches. (2) **Islands**:
+      turned out to already exist structurally — `generateMacroElevation`'s
+      multi-uplift-point design genuinely produces separate landmasses (a
+      real connected-component analysis found secondary islands up to
+      460 zones on some seeds) — but the same analysis found the bulk of
+      what it produced were 1-4 zone noise flecks, barely distinguishable
+      from a rendering artifact. New `pruneNoiseSpeckIslands` (same
+      flood-fill idiom `worldgen.ts`'s underground-cave
+      `keepOnlyLargestFloorRegion` already uses, but pruning small-not-
+      smallest components so a real secondary island survives) converts any
+      land component under `MIN_ISLAND_ZONES` (10) back to ocean — cleans
+      up the noise without inventing a new "always place N islands"
+      generator that would fight the elevation field's own already-working
+      structure. Visually confirmed live (a real seed's overworld map shows
+      one clean, large contiguous desert region, not speckled dots). 2 new
+      regression tests; full suite green (976/976).
+- [x] **Species-specific environmental interactions — the two named
+      examples, built.** (1) **Water-graze foraging** (needs.ts's
+      `tryForageFromWater`/`isWaterForager`): a hungry agent whose species is
+      obligate-aquatic OR simply prefers water (`SpeciesDef.preferredTerrain`)
+      gets a real per-tick chance, while already standing on a water tile, to
+      graze something incidental (algae/krill stand-in) for a partial hunger
+      restore — no travel, no real "food" tile required at all. Real gap this
+      closes, not just flavor: `findReachableFoodTarget`'s own doc comment
+      already flags that `worldgen.ts` only places "food" terrain on LAND
+      tiles, so an obligate-aquatic agent could only ever reach one at the
+      shore ring. Real-run validated: 42 water-affiliated hunger-consume
+      events over a 5000-tick run. (2) **Easier shelter for water types**
+      (shelter.ts): an `obligateAquatic` species gets the same "comfort
+      threshold" discount and build-time halving predators already had,
+      stacking multiplicatively (an obligate-aquatic predator builds in a
+      quarter the ordinary time). Deliberately narrower than the foraging
+      gate — restricted to `obligateAquatic` specifically, not the broader
+      water-preferring case — because at the same 0.15 discount magnitude
+      already used for predators, the broader gate collided exactly with
+      `chooseBehavior`'s own idle threshold (both land on 0.70), which would
+      have made the entire Squirtle line attempt shelter-building on every
+      single idle tick; a genuinely obligate-aquatic species (no
+      conventional home to speak of at all) is where "trivial to build" is
+      the better real fit anyway. 6 new unit tests (needs.test.ts,
+      shelter.test.ts) lock in both halves plus the narrower gate; full
+      suite green (973/973).
+- [x] **Snowy mountaintop habitat, built — a real 6th biome.** Direct ask:
+      "snowy mountain tops where ice Pokemon and dragon live." New "snow"
+      `BiomeDef` (worldgen.ts) — harsher than even Badlands
+      (food/water 0.01/0.02), overwhelmingly boulder (icy rock/snowdrift),
+      elevation-based higher than Highland's own range. At the macro-grid
+      tier this is a REAL elevation gate (`SNOW_ELEVATION_THRESHOLD`,
+      checked before Highland in `macroBiomeFor`) — the tile-level
+      per-biome seed placement itself is elevation-agnostic like every
+      other biome there, same as Highland already is; only the macro
+      classification genuinely caps one biome above another. `floor_snow.png`
+      (public/tiles/) had sat unused since an earlier pass specifically for
+      lack of a biome to map it to — wired up now (sprites.ts's
+      `BIOME_FLOOR`), plus a macro-map color (macroMap.ts). Two new
+      residents (species.ts): Seel (real mainline arctic pinniped — a
+      clean fit) and Dratini (a real, flagged creative liberty: mainline
+      Dratini actually lives in lakes/rivers, grouped into snow anyway
+      since the direct ask named "ice... and dragon" together). Real-run
+      validated: snow zones appear reliably (64-344 zones per 100x100 grid
+      across 10 seeds) and promoting one spawns both new species, confirmed
+      across 4 seeds. 1 updated regression test (6 biome names, was 5);
+      full suite green (976/976).
+- [x] **Three more biomes (desert/jungle/beach) plus a real species batch —
+      direct ask: "more species? more biome types???"** Nine land biomes now,
+      up from six:
+      - **Desert** (`worldgen.ts`) — carved out of Badlands' own driest
+        moisture extreme (`macroGrid.ts`'s `DESERT_MOISTURE_THRESHOLD`),
+        deliberately a DIFFERENT character, not a recolor: open sand dunes,
+        no BSP chamber-carving (`carveBadlandsChambers`'s
+        `isBadlandsDominant` check is keyed by name, so Desert tiles never
+        get it).
+      - **Jungle** — carved out of Forest's own wettest extreme
+        (`JUNGLE_MOISTURE_THRESHOLD`): denser canopy, more food/water than
+        plain Forest, still land-dominant.
+      - **Beach** — a genuinely different kind of biome from the other
+        eight: a coastline post-process (`applyBeachReclassification`), not
+        a moisture/elevation band. Real calibration finding: the elevation
+        field normalizes PER-SEED (min/max of that seed's own raw values),
+        so a fixed absolute elevation cutoff picked up beaches in some seeds
+        and silently produced zero in others — fixed by making the
+        threshold relative to each grid's own measured land-elevation floor
+        instead (confirmed via direct sampling: one seed's real coastal band
+        sat at 0.407-0.464, another's at 0.645-0.695 — very different
+        absolute numbers, same relative position).
+      - Desert's own moisture threshold needed the same real-distribution
+        calibration this codebase's other biome constants already went
+        through: a naive "bottom 15%" guess produced zero Desert zones in
+        9 of 12 sampled seeds (`makeNoise2D`'s own doc comment already flags
+        why — multi-octave value noise clusters toward the middle, so a
+        small raw threshold badly under-fires). Recalibrated to 0.32 by
+        directly sampling the real moisture field, chosen as the lowest
+        value that reliably produced Desert in all 12 seeds while Badlands'
+        own (now thinner) share stayed nonzero everywhere too.
+      - 14 new base species curated (`species.ts`): Vulpix/Cubone (desert),
+        Ekans (grassland/jungle), Caterpie/Weedle/Oddish/Snorlax (jungle/
+        forest), Krabby/Shellder/Psyduck (beach/wetland), Ponyta (grassland/
+        highland), Lapras/Jynx (snow), Zubat (highland/badlands) — plus
+        every evolution reachable purely by in-sim leveling among them
+        (Arbok/Metapod/Butterfree/Kakuna/Beedrill/Kingler/Golduck/Rapidash/
+        Golbat/Gloom — checked against the dex's own `conditions: {}` bar,
+        same standard `leveling.ts` itself uses), same "don't let an evolved
+        agent quietly lose its personality" standard as the earlier
+        evolution-completion pass. None tagged `isPredator` — the existing
+        predator guild already struggles per this file's own extinction-fix
+        history, so this batch stays out of that problem.
+      - **Real bug found (not introduced) while adding this batch, fixed**:
+        `leveling.ts`'s `baseSpeciesOf` correctly walks a species back to its
+        true dex-root prevo, but Snorlax's/Jynx's real roots are LATER-gen
+        baby forms (Munchlax/Smoochum) this codebase's hand-curated egg-group
+        table never had entries for — so either species silently resolved to
+        `eggGroups: []` the moment it was added to the roster. Fixed by
+        giving both babies their line's real egg group, the correct fix
+        (breeding a Jynx really does produce a Smoochum in the real games),
+        not a workaround.
+      - **Real, more significant finding, NOT fixed here (pre-existing, not
+        introduced by this batch)**: tested in isolation (promoted, then
+        immediately demoted with zero ticks elapsed), Desert's real measured
+        `baseResourceIndex` came back ~0.153 and Badlands' ~0.118 — both
+        below `DEATH_HEALTH_THRESHOLD` (0.3), so a species population
+        confined to just ONE isolated zone of either biome is mathematically
+        certain to decline toward local extinction over time; the
+        extinction-fix's own recovery-target drift can't rescue this,
+        because the recovery TARGET itself (`estimateZoneResourceIndex`,
+        both biomes' analytic estimate lands in the same sub-0.3 range) is
+        just as low. This is NOT new — Badlands' own existing residents
+        (Charmander/Diglett/Onix/Geodude/Growlithe/Mankey line) have always
+        had this same property, just never directly measured/flagged before
+        now. In the real, full multi-zone simulation this reads less like a
+        bug and more like a real "source, not sink" habitat: Krabby/
+        Shellder/Golduck founded in a real promoted Beach zone (real-run
+        validation, `validateNewBiomesAndSpecies.ts`) spread outward and
+        thrived in multiple neighboring Grassland/Ocean zones over 4000
+        ticks even as the beach zone's own isolated population dropped to
+        zero — populations are born there and disperse rather than settling
+        permanently, which is a coherent story, just not the one "give
+        Desert some real residents" was originally asking for. Real
+        underlying gap: the recovery-target mechanism only guarantees "don't
+        get stuck below your OWN biome's ceiling forever" and "a mismatched
+        species declines" — it never guaranteed every biome's OWN ceiling
+        clears the survival bar to begin with. Fixing this properly (either
+        a survivable-floor guarantee under `estimateZoneResourceIndex`, or
+        accepting harsh biomes as deliberately migration-fed rather than
+        self-sustaining and building real support for that framing) is real
+        future work, flagged rather than attempted here.
+      - Real-run validated (`validateNewBiomesAndSpecies.ts`, a real
+        `createDemoMacroWorld` run): Jungle promoted for real produced a
+        living, evolving population — Ekans→Arbok, Caterpie→Metapod
+        (→Butterfree), Weedle→Kakuna→Beedrill all occurred in-sim from a
+        single 4000-tick run, not just theoretically reachable. Full suite
+        green (1074/1074 across engine+data), all packages typecheck clean.
+
+## Overworld visualization — SUPERSEDED, see above and "Overworld rearchitecture" above
+
+**Superseded** — the region-graph card strip (`overworldPanel.ts`) this
+section describes no longer exists; replaced by `macroMap.ts`'s single
+pannable/zoomable canvas, see the "Overworld rearchitecture" section above.
+Left in place as the historical record of what was built and validated at
+the time.
 
 Direct ask: "I want to be able to see the overworld stuff... visualize
 overworld." The region-graph engine (merged from the sibling
@@ -28,11 +441,11 @@ a real focus switch confirmed end to end).
 - [ ] The graph strip is a plain left-to-right layout matching the demo's
       own chain topology (`region-a - region-b - region-c`) — a real
       non-chain graph would need an actual layout algorithm, not attempted
-      since only a chain currently exists.
+      since only a chain currently exists. Moot now — see above.
 - [ ] No visual indication on the graph strip itself of migration-edge
       dispersal/emigration actually happening between two regions (visible
       in the event log/Inspector, not as e.g. an animated pulse along the
-      connector between two cards).
+      connector between two cards). Moot now — see above.
 
 ## Underground/canopy agents stranding in surface water on layer-crossing — fixed, see DESIGN.md
 
@@ -374,7 +787,19 @@ weather-driven flora/water dynamics" below — so (1) on resume should scope
 itself to tree lifecycle + biome drift only, not re-do water. Items (2) and
 (3) are both done — see their own sections below.
 
-## Overworld: region graph with promotion/demotion — built, see DESIGN.md
+## Overworld: region graph with promotion/demotion — SUPERSEDED, see below
+
+**Superseded by the macro zone grid** — see "Overworld rearchitecture: a
+real macro zone grid" further down this file and DESIGN.md's own section of
+the same name. The named 3-region graph this section describes (`Overworld`/
+`Region`/`RegionEdge`, `createDemoOverworld`) was built at the wrong level
+of the hierarchy — each "region" was a fully independent seed with no
+spatial relationship to its neighbors, not a real geography. Left in place
+below as the historical record of what was built and validated at the time
+(the promotion/demotion mechanism itself, the aggregate math, the migration
+mechanics — all genuinely reused, not thrown away); every named-graph
+specific detail (the 3 hardcoded region ids, `RegionEdge`, `tickOverworld`/
+`setFocusedRegion`/`createDemoOverworld`) no longer exists in the codebase.
 
 New `packages/engine/src/overworld.ts`: a small region graph (`Overworld`,
 `Region`, `RegionEdge`) where the focused region runs the ordinary full

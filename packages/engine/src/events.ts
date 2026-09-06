@@ -263,6 +263,19 @@ export type SimEvent =
       radius: number;
     }
   | {
+      kind: "macroWeatherChanged";
+      tick: number;
+      /** Only the two types with real cross-zone effects — see overworld.ts's `MacroWeatherKind`; rain/storm aren't part of the macro-scale system. */
+      weatherType: "coldSnap" | "drought";
+      /** Same "began"/"ended" narrative-color convention as `weatherChanged` above, one level up: a macro front spanning many zones, not weather.ts's single-map cells. */
+      phase: "began" | "ended";
+      /** Rounded front center, in zone (row, col) — not tile coordinates. */
+      row: number;
+      col: number;
+      /** Radius in zones. */
+      radius: number;
+    }
+  | {
       kind: "dispersed";
       tick: number;
       agentId: string;
@@ -536,6 +549,8 @@ export type SimEvent =
       species: string;
       /** Rounded head count that moved — see overworld.ts's abstract-tier emigration roll. */
       population: number;
+      /** The herd this slice belongs to — see overworld.ts's `RegionAggregate.herdId`; direct ask, "keep track of herd through zones." */
+      herdId: string;
     }
   | {
       kind: "regionCrossed";
@@ -545,6 +560,8 @@ export type SimEvent =
       species: string;
       fromRegionId: string;
       toRegionId: string;
+      /** The herd this crosser ended up filed under at the destination — see overworld.ts's `foldAgentIntoAggregate`. */
+      herdId: string;
     };
 
 /**
