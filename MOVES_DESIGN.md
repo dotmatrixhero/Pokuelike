@@ -517,6 +517,109 @@ whole point of tying this to Disposition — tag deliberately.
 node should cost something (accuracy, cooldown, power, range) even when
 small.
 
+## Skill-tree template v3 — start from the fantasy (redesign principles)
+
+Direct critique after reviewing the first batch of trees in the Move Tree
+Atlas artifact: "the design looks like you just copied over effects from
+other trees... uninspired." Fair. Rock Throw/Peck/Scratch/Water Gun/Hydro
+Pump/Solar Beam/Earthquake all share the v2 template's *structure* (opener
+→ filler → hub → notable1 → filler → fork → notable2 → filler → keystone),
+which is sound and stays — but they also largely share the same node
+*content* inside that skeleton: a "+power vs. +accuracy" fork, a
+"damageReduction vs. +power/jamCooldown" fork, a generic ally-buff opener,
+a `resistanceBreaker` keystone, over and over. That's the actual problem:
+every tree's levers came from whatever the last tree happened to use,
+not from that move's own fantasy. Three rules, going forward — these
+supersede nothing above, they add a step *before* it:
+
+### 1. Write the fantasy before touching a single node
+
+Before laying out branches, write 2-4 sentences (right here in this doc,
+per move, before any node list) describing what the move IS — viscerally,
+not mechanically: what it looks like, what's dangerous about it, who it's
+dangerous to. Only once that's written do the three branches get designed,
+and each branch's mechanics should be a specific answer to "what does
+Aggression/Boldness/Sociability mean for *this* fantasy" — not a re-skin
+of the same three answers every other move already gave.
+
+Worked example, direct from feedback — **Earthquake**: a self-centered
+shockwave radiating out from the user in every direction. It's not a
+precision tool — it's reckless area denial that doesn't distinguish friend
+from foe, and per `resolveAreaHit` (predation.ts) that's real, current
+engine behavior today, not a hypothetical: its target filter checks only
+`id !== attacker.id`, `alive`, `layer`, and being in the resolved shape —
+nothing about herd membership, so a same-herd ally caught in the burst
+radius takes the hit exactly like an enemy would. That recklessness *is*
+the design space:
+- **Aggression** leans further into "more, bigger, less controlled" — the
+  existing overwhelming-force direction is fine here, since "commit
+  harder" is Aggression's identity on every move, not just this one.
+- **Boldness**, per the redesign note, stops being generic tankiness and
+  reshapes the battlefield itself instead: the ground doesn't just shake,
+  it cracks. A hit could turn the ground under it to real rubble that
+  slows anyone crossing it, or — for a big enough tremor — punch a hole
+  down to the underground layer at the impact site.
+- **Sociability** turns the move's own flaw into its payoff: a herd
+  drilled on this move doesn't get caught in its own quake. The branch's
+  notable/keystone could exempt same-herd agents from the AoE entirely
+  and/or turn the shockwave into a shared buff pulse for whoever's nearby
+  when it lands.
+
+New primitives that example calls for, **none of which exist yet** — add
+a row to the "Engine primitives needed" checklist once one is actually
+built, same discipline as everything already on it:
+- **AoE ally-exemption.** A `MoveTreeNode.delta` flag (e.g.
+  `excludesAllies: true`) that makes `resolveAreaHit`'s target filter also
+  skip same-herd agents when set. Small, real engine work — one extra
+  condition in an existing filter.
+- **Terrain-as-hazard from a hit**, stronger than the existing
+  `terrainBurn`/`terrainFill` (which only ever change a tile's *kind*, not
+  how costly it is to cross): a move-created "rubble" terrain that raises
+  `terrainSpeedMultiplier` (support.ts already has this function; a new
+  `TerrainKind` is the missing piece). The layer-exposure half of the idea
+  is a bigger, separate lift — no primitive anywhere in this engine
+  currently lets a move punch a temporary opening between layers; today
+  every layer transition is agent-initiated, never move-caused. Worth its
+  own design pass later, not assumed away here.
+
+### 2. Filler nodes: use the whole lever list, not just power/accuracy/cooldown
+
+Nearly every shipped tree's filler nodes are "+5 Power," "+5 Accuracy," or
+occasionally "-1 Cooldown," repeated 6-8 times per tree across 10 trees —
+that repetition is a real part of why the atlas reads as copy-pasted, even
+though each of those levers is individually legitimate (the v2 template
+above explicitly names cooldown reduction as *the* signature utility
+lever). Range is another real, already-shipped, cheap delta field
+(`MoveSpec.range` / `MoveTreeNode.delta.range`) that's gone almost unused
+at filler tier. Consult the full **Engine primitives checklist** (top of
+this doc) and **Skill-tree lever brainstorm** (right below) when filling
+in a branch's small nodes — `defensePenetration`, `lifestealFraction`/
+`recoilFraction`, `critRateStage`, `jamCooldownTicks`, `positionSwapPull`
+(once the move has `positionSwap` at all) are all legitimate small,
+low-drama bumps, not just the same two stats every time.
+
+**The one thing that does NOT belong at filler tier: a shape/AoE change.**
+Turning a point into a cone, or a single target into a burst, redefines
+what the move fundamentally does — that's notable- or keystone-tier by
+definition, matching how Peck's *Extended Wingspan* and Ember's *Wide
+Ring* are already built (both notables, never filler).
+
+### 3. Positional/movement levers deserve real per-move thought, not a reused kit
+
+`forcedMovement`, `positionSwap`/`positionSwapPull`,
+`consumesOwnTerrain`, `terrainBurn`/`terrainFill`, and `burrow` are the
+sim's most *physical* levers — they change where agents and terrain
+actually sit, which is where the most memorable interactions live (Peck's
+Snatch and Swap, Rock Throw's boulder-consumption). They've mostly been
+used identically across trees so far — a knockback on one fork, a retreat
+on the other, everywhere. Go back to the fantasy for these specifically:
+what does *this* move's own physical presence in the world look like? A
+throw that drags its target through the point of impact. A retreat that
+only works from concealment. A finisher that repositions the user *into*
+the middle of the area it just created, instead of just away from danger.
+These are worth real per-move design time, not a reused "fork A pushes,
+fork B pulls" shape stamped onto every tree.
+
 ## Skill-tree lever brainstorm
 
 The mechanical levers a tree node can pull, organized by how much new

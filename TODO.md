@@ -3,6 +3,34 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Move-tree redesign: start from the fantasy — principles written, trees pending
+
+Direct critique after reviewing the shipped trees in the Move Tree Atlas
+artifact: "the design looks like you just copied over effects from other
+trees. That's uninspired... we have to do better. Think laterally." Fair —
+every tree so far shares not just the v2 template's structure (sound, kept)
+but largely the same node *content*: the same fork shapes, the same
+ally-buff opener, the same `resistanceBreaker` keystone, repeated across
+10 trees. Wrote up three concrete principles in MOVES_DESIGN.md's new
+"Skill-tree template v3 — start from the fantasy" section, worked through
+against the user's own Earthquake example (an uncontrolled self-centered
+blast that today genuinely does hit allies per `resolveAreaHit` — no herd
+filter exists — which is real design space, not a bug to just fix): (1)
+write each move's actual fantasy in 2-4 sentences before laying out any
+branch, and let each branch answer what Aggression/Boldness/Sociability
+specifically means for *that* fantasy, not a re-skin of the last move's
+answer; (2) filler nodes should draw from the whole lever list (cooldown,
+range, defensePenetration, lifesteal/recoil, crit rate, jam cooldown —
+not just power/accuracy on repeat), while shape/AoE changes stay
+notable/keystone-tier, never filler; (3) positional/movement levers
+(forcedMovement, positionSwap, terrain interaction) deserve real per-move
+design thought, not the same "fork A pushes, fork B pulls" shape reused
+everywhere. Flagged two genuinely new primitives Earthquake's own
+redesign would need (AoE ally-exemption, hazard terrain stronger than the
+existing terrainBurn/terrainFill) rather than pretending they already
+exist. Next: actually redesign the flagged trees against these principles,
+per move, starting with whichever ones get flagged in the atlas.
+
 ## Twelve advanced moves + 3 more flagship trees — built, see MOVES_DESIGN.md
 
 Direct ask, right after the move-tree batch below: "We need more moves
