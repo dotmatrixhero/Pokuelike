@@ -36,10 +36,11 @@ export { mulberry32 };
 /**
  * Procedural surface-layer generation — see DESIGN.md's "Environmental
  * generation, biomes, obstacles, and elevation-aware movement/fog" section.
- * Underground/canopy are untouched (still the plain flat grid `createWorld`
- * always produces) — this is a Surface-only pass, an explicit scope call
- * matching DESIGN.md's existing open question about whether the other two
- * layers ever get their own elevation/terrain model.
+ * Underground and canopy both now get real generated structure of their own
+ * (see the "Underground caves" and "Canopy — derived from Surface" section
+ * doc comments below) rather than the plain flat grid `createWorld` always
+ * produces on its own — underground via independent cellular automata,
+ * canopy by reading Surface's own already-finished terrain (CROPS_DESIGN.md).
  */
 
 // ---------------------------------------------------------------------------
@@ -1464,6 +1465,96 @@ function carveMountainMassifs(world: World, width: number, height: number, rng: 
 }
 
 // ---------------------------------------------------------------------------
+// Canopy — derived from Surface, not independently generated. Direct
+// correction to CROPS_DESIGN.md's original pitch: "I think things don't
+// generate in canopy just floating there. They have to be growing on trees
+// or plants that grow high... groups of trees can provide little islands of
+// canopies... maybe super high elevated walls... the outside of them can
+// leave ridges on canopy." Canopy `"floor"` (walkable) now exists only where
+// Surface gives it a real reason to: directly on/near a tree — a lone tree
+// still counts (so a species that only ever finds one tall tree isn't
+// stranded), while `CANOPY_TREE_LINK_MIN_NEIGHBORS` additionally lets a loose
+// scatter of nearby trees bridge into one shared canopy patch, the "little
+// islands" the pitch asked for — or directly adjacent to a real mountain
+// massif wall (a "ridge"). Badlands BSP chambers also carve `"wall"` tiles
+// onto Surface, but those are excluded via `isMassifBiomeDominant` — a
+// carved chamber isn't an elevated peak, and shouldn't cast a canopy ridge.
+// Everywhere else canopy stays `"wall"` (nothing to stand on) — a real
+// behavior change from the flat all-`"floor"` grid `createWorld` used to
+// leave every non-Surface layer with; underground got its own real structure
+// first (see the cellular-automata section above), canopy is this file's
+// second departure from that original "untouched" scope, this time by
+// reading Surface rather than generating independently, since (unlike
+// underground) canopy has no biome/elevation concept of its own to derive
+// structure from otherwise.
+// ---------------------------------------------------------------------------
+
+/** How far out from a tile a nearby tree still counts toward `CANOPY_TREE_LINK_MIN_NEIGHBORS` — small enough that only a genuinely close cluster links up, not the whole forest. */
+const CANOPY_TREE_LINK_RADIUS = 2;
+
+/** A tile with at least this many trees within `CANOPY_TREE_LINK_RADIUS` (not counting itself) gets canopy floor even if it isn't a tree tile itself — the "little islands" bridging a loose scatter of trees into one walkable patch. */
+const CANOPY_TREE_LINK_MIN_NEIGHBORS = 2;
+
+/** How far out from a real massif wall tile a canopy "ridge" extends. */
+const CANOPY_RIDGE_RADIUS = 1;
+
+/** Ridge canopy sits visibly above tree-canopy's flat 0 — the elevated-peak feel the pitch asked for, same idiom as `BOULDER_ELEVATION_BOOST`/`MASSIF_ELEVATION_BOOST` above. */
+const CANOPY_RIDGE_ELEVATION = 1.2;
+
+function countTreesNearby(world: World, x: number, y: number, radius: number): number {
+  let count = 0;
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      if (tileAt(world, "surface", x + dx, y + dy)?.terrain === "tree") count++;
+    }
+  }
+  return count;
+}
+
+function isNearMassifWall(world: World, seeds: readonly BiomeSeedInfo[], x: number, y: number, radius: number): boolean {
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const nx = x + dx;
+      const ny = y + dy;
+      const tile = tileAt(world, "surface", nx, ny);
+      if (tile?.terrain === "wall" && isMassifBiomeDominant(seeds, nx, ny)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Writes real structure onto `world.tiles.canopy`, reading Surface (already
+ * fully generated, massifs included, by the time this runs) rather than
+ * generating anything independently — see this section's own doc comment.
+ * A no-op effect for a world with no biome data (`isNearMassifWall` simply
+ * never returns true) still runs the tree-linking half fine, so this doesn't
+ * need the same early-return guard `carveMountainMassifs`/
+ * `carveBadlandsChambers` use.
+ */
+function deriveCanopyFromSurface(world: World, width: number, height: number): void {
+  const seeds = world.biomeSeeds ?? [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const surfaceTile = tileAt(world, "surface", x, y)!;
+      const onTree = surfaceTile.terrain === "tree";
+      const treeIsland = onTree || countTreesNearby(world, x, y, CANOPY_TREE_LINK_RADIUS) >= CANOPY_TREE_LINK_MIN_NEIGHBORS;
+      if (treeIsland) {
+        setTile(world, "canopy", x, y, "floor", 0);
+        continue;
+      }
+      const ridge = seeds.length > 0 && isNearMassifWall(world, seeds, x, y, CANOPY_RIDGE_RADIUS);
+      if (ridge) {
+        setTile(world, "canopy", x, y, "floor", CANOPY_RIDGE_ELEVATION);
+      } else {
+        setTile(world, "canopy", x, y, "wall", 0);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Landmark terrain — direct ask: "particularly unique zone gen" and "make
 // 'em interesting to look at." Each landmark carves a real, spatially
 // localized feature (a bounded patch, not the whole zone) on top of the
@@ -1882,6 +1973,12 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   // "distinct xor'd seed per generation concern" pattern as every other
   // noise field in this function.
   carveMountainMassifs(world, width, height, mulberry32(seed ^ 0xbb67ae85), bias?.elevation.highEdges);
+
+  // Canopy is derived from Surface (trees, massif ridges) now that Surface's
+  // own generation — including massifs just above — is fully settled; see
+  // "Canopy — derived from Surface" section doc comment. No rng of its own:
+  // every pixel it reads already came from a real generation step above.
+  deriveCanopyFromSurface(world, width, height);
 
   // Underground caves are independent of everything Surface-only above (no
   // biome/elevation/moisture data to read) — its own derived rng sub-stream,

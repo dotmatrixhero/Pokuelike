@@ -110,12 +110,20 @@ describe("generateWorld", () => {
     expect(kindsSeen.size).toBeGreaterThanOrEqual(5);
   });
 
-  it("canopy stays the plain flat grid — a Surface-only generation pass; underground now gets real cellular-automata cave structure", () => {
-    const world = generateWorld(40, 30, 9);
+  it("canopy is derived from surface (trees/ridges), not a plain flat grid; underground gets real cellular-automata cave structure", () => {
+    const world = generateWorld(90, 60, 9);
+    // Canopy: "floor" only above/near a real tree or a massif ridge, "wall"
+    // (unwalkable — no floating platforms) everywhere else. A 90x60 map with
+    // real biome variety should show both.
+    let sawCanopyFloor = false;
+    let sawCanopyWall = false;
     for (const tile of world.tiles.canopy) {
-      expect(tile.terrain).toBe("floor");
-      expect(tile.elevation).toBe(0);
+      expect(["floor", "wall"]).toContain(tile.terrain);
+      if (tile.terrain === "floor") sawCanopyFloor = true;
+      if (tile.terrain === "wall") sawCanopyWall = true;
     }
+    expect(sawCanopyFloor).toBe(true);
+    expect(sawCanopyWall).toBe(true);
     // Underground: every tile is "floor", "wall" (the CA cave carver's own
     // vocabulary), or "water" (a real, guaranteed pocket biased toward
     // wherever Surface is wettest — see pickUndergroundWaterPocket) — no
@@ -693,9 +701,9 @@ describe("generateWorld: Underground cellular-automata caves", () => {
     }
   });
 
-  it("canopy is untouched by cave generation — still the plain flat grid", () => {
+  it("canopy is untouched by cave generation — its own terrain vocabulary is floor/wall only, never underground's water", () => {
     const world = generateWorld(90, 60, 9);
-    for (const tile of world.tiles.canopy) expect(tile.terrain).toBe("floor");
+    for (const tile of world.tiles.canopy) expect(["floor", "wall"]).toContain(tile.terrain);
   });
 
   it("determinism: the same seed produces byte-identical underground cave layout", () => {

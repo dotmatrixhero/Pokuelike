@@ -227,10 +227,14 @@ export function maybeImmigrate(world: World, ctx: ImmigrationContext | undefined
   if (!species) return;
 
   const groupSize = MIN_GROUP_SIZE + Math.floor(rng() * (MAX_GROUP_SIZE - MIN_GROUP_SIZE + 1));
-  const arrivalPos =
-    species.homeLayer === "surface"
-      ? findWalkableNear(world, "surface", edgePos.x, edgePos.y)
-      : { x: Math.min(world.width - 1, Math.max(0, Math.round(edgePos.x))), y: Math.min(world.height - 1, Math.max(0, Math.round(edgePos.y))) };
+  // Real walkability search on every layer, not just Surface — Underground
+  // (cellular-automata cave walls) and Canopy (derived-from-Surface walls,
+  // CROPS_DESIGN.md) both now carve genuine unwalkable terrain too, the same
+  // "no longer a plain flat grid" fix scenario.ts's own `undergroundAnchor`/
+  // `canopyAnchor` already made for hand-placed scenario spawns. A raw
+  // clamped `edgePos` could otherwise land an immigrant group directly
+  // inside solid cave/canopy wall.
+  const arrivalPos = findWalkableNear(world, species.homeLayer, edgePos.x, edgePos.y);
 
   // Obligate-aquatic species (`ImmigrationSpeciesInfo.obligateAquatic`, see
   // its own doc comment) need a real water tile, not merely a walkable one —
@@ -244,9 +248,7 @@ export function maybeImmigrate(world: World, ctx: ImmigrationContext | undefined
   const usedWaterTiles: Vec2[] = [];
   function nextArrivalPos(i: number): Vec2 {
     if (!species!.obligateAquatic) {
-      return species!.homeLayer === "surface"
-        ? findWalkableNear(world, species!.homeLayer, arrivalPos.x + i, arrivalPos.y)
-        : { x: Math.min(world.width - 1, Math.max(0, arrivalPos.x + i)), y: arrivalPos.y };
+      return findWalkableNear(world, species!.homeLayer, arrivalPos.x + i, arrivalPos.y);
     }
     const waterPos = findNearestIndexed(world, "surface", arrivalPos, "water", usedWaterTiles) ?? arrivalPos;
     usedWaterTiles.push(waterPos);

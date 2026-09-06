@@ -366,6 +366,50 @@ and stamps canopy tiles only where one of those three sits, sized to match
 scoped, and grounded in what Surface already generated — not a fourth
 generation system running in parallel and hoping it lines up.
 
+**Built** (`deriveCanopyFromSurface`, worldgen.ts, run after `carveMountainMassifs`
+so it can read the finished massif layout): scoped to the two sources this
+pass could actually ground in real Surface data today — tree clusters and
+massif ridges. Corn's own canopy projection (single-tile "tall stalk," per
+the pitch) is deliberately NOT built here: Corn today has no `nativeLayer`
+at all (still an ordinary Surface crop, `crops.ts`), and giving it one is a
+crop-registry decision that belongs with task #7/#8's canopy-harvest work,
+not this terrain pass — this task only had to prove canopy CAN carry real
+structure, using the two sources already fully resolved on Surface by the
+time it runs. A canopy tile gets real `"floor"` (walkable) if the same
+(x, y) Surface tile is itself a tree, OR has at least
+`CANOPY_TREE_LINK_MIN_NEIGHBORS` (2) other trees within
+`CANOPY_TREE_LINK_RADIUS` (2) — the "little islands" the direct correction
+asked for, so a loose scatter of nearby trees bridges into one walkable
+patch instead of each tree reading as an isolated single-tile platform a
+flock could never actually stand on together. Independently, a tile within
+`CANOPY_RIDGE_RADIUS` (1) of a real massif wall tile gets ridge floor
+(elevated `CANOPY_RIDGE_ELEVATION` above tree-canopy's flat 0) — gated
+through the same `isMassifBiomeDominant` check `carveMountainMassifs` uses
+internally, deliberately excluding Badlands BSP chambers' own `"wall"`
+tiles (a carved corridor isn't an elevated peak and shouldn't cast a canopy
+ridge). Everywhere else canopy is real `"wall"` — no floating platforms,
+the direct correction's whole point — a real behavior change from the flat
+all-floor grid `createWorld` used to leave every non-Surface layer with.
+
+A real, pre-existing bug this surfaced and fixed: two callers built canopy
+positions assuming the layer was always fully walkable, exactly the same
+class of bug `undergroundAnchor` (scenario.ts) was already written to fix
+once underground caves added real walls. `scenario.ts`'s hand-placed
+Pidgey/Spearow spawns used an unchecked `scaledPos` — fixed by adding a
+`canopyAnchor` helper (mirroring `undergroundAnchor` exactly) and switching
+both spawns to it. `immigration.ts`'s `maybeImmigrate` used a raw clamped
+position for any non-Surface `homeLayer`, Underground included — meaning
+this exact bug already silently existed for Underground immigrants since
+task #1 added cave walls, just never surfaced until Canopy's own walls made
+it obviously wrong too. Fixed both call sites (`arrivalPos` and
+`nextArrivalPos`) to call `findWalkableNear(world, species.homeLayer, ...)`
+unconditionally instead of branching on `homeLayer === "surface"`.
+Validated via `validateCanopy.ts` against a real 90x60 generated world
+(13.2% real canopy floor, the rest real wall — not degenerate in either
+direction) and the real demo scenario (`createDemoWorld`): all three
+canopy-native starting agents — the Pidgey flock and their Spearow hunter —
+land on genuinely walkable canopy tiles.
+
 ### Mountain massifs — the other real generation gap this surfaced
 
 Direct question: "do we have solid wall chunks yet like mountain terrain?"
