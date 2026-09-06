@@ -155,31 +155,42 @@ describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () =>
     expect(respec.rallyCall).toEqual({ ticks: 20 });
   });
 
-  it("Deep Tremor overwrites (doesn't stack with) Tremor Call's own mark duration", () => {
-    const respec = applyMoveTree(rockThrow, ["tremor_call", "sure_footing", "carrying_weight", "deep_tremor"]);
-    expect(respec.rallyCall).toEqual({ ticks: 35 });
+  it("Tremor Bond is a real, distinct Sociability lever (a herd heal), not another way to extend the mark", () => {
+    const respec = applyMoveTree(rockThrow, ["tremor_call", "sure_footing", "herd_grip", "tremor_bond"]);
+    expect(respec.rallyCall).toEqual({ ticks: 20 }); // untouched — Tremor Bond doesn't touch the mark at all
+    expect(respec.targetsAlly).toBe(true);
+    expect(respec.allyEffect).toEqual({ healFraction: 0.15 });
   });
 
-  it("Full Convergence capstone extends the mark further and adds a real jam", () => {
+  it("Herd Ascendant capstone pays off with jam + lifesteal, not a third round of mark-extension", () => {
     const respec = applyMoveTree(rockThrow, [
       "tremor_call",
       "sure_footing",
-      "carrying_weight",
-      "deep_tremor",
+      "herd_grip",
+      "tremor_bond",
       "vanguard_call",
       "colony_watch",
       "tremor_focus",
-      "full_convergence",
+      "herd_ascendant",
     ]);
-    expect(respec.rallyCall).toEqual({ ticks: 60 });
+    expect(respec.rallyCall).toEqual({ ticks: 20 }); // still the opener's own value — never re-touched
     // jamCooldownTicks is additive across nodes (Vanguard Call's own +1 plus
-    // Full Convergence's +3), not an overwrite — see applyMoveTree's merge.
+    // Herd Ascendant's +3), not an overwrite — see applyMoveTree's merge.
     expect(respec.jamCooldownTicks).toBe(4);
+    expect(respec.lifestealFraction).toBeCloseTo(0.05);
   });
 
-  it("Rolling Thunder crosslink stuns outright once a target is already marked and pinned", () => {
+  it("Rolling Thunder crosslink deepens the real Speed-debuff pin once a target is already marked, not a self-lock", () => {
     const respec = applyMoveTree(rockThrow, ["pinning_impact", "tremor_call", "rolling_thunder"]);
-    expect(respec.lockTicks).toBe(2);
+    expect(respec.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -2, ticks: 24 });
+    expect(respec.lockTicks).toBeUndefined();
+  });
+
+  it("Hobbling Throw only needs one prior node, not both Cracked Joint and Dead Aim together", () => {
+    const viaCrackedJointOnly = applyMoveTree(rockThrow, ["pinning_impact", "cracked_joint", "hobbling_throw"]);
+    const viaDeadAimOnly = applyMoveTree(rockThrow, ["pinning_impact", "dead_aim", "hobbling_throw"]);
+    expect(viaCrackedJointOnly.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -1, ticks: 20 });
+    expect(viaDeadAimOnly.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -1, ticks: 20 });
   });
 });
 

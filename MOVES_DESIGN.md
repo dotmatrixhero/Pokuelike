@@ -983,37 +983,13 @@ Diglett). Giving the Squirtle pair a shared `herdId` would be a small, real
 follow-up if their branch should matter sooner rather than later; noted
 here, not done.
 
-- **Rock Throw** (Rock, line-3, cooldown 1) — Onix's second move, alongside
-  Tackle.
-  - **Aggression — "Landslide"**: opener *Heavy Stones* (+power, -accuracy)
-    → filler → filler → notable *Crushing Weight* (`defensePenetration`)
-    → filler → **fork**: *Overhand Heave* (+power, `selfCostPerUse` energy
-    — an all-out throw that costs the thrower something real every time)
-    vs. *Measured Toss* (+accuracy, no cost — a controlled, sustainable
-    throw) → notable *Skyfall* (`bonusVsType` vs. Flying — a rockslide is a
-    real answer to anything with wings) → filler → **keystone** *Cave-In*
-    (+power, heavy `critRateStage`).
-  - **Boldness — "Bedrock"**: opener *Bedrock Stance* (`damageReduction`
-    passive) → filler → notable *Unshakeable* (`immovable` passive) →
-    filler → **fork**: *Aftershock Counter* (bonus vs. a flanking target)
-    vs. *Granite Ward* (+accuracy, more `damageReduction`) → notable
-    *Fracturing Blow* (`statChangeOnHit` target Defense -1 — repeated
-    braced throws crack the target's own guard, not the user's) → filler →
-    **keystone** *Bedrock Breaker* (`resistanceBreaker`).
-  - **Sociability — "Tremor Call"**: opener *Tremor Signal* (`targetsAlly`
-    defense buff) → filler → filler → notable *Seismic Rally*
-    (`targetsAlly` attack buff) → filler → **fork**: *Bulwark Coil*
-    (`damageReduction`, -power) vs. *Vanguard Tunneler* (+power,
-    `jamCooldownTicks`) → notable *Colony Watch* (`regen` passive) →
-    filler → **keystone** *Seismic Lockdown* (heavy `jamCooldownTicks` — a
-    denial capstone, not a heal: the ground itself won't let enemies
-    recover their tempo).
-  - **Crosslinks**: *Grinding Advance* (Aggression↔Boldness,
-    `statChangeOnHit` self-buff off a braced throw) · *Warning Tremor*
-    (Boldness↔Sociability, shared `damageReduction`) · *Rolling Thunder*
-    (Sociability↔Aggression, `lockTicks` — a combined tremor-and-throw big
-    enough to lock the user out of its next tick, not just another
-    situational bonus).
+- **Rock Throw** (Rock, line-3, cooldown 2) — Onix's second move, alongside
+  Tackle. **Superseded** — this original triangle (Aggression "Landslide"/
+  Boldness "Bedrock"/Sociability "Tremor Call") was fully redesigned under
+  template v3; see "Rock Throw v3 redesign (Shipped)" below for the real,
+  current tree ("Denial"/"Bedrock"/"Tremor Rally"). Left here only as a
+  record of what the pre-v3 version looked like — none of the node names
+  below exist in `packages/data/src/moves.ts` anymore.
 
 - **Peck** (Flying, point) — Spearow's only move, a solitary crepuscular
   ambush hunter (mismatched with its diurnal Pidgey prey — see
@@ -1363,13 +1339,35 @@ see `packages/data/src/moves.ts`'s own tree comment for the short version.
   the exact primitive for it. Opener *Tremor Call* sets `rallyCall`, which
   marks the target so every herd-mate's own, independently-run threat/hunt
   pick converges on it — real shared awareness, not a broadcast stat buff.
-  This replaces the old branch's flat `allyEffect` buff spam entirely.
-  Capstone *Full Convergence* extends the mark's radius-in-time
-  (`rallyCall.ticks`) and adds `jamCooldownTicks`.
-- **Crosslinks** deepened per template v3's rule 3: *Rolling Thunder*
-  (Sociability↔Aggression) stuns outright, on top of the pin, once a
-  target is already marked — a real compounding payoff, not just a shared
-  passive.
+  Direct follow-up feedback caught a real gap in the first pass of this
+  branch: it just repeated the same lever three times (mark, then two
+  separate nodes just extending the mark's duration further). Rebuilt with
+  real variety instead — *Tremor Bond* is a distinct herd-support lever (a
+  real idle-tick heal via `targetsAlly`/`allyEffect`, not more marking),
+  and capstone *Herd Ascendant* pays off with `jamCooldownTicks` (an actual
+  control effect on the enemy) plus a small `lifestealFraction` (the
+  user itself feeding off a sustained group fight) — deliberately not a
+  third round of "extend `rallyCall.ticks` again."
+- **Crosslinks**: *Rolling Thunder* (Sociability↔Aggression) deepens the
+  Aggression branch's own Speed-debuff pin once a target is already marked
+  — a real compounding payoff between two branches' actual mechanics, not
+  a shared passive. This crosslink shipped with a real bug in the first
+  pass, caught by direct review: it used `lockTicks`, which locks the
+  *user* out of acting, not the defender — the doc even described it as
+  "stuns outright," which `lockTicks` cannot do. There's no tree-settable
+  way to inflict an actual status/stun today (`statusKind` isn't a tree
+  delta field — only `statusChance` is, and it's meaningless without a
+  `statusKind` the base move never sets), so this was fixed by deepening
+  the primitive the branch actually has (a bigger `statChangeOnHit` Speed
+  debuff) instead of leaving a self-penalizing "reward."
+
+Also fixed, same review pass: *Hobbling Throw*'s prerequisite was
+`prerequisitesAnyOf: [["cracked_joint", "dead_aim"], ["grinding_advance"]]`
+— an inner array is an AND-set in this schema, so that accidentally
+required *both* Cracked Joint and Dead Aim together as one alternative,
+unlike every other convergence node in the roster (which use single-node
+alternatives). Fixed to `[["cracked_joint"], ["dead_aim"],
+["grinding_advance"]]` — any one of the three now suffices.
 
 Newly flagged primitives from this pass (not built, concrete enough to
 pick up directly):
@@ -1477,11 +1475,11 @@ Rock Throw):
     add a real reduction to Quarry Break's own `lockTicks` cost when
     Bedrock Stance is already taken, the same "position/setup pays down a
     later branch's time cost" shape as Hydro Pump's *Anchored Surge*.
-  - *Rolling Thunder* (Sociability↔Aggression) — already the strongest of
-    the three (stuns outright once marked-and-pinned); once the shared
+  - *Rolling Thunder* (Sociability↔Aggression) — already deepens the
+    Aggression pin once a target is marked (fixed from an earlier
+    `lockTicks` self-lock bug — see the v3 writeup above); once the shared
     `"rallyMarked"` condition exists, layer a real damage bonus on top of
-    the stun using the same primitive the other trees now share, instead
-    of `lockTicks` being the only payoff.
+    the debuff too, instead of the Speed stage being the only payoff.
   - *Grounded Signal* (Boldness↔Sociability, new) — Unshakeable's
     `immovable` passive is at its best exactly when the herd has already
     been called in (Tremor Call): grant a real, temporary

@@ -4003,3 +4003,30 @@ not something this pathfinding pass itself caused or is positioned to fix.
       names; full suite green (177/177 data). Move Tree Atlas artifact
       rebuilt via the standardized pipeline and republished in place at its
       existing URL.
+- [x] **Rock Throw v3 review fixes** — three real issues caught by direct
+      review, not just unclear writing:
+      (1) *Hobbling Throw*'s `prerequisitesAnyOf: [["cracked_joint",
+      "dead_aim"], ...]` accidentally required **both** nodes together (an
+      inner array is an AND-set), unlike every other convergence node in
+      the roster. Fixed to three single-node alternatives.
+      (2) *Rolling Thunder* (Sociability↔Aggression crosslink) used
+      `lockTicks`, described as making the throw "stun outright" — but
+      `lockTicks` locks the *user*, not the defender, so it could never do
+      that. There's no tree-settable way to inflict a real status/stun
+      today (`statusKind` isn't a tree delta field). Fixed by deepening
+      the Aggression branch's actual Speed-debuff pin instead
+      (`statChangeOnHit` stage -2/24 ticks) rather than a self-penalizing
+      "reward."
+      (3) Direct feedback: "the lock on thing is a bit too overdone... we
+      need other stuff in the social family that's not just lock on."
+      Sociability's *Deep Tremor*/*Full Convergence* (both just extended
+      `rallyCall.ticks` further) replaced with *Tremor Bond* (a real,
+      distinct herd-support heal via `targetsAlly`/`allyEffect`) and
+      *Herd Ascendant* (a capstone paying off with `jamCooldownTicks` +
+      `lifestealFraction`, not more marking). `moveTrees.test.ts` rewritten
+      to match and to explicitly assert the mark stays untouched by the
+      new nodes; full suite green (178/178 data). MOVES_DESIGN.md's stale
+      pre-v3 Rock Throw paragraph (still describing the old "Cave-In"/
+      "Bedrock Breaker" tree under the old triangle-treatment section)
+      marked superseded rather than left silently contradicting the v3
+      writeup. Atlas artifact rebuilt and republished.

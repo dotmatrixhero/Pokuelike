@@ -1778,7 +1778,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "hobbling_throw",
         name: "Hobbling Throw",
         cost: 1,
-        prerequisitesAnyOf: [["cracked_joint", "dead_aim"], ["grinding_advance"]],
+        prerequisitesAnyOf: [["cracked_joint"], ["dead_aim"], ["grinding_advance"]],
         leaning: "aggression",
         // A second, harder catch — the slow stacks worse the more of these land.
         delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -1, ticks: 20 } },
@@ -1971,30 +1971,34 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { accuracy: 8 },
       },
-      carrying_weight: {
-        id: "carrying_weight",
-        name: "+8 Power",
+      herd_grip: {
+        id: "herd_grip",
+        name: "Herd Grip",
         cost: 1,
         prerequisitesAnyOf: [["sure_footing"], ["warning_tremor"], ["rolling_thunder"]],
         leaning: "sociability",
-        delta: { power: 8 },
+        // Filler variety, not another flat power/accuracy bump — the herd
+        // closing in behind the target leaves it little room to brace.
+        delta: { defensePenetration: 0.15 },
       },
-      deep_tremor: {
-        id: "deep_tremor",
-        name: "Deep Tremor",
+      tremor_bond: {
+        id: "tremor_bond",
+        name: "Tremor Bond",
         cost: 1,
-        prerequisites: ["carrying_weight"],
+        prerequisites: ["herd_grip"],
         leaning: "sociability",
-        // Rides deeper into the rock — the mark reaches, and holds, much
-        // farther out. Overwrites, rather than stacks with, Tremor Call's
-        // own ticks (same merge semantics every other overwrite field uses).
-        delta: { rallyCall: { ticks: 35 } },
+        // A real, distinct Sociability lever from marking: the same tremor
+        // that calls the herd in doubles as a dedicated check-in — an
+        // idle-tick heal for whichever herd-mate needs it most (see
+        // `targetsAlly`'s own doc comment). Not another way to extend or
+        // repeat the rallyCall mark.
+        delta: { targetsAlly: true, allyEffect: { healFraction: 0.15 } },
       },
       vanguard_call: {
         id: "vanguard_call",
         name: "Vanguard Call",
         cost: 1,
-        prerequisites: ["deep_tremor"],
+        prerequisites: ["tremor_bond"],
         excludes: ["bulwark_call"],
         leaning: "sociability",
         delta: { power: 10, jamCooldownTicks: 1 },
@@ -2003,7 +2007,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "bulwark_call",
         name: "Bulwark Call",
         cost: 1,
-        prerequisites: ["deep_tremor"],
+        prerequisites: ["tremor_bond"],
         excludes: ["vanguard_call"],
         leaning: "sociability",
         grantsPassive: { kind: "damageReduction", value: 0.05 },
@@ -2026,16 +2030,17 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { accuracy: 5 },
       },
-      full_convergence: {
-        id: "full_convergence",
-        name: "Full Convergence",
+      herd_ascendant: {
+        id: "herd_ascendant",
+        name: "Herd Ascendant",
         cost: 2,
         prerequisites: ["tremor_focus"],
         leaning: "sociability",
-        // The mark holds long enough, and the herd converges hard enough on
-        // it, that recovering afterward gets steadily harder for whatever's
-        // been struck.
-        delta: { rallyCall: { ticks: 60 }, jamCooldownTicks: 3 },
+        // Deliberately not "extend the mark even further" a third time —
+        // a different payoff: whatever's already marked recovers steadily
+        // worse (jamCooldownTicks, a real control effect on the enemy), and
+        // a sustained group fight lets the user feed off it a little too.
+        delta: { jamCooldownTicks: 3, lifestealFraction: 0.05 },
       },
       // Crosslink: Aggression <-> Boldness — a heavier hit off an already
       // grounded, braced throw.
@@ -2059,14 +2064,20 @@ export const MOVES: Record<string, MoveSpec> = {
         delta: {},
       },
       // Crosslink: Sociability <-> Aggression — a marked target that's
-      // already hobbled gets outright stunned, not just slowed further.
+      // already stumbling gets bogged down hard, not just slowed further.
+      // (Fixed a real mistake here: `lockTicks` locks the *user* out of
+      // acting, not the defender — it can't express a "stun the target"
+      // payoff at all. There's no tree-settable way to inflict an actual
+      // status/stun yet (`statusKind` isn't a tree delta field today), so
+      // this crosslink deepens the real primitive it already had — the
+      // Aggression branch's own defender Speed debuff — instead.)
       rolling_thunder: {
         id: "rolling_thunder",
         name: "Rolling Thunder",
         cost: 1,
         prerequisites: ["tremor_call", "pinning_impact"],
         leaning: "sociability",
-        delta: { lockTicks: 2 },
+        delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -2, ticks: 24 } },
       },
     },
   },
