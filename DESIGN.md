@@ -5653,6 +5653,54 @@ floors at exactly 7-11; `blastoise` (fully evolved, dex threshold 36)
 spawned at 39 — its own real floor plus jitter, not anywhere near the old
 flat 5.
 
+### Second, separate flat-level-5 bug: the overworld zone-promotion path
+
+Direct follow-up after the immigration.ts fix above shipped: "Deployed
+succeeded but I'm still seein lvl 5 blastoises and shit." The immigration.ts
+fix was correct but incomplete — it only covers agents that *immigrate in*
+mid-simulation. It never touches the completely separate macro-grid/overworld
+population-seeding path: when the overworld map is panned onto a zone that
+has never been visited/simulated before, `promoteZone`
+(`packages/engine/src/overworld.ts`) has to invent a starting population from
+scratch via `estimateInitialAggregates`, which hardcoded `avgLevel: 5` for
+every species regardless of evolution stage — the same bug, under a
+different name, in a code path the first fix never reached.
+
+**Built**: threaded the same `naturalMinLevelFor`/`IMMIGRANT_BASE_LEVEL_FLOOR`
+infrastructure through this second path instead of inventing a parallel one.
+`ZoneSpeciesEstimate` (`packages/engine/src/macroGrid.ts`) gained an optional
+`minLevel` field, carried straight from the roster entry's own
+`ImmigrationSpeciesInfo.minLevel` inside `estimateZoneSpecies`.
+`estimateInitialAggregates` now computes
+`Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, estimate.minLevel ?? 1)` instead of the
+flat `5` (required exporting `IMMIGRANT_BASE_LEVEL_FLOOR` from
+immigration.ts, previously private). Also added per-individual jitter,
+`(mw.rng() - 0.5) * 4`, to `promoteZone`'s invented-agent level computation —
+previously every invented individual of a species landed on the exact same
+level with zero variance, the same "some randomness in starting rolls"
+request from the first fix, unaddressed in this second path. The aggregate's
+own `avgLevel` stays the real center so a whole invented population doesn't
+drift together; only per-individual placement gets variance.
+
+A separate, pre-existing `avgLevel: agent.level ?? 5` fallback elsewhere
+(region-crossing herd aggregate update) was deliberately left unchanged — it
+falls back to 5 only when a real agent's own level is genuinely missing, a
+different and much narrower bug class than a systemic default applied to
+every invented spawn.
+
+One existing test (`overworld.test.ts`) that asserted an exact invented
+level of 8 was loosened to a `[6, 10]` range now that jitter is real; a new
+test confirms a genuinely fresh zone promotion seeds an evolved species
+(`venusaur`, `minLevel: 32`) at/above its real floor, not flat 5. Full
+monorepo suite green (1077 engine + 177 data tests) after the change.
+
+Validated live via `packages/runner/src/validateInventedLevels.ts`, which
+manually builds a `MacroWorld` and calls `promoteZone` across a 10x10 grid of
+never-visited zones, recording min/max invented level per species. Evolved
+species land well clear of the old flat 5 and show real spread: `charizard`
+34-38, `golbat` 20-24, `jynx` 28-32, `gloom` 19-23; base forms stay low with
+real per-individual variance (`caterpie`, `zubat`, `snorlax` etc. 3-7).
+
 ## Real confirmed bug: dying of thirst standing on water, fourth instance of "commits no matter what"
 
 Direct report: "I just watched bulbasaurs die of thirst while in water." Not

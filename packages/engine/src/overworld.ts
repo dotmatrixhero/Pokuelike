@@ -1,7 +1,7 @@
 import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import type { LevelingContext } from "./leveling.js";
-import type { ImmigrationContext, ImmigrationSpeciesInfo } from "./immigration.js";
+import { IMMIGRANT_BASE_LEVEL_FLOOR, type ImmigrationContext, type ImmigrationSpeciesInfo } from "./immigration.js";
 import type { RegionDispersalContext } from "./dispersal.js";
 import { tickWorld } from "./simulation.js";
 import { findPosInBiome, findWalkableNear, generateWorld } from "./worldgen.js";
@@ -283,7 +283,14 @@ function estimateInitialAggregates(mw: MacroWorld, row: number, col: number, ctx
       avgHunger: 0.5,
       avgThirst: 0.5,
       avgEnergy: 0.5,
-      avgLevel: 5,
+      // Same real evolution-aware floor `immigration.ts`'s `rollImmigrantLevel`
+      // uses — direct ask: "why does everything spawn at lv5. Especially
+      // evolved Pokemon they should be higher distributed." A never-visited
+      // zone's estimated population is exactly as real a "spawn" as an
+      // immigrant group; a flat `5` here was the same bug under a different
+      // name, just for a species this codebase's own macro-grid ever
+      // *guesses* already lives somewhere instead of walking in from an edge.
+      avgLevel: Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, estimate.minLevel ?? 1),
       baseResourceIndex: resourceIndex,
       resourceIndex,
       lastEventPopulation: estimate.population,
@@ -425,7 +432,12 @@ export function promoteZone(mw: MacroWorld, row: number, col: number, ctx: Immig
     const herdId = aggregate.herdId;
     for (let i = 0; i < count; i++) {
       const pos = placeInvented(world, speciesInfo, mw.rng);
-      const level = Math.max(1, Math.round(aggregate.avgLevel));
+      // Small per-individual variance around the aggregate's own tracked
+      // average — direct ask: "some randomness in starting rolls would be
+      // good." The aggregate average itself stays the real center (a whole
+      // population invented at once shouldn't all drift together), just no
+      // longer every single individual landing on the exact same level.
+      const level = Math.max(1, Math.round(aggregate.avgLevel + (mw.rng() - 0.5) * 4));
       const agent: Agent = ctx.spawnAgent(aggregate.species, `${aggregate.species}-${region.key}-invented-${mw.tick}-${i}`, pos, level, mw.rng);
       agent.needs = {
         hunger: jitteredNeed(aggregate.avgHunger, mw.rng),

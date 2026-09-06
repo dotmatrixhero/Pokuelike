@@ -127,9 +127,13 @@ const MAX_GROUP_SIZE = 3;
  * own) — matches `createDemoWorld`'s own starting-agent level for the
  * roster's non-guardian base-form species (bulbasaur/diglett/sandshrew/
  * pidgey/squirtle/charmander all spawn at 5), preserved as the low end of
- * the roll below rather than changed outright.
+ * the roll below rather than changed outright. Exported so `overworld.ts`'s
+ * own region-invention level pick (`estimateInitialAggregates`) can apply
+ * the identical "at least this, or the species' own real evolution
+ * threshold if higher" floor instead of a second, independently-hardcoded
+ * default.
  */
-const IMMIGRANT_BASE_LEVEL_FLOOR = 5;
+export const IMMIGRANT_BASE_LEVEL_FLOOR = 5;
 /**
  * Real spread on top of a species' own floor — direct ask: "some randomness
  * in starting rolls would be good." `rng() * this`, floored, added to the
