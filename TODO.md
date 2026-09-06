@@ -4139,3 +4139,30 @@ not something this pathfinding pass itself caused or is positioned to fix.
       shortcuts. Added a legend entry explaining the new gold-ring/bridge-
       edge convention. Verified the inline script's syntax before
       rebuilding. Atlas rebuilt and republished.
+- [x] **Fixed the real layout bug behind the crosslink chain being
+      unreadable, plus a file-corruption near-miss** — a follow-up
+      screenshot on mobile showed severe label/node overlap right around
+      Earthquake's new crosslink bridge. Root cause, found in
+      `computeLayout`: only a crosslink's own root counts as
+      `isCrosslink()` (exactly 2 direct prerequisites) — its single-prereq
+      descendants (Marked Rupture, Converged Ruin) fell through to the
+      *main branch* placement path via their own `leaning`, landing them
+      at shallow depth in the SAME angular slot and radius band as
+      Aggression's own early nodes (Shaking Ground et al.), directly
+      competing for space. Fixed by giving `computeLayout` a dedicated
+      pass for crosslink-chain descendants: walk each one back to its real
+      crosslink root, then place it radiating outward along that root's
+      own angle/radius (one step per prerequisite hop) instead of folding
+      it into a branch's own depth ring. Verified directly against the
+      real exported tree data (`computeLayout` extracted and run against
+      Earthquake/Rock Throw/Hydro Pump's actual JSON, positions printed
+      and checked for separation/no missing nodes) before republishing.
+      Also fixed the stage header's controls overlapping each other on
+      narrow screens (missing `flex-wrap`). Caught and fixed, mid-edit: an
+      Edit tool call had silently written two literal NUL bytes into the
+      template instead of space characters, making the file register as
+      binary (`file` reported "data") — found via a direct UTF-8/null-byte
+      check, not assumed; fixed by replacing them and re-verifying both
+      encoding and script syntax before rebuilding. Full data suite still
+      green (184/184, unaffected — this pass never touched
+      `packages/data/src/moves.ts`). Atlas rebuilt and republished.

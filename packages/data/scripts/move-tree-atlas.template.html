@@ -90,6 +90,12 @@
        it's already a floating, draggable, collapsible panel everywhere. */
     .range-grid-wrap .eyebrow { font-size: 9px; }
     svg.range-grid { max-width: 90px; max-height: 90px; }
+
+    /* Direct report + screenshot: the stage header's own controls (title/
+       stats, Build controls, Flag button) were overlapping each other on a
+       narrow screen — none of them wrapped, so they just stacked on top of
+       one another instead of onto a new line. */
+    .stage-head { flex-wrap: wrap; row-gap: 8px; }
   }
 
   header.top {
@@ -673,10 +679,23 @@
     var ids = Object.keys(tree);
     var branches = { aggression: [], boldness: [], sociability: [] };
     var crosslinks = [];
+    // Nodes reached from a crosslink root through an unbroken single-
+    // prerequisite chain (e.g. Marked Rupture, Converged Ruin) are real
+    // crosslink content, not ordinary same-branch fillers — even though
+    // they carry a `leaning` like any other node. Direct report, after the
+    // pilot crosslink bridge just landed these in the same crowded radius
+    // as the branch's own early nodes: "I can't see what you did, it's
+    // all kinda hard to see" / the follow-up screenshot showing labels
+    // overlapping right around there. Kept out of `branches[]` entirely
+    // and positioned in a dedicated pass below instead, radiating outward
+    // from their own crosslink's hub rather than competing for the same
+    // ring as that branch's actual filler chain.
+    var crosslinkDescendants = [];
 
     ids.forEach(function (id) {
       var node = tree[id];
       if (isCrosslink(node)) crosslinks.push(id);
+      else if (isCrosslinkChainMember(tree, id)) crosslinkDescendants.push(id);
       else if (branches[node.leaning]) branches[node.leaning].push(id);
     });
 
@@ -746,6 +765,52 @@
       var rad = mid * Math.PI / 180;
       var r = R0 * 1.42;
       positions[id] = { x: Math.cos(rad) * r, y: Math.sin(rad) * r, branch: "cross", depth: 0 };
+    });
+
+    // Crosslink chain descendants extend their own root's spoke outward,
+    // one step per prerequisite hop — Coordinated Tremor -> Marked Rupture
+    // -> Converged Ruin reads as a bridge radiating from its own hub, not
+    // three unrelated nodes scattered into whichever branch's angular slot
+    // their `leaning` happens to match.
+    var CHAIN_STEP = 42;
+    function crosslinkRootAndHops(id) {
+      var hops = 0, cur = id;
+      for (var guard = 0; guard < ids.length + 1; guard++) {
+        var n = tree[cur];
+        if (!n) return null;
+        if (isCrosslink(n)) return { root: cur, hops: hops };
+        if (!(Array.isArray(n.prerequisites) && n.prerequisites.length === 1)) return null;
+        cur = n.prerequisites[0];
+        hops++;
+      }
+      return null; // guard tripped — shouldn't happen in an acyclic tree
+    }
+    var byRootAndHop = {};
+    crosslinkDescendants.forEach(function (id) {
+      var info = crosslinkRootAndHops(id);
+      if (!info || !positions[info.root]) return;
+      var key = info.root + " " + info.hops;
+      (byRootAndHop[key] = byRootAndHop[key] || []).push(id);
+    });
+    Object.keys(byRootAndHop).forEach(function (key) {
+      var parts = key.split(" ");
+      var rootId = parts[0], hops = +parts[1];
+      var group = byRootAndHop[key];
+      var rootPos = positions[rootId];
+      var rootAngle = Math.atan2(rootPos.y, rootPos.x);
+      var rootR = Math.sqrt(rootPos.x * rootPos.x + rootPos.y * rootPos.y);
+      var r = rootR + hops * CHAIN_STEP;
+      var perp = rootAngle + Math.PI / 2;
+      var n = group.length;
+      group.forEach(function (id, i) {
+        var offset = (i - (n - 1) / 2) * FORK_OFFSET;
+        positions[id] = {
+          x: Math.cos(rootAngle) * r + Math.cos(perp) * offset,
+          y: Math.sin(rootAngle) * r + Math.sin(perp) * offset,
+          branch: "cross",
+          depth: hops,
+        };
+      });
     });
 
     var maxR = 0;
