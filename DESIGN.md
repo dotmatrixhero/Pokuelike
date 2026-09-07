@@ -5604,6 +5604,34 @@ zero behavior change to anything that doesn't opt in.
   `POP_HARD_CAP`) is unit-tested but not yet exercised by a real multi-
   thousand-tick run that actually reaches it — see TODO.md.
 
+### Auto-camera: courtship gets its own shorter dwell and longer cooldown
+
+Direct ask: "bonding takes too much air time on the autocam. reduce it and
+shorten how long it follows them." Courtship (bonded/shelterBuilt/eggLaid)
+was still sharing the same `DWELL_TICKS` (24) hold time and
+`ONE_SHOT_CLUSTER_COOLDOWN_TICKS` (60) cluster-throttle as the rarer,
+individually-more-dramatic one-shot categories (immigration/hatch/
+evolution/death) — it's both the most frequent (any growing herd routinely
+bonds/lays eggs) and the least individually dramatic of the bunch, so it
+was getting a disproportionate share of camera time relative to how
+interesting any one instance actually is.
+
+**Built**: two courtship-specific constants — `COURTSHIP_DWELL_TICKS` (10,
+vs. the ordinary 24) shortens how long the camera actually holds on a
+bonded/eggLaid/shelterBuilt moment once shown; `COURTSHIP_CLUSTER_COOLDOWN_
+TICKS` (150, vs. the ordinary 60) makes a fresh courtship cut show up much
+less often relative to other categories. `reconcile`'s dwell-assignment and
+`enqueueClusteredOneShot`'s cooldown check both branch on `category ===
+"courtship"` to pick the right constant; every other one-shot category is
+unaffected.
+
+Verified directly via `ingest()`: a lone bonded event now dwells exactly 10
+ticks (was 24); a burst of 5 bonds 5 ticks apart still collapses to a
+single queued engagement, now under the longer 150-tick cooldown (an
+evolution cluster in the same run correctly still used the shorter,
+unchanged 60-tick cooldown, confirming the two categories are independent).
+Typecheck clean.
+
 ### Auto-camera clash: retaliation-required bar dropped, replaced with a promotion cooldown
 
 Direct follow-up after the earlier one-shot cluster fix shipped: "i think

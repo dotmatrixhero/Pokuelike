@@ -18,8 +18,17 @@ import { idLabel } from "./notableTitles.js";
 
 export type NotableCategory = "immigration" | "courtship" | "hatch" | "battle" | "clash" | "evolution" | "death";
 
-/** Fixed camera-hold time for a one-shot notable moment (immigration/courtship/hatch/evolution/death not extending a battle). Real ticks, not wall-clock — see `DWELL_TICKS`'s doc comment for why ticks, not ms. */
+/** Fixed camera-hold time for a one-shot notable moment (immigration/hatch/evolution/death not extending a battle — "courtship" uses its own, shorter `COURTSHIP_DWELL_TICKS` instead, see that constant's own doc comment). Real ticks, not wall-clock — see `DWELL_TICKS`'s doc comment for why ticks, not ms. */
 const DWELL_TICKS = 24;
+/**
+ * `DWELL_TICKS`'s own shorter counterpart for "courtship" specifically —
+ * direct ask: "bonding takes too much air time on the autocam. reduce it
+ * and shorten how long it follows them." Courtship (bonded/shelterBuilt/
+ * eggLaid) is real but the least individually dramatic of the one-shot
+ * categories — a brief glance is enough, it doesn't need the same hold time
+ * as a rarer immigration/hatch/evolution/death moment.
+ */
+const COURTSHIP_DWELL_TICKS = 10;
 /**
  * A concluded battle gets a short "epilogue" hold on the same view before the
  * camera releases — long enough to actually see the kill/retreat land, short
@@ -106,6 +115,16 @@ const MAX_QUEUE = 20;
  * widening one engagement rather than queuing a new one per hit).
  */
 const ONE_SHOT_CLUSTER_COOLDOWN_TICKS = 60;
+/**
+ * `ONE_SHOT_CLUSTER_COOLDOWN_TICKS`'s own longer counterpart for
+ * "courtship" specifically — direct ask: "bonding takes too much air time
+ * on the autocam. reduce it." Courtship is both the most frequent one-shot
+ * category (a growing herd routinely bonds/lays eggs/finishes shelters) and
+ * the least individually dramatic, so it gets a real extra cooldown on top
+ * of the shared baseline instead of sharing it with the rarer immigration/
+ * hatch/evolution/death categories.
+ */
+const COURTSHIP_CLUSTER_COOLDOWN_TICKS = 150;
 /**
  * Playback speed (the `SPEED_STEPS` value, not an index) auto-camera holds a
  * followed *non-battle* event (immigration/courtship/hatch/evolution/death)
@@ -511,16 +530,18 @@ export class AutoCameraController {
 
   /**
    * `enqueueOneShot`, gated by `ONE_SHOT_CLUSTER_COOLDOWN_TICKS` per
-   * `category` — see that constant's own doc comment. Skips entirely (not
-   * even reaching `enqueueOneShot`'s own dedup check) while a same-category
-   * engagement was queued too recently; only starts/renews the cooldown
-   * when something was actually pushed onto the queue, so a call
+   * `category` (`COURTSHIP_CLUSTER_COOLDOWN_TICKS` instead for "courtship"
+   * specifically — see that constant's own doc comment). Skips entirely
+   * (not even reaching `enqueueOneShot`'s own dedup check) while a same-
+   * category engagement was queued too recently; only starts/renews the
+   * cooldown when something was actually pushed onto the queue, so a call
    * `enqueueOneShot` itself would have silently deduped (same moment,
    * already tracked) doesn't count as "shown" for cooldown purposes.
    */
   private enqueueClusteredOneShot(category: NotableCategory, sourceKind: SimEvent["kind"], ids: Set<string>, pos: Vec2, label: string, tick: number): void {
+    const cooldown = category === "courtship" ? COURTSHIP_CLUSTER_COOLDOWN_TICKS : ONE_SHOT_CLUSTER_COOLDOWN_TICKS;
     const last = this.lastEnqueuedTickByCategory.get(category);
-    if (last !== undefined && tick - last < ONE_SHOT_CLUSTER_COOLDOWN_TICKS) return;
+    if (last !== undefined && tick - last < cooldown) return;
     const before = this.queue.length;
     this.enqueueOneShot(category, sourceKind, ids, pos, label);
     if (this.queue.length > before) this.lastEnqueuedTickByCategory.set(category, tick);
@@ -669,7 +690,7 @@ export class AutoCameraController {
 
     if (!this.active && this.queue.length > 0) {
       const next = this.popNextEngagement();
-      if (!next.continuous) next.expiresOrLastActiveTick = tick + DWELL_TICKS;
+      if (!next.continuous) next.expiresOrLastActiveTick = tick + (next.category === "courtship" ? COURTSHIP_DWELL_TICKS : DWELL_TICKS);
       this.active = next;
       this.viewerTookOver = false; // a genuinely new thing to look at re-earns camera control even if the viewer panned away from the last one
       // Promotion bookkeeping (`this.active`/`viewerTookOver` above) always
