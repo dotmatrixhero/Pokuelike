@@ -197,6 +197,50 @@ describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () =>
     expect(viaCrackedJointOnly.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -1, ticks: 20 });
     expect(viaDeadAimOnly.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -1, ticks: 20 });
   });
+
+  it("Grinding Advance's bridge (Aggression<->Boldness) reaches both Broken Stride and Bedrock Footing", () => {
+    const viaAggr = applyMoveTree(rockThrow, [
+      "pinning_impact",
+      "bedrock_stance",
+      "grinding_advance",
+      "grinding_footing",
+      "bedrock_momentum",
+      "broken_stride",
+    ]);
+    expect(viaAggr.power).toBe(rockThrow.power + 8);
+
+    const viaBold = applyMoveTree(rockThrow, [
+      "pinning_impact",
+      "bedrock_stance",
+      "grinding_advance",
+      "grinding_footing",
+      "bedrock_momentum",
+      "bedrock_footing",
+    ]);
+    expect(viaBold.power).toBe(rockThrow.power + 5);
+  });
+
+  it("Rolling Thunder's bridge (Sociability<->Aggression) reaches both Tremor Bond and Broken Stride", () => {
+    const viaSoc = applyMoveTree(rockThrow, [
+      "pinning_impact",
+      "tremor_call",
+      "rolling_thunder",
+      "marked_advantage",
+      "converged_quarry",
+      "tremor_bond",
+    ]);
+    expect(viaSoc.targetsAlly).toBe(true);
+
+    const viaAggr = applyMoveTree(rockThrow, [
+      "pinning_impact",
+      "tremor_call",
+      "rolling_thunder",
+      "marked_advantage",
+      "converged_quarry",
+      "broken_stride",
+    ]);
+    expect(viaAggr.power).toBe(rockThrow.power + 10 + 8); // Converged Quarry's own +10, plus Broken Stride's own +8
+  });
 });
 
 describe("Peck tree: reach and positional keystones", () => {
@@ -389,6 +433,50 @@ describe("Hydro Pump tree: v3 redesign — overwhelming, genuinely hard to aim",
     const respec = applyMoveTree(hydroPump, ["building_pressure", "wading_advance", "surge_and_brace"]);
     expect(respec.lockTicks).toBe(0); // +1 from Building Pressure, -1 from the crosslink
   });
+
+  it("Surge and Brace's bridge (Aggression<->Boldness) reaches both Widening Main and Channel Grip", () => {
+    const viaAggr = applyMoveTree(hydroPump, [
+      "building_pressure",
+      "wading_advance",
+      "surge_and_brace",
+      "brace_conditioning",
+      "unified_current",
+      "widening_main",
+    ]);
+    expect(viaAggr.range).toEqual({ min: 0, max: 5 });
+
+    const viaBold = applyMoveTree(hydroPump, [
+      "building_pressure",
+      "wading_advance",
+      "surge_and_brace",
+      "brace_conditioning",
+      "unified_current",
+      "channel_grip",
+    ]);
+    expect(viaBold.range).toEqual({ min: 0, max: 5 });
+  });
+
+  it("Wake of Violence's bridge (Sociability<->Aggression) reaches both Pod Reach and Widening Main", () => {
+    const viaSoc = applyMoveTree(hydroPump, [
+      "pod_current",
+      "building_pressure",
+      "wake_of_violence",
+      "surging_wake",
+      "violent_confluence",
+      "pod_reach",
+    ]);
+    expect(viaSoc.range).toEqual({ min: 0, max: 5 });
+
+    const viaAggr = applyMoveTree(hydroPump, [
+      "pod_current",
+      "building_pressure",
+      "wake_of_violence",
+      "surging_wake",
+      "violent_confluence",
+      "widening_main",
+    ]);
+    expect(viaAggr.range).toEqual({ min: 0, max: 5 });
+  });
 });
 
 describe("Solar Beam tree: v3 redesign — a guardian's dominance display", () => {
@@ -448,6 +536,36 @@ describe("Solar Beam tree: v3 redesign — a guardian's dominance display", () =
         "steadfast_bloom_ally",
       ])
     ).toThrow(/conflicts with already-chosen/);
+  });
+
+  it("Rooted Assault's bridge (Aggression<->Boldness) reaches both Widening Beam and Deepening Roots", () => {
+    const viaAggr = applyMoveTree(solarBeam, ["gathering_light", "sunlit_roots", "rooted_assault", "sunlit_focus", "bedrock_beam", "widening_beam"]);
+    expect(viaAggr.range).toEqual({ min: 0, max: 7 });
+
+    const viaBold = applyMoveTree(solarBeam, ["gathering_light", "sunlit_roots", "rooted_assault", "sunlit_focus", "bedrock_beam", "deepening_roots"]);
+    expect(viaBold.range).toEqual({ min: 0, max: 7 });
+  });
+
+  it("Territorial Flare's bridge (Sociability<->Aggression) reaches both Grove Precision and Widening Beam", () => {
+    const viaSoc = applyMoveTree(solarBeam, [
+      "grove_ward",
+      "gathering_light",
+      "territorial_flare",
+      "territorial_footing",
+      "dominant_bloom",
+      "grove_precision",
+    ]);
+    expect(viaSoc.accuracy).toBe(solarBeam.accuracy + 8 + 5); // Territorial Footing's own +8, plus Grove Precision's own +5
+
+    const viaAggr = applyMoveTree(solarBeam, [
+      "grove_ward",
+      "gathering_light",
+      "territorial_flare",
+      "territorial_footing",
+      "dominant_bloom",
+      "widening_beam",
+    ]);
+    expect(viaAggr.range).toEqual({ min: 0, max: 7 });
   });
 });
 
@@ -577,5 +695,49 @@ describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to rea
     const respec = applyMoveTree(earthquake, ["herdsafe_trigger", "fault_trigger", "coordinated_tremor", "marked_rupture"]);
     expect(respec.rallyCall).toEqual({ ticks: 20 });
     expect(respec.situationalBonus).toEqual({ condition: "rallyMarked", multiplier: 1.3 });
+  });
+
+  it("Cracking Momentum's bridge (Aggression<->Boldness) reaches both Seismic Feed and Deepening Fissure", () => {
+    const viaAggr = applyMoveTree(earthquake, [
+      "fault_trigger",
+      "fissure_grip",
+      "cracking_momentum",
+      "momentum_footing",
+      "fault_convergence",
+      "seismic_feed",
+    ]);
+    expect(viaAggr.lifestealFraction).toBeCloseTo(0.08);
+
+    const viaBold = applyMoveTree(earthquake, [
+      "fault_trigger",
+      "fissure_grip",
+      "cracking_momentum",
+      "momentum_footing",
+      "fault_convergence",
+      "deepening_fissure",
+    ]);
+    expect(viaBold.defensePenetration).toBeCloseTo(0.3);
+  });
+
+  it("Fractured Warning's bridge (Boldness<->Sociability) reaches both Deepening Fissure and Tremor Reach", () => {
+    const viaBold = applyMoveTree(earthquake, [
+      "fissure_grip",
+      "herdsafe_trigger",
+      "fractured_warning",
+      "tremor_lockstep",
+      "warded_convergence",
+      "deepening_fissure",
+    ]);
+    expect(viaBold.defensePenetration).toBeCloseTo(0.3);
+
+    const viaSoc = applyMoveTree(earthquake, [
+      "fissure_grip",
+      "herdsafe_trigger",
+      "fractured_warning",
+      "tremor_lockstep",
+      "warded_convergence",
+      "tremor_reach",
+    ]);
+    expect(viaSoc.range).toEqual({ min: 0, max: 3 });
   });
 });

@@ -752,7 +752,12 @@
     });
 
     // crosslinks: sit at the angular midpoint between the two branches they bridge,
-    // at a small radius, forming a triangle around the hub.
+    // at a small radius, forming a triangle around the hub. Two different
+    // crosslinks can bridge the same branch pair (e.g. Hydro Pump's Wake of
+    // Violence and Marked Undertow both touch Sociability+Aggression) — group
+    // by pair and spread them along the perpendicular so they don't land on
+    // the exact same point.
+    var crosslinksByPair = {};
     crosslinks.forEach(function (id) {
       var node = tree[id];
       var parents = node.prerequisites.map(function (p) { return tree[p]; }).filter(Boolean);
@@ -762,9 +767,25 @@
       // pick the midpoint that is the SHORT way around (they're always 120 deg apart)
       var mid = (a1 + a2) / 2;
       if (Math.abs(a1 - a2) > 180) mid += 180;
+      var pairKey = [branchesTouched[0], branchesTouched[1]].sort().join("|");
+      (crosslinksByPair[pairKey] = crosslinksByPair[pairKey] || []).push({ id: id, mid: mid });
+    });
+    Object.keys(crosslinksByPair).forEach(function (pairKey) {
+      var group = crosslinksByPair[pairKey];
+      var mid = group[0].mid;
       var rad = mid * Math.PI / 180;
+      var perp = rad + Math.PI / 2;
       var r = R0 * 1.42;
-      positions[id] = { x: Math.cos(rad) * r, y: Math.sin(rad) * r, branch: "cross", depth: 0 };
+      var n = group.length;
+      group.forEach(function (entry, i) {
+        var offset = (i - (n - 1) / 2) * (FORK_OFFSET * 0.7);
+        positions[entry.id] = {
+          x: Math.cos(rad) * r + Math.cos(perp) * offset,
+          y: Math.sin(rad) * r + Math.sin(perp) * offset,
+          branch: "cross",
+          depth: 0,
+        };
+      });
     });
 
     // Crosslink chain descendants extend their own root's spoke outward,

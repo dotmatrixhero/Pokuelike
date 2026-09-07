@@ -1554,10 +1554,45 @@ bridge:
   sets," so adding a crosslink-rooted node as one more alternative on
   each side's own pre-fork node is exactly what that field is for.
 
-Not yet done: rolling this same bridge pattern out to the other
-crosslinks in Earthquake, or to Hydro Pump/Solar Beam/Rock Throw at all —
-this was a single pilot, built to be checked (twice, now) before
-repeating the pattern everywhere.
+**Rolled out to every crosslink in every v3 tree (Shipped).** Direct ask,
+once the pattern was validated: "Build out cross links for every branch
+and all moves." Every crosslink in Earthquake, Hydro Pump, Solar Beam,
+and Rock Throw now gets its own filler+notable bridge tail, wired into
+both connected branches' pre-fork nodes, exactly like Converged Ruin:
+
+| Move | Crosslink | Filler → Notable | Reaches into |
+|---|---|---|---|
+| Earthquake | Coordinated Tremor | Marked Rupture → Converged Ruin | Seismic Feed (Aggr) / Tremor Reach (Soc) |
+| Earthquake | Cracking Momentum | Momentum Footing → Fault Convergence | Seismic Feed (Aggr) / Deepening Fissure (Bold) |
+| Earthquake | Fractured Warning | Tremor Lockstep → Warded Convergence | Deepening Fissure (Bold) / Tremor Reach (Soc) |
+| Hydro Pump | Surge and Brace | Brace Conditioning → Unified Current | Widening Main (Aggr) / Channel Grip (Bold) |
+| Hydro Pump | Steadfast Tide | Tidal Footing → Communal Current | Channel Grip (Bold) / Pod Reach (Soc) |
+| Hydro Pump | Wake of Violence | Surging Wake → Violent Confluence | Pod Reach (Soc) / Widening Main (Aggr) |
+| Solar Beam | Rooted Assault | Sunlit Focus → Bedrock Beam | Widening Beam (Aggr) / Deepening Roots (Bold) |
+| Solar Beam | Shared Shade | Canopy Footing → Grove Bulwark | Deepening Roots (Bold) / Grove Precision (Soc) |
+| Solar Beam | Territorial Flare | Territorial Footing → Dominant Bloom | Grove Precision (Soc) / Widening Beam (Aggr) |
+| Rock Throw | Grinding Advance | Grinding Footing → Bedrock Momentum | Broken Stride (Aggr) / Bedrock Footing (Bold) |
+| Rock Throw | Warning Tremor | Warded Footing → Herd's Bulwark | Bedrock Footing (Bold) / Tremor Bond (Soc) |
+| Rock Throw | Rolling Thunder | (Marked Advantage already existed) → Converged Quarry | Broken Stride (Aggr) / Tremor Bond (Soc) |
+
+Every branch's own pre-fork node now has up to 3 real alternate routes in
+its `prerequisitesAnyOf` (its own filler chain, plus the two crosslink
+bridges that reach it from its two neighboring branches) — a build can
+reach any branch's own fork by walking that branch, or by investing a
+little in each of its two neighbors instead. Same two rules from the
+pilot applied everywhere: land one step before the fork, never on it;
+reuse existing primitives only (`power`/`accuracy`/`defensePenetration`/
+`lifestealFraction`/`jamCooldownTicks` — no new engine work needed for
+any of the 11 new bridges).
+
+Found and fixed in the same pass, unrelated to the rollout itself but
+caught while stress-testing the layout: Hydro Pump's *Wake of Violence*
+and *Marked Undertow* both bridge the same branch pair (Sociability +
+Aggression) and were landing on the exact same graph coordinates —
+`computeLayout` only ever positioned one crosslink per branch-pair angle.
+Fixed by grouping crosslinks by the pair of branches they touch and
+spreading multiples along the perpendicular, the same pattern already
+used for branch forks.
 
 - **`SituationalCondition: "rallyMarked"` (Shipped)** — the defender
   currently has an active `rallyMarkTicksRemaining`. Same one-line-

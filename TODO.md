@@ -4185,3 +4185,28 @@ not something this pathfinding pass itself caused or is positioned to fix.
       landing on both sides and that the fork itself still requires an
       explicit extra pick; full suite green (185/185 data). Atlas rebuilt
       and republished.
+- [x] **Rolled the crosslink-bridge pattern out to every crosslink in all
+      four v3 trees** — direct ask, once the pilot was validated: "Build
+      out cross links for every branch and all moves." Every remaining
+      crosslink (2 in Earthquake, 3 each in Hydro Pump/Solar Beam/Rock
+      Throw — 11 total) got its own filler+notable bridge tail, wired into
+      both connected branches' pre-fork nodes via `prerequisitesAnyOf`,
+      exactly matching the validated Converged Ruin pattern (land one
+      step before the fork, reach both branches, no new engine
+      primitives — every new node reuses power/accuracy/
+      defensePenetration/lifestealFraction/jamCooldownTicks). Every
+      branch's own pre-fork node now has up to 3 real alternate routes:
+      its own filler chain, plus the two crosslink bridges reaching it
+      from its two neighboring branches. Found and fixed a real,
+      pre-existing (unrelated to this rollout) layout bug while stress-
+      testing: Hydro Pump's Wake of Violence and Marked Undertow both
+      bridge the same branch pair and were landing on the exact same
+      graph coordinates — `computeLayout` only positioned one crosslink
+      per branch-pair angle. Fixed by grouping crosslinks sharing a
+      branch pair and spreading them, same pattern the branch forks
+      already use. Verified directly: `computeLayout` run against the
+      real exported data for all four trees confirmed zero missing,
+      duplicate, or near-overlapping node positions before rebuilding.
+      Added 8 new end-to-end reachability tests (one representative
+      bridge-into-both-sides check per new crosslink); full suite green
+      (193/193 data). Atlas rebuilt and republished.

@@ -1787,7 +1787,10 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "broken_stride",
         name: "+8 Power",
         cost: 1,
-        prerequisites: ["hobbling_throw"],
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Aggression (Grinding Advance's and Rolling
+        // Thunder's own chains).
+        prerequisitesAnyOf: [["hobbling_throw"], ["bedrock_momentum"], ["converged_quarry"]],
         leaning: "aggression",
         delta: { power: 8 },
       },
@@ -1887,7 +1890,10 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "bedrock_footing",
         name: "+5 Power",
         cost: 1,
-        prerequisites: ["unshakeable"],
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Boldness (Grinding Advance's and Warning Tremor's
+        // own chains).
+        prerequisitesAnyOf: [["unshakeable"], ["bedrock_momentum"], ["herds_bulwark"]],
         leaning: "boldness",
         delta: { power: 5 },
       },
@@ -1985,7 +1991,10 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "tremor_bond",
         name: "Tremor Bond",
         cost: 1,
-        prerequisites: ["herd_grip"],
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Sociability (Warning Tremor's and Rolling
+        // Thunder's own chains).
+        prerequisitesAnyOf: [["herd_grip"], ["herds_bulwark"], ["converged_quarry"]],
         leaning: "sociability",
         // A real, distinct Sociability lever from marking: the same tremor
         // that calls the herd in doubles as a dedicated check-in — an
@@ -2052,6 +2061,25 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 12 } },
       },
+      // Bridge tail (see MOVES_DESIGN.md's "Crosslinks as bridges"):
+      // extends Grinding Advance into Aggression's and Boldness's own
+      // pre-fork nodes (Broken Stride / Bedrock Footing).
+      grinding_footing: {
+        id: "grinding_footing",
+        name: "+8 Accuracy",
+        cost: 1,
+        prerequisites: ["grinding_advance"],
+        leaning: "aggression",
+        delta: { accuracy: 8 },
+      },
+      bedrock_momentum: {
+        id: "bedrock_momentum",
+        name: "Bedrock Momentum",
+        cost: 2,
+        prerequisites: ["grinding_footing"],
+        leaning: "boldness",
+        delta: { defensePenetration: 0.2 },
+      },
       // Crosslink: Boldness <-> Sociability — the tremor's warning reaches
       // far enough to brace the thrower too.
       warning_tremor: {
@@ -2062,6 +2090,24 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         grantsPassive: { kind: "damageReduction", value: 0.05 },
         delta: {},
+      },
+      // Bridge tail: extends Warning Tremor into Boldness's and
+      // Sociability's own pre-fork nodes (Bedrock Footing / Tremor Bond).
+      warded_footing: {
+        id: "warded_footing",
+        name: "+8 Power",
+        cost: 1,
+        prerequisites: ["warning_tremor"],
+        leaning: "boldness",
+        delta: { power: 8 },
+      },
+      herds_bulwark: {
+        id: "herds_bulwark",
+        name: "Herd's Bulwark",
+        cost: 2,
+        prerequisites: ["warded_footing"],
+        leaning: "sociability",
+        delta: { lifestealFraction: 0.05 },
       },
       // Crosslink: Sociability <-> Aggression — a marked target that's
       // already stumbling gets bogged down hard, not just slowed further.
@@ -2090,6 +2136,17 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["rolling_thunder"],
         leaning: "aggression",
         delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.3 } },
+      },
+      // Bridge tail: extends the Rolling Thunder/Marked Advantage chain
+      // into Aggression's and Sociability's own pre-fork nodes (Broken
+      // Stride / Tremor Bond).
+      converged_quarry: {
+        id: "converged_quarry",
+        name: "Converged Quarry",
+        cost: 2,
+        prerequisites: ["marked_advantage"],
+        leaning: "aggression",
+        delta: { power: 10 },
       },
     },
   },
@@ -2491,7 +2548,10 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "widening_main",
         name: "+1 Range",
         cost: 1,
-        prerequisites: ["flooding_wake"],
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Aggression (Surge and Brace's and Wake of
+        // Violence's own chains).
+        prerequisitesAnyOf: [["flooding_wake"], ["unified_current"], ["violent_confluence"]],
         leaning: "aggression",
         // Honest caveat, not hidden: this move's own cone footprint is
         // fixed at `shape.length` (4) regardless of `range.max` — range
@@ -2587,7 +2647,10 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "channel_grip",
         name: "+1 Range",
         cost: 1,
-        prerequisites: ["undertow_anchor"],
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Boldness (Surge and Brace's and Steadfast Tide's
+        // own chains).
+        prerequisitesAnyOf: [["undertow_anchor"], ["unified_current"], ["communal_current"]],
         leaning: "boldness",
         delta: { range: { max: 5 } },
       },
@@ -2680,7 +2743,10 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "pod_reach",
         name: "+1 Range",
         cost: 1,
-        prerequisites: ["wake_rally"],
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Sociability (Steadfast Tide's and Wake of
+        // Violence's own chains).
+        prerequisitesAnyOf: [["wake_rally"], ["communal_current"], ["violent_confluence"]],
         leaning: "sociability",
         delta: { range: { max: 5 } },
       },
@@ -2740,6 +2806,25 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { lockTicks: -1 },
       },
+      // Bridge tail (see MOVES_DESIGN.md's "Crosslinks as bridges"):
+      // extends Surge and Brace into Aggression's and Boldness's own
+      // pre-fork nodes (Widening Main / Channel Grip).
+      brace_conditioning: {
+        id: "brace_conditioning",
+        name: "+8 Accuracy",
+        cost: 1,
+        prerequisites: ["surge_and_brace"],
+        leaning: "aggression",
+        delta: { accuracy: 8 },
+      },
+      unified_current: {
+        id: "unified_current",
+        name: "Unified Current",
+        cost: 2,
+        prerequisites: ["brace_conditioning"],
+        leaning: "boldness",
+        delta: { defensePenetration: 0.2 },
+      },
       // Crosslink: Boldness <-> Sociability — a shared, steady breath
       // between whoever's bracing and whoever's supporting.
       steadfast_tide: {
@@ -2751,6 +2836,24 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "regen", value: 0.02 },
         delta: {},
       },
+      // Bridge tail: extends Steadfast Tide into Boldness's and
+      // Sociability's own pre-fork nodes (Channel Grip / Pod Reach).
+      tidal_footing: {
+        id: "tidal_footing",
+        name: "+8 Power",
+        cost: 1,
+        prerequisites: ["steadfast_tide"],
+        leaning: "boldness",
+        delta: { power: 8 },
+      },
+      communal_current: {
+        id: "communal_current",
+        name: "Communal Current",
+        cost: 2,
+        prerequisites: ["tidal_footing"],
+        leaning: "sociability",
+        delta: { lifestealFraction: 0.05 },
+      },
       // Crosslink: Sociability <-> Aggression — once the pod's converged
       // on a marked target, the strike that follows lands true.
       wake_of_violence: {
@@ -2760,6 +2863,24 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["pod_current", "building_pressure"],
         leaning: "sociability",
         delta: { critRateStage: 1 },
+      },
+      // Bridge tail: extends Wake of Violence into Sociability's and
+      // Aggression's own pre-fork nodes (Pod Reach / Widening Main).
+      surging_wake: {
+        id: "surging_wake",
+        name: "+8 Accuracy",
+        cost: 1,
+        prerequisites: ["wake_of_violence"],
+        leaning: "sociability",
+        delta: { accuracy: 8 },
+      },
+      violent_confluence: {
+        id: "violent_confluence",
+        name: "Violent Confluence",
+        cost: 2,
+        prerequisites: ["surging_wake"],
+        leaning: "aggression",
+        delta: { power: 10 },
       },
       // Deeper crosslink: needs BOTH branches' own real mechanics —
       // Wake Rally's mark and Undertow Pull's drag — not just a shared
@@ -2853,7 +2974,10 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "widening_beam",
         name: "+2 Range",
         cost: 1,
-        prerequisites: ["piercing_ray"],
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Aggression (Rooted Assault's and Territorial
+        // Flare's own chains).
+        prerequisitesAnyOf: [["piercing_ray"], ["bedrock_beam"], ["dominant_bloom"]],
         leaning: "aggression",
         delta: { range: { max: 7 } },
       },
@@ -2940,7 +3064,10 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "deepening_roots",
         name: "+2 Range",
         cost: 1,
-        prerequisites: ["steadfast_bloom"],
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Boldness (Rooted Assault's and Shared Shade's own
+        // chains).
+        prerequisitesAnyOf: [["steadfast_bloom"], ["bedrock_beam"], ["grove_bulwark"]],
         leaning: "boldness",
         delta: { range: { max: 7 } },
       },
@@ -3032,7 +3159,10 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "grove_precision",
         name: "+5 Accuracy",
         cost: 1,
-        prerequisites: ["grove_muster"],
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Sociability (Shared Shade's and Territorial
+        // Flare's own chains).
+        prerequisitesAnyOf: [["grove_muster"], ["grove_bulwark"], ["dominant_bloom"]],
         leaning: "sociability",
         delta: { accuracy: 5 },
       },
@@ -3085,6 +3215,25 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { defensePenetration: 0.2 },
       },
+      // Bridge tail (see MOVES_DESIGN.md's "Crosslinks as bridges"):
+      // extends Rooted Assault into Aggression's and Boldness's own
+      // pre-fork nodes (Widening Beam / Deepening Roots).
+      sunlit_focus: {
+        id: "sunlit_focus",
+        name: "+8 Accuracy",
+        cost: 1,
+        prerequisites: ["rooted_assault"],
+        leaning: "aggression",
+        delta: { accuracy: 8 },
+      },
+      bedrock_beam: {
+        id: "bedrock_beam",
+        name: "Bedrock Beam",
+        cost: 2,
+        prerequisites: ["sunlit_focus"],
+        leaning: "boldness",
+        delta: { power: 10 },
+      },
       // Crosslink: Boldness <-> Sociability — shared vitality from
       // standing guard together.
       shared_shade: {
@@ -3096,6 +3245,25 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "regen", value: 0.02 },
         delta: {},
       },
+      // Bridge tail: extends Shared Shade into Boldness's and
+      // Sociability's own pre-fork nodes (Deepening Roots / Grove
+      // Precision).
+      canopy_footing: {
+        id: "canopy_footing",
+        name: "+8 Power",
+        cost: 1,
+        prerequisites: ["shared_shade"],
+        leaning: "boldness",
+        delta: { power: 8 },
+      },
+      grove_bulwark: {
+        id: "grove_bulwark",
+        name: "Grove Bulwark",
+        cost: 2,
+        prerequisites: ["canopy_footing"],
+        leaning: "sociability",
+        delta: { defensePenetration: 0.15 },
+      },
       // Crosslink: Sociability <-> Aggression — the herd's own warning
       // lets the dominant beam catch a challenger unaware.
       territorial_flare: {
@@ -3105,6 +3273,24 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["grove_ward", "gathering_light"],
         leaning: "sociability",
         delta: { situationalBonus: { condition: "flanking", multiplier: 1.3 } },
+      },
+      // Bridge tail: extends Territorial Flare into Sociability's and
+      // Aggression's own pre-fork nodes (Grove Precision / Widening Beam).
+      territorial_footing: {
+        id: "territorial_footing",
+        name: "+8 Accuracy",
+        cost: 1,
+        prerequisites: ["territorial_flare"],
+        leaning: "sociability",
+        delta: { accuracy: 8 },
+      },
+      dominant_bloom: {
+        id: "dominant_bloom",
+        name: "Dominant Bloom",
+        cost: 2,
+        prerequisites: ["territorial_footing"],
+        leaning: "aggression",
+        delta: { power: 10 },
       },
     },
   },
@@ -3181,16 +3367,11 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "seismic_feed",
         name: "+8% Lifesteal",
         cost: 1,
-        // Reachable the normal way (walk the branch's own filler chain
-        // from Fault Trigger) OR via the Coordinated Tremor -> Marked
-        // Rupture -> Converged Ruin crosslink bridge — see that node's own
-        // comment. Direct follow-up feedback scaled this back from an
-        // earlier version that shortcut straight to the fork below
-        // ("going straight to the choice of 2 nodes are a bit too much"):
-        // the bridge now lands one step before the fork, same as the
-        // normal path — it still has to be chosen from here, same as
-        // anyone else.
-        prerequisitesAnyOf: [["aftershock_barrage"], ["converged_ruin"]],
+        // Reachable the normal way, or via either of the two crosslink
+        // bridges that reach into Aggression (Coordinated Tremor's and
+        // Cracking Momentum's own chains) — each lands here, one step
+        // before the fork below, same as the normal path.
+        prerequisitesAnyOf: [["aftershock_barrage"], ["converged_ruin"], ["fault_convergence"]],
         leaning: "aggression",
         delta: { lifestealFraction: 0.08 },
       },
@@ -3279,7 +3460,10 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "deepening_fissure",
         name: "+0.3 Defense Penetration",
         cost: 1,
-        prerequisites: ["bedrock_anchor"],
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Boldness (Cracking Momentum's and Fractured
+        // Warning's own chains).
+        prerequisitesAnyOf: [["bedrock_anchor"], ["fault_convergence"], ["warded_convergence"]],
         leaning: "boldness",
         delta: { defensePenetration: 0.3 },
       },
@@ -3368,13 +3552,11 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "tremor_reach",
         name: "+1 Range",
         cost: 1,
-        // The bridge reaches into this branch too, not just Aggression —
-        // direct ask: "make them connect to the other branch too. Like it
-        // can go to either branch." Coordinated Tremor bridges Sociability
-        // and Aggression, so Converged Ruin is a real shortcut into
-        // either side of what it connects, landing one step before each
-        // branch's own fork rather than on it (see Seismic Feed's comment).
-        prerequisitesAnyOf: [["bracing_call"], ["converged_ruin"]],
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Sociability (Coordinated Tremor's and Fractured
+        // Warning's own chains) — each lands here, one step before the
+        // fork below, same as the normal path.
+        prerequisitesAnyOf: [["bracing_call"], ["converged_ruin"], ["warded_convergence"]],
         leaning: "sociability",
         delta: { range: { max: 3 } },
       },
@@ -3438,6 +3620,25 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "onHit" } },
       },
+      // Bridge tail (see MOVES_DESIGN.md's "Crosslinks as bridges"): extends
+      // Cracking Momentum into Aggression's and Boldness's own pre-fork
+      // nodes (Seismic Feed / Deepening Fissure).
+      momentum_footing: {
+        id: "momentum_footing",
+        name: "+8 Accuracy",
+        cost: 1,
+        prerequisites: ["cracking_momentum"],
+        leaning: "aggression",
+        delta: { accuracy: 8 },
+      },
+      fault_convergence: {
+        id: "fault_convergence",
+        name: "Fault Convergence",
+        cost: 2,
+        prerequisites: ["momentum_footing"],
+        leaning: "boldness",
+        delta: { power: 10 },
+      },
       // Crosslink: Boldness <-> Sociability — the visible fracture throws
       // off the footing of anyone nearby, friend and foe's tempo alike
       // (the herd already knows to keep clear, per the Sociability opener).
@@ -3447,6 +3648,24 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["fissure_grip", "herdsafe_trigger"],
         leaning: "boldness",
+        delta: { jamCooldownTicks: 1 },
+      },
+      // Bridge tail: extends Fractured Warning into Boldness's and
+      // Sociability's own pre-fork nodes (Deepening Fissure / Tremor Reach).
+      tremor_lockstep: {
+        id: "tremor_lockstep",
+        name: "+8 Accuracy",
+        cost: 1,
+        prerequisites: ["fractured_warning"],
+        leaning: "boldness",
+        delta: { accuracy: 8 },
+      },
+      warded_convergence: {
+        id: "warded_convergence",
+        name: "Warded Convergence",
+        cost: 2,
+        prerequisites: ["tremor_lockstep"],
+        leaning: "sociability",
         delta: { jamCooldownTicks: 1 },
       },
       // Crosslink: Sociability <-> Aggression — once the herd's clear and
