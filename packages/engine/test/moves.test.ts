@@ -280,6 +280,8 @@ describe("applyMoveTree: newer delta fields", () => {
           statusSeverity: 1.5,
           consumesOwnTerrain: { terrain: "boulder", damageMultiplier: 2 },
           terrainFill: { terrain: "water" },
+          drainNeeds: { need: "hunger", amount: 0.1, radius: 3 },
+          matingRadiusBoost: { multiplier: 2, ticks: 30 },
         },
       },
       overwrite_stack_2: {
@@ -298,6 +300,8 @@ describe("applyMoveTree: newer delta fields", () => {
           statusSeverity: 2,
           consumesOwnTerrain: { terrain: "sand", damageMultiplier: 4 },
           terrainFill: { terrain: "mud" },
+          drainNeeds: { need: "thirst", amount: 0.2, radius: 5 },
+          matingRadiusBoost: { multiplier: 3, ticks: 60 },
         },
       },
     },
@@ -326,6 +330,8 @@ describe("applyMoveTree: newer delta fields", () => {
     expect(respec.statusSeverity).toBe(2);
     expect(respec.consumesOwnTerrain).toEqual({ terrain: "sand", damageMultiplier: 4 });
     expect(respec.terrainFill).toEqual({ terrain: "mud" });
+    expect(respec.drainNeeds).toEqual({ need: "thirst", amount: 0.2, radius: 5 });
+    expect(respec.matingRadiusBoost).toEqual({ multiplier: 3, ticks: 60 });
     // Fields not touched by the second node keep the first node's value.
     expect(respec.positionSwap).toBe(true);
     expect(respec.allyEffectOnAttack).toBe(true);

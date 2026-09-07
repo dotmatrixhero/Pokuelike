@@ -84,6 +84,18 @@
       overflow: visible;
     }
     body { overflow-y: auto; }
+
+    /* The range/footprint panel is always position: fixed now (see its
+       base rule) — no mobile-specific override needed here any more,
+       it's already a floating, draggable, collapsible panel everywhere. */
+    .range-grid-wrap .eyebrow { font-size: 9px; }
+    svg.range-grid { max-width: 90px; max-height: 90px; }
+
+    /* Direct report + screenshot: the stage header's own controls (title/
+       stats, Build controls, Flag button) were overlapping each other on a
+       narrow screen — none of them wrapped, so they just stacked on top of
+       one another instead of onto a new line. */
+    .stage-head { flex-wrap: wrap; row-gap: 8px; }
   }
 
   header.top {
@@ -207,23 +219,97 @@
   }
   .stage-head .move-stats b { color: var(--text); font-weight: 500; }
 
+  /* A floating, draggable, collapsible panel — always position: fixed, on
+     every screen size, rather than living inline in the sticky stage
+     header. Direct fix for it covering real tree nodes on mobile; the
+     drag handle and collapse toggle are a direct follow-up ask so it can
+     get out of the way anywhere, not just a fixed corner. */
   .range-grid-wrap {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-width: 150px;
+    padding: 6px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  }
+  .range-grid-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: move;
+    user-select: none;
+    touch-action: none;
+  }
+  .rg-toggle-btn {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    line-height: 1;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: var(--panel-2);
+    color: var(--text-dim);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .rg-toggle-btn:hover { color: var(--text); }
+  .range-grid-wrap.collapsed {
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+  }
+  .range-grid-wrap.collapsed .range-grid-head {
+    cursor: pointer;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  }
+  .range-grid-wrap.collapsed .range-grid-head .eyebrow { display: none; }
+  .range-grid-wrap.collapsed .rg-toggle-btn {
+    width: 40px;
+    height: 40px;
+    border: none;
+    font-size: 18px;
+  }
+  .range-grid-wrap.collapsed .range-grid-body { display: none; }
+  .range-grid-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  .range-grid-stats b { color: var(--text); font-weight: 500; }
+  .range-grid-body {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 4px;
-    flex: none;
   }
-  .range-grid-wrap .eyebrow { align-self: flex-start; }
   svg.range-grid {
     display: block;
-    background: var(--panel);
+    background: var(--panel-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
+    max-width: 100%;
+    height: auto;
   }
   .range-grid-legend {
     display: flex;
-    gap: 10px;
+    flex-direction: column;
+    gap: 2px;
     font-family: "IBM Plex Mono", monospace;
     font-size: 10px;
     color: var(--text-faint);
@@ -233,10 +319,21 @@
   .range-grid-caption {
     font-size: 10px;
     color: var(--text-faint);
-    max-width: 150px;
+    max-width: 135px;
     text-align: center;
     line-height: 1.35;
   }
+  .range-grid-effect {
+    font-size: 10.5px;
+    color: var(--text-dim);
+    max-width: 135px;
+    text-align: left;
+    line-height: 1.4;
+    border-top: 1px solid var(--border-soft);
+    padding-top: 4px;
+    margin-top: 2px;
+  }
+  .range-grid-effect b { color: var(--text); font-weight: 500; }
 
   .flag-btn {
     font-family: "Rajdhani", sans-serif;
@@ -295,6 +392,7 @@
   .edge-normal { stroke-width: 1.4; opacity: 0.55; }
   .edge-anyof { stroke-width: 1.3; stroke-dasharray: 2 4; opacity: 0.55; }
   .edge-cross { stroke-width: 1.6; opacity: 0.8; }
+  .edge-bridge { stroke-width: 2; stroke-dasharray: 4 3; opacity: 0.9; }
   .edge-dim { opacity: 0.12 !important; }
   .edge-lit { opacity: 1 !important; stroke-width: 2.2 !important; }
   .node-dim { opacity: 0.28; }
@@ -481,11 +579,18 @@
         <h2 id="stageTitle">—</h2>
         <div class="move-stats" id="stageStats"></div>
       </div>
-      <div class="range-grid-wrap">
-        <div class="eyebrow">Range &amp; footprint</div>
-        <svg class="range-grid" id="rangeGrid" role="img" aria-label="Range and area of effect"></svg>
-        <div class="range-grid-legend" id="rangeGridLegend"></div>
-        <div class="range-grid-caption" id="rangeGridCaption">Base shape shown — some tree nodes change it (see the graph).</div>
+      <div class="range-grid-wrap" id="rangeGridWrap">
+        <div class="range-grid-head" id="rangeGridHead" title="Drag to move">
+          <span class="eyebrow">Range &amp; footprint</span>
+          <button class="rg-toggle-btn" id="rangeGridToggleBtn" type="button" aria-label="Collapse range panel">–</button>
+        </div>
+        <div class="range-grid-body" id="rangeGridBody">
+          <div class="range-grid-stats" id="rangeGridStats"></div>
+          <svg class="range-grid" id="rangeGrid" role="img" aria-label="Range and area of effect"></svg>
+          <div class="range-grid-legend" id="rangeGridLegend"></div>
+          <div class="range-grid-caption" id="rangeGridCaption">Base shape shown — some tree nodes change it (see the graph).</div>
+          <div class="range-grid-effect" id="rangeGridEffect">Add a node below to see its plain-English effect here.</div>
+        </div>
       </div>
       <div class="build-controls">
         <div class="eyebrow">Build</div>
@@ -515,6 +620,8 @@
     { group: "Legacy (pre-template)", ids: ["ember"] },
     { group: "Full triangle", ids: ["tackle", "slash", "peck", "scratch", "rock_throw", "water_gun"] },
     { group: "Flagship (evolved-line)", ids: ["hydro_pump", "solar_beam", "earthquake"] },
+    { group: "Single-species", ids: ["body_slam"] },
+    { group: "Average units (common species)", ids: ["vine_whip", "wing_attack", "rock_slide", "dig", "flamethrower", "leech_seed"] },
   ];
 
   var TYPE_COLOR = {
@@ -529,12 +636,38 @@
   var BRANCH_COLOR_HEX = { aggression: "#ef6448", boldness: "#4c95e6", sociability: "#43cf95" };
   var CROSS_HEX = "#e0ac3f";
 
-  var state = { moveId: null, selectedNode: null, hoverNode: null };
+  var state = { moveId: null, selectedNode: null, hoverNode: null, lastAllocatedNode: null };
 
   // ---------- Layout: derive branch/depth/fork/crosslink structure from data ----------
 
   function isCrosslink(node) {
     return Array.isArray(node.prerequisites) && node.prerequisites.length === 2;
+  }
+
+  /**
+   * True for a crosslink's own root node AND for any node reached from it
+   * through an unbroken single-prerequisite chain — e.g. Earthquake's
+   * Coordinated Tremor (the crosslink root) -> Marked Rupture -> Converged
+   * Ruin are all "in the chain," even though only Coordinated Tremor
+   * itself satisfies `isCrosslink`. Purely a visualization concept (see
+   * the "crosslink bridge" edge/ring styling below) — doesn't touch
+   * `leaning`, tier classification, or layout positioning, so it can't
+   * change where anything's placed or how points are tallied by branch.
+   * Direct ask, after a real crosslink bridge (Earthquake's
+   * Converged Ruin pilot) was genuinely hard to spot in the graph: "I
+   * can't see what you did, it's all kinda hard to see."
+   */
+  function isCrosslinkChainMember(tree, id, seen) {
+    seen = seen || {};
+    if (seen[id]) return false; // cycle guard — trees are acyclic, but stay defensive
+    seen[id] = true;
+    var node = tree[id];
+    if (!node) return false;
+    if (isCrosslink(node)) return true;
+    if (Array.isArray(node.prerequisites) && node.prerequisites.length === 1) {
+      return isCrosslinkChainMember(tree, node.prerequisites[0], seen);
+    }
+    return false;
   }
 
   function firstAnyOfParent(node) {
@@ -548,10 +681,23 @@
     var ids = Object.keys(tree);
     var branches = { aggression: [], boldness: [], sociability: [] };
     var crosslinks = [];
+    // Nodes reached from a crosslink root through an unbroken single-
+    // prerequisite chain (e.g. Marked Rupture, Converged Ruin) are real
+    // crosslink content, not ordinary same-branch fillers — even though
+    // they carry a `leaning` like any other node. Direct report, after the
+    // pilot crosslink bridge just landed these in the same crowded radius
+    // as the branch's own early nodes: "I can't see what you did, it's
+    // all kinda hard to see" / the follow-up screenshot showing labels
+    // overlapping right around there. Kept out of `branches[]` entirely
+    // and positioned in a dedicated pass below instead, radiating outward
+    // from their own crosslink's hub rather than competing for the same
+    // ring as that branch's actual filler chain.
+    var crosslinkDescendants = [];
 
     ids.forEach(function (id) {
       var node = tree[id];
       if (isCrosslink(node)) crosslinks.push(id);
+      else if (isCrosslinkChainMember(tree, id)) crosslinkDescendants.push(id);
       else if (branches[node.leaning]) branches[node.leaning].push(id);
     });
 
@@ -607,8 +753,22 @@
       });
     });
 
-    // crosslinks: sit at the angular midpoint between the two branches they bridge,
-    // at a small radius, forming a triangle around the hub.
+    // crosslinks: sit at the angular midpoint between the two branches they
+    // bridge. Most bridge two branch openers (depth 0) and belong right
+    // next to the hub — but one that requires deep, expensive nodes from
+    // both sides instead (Hydro Pump's Marked Undertow needs Undertow
+    // Pull, itself behind the ENTIRE Aggression fork) can't sit at that
+    // same fixed hub radius without its own edge cutting straight across
+    // the whole graph — direct report: "hydro pump marked undertow has
+    // some weird bridges that are not correct." Radius now scales with how
+    // deep the crosslink's own real prerequisites actually sit, using the
+    // same per-branch depth already computed above, so it lands out near
+    // where those nodes really are. Two different crosslinks can still
+    // bridge the same branch pair at the same real depth (e.g. Wake of
+    // Violence and an equally-shallow sibling) — grouped by pair+radius and
+    // spread along the perpendicular so they don't land on the exact same
+    // point.
+    var crosslinksByKey = {};
     crosslinks.forEach(function (id) {
       var node = tree[id];
       var parents = node.prerequisites.map(function (p) { return tree[p]; }).filter(Boolean);
@@ -618,9 +778,73 @@
       // pick the midpoint that is the SHORT way around (they're always 120 deg apart)
       var mid = (a1 + a2) / 2;
       if (Math.abs(a1 - a2) > 180) mid += 180;
+      var maxParentDepth = Math.max.apply(null, node.prerequisites.map(depthOf).concat([0]));
+      var r = R0 * 1.42 + maxParentDepth * RSTEP;
+      var pairKey = [branchesTouched[0], branchesTouched[1]].sort().join("|") + "@" + Math.round(r);
+      (crosslinksByKey[pairKey] = crosslinksByKey[pairKey] || []).push({ id: id, mid: mid, r: r });
+    });
+    Object.keys(crosslinksByKey).forEach(function (pairKey) {
+      var group = crosslinksByKey[pairKey];
+      var mid = group[0].mid;
+      var r = group[0].r;
       var rad = mid * Math.PI / 180;
-      var r = R0 * 1.42;
-      positions[id] = { x: Math.cos(rad) * r, y: Math.sin(rad) * r, branch: "cross", depth: 0 };
+      var perp = rad + Math.PI / 2;
+      var n = group.length;
+      group.forEach(function (entry, i) {
+        var offset = (i - (n - 1) / 2) * (FORK_OFFSET * 0.7);
+        positions[entry.id] = {
+          x: Math.cos(rad) * r + Math.cos(perp) * offset,
+          y: Math.sin(rad) * r + Math.sin(perp) * offset,
+          branch: "cross",
+          depth: 0,
+        };
+      });
+    });
+
+    // Crosslink chain descendants extend their own root's spoke outward,
+    // one step per prerequisite hop — Coordinated Tremor -> Marked Rupture
+    // -> Converged Ruin reads as a bridge radiating from its own hub, not
+    // three unrelated nodes scattered into whichever branch's angular slot
+    // their `leaning` happens to match.
+    var CHAIN_STEP = 42;
+    function crosslinkRootAndHops(id) {
+      var hops = 0, cur = id;
+      for (var guard = 0; guard < ids.length + 1; guard++) {
+        var n = tree[cur];
+        if (!n) return null;
+        if (isCrosslink(n)) return { root: cur, hops: hops };
+        if (!(Array.isArray(n.prerequisites) && n.prerequisites.length === 1)) return null;
+        cur = n.prerequisites[0];
+        hops++;
+      }
+      return null; // guard tripped — shouldn't happen in an acyclic tree
+    }
+    var byRootAndHop = {};
+    crosslinkDescendants.forEach(function (id) {
+      var info = crosslinkRootAndHops(id);
+      if (!info || !positions[info.root]) return;
+      var key = info.root + " " + info.hops;
+      (byRootAndHop[key] = byRootAndHop[key] || []).push(id);
+    });
+    Object.keys(byRootAndHop).forEach(function (key) {
+      var parts = key.split(" ");
+      var rootId = parts[0], hops = +parts[1];
+      var group = byRootAndHop[key];
+      var rootPos = positions[rootId];
+      var rootAngle = Math.atan2(rootPos.y, rootPos.x);
+      var rootR = Math.sqrt(rootPos.x * rootPos.x + rootPos.y * rootPos.y);
+      var r = rootR + hops * CHAIN_STEP;
+      var perp = rootAngle + Math.PI / 2;
+      var n = group.length;
+      group.forEach(function (id, i) {
+        var offset = (i - (n - 1) / 2) * FORK_OFFSET;
+        positions[id] = {
+          x: Math.cos(rootAngle) * r + Math.cos(perp) * offset,
+          y: Math.sin(rootAngle) * r + Math.sin(perp) * offset,
+          branch: "cross",
+          depth: hops,
+        };
+      });
     });
 
     var maxR = 0;
@@ -669,6 +893,10 @@
     thorns: function (v) { return "Passive — reflects " + pct(v) + " of incoming damage back onto the attacker."; },
     healAura: function (v) { return "Passive — heals every nearby herd-mate (itself included) " + pct(v) + " of max HP every tick."; },
     defenseBoost: function (v) { return "Passive — permanently raises its own Defense stat-stage by " + v + "."; },
+    aquaticHaste: function (v) { return "Passive — every nearby herd-mate (itself included) moves " + pct(v) + " faster while standing on water."; },
+    nonTerritorial: function () { return "Passive — never initiates a fight over a contested resource tile (can still be targeted by someone else's)."; },
+    calmingPresence: function (v) { return "Passive — every nearby agent (herd or not, itself included) is " + pct(v) + " less likely to start a resource fight nearby."; },
+    unshaken: function () { return "Passive — the next hit against it does nothing at all (no damage, no side effects), then recharges on a cooldown."; },
   };
 
   function pct(v) { return Math.round(v * 1000) / 10 + "%"; }
@@ -724,12 +952,20 @@
     if (has("statusSpreads") && delta.statusSpreads) lines.push("A landed status has a chance to also jump to one other nearby target.");
     if (has("consumesOwnTerrain")) lines.push("×" + delta.consumesOwnTerrain.damageMultiplier + " damage while standing on " + delta.consumesOwnTerrain.terrain + " terrain (consumed either way).");
     if (has("terrainFill")) lines.push("Leaves " + delta.terrainFill.terrain + " terrain where it lands a hit.");
+    if (has("drainNeeds")) lines.push("Steals " + Math.round(delta.drainNeeds.amount * 100) + "% " + delta.drainNeeds.need + " from the nearest non-herd agent within " + delta.drainNeeds.radius + " tiles, and gains it.");
+    if (has("fertilityBoost")) lines.push("Enriches the soil (+" + Math.round(delta.fertilityBoost.amount * 100) + "% fertility) " + (delta.fertilityBoost.radius === 0 ? "on the user's own tile." : "within " + delta.fertilityBoost.radius + " tiles."));
+    if (has("matingRadiusBoost")) lines.push("×" + delta.matingRadiusBoost.multiplier + " mate-search radius for " + delta.matingRadiusBoost.ticks + " ticks.");
+    if (has("gatherBurst")) lines.push("+" + delta.gatherBurst + " gathering progress per use — digs crops/springs out faster, or knocks canopy fruit down faster, depending on the move.");
     if (has("forcedMovement")) {
       var fm = delta.forcedMovement;
       var mover = fm.mover === "attacker" ? "The user" : "The target";
       var dir = fm.direction === "closer" ? "toward the other side" : "away from the other side";
       var timing = fm.timing === "beforeHit" ? "before the hit resolves" : "on a landed, non-killing hit";
       lines.push(mover + " moves " + fm.tiles + " tile" + (fm.tiles === 1 ? "" : "s") + " " + dir + ", " + timing + ".");
+    }
+    if (has("chargeAttack")) {
+      var ca = delta.chargeAttack;
+      lines.push("Charges for " + ca.ticks + " tick" + (ca.ticks === 1 ? "" : "s") + " — invulnerable and unable to act the whole time — then leaps " + ca.leapTiles + " tiles toward the target and lands the hit at +" + ca.bonusPower + " power (fizzles for no damage if the target's gone by then).");
     }
     if (has("shape")) lines.push("Changes its own shape to " + shapeLabel(delta.shape) + ".");
     if (has("range")) lines.push("Changes its max reach to " + (delta.range.max != null ? delta.range.max + " tiles" : JSON.stringify(delta.range)) + ".");
@@ -809,6 +1045,11 @@
         statusSeverity: has("statusSeverity") ? delta.statusSeverity : result.statusSeverity,
         consumesOwnTerrain: has("consumesOwnTerrain") ? delta.consumesOwnTerrain : result.consumesOwnTerrain,
         terrainFill: has("terrainFill") ? delta.terrainFill : result.terrainFill,
+        chargeAttack: has("chargeAttack") ? delta.chargeAttack : result.chargeAttack,
+        drainNeeds: has("drainNeeds") ? delta.drainNeeds : result.drainNeeds,
+        matingRadiusBoost: has("matingRadiusBoost") ? delta.matingRadiusBoost : result.matingRadiusBoost,
+        fertilityBoost: has("fertilityBoost") ? delta.fertilityBoost : result.fertilityBoost,
+        gatherBurst: has("gatherBurst") ? (result.gatherBurst || 0) + delta.gatherBurst : result.gatherBurst,
       });
     });
     return result;
@@ -899,10 +1140,12 @@
     if (idx >= 0) {
       ids.splice(idx, 1);
       ids = pruneInvalid(tree, ids); // cascades to anything that depended on it
+      if (ids.indexOf(state.lastAllocatedNode) < 0) state.lastAllocatedNode = null;
     } else {
       var chosenSet = new Set(ids);
       if (!checkEligible(tree, chosenSet, nodeId)) return; // guard — the button should already be disabled
       ids.push(nodeId);
+      state.lastAllocatedNode = nodeId;
     }
     setChosen(moveId, ids);
     refreshBuildUI(moveId);
@@ -922,6 +1165,7 @@
     var chosenSet = new Set(ids);
     if (!checkEligible(tree, chosenSet, nodeId)) return;
     ids.push(nodeId);
+    state.lastAllocatedNode = nodeId;
     setChosen(moveId, ids);
     refreshBuildUI(moveId);
   }
@@ -954,8 +1198,35 @@
     });
 
     document.getElementById("buildPoints").innerHTML = "<b>" + totalCost(tree, ids) + "</b> pts spent";
+    renderRangeGridEffect(moveId);
 
     if (state.selectedNode) renderDetail(moveId, state.selectedNode);
+  }
+
+  /**
+   * Shows the plain-English effect of the most recently *allocated* node
+   * (added to the build — not just clicked to inspect) right on the
+   * floating range panel, via the same `describePassive`/`describeDelta`
+   * translators the detail panel's own "In plain English" block uses.
+   * Direct ask: replaces what used to be a static range-vs-shape
+   * disclaimer here (moved to MOVES_DESIGN.md's own permanent writeup
+   * instead — see "Two things that read as confusing in review").
+   */
+  function renderRangeGridEffect(moveId) {
+    var el = document.getElementById("rangeGridEffect");
+    var nodeId = state.lastAllocatedNode;
+    var node = nodeId && TREES[moveId].tree[nodeId];
+    if (!node) {
+      el.textContent = "Add a node below to see its plain-English effect here.";
+      return;
+    }
+    var passives = [];
+    if (node.grantsPassive) passives.push(node.grantsPassive);
+    if (node.grantsPassives) passives = passives.concat(node.grantsPassives);
+    var lines = passives.map(describePassive).concat(describeDelta(node.delta || {}));
+    el.innerHTML =
+      "<b>" + node.name + "</b>" +
+      (lines.length ? ": " + lines.join(" ") : " — structural node only, no move-spec change on its own.");
   }
 
   // ---------- SVG rendering ----------
@@ -1030,7 +1301,13 @@
       }
       if (node.prerequisitesAnyOf) {
         node.prerequisitesAnyOf.forEach(function (set) {
-          addEdge(set[set.length - 1], id, "edge-anyof");
+          var srcId = set[set.length - 1];
+          // A "bridge" alternative — its source traces back to a crosslink
+          // root through an unbroken chain — gets the same gold, thicker
+          // treatment as a crosslink edge, instead of blending into the
+          // many ordinary same-branch anyOf shortcuts already in the graph.
+          var isBridge = isCrosslinkChainMember(tree, srcId);
+          addEdge(srcId, id, isBridge ? "edge-bridge" : "edge-anyof", isBridge ? CROSS_HEX : null);
         });
       }
     });
@@ -1072,6 +1349,25 @@
 
       if (node.cost >= 2 && !isCrosslink(node)) {
         g.appendChild(el("circle", { class: "ring", r: r + 4, fill: "none", stroke: color, "stroke-width": 1, opacity: 0.5 }));
+      }
+      // A dashed gold ring marks every node in a crosslink's own chain
+      // (the root itself is already solid gold via nodeColor/isCrosslink) —
+      // nested outside the cost-2 ring above when both apply, so a bridge
+      // like Earthquake's Coordinated Tremor -> Marked Rupture -> Converged
+      // Ruin reads as one continuous gold thread instead of blending into
+      // its branch's ordinary fillers.
+      if (!isCrosslink(node) && isCrosslinkChainMember(tree, id)) {
+        g.appendChild(
+          el("circle", {
+            class: "ring",
+            r: r + (node.cost >= 2 ? 8 : 4),
+            fill: "none",
+            stroke: CROSS_HEX,
+            "stroke-width": 1.4,
+            "stroke-dasharray": "2 2",
+            opacity: 0.85,
+          })
+        );
       }
       g.appendChild(el("circle", { class: "ring", r: r, fill: "#0c1015", stroke: color, "stroke-width": 2.2 }));
       g.appendChild(el("circle", { r: r - 5, fill: color, opacity: node.grantsPassive || node.grantsPassives ? 0.95 : 0.55 }));
@@ -1534,8 +1830,8 @@
     var legend = document.getElementById("rangeGridLegend");
     legend.innerHTML =
       '<span class="item"><span class="swatch" style="background:var(--text)"></span>user</span>' +
-      '<span class="item"><span class="swatch" style="background:' + typeColor + ';opacity:.3"></span>in range</span>' +
-      '<span class="item"><span class="swatch" style="background:' + typeColor + '"></span>' + (move.hitsArea ? "hits (AoE)" : "target tile") + "</span>";
+      '<span class="item"><span class="swatch" style="background:' + typeColor + ';opacity:.3"></span>in range (any direction)</span>' +
+      '<span class="item"><span class="swatch" style="background:' + typeColor + '"></span>' + (move.hitsArea ? "hits (AoE, once fired)" : "target tile") + "</span>";
   }
 
   // ---------- Selection / navigation ----------
@@ -1550,19 +1846,38 @@
   function renderStageStats(displayMove) {
     var baseMove = TREES[state.moveId];
     var nodeCount = Object.keys(baseMove.tree).length;
-    var stats = document.getElementById("stageStats");
-    stats.innerHTML =
+    var shapeStr =
+      displayMove.shape.kind + (displayMove.shape.length ? " " + displayMove.shape.length : "") +
+      (displayMove.shape.radius != null ? " r" + displayMove.shape.radius : "") +
+      (displayMove.shape.width ? "×" + displayMove.shape.width : "");
+    var rangeStr = displayMove.range ? displayMove.range.min + "–" + displayMove.range.max : String(shapeStr);
+
+    // Wide, one-line layout for the stage header.
+    document.getElementById("stageStats").innerHTML =
       "<span><b>" + displayMove.type + "</b> " + displayMove.category + "</span>" +
       "<span>pwr <b>" + displayMove.power + "</b></span>" +
       "<span>acc <b>" + displayMove.accuracy + "</b></span>" +
       "<span>cd <b>" + displayMove.cooldownTicks + "</b></span>" +
-      "<span>shape <b>" + displayMove.shape.kind + (displayMove.shape.length ? " " + displayMove.shape.length : "") + (displayMove.shape.radius != null ? " r" + displayMove.shape.radius : "") + (displayMove.shape.width ? "×" + displayMove.shape.width : "") + "</b></span>" +
+      "<span>shape <b>" + shapeStr + "</b></span>" +
       "<span><b>" + nodeCount + "</b> nodes</span>";
+
+    // Direct ask: the same stats, right on the floating range panel too, so
+    // it's a self-contained readout wherever it ends up on screen.
+    document.getElementById("rangeGridStats").innerHTML =
+      "<span><b>" + displayMove.type + "</b> " + displayMove.category + "</span>" +
+      "<span>pwr <b>" + displayMove.power + "</b> · acc <b>" + displayMove.accuracy + "</b> · cd <b>" + displayMove.cooldownTicks + "</b></span>" +
+      "<span>range <b>" + rangeStr + "</b> · shape <b>" + shapeStr + "</b></span>";
   }
 
   function selectMove(moveId) {
     state.moveId = moveId;
     state.selectedNode = null;
+    // A prior move's last-allocated node id is meaningless once its own
+    // build was already restored from getChosen — re-seed it from that
+    // build's own most-recently-added entry instead of just clearing it,
+    // so the panel isn't blank on a move that already has a saved build.
+    var savedIds = getChosen(moveId);
+    state.lastAllocatedNode = savedIds.length ? savedIds[savedIds.length - 1] : null;
     var move = TREES[moveId];
 
     document.querySelectorAll(".move-btn").forEach(function (b) {
@@ -1657,6 +1972,7 @@
       { swatch: "#e0ac3f", label: "Crosslink" },
       { line: "solid", label: "prerequisite" },
       { line: "dashed", label: "any-of shortcut" },
+      { line: "bridge", label: "crosslink bridge (dashed gold ring = in the chain)" },
       { line: "excl", label: "× mutually exclusive" },
     ];
     items.forEach(function (it) {
@@ -1666,6 +1982,8 @@
         span.innerHTML = '<span class="swatch" style="background:' + it.swatch + '"></span>' + it.label;
       } else if (it.line === "excl") {
         span.innerHTML = '<span class="line-sample dashed" style="border-color:var(--danger)"></span>' + it.label;
+      } else if (it.line === "bridge") {
+        span.innerHTML = '<span class="line-sample dashed" style="border-color:' + CROSS_HEX + '"></span>' + it.label;
       } else {
         span.innerHTML = '<span class="line-sample' + (it.line === "dashed" ? " dashed" : "") + '"></span>' + it.label;
       }
@@ -1683,9 +2001,114 @@
       "<span>" + totalTrees + " trees</span><span>" + totalNodes + " nodes</span>";
   }
 
+  /**
+   * The range/footprint panel is a floating, draggable, collapsible
+   * widget (direct ask, after it covered real tree nodes on mobile) —
+   * drag its head bar to reposition anywhere on screen, tap the toggle
+   * (or the head bar itself once collapsed) to shrink it to a single
+   * round button. Position and collapsed state persist in localStorage
+   * (`moveTreeAtlas.panel.v1`), same pattern as the notes/flags/build
+   * features already use, so it stays where you left it across reloads
+   * and across switching moves.
+   */
+  function setupRangeGridPanel() {
+    var wrap = document.getElementById("rangeGridWrap");
+    var head = document.getElementById("rangeGridHead");
+    var toggleBtn = document.getElementById("rangeGridToggleBtn");
+    var STORE_KEY = "moveTreeAtlas.panel.v1";
+
+    function load() {
+      try { return JSON.parse(localStorage.getItem(STORE_KEY) || "{}"); } catch (e) { return {}; }
+    }
+    function save(s) {
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch (e) {}
+    }
+
+    var panelState = load();
+
+    function applyCollapsed() {
+      wrap.classList.toggle("collapsed", !!panelState.collapsed);
+      toggleBtn.textContent = panelState.collapsed ? "▦" : "–";
+      toggleBtn.setAttribute("aria-label", panelState.collapsed ? "Expand range panel" : "Collapse range panel");
+    }
+    function applyPosition() {
+      if (panelState.left == null || panelState.top == null) return;
+      var maxLeft = Math.max(0, window.innerWidth - 40);
+      var maxTop = Math.max(0, window.innerHeight - 40);
+      wrap.style.left = Math.min(panelState.left, maxLeft) + "px";
+      wrap.style.top = Math.min(panelState.top, maxTop) + "px";
+      wrap.style.right = "auto";
+      wrap.style.bottom = "auto";
+    }
+    applyCollapsed();
+    applyPosition();
+
+    var dragging = false, moved = false, startX = 0, startY = 0, origLeft = 0, origTop = 0;
+
+    function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+    head.addEventListener("pointerdown", function (e) {
+      dragging = true;
+      moved = false;
+      var rect = wrap.getBoundingClientRect();
+      origLeft = rect.left;
+      origTop = rect.top;
+      startX = e.clientX;
+      startY = e.clientY;
+      try { head.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+    window.addEventListener("pointermove", function (e) {
+      if (!dragging) return;
+      var dx = e.clientX - startX, dy = e.clientY - startY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+      if (!moved) return;
+      var rect = wrap.getBoundingClientRect();
+      var newLeft = clamp(origLeft + dx, 4, window.innerWidth - rect.width - 4);
+      var newTop = clamp(origTop + dy, 4, window.innerHeight - rect.height - 4);
+      wrap.style.left = newLeft + "px";
+      wrap.style.top = newTop + "px";
+      wrap.style.right = "auto";
+      wrap.style.bottom = "auto";
+    });
+    window.addEventListener("pointerup", function () {
+      if (!dragging) return;
+      dragging = false;
+      if (moved) {
+        var rect = wrap.getBoundingClientRect();
+        panelState.left = rect.left;
+        panelState.top = rect.top;
+        save(panelState);
+      }
+    });
+
+    // A real drag vs. a tap-to-toggle are disambiguated by whether the
+    // pointer actually moved past the threshold above.
+    function toggleCollapsed() {
+      panelState.collapsed = !panelState.collapsed;
+      save(panelState);
+      applyCollapsed();
+    }
+    head.addEventListener("click", function (e) {
+      if (moved) { moved = false; return; }
+      toggleCollapsed();
+    });
+    // Direct bug: this used to only call stopPropagation() here, on the
+    // (wrong) assumption the click would still bubble up and toggle via
+    // head's own listener above — stopPropagation prevents exactly that,
+    // so the button — the ONLY clickable area once collapsed — did
+    // nothing. Fixed to actually toggle here too, still guarding against
+    // the same click also firing head's listener a second time.
+    toggleBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (moved) { moved = false; return; }
+      toggleCollapsed();
+    });
+  }
+
   buildPicker();
   buildLegend();
   buildHeaderCounts();
+  setupRangeGridPanel();
   selectMove(MOVE_ORDER[1].ids[0]);
 })();
 </script>

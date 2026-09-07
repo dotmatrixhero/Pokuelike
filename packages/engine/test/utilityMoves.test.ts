@@ -209,6 +209,33 @@ describe("maybeUseUtilityMove", () => {
     expect(agent.moveCooldowns?.["leech_seed"]).toBeUndefined();
   });
 
+  it("a drainNeeds move also applies its other utility effects in the same use, not just the drain", () => {
+    // Regression guard for a real composition gap: `drainNeeds` used to
+    // early-return, so any other utility field on the same move (Leech
+    // Seed's own tree puts what it steals back into the ground via
+    // `fertilityBoost`) was silently dead.
+    const world = createWorld(10, 10, 1);
+    const move = makeMove({
+      id: "leech_seed",
+      drainNeeds: { need: "hunger", amount: 0.2, radius: 4 },
+      fertilityBoost: { amount: 0.25, radius: 0 },
+    });
+    const agent = makeAgent({ moves: [move], herdId: "h1", needs: createNeeds({ hunger: 0.5 }) });
+    const target = makeAgent({ id: "victim", pos: { x: 7, y: 5 }, herdId: "h2", needs: createNeeds({ hunger: 0.6 }) });
+    world.agents.push(agent, target);
+    setTile(world, "surface", agent.pos.x, agent.pos.y, "floor");
+    tileAt(world, "surface", agent.pos.x, agent.pos.y)!.fertility = 0.2;
+
+    const fired = maybeUseUtilityMove(world, agent, undefined, alwaysFire);
+
+    expect(fired).toBe(true);
+    expect(agent.needs.hunger).toBeCloseTo(0.7, 5); // the drain still happens
+    expect(target.needs.hunger).toBeCloseTo(0.4, 5);
+    // ...and so does the soil enrichment, which used to be silently skipped
+    expect(tileAt(world, "surface", agent.pos.x, agent.pos.y)!.fertility).toBeCloseTo(0.45, 5);
+    expect(agent.moveCooldowns?.["leech_seed"]).toBe(10); // still exactly one useMove call, not two
+  });
+
   it("only ever fires one move per call, even with multiple off-cooldown utility moves available", () => {
     const world = createWorld(10, 10, 1);
     const growth = makeMove({ id: "growth", fertilityBoost: { amount: 0.3, radius: 0 } });

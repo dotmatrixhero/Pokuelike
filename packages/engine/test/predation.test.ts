@@ -982,6 +982,165 @@ describe("forced movement wired into real combat (resolveHit)", () => {
   });
 });
 
+describe("chargeAttack: a genuine mid-commit wind-up (Agent.chargingAttack, Body Slam's The Reckoning)", () => {
+  const CHARGE_MOVE: MoveSpec = {
+    ...TEST_MOVE,
+    id: "charge-move",
+    cooldownTicks: 10,
+    range: { min: 0, max: 5 },
+    chargeAttack: { ticks: 2, bonusPower: 30, leapTiles: 3 },
+  };
+
+  it("commits the attacker without landing a hit immediately", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [CHARGE_MOVE] });
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought" }));
+    expect(hunter.chargingAttack).toEqual(
+      expect.objectContaining({ moveId: "charge-move", targetId: "bulbasaur-0", ticksRemaining: 2, bonusPower: 30, leapTiles: 3 })
+    );
+    expect(hunter.actionLockTicks).toBe(2);
+  });
+
+  it("a charging agent takes no damage at all — genuine invulnerability, not a defense buff", () => {
+    const world = createWorld(10, 10);
+    // The one charging here is the "prey" fixture — attacked by a real
+    // predator well within its own power to normally down it in one hit.
+    const chargingPrey = prey(
+      { x: 5, y: 5 },
+      {
+        hp: 10,
+        maxHp: 10,
+        chargingAttack: { moveId: "charge-move", targetId: "scyther-0", ticksRemaining: 5, bonusPower: 0, leapTiles: 0, faintKind: "killed" },
+      }
+    );
+    const hunter = predator({ x: 6, y: 5 });
+    world.agents.push(hunter, chargingPrey);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    expect(chargingPrey.hp).toBe(10);
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought" }));
+  });
+
+  it("resolves after its ticks elapse — leaps toward the target's current position, then lands the hit", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 9, y: 5 }, undefined, { moves: [CHARGE_MOVE] }); // out of melee range — only the leap closes it
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // tick 1: starts charging
+    expect(hunter.chargingAttack?.ticksRemaining).toBe(2);
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // tick 2: still charging
+    expect(hunter.chargingAttack?.ticksRemaining).toBe(1);
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought" }));
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // tick 3: releases
+
+    expect(hunter.chargingAttack).toBeUndefined();
+    expect(hunter.actionLockTicks).toBe(0);
+    expect(hunter.pos).not.toEqual({ x: 9, y: 5 }); // leapt toward the target
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "scyther-0", defenderId: "bulbasaur-0" }));
+  });
+
+  it("fizzles for no damage if the target is gone by the time the charge completes", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [CHARGE_MOVE] });
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // starts charging
+    target.alive = false; // the target dies from something else entirely, mid-charge
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // would have released here
+
+    expect(hunter.chargingAttack).toBeUndefined(); // the commitment is still spent...
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought" })); // ...but nothing landed
+  });
+});
+
+describe("unshaken: fully negates the next hit, once, then recharges (Agent.unshakenCooldownTicks, Body Slam's Unbothered)", () => {
+  it("the first hit against a holder off cooldown does nothing at all — no damage, no event", () => {
+    const world = createWorld(10, 10);
+    const unshakenPrey = prey({ x: 5, y: 5 }, { hp: 10, passives: { unshaken: 1 } });
+    const hunter = predator({ x: 6, y: 5 });
+    world.agents.push(hunter, unshakenPrey);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    expect(unshakenPrey.hp).toBe(10);
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought" }));
+    // Not asserting the exact constant (20): agents tick in array order within
+    // the same world tick, so the defender's own tickStatusEffects call (which
+    // decrements this) can run in the same tick right after the cooldown gets
+    // set, one tick "ahead" depending on push order — a real, harmless
+    // ordering quirk, not a bug. What matters is that it's real and running.
+    expect(unshakenPrey.unshakenCooldownTicks).toBeGreaterThan(0);
+  });
+
+  it("a second hit while the shield is still on cooldown lands normally", () => {
+    const world = createWorld(10, 10);
+    const unshakenPrey = prey({ x: 5, y: 5 }, { hp: 10, passives: { unshaken: 1 } });
+    const hunter = predator({ x: 6, y: 5 });
+    world.agents.push(hunter, unshakenPrey);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // shield consumed, no damage
+    // The (blocked) hit still reads as a real threat, so the prey's own flee
+    // instinct kicks in and it steps away — pin both back adjacent so this
+    // tick's attack is guaranteed to be in range again, same as the first.
+    hunter.pos = { x: 6, y: 5 };
+    unshakenPrey.pos = { x: 5, y: 5 };
+    hunter.moveCooldowns = {}; // let it swing again immediately
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // shield still down — this one lands
+
+    expect(unshakenPrey.hp).toBeLessThan(10);
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought" }));
+  });
+
+  it("without the passive, a hit lands normally even with unshakenCooldownTicks at 0", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 });
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    expect(target.hp).toBeLessThan(10);
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought" }));
+  });
+
+  it("the shield recharges after enough ticks pass with no further hits", () => {
+    const world = createWorld(10, 10);
+    const unshakenPrey = prey({ x: 5, y: 5 }, { hp: 10, passives: { unshaken: 1 }, unshakenCooldownTicks: 1 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [{ ...TEST_MOVE, id: "slow-move", cooldownTicks: 30 }] });
+    world.agents.push(hunter, unshakenPrey);
+
+    // Tick once with the hunter's own move on cooldown so it can't attack —
+    // just to let unshakenCooldownTicks itself count down to 0 first.
+    hunter.moveCooldowns = { "slow-move": 5 };
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+    expect(unshakenPrey.unshakenCooldownTicks).toBe(0);
+
+    hunter.moveCooldowns = {};
+    hunter.pos = { x: 6, y: 5 };
+    unshakenPrey.pos = { x: 5, y: 5 }; // pin back adjacent in case the standoff moved it
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+    expect(unshakenPrey.hp).toBe(10); // recharged in time to no-sell this hit too
+  });
+});
+
 describe("multi-hit wired into real combat (resolveHit)", () => {
   it("strikes exactly hits.min===max times, each its own 'fought' event, until the hit count is used up or the target dies", () => {
     const FLURRY_MOVE: MoveSpec = { ...TEST_MOVE, id: "flurry-move", hits: { min: 3, max: 3 } };
@@ -1584,6 +1743,26 @@ describe("new situational conditions wired into real combat", () => {
 
     // targetStatused fires on ANY status (paralysis here), not just burn.
     expect(foughtDamage(paralyzedLog.events)).toBeGreaterThan(foughtDamage(unstatusedLog.events));
+  });
+
+  it("rallyMarked keys off the defender's own active rallyCall mark, not any other agent's", () => {
+    const RALLY_MARKED_MOVE: MoveSpec = { ...TEST_MOVE, id: "rally-marked-move", situationalBonus: { condition: "rallyMarked", multiplier: 3 } };
+
+    const markedWorld = createWorld(10, 10);
+    const markedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [RALLY_MARKED_MOVE] });
+    const markedVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS }, rallyMarkTicksRemaining: 5 });
+    markedWorld.agents.push(markedAttacker, markedVictim);
+    const markedLog = new EventLog();
+    tickWorld(markedWorld, markedLog, RULES);
+
+    const unmarkedWorld = createWorld(10, 10);
+    const unmarkedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [RALLY_MARKED_MOVE] });
+    const unmarkedVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
+    unmarkedWorld.agents.push(unmarkedAttacker, unmarkedVictim);
+    const unmarkedLog = new EventLog();
+    tickWorld(unmarkedWorld, unmarkedLog, RULES);
+
+    expect(foughtDamage(markedLog.events)).toBeGreaterThan(foughtDamage(unmarkedLog.events));
   });
 });
 

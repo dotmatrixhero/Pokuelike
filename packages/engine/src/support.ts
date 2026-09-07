@@ -8,6 +8,7 @@ import { CONSUME_STOCK_AMOUNT, recordGrazing } from "./flora.js";
 import { isNight, isTwilight } from "./daynight.js";
 import { agentsWithin, isHunterSpecies, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS, huntHungerThreshold } from "./predation.js";
 import { findNearestIndexed } from "./resourceIndex.js";
+import { herdMembers } from "./herdIndex.js";
 import { COLD_SNAP_SPEED_MULTIPLIER, isInColdSnap } from "./weather.js";
 import { useMove, withinMoveRange } from "./combat.js";
 import { RAPPORT_FOOD_DELIVERY_DELTA, strengthenRapportMutual } from "./rapport.js";
@@ -229,6 +230,37 @@ export function canopySpeedMultiplier(layer: Layer): number {
 
 export function movementSpeedFactor(fromElevation: number, toElevation: number, toTerrain: TerrainKind): number {
   return elevationSpeedMultiplier(fromElevation, toElevation) * terrainSpeedMultiplier(toTerrain);
+}
+
+/**
+ * The pod's own real terrain mastery — direct ask, after Hydro Pump's
+ * Sociability capstone (Tidal Communion) went through two rounds that
+ * didn't land: a flat `healAura` felt disconnected from "the pod moving
+ * the water together," and a follow-up `excludesAllies` read as reused
+ * content already spent as Earthquake's own opener. `"aquaticHaste"` is
+ * the real fantasy instead: a same-herd agent within
+ * `AQUATIC_HASTE_AURA_RADIUS` of a passive-holder (the holder itself
+ * included) gets a genuine Speed multiplier bonus, but only while THAT
+ * agent is actually standing on a `"water"` tile — composes
+ * multiplicatively into `actionSpeedOf`'s existing chain (simulation.ts),
+ * same call shape as every other Speed modifier there. Doesn't stack
+ * across multiple holders (first qualifying source wins), matching how
+ * this sim's other aura passives (`healAura`) already behave. 1 (no
+ * effect) off water, without a herd, or with no holder nearby.
+ */
+const AQUATIC_HASTE_AURA_RADIUS = 3;
+export function aquaticHasteMultiplier(world: World, agent: Agent): number {
+  if (!agent.herdId) return 1;
+  const tile = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
+  if (tile?.terrain !== "water") return 1;
+  for (const other of herdMembers(world, agent.herdId)) {
+    if (other.layer !== agent.layer) continue;
+    const bonus = other.passives?.aquaticHaste ?? 0;
+    if (bonus <= 0) continue;
+    if (manhattan(other.pos, agent.pos) > AQUATIC_HASTE_AURA_RADIUS) continue;
+    return 1 + bonus;
+  }
+  return 1;
 }
 
 // --- Day/night activity pattern -> effective Speed (see DESIGN.md's "Dynamics that move a content herd", Phase 2) ---

@@ -8,7 +8,7 @@ import { tickEgg } from "./eggs.js";
 import { updateHerdMigrations } from "./herdMigration.js";
 import { maybeImmigrate, type ImmigrationContext } from "./immigration.js";
 import type { LevelingContext } from "./leveling.js";
-import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, canopySpeedMultiplier, coldSnapSpeedMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
+import { CORPSE_PERSIST_TICKS, activityScheduleMultiplier, aquaticHasteMultiplier, canopySpeedMultiplier, coldSnapSpeedMultiplier, effectiveSpeed, movementSpeedFactor } from "./support.js";
 import { tileAt } from "./world.js";
 import { isNight, lightLevel } from "./daynight.js";
 import { advanceBiomeDrift, advanceWaterCycle, advanceWeather } from "./weather.js";
@@ -81,10 +81,17 @@ export function accumulateActionEnergy(agent: Agent, speed: number): boolean {
  * A fifth: paralysis (`status.ts`'s `PARALYSIS_SPEED_MULTIPLIER`) — the
  * *permanent, real-time* half of what paralysis does, independent of its
  * separate per-action-tick skip-chance roll in `tickAgentAction`
- * (needs.ts). Order doesn't matter for a product of multipliers, but for
- * the record: terrain, then off-hours, then cold snap, then paralysis, then
- * injury last. Exported (like `accumulateActionEnergy`) so it's directly
- * testable without needing a full `tickWorld` pass.
+ * (needs.ts).
+ *
+ * A sixth: the `"aquaticHaste"` passive (support.ts's
+ * `aquaticHasteMultiplier`) — a real Speed bonus for a same-herd agent
+ * standing on water near whoever holds the passive, itself included. First
+ * real content: Hydro Pump's Tidal Communion keystone.
+ *
+ * Order doesn't matter for a product of multipliers, but for the record:
+ * terrain, then off-hours, then cold snap, then aquatic haste, then
+ * paralysis, then injury last. Exported (like `accumulateActionEnergy`) so
+ * it's directly testable without needing a full `tickWorld` pass.
  */
 export function actionSpeedOf(world: World, agent: Agent, tick: number): number {
   const baseSpeed =
@@ -93,6 +100,7 @@ export function actionSpeedOf(world: World, agent: Agent, tick: number): number 
     activityScheduleMultiplier(agent.activityPattern, tick) *
     coldSnapSpeedMultiplier(world, agent.layer, agent.pos) *
     canopySpeedMultiplier(agent.layer) *
+    aquaticHasteMultiplier(world, agent) *
     (isParalyzed(agent) ? PARALYSIS_SPEED_MULTIPLIER : 1) *
     // A temporary Speed stat-stage grant (e.g. `MoveSpec.statChangeOnHit`'s
     // self-side effect, or utilityMoves.ts's Agility) composes here, same

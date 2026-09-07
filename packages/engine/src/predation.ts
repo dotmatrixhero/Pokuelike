@@ -225,6 +225,8 @@ export function huntHungerThreshold(world: World, agent: Agent, tick: number): n
 /** Fallback HP for an agent with no real combat profile (stats/level/types) — shouldn't happen for fully-statted species. Exported so support.ts's body-weight proxy can match it. */
 export const FALLBACK_MAX_HP = 10;
 const FALLBACK_DAMAGE = 1;
+/** Ticks the `"unshaken"` passive locks out after fully negating a hit — see `Agent.unshakenCooldownTicks`'s own doc comment (types.ts). */
+const UNSHAKEN_COOLDOWN_TICKS = 20;
 /** A predator at or below this fraction of max HP flees a fight instead of continuing it. See `retreatHpFraction` for the juvenile-aware version actually used. */
 const RETREAT_HP_FRACTION = 0.4;
 /**
@@ -894,6 +896,8 @@ function situationalMultiplier(world: World, attacker: Agent, defender: Agent, m
       return isBurned(defender) ? bonus.multiplier : 1;
     case "targetStatused":
       return defender.status !== undefined ? bonus.multiplier : 1;
+    case "rallyMarked":
+      return (defender.rallyMarkTicksRemaining ?? 0) > 0 ? bonus.multiplier : 1;
   }
 }
 
@@ -1099,6 +1103,18 @@ function resolveHitAgainstTarget(
   accuracyBonusMultiplier = 1
 ): boolean {
   if (defender.alive === false) return false; // already a corpse — nothing left to finish off here (looting/scavenging is a separate path, see support.ts)
+  // A charging defender is genuinely invulnerable — see `Agent.chargingAttack`'s
+  // own doc comment (types.ts): no accuracy roll, no partial effects, this
+  // attack simply doesn't land at all while the wind-up is in progress.
+  if (defender.chargingAttack) return false;
+  // `"unshaken"` fully negates the next hit against the holder, once it's
+  // off cooldown — same "nothing about this hit happens at all" shape as
+  // the charging check above, just gated by a recharging shield instead of
+  // a timed wind-up. See PassiveKind's own doc comment (types.ts).
+  if ((defender.passives?.unshaken ?? 0) > 0 && (defender.unshakenCooldownTicks ?? 0) <= 0) {
+    defender.unshakenCooldownTicks = UNSHAKEN_COOLDOWN_TICKS;
+    return false;
+  }
 
   defender.maxHp = defender.maxHp ?? defender.stats?.maxHp ?? FALLBACK_MAX_HP;
   defender.hp = defender.hp ?? defender.maxHp;
@@ -1299,6 +1315,24 @@ function resolveHit(
     attacker.needs[move.selfCostPerUse.need] = Math.max(0, attacker.needs[move.selfCostPerUse.need] - move.selfCostPerUse.amount);
   }
 
+  // A charge commitment doesn't resolve anything now — it commits the
+  // attacker (via the same `actionLockTicks` block every other lock uses)
+  // and takes over from here entirely: see `Agent.chargingAttack`'s own doc
+  // comment (types.ts) and `resolveChargedAttack` below for the delayed
+  // leap-and-hit this sets up.
+  if (move.chargeAttack) {
+    attacker.actionLockTicks = (attacker.actionLockTicks ?? 0) + move.chargeAttack.ticks;
+    attacker.chargingAttack = {
+      moveId: move.id,
+      targetId: defender.id,
+      ticksRemaining: move.chargeAttack.ticks,
+      bonusPower: move.chargeAttack.bonusPower,
+      leapTiles: move.chargeAttack.leapTiles,
+      faintKind,
+    };
+    return false;
+  }
+
   // A lunge resolves before the hit itself — the attacker's range was
   // already validated by canAttackFromHere before resolveHit was ever
   // called, so this doesn't change whether THIS hit lands, only where the
@@ -1322,6 +1356,45 @@ function resolveHit(
 
   if (move.hitsArea) return resolveAreaHit(world, attacker, defender, move, log, faintKind, ctx, rng, accuracyBonusMultiplier);
   return resolveHitAgainstTarget(world, attacker, defender, move, log, faintKind, ctx, true, rng, accuracyBonusMultiplier);
+}
+
+/**
+ * Resolves a completed charge from `Agent.chargingAttack` — called by
+ * `tickAgentNeeds` (needs.ts) the instant `ticksRemaining` reaches 0
+ * (`tickStatusEffects`, status.ts, ticks it down; this function does the
+ * actual leap-and-hit, since it needs predation.ts's own machinery that
+ * status.ts deliberately avoids importing — see MOVES_DESIGN.md's own note
+ * on the real status.ts/predation.ts import cycle). Looks the original
+ * target back up by id (it may have moved, fled to another layer, or died
+ * in the ticks since the charge started) rather than trusting a stale
+ * reference — a real fizzle risk for committing this hard to one target,
+ * not a guaranteed payoff.
+ */
+export function resolveChargedAttack(
+  world: World,
+  attacker: Agent,
+  log: EventLog | undefined,
+  ctx: LevelingContext | undefined,
+  rng: () => number = Math.random
+): void {
+  const charge = attacker.chargingAttack;
+  if (!charge) return;
+  attacker.chargingAttack = undefined;
+  if (isDead(attacker) || attacker.alive === false) return;
+
+  const defender = world.agents.find((a) => a.id === charge.targetId);
+  if (!defender || defender.alive === false || isDead(defender) || defender.layer !== attacker.layer) return;
+
+  const move = attacker.moves?.find((m) => m.id === charge.moveId);
+  if (!move) return;
+
+  // The leap happens now, at release — not when the charge started — so it
+  // closes whatever distance the target's covered in the meantime, same
+  // "beforeHit" timing every other lunge uses.
+  applyForcedMovement(world, { mover: "attacker", direction: "closer", tiles: charge.leapTiles, timing: "beforeHit" }, attacker, defender);
+
+  const chargedMove: MoveSpec = { ...move, power: move.power + charge.bonusPower };
+  resolveHitAgainstTarget(world, attacker, defender, chargedMove, log, charge.faintKind, ctx, true, rng);
 }
 
 function logKillOrDefeat(world: World, attacker: Agent, defender: Agent, faintKind: "killed" | "defeated", log: EventLog | undefined): void {

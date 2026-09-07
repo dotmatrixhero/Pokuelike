@@ -14,6 +14,221 @@ here to avoid stepping on it. A couple of ideas below (Sandstorm as a
 *local* hazard, not a weather state) are noted as deferred/reframed for
 the same reason.
 
+## Guide for future Claude: principles learned building this system
+
+Written on direct request, after several rounds of real feedback on real
+mistakes — a distillation, not a rehash. Read this before touching a move
+tree. Each principle names the mistake it was learned from so it doesn't
+read as generic advice.
+
+**1. Fantasy first, then mechanics — never the reverse.** The original
+sin of the pre-v3 trees: three branches built by copying another move's
+kit and swapping numbers ("the design looks like you just copied over
+effects from other trees"). The fix that actually worked was starting
+from "why does *this* species use *this* move" before opening the delta
+schema at all — Rock Throw's "Denial" branch (a lumbering body's borrowed
+reach, pinning rather than escalating power) came from that question, not
+from a lever list. If a branch's mechanic could be copy-pasted onto a
+different move/species with only the numbers changed, it's a template,
+not a fantasy — that's the test, not a vibe check.
+
+**2. Extending the user's idea is not the same as originating one.**
+Direct, important feedback: "you're echoing a lot of my ideas... I'm
+worried you're not UNDERSTANDING and learning how to create your own
+based on the fantasy." Costing out a suggestion into real primitives is
+useful but it's translation, not design. The bar: pitch something for a
+move *nobody asked about yet*, reasoning from its fantasy alone. Do this
+regularly, not once as a one-time proof.
+
+**3. Every mechanic must cite the real code path that runs it, not an
+assumption.** Every "is this buildable" question in this whole effort was
+answered by grepping the actual engine function, never by guessing from
+the field name. This caught real, load-bearing facts late guessing would
+have missed — `lockTicks` locks the *user*, not the defender (a crosslink
+was shipped believing the opposite, described as "stuns outright," and
+had to be fixed); `range.max` and `shape` are fully decoupled fields
+(moveRange gates *whether to fire*, `resolveShape` decides *what actually
+gets hit* — conflating them produced a mechanic — "+Range" on an AoE —
+that silently didn't do what its name promised). When a design idea
+depends on how a system works, read that system before proposing the
+mechanic, not after.
+
+**4. A lever that's pure downside with no offsetting benefit is a bug,
+not a design choice.** Found twice, independently, in review: Earthquake's
+`overload_footing` cost a real skill point for `recoilFraction: 0.1`
+alone — a player would never buy pure self-damage. (The `"+10% Recoil"`
+label was itself the tell — read as `recoilFraction * 100`, not as
+"reads plausible so it must be intentional.") Every delta-only filler
+node deserves this check before shipping: does taking it, on its own,
+make the move strictly better for *someone*? If a lever is genuinely a
+tradeoff, the benefit half lives in the *same node*, not a different one
+several steps away that a build might never reach.
+
+**5. Say the numbers, don't paraphrase them.** Every "+10 Range" node
+across three trees was mislabeled — the real deltas were +1 or +2, not
++10. A generic label ("+10 Range") copy-pasted across nodes with
+different real values is exactly how this kind of error survives review:
+nothing about the label itself was ever cross-checked against the actual
+number in the same object. When a node name states a magnitude, compute
+it from the code, don't carry a boilerplate string forward.
+
+**6. Widen a branch's *allowed* flavor before widening its mechanics.**
+Boldness locked to "defensive," Aggression locked to "raw power" forces
+every move's version of that branch back toward the same template — the
+real unlock was permitting Boldness to be earned aggression and Aggression
+to be hunting/stealth or clashing depending on move+species. Do this
+once, explicitly, in the doc (see "Skill-tree template v3" below), not
+implicitly per-move as an exception each time.
+
+**7. Deeper crosslinks means a bridge, not a longer dead end.** First
+attempt at "deeper crosslinks" just added one more single-effect leaf
+node hanging off a crosslink (*Marked Rupture* et al.) — real, but not
+what "deeper" meant. The actual ask: crosslink → filler → notable, where
+that notable becomes a genuine alternate `prerequisitesAnyOf` route
+*into* a main branch, letting a build skip that branch's own linear
+filler grind by investing across two branches instead. Corollary learned
+building the pilot: shortcut the grind, never the fork/decision itself —
+a bridge that skips a branch's one meaningful choice point trivializes
+it rather than offering a real alternate path to it.
+
+**8. A proposal in the doc is not a shipped mechanic — say which one
+something is, always.** Confusion arose twice from writing "proposed"
+crosslinks in prose without marking them clearly enough as unbuilt: "I'm
+not seeing any deeper crosslinks tho." Every mechanic in this doc now
+gets an explicit **Shipped**/proposed/flagged tag, checked against
+whether it's actually in `packages/data/src/moves.ts` — not inferred from
+how confidently it reads.
+
+**9. When a UI element's own visualization looks contradictory, check
+whether it's actually wrong, not just confusing.** The range/shape grid
+looking odd for a cone move ("if max range, do you not do a cone?") led
+to discovering the fillers themselves didn't do what their names claimed
+— genuinely inconsistent-looking output is worth tracing to a root cause
+before writing it off as "just needs a caption."
+
+**10. Design approvals first — proposed once, holds for the rest of the
+session.** Standing rule after an artifact got built before its design
+was ever presented: pitch the design in text, wait for explicit
+"go ahead"/"try it out" before writing code. A pilot on one move/one
+crosslink before rolling a new pattern out everywhere (rule 7's bridge
+pattern) is the same instinct applied to structural changes, not just
+new features.
+
+Seven more, added after rolling the crosslink-bridge pattern out to every
+tree and taking Hydro Pump's Sociability capstone through three real
+iterations — none of this rehashes 1-10, each is a distinct mistake with
+its own fix:
+
+**11. A bridge must reach every branch its crosslink actually connects,
+not just the branch matching its own `leaning`.** Converged Ruin
+(Earthquake) is `leaning: "aggression"`, but the crosslink underneath it
+(*Coordinated Tremor*) bridges Sociability too — v1 only wired the
+shortcut into Aggression's own pre-fork node, corrected directly: "make
+them connect to the other branch too. Like it can go to either branch." A
+descendant node's own `leaning` field is not the boundary of which
+branches a bridge should serve; the crosslink's actual two prerequisite
+branches are.
+
+**12. "Land one step short of the fork" isn't specific enough — land at
+the same depth from the decision a normal walk would reach.** v1 of the
+same bridge wired the shortcut directly onto the fork nodes' own
+`prerequisitesAnyOf`, on the theory that "reaching the fork without
+skipping it" was the rule — still corrected: "the deeper cross link going
+straight to the choice of 2 nodes are a bit too much." The precise rule
+(principle 7's corollary, sharpened): a bridge should save the *grind*,
+never the *last step to the decision*, so the fork stays an equally
+weighted choice regardless of which path got you there.
+
+**13. A bridge's own new content must deepen the specific lever its own
+crosslink already introduced, not reach for a generic stat grab-bag —
+principle #1 applies at the single-node level too, not just the
+whole-tree level.** A rollout across 11 crosslinks shipped with the same
+three-lever rotation every time (+accuracy filler, then +power/
++defensePenetration/+lifestealFraction notable) — direct, blunt feedback:
+"Your crosslinks are laaaaaame tho... the skills don't feel cool." Every
+one had to be rebuilt so its notable escalates whatever its own crosslink
+already does — a lunge gets longer, a crit gets sharper, a mark gets
+stronger — instead of bolting on whichever generic lever hadn't been used
+yet.
+
+**14. A shape/AoE change is notable/capstone-tier currency, earned rather
+than routine — and it's the single best payoff to spend on a bridge
+notable when a big moment is explicitly asked for.** Direct ask, "make
+one of the solar beam ones do like three width beams as a capstone" —
+Solar Beam is single-target everywhere else in its own tree, so turning
+one bridge's notable into a real `hitsArea` cone was the standout of the
+whole rollout, not an arbitrary pick.
+
+**15. When feedback comes back twice on the same node, check whether two
+separate asks are being crammed onto one point before writing a third
+version of it.** Hydro Pump's Tidal Communion took three passes: a flat
+`healAura` didn't match the branch's own fantasy; the `excludesAllies`
+replacement then read as reused content, since Earthquake's own opener
+already does the same thing. The fix wasn't a fourth mechanic bolted onto
+the same node — it was separating "heal" and "don't hit allies" (two
+genuinely different asks) onto two different nodes: `excludesAllies`
+moved down onto the opener next to its existing heal, which freed the
+capstone to become something the roster didn't have yet (`aquaticHaste`).
+
+**16. Confirming a mechanic ISN'T buildable from existing primitives is
+exactly as load-bearing as confirming it IS, and still needs the user's
+go-ahead before new engine work starts.** Before building `aquaticHaste`,
+the closed `PassiveKind` union and `actionSpeedOf`'s multiplier chain were
+read directly to confirm no existing primitive covered "ally aura +
+terrain-conditional" together — then the scope question went to the user
+rather than being decided unilaterally, per principle #10.
+
+### What actually makes a tree interesting, distilled from the roster so far
+
+The principles above are mostly about catching mistakes. These are about
+the other half — recognizable, repeatable patterns behind every node in
+this doc that actually landed well, worth reaching for on purpose rather
+than rediscovering per move:
+
+- **A move's own "flaw" is a branch's best possible payoff, not something
+  to quietly patch over.** Earthquake's AoE doesn't distinguish friend
+  from foe — Sociability's whole identity is a drilled herd that finally
+  doesn't get caught in its own blast, turning the exact same
+  indiscriminate hit into the branch's hook. Hydro Pump's canonically bad
+  accuracy became Boldness's entire fantasy (a patient, controlled deluge
+  instead of a wild spray) rather than a flat "-accuracy" tax filler
+  quietly apologizes for elsewhere. Look for the thing that reads as the
+  move's weakness first — it's usually a branch waiting to happen.
+- **Physical/positional levers are the most memorable interactions in the
+  whole roster, ahead of any number.** A drag, a lunge, a swap, a boulder
+  consumed underfoot, a puddle left behind — these are things an observer
+  can *see happen* mid-fight, unlike "+10% power." `forcedMovement`,
+  `positionSwap`, `consumesOwnTerrain`, `terrainBurn`/`terrainFill` earn
+  disproportionate design time per move specifically because of this (see
+  template v3's rule 3) — reach for one of these before reaching for
+  another accuracy/power filler.
+- **A condition worth gating a payoff on is one the move's own fantasy
+  would obviously care about, not whatever's cheapest to check.**
+  `aquaticHaste` only firing on water, Rock Throw's own boulder tile
+  consumed for real bonus damage, a night-hunter's bonus specifically at
+  night — the condition IS the flavor, not a tax attached to an otherwise
+  generic bonus. A situational bonus that could be swapped for any other
+  situational bonus with no loss of sense is a tell it was picked for
+  convenience, not fit.
+- **Rally/mark-style mechanics are richer than a same-sized buff, because
+  they change what *other* agents independently choose to do, not just a
+  number on the caster.** `rallyMarked`/`preferMarked` turning several
+  agents' separately-run targeting logic onto the same threat is a
+  qualitatively different payoff than the same points spent on flat
+  damage — coordination itself is the reward, not a means to more damage.
+- **A capstone's mechanic should be something the roster doesn't already
+  have, not a bigger number on a lever some other move already uses.**
+  Tidal Communion's own history makes the point directly: both a flat
+  heal and a reused `excludesAllies` were mechanically sound and still
+  felt lame, specifically because neither one was new. When a capstone
+  idea can be described as "like [other move]'s but bigger," that's the
+  signal to keep looking, not to ship it.
+- **The real test that three branches earned three separate identities:
+  can each one be described without naming the move it's attached to?**
+  If a branch's writeup would read exactly the same pasted onto a
+  different move, it's a template wearing that move's name, not a real
+  answer to what that move's own Aggression/Boldness/Sociability means.
+
 ## Engine primitives needed — running checklist
 
 Every tree/lever in this doc that isn't marked "live" is blocked on one of
@@ -54,6 +269,10 @@ grepping for "needs" across the whole file.
 | Ally-effect piggybacking on an attack (`MoveSpec.allyEffectOnAttack`) | "Make it so some of 'em not only do it as a separate target but also auto trigger if using against an enemy while ally is in range too" — a second, independent way the ally-effect fires, on top of (not instead of) `targetsAlly`'s dedicated idle-tick use | **Shipped** — checked in `resolveHit` (predation.ts) the instant the move is used against an enemy, same timing as `statChangeOnHit`'s self-side effect, independent of whether the attack itself lands: finds the nearest in-range, hurt-preferred herd-mate (`nearestAllyEffectTarget`, support.ts — the same "who gets it" rule `applySupportMove` uses, pulled out so both share it) and applies `allyEffect` to them too, at no extra cost. Works with or without `targetsAlly` also set — a move can auto-trigger on attack without ever being a dedicated idle-tick support move, or do both. First real content: Scratch's *Colony Call* and Water Gun's *Shared Current* (see below) |
 | Multi-target/AoE resolution (apply a move to every agent within its resolved shape, not one target) | Growl (its entire premise), Firestorm, Ring of Fire's full fantasy, Boulder Toss/Skipping Stone | **Shipped** — `MoveSpec.hitsArea`, resolved by `resolveAreaHit` (predation.ts): facing derived from attacker->primary-target direction, `resolveShape` finds every living agent in the move's footprint, each gets its own accuracy roll and damage instance; only the deliberately-picked primary target gets status/stat-change/forced-movement/position-swap hooks, incidental targets just take the raw hit. Confirmed in a real fight: a ring-shaped move centered on the attacker landed on both the picked target and an unrelated bystander standing on the same ring. Growl itself still isn't built — see below |
 | AoE ally-exemption (`MoveSpec.excludesAllies`) | A reckless AoE (Earthquake) that a drilled herd learns not to get caught in | **Shipped** — one extra condition in `resolveAreaHit`'s existing target filter, skipping agents whose `herdId` matches the attacker's when the move sets this flag. Without it (the default, and every AoE move's real behavior before this field existed), a same-herd agent caught in the blast takes the hit exactly like an enemy would. First real content: Earthquake's *Herdsafe Trigger* (see below) |
+| Terrain-conditional ally speed aura (`PassiveKind` `"aquaticHaste"`) | Hydro Pump's Pod Tide capstone — direct ask, after two rounds of feedback that its capstone didn't match the branch's own fantasy: "it would be better if it granted all allies greatly more speed when they're on water tiles" | **Shipped** — `support.ts`'s `aquaticHasteMultiplier`, composed into `actionSpeedOf`'s existing multiplier chain (simulation.ts): a same-herd agent within a fixed radius of the passive-holder (itself included) gets a real Speed bonus, but only while THAT agent is currently standing on a `"water"` tile (`world.ts`'s `tileAt`). The first passive in the roster that's both an aura (like `healAura`) AND terrain-conditional (like `terrainSpeedMultiplier`) — neither existing mechanism covered this alone. First real content: Hydro Pump's *Tidal Communion* |
+| Mid-commit charge/wind-up + genuine invulnerability (`MoveSpec.chargeAttack` → `Agent.chargingAttack`) | Body Slam's Boldness keystone (The Reckoning) — direct ask, "you're on the right track but it needs more than just bulk and defense... could add a charge up turn... another notable could make him invulnerable to damage for that charge up... a huge leap/movement tied to the skill" | **Shipped** — `resolveHit` (predation.ts) sets `Agent.chargingAttack` instead of resolving immediately, reusing the existing `actionLockTicks` block for "can't act" (no new no-action guard needed); `resolveHitAgainstTarget` checks it before even rolling accuracy for genuine, unconditional invulnerability; `tickStatusEffects` (status.ts) ticks it down as pure bookkeeping (deliberately not resolving it there — a real status.ts/predation.ts import cycle); `tickAgentNeeds` (needs.ts, which already imports from predation.ts) calls the new `resolveChargedAttack` once ticks hit 0, which looks the original target back up by id (it may have moved, changed layer, or died since), leaps toward wherever it currently is, and lands the hit at a bonus power — or fizzles for nothing if the target's gone. The single biggest new primitive on this whole checklist — a real mid-commit agent state, not just another delta field. First real content: Body Slam's *The Reckoning* |
+| Non-territorial opt-out + de-escalation aura (`PassiveKind` `"nonTerritorial"`/`"calmingPresence"`) | Body Slam's Sociability branch, redesigned after a direct correction on the first draft: "Snorlax tends not to be in a herd. Very solo style... maybe Snorlax is more peaceful and gets along with others easier" — the original branch was built entirely on herd-scoped ally buffs, the wrong fantasy for a solitary animal | **Shipped** — both hook into herdConflict.ts, not a move-hit path: `"nonTerritorial"` is a flat opt-out checked at the top of `applyHerdRivalryConflict` (the holder never initiates a fight over a contested tile, though it can still be found and fought as someone else's rival); `"calmingPresence"` multiplies down `herdConflictChance` for any living, same-layer agent within a fixed radius, deliberately NOT herd-scoped like `healAura`/`aquaticHaste` — a genuinely solitary animal's calm reaches both sides of a nearby standoff, not just its own herd-mates. First real content: Body Slam's *Unbothered*/*No Quarrel*/*Undisturbed* |
+| Cooldown-gated hit negation (`PassiveKind` `"unshaken"` → `Agent.unshakenCooldownTicks`) | Body Slam's Unbothered opener, redesigned after a direct follow-up: "Unbothered should be, takes no damage from first hit in a fight?" — and a real structural fix, surfaced by the user's own hesitation when asked where `nonTerritorial` should land instead ("it's like an interesting trait for a snorlax out in the wild but if it joins your party is a super bad skill to have... maybe its an upfront cost to have a dead node"): `nonTerritorial` was the opener's ONLY payoff, and it's functionally dead the moment this move is actually used in a real fight | **Shipped** — same "nothing about this hit happens at all" shape as `chargeAttack`'s own invulnerability check, right below it in `resolveHitAgainstTarget` (predation.ts): while off cooldown, fully negates the next hit against the holder (no accuracy roll, no damage, no side effects), then sets `Agent.unshakenCooldownTicks` to lock itself out until `tickUnshaken` (status.ts, wired into `tickStatusEffects` alongside `tickChargingAttack`) counts it back down to 0. A genuine "doesn't even flinch the first time" shield — distinct from `damageReduction`'s flat percentage and from `chargeAttack`'s timed wind-up window. `nonTerritorial` moved down to a new filler node (*Not Worth It*) instead of being deleted — the wild-AI flavor is still real, it's just no longer squatting on the branch's one guaranteed-useful-in-combat slot. First real content: Body Slam's *Unbothered* (now grants `unshaken`) and *Not Worth It* (now grants `nonTerritorial`) |
 | Persistent stat stages (`Agent`-level Attack/Defense/etc. modifiers, settable by a move, lasting until cured — distinct from burn's one-off computed halving, which just derives a stage from `agent.status` fresh at each `calculateDamage` call rather than storing one) | Growl specifically (`statStageMultiplier` already exists in combat.ts as a pure function; burn now calls it, but from a computed value, not a stored `Agent.statStages` field) | **Shipped** — `Agent.statStages` (an array of `{stat, stage, ticksRemaining?}` entries, `status.ts`'s `applyStatStage`/`getStatStage`), fed into `calculateDamage`'s existing stat-stage machinery for both attacker and defender, and composing additively with burn's own -2 Attack. `MoveSpec.statChangeOnHit` is the move-level lever: `target: "self"` applies the instant the move is used, `target: "defender"` only on a landed, non-killing hit. **Growl itself is still not built** — it needs this primitive plus multi-target/AoE (both now shipped) plus a no-damage/status-move representation, which remains the one open piece |
 | Status-effect system (burn/poison DOT, paralysis/sleep/freeze) | Ember's/Flamethrower's burn chance, previously idle | **Shipped** — see DESIGN.md's "Status effects" section. Constrict's designed root effect still needs a sixth `StatusKind` (`"root"`), not modeled yet |
 | Idle/opportunistic utility-move trigger (`MoveSpec.utilityMove` + `utilityMoves.ts`'s `maybeUseUtilityMove`) | Growth, Agility, Rain Dance, and every other self/tile-effect move on this whole list — the real gap this section's own "why status effects and environmental moves are two different systems" note predicted | **Shipped** — the third trigger path, alongside the hostile hit pipeline and the ally-support one, checked whenever `chooseBehavior(agent.needs) === "idle"` (needs.ts, NOT `agent.behavior === "idle"` — see this section's own note on why that gate under-fired in a real run). `pickBestMove` excludes `utilityMove`-flagged moves from hostile selection, same as `burrow`. First real content: 13 curated moves, see "Environmental utility moves" above |
@@ -809,7 +1028,386 @@ to use it.
 
 ## Move-tree drafts: the sim's actual movepool
 
-Vine Whip proved the v2 template. **Tackle, Slash, and Ember have all now
+Vine Whip proved the v2 template — but **proving the template and shipping
+it are two different things**, and it was actually Tackle/Slash/Ember that
+got built with it, not Vine Whip itself. Direct catch, much later: "we don't
+have vine whip? i thought we designed it...." Fair — Vine Whip's paper draft
+(the origin of named nodes like "Snapback Lash") was real, but it stayed
+paper. **Vine Whip, Wing Attack, Rock Slide, and Dig have now all shipped
+real v2 trees**, closing that gap and a second one alongside it: a direct
+ask to "look at a bunch of the moves that are actually available to the
+average units in our sim" — every one of these four is a genuinely common
+species' own real signature move (Bulbasaur/Pidgey/Onix/Diglett+Sandshrew,
+all spawned or reachable every run), unlike Body Slam's Snorlax, which has
+no spawn or immigration path at all (a real, still-open gap — see TODO.md).
+
+- **Vine Whip (Bulbasaur)** — 33 nodes. Aggression *Choking Grip* (drain/
+  grip: `lifestealFraction`, a `forcedMovement`-pull fork, a multi-hit
+  `endless_lashing` keystone), Boldness *Root and Bind* (rooted-plant
+  toughness: `damageReduction`/`defenseBoost`/`regen`/`thorns`, ending in a
+  real two-passive keystone), Sociability *Shared Growth* (leans directly
+  into the same nurturing fantasy `leech_seed` already carries: `allyEffect`
+  heal/buff, `allyEffectOnAttack`, a `healAura` keystone).
+- **Wing Attack (Pidgey)** — 33 nodes. Aggression *Relentless Dive*
+  (`critRateStage`/`critCooldownReset`, a multi-hit-vs-bigger-hit fork, a
+  wider-cone keystone). Boldness *Wind Rider* — a bird's real defense is air
+  superiority, not bulk: a `forcedMovement` hit-and-retreat notable, and a
+  keystone finally giving `"unshaken"` its second-ever home (Body Slam's
+  Unbothered was the first). Sociability *Flock Signal* — a prey bird's real
+  defense is the flock: `rallyCall` (*Mob the Threat*, marking a threat for
+  the whole flock to converge on) plus a `calmingPresence`/aggression-buff
+  fork.
+- **Rock Slide (Onix)** — 33 nodes, deliberately NOT a re-skin of Onix's
+  other two trees (Rock Throw's defense-penetrating single-target *Crushing
+  Weight*, Earthquake's ground-shockwave *Herdsafe Trigger*). This one's
+  real, distinct hook: boulders falling FROM ABOVE, leaning on
+  `situationalBonus`'s `"elevation"` condition — the first shipped tree to
+  use it. Sociability *Warning Rumble* reuses Earthquake's `excludesAllies`
+  ally-exemption but for a different reason (an advance-warning tremor, not
+  drilled herd discipline), forking into `calmingPresence` vs.
+  `nonTerritorial` — the second real use of Body Slam's Sociability
+  primitives, on an entirely different, still-solitary-by-canon species.
+- **Dig (Diglett/Sandshrew)** — 21 nodes, and honestly, deliberately
+  smaller than the other three. Dig is never resolved as an actual hit —
+  `pickBestMove` (combat.ts) excludes any `burrow` move from hostile
+  selection — so every damage-facing lever this template normally leans on
+  (`power`/`accuracy`/`defensePenetration`/`forcedMovement`/lifesteal/etc.)
+  is real, valid `MoveTreeNode.delta` syntax that would do *nothing at all*
+  if used here, since the move it modifies is never resolved as a hit. Built
+  honestly instead from the only two levers that ARE real for a move like
+  this: `cooldownTicks` (genuinely gates how often it can burrow-flee) and
+  `grantsPassive`/`grantsPassives` (agent-level, real regardless of how the
+  move gets used). No padded "+5 Power" filler pretending otherwise — see
+  the tree's own top comment in `moves.ts` for the full reasoning. Shared by
+  both Diglett AND Sandshrew (a real cross-species pairing per species.ts's
+  own comment), so Sociability's *Shared Ground* leans directly into that
+  already-written "coexists underground" flavor.
+
+All four verified in a real run (`npx tsx packages/runner/src/index.ts`):
+Bulbasaur auto-respecs across all three Vine Whip branches including the
+`snapback_lash` crosslink; Pidgey/Pidgeotto do the same for Wing Attack.
+Rock Slide and Dig didn't fire in the specific seeds checked so far — Onix/
+Diglett/Sandshrew level up more slowly and compete for the same typed skill
+points as their OTHER known moves' trees (Onix's Rock Throw/Earthquake;
+Diglett/Sandshrew's Tackle/Earthquake), so this reads as normal RNG
+variance on a small sample, not a structural problem — the generic
+structural test suite (`moveTrees.test.ts`) validates all four trees'
+prerequisites/excludes/forks the same way it does every shipped tree, and
+`applyMoveTree` itself doesn't distinguish one tree from another. Full data
+suite green (228/228), engine suite unaffected (1094/1094).
+
+**Round two, direct follow-up ("i just want more more moves" ->
+clarified: "i just mean implement more skill trees for commonly available
+moves. we have so many skill trees we gotta work through. i wont even be
+able to review em all")** — two more real trees, chosen the same way as
+the first four (an actually-common species' own real signature move, still
+bare):
+- **Flamethrower (Charmeleon/Charizard, reachable purely through in-sim
+  leveling from the always-spawned Charmander)** — 33 nodes, zero new
+  engine work. This is the design template's own reference example for the
+  "Power move" archetype, finally built: a genuine mutually-exclusive final
+  fork between two distinct end-states (*Focused Beam*'s single-target
+  nuke vs. *Wildfire Cone*'s wide AoE), not just a longer grind to one
+  ending. Keystone *Wildfire's Reach* pairs `statusSeverity` with
+  `terrainBurn` — the fire doesn't leave anything the way it found it.
+- **Leech Seed (Bulbasaur/Ivysaur/Venusaur)** — 24 nodes, honestly scoped
+  like Dig: it's `utilityMove`-flagged, so `pickBestMove` excludes it from
+  hostile selection same as `burrow` — never resolved as an actual hit.
+  Needed two small new `MoveTreeNode.delta` fields to be worth building at
+  all: `drainNeeds` and `matingRadiusBoost` (both plain overwrites, mirror
+  every other object-shaped delta field, merged in `applyMoveTree` and
+  unit-tested directly in `moves.test.ts`'s existing "kitchen sink" merge
+  suite). Real fork highlight: Boldness's *Twin Taproot* switches
+  `drainNeeds.need` from `"hunger"` to `"thirst"` entirely — a genuinely
+  different resource, not a bigger number on the same one. Aggression's
+  *Twin Drain* is a real cross-move payoff: the vigor it takes sharpens
+  this agent's own Attack stage for whatever it actually fights with,
+  since Leech Seed itself never lands a hit.
+
+Verified live: Leech Seed auto-respecs for real Bulbasaur in an 8000-tick
+run (`gentle_roots`, `steady_roots`, `ravenous_bite`, `wider_reach`, and
+more, across all three branches). Full data suite green (236/236), engine
+suite green (1094/1094, including two new `applyMoveTree` merge
+assertions for `drainNeeds`/`matingRadiusBoost`).
+
+**Design review pass, direct follow-up: "Hmm.. You're missing a lot of
+deeper cross links. And your designs are kinda uninspired..."** — a fair
+hit, and checking it directly (a small script counting each new tree's own
+`// Crosslink:` comments and node totals) turned up one real, concrete bug
+underneath the vaguer complaint: **Vine Whip was only 32 nodes with 2
+crosslinks, not the 33/3 every other tree in this batch has** — the whole
+Sociability↔Aggression bridge was just never written. Fixed by adding
+*Thorned Bouquet* (`critRateStage`, "the gentlest touch turns vicious in a
+heartbeat"), landing it as an alternate way into `reaching_vines` same as
+every other crosslink shortcut. That's the literal "missing" half of the
+complaint.
+
+The "uninspired" half was just as real: across all six trees, the
+Aggression↔Boldness slot had settled into the exact same
+`statChangeOnHit: self attack +1` three times over (Wing Attack, Rock
+Slide, Flamethrower), the Boldness↔Sociability slot into the same
+`damageReduction` grant four times over (those three plus Vine Whip's
+original), and the Sociability↔Aggression slot into the same
+`situationalBonus: flanking 1.25` three times over (Wing Attack, Rock
+Slide, Flamethrower) — principle 13 by name ("Your crosslinks are
+laaaaaame tho... the same three-lever rotation every time"), repeated
+almost verbatim despite being written up in this very doc as a mistake
+already learned from once. Reworked all of them to something specific to
+the move's own fantasy instead,
+without touching any other part of the trees (branches/forks/capstones
+were already distinct — this was specifically a crosslink problem):
+- **Vine Whip**: Boldness↔Sociability *Shared Roots* (`damageReduction`) →
+  *Grafted Vines* (`positionSwap`+`positionSwapPull` — the tangled root
+  network hauls a struggling ally to safety, a real field ability instead
+  of a flat stat).
+- **Wing Attack**: Aggression↔Boldness *Feint and Strike* → *Riding the
+  Gust* (a real `forcedMovement` lunge riding the same current that keeps
+  it airborne); Boldness↔Sociability *Guard the Flock* → *Screening Dive*
+  (a real ally Speed buff, not a passive); Sociability↔Aggression *Ambush
+  Call* → *Scattering Strike* (a real onHit knockback timed to the flock's
+  own scatter).
+- **Rock Slide**: Aggression↔Boldness *Braced Throw* → *Quarried Weight*
+  (`weightScaling` — the braced stance lets it put real mass behind the
+  throw); Boldness↔Sociability *Watchful Bulk* → *Steadfast Warning*
+  (`defenseBoost`, not `damageReduction`); Sociability↔Aggression
+  *Opportunist's Fall* → *Second Wave* (`jamCooldownTicks` — a second wave
+  while the herd's still reacting to the first denies real recovery
+  tempo).
+- **Flamethrower**: Aggression↔Boldness *Tempered Strike* → *Molten Edge*
+  (`defensePenetration`); Boldness↔Sociability *Guardian Ember* → *Ember
+  Ward* (`thorns`, not `damageReduction`); Sociability↔Aggression
+  *Provoked Blaze* → *Flashpoint* (`critRateStage`).
+- **Leech Seed**: Aggression↔Boldness *Grounded Hunger* kept its name but
+  swapped `damageReduction` for `defenseBoost` — it was an exact
+  value-for-value duplicate of Dig's own crosslink otherwise (both
+  honestly-scoped trees share a narrow lever set, so a little more overlap
+  here is real and expected, not a rut).
+- **Dig**'s three crosslinks were left alone — already distinct from each
+  other and about as varied as an honestly-narrow, passives-and-cooldown-
+  only tree can get.
+
+No two crosslinks *within this six-tree batch* share the same mechanic
+now. Verified live: Vine Whip's new *Thorned Bouquet* auto-respecs for a
+real Bulbasaur in a 10000-tick run. Full data suite green (236/236, same
+count — this was a rebalance, not new content), engine suite unaffected.
+Atlas rebuilt and republished.
+
+**Round three, direct follow-up: "Restart on each skill starting with the
+fantasy. Does each node and capstone really fit? Be critical of your own
+work."** A dedicated adversarial audit (not self-review — a fresh pass told
+to be ruthless, checking every node's *displayed* `name` against what its
+`delta` actually does, and every capstone against its own branch's stated
+fantasy) found real, concrete problems the crosslink pass hadn't touched,
+since that pass only ever looked at crosslinks:
+
+- **All six Sociability capstones were `grantsPassive: { kind: "healAura",
+  value: 0.01 }` — byte-identical.** The exact "capstone should be
+  something the roster doesn't already have" bullet, failed six times over
+  in one batch. Fixed by making each one escalate the specific lever its
+  OWN branch already built, instead of switching to a generic heal at the
+  finish line: Vine Whip's *Verdant Grove* → `[healAura, defenseBoost]`;
+  Flamethrower's *Hearth of the Flock* (name itself borrowed Wing Attack's
+  own vocabulary) → renamed *Communal Blaze*, `[regen, calmingPresence]`;
+  Rock Slide's *Stone Circle* → deepens the branch's own `calmingPresence`
+  ladder to 0.3 (bigger than anything earlier on the branch) instead of
+  switching mechanics entirely, since "Warning Rumble" is about warning,
+  not healing; Wing Attack's *Flock's Eye* → deepens `calmingPresence`
+  instead, distinct from Wind Rider's own `unshaken`; Dig's *Denning
+  Together* → `[healAura, regen]`; Leech Seed's *Roots That Feed the
+  Grove* → `[healAura, calmingPresence]`.
+- **Three Boldness capstones were also identical**: `bramble_ward`
+  (Vine Whip), `living_furnace` (Flamethrower), `mountains_weight` (Rock
+  Slide) all granted the exact same `[defenseBoost 0.08, thorns 0.08]`
+  pair. Now distinct weightings matching each branch's own emphasis:
+  Flamethrower leans thorns-heavy (`[0.05, 0.12]` — a furnace punishes
+  more than it shrugs off), Rock Slide leans defense-heavy (`[0.1, 0.06]`
+  — a mountain's real weight matters more than retaliation), Vine Whip
+  stays the baseline `[0.08, 0.08]`.
+- **A real fantasy fix, not just de-duplication**: Vine Whip's Boldness
+  branch is explicitly "a plant that digs in and refuses to be moved," but
+  its opener (*Deep Roots*) granted flat `damageReduction` — a generic
+  tanky stand-in for a specific, already-shipped primitive
+  (`"immovable"`) that says exactly what the fantasy claims. Same fix for
+  Rock Slide's *Unbroken* (an Onix anchored under its own rockfall is an
+  even more literal fit for "cannot be moved" than a rooted plant).
+- **Wing Attack's Aggression capstone directly contradicted its own
+  branch.** *Storm of Talons* widened the shape into a `hitsArea` cone —
+  but the branch is explicitly one bird, one committed dive, all the way
+  down (*Full Talon Dive*, *Killing Stoop*), and the capstone's own
+  comment admitted the stretch ("the whole flock's worth of danger from
+  one bird" — flock belongs to *Sociability*, one branch over). This is
+  principle 14 (shape change as capstone currency) applied without the
+  fantasy actually calling for it. Replaced with *Final Stoop*: stays
+  single-target, a real finishing blow (`situationalBonus: targetLowHp`)
+  against something the dive already reeling — the branch's real climax
+  (*Killing Stoop*'s `critCooldownReset`) finally gets a capstone that
+  escalates it instead of undoing it.
+- **`storm_wings` (Wing Attack Boldness) was flat `damageReduction`** in a
+  branch whose own comment says "air superiority, not raw bulk" —
+  `damageReduction` IS raw bulk. Replaced with a literal read of its own
+  name: `situationalBonus: { condition: "storm" }`, real turbulence to fly
+  through instead of another flat-mitigation stand-in.
+- **`screening_dive` (Wing Attack) was a strictly-worse duplicate of its
+  own prerequisite** `warning_cry` — same ally Speed buff, shorter
+  duration, different name. "Screening" is a real combat term for
+  interposing between a threat and whoever it's after; replaced with
+  `positionSwap` — an actual intercept.
+- **Leech Seed's Sociability branch never touched `drainNeeds` at all**,
+  the one lever this move's whole tree is built around, and its own top
+  comment conceded it was just re-running Vine Whip's nurturing template
+  under a different name — the "describe without naming the move" test,
+  failing in the source comment itself. `rooted_calm` was a pure self-buff
+  in a branch about sharing; replaced with a real `targetsAlly`/
+  `allyEffect` heal (confirmed to actually fire, via `support.ts`'s
+  separate `applySupportMove` path, independent of the move's own
+  `utilityMove`/`drainNeeds` handling — checked directly rather than
+  assumed, since "does this even run" is exactly the kind of question this
+  doc's principle 3 exists for).
+- **Name/mechanic mismatches fixed**: Vine Whip's *Unbreakable Hold*
+  (promised grip, delivered `power`/`cooldownTicks`) → now genuinely
+  denies the target's own tempo (`jamCooldownTicks`); Leech Seed's *Twin
+  Drain* (nothing twin about a single self-buff) → renamed *Sharpened
+  Hunger*; Leech Seed's *Feeding Frenzy* capstone (a flat `regen` ending a
+  branch built entirely on escalating theft) → now a real bigger/wider
+  drain than either fork alone reaches; Leech Seed's *Ancient Roots*
+  capstone (literally re-granting the exact same `damageReduction 0.05`/
+  `regen 0.02` values already granted lower in the same branch) → distinct
+  values and one different lever (`defenseBoost` instead of
+  `damageReduction`); Dig's *Gone Before It Lands* (promised timing/dodge,
+  delivered flat `damageReduction`) → honestly renamed *Deepening
+  Instincts*, since this tree's real lever set (cooldown + passives only)
+  can't actually deliver a dodge effect without new engine work.
+- **Real padding cut, not just renamed**: Dig's Aggression branch had four
+  separate "-1 Cooldown"-lever nodes in a row (two of them literally
+  identical, `looser_grip` and `shallow_dive`) — merged into one `-2
+  Cooldown` node at the combined cost, tightening the branch instead of
+  forcing filler to hit a node count.
+
+**Deliberately NOT fixed this round** (logged, not fixed, per this doc's
+own practice of saying what's still open rather than implying a pass was
+exhaustive): the three Boldness branches (Vine Whip/Flamethrower/Rock
+Slide) are still the same structural template underneath the two
+`immovable` swaps and the three differentiated capstones — same node
+count, same shape, same order, values renamed per move. A real fix needs
+each branch built from its own fantasy's own question, not a shared
+skeleton with different flavor text, which is a bigger rebuild than a
+targeted audit-fix pass. Several crosslinks flagged as "single generic
+stat grabs" (`molten_edge`, `ember_ward`, `steadfast_warning`,
+`second_wave`, `quarried_weight`, and most of Dig's/Leech Seed's three
+each) weren't touched either — real content, just not deep content, and
+fixing them for real likely means the same kind of "read the branch, ask
+what's actually unique about this bridge" work the crosslink round did,
+not another mechanical swap. Full data suite green (236/236 — Dig's merge
+nets one fewer node than before), engine suite unaffected (1094/1094).
+Atlas rebuilt and republished.
+
+**Round four — the environmental-hook pass these trees never got.** First
+run of SKILL_TREE_GUIDE.md as an actual checklist rather than a writeup,
+and its step 2 ("scan for an environmental or utility moment specific to
+this fantasy — Rock Throw picking up a real boulder") immediately turned
+up content three rounds of review had walked straight past, because every
+prior pass audited what was *there* instead of asking what was *missing*:
+
+- **Vine Whip now has a real environmental moment, at zero engine cost.**
+  Vines are plant matter, so a Bulbasaur standing in real `flora` terrain
+  draws on it: `consumesOwnTerrain: { terrain: "flora", damageMultiplier:
+  2 }` — the exact shape of Rock Throw's boulder consumption, on the
+  terrain kind this move's own fantasy actually cares about, and
+  genuinely double-edged (the tile reverts to bare floor, so every big
+  hit costs the map real flora and whatever was growing there). 2x rather
+  than Rock Throw's 3x because flora is common terrain and boulder isn't.
+  This also cleared a flagged name/mechanic mismatch: the node
+  (`sapping_reach`) previously delivered a flat +5 Power under an id
+  promising drain and reach.
+- **Leech Seed's Sociability branch finally shares something.** Three
+  rounds of notes said "Shared Harvest shares nothing" and the last fix
+  could only manage a generic ally-heal. The real answer was
+  environmental all along: what the roots steal goes back into the ground
+  the herd grazes (`fertilityBoost`, flora.ts's own fertility mechanic —
+  the same one Growth and Grassy Terrain use). It also replaced one of
+  two identical "-1 Cooldown" fillers that branch was padded with.
+- **That fix required a real engine bug fix first, found by the guide's
+  step 9 (verify before building).** `maybeUseUtilityMove` early-returned
+  the moment it applied `drainNeeds`, so *every other utility field on the
+  same move was silently dead code* — `fertilityBoost` on Leech Seed would
+  have been a node that visibly did nothing. Fixed so a drain move falls
+  through to its other effects (still exactly one `useMove` call, so no
+  double cooldown), with a regression test pinning both halves firing in
+  one use.
+- **Two Atlas reviewability gaps closed** (found while wiring the above):
+  `drainNeeds` had no `describeDelta` entry at all, so **six** Leech Seed
+  nodes rendered with no description in the very document these trees get
+  reviewed from; `fertilityBoost`/`matingRadiusBoost` had none either, and
+  the Atlas's own build-simulator was silently dropping `chargeAttack`,
+  `drainNeeds`, `matingRadiusBoost` and `fertilityBoost` when computing a
+  resolved spec. All four now merge and describe correctly.
+
+**Proposed, deliberately NOT built — needs a go-ahead** (principle 16: a
+confirmed "this isn't cheaply buildable" is as load-bearing as a
+confirmed yes, and new engine work waits for a scope decision): **Rock
+Slide should leave real rubble.** `terrainFill: { terrain: "boulder" }`
+would make a rockslide leave boulder tiles behind, which composes into a
+genuine cross-move combo — Onix *creates* boulders with Rock Slide, then
+*consumes* them for 3x damage with Rock Throw's already-shipped
+`consumesOwnTerrain`. That's the best cross-branch/cross-move tension
+available anywhere in this roster. Two real blockers found by reading the
+code rather than assuming: (1) `terrainFill`'s handler unconditionally
+calls `waterSoil()` on the filled tile, with a comment stating the
+assumption that it's "exclusive to Water Gun's puddle effect" — a falling
+boulder watering the ground is nonsense, so that call needs gating on the
+filled terrain actually being water; (2) `setTile` sets
+`walkable = isWalkableTerrain(terrain)`, so filling `boulder` creates a
+permanently unwalkable tile *under a living agent*, and repeated use
+would slowly accumulate impassable rubble across the map with no decay
+mechanism (this sim has no "tile change expires" concept — the same gap
+`terrainFill`'s own doc row already flags). Both are solvable; neither
+should be decided unilaterally.
+
+**Correction — I had this wrong, and the user caught it.** I concluded Dig
+couldn't take an environmental hook because it isn't `utilityMove`-flagged.
+That reasoning was sound but I was looking in the wrong place entirely:
+"dig was supposed to make digging springs and food easier... Vine whip
+too... reduce the amount of time to harvest crops." There is a whole real
+*gathering* system these moves already participate in, and I never looked
+at it — I only ever scanned combat and terrain levers.
+
+What already existed (needs.ts + crops.ts, CROPS_DESIGN.md's own pitch):
+an agent on the wrong layer for a crop has to process it out first,
+accruing `Agent.digTicksAccrued` against a threshold, and digging a
+brand-new spring works the same way via `Agent.springDigTicksAccrued`.
+Moves already feed all three paths — an off-cooldown `burrow` move grants
+`DIG_MOVE_BURST_TICKS` toward digging a crop out or sinking a spring, and
+an off-cooldown *damage* move grants `CANOPY_HARVEST_MOVE_BASE_BURST`
+(scaled by its own `range.max`) toward knocking canopy fruit down. What
+was missing was any way for a **tree** to make that better.
+
+**New primitive: `MoveSpec.gatherBurst`** (additive, mirrored as a
+`MoveTreeNode.delta` field). Extra gather progress per use, composed into
+whichever path the move already qualifies for rather than adding a fourth.
+It deliberately never grants access a move didn't have: digging still
+requires a `burrow` move, canopy harvest still requires a damage move, so
+a Vine Whip node speeds up fruit harvesting and still cannot dig.
+
+- **Dig** finally has levers about what Dig is *for*. `Wider Burrow` and
+  `Packed Earth` both grant `gatherBurst: 3` — and both were previously
+  "-1 Cooldown" fillers under names promising something else, so this
+  retired two flagged name/mechanic mismatches and two duplicate-lever
+  fillers at the same time. Measured on real data: a spring goes from 4
+  digs to 3, and crop digging from 5 to 8 progress per use.
+- **Vine Whip**'s `Quickening Growth` (previously one of two identical
+  "+5 Power" fillers in one branch) now grants `gatherBurst: 3`, taking
+  its canopy harvest burst from 5 to 8 per use — a ~60% faster fruit
+  harvest, landing in the branch that's about feeding the herd rather
+  than fighting.
+
+Three new engine tests cover all three real paths (underground crop,
+spring, canopy harvest). The general lesson, worth more than the feature:
+**"is there an environmental hook" is not the same question as "is there
+an environmental hook in the systems I happen to have already read."** The
+gathering system had been shipped for a while and had explicit
+"moves can be used to dig faster" intent written into its own comments.
+
+**Tackle, Slash, and Ember have all now
 shipped their full v2 trees** (`packages/data/src/moves.ts`) — three
 branches (Aggression/Boldness/Sociability) plus a crosslink triangle each,
 33/36/35 nodes respectively, every lever real and unit-tested (see the
@@ -983,37 +1581,13 @@ Diglett). Giving the Squirtle pair a shared `herdId` would be a small, real
 follow-up if their branch should matter sooner rather than later; noted
 here, not done.
 
-- **Rock Throw** (Rock, line-3, cooldown 1) — Onix's second move, alongside
-  Tackle.
-  - **Aggression — "Landslide"**: opener *Heavy Stones* (+power, -accuracy)
-    → filler → filler → notable *Crushing Weight* (`defensePenetration`)
-    → filler → **fork**: *Overhand Heave* (+power, `selfCostPerUse` energy
-    — an all-out throw that costs the thrower something real every time)
-    vs. *Measured Toss* (+accuracy, no cost — a controlled, sustainable
-    throw) → notable *Skyfall* (`bonusVsType` vs. Flying — a rockslide is a
-    real answer to anything with wings) → filler → **keystone** *Cave-In*
-    (+power, heavy `critRateStage`).
-  - **Boldness — "Bedrock"**: opener *Bedrock Stance* (`damageReduction`
-    passive) → filler → notable *Unshakeable* (`immovable` passive) →
-    filler → **fork**: *Aftershock Counter* (bonus vs. a flanking target)
-    vs. *Granite Ward* (+accuracy, more `damageReduction`) → notable
-    *Fracturing Blow* (`statChangeOnHit` target Defense -1 — repeated
-    braced throws crack the target's own guard, not the user's) → filler →
-    **keystone** *Bedrock Breaker* (`resistanceBreaker`).
-  - **Sociability — "Tremor Call"**: opener *Tremor Signal* (`targetsAlly`
-    defense buff) → filler → filler → notable *Seismic Rally*
-    (`targetsAlly` attack buff) → filler → **fork**: *Bulwark Coil*
-    (`damageReduction`, -power) vs. *Vanguard Tunneler* (+power,
-    `jamCooldownTicks`) → notable *Colony Watch* (`regen` passive) →
-    filler → **keystone** *Seismic Lockdown* (heavy `jamCooldownTicks` — a
-    denial capstone, not a heal: the ground itself won't let enemies
-    recover their tempo).
-  - **Crosslinks**: *Grinding Advance* (Aggression↔Boldness,
-    `statChangeOnHit` self-buff off a braced throw) · *Warning Tremor*
-    (Boldness↔Sociability, shared `damageReduction`) · *Rolling Thunder*
-    (Sociability↔Aggression, `lockTicks` — a combined tremor-and-throw big
-    enough to lock the user out of its next tick, not just another
-    situational bonus).
+- **Rock Throw** (Rock, line-3, cooldown 2) — Onix's second move, alongside
+  Tackle. **Superseded** — this original triangle (Aggression "Landslide"/
+  Boldness "Bedrock"/Sociability "Tremor Call") was fully redesigned under
+  template v3; see "Rock Throw v3 redesign (Shipped)" below for the real,
+  current tree ("Denial"/"Bedrock"/"Tremor Rally"). Left here only as a
+  record of what the pre-v3 version looked like — none of the node names
+  below exist in `packages/data/src/moves.ts` anymore.
 
 - **Peck** (Flying, point) — Spearow's only move, a solitary crepuscular
   ambush hunter (mismatched with its diurnal Pidgey prey — see
@@ -1273,7 +1847,22 @@ on each move has the full reasoning; this is the summary.
   - **Sociability ("Pod Tide")**: the fork is a real positional choice —
     *Undertow Guard* (push the threat away from the herd) vs. *Riptide
     Charge* (surge forward to meet it first) — instead of the
-    damageReduction/jamCooldown template reused everywhere else.
+    damageReduction/jamCooldown template reused everywhere else. Opener
+    *Pod Current* carries the branch's own "the pod cares for itself"
+    fantasy on two fronts, live from the first point spent: a real
+    idle-tick heal, plus `excludesAllies` — Hydro Pump's own `hitsArea` is
+    set on the base move and, until this, always hit same-herd agents
+    caught in it too. Keystone *Tidal Communion* took three tries to land:
+    a flat `healAura` team-heal didn't match "the pod moving the water
+    together" (direct feedback); an `excludesAllies` capstone read as
+    reused content already spent as Earthquake's own opener, once moved
+    down to Pod Current above; the real fantasy needed a genuinely new
+    primitive instead — **`"aquaticHaste"`** (`PassiveKind`, types.ts):
+    a same-herd agent near the passive-holder, itself included, gets a
+    real Speed multiplier bonus while standing on water, composed into
+    `actionSpeedOf`'s existing chain (`aquaticHasteMultiplier`,
+    support.ts). First keystone in the whole roster to need a brand-new
+    engine primitive rather than reusing an existing lever.
   - **Crosslinks**: *Surge and Brace* (Aggression↔Boldness, `lockTicks:
     -1` — directly answers the cost Building Pressure itself introduces,
     not just flavor) · *Steadfast Tide* (Boldness↔Sociability, shared
@@ -1363,13 +1952,35 @@ see `packages/data/src/moves.ts`'s own tree comment for the short version.
   the exact primitive for it. Opener *Tremor Call* sets `rallyCall`, which
   marks the target so every herd-mate's own, independently-run threat/hunt
   pick converges on it — real shared awareness, not a broadcast stat buff.
-  This replaces the old branch's flat `allyEffect` buff spam entirely.
-  Capstone *Full Convergence* extends the mark's radius-in-time
-  (`rallyCall.ticks`) and adds `jamCooldownTicks`.
-- **Crosslinks** deepened per template v3's rule 3: *Rolling Thunder*
-  (Sociability↔Aggression) stuns outright, on top of the pin, once a
-  target is already marked — a real compounding payoff, not just a shared
-  passive.
+  Direct follow-up feedback caught a real gap in the first pass of this
+  branch: it just repeated the same lever three times (mark, then two
+  separate nodes just extending the mark's duration further). Rebuilt with
+  real variety instead — *Tremor Bond* is a distinct herd-support lever (a
+  real idle-tick heal via `targetsAlly`/`allyEffect`, not more marking),
+  and capstone *Herd Ascendant* pays off with `jamCooldownTicks` (an actual
+  control effect on the enemy) plus a small `lifestealFraction` (the
+  user itself feeding off a sustained group fight) — deliberately not a
+  third round of "extend `rallyCall.ticks` again."
+- **Crosslinks**: *Rolling Thunder* (Sociability↔Aggression) deepens the
+  Aggression branch's own Speed-debuff pin once a target is already marked
+  — a real compounding payoff between two branches' actual mechanics, not
+  a shared passive. This crosslink shipped with a real bug in the first
+  pass, caught by direct review: it used `lockTicks`, which locks the
+  *user* out of acting, not the defender — the doc even described it as
+  "stuns outright," which `lockTicks` cannot do. There's no tree-settable
+  way to inflict an actual status/stun today (`statusKind` isn't a tree
+  delta field — only `statusChance` is, and it's meaningless without a
+  `statusKind` the base move never sets), so this was fixed by deepening
+  the primitive the branch actually has (a bigger `statChangeOnHit` Speed
+  debuff) instead of leaving a self-penalizing "reward."
+
+Also fixed, same review pass: *Hobbling Throw*'s prerequisite was
+`prerequisitesAnyOf: [["cracked_joint", "dead_aim"], ["grinding_advance"]]`
+— an inner array is an AND-set in this schema, so that accidentally
+required *both* Cracked Joint and Dead Aim together as one alternative,
+unlike every other convergence node in the roster (which use single-node
+alternatives). Fixed to `[["cracked_joint"], ["dead_aim"],
+["grinding_advance"]]` — any one of the three now suffices.
 
 Newly flagged primitives from this pass (not built, concrete enough to
 pick up directly):
@@ -1389,7 +2000,7 @@ pick up directly):
   "Aggression sniper build" archetype — accuracy investment becomes a real
   build identity, not just a filler stat.
 
-### Deeper crosslinks — round 2 (proposed, not yet built)
+### Deeper crosslinks — round 2 (first installment Shipped, rest proposed)
 
 Direct follow-up: "we didn't come up with specific ideas but just the idea
 [of deeper crosslinks]." Fleshing that out for real, per move, rather than
@@ -1399,24 +2010,175 @@ Hydro Pump's *Steadfast Tide* and Solar Beam's *Shared Shade* are both
 "Boldness↔Sociability, shared `regen`," the same mechanic copy-pasted
 across two trees. The proposals below are deliberately never that: each
 one combines the two specific branches' own *distinct* mechanics on that
-move, not a generic shared passive, and none of them are implemented yet.
+move, not a generic shared passive.
 
-One new connective primitive threads through several of these — worth
-building once, reused everywhere `rallyCall` already exists (Earthquake,
-Rock Throw):
-- **`SituationalCondition: "rallyMarked"`** — the defender currently has
-  an active `rallyMarkTicksRemaining`. Same one-line-enum-addition pattern
-  as `"flanking"`/`"targetLowHp"`. Turns "the herd calls out a target"
-  from a pure awareness effect into a real payoff for whoever follows up —
-  Aggression branches get an honest reason to want the mark to land
-  *before* their own big hit, not just tolerate co-existing with it.
+Direct follow-up feedback caught that a doc-only proposal isn't the same as
+a real crosslink you can actually spec into — the connective primitive and
+three of the crosslinks below are now **Shipped**; the rest are still
+proposals:
+
+#### Crosslinks as bridges, not dead-end leaves (the real ask, corrected)
+
+A second round of feedback corrected the direction of this whole effort:
+"deeper crosslinks" didn't mean "one more single-effect node between two
+branches" (which is all *Marked Rupture*/*Marked Undertow*/*Marked
+Advantage* above are) — it meant a crosslink should be a real **bridge**:
+take the crosslink, invest a filler and a notable *off of it*, and that
+notable becomes a genuine shortcut deeper into one of the two parent
+branches, skipping that branch's own linear filler grind.
+
+**Pattern, piloted on Earthquake (Shipped, revised once already)**:
+*Coordinated Tremor* (crosslink) → *Marked Rupture* (filler) → *Converged
+Ruin* (notable). Two rounds of real feedback shaped the final version:
+
+- **v1** wired Converged Ruin directly onto `total_collapse`/
+  `focused_rupture`'s own `prerequisitesAnyOf` — landing the shortcut
+  straight on the branch's fork. Direct correction: "the deeper cross
+  link going straight to the choice of 2 nodes are a bit too much." Also
+  v1 only reached into Aggression, even though Coordinated Tremor bridges
+  *two* branches (Sociability and Aggression) — direct correction: "make
+  them connect to the other branch too. Like it can go to either branch."
+- **v2 (current)**: Converged Ruin is instead wired one step *before*
+  each side's own fork — `seismic_feed`'s `prerequisitesAnyOf` on the
+  Aggression side, `tremor_reach`'s on the Sociability side (the two
+  nodes that structurally mirror each other: last plain filler before
+  each branch's own exclusive fork). Reaching either fork from here still
+  takes the same one extra node it would from the branch's own path — the
+  bridge saves the *grind*, not the *last step to the decision* — and it
+  now genuinely goes "to either branch," matching what Coordinated Tremor
+  itself actually connects.
+
+Two rules that came out of building this, worth keeping for every future
+bridge:
+- **Shortcut the grind, land the same distance from the decision as the
+  normal path would.** Not just "never skip the fork" (v1's fix already
+  tried that name, but still landed adjacent to the fork with an
+  anyOf grant into the fork nodes themselves, which was still read as
+  "too much") — land at the same *node depth relative to the decision*
+  a normal walk would, so the fork remains an equally-weighted choice
+  either way you arrived.
+- **A bridge should reach every branch its crosslink actually touches,
+  not just the one its own `leaning` happens to match.** Converged Ruin
+  is `leaning: "aggression"`, but Coordinated Tremor bridges Sociability
+  too — the shortcut needs its own wiring on *both* sides, not just the
+  side that matches the descendant node's own leaning field.
+- **No new engine primitive needed.** This is pure tree authoring —
+  `prerequisitesAnyOf` already supports "any one of several alternative
+  sets," so adding a crosslink-rooted node as one more alternative on
+  each side's own pre-fork node is exactly what that field is for.
+
+**Rolled out to every crosslink in every v3 tree (Shipped), then
+redesigned once for being exactly the template problem this whole
+effort exists to avoid.** Direct ask, once the pattern was validated:
+"Build out cross links for every branch and all moves." The first pass
+across all 11 remaining crosslinks used the same shape every time —
+filler = `+8 accuracy`, notable = `+10 power`/`+0.2 defensePenetration`/
+`+0.05 lifestealFraction` — direct, blunt, correct feedback: "Your
+crosslinks are laaaaaame tho... the skills don't feel cool." That's
+principle #1 from this doc's own guide, violated by the person who wrote
+it: if a mechanic could be copy-pasted onto a different crosslink with
+only the numbers changed, it's a template, not a fantasy. Every bridge
+below was rebuilt so its notable **deepens the specific lever its own
+crosslink already introduced**, instead of a generic stat grab-bag —
+Cracking Momentum's lunge gets longer, Wake of Violence's crit gets
+sharper, Warning Tremor's damage reduction becomes real ongoing regen,
+Territorial Flare's own capstone became a real, flashy shape change:
+
+| Move | Crosslink | Filler → Notable | Deepens |
+|---|---|---|---|
+| Earthquake | Coordinated Tremor | Marked Rupture → Converged Ruin | rallyMarked 1.3 → 1.6 (same lever, overwrite) |
+| Earthquake | Cracking Momentum | Deeper Lunge (forcedMovement 2 tiles) → Fault Convergence (power+15, recoilFraction 0.08 — a real tradeoff, not a bolt-on) | the lunge itself, then a genuine cost/benefit pair |
+| Earthquake | Fractured Warning | Tremor Lockstep (+1 jam) → Warded Convergence (damageReduction 0.04) | jam, then the warning becomes real protection |
+| Hydro Pump | Surge and Brace | Brace Conditioning (-1 cooldown) → Unified Current (critRateStage+1) | the wind-up-softening lever, then precision |
+| Hydro Pump | Steadfast Tide | Tidal Footing (regen+0.01) → Communal Current (damageReduction 0.05) | shared vitality, then shared armor |
+| Hydro Pump | Wake of Violence | Surging Wake (critRateStage+1) → Violent Confluence (rallyMarked 1.4) | precision, then the pod's real convergence payoff |
+| Solar Beam | Rooted Assault | Sunlit Focus (defensePenetration+0.1) → Bedrock Beam (`thorns` 0.08) | armor-piercing roots, then real retaliation |
+| Solar Beam | Shared Shade | Canopy Footing (regen+0.01) → Grove Bulwark (`defenseBoost` 0.05) | shared vitality, then shared armor |
+| Solar Beam | Territorial Flare | Territorial Footing (critRateStage+1) → **Triple Bloom** (shape → `cone` length 5 width 3, `hitsArea: true`) | catching a rival off guard, then a real capstone-tier AoE payoff |
+| Rock Throw | Grinding Advance | (defensePenetration+0.15) → Bedrock Momentum (self Attack stage 2/16 ticks) | the self-buff itself, deepened |
+| Rock Throw | Warning Tremor | Warded Footing (damageReduction 0.03) → Herd's Bulwark (regen 0.02) | bracing, then real recovery |
+| Rock Throw | Rolling Thunder | (Marked Advantage already existed) → Converged Quarry | rallyMarked 1.3 → 1.6 (same lever, overwrite) |
+
+**Triple Bloom** deserves calling out on its own: direct ask, "make one
+of the solar beam ones do like three width beams as a capstone" — Solar
+Beam is deliberately single-target everywhere else in this tree (its own
+top comment says so explicitly), so turning one bridge notable into a
+genuine `hitsArea` shape change is the single biggest payoff in this
+whole rollout, and exactly where template v3's rule 2 says a shape/AoE
+change is earned — notable/capstone tier, never filler.
+
+Every branch's own pre-fork node still has up to 3 real alternate routes
+in its `prerequisitesAnyOf` (its own filler chain, plus the two crosslink
+bridges that reach it from its two neighboring branches) — a build can
+reach any branch's own fork by walking that branch, or by investing a
+little in each of its two neighbors instead. Land one step before the
+fork, never on it. No new engine primitives needed anywhere in this
+rollout — every lever above (`forcedMovement`, `recoilFraction`,
+`critRateStage`, `situationalBonus`, `grantsPassive` variants, `shape`/
+`hitsArea`) already existed; this was purely about reusing the *right*
+one per bridge instead of the same three by default.
+
+Found and fixed in the same pass, unrelated to the rollout itself but
+caught while stress-testing the layout: Hydro Pump's *Wake of Violence*
+and *Marked Undertow* both bridge the same branch pair (Sociability +
+Aggression) and were landing on the exact same graph coordinates —
+`computeLayout` only ever positioned one crosslink per branch-pair angle.
+Fixed by grouping crosslinks by the pair of branches they touch and
+spreading multiples along the perpendicular, the same pattern already
+used for branch forks.
+
+**A second, real layout bug in the same node, found by direct report**:
+"hydro pump marked undertow has some weird bridges that are not correct."
+*Marked Undertow* is architecturally different from every other crosslink
+in the roster — every other one bridges two branch *openers*
+(`prerequisites` at depth 0, like Building Pressure + Wading Advance), so
+a fixed radius right next to the hub was always correct for them. Marked
+Undertow instead requires `undertow_pull`, itself behind Aggression's
+*entire* fork chain (depth 7) — but `computeLayout` positioned every
+crosslink at the same fixed hub radius regardless, so Marked Undertow's
+own edge to Undertow Pull had to cut diagonally across most of the
+Aggression branch to reach it, reading as broken rather than just
+expensive. Fixed by scaling each crosslink's radius with the real depth
+of its own deepest prerequisite (reusing the same per-branch `depth` map
+`computeLayout` already builds) — a shallow crosslink still sits right at
+the hub as before, but Marked Undertow now sits out near where Undertow
+Pull actually is, so the edge reads as a real, deliberate bridge between
+two expensive investments instead of a random line slashing through the
+graph. Verified directly: recomputed Hydro Pump's real layout before and
+after — Marked Undertow moved from `(-73,-56)` (right at the hub) to
+`(-418,-241)`, now at roughly the same radius as Undertow Pull itself.
+
+**Marked Undertow itself was removed shortly after this fix** — direct
+ask: "Let's just remove marked undertow." The `computeLayout` fix above
+is kept (real, generalized infrastructure for any future crosslink built
+the same deep-dual-prerequisite way), but nothing in the shipped roster
+exercises it right now.
+
+- **`SituationalCondition: "rallyMarked"` (Shipped)** — the defender
+  currently has an active `rallyMarkTicksRemaining`. Same one-line-
+  enum-addition pattern as `"flanking"`/`"targetLowHp"`
+  (`moves.ts`/`predation.ts`'s `situationalMultiplier`, engine test in
+  `predation.test.ts`). Turns "the herd calls out a target" from a pure
+  awareness effect into a real payoff for whoever follows up — Aggression
+  branches get an honest reason to want the mark to land *before* their
+  own big hit, not just tolerate co-existing with it.
 
 - **Earthquake**
-  - *Marked Rupture* (Sociability↔Aggression) — Overload's own power gets
-    a real `situationalBonus: "rallyMarked"` bonus: call out a target with
-    Herdsafe Trigger, then bury it with the AoE-size fork. Replaces
-    *Coordinated Tremor*'s plain `rallyCall` grant (redundant once the
-    opener already sets it) with an actual payoff for the combo.
+  - *Marked Rupture* (Sociability↔Aggression, **Shipped**) — a new node
+    built directly on *Coordinated Tremor*'s own mark (not a replacement —
+    the mark still has to be granted by something): `situationalBonus:
+    "rallyMarked"`, a real payoff for calling out a target with Herdsafe
+    Trigger, then burying it with the AoE-size fork.
+  - *Converged Ruin* (**Shipped**, revised — the "deeper crosslinks"
+    pilot, see "Crosslinks as bridges" below for the full v1→v2 story) —
+    extends that same chain one node further: *Coordinated Tremor* →
+    *Marked Rupture* → *Converged Ruin*. Wired into BOTH `seismic_feed`'s
+    (Aggression) and `tremor_reach`'s (Sociability) own
+    `prerequisitesAnyOf` — one step before each side's own fork, not onto
+    the fork itself. A build that took the Sociability opener plus this
+    3-node crosslink chain reaches either branch's own decision point
+    without walking that branch's own filler grind, but still has to take
+    the actual fork from there, same as anyone else.
   - *Braced Convergence* (Boldness↔Sociability) — the stillness Fissure
     Grip's brace fork already costs (`lockTicks`) buys a real payoff on
     the *other* branch: a much longer `rallyCall.ticks` window, since not
@@ -1442,11 +2204,17 @@ Rock Throw):
     the user a real `statChangeOnHit` self Defense buff — bracing exactly
     as you create the distance, instead of a passive that runs regardless
     of which positional fork got picked.
-  - *Marked Undertow* (Sociability↔Aggression) — the same `"rallyMarked"`
-    condition as Earthquake: a target the herd has already flagged gets
-    pulled in harder — bonus `positionSwapPull` distance on Undertow Pull
-    against a marked target, so the herd's call-out and the nuke branch's
-    own drag mechanic actually compound.
+  - ~~*Marked Undertow* (Sociability↔Aggression)~~ — **Removed**, direct
+    ask: "Let's just remove marked undertow." It needed BOTH *Wake Rally*
+    (the mark) AND *Undertow Pull* (the drag) — a real cross-branch
+    dependency, and the primitive it used (`rallyMarked`) was sound, but
+    it was architecturally the odd one out in the whole roster (every
+    other crosslink bridges two branch *openers*; this one bridged two
+    deep, expensive fork-culminating nodes instead), which is what forced
+    the one-off depth-scaling fix to `computeLayout` documented below.
+    That layout fix stays — it's real, generalized infrastructure for any
+    future crosslink built the same way — but nothing in the shipped
+    roster uses it anymore.
 
 - **Solar Beam** (no `rallyCall` in this tree — Grove's own fork is the
   ally-effect choice instead, so its crosslinks lean on *that* mechanic)
@@ -1477,17 +2245,157 @@ Rock Throw):
     add a real reduction to Quarry Break's own `lockTicks` cost when
     Bedrock Stance is already taken, the same "position/setup pays down a
     later branch's time cost" shape as Hydro Pump's *Anchored Surge*.
-  - *Rolling Thunder* (Sociability↔Aggression) — already the strongest of
-    the three (stuns outright once marked-and-pinned); once the shared
-    `"rallyMarked"` condition exists, layer a real damage bonus on top of
-    the stun using the same primitive the other trees now share, instead
-    of `lockTicks` being the only payoff.
+  - *Rolling Thunder* (Sociability↔Aggression) deepens the Aggression pin
+    once a target is marked (fixed from an earlier `lockTicks` self-lock
+    bug — see the v3 writeup above). *Marked Advantage* (**Shipped**)
+    builds on it directly: a new node using `"rallyMarked"` to add a real
+    damage bonus on top of the debuff, instead of the Speed stage being
+    the only payoff.
   - *Grounded Signal* (Boldness↔Sociability, new) — Unshakeable's
     `immovable` passive is at its best exactly when the herd has already
     been called in (Tremor Call): grant a real, temporary
     `damageReduction` bump specifically while a `rallyCall` mark is
     active, rewarding holding ground once support is genuinely on the way
     rather than immovability being valuable in every fight equally.
+
+### Body Slam (Normal, point/melee) — Snorlax's only real signature move, full v3 treatment (Shipped)
+
+Built as a direct demonstration of this doc's own guide — every principle
+applied deliberately, not retrofitted afterward. **THE FANTASY, written
+before a single node**: this isn't a strike, it's four hundred pounds of
+sleeping mass finally deciding to move — no technique, no follow-through,
+just gravity, timed. What's dangerous about it isn't power, it's
+inevitability: you don't dodge a landslide, you get out from under it
+before it starts, and this animal rarely bothers to warn anyone it's about
+to fall. Single-species freedom (Snorlax is the only curated learner,
+`species.ts`), same as Slash's Scyther-only build — nothing here had to be
+generic enough to also fit a second body.
+
+- **Aggression ("Landslide")**: stays power-archetype on purpose — more
+  mass, less restraint. *Heavy Step* (a modest opening lunge) → a real
+  fork, *Second Slam* (`recoilFraction` — commits fully, costs something
+  back) vs. *Rolling Crush* (two lighter hits instead of one), then
+  *Inevitable* (`defensePenetration` — mass doesn't need precision, just
+  enough attempts). Keystone *Avalanche* turns the single point-target
+  slam into a real `hitsArea` `burst` AND is where `weightScaling` finally
+  lands — moved down from the original opener (*Full Weight*) after direct
+  feedback that starting the tree at its own biggest lever was backwards:
+  "Full weight is probably too strong to be so early." By the time this
+  move can end a fight this way, its whole mass moves with it — the shape
+  change and the weight payoff arriving together, at capstone tier, per
+  template v3's own rule.
+- **Boldness ("Unbudging")**: earned tankiness, not a default reach —
+  nothing on this whole roster fits "doesn't move" better than a sleeping
+  giant, and Snorlax's own curated moveset already primes this fantasy
+  with Defense Curl. *Dead Weight* (`damageReduction`, same earned
+  exception this doc's own "stop overusing damageReduction" note carves
+  out for a fiction that actually justifies it) → *Unbudging*
+  (`immovable`) → a real fork, *Sink In* (`regen`, less power) vs. *Full
+  Bulk* (more `damageReduction`, -accuracy) → *Weathered Giant*
+  (`defenseBoost`) → keystone **The Reckoning** — direct follow-up
+  feedback that bulk/defense alone read as bland, real "intention" needed:
+  "could add a charge up turn, to make it stronger. Maybe... invulnerable
+  to damage for that charge up... a huge leap/movement tied to the skill."
+  A genuine mid-commit wind-up (`chargeAttack`, the single biggest new
+  engine primitive this whole doc has needed — see the checklist above):
+  the giant rears back, is truly invulnerable the entire time (not a
+  defense buff — nothing lands at all), then leaps 5 tiles and lands a
+  +40-power hit — or fizzles for nothing if the target's gone by then, a
+  real risk for committing this hard, not a guaranteed payoff.
+- **Sociability ("At Peace")**: rebuilt from scratch after a direct
+  correction on the first draft — "Snorlax tends not to be in a herd. Very
+  solo style... maybe Snorlax is more peaceful and gets along with others
+  easier." The original branch (*Broad Back*, ally heals/buffs, a
+  `healAura` keystone) was a real fantasy mismatch: it assumed a herd this
+  specific animal usually doesn't have. The real trait — famously placid
+  despite its size — is now a genuine non-territorial, de-escalating
+  presence, not a flat ally buff: *Unbothered* → *Not Worth It* →
+  *No Quarrel* (`"calmingPresence"` 0.3, another new passive — anything
+  nearby, herd or not, calms down too) → a real fork, *Wide Berth* (deepens
+  `calmingPresence` further) vs. *Steady Nerve* (`regen` instead) →
+  *Undisturbed* (`thorns` — doesn't start anything, but whatever finds it
+  anyway regrets it) → keystone **At Peace** (`grantsPassives`,
+  `calmingPresence` 0.5 + `defenseBoost` — a real "two passives, one
+  keystone" finale). Second pass on this branch, direct follow-up: "No
+  quarrel reads as the true capstone. It's a big effect. Undisturbed
+  seems like... it could be a different effect and swapped down." Fair —
+  the first version's keystone (0.25 `calmingPresence` + 0.05 `thorns`)
+  read smaller than No Quarrel's own 0.5 mid-branch, backwards for a
+  capstone. Fixed by trading places: the *name* "Undisturbed" moved down
+  onto the old *Left in Peace* notable (mechanically unchanged, still just
+  `thorns`), No Quarrel's own number came down to 0.3 (a real notable
+  number, not the branch's biggest), and the actual keystone got a
+  decisively bigger `calmingPresence` jump (0.5, more than every earlier
+  grant on the branch) paired with a lever no other Sociability node
+  uses (`defenseBoost`) — genuinely new content at the top, not a smaller
+  echo of what came before. Third pass, direct follow-up on the opener
+  itself: "Unbothered should be, takes no damage from first hit in a
+  fight?" — fair, and it exposed a real structural problem with the
+  original opener: its only payoff, `nonTerritorial`, is functionally dead
+  the instant this move sees real combat (per the user's own hesitation
+  when asked where it should land instead: "it's like an interesting trait
+  for a snorlax out in the wild but if it joins your party is a super bad
+  skill to have"). Fixed by giving *Unbothered* a genuinely new mechanic,
+  `"unshaken"` — fully negates the next hit against the holder once it's
+  off cooldown, no accuracy roll, no partial effects, the literal read of
+  the node's own name — and relocating `nonTerritorial` one step down to a
+  new filler node, *Not Worth It* (the wild-AI flavor is still real, it's
+  just no longer squatting on the branch's one guaranteed-useful-in-combat
+  slot).
+- **Crosslinks**, each deepening its own introduced lever rather than a
+  generic bolt-on (principle 13), each reaching both branches it actually
+  touches (principle 11), each landing one step before its target fork,
+  not on it (principle 12): *Braced Commitment* (Aggression↔Boldness —
+  bracing first is what lets the giant commit its full weight without
+  losing its footing; deepens a self `statChangeOnHit` Defense stage
+  three times across its own root→filler→notable chain) · **Nothing to
+  Prove** (Boldness↔Sociability, redesigned alongside Sociability's own
+  rebuild — the old version leaned on a herd-mark primitive this branch no
+  longer has any use for; new fantasy: an immovable thing that also isn't
+  looking for a fight is the ultimate "just go around it," deepening
+  `calmingPresence` across its own root→filler→notable chain) ·
+  *Provoked Charge* (Sociability↔Aggression — an animal this placid
+  doesn't pull the hit once actually roused, the restraint was the only
+  thing holding the full weight back; pairs a real `lockTicks` wind-up
+  cost with a growing power payoff, per principle 4).
+
+39 nodes total (10 per branch + 3 crosslinks × 3). First shipped tree to
+need genuinely new engine primitives rather than just picking the right
+existing lever — three of them now, all direct follow-up asks across
+successive rounds of feedback: `chargeAttack`/`Agent.chargingAttack` (a
+real mid-commit wind-up with genuine invulnerability, powering The
+Reckoning), `"nonTerritorial"`/`"calmingPresence"` (herdConflict.ts hooks,
+powering the whole Sociability rebuild), and `"unshaken"`/
+`Agent.unshakenCooldownTicks` (a cooldown-gated full hit negation, fixing
+the opener's own dead-node problem — see the checklist above).
+`packages/engine/test/predation.test.ts` covers the charge mechanic
+directly (commits without hitting immediately, genuine invulnerability
+against a real attacker, resolves after its ticks elapse with a real
+leap, fizzles for no damage if the target's gone) and the `unshaken`
+mechanic (a hit off cooldown does nothing at all, a second hit while on
+cooldown lands normally, no effect without the passive, recharges after
+enough ticks); `packages/engine/test/herdConflict.test.ts` covers both
+herd-conflict passives (opts out of initiating, can still be targeted as
+someone else's rival, dampens a third agent's own chance regardless of
+herd, no effect beyond its radius). Engine suite green (1008/1008).
+`packages/data/test/moveTrees.test.ts`'s generic per-tree suite covers
+structural integrity automatically; the dedicated "Body Slam tree"
+describe block was rewritten alongside each redesign round — the keystone
+AoE and its relocated `weightScaling`, The Reckoning's real
+`chargeAttack`, Undisturbed's two passives, Unbothered's real `unshaken`
+grant and Not Worth It's `nonTerritorial` (and a direct check that no
+`targetsAlly`/`allyEffect` survives anywhere on the branch), both forks,
+and all three crosslink bridges' own wiring and lever-deepening. Full
+data suite green (212/212). Atlas rebuilt (verified: no null bytes,
+inline script re-parses, `computeLayout` produces a complete,
+non-overlapping position for all 39 nodes; the `PASSIVE_LABEL`/
+`describeDelta` maps in the template gained real entries for
+`nonTerritorial`, `calmingPresence`, `chargeAttack`, and `unshaken`) and
+republished. Also fixed in an earlier pass: the Atlas's `MOVE_ORDER`
+picker list is hand-maintained, separate from the tree data itself — Body
+Slam's tree had been in the data all along but never appeared in the move
+picker because it was never added there; added a new "Single-species"
+group for it.
 
 ### Pending brainstorm — Earthquake / Hydro Pump / Solar Beam (not yet built)
 
@@ -1545,6 +2453,62 @@ not assumed:
   a real power/effect spike, distinct from every existing cost lever
   (`selfCostPerUse` spends energy/hunger, not PP).
 
+### Two things that read as confusing in review, and what's actually true
+
+Both flagged directly against the Atlas artifact — worth a permanent home
+here rather than re-explaining from scratch next time either comes up.
+
+**Range and shape are genuinely decoupled, not a rendering bug.**
+`MoveRange.max` (`moves.ts`) is how far away a target can be for the
+attacker to *decide* to fire (`moveRange`/`withinMoveRange`, combat.ts) —
+checked in any direction from the attacker. The move's `shape` (resolved
+by `resolveShape` once facing is chosen) is what the attack *actually
+hits*, always starting from the attacker's own tile, at a fixed
+`length`/`radius` independent of how far away the triggering target was.
+For a single-target move (no `hitsArea`) these two numbers are usually
+kept in lockstep on purpose (Peck's *Extended Wingspan* bumps `shape` and
+`range` together) — genuinely extending reach. For an `hitsArea` move
+(Earthquake, Hydro Pump), though, several "+Range" filler nodes (Hydro
+Pump's *Widening Main*, Earthquake's *Cracking Footing*/*Tremor Reach*)
+only ever bumped `range.max`, never the shape itself — so a target at the
+new, farther edge of range can make the attacker fire, but isn't
+guaranteed to actually be *inside* the resolved AoE footprint once it
+does. That's real, current engine behavior, not a mistake to silently
+patch — but it was genuinely confusing without saying so. Documented
+here permanently, and in `widening_main`'s own code comment in
+`moves.ts`. (The Atlas's range panel briefly showed this as a live
+warning too; direct follow-up asked for that removed in favor of the
+panel showing the plain-English effect of whatever node was most
+recently added to the build instead — see the Atlas's own "how to keep
+it updated" section below.) Also fixed in the same pass: every "+Range"
+node in Earthquake/Hydro Pump/Solar Beam was mislabeled `"+10 Range"` regardless
+of its real value — corrected to the actual increment (`+1` for
+Earthquake/Hydro Pump, `+2` for Solar Beam, which reaches its own stated
+"up to 7" cap correctly).
+
+**Movement effects resolve in one fixed, real order — not simultaneously,
+and not build-order-dependent.** A single move can carry a `beforeHit`
+`forcedMovement` (a lunge/retreat), an `onHit` `forcedMovement` (a
+drag/knockback), `positionSwap`, and `positionSwapPull` all at once (Hydro
+Pump's Bastion+Aggression combo is a real example), and it wasn't obvious
+what order they'd actually apply in. They're not simultaneous — the real
+pipeline (`predation.ts`'s `resolveHitAgainstTarget`) is:
+1. `forcedMovement` with `timing: "beforeHit"` — the attacker (or
+   defender) moves *before* the accuracy roll. Doesn't change whether this
+   specific hit lands (range was already checked before this function was
+   even called) — only where the mover ends up standing for whatever
+   comes next.
+2. The hit resolves (accuracy roll, damage).
+3. On a landed, *non-killing* hit only: status effects, the defender-side
+   `statChangeOnHit`, then `forcedMovement` with `timing: "onHit"`, then
+   `positionSwap` (attacker and defender's tiles swap), then
+   `positionSwapPull` (an *additional* push, applied right after the swap,
+   from the attacker's new post-swap position).
+   A killing hit skips this whole block — none of these fire on a kill.
+This is fully deterministic regardless of which order the tree nodes were
+*chosen* in — it's the move's own final, merged spec that's evaluated,
+always in this fixed pipeline order, every time the move is used.
+
 ## Move Tree Atlas: how to keep it updated
 
 **Live URL: https://claude.ai/code/artifact/a089c885-1361-4004-8734-286a50c1d020**
@@ -1588,12 +2552,13 @@ new field to visualize, a UI fix) — edit
 The template is real, versioned source (checked into the repo, reviewed
 and edited like any other file) — never regenerate it from a screenshot or
 from memory of what the artifact looked like; that's exactly the
-"scratch every time" failure mode this process exists to avoid. Sanity-
-check any template edit the same way this process itself was verified:
-run the two build steps and confirm the output's embedded JSON still
-parses and every node still has a `leaning` (a quick Python/Node one-
-liner, same as this file's own move-tree redesigns were checked before
-publishing).
+"scratch every time" failure mode this process exists to avoid.
+
+Sanity-check any template edit the same way this process itself was
+verified: confirm the file has no stray null bytes (a past `Edit` call
+once silently corrupted it), the inline script still parses, and the
+output's embedded JSON still parses with every node still having a
+`leaning`.
 
 1. **Rock Throw / Peck / Scratch / Water Gun** — designed above, zero new
    primitives needed, purely porting work identical to what Tackle/Slash/
@@ -1613,3 +2578,64 @@ publishing).
    DESIGN.md's "Status effects" section; unlocks Aromatherapy/Safeguard's
    counterplay whenever those get built.
 7. Everything else, roughly in the order listed above within each round.
+
+## Crosslinks are bridges, not spurs (the flagship structure, measured)
+
+Prompted by a direct comparison ask: "Compare the skill trees for all your
+new moves with hydro pump/earthquake. You're missing stuff."
+
+The right move here was to **measure before theorising**. Node counts and
+`prerequisitesAnyOf` counts per tree, straight off the exported JSON:
+
+| | flagships (hydro_pump / earthquake / solar_beam) | six new trees, before |
+|---|---|---|
+| nodes | 38-40 | 33 |
+| `prerequisitesAnyOf` | 9-10 | 6 |
+
+A ~6-node, 3-anyOf gap in every one of them is a structural difference, not
+a content preference. Reading Earthquake's actual source rather than
+inferring from its silhouette named it: **its crosslinks are three-node
+bridges**.
+
+```
+cracking_momentum   crosslink; forcedMovement 1 tile
+  -> momentum_footing  "Deeper Lunge"; filler, forcedMovement 2 tiles
+  -> fault_convergence cost 2; power +15, recoilFraction 0.08
+```
+
+Two things make that a bridge instead of a longer dead end:
+
+1. **The filler deepens the crosslink's own lever.** Not "+5 Power" — the
+   same forced-movement idea, escalated. That is principle 13 doing real
+   work: a bridge whose middle node is a generic stat grab is just a
+   corridor with a toll.
+2. **It lands on two rungs of shortcut, not one.** The bridge's cost-2
+   notable is wired as an alternate route into the pre-fork nodes of
+   *both* flanking branches, and the crosslink itself *also* stays a
+   shallower alternate route on an early filler in each. So a build can
+   enter the bridge cheaply and bail early, or commit and arrive one step
+   short of a fork. That is what the extra 3 `anyOf` per tree actually are.
+
+Applied across vine_whip, flamethrower, rock_slide, wing_attack, dig and
+leech_seed: 18 bridges, 36 new nodes, every pre-fork node rewired, every
+early filler restored to accept both flanking crosslinks (principle 11 —
+a bridge must reach every branch its crosslink connects, or it is a spur
+wearing a bridge's node count).
+
+All six now sit at 9 `anyOf`. The four full trees reached 39 nodes; **dig
+(29) and leech_seed (31) were deliberately left short.** Their honest lever
+sets are smaller, and inflating them to hit a number is exactly the
+template failure the rest of this document exists to prevent. Matching the
+flagships' *structure* was the finding; matching their *node count* was
+not.
+
+**Process note worth keeping.** The Atlas layout check that verified this
+found two real defects, in order: first that my own verification harness
+was wrong (`computeLayout` returns `{positions, crosslinks, maxR}`, not a
+bare id->position map, so it reported all 17 trees broken, then — once
+"fixed" against the wrong JSON shape — cheerfully reported all 17 clean
+without examining a single one). Only the third version of the harness was
+actually reading the data, and it immediately found `dig.never_still` and
+`leech_seed.wider_reach` had lost their `leaning` field and would have
+rendered invisibly. A verification step that has never once printed a
+failure has not been verified.

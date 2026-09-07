@@ -235,6 +235,53 @@ describe("layer-gated crop access + digging (CROPS_DESIGN.md)", () => {
     expect(agent.digTicksAccrued).toBeGreaterThan(1);
     expect(agent.moveCooldowns?.[DIG_MOVE.id]).toBe(DIG_MOVE.cooldownTicks); // real cooldown applied — can't spam every tick
   });
+
+  it("gatherBurst on the dig move stacks on top of the base burst, so a tree node really does dig food out faster", () => {
+    // Direct ask: "dig was supposed to make digging springs and food
+    // easier" — Dig's tree can now buy real progress toward that, not
+    // just cooldown reduction.
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    tileAt(world, "surface", 2, 0)!.flavor = "potato";
+    const plain = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }), moves: [DIG_MOVE] });
+
+    const world2 = createWorld(5, 1);
+    setTile(world2, "surface", 2, 0, "food");
+    tileAt(world2, "surface", 2, 0)!.flavor = "potato";
+    const specced = makeAgent({
+      pos: { x: 2, y: 0 },
+      layer: "surface",
+      needs: createNeeds({ hunger: 0.1 }),
+      moves: [{ ...DIG_MOVE, gatherBurst: 4 }],
+    });
+
+    tickAgent(world, plain);
+    tickAgent(world2, specced);
+
+    expect(specced.digTicksAccrued!).toBe(plain.digTicksAccrued! + 4);
+  });
+
+  it("gatherBurst also speeds up digging a brand-new spring, not just crops", () => {
+    const world = createWorld(5, 1); // no water anywhere — forces the spring-digging branch
+    setTile(world, "surface", 2, 0, "floor");
+    const plain = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ thirst: 0.05 }), moves: [DIG_MOVE] });
+    plain.behavior = "seekWater";
+
+    const world2 = createWorld(5, 1);
+    setTile(world2, "surface", 2, 0, "floor");
+    const specced = makeAgent({
+      pos: { x: 2, y: 0 },
+      layer: "surface",
+      needs: createNeeds({ thirst: 0.05 }),
+      moves: [{ ...DIG_MOVE, gatherBurst: 4 }],
+    });
+    specced.behavior = "seekWater";
+
+    tickAgent(world, plain);
+    tickAgent(world2, specced);
+
+    expect(specced.springDigTicksAccrued!).toBe(plain.springDigTicksAccrued! + 4);
+  });
 });
 
 /** Real, low-power melee attack move — for canopy-harvest-by-damage tests. */
@@ -313,6 +360,30 @@ describe("canopy harvest by damage (CROPS_DESIGN.md: \"canopy foods can also be 
     }
 
     expect(ticksToHarvest(RANGED_ATTACK_MOVE)).toBeLessThan(ticksToHarvest(MELEE_ATTACK_MOVE));
+  });
+
+  it("gatherBurst on a damage move speeds up canopy harvesting too (Vine Whip's own tree node)", () => {
+    // Direct ask: "Vine whip too... Reduce the amount of time to harvest
+    // crops." Same field as digging, the other real gather path.
+    const world = createWorld(5, 1);
+    setTile(world, "surface", 2, 0, "food");
+    tileAt(world, "surface", 2, 0)!.flavor = "apple";
+    const plain = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }), moves: [MELEE_ATTACK_MOVE] });
+
+    const world2 = createWorld(5, 1);
+    setTile(world2, "surface", 2, 0, "food");
+    tileAt(world2, "surface", 2, 0)!.flavor = "apple";
+    const specced = makeAgent({
+      pos: { x: 2, y: 0 },
+      layer: "surface",
+      needs: createNeeds({ hunger: 0.1 }),
+      moves: [{ ...MELEE_ATTACK_MOVE, gatherBurst: 4 }],
+    });
+
+    tickAgent(world, plain);
+    tickAgent(world2, specced);
+
+    expect(specced.digTicksAccrued!).toBe(plain.digTicksAccrued! + 4);
   });
 
   it("a status move (real power 0) never substitutes for a damage move — falls back to +1/tick", () => {

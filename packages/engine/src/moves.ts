@@ -22,6 +22,11 @@ export type Direction = "N" | "S" | "E" | "W";
  * status, for a move that only cares about its own signature effect), and
  * `"targetStatused"` (any of the five `StatusKind`s — a predator finishing
  * off something already weakened, not fussy about the cause) are all new.
+ * `"rallyMarked"` (the defender currently has an active
+ * `rallyMarkTicksRemaining` — see `MoveSpec.rallyCall`) is the connective
+ * primitive MOVES_DESIGN.md's "deeper crosslinks" pass asked for: a real
+ * payoff for following up on a Sociability branch's own mark, instead of
+ * the two mechanics merely coexisting.
  */
 export type SituationalCondition =
   | "targetLowHp"
@@ -34,7 +39,8 @@ export type SituationalCondition =
   | "drought"
   | "rain"
   | "targetBurning"
-  | "targetStatused";
+  | "targetStatused"
+  | "rallyMarked";
 
 export type MoveShape =
   | { kind: "point" }
@@ -350,6 +356,25 @@ export interface MoveSpec {
    */
   burrow?: { ticks: number };
   /**
+   * Extra `Agent.digTicksAccrued`/`Agent.springDigTicksAccrued` this move
+   * grants per use while gathering, on top of whichever base burst its own
+   * path already gives (needs.ts). It composes with all three real gather
+   * paths rather than adding a fourth:
+   * - digging an underground-native crop out (`DIG_MOVE_BURST_TICKS`),
+   * - digging a brand-new spring (`SPRING_DIG_TICKS`'s same burst),
+   * - knocking a canopy-native crop down (`CANOPY_HARVEST_MOVE_BASE_BURST`
+   *   plus its `range.max` scaling).
+   *
+   * It never grants access a move didn't already have: those paths still
+   * pick a `burrow`-flagged move for digging and a damage-dealing move for
+   * canopy harvest, so this only ever makes a move that ALREADY qualifies
+   * better at it. A Vine Whip node speeds up fruit harvesting; it can't
+   * dig, and this field doesn't change that.
+   *
+   * Absent = no bonus, the default (every move before this field existed).
+   */
+  gatherBurst?: number;
+  /**
    * Marks this move as usable stand-alone, with no enemy or ally target at
    * all — Growth, Agility, Rain Dance, etc. Real structural gap this closes:
    * every move before this one either rides the hostile hit pipeline
@@ -382,6 +407,19 @@ export interface MoveSpec {
   matingRadiusBoost?: { multiplier: number; ticks: number };
   /** On use, finds the nearest living, non-same-herd agent within `radius` and transfers `amount` of the user's target `need` from them to the user — real resource theft, distinct from any hostile hit. A no-op (still goes on cooldown) if no such agent is in range. Requires `utilityMove`. Absent = no drain effect, the default. */
   drainNeeds?: { need: "hunger" | "thirst"; amount: number; radius: number };
+  /**
+   * A genuine multi-tick wind-up: instead of resolving immediately,
+   * `resolveHit` (predation.ts) sets `Agent.chargingAttack` for `ticks` and
+   * returns without hitting anything — see that field's own doc comment
+   * (types.ts) for the full mechanic (invulnerable and unable to act while
+   * charging, then a `leapTiles` lunge and a `bonusPower` hit on release, or
+   * a fizzle if the original target's gone by then). The single biggest new
+   * primitive on the whole "Engine primitives needed" checklist — a real
+   * mid-commit agent state, not just another `MoveSpec` delta field. Absent
+   * = this move resolves the instant it's used, the default for every move
+   * that doesn't set it.
+   */
+  chargeAttack?: { ticks: number; bonusPower: number; leapTiles: number };
   /**
    * Optional respec DAG (see `applyMoveTree`). Each node is a delta applied
    * on top of the base spec, gated by a point cost and prerequisite node
@@ -539,6 +577,28 @@ export interface MoveTreeNode {
     consumesOwnTerrain?: { terrain: TerrainKind; damageMultiplier: number };
     /** Overwrite, like `shape`. */
     terrainFill?: { terrain: TerrainKind };
+    /** Overwrite, like `shape` — a move has at most one charge commitment at a time. */
+    chargeAttack?: { ticks: number; bonusPower: number; leapTiles: number };
+    /**
+     * Overwrite, like `shape` — restate the full object (need/amount/radius),
+     * not just whichever sub-field changed, since a later node's value
+     * replaces the earlier one entirely rather than merging field-by-field.
+     * Only meaningful on a move that already has a base `drainNeeds` (e.g.
+     * Leech Seed) — utilityMoves.ts's `maybeUseUtilityMove` is what actually
+     * reads it.
+     */
+    drainNeeds?: { need: "hunger" | "thirst"; amount: number; radius: number };
+    /** Overwrite, like `shape`. Only meaningful on a move that already has a base `matingRadiusBoost` (e.g. Sweet Scent). */
+    matingRadiusBoost?: { multiplier: number; ticks: number };
+    /**
+     * Overwrite, like `shape`. Enriches the ground around the caster
+     * (flora.ts's `raiseFertility`, applied by utilityMoves.ts's
+     * `maybeUseUtilityMove`). Requires the move to be `utilityMove`-flagged
+     * to ever fire — a plain attack move setting this would be dead weight.
+     */
+    fertilityBoost?: { amount: number; radius: number };
+    /** Additive, like `power` — see `MoveSpec.gatherBurst`. Real on any move that already qualifies for one of the gather paths (a `burrow` move for digging, a damage move for canopy harvest). */
+    gatherBurst?: number;
   };
 }
 
@@ -697,6 +757,11 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       statusSeverity: delta.statusSeverity ?? result.statusSeverity,
       consumesOwnTerrain: delta.consumesOwnTerrain ?? result.consumesOwnTerrain,
       terrainFill: delta.terrainFill ?? result.terrainFill,
+      chargeAttack: delta.chargeAttack ?? result.chargeAttack,
+      drainNeeds: delta.drainNeeds ?? result.drainNeeds,
+      matingRadiusBoost: delta.matingRadiusBoost ?? result.matingRadiusBoost,
+      fertilityBoost: delta.fertilityBoost ?? result.fertilityBoost,
+      gatherBurst: delta.gatherBurst !== undefined ? (result.gatherBurst ?? 0) + delta.gatherBurst : result.gatherBurst,
     };
   }
 

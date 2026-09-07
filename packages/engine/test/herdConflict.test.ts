@@ -266,6 +266,48 @@ describe("applyHerdRivalryConflict", () => {
     expect(rival.herdConflictCooldownTicks).toBeGreaterThan(0);
     expect(a.herdConflictCooldownTicks).toBeGreaterThan(0);
   });
+
+  it("a `nonTerritorial` agent never initiates, even bold/aggressive and comparably matched", () => {
+    const world = createWorld(20, 20);
+    const a = bumpedUp(agent("a", "snorlax", "herd-a", { x: 4, y: 5 }, { disposition: BOLD, passives: { nonTerritorial: 1 } }));
+    const rival = agent("b", "pidgey", "herd-b", TARGET);
+    world.agents.push(a, rival);
+
+    expect(applyHerdRivalryConflict(world, a, RULES, TARGET, undefined, ALWAYS_FIGHT)).toBe(false);
+  });
+
+  it("a `nonTerritorial` agent can still be found and fought as someone else's rival", () => {
+    const world = createWorld(20, 20);
+    const log = new EventLog();
+    const peaceful = agent("a", "snorlax", "herd-a", TARGET, { passives: { nonTerritorial: 1 } });
+    const b = bumpedUp(agent("b", "pidgey", "herd-b", { x: 4, y: 5 }, { disposition: BOLD }));
+    world.agents.push(peaceful, b);
+
+    expect(applyHerdRivalryConflict(world, b, RULES, TARGET, log, ALWAYS_FIGHT)).toBe(true);
+  });
+
+  it("`calmingPresence` dampens a nearby THIRD agent's own escalation chance, regardless of herd", () => {
+    const world = createWorld(20, 20);
+    // Snorlax isn't a party to this standoff at all — just standing nearby.
+    const snorlax = agent("snorlax-0", "snorlax", "herd-c", { x: 5, y: 6 }, { passives: { calmingPresence: 1 } });
+    const a = bumpedUp(agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD }));
+    const rival = agent("b", "pidgey", "herd-b", TARGET);
+    world.agents.push(snorlax, a, rival);
+
+    // `calmingPresence: 1` dampens the chance to exactly 0 — even a roll of
+    // 0 (which clears every *unmodified* chance in this suite) now fails.
+    expect(applyHerdRivalryConflict(world, a, RULES, TARGET, undefined, ALWAYS_FIGHT)).toBe(false);
+  });
+
+  it("`calmingPresence` has no effect beyond its radius", () => {
+    const world = createWorld(20, 20);
+    const snorlax = agent("snorlax-0", "snorlax", "herd-c", { x: 19, y: 19 }, { passives: { calmingPresence: 1 } });
+    const a = bumpedUp(agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD }));
+    const rival = agent("b", "pidgey", "herd-b", TARGET);
+    world.agents.push(snorlax, a, rival);
+
+    expect(applyHerdRivalryConflict(world, a, RULES, TARGET, undefined, ALWAYS_FIGHT)).toBe(true);
+  });
 });
 
 describe("applyTerritorialGuard (proactive patrol/chase-off, CROPS_DESIGN.md-style direct ask: \"more territorial behavior... guarding resources\")", () => {
