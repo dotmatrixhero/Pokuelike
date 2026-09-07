@@ -74,23 +74,30 @@ const CLASH_ESCALATION_WINDOW_TICKS = 20;
 /** Hard cap on queued-but-not-yet-shown engagements — a chaotic tick (mass death event, say) shouldn't grow this unboundedly; overflow drops the oldest still-queued entries first. */
 const MAX_QUEUE = 20;
 /**
- * Minimum real ticks between two separate "courtship" engagements getting
- * queued at all — direct ask: "autocam is still so uncomfortable... It
- * skips around a lot and focuses on boring shit." Courtship (`bonded`/
- * `shelterBuilt`/`eggLaid`) is real but routine and, once a herd's
- * population is growing, frequent — a healthy herd can bond/lay several
- * eggs within a handful of ticks of each other, and every one of those used
- * to separately queue its own camera cut, so a real fight or immigration
- * elsewhere could end up buried behind a run of five near-identical
- * "X laid an egg" cuts for five different individuals in the same herd. A
- * cooldown collapses a cluster like that down to just its first moment —
- * the camera still shows a courtship beat, it just doesn't chase every
- * single one a synchronized herd produces back to back. Not applied to any
- * other category — immigration/hatch/evolution/death are already rare
- * enough on their own not to need throttling, and battle/clash have their
- * own dedicated continuous-engagement machinery entirely.
+ * Minimum real ticks between two separate one-shot engagements of the SAME
+ * category getting queued at all — direct ask, after actually running the
+ * app and watching auto-camera for a while: "autocam is still so
+ * uncomfortable... It skips around a lot and focuses on boring shit."
+ * First built courtship-only (`bonded`/`shelterBuilt`/`eggLaid` — a healthy
+ * herd routinely bonds/lays several eggs within a handful of ticks of each
+ * other), then generalized once a longer live run showed the exact same
+ * clustering in "evolution" (a whole same-age cohort crossing its level
+ * threshold together: 8 separate "bulbasaur evolved into ivysaur" cuts back
+ * to back) and "death" (3 separate "arbok killed ivysaur" cuts in a row) —
+ * any category CAN burst once a population is large/synchronized enough,
+ * not just courtship. A cooldown per category collapses a burst like that
+ * down to just its first moment — the camera still shows that flavor of
+ * beat, it just doesn't chase every single individual instance a
+ * synchronized population produces back to back, so a real fight or
+ * immigration elsewhere doesn't end up buried behind a run of five
+ * near-identical cuts. NOT applied to "immigration" (already engine-side
+ * rate-limited to at most one group every `MIN_TICKS_BETWEEN_IMMIGRATIONS`
+ * ticks — see `@pokuelike/engine`'s immigration.ts — so it can't burst the
+ * same way) or to battle/clash (their own dedicated continuous-engagement
+ * machinery already handles "the same fight keeps producing hits" by
+ * widening one engagement rather than queuing a new one per hit).
  */
-const COURTSHIP_COOLDOWN_TICKS = 60;
+const ONE_SHOT_CLUSTER_COOLDOWN_TICKS = 60;
 /**
  * Playback speed (the `SPEED_STEPS` value, not an index) auto-camera holds a
  * followed *non-battle* event (immigration/courtship/hatch/evolution/death)
@@ -234,8 +241,8 @@ export class AutoCameraController {
    * merely a second hit from whoever struck first. See `maybeEscalateClash`.
    */
   private clashPendingFirstHit = new Map<string, { sinceTick: number; attackerId: string }>();
-  /** The tick a "courtship" engagement was last actually queued — `undefined` before the first one. Backs `COURTSHIP_COOLDOWN_TICKS`'s throttle; see that constant's own doc comment. */
-  private lastCourtshipEnqueuedTick: number | undefined;
+  /** Per-category tick a one-shot engagement was last actually queued — backs `ONE_SHOT_CLUSTER_COOLDOWN_TICKS`'s throttle; see that constant's own doc comment. Absent entry = never queued yet (or cleared by `reset`). */
+  private lastEnqueuedTickByCategory = new Map<NotableCategory, number>();
 
   constructor(private readonly host: AutoCameraHost) {}
 
@@ -302,7 +309,7 @@ export class AutoCameraController {
     this.queue = [];
     this.active = undefined;
     this.clashPendingFirstHit.clear();
-    this.lastCourtshipEnqueuedTick = undefined;
+    this.lastEnqueuedTickByCategory.clear();
     this.releaseControl();
   }
 
@@ -409,33 +416,33 @@ export class AutoCameraController {
         this.enqueueOneShot("immigration", event.kind, new Set(event.agentIds), event.pos, `${event.agentIds.length} ${event.species} arrived`);
         return;
       case "bonded":
-        this.enqueueCourtship(event.kind, new Set([event.agentId, event.partnerId]), event.pos, `${speciesLabel(event.species, event.partnerSpecies)} bonded`, event.tick);
+        this.enqueueClusteredOneShot("courtship", event.kind, new Set([event.agentId, event.partnerId]), event.pos, `${speciesLabel(event.species, event.partnerSpecies)} bonded`, event.tick);
         return;
       case "shelterBuilt":
-        this.enqueueCourtship(event.kind, new Set([event.agentId]), event.pos, `${event.species} finished a shelter`, event.tick);
+        this.enqueueClusteredOneShot("courtship", event.kind, new Set([event.agentId]), event.pos, `${event.species} finished a shelter`, event.tick);
         return;
       case "eggLaid":
-        this.enqueueCourtship(event.kind, new Set([event.motherId, event.fatherId, event.eggId]), event.pos, `${event.species} laid an egg`, event.tick);
+        this.enqueueClusteredOneShot("courtship", event.kind, new Set([event.motherId, event.fatherId, event.eggId]), event.pos, `${event.species} laid an egg`, event.tick);
         return;
       case "eggHatched":
-        this.enqueueOneShot("hatch", event.kind, new Set([event.agentId]), event.pos, `${event.species} hatched`);
+        this.enqueueClusteredOneShot("hatch", event.kind, new Set([event.agentId]), event.pos, `${event.species} hatched`, event.tick);
         return;
       case "evolved": {
         const pos = world.agents.find((a) => a.id === event.agentId)?.pos ?? { x: 0, y: 0 };
-        this.enqueueOneShot("evolution", event.kind, new Set([event.agentId]), pos, `${event.fromSpecies} evolved into ${event.toSpecies}`);
+        this.enqueueClusteredOneShot("evolution", event.kind, new Set([event.agentId]), pos, `${event.fromSpecies} evolved into ${event.toSpecies}`, event.tick);
         return;
       }
       case "killed":
-        this.onDeath(event.kind, new Set([event.predatorId, event.preyId]), event.pos, `${idLabel(world, event.predatorId, event.predatorSpecies)} killed ${idLabel(world, event.preyId, event.preySpecies)}`);
+        this.onDeath(event.kind, new Set([event.predatorId, event.preyId]), event.pos, `${idLabel(world, event.predatorId, event.predatorSpecies)} killed ${idLabel(world, event.preyId, event.preySpecies)}`, event.tick);
         return;
       case "defeated":
-        this.onDeath(event.kind, new Set([event.winnerId, event.loserId]), event.pos, `${idLabel(world, event.winnerId, event.winnerSpecies)} defeated ${idLabel(world, event.loserId, event.loserSpecies)}`);
+        this.onDeath(event.kind, new Set([event.winnerId, event.loserId]), event.pos, `${idLabel(world, event.winnerId, event.winnerSpecies)} defeated ${idLabel(world, event.loserId, event.loserSpecies)}`, event.tick);
         return;
       case "starved":
-        this.onDeath(event.kind, new Set([event.agentId]), event.pos, `${event.species} starved`);
+        this.onDeath(event.kind, new Set([event.agentId]), event.pos, `${event.species} starved`, event.tick);
         return;
       case "diedOfAge":
-        this.onDeath(event.kind, new Set([event.agentId]), event.pos, `${event.species} died of old age`);
+        this.onDeath(event.kind, new Set([event.agentId]), event.pos, `${event.species} died of old age`, event.tick);
         return;
       case "fought":
         this.onBattleHit("battle", new Set([event.attackerId, event.defenderId]), event.pos, `${idLabel(world, event.attackerId, event.attackerSpecies)} vs ${idLabel(world, event.defenderId, event.defenderSpecies)} fighting`, world);
@@ -514,19 +521,20 @@ export class AutoCameraController {
   }
 
   /**
-   * `enqueueOneShot` for the "courtship" category specifically, gated by
-   * `COURTSHIP_COOLDOWN_TICKS` — see that constant's own doc comment. Skips
-   * entirely (not even reaching `enqueueOneShot`'s own dedup check) while a
-   * prior courtship engagement was queued too recently; only starts/renews
-   * the cooldown when something was actually pushed onto the queue, so a
-   * call `enqueueOneShot` itself would have silently deduped (same moment,
+   * `enqueueOneShot`, gated by `ONE_SHOT_CLUSTER_COOLDOWN_TICKS` per
+   * `category` — see that constant's own doc comment. Skips entirely (not
+   * even reaching `enqueueOneShot`'s own dedup check) while a same-category
+   * engagement was queued too recently; only starts/renews the cooldown
+   * when something was actually pushed onto the queue, so a call
+   * `enqueueOneShot` itself would have silently deduped (same moment,
    * already tracked) doesn't count as "shown" for cooldown purposes.
    */
-  private enqueueCourtship(sourceKind: SimEvent["kind"], ids: Set<string>, pos: Vec2, label: string, tick: number): void {
-    if (this.lastCourtshipEnqueuedTick !== undefined && tick - this.lastCourtshipEnqueuedTick < COURTSHIP_COOLDOWN_TICKS) return;
+  private enqueueClusteredOneShot(category: NotableCategory, sourceKind: SimEvent["kind"], ids: Set<string>, pos: Vec2, label: string, tick: number): void {
+    const last = this.lastEnqueuedTickByCategory.get(category);
+    if (last !== undefined && tick - last < ONE_SHOT_CLUSTER_COOLDOWN_TICKS) return;
     const before = this.queue.length;
-    this.enqueueOneShot("courtship", sourceKind, ids, pos, label);
-    if (this.queue.length > before) this.lastCourtshipEnqueuedTick = tick;
+    this.enqueueOneShot(category, sourceKind, ids, pos, label);
+    if (this.queue.length > before) this.lastEnqueuedTickByCategory.set(category, tick);
   }
 
   /**
@@ -633,10 +641,10 @@ export class AutoCameraController {
   }
 
   /** A true death (`killed`/`defeated`/`starved`/`diedOfAge`) both concludes any continuous engagement it belongs to (via `onBattleParticipantLeft`, called by the same switch arms above through `fainted`/`killed` sharing a victim) and is itself notable on its own — queued as a fresh one-shot only when it isn't already the natural end of an active/queued engagement for the same id, so a kill doesn't show twice back to back. */
-  private onDeath(sourceKind: SimEvent["kind"], ids: Set<string>, pos: Vec2, label: string): void {
+  private onDeath(sourceKind: SimEvent["kind"], ids: Set<string>, pos: Vec2, label: string, tick: number): void {
     for (const id of ids) this.onBattleParticipantLeft(id);
     const covered = (this.active?.continuous && setsOverlap(this.active.ids, ids)) || this.queue.some((e) => e.continuous && setsOverlap(e.ids, ids));
-    if (!covered) this.enqueueOneShot("death", sourceKind, ids, pos, label);
+    if (!covered) this.enqueueClusteredOneShot("death", sourceKind, ids, pos, label, tick);
   }
 
   /**
