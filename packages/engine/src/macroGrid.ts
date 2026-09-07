@@ -574,11 +574,67 @@ const LANDMARK_POPULATION_MULTIPLIER: Partial<Record<LandmarkType, number>> = {
   crossroads: 1.3,
 };
 
+/**
+ * A never-visited zone only ever seeds a SMALL pocket of its habitat's
+ * fitting species, not every single one that could theoretically live
+ * there. Direct ask: "just cuz a zone can support a bunch of different
+ * Pokemon, doesn't mean it should. It should just have a smaller variety of
+ * species per zone... by chance, they just have different pockets of
+ * species" — a real biome (e.g. wetland) can have 15 roster species tagged
+ * for it, and every prior fresh-zone promotion invented ALL of them at
+ * once, so every wetland zone in the whole world looked like the same
+ * fully-stocked checklist instead of feeling like its own distinct pocket
+ * of nature. `[ZONE_SPECIES_POOL_MIN, ZONE_SPECIES_POOL_MAX]` (a real range
+ * rolled per zone, not a fixed count, so pockets vary in richness too, not
+ * just membership) caps how many of the fitting species actually get
+ * invented — picked via `pickZoneSpeciesPool`'s partial shuffle, so which
+ * subset survives is deterministic per zone (same `mw.rng` every other
+ * zone-invention roll already uses) but varies zone to zone, biome to
+ * biome. A habitat with fewer fitting species than the cap (e.g. snow's 4)
+ * is simply left alone — nothing to trim.
+ */
+const ZONE_SPECIES_POOL_MIN = 3;
+const ZONE_SPECIES_POOL_MAX = 6;
+/**
+ * A congregation-type landmark (see `LANDMARK_POPULATION_MULTIPLIER`) is
+ * explicitly meant to draw MULTIPLE species onto the same limited real
+ * estate — the opposite instinct from an ordinary zone's smaller pocket —
+ * so its pool cap gets a real bonus on top of the ordinary range instead of
+ * being trimmed the same way.
+ */
+const LANDMARK_SPECIES_POOL_BONUS = 3;
+
+/**
+ * Deterministically (via `rng`, the zone's own seeded stream) picks a
+ * bounded-size subset of `fitting` — see `ZONE_SPECIES_POOL_MIN`/`_MAX`'s
+ * doc comment for why. A partial Fisher-Yates shuffle (only as many swaps
+ * as the picked pool size needs, not a full shuffle of the whole roster) so
+ * this stays cheap even for a large roster. Returns `fitting` itself,
+ * unmodified order and all, when it's already at or under the pool size —
+ * nothing to trim, and no reason to consume extra `rng()` calls for a
+ * shuffle that wouldn't change the outcome.
+ */
+function pickZoneSpeciesPool(fitting: readonly ImmigrationSpeciesInfo[], poolBonus: number, rng: () => number): ImmigrationSpeciesInfo[] {
+  const poolSize = ZONE_SPECIES_POOL_MIN + poolBonus + Math.floor(rng() * (ZONE_SPECIES_POOL_MAX - ZONE_SPECIES_POOL_MIN + 1));
+  if (fitting.length <= poolSize) return [...fitting];
+
+  const pool = [...fitting];
+  const picked: ImmigrationSpeciesInfo[] = [];
+  for (let i = 0; i < poolSize; i++) {
+    const idx = i + Math.floor(rng() * (pool.length - i));
+    [pool[i], pool[idx]] = [pool[idx]!, pool[i]!];
+    picked.push(pool[i]!);
+  }
+  return picked;
+}
+
 export function estimateZoneSpecies(zone: MacroZone, roster: readonly ImmigrationSpeciesInfo[], rng: () => number): ZoneSpeciesEstimate[] {
   const estimates: ZoneSpeciesEstimate[] = [];
   const multiplier = zone.landmark ? (LANDMARK_POPULATION_MULTIPLIER[zone.landmark] ?? 1) : 1;
-  for (const species of roster) {
-    if (!speciesFitsZone(species, zone)) continue;
+  const isCongregationLandmark = zone.landmark !== undefined && LANDMARK_POPULATION_MULTIPLIER[zone.landmark] !== undefined;
+  const fitting = roster.filter((species) => speciesFitsZone(species, zone));
+  const pool = pickZoneSpeciesPool(fitting, isCongregationLandmark ? LANDMARK_SPECIES_POOL_BONUS : 0, rng);
+  for (const species of pool) {
     estimates.push({
       speciesId: species.id,
       homeLayer: species.homeLayer,

@@ -5604,6 +5604,38 @@ zero behavior change to anything that doesn't opt in.
   `POP_HARD_CAP`) is unit-tested but not yet exercised by a real multi-
   thousand-tick run that actually reaches it — see TODO.md.
 
+### Fresh zones seed a small species pocket, not every fitting species at once
+
+Direct ask: "Just cuz a zone can support a bunch of different Pokemon,
+doesn't mean it should. It should just have a smaller variety of species per
+zone. Makes new zones feel more special and interesting if, by chance, they
+just have different pockets of species." A never-visited zone's estimated
+starting population (`macroGrid.ts`'s `estimateZoneSpecies`) previously
+invented EVERY roster species whose biome/aquatic-ness matched the zone —
+real biomes carry 9-15 tagged species each (wetland: 15, forest: 15,
+badlands: 13), so every zone of a given biome anywhere on the map looked
+like the exact same fully-stocked checklist instead of feeling like its own
+distinct pocket of nature.
+
+**Built**: `pickZoneSpeciesPool` — a partial Fisher-Yates shuffle (only as
+many swaps as the picked pool size needs) that caps a zone's fitting-species
+list down to a real, randomly-sized range
+(`ZONE_SPECIES_POOL_MIN`..`_MAX` = 3..6, rolled per zone via the zone's own
+seeded `rng`) before any of them get invented. A habitat with fewer fitting
+species than the cap (snow's 4) is simply left alone. A congregation-type
+landmark (meteor crater, tunnel warren, deep cavern, crossroads — see
+`LANDMARK_POPULATION_MULTIPLIER`) gets a real bonus on top of the ordinary
+range (`LANDMARK_SPECIES_POOL_BONUS = 3`) instead of being trimmed the same
+way — the opposite instinct, since those landmarks are explicitly meant to
+draw multiple species onto the same small footprint.
+
+Live-validated across a real 10x10 never-visited-zone grid: beach zones
+(5 fitting species) varied 3-5 species per zone with different subsets
+(`[krabby,kingler,shellder,psyduck,golduck]` vs. `[golduck,krabby,psyduck]`
+a few zones over); grassland zones (6 fitting) varied 4-6. Ocean zones
+(only 3 fitting species total) correctly stayed unchanged — nothing to
+trim. Full suite (1077 + 177 tests) and typecheck green.
+
 ### Immigrant levels: evolution-aware and randomized, not a flat constant
 
 Direct ask, after noticing every immigrant arrived at the exact same level
