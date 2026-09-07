@@ -1130,6 +1130,68 @@ more, across all three branches). Full data suite green (236/236), engine
 suite green (1094/1094, including two new `applyMoveTree` merge
 assertions for `drainNeeds`/`matingRadiusBoost`).
 
+**Design review pass, direct follow-up: "Hmm.. You're missing a lot of
+deeper cross links. And your designs are kinda uninspired..."** — a fair
+hit, and checking it directly (a small script counting each new tree's own
+`// Crosslink:` comments and node totals) turned up one real, concrete bug
+underneath the vaguer complaint: **Vine Whip was only 32 nodes with 2
+crosslinks, not the 33/3 every other tree in this batch has** — the whole
+Sociability↔Aggression bridge was just never written. Fixed by adding
+*Thorned Bouquet* (`critRateStage`, "the gentlest touch turns vicious in a
+heartbeat"), landing it as an alternate way into `reaching_vines` same as
+every other crosslink shortcut. That's the literal "missing" half of the
+complaint.
+
+The "uninspired" half was just as real: across all six trees, the
+Aggression↔Boldness slot had settled into the exact same
+`statChangeOnHit: self attack +1` three times over (Wing Attack, Rock
+Slide, Flamethrower), the Boldness↔Sociability slot into the same
+`damageReduction` grant four times over (those three plus Vine Whip's
+original), and the Sociability↔Aggression slot into the same
+`situationalBonus: flanking 1.25` three times over (Wing Attack, Rock
+Slide, Flamethrower) — principle 13 by name ("Your crosslinks are
+laaaaaame tho... the same three-lever rotation every time"), repeated
+almost verbatim despite being written up in this very doc as a mistake
+already learned from once. Reworked all of them to something specific to
+the move's own fantasy instead,
+without touching any other part of the trees (branches/forks/capstones
+were already distinct — this was specifically a crosslink problem):
+- **Vine Whip**: Boldness↔Sociability *Shared Roots* (`damageReduction`) →
+  *Grafted Vines* (`positionSwap`+`positionSwapPull` — the tangled root
+  network hauls a struggling ally to safety, a real field ability instead
+  of a flat stat).
+- **Wing Attack**: Aggression↔Boldness *Feint and Strike* → *Riding the
+  Gust* (a real `forcedMovement` lunge riding the same current that keeps
+  it airborne); Boldness↔Sociability *Guard the Flock* → *Screening Dive*
+  (a real ally Speed buff, not a passive); Sociability↔Aggression *Ambush
+  Call* → *Scattering Strike* (a real onHit knockback timed to the flock's
+  own scatter).
+- **Rock Slide**: Aggression↔Boldness *Braced Throw* → *Quarried Weight*
+  (`weightScaling` — the braced stance lets it put real mass behind the
+  throw); Boldness↔Sociability *Watchful Bulk* → *Steadfast Warning*
+  (`defenseBoost`, not `damageReduction`); Sociability↔Aggression
+  *Opportunist's Fall* → *Second Wave* (`jamCooldownTicks` — a second wave
+  while the herd's still reacting to the first denies real recovery
+  tempo).
+- **Flamethrower**: Aggression↔Boldness *Tempered Strike* → *Molten Edge*
+  (`defensePenetration`); Boldness↔Sociability *Guardian Ember* → *Ember
+  Ward* (`thorns`, not `damageReduction`); Sociability↔Aggression
+  *Provoked Blaze* → *Flashpoint* (`critRateStage`).
+- **Leech Seed**: Aggression↔Boldness *Grounded Hunger* kept its name but
+  swapped `damageReduction` for `defenseBoost` — it was an exact
+  value-for-value duplicate of Dig's own crosslink otherwise (both
+  honestly-scoped trees share a narrow lever set, so a little more overlap
+  here is real and expected, not a rut).
+- **Dig**'s three crosslinks were left alone — already distinct from each
+  other and about as varied as an honestly-narrow, passives-and-cooldown-
+  only tree can get.
+
+No two crosslinks *within this six-tree batch* share the same mechanic
+now. Verified live: Vine Whip's new *Thorned Bouquet* auto-respecs for a
+real Bulbasaur in a 10000-tick run. Full data suite green (236/236, same
+count — this was a rebalance, not new content), engine suite unaffected.
+Atlas rebuilt and republished.
+
 **Tackle, Slash, and Ember have all now
 shipped their full v2 trees** (`packages/data/src/moves.ts`) — three
 branches (Aggression/Boldness/Sociability) plus a crosslink triangle each,

@@ -787,7 +787,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "reaching_vines",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["tendril_lash"], ["snapback_lash"]],
+        prerequisitesAnyOf: [["tendril_lash"], ["snapback_lash"], ["thorned_bouquet"]],
         leaning: "aggression",
         delta: { accuracy: 10 },
       },
@@ -887,7 +887,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "tangled_growth",
         name: "+5 Power",
         cost: 1,
-        prerequisitesAnyOf: [["thick_vines"], ["snapback_lash"], ["shared_roots"]],
+        prerequisitesAnyOf: [["thick_vines"], ["snapback_lash"], ["grafted_vines"]],
         leaning: "boldness",
         delta: { power: 5 },
       },
@@ -960,16 +960,26 @@ export const MOVES: Record<string, MoveSpec> = {
         ],
         delta: {},
       },
-      // Crosslink: Boldness <-> Sociability — a rooted plant sharing its own
-      // ground with whoever's fighting alongside it.
-      shared_roots: {
-        id: "shared_roots",
-        name: "Shared Roots",
+      // Crosslink: Boldness <-> Sociability — the same tangled root network
+      // that anchors it can trade places with a struggling ally, hauling
+      // them clear through the underbrush.
+      grafted_vines: {
+        id: "grafted_vines",
+        name: "Grafted Vines",
         cost: 1,
         prerequisites: ["deep_roots", "nurturing_tendrils"],
         leaning: "sociability",
-        grantsPassive: { kind: "damageReduction", value: 0.05 },
-        delta: {},
+        delta: { positionSwap: true, positionSwapPull: 1 },
+      },
+      // Crosslink: Sociability <-> Aggression — the gentlest touch turns
+      // vicious in a heartbeat once something's actually threatened.
+      thorned_bouquet: {
+        id: "thorned_bouquet",
+        name: "Thorned Bouquet",
+        cost: 1,
+        prerequisites: ["nurturing_tendrils", "choking_grip"],
+        leaning: "aggression",
+        delta: { critRateStage: 1 },
       },
       // --- Sociability: "Shared Growth" — Bulbasaur's own real nurturing
       // instinct (the same fantasy leech_seed already leans on), tending to
@@ -993,7 +1003,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "binding_roots",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["verdant_reach"], ["shared_roots"]],
+        prerequisitesAnyOf: [["verdant_reach"], ["grafted_vines"]],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
@@ -1444,7 +1454,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "steadier_aim",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["hotter_flame"], ["tempered_strike"]],
+        prerequisitesAnyOf: [["hotter_flame"], ["molten_edge"]],
         leaning: "aggression",
         delta: { accuracy: 10 },
       },
@@ -1512,15 +1522,15 @@ export const MOVES: Record<string, MoveSpec> = {
         // hiding in — the fire doesn't leave anything the way it found it.
         delta: { statusSeverity: 2, terrainBurn: true },
       },
-      // Crosslink: Aggression <-> Boldness — a hotter flame tempered by a
-      // steadier hand.
-      tempered_strike: {
-        id: "tempered_strike",
-        name: "Tempered Strike",
+      // Crosslink: Aggression <-> Boldness — the banked heat sharpens the
+      // blast enough to punch straight through whatever guard it meets.
+      molten_edge: {
+        id: "molten_edge",
+        name: "Molten Edge",
         cost: 1,
         prerequisites: ["searing_heat", "thick_scales"],
         leaning: "aggression",
-        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 12 } },
+        delta: { defensePenetration: 0.1 },
       },
       // --- Boldness: "Banked Flame" — a controlled, enduring fire instead
       // of an explosive burst.
@@ -1544,7 +1554,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "steady_burn",
         name: "+5 Power",
         cost: 1,
-        prerequisitesAnyOf: [["hardened_plates"], ["tempered_strike"], ["guardian_ember"]],
+        prerequisitesAnyOf: [["hardened_plates"], ["molten_edge"], ["ember_ward"]],
         leaning: "boldness",
         delta: { power: 5 },
       },
@@ -1614,15 +1624,15 @@ export const MOVES: Record<string, MoveSpec> = {
         ],
         delta: {},
       },
-      // Crosslink: Boldness <-> Sociability — the same banked heat shields
-      // whoever's fighting alongside it.
-      guardian_ember: {
-        id: "guardian_ember",
-        name: "Guardian Ember",
+      // Crosslink: Boldness <-> Sociability — the banked heat singes
+      // anyone who gets too close to whoever it's standing guard over.
+      ember_ward: {
+        id: "ember_ward",
+        name: "Ember Ward",
         cost: 1,
         prerequisites: ["thick_scales", "kindling_call"],
         leaning: "sociability",
-        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        grantsPassive: { kind: "thorns", value: 0.06 },
         delta: {},
       },
       // --- Sociability: "Rally Flame" — a shared fire that sharpens and
@@ -1646,7 +1656,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "quicker_call",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["warmth_shared"], ["guardian_ember"]],
+        prerequisitesAnyOf: [["warmth_shared"], ["ember_ward"]],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
@@ -1712,15 +1722,15 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "healAura", value: 0.01 },
         delta: {},
       },
-      // Crosslink: Sociability <-> Aggression — a fire this shared doesn't
-      // stay banked once something actually threatens the group.
-      provoked_blaze: {
-        id: "provoked_blaze",
-        name: "Provoked Blaze",
+      // Crosslink: Sociability <-> Aggression — a fire this shared catches
+      // fast and hot the instant it's actually provoked.
+      flashpoint: {
+        id: "flashpoint",
+        name: "Flashpoint",
         cost: 1,
         prerequisites: ["kindling_call", "searing_heat"],
         leaning: "aggression",
-        delta: { situationalBonus: { condition: "flanking", multiplier: 1.25 } },
+        delta: { critRateStage: 1 },
       },
     },
   },
@@ -4439,7 +4449,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "steadier_aim",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["heavier_boulders"], ["braced_throw"]],
+        prerequisitesAnyOf: [["heavier_boulders"], ["quarried_weight"]],
         leaning: "aggression",
         delta: { accuracy: 10 },
       },
@@ -4507,15 +4517,15 @@ export const MOVES: Record<string, MoveSpec> = {
         // to the weight of what's already falling.
         delta: { shape: { kind: "burst", radius: 2 }, weightScaling: { factor: 0.1 } },
       },
-      // Crosslink: Aggression <-> Boldness — a braced stance behind every
-      // throw, Boldness's sturdiness feeding Aggression's follow-through.
-      braced_throw: {
-        id: "braced_throw",
-        name: "Braced Throw",
+      // Crosslink: Aggression <-> Boldness — a braced stance means it can
+      // really put its own mass behind the throw without losing footing.
+      quarried_weight: {
+        id: "quarried_weight",
+        name: "Quarried Weight",
         cost: 1,
         prerequisites: ["raining_stones", "stone_shield"],
         leaning: "aggression",
-        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 12 } },
+        delta: { weightScaling: { factor: 0.08 } },
       },
       // --- Boldness: "Bedrock Stance" — standing unmoved in the middle of
       // its own rockfall.
@@ -4539,7 +4549,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "craggy_hide",
         name: "Craggy Hide",
         cost: 1,
-        prerequisitesAnyOf: [["firmer_footing"], ["watchful_bulk"]],
+        prerequisitesAnyOf: [["firmer_footing"], ["steadfast_warning"]],
         leaning: "boldness",
         grantsPassive: { kind: "defenseBoost", value: 0.05 },
         delta: {},
@@ -4611,15 +4621,16 @@ export const MOVES: Record<string, MoveSpec> = {
         ],
         delta: {},
       },
-      // Crosslink: Boldness <-> Sociability — the same steady stance that
-      // shrugs off falling rock also shelters whoever's standing near it.
-      watchful_bulk: {
-        id: "watchful_bulk",
-        name: "Watchful Bulk",
+      // Crosslink: Boldness <-> Sociability — the same steadiness that
+      // shrugs off falling rock is also what lets it read the coming
+      // rumble early.
+      steadfast_warning: {
+        id: "steadfast_warning",
+        name: "Steadfast Warning",
         cost: 1,
         prerequisites: ["stone_shield", "herd_warning"],
         leaning: "sociability",
-        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        grantsPassive: { kind: "defenseBoost", value: 0.04 },
         delta: {},
       },
       // --- Sociability: "Warning Rumble" — the tremor before the rockfall
@@ -4645,7 +4656,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "faster_warning",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["clearer_warning"], ["watchful_bulk"]],
+        prerequisitesAnyOf: [["clearer_warning"], ["steadfast_warning"]],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
@@ -4718,16 +4729,16 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "healAura", value: 0.01 },
         delta: {},
       },
-      // Crosslink: Sociability <-> Aggression — while everything nearby is
-      // still reacting to the warning rumble, this is exactly when it
-      // strikes whatever didn't move fast enough.
-      opportunists_fall: {
-        id: "opportunists_fall",
-        name: "Opportunist's Fall",
+      // Crosslink: Sociability <-> Aggression — the first wave was the
+      // warning; while everything's still reacting to it, a second wave
+      // gives whatever's left standing no real chance to recover.
+      second_wave: {
+        id: "second_wave",
+        name: "Second Wave",
         cost: 1,
         prerequisites: ["herd_warning", "raining_stones"],
         leaning: "aggression",
-        delta: { situationalBonus: { condition: "flanking", multiplier: 1.25 } },
+        delta: { jamCooldownTicks: 1 },
       },
     },
   },
@@ -4820,7 +4831,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "steady_approach",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["sharpened_talons"], ["feint_and_strike"]],
+        prerequisitesAnyOf: [["sharpened_talons"], ["riding_the_gust"]],
         leaning: "aggression",
         delta: { accuracy: 10 },
       },
@@ -4887,15 +4898,15 @@ export const MOVES: Record<string, MoveSpec> = {
         // one bird.
         delta: { shape: { kind: "cone", length: 3, width: 3 }, power: 10 },
       },
-      // Crosslink: Aggression <-> Boldness — a feint on the wind before the
-      // real strike, Boldness's air control feeding Aggression's dive.
-      feint_and_strike: {
-        id: "feint_and_strike",
-        name: "Feint and Strike",
+      // Crosslink: Aggression <-> Boldness — rides the same current that
+      // keeps it airborne straight into range before the target can react.
+      riding_the_gust: {
+        id: "riding_the_gust",
+        name: "Riding the Gust",
         cost: 1,
         prerequisites: ["diving_strike", "evasive_flight"],
         leaning: "aggression",
-        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 12 } },
+        delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" } },
       },
       // --- Boldness: "Wind Rider" — a bird doesn't tank a hit, it's just
       // not there when the hit arrives. Air superiority, not raw bulk.
@@ -4919,7 +4930,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "banking_turn",
         name: "+5 Power",
         cost: 1,
-        prerequisitesAnyOf: [["riding_thermals"], ["feint_and_strike"], ["guard_the_flock"]],
+        prerequisitesAnyOf: [["riding_thermals"], ["riding_the_gust"], ["screening_dive"]],
         leaning: "boldness",
         delta: { power: 5 },
       },
@@ -4989,16 +5000,15 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "unshaken", value: 1 },
         delta: {},
       },
-      // Crosslink: Boldness <-> Sociability — the same air control that
-      // keeps this bird alive extends to covering the flock.
-      guard_the_flock: {
-        id: "guard_the_flock",
-        name: "Guard the Flock",
+      // Crosslink: Boldness <-> Sociability — the same rising current that
+      // lifts this bird clear of a hit lifts a flock-mate too.
+      screening_dive: {
+        id: "screening_dive",
+        name: "Screening Dive",
         cost: 1,
         prerequisites: ["evasive_flight", "warning_cry"],
         leaning: "sociability",
-        grantsPassive: { kind: "damageReduction", value: 0.05 },
-        delta: {},
+        delta: { targetsAlly: true, allyEffect: { buff: { stat: "speed", stage: 1, ticks: 15 } } },
       },
       // --- Sociability: "Flock Signal" — a prey bird's real defense isn't
       // toughness, it's the flock: a warning cry, then the whole group
@@ -5022,7 +5032,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "quicker_call",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["sharper_call"], ["guard_the_flock"]],
+        prerequisitesAnyOf: [["sharper_call"], ["screening_dive"]],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
@@ -5094,15 +5104,16 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "healAura", value: 0.01 },
         delta: {},
       },
-      // Crosslink: Sociability <-> Aggression — the same cry that warns the
-      // flock also tells this one exactly when the target's off guard.
-      ambush_call: {
-        id: "ambush_call",
-        name: "Ambush Call",
+      // Crosslink: Sociability <-> Aggression — strikes right as the cry
+      // scatters the rest of the flock clear, knocking the target away from
+      // wherever it would've followed.
+      scattering_strike: {
+        id: "scattering_strike",
+        name: "Scattering Strike",
         cost: 1,
         prerequisites: ["warning_cry", "diving_strike"],
         leaning: "aggression",
-        delta: { situationalBonus: { condition: "flanking", multiplier: 1.25 } },
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" } },
       },
     },
   },
@@ -6153,14 +6164,14 @@ export const MOVES: Record<string, MoveSpec> = {
         delta: { cooldownTicks: -1 },
       },
       // Crosslink: Aggression <-> Boldness — the hunger it takes goes
-      // straight into a hardier hide.
+      // straight into a hardier stalk, not just a bigger haul.
       grounded_hunger: {
         id: "grounded_hunger",
         name: "Grounded Hunger",
         cost: 1,
         prerequisites: ["ravenous_bite", "steady_roots"],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReduction", value: 0.04 },
+        grantsPassive: { kind: "defenseBoost", value: 0.04 },
         delta: {},
       },
       // --- Boldness: "Deep Taproot" — a slower, safer, more sustainable

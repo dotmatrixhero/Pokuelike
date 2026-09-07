@@ -4661,3 +4661,31 @@ not something this pathfinding pass itself caused or is positioned to fix.
         and Growth are the next candidates (both Bulbasaur's own moves,
         both need small new delta support the same way Leech Seed did —
         `matingRadiusBoost` is already added; `fertilityBoost` isn't yet).
+- [x] **Design review pass on the last 6 trees: fixed a missing crosslink,
+      diversified 3 reused crosslink templates** — direct follow-up: "Hmm..
+      You're missing a lot of deeper cross links. And your designs are
+      kinda uninspired..." A quick script counting each tree's own
+      crosslink comments found a real bug: Vine Whip was 32 nodes/2
+      crosslinks, not 33/3 like every other tree — its Sociability↔
+      Aggression bridge was never written. Added *Thorned Bouquet*
+      (`critRateStage`). Separately, the "uninspired" complaint was also
+      real and verifiable: Aggression↔Boldness had settled into the exact
+      same `statChangeOnHit: self attack +1` three times (Wing Attack,
+      Rock Slide, Flamethrower), Boldness↔Sociability into the same
+      `damageReduction` grant four times, Sociability↔Aggression into the
+      same `situationalBonus: flanking 1.25` three times — a real
+      authoring rut. Reworked all of them to something specific to each
+      move's own fantasy: Vine Whip's *Grafted Vines* (`positionSwap`),
+      Wing Attack's *Riding the Gust*/*Screening Dive*/*Scattering Strike*
+      (`forcedMovement`/ally speed buff/onHit knockback), Rock Slide's
+      *Quarried Weight*/*Steadfast Warning*/*Second Wave*
+      (`weightScaling`/`defenseBoost`/`jamCooldownTicks`), Flamethrower's
+      *Molten Edge*/*Ember Ward*/*Flashpoint*
+      (`defensePenetration`/`thorns`/`critRateStage`), and Leech Seed's
+      *Grounded Hunger* swapped to `defenseBoost` (it was an exact
+      duplicate of Dig's own crosslink otherwise). Dig's three were left
+      alone — already distinct, about as varied as an honestly-narrow tree
+      gets. No two crosslinks within this six-tree batch share a mechanic
+      now. Verified live (Vine Whip's new crosslink auto-respecs for a
+      real Bulbasaur). Full data suite green (236/236, same count — a
+      rebalance, not new content). Atlas rebuilt and republished.
