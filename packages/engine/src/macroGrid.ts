@@ -497,6 +497,9 @@ const LANDMARK_RESOURCE_BONUS: Partial<Record<LandmarkType, number>> = {
   greatLake: 0.25,
   fertileBasin: 0.3,
   sacredSpring: 0.15,
+  // Direct ask: "make certain zones more hospitable" — a Sanctuary reads as
+  // genuinely abundant, on the same order as Fertile Basin.
+  sanctuary: 0.3,
 };
 
 /** A never-visited zone's estimated `RegionAggregate.baseResourceIndex` — see `RESOURCE_ESTIMATE_SCALE`'s doc comment for why this is only an estimate, not a measurement. */
@@ -643,6 +646,36 @@ const LANDMARK_PREDATOR_POOL_BONUS = 2;
 const PREDATOR_POPULATION_DISCOUNT = 0.55;
 
 /**
+ * Direct ask: "make certain zones more hospitable and prey friendly." A
+ * Sanctuary zone (`landmarks.ts`'s new landmark type) caps its predator
+ * species pool tighter than an ordinary zone's own `ZONE_PREDATOR_POOL_CAP`
+ * (2, or up to 4 at a congregation landmark) — real safety in numbers,
+ * genuinely fewer distinct hunting species call it home at all, not just a
+ * thinner population of whichever ones do. `sanctuary` is not itself a
+ * congregation-type landmark (not in `LANDMARK_POPULATION_MULTIPLIER`), so
+ * this override replaces the ordinary cap rather than composing with the
+ * congregation bonus — the two kinds of "special zone" are mutually
+ * exclusive per zone anyway (`placeLandmarks` gives each zone at most one
+ * landmark).
+ */
+const SANCTUARY_PREDATOR_POOL_CAP = 1;
+/**
+ * On top of the tighter species-pool cap above, a Sanctuary further thins
+ * whatever predator population does show up — composes multiplicatively
+ * with the ordinary `PREDATOR_POPULATION_DISCOUNT`, so a Sanctuary's
+ * predator population lands well below even an ordinary zone's already-
+ * discounted one. Real, not just "fewer predator species": the ones that
+ * are there are also a smaller pack.
+ */
+const SANCTUARY_PREDATOR_POPULATION_DISCOUNT = 0.6;
+/**
+ * A Sanctuary's own prey population gets a real bonus multiplier, on top of
+ * the landmark's resource-richness bump (`LANDMARK_RESOURCE_BONUS`) — the
+ * genuinely "prey friendly" half of the ask, not just "predator-thin."
+ */
+const SANCTUARY_PREY_POPULATION_MULTIPLIER = 1.4;
+
+/**
  * Deterministically (via `rng`, the zone's own seeded stream) picks up to
  * `n` entries from `list`, preserving none of the original order (a partial
  * Fisher-Yates shuffle — only as many swaps as `n` needs, not a full shuffle
@@ -676,14 +709,20 @@ function pickRandomSubset<T>(list: readonly T[], n: number, rng: () => number): 
  * random draw across all fitting species occasionally would. A habitat with
  * zero fitting predator species (this roster's desert biome, say) simply
  * gets an all-prey pool — nothing to force.
+ *
+ * `predatorCapOverride`, when given, REPLACES the ordinary
+ * `ZONE_PREDATOR_POOL_CAP` (+ congregation bonus) math entirely rather than
+ * composing with it — currently only `estimateZoneSpecies`'s Sanctuary case
+ * (`SANCTUARY_PREDATOR_POOL_CAP`), see that constant's own doc comment for
+ * why the two "special zone" mechanisms don't need to compose.
  */
-function pickZoneSpeciesPool(fitting: readonly ImmigrationSpeciesInfo[], poolBonus: number, isCongregationLandmark: boolean, rng: () => number): ImmigrationSpeciesInfo[] {
+function pickZoneSpeciesPool(fitting: readonly ImmigrationSpeciesInfo[], poolBonus: number, isCongregationLandmark: boolean, predatorCapOverride: number | undefined, rng: () => number): ImmigrationSpeciesInfo[] {
   const poolSize = ZONE_SPECIES_POOL_MIN + poolBonus + Math.floor(rng() * (ZONE_SPECIES_POOL_MAX - ZONE_SPECIES_POOL_MIN + 1));
   if (fitting.length <= poolSize) return [...fitting];
 
   const predators = fitting.filter((s) => s.isPredator);
   const prey = fitting.filter((s) => !s.isPredator);
-  const predatorCap = ZONE_PREDATOR_POOL_CAP + (isCongregationLandmark ? LANDMARK_PREDATOR_POOL_BONUS : 0);
+  const predatorCap = predatorCapOverride ?? ZONE_PREDATOR_POOL_CAP + (isCongregationLandmark ? LANDMARK_PREDATOR_POOL_BONUS : 0);
   const pickedPredators = pickRandomSubset(predators, Math.min(predatorCap, poolSize), rng);
   const pickedPrey = pickRandomSubset(prey, poolSize - pickedPredators.length, rng);
   return [...pickedPredators, ...pickedPrey];
@@ -693,14 +732,33 @@ export function estimateZoneSpecies(zone: MacroZone, roster: readonly Immigratio
   const estimates: ZoneSpeciesEstimate[] = [];
   const multiplier = zone.landmark ? (LANDMARK_POPULATION_MULTIPLIER[zone.landmark] ?? 1) : 1;
   const isCongregationLandmark = zone.landmark !== undefined && LANDMARK_POPULATION_MULTIPLIER[zone.landmark] !== undefined;
+  // Direct ask: "make certain zones more hospitable and prey friendly" —
+  // see SANCTUARY_PREDATOR_POOL_CAP/_PREDATOR_POPULATION_DISCOUNT/_PREY_
+  // POPULATION_MULTIPLIER's own doc comments for the three real mechanics
+  // this flag gates below.
+  const isSanctuary = zone.landmark === "sanctuary";
   const fitting = roster.filter((species) => speciesFitsZone(species, zone));
-  const pool = pickZoneSpeciesPool(fitting, isCongregationLandmark ? LANDMARK_SPECIES_POOL_BONUS : 0, isCongregationLandmark, rng);
+  const pool = pickZoneSpeciesPool(
+    fitting,
+    isCongregationLandmark ? LANDMARK_SPECIES_POOL_BONUS : 0,
+    isCongregationLandmark,
+    isSanctuary ? SANCTUARY_PREDATOR_POOL_CAP : undefined,
+    rng
+  );
   for (const species of pool) {
-    const predatorDiscount = species.isPredator ? PREDATOR_POPULATION_DISCOUNT : 1;
+    const populationMultiplier =
+      (species.isPredator
+        ? PREDATOR_POPULATION_DISCOUNT * (isSanctuary ? SANCTUARY_PREDATOR_POPULATION_DISCOUNT : 1)
+        : isSanctuary
+          ? SANCTUARY_PREY_POPULATION_MULTIPLIER
+          : 1) *
+      // See `ImmigrationSpeciesInfo.rarity`'s own doc comment — direct ask:
+      // "make arboks less common."
+      (species.rarity ?? 1);
     estimates.push({
       speciesId: species.id,
       homeLayer: species.homeLayer,
-      population: (SEED_POPULATION_BASE + rng() * SEED_POPULATION_VARIANCE) * multiplier * predatorDiscount,
+      population: (SEED_POPULATION_BASE + rng() * SEED_POPULATION_VARIANCE) * multiplier * populationMultiplier,
       minLevel: species.minLevel,
       singleStage: species.singleStage,
       isPredator: species.isPredator,

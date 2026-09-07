@@ -37,7 +37,8 @@ export type LandmarkType =
   | "tunnelWarren"
   | "boneGrounds"
   | "frozenGrotto"
-  | "crossroads";
+  | "crossroads"
+  | "sanctuary";
 
 export const LANDMARK_TYPES: readonly LandmarkType[] = [
   "greatLake",
@@ -50,6 +51,7 @@ export const LANDMARK_TYPES: readonly LandmarkType[] = [
   "boneGrounds",
   "frozenGrotto",
   "crossroads",
+  "sanctuary",
 ];
 
 interface LandmarkDef {
@@ -137,6 +139,18 @@ export const LANDMARK_DEFS: Record<LandmarkType, LandmarkDef> = {
     minLandNeighbors: 3,
     chancePerEligibleZone: 0.001,
     maxCount: 6,
+  },
+  // Direct ask: "make certain zones more hospitable and prey friendly." A
+  // real thinned-predator, resource-rich pocket — see macroGrid.ts's own
+  // `SANCTUARY_*` constants for the actual population-mix mechanics this
+  // unlocks (thinner/fewer predator presence, a real prey population
+  // bonus), on top of the ordinary lush-biome resource richness a Sanctuary
+  // shares with Fertile Basin/Sacred Spring.
+  sanctuary: {
+    name: "Sanctuary",
+    eligibleBiomes: ["grassland", "forest", "wetland", "jungle"],
+    chancePerEligibleZone: 0.0006,
+    maxCount: 8,
   },
 };
 

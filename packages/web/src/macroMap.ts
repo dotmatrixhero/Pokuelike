@@ -76,6 +76,7 @@ const LANDMARK_MARKER_COLOR: Record<LandmarkType, Rgb> = {
   boneGrounds: [235, 230, 210],
   frozenGrotto: [150, 230, 240],
   crossroads: [255, 220, 50],
+  sanctuary: [255, 175, 205],
 };
 
 /** Small circular marker centered on a landmark zone's block, radius scaled to zoom but floored so it's still visible zoomed all the way out. */

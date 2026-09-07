@@ -12940,3 +12940,92 @@ targeting itself is fully dynamic power-ratio matching
 `HUNT_RULES.charizard`/`HUNT_RULES.charmeleon` both confirmed `true` on a
 real `createDemoWorld` build. Full engine (1099 tests) and data (177 tests)
 suites green throughout.
+
+## Zone-spawning tuning: predator/prey level gap, Sanctuary landmark, Arbok rarity
+
+Direct report: "we need to tune spawning a zone more. Predator and prey gap
+level wise is a bit too high. Make em average out to each other. Prey
+should have a wider range of levels. That skew their avg level down. Also
+make certain zones more hospitable and prey friendly." Plus a mid-session
+follow-up: "Make arboks less common. I just don't like em lol."
+
+**Predator/prey level-gap narrowing.** `immigration.ts`'s `rollImmigrantLevel`
+(used both for a walking-in immigrant AND, now, for `overworld.ts`'s
+`estimateInitialAggregates` — a never-visited zone's own "spawn," which
+previously duplicated an out-of-date copy of the same formula instead of
+calling the shared function):
+- `PREDATOR_LEVEL_BOOST` halved (15 -> 6) — predators still read as
+  established individuals, just no longer wide enough on their own to make
+  every encounter one-sided.
+- Prey (non-predator) species get their own, wider jitter band
+  (`PREY_LEVEL_JITTER` = 16, double the old shared 8; `SINGLE_STAGE_PREY_
+  LEVEL_JITTER` = 40 for a `singleStage` prey species, up from 30) —
+  genuinely "a wider range of levels."
+- That wider prey band is sampled with `rng() ** PREY_LEVEL_SKEW` (skew =
+  4, mean fraction 1/5) instead of a uniform roll — the extra range's mass
+  sits toward the LOW end, which is the actual mechanism that pulls the
+  prey average down (a uniform widening alone would have left the average
+  unchanged or raised it). Predators stay a plain uniform roll, unchanged.
+- `overworld.ts`'s `promoteZone` also widens the per-individual variance
+  around an already-invented population's tracked average for prey (±8,
+  was ±4) vs. predators (±4, unchanged) — the "wider range" carries through
+  to the individual-spawn layer too, not just the aggregate estimate.
+
+**Sanctuary landmark** (`landmarks.ts`) — a new, real landmark type, direct
+ask: "make certain zones more hospitable and prey friendly." Eligible in
+grassland/forest/wetland/jungle, same rarity tier as Fertile Basin. Three
+real mechanics, all in `macroGrid.ts`:
+- `LANDMARK_RESOURCE_BONUS.sanctuary = 0.3` — as resource-rich as Fertile
+  Basin.
+- `SANCTUARY_PREDATOR_POOL_CAP = 1` — a Sanctuary's predator species pool
+  is capped tighter than an ordinary zone's `ZONE_PREDATOR_POOL_CAP` (2),
+  via a new `predatorCapOverride` parameter on `pickZoneSpeciesPool` that
+  replaces (rather than composes with) the ordinary cap math.
+- `SANCTUARY_PREDATOR_POPULATION_DISCOUNT` (0.6, composes multiplicatively
+  with the ordinary `PREDATOR_POPULATION_DISCOUNT`) and `SANCTUARY_PREY_
+  POPULATION_MULTIPLIER` (1.4) further thin whatever predator population
+  does show up and boost prey population, on top of the species-pool cap.
+
+Real, distinct terrain too (`worldgen.ts`'s `applySanctuary`, wired into
+`applyLandmarkFeature`): a small water pocket at the landmark's center,
+obstacles (wall/boulder/tree) thinned out across its footprint — open
+sightlines a prey animal can actually see a threat coming across — and
+dense food/bush growth throughout.
+
+**Arbok rarity.** New `SpeciesDef.rarity` field (default `1`, unchanged
+frequency) — a per-species multiplier threaded through both
+`immigration.ts`'s `pickImmigrantSpecies` selection weight and
+`macroGrid.ts`'s `estimateZoneSpecies` invented population size. Arbok set
+to `0.35`. Deliberately does NOT weight `pickZoneSpeciesPool`'s species-pool
+*inclusion* roll (a zone with grassland/jungle habitat can still list Arbok
+among its fitting predators) — only how large a population it gets once
+included, and how often it's picked as a live immigrant. Ekans (its own
+base form) is untouched.
+
+### Real-run findings
+
+A 400x400 macro grid: Sanctuary's resource index read 0.82 vs. 0.52 for a
+plain zone of the same biome; its predator species count read 1 vs. 2 for
+the same plain zone. A controlled (`rng() => 0.5`) single-zone A/B (the
+same fixed-roll technique the new unit tests use) confirmed the prey
+population bump directly — an uncontrolled continuous-rng comparison across
+two different zones is NOT a fair A/B here (pool size and which specific
+species get picked both roll independently per call), which is why the
+unit tests fix `rng` rather than sampling a real stream. Arbok's real
+population share: across a 20,001-zone scan, Arbok's total estimated
+population (7311.9) came in well under Onix's (13664.3) — a same-tier
+predator with a narrower biome tag but no rarity discount — confirming the
+`0.35` multiplier bites at the population level even though Arbok, being
+eligible in more common biomes, still appears in more zones' species lists
+than Onix does. Full engine suite (1129 tests) and data suite (236 tests)
+green throughout, including new direct coverage for the level-gap skew
+mechanism, the Sanctuary's three population mechanics, and Arbok's reduced
+immigrant-selection weight and invented population.
+
+Two flaky pre-existing failures were seen during this work, both in
+`predation.test.ts`, both confirmed unrelated to these changes (pass
+reliably every time when that file is run in isolation — the file's own
+top-of-file doc comment already documents this exact "unseeded `Math.random`
+in a few older tests" flakiness class): "burn halves the burned attacker's
+physical damage output" and "storm/drought/rain check the active weather
+cell." Neither test was touched by this work.

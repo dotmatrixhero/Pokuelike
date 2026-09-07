@@ -100,6 +100,19 @@ export interface SpeciesDef {
    * (spawn.ts), same pattern as `isPredator`/`buildsShelter`.
    */
   obligateAquatic?: boolean;
+  /**
+   * A multiplier on how often this species shows up — both as a walking-in
+   * immigrant (`@pokuelike/engine`'s `immigration.ts`'s `pickImmigrantSpecies`
+   * weight) and in how large its invented population is wherever a
+   * never-visited zone estimates one owning it (`macroGrid.ts`'s
+   * `estimateZoneSpecies`). Direct ask: "make arboks less common. I just
+   * don't like em lol" — a real, judged-per-species dial rather than a
+   * zone-wide/global rule change (same "judged per-species" standard as
+   * `isPredator`/`buildsShelter`/`obligateAquatic` above), so ONE species can
+   * be dialed down without touching anything else on the roster. Absent =
+   * `1`, ordinary/unchanged frequency for every other species.
+   */
+  rarity?: number;
 }
 
 /**
@@ -133,6 +146,7 @@ export function speciesFromDex(dexKey: string, sim: SimSpeciesFields): SpeciesDe
     biomes: sim.biomes,
     preferredTerrain: sim.preferredTerrain,
     obligateAquatic: sim.obligateAquatic,
+    rarity: sim.rarity,
   };
 }
 
@@ -713,6 +727,11 @@ export const SPECIES: Record<string, SpeciesDef> = {
     isPredator: true,
     activityPattern: "nocturnal",
     biomes: ["grassland", "jungle"],
+    // Direct ask: "make arboks less common. I just don't like em lol" — a
+    // real, judged-per-species dial (see `SpeciesDef.rarity`'s own doc
+    // comment), not a change to Ekans (its own base form) or any other
+    // species on the roster.
+    rarity: 0.35,
   }),
   caterpie: speciesFromDex("CATERPIE", {
     spriteKey: "caterpie",

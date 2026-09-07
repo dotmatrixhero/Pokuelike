@@ -11,6 +11,8 @@ import {
   MIN_TICKS_BETWEEN_IMMIGRATIONS,
   POP_HARD_CAP,
   POP_SOFT_CAP,
+  PREDATOR_LEVEL_BOOST,
+  PREY_LEVEL_JITTER,
   type ImmigrationContext,
   type ImmigrationSpeciesInfo,
 } from "../src/immigration.js";
@@ -253,6 +255,27 @@ describe("immigration data plumbing (bare-engine roster)", () => {
     const speciesSeen = new Set(world.agents.map((a) => a.species));
     expect(speciesSeen.size).toBeGreaterThan(0);
   });
+
+  it("a species with a lower `rarity` shows up as an immigrant less often than an otherwise-identical species — direct ask: 'make arboks less common'", () => {
+    const ctx: ImmigrationContext = {
+      speciesRoster: [
+        { id: "common-species", homeLayer: "surface" },
+        { id: "rare-species", homeLayer: "surface", rarity: 0.35 },
+      ],
+      spawnAgent: stubSpawnAgent,
+    };
+    const world = createWorld(60, 60, 5);
+    const log = new EventLog();
+    const rng = seededRng(1234);
+    for (let i = 0; i < 5000; i++) {
+      world.tick += 1;
+      maybeImmigrate(world, ctx, log, rng);
+    }
+    const commonCount = world.agents.filter((a) => a.species === "common-species").length;
+    const rareCount = world.agents.filter((a) => a.species === "rare-species").length;
+    expect(rareCount).toBeGreaterThan(0); // rarity thins it out, doesn't ban it
+    expect(rareCount).toBeLessThan(commonCount);
+  });
 });
 
 describe("rollImmigrantLevel (direct ask: \"why does everything spawn at lv5... some randomness in starting rolls would be good\")", () => {
@@ -263,13 +286,14 @@ describe("rollImmigrantLevel (direct ask: \"why does everything spawn at lv5... 
     expect(rollImmigrantLevel(BASE_FORM, () => 0)).toBe(5);
   });
 
-  it("a base-form species gets real jitter on top of the base default", () => {
-    expect(rollImmigrantLevel(BASE_FORM, () => 0.99)).toBe(5 + 7); // floor(0.99 * 8) = 7
+  it("a base-form (non-predator) species gets real, wide, low-skewed jitter on top of the base default", () => {
+    // PREY_LEVEL_JITTER(16), PREY_LEVEL_SKEW(4): floor(0.99**4 * 16) = floor(15.37) = 15.
+    expect(rollImmigrantLevel(BASE_FORM, () => 0.99)).toBe(5 + 15);
   });
 
-  it("an evolved species floors at its own real evolution level, not the flat base default", () => {
+  it("an evolved (non-predator) species floors at its own real evolution level, not the flat base default", () => {
     expect(rollImmigrantLevel(EVOLVED, () => 0)).toBe(32);
-    expect(rollImmigrantLevel(EVOLVED, () => 0.99)).toBe(32 + 7);
+    expect(rollImmigrantLevel(EVOLVED, () => 0.99)).toBe(32 + 15);
   });
 
   it("an evolved species below the base default still floors at the base default (max, not additive)", () => {
@@ -289,9 +313,40 @@ describe("rollImmigrantLevel (direct ask: \"why does everything spawn at lv5... 
   });
 
   it("a real local average level re-centers the roll on it instead of the bare floor — direct ask: immigrants should come in 'matching the level a little more'", () => {
-    // jitter(8) centered on localAvgLevel(50): floor(50 - 8/2) = 46 .. +7 = 53.
-    expect(rollImmigrantLevel(BASE_FORM, () => 0, 50)).toBe(46);
-    expect(rollImmigrantLevel(BASE_FORM, () => 0.99, 50)).toBe(46 + 7);
+    // PREY_LEVEL_JITTER(16) centered on localAvgLevel(50): floor(50 - 16/2) = 42 .. +15 = 57.
+    expect(rollImmigrantLevel(BASE_FORM, () => 0, 50)).toBe(42);
+    expect(rollImmigrantLevel(BASE_FORM, () => 0.99, 50)).toBe(42 + 15);
+  });
+
+  describe("predator/prey level-gap narrowing (direct ask: \"the gap level wise is a bit too high... make em average out to each other... prey should have a wider range of levels\")", () => {
+    const PREDATOR: ImmigrationSpeciesInfo = { id: "scyther", homeLayer: "surface", isPredator: true };
+
+    it("a predator's own jitter is narrower and NOT skewed low — a plain uniform roll, unlike prey", () => {
+      // IMMIGRANT_LEVEL_JITTER(8) uniform: floor(0.99 * 8) = 7.
+      expect(rollImmigrantLevel(PREDATOR, () => 0.99)).toBe(5 + PREDATOR_LEVEL_BOOST + 7);
+    });
+
+    it("a prey roll can reach well beyond a predator's own old (pre-fix) jitter ceiling — the real 'wider range' the ask asked for", () => {
+      // Old prey ceiling was floor+8; the new one comfortably clears it.
+      expect(rollImmigrantLevel(BASE_FORM, () => 0.999)).toBeGreaterThan(5 + 8);
+    });
+
+    it("skewed-low prey rolls cluster well under the jitter band's own midpoint on average — the mechanism that pulls the prey average down", () => {
+      let seed = 7;
+      const rng = () => {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return seed / 0x7fffffff;
+      };
+      let total = 0;
+      const n = 500;
+      for (let i = 0; i < n; i++) total += rollImmigrantLevel(BASE_FORM, rng) - 5; // isolate the jitter contribution
+      const average = total / n;
+      expect(average).toBeLessThan(PREY_LEVEL_JITTER / 2); // well under a uniform roll's own midpoint (8)
+    });
+
+    it("PREDATOR_LEVEL_BOOST was reduced from its original value — the direct lever narrowing the average-level gap", () => {
+      expect(PREDATOR_LEVEL_BOOST).toBeLessThan(15);
+    });
   });
 
   it("a local average below the species' own floor still never rolls under that floor", () => {
