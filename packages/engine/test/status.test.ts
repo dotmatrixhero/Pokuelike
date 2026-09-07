@@ -5,6 +5,8 @@ import { EventLog } from "../src/events.js";
 import type { Agent } from "../src/types.js";
 import {
   BURN_DAMAGE_FRACTION,
+  REGEN_COMBAT_SUPPRESSION_TICKS,
+  suppressPassiveHealing,
   FREEZE_THAW_CHANCE,
   POISON_DAMAGE_FRACTION,
   SLEEP_TICKS_MAX,
@@ -465,5 +467,63 @@ describe("status predicates", () => {
     expect(isAsleep(makeAgent({ status: { kind: "sleep" } }))).toBe(true);
     expect(isFrozen(makeAgent({ status: { kind: "freeze" } }))).toBe(true);
     expect(isBurned(makeAgent())).toBe(false);
+  });
+});
+
+describe("passive healing: flat vs percent, and the out-of-combat gate", () => {
+  it("regenFlat heals an absolute amount, independent of max HP", () => {
+    const small = makeAgent({ hp: 10, maxHp: 30, passives: { regenFlat: 1 } });
+    const big = makeAgent({ id: "a2", hp: 10, maxHp: 100, passives: { regenFlat: 1 } });
+    tickStatusEffects(small);
+    tickStatusEffects(big);
+    expect(small.hp).toBe(11);
+    expect(big.hp).toBe(11);
+  });
+
+  it("is worth proportionally more to a small unit than a big one — the whole point of flat", () => {
+    const small = makeAgent({ hp: 10, maxHp: 30, passives: { regenFlat: 1 } });
+    const big = makeAgent({ id: "a2", hp: 10, maxHp: 100, passives: { regenFlat: 1 } });
+    tickStatusEffects(small);
+    tickStatusEffects(big);
+    const smallShare = (small.hp! - 10) / small.maxHp!;
+    const bigShare = (big.hp! - 10) / big.maxHp!;
+    expect(smallShare).toBeGreaterThan(bigShare * 3);
+  });
+
+  it("percent regen scales with max HP — the capstone-tier version", () => {
+    const small = makeAgent({ hp: 10, maxHp: 30, passives: { regen: 0.1 } });
+    const big = makeAgent({ id: "a2", hp: 10, maxHp: 100, passives: { regen: 0.1 } });
+    tickStatusEffects(small);
+    tickStatusEffects(big);
+    expect(big.hp! - 10).toBeGreaterThan(small.hp! - 10);
+  });
+
+  it("flat and percent stack additively in one tick", () => {
+    const agent = makeAgent({ hp: 10, maxHp: 100, passives: { regen: 0.1, regenFlat: 2 } });
+    tickStatusEffects(agent);
+    expect(agent.hp).toBe(22); // 10 + 100*0.1 + 2
+  });
+
+  it("recent damage suppresses BOTH flat and percent passive healing", () => {
+    const agent = makeAgent({ hp: 10, maxHp: 100, passives: { regen: 0.1, regenFlat: 2 } });
+    suppressPassiveHealing(agent);
+    tickStatusEffects(agent);
+    expect(agent.hp).toBe(10);
+  });
+
+  it("suppression refreshes rather than stacking", () => {
+    const agent = makeAgent();
+    suppressPassiveHealing(agent, 5);
+    suppressPassiveHealing(agent, 3);
+    expect(agent.regenSuppressedTicks).toBe(5);
+  });
+
+  it("wears off after REGEN_COMBAT_SUPPRESSION_TICKS so a disengaged unit really does recover", () => {
+    const agent = makeAgent({ hp: 10, maxHp: 100, passives: { regenFlat: 2 } });
+    suppressPassiveHealing(agent);
+    for (let i = 0; i < REGEN_COMBAT_SUPPRESSION_TICKS - 1; i++) tickStatusEffects(agent);
+    expect(agent.hp).toBe(10);
+    tickStatusEffects(agent);
+    expect(agent.hp).toBe(12);
   });
 });

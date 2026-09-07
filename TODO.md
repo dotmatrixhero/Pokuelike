@@ -4854,3 +4854,58 @@ not something this pathfinding pass itself caused or is positioned to fix.
       subsequent full runs were clean (1334/1334). Unrelated to the move
       trees (data-only change), but worth chasing: likely shared state or
       ordering across parallel test files rather than true randomness.
+- [x] **Persistent fire (`TerrainKind: "fire"`), and the passive-healing
+      problem it exposed.** Direct ask: "for fire based move we gotta add
+      the fire burning down flora mechanic... and it deals dot damage to
+      units standing in fire... gotta have a rendering for it too."
+      - New `fire.ts`: `igniteTile`, `tickFires`, `applyFireDamage`. Fire
+        is a real terrain kind, so it renders everywhere for free, persists,
+        and interacts with movement and flora rather than sitting in a
+        parallel hazards collection.
+      - `terrainBurn` now lights a real fire instead of instantly deleting
+        the bush. Same end state, but it takes ticks and can get away from
+        you. Wildfire's Reach (Flamethrower) is the only node using it.
+      - Measured on real worlds: median 3 tiles burned / 21 ticks, p90 19 /
+        49, max 47 / 59. Sharp percolation threshold in fuel density
+        (60% -> ~12 tiles, 80% -> ~188, 100% -> the whole map); real worlds
+        are ~5% fuel but clustered. Rain: 10 tiles/41 ticks -> 1 tile/3.
+      - Two bugs caught by the tests: `setTile` leaked stale
+        `burnTicksRemaining`, and the spread pass needed collect-then-apply
+        or a fire chains across a whole row in one tick.
+      - 15 fire tests + 2 rewritten `terrainBurn` tests; 1357 passing.
+- [x] **Passive healing gated on being out of combat, and mostly converted
+      to flat HP.** Direct worry: "will users just be unkillable?" —
+      measurably yes. `grantPassive` accumulates with no cap across every
+      move's tree and choices are permanent, so on a 20k run 117/167 living
+      agents carried regen, p90 6%/tick, max 11% (full heal every 9 ticks,
+      mid-fight). Theoretical ceiling 12%/tick.
+      - Any damage taken suppresses `regen`/`healAura` for
+        `REGEN_COMBAT_SUPPRESSION_TICKS`. Lifesteal, ally heals and the
+        fed/watered heal are untouched — those are paid for or already
+        gated. `healAura` checks each recipient, not the holder.
+      - New `"regenFlat"` passive; 31 of 38 nodes converted to flat HP, 7
+        terminal capstones keep percent (raised to 0.04 so percent reads as
+        the special version). Flat 1 HP/tick = 3.3% to a 30-HP unit, 1.4%
+        to a 70-HP one.
+      - Two nodes named "+0.01 Regen" renamed "+0.5 HP Regen".
+      - Effect: flat conversion alone takes 20k population 167 -> 28; the
+        gate takes it 28 -> 8. Both oscillate rather than spiral.
+- [ ] **Open question for a human: is the new carrying capacity right?**
+      The healing fix is clearly correct in kind, but it lowered the 20k
+      population band from ~12-34 to ~7-31 on seed 12345. That may be the
+      ecosystem working properly under real predation pressure, or it may
+      now be too harsh. Needs a game-feel call, and more seeds. Levers still
+      unbuilt if it IS too harsh: diminishing returns on passive stacking
+      instead of the hard out-of-combat gate, a shorter
+      `REGEN_COMBAT_SUPPRESSION_TICKS`, or larger flat values.
+- [ ] **Not built, still on the table** (raised in the same conversation):
+      diminishing returns on stacked passives, and a per-move
+      heal-reduction lever (Heal Block-style) the trees could reach for.
+      Both are real design levers, neither is needed to close the
+      unkillable problem now that the gate and flat conversion are in.
+- [ ] **Fire is currently inert in real runs.** A 20k-tick run produced
+      zero ignitions — `terrainBurn` lives only on Wildfire's Reach, deep
+      in Flamethrower's Aggression branch, and no agent in the demo world
+      reached it. The mechanic is real and tested but effectively unseen.
+      Worth either seeding fire more broadly across the fire-type trees or
+      accepting it as a rare, memorable event.

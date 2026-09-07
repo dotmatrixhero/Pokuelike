@@ -105,9 +105,22 @@ needed" checklist for the exact code paths behind each one):
 - **Ally-facing**: `targetsAlly`/`allyEffect` (heal/buff),
   `allyEffectOnAttack`
 - **Persistent passives** (`grantsPassive`/`grantsPassives`):
-  `damageReduction`, `defenseBoost`, `immovable`, `regen`, `thorns`,
-  `healAura`, `aquaticHaste`, `nonTerritorial`, `calmingPresence`,
-  `unshaken`
+  `damageReduction`, `defenseBoost`, `immovable`, `regen`, `regenFlat`,
+  `thorns`, `healAura`, `aquaticHaste`, `nonTerritorial`,
+  `calmingPresence`, `unshaken`
+  - **Passives accumulate permanently and without a cap**, across every
+    move a unit knows — `grantPassive` is a `+=`, and tree choices are
+    never removed. So the question for any passive is never "is this node
+    balanced" but "what does the SUM of every node granting this look like
+    on a long-lived agent." That went unasked for `regen` and produced
+    agents healing 11% of max HP per tick, mid-fight (see MOVES_DESIGN.md).
+  - Healing specifically: reach for **`regenFlat`** (flat HP) by default.
+    It is worth proportionally more to a small early unit than a big late
+    one, which is the curve you almost always want. Reserve percentage
+    `regen` for capstones, where being disproportionately strong is the
+    point. Both are gated on being out of combat; lifesteal and ally heals
+    are not, which is the deliberate line between passive and active
+    healing.
 - **Big/rare**: `chargeAttack` (wind-up + genuine invulnerability),
   `statChangeOnHit` (temporary stat stages)
 - **Structural**: `excludes` (real forks), `prerequisitesAnyOf`

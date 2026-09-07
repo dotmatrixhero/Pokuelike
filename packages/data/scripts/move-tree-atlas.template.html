@@ -889,9 +889,10 @@
   var PASSIVE_LABEL = {
     damageReduction: function (v) { return "Passive — takes " + pct(v) + " less damage from every hit."; },
     immovable: function () { return "Passive — can't be dragged, knocked back, or lunged at by anything."; },
-    regen: function (v) { return "Passive — heals " + pct(v) + " of max HP every tick, on its own."; },
+    regen: function (v) { return "Passive — heals " + pct(v) + " of max HP every tick, on its own. Only out of combat (any damage taken suppresses it briefly)."; },
+    regenFlat: function (v) { return "Passive — heals a flat " + v + " HP every tick, on its own. Worth proportionally more to a small unit than a big one. Only out of combat (any damage taken suppresses it briefly)."; },
     thorns: function (v) { return "Passive — reflects " + pct(v) + " of incoming damage back onto the attacker."; },
-    healAura: function (v) { return "Passive — heals every nearby herd-mate (itself included) " + pct(v) + " of max HP every tick."; },
+    healAura: function (v) { return "Passive — heals every nearby herd-mate (itself included) " + pct(v) + " of max HP every tick. Each recipient must be out of combat."; },
     defenseBoost: function (v) { return "Passive — permanently raises its own Defense stat-stage by " + v + "."; },
     aquaticHaste: function (v) { return "Passive — every nearby herd-mate (itself included) moves " + pct(v) + " faster while standing on water."; },
     nonTerritorial: function () { return "Passive — never initiates a fight over a contested resource tile (can still be targeted by someone else's)."; },

@@ -5,6 +5,7 @@ import { tickWorld } from "../src/simulation.js";
 import { applyPredationInstincts, preferMarked } from "../src/predation.js";
 import { EventLog } from "../src/events.js";
 import { mulberry32 } from "../src/rng.js";
+import { FIRE_BURN_TICKS } from "../src/fire.js";
 import type { Agent, HuntRules } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 import type { Disposition } from "../src/nature.js";
@@ -1515,14 +1516,31 @@ describe("jamCooldownTicks/terrainBurn/statusSpreads wired into real combat", ()
     expect(target.moveCooldowns?.["some-move"]).toBe(5);
   });
 
-  it("terrainBurn reverts a bush tile the defender stands on to floor", () => {
+  it("terrainBurn lights a real, persistent fire on the bush the defender stands on", () => {
+    // Was "reverts the bush straight to floor". terrainBurn now starts a
+    // fire that burns down over time and can spread (fire.ts) — the end
+    // state is still scorched floor, it just takes ticks to get there and
+    // is a hazard while it does.
     const BURN_TERRAIN_MOVE: MoveSpec = { ...TEST_MOVE, id: "burn-terrain-move", terrainBurn: true };
     const world = createWorld(10, 10);
+    world.weatherCells = [];
     setTile(world, "surface", 5, 5, "bush");
     const target = prey({ x: 5, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [BURN_TERRAIN_MOVE] });
     world.agents.push(hunter, target);
     tickWorld(world, undefined, RULES);
+    expect(world.tiles.surface[5 * world.width + 5].terrain).toBe("fire");
+  });
+
+  it("a terrainBurn fire eventually burns itself out to scorched floor", () => {
+    const BURN_TERRAIN_MOVE: MoveSpec = { ...TEST_MOVE, id: "burn-terrain-move", terrainBurn: true };
+    const world = createWorld(10, 10);
+    world.weatherCells = [];
+    setTile(world, "surface", 5, 5, "bush");
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [BURN_TERRAIN_MOVE] });
+    world.agents.push(hunter, target);
+    for (let i = 0; i < FIRE_BURN_TICKS + 2; i++) tickWorld(world, undefined, RULES);
     expect(world.tiles.surface[5 * world.width + 5].terrain).toBe("floor");
   });
 

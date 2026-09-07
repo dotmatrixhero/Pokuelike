@@ -95,6 +95,10 @@ export function setTile(
   tile.opaque = isOpaqueTerrain(terrain);
   tile.stock = terrain === "food" ? WORLDGEN_FOOD_MAX_STOCK : terrain === "flora" ? 1 : undefined;
   tile.growth = terrain === "seedling" ? 0 : undefined;
+  // Cleared for the same reason as `stock`/`growth` above: a tile that
+  // stops being fire (burnt out, or rained into water) must not keep stale
+  // fuel that would make it burn on again later.
+  tile.burnTicksRemaining = undefined;
   tile.flavor = terrain === "food" || terrain === "flora" ? flavor : undefined;
   tile.concealment = terrain === "bush" || terrain === "shelter" ? true : undefined;
   tile.vacantTicks = terrain === "shelter" ? 0 : undefined;

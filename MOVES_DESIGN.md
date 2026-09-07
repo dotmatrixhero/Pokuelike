@@ -2639,3 +2639,104 @@ actually reading the data, and it immediately found `dig.never_still` and
 `leech_seed.wider_reach` had lost their `leaning` field and would have
 rendered invisibly. A verification step that has never once printed a
 failure has not been verified.
+
+## Persistent fire, and the passive-healing cap it exposed
+
+Two things landed together here, and the second one only got found because
+the first one needed tuning against it.
+
+### Fire is a terrain kind, not a status
+
+Direct ask: "for fire based move we gotta add the fire burning down flora
+mechanic... and it deals dot damage to units standing in fire... gotta have
+a rendering for it too."
+
+`"fire"` is a real `TerrainKind` (fire.ts), not a status or a parallel
+"hazards" collection. That single choice is what makes it render in every
+renderer for free, persist across ticks, and interact with the movement and
+flora systems that already exist. A burning tile counts down
+`Tile.burnTicksRemaining`, may spread into adjacent `FLAMMABLE_TERRAIN`
+(flora/bush/tree/food/seedling — vegetation only, which is what bounds a
+burn), damages whatever stands in it, and reverts to scorched "floor".
+`terrainBurn` — which previously just deleted a bush outright — now lights
+one of these instead. Same end state, but it takes ticks, it is visible
+while it happens, and it can get away from you.
+
+**Measured, on real generated worlds** (60 burns lit at real flora tiles):
+
+| | median | p90 | max |
+|---|---|---|---|
+| tiles burned | 3 | 19 | 47 |
+| ticks alive | 21 | 49 | 59 |
+
+The interesting property is a genuine percolation threshold in fuel
+density: at 60% uniform fuel a fire takes ~12 tiles, at 80% it takes ~188,
+at 100% it takes the entire map. Real worlds are ~5% fuel globally but
+*clustered*, which is why they land in the interesting middle rather than
+at either extreme. Rain cuts a burn from 10 tiles/41 ticks to 1 tile/3
+ticks.
+
+Two bugs the tests caught while building it, both worth remembering:
+`setTile` cleared every other terrain-specific field but not
+`burnTicksRemaining`, so a burnt-out tile kept stale fuel; and the spread
+pass had to collect-then-apply, or a fire chains across an unbounded run of
+fuel within a single tick (the classic grid-cellular-automaton bug).
+
+### The real finding: stacked passive regen made units nearly unkillable
+
+Tuning fire's damage-over-time meant asking what it had to out-heal, which
+surfaced a direct worry: "I'm a little worried that heal over time will be
+too strong though. Particularly every tick. With all these stacking effects
+will users just be unkillable?"
+
+**It was measurably true.** `grantPassive` does `+= value` with no cap,
+tree choices are permanent and never removed, and an agent spends points
+across the trees of *every* move it knows — so a long-lived agent trends
+toward the sum of every regen node it can reach. On a 20k-tick run:
+
+| | before |
+|---|---|
+| agents carrying regen | 117 of 167 |
+| p90 | 6%/tick |
+| max | 11%/tick — a full heal every 9 ticks, mid-fight |
+
+The population had climbed to 167 precisely *because* nothing could
+finish a kill. The theoretical ceiling was worse still: a 12-point build in
+leech_seed or dig reaches 12%/tick.
+
+Two fixes, both from a direct steer:
+
+1. **Passive healing is gated on being out of combat.** "Make combat
+   healing like leech seed different than passive healing, which requires
+   unit to be out of combat." Any damage taken — a hit, recoil, thorns, or
+   standing in fire — suppresses `regen`/`healAura` for
+   `REGEN_COMBAT_SUPPRESSION_TICKS`. Lifesteal, ally heals and the
+   fed/watered `applyHealOverTime` are deliberately untouched: those are
+   paid for by an action, capped by a real resource, or already gated.
+   `healAura` checks each *recipient* rather than the holder — gating on
+   the holder would get both halves backwards.
+2. **Non-capstone nodes grant flat HP, not a percentage.** "Adding more
+   flat heal rather than percent... scale it better for early game
+   survivors and less useful late game. Percent can be more intense
+   capstone stuff. That feels more special anyways." A new `"regenFlat"`
+   passive: 31 of the 38 regen nodes converted (0.01->0.5 HP, 0.02->1,
+   0.03->1.5, 0.04->2); the 7 terminal capstones keep percent and were
+   raised to 0.04 so percent genuinely reads as the intense version. A flat
+   1 HP/tick is a real 3.3% to a 30-HP early unit and a marginal 1.4% to a
+   70-HP late one — exactly the requested curve.
+
+Two nodes were literally named "+0.01 Regen"; those became "+0.5 HP Regen"
+rather than shipping the name/mechanic mismatch the design guide warns
+about.
+
+**Effect, measured.** Of the two, the flat conversion does most of the
+work: it alone takes the 20k-tick population from 167 to 28, and the
+out-of-combat gate takes it from 28 to 8. Both configurations oscillate
+across the run rather than spiralling (base 12-34, gated 7-31), so the
+system is volatile, not dying — but the gated carrying capacity is
+materially lower, and whether that band is *right* is a game-feel call the
+numbers alone can't settle.
+
+Still on the table from the same conversation and deliberately not built
+yet: diminishing returns on stacking, and a per-move heal-reduction lever
+(a Heal Block-style effect the trees could reach for).

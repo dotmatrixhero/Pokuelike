@@ -181,6 +181,10 @@ export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rn
   tickBurrow(agent, world);
   tickChargingAttack(agent);
   tickUnshaken(agent);
+  // Ticked here rather than in fire.ts so it counts down every tick even
+  // once the agent has stepped off the fire — same always-runs placement as
+  // every other per-tick countdown in this function.
+  if (agent.regenSuppressedTicks) agent.regenSuppressedTicks = Math.max(0, agent.regenSuppressedTicks - 1);
   applyRegenPassive(agent);
   applyHealAuraPassive(agent, world);
 
@@ -311,6 +315,24 @@ function tickUnshaken(agent: Agent): void {
   agent.unshakenCooldownTicks = Math.max(0, agent.unshakenCooldownTicks - 1);
 }
 
+/**
+ * How long any damage taken holds `regen`/`healAura` down. Roughly a couple
+ * of move cooldowns: long enough that passive healing can't out-tick a real
+ * fight, short enough that a unit that disengages is genuinely recovering
+ * rather than permanently locked out. See `Agent.regenSuppressedTicks`.
+ */
+export const REGEN_COMBAT_SUPPRESSION_TICKS = 8;
+
+/** Marks an agent as recently hurt, suppressing its PASSIVE healing for `REGEN_COMBAT_SUPPRESSION_TICKS`. Called from every damage site (predation.ts's hit/recoil/thorns, fire.ts). Refreshes rather than stacking. */
+export function suppressPassiveHealing(agent: Agent, ticks = REGEN_COMBAT_SUPPRESSION_TICKS): void {
+  agent.regenSuppressedTicks = Math.max(agent.regenSuppressedTicks ?? 0, ticks);
+}
+
+/** True while passive healing (`regen`/`healAura`) is gated off by recent damage. */
+export function isPassiveHealingSuppressed(agent: Agent): boolean {
+  return (agent.regenSuppressedTicks ?? 0) > 0;
+}
+
 // --- Agent-modifying passives (Agent.passives) ---
 
 /** Grants (accumulates into) a permanent passive — called from `maybeAutoRespec` (leveling.ts) when a node with `grantsPassive` is chosen. */
@@ -341,12 +363,17 @@ export function defenseBoostOf(agent: Agent): number {
   return agent.passives?.defenseBoost ?? 0;
 }
 
-/** Per-tick HP regen from the `"regen"` passive, on top of (independent of) the fed/watered `applyHealOverTime` (support.ts) — a regen agent heals even while starving. No-op on a corpse or one with no regen passive. */
+/** Per-tick HP regen from the `"regen"` (fraction of max HP) and `"regenFlat"` (absolute HP) passives, on top of (independent of) the fed/watered `applyHealOverTime` (support.ts) — a regen agent heals even while starving. No-op on a corpse or one with no regen passive. */
 function applyRegenPassive(agent: Agent): void {
   const fraction = agent.passives?.regen ?? 0;
-  if (agent.alive === false || fraction <= 0) return;
+  const flat = agent.passives?.regenFlat ?? 0;
+  if (agent.alive === false || (fraction <= 0 && flat <= 0)) return;
+  // Any recent damage holds passive regen down — see
+  // `Agent.regenSuppressedTicks` for why passive healing specifically is
+  // the kind that needs an out-of-combat gate.
+  if (isPassiveHealingSuppressed(agent)) return;
   if (agent.hp === undefined || agent.maxHp === undefined) return;
-  agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * fraction);
+  agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * fraction + flat);
 }
 
 /** The flat fraction of damage taken the `"thorns"` passive reflects back at the attacker — read by `applySingleDamageInstance` (predation.ts). 0 if the agent has none. */
@@ -370,6 +397,10 @@ const HEAL_AURA_RADIUS = 3;
 function applyHealAuraPassive(agent: Agent, world: World): void {
   const fraction = agent.passives?.healAura ?? 0;
   if (agent.alive === false || fraction <= 0 || !agent.herdId) return;
+  // The aura HOLDER being in combat doesn't stop it; each RECIPIENT is
+  // checked below instead. A support unit hanging back should still be
+  // healing, and a unit being hit should still not be passively healing —
+  // gating on the holder would get both of those backwards.
   // Scoped to this agent's own herd (herdIndex.ts) rather than a scan of
   // every living agent in the world — see herdMembers's doc comment for the
   // real O(agents²) regression this fixes once more than a handful of
@@ -378,6 +409,7 @@ function applyHealAuraPassive(agent: Agent, world: World): void {
     if (other.layer !== agent.layer) continue;
     if (Math.abs(other.pos.x - agent.pos.x) + Math.abs(other.pos.y - agent.pos.y) > HEAL_AURA_RADIUS) continue;
     if (other.hp === undefined || other.maxHp === undefined) continue;
+    if (isPassiveHealingSuppressed(other)) continue;
     other.hp = Math.min(other.maxHp, other.hp + other.maxHp * fraction);
   }
 }
