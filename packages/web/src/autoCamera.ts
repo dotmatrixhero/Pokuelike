@@ -74,6 +74,24 @@ const CLASH_ESCALATION_WINDOW_TICKS = 20;
 /** Hard cap on queued-but-not-yet-shown engagements — a chaotic tick (mass death event, say) shouldn't grow this unboundedly; overflow drops the oldest still-queued entries first. */
 const MAX_QUEUE = 20;
 /**
+ * Minimum real ticks between two separate "courtship" engagements getting
+ * queued at all — direct ask: "autocam is still so uncomfortable... It
+ * skips around a lot and focuses on boring shit." Courtship (`bonded`/
+ * `shelterBuilt`/`eggLaid`) is real but routine and, once a herd's
+ * population is growing, frequent — a healthy herd can bond/lay several
+ * eggs within a handful of ticks of each other, and every one of those used
+ * to separately queue its own camera cut, so a real fight or immigration
+ * elsewhere could end up buried behind a run of five near-identical
+ * "X laid an egg" cuts for five different individuals in the same herd. A
+ * cooldown collapses a cluster like that down to just its first moment —
+ * the camera still shows a courtship beat, it just doesn't chase every
+ * single one a synchronized herd produces back to back. Not applied to any
+ * other category — immigration/hatch/evolution/death are already rare
+ * enough on their own not to need throttling, and battle/clash have their
+ * own dedicated continuous-engagement machinery entirely.
+ */
+const COURTSHIP_COOLDOWN_TICKS = 60;
+/**
  * Playback speed (the `SPEED_STEPS` value, not an index) auto-camera holds a
  * followed *non-battle* event (immigration/courtship/hatch/evolution/death)
  * to. Direct ask: "Maybe for evolutions. And stuff make it be x8. Not x2" —
@@ -216,6 +234,8 @@ export class AutoCameraController {
    * merely a second hit from whoever struck first. See `maybeEscalateClash`.
    */
   private clashPendingFirstHit = new Map<string, { sinceTick: number; attackerId: string }>();
+  /** The tick a "courtship" engagement was last actually queued — `undefined` before the first one. Backs `COURTSHIP_COOLDOWN_TICKS`'s throttle; see that constant's own doc comment. */
+  private lastCourtshipEnqueuedTick: number | undefined;
 
   constructor(private readonly host: AutoCameraHost) {}
 
@@ -282,6 +302,7 @@ export class AutoCameraController {
     this.queue = [];
     this.active = undefined;
     this.clashPendingFirstHit.clear();
+    this.lastCourtshipEnqueuedTick = undefined;
     this.releaseControl();
   }
 
@@ -388,13 +409,13 @@ export class AutoCameraController {
         this.enqueueOneShot("immigration", event.kind, new Set(event.agentIds), event.pos, `${event.agentIds.length} ${event.species} arrived`);
         return;
       case "bonded":
-        this.enqueueOneShot("courtship", event.kind, new Set([event.agentId, event.partnerId]), event.pos, `${speciesLabel(event.species, event.partnerSpecies)} bonded`);
+        this.enqueueCourtship(event.kind, new Set([event.agentId, event.partnerId]), event.pos, `${speciesLabel(event.species, event.partnerSpecies)} bonded`, event.tick);
         return;
       case "shelterBuilt":
-        this.enqueueOneShot("courtship", event.kind, new Set([event.agentId]), event.pos, `${event.species} finished a shelter`);
+        this.enqueueCourtship(event.kind, new Set([event.agentId]), event.pos, `${event.species} finished a shelter`, event.tick);
         return;
       case "eggLaid":
-        this.enqueueOneShot("courtship", event.kind, new Set([event.motherId, event.fatherId, event.eggId]), event.pos, `${event.species} laid an egg`);
+        this.enqueueCourtship(event.kind, new Set([event.motherId, event.fatherId, event.eggId]), event.pos, `${event.species} laid an egg`, event.tick);
         return;
       case "eggHatched":
         this.enqueueOneShot("hatch", event.kind, new Set([event.agentId]), event.pos, `${event.species} hatched`);
@@ -490,6 +511,22 @@ export class AutoCameraController {
     if (this.queue.some((e) => e.sourceKind === sourceKind && setsOverlap(e.ids, ids))) return;
     this.queue.push({ category, sourceKind, ids, fallbackPos: pos, label, continuous: false, expiresOrLastActiveTick: 0, seq: this.nextSeq++ });
     if (this.queue.length > MAX_QUEUE) this.queue.shift();
+  }
+
+  /**
+   * `enqueueOneShot` for the "courtship" category specifically, gated by
+   * `COURTSHIP_COOLDOWN_TICKS` — see that constant's own doc comment. Skips
+   * entirely (not even reaching `enqueueOneShot`'s own dedup check) while a
+   * prior courtship engagement was queued too recently; only starts/renews
+   * the cooldown when something was actually pushed onto the queue, so a
+   * call `enqueueOneShot` itself would have silently deduped (same moment,
+   * already tracked) doesn't count as "shown" for cooldown purposes.
+   */
+  private enqueueCourtship(sourceKind: SimEvent["kind"], ids: Set<string>, pos: Vec2, label: string, tick: number): void {
+    if (this.lastCourtshipEnqueuedTick !== undefined && tick - this.lastCourtshipEnqueuedTick < COURTSHIP_COOLDOWN_TICKS) return;
+    const before = this.queue.length;
+    this.enqueueOneShot("courtship", sourceKind, ids, pos, label);
+    if (this.queue.length > before) this.lastCourtshipEnqueuedTick = tick;
   }
 
   /**
@@ -606,16 +643,23 @@ export class AutoCameraController {
    * Pop the next engagement to show, preferring any queued *battle*, then any
    * queued *clash*, over however long everything else has been waiting —
    * direct ask: "prioritize battles if there are multiple things going on."
-   * Falls back to plain FIFO among the remaining one-shot categories
-   * (unchanged from before this method existed). A currently-*active*
-   * one-shot doesn't go through here at all — see `onBattleHit`'s own
-   * preemption of `this.active` for that half.
+   * Among the remaining one-shot categories, a non-"courtship" one
+   * (immigration/hatch/evolution/death — all rarer and more individually
+   * notable than routine bonding/egg-laying) jumps ahead of any queued
+   * courtship too, same "boring stuff shouldn't block the more interesting
+   * stuff" reasoning as battle/clash outranking everything else — direct
+   * follow-up ask: "It skips around a lot and focuses on boring shit."
+   * Otherwise plain FIFO (unchanged from before this method existed). A
+   * currently-*active* one-shot doesn't go through here at all — see
+   * `onBattleHit`'s own preemption of `this.active` for that half.
    */
   private popNextEngagement(): Engagement {
     const battleIndex = this.queue.findIndex((e) => e.category === "battle");
     if (battleIndex >= 0) return this.queue.splice(battleIndex, 1)[0]!;
     const clashIndex = this.queue.findIndex((e) => e.category === "clash");
     if (clashIndex >= 0) return this.queue.splice(clashIndex, 1)[0]!;
+    const notableOneShotIndex = this.queue.findIndex((e) => e.category !== "courtship");
+    if (notableOneShotIndex >= 0) return this.queue.splice(notableOneShotIndex, 1)[0]!;
     return this.queue.shift()!;
   }
 
