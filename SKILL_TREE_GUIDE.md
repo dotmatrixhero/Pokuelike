@@ -21,19 +21,55 @@ move do" (that's the dex entry) — why would this specific animal reach for
 it. If the sentence would read identically for a different species, keep
 digging before writing a single node.
 
-### 2. Scan for an environmental or utility hook specific to this fantasy
+### 2. Scan EVERY world system for a hook, not just the ones you've read
 
-Before drafting branches, ask: is there a physical "moment" this move's
-own fantasy implies — something that touches terrain, a resource, the
-map itself, not just a target's HP? Rock Throw picking up and consuming a
-real boulder tile. Water Gun leaving a puddle behind. Ember burning down
-the bush a target was hiding in. Leech Seed literally draining a real
-resource from a nearby agent. These are consistently the most memorable,
-specific content in the whole roster — more so than any numeric lever —
-because they're something an observer can *see happen* mid-fight. If the
-move's own fantasy has one of these sitting in it, it usually deserves a
-branch of its own or a real capstone, not an afterthought bolted onto
-whichever branch has room.
+Before drafting branches, ask: is there a real "moment" this move's own
+fantasy implies outside of dealing damage? Rock Throw picking up and
+consuming a real boulder tile. Water Gun leaving a puddle. Ember burning
+down the bush a target hid in. Leech Seed draining a real resource off a
+nearby agent. Vine Whip drawing on the flora it's standing in. These are
+consistently the most memorable content in the roster — more than any
+numeric lever — because an observer can *see them happen*. A move whose
+fantasy contains one usually deserves a branch or a real capstone built
+around it, not an afterthought bolted onto whichever branch has room.
+
+**Do this as an enumeration, not a brainstorm.** This step failed once by
+being run as "what comes to mind?" — which only ever surfaces hooks in the
+systems already loaded in context. Dig and Vine Whip were both declared to
+have no available hook, and both were wrong: there was an entire
+*gathering* system (crop digging, spring digging, canopy harvesting) that
+moves already fed into, whose own source comments literally said "moves
+can be used to dig faster." It was never considered because nothing had
+made me open needs.ts that session.
+
+So walk the list of real world systems and ask "does this move's fantasy
+touch this one?" for each, out loud, even the ones that feel unrelated:
+
+- **Gathering / work** — crop digging, spring digging, canopy harvest
+  (`digTicksAccrued`/`springDigTicksAccrued`, needs.ts + crops.ts)
+- **Flora & soil** — fertility, growth, seeding, harvest recovery
+  (flora.ts)
+- **Terrain** — burn, fill, consume-own-tile, walkability (world.ts's
+  `setTile`)
+- **Water** — springs, water bodies, drying/receding (waterBody.ts)
+- **Shelter** — building, occupancy, caches (shelter.ts)
+- **Needs** — hunger/thirst/energy costs and restoration (needs.ts)
+- **Reproduction** — mate search radius, breeding (reproduction.ts)
+- **Herd** — conflict/rivalry, cohesion, migration, leadership
+- **Weather** — real cells, and the conditions keyed off them
+- **Layers** — surface/canopy/underground movement and access
+- **Status & combat** — the obvious one, and the one that hogs attention
+
+A "no" for most of them is fine and fast. The point is that the no is
+*checked* rather than assumed.
+
+**And verify the hook actually fires for this move** (step 9's job, but
+it bites hardest here): a field can be perfectly real and still be dead on
+a particular move because of how its path is gated. `fertilityBoost` only
+runs for `utilityMove`-flagged moves. Canopy harvest only accepts a
+damage-dealing move; crop digging only accepts a `burrow` one. Adding the
+right-sounding field to the wrong move produces a node that visibly does
+nothing.
 
 ### 3. Know the lever palette before drafting anything
 
@@ -60,6 +96,12 @@ needed" checklist for the exact code paths behind each one):
 - **Terrain/environment**: `terrainBurn`, `terrainFill`,
   `consumesOwnTerrain`, `fertilityBoost`, `drainNeeds`,
   `matingRadiusBoost`, `burrow`
+- **Gathering / work** (the category step 2 got caught missing —
+  these are about what a move DOES for its user outside a fight, and
+  they're the least-reached-for levers in the whole palette):
+  `gatherBurst` (faster crop digging, spring digging, or canopy
+  harvesting, composed into whichever of those paths the move already
+  qualifies for), plus `fertilityBoost` and `drainNeeds` above
 - **Ally-facing**: `targetsAlly`/`allyEffect` (heal/buff),
   `allyEffectOnAttack`
 - **Persistent passives** (`grantsPassive`/`grantsPassives`):
