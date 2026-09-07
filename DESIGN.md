@@ -5604,7 +5604,52 @@ zero behavior change to anything that doesn't opt in.
   `POP_HARD_CAP`) is unit-tested but not yet exercised by a real multi-
   thousand-tick run that actually reaches it — see TODO.md.
 
-### Fresh zones seed a small species pocket, not every fitting species at once
+### Auto-camera: throttling same-category one-shot clusters ("skips around a lot and focuses on boring shit")
+
+Direct ask: "autocam is still so uncomfortable. Can you like try it and see
+what happens? It skips around a lot and focuses on boring shit." Actually
+launched the web app (vite dev server + headless Chromium via Playwright,
+not just reasoning about the code) and watched auto-camera's status label
+over ~2000 real sim ticks at 32x. First observed run: a healthy herd's
+population growth produced tight clusters of near-identical courtship
+one-shots — 5 separate "arbok laid an egg" cuts for 5 different pairs
+within ~20 ticks of each other — each queuing its own separate camera cut,
+so a genuinely rarer/more notable moment elsewhere could sit buried behind
+a run of five near-identical "boring" cuts.
+
+**Built**: `ONE_SHOT_CLUSTER_COOLDOWN_TICKS` (60) — `enqueueClusteredOneShot`
+skips queuing a new one-shot engagement of a given `NotableCategory` while
+one of the same category was already queued within that many ticks, so a
+synchronized burst collapses down to just its first moment instead of
+chasing every individual instance. `popNextEngagement` also now lets any
+queued non-courtship one-shot (immigration/hatch/evolution/death) jump
+ahead of a queued courtship in the FIFO — same "boring stuff shouldn't
+block more interesting stuff" reasoning battle/clash already got over
+one-shots generally.
+
+First built courtship-only; a second live run against that fix showed the
+exact same clustering in categories the first pass didn't touch — a
+same-age cohort crossing its evolution threshold together (8 separate
+"bulbasaur evolved into ivysaur" cuts back to back) and a kill streak (3
+separate "arbok killed ivysaur" cuts). Generalized to a single per-category
+cooldown (`lastEnqueuedTickByCategory`) covering courtship/hatch/evolution/
+death alike — any category can burst once a population is large/
+synchronized enough, not just courtship. Immigration is deliberately
+excluded (already engine-side rate-limited via `MIN_TICKS_BETWEEN_
+IMMIGRATIONS`, can't burst the same way); battle/clash are unaffected
+(their own continuous-engagement machinery already widens one engagement
+per fight rather than queuing a new one per hit).
+
+Verified directly (not just by re-running the noisy headless observation,
+whose 3-second poll interval turned out too coarse to reliably distinguish
+"one engagement dwelling through its 24-tick window" from "several separate
+ones back to back" — DWELL_TICKS at AUTO_CAM_SLOWDOWN_SPEED's 8x is only
+half a real second): a focused test feeding `AutoCameraController.ingest`
+six `evolved` events for six different agents, 5 ticks apart each,
+collapses to exactly one queued engagement instead of six. `packages/web`
+has no test suite (no `test` script in its `package.json`) — this was
+verified via a one-off `tsx` script directly exercising the real class, not
+added as a permanent test.
 
 Direct ask: "Just cuz a zone can support a bunch of different Pokemon,
 doesn't mean it should. It should just have a smaller variety of species per
