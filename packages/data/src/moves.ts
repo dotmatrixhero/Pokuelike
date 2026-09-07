@@ -1033,11 +1033,20 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       quickening_growth: {
         id: "quickening_growth",
-        name: "+5 Power",
+        name: "Quickening Growth",
         cost: 1,
         prerequisites: ["shared_vigor"],
         leaning: "sociability",
-        delta: { power: 5 },
+        // Direct correction: "Vine whip too... Reduce the amount of time
+        // to harvest crops." Vine Whip already qualifies as a canopy
+        // harvest move (needs.ts picks any off-cooldown damage move, and
+        // scales the burst by `range.max` — this move's reach of 2 is
+        // already worth a bonus there). `gatherBurst` makes the vines
+        // genuinely better at bringing fruit down, which lands squarely in
+        // the branch that's about feeding the herd rather than fighting.
+        // Also retires one of two identical "+5 Power" fillers this branch
+        // was padded with.
+        delta: { gatherBurst: 3 },
       },
       vine_network: {
         id: "vine_network",
@@ -5800,11 +5809,15 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       packed_earth: {
         id: "packed_earth",
-        name: "-1 Cooldown",
+        name: "Packed Earth",
         cost: 1,
         prerequisitesAnyOf: [["thicker_hide"], ["braced_dive"], ["shared_shelter"]],
         leaning: "boldness",
-        delta: { cooldownTicks: -1 },
+        // Hard-packed ground is no obstacle to a digger that's built for
+        // it — another real `gatherBurst`, and another duplicate
+        // "-1 Cooldown" filler retired (this branch had two identical
+        // ones under names that both promised something else).
+        delta: { gatherBurst: 3 },
       },
       bedrock_grip: {
         id: "bedrock_grip",
@@ -5873,11 +5886,21 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       wider_burrow: {
         id: "wider_burrow",
-        name: "-1 Cooldown",
+        name: "Wider Burrow",
         cost: 1,
         prerequisites: ["peaceful_tunnels"],
         leaning: "sociability",
-        delta: { cooldownTicks: -1 },
+        // Direct correction, and the hook this whole tree was missing:
+        // "dig was supposed to make digging springs and food easier."
+        // It already did a little — needs.ts hands any off-cooldown
+        // `burrow` move a real `DIG_MOVE_BURST_TICKS` head start on
+        // uncovering an underground crop or digging a brand-new spring —
+        // but nothing in the tree could ever make that better. `gatherBurst`
+        // does, and it's the first lever on this tree that's about what Dig
+        // is actually FOR rather than how fast it recharges. Also clears a
+        // flagged name/mechanic mismatch: "Wider Burrow" used to grant a
+        // cooldown reduction.
+        delta: { gatherBurst: 3 },
       },
       quiet_ground: {
         id: "quiet_ground",

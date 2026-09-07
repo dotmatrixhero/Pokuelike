@@ -4789,8 +4789,27 @@ not something this pathfinding pass itself caused or is positioned to fix.
       `setTile` makes boulder unwalkable, so this creates impassable tiles
       under living agents and slowly accumulates permanent rubble with no
       decay mechanism. Both solvable, neither decided unilaterally.
-- [ ] **Confirmed NOT buildable as-is: Dig has no environmental hook.**
-      Soil-tilling via `fertilityBoost` is the natural fit, but Dig isn't
-      `utilityMove`-flagged (it fires from the flee branch), so
-      `maybeUseUtilityMove` never sees it. Flagging it would change what
-      the move fundamentally is — a design decision, not a fix.
+- [x] **CORRECTED — Dig and Vine Whip both hook into the real gathering
+      system; I'd been looking in the wrong place.** Direct correction:
+      "dig was supposed to make digging springs and food easier... Vine
+      whip too... Reduce the amount of time to harvest crops." My previous
+      "not buildable" note only considered `utilityMove`; the actual hook
+      is the `digTicksAccrued`/`springDigTicksAccrued` gathering system in
+      needs.ts + crops.ts, which moves ALREADY feed (a `burrow` move for
+      digging crops/springs, a damage move scaled by `range.max` for
+      canopy harvest). What was missing was any way for a tree to improve
+      it.
+      - New `MoveSpec.gatherBurst` (+ matching tree delta, additive),
+        composed into all three real gather paths. Never grants access a
+        move lacked — Vine Whip harvests faster but still can't dig.
+      - **Dig**: `Wider Burrow` and `Packed Earth` now grant real gather
+        progress instead of being "-1 Cooldown" fillers under names that
+        promised something else — retiring two name/mechanic mismatches
+        AND two duplicate-lever fillers. Spring digging: 4 uses -> 3.
+      - **Vine Whip**: `Quickening Growth` (one of two identical "+5
+        Power" fillers) now speeds canopy harvest from 5 -> 8 per use.
+      - 3 new engine tests, one per gather path. Engine 1098/1098.
+      - Lesson worth keeping: "is there an environmental hook?" is not the
+        same question as "is there one in the systems I've already read."
+        The gathering system was shipped, and its own comments already
+        said "moves can be used to dig faster."

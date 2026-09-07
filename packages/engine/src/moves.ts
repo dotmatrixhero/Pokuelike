@@ -356,6 +356,25 @@ export interface MoveSpec {
    */
   burrow?: { ticks: number };
   /**
+   * Extra `Agent.digTicksAccrued`/`Agent.springDigTicksAccrued` this move
+   * grants per use while gathering, on top of whichever base burst its own
+   * path already gives (needs.ts). It composes with all three real gather
+   * paths rather than adding a fourth:
+   * - digging an underground-native crop out (`DIG_MOVE_BURST_TICKS`),
+   * - digging a brand-new spring (`SPRING_DIG_TICKS`'s same burst),
+   * - knocking a canopy-native crop down (`CANOPY_HARVEST_MOVE_BASE_BURST`
+   *   plus its `range.max` scaling).
+   *
+   * It never grants access a move didn't already have: those paths still
+   * pick a `burrow`-flagged move for digging and a damage-dealing move for
+   * canopy harvest, so this only ever makes a move that ALREADY qualifies
+   * better at it. A Vine Whip node speeds up fruit harvesting; it can't
+   * dig, and this field doesn't change that.
+   *
+   * Absent = no bonus, the default (every move before this field existed).
+   */
+  gatherBurst?: number;
+  /**
    * Marks this move as usable stand-alone, with no enemy or ally target at
    * all — Growth, Agility, Rain Dance, etc. Real structural gap this closes:
    * every move before this one either rides the hostile hit pipeline
@@ -578,6 +597,8 @@ export interface MoveTreeNode {
      * to ever fire — a plain attack move setting this would be dead weight.
      */
     fertilityBoost?: { amount: number; radius: number };
+    /** Additive, like `power` — see `MoveSpec.gatherBurst`. Real on any move that already qualifies for one of the gather paths (a `burrow` move for digging, a damage move for canopy harvest). */
+    gatherBurst?: number;
   };
 }
 
@@ -740,6 +761,7 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       drainNeeds: delta.drainNeeds ?? result.drainNeeds,
       matingRadiusBoost: delta.matingRadiusBoost ?? result.matingRadiusBoost,
       fertilityBoost: delta.fertilityBoost ?? result.fertilityBoost,
+      gatherBurst: delta.gatherBurst !== undefined ? (result.gatherBurst ?? 0) + delta.gatherBurst : result.gatherBurst,
     };
   }
 

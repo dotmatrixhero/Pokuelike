@@ -955,6 +955,7 @@
     if (has("drainNeeds")) lines.push("Steals " + Math.round(delta.drainNeeds.amount * 100) + "% " + delta.drainNeeds.need + " from the nearest non-herd agent within " + delta.drainNeeds.radius + " tiles, and gains it.");
     if (has("fertilityBoost")) lines.push("Enriches the soil (+" + Math.round(delta.fertilityBoost.amount * 100) + "% fertility) " + (delta.fertilityBoost.radius === 0 ? "on the user's own tile." : "within " + delta.fertilityBoost.radius + " tiles."));
     if (has("matingRadiusBoost")) lines.push("×" + delta.matingRadiusBoost.multiplier + " mate-search radius for " + delta.matingRadiusBoost.ticks + " ticks.");
+    if (has("gatherBurst")) lines.push("+" + delta.gatherBurst + " gathering progress per use — digs crops/springs out faster, or knocks canopy fruit down faster, depending on the move.");
     if (has("forcedMovement")) {
       var fm = delta.forcedMovement;
       var mover = fm.mover === "attacker" ? "The user" : "The target";
@@ -1048,6 +1049,7 @@
         drainNeeds: has("drainNeeds") ? delta.drainNeeds : result.drainNeeds,
         matingRadiusBoost: has("matingRadiusBoost") ? delta.matingRadiusBoost : result.matingRadiusBoost,
         fertilityBoost: has("fertilityBoost") ? delta.fertilityBoost : result.fertilityBoost,
+        gatherBurst: has("gatherBurst") ? (result.gatherBurst || 0) + delta.gatherBurst : result.gatherBurst,
       });
     });
     return result;

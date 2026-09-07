@@ -1272,7 +1272,11 @@ export function tickAgentAction(
               if (harvestMove) {
                 useMove(agent, harvestMove, world.tick);
                 const rangeMax = harvestMove.range?.max ?? 1;
-                agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + CANOPY_HARVEST_MOVE_BASE_BURST + Math.max(0, rangeMax - 1) * CANOPY_HARVEST_RANGE_BONUS_PER_POINT;
+                agent.digTicksAccrued =
+                  (agent.digTicksAccrued ?? 0) +
+                  CANOPY_HARVEST_MOVE_BASE_BURST +
+                  Math.max(0, rangeMax - 1) * CANOPY_HARVEST_RANGE_BONUS_PER_POINT +
+                  (harvestMove.gatherBurst ?? 0);
               } else {
                 agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + 1;
               }
@@ -1280,7 +1284,7 @@ export function tickAgentAction(
               const digMove = (agent.moves ?? []).find((move) => move.burrow && !agent.moveCooldowns?.[move.id]);
               if (digMove) {
                 useMove(agent, digMove, world.tick);
-                agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + DIG_MOVE_BURST_TICKS;
+                agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + DIG_MOVE_BURST_TICKS + (digMove.gatherBurst ?? 0);
               } else {
                 agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + 1;
               }
@@ -1474,7 +1478,7 @@ export function tickAgentAction(
       const digMove = (agent.moves ?? []).find((move) => move.burrow && !agent.moveCooldowns?.[move.id]);
       if (digMove) {
         useMove(agent, digMove, world.tick);
-        agent.springDigTicksAccrued = (agent.springDigTicksAccrued ?? 0) + DIG_MOVE_BURST_TICKS;
+        agent.springDigTicksAccrued = (agent.springDigTicksAccrued ?? 0) + DIG_MOVE_BURST_TICKS + (digMove.gatherBurst ?? 0);
       } else {
         agent.springDigTicksAccrued = (agent.springDigTicksAccrued ?? 0) + 1;
       }

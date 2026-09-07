@@ -1363,11 +1363,49 @@ mechanism (this sim has no "tile change expires" concept — the same gap
 `terrainFill`'s own doc row already flags). Both are solvable; neither
 should be decided unilaterally.
 
-**Also confirmed not buildable as-is**: Dig can't take an environmental
-hook (soil-tilling via `fertilityBoost` would be the natural one) because
-Dig is not `utilityMove`-flagged — it fires from the flee branch, so
-`maybeUseUtilityMove` never sees it. Making it one would change what the
-move fundamentally is, which is a design decision, not a fix.
+**Correction — I had this wrong, and the user caught it.** I concluded Dig
+couldn't take an environmental hook because it isn't `utilityMove`-flagged.
+That reasoning was sound but I was looking in the wrong place entirely:
+"dig was supposed to make digging springs and food easier... Vine whip
+too... reduce the amount of time to harvest crops." There is a whole real
+*gathering* system these moves already participate in, and I never looked
+at it — I only ever scanned combat and terrain levers.
+
+What already existed (needs.ts + crops.ts, CROPS_DESIGN.md's own pitch):
+an agent on the wrong layer for a crop has to process it out first,
+accruing `Agent.digTicksAccrued` against a threshold, and digging a
+brand-new spring works the same way via `Agent.springDigTicksAccrued`.
+Moves already feed all three paths — an off-cooldown `burrow` move grants
+`DIG_MOVE_BURST_TICKS` toward digging a crop out or sinking a spring, and
+an off-cooldown *damage* move grants `CANOPY_HARVEST_MOVE_BASE_BURST`
+(scaled by its own `range.max`) toward knocking canopy fruit down. What
+was missing was any way for a **tree** to make that better.
+
+**New primitive: `MoveSpec.gatherBurst`** (additive, mirrored as a
+`MoveTreeNode.delta` field). Extra gather progress per use, composed into
+whichever path the move already qualifies for rather than adding a fourth.
+It deliberately never grants access a move didn't have: digging still
+requires a `burrow` move, canopy harvest still requires a damage move, so
+a Vine Whip node speeds up fruit harvesting and still cannot dig.
+
+- **Dig** finally has levers about what Dig is *for*. `Wider Burrow` and
+  `Packed Earth` both grant `gatherBurst: 3` — and both were previously
+  "-1 Cooldown" fillers under names promising something else, so this
+  retired two flagged name/mechanic mismatches and two duplicate-lever
+  fillers at the same time. Measured on real data: a spring goes from 4
+  digs to 3, and crop digging from 5 to 8 progress per use.
+- **Vine Whip**'s `Quickening Growth` (previously one of two identical
+  "+5 Power" fillers in one branch) now grants `gatherBurst: 3`, taking
+  its canopy harvest burst from 5 to 8 per use — a ~60% faster fruit
+  harvest, landing in the branch that's about feeding the herd rather
+  than fighting.
+
+Three new engine tests cover all three real paths (underground crop,
+spring, canopy harvest). The general lesson, worth more than the feature:
+**"is there an environmental hook" is not the same question as "is there
+an environmental hook in the systems I happen to have already read."** The
+gathering system had been shipped for a while and had explicit
+"moves can be used to dig faster" intent written into its own comments.
 
 **Tackle, Slash, and Ember have all now
 shipped their full v2 trees** (`packages/data/src/moves.ts`) — three
