@@ -22,6 +22,7 @@ import { activeWeatherAt, isInColdSnap, stormAccuracyMultiplier } from "./weathe
 import {
   applyStatStage,
   BURN_ATTACK_STAGE,
+  damageReductionFlatOf,
   damageReductionOf,
   defenseBoostOf,
   getStatStage,
@@ -208,6 +209,14 @@ export function huntHungerThreshold(world: World, agent: Agent, tick: number): n
 /** Fallback HP for an agent with no real combat profile (stats/level/types) — shouldn't happen for fully-statted species. Exported so support.ts's body-weight proxy can match it. */
 export const FALLBACK_MAX_HP = 10;
 const FALLBACK_DAMAGE = 1;
+
+/**
+ * The least damage a landed, damaging hit can be reduced to by flat armor
+ * (`"damageReductionFlat"`). Without a floor, enough stacked flat reduction
+ * makes a unit simply immune to weaker attackers rather than tough against
+ * them — the failure mode flat armor systems classically have.
+ */
+export const MIN_LANDED_DAMAGE = 1;
 /** Ticks the `"unshaken"` passive locks out after fully negating a hit — see `Agent.unshakenCooldownTicks`'s own doc comment (types.ts). */
 const UNSHAKEN_COOLDOWN_TICKS = 20;
 /** A predator at or below this fraction of max HP flees a fight instead of continuing it. See `retreatHpFraction` for the juvenile-aware version actually used. */
@@ -932,7 +941,17 @@ function applySingleDamageInstance(
         ).damage
       : FALLBACK_DAMAGE;
 
-  const damage = Math.max(0, Math.floor(rawDamage * situational * consumedTerrainMultiplier * (1 - damageReductionOf(defender))));
+  // Percentage reduction (with diminishing returns, see status.ts) first,
+  // then flat armor off the result. The `MIN_LANDED_DAMAGE` floor only
+  // applies to a hit that was actually going to hurt: flat armor may blunt a
+  // weak attack to a scratch, but must never make a unit outright immune to
+  // one, which uncapped flat reduction otherwise does. A move that already
+  // deals nothing still deals nothing.
+  const afterPercent = Math.floor(rawDamage * situational * consumedTerrainMultiplier * (1 - damageReductionOf(defender)));
+  const damage =
+    afterPercent <= 0
+      ? Math.max(0, afterPercent)
+      : Math.max(MIN_LANDED_DAMAGE, afterPercent - damageReductionFlatOf(defender));
 
   if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log, ctx, rng);
 

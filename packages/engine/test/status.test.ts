@@ -12,6 +12,7 @@ import {
   SLEEP_TICKS_MAX,
   SLEEP_TICKS_MIN,
   applyStatStage,
+  damageReductionFlatOf,
   damageReductionOf,
   defenseBoostOf,
   getStatStage,
@@ -310,13 +311,49 @@ describe("agent-modifying passives (grantPassive/damageReductionOf/isImmovable)"
     expect(agent.passives?.damageReduction).toBeCloseTo(0.25);
   });
 
-  it("damageReductionOf reads the accumulated fraction, capped at 1", () => {
+  it("damageReductionOf applies diminishing returns to the accumulated fraction", () => {
     const agent = makeAgent();
     expect(damageReductionOf(agent)).toBe(0);
-    grantPassive(agent, "damageReduction", 0.5);
-    expect(damageReductionOf(agent)).toBe(0.5);
-    grantPassive(agent, "damageReduction", 5); // way over 1
-    expect(damageReductionOf(agent)).toBe(1);
+    // A single small node is worth very nearly its face value...
+    grantPassive(agent, "damageReduction", 0.05);
+    expect(damageReductionOf(agent)).toBeCloseTo(0.0476, 3);
+    // ...while a big stack is pulled back hard: 0.5 raw -> 1/3 effective.
+    grantPassive(agent, "damageReduction", 0.45);
+    expect(damageReductionOf(agent)).toBeCloseTo(0.3333, 3);
+  });
+
+  it("damageReductionOf can never reach immunity, however much is stacked", () => {
+    const agent = makeAgent();
+    grantPassive(agent, "damageReduction", 100);
+    expect(damageReductionOf(agent)).toBeLessThan(1);
+    expect(damageReductionOf(agent)).toBeGreaterThan(0.98);
+  });
+
+  it("damageReductionOf is monotonic — more is always worth something, just less", () => {
+    let prev = 0;
+    const agent = makeAgent();
+    for (let i = 0; i < 12; i++) {
+      grantPassive(agent, "damageReduction", 0.05);
+      const now = damageReductionOf(agent);
+      expect(now).toBeGreaterThan(prev);
+      prev = now;
+    }
+  });
+
+  it("percentage and flat damage reduction are independent passives", () => {
+    const agent = makeAgent();
+    grantPassive(agent, "damageReduction", 0.2);
+    grantPassive(agent, "damageReductionFlat", 3);
+    expect(damageReductionOf(agent)).toBeCloseTo(0.2 / 1.2, 4);
+    expect(damageReductionFlatOf(agent)).toBe(3);
+  });
+
+  it("damageReductionFlatOf reads the accumulated flat armor", () => {
+    const agent = makeAgent();
+    expect(damageReductionFlatOf(agent)).toBe(0);
+    grantPassive(agent, "damageReductionFlat", 2);
+    grantPassive(agent, "damageReductionFlat", 1.5);
+    expect(damageReductionFlatOf(agent)).toBeCloseTo(3.5);
   });
 
   it("isImmovable reflects whether the passive was granted at all", () => {

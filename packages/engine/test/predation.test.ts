@@ -6,6 +6,7 @@ import { applyPredationInstincts, preferMarked } from "../src/predation.js";
 import { EventLog } from "../src/events.js";
 import { mulberry32 } from "../src/rng.js";
 import { FIRE_BURN_TICKS } from "../src/fire.js";
+import { MIN_LANDED_DAMAGE } from "../src/predation.js";
 import type { Agent, HuntRules } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 import type { Disposition } from "../src/nature.js";
@@ -2552,5 +2553,36 @@ describe("allyEffectOnAttack: the ally-effect ALSO piggybacks on a hostile attac
     expect(log.events.some((e) => e.kind === "fought" && (e as any).moveId === "plain-ally-move")).toBe(true);
     expect(packmate.hp).toBe(10); // untouched
     expect(log.events.some((e) => e.kind === "supported")).toBe(false);
+  });
+});
+
+describe("flat damage reduction (damageReductionFlat) in real combat", () => {
+  const STATS = { maxHp: 100, attack: 50, defense: 30, spAttack: 30, spDefense: 30, speed: 40 };
+  const SLOW = { maxHp: 100, attack: 30, defense: 30, spAttack: 30, spDefense: 30, speed: 10 };
+
+  function damageWith(passives: Agent["passives"]): number {
+    const world = createWorld(10, 10);
+    const attacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...STATS }, maxHp: 200, moves: [TEST_MOVE] });
+    const victim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...SLOW }, passives });
+    world.agents.push(attacker, victim);
+    const log = new EventLog();
+    tickWorld(world, log, RULES);
+    const fought = log.events.find((e) => e.kind === "fought");
+    return fought ? (fought as Extract<(typeof log.events)[number], { kind: "fought" }>).damage : 0;
+  }
+
+  it("takes a flat amount off the hit", () => {
+    expect(damageWith({ damageReductionFlat: 3 })).toBeLessThan(damageWith(undefined));
+  });
+
+  it("never reduces a landed hit below MIN_LANDED_DAMAGE — armor makes you tough, not immune", () => {
+    // Far more flat armor than any real build could stack.
+    expect(damageWith({ damageReductionFlat: 9999 })).toBe(MIN_LANDED_DAMAGE);
+  });
+
+  it("stacks with percentage reduction rather than replacing it", () => {
+    const both = damageWith({ damageReduction: 0.3, damageReductionFlat: 2 });
+    const pctOnly = damageWith({ damageReduction: 0.3 });
+    expect(both).toBeLessThan(pctOnly);
   });
 });

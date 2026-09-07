@@ -853,7 +853,7 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
 
     const fullBulk = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "full_bulk"]);
     expect(fullBulk.accuracy).toBe(bodySlam.accuracy - 8 + 8);
-    expect(bodySlam.tree!.full_bulk.grantsPassive).toEqual({ kind: "damageReduction", value: 0.05 });
+    expect(bodySlam.tree!.full_bulk.grantsPassive).toEqual({ kind: "damageReductionFlat", value: 1 });
 
     const wideBerth = applyMoveTree(bodySlam, ["unbothered", "settled_ease", "unhurried_reset", "no_quarrel", "quiet_ground", "wide_berth"]);
     expect(bodySlam.tree!.wide_berth.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.2 });

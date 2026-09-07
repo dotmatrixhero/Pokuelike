@@ -72,6 +72,14 @@ export type PassiveKind =
    * Percent can be more intense capstone stuff."
    */
   | "regenFlat"
+  /**
+   * Flat HP taken off each incoming hit, as opposed to `"damageReduction"`'s
+   * fraction. Same early-strong/late-marginal scaling as `"regenFlat"`, and
+   * the same split of roles: the common tree nodes grant this, capstones
+   * grant the percentage. A landed hit always does at least
+   * `MIN_LANDED_DAMAGE`, so this never confers immunity to weak attacks.
+   */
+  | "damageReductionFlat"
   | "thorns"
   | "healAura"
   | "defenseBoost"

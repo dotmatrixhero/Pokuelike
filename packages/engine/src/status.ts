@@ -341,9 +341,54 @@ export function grantPassive(agent: Agent, kind: PassiveKind, value: number): vo
   agent.passives[kind] = (agent.passives[kind] ?? 0) + value;
 }
 
-/** The flat fraction of incoming damage the `"damageReduction"` passive takes off — read by `resolveHit` (predation.ts). 0 if the agent has none. */
+/**
+ * The fraction of incoming damage the `"damageReduction"` passive takes
+ * off, **after diminishing returns** — read by `resolveHit` (predation.ts).
+ * 0 if the agent has none.
+ *
+ * The raw passive is an uncapped running sum (`grantPassive` is a `+=` and
+ * tree choices are permanent), so it has the same runaway shape `regen` did:
+ * measured on a pre-fix 20k-tick run, 1234 of 1368 living agents carried
+ * some, median 0.15, p90 0.25, max 0.33 — a third of all incoming damage
+ * simply deleted, on every hit, forever.
+ *
+ * The curve is hyperbolic, `x / (1 + x)`:
+ *
+ * | raw sum | effective |
+ * |---|---|
+ * | 0.05 | 0.048 |
+ * | 0.15 | 0.130 |
+ * | 0.25 | 0.200 |
+ * | 0.33 | 0.248 |
+ * | 1.00 | 0.500 |
+ * | 3.00 | 0.750 |
+ *
+ * Chosen over a hard cap for two reasons: a single node is worth almost
+ * exactly its face value (so early nodes still feel like what they say),
+ * and there is no cliff where further investment silently does nothing —
+ * it just gets progressively worse value, and can never reach immunity.
+ * Percentage reduction is the capstone-tier version of this passive; the
+ * common nodes grant `"damageReductionFlat"` instead, same split as
+ * `regen`/`regenFlat`.
+ */
 export function damageReductionOf(agent: Agent): number {
-  return Math.min(1, agent.passives?.damageReduction ?? 0);
+  const raw = Math.max(0, agent.passives?.damageReduction ?? 0);
+  return raw / (1 + raw);
+}
+
+/**
+ * Flat HP taken off an incoming hit by the `"damageReductionFlat"` passive,
+ * applied AFTER the percentage reduction above — read by `resolveHit`
+ * (predation.ts), which enforces that a landed hit still does at least
+ * `MIN_LANDED_DAMAGE`, so flat armor can blunt a weak hit but never make a
+ * unit outright immune to one. 0 if the agent has none.
+ *
+ * Scales the way flat healing does and for the same reason: 2 points off a
+ * 12-damage early hit matters, 2 points off a 60-damage late one barely
+ * registers.
+ */
+export function damageReductionFlatOf(agent: Agent): number {
+  return Math.max(0, agent.passives?.damageReductionFlat ?? 0);
 }
 
 /** True if the `"immovable"` passive should block this agent from being forced-moved — read by `applyForcedMovement` (movement.ts). */

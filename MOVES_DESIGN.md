@@ -2827,3 +2827,53 @@ genuinely is a plant's boldness), so the other two moved off it:
 One node was caught mid-rework promising "burn immunity" in its comment
 while granting `damageReduction` — rewritten to do what its name says. That
 check is cheap and it keeps finding things.
+
+## damageReduction: diminishing returns plus a flat tier
+
+Same uncapped-accumulation bug `regen` had, found in the same pre-fix
+baseline and confirmed on a second seed: 1234 of 1368 living agents carried
+some, median 0.15, p90 0.25, max 0.33 — a third of every incoming hit
+deleted, permanently, with `damageReductionOf` clamping only at 1.0 (total
+immunity). Unlike regen it is not healing, so the out-of-combat gate was the
+wrong tool. Direct steer: "for damage reduction, we do diminishing returns
+and flat."
+
+**Diminishing returns** are hyperbolic, `x / (1 + x)`, applied at read time
+because `grantPassive` only ever stores the running sum (there is no list of
+individual sources to stack multiplicatively):
+
+| raw sum | effective |
+|---|---|
+| 0.05 | 0.048 |
+| 0.15 | 0.130 |
+| 0.25 | 0.200 |
+| 0.33 | 0.248 |
+| 1.00 | 0.500 |
+| 3.00 | 0.750 |
+
+Chosen over a hard cap deliberately. A single node is worth almost exactly
+its face value, so early nodes still deliver what they say; there is no
+cliff where further investment silently stops mattering, just progressively
+worse value; and immunity is mathematically unreachable rather than merely
+clamped. A cap would have created exactly the "why is this node doing
+nothing" dead zone that the whole reachability section above is about.
+
+**Flat tier** mirrors the `regen`/`regenFlat` split, for the same reason:
+`damageReductionFlat` takes absolute HP off a hit, so it is worth
+proportionally more against the weak hits an early unit faces than the big
+ones a late unit does. 39 of 41 nodes converted; the 2 terminal capstones
+keep percentage and were raised to 0.12 so percentage reads as the
+disproportionate version.
+
+The one thing flat armor must not do is confer immunity, which is the
+classic failure of flat-reduction systems — enough armor and a weaker
+attacker simply cannot touch you. `MIN_LANDED_DAMAGE` (1) floors any landed,
+damaging hit, and it deliberately only applies to a hit that was going to
+hurt: a move already dealing nothing still deals nothing. Order is
+percentage first, then flat off the result.
+
+Note the shape this shares with the healing fix: in both cases the bug was
+never a badly-tuned node, it was that **the sum of every node granting a
+passive had never been the unit of analysis.** That question — "what does
+this look like on an agent that took all of them" — is now the first one to
+ask of any new passive.

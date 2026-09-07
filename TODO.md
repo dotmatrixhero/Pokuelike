@@ -4984,3 +4984,21 @@ not something this pathfinding pass itself caused or is positioned to fix.
       game-feel call from the previous round; the healing levers not built
       (diminishing returns, per-move heal reduction) remain the tuning
       options if it wants raising.
+- [x] **damageReduction: diminishing returns + a flat tier.** Direct steer:
+      "for damage reduction, we do diminishing returns and flat."
+      - `damageReductionOf` now applies `x / (1 + x)` at read time (the raw
+        passive is only ever stored as a running sum, so there are no
+        individual sources to stack multiplicatively). 0.05 raw -> 0.048
+        effective, 0.33 -> 0.248, 1.0 -> 0.5; immunity is unreachable
+        rather than clamped. Preferred over a hard cap so single nodes
+        still deliver face value and there is no dead zone where further
+        investment silently does nothing.
+      - New `damageReductionFlat` passive; 39 of 41 nodes converted
+        (0.03->0.5, 0.04->0.75, 0.05->1, 0.06->1.25, 0.08->1.5, 0.1->2),
+        the 2 terminal capstones keep percentage and were raised to 0.12.
+      - `MIN_LANDED_DAMAGE` floors a landed damaging hit at 1 so flat armor
+        can never make a unit immune to weak attackers — the classic
+        flat-armor failure. A move already dealing 0 still deals 0.
+      - One node named "+0.03 Damage Reduction" renamed "+0.5 Armor".
+      - 8 new tests (curve shape, monotonicity, unreachable immunity, the
+        floor, percent+flat stacking).

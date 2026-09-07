@@ -28,7 +28,7 @@ for (let i = 0; i < ticks; i++) {
 }
 const alive = world.agents.filter((a: any) => a.alive !== false);
 const q = (arr: number[], p: number) => { const s=[...arr].sort((x,y)=>x-y); return s.length? s[Math.min(s.length-1, Math.floor(p*s.length))] : 0; };
-for (const kind of ["regen","regenFlat","healAura"]) {
+for (const kind of ["regen","regenFlat","healAura","damageReduction","damageReductionFlat"]) {
   const vals = alive.map((a: any) => a.passives?.[kind] ?? 0);
   const nz = vals.filter((v:number)=>v>0);
   console.log(kind.padEnd(10), `holders ${String(nz.length).padStart(3)}/${alive.length}`, `max ${Math.max(0,...vals).toFixed(3)}`, `p90 ${q(nz,0.9).toFixed(3)}`);
@@ -39,6 +39,12 @@ const eff = alive.map((a:any)=>({sp:a.species, maxHp:a.maxHp,
 eff.sort((x,y)=>y.pct-x.pct);
 console.log("\ntop effective passive heal (%/tick of maxHp), when NOT suppressed:");
 for(const e of eff.slice(0,5)) console.log(`  ${e.sp.padEnd(12)} ${(e.pct*100).toFixed(2)}%/tick  maxHp ${e.maxHp} => full heal in ${(1/e.pct).toFixed(0)} ticks`);
+// Effective damage reduction after diminishing returns (status.ts) — the
+// raw accumulated sum is misleading, this is what a hit actually sees.
+const dr = alive.map((a: any) => { const raw = a.passives?.damageReduction ?? 0; return raw / (1 + raw); }).sort((x: number, y: number) => x - y);
+if (dr.length) console.log(`effective damageReduction: median ${(100*dr[Math.floor(dr.length/2)]).toFixed(1)}%  p90 ${(100*dr[Math.floor(0.9*dr.length)]).toFixed(1)}%  max ${(100*dr[dr.length-1]).toFixed(1)}%`);
+const flatArmor = alive.map((a: any) => a.passives?.damageReductionFlat ?? 0).sort((x: number, y: number) => x - y);
+if (flatArmor.length) console.log(`flat armor: median ${flatArmor[Math.floor(flatArmor.length/2)]}  max ${flatArmor[flatArmor.length-1]}`);
 console.log(`\npassive healing suppressed in ${(100*suppressed/Math.max(1,samples)).toFixed(1)}% of agent-samples`);
 const ev = (k:string)=>log.events.filter((e:any)=>e.kind===k).length;
 console.log(`alive ${alive.length} | fought ${ev("fought")} killed ${ev("killed")} starved ${ev("starved")} burned ${ev("burned")} | kills/fight ${(ev("killed")/Math.max(1,ev("fought"))).toFixed(3)}`);
