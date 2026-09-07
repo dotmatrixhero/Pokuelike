@@ -1192,6 +1192,115 @@ real Bulbasaur in a 10000-tick run. Full data suite green (236/236, same
 count — this was a rebalance, not new content), engine suite unaffected.
 Atlas rebuilt and republished.
 
+**Round three, direct follow-up: "Restart on each skill starting with the
+fantasy. Does each node and capstone really fit? Be critical of your own
+work."** A dedicated adversarial audit (not self-review — a fresh pass told
+to be ruthless, checking every node's *displayed* `name` against what its
+`delta` actually does, and every capstone against its own branch's stated
+fantasy) found real, concrete problems the crosslink pass hadn't touched,
+since that pass only ever looked at crosslinks:
+
+- **All six Sociability capstones were `grantsPassive: { kind: "healAura",
+  value: 0.01 }` — byte-identical.** The exact "capstone should be
+  something the roster doesn't already have" bullet, failed six times over
+  in one batch. Fixed by making each one escalate the specific lever its
+  OWN branch already built, instead of switching to a generic heal at the
+  finish line: Vine Whip's *Verdant Grove* → `[healAura, defenseBoost]`;
+  Flamethrower's *Hearth of the Flock* (name itself borrowed Wing Attack's
+  own vocabulary) → renamed *Communal Blaze*, `[regen, calmingPresence]`;
+  Rock Slide's *Stone Circle* → deepens the branch's own `calmingPresence`
+  ladder to 0.3 (bigger than anything earlier on the branch) instead of
+  switching mechanics entirely, since "Warning Rumble" is about warning,
+  not healing; Wing Attack's *Flock's Eye* → deepens `calmingPresence`
+  instead, distinct from Wind Rider's own `unshaken`; Dig's *Denning
+  Together* → `[healAura, regen]`; Leech Seed's *Roots That Feed the
+  Grove* → `[healAura, calmingPresence]`.
+- **Three Boldness capstones were also identical**: `bramble_ward`
+  (Vine Whip), `living_furnace` (Flamethrower), `mountains_weight` (Rock
+  Slide) all granted the exact same `[defenseBoost 0.08, thorns 0.08]`
+  pair. Now distinct weightings matching each branch's own emphasis:
+  Flamethrower leans thorns-heavy (`[0.05, 0.12]` — a furnace punishes
+  more than it shrugs off), Rock Slide leans defense-heavy (`[0.1, 0.06]`
+  — a mountain's real weight matters more than retaliation), Vine Whip
+  stays the baseline `[0.08, 0.08]`.
+- **A real fantasy fix, not just de-duplication**: Vine Whip's Boldness
+  branch is explicitly "a plant that digs in and refuses to be moved," but
+  its opener (*Deep Roots*) granted flat `damageReduction` — a generic
+  tanky stand-in for a specific, already-shipped primitive
+  (`"immovable"`) that says exactly what the fantasy claims. Same fix for
+  Rock Slide's *Unbroken* (an Onix anchored under its own rockfall is an
+  even more literal fit for "cannot be moved" than a rooted plant).
+- **Wing Attack's Aggression capstone directly contradicted its own
+  branch.** *Storm of Talons* widened the shape into a `hitsArea` cone —
+  but the branch is explicitly one bird, one committed dive, all the way
+  down (*Full Talon Dive*, *Killing Stoop*), and the capstone's own
+  comment admitted the stretch ("the whole flock's worth of danger from
+  one bird" — flock belongs to *Sociability*, one branch over). This is
+  principle 14 (shape change as capstone currency) applied without the
+  fantasy actually calling for it. Replaced with *Final Stoop*: stays
+  single-target, a real finishing blow (`situationalBonus: targetLowHp`)
+  against something the dive already reeling — the branch's real climax
+  (*Killing Stoop*'s `critCooldownReset`) finally gets a capstone that
+  escalates it instead of undoing it.
+- **`storm_wings` (Wing Attack Boldness) was flat `damageReduction`** in a
+  branch whose own comment says "air superiority, not raw bulk" —
+  `damageReduction` IS raw bulk. Replaced with a literal read of its own
+  name: `situationalBonus: { condition: "storm" }`, real turbulence to fly
+  through instead of another flat-mitigation stand-in.
+- **`screening_dive` (Wing Attack) was a strictly-worse duplicate of its
+  own prerequisite** `warning_cry` — same ally Speed buff, shorter
+  duration, different name. "Screening" is a real combat term for
+  interposing between a threat and whoever it's after; replaced with
+  `positionSwap` — an actual intercept.
+- **Leech Seed's Sociability branch never touched `drainNeeds` at all**,
+  the one lever this move's whole tree is built around, and its own top
+  comment conceded it was just re-running Vine Whip's nurturing template
+  under a different name — the "describe without naming the move" test,
+  failing in the source comment itself. `rooted_calm` was a pure self-buff
+  in a branch about sharing; replaced with a real `targetsAlly`/
+  `allyEffect` heal (confirmed to actually fire, via `support.ts`'s
+  separate `applySupportMove` path, independent of the move's own
+  `utilityMove`/`drainNeeds` handling — checked directly rather than
+  assumed, since "does this even run" is exactly the kind of question this
+  doc's principle 3 exists for).
+- **Name/mechanic mismatches fixed**: Vine Whip's *Unbreakable Hold*
+  (promised grip, delivered `power`/`cooldownTicks`) → now genuinely
+  denies the target's own tempo (`jamCooldownTicks`); Leech Seed's *Twin
+  Drain* (nothing twin about a single self-buff) → renamed *Sharpened
+  Hunger*; Leech Seed's *Feeding Frenzy* capstone (a flat `regen` ending a
+  branch built entirely on escalating theft) → now a real bigger/wider
+  drain than either fork alone reaches; Leech Seed's *Ancient Roots*
+  capstone (literally re-granting the exact same `damageReduction 0.05`/
+  `regen 0.02` values already granted lower in the same branch) → distinct
+  values and one different lever (`defenseBoost` instead of
+  `damageReduction`); Dig's *Gone Before It Lands* (promised timing/dodge,
+  delivered flat `damageReduction`) → honestly renamed *Deepening
+  Instincts*, since this tree's real lever set (cooldown + passives only)
+  can't actually deliver a dodge effect without new engine work.
+- **Real padding cut, not just renamed**: Dig's Aggression branch had four
+  separate "-1 Cooldown"-lever nodes in a row (two of them literally
+  identical, `looser_grip` and `shallow_dive`) — merged into one `-2
+  Cooldown` node at the combined cost, tightening the branch instead of
+  forcing filler to hit a node count.
+
+**Deliberately NOT fixed this round** (logged, not fixed, per this doc's
+own practice of saying what's still open rather than implying a pass was
+exhaustive): the three Boldness branches (Vine Whip/Flamethrower/Rock
+Slide) are still the same structural template underneath the two
+`immovable` swaps and the three differentiated capstones — same node
+count, same shape, same order, values renamed per move. A real fix needs
+each branch built from its own fantasy's own question, not a shared
+skeleton with different flavor text, which is a bigger rebuild than a
+targeted audit-fix pass. Several crosslinks flagged as "single generic
+stat grabs" (`molten_edge`, `ember_ward`, `steadfast_warning`,
+`second_wave`, `quarried_weight`, and most of Dig's/Leech Seed's three
+each) weren't touched either — real content, just not deep content, and
+fixing them for real likely means the same kind of "read the branch, ask
+what's actually unique about this bridge" work the crosslink round did,
+not another mechanical swap. Full data suite green (236/236 — Dig's merge
+nets one fewer node than before), engine suite unaffected (1094/1094).
+Atlas rebuilt and republished.
+
 **Tackle, Slash, and Ember have all now
 shipped their full v2 trees** (`packages/data/src/moves.ts`) — three
 branches (Aggression/Boldness/Sociability) plus a crosslink triangle each,

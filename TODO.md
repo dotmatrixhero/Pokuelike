@@ -4689,3 +4689,59 @@ not something this pathfinding pass itself caused or is positioned to fix.
       now. Verified live (Vine Whip's new crosslink auto-respecs for a
       real Bulbasaur). Full data suite green (236/236, same count — a
       rebalance, not new content). Atlas rebuilt and republished.
+- [x] **Ruthless fantasy-fit audit of all 6 trees, real fixes applied** —
+      direct follow-up: "Restart on each skill starting with the fantasy.
+      Does each node and capstone really fit? Be critical of your own
+      work." Ran an adversarial audit (fresh eyes, not self-review)
+      checking every node's displayed name against what its delta actually
+      does, and every capstone against its own branch's stated fantasy.
+      Real findings, not nitpicks:
+      - **All 6 Sociability capstones were byte-identical**
+        (`healAura 0.01`) and **3 Boldness capstones were also identical**
+        (`[defenseBoost 0.08, thorns 0.08]`) — fixed by making each escalate
+        the specific lever its own branch already built (Rock Slide's now
+        deepens its own `calmingPresence` ladder to 0.3; Flamethrower's
+        Boldness capstone leans thorns-heavy, Rock Slide's leans
+        defense-heavy) instead of converging on the same generic finish.
+      - **Wing Attack's own Aggression capstone contradicted its own
+        branch** — *Storm of Talons* widened into an AoE cone in a branch
+        explicitly built around "one bird, one committed dive," with the
+        node's own comment admitting the stretch. Replaced with *Final
+        Stoop*, a real single-target finishing blow.
+      - **Vine Whip's Boldness fantasy ("refuses to be moved") wasn't
+        actually delivered** — its opener granted flat `damageReduction`
+        instead of the already-shipped `"immovable"` passive that says
+        exactly that. Same fix for Rock Slide's *Unbroken* (an Onix
+        anchored under its own rockfall is an even better fit).
+      - **Leech Seed's Sociability branch never touched `drainNeeds`**,
+        the one lever its whole tree is built on, and its own comment
+        conceded it was a reskin of Vine Whip's branch. Gave it a real
+        `targetsAlly`/`allyEffect` heal instead of a self-buff — verified
+        this actually fires (a separate code path, `support.ts`'s
+        `applySupportMove`, independent of the move's own drainNeeds
+        handling) before shipping it, not assumed.
+      - **Real name/mechanic lies fixed**: Vine Whip's *Unbreakable Hold*
+        (promised grip, delivered flat power/cooldown) now actually denies
+        tempo (`jamCooldownTicks`); Wing Attack's *Storm Wings* (flat
+        `damageReduction` in a branch about NOT tanking) now uses a real
+        `storm` situational bonus; Wing Attack's *Screening Dive* (was a
+        strictly-worse duplicate of its own prerequisite) now does a real
+        `positionSwap` intercept; Leech Seed's *Twin Drain* (nothing twin
+        about it) renamed *Sharpened Hunger*; its *Feeding Frenzy* capstone
+        (flat regen ending a branch about escalating theft) now actually
+        escalates the drain; its *Ancient Roots* capstone (literally
+        re-granting the same two values already granted lower in the same
+        branch) now grants distinct ones; Dig's *Gone Before It Lands*
+        (promised dodge/timing this honest tree's lever set can't deliver)
+        honestly renamed *Deepening Instincts*.
+      - **Real padding cut**: Dig's Aggression branch had four separate
+        "-1 Cooldown" nodes (two literally identical) — merged two into one
+        "-2 Cooldown" node at the combined cost.
+      - **Deliberately left open, logged rather than hidden**: the three
+        Boldness branches are still one structural template with different
+        flavor text underneath the fixes above — a real fix needs each
+        branch built from its own fantasy from scratch, a bigger rebuild
+        than an audit-fix pass. Several crosslinks flagged as "generic
+        single-stat grabs" also weren't deepened this round.
+      - Full data suite green (236/236 — Dig's merge nets one fewer node),
+        engine suite unaffected (1094/1094). Atlas rebuilt and republished.

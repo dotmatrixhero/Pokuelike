@@ -834,7 +834,9 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["throttling_grip"], ["constricting_pull"]],
         leaning: "aggression",
-        delta: { power: 10, cooldownTicks: -1 },
+        // Actually delivers on the name now — the grip itself denies the
+        // target's own tempo, not just more power.
+        delta: { power: 5, jamCooldownTicks: 1 },
       },
       sapping_reach: {
         id: "sapping_reach",
@@ -872,7 +874,10 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Deep Roots",
         cost: 1,
         leaning: "boldness",
-        grantsPassive: { kind: "damageReduction", value: 0.08 },
+        // The branch's own stated fantasy is "refuses to be moved" — this
+        // now actually delivers that (no drag/knockback/lunge budges it),
+        // not a generic damage-reduction stand-in for it.
+        grantsPassive: { kind: "immovable", value: 1 },
         delta: {},
       },
       thick_vines: {
@@ -1067,9 +1072,13 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["deep_bond"],
         leaning: "sociability",
-        // Just growing near this Bulbasaur mends the herd, slowly, on its
-        // own — no move needed, no cooldown to manage.
-        grantsPassive: { kind: "healAura", value: 0.01 },
+        // Just growing near this Bulbasaur mends the herd, and the ground
+        // it's rooted in grows sturdier under its care too — a real
+        // "two passives, one keystone" finale, not just a bigger heal.
+        grantsPassives: [
+          { kind: "healAura", value: 0.015 },
+          { kind: "defenseBoost", value: 0.03 },
+        ],
         delta: {},
       },
     },
@@ -1618,9 +1627,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["hotter_scales"],
         leaning: "boldness",
+        // Heavier on thorns than defense — a furnace punishes whoever
+        // touches it more than it simply shrugs off the hit.
         grantsPassives: [
-          { kind: "defenseBoost", value: 0.08 },
-          { kind: "thorns", value: 0.08 },
+          { kind: "defenseBoost", value: 0.05 },
+          { kind: "thorns", value: 0.12 },
         ],
         delta: {},
       },
@@ -1713,13 +1724,18 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { power: 5 },
       },
-      hearth_of_the_flock: {
-        id: "hearth_of_the_flock",
-        name: "Hearth of the Flock",
+      communal_blaze: {
+        id: "communal_blaze",
+        name: "Communal Blaze",
         cost: 2,
         prerequisites: ["steadfast_blaze"],
         leaning: "sociability",
-        grantsPassive: { kind: "healAura", value: 0.01 },
+        // Everyone gathered around it recovers faster AND settles down —
+        // a real "two passives" finale distinct from a flat heal aura.
+        grantsPassives: [
+          { kind: "regen", value: 0.02 },
+          { kind: "calmingPresence", value: 0.1 },
+        ],
         delta: {},
       },
       // Crosslink: Sociability <-> Aggression — a fire this shared catches
@@ -4596,7 +4612,10 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["weathering"], ["jagged_edges"]],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReduction", value: 0.06 },
+        // Anchored under its own rockfall — no drag/knockback/lunge so
+        // much as budges it, a real delivery on "Unbroken" instead of
+        // another flat damage-reduction stand-in.
+        grantsPassive: { kind: "immovable", value: 1 },
         delta: {},
       },
       time_worn: {
@@ -4613,11 +4632,12 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["time_worn"],
         leaning: "boldness",
-        // A real "two passives, one keystone" finale — the craggy hide
-        // grows edges of its own.
+        // Heavier on raw defense than retaliation — the actual weight of
+        // a mountain standing firm matters more here than punishing
+        // whoever's still hitting it.
         grantsPassives: [
-          { kind: "defenseBoost", value: 0.08 },
-          { kind: "thorns", value: 0.08 },
+          { kind: "defenseBoost", value: 0.1 },
+          { kind: "thorns", value: 0.06 },
         ],
         delta: {},
       },
@@ -4725,8 +4745,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["lasting_rumble"],
         leaning: "sociability",
-        // Denning together, tending each other, slowly, no move needed.
-        grantsPassive: { kind: "healAura", value: 0.01 },
+        // Escalates the branch's own real lever instead of switching to a
+        // generic heal — after enough warnings, the ground around it
+        // finally settles for good, a decisively bigger calm than
+        // anything earlier on this branch (0.2/0.15 at most before this).
+        grantsPassive: { kind: "calmingPresence", value: 0.3 },
         delta: {},
       },
       // Crosslink: Sociability <-> Aggression — the first wave was the
@@ -4888,15 +4911,19 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { power: 5 },
       },
-      storm_of_talons: {
-        id: "storm_of_talons",
-        name: "Storm of Talons",
+      final_stoop: {
+        id: "final_stoop",
+        name: "Final Stoop",
         cost: 2,
         prerequisites: ["diving_momentum"],
         leaning: "aggression",
-        // A wider dive-bomb spread — the whole flock's worth of danger from
-        // one bird.
-        delta: { shape: { kind: "cone", length: 3, width: 3 }, power: 10 },
+        // Fixes a real self-inflicted contradiction: this branch is one
+        // bird, one committed dive, all the way down (full_talon_dive,
+        // killing_stoop) — the old capstone widened it into a flock-sized
+        // AoE cone, undoing everything the branch just built. This one
+        // stays single-target and finishes what the stoop started: a real
+        // predator's kill shot against something already reeling.
+        delta: { power: 10, situationalBonus: { condition: "targetLowHp", multiplier: 1.5 } },
       },
       // Crosslink: Aggression <-> Boldness — rides the same current that
       // keeps it airborne straight into range before the target can react.
@@ -4969,8 +4996,11 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["steadier_wings"],
         excludes: ["tailwind_recovery"],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReduction", value: 0.05 },
-        delta: { accuracy: -5 },
+        // A literal read of its own name instead of another flat
+        // damage-reduction stand-in — this branch's whole point is air
+        // superiority, not raw bulk, and flat mitigation IS raw bulk.
+        // Real turbulence to fly through, not around.
+        delta: { situationalBonus: { condition: "storm", multiplier: 1.4 }, accuracy: -5 },
       },
       sky_dominance: {
         id: "sky_dominance",
@@ -5000,15 +5030,17 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "unshaken", value: 1 },
         delta: {},
       },
-      // Crosslink: Boldness <-> Sociability — the same rising current that
-      // lifts this bird clear of a hit lifts a flock-mate too.
+      // Crosslink: Boldness <-> Sociability — a real intercept, not another
+      // speed buff (the old version was just `warning_cry` with a shorter
+      // duration under a different name). "Screening" is a real combat
+      // term for interposing between a threat and whoever it's after.
       screening_dive: {
         id: "screening_dive",
         name: "Screening Dive",
         cost: 1,
         prerequisites: ["evasive_flight", "warning_cry"],
         leaning: "sociability",
-        delta: { targetsAlly: true, allyEffect: { buff: { stat: "speed", stage: 1, ticks: 15 } } },
+        delta: { positionSwap: true },
       },
       // --- Sociability: "Flock Signal" — a prey bird's real defense isn't
       // toughness, it's the flock: a warning cry, then the whole group
@@ -5099,9 +5131,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["steadfast_call"],
         leaning: "sociability",
-        // Just staying alert together mends the flock, slowly, all on its
-        // own.
-        grantsPassive: { kind: "healAura", value: 0.01 },
+        // Collective vigilance, not a flat heal — the flock's real payoff
+        // was always the rally/de-escalation ladder (mob_the_threat ->
+        // united_front), so the capstone deepens that instead of switching
+        // to a generic aura. Distinct from Wind Rider's own unshaken.
+        grantsPassive: { kind: "calmingPresence", value: 0.2 },
         delta: {},
       },
       // Crosslink: Sociability <-> Aggression — strikes right as the cry
@@ -5667,21 +5701,18 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "unshaken", value: 1 },
         delta: {},
       },
-      looser_grip: {
-        id: "looser_grip",
-        name: "-1 Cooldown",
-        cost: 1,
-        prerequisites: ["quick_reflexes"],
-        leaning: "aggression",
-        delta: { cooldownTicks: -1 },
-      },
       shallow_dive: {
         id: "shallow_dive",
-        name: "-1 Cooldown",
-        cost: 1,
-        prerequisitesAnyOf: [["looser_grip"], ["braced_dive"]],
+        name: "-2 Cooldown",
+        cost: 2,
+        prerequisitesAnyOf: [["quick_reflexes"], ["braced_dive"]],
         leaning: "aggression",
-        delta: { cooldownTicks: -1 },
+        // Consolidated from two separate "-1 Cooldown" nodes into one —
+        // this branch's honestly-narrow lever set (only cooldownTicks and
+        // passives are real for a move that's never resolved as a hit)
+        // doesn't need the padding of splitting the same lever twice just
+        // to hit a node count.
+        delta: { cooldownTicks: -2 },
       },
       never_still: {
         id: "never_still",
@@ -5714,12 +5745,16 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "thorns", value: 0.1 },
         delta: {},
       },
-      gone_before_it_lands: {
-        id: "gone_before_it_lands",
-        name: "Gone Before It Lands",
+      deepening_instincts: {
+        id: "deepening_instincts",
+        name: "Deepening Instincts",
         cost: 2,
         prerequisitesAnyOf: [["instant_vanish"], ["false_surface"]],
         leaning: "aggression",
+        // Honest rename — the old "Gone Before It Lands" promised a
+        // dodge/timing effect this tree's real lever set (cooldownTicks +
+        // passives only, since Dig is never resolved as a hit) can't
+        // actually deliver.
         grantsPassive: { kind: "damageReduction", value: 0.06 },
         delta: { cooldownTicks: -1 },
       },
@@ -5876,7 +5911,12 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["deeper_calm"], ["watchful_rest"]],
         leaning: "sociability",
-        grantsPassive: { kind: "healAura", value: 0.01 },
+        // A shared den means real rest for everyone in it, not just a
+        // trickle of healing.
+        grantsPassives: [
+          { kind: "healAura", value: 0.01 },
+          { kind: "regen", value: 0.02 },
+        ],
         delta: {},
       },
       // Crosslink: Sociability <-> Aggression — even the quick-vanishing
@@ -6136,13 +6176,13 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Insatiable",
         cost: 1,
         prerequisites: ["hungrier_roots"],
-        excludes: ["twin_drain"],
+        excludes: ["sharpened_hunger"],
         leaning: "aggression",
         delta: { drainNeeds: { need: "hunger", amount: 0.5, radius: 5 } },
       },
-      twin_drain: {
-        id: "twin_drain",
-        name: "Twin Drain",
+      sharpened_hunger: {
+        id: "sharpened_hunger",
+        name: "Sharpened Hunger",
         cost: 1,
         prerequisites: ["hungrier_roots"],
         excludes: ["insatiable"],
@@ -6156,12 +6196,12 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "feeding_frenzy",
         name: "Feeding Frenzy",
         cost: 2,
-        prerequisitesAnyOf: [["insatiable"], ["twin_drain"]],
+        prerequisitesAnyOf: [["insatiable"], ["sharpened_hunger"]],
         leaning: "aggression",
-        // The constant draining keeps it topped up even between successful
-        // casts.
-        grantsPassive: { kind: "regen", value: 0.03 },
-        delta: { cooldownTicks: -1 },
+        // A real escalation regardless of which fork got here — a bigger,
+        // wider theft than either path alone reaches, not a flat passive
+        // standing in for "the branch is now finished."
+        delta: { drainNeeds: { need: "hunger", amount: 0.6, radius: 6 }, cooldownTicks: -1 },
       },
       // Crosslink: Aggression <-> Boldness — the hunger it takes goes
       // straight into a hardier stalk, not just a bigger haul.
@@ -6236,9 +6276,12 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["bountiful_roots"], ["twin_taproot"]],
         leaning: "boldness",
+        // Distinct from Sturdy Return/Steady Roots below it, not the same
+        // two values re-granted a second time — a genuinely deeper root
+        // system, not a bigger number on the same two levers.
         grantsPassives: [
-          { kind: "damageReduction", value: 0.05 },
-          { kind: "regen", value: 0.02 },
+          { kind: "regen", value: 0.03 },
+          { kind: "defenseBoost", value: 0.04 },
         ],
         delta: {},
       },
@@ -6253,8 +6296,10 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "calmingPresence", value: 0.1 },
         delta: {},
       },
-      // --- Sociability: "Shared Harvest" — the same nurturing fantasy
-      // Vine Whip's own Sociability branch leans on.
+      // --- Sociability: "Shared Harvest" — what the roots take doesn't
+      // stay with the caster. Real follow-up on a self-critique: the first
+      // draft never actually shared anything it stole, just re-ran Vine
+      // Whip's own nurturing template under a different name.
       gentle_roots: {
         id: "gentle_roots",
         name: "Gentle Roots",
@@ -6269,7 +6314,13 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["gentle_roots"],
         leaning: "sociability",
-        delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 20 } },
+        // A real ally-facing effect at last — fires through the separate
+        // targetsAlly/allyEffect path (support.ts's applySupportMove),
+        // independent of this move's own drainNeeds/utilityMove path. Not
+        // literally wired to the stolen resource itself (no mechanism for
+        // that yet), but a genuine "pass some of it on" gesture instead of
+        // another self-buff.
+        delta: { targetsAlly: true, allyEffect: { healFraction: 0.1 } },
       },
       quieter_ground: {
         id: "quieter_ground",
@@ -6313,7 +6364,12 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["deepening_calm"], ["watchful_roots"]],
         leaning: "sociability",
-        grantsPassive: { kind: "healAura", value: 0.01 },
+        // What the roots take, the grove gets back — a slow herd-wide heal
+        // paired with the branch's own calm, not a bare aura on its own.
+        grantsPassives: [
+          { kind: "healAura", value: 0.012 },
+          { kind: "calmingPresence", value: 0.1 },
+        ],
         delta: {},
       },
       // Crosslink: Sociability <-> Aggression — even a shared harvest
