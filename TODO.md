@@ -4938,6 +4938,28 @@ not something this pathfinding pass itself caused or is positioned to fix.
       leaves fire behind it); Rock Slide rebuilt around `weightScaling` +
       the `elevation` bonus, with a positional fork instead of the stock
       regen-vs-thorns one.
+- [x] **Second seed confirms the ORIGINAL regen diagnosis** (a long
+      background baseline run that only finished later). Seed 777, pre-fix:
+      1368 living agents, 471 carrying regen, max 11.00%/tick, p90 6% —
+      an identical ceiling to seed 12345's 11%/6%. Worth being precise
+      about what this does and does not vindicate: the passive-stacking
+      measurement is robust across seeds, because the ceiling is a property
+      of the tree content and the uncapped `+=` rather than of a run's RNG
+      trajectory. The POPULATION figures quoted alongside it are still
+      unreliable (see below). Seed 777 also shows the runaway shape clearly:
+      1368 agents alive at 20k ticks when nothing can finish a kill.
+- [ ] **`damageReduction` has the same uncapped-stacking problem and was
+      never addressed.** Same pre-fix baseline: median 0.15, p90 0.25, max
+      0.33 across 1234 of 1368 living agents — every third point of damage
+      simply deleted, on a passive that `damageReductionOf` only clamps at
+      1.0 (i.e. total immunity). It accumulates permanently across every
+      move's tree exactly like regen did, and unlike regen it is NOT gated
+      on being out of combat, so it applies to every hit in a fight. The
+      out-of-combat gate is the wrong tool here (flat damage reduction is
+      not healing); the options are a real cap, diminishing returns, or
+      converting the low-tier nodes to flat damage reduction the way regen
+      went flat. Not urgent, but it is the same bug wearing a different
+      passive.
 - [ ] **METHODOLOGY: stop trusting single-seed population numbers.**
       Adding one extra `rng()` draw per skill-point grant, with its effect
       disabled, moved a seed's 20k population from 129 to 3. Across 6 seeds
