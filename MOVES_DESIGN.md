@@ -114,6 +114,86 @@ crosslink before rolling a new pattern out everywhere (rule 7's bridge
 pattern) is the same instinct applied to structural changes, not just
 new features.
 
+Seven more, added after rolling the crosslink-bridge pattern out to every
+tree and taking Hydro Pump's Sociability capstone through three real
+iterations — none of this rehashes 1-10, each is a distinct mistake with
+its own fix:
+
+**11. A bridge must reach every branch its crosslink actually connects,
+not just the branch matching its own `leaning`.** Converged Ruin
+(Earthquake) is `leaning: "aggression"`, but the crosslink underneath it
+(*Coordinated Tremor*) bridges Sociability too — v1 only wired the
+shortcut into Aggression's own pre-fork node, corrected directly: "make
+them connect to the other branch too. Like it can go to either branch." A
+descendant node's own `leaning` field is not the boundary of which
+branches a bridge should serve; the crosslink's actual two prerequisite
+branches are.
+
+**12. "Land one step short of the fork" isn't specific enough — land at
+the same depth from the decision a normal walk would reach.** v1 of the
+same bridge wired the shortcut directly onto the fork nodes' own
+`prerequisitesAnyOf`, on the theory that "reaching the fork without
+skipping it" was the rule — still corrected: "the deeper cross link going
+straight to the choice of 2 nodes are a bit too much." The precise rule
+(principle 7's corollary, sharpened): a bridge should save the *grind*,
+never the *last step to the decision*, so the fork stays an equally
+weighted choice regardless of which path got you there.
+
+**13. A bridge's own new content must deepen the specific lever its own
+crosslink already introduced, not reach for a generic stat grab-bag —
+principle #1 applies at the single-node level too, not just the
+whole-tree level.** A rollout across 11 crosslinks shipped with the same
+three-lever rotation every time (+accuracy filler, then +power/
++defensePenetration/+lifestealFraction notable) — direct, blunt feedback:
+"Your crosslinks are laaaaaame tho... the skills don't feel cool." Every
+one had to be rebuilt so its notable escalates whatever its own crosslink
+already does — a lunge gets longer, a crit gets sharper, a mark gets
+stronger — instead of bolting on whichever generic lever hadn't been used
+yet.
+
+**14. A shape/AoE change is notable/capstone-tier currency, earned rather
+than routine — and it's the single best payoff to spend on a bridge
+notable when a big moment is explicitly asked for.** Direct ask, "make
+one of the solar beam ones do like three width beams as a capstone" —
+Solar Beam is single-target everywhere else in its own tree, so turning
+one bridge's notable into a real `hitsArea` cone was the standout of the
+whole rollout, not an arbitrary pick.
+
+**15. A generated diagram's layout math is real code and deserves the
+same "read the function, don't eyeball it" discipline as gameplay code.**
+A crosslink whose edge visually "cut across the graph" wasn't a rendering
+quirk — `computeLayout` placed every crosslink at the same fixed hub
+radius regardless of how deep its actual prerequisite sat, so a crosslink
+rooted at depth 7 got drawn as if it were rooted at depth 0. The direct
+report ("hydro pump marked undertow has some weird bridges that are not
+correct") was correct on the merits; fixed by scaling each crosslink's
+radius to the real depth of its own deepest prerequisite. Same instinct
+as principle 9, but the root cause this time was positional math, not an
+incorrect delta.
+
+**16. When feedback comes back twice on the same node, check whether two
+separate asks are being crammed onto one point before writing a third
+version of it.** Hydro Pump's Tidal Communion took three passes: a flat
+`healAura` didn't match the branch's own fantasy; the `excludesAllies`
+replacement then read as reused content, since Earthquake's own opener
+already does the same thing. The fix wasn't a fourth mechanic bolted onto
+the same node — it was separating "heal" and "don't hit allies" (two
+genuinely different asks) onto two different nodes: `excludesAllies`
+moved down onto the opener next to its existing heal, which freed the
+capstone to become something the roster didn't have yet (`aquaticHaste`).
+
+**17. Confirming a mechanic ISN'T buildable from existing primitives is
+exactly as load-bearing as confirming it IS, and still needs the user's
+go-ahead before new engine work starts.** Before building `aquaticHaste`,
+the closed `PassiveKind` union, `actionSpeedOf`'s multiplier chain, and
+`terrainSpeedMultiplier`'s per-terrain-only signature were all read
+directly to confirm no existing primitive covered "ally aura +
+terrain-conditional" together — then the scope question went to the user
+(AskUserQuestion) rather than being decided unilaterally, per principle
+#10. Guessing "this probably needs new code" from a field name alone
+would have skipped the exact verification step principle #3 already
+demands.
+
 ## Engine primitives needed — running checklist
 
 Every tree/lever in this doc that isn't marked "live" is blocked on one of
@@ -1916,12 +1996,37 @@ new field to visualize, a UI fix) — edit
 The template is real, versioned source (checked into the repo, reviewed
 and edited like any other file) — never regenerate it from a screenshot or
 from memory of what the artifact looked like; that's exactly the
-"scratch every time" failure mode this process exists to avoid. Sanity-
-check any template edit the same way this process itself was verified:
-run the two build steps and confirm the output's embedded JSON still
-parses and every node still has a `leaning` (a quick Python/Node one-
-liner, same as this file's own move-tree redesigns were checked before
-publishing).
+"scratch every time" failure mode this process exists to avoid.
+
+**Verify every template edit before rebuilding — not optional, learned
+from a real incident.** An `Edit` tool call once silently wrote two
+literal NUL bytes into the template (surfaced only because `file` then
+reported "data" instead of text on a file that had always been plain
+HTML). Since then, every template edit gets two checks before the two
+build steps run, every time, no exceptions:
+1. **File integrity** — a quick Python check: `data =
+   open(path,'rb').read()`, confirm `data.count(b'\x00') == 0` and
+   `data.decode('utf-8')` doesn't raise.
+2. **Inline-script syntax** — extract the `<script>...</script>` IIFE by
+   string-slicing the file, then `new Function(js)` it in Node with the
+   `__TREE_DATA__` JSON parse stubbed to `"{}"` (the real data isn't
+   present yet at this point in the pipeline) — a syntax error surfaces
+   here, immediately, instead of silently in the published page.
+
+**Whenever `computeLayout` itself changes, verify the actual output
+against real data before publishing — a layout bug reads as a cosmetic
+UI complaint until it isn't.** Two real, non-cosmetic bugs shipped past a
+"looks fine" glance and were only caught by a direct report against the
+live artifact (see "Deeper crosslinks — round 2" above: the branch-pair
+overlap bug and Marked Undertow's fixed-hub-radius bug). The check: string-
+slice `computeLayout` back out of the template, `new
+Function('tree', snippet + 'return computeLayout(tree);')`, and run it
+against the real exported tree JSON (step 1's `/tmp/trees.json`) for
+*every* tree in the roster — not just the one being changed, since a
+shared layout function's bug rarely stays confined to one tree. Check the
+result for missing positions, exact-duplicate positions, and
+near-overlaps (anything under ~20px apart) before rebuilding and
+republishing.
 
 1. **Rock Throw / Peck / Scratch / Water Gun** — designed above, zero new
    primitives needed, purely porting work identical to what Tackle/Slash/
