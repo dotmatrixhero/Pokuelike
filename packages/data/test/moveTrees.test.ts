@@ -397,23 +397,20 @@ describe("Hydro Pump tree: v3 redesign — overwhelming, genuinely hard to aim",
     expect(respec.terrainFill).toEqual({ terrain: "water" });
   });
 
-  it("Marked Undertow needs both Wake Rally's mark and Undertow Pull's drag — a real cross-branch dependency", () => {
+  it("Tidal Communion is a real 'pod moves as one' payoff (excludesAllies), not a flat team-heal", () => {
     const respec = applyMoveTree(hydroPump, [
       "pod_current",
       "pod_footing",
       "wake_footing",
       "wake_rally",
-      "building_pressure",
-      "pump_conditioning",
-      "overwhelm_footing",
-      "bursting_main",
-      "flooding_wake",
-      "widening_main",
-      "overwhelm_surge",
-      "undertow_pull",
-      "marked_undertow",
+      "pod_reach",
+      "undertow_guard",
+      "pod_instinct",
+      "pod_precision",
+      "tidal_communion",
     ]);
-    expect(respec.situationalBonus).toEqual({ condition: "rallyMarked", multiplier: 1.3 });
+    expect(respec.excludesAllies).toBe(true);
+    expect(respec.grantsPassive).toBeUndefined();
   });
 
   it("Tidal Bastion is a real two-passive keystone, distinct from Water Gun's own resistanceBreaker", () => {

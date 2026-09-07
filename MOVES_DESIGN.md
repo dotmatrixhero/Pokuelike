@@ -1349,7 +1349,15 @@ on each move has the full reasoning; this is the summary.
   - **Sociability ("Pod Tide")**: the fork is a real positional choice —
     *Undertow Guard* (push the threat away from the herd) vs. *Riptide
     Charge* (surge forward to meet it first) — instead of the
-    damageReduction/jamCooldown template reused everywhere else.
+    damageReduction/jamCooldown template reused everywhere else. Keystone
+    *Tidal Communion* was originally a flat `healAura` team-heal — direct
+    feedback: "team healing isn't like matching the fantasy." Redesigned
+    to the actual fantasy instead: `excludesAllies`, so the pod that's
+    learned to move the water together finally isn't caught in its own
+    blast (Hydro Pump's own `hitsArea` is set on the base move and, until
+    this keystone, always hit same-herd agents caught in it too — the
+    same primitive Earthquake's Herdsafe Trigger already uses, just never
+    used here before).
   - **Crosslinks**: *Surge and Brace* (Aggression↔Boldness, `lockTicks:
     -1` — directly answers the cost Building Pressure itself introduces,
     not just flavor) · *Steadfast Tide* (Boldness↔Sociability, shared
@@ -1635,6 +1643,12 @@ graph. Verified directly: recomputed Hydro Pump's real layout before and
 after — Marked Undertow moved from `(-73,-56)` (right at the hub) to
 `(-418,-241)`, now at roughly the same radius as Undertow Pull itself.
 
+**Marked Undertow itself was removed shortly after this fix** — direct
+ask: "Let's just remove marked undertow." The `computeLayout` fix above
+is kept (real, generalized infrastructure for any future crosslink built
+the same deep-dual-prerequisite way), but nothing in the shipped roster
+exercises it right now.
+
 - **`SituationalCondition: "rallyMarked"` (Shipped)** — the defender
   currently has an active `rallyMarkTicksRemaining`. Same one-line-
   enum-addition pattern as `"flanking"`/`"targetLowHp"`
@@ -1685,15 +1699,17 @@ after — Marked Undertow moved from `(-73,-56)` (right at the hub) to
     the user a real `statChangeOnHit` self Defense buff — bracing exactly
     as you create the distance, instead of a passive that runs regardless
     of which positional fork got picked.
-  - *Marked Undertow* (Sociability↔Aggression, **Shipped**) — needs BOTH
-    *Wake Rally* (the mark) AND *Undertow Pull* (the drag), a real
-    cross-branch dependency rather than a single-prereq node: `situationalBonus:
-    "rallyMarked"` — the current pulls hardest at whatever the pod has
-    already flagged. (The pitched version — extra `positionSwapPull`
-    distance specifically — isn't buildable from `situationalBonus` alone,
-    since that only scales damage; a distance bonus keyed off a condition
-    would need its own new field. Shipped the damage version instead of
-    faking the distance one.)
+  - ~~*Marked Undertow* (Sociability↔Aggression)~~ — **Removed**, direct
+    ask: "Let's just remove marked undertow." It needed BOTH *Wake Rally*
+    (the mark) AND *Undertow Pull* (the drag) — a real cross-branch
+    dependency, and the primitive it used (`rallyMarked`) was sound, but
+    it was architecturally the odd one out in the whole roster (every
+    other crosslink bridges two branch *openers*; this one bridged two
+    deep, expensive fork-culminating nodes instead), which is what forced
+    the one-off depth-scaling fix to `computeLayout` documented below.
+    That layout fix stays — it's real, generalized infrastructure for any
+    future crosslink built the same way — but nothing in the shipped
+    roster uses it anymore.
 
 - **Solar Beam** (no `rallyCall` in this tree — Grove's own fork is the
   ally-effect choice instead, so its crosslinks lean on *that* mechanic)

@@ -2804,8 +2804,14 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["pod_precision"],
         leaning: "sociability",
-        grantsPassive: { kind: "healAura", value: 0.01 },
-        delta: {},
+        // Direct feedback: a flat team-heal capstone didn't match this
+        // branch's own fantasy ("the pod moving the water together").
+        // Real payoff instead: the pod learns to ride its own current as
+        // one — Hydro Pump's `hitsArea` blast (set on the base move) no
+        // longer catches herd-mates caught in it, the same `excludesAllies`
+        // primitive Earthquake's Herdsafe Trigger already uses, finally
+        // used here where "the pod moves together" is the literal fantasy.
+        delta: { excludesAllies: true },
       },
       // Crosslink: Aggression <-> Boldness — Boldness's steadiness softens
       // Aggression's own wind-up cost, directly answering the price
@@ -2909,18 +2915,6 @@ export const MOVES: Record<string, MoveSpec> = {
         // power bolt-on — a target the herd has flagged gets hit hardest
         // once the current actually catches it.
         delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.4 } },
-      },
-      // Deeper crosslink: needs BOTH branches' own real mechanics —
-      // Wake Rally's mark and Undertow Pull's drag — not just a shared
-      // passive. Uses the new `"rallyMarked"` primitive: the current
-      // pulls hardest at whatever the pod has already flagged.
-      marked_undertow: {
-        id: "marked_undertow",
-        name: "Marked Undertow",
-        cost: 1,
-        prerequisites: ["wake_rally", "undertow_pull"],
-        leaning: "aggression",
-        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.3 } },
       },
     },
   },

@@ -4267,3 +4267,19 @@ not something this pathfinding pass itself caused or is positioned to fix.
       near-overlapping positions across all four trees before rebuilding;
       full data suite unaffected and still green (193/193). Atlas rebuilt
       and republished.
+- [x] **Removed Marked Undertow; redesigned Hydro Pump's Sociability
+      capstone to actually match its own fantasy** — direct ask: "Let's
+      just remove marked undertow. I think hydro pump sociable capstone is
+      kinda lame. Team healing isn't like matching the fantasy imo."
+      Deleted `marked_undertow` entirely (it was the one crosslink whose
+      layout needed a special depth-scaling fix last round — that fix
+      stays in `computeLayout` as real infrastructure, just unused by the
+      current roster now). *Tidal Communion* (the Pod Tide branch's own
+      capstone) was a flat `healAura` team-heal, disconnected from the
+      branch's actual fantasy ("the pod moving the water together").
+      Redesigned to `excludesAllies` instead — the pod finally isn't
+      caught in its own `hitsArea` blast, the literal fantasy, reusing the
+      same primitive Earthquake's Herdsafe Trigger already uses. Updated
+      the one test that referenced Marked Undertow and the capstone's own
+      assertion; full suite green (193/193 data). Atlas rebuilt and
+      republished.
