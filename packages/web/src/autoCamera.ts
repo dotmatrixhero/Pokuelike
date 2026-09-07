@@ -16,10 +16,19 @@ import { idLabel } from "./notableTitles.js";
  * existing tick loop.
  */
 
-export type NotableCategory = "immigration" | "courtship" | "hatch" | "battle" | "evolution" | "death";
+export type NotableCategory = "immigration" | "courtship" | "hatch" | "battle" | "clash" | "evolution" | "death";
 
-/** Fixed camera-hold time for a one-shot notable moment (immigration/courtship/hatch/evolution/death not extending a battle). Real ticks, not wall-clock — see `DWELL_TICKS`'s doc comment for why ticks, not ms. */
+/** Fixed camera-hold time for a one-shot notable moment (immigration/hatch/evolution/death not extending a battle — "courtship" uses its own, shorter `COURTSHIP_DWELL_TICKS` instead, see that constant's own doc comment). Real ticks, not wall-clock — see `DWELL_TICKS`'s doc comment for why ticks, not ms. */
 const DWELL_TICKS = 24;
+/**
+ * `DWELL_TICKS`'s own shorter counterpart for "courtship" specifically —
+ * direct ask: "bonding takes too much air time on the autocam. reduce it
+ * and shorten how long it follows them." Courtship (bonded/shelterBuilt/
+ * eggLaid) is real but the least individually dramatic of the one-shot
+ * categories — a brief glance is enough, it doesn't need the same hold time
+ * as a rarer immigration/hatch/evolution/death moment.
+ */
+const COURTSHIP_DWELL_TICKS = 10;
 /**
  * A concluded battle gets a short "epilogue" hold on the same view before the
  * camera releases — long enough to actually see the kill/retreat land, short
@@ -42,8 +51,80 @@ const BATTLE_EPILOGUE_MS = 1000;
  * `maybeConcludeBattle`.
  */
 const BATTLE_STALE_TICKS = 40;
+/**
+ * A `herdClash` skirmish — direct ask: "clashes that don't do nothing are
+ * lame... time out faster." A herd rivalry fight is non-lethal by design
+ * (`herdConflict.ts`'s own doc comment: "cannot faint or kill, full stop"),
+ * so it doesn't earn a real battle's patience for a lull between hits — a
+ * skirmish that's gone quiet this briefly almost always really is over, not
+ * mid-standoff, and shouldn't hold the camera/speed override waiting to find
+ * out.
+ */
+const CLASH_STALE_TICKS = 8;
+/** `CLASH_STALE_TICKS`'s own real-ms epilogue counterpart — see `BATTLE_EPILOGUE_MS`'s doc comment for why this is wall-clock, not ticks. Proportionally shorter than a real battle's, same "it's over, move on" reasoning. */
+const CLASH_EPILOGUE_MS = 400;
+/**
+ * Minimum real ticks between two separate PROMOTIONS of a brand-new pair
+ * into a camera-worthy "clash" engagement — direct ask, after watching a
+ * live run with the earlier retaliation-required bar in place: "auto cam is
+ * now skipping boring stuff. but i'm not seeing like any battles. like
+ * these move usages are interesting! but i dont get to see any of em."
+ * `herdConflict.ts`'s own design ("cannot faint or kill... loser retreats
+ * once meaningfully hurt") means most skirmishes genuinely are one-sided —
+ * a defender backing off rather than trading hits back — so requiring a
+ * real direction-reversed retaliation before ever engaging the camera (this
+ * constant's own prior incarnation, `CLASH_ESCALATION_WINDOW_TICKS`) made
+ * almost every real, damage-dealing hit invisible, not just the boring
+ * ones. A landed hit is real on its own — it's a genuine move connecting
+ * for genuine damage — so it's camera-worthy again without waiting for a
+ * response; this cooldown is what keeps that from regressing into the
+ * EARLIER complaint ("a lot more clashing now... clashes that don't do
+ * anything are lame") — a brand-new pair's promotion is throttled the same
+ * way `ONE_SHOT_CLUSTER_COOLDOWN_TICKS` throttles one-shot bursts, so a
+ * herd's many simultaneous one-sided skirmishes surface an occasional real
+ * one instead of spamming a cut per hit. See `maybeEngageClash`. Does NOT
+ * apply to widening an already-active/queued pair's own engagement — every
+ * real hit between a pair already on screen still extends it, same as
+ * before.
+ */
+const CLASH_PROMOTION_COOLDOWN_TICKS = 40;
 /** Hard cap on queued-but-not-yet-shown engagements — a chaotic tick (mass death event, say) shouldn't grow this unboundedly; overflow drops the oldest still-queued entries first. */
 const MAX_QUEUE = 20;
+/**
+ * Minimum real ticks between two separate one-shot engagements of the SAME
+ * category getting queued at all — direct ask, after actually running the
+ * app and watching auto-camera for a while: "autocam is still so
+ * uncomfortable... It skips around a lot and focuses on boring shit."
+ * First built courtship-only (`bonded`/`shelterBuilt`/`eggLaid` — a healthy
+ * herd routinely bonds/lays several eggs within a handful of ticks of each
+ * other), then generalized once a longer live run showed the exact same
+ * clustering in "evolution" (a whole same-age cohort crossing its level
+ * threshold together: 8 separate "bulbasaur evolved into ivysaur" cuts back
+ * to back) and "death" (3 separate "arbok killed ivysaur" cuts in a row) —
+ * any category CAN burst once a population is large/synchronized enough,
+ * not just courtship. A cooldown per category collapses a burst like that
+ * down to just its first moment — the camera still shows that flavor of
+ * beat, it just doesn't chase every single individual instance a
+ * synchronized population produces back to back, so a real fight or
+ * immigration elsewhere doesn't end up buried behind a run of five
+ * near-identical cuts. NOT applied to "immigration" (already engine-side
+ * rate-limited to at most one group every `MIN_TICKS_BETWEEN_IMMIGRATIONS`
+ * ticks — see `@pokuelike/engine`'s immigration.ts — so it can't burst the
+ * same way) or to battle/clash (their own dedicated continuous-engagement
+ * machinery already handles "the same fight keeps producing hits" by
+ * widening one engagement rather than queuing a new one per hit).
+ */
+const ONE_SHOT_CLUSTER_COOLDOWN_TICKS = 60;
+/**
+ * `ONE_SHOT_CLUSTER_COOLDOWN_TICKS`'s own longer counterpart for
+ * "courtship" specifically — direct ask: "bonding takes too much air time
+ * on the autocam. reduce it." Courtship is both the most frequent one-shot
+ * category (a growing herd routinely bonds/lays eggs/finishes shelters) and
+ * the least individually dramatic, so it gets a real extra cooldown on top
+ * of the shared baseline instead of sharing it with the rarer immigration/
+ * hatch/evolution/death categories.
+ */
+const COURTSHIP_CLUSTER_COOLDOWN_TICKS = 150;
 /**
  * Playback speed (the `SPEED_STEPS` value, not an index) auto-camera holds a
  * followed *non-battle* event (immigration/courtship/hatch/evolution/death)
@@ -75,8 +156,11 @@ const SLOWDOWN_THRESHOLD_SPEED = 16;
  * `AutoCameraHost.enterBattleStep`/`exitBattleStep`, and `main.ts`'s
  * `BATTLE_STEP_INTERVAL_MS`) — a deliberate, watchable beat per tick,
  * regardless of what speed the viewer was previously at. Every other
- * notable category keeps the unchanged ≥4x-only / 2x-target speed-slowdown
- * behavior below.
+ * notable category — including "clash" (`herdClash`, direct follow-up ask:
+ * "keep the slow down, but time out faster. Don't even enter battle step,
+ * just go 1x or some shit" — a non-lethal herd skirmish never earns the
+ * hit-by-hit precision a real fight needs) — keeps the unchanged ≥16x-only
+ * / 8x-target ordinary speed-slowdown behavior below, never `enterBattleStep`.
  */
 
 interface Engagement {
@@ -168,6 +252,10 @@ export class AutoCameraController {
   private battleStepping = false;
   /** Sticky "the viewer took the wheel" flag — set by `noteManualViewChange`, cleared whenever a *new* engagement becomes active. While set, the currently-active engagement keeps running (log filter, dwell/conclusion logic) but stops re-centering the camera; a fresh notable event still takes it back, since that's a deliberate new thing to look at, not a continuation of what the viewer already panned away from. */
   private viewerTookOver = false;
+  /** Tick a brand-new pair was last promoted into a real "clash" engagement — backs `CLASH_PROMOTION_COOLDOWN_TICKS`'s throttle; see that constant's own doc comment. `undefined` before the first promotion (or cleared by `reset`). */
+  private lastClashPromotedTick: number | undefined;
+  /** Per-category tick a one-shot engagement was last actually queued — backs `ONE_SHOT_CLUSTER_COOLDOWN_TICKS`'s throttle; see that constant's own doc comment. Absent entry = never queued yet (or cleared by `reset`). */
+  private lastEnqueuedTickByCategory = new Map<NotableCategory, number>();
 
   constructor(private readonly host: AutoCameraHost) {}
 
@@ -233,6 +321,8 @@ export class AutoCameraController {
   reset(): void {
     this.queue = [];
     this.active = undefined;
+    this.lastClashPromotedTick = undefined;
+    this.lastEnqueuedTickByCategory.clear();
     this.releaseControl();
   }
 
@@ -294,20 +384,21 @@ export class AutoCameraController {
   }
 
   /**
-   * Every currently-tracked *battle* engagement (the active one, if it's a
-   * battle, plus any battles still queued behind it) — unlike
-   * `currentEngagement()`, NOT gated on `isEnabled()`, since detection now
-   * always runs (see `ingest`). Direct ask: "draw the yellow bounding box
-   * anyways on all cool events happening around the map" while Auto Camera
-   * is off. Deliberately scoped to battles only, not every notable one-shot
-   * (immigration/courtship/hatch/evolution/death) — those are momentary and
-   * don't have a meaningful "still ongoing, still worth a box" window the
-   * way a continuous battle naturally tracks via `expiresOrLastActiveTick`/
+   * Every currently-tracked *continuous combat* engagement — battle or clash
+   * (the active one, if it's one of those, plus any still queued behind it)
+   * — unlike `currentEngagement()`, NOT gated on `isEnabled()`, since
+   * detection now always runs (see `ingest`). Direct ask: "draw the yellow
+   * bounding box anyways on all cool events happening around the map" while
+   * Auto Camera is off. Deliberately scoped to the two continuous
+   * categories, not every notable one-shot (immigration/courtship/hatch/
+   * evolution/death) — those are momentary and don't have a meaningful
+   * "still ongoing, still worth a box" window the way a continuous
+   * engagement naturally tracks via `expiresOrLastActiveTick`/
    * `concludedAtTick`; a real follow-up if the one-shot case is wanted too.
    */
   listBattleEngagements(): ActiveEngagementInfo[] {
     const all = this.active ? [this.active, ...this.queue] : this.queue;
-    return all.filter((e) => e.category === "battle").map((e) => ({ seq: e.seq, category: e.category, ids: e.ids, label: e.label }));
+    return all.filter((e) => e.continuous).map((e) => ({ seq: e.seq, category: e.category, ids: e.ids, label: e.label }));
   }
 
   /**
@@ -338,40 +429,53 @@ export class AutoCameraController {
         this.enqueueOneShot("immigration", event.kind, new Set(event.agentIds), event.pos, `${event.agentIds.length} ${event.species} arrived`);
         return;
       case "bonded":
-        this.enqueueOneShot("courtship", event.kind, new Set([event.agentId, event.partnerId]), event.pos, `${speciesLabel(event.species, event.partnerSpecies)} bonded`);
+        this.enqueueClusteredOneShot("courtship", event.kind, new Set([event.agentId, event.partnerId]), event.pos, `${speciesLabel(event.species, event.partnerSpecies)} bonded`, event.tick);
         return;
       case "shelterBuilt":
-        this.enqueueOneShot("courtship", event.kind, new Set([event.agentId]), event.pos, `${event.species} finished a shelter`);
+        this.enqueueClusteredOneShot("courtship", event.kind, new Set([event.agentId]), event.pos, `${event.species} finished a shelter`, event.tick);
         return;
       case "eggLaid":
-        this.enqueueOneShot("courtship", event.kind, new Set([event.motherId, event.fatherId, event.eggId]), event.pos, `${event.species} laid an egg`);
+        this.enqueueClusteredOneShot("courtship", event.kind, new Set([event.motherId, event.fatherId, event.eggId]), event.pos, `${event.species} laid an egg`, event.tick);
         return;
       case "eggHatched":
-        this.enqueueOneShot("hatch", event.kind, new Set([event.agentId]), event.pos, `${event.species} hatched`);
+        this.enqueueClusteredOneShot("hatch", event.kind, new Set([event.agentId]), event.pos, `${event.species} hatched`, event.tick);
         return;
       case "evolved": {
         const pos = world.agents.find((a) => a.id === event.agentId)?.pos ?? { x: 0, y: 0 };
-        this.enqueueOneShot("evolution", event.kind, new Set([event.agentId]), pos, `${event.fromSpecies} evolved into ${event.toSpecies}`);
+        this.enqueueClusteredOneShot("evolution", event.kind, new Set([event.agentId]), pos, `${event.fromSpecies} evolved into ${event.toSpecies}`, event.tick);
         return;
       }
       case "killed":
-        this.onDeath(event.kind, new Set([event.predatorId, event.preyId]), event.pos, `${idLabel(world, event.predatorId, event.predatorSpecies)} killed ${idLabel(world, event.preyId, event.preySpecies)}`);
+        this.onDeath(event.kind, new Set([event.predatorId, event.preyId]), event.pos, `${idLabel(world, event.predatorId, event.predatorSpecies)} killed ${idLabel(world, event.preyId, event.preySpecies)}`, event.tick);
         return;
       case "defeated":
-        this.onDeath(event.kind, new Set([event.winnerId, event.loserId]), event.pos, `${idLabel(world, event.winnerId, event.winnerSpecies)} defeated ${idLabel(world, event.loserId, event.loserSpecies)}`);
+        this.onDeath(event.kind, new Set([event.winnerId, event.loserId]), event.pos, `${idLabel(world, event.winnerId, event.winnerSpecies)} defeated ${idLabel(world, event.loserId, event.loserSpecies)}`, event.tick);
         return;
       case "starved":
-        this.onDeath(event.kind, new Set([event.agentId]), event.pos, `${event.species} starved`);
+        this.onDeath(event.kind, new Set([event.agentId]), event.pos, `${event.species} starved`, event.tick);
         return;
       case "diedOfAge":
-        this.onDeath(event.kind, new Set([event.agentId]), event.pos, `${event.species} died of old age`);
+        this.onDeath(event.kind, new Set([event.agentId]), event.pos, `${event.species} died of old age`, event.tick);
         return;
       case "fought":
-        this.onBattleHit(new Set([event.attackerId, event.defenderId]), event.pos, `${idLabel(world, event.attackerId, event.attackerSpecies)} vs ${idLabel(world, event.defenderId, event.defenderSpecies)} fighting`, world);
+        this.onBattleHit("battle", new Set([event.attackerId, event.defenderId]), event.pos, `${idLabel(world, event.attackerId, event.attackerSpecies)} vs ${idLabel(world, event.defenderId, event.defenderSpecies)} fighting`, world);
         return;
       case "herdClash":
+        // "clash" — a lower-drama, faster-timing-out category than "battle",
+        // direct ask: real fights ("fought") are the dramatic thing worth a
+        // hard one-tick-at-a-time pause; a non-lethal herd resource
+        // skirmish isn't. See `CLASH_STALE_TICKS`/`CLASH_EPILOGUE_MS`'s own
+        // doc comments. Any real (non-"missed") hit is camera-worthy on its
+        // own — see `maybeEngageClash`'s own doc comment for why this no
+        // longer waits for a retaliating hit first.
         if (event.outcome !== "missed") {
-          this.onBattleHit(new Set([event.attackerId, event.defenderId]), event.pos, `${idLabel(world, event.attackerId, event.attackerSpecies)} vs ${idLabel(world, event.defenderId, event.defenderSpecies)} clashing`, world);
+          this.maybeEngageClash(
+            event.tick,
+            new Set([event.attackerId, event.defenderId]),
+            event.pos,
+            `${idLabel(world, event.attackerId, event.attackerSpecies)} vs ${idLabel(world, event.defenderId, event.defenderSpecies)} clashing`,
+            world
+          );
         }
         if (event.outcome === "retreated") this.onBattleParticipantLeft(event.defenderId);
         return;
@@ -397,6 +501,7 @@ export class AutoCameraController {
           if (agent?.fightTarget) {
             const target = world.agents.find((a) => a.id === agent.fightTarget);
             this.onBattleHit(
+              "battle",
               new Set([event.agentId, agent.fightTarget]),
               agent.pos,
               `${idLabel(world, event.agentId, event.species)} vs ${target ? idLabel(world, target.id, target.species) : "something"} engaging`,
@@ -423,9 +528,52 @@ export class AutoCameraController {
     if (this.queue.length > MAX_QUEUE) this.queue.shift();
   }
 
-  /** A `fought`/non-missed `herdClash` hit — starts a new battle engagement for this pair, or keeps an existing one (for either participant) alive. */
-  private onBattleHit(ids: Set<string>, pos: Vec2, label: string, world: World): void {
-    const existing = this.findBattle(ids);
+  /**
+   * `enqueueOneShot`, gated by `ONE_SHOT_CLUSTER_COOLDOWN_TICKS` per
+   * `category` (`COURTSHIP_CLUSTER_COOLDOWN_TICKS` instead for "courtship"
+   * specifically — see that constant's own doc comment). Skips entirely
+   * (not even reaching `enqueueOneShot`'s own dedup check) while a same-
+   * category engagement was queued too recently; only starts/renews the
+   * cooldown when something was actually pushed onto the queue, so a call
+   * `enqueueOneShot` itself would have silently deduped (same moment,
+   * already tracked) doesn't count as "shown" for cooldown purposes.
+   */
+  private enqueueClusteredOneShot(category: NotableCategory, sourceKind: SimEvent["kind"], ids: Set<string>, pos: Vec2, label: string, tick: number): void {
+    const cooldown = category === "courtship" ? COURTSHIP_CLUSTER_COOLDOWN_TICKS : ONE_SHOT_CLUSTER_COOLDOWN_TICKS;
+    const last = this.lastEnqueuedTickByCategory.get(category);
+    if (last !== undefined && tick - last < cooldown) return;
+    const before = this.queue.length;
+    this.enqueueOneShot(category, sourceKind, ids, pos, label);
+    if (this.queue.length > before) this.lastEnqueuedTickByCategory.set(category, tick);
+  }
+
+  /**
+   * Whether a brand-new `herdClash` pair's real hit is allowed to become a
+   * camera-worthy "clash" engagement — see `CLASH_PROMOTION_COOLDOWN_TICKS`'s
+   * own doc comment for the direct ask this exists for. A pair already
+   * mid-engagement (widening an existing one) always qualifies immediately —
+   * the cooldown only gates a pair's first PROMOTION, never a hit landed by
+   * a pair already on screen.
+   */
+  private maybeEngageClash(tick: number, ids: Set<string>, pos: Vec2, label: string, world: World): void {
+    if (this.findContinuous(ids)) {
+      this.onBattleHit("clash", ids, pos, label, world);
+      return;
+    }
+    if (this.lastClashPromotedTick !== undefined && tick - this.lastClashPromotedTick < CLASH_PROMOTION_COOLDOWN_TICKS) return;
+    this.lastClashPromotedTick = tick;
+    this.onBattleHit("clash", ids, pos, label, world);
+  }
+
+  /**
+   * A `fought`/non-missed `herdClash` hit — starts a new continuous
+   * engagement for this pair, or keeps an existing one (for either
+   * participant) alive. `category` distinguishes a real fight ("battle",
+   * `enterBattleStep`-worthy) from a herd rivalry skirmish ("clash", faster
+   * timeouts, never `enterBattleStep` — see `CLASH_STALE_TICKS`).
+   */
+  private onBattleHit(category: "battle" | "clash", ids: Set<string>, pos: Vec2, label: string, world: World): void {
+    const existing = this.findContinuous(ids);
     if (existing) {
       // A new participant can join mid-fight (e.g. a pack-hunt assist) —
       // widen the tracked id set so the log filter/camera follow both
@@ -435,52 +583,76 @@ export class AutoCameraController {
       existing.expiresOrLastActiveTick = world.tick;
       return;
     }
-    // A battle is the single most important thing on screen — direct ask:
-    // "prioritize battles if there are multiple things going on." A brand
-    // new fight preempts whatever one-shot moment (immigration/courtship/
-    // hatch/evolution/death) is currently active instead of waiting for its
-    // own dwell timer to run out; expiring it now (rather than removing it
-    // outright) lets `reconcile` finish it through its normal path on the
-    // very next tick. Never preempts an *existing* battle — the `existing`
-    // check above already widens that one instead of racing a second, so
-    // `this.active` here is always non-battle whenever this branch runs.
-    if (this.active && this.active.category !== "battle") {
-      this.active.expiresOrLastActiveTick = world.tick;
+    // A real battle is the single most important thing on screen — direct
+    // ask: "prioritize battles if there are multiple things going on." A
+    // brand new fight preempts whatever one-shot moment (immigration/
+    // courtship/hatch/evolution/death) OR lower-priority clash is currently
+    // active instead of waiting for its own dwell/stale timer to run out;
+    // expiring it now (rather than removing it outright) lets `reconcile`
+    // finish it through its normal path on the very next tick. A clash only
+    // preempts a one-shot — never an already-active battle (which always
+    // outranks it) or another already-active clash (which just queues
+    // behind, same FIFO-among-equals as any other category). The `existing`
+    // check above already widens a same-pair match instead of racing a
+    // second engagement for it.
+    if (this.active) {
+      const preempt = category === "battle" ? this.active.category !== "battle" : this.active.category !== "battle" && this.active.category !== "clash";
+      if (preempt) this.active.expiresOrLastActiveTick = world.tick;
     }
-    this.queue.push({ category: "battle", sourceKind: "fought", ids: new Set(ids), fallbackPos: pos, label, continuous: true, expiresOrLastActiveTick: world.tick, seq: this.nextSeq++ });
+    this.queue.push({
+      category,
+      sourceKind: category === "battle" ? "fought" : "herdClash",
+      ids: new Set(ids),
+      fallbackPos: pos,
+      label,
+      continuous: true,
+      expiresOrLastActiveTick: world.tick,
+      seq: this.nextSeq++,
+    });
     if (this.queue.length > MAX_QUEUE) this.queue.shift();
   }
 
-  /** A death, fainting, or successful-retreat signal naming a battle's participant — the real conclusion path (see `BATTLE_STALE_TICKS` for the fallback path). Idempotent against an engagement already concluding. */
+  /** A death, fainting, or successful-retreat signal naming a continuous engagement's participant — the real conclusion path (see `BATTLE_STALE_TICKS`/`CLASH_STALE_TICKS` for the fallback path). Idempotent against an engagement already concluding. */
   private onBattleParticipantLeft(agentId: string): void {
-    const battle = this.findBattle(new Set([agentId]));
-    if (battle && battle.concludedAtTick === undefined) battle.concludedAtTick = -1; // marked now, epilogue tick stamped once we know world.tick in reconcile()
+    const engagement = this.findContinuous(new Set([agentId]));
+    if (engagement && engagement.concludedAtTick === undefined) engagement.concludedAtTick = -1; // marked now, epilogue tick stamped once we know world.tick in reconcile()
   }
 
-  /** A true death (`killed`/`defeated`/`starved`/`diedOfAge`) both concludes any battle it belongs to (via `onBattleParticipantLeft`, called by the same switch arms above through `fainted`/`killed` sharing a victim) and is itself notable on its own — queued as a fresh one-shot only when it isn't already the natural end of an active/queued battle for the same id, so a kill doesn't show twice back to back. */
-  private onDeath(sourceKind: SimEvent["kind"], ids: Set<string>, pos: Vec2, label: string): void {
+  /** A true death (`killed`/`defeated`/`starved`/`diedOfAge`) both concludes any continuous engagement it belongs to (via `onBattleParticipantLeft`, called by the same switch arms above through `fainted`/`killed` sharing a victim) and is itself notable on its own — queued as a fresh one-shot only when it isn't already the natural end of an active/queued engagement for the same id, so a kill doesn't show twice back to back. */
+  private onDeath(sourceKind: SimEvent["kind"], ids: Set<string>, pos: Vec2, label: string, tick: number): void {
     for (const id of ids) this.onBattleParticipantLeft(id);
-    const coveredByBattle = (this.active?.category === "battle" && setsOverlap(this.active.ids, ids)) || this.queue.some((e) => e.category === "battle" && setsOverlap(e.ids, ids));
-    if (!coveredByBattle) this.enqueueOneShot("death", sourceKind, ids, pos, label);
+    const covered = (this.active?.continuous && setsOverlap(this.active.ids, ids)) || this.queue.some((e) => e.continuous && setsOverlap(e.ids, ids));
+    if (!covered) this.enqueueClusteredOneShot("death", sourceKind, ids, pos, label, tick);
   }
 
   /**
-   * Pop the next engagement to show, preferring any queued *battle* over
-   * however long everything else has been waiting — direct ask: "prioritize
-   * battles if there are multiple things going on." Falls back to plain
-   * FIFO among non-battle categories (unchanged from before this method
-   * existed). A currently-*active* one-shot doesn't go through here at all —
-   * see `onBattleHit`'s own preemption of `this.active` for that half.
+   * Pop the next engagement to show, preferring any queued *battle*, then any
+   * queued *clash*, over however long everything else has been waiting —
+   * direct ask: "prioritize battles if there are multiple things going on."
+   * Among the remaining one-shot categories, a non-"courtship" one
+   * (immigration/hatch/evolution/death — all rarer and more individually
+   * notable than routine bonding/egg-laying) jumps ahead of any queued
+   * courtship too, same "boring stuff shouldn't block the more interesting
+   * stuff" reasoning as battle/clash outranking everything else — direct
+   * follow-up ask: "It skips around a lot and focuses on boring shit."
+   * Otherwise plain FIFO (unchanged from before this method existed). A
+   * currently-*active* one-shot doesn't go through here at all — see
+   * `onBattleHit`'s own preemption of `this.active` for that half.
    */
   private popNextEngagement(): Engagement {
     const battleIndex = this.queue.findIndex((e) => e.category === "battle");
     if (battleIndex >= 0) return this.queue.splice(battleIndex, 1)[0]!;
+    const clashIndex = this.queue.findIndex((e) => e.category === "clash");
+    if (clashIndex >= 0) return this.queue.splice(clashIndex, 1)[0]!;
+    const notableOneShotIndex = this.queue.findIndex((e) => e.category !== "courtship");
+    if (notableOneShotIndex >= 0) return this.queue.splice(notableOneShotIndex, 1)[0]!;
     return this.queue.shift()!;
   }
 
-  private findBattle(ids: Set<string>): Engagement | undefined {
-    if (this.active?.category === "battle" && setsOverlap(this.active.ids, ids)) return this.active;
-    return this.queue.find((e) => e.category === "battle" && setsOverlap(e.ids, ids));
+  /** Any active/queued continuous (battle or clash) engagement overlapping `ids`. */
+  private findContinuous(ids: Set<string>): Engagement | undefined {
+    if (this.active?.continuous && setsOverlap(this.active.ids, ids)) return this.active;
+    return this.queue.find((e) => e.continuous && setsOverlap(e.ids, ids));
   }
 
   // --- state machine -----------------------------------------------------------
@@ -488,22 +660,27 @@ export class AutoCameraController {
   private reconcile(world: World): void {
     const tick = world.tick;
 
-    // Stamp any battle marked-concluded-this-batch (see onBattleParticipantLeft's -1 sentinel) with a real epilogue deadline now that we know the tick — and the real-ms clock BATTLE_EPILOGUE_MS actually counts against.
+    // Stamp any continuous engagement marked-concluded-this-batch (see onBattleParticipantLeft's -1 sentinel) with a real epilogue deadline now that we know the tick — and the real-ms clock its own epilogue duration actually counts against.
     for (const e of [this.active, ...this.queue]) {
-      if (e && e.category === "battle" && e.concludedAtTick === -1) {
+      if (e && e.continuous && e.concludedAtTick === -1) {
         e.concludedAtTick = tick;
         e.concludedAtRealMs = performance.now();
       }
     }
 
     if (this.active) {
-      if (this.active.category === "battle") {
-        if (this.active.concludedAtTick === undefined && tick - this.active.expiresOrLastActiveTick > BATTLE_STALE_TICKS) {
+      if (this.active.continuous) {
+        // "clash" (a non-lethal herd skirmish) gets a much shorter leash on
+        // both halves than a real "battle" — see CLASH_STALE_TICKS/
+        // CLASH_EPILOGUE_MS's own doc comments for why.
+        const staleTicks = this.active.category === "clash" ? CLASH_STALE_TICKS : BATTLE_STALE_TICKS;
+        const epilogueMs = this.active.category === "clash" ? CLASH_EPILOGUE_MS : BATTLE_EPILOGUE_MS;
+        if (this.active.concludedAtTick === undefined && tick - this.active.expiresOrLastActiveTick > staleTicks) {
           // Fallback path: no explicit death/flee/retreat signal, but nothing's landed a hit in a while either — treat as disengaged.
           this.active.concludedAtTick = tick;
           this.active.concludedAtRealMs = performance.now();
         }
-        if (this.active.concludedAtRealMs !== undefined && performance.now() - this.active.concludedAtRealMs >= BATTLE_EPILOGUE_MS) {
+        if (this.active.concludedAtRealMs !== undefined && performance.now() - this.active.concludedAtRealMs >= epilogueMs) {
           this.finishActive(world);
         }
       } else if (tick >= this.active.expiresOrLastActiveTick) {
@@ -513,7 +690,7 @@ export class AutoCameraController {
 
     if (!this.active && this.queue.length > 0) {
       const next = this.popNextEngagement();
-      if (!next.continuous) next.expiresOrLastActiveTick = tick + DWELL_TICKS;
+      if (!next.continuous) next.expiresOrLastActiveTick = tick + (next.category === "courtship" ? COURTSHIP_DWELL_TICKS : DWELL_TICKS);
       this.active = next;
       this.viewerTookOver = false; // a genuinely new thing to look at re-earns camera control even if the viewer panned away from the last one
       // Promotion bookkeeping (`this.active`/`viewerTookOver` above) always

@@ -3,17 +3,17 @@ import { createWorld, setTile, tileAt } from "../src/world.js";
 import {
   maybeDropSeed,
   growFlora,
-  seasonalMultiplier,
+  growCanopyFood,
   recordGrazing,
   waterSoil,
   tendSoil,
   foodNutritionFactor,
   CONSUME_STOCK_AMOUNT,
   FOOD_MAX_STOCK,
-  FOOD_FLAVORS,
   FLORA_FLAVORS,
   MATURATION_TICKS,
 } from "../src/flora.js";
+import { seasonalMultiplier, FOOD_CROPS, SEASON_LENGTH, CANOPY_APPLE_RIPEN_TICKS } from "../src/crops.js";
 import { EventLog } from "../src/events.js";
 
 afterEach(() => {
@@ -59,15 +59,18 @@ describe("growFlora", () => {
     const tile = tileAt(world, "surface", 1, 1)!;
     tile.growth = MATURATION_TICKS - 1; // one tick from maturity
     const log = new EventLog();
-    vi.spyOn(Math, "random").mockReturnValue(0); // beats the food-vs-flora roll, picks flavor index 0
+    vi.spyOn(Math, "random").mockReturnValue(0); // beats the food-vs-flora roll
 
     growFlora(world, log);
 
     expect(tile.terrain).toBe("food");
     expect(tile.stock).toBe(FOOD_MAX_STOCK);
-    expect(tile.flavor).toBe(FOOD_FLAVORS[0]);
+    // A hand-built world has no biomeSeeds at all, so every biome-gated crop
+    // (Wheat/Tomato/Corn/Rice/Apple/Potato/Pumpkin) is ineligible — Herbs
+    // (no gates at all) is the only crop `pickCrop` can ever land on here.
+    expect(tile.flavor).toBe("herbs");
     expect(log.events).toContainEqual(
-      expect.objectContaining({ kind: "floraChanged", stage: "sprouted", flavor: FOOD_FLAVORS[0] })
+      expect.objectContaining({ kind: "floraChanged", stage: "sprouted", flavor: "herbs" })
     );
   });
 
@@ -85,14 +88,18 @@ describe("growFlora", () => {
     expect(FLORA_FLAVORS as readonly string[]).toContain(tile.flavor);
   });
 
-  it("favors sun-loving berries when a seedling matures next to a sunbeam", () => {
+  it("a seedling near a sunbeam is more likely to mature into food (the real mechanism Tomato's sunLoving gate reuses)", () => {
     const world = createWorld(5, 5);
     setTile(world, "surface", 2, 2, "sunbeam");
     setTile(world, "surface", 3, 2, "seedling");
     const tile = tileAt(world, "surface", 3, 2)!;
     tile.growth = MATURATION_TICKS - 1;
     // 0.7 is below the near-sunbeam food chance (0.8) but above the normal
-    // one (0.55) — proves the sunbeam is what tips this into food.
+    // one (0.55) — proves the sunbeam is what tips this into food. (Tomato
+    // itself can't actually be picked here — this hand-built world has no
+    // biomeSeeds, so pickCrop always falls back to Herbs — but the
+    // near-sunbeam food-chance boost Tomato's `sunLoving` gate reuses is
+    // exactly this mechanism, unchanged by the crop system.)
     vi.spyOn(Math, "random").mockReturnValue(0.7);
 
     growFlora(world);
@@ -118,7 +125,7 @@ describe("growFlora", () => {
     setTile(world, "surface", 1, 1, "food");
     const tile = tileAt(world, "surface", 1, 1)!;
     tile.stock = 0.001; // one tick of natural decay finishes it off
-    tile.flavor = "oran";
+    tile.flavor = "herbs";
     const log = new EventLog();
 
     growFlora(world, log);
@@ -811,5 +818,166 @@ describe("plant quality (direct ask: \"fully fertile plant gives super higher qu
       expect(factor).toBeLessThan(1);
       expect(factor).toBeGreaterThan(0);
     });
+
+    it("a nutrition-dense crop (Pumpkin) restores meaningfully more than a filler one (Herbs) at identical quality — the real 'keep you full for longer' mechanism", () => {
+      const world = createWorld(3, 3);
+      setTile(world, "surface", 1, 1, "food");
+      const tile = tileAt(world, "surface", 1, 1)!;
+      tile.quality = 0.7;
+      tile.flavor = "herbs";
+      const herbsFactor = foodNutritionFactor(tile);
+      tile.flavor = "pumpkin";
+      const pumpkinFactor = foodNutritionFactor(tile);
+      expect(pumpkinFactor).toBeGreaterThan(herbsFactor);
+      expect(pumpkinFactor / herbsFactor).toBeCloseTo(FOOD_CROPS.pumpkin.nutritionMultiplier / FOOD_CROPS.herbs.nutritionMultiplier, 5);
+    });
+
+    it("a flavor that isn't a real crop id (e.g. decorative flora's own flavors) is treated as a neutral 1x multiplier, not a crash", () => {
+      const world = createWorld(3, 3);
+      setTile(world, "surface", 1, 1, "food");
+      const tile = tileAt(world, "surface", 1, 1)!;
+      tile.flavor = "bloom"; // a FLORA_FLAVORS value, never a real CropId
+      expect(() => foodNutritionFactor(tile)).not.toThrow();
+      expect(foodNutritionFactor(tile)).toBe(1);
+    });
+  });
+});
+
+describe("crop maturation (CROPS_DESIGN.md: real biome/moisture/season-gated crops, not cosmetic flavors)", () => {
+  it("a biome with real biomeSeeds data picks a real, biome-eligible crop instead of always falling back to Herbs", () => {
+    const world = createWorld(10, 10);
+    // A single grassland seed covering the whole tiny world — real
+    // `biomeWeightsAt` data this time, unlike the hand-built worlds
+    // elsewhere in this file (which have none and always land on Herbs).
+    world.biomeSeeds = [{ x: 5, y: 5, name: "grassland" }];
+    setTile(world, "surface", 5, 5, "seedling");
+    const tile = tileAt(world, "surface", 5, 5)!;
+    tile.growth = MATURATION_TICKS - 1;
+    world.tick = 0; // Spring — wide-window grassland crops are all eligible
+
+    // Sample across enough rng values that if crop selection were still
+    // hardcoded to Herbs only, this would never see anything else.
+    const seen = new Set<string>();
+    for (let i = 0; i < 30; i++) {
+      const w = createWorld(10, 10);
+      w.biomeSeeds = [{ x: 5, y: 5, name: "grassland" }];
+      setTile(w, "surface", 5, 5, "seedling");
+      tileAt(w, "surface", 5, 5)!.growth = MATURATION_TICKS - 1;
+      growFlora(w, undefined, () => i / 30);
+      const t = tileAt(w, "surface", 5, 5)!;
+      if (t.terrain === "food") seen.add(t.flavor!);
+    }
+    // Grassland-at-Spring-eligible crops: herbs, all four berries (ungated),
+    // wheat, corn — Tomato (Summer-only) and Pumpkin (Autumn-only) are
+    // excluded by their season window at tick 0 regardless of biome.
+    expect(seen.size).toBeGreaterThan(1);
+    for (const flavor of seen) expect(["herbs", "oran", "pecha", "sitrus", "cheri", "wheat", "corn"]).toContain(flavor);
+  });
+
+  it("Winter cuts a non-hardy crop's real chance of maturing into food at all (vs. decorative flora)", () => {
+    function foodFraction(tick: number): number {
+      let foodCount = 0;
+      const trials = 200;
+      for (let i = 0; i < trials; i++) {
+        const world = createWorld(3, 3);
+        world.biomeSeeds = [{ x: 1, y: 1, name: "grassland" }];
+        setTile(world, "surface", 1, 1, "seedling");
+        tileAt(world, "surface", 1, 1)!.growth = MATURATION_TICKS - 1;
+        world.tick = tick;
+        growFlora(world, undefined, () => i / trials);
+        if (tileAt(world, "surface", 1, 1)!.terrain === "food") foodCount++;
+      }
+      return foodCount / trials;
+    }
+
+    const springFraction = foodFraction(0); // Spring
+    const winterFraction = foodFraction(SEASON_LENGTH * 0.9); // Winter
+    expect(winterFraction).toBeLessThan(springFraction);
+  });
+
+  it("a drought-resistant crop (Potato) decays slower under drought than a non-resistant one", () => {
+    function stockAfterOneTick(flavor: string, drought: boolean): number {
+      const world = createWorld(3, 3);
+      setTile(world, "surface", 1, 1, "food");
+      const tile = tileAt(world, "surface", 1, 1)!;
+      tile.stock = 0.5;
+      tile.flavor = flavor;
+      if (drought) {
+        world.weatherCells = [
+          { id: "d", type: "drought", center: { x: 1, y: 1 }, radius: 3, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
+        ];
+      }
+      growFlora(world, undefined, () => 0.99); // never spreads, isolates decay
+      return tileAt(world, "surface", 1, 1)!.stock!;
+    }
+
+    const potatoNoDrought = stockAfterOneTick("potato", false);
+    const potatoDrought = stockAfterOneTick("potato", true);
+    const herbsDrought = stockAfterOneTick("herbs", true);
+
+    // Both decay faster under drought than without it (real drought effect
+    // still applies)...
+    expect(potatoDrought).toBeLessThan(potatoNoDrought);
+    // ...but Potato is spared most of that penalty relative to a
+    // non-drought-resistant crop under the identical drought.
+    expect(potatoDrought).toBeGreaterThan(herbsDrought);
+  });
+});
+
+describe("growCanopyFood (CROPS_DESIGN.md: real growth-stage rendering, unripe canopy Apple before it's actually harvestable)", () => {
+  it("advances an unripe canopy Apple tile's growth by 1 per tick, never touching Surface flora", () => {
+    const world = createWorld(3, 1);
+    setTile(world, "canopy", 1, 0, "food", 0, "apple");
+    const tile = tileAt(world, "canopy", 1, 0)!;
+    tile.stock = 0;
+    tile.growth = 0;
+    setTile(world, "surface", 1, 0, "food", 0, "corn"); // untouched control — growCanopyFood is Canopy-only
+    const surfaceTile = tileAt(world, "surface", 1, 0)!;
+    const surfaceStockBefore = surfaceTile.stock;
+
+    growCanopyFood(world);
+
+    expect(tile.growth).toBe(1);
+    expect(tile.stock).toBe(0); // not ripe yet
+    expect(surfaceTile.stock).toBe(surfaceStockBefore); // untouched
+  });
+
+  it("flips to real harvestable stock once growth reaches CANOPY_APPLE_RIPEN_TICKS, clearing the growth counter", () => {
+    const world = createWorld(3, 1);
+    setTile(world, "canopy", 1, 0, "food", 0, "apple");
+    const tile = tileAt(world, "canopy", 1, 0)!;
+    tile.stock = 0;
+    tile.growth = CANOPY_APPLE_RIPEN_TICKS - 1;
+
+    growCanopyFood(world);
+
+    expect(tile.stock).toBe(FOOD_MAX_STOCK);
+    expect(tile.growth).toBeUndefined();
+  });
+
+  it("never touches an already-ripe canopy Apple tile (real stock) — growCanopyFood only advances unripe ones", () => {
+    const world = createWorld(3, 1);
+    setTile(world, "canopy", 1, 0, "food", 0, "apple");
+    const tile = tileAt(world, "canopy", 1, 0)!;
+    const ripeStock = tile.stock;
+
+    growCanopyFood(world);
+
+    expect(tile.stock).toBe(ripeStock);
+    expect(tile.growth).toBeUndefined();
+  });
+
+  it("never touches a non-Apple canopy food tile or a plain canopy floor tile", () => {
+    const world = createWorld(3, 1);
+    setTile(world, "canopy", 0, 0, "floor");
+    setTile(world, "canopy", 1, 0, "food", 0, "corn"); // hypothetical non-canopy-native flavor on canopy — shouldn't happen in real worldgen, but growCanopyFood should still ignore it safely
+    const cornTile = tileAt(world, "canopy", 1, 0)!;
+    cornTile.stock = 0;
+    cornTile.growth = 0;
+
+    growCanopyFood(world);
+
+    expect(tileAt(world, "canopy", 0, 0)!.growth).toBeUndefined();
+    expect(cornTile.growth).toBe(0); // untouched — only flavor "apple" is ever advanced
   });
 });

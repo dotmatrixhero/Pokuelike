@@ -5604,6 +5604,448 @@ zero behavior change to anything that doesn't opt in.
   `POP_HARD_CAP`) is unit-tested but not yet exercised by a real multi-
   thousand-tick run that actually reaches it — see TODO.md.
 
+### Auto-camera: courtship gets its own shorter dwell and longer cooldown
+
+Direct ask: "bonding takes too much air time on the autocam. reduce it and
+shorten how long it follows them." Courtship (bonded/shelterBuilt/eggLaid)
+was still sharing the same `DWELL_TICKS` (24) hold time and
+`ONE_SHOT_CLUSTER_COOLDOWN_TICKS` (60) cluster-throttle as the rarer,
+individually-more-dramatic one-shot categories (immigration/hatch/
+evolution/death) — it's both the most frequent (any growing herd routinely
+bonds/lays eggs) and the least individually dramatic of the bunch, so it
+was getting a disproportionate share of camera time relative to how
+interesting any one instance actually is.
+
+**Built**: two courtship-specific constants — `COURTSHIP_DWELL_TICKS` (10,
+vs. the ordinary 24) shortens how long the camera actually holds on a
+bonded/eggLaid/shelterBuilt moment once shown; `COURTSHIP_CLUSTER_COOLDOWN_
+TICKS` (150, vs. the ordinary 60) makes a fresh courtship cut show up much
+less often relative to other categories. `reconcile`'s dwell-assignment and
+`enqueueClusteredOneShot`'s cooldown check both branch on `category ===
+"courtship"` to pick the right constant; every other one-shot category is
+unaffected.
+
+Verified directly via `ingest()`: a lone bonded event now dwells exactly 10
+ticks (was 24); a burst of 5 bonds 5 ticks apart still collapses to a
+single queued engagement, now under the longer 150-tick cooldown (an
+evolution cluster in the same run correctly still used the shorter,
+unchanged 60-tick cooldown, confirming the two categories are independent).
+Typecheck clean.
+
+### Auto-camera clash: retaliation-required bar dropped, replaced with a promotion cooldown
+
+Direct follow-up after the earlier one-shot cluster fix shipped: "i think
+auto cam is now skipping boring stuff. but i'm not seeing like any battles.
+like these move usages are interesting! but i dont get to see any of em..."
+Traced to the retaliation-required bar built two sessions earlier
+(`CLASH_ESCALATION_WINDOW_TICKS`, "auto cam shouldn't focus at all until
+retaliation hit"): `herdConflict.ts`'s own design ("cannot faint or kill,
+full stop... loser retreats once meaningfully hurt") means most real
+skirmishes are genuinely one-sided — a defender backing off rather than
+trading hits — so requiring a real direction-reversed retaliation before
+ever engaging the camera made almost every real, damage-dealing hit
+invisible, not just the boring ones. The event log the user was watching
+showed real moves connecting (tackle/acid/ember, real damage, weight/
+flanking modifiers) that auto-camera never once cut to.
+
+**Built**: dropped the retaliation requirement — any real (non-"missed")
+`herdClash` hit is camera-worthy again, same as the mechanic's very first
+version. To avoid regressing into the EARLIER complaint that requirement
+was built to fix ("a lot more clashing now. But they aren't fighting...
+clashes that don't do anything are lame"), a brand-new pair's first
+promotion is now throttled by `CLASH_PROMOTION_COOLDOWN_TICKS` (40 ticks) —
+the same clustering-cooldown idea `ONE_SHOT_CLUSTER_COOLDOWN_TICKS` already
+uses for one-shot categories, just applied to clash promotions instead. A
+pair already on screen still gets every real hit immediately (widening,
+not gated) — the cooldown only limits how often a genuinely NEW pair gets
+picked up, so a herd's many simultaneous one-sided skirmishes surface an
+occasional real one instead of spamming a cut per hit.
+
+`clashPendingFirstHit`/`maybeEscalateClash` removed entirely, replaced by a
+single `lastClashPromotedTick` field and `maybeEngageClash`. Verified
+directly (ingest a single one-sided hit for a fresh pair — promotes
+immediately now; a second fresh pair within the cooldown — throttled; a
+third past the cooldown — promotes). Typecheck clean; `packages/web` has no
+test suite of its own (see the earlier auto-camera fix's own note on this).
+
+### Predator level and per-zone variety were both too thin
+
+Direct follow-up, same message thread: "i also think our species changes
+have removed too many predators. and a liot of em are too low leveled...
+we need at least a couple higher leveld predators." Two real, separate
+gaps in the predator pass from earlier this session:
+
+1. **Zone variety was capped too tight.** `ZONE_PREDATOR_POOL_CAP` was
+   exactly 1 — a zone whose biome had several real predator species
+   fitting it (badlands: Onix/Growlithe/Zubat/Golbat) only ever showed a
+   single one, every single time, regardless of how much real predator
+   diversity the roster now has. Raised 1 -> 2 (landmark bonus 1 -> 2 to
+   match), and `PREDATOR_POPULATION_DISCOUNT` 0.4 -> 0.55 — still
+   meaningfully thinner than prey, just not negligible.
+2. **Base-form predators floored at the same low level as any ordinary
+   prey species.** Scyther/Spearow/Onix/Ekans/Zubat all have a real
+   `minLevel` of 1 (no level-gated evolution of their own, or not yet
+   evolved), so they floored at the exact same 5-12 immigrant/invented
+   range as a harmless base-form prey species — a real predator reading as
+   just as weak as anything else. Added `PREDATOR_LEVEL_BOOST` (15),
+   applied on top of whichever floor already applied (ordinary or
+   evolution-threshold-based) in BOTH spawn paths —
+   `immigration.ts`'s `rollImmigrantLevel` and `overworld.ts`'s
+   `estimateInitialAggregates` — via the same `ImmigrationSpeciesInfo`/
+   `ZoneSpeciesEstimate.isPredator` field the zone-composition balance
+   already threads through.
+
+Live-validated across a real 12x12 never-visited-zone grid: predator
+levels now land well above the old flat range — Ekans 19-29 (was ~5-12),
+Zubat/Onix ~18-28, Arbok/Golbat ~38-45, Gyarados 34-44, Tentacruel 43-54 —
+and 18/144 promoted zones now show more than one predator species (was
+architecturally impossible at cap=1). Full suite (1077 + 177 tests) and
+typecheck green.
+
+### Zone species floor raised to 4-7, plus two new species to actually make that possible
+
+Direct ask: "Can you add like a little species. More throughout? Each zone
+should have at least 4, max 7 to start." `ZONE_SPECIES_POOL_MIN`/`_MAX`
+(macroGrid.ts) raised from 3-6 to 4-7 — but a plain constant bump alone
+couldn't deliver "at least 4" everywhere: two habitats structurally didn't
+have that many fitting species to begin with. Obligate-aquatic ("ocean")
+had only 3 (magikarp/tentacool/tentacruel); desert had only 2 (vulpix/
+cubone). `pickZoneSpeciesPool`/`pickRandomSubset` can only ever pick FROM
+what fits — no amount of pool-size tuning invents a species that isn't
+there, confirmed directly: a fresh live check after only the constant
+change still showed zones landing as low as 2.
+
+**Built**: two real fixes, matched to what each thin habitat actually
+needed —
+1. **Ocean**: added Horsea and Seadra (real, fully-aquatic Gen 1 water
+   creatures, `obligateAquatic: true`) as genuine new roster species — a
+   real fourth and fifth resident, not padding. Real level-gated moves
+   (Water Gun at 1, Agility at 28, both already curated) — spawn-time move
+   gating (the earlier Sandshrew/Earthquake fix) applies to them
+   automatically, no special-casing needed.
+2. **Desert**: extended three EXISTING species' `biomes` tags to include
+   "desert" rather than inventing new species where lore-accurate biome
+   tagging was the real gap — Sandshrew (whose own flavor text literally
+   says "a desert dweller"), Diglett (a burrowing mole, equally plausible
+   under loose desert sand as under grassland/badlands), and Growlithe
+   ("found in rocky, arid regions," already badlands-tagged). Desert's
+   fitting count goes from 2 to 5.
+
+Also fixed a real pre-existing bug this surfaced: `species.test.ts` had a
+stale, hardcoded 5-biome list (`["grassland", "forest", "wetland",
+"badlands", "highland"]`) missing snow/desert/jungle/beach entirely,
+inconsistent with that same file's own current `ALL_BIOME_NAMES` a few
+lines down — Growlithe's new "desert" tag correctly failed against the
+stale list. Fixed by pointing at `ALL_BIOME_NAMES` instead of duplicating
+it.
+
+Live-validated across a real 14x14 never-visited-zone grid (196 zones):
+every single one landed in [4, 7] species — min 4, max 7, zero zones below
+the floor (a check run before the desert/ocean fixes, constant-only, still
+showed a min of 2). Distribution: 44 zones at 4, 124 at 5, 12 at 6, 16 at
+7. Full suite (1077 + 177 tests) and typecheck green.
+
+### Predator accuracy pass + guaranteed predator/prey mix per zone
+
+Direct ask: "I think ekans and arbok are predators. So we should make a pass
+on predators, make sure we accurately mark em and try to have at least some
+predators + prey per each zone typically. With a smaller number of
+predators." Checked the correction against what the user had actually
+observed (an "arbok killed ivysaur" cut in an earlier auto-camera run) —
+that specific kill was real but NOT predation: it was `applyEggDefense`
+(predation.ts), Arbok fighting to the death defending its own eggs against
+a non-herd threat, a completely separate mechanic from species-level
+hunting. Ekans/Arbok genuinely were untagged (`isPredator` absent) — a
+deliberate prior tradeoff, documented right in species.ts's own comment: a
+2-Pokémon predator guild (Scyther/Spearow/Onix/Gyarados/Tentacruel) already
+crashed toward extinction in a real run (TODO.md's "one predator species =
+100% of pressure" finding), so a follow-up batch that added Ekans/Arbok/
+Zubat/Golbat deliberately left all of them untagged rather than making that
+fragility worse, even though their real mainline flavor text clearly
+qualifies (Ekans/Arbok: "eats bird eggs whole"; Zubat/Golbat: drains life
+energy, vampiric).
+
+**Built, in the order the fragility risk actually needed**:
+1. **Accuracy**: Ekans, Arbok, Zubat, Golbat all tagged `isPredator: true`
+   for real now — the roster's other five stay as they were (Scyther/
+   Spearow/Onix/Gyarados/Tentacruel), no over-correction beyond the
+   species the user named plus the one other pair species.ts's own comment
+   had already flagged as the obvious next candidate.
+2. **The actual fragility fix**: `ImmigrationSpeciesInfo`/`ZoneSpeciesEstimate`
+   gained `isPredator`, carried through from `species.ts`. `macroGrid.ts`'s
+   `pickZoneSpeciesPool` (the same pocket-of-3-6-species mechanic from the
+   zone-diversity fix above) now splits a zone's fitting-species list into
+   predators and prey, picks up to `ZONE_PREDATOR_POOL_CAP` (1, +1 for a
+   congregation landmark) predator species FIRST, then fills the rest of
+   the pool with prey — so a zone whose habitat has real hunters in it
+   typically gets exactly one, never left out entirely, but never
+   dominated by them either. A habitat with zero fitting predator species
+   (this roster's beach/snow biomes, currently) simply gets an all-prey
+   pool. `PREDATOR_POPULATION_DISCOUNT` (0.4x) also scales down a predator
+   estimate's own invented population relative to the same formula's
+   ordinary prey result — real ecology (a hunting guild is always thinner
+   on the ground than what it hunts) backing the same "smaller number"
+   ask at the individual-count level, not just the species-pool level.
+
+This is also a direct, real answer to TODO.md's own "killing the sole
+predator species removed 100% of predator pressure for the whole herd"
+finding — the guild is real predator variety now (7 species with their own
+per-zone spread) instead of a handful of species that happened to all be
+tagged, so no single kill anywhere can zero out predation pressure for an
+entire zone's ecosystem the way it used to.
+
+Live-validated across the same real 10x10 never-visited-zone grid used to
+validate the diversity fix: 75/100 promoted zones landed exactly one
+predator species (tentacruel/gyarados/ekans/zubat/golbat/scyther,
+biome-appropriate each time), 100/100 had at least one prey species, and
+predator population counts stayed consistently well below prey counts in
+every zone that had both (e.g. `wetland: gyarados predCount=4,
+preySpecies=4 preyCount=35`). Full suite (1077 + 177 tests) and typecheck
+green.
+
+### Auto-camera: throttling same-category one-shot clusters ("skips around a lot and focuses on boring shit")
+
+Direct ask: "autocam is still so uncomfortable. Can you like try it and see
+what happens? It skips around a lot and focuses on boring shit." Actually
+launched the web app (vite dev server + headless Chromium via Playwright,
+not just reasoning about the code) and watched auto-camera's status label
+over ~2000 real sim ticks at 32x. First observed run: a healthy herd's
+population growth produced tight clusters of near-identical courtship
+one-shots — 5 separate "arbok laid an egg" cuts for 5 different pairs
+within ~20 ticks of each other — each queuing its own separate camera cut,
+so a genuinely rarer/more notable moment elsewhere could sit buried behind
+a run of five near-identical "boring" cuts.
+
+**Built**: `ONE_SHOT_CLUSTER_COOLDOWN_TICKS` (60) — `enqueueClusteredOneShot`
+skips queuing a new one-shot engagement of a given `NotableCategory` while
+one of the same category was already queued within that many ticks, so a
+synchronized burst collapses down to just its first moment instead of
+chasing every individual instance. `popNextEngagement` also now lets any
+queued non-courtship one-shot (immigration/hatch/evolution/death) jump
+ahead of a queued courtship in the FIFO — same "boring stuff shouldn't
+block more interesting stuff" reasoning battle/clash already got over
+one-shots generally.
+
+First built courtship-only; a second live run against that fix showed the
+exact same clustering in categories the first pass didn't touch — a
+same-age cohort crossing its evolution threshold together (8 separate
+"bulbasaur evolved into ivysaur" cuts back to back) and a kill streak (3
+separate "arbok killed ivysaur" cuts). Generalized to a single per-category
+cooldown (`lastEnqueuedTickByCategory`) covering courtship/hatch/evolution/
+death alike — any category can burst once a population is large/
+synchronized enough, not just courtship. Immigration is deliberately
+excluded (already engine-side rate-limited via `MIN_TICKS_BETWEEN_
+IMMIGRATIONS`, can't burst the same way); battle/clash are unaffected
+(their own continuous-engagement machinery already widens one engagement
+per fight rather than queuing a new one per hit).
+
+Verified directly (not just by re-running the noisy headless observation,
+whose 3-second poll interval turned out too coarse to reliably distinguish
+"one engagement dwelling through its 24-tick window" from "several separate
+ones back to back" — DWELL_TICKS at AUTO_CAM_SLOWDOWN_SPEED's 8x is only
+half a real second): a focused test feeding `AutoCameraController.ingest`
+six `evolved` events for six different agents, 5 ticks apart each,
+collapses to exactly one queued engagement instead of six. `packages/web`
+has no test suite (no `test` script in its `package.json`) — this was
+verified via a one-off `tsx` script directly exercising the real class, not
+added as a permanent test.
+
+Direct ask: "Just cuz a zone can support a bunch of different Pokemon,
+doesn't mean it should. It should just have a smaller variety of species per
+zone. Makes new zones feel more special and interesting if, by chance, they
+just have different pockets of species." A never-visited zone's estimated
+starting population (`macroGrid.ts`'s `estimateZoneSpecies`) previously
+invented EVERY roster species whose biome/aquatic-ness matched the zone —
+real biomes carry 9-15 tagged species each (wetland: 15, forest: 15,
+badlands: 13), so every zone of a given biome anywhere on the map looked
+like the exact same fully-stocked checklist instead of feeling like its own
+distinct pocket of nature.
+
+**Built**: `pickZoneSpeciesPool` — a partial Fisher-Yates shuffle (only as
+many swaps as the picked pool size needs) that caps a zone's fitting-species
+list down to a real, randomly-sized range
+(`ZONE_SPECIES_POOL_MIN`..`_MAX` = 3..6, rolled per zone via the zone's own
+seeded `rng`) before any of them get invented. A habitat with fewer fitting
+species than the cap (snow's 4) is simply left alone. A congregation-type
+landmark (meteor crater, tunnel warren, deep cavern, crossroads — see
+`LANDMARK_POPULATION_MULTIPLIER`) gets a real bonus on top of the ordinary
+range (`LANDMARK_SPECIES_POOL_BONUS = 3`) instead of being trimmed the same
+way — the opposite instinct, since those landmarks are explicitly meant to
+draw multiple species onto the same small footprint.
+
+Live-validated across a real 10x10 never-visited-zone grid: beach zones
+(5 fitting species) varied 3-5 species per zone with different subsets
+(`[krabby,kingler,shellder,psyduck,golduck]` vs. `[golduck,krabby,psyduck]`
+a few zones over); grassland zones (6 fitting) varied 4-6. Ocean zones
+(only 3 fitting species total) correctly stayed unchanged — nothing to
+trim. Full suite (1077 + 177 tests) and typecheck green.
+
+### Immigrant levels: evolution-aware and randomized, not a flat constant
+
+Direct ask, after noticing every immigrant arrived at the exact same level
+regardless of species: "why does everything spawn at lv5. Especially
+evolved Pokémon they should be higher distributed. Some randomness in
+starting rolls would be good." The bug was real and total: `IMMIGRANT_LEVEL`
+was a single flat constant (5) applied to every roster species —
+`IMMIGRATION_CONTEXT`'s roster is `Object.values(SPECIES)`, every roster
+species including fully-evolved ones, so an evolved final-stage Pokémon
+could immigrate in at exactly the same level as a freshly-hatched base
+form, with zero variance run to run.
+
+**Built**: `packages/data/src/leveling.ts`'s `naturalMinLevelFor(speciesId)`
+— a real reverse-of-the-dex lookup (same construction idiom as the
+existing `PREVO_KEY_BY_KEY` reverse map just above it) returning the real
+level threshold a species' own most-recent evolution required, or 1 for an
+unevolved base form. Only needs its own single (highest) threshold, not a
+sum along the whole chain — reaching evolution N already implies clearing
+every earlier, lower-numbered stage's threshold first. Deliberately shares
+the exact same level-gated-only filter (`level !== undefined && no
+conditions`) `computeProfileFromDexEntry`'s own `evolutions` field already
+uses, so this never floors a species at a threshold reachable only via an
+item/trade evolution this sim doesn't track (Vileplume, Ninetales, etc.
+correctly read back as 1 — an honest reflection of "not modeled," not a
+bug). `ImmigrationSpeciesInfo` (engine/immigration.ts) gained an optional
+`minLevel` field, populated per roster entry in
+`packages/data/src/immigration.ts`. `rollImmigrantLevel` replaces the flat
+constant: `Math.max(IMMIGRANT_BASE_LEVEL_FLOOR (5), species.minLevel ?? 1)
++ Math.floor(rng() * IMMIGRANT_LEVEL_JITTER (8))` — an unclassified/base
+species keeps its old 5-12 range unchanged (the `max` against 5 preserves
+today's floor), while a genuinely evolved species floors at its own real
+threshold instead. Exported (like `accumulateActionEnergy`) purely so it's
+directly, deterministically unit-testable without reverse-engineering
+`maybeImmigrate`'s own internal rng call order.
+
+7 new engine tests (5 on `rollImmigrantLevel` directly, 2 through
+`maybeImmigrate`'s public surface) plus the pre-existing determinism suite,
+all green. Validated via `validateImmigrantLevels.ts` over a real
+8000-tick demo-world run, wrapping `spawnAgent` to capture the level
+actually rolled at spawn time (reading `agent.level` off `world.agents` at
+the end of the run would be misleading — a still-living immigrant keeps
+leveling up from ordinary exp gain long after arriving, unrelated to what
+it spawned at): base-form species (cubone, caterpie, oddish, vulpix,
+sandshrew, scyther, ponyta) land within the expected 5-12 range with real
+variety; `metapod` (real dex threshold: evolves from Caterpie at level 7)
+floors at exactly 7-11; `blastoise` (fully evolved, dex threshold 36)
+spawned at 39 — its own real floor plus jitter, not anywhere near the old
+flat 5.
+
+### Second, separate flat-level-5 bug: the overworld zone-promotion path
+
+Direct follow-up after the immigration.ts fix above shipped: "Deployed
+succeeded but I'm still seein lvl 5 blastoises and shit." The immigration.ts
+fix was correct but incomplete — it only covers agents that *immigrate in*
+mid-simulation. It never touches the completely separate macro-grid/overworld
+population-seeding path: when the overworld map is panned onto a zone that
+has never been visited/simulated before, `promoteZone`
+(`packages/engine/src/overworld.ts`) has to invent a starting population from
+scratch via `estimateInitialAggregates`, which hardcoded `avgLevel: 5` for
+every species regardless of evolution stage — the same bug, under a
+different name, in a code path the first fix never reached.
+
+**Built**: threaded the same `naturalMinLevelFor`/`IMMIGRANT_BASE_LEVEL_FLOOR`
+infrastructure through this second path instead of inventing a parallel one.
+`ZoneSpeciesEstimate` (`packages/engine/src/macroGrid.ts`) gained an optional
+`minLevel` field, carried straight from the roster entry's own
+`ImmigrationSpeciesInfo.minLevel` inside `estimateZoneSpecies`.
+`estimateInitialAggregates` now computes
+`Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, estimate.minLevel ?? 1)` instead of the
+flat `5` (required exporting `IMMIGRANT_BASE_LEVEL_FLOOR` from
+immigration.ts, previously private). Also added per-individual jitter,
+`(mw.rng() - 0.5) * 4`, to `promoteZone`'s invented-agent level computation —
+previously every invented individual of a species landed on the exact same
+level with zero variance, the same "some randomness in starting rolls"
+request from the first fix, unaddressed in this second path. The aggregate's
+own `avgLevel` stays the real center so a whole invented population doesn't
+drift together; only per-individual placement gets variance.
+
+A separate, pre-existing `avgLevel: agent.level ?? 5` fallback elsewhere
+(region-crossing herd aggregate update) was deliberately left unchanged — it
+falls back to 5 only when a real agent's own level is genuinely missing, a
+different and much narrower bug class than a systemic default applied to
+every invented spawn.
+
+One existing test (`overworld.test.ts`) that asserted an exact invented
+level of 8 was loosened to a `[6, 10]` range now that jitter is real; a new
+test confirms a genuinely fresh zone promotion seeds an evolved species
+(`venusaur`, `minLevel: 32`) at/above its real floor, not flat 5. Full
+monorepo suite green (1077 engine + 177 data tests) after the change.
+
+Validated live via `packages/runner/src/validateInventedLevels.ts`, which
+manually builds a `MacroWorld` and calls `promoteZone` across a 10x10 grid of
+never-visited zones, recording min/max invented level per species. Evolved
+species land well clear of the old flat 5 and show real spread: `charizard`
+34-38, `golbat` 20-24, `jynx` 28-32, `gloom` 19-23; base forms stay low with
+real per-individual variance (`caterpie`, `zubat`, `snorlax` etc. 3-7).
+
+### Single-stage species get a wider base-level range
+
+Direct ask: "make all Pokémon with just base form have a wider range of
+base level." A species partway through a multi-stage line (Bulbasaur) is
+realistically "young" at the immigrant/invented-population floor — it
+hasn't had time to evolve yet, so clustering near the floor makes sense.
+A species with only one form EVER (Tauros, Farfetch'd, Lapras, Snorlax,
+Jynx, Ditto) has no such tell: a wild population of it plausibly spans its
+whole adult lifespan, so a narrow 5-12-ish spread undersells it.
+
+**Built**: `packages/data/src/leveling.ts`'s new `isSingleStageSpecies
+(speciesId)` — true when the dex's raw `evolutions` list is empty (no
+forward evolution at all, even an unmodeled item/trade one — a species that
+evolves only via a mechanic this sim doesn't track, like Scyther -> Scizor,
+still isn't "just base form") AND it isn't itself evolved from another real
+ROSTER species (checked against `PREVO_KEY_BY_KEY` gated by `SPECIES`, not
+the raw dex — Snorlax's raw dex prevo is Munchlax, a later-gen baby form
+nothing in this sim ever spawns or breeds into, so that prevo edge alone
+shouldn't disqualify it). `ImmigrationSpeciesInfo`/`ZoneSpeciesEstimate`
+gained a `singleStage` field carrying this through both spawn paths.
+`immigration.ts`'s `rollImmigrantLevel` uses a much wider jitter
+(`SINGLE_STAGE_LEVEL_JITTER = 30`, vs. the ordinary `IMMIGRANT_LEVEL_JITTER
+= 8`) for a `singleStage` species; `overworld.ts`'s `estimateInitialAggregates`
+and `promoteZone`'s per-individual variance do the same for the macro-grid
+path.
+
+Live-validated via `validateInventedLevels.ts`: Lapras now spans 1-39,
+Snorlax 1-27, Jynx 24-62 (all `singleStage`), while a multi-stage base form
+like Bulbasaur stays in its original narrower 7-14 range and an unmodeled-
+evolution species like Scyther correctly stays narrow too (it does have a
+real, if unmodeled, further evolution). Full suite (1077 + 177 tests) green.
+
+### Real bug: spawned agents knew moves far above their level (lv10 Sandshrew with Earthquake)
+
+Direct report: "Any reason why a lv ten sandshrew knows earthquake?" Real
+and total: `packages/data/src/spawn.ts`'s `spawnAgent` granted every move in
+a species' hand-curated `SpeciesDef.moves` list unconditionally, regardless
+of spawn level — that list carries no level annotation of its own, unlike
+the real, already-level-gated learnset already used elsewhere in this
+codebase (`leveling.ts`'s `grantExp`/`ensureCombatProfile`, which correctly
+gate a newborn's or leveling agent's moves off the dex's own `levelMoves`).
+Auditing the whole roster against the real dex thresholds found this wasn't
+Sandshrew-specific: Venusaur/Ivysaur knew Solar Beam (real threshold 54-65)
+from level 1, Blastoise knew Hydro Pump (49) from level 1, Onix/Geodude both
+had Earthquake (52/34) unconditionally, etc. — a systemic gap, not one
+species' curated list being wrong.
+
+**Built**: `spawn.ts` gained `moveUnlockLevel(speciesId, moveId)`, a direct
+cross-reference against the imported dex's real `levelMoves` for that exact
+species (lowest level if a move somehow appears more than once, defensive).
+`spawnAgent` now filters `species.moves` down to only the moves whose real
+threshold is `<= level` before building `knownMoves`/`moves` — a higher-tier
+move still in the curated list is picked up naturally later via `grantExp`
+once the agent's real level actually crosses that threshold, the same path
+a naturally-leveled agent already uses, so nothing is permanently lost, just
+correctly delayed. A move with no entry in the dex's own learnset (a
+curated move that isn't a real level-up move for this species, if that ever
+happens) reads as level 1 — nothing to gate against — and stays available
+from spawn, unchanged from before. Falls back to the single
+lowest-threshold move if every one of a species' curated moves would
+otherwise be gated out at a very low spawn level, so a newly-spawned agent
+is never left with zero moves.
+
+Verified live: a Sandshrew now spawns knowing only Scratch at levels 1-20,
+and doesn't pick up Dig/Agility/Earthquake until its real level (30/28/46)
+crosses each threshold — exactly the same species that prompted the report.
+Full suite (1077 + 177 tests) green; no existing test asserted the old
+unconditional-move behavior.
+
 ## Real confirmed bug: dying of thirst standing on water, fourth instance of "commits no matter what"
 
 Direct report: "I just watched bulbasaurs die of thirst while in water." Not
@@ -6485,6 +6927,105 @@ Nothing in these 9 runs reads as a *new* predator die-off pattern, and by
 construction (decision #2 above) this mechanic structurally cannot be the
 cause of one — predators never appear on either side of a `herdClash`.
 
+### Territorial guarding — direct follow-up: proactive, not just reactive
+
+Direct follow-up ask: "I think I want more territorial behavior. Around
+guarding resources" — refined through two more messages into a full
+proactive-invasion design, not just a defender-side tweak: "the unit
+wandering into a territorial space would... be incentivized to try to fight
+and take over resources... that's why they would go in to keep fighting if
+they thought they could win," plus real tolerance exceptions ("units who
+have developed relationships (known safe) or bonded or species that are esp
+not aggressive/same egg type... could be tolerated. But new outsiders would
+not be. And if food or water became scarce that tolerance may lessen").
+
+**Decided:**
+
+1. **Proactive, not gated behind a stuck resource-block.** The
+   resource-contention trigger above only ever fires once an agent has
+   already been stuck `HERD_CONFLICT_MIN_BLOCKED_TICKS` (8) deep waiting on
+   one specific crowded tile — a real gap for "patrol/chase off an intruder
+   before it even gets that far." `applyTerritorialGuard` (herdConflict.ts)
+   is checked every action tick instead, for every eligible agent, whether
+   or not it's currently even trying to reach a resource.
+2. **Symmetric, not owner-vs-intruder.** This codebase has no herd-level
+   "claimed territory" concept to check "is this MY land" against —
+   `Agent.homePos` is individual-scoped, set once at spawn. Rather than
+   inventing one, the trigger checks "is there a different-herd, non-
+   tolerated agent near me, somewhere with real resources" — which reads
+   correctly from either side's own action tick: a resident whose turf a
+   stranger wandered into chases it off; that same stranger, on its own
+   turn, is equally free to stand its ground and fight for a foothold
+   instead of retreating. This is what makes "the wandering unit is
+   incentivized to fight and take over" fall out for free, rather than
+   needing a whole separate invader-side mechanic: both sides run through
+   the exact same function.
+3. **"If they thought they could win" is the existing power-ratio gate,
+   reused unchanged** (`HERD_CONFLICT_MIN_POWER_RATIO`) — a genuinely
+   confident, comparably-matched agent (either side) engages; a hopeless
+   mismatch doesn't, regardless of which side initiated. On top of that, the
+   acting agent's own hunger/thirst urgency now additionally raises the
+   trigger chance (`GUARD_NEED_URGENCY_SCALE`) — a hungry/thirsty agent is a
+   more willing invader than a well-fed one just passing through, the direct
+   "why they would go in" motivator the ask called for.
+4. **Real tolerance, real erosion under scarcity.** `isToleratedIntruder`
+   exempts two real cases from being treated as a fair-game rival at all: a
+   genuinely positive rapport (`rapport.ts` — a bonded mate, a past
+   mutual-defense ally) above a threshold, and a same-egg-group stranger
+   (`leveling.ts`'s real mainline-breeding-compatible `canBreed`, the "same
+   egg type" ask) whose own current effective disposition reads as
+   sufficiently unaggressive. Both thresholds are scaled by a real,
+   continuous `scarcityFactor` (0 at comfortably-plentiful local resources,
+   1 right at the "barely worth guarding at all" floor) — "if food or water
+   became scarce that tolerance may lessen" is a literal shrinking bar, not
+   a hard cutoff, and at genuine scarcity even a bonded pair from different
+   herds stops being exempt.
+5. **Same non-lethal resolution, same shared cooldown, same everything else
+   this module already established** — `resolveRivalryHit`,
+   `HERD_CONFLICT_HP_FLOOR_FRACTION`/`_RETREAT_HP_FRACTION`,
+   `Agent.herdConflictCooldownTicks` (shared with the reactive trigger, so a
+   pair that just fought via either path doesn't immediately re-engage via
+   the other). Predators stay fully out of scope, unchanged. No new
+   `SimEvent` kind — a proactive engagement still resolves through
+   `resolveRivalryHit` and still logs the same `herdClash` shape.
+
+**Built, real-run findings:** `applyTerritorialGuard` (herdConflict.ts),
+called from needs.ts's `tickAgentAction` at the same "survival/feeding
+instinct" priority tier as `applyScavenging` — deliberately NOT gated behind
+`needsAreUrgent` (unlike `applySupportMove`/dispersal below it), since a
+hungry/thirsty agent is exactly who this mechanic means to let fight for a
+foothold rather than wander off looking elsewhere. `findRivalOccupant` and
+`herdConflictChance` (both pre-existing, private to this module) were
+generalized with an optional radius/base-chance-and-scale parameter rather
+than duplicated, so both triggers share one real rival-detection/chance
+implementation. 10 new engine tests (`herdConflict.test.ts`) cover: no rival
+nearby, herd-mates never counted, predators excluded either side, nothing
+worth guarding (no real food/water) refusing to engage, a bold confident
+agent engaging a real cross-species rival near real resources, a badly
+outmatched agent refusing (same confidence gate), a timid agent's
+disposition gate holding, a bonded/high-rapport rival tolerated while
+resources are plentiful, a hungry agent engaging where an otherwise-
+identical well-fed one doesn't (the need-urgency bonus, isolated via a rigged
+rng value between the two agents' real computed chances), and the shared
+cooldown gate. All 1061 engine tests pass, determinism acceptance test
+included. Validated via `validateTerritorialGuard.ts` over a real 8000-tick
+demo-world run: 696 `herdClash` events total (well above the 19-90-per-3000-
+ticks baseline the resource-contention trigger alone produced), and 4330
+ticks showed a living, non-predator, herded agent actively chasing/engaging
+a different-herd target while its own `ticksBlockedFromResource` sat below
+the reactive trigger's own 8-tick prerequisite — the real, distinguishing
+signature that this is genuinely the new proactive path firing, not just
+the pre-existing reactive one under a different name.
+
+**Honestly not built:** no herd-level "claimed territory" concept exists
+even now (decision #2 deliberately worked around needing one) — a real
+follow-up would give a herd an actual home-range polygon/radius rather than
+inferring "worth defending" purely from what's physically nearby whoever's
+current action tick is running. `scarcityFactor`/tolerance thresholds are
+sim-original guesses, same "judge against a real run" discipline as every
+other tuning constant in this codebase, not yet separately validated for
+"does tolerance visibly erode during a real drought."
+
 **Single-seed before/after comparison was attempted and explicitly
 discarded as unreliable**, not glossed over: disabling the feature's call
 site and re-running the same 3 seeds (42/7/20260903) produced wildly
@@ -6506,9 +7047,10 @@ than showing a new predator-specific regression.
 
 ### Explicitly not done here (see TODO.md)
 
-- Extending herdMigration.ts's territorial trigger to escalate into combat
-  instead of always relocating — the other real candidate trigger mechanism
-  from the original design brief, deliberately not built (see decision #1).
+- ~~Extending herdMigration.ts's territorial trigger to escalate into combat
+  instead of always relocating~~ — built, see "Territorial guarding" above
+  (a different implementation than literally extending herdMigration.ts's
+  own centroid-based trigger, but the same real gap it names).
 - Predator involvement of any kind (predator-vs-predator rivalry, or a
   predator contesting a resource with a non-predator) — deliberately scoped
   out entirely (decision #2), not a partial/softer version of it.
@@ -6518,7 +7060,65 @@ than showing a new predator-specific regression.
   conflict is a much bigger new death-risk surface to validate safely, and
   the individual-pair version already satisfies the direct ask.
 
-## Grazing scars: sustained heavy grazing degrades a tile beyond ordinary depletion
+### Retaliation — direct follow-up: "there isn't any fighting back, is there?"
+
+After territorial guarding made `herdClash` far more frequent, a real gap
+surfaced: `resolveRivalryHit` is one-directional — whoever's action tick is
+running picks a move and hits the other side; the defender doesn't swing
+back in that same exchange. The only way it ever hit back before this was
+by independently re-clearing the WHOLE ordinary trigger gate (cooldown,
+tolerance, abundance, disposition roll) on its own later tick, which
+usually just didn't line up — real rivalry fights read as one hit, then
+nothing. Refined through a follow-up message into a real, but not
+unconditional, response: "they should retaliate to see strength. From
+there, if it looks like they'll lose they can make a decision to leave...
+if they recognize their foe is much more powerful than them they can back
+out without retaliation. But against relatively equal level +/-5, they
+should retaliate."
+
+**Decided:**
+
+1. **A direct response to a specific hit, not a fresh escalation decision.**
+   `resolveRivalryHit` now sets `Agent.retaliateAgainstId` on the defender
+   the instant a real hit lands and it *doesn't* cross the retreat threshold
+   (a defender that's already backing off isn't retaliating — the two are
+   mutually exclusive outcomes of the same hit). `applyRivalryRetaliation`
+   spends this flag on the defender's own very next action tick — checked
+   ahead of scavenging/territorial-guarding in needs.ts's priority chain, so
+   a real "I was just hit" response outranks a fresh, unrelated decision to
+   escalate elsewhere.
+2. **Sizing up the specific foe by level, not the reactive/proactive
+   triggers' own maxHp-ratio confidence gate.** `HERD_CONFLICT_MIN_POWER_RATIO`
+   (a comparably-matched-stats gate) already governs whether a fight starts
+   in the first place; retaliation asks a simpler, more legible question
+   about the specific individual that just landed a hit — "is this
+   opponent's level within `RETALIATION_LEVEL_TOLERANCE` (5) of mine?" A
+   foe more than 5 levels stronger gets backed away from instead (a real
+   `stepAway` + the same `HERD_CONFLICT_COOLDOWN_TICKS` cooldown
+   `resolveRivalryHit`'s own retreat branch already uses) — a real, felt
+   de-escalation, not a coin-flip refusal. A comparable (or weaker) foe gets
+   hit back immediately, no fresh roll needed.
+3. **One evaluation opportunity, always consumed.** `retaliateAgainstId` is
+   cleared the instant `applyRivalryRetaliation` checks it, regardless of
+   outcome (target gone, out of range, predator, on cooldown, or a real
+   swing/back-away) — this is a one-shot response to one specific hit, never
+   a standing grudge that lingers or re-fires later.
+
+**Built, real-run findings:** `applyRivalryRetaliation` (herdConflict.ts),
+`Agent.retaliateAgainstId` (types.ts), 8 new engine tests covering: no
+pending retaliation (no-op), a comparable-level target hit right back (flag
+consumed), backing away from a much-stronger foe (no attack logged, real
+position change, real cooldown applied), the exact `+5` boundary still
+counting as "comparable," a vanished/fainted target (flag still consumed,
+no crash), predator exclusion, the shared cooldown gate, and confirming
+`resolveRivalryHit` itself only sets the flag on a genuine non-retreating
+hit (never on a miss, never on a retreat). All 1069 engine tests pass.
+Validated via `validateRivalryRetaliation.ts` over a real 8000-tick
+demo-world run: of 103 distinct rivalry pairs that exchanged at least one
+real hit, 54 (~52%) showed genuine back-and-forth — both sides actually
+landing a hit on each other — versus what was structurally impossible to
+measure as anything but coincidental before this feature (the old
+mechanism had no notion of "responding" at all, only independent re-rolls).
 
 Direct user pitch, approved directly ("Yeah that sounds good"): world-shaping
 behavior beyond shelter-building — species that leave a real, lasting mark on
@@ -11864,3 +12464,109 @@ tests) green throughout; web production build succeeds.
   Z-levels, the life/notable-history generation passes, dynamic cross-zone
   propagation — is still exactly where it was: real, vision-stage, not
   built.
+
+## Natural landmarks on the macro grid, built
+
+Direct follow-up to "how do we get more character, more points of interest"
+on the macro grid above. Landed on real mainline Pokémon location
+archetypes (Mt. Moon, Cerulean Cave, Diglett's Cave, Lavender Town/Pokémon
+Tower, Seafoam Islands) as the well to draw from, but a hard constraint
+narrowed it: "stay away from the human civilization pass for now, just
+natural places" — every one of those is naturalized into something a real
+place could be without implying anyone built it (a meteorite impact instead
+of a tower on a hill, a colony's own dug burrows instead of a pre-existing
+cave network, a species' own "return here to die" instinct instead of a
+graveyard). Final direct ask: "I want particularly unique zone gen for
+them... make em interesting to look at and form interesting points of
+conflict and emergent stuff."
+
+Ten types shipped, one new module (`landmarks.ts`) plus real hooks into
+three existing ones:
+
+- **Placement** (`landmarks.ts`'s `placeLandmarks`, called from
+  `generateMacroGrid` right after river carving): one independent scatter
+  pass per type over the whole zone grid, each zone getting at most one
+  landmark. `LANDMARK_DEFS` gates eligibility per type — `requiresLake`
+  (Great Lake reuses the real, previously-dead `MacroZone.isLake` flag),
+  `eligibleBiomes`, `minLandNeighbors` (Crossroads: a real geographic
+  junction, at least 3 non-ocean orthogonal neighbors) — then rolls an
+  independent, deliberately tiny `chancePerEligibleZone` per zone, capped by
+  a hard `maxCount` so a huge grid doesn't drown in "rare" landmarks. Every
+  number here is a sim-original guess, same as every other tuning table in
+  this codebase, checked once against a real 400x400 (160,000-zone) grid via
+  `validateLandmarks.ts` rather than calibrated against anything — all ten
+  types placed at least once, roughly per their intended rarity order.
+- **Unique terrain generation** (`worldgen.ts`'s ten `apply<Name>` functions
+  plus the `applyLandmarkFeature` dispatcher, run last of all in
+  `generateWorld`, after rivers/BSP chambers/underground caves, so a
+  landmark's footprint deliberately overwrites whatever ordinary biome
+  generation already put there): each type gets its own genuinely distinct
+  stamp, not just a name on an otherwise-ordinary tile — a real water circle
+  for Great Lake/Sacred Spring, a boulder-rimmed cleared crater floor for
+  Meteor Crater, a proper cellular-automata cave patch (the same
+  random-fill-then-smooth-then-keep-largest-region recipe
+  `generateUndergroundCaves` already uses, generalized into a local, scoped
+  `carveOrganicCavePatch` helper) for Deep Cavern (walls) and Frozen Grotto
+  (boulders — the softer, wanderable-into read), several small
+  burrow-entrance clusters scattered through a wide sand/mud patch for
+  Tunnel Warren, a starkly stripped-bare clearing for Bone Grounds (nothing
+  planted here on purpose — whatever grows comes only from what's died and
+  decayed on it), a dense sunbeam-tile cluster for Geothermal Vent (the
+  existing warmth terrain, elsewhere only a scattered 3% roll on high
+  ground), thinned-out open ground for Crossroads, and denser bush/food
+  overgrowth for Fertile Basin.
+- **Real mechanical hooks** (`macroGrid.ts`'s `estimateZoneResourceIndex`/
+  `estimateZoneSpecies`, the same never-visited-zone guesses a promotion or
+  received migrants already read): `LANDMARK_RESOURCE_BONUS` gives the
+  genuinely abundant landmarks (Great Lake, Fertile Basin, Sacred Spring) a
+  flat top-up over their ordinary biome-driven baseline; `LANDMARK_
+  POPULATION_MULTIPLIER` gives the congregation-shaped landmarks (Meteor
+  Crater, Tunnel Warren, Deep Cavern, Crossroads) a multiplier applied to
+  EVERY fitting species' seed population, not a pick-one-winner boost — the
+  deliberate mechanism for "points of conflict and emergent stuff": several
+  species' populations packed onto the same small, scarce footprint is
+  exactly the setup `herdConflict.ts`'s existing cross-species
+  resource-contention rivalry trigger (a sustained blocked/crowded-tile
+  standoff, already fully built, needs no new code) fires more of on its
+  own. Bone Grounds deliberately gets no resource bonus here — its richness
+  is meant to be earned through the not-yet-built corpse-decomposition
+  passive, not handed out for free.
+- **Visible on the map** (`macroMap.ts`): a small, saturated, per-type
+  colored marker drawn at a landmark zone's center, deliberately off the
+  biome color palette so it reads as "something unusual is here" at a
+  glance even at a flat-block zoom level, not blended into its host biome's
+  own color.
+
+Validated via `validateLandmarks.ts` (a real 400x400 grid: all ten types
+placed; resource-index/population estimates measurably higher than a plain
+zone of the same biome where intended; each promoted zone's terrain
+genuinely distinct) and a dedicated `landmarks.test.ts` plus additions to
+`macroGrid.test.ts`/`worldgen.test.ts` (placement determinism/eligibility/
+caps, the resource and population hooks, real terrain generation for every
+reachable type, and a regression test for a real bug caught along the way:
+`applyDeepCavern` originally called its own center-picking helper twice —
+once for x, once for y — producing an inconsistent center from two
+independent rng draws instead of one consistent point, fixed to call it
+once and reuse both coordinates, matching `applyFrozenGrotto`'s
+already-correct pattern right below it). Full engine suite (1002 tests) and
+data suite (104 tests) green throughout.
+
+### What's honestly still open
+
+- **The emergent-conflict payoff is mechanically wired but not yet observed
+  in a real run** — the population multiplier moves the seed numbers
+  `estimateZoneSpecies` produces, but nothing here has yet measured whether
+  a promoted, congregation-biased landmark actually produces more
+  `herdConflict.ts` rivalry events than an ordinary zone over a real
+  multi-thousand-tick run.
+- **No zone-info text panel names a focused zone's landmark** — currently
+  only the macro map's own colored marker surfaces it; clicking a landmark
+  zone doesn't (yet) show "Great Lake" anywhere as text.
+- **Bone Grounds' real richness (corpse decomposition enriching the ground)
+  isn't built** — MOVES_DESIGN.md's own pitched "decayed corpse enriches
+  soil" passive is the real mechanism this was written to eventually plug
+  into; until then Bone Grounds is terrain-distinct but resource-neutral.
+- **Rarity is a single guess, not tuned** — `chancePerEligibleZone`/
+  `maxCount` were judged against one real grid and left as-is; genuinely
+  playing the game on a real map may reveal some types read too sparse or
+  too common.

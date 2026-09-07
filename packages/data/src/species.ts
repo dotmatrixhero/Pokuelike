@@ -222,8 +222,13 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Underground has no biome of its own (worldgen.ts's biomes only vary
     // the surface layer) — tagged by the surface biome its tunnels would
     // sit under: loose, diggable ground reads as grassland/badlands, not
-    // dense forest or waterlogged wetland.
-    biomes: ["grassland", "badlands"],
+    // dense forest or waterlogged wetland. "desert" added later — direct
+    // ask: "add like a little species. More throughout? Each zone should
+    // have at least 4, max 7 to start," and desert's own fitting-species
+    // count (vulpix/cubone alone) couldn't meet that floor; a real
+    // burrowing mole under loose desert sand is exactly as lore-plausible
+    // as under grassland/badlands.
+    biomes: ["grassland", "badlands", "desert"],
     // No `preferredTerrain` tag: underground is a flat, terrain-uniform
     // floor grid (worldgen.ts never varies it), so there's no meaningful
     // tile kind to prefer among on its own home layer — and it already has
@@ -294,8 +299,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Same "no biome of its own, tagged by the surface above" reasoning as
     // Diglett — a desert-dwelling burrower reads squarely as badlands, with
     // grassland as a secondary (real-world ground squirrels/gophers aren't
-    // desert-exclusive).
-    biomes: ["badlands", "grassland"],
+    // desert-exclusive). "desert" itself added later, directly matching its
+    // own flavor text ("a desert dweller") — see diglett's own comment
+    // above for the direct ask this addresses.
+    biomes: ["badlands", "grassland", "desert"],
   }),
   onix: speciesFromDex("ONIX", {
     spriteKey: "onix",
@@ -372,7 +379,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // doc comment on why level-with-no-conditions is the bar) — so, like
     // Onix in the existing roster, this species simply never evolves
     // in-sim yet. Not a bug, an accepted existing limitation.
-    biomes: ["badlands"],
+    // "desert" added later, same "found in rocky, arid regions" flavor
+    // reasoning as badlands above, and the same direct ask driving diglett/
+    // sandshrew's own desert tag (see diglett's own comment).
+    biomes: ["badlands", "desert"],
     // Fire-type warmth-seeker, same "sunbeam" affinity reasoning as
     // Charmander above — a dry-terrain dog that suns itself when idle.
     preferredTerrain: ["sunbeam"],
@@ -582,17 +592,55 @@ export const SPECIES: Record<string, SpeciesDef> = {
     biomes: ["snow", "wetland"],
     preferredTerrain: ["water"],
   }),
+  // Direct ask: "add like a little species. More throughout? Each zone
+  // should have at least 4, max 7 to start" — the zone species-pool floor
+  // (macroGrid.ts's `ZONE_SPECIES_POOL_MIN`) can't be met by a habitat that
+  // structurally doesn't have that many fitting species to begin with;
+  // obligate-aquatic ("ocean") had only 3 (magikarp/tentacool/tentacruel).
+  // Horsea/Seadra are real, fully-aquatic Gen 1 water creatures — a genuine
+  // fourth (and evolved fifth) resident, not padding.
+  horsea: speciesFromDex("HORSEA", {
+    spriteKey: "horsea",
+    placeholderColor: "#88c0d8",
+    homeLayer: "surface",
+    // Water Gun (level 1) and Agility (level 28) are Horsea's real level-up
+    // moves — same "off-type/simple curated pair" pattern as dratini's own
+    // entry above.
+    moves: ["water_gun", "agility"],
+    biomes: ["wetland"],
+    obligateAquatic: true,
+    preferredTerrain: ["water"],
+  }),
+  seadra: speciesFromDex("SEADRA", {
+    spriteKey: "seadra",
+    placeholderColor: "#5890b0",
+    homeLayer: "surface",
+    moves: ["water_gun", "agility"],
+    biomes: ["wetland"],
+    obligateAquatic: true,
+    preferredTerrain: ["water"],
+  }),
 
   // --- New base species below: direct ask ("more species? more biome
   // types???") following the new desert/jungle/beach biomes (worldgen.ts/
   // macroGrid.ts) — real residents for all three, plus a few more for the
-  // existing roster's thinner biomes (grassland/highland/snow). All 14 keep
-  // this batch's own predator-guild caution from the badlands/highland pass
-  // above: none tagged `isPredator` (Zubat/Golbat's real "drains life
-  // energy" flavor would qualify, but the existing predator guild already
-  // crashes toward extinction in a real run per TODO.md — adding another
-  // hunter to an already-struggling guild isn't this batch's problem to
-  // solve). Each evolution reachable purely by in-sim leveling (checked
+  // existing roster's thinner biomes (grassland/highland/snow). Originally
+  // ALL 14 kept this batch's own predator-guild caution from the badlands/
+  // highland pass above: none tagged `isPredator`, even the ones (Ekans/
+  // Arbok's real egg-eating, Zubat/Golbat's real "drains life energy"
+  // flavor) that clearly qualified, since the existing predator guild
+  // already crashed toward extinction in a real run per TODO.md. Direct
+  // follow-up ask, later in the same project: "I think ekans and arbok are
+  // predators... make sure we accurately mark em... try to have at least
+  // some predators + prey per each zone" — those four are now tagged for
+  // real (see each one's own comment below), alongside the actual fix for
+  // the fragility this caution was guarding against:
+  // macroGrid.ts's `pickZoneSpeciesPool` now deliberately balances a zone's
+  // invented population toward a SMALL number of predators against more
+  // prey, and TODO.md's own "one predator species = 100% of pressure"
+  // finding is directly addressed by there now being real predator variety
+  // instead of one single species carrying the whole guild. Each evolution
+  // reachable purely by in-sim leveling (checked
   // against the dex's own `evolutions` data, `conditions: {}` only — same
   // bar `leveling.ts`'s `computeProfileFromDexEntry` itself uses) gets its
   // own curated entry too, same "don't let an evolved agent quietly lose
@@ -636,8 +684,14 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Poison Sting is Ekans's real level-1 move.
     moves: ["tackle", "poison_sting"],
     // "Moves silently and stealthily... eats bird eggs whole" per mainline
-    // flavor text — a nocturnal ambush hunter's hours, even though it isn't
-    // tagged `isPredator` here (see this batch's top comment).
+    // flavor text — a nocturnal ambush hunter's hours. Direct ask ("I think
+    // ekans and arbok are predators... make sure we accurately mark em"):
+    // this batch's own original top comment deliberately left it untagged,
+    // citing the predator guild's real extinction fragility (see TODO.md) —
+    // now tagged for real, alongside the zone-composition guarantee
+    // (macroGrid.ts's `pickZoneSpeciesPool`) that was the actual missing
+    // piece keeping that fragility in check, not species accuracy itself.
+    isPredator: true,
     activityPattern: "nocturnal",
     biomes: ["grassland", "jungle"],
   }),
@@ -646,6 +700,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     placeholderColor: "#785888",
     homeLayer: "surface",
     moves: ["tackle", "poison_sting", "sludge"],
+    // See ekans's own comment immediately above — same direct ask, same reasoning.
+    isPredator: true,
     activityPattern: "nocturnal",
     biomes: ["grassland", "jungle"],
   }),
@@ -838,6 +894,14 @@ export const SPECIES: Record<string, SpeciesDef> = {
     homeLayer: "underground",
     // Poison Sting is Zubat's real level-1 move.
     moves: ["tackle", "poison_sting"],
+    // Real "drains life energy" vampiric flavor — the exact case this
+    // batch's own original top comment named as qualifying but left
+    // untagged over predator-guild fragility (see TODO.md). Direct ask
+    // ("make a pass on predators, make sure we accurately mark em"): tagged
+    // for real now, alongside macroGrid.ts's `pickZoneSpeciesPool` zone-
+    // composition guarantee — see ekans's own comment above for the full
+    // reasoning.
+    isPredator: true,
     // Avoids daylight entirely per mainline flavor text.
     activityPattern: "nocturnal",
     biomes: ["highland", "badlands"],
@@ -847,6 +911,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     placeholderColor: "#6848a0",
     homeLayer: "underground",
     moves: ["tackle", "poison_sting", "wing_attack"],
+    // See zubat's own comment immediately above — same direct ask, same reasoning.
+    isPredator: true,
     activityPattern: "nocturnal",
     // Real further evolution (Crobat) needs a FRIENDSHIP condition, not a
     // plain level — same "never evolves in-sim" limitation as Growlithe/

@@ -179,7 +179,12 @@ describe("promoteZone", () => {
     expect(region.aggregates).toBeUndefined();
     for (const agent of world.agents) {
       expect(agent.species).toBe("bulbasaur");
-      expect(agent.level).toBe(8);
+      // A small +/-2 real per-individual jitter around the aggregate's own
+      // tracked average (8) — direct ask: "some randomness in starting
+      // rolls would be good" — not every invented individual landing on
+      // the exact same level any more.
+      expect(agent.level).toBeGreaterThanOrEqual(6);
+      expect(agent.level).toBeLessThanOrEqual(10);
       expect(agent.sex === "male" || agent.sex === "female").toBe(true);
       expect(agent.needs.hunger).toBeGreaterThanOrEqual(0);
       expect(agent.needs.hunger).toBeLessThanOrEqual(1);
@@ -229,6 +234,19 @@ describe("promoteZone", () => {
     expect(species.has("bulbasaur")).toBe(true);
     expect(species.has("diglett")).toBe(true);
     expect(region.aggregates).toBeUndefined();
+  });
+
+  it("a genuinely fresh zone seeds an evolved species' estimated population at its own real evolution floor, not a flat default — direct ask: \"why does everything spawn at lv5\"", () => {
+    const evolvedCtx: ImmigrationContext = {
+      speciesRoster: [{ id: "venusaur", homeLayer: "surface", biomes: ["grassland"], minLevel: 32 }],
+      spawnAgent: stubSpawnAgent,
+    };
+    const mw = makeMacroWorld(makeGrid(3, 3), [], 1, 1, seededRng(7));
+    const region = promoteZone(mw, 0, 0, evolvedCtx);
+
+    const venusaurs = region.world!.agents.filter((a) => a.species === "venusaur");
+    expect(venusaurs.length).toBeGreaterThan(0);
+    for (const a of venusaurs) expect(a.level).toBeGreaterThanOrEqual(30); // 32 floor, +/-2 jitter
   });
 
   it("promoting the same fresh zone twice generates the exact same terrain both times (position-deterministic, not stream-order-dependent)", () => {

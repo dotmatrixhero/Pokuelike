@@ -240,12 +240,14 @@ export function getFertilePatch(): HTMLImageElement | null {
 /**
  * Real berry-plant art (ripped from legacy-cpp/data/sprites/"berry
  * sprites.png", a growth-stage sheet: each berry has a small/medium/ripe
- * stage) for "food"/"flora" tiles, keyed by the same flavor name
- * flora.ts's FOOD_FLAVORS/FLORA_FLAVORS already assigns — so a "cheri"
- * food tile always draws the same real Cheri-Berry-ish plant, not a
- * random one. Ripe (fruit-visible) stage only; renderer.ts scales opacity
- * by the tile's own stock so a depleted patch still visually fades like
- * it did before this art existed.
+ * stage) for "food"/"flora" tiles, keyed by the tile's own flavor — a
+ * `crops.ts` `CropId` for "food" (CROPS_DESIGN.md; no dedicated art exists
+ * yet for the real crops, so this currently always misses and falls back
+ * to `FLAVOR_FG`/`FLAVOR_GLYPH`'s colored-glyph rendering, same as any
+ * other flavor with no art) or `flora.ts`'s `FLORA_FLAVORS` for "flora".
+ * Ripe (fruit-visible) stage only; renderer.ts scales opacity by the
+ * tile's own stock so a depleted patch still visually fades like it did
+ * before this art existed.
  */
 export function getFoodSprite(flavor: string): HTMLImageElement | null {
   return loadSprite(`tile_food_${flavor}`, `/tiles/food_${flavor}.png`);

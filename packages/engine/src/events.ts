@@ -368,8 +368,14 @@ export type SimEvent =
       pos: Vec2;
       from: TerrainKind;
       to: TerrainKind;
-      /** Which sustained weather condition caused it — see weather.ts's `advanceWaterCycle`, currently the only producer of this event. */
-      cause: "drought" | "rain";
+      /**
+       * What caused it — "drought"/"rain" from weather.ts's
+       * `advanceWaterCycle` (sustained water-cycle drying/forming); "dug"
+       * from needs.ts's dig-a-spring last resort (CROPS_DESIGN.md's water
+       * rework: an agent with no reachable water anywhere digs a real new
+       * spring at its own position instead of migrating away).
+       */
+      cause: "drought" | "rain" | "dug";
     }
   | {
       kind: "herdClash";

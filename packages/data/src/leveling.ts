@@ -14,11 +14,76 @@ const SPECIES_KEY_BY_ID: Record<number, string> = Object.fromEntries(SPECIES_DEX
  * every species' evolutions and recording the target's prevo.
  */
 const PREVO_KEY_BY_KEY: Record<string, string> = {};
+/**
+ * Same reverse-of-the-dex construction as `PREVO_KEY_BY_KEY` immediately
+ * above, but recording the real level threshold instead of just the prevo's
+ * identity — dex key -> the level at which it evolved INTO this exact form.
+ * A species reachable via more than one path (shouldn't happen in this
+ * dex, but defensive) keeps the highest threshold seen, since "evolved
+ * into" is a floor, not an exact value. Same level-gated-only filter
+ * `computeProfileFromDexEntry`'s own `evolutions` field uses (PokeRogue
+ * stamps a `level: 1` placeholder on trade evolutions too — see that
+ * function's own doc comment on Onix -> Steelix) — this must agree with
+ * that filter, or `naturalMinLevelFor` could floor a species below a level
+ * it could only reach via a real level-gated path.
+ */
+const MIN_LEVEL_BY_KEY: Record<string, number> = {};
 for (const species of SPECIES_DEX) {
   for (const evo of species.evolutions) {
     const targetKey = SPECIES_KEY_BY_ID[evo.target];
     if (targetKey) PREVO_KEY_BY_KEY[targetKey] = species.key;
+    if (targetKey && evo.level !== undefined && Object.keys(evo.conditions).length === 0) {
+      MIN_LEVEL_BY_KEY[targetKey] = Math.max(MIN_LEVEL_BY_KEY[targetKey] ?? 0, evo.level);
+    }
   }
+}
+
+/**
+ * The lowest level a real specimen of `speciesId` could plausibly exist at
+ * — 1 for a base form (nothing had to evolve into it), or the real level
+ * threshold its own most-recent evolution required otherwise. Direct ask,
+ * after noticing every immigrant spawns at a flat level regardless of
+ * species: "everything spawn[s] at lv5. Especially evolved Pokémon they
+ * should be higher distributed." An evolution chain's minimum only ever
+ * needs its OWN (highest, since evolution levels increase per stage by
+ * mainline design) threshold, not a sum along the whole chain — reaching
+ * evolution N already implies having passed every earlier stage's own
+ * (lower) threshold first.
+ */
+export function naturalMinLevelFor(speciesId: string): number {
+  return MIN_LEVEL_BY_KEY[speciesId.toUpperCase()] ?? 1;
+}
+
+/**
+ * True for a species that never evolves at all AND isn't itself an evolved
+ * form — e.g. Tauros, Farfetch'd, Lapras, Scyther, Snorlax, Ditto. Direct
+ * ask: "make all Pokémon with just base form have a wider range of base
+ * level." Deliberately checks the RAW dex `evolutions` list (any kind, not
+ * just the level-gated-only filter `MIN_LEVEL_BY_KEY`/`computeProfileFrom
+ * DexEntry` use) — a species that evolves only via an item/trade this sim
+ * doesn't model (e.g. Poliwhirl -> Politoed) is still part of a real
+ * multi-stage line, not a genuinely single-form species, even though this
+ * sim would otherwise floor it at level 1 same as a true single-stage
+ * species. `PREVO_KEY_BY_KEY` (already built above from the same raw list)
+ * rules out the other half: an evolved form itself (e.g. Ivysaur) is never
+ * "just base form" even on the rare case it has no evolutions of its own
+ * yet to check.
+ *
+ * `PREVO_KEY_BY_KEY`'s prevo only disqualifies a species when that prevo is
+ * itself a real, spawnable roster species (`SPECIES`) — Snorlax's raw dex
+ * prevo is Munchlax (a later-gen baby form nothing in this sim ever spawns
+ * or breeds into, same known gap `EGG_GROUPS_BY_BASE_KEY`'s own comment on
+ * Smoochum/Munchlax documents), so treating that prevo edge as disqualifying
+ * would wrongly deny Snorlax the wider single-stage range even though
+ * nothing in this sim's roster ever actually evolves into it.
+ */
+export function isSingleStageSpecies(speciesId: string): boolean {
+  const key = speciesId.toUpperCase();
+  const entry = SPECIES_DEX_BY_KEY[key];
+  const hasForwardEvolution = entry ? entry.evolutions.length > 0 : false;
+  const prevoKey = PREVO_KEY_BY_KEY[key];
+  const prevoIsRosterSpecies = prevoKey ? Boolean(SPECIES[prevoKey.toLowerCase()]) : false;
+  return !hasForwardEvolution && !prevoIsRosterSpecies;
 }
 
 /**

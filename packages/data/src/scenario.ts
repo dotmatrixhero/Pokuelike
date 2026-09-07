@@ -51,24 +51,19 @@ function anchor(world: World, x: number, y: number) {
 }
 
 /**
- * Same scaling, for Canopy — that layer is still always a plain flat grid
- * (no obstacles/elevation there, a Surface-only generation pass — see
- * worldgen.ts), so every tile is walkable and no `findWalkableNear` search is
- * needed. Was a real bug in an earlier pass of this feature: these positions
- * used to be computed directly against the *new* SCENARIO_WIDTH/HEIGHT (e.g.
- * `SCENARIO_WIDTH - 3`) while sharing anchors with code still written in the
- * old 24x16 frame, which put predator and prey in opposite corners of the
- * new, much bigger map — far outside detection range of each other for the
- * entire length of a real run, confirmed by a 1000-tick run with zero
- * "fought"/"killed" events on either pair. Scaling from the *old* frame
- * consistently, the same way `anchor` does for the surface, keeps them
- * exactly as close (relatively) as they were on the original map.
- *
- * NOT used for Underground positions any more — see `undergroundAnchor`
- * below for why that layer needs a real walkability search now too.
+ * Same idea as `undergroundAnchor`, for Canopy. Real bug this closes: this
+ * file used to compute Canopy spawn positions with the unchecked `scaledPos`
+ * above, back when Canopy really was always a plain fully-walkable flat grid
+ * (see worldgen.ts's own doc comment history). It no longer is —
+ * `generateWorld` now derives real "wall" (unwalkable) canopy from Surface
+ * wherever there's no tree or massif ridge nearby (CROPS_DESIGN.md) — so an
+ * unchecked scaled anchor could land the Pidgey flock or Spearow in an
+ * unwalkable gap on some seeds, the exact same class of bug
+ * `undergroundAnchor` already fixed for Underground once cave generation
+ * gave that layer real walls too.
  */
-function scaledPos(x: number, y: number) {
-  return { x: Math.round(x * SCALE_X), y: Math.round(y * SCALE_Y) };
+function canopyAnchor(world: World, x: number, y: number) {
+  return findWalkableNear(world, "canopy", x * SCALE_X, y * SCALE_Y);
 }
 
 /**
@@ -271,19 +266,19 @@ export function createDemoWorld(seed: number = SCENARIO_SEED): World {
   // same pattern one layer up.
   const pidgeyFlock = [
     {
-      ...spawnAgent("pidgey", "pidgey-0", scaledPos(2, 2), 5, world.rng),
+      ...spawnAgent("pidgey", "pidgey-0", canopyAnchor(world, 2, 2), 5, world.rng),
       needs: createNeeds({ thirst: 0.2 }),
       herdId: "pidgey-flock",
       sex: "female" as const,
     },
     {
-      ...spawnAgent("pidgey", "pidgey-1", scaledPos(3, 2), 5, world.rng),
+      ...spawnAgent("pidgey", "pidgey-1", canopyAnchor(world, 3, 2), 5, world.rng),
       herdId: "pidgey-flock",
       sex: "male" as const,
     },
   ];
   const spearow = {
-    ...spawnAgent("spearow", "spearow-0", scaledPos(OLD_WIDTH - 2, OLD_HEIGHT - 2), 10, world.rng),
+    ...spawnAgent("spearow", "spearow-0", canopyAnchor(world, OLD_WIDTH - 2, OLD_HEIGHT - 2), 10, world.rng),
     needs: createNeeds({ hunger: 0.3 }),
     sex: "female" as const,
   };

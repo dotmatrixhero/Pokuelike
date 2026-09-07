@@ -471,6 +471,24 @@ export interface Agent {
    */
   herdConflictCooldownTicks?: number;
   /**
+   * Set to the attacker's id the instant a `herdConflict.ts` rivalry hit
+   * actually lands on this agent (never on a miss, never when the hit made
+   * it retreat instead) — direct follow-up ask, after noticing herd rivalry
+   * fights read as one-sided: "there isn't any fighting back, is there?"
+   * Real, but not unconditional: on this agent's own very next action tick,
+   * `applyRivalryRetaliation` spends this (whether or not anything happens)
+   * to size the attacker up — "if it looks like they'll lose they can make
+   * a decision to leave... if they recognize their foe is much more
+   * powerful... they can back out without retaliation. But against
+   * relatively equal level +/-5, they should retaliate." A comparable (or
+   * weaker) attacker gets hit right back, no fresh disposition/tolerance
+   * roll needed (this is a direct response, not a new decision to
+   * escalate); a much stronger one gets backed away from instead — a real,
+   * felt de-escalation, not a coin flip. Absent = nothing to size up, the
+   * default.
+   */
+  retaliateAgainstId?: string;
+  /**
    * Rolling memory of resource tiles (same terrain kind as the current
    * seekWater/seekFood target) found crowded during the current seeking
    * episode — excluded from the next nearest-tile pick once
@@ -485,6 +503,34 @@ export interface Agent {
    * oscillation-prevention reasoning.
    */
   blockedResourceTiles?: Vec2[];
+  /**
+   * Ticks spent standing on a layer-mismatched crop's tile actually digging
+   * it out (CROPS_DESIGN.md's "layer-gated crop access" pitch) — the real
+   * multi-tick process-time cost a surface agent pays for an
+   * underground-native crop (Potato, Pumpkin), reusing `shelter.ts`'s own
+   * `shelterBuildTicks` shape (accrue while standing there, consume once a
+   * threshold is crossed, reset on interruption). Absent/0 while not
+   * currently digging. Never accrues for an agent already on the crop's own
+   * `FoodCropDef.nativeLayer` — that access is free, no digging tax at all.
+   * (An underground agent still has to physically path up to the surface
+   * tile to reach it today — the deeper "never has to leave its own layer"
+   * version of the ask is a real, separate, not-yet-built refinement; see
+   * CROPS_DESIGN.md.)
+   */
+  digTicksAccrued?: number;
+  /**
+   * Ticks spent digging a brand-new spring at the agent's own position —
+   * CROPS_DESIGN.md's water rework, the real last resort once an agent's
+   * `seekWater` search finds no reachable water anywhere on any layer
+   * (after the ordinary same-layer and cross-layer checks both fail): dig
+   * right where it's standing instead of only ever migrating away. Same
+   * accrue-then-complete shape as `digTicksAccrued`, kept as a genuinely
+   * separate counter rather than reused — digging for a crop and digging
+   * for water are two different real actions an agent could in principle
+   * need mid-episode of each other, and sharing one field would let
+   * progress on one silently count toward the other.
+   */
+  springDigTicksAccrued?: number;
   /**
    * Speed-driven action-economy accumulator (see simulation.ts). Gains the
    * agent's real Speed stat every world tick; once it crosses

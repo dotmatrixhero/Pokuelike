@@ -1,11 +1,12 @@
-import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Vec2, World } from "./types.js";
-import { otherLayers, tileAt } from "./world.js";
+import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Tile, Vec2, World } from "./types.js";
+import { otherLayers, setTile, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
 import { applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan, resolveChargedAttack } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing, tendSoil } from "./flora.js";
-import { tickCooldowns } from "./combat.js";
+import { tickCooldowns, useMove } from "./combat.js";
+import { DIG_TICKS_DEFAULT, FOOD_CROPS, type CropId } from "./crops.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
 import { migrate } from "./migration.js";
 import { applyDispersal, maybeTriggerDispersal, type RegionDispersalContext } from "./dispersal.js";
@@ -35,7 +36,7 @@ import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
 import { findWalkableNear } from "./worldgen.js";
-import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict } from "./herdConflict.js";
+import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict, applyRivalryRetaliation, applyTerritorialGuard } from "./herdConflict.js";
 import { maybeUseUtilityMove } from "./utilityMoves.js";
 import { thirstDecayMultiplier } from "./weather.js";
 import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
@@ -649,6 +650,70 @@ function tryForageFromWater(world: World, agent: Agent, log: EventLog | undefine
  */
 const FEEDING_PRIORITY_STOCK_THRESHOLD = 2 * CONSUME_STOCK_AMOUNT;
 
+/** Herbs' own real hook (CROPS_DESIGN.md) — deliberately well under Safeguard's 60-tick grant, and self-only (no herd-radius aura like Safeguard's), so it reads as "the humble remedy," not a strictly-better food. */
+const HERBS_STATUS_IMMUNE_TICKS = 20;
+
+/**
+ * Real process-time cost to dig a brand-new spring — CROPS_DESIGN.md's
+ * water rework. Same order of magnitude as `DIG_TICKS_DEFAULT`/the real
+ * `dig` move's own `burrow.ticks` (20) — this literally is that move's own
+ * canonical duration, since digging a spring is a more literal read of
+ * "Dig" than uncovering an existing crop is.
+ */
+const SPRING_DIG_TICKS = 20;
+
+/**
+ * How much extra `Agent.digTicksAccrued` a single successful use of an
+ * off-cooldown `burrow`-flagged move (the real `dig` move, currently the
+ * only one) grants, on top of the ordinary +1/tick — "moves can be used to
+ * dig faster... like dig," CROPS_DESIGN.md's own pitch. Deliberately a real
+ * multi-tick burst (a third of `DIG_TICKS_DEFAULT`), not a token nudge, so
+ * actually knowing Dig is worth something concrete here, gated by the
+ * move's own real cooldown (`useMove`) so it can't be spammed every tick.
+ * Scoped to `burrow`-flagged moves only for now — CROPS_DESIGN.md's own
+ * "most damage moves" phrasing is flagged there as a real open question,
+ * not decided here.
+ */
+const DIG_MOVE_BURST_TICKS = 5;
+
+/**
+ * `Agent.digTicksAccrued` burst a single off-cooldown damage-dealing move
+ * grants toward processing a canopy-native crop (Apple) out — the "canopy
+ * foods processed by damage" half of the pitch, `DIG_MOVE_BURST_TICKS`'s
+ * own counterpart for Canopy instead of Underground. Any move with real
+ * `power` and a non-`"status"` `category` qualifies (Tackle, Peck, ...) —
+ * deliberately not scoped to `burrow`-flagged moves the way digging is,
+ * since knocking fruit down is a damage action, not an extraction one.
+ */
+const CANOPY_HARVEST_MOVE_BASE_BURST = 3;
+
+/**
+ * Extra burst per point of a damage move's own `range.max` beyond 1 (melee)
+ * — "higher range gives advantage," a direct, cheap reuse of `MoveSpec.
+ * range` (already real and consumed by combat.ts's `moveRange`/
+ * `withinMoveRange`) rather than inventing a second range concept just for
+ * this. A move with no explicit `range` set falls back to 1 (melee), same
+ * as `CANOPY_HARVEST_MOVE_BASE_BURST` alone — no accidental bonus for specs
+ * that predate the `range` field.
+ */
+const CANOPY_HARVEST_RANGE_BONUS_PER_POINT = 2;
+
+/**
+ * How many more `Agent.digTicksAccrued` this crop still needs before an
+ * agent on a mismatched layer can actually eat from it — undefined when no
+ * digging is required at all (the crop has no `nativeLayer`, or this agent
+ * is already on it). CROPS_DESIGN.md's "layer-gated crop access": Potato/
+ * Pumpkin are underground-native, so a surface agent pays this real
+ * process-time tax while an underground agent standing on the same tile
+ * pays nothing.
+ */
+function cropDigThreshold(tile: Tile | undefined, agentLayer: Layer): number | undefined {
+  if (!tile?.flavor || !(tile.flavor in FOOD_CROPS)) return undefined;
+  const def = FOOD_CROPS[tile.flavor as CropId];
+  if (!def.nativeLayer || def.nativeLayer === agentLayer) return undefined;
+  return def.digTicks ?? DIG_TICKS_DEFAULT;
+}
+
 function yieldsToHigherRankedFeeder(world: World, agent: Agent, tileStock: number | undefined): boolean {
   if (!agent.herdId) return false;
   if (tileStock === undefined || tileStock >= FEEDING_PRIORITY_STOCK_THRESHOLD) return false;
@@ -894,6 +959,14 @@ export function tickAgentAction(
   // predation.ts's `applyEggEating` doc comment for why it's a separate
   // mechanism entirely.
   if (applyEggEating(world, agent, ctx, log, rng)) return;
+  // Retaliation (herdConflict.ts) — direct follow-up: "there isn't any
+  // fighting back, is there?" Checked ahead of scavenging/territorial
+  // guarding below (same tier, but a direct response to just having been
+  // hit outranks a fresh decision to escalate) — spends `Agent.
+  // retaliateAgainstId` the instant it's set, regardless of `rules` gating
+  // being met (the function itself re-checks predator exclusion), same
+  // "checked here regardless" shape `applyEggEating` right above uses.
+  if (applyRivalryRetaliation(world, agent, rules ?? {}, log, rng)) return;
   // A real fallback, not a last resort tacked on after everything else: a
   // hungry predator that had nothing to flee/fight/hunt this tick (solo or
   // pack — see predation.ts) checks for a nearby corpse to feed from
@@ -903,6 +976,17 @@ export function tickAgentAction(
   // refusal, same "survival/feeding instincts before routine behavior"
   // ordering every other step in this function already follows).
   if (rules && applyScavenging(world, agent, rules, log)) return;
+  // Territorial guarding (herdConflict.ts) — direct ask: "more territorial
+  // behavior. Around guarding resources," refined to proactive patrol/
+  // chase-off. Deliberately NOT gated on `needsAreUrgent` below (unlike
+  // `applySupportMove`/dispersal) — a hungry/thirsty agent is exactly who
+  // this mechanic means to let fight for a foothold rather than just wander
+  // off looking elsewhere, direct ask: "incentivize[d] to try to fight and
+  // take over resources... if they thought they could win." Sits at the
+  // same "survival/feeding instinct" tier as `applyScavenging` right above —
+  // after predation/egg-eating already got first refusal, ahead of routine
+  // carrying/looting/support/dispersal.
+  if (rules && applyTerritorialGuard(world, agent, rules, log, rng, ctx)) return;
   if (maybeStartCarrying(world, agent, log)) return;
   if (applyLooting(world, agent, log)) return;
   // Real confirmed death case: a zero-cooldown ally-buff move (reachable via
@@ -1174,11 +1258,53 @@ export function tickAgentAction(
         agent.ticksBlockedFromResource = 0;
         const need = agent.behavior === "seekWater" ? "thirst" : "hunger";
         const targetTile = agent.behavior === "seekFood" ? tileAt(world, agent.layer, target.x, target.y) : undefined;
+
+        if (agent.behavior === "seekFood") {
+          const digThreshold = cropDigThreshold(targetTile, agent.layer);
+          if (digThreshold !== undefined) {
+            const cropDef = targetTile?.flavor && targetTile.flavor in FOOD_CROPS ? FOOD_CROPS[targetTile.flavor as CropId] : undefined;
+            if (cropDef?.nativeLayer === "canopy") {
+              // "Canopy foods can also be processed by damage, with higher
+              // range giving advantage" — a damage move substitutes for the
+              // ordinary dig move, its own `range.max` scaling the burst
+              // instead of a flat bonus.
+              const harvestMove = (agent.moves ?? []).find((move) => move.power > 0 && move.category !== "status" && !agent.moveCooldowns?.[move.id]);
+              if (harvestMove) {
+                useMove(agent, harvestMove, world.tick);
+                const rangeMax = harvestMove.range?.max ?? 1;
+                agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + CANOPY_HARVEST_MOVE_BASE_BURST + Math.max(0, rangeMax - 1) * CANOPY_HARVEST_RANGE_BONUS_PER_POINT;
+              } else {
+                agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + 1;
+              }
+            } else {
+              const digMove = (agent.moves ?? []).find((move) => move.burrow && !agent.moveCooldowns?.[move.id]);
+              if (digMove) {
+                useMove(agent, digMove, world.tick);
+                agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + DIG_MOVE_BURST_TICKS;
+              } else {
+                agent.digTicksAccrued = (agent.digTicksAccrued ?? 0) + 1;
+              }
+            }
+            if (agent.digTicksAccrued < digThreshold) return; // still processing — no consume this tick
+            agent.digTicksAccrued = undefined; // done — a fresh dig/harvest next time, not a lingering surplus
+          }
+        }
+
         consume(agent.needs, agent.behavior, agent.behavior === "seekFood" ? foodNutritionFactor(targetTile) : 1);
         if (agent.behavior === "seekFood") {
           if (targetTile?.stock !== undefined) {
             targetTile.stock = Math.max(0, targetTile.stock - CONSUME_STOCK_AMOUNT);
             recordGrazing(targetTile); // real self-feeding grazing event — see flora.ts's "Grazing scars"
+          }
+          // Herbs' own real hook (CROPS_DESIGN.md): "the humble remedy" — a
+          // short status-immunity grant on eat, well under Safeguard's own
+          // 60-tick/herd-radius grant (self-only here, no aura), reusing the
+          // exact field/tick-down mechanism Safeguard already established
+          // (status.ts's `statusImmuneTicksRemaining`) rather than a second
+          // one. Makes the deliberately weak Filler tier a real choice
+          // (nutrition vs. a minor status hedge), not just a tier to skip.
+          if (targetTile?.flavor === "herbs") {
+            agent.statusImmuneTicksRemaining = HERBS_STATUS_IMMUNE_TICKS;
           }
         }
         grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
@@ -1327,6 +1453,38 @@ export function tickAgentAction(
     // against its own starvation grace period.
     if (somethingExistsNearby) {
       agent.ticksWithoutResource = MIGRATE_AFTER_TICKS;
+    }
+
+    // Dig a spring — CROPS_DESIGN.md's water rework, the real last resort
+    // once water genuinely doesn't exist anywhere reachable on any layer at
+    // all (`!somethingExistsNearby` — the same-layer check above and the
+    // cross-layer check just above that both already failed to find even
+    // an EXCLUDED candidate). Deliberately NOT triggered just because every
+    // known water tile is currently crowded (`somethingExistsNearby` true
+    // but every instance excluded) — that's a real, different, temporary
+    // situation the existing wait/relocate escape valve below already
+    // handles; digging a whole new spring is for when water is genuinely
+    // absent, not merely contested. Dig right where it's standing instead
+    // of only ever migrating away. Real, multi-tick process cost
+    // (SPRING_DIG_TICKS), same accrue-then-complete shape as crop digging,
+    // sped up the same way by an off-cooldown `dig` move. Only on real bare
+    // ground (`floor`) — never carves through an obstacle or another
+    // water/food tile.
+    if (!somethingExistsNearby && agent.behavior === "seekWater" && tileAt(world, agent.layer, agent.pos.x, agent.pos.y)?.terrain === "floor") {
+      const digMove = (agent.moves ?? []).find((move) => move.burrow && !agent.moveCooldowns?.[move.id]);
+      if (digMove) {
+        useMove(agent, digMove, world.tick);
+        agent.springDigTicksAccrued = (agent.springDigTicksAccrued ?? 0) + DIG_MOVE_BURST_TICKS;
+      } else {
+        agent.springDigTicksAccrued = (agent.springDigTicksAccrued ?? 0) + 1;
+      }
+      if (agent.springDigTicksAccrued >= SPRING_DIG_TICKS) {
+        setTile(world, agent.layer, agent.pos.x, agent.pos.y, "water", 0);
+        agent.springDigTicksAccrued = undefined;
+        agent.ticksWithoutResource = 0;
+        log?.record({ kind: "terrainChanged", tick: world.tick, layer: agent.layer, pos: agent.pos, from: "floor", to: "water", cause: "dug" });
+      }
+      return;
     }
 
     // No layer has the resource at all — this agent isn't starving-immediately

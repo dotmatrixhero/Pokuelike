@@ -65,15 +65,59 @@ export const TERRAIN_FG: Record<TerrainKind, Rgb> = {
   shelter: [196, 158, 108],
 };
 
-/** Per-flavor overrides for "food"/"flora" tiles — see flora.ts's FOOD_FLAVORS/FLORA_FLAVORS. */
+/**
+ * Per-flavor overrides for "food"/"flora" tiles. "food" flavors are real
+ * `crops.ts` `CropId`s now (CROPS_DESIGN.md) — the four original berries
+ * (Oran/Sitrus/Pecha/Cheri) plus the new crops, all real food sources side
+ * by side, not one replacing the other. The new crops' colors are
+ * deliberately saturated, off the ordinary terrain palette so a rare one
+ * like Pumpkin reads as "something special grew here," same intent as
+ * `macroMap.ts`'s own landmark markers; the berries keep their original
+ * colors unchanged. No dedicated sprite art exists for the new crops yet
+ * (see sprites.ts's `getFoodSprite`), so this glyph/color IS their real
+ * look until art is added — falls back cleanly, not to a broken image (see
+ * renderer.ts's `plantSprite` check). "flora" flavors are still purely
+ * decorative, unchanged.
+ */
 export const FLAVOR_FG: Record<string, Rgb> = {
+  herbs: [150, 190, 120],
   oran: [90, 140, 255],
   sitrus: [250, 176, 60],
   pecha: [255, 140, 190],
   cheri: [230, 70, 70],
+  wheat: [222, 184, 94],
+  tomato: [214, 64, 50],
+  corn: [235, 200, 60],
+  rice: [235, 230, 205],
+  apple: [200, 40, 40],
+  potato: [150, 110, 70],
+  pumpkin: [230, 130, 30],
   moss: [120, 165, 100],
   fern: [80, 130, 80],
   bloom: [205, 125, 195],
+};
+
+/**
+ * Real emoji art for the 8 new crops, tile-render-mode only (direct ask:
+ * "do them for tile mode at least") — the ASCII render mode
+ * (`drawWorldAscii`/ascii.ts) stays plain letters, its whole point being a
+ * monospace classic look. The 4 original berries keep their real hand-drawn
+ * sprite art (`getFoodSprite`) instead, so they're deliberately absent
+ * here — this is only for crops that don't have dedicated pixel art of
+ * their own yet. "honey" is included even though that crop isn't built yet
+ * (CROPS_DESIGN.md's own deferred second cut) — a harmless, ready-to-use
+ * entry once it exists, not read by anything until then.
+ */
+export const CROP_EMOJI: Partial<Record<string, string>> = {
+  wheat: "🌾",
+  tomato: "🍅",
+  corn: "🌽",
+  rice: "🍚",
+  apple: "🍎",
+  potato: "🥔",
+  pumpkin: "🎃",
+  herbs: "🌿",
+  honey: "🍯",
 };
 
 /** Direct port of ascii.ts's TERRAIN_GLYPH/FLAVOR_GLYPH — the "ASCII classic" render mode's glyph set, Brogue-style. */
@@ -94,10 +138,18 @@ export const TERRAIN_GLYPH: Record<TerrainKind, string> = {
 };
 
 export const FLAVOR_GLYPH: Record<string, string> = {
+  herbs: "h",
   oran: "%",
   sitrus: "&",
   pecha: "*",
   cheri: "+",
+  wheat: "w",
+  tomato: "t",
+  corn: "c",
+  rice: "r",
+  apple: "a",
+  potato: "p",
+  pumpkin: "P",
   moss: "`",
   fern: "'",
   bloom: ";",

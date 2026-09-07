@@ -3,6 +3,67 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Food crops (Oran/Sitrus/Pecha/Cheri berries kept + Corn/Wheat/Rice/Tomato/Apple/Potato/Pumpkin/Herbs) — built, see CROPS_DESIGN.md
+
+Direct ask: "more kinds of food, not just berries... nutrition dense, grow
+in certain regions and seasons, and be heavily contested," refined into
+"make it so they keep you full for longer, and also are affected by zone
+and climate and season," then corrected: "I think we need to keep berry as
+food sources tho." Real biome/moisture/season-gated crops replace the old
+purely-cosmetic flavor LIST (`FOOD_FLAVORS`, confirmed zero gameplay effect
+before this) — the four original berries themselves are still real, ungated
+food sources in the same registry, just alongside 8 new crops instead of
+alone. Full scope, tier table, and built-vs-scoped delta in CROPS_DESIGN.md.
+Two real calibration bugs caught by sampling a real generated world before
+shipping (Rice's moisture gate and Tomato's sunbeam gate were both
+unreachable as first drafted) — see CROPS_DESIGN.md's own "Built — real-run
+findings" section for the numbers. Confirmed via `validateCrops.ts` over a
+real 8000-tick run: all 4 berries plus 7 of 8 new crops appear (Pumpkin
+absent this particular run — plausible variance, not a gate bug), Winter
+cuts average live food tiles by roughly 20x. Flagged follow-ups:
+
+- The "heavily contested" half of the ask rests on `herdConflict.ts`'s
+  existing generic resource-blocking trigger, not on any crop-specific
+  contest-seeking behavior (agents still just `seekFood` their nearest
+  option) — the validation run couldn't actually confirm rare crops draw
+  more clashes than common ones; see CROPS_DESIGN.md for the honest
+  breakdown of why and what a real test of this would need (larger
+  population, and/or `herdClash` events recording the contested tile's own
+  position instead of wherever the skirmish itself happens).
+- Honey is deferred, not built — CROPS_DESIGN.md scopes a real
+  pollinator-adjacency design (a `bloom` tile timer + Butterfree/Beedrill
+  proximity) but it needs new per-tile state none of the 8 shipped crops
+  needed, so it was sequenced out of this pass.
+- No dedicated sprite art exists for any of the 8 crops yet — they render
+  via the existing colored-glyph fallback (`palette.ts`/`ascii.ts`), same
+  path any flavor without real art already used.
+
+## Natural landmarks on the macro grid — built, see DESIGN.md
+
+Direct ask: "more character, more points of interest," refined through "stay
+away from the human civilization pass, just natural places" and finally "I
+want particularly unique zone gen for them... make em interesting to look at
+and form interesting points of conflict and emergent stuff." Ten real,
+naturalized landmark types shipped (Great Lake, Fertile Basin, Sacred
+Spring, Geothermal Vent, Meteor Crater, Deep Cavern, Tunnel Warren, Bone
+Grounds, Frozen Grotto, Crossroads) — mainline Pokémon location archetypes
+(Mt. Moon, Cerulean Cave, Diglett's Cave, Lavender Tower, Seafoam Islands)
+with every human-built structure filtered out, each still carrying a real
+mechanical hook. Full writeup, rarity numbers, and the mechanical-hooks
+detail in DESIGN.md's "Natural landmarks" section. Flagged follow-ups:
+
+- Rarity (`LANDMARK_DEFS`' `chancePerEligibleZone`/`maxCount`) is a
+  sim-original guess checked once against a 400x400 real grid
+  (`validateLandmarks.ts`) — revisit if landmarks read too sparse/common
+  once more of the game is actually played on a real map.
+- Bone Grounds' resource richness is deliberately left at zero bonus for now
+  (see `LANDMARK_RESOURCE_BONUS`'s doc comment) — it's meant to be earned
+  through the not-yet-built corpse-decomposition-enriches-soil passive
+  (itself still a pitched idea in MOVES_DESIGN.md), not handed out for free.
+- No dedicated zone-info panel exists yet to name a focused zone's landmark
+  in text (e.g. "Great Lake") — currently only the macro map's own colored
+  marker (`macroMap.ts`) surfaces it visually.
+
 ## New standard: every attack move starts at cooldownTicks 2 minimum
 
 Direct follow-up to the cooldown-timing fix above: "let's move all Moves
@@ -1782,16 +1843,19 @@ produce a real story before player mechanics are worth building further.
       level this file already documents elsewhere — no new predator-specific
       regression observed, and by construction (predators excluded from the
       trigger entirely) this mechanic cannot be the cause of one.
-- [ ] **Real follow-up, deliberately not built this pass**: extending
-      herdMigration.ts's existing same-species territorial-rivalry trigger
-      (today it always resolves by the smaller herd relocating away) to
-      sometimes escalate into a real fight instead, using the same
-      non-lethal `herdConflict.ts` resolution machinery. This was the other
-      real candidate trigger from the original design brief — resource
-      contention (built) was judged the more concrete, better-motivated
-      mechanism given the user's own "fight over resources" phrasing and
-      occupancy.ts's real, frequent tile-capacity contention, but territorial
-      escalation is a real, reasonable second half worth a future pass.
+- [x] **Proactive territorial guarding — built, see DESIGN.md's "Territorial
+      guarding" section.** Direct follow-up: "more territorial behavior...
+      guarding resources," refined into a full symmetric invader/defender
+      design. Not literally an extension of herdMigration.ts's centroid-based
+      trigger as first sketched below — `applyTerritorialGuard`
+      (herdConflict.ts) instead checks every action tick for a nearby,
+      non-tolerated, different-herd agent near real resources, so a
+      resident chasing off an intruder and that same intruder fighting for a
+      foothold on its own turn are the same code path, not two mechanisms.
+      Real tolerance exceptions (bonded/high-rapport, same-egg-group and
+      unaggressive) erode as local resources get scarcer. Validated over a
+      real 8000-tick run: 696 herdClash events (well above the
+      resource-contention trigger's own 19-90-per-3000-ticks baseline).
 - [ ] **Real follow-up, deliberately scoped out for predator-fragility
       safety**: herd conflict currently excludes predator species entirely,
       on both sides of a potential fight (no predator-vs-predator rivalry,

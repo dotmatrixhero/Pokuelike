@@ -1,9 +1,10 @@
 import type { Agent, BiomeSeedInfo, Layer, Vec2, World } from "./types.js";
 import { createWorld, setElevation, setTile, tileAt } from "./world.js";
-import { FOOD_FLAVORS } from "./flora.js";
+import { CANOPY_APPLE_RIPEN_TICKS, pickCrop } from "./crops.js";
 import { mulberry32 } from "./rng.js";
 import { canEnterWater } from "./waterBody.js";
 import type { ZoneDirection } from "./directions.js";
+import type { LandmarkType } from "./landmarks.js";
 
 /**
  * Stand-in for `canEnterWater`'s `agent` parameter — an ordinary land
@@ -35,10 +36,11 @@ export { mulberry32 };
 /**
  * Procedural surface-layer generation — see DESIGN.md's "Environmental
  * generation, biomes, obstacles, and elevation-aware movement/fog" section.
- * Underground/canopy are untouched (still the plain flat grid `createWorld`
- * always produces) — this is a Surface-only pass, an explicit scope call
- * matching DESIGN.md's existing open question about whether the other two
- * layers ever get their own elevation/terrain model.
+ * Underground and canopy both now get real generated structure of their own
+ * (see the "Underground caves" and "Canopy — derived from Surface" section
+ * doc comments below) rather than the plain flat grid `createWorld` always
+ * produces on its own — underground via independent cellular automata,
+ * canopy by reading Surface's own already-finished terrain (CROPS_DESIGN.md).
  */
 
 // ---------------------------------------------------------------------------
@@ -261,10 +263,36 @@ export interface MacroElevationBias {
   lowEdges: readonly ZoneDirection[];
   /** Edges of the tile grid to pull elevation UP toward — the mirror of `lowEdges`, for a neighbor the macro grid marked as higher elevation. */
   highEdges: readonly ZoneDirection[];
+  /**
+   * Edges the macro grid recorded a river actually crossing at
+   * (`MacroZone.riverEdges`, carved by `carveMacroRivers`) — real macro-level
+   * fact that used to exist and go completely unread by per-zone generation
+   * (see DESIGN.md's own "still open" list). Carves a narrow low-elevation
+   * trench near just that edge (see `RIVER_EDGE_TRENCH_STRENGTH`'s doc
+   * comment for why this is deliberately narrower than `lowEdges`' whole-zone
+   * tilt), so a real river reaching this zone is measurably more likely to
+   * actually route out through the specific edge the macro grid marked —
+   * a bias, not a guaranteed pixel-for-pixel stitch across the zone
+   * boundary, same honesty every other lossy macro-to-zone fact in this file
+   * already holds itself to.
+   */
+  riverEdges: readonly ZoneDirection[];
 }
 
 /** How strongly `lowEdges`/`highEdges` pull the raw macro field toward/away from a tile-grid edge — a linear gradient from 1 at the named edge to 0 at the opposite one, scaled by this. Tuned against a real generated zone (see DESIGN.md) so a coastline reliably lands on the biased edge without flattening the rest of the zone's own local variety. */
 const EDGE_BIAS_STRENGTH = 0.6;
+/**
+ * `riverEdges`' own version of `EDGE_BIAS_STRENGTH` — deliberately applied
+ * to `edgeCloseness(...)` raised to `RIVER_EDGE_TRENCH_EXPONENT` rather than
+ * the raw linear gradient `lowEdges`/`highEdges` use, so the pull is a real
+ * narrow trench near just the marked edge instead of a whole-zone tilt (a
+ * whole-zone tilt is exactly right for "this zone borders ocean," but wrong
+ * for "a river happens to cross here" — most of the zone shouldn't read as
+ * lowland just because one river passes through one edge of it).
+ */
+const RIVER_EDGE_TRENCH_STRENGTH = 1.4;
+/** Higher = the river-edge trench decays faster moving away from the marked edge, keeping it a narrow band rather than spanning the zone. */
+const RIVER_EDGE_TRENCH_EXPONENT = 2;
 
 /** How much of `.normalized()`'s reported value is pulled toward `MacroElevationBias.elevationShift` vs. this zone's own locally generated shape — kept well under 1 so a highland zone still has real local peaks/valleys, not a flat plateau at the target height. */
 const ELEVATION_SHIFT_WEIGHT = 0.35;
@@ -322,6 +350,7 @@ export function generateMacroElevation(
       if (bias) {
         for (const dir of bias.lowEdges) v -= edgeCloseness(dir, x, y, width, height) * EDGE_BIAS_STRENGTH;
         for (const dir of bias.highEdges) v += edgeCloseness(dir, x, y, width, height) * EDGE_BIAS_STRENGTH;
+        for (const dir of bias.riverEdges) v -= edgeCloseness(dir, x, y, width, height) ** RIVER_EDGE_TRENCH_EXPONENT * RIVER_EDGE_TRENCH_STRENGTH;
       }
       raw[y * width + x] = v;
       if (v < min) min = v;
@@ -997,6 +1026,29 @@ function isBadlandsDominant(seeds: readonly BiomeSeedInfo[], x: number, y: numbe
 }
 
 /**
+ * The single highest-weight biome name at (x, y) in `biomeWeightsAt`'s
+ * blend — undefined on a world with no biome data at all
+ * (`biomeWeightsAt` returns `{}`). Used by `flora.ts`'s crop-maturation
+ * pick (`crops.ts`'s `pickCrop`) to decide which real crop a maturing
+ * seedling is even eligible to become — a general "what biome is this,
+ * really" helper, generalized out of `isBadlandsDominant`'s own
+ * single-biome check just above rather than duplicating the same
+ * highest-weight scan for a second purpose.
+ */
+export function dominantBiomeAt(seeds: readonly BiomeSeedInfo[] | undefined, x: number, y: number): string | undefined {
+  const weights = biomeWeightsAt(seeds, x, y);
+  let best: string | undefined;
+  let bestWeight = 0;
+  for (const [name, weight] of Object.entries(weights)) {
+    if (weight > bestWeight) {
+      bestWeight = weight;
+      best = name;
+    }
+  }
+  return best;
+}
+
+/**
  * Carves BSP chamber/canyon boundaries into every Badlands-dominant tile —
  * see this section's doc comment. A no-op on a world with no biome data at
  * all (`world.biomeSeeds` absent/empty), same contract every other biome-
@@ -1133,6 +1185,67 @@ function keepOnlyLargestFloorRegion(grid: Uint8Array, width: number, height: num
 }
 
 /**
+ * Radius of the guaranteed underground water pocket — deliberately modest,
+ * a real spring/pool, not a lake swallowing a big share of the one
+ * connected cave region every underground creature needs to keep using.
+ */
+const UNDERGROUND_WATER_POCKET_RADIUS = 3;
+/**
+ * Among the real floor cells in the (already-finalized, single-connected)
+ * cave region, how large a top slice (by real surface water-density proxy)
+ * counts as "wet enough" to be a candidate center — kept well under 1 so
+ * the pocket lands somewhere genuinely correlated with real surface water,
+ * not anywhere in the cave at random, while still leaving real seed-to-seed
+ * variety in exactly where within that wet region it lands.
+ */
+const UNDERGROUND_WATER_CANDIDATE_TOP_FRACTION = 0.15;
+
+/**
+ * Picks the real underground cells a guaranteed water pocket occupies —
+ * direct ask: "places with deep water... needs to be reflected in the
+ * underground as well; the surface also influences how the underground
+ * is." Before this, underground generation had zero awareness of Surface
+ * at all (`generateUndergroundCaves`' own doc comment: "independent of
+ * everything Surface-only above"). The center is picked from real floor
+ * cells (never inside solid rock), weighted toward whichever (x, y)
+ * columns Surface's own `effectiveWaterDensityAt` already reads as
+ * wettest — a real vertical correlation, not two independent rng draws
+ * that happen to share a footprint by coincidence. Always returns a
+ * non-empty set when the cave has any floor at all — "100% will always
+ * spawn at least some [water] underground," per the direct ask, is a hard
+ * guarantee here, not a sparse roll the way landmarks are.
+ */
+function pickUndergroundWaterPocket(world: World, width: number, height: number, grid: Uint8Array, rng: () => number): Set<number> {
+  const candidates: { i: number; density: number }[] = [];
+  for (let i = 0; i < grid.length; i++) {
+    if (grid[i]) continue; // wall
+    const x = i % width;
+    const y = Math.floor(i / width);
+    const density = effectiveWaterDensityAt(world.biomeSeeds, world.biomeSeedDrift, x, y) ?? 0;
+    candidates.push({ i, density });
+  }
+  if (candidates.length === 0) return new Set();
+
+  candidates.sort((a, b) => b.density - a.density);
+  const topSlice = candidates.slice(0, Math.max(1, Math.ceil(candidates.length * UNDERGROUND_WATER_CANDIDATE_TOP_FRACTION)));
+  const seedIndex = topSlice[Math.floor(rng() * topSlice.length)]!.i;
+  const center: Vec2 = { x: seedIndex % width, y: Math.floor(seedIndex / width) };
+
+  const pocket = new Set<number>();
+  forEachTileInJitteredCircle(center, UNDERGROUND_WATER_POCKET_RADIUS, width, height, rng, (x, y) => {
+    const i = y * width + x;
+    if (!grid[i]) pocket.add(i); // never carve water through solid rock
+  });
+  // The jittered circle can, in principle, land entirely on cells the
+  // jitter itself excluded (a real but rare edge case) — the center cell is
+  // always real floor by construction (drawn from `candidates` above), so
+  // falling back to just that one tile keeps the "always non-empty" promise
+  // even in that unlucky case.
+  if (pocket.size === 0) pocket.add(seedIndex);
+  return pocket;
+}
+
+/**
  * Generates cellular-automata cave structure for the Underground layer — see
  * this section's doc comment. Deterministic for a given rng, same contract
  * as every other generation step in this file.
@@ -1161,10 +1274,545 @@ function generateUndergroundCaves(world: World, width: number, height: number, r
 
   keepOnlyLargestFloorRegion(grid, width, height);
 
+  const waterCells = pickUndergroundWaterPocket(world, width, height, grid, rng);
+
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      if (grid[y * width + x]) setTile(world, "underground", x, y, "wall");
+      const i = y * width + x;
+      if (grid[i]) {
+        setTile(world, "underground", x, y, "wall");
+      } else if (waterCells.has(i)) {
+        setTile(world, "underground", x, y, "water", 0);
+      }
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mountain massifs — Surface's own version of the underground caves' CA
+// technique just above, reused rather than reinvented: direct question "do
+// we have solid wall chunks yet like mountain terrain?" Answer at the time
+// this was written: no — Highland/Snow were elevation-biased *scatter*
+// (each obstacle tile independently rolled from its own noise field), never
+// a real contiguous landform. This carves one: random-fill-then-smooth
+// cellular automata, scoped strictly to Highland/Snow-dominant tiles (the
+// same `dominantBiomeAt`-driven gating `carveBadlandsChambers` already
+// established for its own biome-scoped generation), keeping only genuinely
+// large connected wall components — real solid massifs, not speckle — as
+// distinct from Badlands' own BSP chambers (thin carved corridor dividers,
+// most of the biome stays open) or ordinary boulder scatter (independent
+// single tiles, no landform). A massif's own outer rim is exactly what a
+// later canopy-derivation pass reads as a "ridge" (CROPS_DESIGN.md).
+// ---------------------------------------------------------------------------
+
+/**
+ * Same shape as `CAVE_INITIAL_WALL_CHANCE`, but deliberately ABOVE 0.5, not
+ * mirroring its value — a real, sampled-and-caught bug: `CAVE_INITIAL_WALL_
+ * CHANCE` (0.4) works for underground caves because *floor* is what needs
+ * to survive and consolidate into one big region there, and under this
+ * majority-vote smoothing rule, whichever phase starts as the majority is
+ * the one that reliably consolidates — wall being the minority phase is
+ * exactly why caves stay mostly open. This generator wants the opposite
+ * outcome (wall consolidates, floor stays open), so wall has to start as
+ * the majority, not the same-looking-but-wrong 0.45 an initial pass used
+ * (confirmed by real sampling: only 7/20 generated worlds had ANY massif at
+ * all, averaging ~11 wall tiles against an ~867-tile Highland/Snow
+ * footprint — the CA was shrinking wall away almost everywhere, same
+ * mechanism that makes caves mostly floor, just not what a massif needs).
+ */
+const MASSIF_INITIAL_WALL_CHANCE = 0.58;
+/** Same recipe as the cave CA — random fill settles into smooth-edged blobs after a few neighbor-majority passes. */
+const MASSIF_SMOOTHING_ITERATIONS = 4;
+/** Same rule as `CAVE_WALL_NEIGHBOR_THRESHOLD`, but off-footprint neighbors (a tile that isn't Highland/Snow-dominant) are NOT forced to count as wall the way underground's off-map edge is — a massif should taper naturally at its own biome boundary, not wall itself off from the surrounding land the way a cave never opens onto the world border. */
+const MASSIF_WALL_NEIGHBOR_THRESHOLD = 5;
+/** A connected wall component smaller than this many tiles reads as leftover CA speckle, not a real massif — cleared back to open ground rather than left as scattered single-tile noise. */
+const MASSIF_MIN_COMPONENT_SIZE = 12;
+/** Deliberately bigger than `BOULDER_ELEVATION_BOOST` (0.8) — a real mountain massif should read taller than an ordinary boulder outcrop, not the same height. */
+const MASSIF_ELEVATION_BOOST = 1.6;
+/**
+ * How much extra initial-fill chance a `highEdges`-marked boundary band
+ * gets, on top of `MASSIF_INITIAL_WALL_CHANCE` — cross-zone contiguity for
+ * mountains, the same "even if it doesn't perfectly line up" bias
+ * `riverEdges`' trench already established for rivers: a zone whose macro
+ * neighbor across this edge is also elevated gets more raw wall material
+ * seeded near that specific edge, so a real massif is more likely to
+ * actually grow toward (and plausibly abut) whatever the neighboring zone
+ * generates on its own side — a nudge, not a guaranteed stitch.
+ */
+const MASSIF_EDGE_SEED_BOOST = 0.3;
+/** Same idea as `RIVER_EDGE_TRENCH_EXPONENT` — keeps the seed-chance boost a real narrow band near the edge, not a whole-zone-wide bump. */
+const MASSIF_EDGE_SEED_EXPONENT = 2;
+
+/**
+ * True if `(x, y)` reads as Highland or Snow more strongly than every other
+ * biome in `biomeWeightsAt`'s blend — the same *dominant*, not merely
+ * nonzero-weight, standard `isBadlandsDominant` already established, so a
+ * massif stays inside its own biome's real footprint instead of spilling
+ * into the cross-biome transition band at its edges.
+ */
+function isMassifBiomeDominant(seeds: readonly BiomeSeedInfo[], x: number, y: number): boolean {
+  const weights = biomeWeightsAt(seeds, x, y);
+  let bestName: string | undefined;
+  let bestWeight = 0;
+  for (const [name, weight] of Object.entries(weights)) {
+    if (weight > bestWeight) {
+      bestWeight = weight;
+      bestName = name;
+    }
+  }
+  return bestName === "highland" || bestName === "snow";
+}
+
+/**
+ * Clears (sets to floor/0) every 4-connected wall component smaller than
+ * `MASSIF_MIN_COMPONENT_SIZE` — the massif's own version of
+ * `keepOnlyLargestFloorRegion`, but the mirror concern: that function keeps
+ * exactly one open region and walls off every smaller pocket (an
+ * underground cave must stay fully reachable); this keeps every
+ * sufficiently large WALL mass (a real generated world can and should have
+ * more than one separate mountain range) and clears only the small leftover
+ * speckle CA smoothing didn't fully resolve.
+ */
+function clearSmallWallComponents(grid: Uint8Array, width: number, height: number, minSize: number): void {
+  const visited = new Uint8Array(grid.length);
+
+  for (let start = 0; start < grid.length; start++) {
+    if (visited[start] || !grid[start]) continue; // already visited, or already floor
+    const component: number[] = [start];
+    visited[start] = 1;
+    const queue = [start];
+    while (queue.length > 0) {
+      const i = queue.pop()!;
+      const x = i % width;
+      const y = Math.floor(i / width);
+      for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]) {
+        if (nx! < 0 || ny! < 0 || nx! >= width || ny! >= height) continue;
+        const ni = ny! * width + nx!;
+        if (visited[ni] || !grid[ni]) continue;
+        visited[ni] = 1;
+        queue.push(ni);
+        component.push(ni);
+      }
+    }
+    if (component.length < minSize) {
+      for (const i of component) grid[i] = 0;
+    }
+  }
+}
+
+/**
+ * Carves real, contiguous mountain-massif wall structure into every
+ * Highland/Snow-dominant tile — see this section's doc comment. A no-op on
+ * a world with no biome data at all (`world.biomeSeeds` absent/empty), same
+ * contract every other biome-aware function in this file follows. Runs
+ * after `carveSuicuneRivers` (skips any tile a river already carved to
+ * "water" via the `tile.terrain === "water"` check below) — the same
+ * ordering `carveBadlandsChambers` already established, for the same
+ * reason: simpler for this pass to skip the handful of tiles a river
+ * already claimed than for river carving to have to reason about massifs.
+ * `highEdges` (from `ZoneGenerationBias.elevation`, when this zone has one)
+ * biases extra initial wall material toward those specific edges — cross-
+ * zone mountain contiguity, see `MASSIF_EDGE_SEED_BOOST`'s doc comment.
+ */
+function carveMountainMassifs(world: World, width: number, height: number, rng: () => number, highEdges: readonly ZoneDirection[] = []): void {
+  const seeds = world.biomeSeeds;
+  if (!seeds || seeds.length === 0) return;
+
+  const dominant = new Uint8Array(width * height);
+  const grid = new Uint8Array(width * height); // 1 = wall (massif), 0 = floor
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const tile = tileAt(world, "surface", x, y);
+      if (!tile || tile.terrain === "water" || !isMassifBiomeDominant(seeds, x, y)) continue;
+      dominant[y * width + x] = 1;
+      let fillChance = MASSIF_INITIAL_WALL_CHANCE;
+      for (const dir of highEdges) {
+        fillChance += edgeCloseness(dir, x, y, width, height) ** MASSIF_EDGE_SEED_EXPONENT * MASSIF_EDGE_SEED_BOOST;
+      }
+      grid[y * width + x] = rng() < Math.min(0.95, fillChance) ? 1 : 0;
+    }
+  }
+
+  for (let iter = 0; iter < MASSIF_SMOOTHING_ITERATIONS; iter++) {
+    const next = new Uint8Array(grid.length);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = y * width + x;
+        // Off the massif's own biome footprint entirely — never a wall,
+        // regardless of how many wall neighbors it has, so a massif tapers
+        // to its real biome boundary instead of bleeding into Grassland.
+        if (!dominant[i]) continue;
+        next[i] = countWallNeighbors(grid, width, height, x, y) >= MASSIF_WALL_NEIGHBOR_THRESHOLD ? 1 : 0;
+      }
+    }
+    grid.set(next);
+  }
+
+  clearSmallWallComponents(grid, width, height, MASSIF_MIN_COMPONENT_SIZE);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      if (!grid[i]) continue;
+      const tile = tileAt(world, "surface", x, y)!;
+      // Undo any existing BOULDER_ELEVATION_BOOST first (same "re-painting
+      // is a no-op, not a double boost" pattern carveBadlandsChambers
+      // already uses) before applying the massif's own, taller boost.
+      const ambientElevation = tile.terrain === "boulder" ? tile.elevation - BOULDER_ELEVATION_BOOST : tile.elevation;
+      setTile(world, "surface", x, y, "wall", ambientElevation + MASSIF_ELEVATION_BOOST);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Canopy — derived from Surface, not independently generated. Direct
+// correction to CROPS_DESIGN.md's original pitch: "I think things don't
+// generate in canopy just floating there. They have to be growing on trees
+// or plants that grow high... groups of trees can provide little islands of
+// canopies... maybe super high elevated walls... the outside of them can
+// leave ridges on canopy." Canopy `"floor"` (walkable) now exists only where
+// Surface gives it a real reason to: directly on/near a tree — a lone tree
+// still counts (so a species that only ever finds one tall tree isn't
+// stranded), while `CANOPY_TREE_LINK_MIN_NEIGHBORS` additionally lets a loose
+// scatter of nearby trees bridge into one shared canopy patch, the "little
+// islands" the pitch asked for — or directly adjacent to a real mountain
+// massif wall (a "ridge"). Badlands BSP chambers also carve `"wall"` tiles
+// onto Surface, but those are excluded via `isMassifBiomeDominant` — a
+// carved chamber isn't an elevated peak, and shouldn't cast a canopy ridge.
+// Everywhere else canopy stays `"wall"` (nothing to stand on) — a real
+// behavior change from the flat all-`"floor"` grid `createWorld` used to
+// leave every non-Surface layer with; underground got its own real structure
+// first (see the cellular-automata section above), canopy is this file's
+// second departure from that original "untouched" scope, this time by
+// reading Surface rather than generating independently, since (unlike
+// underground) canopy has no biome/elevation concept of its own to derive
+// structure from otherwise.
+// ---------------------------------------------------------------------------
+
+/** How far out from a tile a nearby tree still counts toward `CANOPY_TREE_LINK_MIN_NEIGHBORS` — small enough that only a genuinely close cluster links up, not the whole forest. */
+const CANOPY_TREE_LINK_RADIUS = 2;
+
+/** A tile with at least this many trees within `CANOPY_TREE_LINK_RADIUS` (not counting itself) gets canopy floor even if it isn't a tree tile itself — the "little islands" bridging a loose scatter of trees into one walkable patch. */
+const CANOPY_TREE_LINK_MIN_NEIGHBORS = 2;
+
+/** How far out from a real massif wall tile a canopy "ridge" extends. */
+const CANOPY_RIDGE_RADIUS = 1;
+
+/** Ridge canopy sits visibly above tree-canopy's flat 0 — the elevated-peak feel the pitch asked for, same idiom as `BOULDER_ELEVATION_BOOST`/`MASSIF_ELEVATION_BOOST` above. */
+const CANOPY_RIDGE_ELEVATION = 1.2;
+
+function countTreesNearby(world: World, x: number, y: number, radius: number): number {
+  let count = 0;
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      if (tileAt(world, "surface", x + dx, y + dy)?.terrain === "tree") count++;
+    }
+  }
+  return count;
+}
+
+function isNearMassifWall(world: World, seeds: readonly BiomeSeedInfo[], x: number, y: number, radius: number): boolean {
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const nx = x + dx;
+      const ny = y + dy;
+      const tile = tileAt(world, "surface", nx, ny);
+      if (tile?.terrain === "wall" && isMassifBiomeDominant(seeds, nx, ny)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Fraction of tree-linked canopy floor tiles (never ridge tiles — a massif
+ * rim is bare rock, not an orchard) that get a real Apple food tile at
+ * generation time — CROPS_DESIGN.md's "Apples should form on tree." Apple
+ * is deliberately excluded from Surface's own `pickCrop` placement
+ * (`excludeLayers: ["canopy"]` at both call sites) so this is genuinely
+ * its only real source, not a duplicate.
+ */
+const CANOPY_APPLE_DENSITY = 0.12;
+
+/** Fraction of newly-placed canopy Apple tiles that start already ripe (real stock) rather than unripe and staggered along `CANOPY_APPLE_RIPEN_TICKS` — see the call site's own doc comment. */
+const CANOPY_APPLE_ALREADY_RIPE_FRACTION = 1 / 3;
+
+/**
+ * Writes real structure onto `world.tiles.canopy`, reading Surface (already
+ * fully generated, massifs included, by the time this runs) rather than
+ * generating anything independently — see this section's own doc comment.
+ * A no-op effect for a world with no biome data (`isNearMassifWall` simply
+ * never returns true) still runs the tree-linking half fine, so this doesn't
+ * need the same early-return guard `carveMountainMassifs`/
+ * `carveBadlandsChambers` use. `foodRng` is its own derived sub-stream (see
+ * `generateWorld`'s xor-constant convention) — deriving structure from
+ * Surface doesn't mean this pass can't roll its own dice for what grows on
+ * top of that structure.
+ */
+function deriveCanopyFromSurface(world: World, width: number, height: number, foodRng: () => number): void {
+  const seeds = world.biomeSeeds ?? [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const surfaceTile = tileAt(world, "surface", x, y)!;
+      const onTree = surfaceTile.terrain === "tree";
+      const treeIsland = onTree || countTreesNearby(world, x, y, CANOPY_TREE_LINK_RADIUS) >= CANOPY_TREE_LINK_MIN_NEIGHBORS;
+      if (treeIsland) {
+        if (foodRng() < CANOPY_APPLE_DENSITY) {
+          setTile(world, "canopy", x, y, "food", 0, "apple");
+          // Real growth-stage rendering (CROPS_DESIGN.md): "a canopy Apple
+          // tree... reading as 'growing' before 'ready to pick'" — a
+          // freshly generated map shouldn't already be 100% instantly
+          // harvestable trees. A third start already ripe (real stock,
+          // `Tile.growth` left unset) so the map isn't bare of real canopy
+          // food at tick 0; the rest start unripe (`stock: 0`) at a
+          // staggered random point in their real ripening clock
+          // (`growCanopyFood`, flora.ts) rather than all flipping ripe on
+          // the exact same tick.
+          if (foodRng() >= CANOPY_APPLE_ALREADY_RIPE_FRACTION) {
+            const tile = tileAt(world, "canopy", x, y)!;
+            tile.stock = 0;
+            tile.growth = Math.floor(foodRng() * CANOPY_APPLE_RIPEN_TICKS);
+          }
+        } else {
+          setTile(world, "canopy", x, y, "floor", 0);
+        }
+        continue;
+      }
+      const ridge = seeds.length > 0 && isNearMassifWall(world, seeds, x, y, CANOPY_RIDGE_RADIUS);
+      if (ridge) {
+        setTile(world, "canopy", x, y, "floor", CANOPY_RIDGE_ELEVATION);
+      } else {
+        setTile(world, "canopy", x, y, "wall", 0);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Landmark terrain — direct ask: "particularly unique zone gen" and "make
+// 'em interesting to look at." Each landmark carves a real, spatially
+// localized feature (a bounded patch, not the whole zone) on top of the
+// zone's ordinary biome-blended generation, run last (after rivers/BSP/
+// caves) so it always wins. Reuses this file's own existing primitives
+// (the CA cave algorithm above, `setTile`) rather than inventing per-
+// landmark generation from scratch — same "one small carving pass, same
+// shape as the others" idiom `carveBadlandsChambers` already established.
+// ---------------------------------------------------------------------------
+
+/** How far in from a zone's edge a landmark's center can land — keeps the feature from getting clipped by the map border. */
+const LANDMARK_EDGE_MARGIN = 8;
+
+function pickLandmarkCenter(rng: () => number, width: number, height: number): Vec2 {
+  const margin = Math.min(LANDMARK_EDGE_MARGIN, Math.floor(Math.min(width, height) / 3));
+  return {
+    x: margin + Math.floor(rng() * Math.max(1, width - margin * 2)),
+    y: margin + Math.floor(rng() * Math.max(1, height - margin * 2)),
+  };
+}
+
+/** A filled circle (Euclidean, with a little per-tile edge jitter so it doesn't read as a perfect compass-drawn ring) — the shared shape underneath Great Lake/Sacred Spring/Meteor Crater's floor. */
+function forEachTileInJitteredCircle(center: Vec2, radius: number, width: number, height: number, rng: () => number, fn: (x: number, y: number, distFrac: number) => void): void {
+  const r = Math.round(radius);
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const x = center.x + dx;
+      const y = center.y + dy;
+      if (x < 0 || y < 0 || x >= width || y >= height) continue;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const jitter = (rng() - 0.5) * 1.5;
+      if (dist + jitter > radius) continue;
+      fn(x, y, dist / radius);
+    }
+  }
+}
+
+const GREAT_LAKE_RADIUS = 7;
+function applyGreatLake(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  forEachTileInJitteredCircle(center, GREAT_LAKE_RADIUS, width, height, rng, (x, y) => {
+    setTile(world, "surface", x, y, "water", 0);
+  });
+}
+
+const SACRED_SPRING_RADIUS = 2;
+function applySacredSpring(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  // Small and deliberate — a real spring, not another lake; the surrounding
+  // ring gets a food-stock bump (real oasis-adjacent growth), not more water.
+  forEachTileInJitteredCircle(center, SACRED_SPRING_RADIUS, width, height, rng, (x, y) => {
+    setTile(world, "surface", x, y, "water", 0);
+  });
+  forEachTileInJitteredCircle(center, SACRED_SPRING_RADIUS + 3, width, height, rng, (x, y, distFrac) => {
+    if (distFrac < 0.5) return; // the water ring itself, already handled above
+    const tile = tileAt(world, "surface", x, y);
+    if (tile?.terrain === "floor" && rng() < 0.4) setTile(world, "surface", x, y, "food", 0.8);
+  });
+}
+
+const METEOR_CRATER_RADIUS = 6;
+function applyMeteorCrater(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  forEachTileInJitteredCircle(center, METEOR_CRATER_RADIUS, width, height, rng, (x, y, distFrac) => {
+    const tile = tileAt(world, "surface", x, y);
+    if (!tile || tile.terrain === "water") return;
+    if (distFrac > 0.8) {
+      // The rim — real impact debris, a ring of boulders thrown up by the strike.
+      setTile(world, "surface", x, y, "boulder", tile.elevation + BOULDER_ELEVATION_BOOST);
+    } else {
+      // The crater floor — cleared and, per real "impact site enriches the
+      // ground" flavor, unusually food-rich.
+      setTile(world, "surface", x, y, rng() < 0.35 ? "food" : "floor", Math.max(0, tile.elevation - 0.3));
+    }
+  });
+}
+
+/** A local, bounded cellular-automata cave patch — same recipe `generateUndergroundCaves` uses (random fill + neighbor-majority smoothing + keep-largest-region), just sized to one landmark's footprint instead of a whole layer. Returns which local cells are "wall" (1) vs. "floor" (0). */
+function carveOrganicCavePatch(diameter: number, rng: () => number): Uint8Array {
+  const grid = new Uint8Array(diameter * diameter);
+  for (let i = 0; i < grid.length; i++) grid[i] = rng() < CAVE_INITIAL_WALL_CHANCE ? 1 : 0;
+  for (let iter = 0; iter < CAVE_SMOOTHING_ITERATIONS; iter++) {
+    const next = new Uint8Array(grid.length);
+    for (let y = 0; y < diameter; y++) {
+      for (let x = 0; x < diameter; x++) {
+        next[y * diameter + x] = countWallNeighbors(grid, diameter, diameter, x, y) >= CAVE_WALL_NEIGHBOR_THRESHOLD ? 1 : 0;
+      }
+    }
+    grid.set(next);
+  }
+  keepOnlyLargestFloorRegion(grid, diameter, diameter);
+  return grid;
+}
+
+const DEEP_CAVERN_RADIUS = 9;
+function applyDeepCavern(world: World, width: number, height: number, rng: () => number): void {
+  const diameter = DEEP_CAVERN_RADIUS * 2 + 1;
+  const patch = carveOrganicCavePatch(diameter, rng);
+  const centerPick = pickLandmarkCenter(rng, width, height);
+  const origin: Vec2 = { x: Math.min(width - diameter, Math.max(0, centerPick.x - DEEP_CAVERN_RADIUS)), y: Math.min(height - diameter, Math.max(0, centerPick.y - DEEP_CAVERN_RADIUS)) };
+  for (let y = 0; y < diameter; y++) {
+    for (let x = 0; x < diameter; x++) {
+      const wx = origin.x + x;
+      const wy = origin.y + y;
+      const tile = tileAt(world, "surface", wx, wy);
+      if (!tile || tile.terrain === "water") continue;
+      if (patch[y * diameter + x]) setTile(world, "surface", wx, wy, "wall", tile.elevation + BOULDER_ELEVATION_BOOST);
+    }
+  }
+}
+
+/** Frozen Grotto's own version of Deep Cavern's cave shape — "boulder" (climbable icy rock) instead of "wall" (a real blocking cliff face), a softer, more traversable cave befitting an ice cave you can wander into rather than a sealed cavern. */
+function applyFrozenGrotto(world: World, width: number, height: number, rng: () => number): void {
+  const diameter = DEEP_CAVERN_RADIUS * 2 + 1;
+  const patch = carveOrganicCavePatch(diameter, rng);
+  const centerPick = pickLandmarkCenter(rng, width, height);
+  const origin: Vec2 = { x: Math.min(width - diameter, Math.max(0, centerPick.x - DEEP_CAVERN_RADIUS)), y: Math.min(height - diameter, Math.max(0, centerPick.y - DEEP_CAVERN_RADIUS)) };
+  for (let y = 0; y < diameter; y++) {
+    for (let x = 0; x < diameter; x++) {
+      const wx = origin.x + x;
+      const wy = origin.y + y;
+      const tile = tileAt(world, "surface", wx, wy);
+      if (!tile || tile.terrain === "water") continue;
+      if (patch[y * diameter + x]) setTile(world, "surface", wx, wy, "boulder", tile.elevation + BOULDER_ELEVATION_BOOST);
+    }
+  }
+}
+
+const TUNNEL_WARREN_RADIUS = 8;
+/** How many separate burrow-entrance clusters get scattered across the warren's footprint. */
+const TUNNEL_WARREN_BURROW_COUNT = 6;
+function applyTunnelWarren(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  // The colony's own dug ground — a wide patch of loose sand/mud, real digging
+  // material, not rock (distinct from Deep Cavern's carved-rock read).
+  forEachTileInJitteredCircle(center, TUNNEL_WARREN_RADIUS, width, height, rng, (x, y) => {
+    const tile = tileAt(world, "surface", x, y);
+    if (tile?.terrain === "floor" && rng() < 0.5) setTile(world, "surface", x, y, rng() < 0.5 ? "sand" : "mud", tile.elevation);
+  });
+  // Several distinct burrow-entrance clusters (small boulder rings marking a
+  // real dug-out mound) scattered through that footprint — many separate
+  // holes, not one single den.
+  for (let i = 0; i < TUNNEL_WARREN_BURROW_COUNT; i++) {
+    const angle = rng() * Math.PI * 2;
+    const dist = rng() * TUNNEL_WARREN_RADIUS * 0.8;
+    const bx = Math.round(center.x + Math.cos(angle) * dist);
+    const by = Math.round(center.y + Math.sin(angle) * dist);
+    forEachTileInJitteredCircle({ x: bx, y: by }, 1, width, height, rng, (x, y) => {
+      const tile = tileAt(world, "surface", x, y);
+      if (tile && tile.terrain !== "water") setTile(world, "surface", x, y, "mud", tile.elevation);
+    });
+  }
+}
+
+const BONE_GROUNDS_RADIUS = 6;
+function applyBoneGrounds(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  // A real "elephant graveyard" clearing — starkly open ground, almost every
+  // obstacle stripped away, nothing planted here on purpose; whatever life
+  // this patch gets comes only from what's died and decayed on it.
+  forEachTileInJitteredCircle(center, BONE_GROUNDS_RADIUS, width, height, rng, (x, y) => {
+    const tile = tileAt(world, "surface", x, y);
+    if (tile && tile.terrain !== "water" && tile.terrain !== "floor") setTile(world, "surface", x, y, "floor", tile.elevation);
+  });
+}
+
+const GEOTHERMAL_VENT_RADIUS = 5;
+function applyGeothermalVent(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  // A real cluster of "sunbeam" tiles (worldgen.ts's own rare warmth terrain,
+  // elsewhere only a scattered 3% roll on high ground) — reliably dense here
+  // instead of incidental, so this genuinely reads as a warm spot on the map.
+  forEachTileInJitteredCircle(center, GEOTHERMAL_VENT_RADIUS, width, height, rng, (x, y) => {
+    const tile = tileAt(world, "surface", x, y);
+    if (tile?.terrain === "floor" && rng() < 0.6) setTile(world, "surface", x, y, "sunbeam", tile.elevation);
+  });
+}
+
+const CROSSROADS_RADIUS = 7;
+function applyCrossroads(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  // A real geographic junction reads as open ground — obstacles thinned out,
+  // wide sightlines, the paths that actually converge here left legible
+  // instead of choked with whatever the ordinary biome would have scattered.
+  forEachTileInJitteredCircle(center, CROSSROADS_RADIUS, width, height, rng, (x, y) => {
+    const tile = tileAt(world, "surface", x, y);
+    if (tile && tile.terrain !== "water" && tile.terrain !== "floor" && rng() < 0.7) setTile(world, "surface", x, y, "floor", tile.elevation);
+  });
+}
+
+/** Fertile Basin's own signature — real overgrowth, denser bush/tree cover than the zone's ordinary biome blend would place on its own, read as a lush hollow rather than just "grassland, but higher numbers underneath." */
+const FERTILE_BASIN_RADIUS = 7;
+function applyFertileBasin(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  forEachTileInJitteredCircle(center, FERTILE_BASIN_RADIUS, width, height, rng, (x, y) => {
+    const tile = tileAt(world, "surface", x, y);
+    if (tile?.terrain === "floor" && rng() < 0.5) setTile(world, "surface", x, y, rng() < 0.6 ? "bush" : "food", tile.elevation);
+  });
+}
+
+function applyLandmarkFeature(world: World, width: number, height: number, rng: () => number, landmark: LandmarkType | undefined): void {
+  switch (landmark) {
+    case "greatLake":
+      return applyGreatLake(world, width, height, rng);
+    case "fertileBasin":
+      return applyFertileBasin(world, width, height, rng);
+    case "sacredSpring":
+      return applySacredSpring(world, width, height, rng);
+    case "geothermalVent":
+      return applyGeothermalVent(world, width, height, rng);
+    case "meteorCrater":
+      return applyMeteorCrater(world, width, height, rng);
+    case "deepCavern":
+      return applyDeepCavern(world, width, height, rng);
+    case "tunnelWarren":
+      return applyTunnelWarren(world, width, height, rng);
+    case "boneGrounds":
+      return applyBoneGrounds(world, width, height, rng);
+    case "frozenGrotto":
+      return applyFrozenGrotto(world, width, height, rng);
+    case "crossroads":
+      return applyCrossroads(world, width, height, rng);
+    case undefined:
+      return;
   }
 }
 
@@ -1219,6 +1867,8 @@ export interface ZoneGenerationBias {
   elevation: MacroElevationBias;
   /** A `BIOME_NAMES` entry to bias this zone's biome-seed scatter toward — absent (or a name `generateWorld` doesn't recognize, e.g. "ocean") leaves biome placement exactly as unbiased `placeBiomeSeeds` would. */
   dominantBiome?: string;
+  /** This zone's `MacroZone.landmark`, if any — carves genuinely distinct terrain on top of the ordinary biome-blended generation above (`applyLandmarkFeature`, run last, after rivers/BSP/caves). Absent = an ordinary zone, ordinary terrain. */
+  landmark?: LandmarkType;
 }
 
 /** How many extra seeds of `ZoneGenerationBias.dominantBiome` get scattered on top of the ordinary biome mix — enough to make it genuinely dominate the blend (see `blendBiomeParams`'s nearest-`NEAREST_BIOME_SEEDS` weighting) without completely erasing the variety a real zone should still have. Sim-original guess, judge against a real promoted zone like every other tuning constant in this file. */
@@ -1320,8 +1970,22 @@ export function generateWorld(width: number, height: number, seed: number, bias?
       }
 
       if (foodField.sample(x, y) < foodField.thresholdFor(params.foodDensity)) {
-        const flavor = FOOD_FLAVORS[Math.floor(flavorRng() * FOOD_FLAVORS.length)]!;
-        setTile(world, "surface", x, y, "food", elevation, flavor);
+        // Real biome/moisture-gated crop pick (crops.ts's pickCrop), same
+        // runtime biome-blend/moisture-proxy functions flora.ts's own
+        // maturation pick reuses — nearSun is always false here since
+        // sunbeam tiles aren't placed until after this loop runs (see
+        // below). Tomato (sunLoving) can still be picked here at its base
+        // rate — nearSun only doubles its odds, it was never a hard
+        // requirement (see crops.ts's own doc comment on why one would be
+        // unreachable in Tomato's assigned biomes anyway).
+        const biome = dominantBiomeAt(world.biomeSeeds, x, y);
+        const moisture = effectiveWaterDensityAt(world.biomeSeeds, world.biomeSeedDrift, x, y);
+        // Apple (canopy-native) is deliberately excluded here — it gets its
+        // own dedicated placement on the Canopy grid instead, right below
+        // (`deriveCanopyFromSurface`'s food step) — see `pickCrop`'s own doc
+        // comment on `excludeLayers`.
+        const crop = pickCrop(biome, moisture, world.tick, false, flavorRng, ["canopy"]);
+        setTile(world, "surface", x, y, "food", elevation, crop);
         continue;
       }
 
@@ -1342,11 +2006,29 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   // above.
   carveBadlandsChambers(world, width, height, mulberry32(seed ^ 0x2545f491));
 
+  // Mountain massifs, same "after rivers, skip existing water" ordering as
+  // Badlands BSP chambers just above — its own derived rng sub-stream, same
+  // "distinct xor'd seed per generation concern" pattern as every other
+  // noise field in this function.
+  carveMountainMassifs(world, width, height, mulberry32(seed ^ 0xbb67ae85), bias?.elevation.highEdges);
+
+  // Canopy is derived from Surface (trees, massif ridges) now that Surface's
+  // own generation — including massifs just above — is fully settled; see
+  // "Canopy — derived from Surface" section doc comment. No rng of its own:
+  // every pixel it reads already came from a real generation step above.
+  deriveCanopyFromSurface(world, width, height, mulberry32(seed ^ 0x38b34ae5));
+
   // Underground caves are independent of everything Surface-only above (no
   // biome/elevation/moisture data to read) — its own derived rng sub-stream,
   // same "distinct xor'd seed per generation concern" pattern as every other
   // noise field in this function.
   generateUndergroundCaves(world, width, height, mulberry32(seed ^ 0x27220a95));
+
+  // Landmark terrain runs last of all — it deliberately overwrites whatever
+  // ordinary biome/river/cave generation already placed on top of a
+  // promoted zone's footprint, same "distinct xor'd seed per generation
+  // concern" pattern as every other step above.
+  applyLandmarkFeature(world, width, height, mulberry32(seed ^ 0x9e3779b1), bias?.landmark);
 
   return world;
 }

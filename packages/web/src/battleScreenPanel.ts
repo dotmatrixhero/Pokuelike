@@ -276,6 +276,8 @@ function sceneLine(category: NotableCategory, label: string): string {
       return `${label}...`;
     case "battle":
       return `${label}!`;
+    case "clash":
+      return `${label}!`;
   }
 }
 

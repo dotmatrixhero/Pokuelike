@@ -42,6 +42,37 @@ export interface ImmigrationSpeciesInfo {
    * moment they arrive. Absent/false = unchanged existing behavior.
    */
   obligateAquatic?: boolean;
+  /**
+   * The lowest level a real specimen of this species could plausibly exist
+   * at — 1 for a base form, or its own real evolution-level threshold
+   * otherwise (`@pokuelike/data`'s `naturalMinLevelFor`). Absent = treated
+   * as 1, the safe "no evolution data available" fallback (bare-engine
+   * tests that build a roster by hand). See `rollImmigrantLevel`'s own doc
+   * comment for how this actually turns into a spawn level.
+   */
+  minLevel?: number;
+  /**
+   * True for a species that never evolves at all AND isn't itself an
+   * evolved form (`@pokuelike/data`'s `isSingleStageSpecies`) — e.g. Tauros,
+   * Farfetch'd, Lapras, Scyther, Snorlax. Direct ask: "make all Pokémon with
+   * just base form have a wider range of base level." A species partway
+   * through a multi-stage line (Bulbasaur) is realistically "young" at its
+   * floor — it hasn't had time to evolve yet — but a species with only one
+   * form ever has no such tell: a wild population of it plausibly spans its
+   * entire adult lifespan, so its spawn range should reflect that instead of
+   * the same narrow just-hatched spread every base form gets. Absent/false =
+   * unchanged existing behavior. See `rollImmigrantLevel`.
+   */
+  singleStage?: boolean;
+  /**
+   * See species.ts's `SpeciesDef.isPredator`. Carried through so
+   * `macroGrid.ts`'s `pickZoneSpeciesPool` can deliberately balance a fresh
+   * zone's invented population — direct ask: "try to have at least some
+   * predators + prey per each zone typically. With a smaller number of
+   * predators." Absent/false = an ordinary prey/neutral species, unchanged
+   * existing behavior.
+   */
+  isPredator?: boolean;
 }
 
 export interface ImmigrationContext {
@@ -113,8 +144,77 @@ function immigrationScale(livingCount: number): number {
 const MIN_GROUP_SIZE = 1;
 const MAX_GROUP_SIZE = 3;
 
-/** The level immigrant agents arrive at — matches `createDemoWorld`'s own starting-agent level for the roster's non-guardian species (bulbasaur/diglett/sandshrew/pidgey/squirtle/charmander all spawn at 5), so an immigrant isn't mechanically distinguishable from a hand-placed starter. */
-const IMMIGRANT_LEVEL = 5;
+/**
+ * Floor level for a base-form immigrant (no real evolution threshold of its
+ * own) — matches `createDemoWorld`'s own starting-agent level for the
+ * roster's non-guardian base-form species (bulbasaur/diglett/sandshrew/
+ * pidgey/squirtle/charmander all spawn at 5), preserved as the low end of
+ * the roll below rather than changed outright. Exported so `overworld.ts`'s
+ * own region-invention level pick (`estimateInitialAggregates`) can apply
+ * the identical "at least this, or the species' own real evolution
+ * threshold if higher" floor instead of a second, independently-hardcoded
+ * default.
+ */
+export const IMMIGRANT_BASE_LEVEL_FLOOR = 5;
+/**
+ * Real spread on top of a species' own floor — direct ask: "some randomness
+ * in starting rolls would be good." `rng() * this`, floored, added to the
+ * floor below — e.g. a base-form immigrant now arrives anywhere from 5 to
+ * 12, not a single fixed value every time.
+ */
+export const IMMIGRANT_LEVEL_JITTER = 8;
+/**
+ * Jitter used instead of `IMMIGRANT_LEVEL_JITTER` for a `singleStage`
+ * species — direct ask: "make all Pokémon with just base form have a wider
+ * range of base level." A species that never evolves has no "still young,
+ * hasn't evolved yet" reason to cluster near the floor, so its spawn range
+ * spans something closer to a real wild population's full adult spread
+ * (floor 5 to ~35) instead of the same narrow 5-12 every base form gets.
+ * Exported for the same direct-testability reason as `IMMIGRANT_LEVEL_
+ * JITTER`.
+ */
+export const SINGLE_STAGE_LEVEL_JITTER = 30;
+/**
+ * Added on top of a predator species' own ordinary floor — direct ask,
+ * after the earlier predator pass: "a lot of em are too low leveled... we
+ * need at least a couple higher leveld predators." A BASE-form predator
+ * (Scyther/Spearow/Onix/Ekans/Zubat — real `minLevel` 1, same as any
+ * ordinary base-form prey species) previously floored at the exact same
+ * 5-12 range as anything else, which reads as a weak, unthreatening
+ * "predator" — real apex hunters are established, mature individuals, not
+ * fresh hatchlings. `species.isPredator` (`ImmigrationSpeciesInfo`,
+ * `@pokuelike/data`'s `SpeciesDef.isPredator`) adds this flat boost before
+ * jitter, on top of whichever floor (ordinary or evolution-threshold-based)
+ * already applied — an evolved predator (Gyarados/Tentacruel/Arbok/Golbat,
+ * already floored higher via their own real evolution level) gets pushed
+ * higher still, same as a base-form one.
+ */
+export const PREDATOR_LEVEL_BOOST = 15;
+
+/**
+ * A real, species-aware immigrant level — direct ask, after noticing every
+ * immigrant arrived at the exact same flat level regardless of species:
+ * "why does everything spawn at lv5. Especially evolved Pokémon they should
+ * be higher distributed." `species.minLevel` (`ImmigrationSpeciesInfo`,
+ * `@pokuelike/data`'s `naturalMinLevelFor`) is the real floor an already-
+ * evolved species could plausibly exist at — `Math.max` against the
+ * ordinary base-form floor so an unclassified/base species keeps its
+ * existing 5+ range unchanged, while a genuinely evolved species floors
+ * meaningfully higher (its own real evolution-level threshold) before a
+ * real jitter on top — wider (`SINGLE_STAGE_LEVEL_JITTER`) for a species
+ * that never evolves at all (`species.singleStage`), narrower otherwise. A
+ * predator (`species.isPredator`) also gets `PREDATOR_LEVEL_BOOST` added to
+ * its floor — see that constant's own doc comment. Exported (like
+ * `accumulateActionEnergy` in simulation.ts) so it's directly,
+ * deterministically testable without needing to reverse-engineer
+ * `maybeImmigrate`'s own internal rng call order just to isolate this one
+ * roll.
+ */
+export function rollImmigrantLevel(species: ImmigrationSpeciesInfo, rng: () => number): number {
+  const floor = Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, species.minLevel ?? 1) + (species.isPredator ? PREDATOR_LEVEL_BOOST : 0);
+  const jitter = species.singleStage ? SINGLE_STAGE_LEVEL_JITTER : IMMIGRANT_LEVEL_JITTER;
+  return floor + Math.floor(rng() * jitter);
+}
 
 /**
  * Picks a random point on one of the four map edges — "arrives from
@@ -227,10 +327,14 @@ export function maybeImmigrate(world: World, ctx: ImmigrationContext | undefined
   if (!species) return;
 
   const groupSize = MIN_GROUP_SIZE + Math.floor(rng() * (MAX_GROUP_SIZE - MIN_GROUP_SIZE + 1));
-  const arrivalPos =
-    species.homeLayer === "surface"
-      ? findWalkableNear(world, "surface", edgePos.x, edgePos.y)
-      : { x: Math.min(world.width - 1, Math.max(0, Math.round(edgePos.x))), y: Math.min(world.height - 1, Math.max(0, Math.round(edgePos.y))) };
+  // Real walkability search on every layer, not just Surface — Underground
+  // (cellular-automata cave walls) and Canopy (derived-from-Surface walls,
+  // CROPS_DESIGN.md) both now carve genuine unwalkable terrain too, the same
+  // "no longer a plain flat grid" fix scenario.ts's own `undergroundAnchor`/
+  // `canopyAnchor` already made for hand-placed scenario spawns. A raw
+  // clamped `edgePos` could otherwise land an immigrant group directly
+  // inside solid cave/canopy wall.
+  const arrivalPos = findWalkableNear(world, species.homeLayer, edgePos.x, edgePos.y);
 
   // Obligate-aquatic species (`ImmigrationSpeciesInfo.obligateAquatic`, see
   // its own doc comment) need a real water tile, not merely a walkable one —
@@ -244,9 +348,7 @@ export function maybeImmigrate(world: World, ctx: ImmigrationContext | undefined
   const usedWaterTiles: Vec2[] = [];
   function nextArrivalPos(i: number): Vec2 {
     if (!species!.obligateAquatic) {
-      return species!.homeLayer === "surface"
-        ? findWalkableNear(world, species!.homeLayer, arrivalPos.x + i, arrivalPos.y)
-        : { x: Math.min(world.width - 1, Math.max(0, arrivalPos.x + i)), y: arrivalPos.y };
+      return findWalkableNear(world, species!.homeLayer, arrivalPos.x + i, arrivalPos.y);
     }
     const waterPos = findNearestIndexed(world, "surface", arrivalPos, "water", usedWaterTiles) ?? arrivalPos;
     usedWaterTiles.push(waterPos);
@@ -256,7 +358,7 @@ export function maybeImmigrate(world: World, ctx: ImmigrationContext | undefined
   const newAgents: Agent[] = [];
   for (let i = 0; i < groupSize; i++) {
     const pos = nextArrivalPos(i);
-    const agent = ctx.spawnAgent(species.id, `${species.id}-immigrant-${world.tick}-${i}`, pos, IMMIGRANT_LEVEL, rng);
+    const agent = ctx.spawnAgent(species.id, `${species.id}-immigrant-${world.tick}-${i}`, pos, rollImmigrantLevel(species, rng), rng);
     agent.sex = rng() < 0.5 ? "male" : "female";
     newAgents.push(agent);
   }
