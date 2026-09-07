@@ -5604,6 +5604,49 @@ zero behavior change to anything that doesn't opt in.
   `POP_HARD_CAP`) is unit-tested but not yet exercised by a real multi-
   thousand-tick run that actually reaches it — see TODO.md.
 
+### Zone species floor raised to 4-7, plus two new species to actually make that possible
+
+Direct ask: "Can you add like a little species. More throughout? Each zone
+should have at least 4, max 7 to start." `ZONE_SPECIES_POOL_MIN`/`_MAX`
+(macroGrid.ts) raised from 3-6 to 4-7 — but a plain constant bump alone
+couldn't deliver "at least 4" everywhere: two habitats structurally didn't
+have that many fitting species to begin with. Obligate-aquatic ("ocean")
+had only 3 (magikarp/tentacool/tentacruel); desert had only 2 (vulpix/
+cubone). `pickZoneSpeciesPool`/`pickRandomSubset` can only ever pick FROM
+what fits — no amount of pool-size tuning invents a species that isn't
+there, confirmed directly: a fresh live check after only the constant
+change still showed zones landing as low as 2.
+
+**Built**: two real fixes, matched to what each thin habitat actually
+needed —
+1. **Ocean**: added Horsea and Seadra (real, fully-aquatic Gen 1 water
+   creatures, `obligateAquatic: true`) as genuine new roster species — a
+   real fourth and fifth resident, not padding. Real level-gated moves
+   (Water Gun at 1, Agility at 28, both already curated) — spawn-time move
+   gating (the earlier Sandshrew/Earthquake fix) applies to them
+   automatically, no special-casing needed.
+2. **Desert**: extended three EXISTING species' `biomes` tags to include
+   "desert" rather than inventing new species where lore-accurate biome
+   tagging was the real gap — Sandshrew (whose own flavor text literally
+   says "a desert dweller"), Diglett (a burrowing mole, equally plausible
+   under loose desert sand as under grassland/badlands), and Growlithe
+   ("found in rocky, arid regions," already badlands-tagged). Desert's
+   fitting count goes from 2 to 5.
+
+Also fixed a real pre-existing bug this surfaced: `species.test.ts` had a
+stale, hardcoded 5-biome list (`["grassland", "forest", "wetland",
+"badlands", "highland"]`) missing snow/desert/jungle/beach entirely,
+inconsistent with that same file's own current `ALL_BIOME_NAMES` a few
+lines down — Growlithe's new "desert" tag correctly failed against the
+stale list. Fixed by pointing at `ALL_BIOME_NAMES` instead of duplicating
+it.
+
+Live-validated across a real 14x14 never-visited-zone grid (196 zones):
+every single one landed in [4, 7] species — min 4, max 7, zero zones below
+the floor (a check run before the desert/ocean fixes, constant-only, still
+showed a min of 2). Distribution: 44 zones at 4, 124 at 5, 12 at 6, 16 at
+7. Full suite (1077 + 177 tests) and typecheck green.
+
 ### Predator accuracy pass + guaranteed predator/prey mix per zone
 
 Direct ask: "I think ekans and arbok are predators. So we should make a pass

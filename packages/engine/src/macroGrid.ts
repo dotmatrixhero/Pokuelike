@@ -593,10 +593,15 @@ const LANDMARK_POPULATION_MULTIPLIER: Partial<Record<LandmarkType, number>> = {
  * subset survives is deterministic per zone (same `mw.rng` every other
  * zone-invention roll already uses) but varies zone to zone, biome to
  * biome. A habitat with fewer fitting species than the cap (e.g. snow's 4)
- * is simply left alone — nothing to trim.
+ * is simply left alone — nothing to trim. Raised from 3-6 to 4-7, direct
+ * follow-up ask once this first shipped: "add like a little species. More
+ * throughout? Each zone should have at least 4, max 7 to start" — richer
+ * "to start" (a zone still isn't capped forever; population/species mix
+ * keeps evolving via ordinary migration/reproduction after promotion,
+ * this only bounds what a genuinely fresh zone is invented with).
  */
-const ZONE_SPECIES_POOL_MIN = 3;
-const ZONE_SPECIES_POOL_MAX = 6;
+const ZONE_SPECIES_POOL_MIN = 4;
+const ZONE_SPECIES_POOL_MAX = 7;
 /**
  * A congregation-type landmark (see `LANDMARK_POPULATION_MULTIPLIER`) is
  * explicitly meant to draw MULTIPLE species onto the same limited real
@@ -609,7 +614,7 @@ const LANDMARK_SPECIES_POOL_BONUS = 3;
  * How many of a zone's pool slots can be predator species — direct ask:
  * "try to have at least some predators + prey per each zone typically. With
  * a smaller number of predators." Deliberately small relative to
- * `ZONE_SPECIES_POOL_MIN`/`_MAX` (3-6, or up to 9 with a congregation
+ * `ZONE_SPECIES_POOL_MIN`/`_MAX` (4-7, or up to 10 with a congregation
  * landmark's bonus): a zone should feel like it has real hunters in it, not
  * be dominated by them — see `pickZoneSpeciesPool`'s own doc comment for how
  * this actually gets enforced. A congregation landmark's real "draw multiple

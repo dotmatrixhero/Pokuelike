@@ -62,7 +62,7 @@ describe("new species: dex entries resolve", () => {
       const species = SPECIES[id]!;
       expect(species.biomes && species.biomes.length).toBeTruthy();
       for (const biome of species.biomes!) {
-        expect(["grassland", "forest", "wetland", "badlands", "highland"]).toContain(biome);
+        expect(ALL_BIOME_NAMES).toContain(biome);
       }
     });
   }

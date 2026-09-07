@@ -222,8 +222,13 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Underground has no biome of its own (worldgen.ts's biomes only vary
     // the surface layer) — tagged by the surface biome its tunnels would
     // sit under: loose, diggable ground reads as grassland/badlands, not
-    // dense forest or waterlogged wetland.
-    biomes: ["grassland", "badlands"],
+    // dense forest or waterlogged wetland. "desert" added later — direct
+    // ask: "add like a little species. More throughout? Each zone should
+    // have at least 4, max 7 to start," and desert's own fitting-species
+    // count (vulpix/cubone alone) couldn't meet that floor; a real
+    // burrowing mole under loose desert sand is exactly as lore-plausible
+    // as under grassland/badlands.
+    biomes: ["grassland", "badlands", "desert"],
     // No `preferredTerrain` tag: underground is a flat, terrain-uniform
     // floor grid (worldgen.ts never varies it), so there's no meaningful
     // tile kind to prefer among on its own home layer — and it already has
@@ -294,8 +299,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Same "no biome of its own, tagged by the surface above" reasoning as
     // Diglett — a desert-dwelling burrower reads squarely as badlands, with
     // grassland as a secondary (real-world ground squirrels/gophers aren't
-    // desert-exclusive).
-    biomes: ["badlands", "grassland"],
+    // desert-exclusive). "desert" itself added later, directly matching its
+    // own flavor text ("a desert dweller") — see diglett's own comment
+    // above for the direct ask this addresses.
+    biomes: ["badlands", "grassland", "desert"],
   }),
   onix: speciesFromDex("ONIX", {
     spriteKey: "onix",
@@ -372,7 +379,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // doc comment on why level-with-no-conditions is the bar) — so, like
     // Onix in the existing roster, this species simply never evolves
     // in-sim yet. Not a bug, an accepted existing limitation.
-    biomes: ["badlands"],
+    // "desert" added later, same "found in rocky, arid regions" flavor
+    // reasoning as badlands above, and the same direct ask driving diglett/
+    // sandshrew's own desert tag (see diglett's own comment).
+    biomes: ["badlands", "desert"],
     // Fire-type warmth-seeker, same "sunbeam" affinity reasoning as
     // Charmander above — a dry-terrain dog that suns itself when idle.
     preferredTerrain: ["sunbeam"],
@@ -580,6 +590,34 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // ask naming "ice... and dragon" together as snow-biome residents.
     // Wetland kept as a secondary nod to its actual mainline habitat.
     biomes: ["snow", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  // Direct ask: "add like a little species. More throughout? Each zone
+  // should have at least 4, max 7 to start" — the zone species-pool floor
+  // (macroGrid.ts's `ZONE_SPECIES_POOL_MIN`) can't be met by a habitat that
+  // structurally doesn't have that many fitting species to begin with;
+  // obligate-aquatic ("ocean") had only 3 (magikarp/tentacool/tentacruel).
+  // Horsea/Seadra are real, fully-aquatic Gen 1 water creatures — a genuine
+  // fourth (and evolved fifth) resident, not padding.
+  horsea: speciesFromDex("HORSEA", {
+    spriteKey: "horsea",
+    placeholderColor: "#88c0d8",
+    homeLayer: "surface",
+    // Water Gun (level 1) and Agility (level 28) are Horsea's real level-up
+    // moves — same "off-type/simple curated pair" pattern as dratini's own
+    // entry above.
+    moves: ["water_gun", "agility"],
+    biomes: ["wetland"],
+    obligateAquatic: true,
+    preferredTerrain: ["water"],
+  }),
+  seadra: speciesFromDex("SEADRA", {
+    spriteKey: "seadra",
+    placeholderColor: "#5890b0",
+    homeLayer: "surface",
+    moves: ["water_gun", "agility"],
+    biomes: ["wetland"],
+    obligateAquatic: true,
     preferredTerrain: ["water"],
   }),
 
