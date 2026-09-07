@@ -16,6 +16,7 @@ import {
   type SpriteDirection,
 } from "./sprites.js";
 import type { ActivePopup } from "./eventPopups.js";
+import type { ActiveMoveFlash } from "./moveEffects.js";
 import {
   CROP_EMOJI,
   FLAVOR_FG,
@@ -491,14 +492,16 @@ export function drawWorld(
    * populated (detection now runs regardless of Auto Camera's on/off
    * toggle) and scoped to battles only, not every notable one-shot.
    */
-  passiveHighlights?: readonly ReadonlySet<string>[]
+  passiveHighlights?: readonly ReadonlySet<string>[],
+  /** Ids of agents that used a move recently enough to still be jiggling — see moveEffects.ts's `MoveEffects.jigglingAgentIds`. */
+  jigglingAgentIds?: ReadonlySet<string>
 ): void {
   // Always advance the animation clock, even in ASCII mode (which ignores
   // `dt` entirely) — so switching from ASCII back to tile mode doesn't hand
   // `interpolatedPos` one huge accumulated `dt` and produce a visible warp.
   const dt = frameDeltaSeconds();
   if (style === "ascii") return drawWorldAscii(ctx, world, selectedAgentId);
-  return drawWorldTiles(ctx, world, selectedAgentId, dt, autoCamHighlightIds, passiveHighlights);
+  return drawWorldTiles(ctx, world, selectedAgentId, dt, autoCamHighlightIds, passiveHighlights, jigglingAgentIds);
 }
 
 function drawWorldTiles(
@@ -507,7 +510,8 @@ function drawWorldTiles(
   selectedAgentId: string | undefined,
   dt: number,
   autoCamHighlightIds?: ReadonlySet<string>,
-  passiveHighlights?: readonly ReadonlySet<string>[]
+  passiveHighlights?: readonly ReadonlySet<string>[],
+  jigglingAgentIds?: ReadonlySet<string>
 ): void {
   const surface = world.tiles.surface;
 
@@ -732,7 +736,7 @@ function drawWorldTiles(
   pruneStaleFacings(world);
   for (const agent of world.agents) {
     if (agent.layer !== "surface") continue;
-    drawAgent(ctx, agent, agent.id === selectedAgentId, dt);
+    drawAgent(ctx, agent, agent.id === selectedAgentId, dt, jigglingAgentIds?.has(agent.id) ?? false);
   }
 
   drawWarmLights(ctx, world);
@@ -912,10 +916,29 @@ function drawAgentGlyph(ctx: CanvasRenderingContext2D, agent: Agent, cx: number,
   }
 }
 
-function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: boolean, dt: number): void {
+/** Cheap deterministic per-id phase (0..2π) so several agents jiggling at once don't all shake in lockstep. */
+function idPhase(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return (h % 1000) / 1000 * Math.PI * 2;
+}
+
+function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: boolean, dt: number, jiggling: boolean): void {
   const pos = interpolatedPos(agent, dt);
   const px = pos.x * TILE_SIZE;
   const py = pos.y * TILE_SIZE;
+  // Direct ask: "make the tile/sprite sorta jiggle when its using a move" —
+  // a small, fast shake applied only to the sprite/fallback draw below (not
+  // the drop shadow, which stays pinned to the tile so the shake reads as
+  // the body moving above a fixed ground contact point, not the whole tile
+  // sliding around).
+  let jitterX = 0;
+  let jitterY = 0;
+  if (jiggling) {
+    const t = performance.now() / 35 + idPhase(agent.id);
+    jitterX = Math.sin(t) * TILE_SIZE * 0.07;
+    jitterY = Math.cos(t * 1.3) * TILE_SIZE * 0.04;
+  }
   const def = SPECIES[agent.species];
   const direction = facingOf(agent);
   // `def` only exists for the small hand-curated roster (species.ts) — an
@@ -958,17 +981,17 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
     // direction, so the plain source image is already correctly oriented.
     const w = TILE_SIZE * SPRITE_SCALE;
     const h = TILE_SIZE * SPRITE_SCALE;
-    const dx = px + TILE_SIZE / 2 - w / 2;
-    const dy = py + TILE_SIZE - h;
+    const dx = px + TILE_SIZE / 2 - w / 2 + jitterX;
+    const dy = py + TILE_SIZE - h + jitterY;
     ctx.drawImage(sprite, dx, dy, w, h);
   } else {
     const primaryType = agent.types?.[0];
     const fill = isCorpse ? [90, 90, 90] : primaryType ? TYPE_COLOR[primaryType] : ([200, 200, 200] as const);
     ctx.fillStyle = rgbToCss(fill as [number, number, number]);
-    ctx.fillRect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+    ctx.fillRect(px + 2 + jitterX, py + 2 + jitterY, TILE_SIZE - 4, TILE_SIZE - 4);
     ctx.fillStyle = "#0d0d0d";
     ctx.font = `${TILE_SIZE * 0.6}px monospace`;
-    ctx.fillText((def?.name ?? agent.species)[0]!, px + TILE_SIZE * 0.22, py + TILE_SIZE * 0.75);
+    ctx.fillText((def?.name ?? agent.species)[0]!, px + TILE_SIZE * 0.22 + jitterX, py + TILE_SIZE * 0.75 + jitterY);
   }
 
   if (agent.fainted && !isCorpse) {
@@ -995,6 +1018,30 @@ export function drawEventPopups(ctx: CanvasRenderingContext2D, popups: readonly 
     ctx.globalAlpha = Math.max(0, popup.fade);
     ctx.fillStyle = popup.color;
     ctx.fillText(popup.icon, cx, cy);
+  }
+  ctx.restore();
+}
+
+/**
+ * A quick bright square flash on whichever tile a move just hit (or missed
+ * at — see moveEffects.ts's own doc comment) — direct ask: "light up the
+ * square it effects." Drawn as a fading ring/glow rather than a flat fill so
+ * it reads as an impact instead of just recoloring the tile.
+ */
+export function drawMoveFlashes(ctx: CanvasRenderingContext2D, flashes: readonly ActiveMoveFlash[]): void {
+  if (flashes.length === 0) return;
+  ctx.save();
+  for (const flash of flashes) {
+    const cx = flash.pos.x * TILE_SIZE + TILE_SIZE / 2;
+    const cy = flash.pos.y * TILE_SIZE + TILE_SIZE / 2;
+    // Expands slightly as it fades — a real, brief impact pulse.
+    const radius = TILE_SIZE * (0.3 + (1 - flash.fade) * 0.35);
+    ctx.globalAlpha = Math.max(0, flash.fade) * 0.75;
+    ctx.strokeStyle = "#fff8c8";
+    ctx.lineWidth = Math.max(1, TILE_SIZE * 0.08 * flash.fade);
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.stroke();
   }
   ctx.restore();
 }

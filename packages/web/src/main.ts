@@ -1,8 +1,9 @@
 import { EventLog, tickWorld, tickMacroWorld, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World } from "@pokuelike/engine";
 import { createDemoWorld, createDemoMacroWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
-import { agentAtCanvasPos, drawEventPopups, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
+import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { EventPopups } from "./eventPopups.js";
+import { MoveEffects } from "./moveEffects.js";
 import { renderInspector } from "./inspector.js";
 import { renderLegend } from "./legend.js";
 import { AutoCameraController, type AutoCameraHost } from "./autoCamera.js";
@@ -127,6 +128,7 @@ let zoom = DEFAULT_ZOOM;
 const eventLogPanel = new EventLogPanel(eventLogEl);
 const battleScreenPanel = new BattleScreenPanel(battleScreenEl);
 const eventPopups = new EventPopups();
+const moveEffects = new MoveEffects();
 
 // --- Auto Camera -------------------------------------------------------------
 // See autoCamera.ts for the detection/state-machine design writeup (DESIGN.md
@@ -227,6 +229,7 @@ function resetUiForNewWorld(): void {
   eventLogPanel.setFilter(undefined);
   battleScreenPanel.reset();
   eventPopups.reset();
+  moveEffects.reset();
   renderInspector(inspectorEl, undefined, world);
   tabManualOverrideForBattleSeq = undefined;
   lastAutoSwitchedBattleSeq = undefined;
@@ -305,6 +308,7 @@ function step(): void {
   const displayEvents = newEvents.filter((e) => !(e.kind === "fought" && e.finishingBlow));
   eventLogPanel.ingest(displayEvents, world);
   eventPopups.ingest(displayEvents, world);
+  moveEffects.ingest(displayEvents);
   autoCamera.ingest(displayEvents, world);
   battleScreenPanel.ingest(displayEvents, world);
   lastLoggedEventCount = log.events.length;
@@ -841,9 +845,11 @@ function frame(): void {
     selectedAgentId,
     renderStyle,
     engagement?.ids,
-    autoCamera.listBattleEngagements().map((e) => e.ids)
+    autoCamera.listBattleEngagements().map((e) => e.ids),
+    moveEffects.jigglingAgentIds()
   );
   drawEventPopups(ctx, eventPopups.active());
+  drawMoveFlashes(ctx, moveEffects.activeFlashes());
   autoCamStatusEl.textContent = autoCamera.currentLabel() ?? (autoCamera.isEnabled() ? "watching…" : "");
   battleScreenPanel.setActive(engagement);
   maybeAutoSwitchTab();

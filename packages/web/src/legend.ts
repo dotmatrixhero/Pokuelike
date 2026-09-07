@@ -1,5 +1,6 @@
 import type { PokemonType, TerrainKind } from "@pokuelike/engine";
-import { rgbToCss, TERRAIN_GLYPH, TYPE_COLOR } from "./palette.js";
+import { FOOD_CROPS } from "@pokuelike/engine";
+import { rgbToCss, CROP_EMOJI, FLAVOR_FG, TERRAIN_GLYPH, TYPE_COLOR } from "./palette.js";
 
 const TERRAIN_LABEL: Record<TerrainKind, string> = {
   floor: "open ground",
@@ -33,6 +34,42 @@ export function renderLegend(container: HTMLElement): void {
   }
   terrainGroup.appendChild(terrainGrid);
   frag.appendChild(terrainGroup);
+
+  // Direct report: "the other food sources. are they in the game? idk if i
+  // see em" — they are (crops.ts's real FOOD_CROPS registry, rendered with
+  // distinct sprites/colors per flavor, renderer.ts), but the legend only
+  // ever listed one generic "food" glyph, with no way to learn which map
+  // glyph/color means which crop. This group lists every real crop by its
+  // actual display name and on-map look (a real emoji for the 7 crops that
+  // have one — CROP_EMOJI — or its real map color as a swatch for the 4
+  // original berries, which use hand-drawn sprite art instead).
+  const cropGroup = document.createElement("div");
+  const cropTitle = document.createElement("div");
+  cropTitle.className = "legend-group-title";
+  cropTitle.textContent = "Food crops";
+  cropGroup.appendChild(cropTitle);
+  const cropGrid = document.createElement("div");
+  cropGrid.className = "legend-grid";
+  for (const [id, def] of Object.entries(FOOD_CROPS)) {
+    const item = document.createElement("div");
+    item.className = "legend-item";
+    const mark = document.createElement("span");
+    const emoji = CROP_EMOJI[id];
+    if (emoji) {
+      mark.className = "legend-glyph";
+      mark.textContent = emoji;
+    } else {
+      mark.className = "legend-swatch";
+      const rgb = FLAVOR_FG[id];
+      if (rgb) mark.style.background = rgbToCss(rgb);
+    }
+    const label = document.createElement("span");
+    label.textContent = def.name;
+    item.append(mark, label);
+    cropGrid.appendChild(item);
+  }
+  cropGroup.appendChild(cropGrid);
+  frag.appendChild(cropGroup);
 
   const typeGroup = document.createElement("div");
   const typeTitle = document.createElement("div");
