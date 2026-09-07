@@ -4745,3 +4745,52 @@ not something this pathfinding pass itself caused or is positioned to fix.
         single-stat grabs" also weren't deepened this round.
       - Full data suite green (236/236 — Dig's merge nets one fewer node),
         engine suite unaffected (1094/1094). Atlas rebuilt and republished.
+- [x] **Environmental-hook pass on the new trees (first real run of
+      SKILL_TREE_GUIDE.md as a checklist)** — direct follow-up: "Now do
+      another pass on our new moves like leech seed, vine whip etc."
+      Running the guide's own step 2 (scan for an environmental/utility
+      moment specific to the fantasy — the Rock Throw boulder pass) found
+      content three previous review rounds walked past, because every
+      earlier pass audited what was there instead of asking what was
+      missing.
+      - **Vine Whip**: now draws on real `flora` terrain it's standing in
+        (`consumesOwnTerrain`, 2x damage, tile consumed) — Rock Throw's
+        exact shape on the terrain this move's fantasy cares about, and
+        genuinely double-edged since it destroys real flora. Zero engine
+        work. Also cleared a flagged name/mechanic mismatch on that node.
+      - **Leech Seed**: "Shared Harvest" finally shares something — what
+        the roots steal goes back into the soil (`fertilityBoost`), the
+        literal ecosystem payoff three rounds of notes kept asking for.
+        Replaced a duplicate "-1 Cooldown" filler.
+      - **Real engine bug found by the guide's verify-first step**:
+        `maybeUseUtilityMove` early-returned after applying `drainNeeds`,
+        so every other utility field on the same move was silently dead
+        code. Fixed (falls through, still one `useMove` call) with a
+        regression test. Without this, the Leech Seed node above would
+        have shipped doing visibly nothing.
+      - **Atlas reviewability gaps closed**: `drainNeeds` had no
+        `describeDelta` entry, so SIX Leech Seed nodes rendered with no
+        description in the doc these trees are reviewed from;
+        `fertilityBoost`/`matingRadiusBoost` likewise; and the Atlas build
+        simulator silently dropped `chargeAttack`/`drainNeeds`/
+        `matingRadiusBoost`/`fertilityBoost`. All fixed.
+      - Engine suite green (1095/1095, +1 new), data green (236/236),
+        `feed_the_soil` confirmed firing for real Bulbasaurs in an
+        8000-tick run. Atlas rebuilt and republished.
+- [ ] **Proposed, needs a go-ahead: Rock Slide should leave real rubble.**
+      `terrainFill: { terrain: "boulder" }` would make a rockslide leave
+      boulders behind, composing into a real cross-move combo — Onix
+      creates boulders with Rock Slide, then consumes them for 3x damage
+      via Rock Throw's existing `consumesOwnTerrain`. Best cross-move
+      tension available in the roster. Two real blockers found by reading
+      the code: (1) `terrainFill` unconditionally calls `waterSoil()` on
+      the filled tile (its comment assumes it's Water Gun-exclusive) — a
+      falling boulder watering soil is nonsense, needs gating; (2)
+      `setTile` makes boulder unwalkable, so this creates impassable tiles
+      under living agents and slowly accumulates permanent rubble with no
+      decay mechanism. Both solvable, neither decided unilaterally.
+- [ ] **Confirmed NOT buildable as-is: Dig has no environmental hook.**
+      Soil-tilling via `fertilityBoost` is the natural fit, but Dig isn't
+      `utilityMove`-flagged (it fires from the flee branch), so
+      `maybeUseUtilityMove` never sees it. Flagging it would change what
+      the move fundamentally is — a design decision, not a fix.

@@ -44,10 +44,15 @@ export function maybeUseUtilityMove(world: World, agent: Agent, log: EventLog | 
       const { need, amount } = move.drainNeeds;
       target.needs[need] = Math.max(0, target.needs[need] - amount);
       agent.needs[need] = Math.min(1, agent.needs[need] + amount);
-      return true;
+      // Deliberately falls through to the effect checks below instead of
+      // returning here. A `drainNeeds` move can carry other utility fields
+      // too (Leech Seed's own tree puts what it steals back into the
+      // ground via `fertilityBoost`), and the old early return made every
+      // one of those silently dead on any move that also drains — a real
+      // composition gap, not just a missed feature.
+    } else {
+      useMove(agent, move, world.tick);
     }
-
-    useMove(agent, move, world.tick);
 
     if (move.selfHeal && agent.hp !== undefined && agent.maxHp !== undefined) {
       let fraction = move.selfHeal.fraction;

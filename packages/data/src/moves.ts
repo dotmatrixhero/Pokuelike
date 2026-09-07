@@ -840,11 +840,22 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       sapping_reach: {
         id: "sapping_reach",
-        name: "+5 Power",
+        name: "Sapping Reach",
         cost: 1,
         prerequisites: ["unbreakable_hold"],
         leaning: "aggression",
-        delta: { power: 5 },
+        // SKILL_TREE_GUIDE.md step 2 (the environmental-hook pass this
+        // tree never got): Vine Whip's vines ARE plant matter, so a
+        // Bulbasaur standing in real flora can draw on it — the same
+        // shape as Rock Throw's boulder-consumption, on the terrain kind
+        // this move's own fantasy actually cares about. Genuinely
+        // double-edged, which is the point: the tile reverts to plain
+        // floor, so every big hit costs the map a real flora tile (and
+        // whatever was growing on it). 2x rather than Rock Throw's 3x
+        // because flora is common terrain and boulder isn't.
+        // Also fixes a flagged name/mechanic mismatch: the id promised
+        // "sapping" and "reach" while the node delivered a flat +5 Power.
+        delta: { consumesOwnTerrain: { terrain: "flora", damageMultiplier: 2 } },
       },
       endless_lashing: {
         id: "endless_lashing",
@@ -6322,19 +6333,29 @@ export const MOVES: Record<string, MoveSpec> = {
         // another self-buff.
         delta: { targetsAlly: true, allyEffect: { healFraction: 0.1 } },
       },
-      quieter_ground: {
-        id: "quieter_ground",
-        name: "-1 Cooldown",
+      feed_the_soil: {
+        id: "feed_the_soil",
+        name: "Feed the Soil",
         cost: 1,
         prerequisitesAnyOf: [["rooted_calm"], ["communal_taproot"]],
         leaning: "sociability",
-        delta: { cooldownTicks: -1 },
+        // SKILL_TREE_GUIDE.md step 2, and the fix for this branch's
+        // sharpest self-criticism: "Shared Harvest" never actually shared
+        // anything it stole. Now what the roots take goes straight back
+        // into the ground the herd grazes (flora.ts's real fertility
+        // mechanic, the same one Growth/Grassy Terrain use) — a literal,
+        // visible ecosystem payoff instead of another passive aura.
+        // Required a real engine fix to work at all: `drainNeeds` used to
+        // early-return in `maybeUseUtilityMove`, silently killing every
+        // other utility field on the same move. Also replaces one of two
+        // identical "-1 Cooldown" fillers this branch was padded with.
+        delta: { fertilityBoost: { amount: 0.2, radius: 1 } },
       },
       settled_growth: {
         id: "settled_growth",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["quieter_ground"],
+        prerequisites: ["feed_the_soil"],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },

@@ -571,6 +571,13 @@ export interface MoveTreeNode {
     drainNeeds?: { need: "hunger" | "thirst"; amount: number; radius: number };
     /** Overwrite, like `shape`. Only meaningful on a move that already has a base `matingRadiusBoost` (e.g. Sweet Scent). */
     matingRadiusBoost?: { multiplier: number; ticks: number };
+    /**
+     * Overwrite, like `shape`. Enriches the ground around the caster
+     * (flora.ts's `raiseFertility`, applied by utilityMoves.ts's
+     * `maybeUseUtilityMove`). Requires the move to be `utilityMove`-flagged
+     * to ever fire — a plain attack move setting this would be dead weight.
+     */
+    fertilityBoost?: { amount: number; radius: number };
   };
 }
 
@@ -732,6 +739,7 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       chargeAttack: delta.chargeAttack ?? result.chargeAttack,
       drainNeeds: delta.drainNeeds ?? result.drainNeeds,
       matingRadiusBoost: delta.matingRadiusBoost ?? result.matingRadiusBoost,
+      fertilityBoost: delta.fertilityBoost ?? result.fertilityBoost,
     };
   }
 

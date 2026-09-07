@@ -1301,6 +1301,74 @@ not another mechanical swap. Full data suite green (236/236 — Dig's merge
 nets one fewer node than before), engine suite unaffected (1094/1094).
 Atlas rebuilt and republished.
 
+**Round four — the environmental-hook pass these trees never got.** First
+run of SKILL_TREE_GUIDE.md as an actual checklist rather than a writeup,
+and its step 2 ("scan for an environmental or utility moment specific to
+this fantasy — Rock Throw picking up a real boulder") immediately turned
+up content three rounds of review had walked straight past, because every
+prior pass audited what was *there* instead of asking what was *missing*:
+
+- **Vine Whip now has a real environmental moment, at zero engine cost.**
+  Vines are plant matter, so a Bulbasaur standing in real `flora` terrain
+  draws on it: `consumesOwnTerrain: { terrain: "flora", damageMultiplier:
+  2 }` — the exact shape of Rock Throw's boulder consumption, on the
+  terrain kind this move's own fantasy actually cares about, and
+  genuinely double-edged (the tile reverts to bare floor, so every big
+  hit costs the map real flora and whatever was growing there). 2x rather
+  than Rock Throw's 3x because flora is common terrain and boulder isn't.
+  This also cleared a flagged name/mechanic mismatch: the node
+  (`sapping_reach`) previously delivered a flat +5 Power under an id
+  promising drain and reach.
+- **Leech Seed's Sociability branch finally shares something.** Three
+  rounds of notes said "Shared Harvest shares nothing" and the last fix
+  could only manage a generic ally-heal. The real answer was
+  environmental all along: what the roots steal goes back into the ground
+  the herd grazes (`fertilityBoost`, flora.ts's own fertility mechanic —
+  the same one Growth and Grassy Terrain use). It also replaced one of
+  two identical "-1 Cooldown" fillers that branch was padded with.
+- **That fix required a real engine bug fix first, found by the guide's
+  step 9 (verify before building).** `maybeUseUtilityMove` early-returned
+  the moment it applied `drainNeeds`, so *every other utility field on the
+  same move was silently dead code* — `fertilityBoost` on Leech Seed would
+  have been a node that visibly did nothing. Fixed so a drain move falls
+  through to its other effects (still exactly one `useMove` call, so no
+  double cooldown), with a regression test pinning both halves firing in
+  one use.
+- **Two Atlas reviewability gaps closed** (found while wiring the above):
+  `drainNeeds` had no `describeDelta` entry at all, so **six** Leech Seed
+  nodes rendered with no description in the very document these trees get
+  reviewed from; `fertilityBoost`/`matingRadiusBoost` had none either, and
+  the Atlas's own build-simulator was silently dropping `chargeAttack`,
+  `drainNeeds`, `matingRadiusBoost` and `fertilityBoost` when computing a
+  resolved spec. All four now merge and describe correctly.
+
+**Proposed, deliberately NOT built — needs a go-ahead** (principle 16: a
+confirmed "this isn't cheaply buildable" is as load-bearing as a
+confirmed yes, and new engine work waits for a scope decision): **Rock
+Slide should leave real rubble.** `terrainFill: { terrain: "boulder" }`
+would make a rockslide leave boulder tiles behind, which composes into a
+genuine cross-move combo — Onix *creates* boulders with Rock Slide, then
+*consumes* them for 3x damage with Rock Throw's already-shipped
+`consumesOwnTerrain`. That's the best cross-branch/cross-move tension
+available anywhere in this roster. Two real blockers found by reading the
+code rather than assuming: (1) `terrainFill`'s handler unconditionally
+calls `waterSoil()` on the filled tile, with a comment stating the
+assumption that it's "exclusive to Water Gun's puddle effect" — a falling
+boulder watering the ground is nonsense, so that call needs gating on the
+filled terrain actually being water; (2) `setTile` sets
+`walkable = isWalkableTerrain(terrain)`, so filling `boulder` creates a
+permanently unwalkable tile *under a living agent*, and repeated use
+would slowly accumulate impassable rubble across the map with no decay
+mechanism (this sim has no "tile change expires" concept — the same gap
+`terrainFill`'s own doc row already flags). Both are solvable; neither
+should be decided unilaterally.
+
+**Also confirmed not buildable as-is**: Dig can't take an environmental
+hook (soil-tilling via `fertilityBoost` would be the natural one) because
+Dig is not `utilityMove`-flagged — it fires from the flee branch, so
+`maybeUseUtilityMove` never sees it. Making it one would change what the
+move fundamentally is, which is a design decision, not a fix.
+
 **Tackle, Slash, and Ember have all now
 shipped their full v2 trees** (`packages/data/src/moves.ts`) — three
 branches (Aggression/Boldness/Sociability) plus a crosslink triangle each,
