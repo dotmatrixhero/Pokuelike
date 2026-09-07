@@ -4439,3 +4439,23 @@ not something this pathfinding pass itself caused or is positioned to fix.
         entries for `nonTerritorial`, `calmingPresence`, and
         `chargeAttack`; rebuilt (verified: integrity, syntax,
         `computeLayout` across the whole roster) and republished.
+- [x] **Body Slam: fixed Sociability's capstone reading smaller than its
+      own mid-branch notable** — direct follow-up: "No quarrel reads as
+      the true capstone. It's a big effect. Undisturbed seems like... it
+      could be a different effect and swapped down. Try not to make
+      capstone less interesting than notables." Real numbers problem: No
+      Quarrel granted `calmingPresence: 0.5` at notable tier while the old
+      keystone (*Undisturbed*) only granted 0.25 + a small 0.05 `thorns`
+      — a smaller echo of an earlier grant, not a real escalation. Fixed
+      by trading places rather than just rebalancing in place: the
+      *Undisturbed* name moved down onto the old *Left in Peace* notable
+      (mechanically untouched, still plain `thorns`), No Quarrel's own
+      value came down to 0.3 (a real notable number), and the actual
+      keystone (same node id, new name **At Peace**) got a decisively
+      bigger `calmingPresence` jump (0.5, bigger than every earlier grant
+      on the branch) paired with a lever no other Sociability node uses
+      (`defenseBoost`) instead of just more of what came before. Rewrote
+      the two tests covering these nodes, including a direct assertion
+      that the keystone's own `calmingPresence` value is strictly greater
+      than No Quarrel's; full data suite green (211/211). Atlas rebuilt
+      and republished.

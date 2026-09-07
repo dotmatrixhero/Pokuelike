@@ -803,16 +803,24 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
     expect(respec.chargeAttack).toEqual({ ticks: 2, bonusPower: 40, leapTiles: 5 });
   });
 
-  it("Undisturbed (Sociability keystone) grants two passives at once — a real solitary payoff, not a herd buff", () => {
+  it("At Peace (Sociability keystone) grants two passives at once, bigger than any single earlier grant on the branch", () => {
     expect(bodySlam.tree!.undisturbed.grantsPassives).toEqual([
-      { kind: "calmingPresence", value: 0.25 },
-      { kind: "thorns", value: 0.05 },
+      { kind: "calmingPresence", value: 0.5 },
+      { kind: "defenseBoost", value: 0.08 },
     ]);
+    // The capstone's own calmingPresence jump is bigger than No Quarrel's
+    // (the mid-branch notable) — direct feedback that the reverse read as
+    // the capstone being less interesting than a notable along the way.
+    expect(bodySlam.tree!.undisturbed.grantsPassives![0].value).toBeGreaterThan(bodySlam.tree!.no_quarrel.grantsPassive!.value);
+  });
+
+  it("Undisturbed (Sociability notable, renamed down from the old keystone) grants a real but modest single passive", () => {
+    expect(bodySlam.tree!.left_in_peace.grantsPassive).toEqual({ kind: "thorns", value: 0.08 });
   });
 
   it("Unbothered and No Quarrel (Sociability) grant the real non-herd passives the solitary redesign asked for", () => {
     expect(bodySlam.tree!.unbothered.grantsPassive).toEqual({ kind: "nonTerritorial", value: 1 });
-    expect(bodySlam.tree!.no_quarrel.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.5 });
+    expect(bodySlam.tree!.no_quarrel.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.3 });
     // No targetsAlly/allyEffect anywhere left on this branch — the old
     // herd-support version is gone, not just renamed.
     for (const node of Object.values(bodySlam.tree!)) {

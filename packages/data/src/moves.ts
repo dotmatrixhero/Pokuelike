@@ -4156,8 +4156,11 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // Real, immediate de-escalation — not herd-scoped like this sim's
         // other aura passives: whoever's nearby, herd-mate or rival alike,
-        // finds less reason to start something too.
-        grantsPassive: { kind: "calmingPresence", value: 0.5 },
+        // finds less reason to start something too. A real notable-tier
+        // number, not the branch's own biggest one — direct feedback that
+        // this was reading as the true capstone, crowding out the actual
+        // keystone below.
+        grantsPassive: { kind: "calmingPresence", value: 0.3 },
         delta: {},
       },
       quiet_ground: {
@@ -4197,13 +4200,15 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       left_in_peace: {
         id: "left_in_peace",
-        name: "Left in Peace",
+        name: "Undisturbed",
         cost: 2,
         prerequisitesAnyOf: [["wide_berth"], ["steady_nerve"]],
         leaning: "sociability",
         // It doesn't go looking for trouble, but whatever finds it anyway
         // doesn't enjoy the experience — real self-defense without ever
-        // being the one who started it.
+        // being the one who started it. Direct feedback moved this node's
+        // own name down from the keystone: a solid notable-tier effect on
+        // its own, just not the branch's biggest moment.
         grantsPassive: { kind: "thorns", value: 0.08 },
         delta: {},
       },
@@ -4217,19 +4222,23 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       undisturbed: {
         id: "undisturbed",
-        name: "Undisturbed",
+        name: "At Peace",
         cost: 2,
         prerequisites: ["unbroken_calm"],
         leaning: "sociability",
-        // The branch's real "final form": its presence alone keeps the
-        // whole area calm, wider than ever, and on the rare occasion it's
-        // still bothered anyway, it comes to regret it (same "two
-        // passives, one keystone" shape as Scratch's Colony Warmth, all-new
-        // content — the old version of this keystone shared a flat heal
-        // with a herd this move no longer assumes exists).
+        // The branch's real "final form" — direct feedback that the old
+        // version of this keystone (a modest top-up on levers already
+        // granted earlier) read smaller than No Quarrel's own big jump
+        // mid-branch, backwards for a capstone. Real escalation instead: a
+        // decisive calmingPresence jump — bigger than every earlier grant
+        // on this branch combined — paired with a genuinely new lever for
+        // this branch (`defenseBoost`, not reused from anywhere else in
+        // Sociability): the whole area finally settles around it, and
+        // anything that still tries can't even make a dent (same "two
+        // passives, one keystone" shape as Scratch's Colony Warmth).
         grantsPassives: [
-          { kind: "calmingPresence", value: 0.25 },
-          { kind: "thorns", value: 0.05 },
+          { kind: "calmingPresence", value: 0.5 },
+          { kind: "defenseBoost", value: 0.08 },
         ],
         delta: {},
       },

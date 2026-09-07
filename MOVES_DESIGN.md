@@ -1922,7 +1922,7 @@ generic enough to also fit a second body.
   defense buff — nothing lands at all), then leaps 5 tiles and lands a
   +40-power hit — or fizzles for nothing if the target's gone by then, a
   real risk for committing this hard, not a guaranteed payoff.
-- **Sociability ("Undisturbed")**: rebuilt from scratch after a direct
+- **Sociability ("At Peace")**: rebuilt from scratch after a direct
   correction on the first draft — "Snorlax tends not to be in a herd. Very
   solo style... maybe Snorlax is more peaceful and gets along with others
   easier." The original branch (*Broad Back*, ally heals/buffs, a
@@ -1931,14 +1931,25 @@ generic enough to also fit a second body.
   despite its size — is now a genuine non-territorial, de-escalating
   presence, not a flat ally buff: *Unbothered* (`"nonTerritorial"`, a new
   passive — it never picks a fight over a resource) → *No Quarrel*
-  (`"calmingPresence"`, another new passive — anything nearby, herd or
+  (`"calmingPresence"` 0.3, another new passive — anything nearby, herd or
   not, calms down too) → a real fork, *Wide Berth* (deepens
-  `calmingPresence` further) vs. *Steady Nerve* (`regen` instead) → *Left
-  in Peace* (`thorns` — doesn't start anything, but whatever finds it
-  anyway regrets it) → keystone *Undisturbed* (`grantsPassives`, both
-  `calmingPresence` and `thorns` at once — a real "two passives, one
-  keystone" finale, all-new content, not the old herd-scoped heal wearing
-  a new name).
+  `calmingPresence` further) vs. *Steady Nerve* (`regen` instead) →
+  *Undisturbed* (`thorns` — doesn't start anything, but whatever finds it
+  anyway regrets it) → keystone **At Peace** (`grantsPassives`,
+  `calmingPresence` 0.5 + `defenseBoost` — a real "two passives, one
+  keystone" finale). Second pass on this branch, direct follow-up: "No
+  quarrel reads as the true capstone. It's a big effect. Undisturbed
+  seems like... it could be a different effect and swapped down." Fair —
+  the first version's keystone (0.25 `calmingPresence` + 0.05 `thorns`)
+  read smaller than No Quarrel's own 0.5 mid-branch, backwards for a
+  capstone. Fixed by trading places: the *name* "Undisturbed" moved down
+  onto the old *Left in Peace* notable (mechanically unchanged, still just
+  `thorns`), No Quarrel's own number came down to 0.3 (a real notable
+  number, not the branch's biggest), and the actual keystone got a
+  decisively bigger `calmingPresence` jump (0.5, more than every earlier
+  grant on the branch) paired with a lever no other Sociability node
+  uses (`defenseBoost`) — genuinely new content at the top, not a smaller
+  echo of what came before.
 - **Crosslinks**, each deepening its own introduced lever rather than a
   generic bolt-on (principle 13), each reaching both branches it actually
   touches (principle 11), each landing one step before its target fork,
