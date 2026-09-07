@@ -4248,3 +4248,22 @@ not something this pathfinding pass itself caused or is positioned to fix.
       double-firing via the head listener, and still respecting the
       drag-vs-tap `moved` check). Verified the template's encoding and
       script syntax before rebuilding. Atlas rebuilt and republished.
+- [x] **Fixed Marked Undertow's genuinely broken-looking layout position** —
+      direct report: "hydro pump marked undertow has some weird bridges
+      that are not correct." Real bug, not a feel thing: every other
+      crosslink bridges two branch openers (depth 0), so a fixed radius
+      right at the hub was always correct for them — but Marked Undertow
+      requires Undertow Pull, itself behind Aggression's entire fork chain
+      (depth 7), and `computeLayout` positioned every crosslink at that
+      same fixed hub radius regardless. Its own edge to Undertow Pull had
+      to cut diagonally across most of the Aggression branch to reach it.
+      Fixed by scaling each crosslink's radius with the real depth of its
+      own deepest prerequisite, reusing the per-branch depth map
+      `computeLayout` already builds — verified directly: Marked Undertow
+      moved from `(-73,-56)` (right at the hub) to `(-418,-241)`, now at
+      roughly the same radius as Undertow Pull itself, so the edge reads
+      as a real bridge between two expensive investments instead of a
+      line slashing across the graph. Re-verified zero missing/duplicate/
+      near-overlapping positions across all four trees before rebuilding;
+      full data suite unaffected and still green (193/193). Atlas rebuilt
+      and republished.

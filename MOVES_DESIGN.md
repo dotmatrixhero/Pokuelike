@@ -1614,6 +1614,27 @@ Fixed by grouping crosslinks by the pair of branches they touch and
 spreading multiples along the perpendicular, the same pattern already
 used for branch forks.
 
+**A second, real layout bug in the same node, found by direct report**:
+"hydro pump marked undertow has some weird bridges that are not correct."
+*Marked Undertow* is architecturally different from every other crosslink
+in the roster — every other one bridges two branch *openers*
+(`prerequisites` at depth 0, like Building Pressure + Wading Advance), so
+a fixed radius right next to the hub was always correct for them. Marked
+Undertow instead requires `undertow_pull`, itself behind Aggression's
+*entire* fork chain (depth 7) — but `computeLayout` positioned every
+crosslink at the same fixed hub radius regardless, so Marked Undertow's
+own edge to Undertow Pull had to cut diagonally across most of the
+Aggression branch to reach it, reading as broken rather than just
+expensive. Fixed by scaling each crosslink's radius with the real depth
+of its own deepest prerequisite (reusing the same per-branch `depth` map
+`computeLayout` already builds) — a shallow crosslink still sits right at
+the hub as before, but Marked Undertow now sits out near where Undertow
+Pull actually is, so the edge reads as a real, deliberate bridge between
+two expensive investments instead of a random line slashing through the
+graph. Verified directly: recomputed Hydro Pump's real layout before and
+after — Marked Undertow moved from `(-73,-56)` (right at the hub) to
+`(-418,-241)`, now at roughly the same radius as Undertow Pull itself.
+
 - **`SituationalCondition: "rallyMarked"` (Shipped)** — the defender
   currently has an active `rallyMarkTicksRemaining`. Same one-line-
   enum-addition pattern as `"flanking"`/`"targetLowHp"`

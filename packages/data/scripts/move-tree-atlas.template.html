@@ -751,13 +751,22 @@
       });
     });
 
-    // crosslinks: sit at the angular midpoint between the two branches they bridge,
-    // at a small radius, forming a triangle around the hub. Two different
-    // crosslinks can bridge the same branch pair (e.g. Hydro Pump's Wake of
-    // Violence and Marked Undertow both touch Sociability+Aggression) — group
-    // by pair and spread them along the perpendicular so they don't land on
-    // the exact same point.
-    var crosslinksByPair = {};
+    // crosslinks: sit at the angular midpoint between the two branches they
+    // bridge. Most bridge two branch openers (depth 0) and belong right
+    // next to the hub — but one that requires deep, expensive nodes from
+    // both sides instead (Hydro Pump's Marked Undertow needs Undertow
+    // Pull, itself behind the ENTIRE Aggression fork) can't sit at that
+    // same fixed hub radius without its own edge cutting straight across
+    // the whole graph — direct report: "hydro pump marked undertow has
+    // some weird bridges that are not correct." Radius now scales with how
+    // deep the crosslink's own real prerequisites actually sit, using the
+    // same per-branch depth already computed above, so it lands out near
+    // where those nodes really are. Two different crosslinks can still
+    // bridge the same branch pair at the same real depth (e.g. Wake of
+    // Violence and an equally-shallow sibling) — grouped by pair+radius and
+    // spread along the perpendicular so they don't land on the exact same
+    // point.
+    var crosslinksByKey = {};
     crosslinks.forEach(function (id) {
       var node = tree[id];
       var parents = node.prerequisites.map(function (p) { return tree[p]; }).filter(Boolean);
@@ -767,15 +776,17 @@
       // pick the midpoint that is the SHORT way around (they're always 120 deg apart)
       var mid = (a1 + a2) / 2;
       if (Math.abs(a1 - a2) > 180) mid += 180;
-      var pairKey = [branchesTouched[0], branchesTouched[1]].sort().join("|");
-      (crosslinksByPair[pairKey] = crosslinksByPair[pairKey] || []).push({ id: id, mid: mid });
+      var maxParentDepth = Math.max.apply(null, node.prerequisites.map(depthOf).concat([0]));
+      var r = R0 * 1.42 + maxParentDepth * RSTEP;
+      var pairKey = [branchesTouched[0], branchesTouched[1]].sort().join("|") + "@" + Math.round(r);
+      (crosslinksByKey[pairKey] = crosslinksByKey[pairKey] || []).push({ id: id, mid: mid, r: r });
     });
-    Object.keys(crosslinksByPair).forEach(function (pairKey) {
-      var group = crosslinksByPair[pairKey];
+    Object.keys(crosslinksByKey).forEach(function (pairKey) {
+      var group = crosslinksByKey[pairKey];
       var mid = group[0].mid;
+      var r = group[0].r;
       var rad = mid * Math.PI / 180;
       var perp = rad + Math.PI / 2;
-      var r = R0 * 1.42;
       var n = group.length;
       group.forEach(function (entry, i) {
         var offset = (i - (n - 1) / 2) * (FORK_OFFSET * 0.7);
