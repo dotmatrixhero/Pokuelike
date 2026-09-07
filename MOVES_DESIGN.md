@@ -272,6 +272,7 @@ grepping for "needs" across the whole file.
 | Terrain-conditional ally speed aura (`PassiveKind` `"aquaticHaste"`) | Hydro Pump's Pod Tide capstone — direct ask, after two rounds of feedback that its capstone didn't match the branch's own fantasy: "it would be better if it granted all allies greatly more speed when they're on water tiles" | **Shipped** — `support.ts`'s `aquaticHasteMultiplier`, composed into `actionSpeedOf`'s existing multiplier chain (simulation.ts): a same-herd agent within a fixed radius of the passive-holder (itself included) gets a real Speed bonus, but only while THAT agent is currently standing on a `"water"` tile (`world.ts`'s `tileAt`). The first passive in the roster that's both an aura (like `healAura`) AND terrain-conditional (like `terrainSpeedMultiplier`) — neither existing mechanism covered this alone. First real content: Hydro Pump's *Tidal Communion* |
 | Mid-commit charge/wind-up + genuine invulnerability (`MoveSpec.chargeAttack` → `Agent.chargingAttack`) | Body Slam's Boldness keystone (The Reckoning) — direct ask, "you're on the right track but it needs more than just bulk and defense... could add a charge up turn... another notable could make him invulnerable to damage for that charge up... a huge leap/movement tied to the skill" | **Shipped** — `resolveHit` (predation.ts) sets `Agent.chargingAttack` instead of resolving immediately, reusing the existing `actionLockTicks` block for "can't act" (no new no-action guard needed); `resolveHitAgainstTarget` checks it before even rolling accuracy for genuine, unconditional invulnerability; `tickStatusEffects` (status.ts) ticks it down as pure bookkeeping (deliberately not resolving it there — a real status.ts/predation.ts import cycle); `tickAgentNeeds` (needs.ts, which already imports from predation.ts) calls the new `resolveChargedAttack` once ticks hit 0, which looks the original target back up by id (it may have moved, changed layer, or died since), leaps toward wherever it currently is, and lands the hit at a bonus power — or fizzles for nothing if the target's gone. The single biggest new primitive on this whole checklist — a real mid-commit agent state, not just another delta field. First real content: Body Slam's *The Reckoning* |
 | Non-territorial opt-out + de-escalation aura (`PassiveKind` `"nonTerritorial"`/`"calmingPresence"`) | Body Slam's Sociability branch, redesigned after a direct correction on the first draft: "Snorlax tends not to be in a herd. Very solo style... maybe Snorlax is more peaceful and gets along with others easier" — the original branch was built entirely on herd-scoped ally buffs, the wrong fantasy for a solitary animal | **Shipped** — both hook into herdConflict.ts, not a move-hit path: `"nonTerritorial"` is a flat opt-out checked at the top of `applyHerdRivalryConflict` (the holder never initiates a fight over a contested tile, though it can still be found and fought as someone else's rival); `"calmingPresence"` multiplies down `herdConflictChance` for any living, same-layer agent within a fixed radius, deliberately NOT herd-scoped like `healAura`/`aquaticHaste` — a genuinely solitary animal's calm reaches both sides of a nearby standoff, not just its own herd-mates. First real content: Body Slam's *Unbothered*/*No Quarrel*/*Undisturbed* |
+| Cooldown-gated hit negation (`PassiveKind` `"unshaken"` → `Agent.unshakenCooldownTicks`) | Body Slam's Unbothered opener, redesigned after a direct follow-up: "Unbothered should be, takes no damage from first hit in a fight?" — and a real structural fix, surfaced by the user's own hesitation when asked where `nonTerritorial` should land instead ("it's like an interesting trait for a snorlax out in the wild but if it joins your party is a super bad skill to have... maybe its an upfront cost to have a dead node"): `nonTerritorial` was the opener's ONLY payoff, and it's functionally dead the moment this move is actually used in a real fight | **Shipped** — same "nothing about this hit happens at all" shape as `chargeAttack`'s own invulnerability check, right below it in `resolveHitAgainstTarget` (predation.ts): while off cooldown, fully negates the next hit against the holder (no accuracy roll, no damage, no side effects), then sets `Agent.unshakenCooldownTicks` to lock itself out until `tickUnshaken` (status.ts, wired into `tickStatusEffects` alongside `tickChargingAttack`) counts it back down to 0. A genuine "doesn't even flinch the first time" shield — distinct from `damageReduction`'s flat percentage and from `chargeAttack`'s timed wind-up window. `nonTerritorial` moved down to a new filler node (*Not Worth It*) instead of being deleted — the wild-AI flavor is still real, it's just no longer squatting on the branch's one guaranteed-useful-in-combat slot. First real content: Body Slam's *Unbothered* (now grants `unshaken`) and *Not Worth It* (now grants `nonTerritorial`) |
 | Persistent stat stages (`Agent`-level Attack/Defense/etc. modifiers, settable by a move, lasting until cured — distinct from burn's one-off computed halving, which just derives a stage from `agent.status` fresh at each `calculateDamage` call rather than storing one) | Growl specifically (`statStageMultiplier` already exists in combat.ts as a pure function; burn now calls it, but from a computed value, not a stored `Agent.statStages` field) | **Shipped** — `Agent.statStages` (an array of `{stat, stage, ticksRemaining?}` entries, `status.ts`'s `applyStatStage`/`getStatStage`), fed into `calculateDamage`'s existing stat-stage machinery for both attacker and defender, and composing additively with burn's own -2 Attack. `MoveSpec.statChangeOnHit` is the move-level lever: `target: "self"` applies the instant the move is used, `target: "defender"` only on a landed, non-killing hit. **Growl itself is still not built** — it needs this primitive plus multi-target/AoE (both now shipped) plus a no-damage/status-move representation, which remains the one open piece |
 | Status-effect system (burn/poison DOT, paralysis/sleep/freeze) | Ember's/Flamethrower's burn chance, previously idle | **Shipped** — see DESIGN.md's "Status effects" section. Constrict's designed root effect still needs a sixth `StatusKind` (`"root"`), not modeled yet |
 | Idle/opportunistic utility-move trigger (`MoveSpec.utilityMove` + `utilityMoves.ts`'s `maybeUseUtilityMove`) | Growth, Agility, Rain Dance, and every other self/tile-effect move on this whole list — the real gap this section's own "why status effects and environmental moves are two different systems" note predicted | **Shipped** — the third trigger path, alongside the hostile hit pipeline and the ally-support one, checked whenever `chooseBehavior(agent.needs) === "idle"` (needs.ts, NOT `agent.behavior === "idle"` — see this section's own note on why that gate under-fired in a real run). `pickBestMove` excludes `utilityMove`-flagged moves from hostile selection, same as `burrow`. First real content: 13 curated moves, see "Environmental utility moves" above |
@@ -1929,10 +1930,9 @@ generic enough to also fit a second body.
   `healAura` keystone) was a real fantasy mismatch: it assumed a herd this
   specific animal usually doesn't have. The real trait — famously placid
   despite its size — is now a genuine non-territorial, de-escalating
-  presence, not a flat ally buff: *Unbothered* (`"nonTerritorial"`, a new
-  passive — it never picks a fight over a resource) → *No Quarrel*
-  (`"calmingPresence"` 0.3, another new passive — anything nearby, herd or
-  not, calms down too) → a real fork, *Wide Berth* (deepens
+  presence, not a flat ally buff: *Unbothered* → *Not Worth It* →
+  *No Quarrel* (`"calmingPresence"` 0.3, another new passive — anything
+  nearby, herd or not, calms down too) → a real fork, *Wide Berth* (deepens
   `calmingPresence` further) vs. *Steady Nerve* (`regen` instead) →
   *Undisturbed* (`thorns` — doesn't start anything, but whatever finds it
   anyway regrets it) → keystone **At Peace** (`grantsPassives`,
@@ -1949,7 +1949,20 @@ generic enough to also fit a second body.
   decisively bigger `calmingPresence` jump (0.5, more than every earlier
   grant on the branch) paired with a lever no other Sociability node
   uses (`defenseBoost`) — genuinely new content at the top, not a smaller
-  echo of what came before.
+  echo of what came before. Third pass, direct follow-up on the opener
+  itself: "Unbothered should be, takes no damage from first hit in a
+  fight?" — fair, and it exposed a real structural problem with the
+  original opener: its only payoff, `nonTerritorial`, is functionally dead
+  the instant this move sees real combat (per the user's own hesitation
+  when asked where it should land instead: "it's like an interesting trait
+  for a snorlax out in the wild but if it joins your party is a super bad
+  skill to have"). Fixed by giving *Unbothered* a genuinely new mechanic,
+  `"unshaken"` — fully negates the next hit against the holder once it's
+  off cooldown, no accuracy roll, no partial effects, the literal read of
+  the node's own name — and relocating `nonTerritorial` one step down to a
+  new filler node, *Not Worth It* (the wild-AI flavor is still real, it's
+  just no longer squatting on the branch's one guaranteed-useful-in-combat
+  slot).
 - **Crosslinks**, each deepening its own introduced lever rather than a
   generic bolt-on (principle 13), each reaching both branches it actually
   touches (principle 11), each landing one step before its target fork,
@@ -1969,36 +1982,41 @@ generic enough to also fit a second body.
 
 39 nodes total (10 per branch + 3 crosslinks × 3). First shipped tree to
 need genuinely new engine primitives rather than just picking the right
-existing lever — two of them, both direct follow-up asks after the first
-version shipped: `chargeAttack`/`Agent.chargingAttack` (a real mid-commit
-wind-up with genuine invulnerability, powering The Reckoning) and
-`"nonTerritorial"`/`"calmingPresence"` (herdConflict.ts hooks, powering
-the whole Sociability rebuild). `packages/engine/test/predation.test.ts`
-covers the charge mechanic directly (commits without hitting immediately,
-genuine invulnerability against a real attacker, resolves after its ticks
-elapse with a real leap, fizzles for no damage if the target's gone);
-`packages/engine/test/herdConflict.test.ts` covers both new passives
-(opts out of initiating, can still be targeted as someone else's rival,
-dampens a third agent's own chance regardless of herd, no effect beyond
-its radius). Engine suite green (1004/1004, aside from one pre-existing,
-unseeded-RNG flake in `reproduction.test.ts` unrelated to this work).
+existing lever — three of them now, all direct follow-up asks across
+successive rounds of feedback: `chargeAttack`/`Agent.chargingAttack` (a
+real mid-commit wind-up with genuine invulnerability, powering The
+Reckoning), `"nonTerritorial"`/`"calmingPresence"` (herdConflict.ts hooks,
+powering the whole Sociability rebuild), and `"unshaken"`/
+`Agent.unshakenCooldownTicks` (a cooldown-gated full hit negation, fixing
+the opener's own dead-node problem — see the checklist above).
+`packages/engine/test/predation.test.ts` covers the charge mechanic
+directly (commits without hitting immediately, genuine invulnerability
+against a real attacker, resolves after its ticks elapse with a real
+leap, fizzles for no damage if the target's gone) and the `unshaken`
+mechanic (a hit off cooldown does nothing at all, a second hit while on
+cooldown lands normally, no effect without the passive, recharges after
+enough ticks); `packages/engine/test/herdConflict.test.ts` covers both
+herd-conflict passives (opts out of initiating, can still be targeted as
+someone else's rival, dampens a third agent's own chance regardless of
+herd, no effect beyond its radius). Engine suite green (1008/1008).
 `packages/data/test/moveTrees.test.ts`'s generic per-tree suite covers
 structural integrity automatically; the dedicated "Body Slam tree"
-describe block was rewritten alongside the redesign — the keystone AoE
-and its relocated `weightScaling`, The Reckoning's real `chargeAttack`,
-Undisturbed's two passives, the solitary Sociability branch's real
-passives (and a direct check that no `targetsAlly`/`allyEffect` survives
-anywhere on it), both forks, and all three crosslink bridges' own wiring
-and lever-deepening. Full data suite green (210/210). Atlas rebuilt
-(verified: no null bytes, inline script re-parses, `computeLayout`
-produces a complete, non-overlapping position for all 39 nodes; the
-`PASSIVE_LABEL`/`describeDelta` maps in the template gained real entries
-for `nonTerritorial`, `calmingPresence`, and `chargeAttack`) and
-republished. Also fixed in the same pass: the Atlas's `MOVE_ORDER` picker
-list is hand-maintained, separate from the tree data itself — Body Slam's
-tree had been in the data all along but never appeared in the move picker
-because it was never added there; added a new "Single-species" group for
-it.
+describe block was rewritten alongside each redesign round — the keystone
+AoE and its relocated `weightScaling`, The Reckoning's real
+`chargeAttack`, Undisturbed's two passives, Unbothered's real `unshaken`
+grant and Not Worth It's `nonTerritorial` (and a direct check that no
+`targetsAlly`/`allyEffect` survives anywhere on the branch), both forks,
+and all three crosslink bridges' own wiring and lever-deepening. Full
+data suite green (212/212). Atlas rebuilt (verified: no null bytes,
+inline script re-parses, `computeLayout` produces a complete,
+non-overlapping position for all 39 nodes; the `PASSIVE_LABEL`/
+`describeDelta` maps in the template gained real entries for
+`nonTerritorial`, `calmingPresence`, `chargeAttack`, and `unshaken`) and
+republished. Also fixed in an earlier pass: the Atlas's `MOVE_ORDER`
+picker list is hand-maintained, separate from the tree data itself — Body
+Slam's tree had been in the data all along but never appeared in the move
+picker because it was never added there; added a new "Single-species"
+group for it.
 
 ### Pending brainstorm — Earthquake / Hydro Pump / Solar Beam (not yet built)
 

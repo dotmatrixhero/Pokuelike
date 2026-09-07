@@ -1029,6 +1029,79 @@ describe("chargeAttack: a genuine mid-commit wind-up (Agent.chargingAttack, Body
   });
 });
 
+describe("unshaken: fully negates the next hit, once, then recharges (Agent.unshakenCooldownTicks, Body Slam's Unbothered)", () => {
+  it("the first hit against a holder off cooldown does nothing at all — no damage, no event", () => {
+    const world = createWorld(10, 10);
+    const unshakenPrey = prey({ x: 5, y: 5 }, { hp: 10, passives: { unshaken: 1 } });
+    const hunter = predator({ x: 6, y: 5 });
+    world.agents.push(hunter, unshakenPrey);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    expect(unshakenPrey.hp).toBe(10);
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought" }));
+    // Not asserting the exact constant (20): agents tick in array order within
+    // the same world tick, so the defender's own tickStatusEffects call (which
+    // decrements this) can run in the same tick right after the cooldown gets
+    // set, one tick "ahead" depending on push order — a real, harmless
+    // ordering quirk, not a bug. What matters is that it's real and running.
+    expect(unshakenPrey.unshakenCooldownTicks).toBeGreaterThan(0);
+  });
+
+  it("a second hit while the shield is still on cooldown lands normally", () => {
+    const world = createWorld(10, 10);
+    const unshakenPrey = prey({ x: 5, y: 5 }, { hp: 10, passives: { unshaken: 1 } });
+    const hunter = predator({ x: 6, y: 5 });
+    world.agents.push(hunter, unshakenPrey);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // shield consumed, no damage
+    // The (blocked) hit still reads as a real threat, so the prey's own flee
+    // instinct kicks in and it steps away — pin both back adjacent so this
+    // tick's attack is guaranteed to be in range again, same as the first.
+    hunter.pos = { x: 6, y: 5 };
+    unshakenPrey.pos = { x: 5, y: 5 };
+    hunter.moveCooldowns = {}; // let it swing again immediately
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // shield still down — this one lands
+
+    expect(unshakenPrey.hp).toBeLessThan(10);
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought" }));
+  });
+
+  it("without the passive, a hit lands normally even with unshakenCooldownTicks at 0", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 });
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    expect(target.hp).toBeLessThan(10);
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought" }));
+  });
+
+  it("the shield recharges after enough ticks pass with no further hits", () => {
+    const world = createWorld(10, 10);
+    const unshakenPrey = prey({ x: 5, y: 5 }, { hp: 10, passives: { unshaken: 1 }, unshakenCooldownTicks: 1 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [{ ...TEST_MOVE, id: "slow-move", cooldownTicks: 30 }] });
+    world.agents.push(hunter, unshakenPrey);
+
+    // Tick once with the hunter's own move on cooldown so it can't attack —
+    // just to let unshakenCooldownTicks itself count down to 0 first.
+    hunter.moveCooldowns = { "slow-move": 5 };
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+    expect(unshakenPrey.unshakenCooldownTicks).toBe(0);
+
+    hunter.moveCooldowns = {};
+    hunter.pos = { x: 6, y: 5 };
+    unshakenPrey.pos = { x: 5, y: 5 }; // pin back adjacent in case the standoff moved it
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+    expect(unshakenPrey.hp).toBe(10); // recharged in time to no-sell this hit too
+  });
+});
+
 describe("multi-hit wired into real combat (resolveHit)", () => {
   it("strikes exactly hits.min===max times, each its own 'fought' event, until the hit count is used up or the target dies", () => {
     const FLURRY_MOVE: MoveSpec = { ...TEST_MOVE, id: "flurry-move", hits: { min: 3, max: 3 } };

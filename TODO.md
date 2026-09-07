@@ -4459,3 +4459,42 @@ not something this pathfinding pass itself caused or is positioned to fix.
       that the keystone's own `calmingPresence` value is strictly greater
       than No Quarrel's; full data suite green (211/211). Atlas rebuilt
       and republished.
+- [x] **Body Slam: gave Unbothered a real combat mechanic, fixed its own
+      dead-node problem** — direct follow-up: "Unbothered should be,
+      takes no damage from first hit in a fight?" Digging into where its
+      *actual* payoff (`nonTerritorial`) should live instead surfaced the
+      real structural problem: `nonTerritorial` was the opener's ONLY
+      grant, and it's functionally dead the instant this move sees real
+      combat — a wild-AI flavor pick, not a party skill. The user's own
+      hesitant answer nailed it: "it's like an interesting trait for a
+      snorlax out in the wild but if it joins your party is a super bad
+      skill to have... maybe its an upfront cost to have a dead node to
+      get the more powerful calming aura." Rather than accept that
+      trade-off, built a new primitive: **`"unshaken"`**
+      (`PassiveKind` → `Agent.unshakenCooldownTicks`) — fully negates the
+      next hit against the holder once it's off cooldown (no accuracy
+      roll, no partial damage, nothing at all happens), then locks itself
+      out for `UNSHAKEN_COOLDOWN_TICKS` (20) until it recharges. Same
+      "genuinely nothing happens" shape as `chargeAttack`'s own
+      invulnerability check, right below it in `resolveHitAgainstTarget`
+      (predation.ts); `tickUnshaken` (status.ts) ticks the cooldown down
+      alongside `tickChargingAttack`. *Unbothered* now grants `unshaken`
+      directly (the literal read of its own name); `nonTerritorial` moved
+      one step down to a new filler node, **Not Worth It** — still real,
+      still earns its point, just no longer squatting on the branch's one
+      guaranteed-useful-in-combat slot. 4 new engine tests
+      (`predation.test.ts`): a hit off cooldown does nothing at all (no
+      damage, no `fought` event), a second hit while still on cooldown
+      lands normally, no effect at all without the passive, and it
+      recharges after enough ticks pass with no further hits (two of
+      these needed a real fix mid-debug: agents tick in array-push order
+      within one `tickWorld` call, so a defender's own cooldown-tick can
+      run in the same tick right after being set — a harmless ordering
+      quirk, not a bug — and even a fully-negated hit still reads as a
+      real threat to the target's own flee AI, so the test has to pin
+      both agents back adjacent before a scripted second attack).
+      Rewrote the moveTrees.test.ts assertions for Unbothered/Not Worth
+      It's swapped grants. Full data suite green (212/212), engine suite
+      green (1008/1008). MOVES_DESIGN.md's primitives checklist and Body
+      Slam writeup updated; Atlas's `PASSIVE_LABEL` map got a real
+      `unshaken` entry; rebuilt and republished.

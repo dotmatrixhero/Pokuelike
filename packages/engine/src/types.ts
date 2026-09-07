@@ -49,7 +49,12 @@ export type StatusKind = "burn" | "poison" | "paralysis" | "sleep" | "freeze";
  * chance multiplied down, deliberately NOT herd-scoped like `healAura`/
  * `aquaticHaste`: a genuinely solitary animal that just isn't worth
  * fighting near calms down *both* sides of a nearby standoff, not just its
- * own herd-mates). See MOVES_DESIGN.md's primitives checklist.
+ * own herd-mates), and `"unshaken"` (predation.ts's `resolveHitAgainstTarget`
+ * — the next hit against the holder is fully negated, no accuracy roll, no
+ * partial effects, exactly like `chargingAttack`'s own invulnerability
+ * window, then `Agent.unshakenCooldownTicks` locks it out until it recharges
+ * — a real, felt "doesn't even flinch the first time" rather than a flat
+ * damage-reduction percentage). See MOVES_DESIGN.md's primitives checklist.
  */
 export type PassiveKind =
   | "damageReduction"
@@ -60,7 +65,8 @@ export type PassiveKind =
   | "defenseBoost"
   | "aquaticHaste"
   | "nonTerritorial"
-  | "calmingPresence";
+  | "calmingPresence"
+  | "unshaken";
 
 /**
  * Why a herd is (or was) migrating — see herdMigration.ts/DESIGN.md's
@@ -692,6 +698,18 @@ export interface Agent {
     /** The same `faintKind` `resolveHit` was originally called with — a hunt's "killed" vs. a rivalry/mob-fight's "defeated" — so the delayed release resolves in the same context it started in, not a guessed default. */
     faintKind: "killed" | "defeated";
   };
+  /**
+   * Ticks remaining before the `"unshaken"` passive can trigger again — set
+   * to `UNSHAKEN_COOLDOWN_TICKS` (predation.ts) the instant it fully negates
+   * a hit (`resolveHitAgainstTarget`), ticked down every tick regardless of
+   * action (`tickStatusEffects`, status.ts, same shape as
+   * `burrowedTicksRemaining`). While this is 0 (the default) and the agent
+   * holds `"unshaken"`, the very next hit against it does nothing at all —
+   * no accuracy roll, no damage, no status/knockback — then this locks the
+   * shield out until it recharges. Absent/0 = ready, the default for every
+   * agent, whether or not it holds the passive.
+   */
+  unshakenCooldownTicks?: number;
   /**
    * Ticks remaining during which this agent (and, per `MoveSpec.
    * statusImmunityAura`'s `radius`, any living same-herd ally within it)

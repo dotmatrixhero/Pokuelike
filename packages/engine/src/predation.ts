@@ -206,6 +206,8 @@ export function huntHungerThreshold(world: World, agent: Agent, tick: number): n
 /** Fallback HP for an agent with no real combat profile (stats/level/types) — shouldn't happen for fully-statted species. Exported so support.ts's body-weight proxy can match it. */
 export const FALLBACK_MAX_HP = 10;
 const FALLBACK_DAMAGE = 1;
+/** Ticks the `"unshaken"` passive locks out after fully negating a hit — see `Agent.unshakenCooldownTicks`'s own doc comment (types.ts). */
+const UNSHAKEN_COOLDOWN_TICKS = 20;
 /** A predator at or below this fraction of max HP flees a fight instead of continuing it. See `retreatHpFraction` for the juvenile-aware version actually used. */
 const RETREAT_HP_FRACTION = 0.4;
 /**
@@ -1049,6 +1051,14 @@ function resolveHitAgainstTarget(
   // own doc comment (types.ts): no accuracy roll, no partial effects, this
   // attack simply doesn't land at all while the wind-up is in progress.
   if (defender.chargingAttack) return false;
+  // `"unshaken"` fully negates the next hit against the holder, once it's
+  // off cooldown — same "nothing about this hit happens at all" shape as
+  // the charging check above, just gated by a recharging shield instead of
+  // a timed wind-up. See PassiveKind's own doc comment (types.ts).
+  if ((defender.passives?.unshaken ?? 0) > 0 && (defender.unshakenCooldownTicks ?? 0) <= 0) {
+    defender.unshakenCooldownTicks = UNSHAKEN_COOLDOWN_TICKS;
+    return false;
+  }
 
   defender.maxHp = defender.maxHp ?? defender.stats?.maxHp ?? FALLBACK_MAX_HP;
   defender.hp = defender.hp ?? defender.maxHp;

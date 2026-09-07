@@ -4116,29 +4116,37 @@ export const MOVES: Record<string, MoveSpec> = {
       // be in a herd. Very solo style... maybe Snorlax is more peaceful and
       // gets along with others easier." Real mechanics for it, not a flat
       // ally buff: it never picks a fight over a resource
-      // (`"nonTerritorial"`), and anything nearby — herd or not, rival or
-      // not — calms down just being near it (`"calmingPresence"`,
-      // herdConflict.ts). See both `PassiveKind`s' own doc comments,
-      // types.ts.) ---
+      // (`"nonTerritorial"`), it doesn't even flinch the first time
+      // something actually lands a hit (`"unshaken"`), and anything nearby
+      // — herd or not, rival or not — calms down just being near it
+      // (`"calmingPresence"`, herdConflict.ts). See all three `PassiveKind`s'
+      // own doc comments, types.ts. ---
       unbothered: {
         id: "unbothered",
         name: "Unbothered",
         cost: 1,
         leaning: "sociability",
-        // A flat opt-out, live from the first point spent — it simply never
-        // starts something over a contested tile. Doesn't stop it being
-        // targeted as someone ELSE's rival; it just never picks the fight
-        // itself.
-        grantsPassive: { kind: "nonTerritorial", value: 1 },
+        // Direct follow-up: "Unbothered should be, takes no damage from
+        // first hit in a fight?" Fair — `"nonTerritorial"` (this node's
+        // first draft) only ever mattered for wild-agent resource disputes,
+        // a dead pick the moment this move actually sees real combat.
+        // `"unshaken"` fixes that: the literal read of the node's own name,
+        // and useful in every fight, not just a wild-AI resource squabble.
+        grantsPassive: { kind: "unshaken", value: 1 },
         delta: {},
       },
       settled_ease: {
         id: "settled_ease",
-        name: "+5 Accuracy",
+        name: "Not Worth It",
         cost: 1,
         prerequisites: ["unbothered"],
         leaning: "sociability",
-        delta: { accuracy: 5 },
+        // `"nonTerritorial"` moved down from the old opener — still real,
+        // still earns its point (a wild Snorlax genuinely never starts a
+        // resource fight), just no longer squatting on the branch's one
+        // guaranteed-useful-in-combat slot.
+        grantsPassive: { kind: "nonTerritorial", value: 1 },
+        delta: {},
       },
       unhurried_reset: {
         id: "unhurried_reset",

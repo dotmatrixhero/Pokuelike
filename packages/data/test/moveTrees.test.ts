@@ -818,8 +818,16 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
     expect(bodySlam.tree!.left_in_peace.grantsPassive).toEqual({ kind: "thorns", value: 0.08 });
   });
 
-  it("Unbothered and No Quarrel (Sociability) grant the real non-herd passives the solitary redesign asked for", () => {
-    expect(bodySlam.tree!.unbothered.grantsPassive).toEqual({ kind: "nonTerritorial", value: 1 });
+  it("Unbothered grants a real combat-relevant passive (unshaken), not just a wild-AI-only opt-out", () => {
+    // Direct follow-up: nonTerritorial only ever mattered for wild-agent
+    // resource disputes — a dead pick the moment this move sees real combat.
+    // It moved down to Not Worth It; Unbothered itself now grants the
+    // literal read of its own name.
+    expect(bodySlam.tree!.unbothered.grantsPassive).toEqual({ kind: "unshaken", value: 1 });
+    expect(bodySlam.tree!.settled_ease.grantsPassive).toEqual({ kind: "nonTerritorial", value: 1 });
+  });
+
+  it("No Quarrel (Sociability) grants the real non-herd de-escalation passive the solitary redesign asked for", () => {
     expect(bodySlam.tree!.no_quarrel.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.3 });
     // No targetsAlly/allyEffect anywhere left on this branch — the old
     // herd-support version is gone, not just renamed.

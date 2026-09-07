@@ -180,6 +180,7 @@ export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rn
   tickMatingRadiusBoost(agent);
   tickBurrow(agent, world);
   tickChargingAttack(agent);
+  tickUnshaken(agent);
   applyRegenPassive(agent);
   applyHealAuraPassive(agent, world);
 
@@ -302,6 +303,12 @@ function tickBurrow(agent: Agent, world: World): void {
 function tickChargingAttack(agent: Agent): void {
   if (agent.alive === false || !agent.chargingAttack) return;
   agent.chargingAttack.ticksRemaining = Math.max(0, agent.chargingAttack.ticksRemaining - 1);
+}
+
+/** Ticks down the `"unshaken"` passive's recharge — see `Agent.unshakenCooldownTicks`'s own doc comment (types.ts). Pure bookkeeping, same shape as `tickBurrow`/`tickChargingAttack` above; the shield itself is checked and consumed directly in `resolveHitAgainstTarget` (predation.ts). No-op on a corpse. */
+function tickUnshaken(agent: Agent): void {
+  if (agent.alive === false || !agent.unshakenCooldownTicks) return;
+  agent.unshakenCooldownTicks = Math.max(0, agent.unshakenCooldownTicks - 1);
 }
 
 // --- Agent-modifying passives (Agent.passives) ---

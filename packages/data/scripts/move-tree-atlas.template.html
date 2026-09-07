@@ -895,6 +895,7 @@
     aquaticHaste: function (v) { return "Passive — every nearby herd-mate (itself included) moves " + pct(v) + " faster while standing on water."; },
     nonTerritorial: function () { return "Passive — never initiates a fight over a contested resource tile (can still be targeted by someone else's)."; },
     calmingPresence: function (v) { return "Passive — every nearby agent (herd or not, itself included) is " + pct(v) + " less likely to start a resource fight nearby."; },
+    unshaken: function () { return "Passive — the next hit against it does nothing at all (no damage, no side effects), then recharges on a cooldown."; },
   };
 
   function pct(v) { return Math.round(v * 1000) / 10 + "%"; }
