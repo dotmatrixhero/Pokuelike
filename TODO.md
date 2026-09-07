@@ -4210,3 +4210,28 @@ not something this pathfinding pass itself caused or is positioned to fix.
       Added 8 new end-to-end reachability tests (one representative
       bridge-into-both-sides check per new crosslink); full suite green
       (193/193 data). Atlas rebuilt and republished.
+- [x] **Redesigned every crosslink bridge — the first pass was a template,
+      not a fantasy** — direct, blunt feedback: "Your cross links are
+      laaaaaame tho... the skills don't feel cool." Fair: every one of the
+      11 new bridges from the rollout used the exact same shape (filler =
+      +8 accuracy, notable = +10 power/+0.2 defensePenetration/+0.05
+      lifesteal), interchangeable across all of them — precisely the
+      template problem principle #1 of this doc's own lessons-learned
+      guide warns about. Rebuilt every notable to deepen the specific
+      lever its own crosslink already introduced instead: Cracking
+      Momentum's lunge reaches further; Fault Convergence pairs power with
+      real recoil (never a pure downside, per lesson #4); Wake of
+      Violence's crit gets sharper before paying off via rallyMarked;
+      Warning Tremor's bracing becomes real ongoing regen; Rooted
+      Assault's armor-piercing roots grow into real thorns; Coordinated
+      Tremor's and Rolling Thunder's own rallyMarked payoffs deepen
+      further (1.3 → 1.6) instead of bolting on flat power. Direct
+      follow-up ask: "make one of the solar beam ones do like three width
+      beams as a capstone" — Territorial Flare's own notable (renamed
+      Triple Bloom) now turns into a genuine `hitsArea` cone (length 5,
+      width 3), Solar Beam's first real AoE anywhere in that tree — a
+      real capstone-tier shape change, not another stat bump. No new
+      engine primitives needed for any of it; every lever already existed,
+      this was about picking the *right* one per bridge. Two test
+      assertions updated to match the new mechanics; full suite green
+      (193/193 data). Atlas rebuilt and republished.

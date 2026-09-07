@@ -1554,36 +1554,56 @@ bridge:
   sets," so adding a crosslink-rooted node as one more alternative on
   each side's own pre-fork node is exactly what that field is for.
 
-**Rolled out to every crosslink in every v3 tree (Shipped).** Direct ask,
-once the pattern was validated: "Build out cross links for every branch
-and all moves." Every crosslink in Earthquake, Hydro Pump, Solar Beam,
-and Rock Throw now gets its own filler+notable bridge tail, wired into
-both connected branches' pre-fork nodes, exactly like Converged Ruin:
+**Rolled out to every crosslink in every v3 tree (Shipped), then
+redesigned once for being exactly the template problem this whole
+effort exists to avoid.** Direct ask, once the pattern was validated:
+"Build out cross links for every branch and all moves." The first pass
+across all 11 remaining crosslinks used the same shape every time —
+filler = `+8 accuracy`, notable = `+10 power`/`+0.2 defensePenetration`/
+`+0.05 lifestealFraction` — direct, blunt, correct feedback: "Your
+crosslinks are laaaaaame tho... the skills don't feel cool." That's
+principle #1 from this doc's own guide, violated by the person who wrote
+it: if a mechanic could be copy-pasted onto a different crosslink with
+only the numbers changed, it's a template, not a fantasy. Every bridge
+below was rebuilt so its notable **deepens the specific lever its own
+crosslink already introduced**, instead of a generic stat grab-bag —
+Cracking Momentum's lunge gets longer, Wake of Violence's crit gets
+sharper, Warning Tremor's damage reduction becomes real ongoing regen,
+Territorial Flare's own capstone became a real, flashy shape change:
 
-| Move | Crosslink | Filler → Notable | Reaches into |
+| Move | Crosslink | Filler → Notable | Deepens |
 |---|---|---|---|
-| Earthquake | Coordinated Tremor | Marked Rupture → Converged Ruin | Seismic Feed (Aggr) / Tremor Reach (Soc) |
-| Earthquake | Cracking Momentum | Momentum Footing → Fault Convergence | Seismic Feed (Aggr) / Deepening Fissure (Bold) |
-| Earthquake | Fractured Warning | Tremor Lockstep → Warded Convergence | Deepening Fissure (Bold) / Tremor Reach (Soc) |
-| Hydro Pump | Surge and Brace | Brace Conditioning → Unified Current | Widening Main (Aggr) / Channel Grip (Bold) |
-| Hydro Pump | Steadfast Tide | Tidal Footing → Communal Current | Channel Grip (Bold) / Pod Reach (Soc) |
-| Hydro Pump | Wake of Violence | Surging Wake → Violent Confluence | Pod Reach (Soc) / Widening Main (Aggr) |
-| Solar Beam | Rooted Assault | Sunlit Focus → Bedrock Beam | Widening Beam (Aggr) / Deepening Roots (Bold) |
-| Solar Beam | Shared Shade | Canopy Footing → Grove Bulwark | Deepening Roots (Bold) / Grove Precision (Soc) |
-| Solar Beam | Territorial Flare | Territorial Footing → Dominant Bloom | Grove Precision (Soc) / Widening Beam (Aggr) |
-| Rock Throw | Grinding Advance | Grinding Footing → Bedrock Momentum | Broken Stride (Aggr) / Bedrock Footing (Bold) |
-| Rock Throw | Warning Tremor | Warded Footing → Herd's Bulwark | Bedrock Footing (Bold) / Tremor Bond (Soc) |
-| Rock Throw | Rolling Thunder | (Marked Advantage already existed) → Converged Quarry | Broken Stride (Aggr) / Tremor Bond (Soc) |
+| Earthquake | Coordinated Tremor | Marked Rupture → Converged Ruin | rallyMarked 1.3 → 1.6 (same lever, overwrite) |
+| Earthquake | Cracking Momentum | Deeper Lunge (forcedMovement 2 tiles) → Fault Convergence (power+15, recoilFraction 0.08 — a real tradeoff, not a bolt-on) | the lunge itself, then a genuine cost/benefit pair |
+| Earthquake | Fractured Warning | Tremor Lockstep (+1 jam) → Warded Convergence (damageReduction 0.04) | jam, then the warning becomes real protection |
+| Hydro Pump | Surge and Brace | Brace Conditioning (-1 cooldown) → Unified Current (critRateStage+1) | the wind-up-softening lever, then precision |
+| Hydro Pump | Steadfast Tide | Tidal Footing (regen+0.01) → Communal Current (damageReduction 0.05) | shared vitality, then shared armor |
+| Hydro Pump | Wake of Violence | Surging Wake (critRateStage+1) → Violent Confluence (rallyMarked 1.4) | precision, then the pod's real convergence payoff |
+| Solar Beam | Rooted Assault | Sunlit Focus (defensePenetration+0.1) → Bedrock Beam (`thorns` 0.08) | armor-piercing roots, then real retaliation |
+| Solar Beam | Shared Shade | Canopy Footing (regen+0.01) → Grove Bulwark (`defenseBoost` 0.05) | shared vitality, then shared armor |
+| Solar Beam | Territorial Flare | Territorial Footing (critRateStage+1) → **Triple Bloom** (shape → `cone` length 5 width 3, `hitsArea: true`) | catching a rival off guard, then a real capstone-tier AoE payoff |
+| Rock Throw | Grinding Advance | (defensePenetration+0.15) → Bedrock Momentum (self Attack stage 2/16 ticks) | the self-buff itself, deepened |
+| Rock Throw | Warning Tremor | Warded Footing (damageReduction 0.03) → Herd's Bulwark (regen 0.02) | bracing, then real recovery |
+| Rock Throw | Rolling Thunder | (Marked Advantage already existed) → Converged Quarry | rallyMarked 1.3 → 1.6 (same lever, overwrite) |
 
-Every branch's own pre-fork node now has up to 3 real alternate routes in
-its `prerequisitesAnyOf` (its own filler chain, plus the two crosslink
+**Triple Bloom** deserves calling out on its own: direct ask, "make one
+of the solar beam ones do like three width beams as a capstone" — Solar
+Beam is deliberately single-target everywhere else in this tree (its own
+top comment says so explicitly), so turning one bridge notable into a
+genuine `hitsArea` shape change is the single biggest payoff in this
+whole rollout, and exactly where template v3's rule 2 says a shape/AoE
+change is earned — notable/capstone tier, never filler.
+
+Every branch's own pre-fork node still has up to 3 real alternate routes
+in its `prerequisitesAnyOf` (its own filler chain, plus the two crosslink
 bridges that reach it from its two neighboring branches) — a build can
 reach any branch's own fork by walking that branch, or by investing a
-little in each of its two neighbors instead. Same two rules from the
-pilot applied everywhere: land one step before the fork, never on it;
-reuse existing primitives only (`power`/`accuracy`/`defensePenetration`/
-`lifestealFraction`/`jamCooldownTicks` — no new engine work needed for
-any of the 11 new bridges).
+little in each of its two neighbors instead. Land one step before the
+fork, never on it. No new engine primitives needed anywhere in this
+rollout — every lever above (`forcedMovement`, `recoilFraction`,
+`critRateStage`, `situationalBonus`, `grantsPassive` variants, `shape`/
+`hitsArea`) already existed; this was purely about reusing the *right*
+one per bridge instead of the same three by default.
 
 Found and fixed in the same pass, unrelated to the rollout itself but
 caught while stress-testing the layout: Hydro Pump's *Wake of Violence*

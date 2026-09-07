@@ -2066,11 +2066,11 @@ export const MOVES: Record<string, MoveSpec> = {
       // pre-fork nodes (Broken Stride / Bedrock Footing).
       grinding_footing: {
         id: "grinding_footing",
-        name: "+8 Accuracy",
+        name: "+0.15 Defense Penetration",
         cost: 1,
         prerequisites: ["grinding_advance"],
         leaning: "aggression",
-        delta: { accuracy: 8 },
+        delta: { defensePenetration: 0.15 },
       },
       bedrock_momentum: {
         id: "bedrock_momentum",
@@ -2078,7 +2078,10 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["grinding_footing"],
         leaning: "boldness",
-        delta: { defensePenetration: 0.2 },
+        // Deepens Grinding Advance's own lever instead of bolting on a
+        // generic stat — the braced hit doesn't just land once, it builds:
+        // a bigger, longer self-Attack surge than the crosslink alone gave.
+        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 2, ticks: 16 } },
       },
       // Crosslink: Boldness <-> Sociability — the tremor's warning reaches
       // far enough to brace the thrower too.
@@ -2095,11 +2098,12 @@ export const MOVES: Record<string, MoveSpec> = {
       // Sociability's own pre-fork nodes (Bedrock Footing / Tremor Bond).
       warded_footing: {
         id: "warded_footing",
-        name: "+8 Power",
+        name: "+0.03 Damage Reduction",
         cost: 1,
         prerequisites: ["warning_tremor"],
         leaning: "boldness",
-        delta: { power: 8 },
+        grantsPassive: { kind: "damageReduction", value: 0.03 },
+        delta: {},
       },
       herds_bulwark: {
         id: "herds_bulwark",
@@ -2107,7 +2111,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["warded_footing"],
         leaning: "sociability",
-        delta: { lifestealFraction: 0.05 },
+        // Deepens the bracing lever Warning Tremor already granted, instead
+        // of a generic lifesteal bolt-on — the herd's own care extends into
+        // real, ongoing recovery.
+        grantsPassive: { kind: "regen", value: 0.02 },
+        delta: {},
       },
       // Crosslink: Sociability <-> Aggression — a marked target that's
       // already stumbling gets bogged down hard, not just slowed further.
@@ -2146,7 +2154,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["marked_advantage"],
         leaning: "aggression",
-        delta: { power: 10 },
+        // Deepens Marked Advantage's own rallyMarked payoff further
+        // (overwrite, like every other situationalBonus) instead of a
+        // flat power bolt-on — a target this pinned and this marked barely
+        // stands a chance.
+        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.6 } },
       },
     },
   },
@@ -2811,11 +2823,13 @@ export const MOVES: Record<string, MoveSpec> = {
       // pre-fork nodes (Widening Main / Channel Grip).
       brace_conditioning: {
         id: "brace_conditioning",
-        name: "+8 Accuracy",
+        name: "-1 Cooldown",
         cost: 1,
         prerequisites: ["surge_and_brace"],
         leaning: "aggression",
-        delta: { accuracy: 8 },
+        // Deepens the same wind-up-softening lever Surge and Brace already
+        // introduced, instead of a generic accuracy bolt-on.
+        delta: { cooldownTicks: -1 },
       },
       unified_current: {
         id: "unified_current",
@@ -2823,7 +2837,9 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["brace_conditioning"],
         leaning: "boldness",
-        delta: { defensePenetration: 0.2 },
+        // A precisely-timed release lands true — ties into Overwhelm's own
+        // crit lever (Maelstrom) instead of a flat defensePenetration bolt-on.
+        delta: { critRateStage: 1 },
       },
       // Crosslink: Boldness <-> Sociability — a shared, steady breath
       // between whoever's bracing and whoever's supporting.
@@ -2840,11 +2856,14 @@ export const MOVES: Record<string, MoveSpec> = {
       // Sociability's own pre-fork nodes (Channel Grip / Pod Reach).
       tidal_footing: {
         id: "tidal_footing",
-        name: "+8 Power",
+        name: "+0.01 Regen",
         cost: 1,
         prerequisites: ["steadfast_tide"],
         leaning: "boldness",
-        delta: { power: 8 },
+        // Deepens Steadfast Tide's own shared-vitality lever directly,
+        // instead of a generic power bolt-on.
+        grantsPassive: { kind: "regen", value: 0.01 },
+        delta: {},
       },
       communal_current: {
         id: "communal_current",
@@ -2852,7 +2871,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["tidal_footing"],
         leaning: "sociability",
-        delta: { lifestealFraction: 0.05 },
+        // The shared current becomes real shared protection, not just
+        // shared healing — ties Boldness's own defensive identity into the
+        // bridge instead of a flat lifesteal bolt-on.
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        delta: {},
       },
       // Crosslink: Sociability <-> Aggression — once the pod's converged
       // on a marked target, the strike that follows lands true.
@@ -2868,11 +2891,13 @@ export const MOVES: Record<string, MoveSpec> = {
       // Aggression's own pre-fork nodes (Pod Reach / Widening Main).
       surging_wake: {
         id: "surging_wake",
-        name: "+8 Accuracy",
+        name: "+1 Crit Rate Stage",
         cost: 1,
         prerequisites: ["wake_of_violence"],
         leaning: "sociability",
-        delta: { accuracy: 8 },
+        // Deepens Wake of Violence's own precision lever directly, instead
+        // of a generic accuracy bolt-on.
+        delta: { critRateStage: 1 },
       },
       violent_confluence: {
         id: "violent_confluence",
@@ -2880,7 +2905,10 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["surging_wake"],
         leaning: "aggression",
-        delta: { power: 10 },
+        // The pod's own convergence is the real payoff here, not a flat
+        // power bolt-on — a target the herd has flagged gets hit hardest
+        // once the current actually catches it.
+        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.4 } },
       },
       // Deeper crosslink: needs BOTH branches' own real mechanics —
       // Wake Rally's mark and Undertow Pull's drag — not just a shared
@@ -3220,11 +3248,13 @@ export const MOVES: Record<string, MoveSpec> = {
       // pre-fork nodes (Widening Beam / Deepening Roots).
       sunlit_focus: {
         id: "sunlit_focus",
-        name: "+8 Accuracy",
+        name: "+0.1 Defense Penetration",
         cost: 1,
         prerequisites: ["rooted_assault"],
         leaning: "aggression",
-        delta: { accuracy: 8 },
+        // Deepens Rooted Assault's own lever directly, instead of a
+        // generic accuracy bolt-on.
+        delta: { defensePenetration: 0.1 },
       },
       bedrock_beam: {
         id: "bedrock_beam",
@@ -3232,7 +3262,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["sunlit_focus"],
         leaning: "boldness",
-        delta: { power: 10 },
+        // Rooted so firmly it punishes anything that gets close — ties
+        // Boldness's own thorns lever (Verdant Wall/Ancient Grove) into
+        // the bridge instead of a flat power bolt-on.
+        grantsPassive: { kind: "thorns", value: 0.08 },
+        delta: {},
       },
       // Crosslink: Boldness <-> Sociability — shared vitality from
       // standing guard together.
@@ -3250,11 +3284,14 @@ export const MOVES: Record<string, MoveSpec> = {
       // Precision).
       canopy_footing: {
         id: "canopy_footing",
-        name: "+8 Power",
+        name: "+0.01 Regen",
         cost: 1,
         prerequisites: ["shared_shade"],
         leaning: "boldness",
-        delta: { power: 8 },
+        // Deepens Shared Shade's own shared-vitality lever directly,
+        // instead of a generic power bolt-on.
+        grantsPassive: { kind: "regen", value: 0.01 },
+        delta: {},
       },
       grove_bulwark: {
         id: "grove_bulwark",
@@ -3262,7 +3299,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["canopy_footing"],
         leaning: "sociability",
-        delta: { defensePenetration: 0.15 },
+        // The shared shade becomes real shared armor — ties Boldness's own
+        // defenseBoost lever (Sunlit Roots) into the bridge instead of a
+        // flat defensePenetration bolt-on.
+        grantsPassive: { kind: "defenseBoost", value: 0.05 },
+        delta: {},
       },
       // Crosslink: Sociability <-> Aggression — the herd's own warning
       // lets the dominant beam catch a challenger unaware.
@@ -3278,19 +3319,28 @@ export const MOVES: Record<string, MoveSpec> = {
       // Aggression's own pre-fork nodes (Grove Precision / Widening Beam).
       territorial_footing: {
         id: "territorial_footing",
-        name: "+8 Accuracy",
+        name: "+1 Crit Rate Stage",
         cost: 1,
         prerequisites: ["territorial_flare"],
         leaning: "sociability",
-        delta: { accuracy: 8 },
+        // Catching a challenger off guard is exactly when a solid hit
+        // becomes a great one — ties Dominance's own crit lever (Gathering
+        // Light) in, instead of a generic accuracy bolt-on.
+        delta: { critRateStage: 1 },
       },
       dominant_bloom: {
         id: "dominant_bloom",
-        name: "Dominant Bloom",
+        name: "Triple Bloom",
         cost: 2,
         prerequisites: ["territorial_footing"],
         leaning: "aggression",
-        delta: { power: 10 },
+        // A real, flashy capstone-tier payoff — the dominance display
+        // widens into three simultaneous beams. Solar Beam is deliberately
+        // single-target everywhere else in this tree (see the move's own
+        // top comment); this is the one place a shape change is earned,
+        // per template v3's rule that shape/AoE changes belong at
+        // notable/capstone tier, never filler.
+        delta: { shape: { kind: "cone", length: 5, width: 3 }, hitsArea: true },
       },
     },
   },
@@ -3625,11 +3675,14 @@ export const MOVES: Record<string, MoveSpec> = {
       // nodes (Seismic Feed / Deepening Fissure).
       momentum_footing: {
         id: "momentum_footing",
-        name: "+8 Accuracy",
+        name: "Deeper Lunge",
         cost: 1,
         prerequisites: ["cracking_momentum"],
         leaning: "aggression",
-        delta: { accuracy: 8 },
+        // Deepens Cracking Momentum's own forced-movement lever directly
+        // (overwrite, like every other `forcedMovement`) — the momentum
+        // carries it twice as far — instead of a generic accuracy bolt-on.
+        delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 2, timing: "onHit" } },
       },
       fault_convergence: {
         id: "fault_convergence",
@@ -3637,7 +3690,10 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["momentum_footing"],
         leaning: "boldness",
-        delta: { power: 10 },
+        // Crashing through that much rubble that fast costs something real
+        // — a genuine tradeoff, not a flat power bolt-on with nothing to
+        // balance it (see MOVES_DESIGN.md's guide on pure-downside bugs).
+        delta: { power: 15, recoilFraction: 0.08 },
       },
       // Crosslink: Boldness <-> Sociability — the visible fracture throws
       // off the footing of anyone nearby, friend and foe's tempo alike
@@ -3654,11 +3710,13 @@ export const MOVES: Record<string, MoveSpec> = {
       // Sociability's own pre-fork nodes (Deepening Fissure / Tremor Reach).
       tremor_lockstep: {
         id: "tremor_lockstep",
-        name: "+8 Accuracy",
+        name: "+1 Jam",
         cost: 1,
         prerequisites: ["fractured_warning"],
         leaning: "boldness",
-        delta: { accuracy: 8 },
+        // Deepens Fractured Warning's own jam lever directly, instead of a
+        // generic accuracy bolt-on.
+        delta: { jamCooldownTicks: 1 },
       },
       warded_convergence: {
         id: "warded_convergence",
@@ -3666,7 +3724,10 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["tremor_lockstep"],
         leaning: "sociability",
-        delta: { jamCooldownTicks: 1 },
+        // The warning becomes real protection — ties into the herd's own
+        // bracing instead of a generic jam-again bolt-on.
+        grantsPassive: { kind: "damageReduction", value: 0.04 },
+        delta: {},
       },
       // Crosslink: Sociability <-> Aggression — once the herd's clear and
       // warned, whatever's left standing gets the full, converged brunt.
@@ -3709,7 +3770,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["marked_rupture"],
         leaning: "aggression",
-        delta: { defensePenetration: 0.2 },
+        // Deepens Marked Rupture's own rallyMarked payoff further
+        // (overwrite, like every other situationalBonus) instead of a flat
+        // defensePenetration bolt-on — the ground doesn't just care about
+        // the mark, the convergence multiplies it.
+        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.6 } },
       },
     },
   },

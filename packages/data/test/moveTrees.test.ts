@@ -239,7 +239,10 @@ describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () =>
       "converged_quarry",
       "broken_stride",
     ]);
-    expect(viaAggr.power).toBe(rockThrow.power + 10 + 8); // Converged Quarry's own +10, plus Broken Stride's own +8
+    expect(viaAggr.power).toBe(rockThrow.power + 8); // Broken Stride's own +8
+    // Converged Quarry deepens Marked Advantage's own rallyMarked payoff
+    // (overwrite) rather than bolting on a generic power bump.
+    expect(viaAggr.situationalBonus).toEqual({ condition: "rallyMarked", multiplier: 1.6 });
   });
 });
 
@@ -555,7 +558,8 @@ describe("Solar Beam tree: v3 redesign — a guardian's dominance display", () =
       "dominant_bloom",
       "grove_precision",
     ]);
-    expect(viaSoc.accuracy).toBe(solarBeam.accuracy + 8 + 5); // Territorial Footing's own +8, plus Grove Precision's own +5
+    expect(viaSoc.critRateStage).toBe(2); // Gathering Light's own +1, plus Territorial Footing's own +1
+    expect(viaSoc.accuracy).toBe(solarBeam.accuracy + 5); // Grove Precision's own +5
 
     const viaAggr = applyMoveTree(solarBeam, [
       "grove_ward",
@@ -566,6 +570,10 @@ describe("Solar Beam tree: v3 redesign — a guardian's dominance display", () =
       "widening_beam",
     ]);
     expect(viaAggr.range).toEqual({ min: 0, max: 7 });
+    // Triple Bloom is a real, flashy capstone-tier payoff — a genuine
+    // shape/AoE change (earned at notable tier), not another stat bump.
+    expect(viaAggr.shape).toEqual({ kind: "cone", length: 5, width: 3 });
+    expect(viaAggr.hitsArea).toBe(true);
   });
 });
 
