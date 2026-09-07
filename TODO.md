@@ -4323,3 +4323,34 @@ not something this pathfinding pass itself caused or is positioned to fix.
       full data suite green (194/194). Atlas's `PASSIVE_LABEL` map updated
       with a plain-English `aquaticHaste` description; rebuilt and
       republished.
+- [x] **Body Slam: a full v3 tree built as a direct demonstration of this
+      doc's own design guide** — direct ask, "prove me you learned how to
+      design by designing another move skill tree," after the guide's
+      principles (1-17) and the "what actually makes a tree interesting"
+      patterns were distilled from this session's earlier work. Picked
+      Body Slam specifically because it was real, canonical, and
+      completely untreed (Snorlax's only signature move, `species.ts`),
+      same single-species freedom Slash used for Scyther. Wrote the
+      fantasy first (mass and inevitability, not power), then three
+      branches that each answer it differently: Aggression ("Landslide")
+      escalates the mass itself into a real `hitsArea` capstone;
+      Boldness ("Unbudging") earns real tankiness for once — nothing in
+      the roster fits `immovable` better than a sleeping giant, and
+      Snorlax's own curated Defense Curl already primed it; Sociability
+      ("Gentle Giant") turns the real canonical Snorlax trait into an
+      actual herd shelter (a `healAura`+`defenseBoost` multi-passive
+      keystone), not a flat ally buff. Three crosslink bridges built
+      correctly the first time — each reaching both branches it touches,
+      landing one step before each fork, deepening its own introduced
+      lever (a self-Defense stat stage, a `rallyMarked` bonus, a
+      `lockTicks`-for-power tradeoff) — no repeat of the "lame crosslinks"
+      mistake from earlier in this session. 39 nodes, zero new engine
+      primitives (every lever already shipped — purely picking the right
+      one per node). Added a dedicated "Body Slam tree" describe block
+      (`moveTrees.test.ts`) covering the keystone AoE, both
+      grantsPassive(s) gotchas, both forks' real tradeoffs, and all three
+      crosslink bridges' wiring; full data suite green (207/207), engine
+      suite unaffected (996/996). Atlas rebuilt (verified: no null bytes,
+      inline script re-parses, `computeLayout` produces complete,
+      non-overlapping positions for all 39 new nodes across all 11 treed
+      moves) and republished.

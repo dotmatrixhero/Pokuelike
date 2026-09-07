@@ -3863,6 +3863,445 @@ export const MOVES: Record<string, MoveSpec> = {
     range: { min: 0, max: 1 },
     statusChance: 0.3,
     statusKind: "paralysis",
+    // v3 tree (MOVES_DESIGN.md's "start from the fantasy" pass).
+    // THE FANTASY: this isn't a strike, it's four hundred pounds of
+    // sleeping mass finally deciding to move — no technique, no
+    // follow-through, just gravity, timed. What's dangerous about it isn't
+    // power, it's inevitability: you don't dodge a landslide, you get out
+    // from under it before it starts, and this animal rarely bothers to
+    // warn anyone it's about to fall. Snorlax's only real signature move
+    // (species.ts) — same single-species freedom Slash's tree used for
+    // Scyther, built specifically for this one body, not a generic "heavy
+    // hit" template.
+    // - Aggression ("Landslide"): stays power-archetype on purpose — more
+    //   mass, less restraint, escalating to a real localized collapse.
+    // - Boldness ("Unbudging"): earned tankiness, not a default reach —
+    //   nothing on this whole roster fits "doesn't move" better than a
+    //   sleeping giant (Snorlax's own curated moveset already primes this
+    //   with Defense Curl).
+    // - Sociability ("Gentle Giant"): the real canonical Snorlax trait —
+    //   famously peaceful despite its size — turned into the herd's actual
+    //   shelter: protection and recovery through calm presence, not a flat
+    //   ally buff copied from elsewhere.
+    tree: {
+      // --- Aggression: Landslide (more mass, less restraint) ---
+      full_weight: {
+        id: "full_weight",
+        name: "Full Weight",
+        cost: 1,
+        leaning: "aggression",
+        // Bonus power scales with the user's own bulk — same lever as
+        // Tackle's Weighted Charge, but this move IS that fantasy, not a
+        // side branch of a different one: nothing in the roster has more
+        // maxHp to throw around than Snorlax.
+        delta: { weightScaling: { factor: 0.15 }, accuracy: -5 },
+      },
+      numbing_follow_through: {
+        id: "numbing_follow_through",
+        name: "+10% Paralysis Chance",
+        cost: 1,
+        prerequisites: ["full_weight"],
+        leaning: "aggression",
+        delta: { statusChance: 0.1 },
+      },
+      mounting_momentum: {
+        id: "mounting_momentum",
+        name: "+8 Power",
+        cost: 1,
+        prerequisites: ["numbing_follow_through"],
+        leaning: "aggression",
+        delta: { power: 8 },
+      },
+      ground_shaking_landing: {
+        id: "ground_shaking_landing",
+        name: "Ground-Shaking Landing",
+        cost: 1,
+        prerequisites: ["mounting_momentum"],
+        leaning: "aggression",
+        // Not a technique — a body just landing somewhere it wasn't,
+        // driving whatever it hit backward with it.
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 2, timing: "onHit" } },
+      },
+      rolling_advance: {
+        id: "rolling_advance",
+        name: "+8 Power",
+        cost: 1,
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Aggression (Braced Commitment's and Provoked
+        // Charge's own chains).
+        prerequisitesAnyOf: [["ground_shaking_landing"], ["settled_impact"], ["undivided"]],
+        leaning: "aggression",
+        delta: { power: 8 },
+      },
+      second_slam: {
+        id: "second_slam",
+        name: "Second Slam",
+        cost: 2,
+        prerequisites: ["rolling_advance"],
+        excludes: ["rolling_crush"],
+        leaning: "aggression",
+        // Commits fully — the fall itself costs something now too.
+        delta: { power: 15, recoilFraction: 0.08 },
+      },
+      rolling_crush: {
+        id: "rolling_crush",
+        name: "Rolling Crush",
+        cost: 2,
+        prerequisites: ["rolling_advance"],
+        excludes: ["second_slam"],
+        leaning: "aggression",
+        // The weight keeps going after the first impact — a lighter
+        // aftershock instead of one committed drop.
+        delta: { hits: { min: 2, max: 2 }, power: -12, critRateStage: 1 },
+      },
+      inevitable: {
+        id: "inevitable",
+        name: "Inevitable",
+        cost: 2,
+        prerequisitesAnyOf: [["second_slam"], ["rolling_crush"]],
+        leaning: "aggression",
+        // Mass doesn't need precision — it just needs enough attempts to
+        // eventually find the gap in any guard.
+        delta: { defensePenetration: 0.25 },
+      },
+      crushing_follow_up: {
+        id: "crushing_follow_up",
+        name: "+8 Power",
+        cost: 1,
+        prerequisites: ["inevitable"],
+        leaning: "aggression",
+        delta: { power: 8 },
+      },
+      avalanche: {
+        id: "avalanche",
+        name: "Avalanche",
+        cost: 2,
+        prerequisites: ["crushing_follow_up"],
+        leaning: "aggression",
+        // The single slam becomes a real localized collapse — everything
+        // near the point of impact, not just the one target, gets caught
+        // in the landing.
+        delta: { shape: { kind: "burst", radius: 1 }, hitsArea: true, power: -10 },
+      },
+      // --- Boldness: Unbudging (a sleeping mountain that refuses to move) ---
+      dead_weight: {
+        id: "dead_weight",
+        name: "Dead Weight",
+        cost: 1,
+        leaning: "boldness",
+        // Earned, not a default reach — sheer mass makes hits land soft,
+        // same exception this doc's own "stop overusing damageReduction"
+        // note already carves out for a fiction that actually justifies it.
+        grantsPassive: { kind: "damageReduction", value: 0.08 },
+        delta: {},
+      },
+      settled_footing: {
+        id: "settled_footing",
+        name: "+8 Accuracy",
+        cost: 1,
+        prerequisites: ["dead_weight"],
+        leaning: "boldness",
+        delta: { accuracy: 8 },
+      },
+      patient_reset: {
+        id: "patient_reset",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["settled_footing"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      unbudging: {
+        id: "unbudging",
+        name: "Unbudging",
+        cost: 1,
+        prerequisites: ["patient_reset"],
+        leaning: "boldness",
+        // Nothing on this whole roster embodies "can't be dragged, knocked
+        // back, or lunged at" better than a sleeping giant that simply
+        // doesn't move.
+        grantsPassive: { kind: "immovable", value: 1 },
+        delta: {},
+      },
+      bracing_follow_through: {
+        id: "bracing_follow_through",
+        name: "+5 Power",
+        cost: 1,
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Boldness (Braced Commitment's and Called to Stand's
+        // own chains).
+        prerequisitesAnyOf: [["unbudging"], ["settled_impact"], ["undivided_stand"]],
+        leaning: "boldness",
+        delta: { power: 5 },
+      },
+      sink_in: {
+        id: "sink_in",
+        name: "Sink In",
+        cost: 2,
+        prerequisites: ["bracing_follow_through"],
+        excludes: ["full_bulk"],
+        leaning: "boldness",
+        // The longer it just sits there, the more it recovers — laziness
+        // as sustain.
+        grantsPassive: { kind: "regen", value: 0.02 },
+        delta: { power: -5 },
+      },
+      full_bulk: {
+        id: "full_bulk",
+        name: "Full Bulk",
+        cost: 2,
+        prerequisites: ["bracing_follow_through"],
+        excludes: ["sink_in"],
+        leaning: "boldness",
+        // An even heavier stance — harder to line up, nearly impossible to
+        // hurt once it lands.
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        delta: { accuracy: -8 },
+      },
+      weathered_giant: {
+        id: "weathered_giant",
+        name: "Weathered Giant",
+        cost: 2,
+        prerequisitesAnyOf: [["sink_in"], ["full_bulk"]],
+        leaning: "boldness",
+        // A second, distinct armor lever, earned by a branch whose entire
+        // identity is refusing to budge — no need to apologize for it the
+        // way a generic tankiness reach would.
+        grantsPassive: { kind: "defenseBoost", value: 0.05 },
+        delta: {},
+      },
+      settled_power: {
+        id: "settled_power",
+        name: "+8 Power",
+        cost: 1,
+        prerequisites: ["weathered_giant"],
+        leaning: "boldness",
+        delta: { power: 8 },
+      },
+      mountains_answer: {
+        id: "mountains_answer",
+        name: "Mountain's Answer",
+        cost: 2,
+        prerequisites: ["settled_power"],
+        leaning: "boldness",
+        // Anyone who keeps hitting something this heavy eventually hurts
+        // themselves more than they hurt it.
+        grantsPassive: { kind: "thorns", value: 0.1 },
+        delta: {},
+      },
+      // --- Sociability: Gentle Giant (the herd's actual shelter) ---
+      broad_back: {
+        id: "broad_back",
+        name: "Broad Back",
+        cost: 1,
+        leaning: "sociability",
+        // Standing near something this big and steady is protection in
+        // itself — real from the very first point spent.
+        delta: { targetsAlly: true, allyEffect: { buff: { stat: "defense", stage: 1, ticks: 20 } } },
+      },
+      watchful_pace: {
+        id: "watchful_pace",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["broad_back"],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      steady_footing: {
+        id: "steady_footing",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["watchful_pace"],
+        leaning: "sociability",
+        delta: { accuracy: 5 },
+      },
+      watchful_rest: {
+        id: "watchful_rest",
+        name: "Watchful Rest",
+        cost: 1,
+        prerequisites: ["steady_footing"],
+        leaning: "sociability",
+        // Whenever this actually lands on a real threat, the nearest hurt
+        // herd-mate benefits too — protecting by neutralizing what
+        // threatens them, not just buffing passively from a distance.
+        delta: {
+          allyEffectOnAttack: true,
+          allyEffect: { healFraction: 0.12, buff: { stat: "defense", stage: 1, ticks: 20 } },
+        },
+      },
+      herd_pace: {
+        id: "herd_pace",
+        name: "+5 Power",
+        cost: 1,
+        // Reachable the normal way, or via either crosslink bridge that
+        // reaches into Sociability (Called to Stand's and Provoked
+        // Charge's own chains).
+        prerequisitesAnyOf: [["watchful_rest"], ["undivided_stand"], ["undivided"]],
+        leaning: "sociability",
+        delta: { power: 5 },
+      },
+      wake_the_giant: {
+        id: "wake_the_giant",
+        name: "Wake the Giant",
+        cost: 2,
+        prerequisites: ["herd_pace"],
+        excludes: ["steady_ground"],
+        leaning: "sociability",
+        // Snorlax is lazy — getting it to actually engage a specific
+        // threat is itself the herd's whole strategy.
+        delta: { rallyCall: { ticks: 20 } },
+      },
+      steady_ground: {
+        id: "steady_ground",
+        name: "Steady Ground",
+        cost: 2,
+        prerequisites: ["herd_pace"],
+        excludes: ["wake_the_giant"],
+        leaning: "sociability",
+        // Standing perfectly still and steady disrupts an attacker's own
+        // rhythm — Body Slam landing exactly where they were sure not to
+        // be.
+        delta: { jamCooldownTicks: 1 },
+      },
+      herds_shade: {
+        id: "herds_shade",
+        name: "Herd's Shade",
+        cost: 2,
+        prerequisitesAnyOf: [["wake_the_giant"], ["steady_ground"]],
+        leaning: "sociability",
+        // The herd naps in the giant's shadow, safe and recovering — real
+        // for the first time on this branch, not just a defense buff.
+        grantsPassive: { kind: "healAura", value: 0.02 },
+        delta: {},
+      },
+      gentle_footing: {
+        id: "gentle_footing",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["herds_shade"],
+        leaning: "sociability",
+        delta: { accuracy: 5 },
+      },
+      sanctuary_slam: {
+        id: "sanctuary_slam",
+        name: "Sanctuary Slam",
+        cost: 2,
+        prerequisites: ["gentle_footing"],
+        leaning: "sociability",
+        // The giant fully settles into place — a real "final form" of the
+        // whole branch's own identity: it shares its own recovery with the
+        // herd AND becomes genuinely harder to budge itself, both at once
+        // (same "two passives, one keystone" shape as Scratch's Colony
+        // Warmth).
+        grantsPassives: [
+          { kind: "healAura", value: 0.02 },
+          { kind: "defenseBoost", value: 0.06 },
+        ],
+        delta: {},
+      },
+      // Crosslink: Aggression <-> Boldness — bracing first is what lets the
+      // giant commit its full weight without losing its footing.
+      braced_commitment: {
+        id: "braced_commitment",
+        name: "Braced Commitment",
+        cost: 1,
+        prerequisites: ["full_weight", "dead_weight"],
+        leaning: "boldness",
+        delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 10 } },
+      },
+      // Bridge tail (see MOVES_DESIGN.md's "Crosslinks as bridges"): extends
+      // Braced Commitment into Aggression's and Boldness's own pre-fork
+      // nodes (Rolling Advance / Bracing Follow-Through).
+      deepening_brace: {
+        id: "deepening_brace",
+        name: "Deepening Brace",
+        cost: 1,
+        prerequisites: ["braced_commitment"],
+        leaning: "boldness",
+        // Deepens Braced Commitment's own lever directly (overwrite, like
+        // every other statChangeOnHit) instead of a generic accuracy
+        // bolt-on.
+        delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 2, ticks: 14 } },
+      },
+      settled_impact: {
+        id: "settled_impact",
+        name: "Settled Impact",
+        cost: 2,
+        prerequisites: ["deepening_brace"],
+        leaning: "boldness",
+        // Bracing before committing the full weight means none of that
+        // force gets wasted on its own wobble.
+        delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 3, ticks: 18 }, defensePenetration: 0.15 },
+      },
+      // Crosslink: Boldness <-> Sociability — once the herd has actually
+      // marked something, the most unmovable thing in the roster simply
+      // doesn't miss what's already right in front of it.
+      called_to_stand: {
+        id: "called_to_stand",
+        name: "Called to Stand",
+        cost: 1,
+        prerequisites: ["dead_weight", "broad_back"],
+        leaning: "sociability",
+        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.3 } },
+      },
+      // Bridge tail: extends Called to Stand into Boldness's and
+      // Sociability's own pre-fork nodes (Bracing Follow-Through / Herd
+      // Pace).
+      steadfast_focus: {
+        id: "steadfast_focus",
+        name: "Steadfast Focus",
+        cost: 1,
+        prerequisites: ["called_to_stand"],
+        leaning: "sociability",
+        // Deepens Called to Stand's own lever directly, instead of a
+        // generic power bolt-on.
+        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.45 } },
+      },
+      undivided_stand: {
+        id: "undivided_stand",
+        name: "Undivided Stand",
+        cost: 2,
+        prerequisites: ["steadfast_focus"],
+        leaning: "sociability",
+        // Once it's committed to what the herd marked, it doesn't miss.
+        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.65 }, accuracy: 8 },
+      },
+      // Crosslink: Sociability <-> Aggression — an animal this placid
+      // doesn't pull the hit once actually roused; the restraint was the
+      // only thing holding the full weight back.
+      provoked_charge: {
+        id: "provoked_charge",
+        name: "Provoked Charge",
+        cost: 1,
+        prerequisites: ["broad_back", "full_weight"],
+        leaning: "aggression",
+        // A real wind-up cost, paired with the benefit it buys — a beat of
+        // hesitation before the herd's own gentle giant actually commits.
+        delta: { lockTicks: 1, power: 10 },
+      },
+      // Bridge tail: extends Provoked Charge into Sociability's and
+      // Aggression's own pre-fork nodes (Herd Pace / Rolling Advance).
+      full_commitment: {
+        id: "full_commitment",
+        name: "Full Commitment",
+        cost: 1,
+        prerequisites: ["provoked_charge"],
+        leaning: "aggression",
+        // Deepens the payoff side of the same tradeoff rather than adding
+        // more wind-up — the cost stays fixed, the reward keeps growing.
+        delta: { power: 10 },
+      },
+      undivided: {
+        id: "undivided",
+        name: "Undivided",
+        cost: 2,
+        prerequisites: ["full_commitment"],
+        leaning: "aggression",
+        // Once it's fully provoked, there's no half-measure left in it at
+        // all — it spends its own vitality as readily as the target's.
+        delta: { power: 15, lifestealFraction: 0.05 },
+      },
+    },
   },
   dig: {
     id: "dig",

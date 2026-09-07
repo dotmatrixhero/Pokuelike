@@ -743,3 +743,106 @@ describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to rea
     expect(viaSoc.range).toEqual({ min: 0, max: 3 });
   });
 });
+
+describe("Body Slam tree: inevitability, not just a heavier hit", () => {
+  const bodySlam = MOVES.body_slam;
+
+  it("is a real single-target hit by default — the AoE is earned, not baked in", () => {
+    expect(bodySlam.shape).toEqual({ kind: "point" });
+    expect(bodySlam.hitsArea).toBeUndefined();
+  });
+
+  it("Avalanche (Aggression keystone) turns the single slam into a real localized collapse", () => {
+    const respec = applyMoveTree(bodySlam, [
+      "full_weight",
+      "numbing_follow_through",
+      "mounting_momentum",
+      "ground_shaking_landing",
+      "rolling_advance",
+      "second_slam",
+      "inevitable",
+      "crushing_follow_up",
+      "avalanche",
+    ]);
+    expect(respec.shape).toEqual({ kind: "burst", radius: 1 });
+    expect(respec.hitsArea).toBe(true);
+  });
+
+  it("Unbudging and Mountain's Answer (Boldness) grant real Agent-level passives, not MoveSpec deltas", () => {
+    expect(bodySlam.tree!.unbudging.grantsPassive).toEqual({ kind: "immovable", value: 1 });
+    expect(bodySlam.tree!.mountains_answer.grantsPassive).toEqual({ kind: "thorns", value: 0.1 });
+    // applyMoveTree's own resolved MoveSpec never carries a passive — it's
+    // asserted on the tree node directly, not on the respec result (a real
+    // gotcha this whole doc's test suite has hit more than once).
+    const respec = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging"]);
+    expect((respec as Record<string, unknown>).grantsPassive).toBeUndefined();
+  });
+
+  it("Sanctuary Slam (Sociability keystone) grants two passives at once — a real shelter, not a bigger number on one lever", () => {
+    expect(bodySlam.tree!.sanctuary_slam.grantsPassives).toEqual([
+      { kind: "healAura", value: 0.02 },
+      { kind: "defenseBoost", value: 0.06 },
+    ]);
+  });
+
+  it("the fork choices are genuine tradeoffs, not strictly-better stat sticks", () => {
+    const secondSlam = applyMoveTree(bodySlam, ["full_weight", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "second_slam"]);
+    expect(secondSlam.power).toBe(bodySlam.power + 8 + 8 + 15);
+    expect(secondSlam.recoilFraction).toBeCloseTo(0.08);
+
+    const rollingCrush = applyMoveTree(bodySlam, ["full_weight", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "rolling_crush"]);
+    expect(rollingCrush.hits).toEqual({ min: 2, max: 2 });
+    expect(rollingCrush.power).toBe(bodySlam.power + 8 + 8 - 12);
+
+    const sinkIn = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "sink_in"]);
+    expect(sinkIn.power).toBe(bodySlam.power + 5 - 5);
+    expect(bodySlam.tree!.sink_in.grantsPassive).toEqual({ kind: "regen", value: 0.02 });
+
+    const fullBulk = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "full_bulk"]);
+    expect(fullBulk.accuracy).toBe(bodySlam.accuracy - 8 + 8);
+    expect(bodySlam.tree!.full_bulk.grantsPassive).toEqual({ kind: "damageReduction", value: 0.05 });
+  });
+
+  it("second_slam and rolling_crush are a real mutually exclusive fork", () => {
+    expect(() => applyMoveTree(bodySlam, ["full_weight", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "second_slam", "rolling_crush"])).toThrow(
+      /conflicts with already-chosen/
+    );
+  });
+
+  it("Braced Commitment's bridge (Aggression<->Boldness) reaches both Rolling Advance and Bracing Follow-Through, one step before each fork", () => {
+    // The bridge notable alone does NOT satisfy the fork — same "one step
+    // early, not onto the fork itself" rule every other bridge in this
+    // roster follows.
+    expect(() =>
+      applyMoveTree(bodySlam, ["full_weight", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "second_slam"])
+    ).toThrow(/requires \[rolling_advance\]/);
+
+    const viaAgg = applyMoveTree(bodySlam, ["full_weight", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "rolling_advance"]);
+    expect(viaAgg.statChangeOnHit).toEqual({ target: "self", stat: "defense", stage: 3, ticks: 18 });
+    expect(viaAgg.defensePenetration).toBeCloseTo(0.15);
+    // None of Aggression's own linear filler chain was ever chosen.
+    expect(viaAgg.statusChance).toBe(bodySlam.statusChance);
+
+    const viaBold = applyMoveTree(bodySlam, ["full_weight", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "bracing_follow_through"]);
+    expect(viaBold.power).toBe(bodySlam.power + 5);
+  });
+
+  it("Called to Stand's bridge (Boldness<->Sociability) deepens its own rallyMarked lever, not a generic bolt-on", () => {
+    const respec = applyMoveTree(bodySlam, [
+      "dead_weight",
+      "broad_back",
+      "called_to_stand",
+      "steadfast_focus",
+      "undivided_stand",
+      "herd_pace",
+    ]);
+    expect(respec.situationalBonus).toEqual({ condition: "rallyMarked", multiplier: 1.65 });
+  });
+
+  it("Provoked Charge's bridge (Sociability<->Aggression) pairs its lockTicks cost with a real, growing benefit", () => {
+    const respec = applyMoveTree(bodySlam, ["broad_back", "full_weight", "provoked_charge", "full_commitment", "undivided"]);
+    expect(respec.lockTicks).toBe(1);
+    expect(respec.power).toBe(bodySlam.power + 10 + 10 + 15);
+    expect(respec.lifestealFraction).toBeCloseTo(0.05);
+  });
+});

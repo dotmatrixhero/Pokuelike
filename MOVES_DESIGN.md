@@ -1876,6 +1876,85 @@ exercises it right now.
     active, rewarding holding ground once support is genuinely on the way
     rather than immovability being valuable in every fight equally.
 
+### Body Slam (Normal, point/melee) — Snorlax's only real signature move, full v3 treatment (Shipped)
+
+Built as a direct demonstration of this doc's own guide — every principle
+applied deliberately, not retrofitted afterward. **THE FANTASY, written
+before a single node**: this isn't a strike, it's four hundred pounds of
+sleeping mass finally deciding to move — no technique, no follow-through,
+just gravity, timed. What's dangerous about it isn't power, it's
+inevitability: you don't dodge a landslide, you get out from under it
+before it starts, and this animal rarely bothers to warn anyone it's about
+to fall. Single-species freedom (Snorlax is the only curated learner,
+`species.ts`), same as Slash's Scyther-only build — nothing here had to be
+generic enough to also fit a second body.
+
+- **Aggression ("Landslide")**: stays power-archetype on purpose — more
+  mass, less restraint. *Full Weight* (`weightScaling`, the same lever
+  Tackle's Weighted Charge uses, but here it's the move's own primary
+  identity, not a side branch — nothing in the roster has more `maxHp` to
+  throw around) opens immediately. A real fork, *Second Slam*
+  (`recoilFraction` — commits fully, costs something back) vs. *Rolling
+  Crush* (two lighter hits instead of one), then *Inevitable*
+  (`defensePenetration` — mass doesn't need precision, just enough
+  attempts). Keystone *Avalanche* turns the single point-target slam into
+  a real `hitsArea` `burst` — the one shape/AoE change in the whole tree,
+  spent at capstone tier per template v3's own rule, not filler.
+- **Boldness ("Unbudging")**: earned tankiness, not a default reach —
+  nothing on this whole roster fits "doesn't move" better than a sleeping
+  giant, and Snorlax's own curated moveset already primes this fantasy
+  with Defense Curl. *Dead Weight* (`damageReduction`, same earned
+  exception this doc's own "stop overusing damageReduction" note carves
+  out for a fiction that actually justifies it) → *Unbudging*
+  (`immovable` — the passive fits nothing in the roster better than this)
+  → a real fork, *Sink In* (`regen`, less power — laziness as sustain) vs.
+  *Full Bulk* (more `damageReduction`, -accuracy) → *Weathered Giant*
+  (`defenseBoost`, a second armor lever earned by a branch whose entire
+  identity is refusing to budge) → keystone *Mountain's Answer* (`thorns`
+  — anyone who keeps hitting something this heavy eventually hurts
+  themselves more than they hurt it).
+- **Sociability ("Gentle Giant")**: the real canonical Snorlax trait —
+  famously peaceful despite its size — turned into the herd's actual
+  shelter, not a flat ally buff copied from elsewhere. *Broad Back*
+  (`targetsAlly`/`allyEffect` defense buff) → *Watchful Rest*
+  (`allyEffectOnAttack`, broadened to heal too — protecting by
+  neutralizing what threatens the herd, not just buffing from a distance)
+  → a real fork, *Wake the Giant* (`rallyCall` — getting a lazy giant to
+  actually engage a specific threat is itself the herd's whole strategy)
+  vs. *Steady Ground* (`jamCooldownTicks` — standing perfectly still
+  disrupts an attacker's own rhythm) → *Herd's Shade* (`healAura`, the
+  herd finally gets real recovery near the giant) → keystone *Sanctuary
+  Slam* (`grantsPassives`, both `healAura` and `defenseBoost` at once —
+  the giant fully settles into place, a real "two passives, one keystone"
+  finale, same shape as Scratch's Colony Warmth, not a bigger number on a
+  single existing lever).
+- **Crosslinks**, each deepening its own introduced lever rather than a
+  generic bolt-on (principle 13), each reaching both branches it actually
+  touches (principle 11), each landing one step before its target fork,
+  not on it (principle 12): *Braced Commitment* (Aggression↔Boldness —
+  bracing first is what lets the giant commit its full weight without
+  losing its footing; deepens a self `statChangeOnHit` Defense stage
+  three times across its own root→filler→notable chain) · *Called to
+  Stand* (Boldness↔Sociability — once the herd has actually marked
+  something, the most unmovable thing in the roster simply doesn't miss
+  what's right in front of it; deepens `situationalBonus: "rallyMarked"`)
+  · *Provoked Charge* (Sociability↔Aggression — an animal this placid
+  doesn't pull the hit once actually roused, the restraint was the only
+  thing holding the full weight back; pairs a real `lockTicks` wind-up
+  cost with a growing power payoff, per principle 4).
+
+39 nodes total (10 per branch + 3 crosslinks × 3), zero new engine
+primitives — every lever was already shipped; this was purely about
+picking the *right* one per node instead of the same three by default.
+`packages/data/test/moveTrees.test.ts`'s generic per-tree suite covers
+structural integrity automatically; a dedicated "Body Slam tree" describe
+block adds move-specific assertions for the keystone AoE, both real
+multi-passive/passive-vs-delta gotchas, both forks' genuine tradeoffs, and
+all three crosslink bridges' own wiring and lever-deepening. Full data
+suite green (207/207). Atlas rebuilt (verified: no null bytes, inline
+script re-parses, `computeLayout` produces a complete, non-overlapping
+position for all 39 nodes) and republished.
+
 ### Pending brainstorm — Earthquake / Hydro Pump / Solar Beam (not yet built)
 
 Consolidated here so none of this is lost to context compaction — these
