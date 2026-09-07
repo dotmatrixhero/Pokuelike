@@ -42,3 +42,9 @@ for(const e of eff.slice(0,5)) console.log(`  ${e.sp.padEnd(12)} ${(e.pct*100).t
 console.log(`\npassive healing suppressed in ${(100*suppressed/Math.max(1,samples)).toFixed(1)}% of agent-samples`);
 const ev = (k:string)=>log.events.filter((e:any)=>e.kind===k).length;
 console.log(`alive ${alive.length} | fought ${ev("fought")} killed ${ev("killed")} starved ${ev("starved")} burned ${ev("burned")} | kills/fight ${(ev("killed")/Math.max(1,ev("fought"))).toFixed(3)}`);
+// `burned` counts fire DEATHS; ignitions are terrainChanged events. A run can
+// have plenty of fire and zero burn deaths, so count both or you will read
+// "burned 0" as "fire never happened" (it did, once, misleadingly).
+const fireEvents = log.events.filter((e: any) => e.kind === "terrainChanged" && e.cause === "fire");
+const lit = fireEvents.filter((e: any) => e.to === "fire").length;
+console.log(`fire: ${lit} tiles ignited, ${fireEvents.length - lit} burned out`);

@@ -254,11 +254,39 @@ actually failed this exact process:
   it's attached to? If a branch's writeup would read identically pasted
   onto a different move, it's a template wearing that move's name.
 
+### 10b. Check the node is actually REACHABLE, not just correct
+
+A node can be perfectly designed, fully tested, rendered in the Atlas, and
+still never happen. Two ways that bites, both found the hard way:
+
+- **Cost.** Agents auto-spend points as they arrive, so expensive nodes are
+  reached far less often than their position suggests. Before the
+  `SKILLPOINT_SAVE_CHANCE` fix, cost-3 nodes were reached literally never
+  and cost-2 nodes 6 times out of 144. If a mechanic only exists on an
+  expensive node, it effectively does not exist.
+- **Depth, and which species know the move.** A mechanic on Flamethrower
+  reaches one species entry; the same mechanic on Ember reaches six. And
+  depth compounds: a node five steps into a branch was held by 9 of 360
+  living agents. Put a mechanic you actually want *seen* near the opener of
+  a widely-known move.
+
+The test is empirical, not architectural: run the sim and count how many
+agents hold the node and how many times the effect fired. "It is in the
+tree" is not the same as "it happens."
+
 ### 11. Build, test, verify, document
 
 Implement in `moves.ts`, typecheck, run the generic structural test suite,
 then actually confirm it live — a real sim run showing the tree getting
-auto-respecced, not just passing structural validation. Update
+auto-respecced, not just passing structural validation.
+
+**Average across seeds before claiming any behavioral effect.** Population
+in this sim is violently RNG-sensitive: adding a single extra `rng()` draw
+per skill-point grant, with its effect disabled, moved one seed's 20k-tick
+population from 129 to 3, and across 6 seeds the range is 11-151. A
+single-seed before/after population comparison is not evidence, however
+clean the numbers look. Count distinct nodes reached, or effects fired —
+those hold up where population does not. Update
 MOVES_DESIGN.md (the writeup, citing the real feedback/reasoning behind
 each choice) and TODO.md (a dated-style entry), rebuild and republish the
 Move Tree Atlas, then commit.

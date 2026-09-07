@@ -78,7 +78,18 @@ export type PassiveKind =
   | "aquaticHaste"
   | "nonTerritorial"
   | "calmingPresence"
-  | "unshaken";
+  | "unshaken"
+  /**
+   * Fraction of fire-terrain damage ignored (fire.ts's `applyFireDamage`),
+   * and at 1 the holder's passive healing is no longer suppressed by
+   * standing in fire either. A creature that lives in its own flames.
+   *
+   * Deliberately does NOT touch the `"burn"` status or Fire-type attack
+   * damage — those are the type chart's job. This is specifically about the
+   * hazard tile, which is what makes it a real reason to fight standing in
+   * your own wildfire rather than a generic resistance.
+   */
+  | "fireproof";
 
 /**
  * Why a herd is (or was) migrating — see herdMigration.ts/DESIGN.md's

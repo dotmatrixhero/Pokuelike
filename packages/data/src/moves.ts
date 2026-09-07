@@ -212,7 +212,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         // A real, felt recovery rhythm — bought by trading away some
         // precision to fight sustainably instead of going all-out.
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regenFlat", value: 2.25 },
         delta: { accuracy: -5 },
       },
       weathered_grip: {
@@ -692,7 +692,7 @@ export const MOVES: Record<string, MoveSpec> = {
         excludes: ["territorial_snarl"],
         leaning: "sociability",
         // Feeds off scraps between fights, recovering quietly.
-        grantsPassive: { kind: "regenFlat", value: 0.5 },
+        grantsPassive: { kind: "regenFlat", value: 0.75 },
         delta: { power: -5 },
       },
       territorial_snarl: {
@@ -952,7 +952,7 @@ export const MOVES: Record<string, MoveSpec> = {
         excludes: ["thornbound"],
         leaning: "boldness",
         // Draws steady nourishment straight from the ground it's rooted in.
-        grantsPassive: { kind: "regenFlat", value: 2 },
+        grantsPassive: { kind: "regenFlat", value: 3 },
         delta: {},
       },
       thornbound: {
@@ -1186,7 +1186,20 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Wider Burn",
         cost: 1,
         leaning: "aggression",
-        delta: { statusChance: 0.15, cooldownTicks: -1 },
+        // The node that puts fire on the map, and its placement is measured
+        // rather than chosen for flavor. Ignition started on Flamethrower's
+        // Wildfire's Reach and produced ZERO ignitions in 20k ticks;
+        // Ember's `wildfire_burst` (cost 3) also zero; `hot_coals` (depth 5)
+        // reached 9 of 360 living agents and fought 18 of 1217 fights, for
+        // exactly ONE fire across 6 seeds. A mechanic that is shipped,
+        // tested, rendered, and never seen is not shipped.
+        //
+        // So it belongs on the opener of the fire-starting move — Ember is
+        // known by six species entries to Flamethrower's one, and "Wider
+        // Burn" is a name that already promises the flame catching what is
+        // around it. Fuel is only ~5% of a real map, so even at full uptake
+        // this stays occasional rather than constant.
+        delta: { statusChance: 0.15, cooldownTicks: -1, terrainBurn: true },
       },
       kindling: {
         id: "kindling",
@@ -1214,10 +1227,11 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       hot_coals: {
         id: "hot_coals",
-        name: "+5% status chance",
+        name: "Hot Coals",
         cost: 1,
         prerequisites: ["roaring_blaze"],
         leaning: "aggression",
+        // Renamed off "+5% status chance" — a real name for a real node.
         delta: { statusChance: 0.05 },
       },
       fan_the_flames: {
@@ -1247,8 +1261,18 @@ export const MOVES: Record<string, MoveSpec> = {
         excludes: ["inferno"],
         leaning: "aggression",
         // The flame doesn't stay contained to one line anymore — it catches
-        // everything nearby, including the caster's own footing.
-        delta: { shape: { kind: "burst", radius: 1 }, hitsArea: true, power: -10 },
+        // everything nearby, including the caster's own footing. `terrainBurn`
+        // makes that literal: this is the node that actually starts a fire
+        // (fire.ts), which then burns down flora and spreads on its own.
+        //
+        // Deliberately placed here rather than only on Flamethrower's
+        // Wildfire's Reach, which was the sole terrainBurn node and produced
+        // ZERO ignitions across a 20k-tick run — Flamethrower is known by one
+        // species entry, Ember by six. This is also what makes the
+        // Inferno/Wildfire Burst fork a real choice rather than "line vs
+        // burst": reach and status severity, against an area that sets the
+        // ground alight and keeps burning after you have moved on.
+        delta: { shape: { kind: "burst", radius: 1 }, hitsArea: true, power: -10, terrainBurn: true },
       },
       pyroclasm: {
         id: "pyroclasm",
@@ -1355,7 +1379,7 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisitesAnyOf: [["lingering_ring"], ["searing_wall"]],
         leaning: "boldness",
         // The fire never really goes out.
-        grantsPassive: { kind: "regenFlat", value: 0.5 },
+        grantsPassive: { kind: "regenFlat", value: 0.75 },
         delta: { cooldownTicks: -1 },
       },
       ring_capstone_filler: {
@@ -1448,7 +1472,7 @@ export const MOVES: Record<string, MoveSpec> = {
         excludes: ["wildfire_call"],
         leaning: "sociability",
         // Tends the fire for everyone, at some cost to its own offense.
-        grantsPassive: { kind: "regenFlat", value: 0.75 },
+        grantsPassive: { kind: "regenFlat", value: 1 },
         delta: { power: -5 },
       },
       wildfire_call: {
@@ -1469,7 +1493,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // A blaze that never really needs tending anymore — it just keeps
         // giving a little back, tick after tick.
-        grantsPassive: { kind: "regenFlat", value: 1 },
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: { statusChance: 0.1 },
       },
       hearth_capstone_filler: {
@@ -1640,12 +1664,28 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       // --- Boldness: "Banked Flame" — a controlled, enduring fire instead
       // of an explosive burst.
+      // --- Boldness: the furnace that stands in its own fire ---
+      //
+      // Reworked away from a generic armor ladder (damageReduction ->
+      // defenseBoost -> regen/thorns fork -> defenseBoost+thorns capstone)
+      // that vine_whip and rock_slide were running node-for-node with the
+      // same passive values. Three moves cannot all be "the tanky one."
+      //
+      // The fantasy that is only true here: this creature does not survive
+      // by being armored, it survives by being made of the thing that hurts
+      // everyone else. Now that fire is real, persistent terrain (fire.ts),
+      // that is a mechanic and not just flavor — this branch buys the right
+      // to keep fighting inside its own wildfire, which no other move in the
+      // roster can do, and which pairs with the Aggression branch's
+      // Wildfire's Reach rather than sitting in a separate corner.
       thick_scales: {
         id: "thick_scales",
-        name: "Thick Scales",
+        name: "Scorchproof Hide",
         cost: 1,
         leaning: "boldness",
-        grantsPassive: { kind: "damageReduction", value: 0.08 },
+        // Half damage from standing in fire — enough to hold a burning tile
+        // for a while, not enough to ignore it.
+        grantsPassive: { kind: "fireproof", value: 0.5 },
         delta: {},
       },
       hardened_plates: {
@@ -1670,8 +1710,9 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["steady_burn"],
         leaning: "boldness",
-        grantsPassive: { kind: "defenseBoost", value: 0.05 },
-        delta: {},
+        // Cornered and burning hotter for it — the branch's own escalation
+        // lever, rather than another flat defense number.
+        delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.35 } },
       },
       slower_burn: {
         id: "slower_burn",
@@ -1681,6 +1722,11 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
       },
+      // The real fork: do you want to OWN the burning ground, or to make
+      // yourself the thing that isn't safe to stand next to? Both are "fire
+      // as armor", and they pull toward genuinely different fights — one
+      // wants a wildfire to stand in, the other doesn't care about terrain
+      // at all.
       smoldering_core: {
         id: "smoldering_core",
         name: "Smoldering Core",
@@ -1688,8 +1734,10 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["slower_burn"],
         excludes: ["flame_wreath"],
         leaning: "boldness",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
-        delta: {},
+        // Total fire immunity: at 1 the holder also keeps regenerating while
+        // standing in fire (fire.ts). The burning tile becomes YOUR ground.
+        grantsPassive: { kind: "fireproof", value: 0.5 },
+        delta: { situationalBonus: { condition: "targetBurning", multiplier: 1.5 } },
       },
       flame_wreath: {
         id: "flame_wreath",
@@ -1698,8 +1746,9 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["slower_burn"],
         excludes: ["smoldering_core"],
         leaning: "boldness",
-        grantsPassive: { kind: "thorns", value: 0.12 },
-        delta: {},
+        // The other answer: never mind the ground, be the hazard yourself.
+        grantsPassive: { kind: "thorns", value: 0.14 },
+        delta: { statusChance: 0.1 },
       },
       unburnt: {
         id: "unburnt",
@@ -1707,8 +1756,12 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["smoldering_core"], ["flame_wreath"]],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReduction", value: 0.06 },
-        delta: {},
+        // Tops the branch up to full fire immunity from EITHER fork — the
+        // Flame Wreath side has spent its nodes on being the hazard rather
+        // than on surviving one, so this is where that build stops caring
+        // about burning ground too. (Named for what it does: unburnt.)
+        grantsPassive: { kind: "fireproof", value: 0.5 },
+        delta: { power: 5 },
       },
       hotter_scales: {
         id: "hotter_scales",
@@ -1724,13 +1777,12 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["hotter_scales"],
         leaning: "boldness",
-        // Heavier on thorns than defense — a furnace punishes whoever
-        // touches it more than it simply shrugs off the hit.
-        grantsPassives: [
-          { kind: "defenseBoost", value: 0.05 },
-          { kind: "thorns", value: 0.12 },
-        ],
-        delta: {},
+        // The capstone escalates this branch's own lever rather than
+        // reaching for the roster's generic tank passives: it leaves fire
+        // behind it wherever it fights, and it is the one thing in the game
+        // that is comfortable there.
+        grantsPassive: { kind: "fireproof", value: 1 },
+        delta: { terrainBurn: true },
       },
       // Crosslink: Boldness <-> Sociability — the banked heat singes
       // anyone who gets too close to whoever it's standing guard over.
@@ -2138,7 +2190,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["screening_wings"], ["harriers_charge"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regenFlat", value: 2.25 },
         delta: {},
       },
       flock_instinct: {
@@ -2447,7 +2499,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["colony_guard"], ["tunnel_runner"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regenFlat", value: 2.25 },
         delta: {},
       },
       den_instinct: {
@@ -2812,7 +2864,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["vanguard_call"], ["bulwark_call"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regenFlat", value: 2.25 },
         delta: {},
       },
       tremor_focus: {
@@ -2898,7 +2950,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // Deepens the bracing lever Warning Tremor already granted, instead
         // of a generic lifesteal bolt-on — the herd's own care extends into
         // real, ongoing recovery.
-        grantsPassive: { kind: "regenFlat", value: 1 },
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: {},
       },
       // Crosslink: Sociability <-> Aggression — a marked target that's
@@ -3204,7 +3256,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["undertow_guard"], ["riptide_rush"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regenFlat", value: 2.25 },
         delta: {},
       },
       tide_instinct: {
@@ -3648,20 +3700,20 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["wading_advance", "pod_current"],
         leaning: "boldness",
-        grantsPassive: { kind: "regenFlat", value: 1 },
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: {},
       },
       // Bridge tail: extends Steadfast Tide into Boldness's and
       // Sociability's own pre-fork nodes (Channel Grip / Pod Reach).
       tidal_footing: {
         id: "tidal_footing",
-        name: "+0.5 HP Regen",
+        name: "+0.75 HP Regen",
         cost: 1,
         prerequisites: ["steadfast_tide"],
         leaning: "boldness",
         // Deepens Steadfast Tide's own shared-vitality lever directly,
         // instead of a generic power bolt-on.
-        grantsPassive: { kind: "regenFlat", value: 0.5 },
+        grantsPassive: { kind: "regenFlat", value: 0.75 },
         delta: {},
       },
       communal_current: {
@@ -4063,7 +4115,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["sunlit_roots", "grove_ward"],
         leaning: "boldness",
-        grantsPassive: { kind: "regenFlat", value: 1 },
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: {},
       },
       // Bridge tail: extends Shared Shade into Boldness's and
@@ -4071,13 +4123,13 @@ export const MOVES: Record<string, MoveSpec> = {
       // Precision).
       canopy_footing: {
         id: "canopy_footing",
-        name: "+0.5 HP Regen",
+        name: "+0.75 HP Regen",
         cost: 1,
         prerequisites: ["shared_shade"],
         leaning: "boldness",
         // Deepens Shared Shade's own shared-vitality lever directly,
         // instead of a generic power bolt-on.
-        grantsPassive: { kind: "regenFlat", value: 0.5 },
+        grantsPassive: { kind: "regenFlat", value: 0.75 },
         delta: {},
       },
       grove_bulwark: {
@@ -4424,7 +4476,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["guardians_ground"], ["rally_quake"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regenFlat", value: 2.25 },
         delta: {},
       },
       herd_precision: {
@@ -4705,13 +4757,28 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       // --- Boldness: "Bedrock Stance" — standing unmoved in the middle of
       // its own rockfall.
+      // --- Boldness: mass, and the high ground it fights from ---
+      //
+      // Reworked off the same generic armor ladder vine_whip and
+      // flamethrower were running node-for-node (damageReduction ->
+      // defenseBoost -> regen/thorns fork -> defenseBoost+thorns capstone,
+      // identical passive values). Vine Whip is the honest owner of
+      // rooted-and-thorny; this branch was borrowing it.
+      //
+      // What is only true of a rockslide: it is a WEIGHT problem, and it is
+      // an ELEVATION problem. Nothing else in the roster gets to build
+      // around `weightScaling` and the `elevation` situational bonus, and
+      // both are levers the trees have barely touched. This branch is about
+      // being the heavy thing standing above you, not about having thicker
+      // skin than the next tank.
       stone_shield: {
         id: "stone_shield",
-        name: "Stone Shield",
+        name: "Set Stance",
         cost: 1,
         leaning: "boldness",
-        grantsPassive: { kind: "damageReduction", value: 0.08 },
-        delta: {},
+        // Plants its feet and lets its own bulk do the work — the branch's
+        // thesis stated in its first node.
+        delta: { weightScaling: { factor: 0.2 } },
       },
       firmer_footing: {
         id: "firmer_footing",
@@ -4732,11 +4799,12 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       denser_stone: {
         id: "denser_stone",
-        name: "+5 Power",
+        name: "Denser Stone",
         cost: 1,
         prerequisites: ["craggy_hide"],
         leaning: "boldness",
-        delta: { power: 5 },
+        // Deepens the opener's own lever instead of being another +5 Power.
+        delta: { weightScaling: { factor: 0.15 } },
       },
       settled_stance: {
         id: "settled_stance",
@@ -4746,15 +4814,17 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
       },
+      // The fork: take the high ground and rain rock down from it, or
+      // refuse to give ground at all. Both are "mass"; they want opposite
+      // positions on the map, which is the tension worth having.
       weathering: {
         id: "weathering",
-        name: "Weathering",
+        name: "High Perch",
         cost: 1,
         prerequisites: ["settled_stance"],
         excludes: ["jagged_edges"],
         leaning: "boldness",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
-        delta: {},
+        delta: { situationalBonus: { condition: "elevation", multiplier: 1.45 } },
       },
       jagged_edges: {
         id: "jagged_edges",
@@ -4792,14 +4862,12 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["time_worn"],
         leaning: "boldness",
-        // Heavier on raw defense than retaliation — the actual weight of
-        // a mountain standing firm matters more here than punishing
-        // whoever's still hitting it.
-        grantsPassives: [
-          { kind: "defenseBoost", value: 0.1 },
-          { kind: "thorns", value: 0.06 },
-        ],
-        delta: {},
+        // Escalates the branch's OWN lever — the heaviest version of the
+        // thing every node here has been building — rather than reaching
+        // for the roster's stock defenseBoost+thorns tank capstone, which
+        // is exactly what it used to be.
+        grantsPassive: { kind: "defenseBoost", value: 0.06 },
+        delta: { weightScaling: { factor: 0.25 }, defensePenetration: 0.15 },
       },
       // Crosslink: Boldness <-> Sociability — the same steadiness that
       // shrugs off falling rock is also what lets it read the coming
@@ -5207,7 +5275,7 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["steadier_wings"],
         excludes: ["storm_wings"],
         leaning: "boldness",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regenFlat", value: 2.25 },
         delta: {},
       },
       storm_wings: {
@@ -5614,7 +5682,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         // The longer it just sits there, the more it recovers — laziness
         // as sustain.
-        grantsPassive: { kind: "regenFlat", value: 1 },
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: { power: -5 },
       },
       full_bulk: {
@@ -5760,7 +5828,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // Content and undisturbed, it simply isn't worn down the way
         // something always looking over its shoulder would be.
-        grantsPassive: { kind: "regenFlat", value: 1 },
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: {},
       },
       left_in_peace: {
@@ -5992,7 +6060,7 @@ export const MOVES: Record<string, MoveSpec> = {
         excludes: ["false_surface"],
         leaning: "aggression",
         // Recovers fast between dives instead of biting on the way past.
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regenFlat", value: 2.25 },
         delta: {},
       },
       false_surface: {
@@ -6099,7 +6167,7 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["bedrock_grip"],
         excludes: ["stone_hide"],
         leaning: "boldness",
-        grantsPassive: { kind: "regenFlat", value: 2 },
+        grantsPassive: { kind: "regenFlat", value: 3 },
         delta: {},
       },
       stone_hide: {
@@ -6221,7 +6289,7 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["settling_earth"],
         excludes: ["deeper_calm"],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regenFlat", value: 2.25 },
         delta: {},
       },
       denning_together: {
@@ -6246,7 +6314,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["peaceful_tunnels", "quick_reflexes"],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 1 },
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: { cooldownTicks: -1 },
       },
       sharper_warning: {
@@ -6266,7 +6334,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         // Underground before anything else has reacted, and recovering while
         // it waits.
-        grantsPassive: { kind: "regenFlat", value: 1 },
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: { cooldownTicks: -2 },
       },
     },
@@ -6584,7 +6652,7 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Steady Roots",
         cost: 1,
         leaning: "boldness",
-        grantsPassive: { kind: "regenFlat", value: 1 },
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: {},
       },
       thick_bark: {
@@ -6748,7 +6816,7 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["settled_growth"],
         excludes: ["deepening_calm"],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regenFlat", value: 2.25 },
         delta: {},
       },
       roots_that_feed_the_grove: {
@@ -6773,7 +6841,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["gentle_roots", "ravenous_bite"],
         leaning: "aggression",
-        grantsPassive: { kind: "regenFlat", value: 1 },
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: { cooldownTicks: -1 },
       },
       richer_ground: {
@@ -6783,7 +6851,7 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["feeding_ground"],
         leaning: "aggression",
         // Deepens Feeding Ground's own recovery lever.
-        grantsPassive: { kind: "regenFlat", value: 1 },
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: {},
       },
       endless_bounty: {
@@ -6793,7 +6861,7 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["richer_ground"],
         leaning: "sociability",
         // Never quite empty, and never waiting long.
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regenFlat", value: 2.25 },
         delta: { cooldownTicks: -1 },
       },
     },

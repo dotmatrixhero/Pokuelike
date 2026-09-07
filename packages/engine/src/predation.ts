@@ -15,7 +15,7 @@ import { isPathClear } from "./fov.js";
 import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt, setTile } from "./world.js";
 import { waterSoil } from "./flora.js";
-import { igniteTile } from "./fire.js";
+import { igniteNear } from "./fire.js";
 import { recordPredatorPressure } from "./herdMigration.js";
 import { isNight, isTwilight, lightLevel } from "./daynight.js";
 import { activeWeatherAt, isInColdSnap, stormAccuracyMultiplier } from "./weather.js";
@@ -1130,7 +1130,7 @@ function resolveHitAgainstTarget(
       // "the fire burning down flora mechanic." The end state is the same
       // scorched floor; what changed is that it now takes ticks, is
       // visible while it happens, and can get away from you.
-      igniteTile(world, defender.layer, defender.pos.x, defender.pos.y, log);
+      igniteNear(world, defender.layer, defender.pos.x, defender.pos.y, log);
     }
     if (move.terrainFill) {
       const tile = tileAt(world, defender.layer, defender.pos.x, defender.pos.y);

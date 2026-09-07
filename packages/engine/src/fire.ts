@@ -92,6 +92,31 @@ export function igniteTile(world: World, layer: Layer, x: number, y: number, log
 }
 
 /**
+ * Lights the given tile if it has fuel, otherwise the first adjacent tile
+ * that does. Returns whether anything caught.
+ *
+ * The spill to a neighbour is not generosity, it is what makes the mechanic
+ * exist at all: `terrainBurn` fires on a landed hit, and it originally only
+ * ever checked the defender's own tile — but fuel is roughly 5% of a real
+ * map, so a fight had to happen exactly on a bush for anything to burn.
+ * Measured across 6 seeds x 10k ticks with the tile-only rule: ONE ignition.
+ * Checking the four neighbours as well is the difference between a shipped
+ * mechanic and a shipped mechanic nobody ever sees.
+ */
+export function igniteNear(world: World, layer: Layer, x: number, y: number, log?: EventLog): boolean {
+  if (igniteTile(world, layer, x, y, log)) return true;
+  for (const [dx, dy] of [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ] as const) {
+    if (igniteTile(world, layer, x + dx, y + dy, log)) return true;
+  }
+  return false;
+}
+
+/**
  * One tick of every burning tile on the surface: spread, burn down, and
  * scorch out. Agent damage is `applyFireDamage` below, kept separate
  * because it walks `world.agents` rather than the tile grid and because
@@ -168,7 +193,12 @@ export function applyFireDamage(world: World, log?: EventLog, rng: () => number 
     if (agent.hp === undefined || agent.maxHp === undefined) continue;
     if (!isFire(tileAt(world, agent.layer, agent.pos.x, agent.pos.y))) continue;
 
-    agent.hp = Math.max(0, agent.hp - agent.maxHp * FIRE_DAMAGE_FRACTION_PER_TICK);
+    // A fireproof creature stands in its own flames — see the passive's own
+    // doc comment for why this covers the hazard tile only, not the burn
+    // status or Fire-type damage.
+    const fireproof = Math.min(1, agent.passives?.fireproof ?? 0);
+    if (fireproof >= 1) continue;
+    agent.hp = Math.max(0, agent.hp - agent.maxHp * FIRE_DAMAGE_FRACTION_PER_TICK * (1 - fireproof));
     maybeInflictStatus(
       agent,
       agent.id,

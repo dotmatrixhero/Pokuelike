@@ -849,7 +849,7 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
 
     const sinkIn = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "sink_in"]);
     expect(sinkIn.power).toBe(bodySlam.power + 5 - 5);
-    expect(bodySlam.tree!.sink_in.grantsPassive).toEqual({ kind: "regenFlat", value: 1 });
+    expect(bodySlam.tree!.sink_in.grantsPassive).toEqual({ kind: "regenFlat", value: 1.5 });
 
     const fullBulk = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "full_bulk"]);
     expect(fullBulk.accuracy).toBe(bodySlam.accuracy - 8 + 8);
@@ -860,7 +860,7 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
     expect(wideBerth.power).toBe(bodySlam.power + 5);
 
     const steadyNerve = applyMoveTree(bodySlam, ["unbothered", "settled_ease", "unhurried_reset", "no_quarrel", "quiet_ground", "steady_nerve"]);
-    expect(bodySlam.tree!.steady_nerve.grantsPassive).toEqual({ kind: "regenFlat", value: 1 });
+    expect(bodySlam.tree!.steady_nerve.grantsPassive).toEqual({ kind: "regenFlat", value: 1.5 });
     expect(steadyNerve.power).toBe(bodySlam.power + 5);
   });
 

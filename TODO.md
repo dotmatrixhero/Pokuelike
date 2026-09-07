@@ -4909,3 +4909,56 @@ not something this pathfinding pass itself caused or is positioned to fix.
       reached it. The mechanic is real and tested but effectively unseen.
       Worth either seeding fire more broadly across the fire-type trees or
       accepting it as a rare, memorable event.
+- [x] **Flat regen bumped 1.5x** (0.5->0.75, 1->1.5, 1.5->2.25, 2->3), per
+      "flat conversion is fine. Maybe bump it a tiny bit." The two nodes
+      displaying their own number renamed to "+0.75 HP Regen" to match.
+- [x] **MAJOR: cost-2 and cost-3 tree nodes were nearly dead content.**
+      Found while chasing why fire never triggered. `maybeAutoRespec` spends
+      each point the instant it arrives and a cost-1 candidate almost always
+      exists, so agents never bank the 2-3 points a keystone or capstone
+      costs. Measured across a living population: cost-1 reached 77/456
+      distinct nodes, cost-2 only 6/144, cost-3 exactly 0/4.
+      - Fixed with `SKILLPOINT_SAVE_CHANCE` (0.5): bank the point when
+        exactly one grant short of an already-unlocked node. Across 6 seeds
+        this takes cost-3 from 0/4 to 2/4 reached.
+      - The first attempt banked whenever ANY unaffordable node existed
+        (almost always true) and agents saved forever, picking ~nothing.
+        "Exactly one grant away" is what makes it self-limiting.
+- [x] **Fire now actually happens: 0 -> 74 ignitions across 6 seeds.**
+      Three separate causes, each found by measuring rather than guessing:
+      terrainBurn sat only on Flamethrower (1 species entry vs Ember's 6);
+      then on cost-3 nodes nothing reaches; then at depth 5, where only
+      9 of 360 agents arrived and 18 of 1217 fights involved one. It now
+      sits on Ember's opener "Wider Burn", whose name already promised it,
+      and spills to an adjacent fuel tile since fuel is only ~5% of a map.
+- [x] **Boldness de-templated.** vine_whip/flamethrower/rock_slide ran the
+      same branch node-for-node with identical passive values. Vine Whip
+      keeps rooted-and-thorny (it is the honest owner); Flamethrower rebuilt
+      around a new `fireproof` passive (stands in its own wildfire, capstone
+      leaves fire behind it); Rock Slide rebuilt around `weightScaling` +
+      the `elevation` bonus, with a positional fork instead of the stock
+      regen-vs-thorns one.
+- [ ] **METHODOLOGY: stop trusting single-seed population numbers.**
+      Adding one extra `rng()` draw per skill-point grant, with its effect
+      disabled, moved a seed's 20k population from 129 to 3. Across 6 seeds
+      population ranges 11-151. Earlier entries in this file quote
+      single-seed population swings (167 -> 28 -> 8 -> 129) as if they were
+      clean signal; they are not, and should be re-measured with
+      `validateSkillEconomy.ts` before anyone acts on them.
+      Distinct-nodes-reached is the metric that holds up.
+- [ ] **The intermittent test flake is real and recurring.** Now seen in
+      three different files across separate full runs (predation,
+      reproduction "lays a real egg", status "burn halves the burned
+      attacker's physical damage"), each passing in isolation and on re-run.
+      Different test each time points at shared global state rather than one
+      bad test. Narrowed a little: the status test passes 5/5 in isolation
+      and only fails inside the full parallel run, and three test files
+      (flora, needs, predation) spy on `Math.random`. All three do restore
+      it, so the leak is subtler than a missing `restoreAllMocks` — likely
+      worker/module sharing across parallel files. Not caused by the fire or
+      healing work (it predates both). Worth a dedicated look.
+- [ ] **Population may still be low.** Multi-seed median sits around 18 with
+      a long tail to 151. Whether that band is right is still the open
+      game-feel call from the previous round; the healing levers not built
+      (diminishing returns, per-move heal reduction) remain the tuning
+      options if it wants raising.

@@ -2740,3 +2740,90 @@ numbers alone can't settle.
 Still on the table from the same conversation and deliberately not built
 yet: diminishing returns on stacking, and a per-move heal-reduction lever
 (a Heal Block-style effect the trees could reach for).
+
+## Three findings from making fire actually show up
+
+Asked to make the fire mechanic real in play, fix the Boldness template, and
+bump flat healing. The first of those turned into the most important finding
+in this document.
+
+### Cost-2 and cost-3 nodes were very nearly dead content
+
+Fire shipped, tested, rendered — and produced **zero ignitions across a
+20k-tick run**. Chasing why went three levels deep:
+
+1. `terrainBurn` lived only on Flamethrower's Wildfire's Reach. Flamethrower
+   is known by one species entry; Ember by six. Moved it to Ember.
+2. Still zero. Ember's `wildfire_burst` is **cost 3** — and measuring node
+   picks across a living population found the real problem:
+
+   | node cost | distinct nodes ever reached |
+   |---|---|
+   | 1 | 77 / 456 |
+   | 2 | 6 / 144 |
+   | 3 | **0 / 4** |
+
+   `maybeAutoRespec` spends every point the instant it arrives, and a cost-1
+   candidate is nearly always available, so an agent can never accumulate the
+   2-3 points a keystone or capstone costs. **Every capstone in the game was
+   nearly unreachable and cost-3 nodes were unreachable outright.** Fixed
+   with `SKILLPOINT_SAVE_CHANCE`: bank the point when exactly one grant short
+   of something already unlocked. Across 6 seeds that takes cost-3 from 0/4
+   to 2/4 reached.
+
+   The first version of this banked whenever *any* unaffordable node existed
+   — almost always true — so agents saved forever and picked nearly nothing.
+   Bounding it to "exactly one grant away" is what makes it self-limiting.
+3. Still one ignition in 60k agent-ticks. Instrumenting rather than guessing:
+   only **9 of 360** living agents had reached the depth-5 node carrying it,
+   and only 18 of 1217 fights involved one. Depth was the bottleneck, not
+   fuel. Ignition now sits on Ember's **opener**, whose name ("Wider Burn")
+   already promised it. Result: **74 ignitions** across the same 6 seeds.
+
+Fire also now spills to an adjacent fuel tile when the defender's own tile
+has none — fuel is ~5% of a real map, so a tile-only rule meant a fight had
+to land exactly on a bush.
+
+### A methodology correction worth more than the fixes
+
+Population in this sim is **wildly** sensitive to the RNG sequence. Inserting
+a single extra `rng()` draw per skill-point grant, *with its effect
+disabled*, moved one seed's 20k population from 129 to 3. Several
+single-seed before/after population comparisons were made earlier in this
+work — including the ones quoted in the passive-healing section above — and
+they are far weaker evidence than they were presented as. Across 6 seeds the
+population range is 11-151 with a median around 18; that spread swamps most
+of the effects being measured. `validateSkillEconomy.ts` exists to average
+across seeds. **Distinct-nodes-reached is the trustworthy metric here;
+population is not.**
+
+### Boldness: three moves were wearing one suit of armor
+
+vine_whip, flamethrower and rock_slide ran the same branch node-for-node,
+with the same passive values:
+
+```
+[damageReduction] -> +10 Acc -> +5 Pow -> [defenseBoost] -> -1 CD
+   -> FORK: [regen] vs [thorns 0.12]
+   -> [damageReduction] -> +10 Acc -> [defenseBoost + thorns]
+```
+
+None of them passed the guide's own test — "describe the branch without
+naming the move." Vine Whip is the honest owner of rooted-and-thorny (that
+genuinely is a plant's boldness), so the other two moved off it:
+
+- **Flamethrower — the furnace that stands in its own fire.** Built on a new
+  `fireproof` passive: half fire-terrain damage at the opener, full immunity
+  at the capstone, which also leaves fire behind it wherever it fights. Only
+  possible because fire is now real terrain, and it deliberately ties the
+  Boldness branch to the Aggression branch's wildfire rather than sitting in
+  its own corner. `fireproof` covers the hazard tile only — not the burn
+  status, not Fire-type damage, which stay the type chart's job.
+- **Rock Slide — mass, and the high ground.** Built on `weightScaling` and
+  the `elevation` situational bonus, two levers the trees had barely
+  touched. Its fork is now positional (take the high ground vs refuse to
+  give ground) rather than the stock regen-vs-thorns.
+
+One node was caught mid-rework promising "burn immunity" in its comment
+while granting `damageReduction` — rewritten to do what its name says. That
+check is cheap and it keeps finding things.

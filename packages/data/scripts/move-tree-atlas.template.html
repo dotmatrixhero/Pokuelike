@@ -890,6 +890,7 @@
     damageReduction: function (v) { return "Passive — takes " + pct(v) + " less damage from every hit."; },
     immovable: function () { return "Passive — can't be dragged, knocked back, or lunged at by anything."; },
     regen: function (v) { return "Passive — heals " + pct(v) + " of max HP every tick, on its own. Only out of combat (any damage taken suppresses it briefly)."; },
+    fireproof: function (v) { return v >= 1 ? "Passive — completely immune to standing in fire: no damage, and passive healing keeps working on a burning tile." : "Passive — ignores " + pct(v) + " of the damage from standing in a fire tile."; },
     regenFlat: function (v) { return "Passive — heals a flat " + v + " HP every tick, on its own. Worth proportionally more to a small unit than a big one. Only out of combat (any damage taken suppresses it briefly)."; },
     thorns: function (v) { return "Passive — reflects " + pct(v) + " of incoming damage back onto the attacker."; },
     healAura: function (v) { return "Passive — heals every nearby herd-mate (itself included) " + pct(v) + " of max HP every tick. Each recipient must be out of combat."; },
