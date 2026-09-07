@@ -891,6 +891,7 @@
     thorns: function (v) { return "Passive — reflects " + pct(v) + " of incoming damage back onto the attacker."; },
     healAura: function (v) { return "Passive — heals every nearby herd-mate (itself included) " + pct(v) + " of max HP every tick."; },
     defenseBoost: function (v) { return "Passive — permanently raises its own Defense stat-stage by " + v + "."; },
+    aquaticHaste: function (v) { return "Passive — every nearby herd-mate (itself included) moves " + pct(v) + " faster while standing on water."; },
   };
 
   function pct(v) { return Math.round(v * 1000) / 10 + "%"; }

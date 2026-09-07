@@ -2724,7 +2724,14 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Pod Current",
         cost: 1,
         leaning: "sociability",
-        delta: { targetsAlly: true, allyEffect: { healFraction: 0.15 } },
+        // The opener carries the branch's own "the pod cares for itself"
+        // fantasy on two fronts, live from the first point spent: a real
+        // idle-tick heal, and — moved here from the capstone after direct
+        // feedback that reusing Earthquake's own opener trick as a
+        // capstone felt recycled — the pod finally doesn't hurt its own:
+        // Hydro Pump's `hitsArea` (set on the base move) no longer catches
+        // herd-mates caught in it.
+        delta: { targetsAlly: true, allyEffect: { healFraction: 0.15 }, excludesAllies: true },
       },
       pod_footing: {
         id: "pod_footing",
@@ -2804,14 +2811,16 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["pod_precision"],
         leaning: "sociability",
-        // Direct feedback: a flat team-heal capstone didn't match this
-        // branch's own fantasy ("the pod moving the water together").
-        // Real payoff instead: the pod learns to ride its own current as
-        // one — Hydro Pump's `hitsArea` blast (set on the base move) no
-        // longer catches herd-mates caught in it, the same `excludesAllies`
-        // primitive Earthquake's Herdsafe Trigger already uses, finally
-        // used here where "the pod moves together" is the literal fantasy.
-        delta: { excludesAllies: true },
+        // Third try at this capstone, direct feedback both times: a flat
+        // team-heal didn't match "the pod moving the water together," and
+        // the follow-up `excludesAllies` (moved to Pod Current's own
+        // opener instead — see its comment) read as reused content
+        // already spent as Earthquake's own opener. The real fantasy: the
+        // whole pod moves faster through its own element — a genuine,
+        // brand-new engine primitive (`"aquaticHaste"`, see PassiveKind's
+        // own doc comment in types.ts), not a flat stat bolt-on.
+        grantsPassive: { kind: "aquaticHaste", value: 0.75 },
+        delta: {},
       },
       // Crosslink: Aggression <-> Boldness — Boldness's steadiness softens
       // Aggression's own wind-up cost, directly answering the price

@@ -21,6 +21,7 @@ import {
   activityScheduleMultiplier,
   OFF_HOURS_SPEED_MULTIPLIER,
   coldSnapSpeedMultiplier,
+  aquaticHasteMultiplier,
   applySupportMove,
   applyScavenging,
   DELIVERED_FOOD_HUNGER_RESTORE,
@@ -483,6 +484,55 @@ describe("coldSnapSpeedMultiplier: the fourth composable Speed modifier (Phase 3
     expect(coldSnap).toBe(COLD_SNAP_SPEED_MULTIPLIER);
     // All four penalties really did stack — strictly less than terrain/off-hours alone, without the cold snap.
     expect(finalSpeed).toBeLessThan(effectiveSpeed(injuredAgent, baseSpeed * terrainFactor * offHours));
+  });
+});
+
+describe("aquaticHasteMultiplier: the pod's own real terrain mastery (Hydro Pump's Tidal Communion)", () => {
+  it("boosts a same-herd agent's Speed while it's standing on water, if a nearby herd-mate holds the passive", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    const holder = makeAgent({ id: "holder", herdId: "pod", pos: { x: 4, y: 5 }, passives: { aquaticHaste: 0.75 } });
+    const swimmer = makeAgent({ id: "swimmer", herdId: "pod", pos: { x: 5, y: 5 } });
+    world.agents.push(holder, swimmer);
+
+    expect(aquaticHasteMultiplier(world, swimmer)).toBeCloseTo(1.75);
+  });
+
+  it("is neutral (1) off water, even standing right next to the passive-holder", () => {
+    const world = createWorld(10, 10); // default floor terrain
+    const holder = makeAgent({ id: "holder", herdId: "pod", pos: { x: 4, y: 5 }, passives: { aquaticHaste: 0.75 } });
+    const dryLander = makeAgent({ id: "dry", herdId: "pod", pos: { x: 5, y: 5 } });
+    world.agents.push(holder, dryLander);
+
+    expect(aquaticHasteMultiplier(world, dryLander)).toBe(1);
+  });
+
+  it("is neutral (1) on water with no nearby holder, no herd, or the holder out of radius", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    const noHerd = makeAgent({ id: "lone", pos: { x: 5, y: 5 } });
+    world.agents.push(noHerd);
+    expect(aquaticHasteMultiplier(world, noHerd)).toBe(1);
+
+    const swimmer = makeAgent({ id: "swimmer2", herdId: "pod2", pos: { x: 5, y: 5 } });
+    const farHolder = makeAgent({ id: "far-holder", herdId: "pod2", pos: { x: 9, y: 9 }, passives: { aquaticHaste: 0.75 } });
+    world.agents.push(swimmer, farHolder);
+    expect(aquaticHasteMultiplier(world, swimmer)).toBe(1);
+  });
+
+  it("composes multiplicatively alongside the other Speed modifiers, not replacing any of them", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 5, 5, "water");
+    const holder = makeAgent({ id: "holder", herdId: "pod", pos: { x: 4, y: 5 }, passives: { aquaticHaste: 0.75 } });
+    const swimmer = makeAgent({ id: "swimmer", herdId: "pod", pos: { x: 5, y: 5 } });
+    world.agents.push(holder, swimmer);
+
+    const baseSpeed = 40;
+    const terrainFactor = movementSpeedFactor(0, 0, "floor");
+    const haste = aquaticHasteMultiplier(world, swimmer);
+    const speed = baseSpeed * terrainFactor * haste;
+
+    expect(speed).toBeCloseTo(baseSpeed * 1.75);
   });
 });
 

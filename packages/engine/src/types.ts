@@ -35,9 +35,14 @@ export type StatusKind = "burn" | "poison" | "paralysis" | "sleep" | "freeze";
  * on top of the agent's own stacked stages — physical-only for free, since
  * `calculateDamage` only ever reads the `defense` stage for a physical
  * move, never `spDefense`, unlike `damageReduction` which blunts every hit
- * indiscriminately). See MOVES_DESIGN.md's primitives checklist.
+ * indiscriminately), `"aquaticHaste"` (support.ts's
+ * `aquaticHasteMultiplier`, composed into `actionSpeedOf`, simulation.ts —
+ * a real Speed multiplier bonus for every same-herd agent near the
+ * passive-holder, itself included, while THAT agent is currently standing
+ * on a `"water"` terrain tile; no effect off water or without a nearby
+ * holder). See MOVES_DESIGN.md's primitives checklist.
  */
-export type PassiveKind = "damageReduction" | "immovable" | "regen" | "thorns" | "healAura" | "defenseBoost";
+export type PassiveKind = "damageReduction" | "immovable" | "regen" | "thorns" | "healAura" | "defenseBoost" | "aquaticHaste";
 
 /**
  * Why a herd is (or was) migrating — see herdMigration.ts/DESIGN.md's

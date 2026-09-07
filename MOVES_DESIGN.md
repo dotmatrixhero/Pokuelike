@@ -154,6 +154,7 @@ grepping for "needs" across the whole file.
 | Ally-effect piggybacking on an attack (`MoveSpec.allyEffectOnAttack`) | "Make it so some of 'em not only do it as a separate target but also auto trigger if using against an enemy while ally is in range too" — a second, independent way the ally-effect fires, on top of (not instead of) `targetsAlly`'s dedicated idle-tick use | **Shipped** — checked in `resolveHit` (predation.ts) the instant the move is used against an enemy, same timing as `statChangeOnHit`'s self-side effect, independent of whether the attack itself lands: finds the nearest in-range, hurt-preferred herd-mate (`nearestAllyEffectTarget`, support.ts — the same "who gets it" rule `applySupportMove` uses, pulled out so both share it) and applies `allyEffect` to them too, at no extra cost. Works with or without `targetsAlly` also set — a move can auto-trigger on attack without ever being a dedicated idle-tick support move, or do both. First real content: Scratch's *Colony Call* and Water Gun's *Shared Current* (see below) |
 | Multi-target/AoE resolution (apply a move to every agent within its resolved shape, not one target) | Growl (its entire premise), Firestorm, Ring of Fire's full fantasy, Boulder Toss/Skipping Stone | **Shipped** — `MoveSpec.hitsArea`, resolved by `resolveAreaHit` (predation.ts): facing derived from attacker->primary-target direction, `resolveShape` finds every living agent in the move's footprint, each gets its own accuracy roll and damage instance; only the deliberately-picked primary target gets status/stat-change/forced-movement/position-swap hooks, incidental targets just take the raw hit. Confirmed in a real fight: a ring-shaped move centered on the attacker landed on both the picked target and an unrelated bystander standing on the same ring. Growl itself still isn't built — see below |
 | AoE ally-exemption (`MoveSpec.excludesAllies`) | A reckless AoE (Earthquake) that a drilled herd learns not to get caught in | **Shipped** — one extra condition in `resolveAreaHit`'s existing target filter, skipping agents whose `herdId` matches the attacker's when the move sets this flag. Without it (the default, and every AoE move's real behavior before this field existed), a same-herd agent caught in the blast takes the hit exactly like an enemy would. First real content: Earthquake's *Herdsafe Trigger* (see below) |
+| Terrain-conditional ally speed aura (`PassiveKind` `"aquaticHaste"`) | Hydro Pump's Pod Tide capstone — direct ask, after two rounds of feedback that its capstone didn't match the branch's own fantasy: "it would be better if it granted all allies greatly more speed when they're on water tiles" | **Shipped** — `support.ts`'s `aquaticHasteMultiplier`, composed into `actionSpeedOf`'s existing multiplier chain (simulation.ts): a same-herd agent within a fixed radius of the passive-holder (itself included) gets a real Speed bonus, but only while THAT agent is currently standing on a `"water"` tile (`world.ts`'s `tileAt`). The first passive in the roster that's both an aura (like `healAura`) AND terrain-conditional (like `terrainSpeedMultiplier`) — neither existing mechanism covered this alone. First real content: Hydro Pump's *Tidal Communion* |
 | Persistent stat stages (`Agent`-level Attack/Defense/etc. modifiers, settable by a move, lasting until cured — distinct from burn's one-off computed halving, which just derives a stage from `agent.status` fresh at each `calculateDamage` call rather than storing one) | Growl specifically (`statStageMultiplier` already exists in combat.ts as a pure function; burn now calls it, but from a computed value, not a stored `Agent.statStages` field) | **Shipped** — `Agent.statStages` (an array of `{stat, stage, ticksRemaining?}` entries, `status.ts`'s `applyStatStage`/`getStatStage`), fed into `calculateDamage`'s existing stat-stage machinery for both attacker and defender, and composing additively with burn's own -2 Attack. `MoveSpec.statChangeOnHit` is the move-level lever: `target: "self"` applies the instant the move is used, `target: "defender"` only on a landed, non-killing hit. **Growl itself is still not built** — it needs this primitive plus multi-target/AoE (both now shipped) plus a no-damage/status-move representation, which remains the one open piece |
 | Status-effect system (burn/poison DOT, paralysis/sleep/freeze) | Ember's/Flamethrower's burn chance, previously idle | **Shipped** — see DESIGN.md's "Status effects" section. Constrict's designed root effect still needs a sixth `StatusKind` (`"root"`), not modeled yet |
 | Idle/opportunistic utility-move trigger (`MoveSpec.utilityMove` + `utilityMoves.ts`'s `maybeUseUtilityMove`) | Growth, Agility, Rain Dance, and every other self/tile-effect move on this whole list — the real gap this section's own "why status effects and environmental moves are two different systems" note predicted | **Shipped** — the third trigger path, alongside the hostile hit pipeline and the ally-support one, checked whenever `chooseBehavior(agent.needs) === "idle"` (needs.ts, NOT `agent.behavior === "idle"` — see this section's own note on why that gate under-fired in a real run). `pickBestMove` excludes `utilityMove`-flagged moves from hostile selection, same as `burrow`. First real content: 13 curated moves, see "Environmental utility moves" above |
@@ -1349,15 +1350,22 @@ on each move has the full reasoning; this is the summary.
   - **Sociability ("Pod Tide")**: the fork is a real positional choice —
     *Undertow Guard* (push the threat away from the herd) vs. *Riptide
     Charge* (surge forward to meet it first) — instead of the
-    damageReduction/jamCooldown template reused everywhere else. Keystone
-    *Tidal Communion* was originally a flat `healAura` team-heal — direct
-    feedback: "team healing isn't like matching the fantasy." Redesigned
-    to the actual fantasy instead: `excludesAllies`, so the pod that's
-    learned to move the water together finally isn't caught in its own
-    blast (Hydro Pump's own `hitsArea` is set on the base move and, until
-    this keystone, always hit same-herd agents caught in it too — the
-    same primitive Earthquake's Herdsafe Trigger already uses, just never
-    used here before).
+    damageReduction/jamCooldown template reused everywhere else. Opener
+    *Pod Current* carries the branch's own "the pod cares for itself"
+    fantasy on two fronts, live from the first point spent: a real
+    idle-tick heal, plus `excludesAllies` — Hydro Pump's own `hitsArea` is
+    set on the base move and, until this, always hit same-herd agents
+    caught in it too. Keystone *Tidal Communion* took three tries to land:
+    a flat `healAura` team-heal didn't match "the pod moving the water
+    together" (direct feedback); an `excludesAllies` capstone read as
+    reused content already spent as Earthquake's own opener, once moved
+    down to Pod Current above; the real fantasy needed a genuinely new
+    primitive instead — **`"aquaticHaste"`** (`PassiveKind`, types.ts):
+    a same-herd agent near the passive-holder, itself included, gets a
+    real Speed multiplier bonus while standing on water, composed into
+    `actionSpeedOf`'s existing chain (`aquaticHasteMultiplier`,
+    support.ts). First keystone in the whole roster to need a brand-new
+    engine primitive rather than reusing an existing lever.
   - **Crosslinks**: *Surge and Brace* (Aggression↔Boldness, `lockTicks:
     -1` — directly answers the cost Building Pressure itself introduces,
     not just flavor) · *Steadfast Tide* (Boldness↔Sociability, shared

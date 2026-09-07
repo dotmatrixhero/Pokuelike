@@ -397,20 +397,17 @@ describe("Hydro Pump tree: v3 redesign — overwhelming, genuinely hard to aim",
     expect(respec.terrainFill).toEqual({ terrain: "water" });
   });
 
-  it("Tidal Communion is a real 'pod moves as one' payoff (excludesAllies), not a flat team-heal", () => {
-    const respec = applyMoveTree(hydroPump, [
-      "pod_current",
-      "pod_footing",
-      "wake_footing",
-      "wake_rally",
-      "pod_reach",
-      "undertow_guard",
-      "pod_instinct",
-      "pod_precision",
-      "tidal_communion",
-    ]);
+  it("Pod Current's opener heals AND keeps the pod from hurting its own (excludesAllies)", () => {
+    const respec = applyMoveTree(hydroPump, ["pod_current"]);
+    expect(respec.targetsAlly).toBe(true);
+    expect(respec.allyEffect).toEqual({ healFraction: 0.15 });
     expect(respec.excludesAllies).toBe(true);
-    expect(respec.grantsPassive).toBeUndefined();
+  });
+
+  it("Tidal Communion is a real terrain-mastery payoff (aquaticHaste), not a flat team-heal or reused excludesAllies", () => {
+    const node = hydroPump.tree!.tidal_communion;
+    expect(node.grantsPassive).toEqual({ kind: "aquaticHaste", value: 0.75 });
+    expect(node.delta.excludesAllies).toBeUndefined();
   });
 
   it("Tidal Bastion is a real two-passive keystone, distinct from Water Gun's own resistanceBreaker", () => {

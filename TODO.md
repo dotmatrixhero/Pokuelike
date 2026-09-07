@@ -4283,3 +4283,43 @@ not something this pathfinding pass itself caused or is positioned to fix.
       the one test that referenced Marked Undertow and the capstone's own
       assertion; full suite green (193/193 data). Atlas rebuilt and
       republished.
+- [x] **Tidal Communion, third and final try — built a genuinely new engine
+      primitive instead of reusing one** — direct follow-up feedback on the
+      `excludesAllies` capstone above: "But with the first social capstone,
+      it should heal allies, no? I think it would be better if it granted
+      all allies greatly more speed when they're on water tiles?", then
+      clarified: "Sorry, I meant as in, with the first notable in the tree
+      it already stops friendly fire so like that's what I meant" — i.e.
+      the real objection was that `excludesAllies` as the *capstone* read
+      as reused content, since Earthquake's own opener (Herdsafe Trigger)
+      already does the same thing. Checked the real code before proposing
+      anything (`PassiveKind`'s closed union, `actionSpeedOf`'s multiplier
+      chain, `terrainSpeedMultiplier`'s per-terrain-only signature) and
+      confirmed a terrain-conditional ally-speed aura genuinely didn't
+      exist yet; asked the user how to scope it via AskUserQuestion — they
+      picked "Build the water-speed aura now." Split the two concerns onto
+      two different nodes instead of cramming both onto one: moved
+      `excludesAllies` down onto *Pod Current* (the opener, paired with its
+      existing idle heal — answers "it should heal allies, no?" directly),
+      and gave *Tidal Communion* a brand-new `PassiveKind`,
+      `"aquaticHaste"` — a same-herd agent within a fixed radius of the
+      passive-holder (itself included) gets a real Speed multiplier bonus,
+      but only while standing on a `"water"` tile. Implemented as
+      `aquaticHasteMultiplier` in `support.ts`, mirroring the existing
+      `healAura` aura pattern (herd-scoped iteration + radius check), and
+      composed into `actionSpeedOf`'s existing multiplier chain in
+      `simulation.ts` alongside terrain/off-hours/cold-snap/paralysis. This
+      is the first passive in the whole roster that's both an aura AND
+      terrain-conditional — neither existing mechanism covered it alone,
+      and the first keystone to need genuinely new engine work rather than
+      recombining an existing lever. Added 4 new engine tests
+      (`support.test.ts`: boosts on water near a holder, neutral off water,
+      neutral out of radius/no herd/no holder, composes multiplicatively
+      with other Speed modifiers) — engine suite 992 → 996, all green.
+      Updated the two data tests that referenced the old capstone delta to
+      check `grantsPassive` on the tree node directly (`applyMoveTree`
+      doesn't merge `grantsPassive` into its resolved `MoveSpec` — a
+      recurring gotcha this session, hit before on a Rock Throw test too);
+      full data suite green (194/194). Atlas's `PASSIVE_LABEL` map updated
+      with a plain-English `aquaticHaste` description; rebuilt and
+      republished.
