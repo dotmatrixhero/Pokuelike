@@ -251,7 +251,7 @@ export function tickWorld(
   // more simply than a bespoke hook at each of the four separate trigger
   // sites plus a second periodic scan for the three "currently highest"
   // titles (rival/elder/wanderer).
-  updateNotables(world, log, ctx);
+  updateNotables(world, log, ctx, rng);
   // Herd Leadership builds directly on Notables — must run strictly after
   // updateNotables so a title lost/claimed THIS tick is already reflected in
   // `Agent.notableTitle` before leadership eligibility is re-checked. See

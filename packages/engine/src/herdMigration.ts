@@ -316,14 +316,23 @@ export const PREDATOR_PRESSURE_THRESHOLD = 5;
  * `PREDATOR_PRESSURE_WINDOW_TICKS` ticks after the last of them), which is
  * fine for a threshold this coarse and much cheaper than exact windowing.
  */
-export function recordPredatorPressure(world: World, herdId: string | undefined, threatPos: Vec2): void {
+/**
+ * `weight` (default 1): direct ask, after a level-spread report — "migrate
+ * away from high-level Pokemon too." A hit from a predator that's
+ * significantly above the defender's own level counts for more than one
+ * from an evenly-matched attacker, so a herd facing a genuinely dangerous
+ * (not just persistent) threat reaches `PREDATOR_PRESSURE_THRESHOLD` and
+ * triggers migration sooner — see predation.ts's call site for how the
+ * weight itself is derived from the real level gap.
+ */
+export function recordPredatorPressure(world: World, herdId: string | undefined, threatPos: Vec2, weight = 1): void {
   if (!herdId) return;
   world.herdPredatorPressure ??= {};
   const existing = world.herdPredatorPressure[herdId];
   if (!existing || world.tick - existing.windowStart > PREDATOR_PRESSURE_WINDOW_TICKS) {
-    world.herdPredatorPressure[herdId] = { count: 1, windowStart: world.tick, lastThreatPos: threatPos };
+    world.herdPredatorPressure[herdId] = { count: weight, windowStart: world.tick, lastThreatPos: threatPos };
   } else {
-    existing.count += 1;
+    existing.count += weight;
     existing.lastThreatPos = threatPos;
   }
 }

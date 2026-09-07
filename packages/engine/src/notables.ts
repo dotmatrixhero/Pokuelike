@@ -47,8 +47,24 @@ import type { LevelingContext } from "./leveling.js";
  * threading a bespoke check into each of the four separate trigger sites
  * (predation.ts's kill, shelter.ts's build-tick, support.ts's delivery,
  * eggs.ts's hatch) on top of a *second*, separate periodic scan for
- * rival/elder/wanderer. `updateNotables` is pure bookkeeping plus event
- * emission — no rng, so it doesn't affect determinism.
+ * rival/elder/wanderer.
+ *
+ * **A new claim/transfer is a random chance, not instant on crossing the
+ * threshold.** Direct report: seeing savant/elder/beloved/shaman all held
+ * within the same herd at once read as titles being handed out too freely,
+ * plus a real bug (below) that made Elder unfairly easy for hatchlings —
+ * and the direct fix requested: "make it a random chance to obtain the
+ * title." Once a challenger clears a title's threshold, the actual
+ * hand-of-title only happens on a tick where a `NOTABLE_GRANT_CHANCE_PER_
+ * TICK` roll hits — otherwise the challenger stays eligible-but-uncrowned
+ * and gets re-rolled next tick (and every tick after, until either it wins
+ * the roll or a still-better challenger takes its place first). This
+ * doesn't affect determinism — the same seed still produces the same
+ * sequence of `rng()` draws — but does mean `updateNotables` needs an
+ * explicit `rng` now (threaded from `tickWorld`, same as `growFlora` etc.);
+ * a title genuinely dying-and-vacating is NOT gated by this roll (no reason
+ * to keep a title artificially unclaimed once its old holder is gone and
+ * nobody else is competing for the delay).
  */
 
 /**
@@ -58,62 +74,91 @@ import type { LevelingContext } from "./leveling.js";
  * top-of-file doc comment and DESIGN.md's "Notables" section for the real
  * multi-seed numbers these were calibrated against.
  */
+/**
+ * Direct report, after the thresholds below had already been calibrated
+ * once: "Titles seems too common in general. I see a savant, elder,
+ * beloved, shaman all in the same group. That's incorrect. Maybe we need to
+ * slow it down a lot more." Every threshold here was raised well past its
+ * previous bar (roughly 2.5-3x on the counters that scale, elder pushed out
+ * to a genuine rare-survivor bar) on top of the separate random-chance gate
+ * this module's top doc comment describes — the two changes compound, so
+ * this second pass leans on real headroom rather than re-deriving each
+ * number from scratch; still to be judged against a real multi-seed run
+ * like every other tuning number in this file.
+ */
 export const NOTABLE_TITLE_MIN_THRESHOLDS: Record<NotableTitleId, number> = {
   // A real, sustained combat record — several real kills/mob-defenses, not
   // a single lucky hunt. See DESIGN.md's real-run kill-count distribution.
-  hero: 5,
-  // More than one shelter's worth of real build-tick investment
+  hero: 15,
+  // Several shelters' worth of real build-tick investment
   // (SHELTER_BUILD_TICKS = 40, or 20 for a predator) — a genuine, repeated
-  // contributor, not whoever happened to finish the very first shelter.
-  builder: 60,
+  // contributor, not whoever happened to finish a couple of shelters.
+  builder: 150,
   // DESIGN.md's Rapport section found foodDelivered fires 0-1 times per
   // 8000-tick run under the existing applyHerdSupport gate — deliberately
-  // NOT inflated to make this title common; 2 real deliveries is already a
+  // NOT inflated to make this title common; 5 real deliveries is a
   // genuinely rare, earned bar at this sim's actual population dynamics.
-  gatherer: 2,
-  // |rapport score| on the -1..1 scale — 0.4 needs sustained, repeated
+  gatherer: 5,
+  // |rapport score| on the -1..1 scale — 0.6 needs sustained, repeated
   // conflict with the same rival (a single herdClash hit is only ±0.06), not
-  // one bad encounter.
-  rival: 0.4,
+  // one bad encounter, and close to the scale's own practical ceiling.
+  rival: 0.6,
   // Real, hatched (not merely laid — see Agent.lifetimeOffspring's doc
   // comment) surviving offspring from the same parent.
-  beloved: 4,
-  // Ticks alive — well past MATURITY_AGE (200) and EGG_INCUBATION_TICKS
-  // (80), a real multi-thousand-tick survivor, not just "grown up."
-  elder: 500,
+  beloved: 10,
+  // Ticks alive — a genuine multi-thousand-tick survivor, several times
+  // MATURITY_AGE (200) past merely "grown up." Also fixes a real bug: prior
+  // to `spawn.ts` giving every fresh spawn (worldgen founder or immigrant) a
+  // real starting `age`, only egg-hatched agents ever tracked age at all —
+  // a hatchling could claim Elder at the old, lower bar while every founder/
+  // immigrant was permanently ineligible. Both now age on equal footing.
+  elder: 1500,
   // Manhattan tiles from birth position (lifetime high-water mark, see
   // Agent.maxDispersalDistance's doc comment) — calibrated up from an
   // initial 30 after a real run showed that bar let ordinary movement
   // contest the title constantly (see DESIGN.md's "Notables" section for
-  // the real before/after transfer-count numbers); 60 is a real, deliberate
-  // disperser on a SCENARIO_WIDTH x SCENARIO_HEIGHT = 90x60 map (roughly
-  // two-thirds of the map's shorter dimension), not an agent that merely
+  // the real before/after transfer-count numbers); 100 is a real, deliberate
+  // disperser on a SCENARIO_WIDTH x SCENARIO_HEIGHT = 90x60 map (further
+  // than the map's own shorter dimension), not an agent that merely
   // wandered its home range.
-  wanderer: 60,
+  wanderer: 100,
   // A single real kill against a target GIANT_SLAYER_LEVEL_GAP levels above
   // the killer is already the whole notable moment — direct ask: "it makes
   // you notable" — unlike Hero's ordinary kill count, this deliberately
-  // does NOT need repetition to earn the title.
+  // does NOT need repetition to earn the title. The random-chance grant
+  // gate is what slows this one down now, not the threshold.
   giantSlayer: 1,
   // One genuinely maxed branch (see SAVANT_MIN_BRANCH_NODES) is a real,
   // deliberate specialization — same "the single instance is already
   // notable" reasoning as giantSlayer above, not a count that needs
-  // padding out.
+  // padding out; the random-chance grant gate slows this one down instead.
   savant: 1,
-  // Direct ask: "'alpha' - which is win over 40 clashes" — exact number as given.
-  alpha: 40,
+  // Raised well past the original direct ask ("'alpha' - which is win over
+  // 40 clashes") per this section's own top-of-block report — 100 real
+  // clash wins is a genuine standout, not a moderately active fighter.
+  alpha: 100,
   // Sim-original guess, to be judged against a real run like every other
   // tuning number in this file — DESIGN.md's Rapport section found the
   // OTHER real support trigger (foodDelivered) fires 0-1 times per
   // 8000-tick run under its own gate; ally-effect support moves need a
   // real targetsAlly move build in the first place (not every agent ever
-  // gets one via the respec tree), so this is likely similarly rare. 5 is
-  // a real, repeated pattern rather than a single lucky heal, without
-  // assuming a frequency this hasn't actually been run against yet.
-  shaman: 5,
-  // Direct ask: "'underdog' for losing 40 clashes" — same exact number as Alpha, mirrored.
-  underdog: 40,
+  // gets one via the respec tree), so this is likely similarly rare. 15 is
+  // a real, sustained pattern rather than a handful of lucky heals.
+  shaman: 15,
+  // Raised to match Alpha's own new bar, mirrored from the original direct
+  // ask ("'underdog' for losing 40 clashes") the same way Alpha was.
+  underdog: 100,
 };
+
+/**
+ * Once a challenger clears a title's threshold, the actual claim only goes
+ * through on a tick this roll hits — see this module's top-of-file doc
+ * comment ("A new claim/transfer is a random chance, not instant"). ~1 in
+ * 80 ticks on average for an uninterrupted eligible challenger; titles
+ * still land in a reasonable time over a multi-thousand-tick run, but stop
+ * snapping on the very tick a stat crosses its bar.
+ */
+export const NOTABLE_GRANT_CHANCE_PER_TICK = 0.0125;
 
 /** Fixed, documented priority order for resolving "one title per agent" — see this module's top-of-file doc comment. */
 const TITLE_ORDER: NotableTitleId[] = [
@@ -244,10 +289,10 @@ function isLivingNonEgg(agent: Agent): boolean {
  * Once per world tick (see `tickWorld`, simulation.ts): re-derives every
  * title's current best living, eligible challenger and transfers the title
  * if it beats the incumbent (or the incumbent has died) — see this module's
- * top-of-file doc comment for the full mechanism. Pure bookkeeping plus
- * `titleClaimed`/`titleLost` event emission; no rng.
+ * top-of-file doc comment for the full mechanism, including the random-
+ * chance gate on new claims/transfers that `rng` drives.
  */
-export function updateNotables(world: World, log?: EventLog, ctx?: LevelingContext): void {
+export function updateNotables(world: World, log?: EventLog, ctx?: LevelingContext, rng: () => number = Math.random): void {
   for (const title of TITLE_ORDER) {
     const holderRecord = world.notables?.[title];
     // The holder may no longer even be in `world.agents` (a corpse pruned by
@@ -277,8 +322,16 @@ export function updateNotables(world: World, log?: EventLog, ctx?: LevelingConte
     const threshold = NOTABLE_TITLE_MIN_THRESHOLDS[title];
     const challengerQualifies = bestAgent !== undefined && bestValue >= threshold;
     const sameHolder = challengerQualifies && holderAlive && bestAgent === holderAgent;
+    // A genuinely new claim/transfer is gated behind a random-chance roll
+    // (see NOTABLE_GRANT_CHANCE_PER_TICK's own doc comment) — an eligible
+    // challenger stays eligible-but-uncrowned until the roll hits, rather
+    // than snapping the instant the threshold is crossed. Only drawn when
+    // there's actually a decision to gate, so an ineligible/unchanged tick
+    // costs no rng draw. Vacating a dead incumbent's title (the `else if`
+    // branch below) is NOT gated by this.
+    const grantRollHits = challengerQualifies && !sameHolder && rng() < NOTABLE_GRANT_CHANCE_PER_TICK;
 
-    if (challengerQualifies && !sameHolder) {
+    if (challengerQualifies && !sameHolder && grantRollHits) {
       // A genuine transfer (or first-ever claim) — bestAgent either beat the
       // living incumbent's own current value, or the incumbent is gone
       // (dead, or already pruned).

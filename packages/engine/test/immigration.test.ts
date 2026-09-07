@@ -6,6 +6,7 @@ import { tickWorld } from "../src/simulation.js";
 import {
   maybeImmigrate,
   rollImmigrantLevel,
+  localAverageLevel,
   IMMIGRATION_BASE_CHANCE,
   MIN_TICKS_BETWEEN_IMMIGRATIONS,
   POP_HARD_CAP,
@@ -285,5 +286,35 @@ describe("rollImmigrantLevel (direct ask: \"why does everything spawn at lv5... 
     };
     for (let i = 0; i < 20; i++) levels.add(rollImmigrantLevel(BASE_FORM, rng));
     expect(levels.size).toBeGreaterThan(1);
+  });
+
+  it("a real local average level re-centers the roll on it instead of the bare floor — direct ask: immigrants should come in 'matching the level a little more'", () => {
+    // jitter(8) centered on localAvgLevel(50): floor(50 - 8/2) = 46 .. +7 = 53.
+    expect(rollImmigrantLevel(BASE_FORM, () => 0, 50)).toBe(46);
+    expect(rollImmigrantLevel(BASE_FORM, () => 0.99, 50)).toBe(46 + 7);
+  });
+
+  it("a local average below the species' own floor still never rolls under that floor", () => {
+    expect(rollImmigrantLevel(BASE_FORM, () => 0, 2)).toBe(5); // floor(2 - 4) = -2, clamped to floor(5)
+  });
+});
+
+describe("localAverageLevel", () => {
+  it("averages only the given species' living, non-egg population", () => {
+    const world = createWorld(20, 20);
+    world.agents.push(
+      { ...livingAgent("a", "bulbasaur"), level: 10 },
+      { ...livingAgent("b", "bulbasaur"), level: 20 },
+      { ...livingAgent("c", "bulbasaur"), level: 999, alive: false }, // dead — excluded
+      { ...livingAgent("d", "bulbasaur"), level: 999, isEgg: true }, // egg — excluded
+      { ...livingAgent("e", "venusaur"), level: 999 } // different species — excluded
+    );
+
+    expect(localAverageLevel(world, "bulbasaur")).toBe(15);
+  });
+
+  it("is undefined when no living member of that species exists yet", () => {
+    const world = createWorld(20, 20);
+    expect(localAverageLevel(world, "bulbasaur")).toBeUndefined();
   });
 });

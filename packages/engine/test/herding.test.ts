@@ -104,6 +104,30 @@ describe("applyHerdCohesion", () => {
     expect(guardian.pos.x).toBeGreaterThan(0);
   });
 
+  it("a low-level member (relative to its herd's own top level) uses a tighter leash than an ordinary member at the same distance — direct ask: 'lower level Pokemon travel together more'", () => {
+    const world = createWorld(20, 20);
+    const straggler = member("a", { x: 0, y: 0 }, { level: 1 });
+    world.agents.push(straggler, member("b", { x: 8, y: 0 }, { level: 20 }));
+    // Centroid is (4, 0) — distance 4 from the straggler: past the tighter
+    // LOW_LEVEL_COHESION_DISTANCE(3) but within the ordinary COHESION_DISTANCE(5).
+
+    const moved = applyHerdCohesion(world, straggler);
+
+    expect(moved).toBe(true);
+    expect(straggler.pos.x).toBeGreaterThan(0);
+  });
+
+  it("a member close in level to its herd's top keeps the ordinary wider leash at that same distance", () => {
+    const world = createWorld(20, 20);
+    const straggler = member("a", { x: 0, y: 0 }, { level: 18 });
+    world.agents.push(straggler, member("b", { x: 8, y: 0 }, { level: 20 }));
+
+    const moved = applyHerdCohesion(world, straggler);
+
+    expect(moved).toBe(false);
+    expect(straggler.pos).toEqual({ x: 0, y: 0 });
+  });
+
   it("an ordinary (non-guardian) herd member keeps the wider leash and whole-herd centroid even when rules are provided", () => {
     const world = createWorld(20, 20);
     const nearby = member("a", { x: 5, y: 5 }, { species: "bulbasaur" });

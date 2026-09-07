@@ -209,11 +209,43 @@ export const PREDATOR_LEVEL_BOOST = 15;
  * deterministically testable without needing to reverse-engineer
  * `maybeImmigrate`'s own internal rng call order just to isolate this one
  * roll.
+ *
+ * `localAvgLevel`, when given (see `localAverageLevel` — the real average
+ * level of this species' own currently-living population in the world),
+ * re-centers the same jitter band on it instead of on the bare species
+ * floor — direct ask, after a report of one-sided fights from the level
+ * spread: "the ones that migrate in come in matching the level a little
+ * more." Still clamped at `floor` (an evolved/predator species never
+ * arrives below its own real minimum just because a struggling local
+ * population's average happens to be lower). Absent (no living member of
+ * this species yet to match against — a genuinely first arrival) falls back
+ * to the original species-only floor+jitter roll unchanged.
  */
-export function rollImmigrantLevel(species: ImmigrationSpeciesInfo, rng: () => number): number {
+export function rollImmigrantLevel(species: ImmigrationSpeciesInfo, rng: () => number, localAvgLevel?: number): number {
   const floor = Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, species.minLevel ?? 1) + (species.isPredator ? PREDATOR_LEVEL_BOOST : 0);
   const jitter = species.singleStage ? SINGLE_STAGE_LEVEL_JITTER : IMMIGRANT_LEVEL_JITTER;
-  return floor + Math.floor(rng() * jitter);
+  if (localAvgLevel === undefined) {
+    return floor + Math.floor(rng() * jitter);
+  }
+  const center = Math.max(floor, Math.round(localAvgLevel - jitter / 2));
+  return center + Math.floor(rng() * jitter);
+}
+
+/**
+ * The real average level of `speciesId`'s currently-living, non-egg
+ * population in `world` — `undefined` if none exist yet (a genuinely first
+ * arrival has nothing local to match). See `rollImmigrantLevel`'s own doc
+ * comment for why this is what an immigrant's level gets centered on.
+ */
+export function localAverageLevel(world: World, speciesId: string): number | undefined {
+  let sum = 0;
+  let count = 0;
+  for (const agent of world.agents) {
+    if (agent.alive === false || agent.isEgg || agent.species !== speciesId) continue;
+    sum += agent.level ?? 1;
+    count++;
+  }
+  return count > 0 ? sum / count : undefined;
 }
 
 /**
@@ -355,10 +387,11 @@ export function maybeImmigrate(world: World, ctx: ImmigrationContext | undefined
     return waterPos;
   }
 
+  const localAvgLevel = localAverageLevel(world, species.id);
   const newAgents: Agent[] = [];
   for (let i = 0; i < groupSize; i++) {
     const pos = nextArrivalPos(i);
-    const agent = ctx.spawnAgent(species.id, `${species.id}-immigrant-${world.tick}-${i}`, pos, rollImmigrantLevel(species, rng), rng);
+    const agent = ctx.spawnAgent(species.id, `${species.id}-immigrant-${world.tick}-${i}`, pos, rollImmigrantLevel(species, rng, localAvgLevel), rng);
     agent.sex = rng() < 0.5 ? "male" : "female";
     newAgents.push(agent);
   }

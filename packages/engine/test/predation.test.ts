@@ -413,6 +413,22 @@ describe("mob-fighting", () => {
     expect(solo.behavior).toBe("flee");
   });
 
+  it("a badly outleveled herd flees a threat instead of mobbing it, even with enough allies present — direct ask: lower-level Pokémon 'need to try to survive more'", () => {
+    const world = createWorld(10, 10);
+    const mobber1 = prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", level: 3 });
+    const mobber2 = prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a", level: 3 });
+    const mobber3 = prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a", level: 3 });
+    world.agents.push(mobber1, mobber2, mobber3, predator({ x: 5, y: 6 }, 0.3, { level: 30 }));
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    // Same headcount/positions as the "mobs the predator instead of fleeing"
+    // test above — the only difference is the real level gap — and the
+    // outcome flips.
+    expect(mobber1.behavior).toBe("flee");
+  });
+
   it("a lone or small group still flees rather than fights", () => {
     const world = createWorld(10, 10);
     const mobber1 = prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" });
@@ -517,6 +533,29 @@ describe("disposition wiring", () => {
     const world = createWorld(20, 20);
     const target = prey({ x: 5, y: 5 });
     world.agents.push(target, predator({ x: 10, y: 5 }));
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(target.behavior).not.toBe("flee");
+  });
+
+  it("a badly outleveled prey reacts to a threat beyond the ordinary flee radius (severe level gap widens detection) — direct ask: lower-level Pokémon should flee 'faster'", () => {
+    const world = createWorld(20, 20);
+    // Distance 7 — beyond the neutral FLEE_DETECT_RADIUS(4) even with the
+    // SEVERE_THREAT_EXTRA_FLEE_RADIUS(3) not yet counted, but exactly at the
+    // widened radius once it is.
+    const target = prey({ x: 5, y: 5 }, { level: 3 });
+    world.agents.push(target, predator({ x: 12, y: 5 }, 0.3, { level: 30 }));
+
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(target.behavior).toBe("flee");
+  });
+
+  it("an evenly-matched predator at that same distance does NOT trigger the widened radius — the widening is level-gap-gated, not universal", () => {
+    const world = createWorld(20, 20);
+    const target = prey({ x: 5, y: 5 }, { level: 3 });
+    world.agents.push(target, predator({ x: 12, y: 5 }, 0.3, { level: 3 }));
 
     tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
 

@@ -484,6 +484,11 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "charmeleon",
     placeholderColor: "#f5701c",
     homeLayer: "surface",
+    // Direct ask: "Charizard and chameleon should become predators" — this
+    // stage already reads as a real hunter in mainline flavor text ("cruel,
+    // savage nature," burns anything that resists), not merely a scaled-up
+    // Charmander.
+    isPredator: true,
     // Bigger flame, same fuel source — "scratch" as a real physical attack
     // alongside Ember now that it's grown claws worth using, rather than
     // just a hotter Charmander.
@@ -496,6 +501,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "charizard",
     placeholderColor: "#e8712c",
     homeLayer: "surface",
+    // Direct ask: "Charizard and chameleon should become predators" — the
+    // comment right below already called this "an apex flyer/predator
+    // design in the mainline games"; this makes that read a real mechanic.
+    isPredator: true,
     // The roster's one curated Flamethrower user — its tail flame is
     // "said to burn even more intensely" per mainline flavor text, so the
     // upgrade from Ember is the whole point of finally reaching this stage.

@@ -5,6 +5,21 @@ import { isImmovable } from "./status.js";
 import { canEnterTile } from "./occupancy.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
 
+/**
+ * Direct ask: "Flying Pokémon should be able to fly over obstacles and
+ * water in canopy." Canopy's own `"wall"` tiles (`worldgen.ts`'s
+ * `deriveCanopyFromSurface` — the gaps between tree-linked "islands" and
+ * massif ridges) are real obstacles for every ground-bound canopy dweller;
+ * a Flying-type agent ignores them entirely on this one layer, same total
+ * exemption `canEnterWater` gives it for water everywhere. Scoped to
+ * canopy specifically (not surface/underground walls) — flying over a gap
+ * between tree canopies is the literal ask; surface mountains/underground
+ * walls are a separate, not-yet-asked-for exemption.
+ */
+export function canFlyOverObstacle(agent: Agent, layer: Layer): boolean {
+  return layer === "canopy" && !!agent.types?.includes("flying");
+}
+
 function candidatesToward(pos: Vec2, dx: number, dy: number): Vec2[] {
   return [
     { x: pos.x + dx, y: pos.y + dy },
@@ -39,7 +54,9 @@ function firstWalkable(world: World, layer: Layer, pos: Vec2, candidates: Vec2[]
   for (const candidate of candidates) {
     if (candidate.x === pos.x && candidate.y === pos.y) continue;
     if (avoid && candidate.x === avoid.x && candidate.y === avoid.y) continue;
-    if (!tileAt(world, layer, candidate.x, candidate.y)?.walkable) continue;
+    const tile = tileAt(world, layer, candidate.x, candidate.y);
+    if (!tile) continue;
+    if (!tile.walkable && !canFlyOverObstacle(agent, layer)) continue;
     if (!canEnterWater(world, agent, layer, candidate)) continue;
     if (!canEnterLand(world, agent, layer, candidate)) continue;
     if (mover && !canEnterTile(world, mover, layer, candidate)) continue;

@@ -12780,3 +12780,163 @@ tiles around tick 2601) tracking how many agents were actually down there
 at the time — the same traffic-driven boom/decay pattern Surface crops
 already show, now working Underground too. Full engine suite (1083 tests)
 green throughout.
+
+## Notable titles: slower, random, and fair to founders/immigrants
+
+Direct report: "The elder is being granted to hatched Pokémon 400 ticks old
+while native Pokémon don't have ticks old. Titles seems too common in
+general. I see a savant, elder, beloved, shaman all in the same group.
+That's incorrect. Maybe we need to slow it down a lot more. And make it a
+random chance to obtain the title."
+
+**The real bug.** `Agent.age` was only ever initialized at egg hatch
+(`eggs.ts`'s `tickEgg`, `agent.age = 0`) — every worldgen founder and every
+immigrant (`spawn.ts`'s shared `spawnAgent`, used by both paths) left `age`
+`undefined` forever, since `needs.ts`'s per-tick increment only bumps an
+*already-defined* age. `notables.ts`'s Elder title correctly treats absent
+age as "never tracked" rather than "age 0" (so a founder can't silently
+out-rank a real elder) — the practical effect was that only hatched
+Pokémon could ever become Elder at all. Fixed in `spawn.ts`: every fresh
+spawn now starts at `age: MATURITY_AGE` (200) — already mature immediately
+(preserving `isMature`'s old "absent age = mature" behavior exactly, so no
+breeding-eligibility regression), but now a real, growing number that
+competes for Elder on equal footing with hatchlings.
+
+**Slower.** Every threshold in `NOTABLE_TITLE_MIN_THRESHOLDS` was raised
+well past its previous bar (roughly 2.5-3x on the counters that scale;
+Elder's own bar went from 500 to 1500 ticks alive).
+
+**Random.** A challenger clearing a title's threshold no longer claims it
+instantly — `updateNotables` now rolls `NOTABLE_GRANT_CHANCE_PER_TICK`
+(1.25%, ~1-in-80 ticks) each tick an eligible-but-uncrowned challenger
+exists, so the actual hand-of-title lands at an unpredictable, spread-out
+point rather than snapping the instant a stat crosses its bar. A title
+genuinely vacating because its holder died is NOT gated by this roll — no
+reason to keep it artificially unclaimed once nobody's actually racing for
+it. `updateNotables` now takes an explicit `rng` (threaded from
+`tickWorld`, same as `growFlora` etc.) — determinism is unaffected (same
+seed still produces the same draw sequence), just a real new draw site.
+
+### Real-run findings
+
+An 8000-tick `createDemoWorld` run: first title claimed at tick 773 (was
+near-instant before this fix, since several agents already start well past
+the old, lower thresholds). By the end of the run three different titles
+were held by three agents in three different herds (`elder`/`savant`/
+`wanderer`, herds `undefined`/`undefined`/`golbat-immigrant-lineage-5708`)
+— no same-herd clustering. The living Elder's age read 8200, comfortably
+past the new 1500 threshold. Full engine suite (1099 tests) green
+throughout, including new coverage in `notables.test.ts` for the grant-roll
+gate (an eligible challenger stays uncrowned on a miss, claims on a hit;
+vacating a dead incumbent's title is never gated).
+
+## Lower-level survival: grouping, earlier flight, migration, and immigrant level matching
+
+Direct report, after noticing a lot of one-sided fights from the level
+spread: "I think it's fine to have the difference in power level, but
+ideally Pokémon that are lower level travel together more and also run
+away faster against high level opponents. Maybe they migrate away from
+high level Pokemon too. And the ones that migrate in come in matching the
+level a little more. I think the power level difference is acceptable, but
+lower level Pokemon need to try to survive more."
+
+Four separate, real mechanics, all gated on the same reused "5+ levels is a
+genuine gap" bar (`predation.ts`'s `SEVERE_LEVEL_GAP`, aliased to the
+existing `GIANT_SLAYER_LEVEL_GAP` rather than a fresh number):
+
+- **Travel together more** (`herding.ts`): `applyHerdCohesion` now checks
+  an agent's level against its own herd's current top living level
+  (`herdMaxLevel`). A member trailing by `LOW_LEVEL_COHESION_GAP` (5) or
+  more uses a tighter `LOW_LEVEL_COHESION_DISTANCE` (3) leash instead of
+  the ordinary `COHESION_DISTANCE` (5) — the same magnitude leash a
+  guardian already gets, for the same underlying reason (staying close to
+  the group is a real survival behavior).
+- **Flee sooner and skip doomed fights** (`predation.ts`):
+  `applyPredationInstincts`'s threat-detection query now searches out to
+  `effectiveFleeRadius + SEVERE_THREAT_EXTRA_FLEE_RADIUS` (3 extra tiles),
+  but only actually reacts to anything beyond the ordinary radius if that
+  specific threat clears `SEVERE_LEVEL_GAP` — an evenly-matched threat at
+  the same distance still doesn't register early. Separately, the
+  mob-fight branch (enough nearby allies to turn and fight instead of
+  fleeing) is now also gated on `levelGap(threat, agent) < SEVERE_LEVEL_GAP`
+  — a badly outleveled herd no longer commits to a fight it can't win just
+  because the headcount math says "enough allies," and falls through to
+  flee instead.
+- **Migrate away from high-level threats** (`herdMigration.ts`):
+  `recordPredatorPressure` now takes a `weight` (default 1); `predation.ts`'s
+  call site computes it as `1 + floor(levelGap / SEVERE_LEVEL_GAP)`, so a
+  hit from a much stronger predator counts as several ordinary hits toward
+  the existing `PREDATOR_PRESSURE_THRESHOLD` migration trigger. The
+  trigger and its "score away from the threat" destination logic
+  (`pickDestination`'s `AWAY_WEIGHT`) were already real; this just makes a
+  genuinely dangerous predator reach that trigger faster than a merely
+  persistent, evenly-matched one.
+- **Immigrants match the local level** (`immigration.ts`): new
+  `localAverageLevel(world, speciesId)` computes the real average level of
+  that species' current living population. `rollImmigrantLevel` takes it
+  as an optional third argument and, when given, re-centers its existing
+  jitter band on it (`max(floor, round(localAvgLevel - jitter/2))`)
+  instead of the bare species floor — still clamped so a struggling local
+  population's low average can never push a new arrival below the
+  species' own real minimum. `maybeImmigrate` computes it once per
+  immigration event and threads it through. A genuinely first arrival (no
+  living member of that species yet) falls back to the original
+  species-only floor+jitter roll unchanged.
+
+### Real-run findings
+
+Full engine suite (1099 tests) green, including new direct coverage: a
+mob-sized herd that would have fought under the old headcount-only rule now
+flees when the threat clears `SEVERE_LEVEL_GAP`; a severely outleveled prey
+reacts to a threat at distance 7 (beyond the ordinary radius) while an
+evenly-matched one at the same distance doesn't; a low-level herd member
+moves back toward centroid at a distance an ordinary member would tolerate;
+a single severe-gap hit alone can cross `PREDATOR_PRESSURE_THRESHOLD` and
+trigger migration; `rollImmigrantLevel`/`localAverageLevel` re-centering
+and floor-clamping both verified directly.
+
+## Flying Pokémon fly over canopy obstacles and water everywhere
+
+Direct ask: "Flying Pokémon should be able to fly over obstacles and water
+in canopy." Two real exemptions, both keyed off `agent.types?.includes
+("flying")` (types come straight from the imported dex data via
+`speciesFromDex`, so Charizard/Pidgey/Spearow/Zubat/Golbat — anything
+dex-tagged Flying — already qualify with zero data changes):
+
+- **Water, everywhere** (`waterBody.ts`'s `canEnterWater`): a Flying-type
+  agent is now unrestricted on any water tile, any layer — the same total
+  exemption Water-types already got, checked first.
+- **Canopy obstacles specifically** (`movement.ts`'s new `canFlyOverObstacle`,
+  read by both `movement.ts`'s `firstWalkable` and `pathfinding.ts`'s
+  `isWalkableFor` — the two real walkability chokepoints): a Flying-type
+  agent ignores canopy's own `"wall"` tiles (the gaps `worldgen.ts`'s
+  `deriveCanopyFromSurface` leaves between tree-linked "islands" and
+  massif ridges) entirely. Deliberately scoped to the canopy layer only —
+  a Flying-type still can't walk through a surface tree/mountain wall
+  tile, which is a separate, not-yet-asked-for exemption.
+
+### Real-run findings
+
+New direct tests: a flying-type agent steps straight through a canopy wall
+tile a non-flying agent can't; that same flying agent's exemption does NOT
+extend to a surface obstacle (layer-scoped, not species-wide); a
+flying-type agent freely enters a large water body's interior the same way
+a water-type does. Full engine suite (1099 tests) green throughout.
+
+## Charizard and Charmeleon become predators
+
+Direct ask: "Charizard and chameleon should become predators." Both already
+read as apex-predator-flavored in their existing `species.ts` doc comments
+("cruel, savage nature" for Charmeleon; "an apex flyer/predator design in
+the mainline games" for Charizard, in a comment written before this
+feature existed) — just added `isPredator: true` to each `speciesFromDex`
+call. `HUNT_RULES` (`packages/data/src/predation.ts`) derives automatically
+by filtering `SPECIES` for `isPredator`, so no other wiring was needed;
+targeting itself is fully dynamic power-ratio matching
+(`predation.ts`'s `isPreyOf`), not a species-specific prey list.
+
+### Real-run findings
+
+`HUNT_RULES.charizard`/`HUNT_RULES.charmeleon` both confirmed `true` on a
+real `createDemoWorld` build. Full engine (1099 tests) and data (177 tests)
+suites green throughout.

@@ -187,6 +187,11 @@ function isLandShoreTile(world: World, layer: Layer, pos: Vec2): boolean {
  * "is this even water" branch of their own.
  *
  * The rule, in order:
+ *  - Flying-type agents (`agent.types?.includes("flying")`): always `true`,
+ *    everywhere, no restriction at all — direct ask: "Flying Pokémon should
+ *    be able to fly over obstacles and water" — the same total exemption
+ *    Water-types get below, for the opposite reason (going over rather than
+ *    through).
  *  - Water-type agents (`agent.types?.includes("water")`): always `true`,
  *    everywhere, no restriction at all — a water Pokémon can obviously swim.
  *  - A water tile belonging to a body that ISN'T "large"
@@ -208,6 +213,7 @@ function isLandShoreTile(world: World, layer: Layer, pos: Vec2): boolean {
 export function canEnterWater(world: World, agent: Agent, layer: Layer, pos: Vec2): boolean {
   const tile = tileAt(world, layer, pos.x, pos.y);
   if (!tile || tile.terrain !== "water") return true;
+  if (agent.types?.includes("flying")) return true;
   if (agent.types?.includes("water")) return true;
 
   const size = waterBodySizeAt(world, pos);

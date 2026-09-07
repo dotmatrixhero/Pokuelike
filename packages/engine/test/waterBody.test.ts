@@ -186,6 +186,14 @@ describe("canEnterWater", () => {
     const world = createWorld(10, 10);
     expect(canEnterWater(world, makeAgent(), "surface", { x: -1, y: 0 })).toBe(true);
   });
+
+  it("a flying-type agent is unrestricted everywhere, including a large body's interior — direct ask: 'fly over obstacles and water'", () => {
+    const world = createWorld(10, 10);
+    buildLargeLake(world);
+    const flyer = makeAgent(["flying"]);
+    expect(canEnterWater(world, flyer, "surface", { x: 2, y: 4 })).toBe(true);
+    expect(canEnterWater(world, flyer, "surface", { x: 4, y: 4 })).toBe(true);
+  });
 });
 
 describe("canEnterLand", () => {

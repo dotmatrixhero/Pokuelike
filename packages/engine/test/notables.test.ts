@@ -26,7 +26,7 @@ describe("notables: record-holder transfer mechanism", () => {
     const a = agent("a", { lifetimeKills: NOTABLE_TITLE_MIN_THRESHOLDS.hero - 1 });
     world.agents.push(a);
 
-    updateNotables(world);
+    updateNotables(world, undefined, undefined, () => 0);
 
     expect(world.notables?.hero).toBeUndefined();
     expect(a.notableTitle).toBeUndefined();
@@ -38,7 +38,7 @@ describe("notables: record-holder transfer mechanism", () => {
     const a = agent("a", { lifetimeKills: NOTABLE_TITLE_MIN_THRESHOLDS.hero });
     world.agents.push(a);
 
-    updateNotables(world, log);
+    updateNotables(world, log, undefined, () => 0);
 
     expect(world.notables?.hero).toEqual({ agentId: "a", value: NOTABLE_TITLE_MIN_THRESHOLDS.hero, claimedAtTick: 0 });
     expect(a.notableTitle).toBe("hero");
@@ -55,7 +55,7 @@ describe("notables: record-holder transfer mechanism", () => {
 
     // Tick once with only `low` qualifying-relevant — both present from the
     // start, so the very first tick should already crown the higher one.
-    updateNotables(world, log);
+    updateNotables(world, log, undefined, () => 0);
 
     expect(world.notables?.hero?.agentId).toBe("high");
     expect(high.notableTitle).toBe("hero");
@@ -65,7 +65,7 @@ describe("notables: record-holder transfer mechanism", () => {
     // flips the other way purely because the tracked stat changed, nothing
     // else.
     low.lifetimeKills = high.lifetimeKills! + 5;
-    updateNotables(world, log);
+    updateNotables(world, log, undefined, () => 0);
 
     expect(world.notables?.hero?.agentId).toBe("low");
     expect(low.notableTitle).toBe("hero");
@@ -80,12 +80,12 @@ describe("notables: record-holder transfer mechanism", () => {
     const holder = agent("holder", { lifetimeKills: NOTABLE_TITLE_MIN_THRESHOLDS.hero + 10 });
     const challenger = agent("challenger", { lifetimeKills: NOTABLE_TITLE_MIN_THRESHOLDS.hero });
     world.agents.push(holder, challenger);
-    updateNotables(world);
+    updateNotables(world, undefined, undefined, () => 0);
     expect(world.notables?.hero?.agentId).toBe("holder");
 
     holder.alive = false;
     const log = new EventLog();
-    updateNotables(world, log);
+    updateNotables(world, log, undefined, () => 0);
 
     expect(world.notables?.hero?.agentId).toBe("challenger");
     expect(challenger.notableTitle).toBe("hero");
@@ -97,11 +97,11 @@ describe("notables: record-holder transfer mechanism", () => {
     const world = createWorld(10, 10);
     const holder = agent("holder", { lifetimeKills: NOTABLE_TITLE_MIN_THRESHOLDS.hero });
     world.agents.push(holder);
-    updateNotables(world);
+    updateNotables(world, undefined, undefined, () => 0);
     expect(world.notables?.hero?.agentId).toBe("holder");
 
     holder.alive = false;
-    updateNotables(world);
+    updateNotables(world, undefined, undefined, () => 0);
 
     expect(world.notables?.hero).toBeUndefined();
     expect(holder.notableTitle).toBeUndefined();
@@ -115,7 +115,7 @@ describe("notables: record-holder transfer mechanism", () => {
     const runnerUpBuilder = agent("runnerUp", { lifetimeShelterTicks: NOTABLE_TITLE_MIN_THRESHOLDS.builder });
     world.agents.push(star, runnerUpBuilder);
 
-    updateNotables(world);
+    updateNotables(world, undefined, undefined, () => 0);
 
     // TITLE_ORDER processes "hero" before "builder" — star claims hero first.
     expect(world.notables?.hero?.agentId).toBe("star");
@@ -133,7 +133,7 @@ describe("notables: record-holder transfer mechanism", () => {
     world.agents.push(a, b);
     adjustRapport(world, a, "b", -(NOTABLE_TITLE_MIN_THRESHOLDS.rival + 0.1), () => 0.5);
 
-    updateNotables(world);
+    updateNotables(world, undefined, undefined, () => 0);
 
     expect(world.notables?.rival?.agentId).toBe("a");
     expect(a.notableTitle).toBe("rival");
@@ -145,7 +145,7 @@ describe("notables: record-holder transfer mechanism", () => {
     const tracked = agent("tracked", { age: NOTABLE_TITLE_MIN_THRESHOLDS.elder });
     world.agents.push(untracked, tracked);
 
-    updateNotables(world);
+    updateNotables(world, undefined, undefined, () => 0);
 
     expect(world.notables?.elder?.agentId).toBe("tracked");
   });
@@ -156,7 +156,7 @@ describe("notables: record-holder transfer mechanism", () => {
     const far = agent("far", { birthPos: { x: 0, y: 0 }, pos: { x: NOTABLE_TITLE_MIN_THRESHOLDS.wanderer, y: 0 } });
     world.agents.push(near, far);
 
-    updateNotables(world);
+    updateNotables(world, undefined, undefined, () => 0);
 
     expect(world.notables?.wanderer?.agentId).toBe("far");
     expect(far.notableTitle).toBe("wanderer");
@@ -169,7 +169,7 @@ describe("notables: record-holder transfer mechanism", () => {
     const c = agent("c", { lifetimeShelterTicks: NOTABLE_TITLE_MIN_THRESHOLDS.builder });
     world.agents.push(a, b, c);
 
-    updateNotables(world);
+    updateNotables(world, undefined, undefined, () => 0);
 
     expect(world.notables?.beloved?.agentId).toBe("a");
     expect(world.notables?.gatherer?.agentId).toBe("b");
@@ -181,7 +181,7 @@ describe("notables: record-holder transfer mechanism", () => {
     const a = agent("a", { lifetimeGiantSlayerKills: NOTABLE_TITLE_MIN_THRESHOLDS.giantSlayer });
     world.agents.push(a);
 
-    updateNotables(world);
+    updateNotables(world, undefined, undefined, () => 0);
 
     expect(world.notables?.giantSlayer?.agentId).toBe("a");
     expect(a.notableTitle).toBe("giantSlayer");
@@ -203,7 +203,7 @@ describe("notables: record-holder transfer mechanism", () => {
     const deep = agent("deep", { moveTreeChoices: { M: ["n1", "n2", "n3", "n4", "n5", "n6"] } });
     world.agents.push(shallow, deep);
 
-    updateNotables(world, undefined, ctx);
+    updateNotables(world, undefined, ctx, () => 0);
 
     expect(world.notables?.savant?.agentId).toBe("deep");
     expect(deep.notableTitle).toBe("savant");
@@ -215,10 +215,45 @@ describe("notables: record-holder transfer mechanism", () => {
     const egg = agent("egg", { isEgg: true, lifetimeKills: 1000, age: 1000 });
     world.agents.push(egg);
 
-    updateNotables(world);
+    updateNotables(world, undefined, undefined, () => 0);
 
     expect(world.notables?.hero).toBeUndefined();
     expect(world.notables?.elder).toBeUndefined();
+  });
+});
+
+describe("notables: random-chance grant gate", () => {
+  it("an eligible challenger stays uncrowned on a tick the grant roll misses, then claims once it hits", () => {
+    const world = createWorld(10, 10);
+    const log = new EventLog();
+    const a = agent("a", { lifetimeKills: NOTABLE_TITLE_MIN_THRESHOLDS.hero });
+    world.agents.push(a);
+
+    // rng() returns 1 (never < any chance in (0,1)) — the roll always misses.
+    updateNotables(world, log, undefined, () => 1);
+    expect(world.notables?.hero).toBeUndefined();
+    expect(a.notableTitle).toBeUndefined();
+    expect(log.events.some((e) => e.kind === "titleClaimed")).toBe(false);
+
+    // Same still-eligible challenger, this time the roll hits (0 < any chance).
+    updateNotables(world, log, undefined, () => 0);
+    expect(world.notables?.hero?.agentId).toBe("a");
+    expect(a.notableTitle).toBe("hero");
+  });
+
+  it("vacating a dead incumbent's title is NOT gated by the grant roll", () => {
+    const world = createWorld(10, 10);
+    const holder = agent("holder", { lifetimeKills: NOTABLE_TITLE_MIN_THRESHOLDS.hero });
+    world.agents.push(holder);
+    updateNotables(world, undefined, undefined, () => 0);
+    expect(world.notables?.hero?.agentId).toBe("holder");
+
+    holder.alive = false;
+    // Roll always misses, but the title should still vacate immediately —
+    // this path isn't gated at all.
+    updateNotables(world, undefined, undefined, () => 1);
+    expect(world.notables?.hero).toBeUndefined();
+    expect(holder.notableTitle).toBeUndefined();
   });
 });
 

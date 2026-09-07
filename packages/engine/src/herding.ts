@@ -20,6 +20,17 @@ export const COHESION_DISTANCE = 5;
  * not an averaged blob that includes its own drift.
  */
 const GUARDIAN_COHESION_DISTANCE = 3;
+/**
+ * How far below its herd's own top living level an agent has to be before
+ * it counts as "low-level" for the tighter cohesion leash below — direct
+ * report of one-sided fights from the level spread: "lower level Pokemon
+ * travel together more." Reuses `GIANT_SLAYER_LEVEL_GAP`'s "5+ levels is a
+ * real gap" bar (see predation.ts's `SEVERE_LEVEL_GAP`) rather than a third
+ * independently-tuned number for the same underlying idea.
+ */
+const LOW_LEVEL_COHESION_GAP = 5;
+/** Tighter leash than the ordinary `COHESION_DISTANCE` — same magnitude as `GUARDIAN_COHESION_DISTANCE`, for the same reason: staying close to the group is a real survival behavior, not just idle drift-correction. */
+const LOW_LEVEL_COHESION_DISTANCE = 3;
 
 function manhattan(a: Vec2, b: Vec2): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
@@ -63,6 +74,16 @@ export function herdRank(world: World, agent: Agent): number {
 /** Herd size backing `herdRank`'s denominator — living members sharing `herdId`, any layer. */
 export function herdSize(world: World, herdId: string): number {
   return world.agents.filter((other) => other.alive !== false && !other.isEgg && other.herdId === herdId).length;
+}
+
+/** The highest `level` among a herd's living, non-egg members (any layer) — backs `applyHerdCohesion`'s low-level tighter-leash check, see `LOW_LEVEL_COHESION_GAP`. 0 for an empty/nonexistent herd (no living member could ever read as "low-level relative to" it). */
+function herdMaxLevel(world: World, herdId: string): number {
+  let max = 0;
+  for (const other of world.agents) {
+    if (other.alive === false || other.isEgg || other.herdId !== herdId) continue;
+    if ((other.level ?? 1) > max) max = other.level ?? 1;
+  }
+  return max;
 }
 
 /**
@@ -148,7 +169,14 @@ export function applyHerdCohesion(world: World, agent: Agent, rules?: HuntRules)
     : isGuardian
       ? protectedHerdCentroid(world, agent.herdId, agent.layer, rules!)
       : herdCentroid(world, agent.herdId, agent.layer);
-  const distance = isGuardian ? GUARDIAN_COHESION_DISTANCE : COHESION_DISTANCE;
+  // A low-level member relative to its own herd's current top level sticks
+  // closer to the group instead of drifting the same wide leash a
+  // full-grown/veteran herd-mate tolerates — direct ask: "lower level
+  // Pokemon travel together more." Guardians keep their own tighter leash
+  // regardless (already the tightest, and level isn't the reason a
+  // guardian stays close).
+  const isLowLevel = !isGuardian && herdMaxLevel(world, agent.herdId) - (agent.level ?? 1) >= LOW_LEVEL_COHESION_GAP;
+  const distance = isGuardian ? GUARDIAN_COHESION_DISTANCE : isLowLevel ? LOW_LEVEL_COHESION_DISTANCE : COHESION_DISTANCE;
   if (!centroid || manhattan(agent.pos, centroid) <= distance) return false;
 
   agent.pos = stepToward(world, agent.layer, agent.pos, centroid, agent);

@@ -256,6 +256,19 @@ describe("updateHerdMigrations: predator-pressure trigger", () => {
     expect(migration!.target.x).toBeLessThan(40);
   });
 
+  it("a single call with a real weight (a severe level-gap hit) can cross the threshold on its own — direct ask: 'migrate away from high-level Pokemon too'", () => {
+    const world = createWorld(80, 80);
+    world.agents.push(member("a", { x: 40, y: 30 }), member("b", { x: 40, y: 30 }));
+    // One isolated event, same as the "does not trigger" test above, but
+    // weighted as if it came from a real severe level-gap predator instead
+    // of the default weight of 1 — this alone should be enough.
+    recordPredatorPressure(world, "herd-a", { x: 75, y: 30 }, PREDATOR_PRESSURE_THRESHOLD);
+
+    updateHerdMigrations(world, undefined, NEVER_WANDER);
+
+    expect(world.herdMigrations?.["herd-a"]).toBeDefined();
+  });
+
   it("consumes the pressure counter on trigger, so it doesn't immediately refire next window", () => {
     const world = createWorld(80, 80);
     world.agents.push(member("a", { x: 40, y: 30 }), member("b", { x: 40, y: 30 }));
