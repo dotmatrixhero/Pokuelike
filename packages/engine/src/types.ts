@@ -460,6 +460,17 @@ export interface Agent {
    */
   retaliateAgainstId?: string;
   /**
+   * World tick this agent last took part in a `herdConflict.ts` rivalry hit
+   * (either side — attacker or defender, hit or miss) — direct ask: "6 unit
+   * free for alls that get really confusing." Backs
+   * `herdConflict.ts`'s local-fight cap: before a brand-new pair is allowed
+   * to start its own separate fight, nearby agents with a recent-enough
+   * value here count as "already busy," so only so many concurrent
+   * skirmishes can pile into the same small area at once. Absent = never
+   * fought (or long enough ago not to count), the default.
+   */
+  lastHerdConflictTick?: number;
+  /**
    * Rolling memory of resource tiles (same terrain kind as the current
    * seekWater/seekFood target) found crowded during the current seeking
    * episode — excluded from the next nearest-tile pick once

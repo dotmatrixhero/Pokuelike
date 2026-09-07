@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { createWorld, setTile } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
 import {
-  HERD_CONFLICT_HP_FLOOR_FRACTION,
   HERD_CONFLICT_MIN_BLOCKED_TICKS,
   HERD_CONFLICT_MIN_POWER_RATIO,
+  MAX_LOCAL_FIGHT_PARTICIPANTS,
   RETALIATION_LEVEL_TOLERANCE,
   applyHerdRivalryConflict,
   applyRivalryRetaliation,
@@ -149,32 +149,108 @@ describe("applyHerdRivalryConflict", () => {
     expect(applyHerdRivalryConflict(world, a, RULES, TARGET, undefined, ALWAYS_FIGHT)).toBe(false);
   });
 
-  it("never faints or kills — hp is clamped at the non-lethal floor no matter how many hits land", () => {
+  it("refuses to start a brand-new fight once the local area already has MAX_LOCAL_FIGHT_PARTICIPANTS busy — direct ask: \"6 unit free for alls that get really confusing\"", () => {
+    const world = createWorld(20, 20);
+    const a = bumpedUp(agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD }));
+    const rival = agent("b", "pidgey", "herd-b", TARGET);
+    world.agents.push(a, rival);
+    // Fill the local area with MAX_LOCAL_FIGHT_PARTICIPANTS bystanders whose
+    // own herdConflict hit just landed this exact tick, well within the cap
+    // radius — a brand-new pair should be refused even though every other
+    // gate (cooldown, power ratio, disposition roll) would otherwise pass.
+    for (let i = 0; i < MAX_LOCAL_FIGHT_PARTICIPANTS; i++) {
+      const busy = agent(`busy-${i}`, "bulbasaur", `herd-busy-${i}`, { x: 5, y: 5 }, { lastHerdConflictTick: world.tick });
+      world.agents.push(busy);
+    }
+
+    expect(applyHerdRivalryConflict(world, a, RULES, TARGET, undefined, ALWAYS_FIGHT)).toBe(false);
+  });
+
+  it("does NOT cap a fight already in progress — only starting a brand-new one", () => {
+    // Same busy-area setup as above, but this time via applyRivalryRetaliation
+    // (a direct continuation, not a new fight) — must still go through.
+    const world = createWorld(20, 20);
+    const log = new EventLog();
+    const a = agent("a", "bulbasaur", "herd-a", { x: 5, y: 5 }, { retaliateAgainstId: "b", level: 10 });
+    const rival = agent("b", "pidgey", "herd-b", { x: 5, y: 6 }, { level: 12 });
+    world.agents.push(a, rival);
+    for (let i = 0; i < MAX_LOCAL_FIGHT_PARTICIPANTS; i++) {
+      const busy = agent(`busy-${i}`, "bulbasaur", `herd-busy-${i}`, { x: 5, y: 5 }, { lastHerdConflictTick: world.tick });
+      world.agents.push(busy);
+    }
+
+    expect(applyRivalryRetaliation(world, a, RULES, log, ALWAYS_FIGHT)).toBe(true);
+    expect(log.events.some((e) => e.kind === "herdClash")).toBe(true);
+  });
+
+  it("a fresh pair's knockout hit faints, not kills, when neither lethal path fires", () => {
+    // 0.1 clears the (BOLD, no-grudge) engagement chance and hits at 100%
+    // accuracy, but fails HERD_CONFLICT_LETHAL_CHANCE (0.04) — and a brand
+    // new pair has no rapport history to clear HERD_CONFLICT_LETHAL_GRUDGE_
+    // THRESHOLD either. Since this is a single constant rng, it's returned
+    // for every roll the resolution makes, not just the ones named here.
+    const rng = () => 0.1;
     const world = createWorld(20, 20);
     const log = new EventLog();
     const a = bumpedUp(agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD, moves: [{ ...TEST_MOVE, power: 400 }] }));
     const rival = agent("b", "pidgey", "herd-b", TARGET);
     world.agents.push(a, rival);
 
-    // Repeatedly resolve hits directly (bypassing cooldown/roll gating that
-    // would normally space these out) to confirm the floor holds under
-    // worst-case repeated damage, not just "one hit happens not to kill."
-    for (let i = 0; i < 50; i++) {
-      a.herdConflictCooldownTicks = 0;
-      a.moveCooldowns = {};
-      applyHerdRivalryConflict(world, a, RULES, TARGET, log, ALWAYS_FIGHT);
-    }
+    expect(applyHerdRivalryConflict(world, a, RULES, TARGET, log, rng)).toBe(true);
 
+    expect(rival.hp).toBe(0);
+    expect(rival.fainted).toBe(true);
     expect(rival.alive).not.toBe(false);
-    expect(rival.fainted).not.toBe(true);
-    const floor = Math.floor(HERD_CONFLICT_HP_FLOOR_FRACTION * rival.maxHp!);
-    expect(rival.hp).toBeGreaterThanOrEqual(floor);
+    expect(log.events.some((e) => e.kind === "fainted" && e.agentId === "b")).toBe(true);
+    expect(log.events.some((e) => e.kind === "defeated")).toBe(false);
+  });
+
+  it("a small flat chance can make even a FIRST knockout between strangers lethal", () => {
+    // 0.01 clears engagement/accuracy the same way, and additionally clears
+    // HERD_CONFLICT_LETHAL_CHANCE (0.01 < 0.04) — with a fresh pair's grudge
+    // still at 0, this is exclusively the flat-chance path, not the grudge one.
+    const rng = () => 0.01;
+    const world = createWorld(20, 20);
+    const log = new EventLog();
+    const a = bumpedUp(agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD, moves: [{ ...TEST_MOVE, power: 400 }] }));
+    const rival = agent("b", "pidgey", "herd-b", TARGET);
+    world.agents.push(a, rival);
+
+    expect(applyHerdRivalryConflict(world, a, RULES, TARGET, log, rng)).toBe(true);
+
+    expect(rival.alive).toBe(false);
+    expect(rival.fainted).not.toBe(true); // a true kill, not a faint-then-recover
+    const defeated = log.events.find((e) => e.kind === "defeated");
+    expect(defeated).toMatchObject({ winnerId: "a", loserId: "b" });
+  });
+
+  it("a deep, pre-existing grudge makes the next knockout lethal even when the flat chance fails", () => {
+    // Same 0.1 as the "faints, not kills" test above — the ONLY difference
+    // here is the attacker's own real grudge toward this specific rival,
+    // set deep enough to clear HERD_CONFLICT_LETHAL_GRUDGE_THRESHOLD.
+    const rng = () => 0.1;
+    const world = createWorld(20, 20);
+    const log = new EventLog();
+    const a = bumpedUp(agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD, moves: [{ ...TEST_MOVE, power: 400 }] }));
+    const rival = agent("b", "pidgey", "herd-b", TARGET);
+    a.rapport = { b: { score: -0.9, lastInteractionTick: 0 } };
+    world.agents.push(a, rival);
+
+    expect(applyHerdRivalryConflict(world, a, RULES, TARGET, log, rng)).toBe(true);
+
+    expect(rival.alive).toBe(false);
+    const defeated = log.events.find((e) => e.kind === "defeated");
+    expect(defeated).toMatchObject({ winnerId: "a", loserId: "b" });
   });
 
   it("a defender that drops to the retreat threshold physically steps away from the contested tile", () => {
     const world = createWorld(20, 20);
     const log = new EventLog();
-    const a = bumpedUp(agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD, moves: [{ ...TEST_MOVE, power: 200 }] }));
+    // 120, not 200 — ALWAYS_FIGHT's rng()=0 always crits (0 < 1/24) on top of
+    // minimum damage variance, so a much higher power would knock the
+    // defender all the way to 0 hp (a genuine knockout) instead of merely
+    // crossing the retreat threshold, which is what this test means to show.
+    const a = bumpedUp(agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD, moves: [{ ...TEST_MOVE, power: 120 }] }));
     const rival = agent("b", "pidgey", "herd-b", TARGET);
     world.agents.push(a, rival);
     setTile(world, "surface", TARGET.x, TARGET.y, "floor");

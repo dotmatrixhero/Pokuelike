@@ -958,7 +958,7 @@ export function tickAgentAction(
   // retaliateAgainstId` the instant it's set, regardless of `rules` gating
   // being met (the function itself re-checks predator exclusion), same
   // "checked here regardless" shape `applyEggEating` right above uses.
-  if (applyRivalryRetaliation(world, agent, rules ?? {}, log, rng)) return;
+  if (applyRivalryRetaliation(world, agent, rules ?? {}, log, rng, ctx)) return;
   // A real fallback, not a last resort tacked on after everything else: a
   // hungry predator that had nothing to flee/fight/hunt this tick (solo or
   // pack — see predation.ts) checks for a nearby corpse to feed from
@@ -1323,7 +1323,7 @@ export function tickAgentAction(
         if (
           rules &&
           (agent.ticksBlockedFromResource ?? 0) >= HERD_CONFLICT_MIN_BLOCKED_TICKS &&
-          applyHerdRivalryConflict(world, agent, rules, target, log, rng)
+          applyHerdRivalryConflict(world, agent, rules, target, log, rng, ctx)
         ) {
           return;
         }

@@ -5604,6 +5604,68 @@ zero behavior change to anything that doesn't opt in.
   `POP_HARD_CAP`) is unit-tested but not yet exercised by a real multi-
   thousand-tick run that actually reaches it — see TODO.md.
 
+### Herd conflict: rare lethal escalation, and a cap on multi-way brawls
+
+Direct ask, after walking through how the mechanic works: "i think that's
+fine, i think mostly i want that to be the case. but i think i do want them
+to escalate to death sometimes. it's just not dramatic enuogh. i think
+another thing that's happening is like multi-way 6 unit free for alls that
+get really confusing." Two real, separate changes, both scoped by follow-up
+answers (grudge-based-AND-flat-chance for lethality, capped simultaneous
+local fights for the brawls) — clarified further: "they could always fight
+til hp = 0 but not fully kill them, unlike predation," meaning the fix
+isn't "sometimes skip the floor," it's "the floor is gone — a knockout is
+now always possible — but a knockout only rarely goes all the way to a real
+death."
+
+**Lethal escalation.** `HERD_CONFLICT_HP_FLOOR_FRACTION` (the old "can never
+go below 15% hp" clamp) is gone — `resolveRivalryHit` can now genuinely
+bring a defender to 0 hp. Reaching 0 hp faints the defender — the exact same
+`fainted`/`finishingPool` state predation.ts uses, so it heals and wakes up
+via the same already-existing `applyHealOverTime`/`maybeRecoverFromFaint`
+every fainted agent gets (or can be carried to safety, support.ts) — but
+this mechanic never automatically continues into predation's finishing-blow
+loop the way an actual hunt would; a herd-conflict participant doesn't chase
+down a downed rival. A TRUE death only happens when the exact hit that
+causes the knockout clears `isLethalEscalation`'s bar — two independent
+paths, either enough: a deep, real pre-existing grudge between these two
+specific individuals (`HERD_CONFLICT_LETHAL_GRUDGE_THRESHOLD = -0.85`,
+checked against rapport BEFORE this hit's own rapport shift, so it reflects
+real history, not a grudge the hit itself just created), or a small,
+independent flat chance (`HERD_CONFLICT_LETHAL_CHANCE = 0.04`) so a fight
+can rarely go all the way even between total strangers. A real death grants
+kill exp and increments `lifetimeKills` (Notables) same as a predation kill,
+and logs `defeated` (the same non-predation-death event kind egg-defense
+already uses) — auto-camera already treats that as a death-worthy cut with
+no changes needed there.
+
+**Local fight cap.** New `Agent.lastHerdConflictTick`, stamped on both
+participants every real herd-conflict hit. `tooManyLocalFights` refuses to
+let a BRAND-NEW pair start fighting at all once
+`MAX_LOCAL_FIGHT_PARTICIPANTS` (4 — two concurrent pairs) other agents are
+already actively fighting (hit within the last 20 ticks) within 4 tiles of
+where the new one would start. Checked only by `applyHerdRivalryConflict`/
+`applyTerritorialGuard` (the two triggers that start something NEW) —
+`applyRivalryRetaliation`, a direct one-shot continuation of a fight already
+in progress, is deliberately exempt, so an ongoing pair's own back-and-forth
+is never capped, only OTHER unrelated agents piling onto an already-busy
+area. On the display side, `autoCamera.ts`'s `onBattleHit` now relabels an
+engagement once widening pulls a third participant in (`"N-way battle/
+brawl"` instead of a stale two-name label that no longer describes what's
+actually on screen).
+
+Live-validated over a real 12,000-tick `createDemoWorld` run
+(`validateLethalClashes.ts`): 96 real herd-clash hits produced 19 knockouts
+and 2 true deaths — roughly one in ten knockouts escalating, both grudge-
+and chance-driven paths structurally reachable, neither routine. New engine
+tests cover both lethal paths directly (a fresh pair's knockout faints, a
+flat-chance roll makes a first-ever knockout lethal, a pre-set deep grudge
+makes the next knockout lethal regardless of the flat chance) plus the
+local-fight cap (a brand-new pair refused when the area's already at
+`MAX_LOCAL_FIGHT_PARTICIPANTS`, but a retaliation continuation still goes
+through under the same busy conditions). Full suite (1081 + 177 tests) and
+typecheck green.
+
 ### Auto-camera: courtship gets its own shorter dwell and longer cooldown
 
 Direct ask: "bonding takes too much air time on the autocam. reduce it and

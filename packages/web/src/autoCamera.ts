@@ -575,12 +575,24 @@ export class AutoCameraController {
   private onBattleHit(category: "battle" | "clash", ids: Set<string>, pos: Vec2, label: string, world: World): void {
     const existing = this.findContinuous(ids);
     if (existing) {
-      // A new participant can join mid-fight (e.g. a pack-hunt assist) —
-      // widen the tracked id set so the log filter/camera follow both
-      // pick it up, rather than starting a second, competing engagement.
+      // A new participant can join mid-fight (e.g. a pack-hunt assist, or —
+      // now that herd-conflict fights can genuinely coexist nearby — two
+      // separate pairs whose own ids happen to overlap through a shared
+      // participant) — widen the tracked id set so the log filter/camera
+      // follow both pick it up, rather than starting a second, competing
+      // engagement.
       for (const id of ids) existing.ids.add(id);
       existing.fallbackPos = pos;
       existing.expiresOrLastActiveTick = world.tick;
+      // Direct ask: "multi-way 6 unit free for alls that get really
+      // confusing" — once widening pulls a THIRD participant into what
+      // started as an ordinary pair, the original "X vs Y" label no longer
+      // describes what's actually on screen. Relabel to something that
+      // reads as a real multi-agent brawl instead of a stale two-name
+      // string quietly tracking more than it says.
+      if (existing.ids.size > 2) {
+        existing.label = `${existing.ids.size}-way ${category === "battle" ? "battle" : "brawl"}`;
+      }
       return;
     }
     // A real battle is the single most important thing on screen — direct
