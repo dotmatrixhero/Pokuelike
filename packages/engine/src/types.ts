@@ -40,9 +40,27 @@ export type StatusKind = "burn" | "poison" | "paralysis" | "sleep" | "freeze";
  * a real Speed multiplier bonus for every same-herd agent near the
  * passive-holder, itself included, while THAT agent is currently standing
  * on a `"water"` terrain tile; no effect off water or without a nearby
- * holder). See MOVES_DESIGN.md's primitives checklist.
+ * holder), `"nonTerritorial"` (herdConflict.ts's `applyHerdRivalryConflict`,
+ * a flat opt-out — the holder never initiates a herd-rivalry fight over a
+ * contested resource tile, though it can still be drawn in as someone
+ * else's target), and `"calmingPresence"` (herdConflict.ts's
+ * `herdConflictChance`, a real de-escalation aura — every living agent
+ * within a fixed radius, itself included, gets its own rivalry-escalation
+ * chance multiplied down, deliberately NOT herd-scoped like `healAura`/
+ * `aquaticHaste`: a genuinely solitary animal that just isn't worth
+ * fighting near calms down *both* sides of a nearby standoff, not just its
+ * own herd-mates). See MOVES_DESIGN.md's primitives checklist.
  */
-export type PassiveKind = "damageReduction" | "immovable" | "regen" | "thorns" | "healAura" | "defenseBoost" | "aquaticHaste";
+export type PassiveKind =
+  | "damageReduction"
+  | "immovable"
+  | "regen"
+  | "thorns"
+  | "healAura"
+  | "defenseBoost"
+  | "aquaticHaste"
+  | "nonTerritorial"
+  | "calmingPresence";
 
 /**
  * Why a herd is (or was) migrating — see herdMigration.ts/DESIGN.md's
@@ -645,6 +663,35 @@ export interface Agent {
   burrowedTicksRemaining?: number;
   /** The layer this agent burrowed *from* — see `burrowedTicksRemaining`. Absent whenever not currently burrowed. */
   burrowedFromLayer?: Layer;
+  /**
+   * A move-driven wind-up commitment — set instead of resolving immediately
+   * when a move with `MoveSpec.chargeAttack` is used (`resolveHit`,
+   * predation.ts), alongside the same `actionLockTicks` block every other
+   * lock uses (no separate no-action guard needed). Two real effects while
+   * this is set: the agent cannot act (already covered by `actionLockTicks`)
+   * and takes NO damage at all from anything — `resolveHitAgainstTarget`
+   * (predation.ts) checks this before even rolling accuracy, a genuine
+   * invulnerability window, not a defense buff. `ticksRemaining` counts down
+   * every tick regardless of action (`tickStatusEffects`, status.ts, same
+   * shape as `burrowedTicksRemaining`); when it reaches 0, `tickAgentNeeds`
+   * (needs.ts) calls `resolveChargedAttack` (predation.ts), which looks
+   * `targetId` back up in the world, leaps the attacker `leapTiles` toward
+   * wherever that target *currently* is, and lands the hit at `bonusPower`
+   * on top of the move's own power. If the target's dead, gone, or changed
+   * layer by then, the charge fizzles for no damage — a real risk for
+   * committing this hard to one target, not a guaranteed payoff. Absent =
+   * not charging, the default for every agent and every move that doesn't
+   * set `chargeAttack`.
+   */
+  chargingAttack?: {
+    moveId: string;
+    targetId: string;
+    ticksRemaining: number;
+    bonusPower: number;
+    leapTiles: number;
+    /** The same `faintKind` `resolveHit` was originally called with — a hunt's "killed" vs. a rivalry/mob-fight's "defeated" — so the delayed release resolves in the same context it started in, not a guessed default. */
+    faintKind: "killed" | "defeated";
+  };
   /**
    * Ticks remaining during which this agent (and, per `MoveSpec.
    * statusImmunityAura`'s `radius`, any living same-herd ally within it)

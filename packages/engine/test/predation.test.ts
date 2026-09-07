@@ -943,6 +943,92 @@ describe("forced movement wired into real combat (resolveHit)", () => {
   });
 });
 
+describe("chargeAttack: a genuine mid-commit wind-up (Agent.chargingAttack, Body Slam's The Reckoning)", () => {
+  const CHARGE_MOVE: MoveSpec = {
+    ...TEST_MOVE,
+    id: "charge-move",
+    cooldownTicks: 10,
+    range: { min: 0, max: 5 },
+    chargeAttack: { ticks: 2, bonusPower: 30, leapTiles: 3 },
+  };
+
+  it("commits the attacker without landing a hit immediately", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [CHARGE_MOVE] });
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought" }));
+    expect(hunter.chargingAttack).toEqual(
+      expect.objectContaining({ moveId: "charge-move", targetId: "bulbasaur-0", ticksRemaining: 2, bonusPower: 30, leapTiles: 3 })
+    );
+    expect(hunter.actionLockTicks).toBe(2);
+  });
+
+  it("a charging agent takes no damage at all — genuine invulnerability, not a defense buff", () => {
+    const world = createWorld(10, 10);
+    // The one charging here is the "prey" fixture — attacked by a real
+    // predator well within its own power to normally down it in one hit.
+    const chargingPrey = prey(
+      { x: 5, y: 5 },
+      {
+        hp: 10,
+        maxHp: 10,
+        chargingAttack: { moveId: "charge-move", targetId: "scyther-0", ticksRemaining: 5, bonusPower: 0, leapTiles: 0, faintKind: "killed" },
+      }
+    );
+    const hunter = predator({ x: 6, y: 5 });
+    world.agents.push(hunter, chargingPrey);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    expect(chargingPrey.hp).toBe(10);
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought" }));
+  });
+
+  it("resolves after its ticks elapse — leaps toward the target's current position, then lands the hit", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 9, y: 5 }, undefined, { moves: [CHARGE_MOVE] }); // out of melee range — only the leap closes it
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // tick 1: starts charging
+    expect(hunter.chargingAttack?.ticksRemaining).toBe(2);
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // tick 2: still charging
+    expect(hunter.chargingAttack?.ticksRemaining).toBe(1);
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought" }));
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // tick 3: releases
+
+    expect(hunter.chargingAttack).toBeUndefined();
+    expect(hunter.actionLockTicks).toBe(0);
+    expect(hunter.pos).not.toEqual({ x: 9, y: 5 }); // leapt toward the target
+    expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "scyther-0", defenderId: "bulbasaur-0" }));
+  });
+
+  it("fizzles for no damage if the target is gone by the time the charge completes", () => {
+    const world = createWorld(10, 10);
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [CHARGE_MOVE] });
+    world.agents.push(hunter, target);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // starts charging
+    target.alive = false; // the target dies from something else entirely, mid-charge
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+    tickWorld(world, log, RULES, undefined, SAFE_RNG); // would have released here
+
+    expect(hunter.chargingAttack).toBeUndefined(); // the commitment is still spent...
+    expect(log.events).not.toContainEqual(expect.objectContaining({ kind: "fought" })); // ...but nothing landed
+  });
+});
+
 describe("multi-hit wired into real combat (resolveHit)", () => {
   it("strikes exactly hits.min===max times, each its own 'fought' event, until the hit count is used up or the target dies", () => {
     const FLURRY_MOVE: MoveSpec = { ...TEST_MOVE, id: "flurry-move", hits: { min: 3, max: 3 } };

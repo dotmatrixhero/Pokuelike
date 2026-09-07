@@ -4354,3 +4354,88 @@ not something this pathfinding pass itself caused or is positioned to fix.
       inline script re-parses, `computeLayout` produces complete,
       non-overlapping positions for all 39 new nodes across all 11 treed
       moves) and republished.
+- [x] **Fixed Body Slam missing from the Atlas move picker** — direct
+      report: "It isn't there. I don't see body slam in the list of
+      moves." Real bug, not a stale cache: `MOVE_ORDER` (the picker list in
+      `move-tree-atlas.template.html`) is hand-maintained, separate from
+      the actual tree data — adding Body Slam's tree never added it to
+      this list, so it silently never rendered in the nav despite being in
+      the underlying JSON all along. Added a new "Single-species" group
+      for it. Verified (integrity, syntax, `computeLayout`) and
+      republished.
+- [x] **Body Slam: redesigned Boldness (real "intention," not just bulk)
+      and Sociability (solitary, not herd-based), plus rebalanced
+      Aggression — two genuinely new engine primitives, both direct
+      follow-up asks** — "sketch the sociability. But I think boldness is
+      a little bland too... Intention could be a thing too. Could add a
+      charge up turn, to make it stronger. Maybe another notable could
+      make him invulnerable to damage for that charge up. Maybe you could
+      add a huge leap/movement tied to the skill... Full weight is
+      probably too strong to be so early." Scoped via AskUserQuestion
+      before writing engine code (the charge/invulnerability state and the
+      rivalry hooks were both explicitly greenlit; a `maxHp`-boost
+      crosslink idea was not, and wasn't built).
+      - **New engine primitive: `MoveSpec.chargeAttack` →
+        `Agent.chargingAttack`** — a genuine mid-commit wind-up. Reuses
+        the existing `actionLockTicks` block for "can't act" (no new
+        no-action guard needed); `resolveHitAgainstTarget` (predation.ts)
+        checks it before even rolling accuracy for real, unconditional
+        invulnerability; `tickStatusEffects` (status.ts) only ticks it
+        down (deliberately not resolving it there — a real status.ts/
+        predation.ts import cycle, same constraint `maybeSpreadStatus`
+        already respects); `tickAgentNeeds` (needs.ts, which already
+        imports from predation.ts) calls the new, exported
+        `resolveChargedAttack` once ticks hit 0 — it looks the original
+        target back up by id (may have moved, changed layer, or died
+        since), leaps toward wherever it currently is, and lands the hit
+        at a bonus power, or fizzles for nothing if the target's gone. 4
+        new engine tests (`predation.test.ts`): commits without an
+        immediate hit, genuine invulnerability against a real attacker,
+        resolves after its ticks elapse with a real leap and a landed
+        hit, fizzles for no damage if the target dies mid-charge.
+      - **New engine primitives: `PassiveKind` `"nonTerritorial"`/
+        `"calmingPresence"`** — both hook into herdConflict.ts, not a
+        move-hit path. `"nonTerritorial"` is a flat opt-out at the top of
+        `applyHerdRivalryConflict` (never initiates, can still be
+        targeted as someone else's rival). `"calmingPresence"` multiplies
+        down `herdConflictChance` for any living, same-layer agent within
+        a fixed radius — deliberately NOT herd-scoped like `healAura`/
+        `aquaticHaste`, since the fantasy is a genuinely solitary animal
+        that calms *both* sides of a nearby standoff, not just its own
+        herd-mates. 4 new engine tests (`herdConflict.test.ts`): opts out
+        of initiating, can still be fought as someone else's rival,
+        dampens a third agent's own chance regardless of herd, no effect
+        beyond its radius.
+      - **Aggression rebalanced**: `weightScaling` moved off the opener
+        (renamed *Full Weight* → *Heavy Step*, now a modest lunge) down to
+        the keystone (*Avalanche*, alongside its existing `hitsArea` shape
+        change) — direct feedback that handing out the tree's biggest
+        lever on the first point spent was backwards.
+      - **Boldness keystone replaced**: *Mountain's Answer* (`thorns`) →
+        **The Reckoning** (`chargeAttack`: 2-tick charge, +40 power, a
+        5-tile leap) — real "intention," invulnerable the whole time it's
+        winding up, a genuine risk (fizzles if the target's gone) not a
+        guaranteed payoff.
+      - **Sociability rebuilt from scratch**: the old herd-support branch
+        (*Broad Back*/*Watchful Rest*/*Wake the Giant*/*Herd's Shade*/
+        *Sanctuary Slam*, all `targetsAlly`/`allyEffect`/`healAura`) is
+        gone entirely, replaced with *Unbothered* → *No Quarrel* → a real
+        fork (*Wide Berth* vs. *Steady Nerve*) → *Left in Peace* →
+        keystone *Undisturbed* (`grantsPassives`: `calmingPresence` +
+        `thorns`) — no ally-targeting content survives anywhere on the
+        branch (checked directly in the rewritten test).
+      - **Boldness↔Sociability crosslink redesigned**: *Called to Stand*
+        (`rallyMarked`, no longer fits a herdless branch) → **Nothing to
+        Prove** (deepens `calmingPresence` across its own root→filler→
+        notable chain — "an immovable thing that also isn't looking for a
+        fight is the ultimate 'just go around it'"). The other two
+        crosslinks kept their own mechanics, just re-rooted onto the
+        renamed/rebuilt opener ids.
+      - Rewrote the whole "Body Slam tree" test block for the new
+        structure; full data suite green (210/210), engine suite green
+        (1004/1004, aside from one pre-existing unseeded-RNG flake in
+        `reproduction.test.ts`, confirmed unrelated by re-running it
+        standalone). Atlas's `PASSIVE_LABEL`/`describeDelta` maps got real
+        entries for `nonTerritorial`, `calmingPresence`, and
+        `chargeAttack`; rebuilt (verified: integrity, syntax,
+        `computeLayout` across the whole roster) and republished.

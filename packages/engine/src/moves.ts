@@ -389,6 +389,19 @@ export interface MoveSpec {
   /** On use, finds the nearest living, non-same-herd agent within `radius` and transfers `amount` of the user's target `need` from them to the user — real resource theft, distinct from any hostile hit. A no-op (still goes on cooldown) if no such agent is in range. Requires `utilityMove`. Absent = no drain effect, the default. */
   drainNeeds?: { need: "hunger" | "thirst"; amount: number; radius: number };
   /**
+   * A genuine multi-tick wind-up: instead of resolving immediately,
+   * `resolveHit` (predation.ts) sets `Agent.chargingAttack` for `ticks` and
+   * returns without hitting anything — see that field's own doc comment
+   * (types.ts) for the full mechanic (invulnerable and unable to act while
+   * charging, then a `leapTiles` lunge and a `bonusPower` hit on release, or
+   * a fizzle if the original target's gone by then). The single biggest new
+   * primitive on the whole "Engine primitives needed" checklist — a real
+   * mid-commit agent state, not just another `MoveSpec` delta field. Absent
+   * = this move resolves the instant it's used, the default for every move
+   * that doesn't set it.
+   */
+  chargeAttack?: { ticks: number; bonusPower: number; leapTiles: number };
+  /**
    * Optional respec DAG (see `applyMoveTree`). Each node is a delta applied
    * on top of the base spec, gated by a point cost and prerequisite node
    * id(s). Absent = this move can't be respec'd (the common case — only
@@ -545,6 +558,8 @@ export interface MoveTreeNode {
     consumesOwnTerrain?: { terrain: TerrainKind; damageMultiplier: number };
     /** Overwrite, like `shape`. */
     terrainFill?: { terrain: TerrainKind };
+    /** Overwrite, like `shape` — a move has at most one charge commitment at a time. */
+    chargeAttack?: { ticks: number; bonusPower: number; leapTiles: number };
   };
 }
 
@@ -703,6 +718,7 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       statusSeverity: delta.statusSeverity ?? result.statusSeverity,
       consumesOwnTerrain: delta.consumesOwnTerrain ?? result.consumesOwnTerrain,
       terrainFill: delta.terrainFill ?? result.terrainFill,
+      chargeAttack: delta.chargeAttack ?? result.chargeAttack,
     };
   }
 

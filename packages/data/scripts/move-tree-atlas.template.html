@@ -893,6 +893,8 @@
     healAura: function (v) { return "Passive — heals every nearby herd-mate (itself included) " + pct(v) + " of max HP every tick."; },
     defenseBoost: function (v) { return "Passive — permanently raises its own Defense stat-stage by " + v + "."; },
     aquaticHaste: function (v) { return "Passive — every nearby herd-mate (itself included) moves " + pct(v) + " faster while standing on water."; },
+    nonTerritorial: function () { return "Passive — never initiates a fight over a contested resource tile (can still be targeted by someone else's)."; },
+    calmingPresence: function (v) { return "Passive — every nearby agent (herd or not, itself included) is " + pct(v) + " less likely to start a resource fight nearby."; },
   };
 
   function pct(v) { return Math.round(v * 1000) / 10 + "%"; }
@@ -954,6 +956,10 @@
       var dir = fm.direction === "closer" ? "toward the other side" : "away from the other side";
       var timing = fm.timing === "beforeHit" ? "before the hit resolves" : "on a landed, non-killing hit";
       lines.push(mover + " moves " + fm.tiles + " tile" + (fm.tiles === 1 ? "" : "s") + " " + dir + ", " + timing + ".");
+    }
+    if (has("chargeAttack")) {
+      var ca = delta.chargeAttack;
+      lines.push("Charges for " + ca.ticks + " tick" + (ca.ticks === 1 ? "" : "s") + " — invulnerable and unable to act the whole time — then leaps " + ca.leapTiles + " tiles toward the target and lands the hit at +" + ca.bonusPower + " power (fizzles for no damage if the target's gone by then).");
     }
     if (has("shape")) lines.push("Changes its own shape to " + shapeLabel(delta.shape) + ".");
     if (has("range")) lines.push("Changes its max reach to " + (delta.range.max != null ? delta.range.max + " tiles" : JSON.stringify(delta.range)) + ".");

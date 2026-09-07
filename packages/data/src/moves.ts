@@ -3874,33 +3874,44 @@ export const MOVES: Record<string, MoveSpec> = {
     // Scyther, built specifically for this one body, not a generic "heavy
     // hit" template.
     // - Aggression ("Landslide"): stays power-archetype on purpose — more
-    //   mass, less restraint, escalating to a real localized collapse.
+    //   mass, less restraint, escalating to a real localized collapse. The
+    //   full-body weight payoff (`weightScaling`) is earned at the keystone
+    //   now, not handed out on the opener — direct feedback that starting
+    //   this strong was backwards, moved from Full Weight (now a modest
+    //   opening lunge) to Avalanche, where "the giant finally throws its
+    //   whole self into it" actually belongs.
     // - Boldness ("Unbudging"): earned tankiness, not a default reach —
     //   nothing on this whole roster fits "doesn't move" better than a
     //   sleeping giant (Snorlax's own curated moveset already primes this
-    //   with Defense Curl).
-    // - Sociability ("Gentle Giant"): the real canonical Snorlax trait —
-    //   famously peaceful despite its size — turned into the herd's actual
-    //   shelter: protection and recovery through calm presence, not a flat
-    //   ally buff copied from elsewhere.
+    //   with Defense Curl). Real follow-up feedback that bulk/defense alone
+    //   read as bland: the keystone is now a genuine wind-up — a deliberate,
+    //   telegraphed commitment (real "intention," not just more armor),
+    //   invulnerable while charging, then a huge leap and a devastating hit.
+    // - Sociability ("Undisturbed"): direct correction on the first draft —
+    //   Snorlax is canonically a solitary animal, not a herd one, so a
+    //   branch built entirely on ally-buffing herd support was the wrong
+    //   fantasy for this specific body. The real trait (famously placid
+    //   despite its size) is now a genuine non-territorial, de-escalating
+    //   presence: it never starts a fight over a resource, and anything
+    //   nearby — herd or not, rival or not — calms down just being near it.
     tree: {
       // --- Aggression: Landslide (more mass, less restraint) ---
-      full_weight: {
-        id: "full_weight",
-        name: "Full Weight",
+      heavy_step: {
+        id: "heavy_step",
+        name: "Heavy Step",
         cost: 1,
         leaning: "aggression",
-        // Bonus power scales with the user's own bulk — same lever as
-        // Tackle's Weighted Charge, but this move IS that fantasy, not a
-        // side branch of a different one: nothing in the roster has more
-        // maxHp to throw around than Snorlax.
-        delta: { weightScaling: { factor: 0.15 }, accuracy: -5 },
+        // The first sign of what's coming — a small, immediate lunge, not
+        // yet the full weight of the thing. Deliberately modest: the real
+        // weightScaling payoff moved to the keystone (Avalanche) — see this
+        // move's own top comment.
+        delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" } },
       },
       numbing_follow_through: {
         id: "numbing_follow_through",
         name: "+10% Paralysis Chance",
         cost: 1,
-        prerequisites: ["full_weight"],
+        prerequisites: ["heavy_step"],
         leaning: "aggression",
         delta: { statusChance: 0.1 },
       },
@@ -3980,8 +3991,11 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         // The single slam becomes a real localized collapse — everything
         // near the point of impact, not just the one target, gets caught
-        // in the landing.
-        delta: { shape: { kind: "burst", radius: 1 }, hitsArea: true, power: -10 },
+        // in the landing. Also where the real full-body weight payoff
+        // finally lands (moved down from the old Full Weight opener, per
+        // direct feedback that it was too strong too early) — by the time
+        // this move can end a fight this way, its whole mass moves with it.
+        delta: { shape: { kind: "burst", radius: 1 }, hitsArea: true, power: -10, weightScaling: { factor: 0.15 } },
       },
       // --- Boldness: Unbudging (a sleeping mountain that refuses to move) ---
       dead_weight: {
@@ -4078,124 +4092,144 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { power: 8 },
       },
-      mountains_answer: {
-        id: "mountains_answer",
-        name: "Mountain's Answer",
+      the_reckoning: {
+        id: "the_reckoning",
+        name: "The Reckoning",
         cost: 2,
         prerequisites: ["settled_power"],
         leaning: "boldness",
-        // Anyone who keeps hitting something this heavy eventually hurts
-        // themselves more than they hurt it.
-        grantsPassive: { kind: "thorns", value: 0.1 },
-        delta: {},
+        // Direct feedback: bulk and defense alone read as bland — this
+        // branch needed real "intention," not just more armor. A deliberate,
+        // telegraphed commitment: the giant rears back and gathers itself
+        // (`chargeAttack`'s own mid-commit wind-up — see its doc comment,
+        // moves.ts), genuinely invulnerable the whole time it's winding up,
+        // then closes a huge distance in one leap and lands a devastating
+        // blow. A real risk, not a guaranteed payoff — if the target's gone
+        // by the time it releases, the whole commitment fizzles for
+        // nothing, same "commit hard, pay a real cost" shape as every other
+        // keystone-tier tradeoff on this whole roster.
+        delta: { chargeAttack: { ticks: 2, bonusPower: 40, leapTiles: 5 } },
       },
-      // --- Sociability: Gentle Giant (the herd's actual shelter) ---
-      broad_back: {
-        id: "broad_back",
-        name: "Broad Back",
+      // --- Sociability: Undisturbed (a solitary, non-territorial presence,
+      // not a herd defender — Snorlax is canonically a loner, direct
+      // correction on the first draft of this branch: "Snorlax tends not to
+      // be in a herd. Very solo style... maybe Snorlax is more peaceful and
+      // gets along with others easier." Real mechanics for it, not a flat
+      // ally buff: it never picks a fight over a resource
+      // (`"nonTerritorial"`), and anything nearby — herd or not, rival or
+      // not — calms down just being near it (`"calmingPresence"`,
+      // herdConflict.ts). See both `PassiveKind`s' own doc comments,
+      // types.ts.) ---
+      unbothered: {
+        id: "unbothered",
+        name: "Unbothered",
         cost: 1,
         leaning: "sociability",
-        // Standing near something this big and steady is protection in
-        // itself — real from the very first point spent.
-        delta: { targetsAlly: true, allyEffect: { buff: { stat: "defense", stage: 1, ticks: 20 } } },
+        // A flat opt-out, live from the first point spent — it simply never
+        // starts something over a contested tile. Doesn't stop it being
+        // targeted as someone ELSE's rival; it just never picks the fight
+        // itself.
+        grantsPassive: { kind: "nonTerritorial", value: 1 },
+        delta: {},
       },
-      watchful_pace: {
-        id: "watchful_pace",
+      settled_ease: {
+        id: "settled_ease",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["unbothered"],
+        leaning: "sociability",
+        delta: { accuracy: 5 },
+      },
+      unhurried_reset: {
+        id: "unhurried_reset",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["broad_back"],
+        prerequisites: ["settled_ease"],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
-      steady_footing: {
-        id: "steady_footing",
-        name: "+5 Accuracy",
+      no_quarrel: {
+        id: "no_quarrel",
+        name: "No Quarrel",
         cost: 1,
-        prerequisites: ["watchful_pace"],
+        prerequisites: ["unhurried_reset"],
         leaning: "sociability",
-        delta: { accuracy: 5 },
+        // Real, immediate de-escalation — not herd-scoped like this sim's
+        // other aura passives: whoever's nearby, herd-mate or rival alike,
+        // finds less reason to start something too.
+        grantsPassive: { kind: "calmingPresence", value: 0.5 },
+        delta: {},
       },
-      watchful_rest: {
-        id: "watchful_rest",
-        name: "Watchful Rest",
-        cost: 1,
-        prerequisites: ["steady_footing"],
-        leaning: "sociability",
-        // Whenever this actually lands on a real threat, the nearest hurt
-        // herd-mate benefits too — protecting by neutralizing what
-        // threatens them, not just buffing passively from a distance.
-        delta: {
-          allyEffectOnAttack: true,
-          allyEffect: { healFraction: 0.12, buff: { stat: "defense", stage: 1, ticks: 20 } },
-        },
-      },
-      herd_pace: {
-        id: "herd_pace",
+      quiet_ground: {
+        id: "quiet_ground",
         name: "+5 Power",
         cost: 1,
         // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Sociability (Called to Stand's and Provoked
+        // reaches into Sociability (Nothing to Prove's and Provoked
         // Charge's own chains).
-        prerequisitesAnyOf: [["watchful_rest"], ["undivided_stand"], ["undivided"]],
+        prerequisitesAnyOf: [["no_quarrel"], ["undivided_stand"], ["undivided"]],
         leaning: "sociability",
         delta: { power: 5 },
       },
-      wake_the_giant: {
-        id: "wake_the_giant",
-        name: "Wake the Giant",
+      wide_berth: {
+        id: "wide_berth",
+        name: "Wide Berth",
         cost: 2,
-        prerequisites: ["herd_pace"],
-        excludes: ["steady_ground"],
+        prerequisites: ["quiet_ground"],
+        excludes: ["steady_nerve"],
         leaning: "sociability",
-        // Snorlax is lazy — getting it to actually engage a specific
-        // threat is itself the herd's whole strategy.
-        delta: { rallyCall: { ticks: 20 } },
-      },
-      steady_ground: {
-        id: "steady_ground",
-        name: "Steady Ground",
-        cost: 2,
-        prerequisites: ["herd_pace"],
-        excludes: ["wake_the_giant"],
-        leaning: "sociability",
-        // Standing perfectly still and steady disrupts an attacker's own
-        // rhythm — Body Slam landing exactly where they were sure not to
-        // be.
-        delta: { jamCooldownTicks: 1 },
-      },
-      herds_shade: {
-        id: "herds_shade",
-        name: "Herd's Shade",
-        cost: 2,
-        prerequisitesAnyOf: [["wake_the_giant"], ["steady_ground"]],
-        leaning: "sociability",
-        // The herd naps in the giant's shadow, safe and recovering — real
-        // for the first time on this branch, not just a defense buff.
-        grantsPassive: { kind: "healAura", value: 0.02 },
+        // Deepens No Quarrel's own lever directly — the peace it keeps
+        // reaches further out.
+        grantsPassive: { kind: "calmingPresence", value: 0.2 },
         delta: {},
       },
-      gentle_footing: {
-        id: "gentle_footing",
+      steady_nerve: {
+        id: "steady_nerve",
+        name: "Steady Nerve",
+        cost: 2,
+        prerequisites: ["quiet_ground"],
+        excludes: ["wide_berth"],
+        leaning: "sociability",
+        // Content and undisturbed, it simply isn't worn down the way
+        // something always looking over its shoulder would be.
+        grantsPassive: { kind: "regen", value: 0.02 },
+        delta: {},
+      },
+      left_in_peace: {
+        id: "left_in_peace",
+        name: "Left in Peace",
+        cost: 2,
+        prerequisitesAnyOf: [["wide_berth"], ["steady_nerve"]],
+        leaning: "sociability",
+        // It doesn't go looking for trouble, but whatever finds it anyway
+        // doesn't enjoy the experience — real self-defense without ever
+        // being the one who started it.
+        grantsPassive: { kind: "thorns", value: 0.08 },
+        delta: {},
+      },
+      unbroken_calm: {
+        id: "unbroken_calm",
         name: "+5 Accuracy",
         cost: 1,
-        prerequisites: ["herds_shade"],
+        prerequisites: ["left_in_peace"],
         leaning: "sociability",
         delta: { accuracy: 5 },
       },
-      sanctuary_slam: {
-        id: "sanctuary_slam",
-        name: "Sanctuary Slam",
+      undisturbed: {
+        id: "undisturbed",
+        name: "Undisturbed",
         cost: 2,
-        prerequisites: ["gentle_footing"],
+        prerequisites: ["unbroken_calm"],
         leaning: "sociability",
-        // The giant fully settles into place — a real "final form" of the
-        // whole branch's own identity: it shares its own recovery with the
-        // herd AND becomes genuinely harder to budge itself, both at once
-        // (same "two passives, one keystone" shape as Scratch's Colony
-        // Warmth).
+        // The branch's real "final form": its presence alone keeps the
+        // whole area calm, wider than ever, and on the rare occasion it's
+        // still bothered anyway, it comes to regret it (same "two
+        // passives, one keystone" shape as Scratch's Colony Warmth, all-new
+        // content — the old version of this keystone shared a flat heal
+        // with a herd this move no longer assumes exists).
         grantsPassives: [
-          { kind: "healAura", value: 0.02 },
-          { kind: "defenseBoost", value: 0.06 },
+          { kind: "calmingPresence", value: 0.25 },
+          { kind: "thorns", value: 0.05 },
         ],
         delta: {},
       },
@@ -4205,7 +4239,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "braced_commitment",
         name: "Braced Commitment",
         cost: 1,
-        prerequisites: ["full_weight", "dead_weight"],
+        prerequisites: ["heavy_step", "dead_weight"],
         leaning: "boldness",
         delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 10 } },
       },
@@ -4233,38 +4267,43 @@ export const MOVES: Record<string, MoveSpec> = {
         // force gets wasted on its own wobble.
         delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 3, ticks: 18 }, defensePenetration: 0.15 },
       },
-      // Crosslink: Boldness <-> Sociability — once the herd has actually
-      // marked something, the most unmovable thing in the roster simply
-      // doesn't miss what's already right in front of it.
+      // Crosslink: Boldness <-> Sociability — redesigned alongside
+      // Sociability's own rebuild (the old version leaned on a herd-mark
+      // primitive this branch no longer has any use for). New fantasy: an
+      // immovable thing that also isn't looking for a fight is the ultimate
+      // "just go around it" — nothing here is worth anyone's trouble.
       called_to_stand: {
         id: "called_to_stand",
-        name: "Called to Stand",
+        name: "Nothing to Prove",
         cost: 1,
-        prerequisites: ["dead_weight", "broad_back"],
-        leaning: "sociability",
-        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.3 } },
+        prerequisites: ["dead_weight", "unbothered"],
+        leaning: "boldness",
+        grantsPassive: { kind: "calmingPresence", value: 0.15 },
+        delta: {},
       },
-      // Bridge tail: extends Called to Stand into Boldness's and
-      // Sociability's own pre-fork nodes (Bracing Follow-Through / Herd
-      // Pace).
+      // Bridge tail: extends Nothing to Prove into Boldness's and
+      // Sociability's own pre-fork nodes (Bracing Follow-Through / Quiet
+      // Ground).
       steadfast_focus: {
         id: "steadfast_focus",
-        name: "Steadfast Focus",
+        name: "Widening Calm",
         cost: 1,
         prerequisites: ["called_to_stand"],
-        leaning: "sociability",
-        // Deepens Called to Stand's own lever directly, instead of a
+        leaning: "boldness",
+        // Deepens Nothing to Prove's own lever directly, instead of a
         // generic power bolt-on.
-        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.45 } },
+        grantsPassive: { kind: "calmingPresence", value: 0.15 },
+        delta: {},
       },
       undivided_stand: {
         id: "undivided_stand",
-        name: "Undivided Stand",
+        name: "Beneath Notice",
         cost: 2,
         prerequisites: ["steadfast_focus"],
         leaning: "sociability",
-        // Once it's committed to what the herd marked, it doesn't miss.
-        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.65 }, accuracy: 8 },
+        // By now, nothing sane bothers starting something with it at all.
+        grantsPassive: { kind: "calmingPresence", value: 0.2 },
+        delta: {},
       },
       // Crosslink: Sociability <-> Aggression — an animal this placid
       // doesn't pull the hit once actually roused; the restraint was the
@@ -4273,14 +4312,14 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "provoked_charge",
         name: "Provoked Charge",
         cost: 1,
-        prerequisites: ["broad_back", "full_weight"],
+        prerequisites: ["unbothered", "heavy_step"],
         leaning: "aggression",
         // A real wind-up cost, paired with the benefit it buys — a beat of
-        // hesitation before the herd's own gentle giant actually commits.
+        // hesitation before something this placid actually commits.
         delta: { lockTicks: 1, power: 10 },
       },
       // Bridge tail: extends Provoked Charge into Sociability's and
-      // Aggression's own pre-fork nodes (Herd Pace / Rolling Advance).
+      // Aggression's own pre-fork nodes (Quiet Ground / Rolling Advance).
       full_commitment: {
         id: "full_commitment",
         name: "Full Commitment",

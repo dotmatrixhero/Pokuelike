@@ -2,7 +2,7 @@ import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Vec2, W
 import { otherLayers, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
-import { applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan } from "./predation.js";
+import { applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan, resolveChargedAttack } from "./predation.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing, tendSoil } from "./flora.js";
 import { tickCooldowns } from "./combat.js";
@@ -702,6 +702,14 @@ export function tickAgentNeeds(
   if (agent.alive === false) return;
   if (agent.age !== undefined) agent.age += 1;
   if (world) tickStatusEffects(agent, world, log, rng);
+  // A charge that just finished counting down resolves right here — needs.ts
+  // already imports from predation.ts (unlike status.ts, which deliberately
+  // doesn't, to avoid a real import cycle — see `tickChargingAttack`'s own
+  // doc comment, status.ts), so this is the one place with both the ticked-
+  // down state and the machinery to actually resolve it.
+  if (world && agent.chargingAttack && agent.chargingAttack.ticksRemaining <= 0) {
+    resolveChargedAttack(world, agent, log, ctx, rng);
+  }
   // "tilling/planting it via grass type help" — a live Grass-type agent
   // gradually enriches the ground it's standing on, every tick, no move
   // or intent required. Surface-only, matching flora.ts's own scope.

@@ -156,7 +156,33 @@ function courageOf(world: World, agent: Agent): number {
  */
 function herdConflictChance(world: World, agent: Agent, grudge: number): number {
   const grudgeBonus = Math.max(0, -grudge) * HERD_CONFLICT_GRUDGE_SCALE;
-  return HERD_CONFLICT_BASE_CHANCE + courageOf(world, agent) * HERD_CONFLICT_DISPOSITION_SCALE + grudgeBonus;
+  const base = HERD_CONFLICT_BASE_CHANCE + courageOf(world, agent) * HERD_CONFLICT_DISPOSITION_SCALE + grudgeBonus;
+  return base * calmingMultiplier(world, agent);
+}
+
+/** Radius `"calmingPresence"` reaches — see that `PassiveKind`'s own doc comment (types.ts). */
+const CALMING_PRESENCE_RADIUS = 3;
+
+/**
+ * How much a nearby `"calmingPresence"` holder dampens `agent`'s own
+ * rivalry-escalation chance — deliberately scans every living, same-layer
+ * agent regardless of `herdId` (unlike `healAura`/`aquaticHaste`, which stay
+ * herd-scoped), since the fantasy is a genuinely solitary animal that calms
+ * *any* nearby standoff, including the holder's own would-be rivals, not a
+ * herd buff. Doesn't stack across multiple sources (the strongest nearby
+ * source wins, matching this sim's other aura passives). 1 (no effect)
+ * without a holder in range.
+ */
+function calmingMultiplier(world: World, agent: Agent): number {
+  let strongest = 0;
+  for (const other of world.agents) {
+    if (other.id === agent.id || other.alive === false || other.layer !== agent.layer) continue;
+    const calm = other.passives?.calmingPresence ?? 0;
+    if (calm <= strongest) continue;
+    if (manhattan(other.pos, agent.pos) > CALMING_PRESENCE_RADIUS) continue;
+    strongest = calm;
+  }
+  return Math.max(0, 1 - strongest);
 }
 
 /**
@@ -283,6 +309,11 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
 export function applyHerdRivalryConflict(world: World, agent: Agent, rules: HuntRules, target: Vec2, log: EventLog | undefined, rng: () => number): boolean {
   if ((agent.herdConflictCooldownTicks ?? 0) > 0) return false;
   if (rules[agent.species]) return false; // predator — out of scope, see doc comment
+  // A flat opt-out (`"nonTerritorial"` passive) — this agent never picks a
+  // fight over a resource tile, though it can still be found and fought by
+  // someone else's own `findRivalOccupant` call. See PassiveKind's own doc
+  // comment (types.ts).
+  if (agent.passives?.nonTerritorial) return false;
 
   const rival = findRivalOccupant(world, agent, rules, target);
   if (!rival) return false;

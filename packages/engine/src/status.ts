@@ -179,6 +179,7 @@ export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rn
   tickStatusImmunity(agent);
   tickMatingRadiusBoost(agent);
   tickBurrow(agent, world);
+  tickChargingAttack(agent);
   applyRegenPassive(agent);
   applyHealAuraPassive(agent, world);
 
@@ -285,6 +286,22 @@ function tickBurrow(agent: Agent, world: World): void {
     // identical relocate-to-nearest-safe-tile fix.
     agent.pos = findWalkableNear(world, agent.layer, agent.pos.x, agent.pos.y);
   }
+}
+
+/**
+ * Ticks down a `MoveSpec.chargeAttack` wind-up (`Agent.chargingAttack`'s own
+ * doc comment, types.ts) — pure bookkeeping only, same shape as `tickBurrow`
+ * above. Deliberately does NOT resolve the attack itself when it reaches 0:
+ * that needs predation.ts's own hit-resolution machinery, which status.ts
+ * doesn't import (a real cycle with predation.ts — see this file's own
+ * `maybeSpreadStatus` for the same constraint elsewhere). `tickAgentNeeds`
+ * (needs.ts, which already imports from predation.ts) checks
+ * `ticksRemaining <= 0` right after calling `tickStatusEffects` and calls
+ * `resolveChargedAttack` (predation.ts) itself. No-op on a corpse.
+ */
+function tickChargingAttack(agent: Agent): void {
+  if (agent.alive === false || !agent.chargingAttack) return;
+  agent.chargingAttack.ticksRemaining = Math.max(0, agent.chargingAttack.ticksRemaining - 1);
 }
 
 // --- Agent-modifying passives (Agent.passives) ---

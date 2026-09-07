@@ -752,9 +752,9 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
     expect(bodySlam.hitsArea).toBeUndefined();
   });
 
-  it("Avalanche (Aggression keystone) turns the single slam into a real localized collapse", () => {
+  it("Avalanche (Aggression keystone) turns the single slam into a real localized collapse, and is where the real weight payoff now lands", () => {
     const respec = applyMoveTree(bodySlam, [
-      "full_weight",
+      "heavy_step",
       "numbing_follow_through",
       "mounting_momentum",
       "ground_shaking_landing",
@@ -766,11 +766,21 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
     ]);
     expect(respec.shape).toEqual({ kind: "burst", radius: 1 });
     expect(respec.hitsArea).toBe(true);
+    // Moved down from the old Full Weight opener, per direct feedback that
+    // starting this strong was backwards — Heavy Step itself carries no
+    // weightScaling at all.
+    expect(respec.weightScaling).toEqual({ factor: 0.15 });
+    expect(bodySlam.tree!.heavy_step.delta.weightScaling).toBeUndefined();
   });
 
-  it("Unbudging and Mountain's Answer (Boldness) grant real Agent-level passives, not MoveSpec deltas", () => {
+  it("Heavy Step (Aggression opener) is a modest lunge, not the old opener's big weight swing", () => {
+    expect(bodySlam.tree!.heavy_step.delta).toEqual({
+      forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" },
+    });
+  });
+
+  it("Unbudging (Boldness notable) grants a real Agent-level passive, not a MoveSpec delta", () => {
     expect(bodySlam.tree!.unbudging.grantsPassive).toEqual({ kind: "immovable", value: 1 });
-    expect(bodySlam.tree!.mountains_answer.grantsPassive).toEqual({ kind: "thorns", value: 0.1 });
     // applyMoveTree's own resolved MoveSpec never carries a passive — it's
     // asserted on the tree node directly, not on the respec result (a real
     // gotcha this whole doc's test suite has hit more than once).
@@ -778,19 +788,46 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
     expect((respec as Record<string, unknown>).grantsPassive).toBeUndefined();
   });
 
-  it("Sanctuary Slam (Sociability keystone) grants two passives at once — a real shelter, not a bigger number on one lever", () => {
-    expect(bodySlam.tree!.sanctuary_slam.grantsPassives).toEqual([
-      { kind: "healAura", value: 0.02 },
-      { kind: "defenseBoost", value: 0.06 },
+  it("The Reckoning (Boldness keystone) is a real charge commitment, not more armor", () => {
+    const respec = applyMoveTree(bodySlam, [
+      "dead_weight",
+      "settled_footing",
+      "patient_reset",
+      "unbudging",
+      "bracing_follow_through",
+      "sink_in",
+      "weathered_giant",
+      "settled_power",
+      "the_reckoning",
+    ]);
+    expect(respec.chargeAttack).toEqual({ ticks: 2, bonusPower: 40, leapTiles: 5 });
+  });
+
+  it("Undisturbed (Sociability keystone) grants two passives at once — a real solitary payoff, not a herd buff", () => {
+    expect(bodySlam.tree!.undisturbed.grantsPassives).toEqual([
+      { kind: "calmingPresence", value: 0.25 },
+      { kind: "thorns", value: 0.05 },
     ]);
   });
 
+  it("Unbothered and No Quarrel (Sociability) grant the real non-herd passives the solitary redesign asked for", () => {
+    expect(bodySlam.tree!.unbothered.grantsPassive).toEqual({ kind: "nonTerritorial", value: 1 });
+    expect(bodySlam.tree!.no_quarrel.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.5 });
+    // No targetsAlly/allyEffect anywhere left on this branch — the old
+    // herd-support version is gone, not just renamed.
+    for (const node of Object.values(bodySlam.tree!)) {
+      if (node.leaning !== "sociability") continue;
+      expect(node.delta.targetsAlly).toBeUndefined();
+      expect(node.delta.allyEffect).toBeUndefined();
+    }
+  });
+
   it("the fork choices are genuine tradeoffs, not strictly-better stat sticks", () => {
-    const secondSlam = applyMoveTree(bodySlam, ["full_weight", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "second_slam"]);
+    const secondSlam = applyMoveTree(bodySlam, ["heavy_step", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "second_slam"]);
     expect(secondSlam.power).toBe(bodySlam.power + 8 + 8 + 15);
     expect(secondSlam.recoilFraction).toBeCloseTo(0.08);
 
-    const rollingCrush = applyMoveTree(bodySlam, ["full_weight", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "rolling_crush"]);
+    const rollingCrush = applyMoveTree(bodySlam, ["heavy_step", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "rolling_crush"]);
     expect(rollingCrush.hits).toEqual({ min: 2, max: 2 });
     expect(rollingCrush.power).toBe(bodySlam.power + 8 + 8 - 12);
 
@@ -801,10 +838,18 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
     const fullBulk = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "full_bulk"]);
     expect(fullBulk.accuracy).toBe(bodySlam.accuracy - 8 + 8);
     expect(bodySlam.tree!.full_bulk.grantsPassive).toEqual({ kind: "damageReduction", value: 0.05 });
+
+    const wideBerth = applyMoveTree(bodySlam, ["unbothered", "settled_ease", "unhurried_reset", "no_quarrel", "quiet_ground", "wide_berth"]);
+    expect(bodySlam.tree!.wide_berth.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.2 });
+    expect(wideBerth.power).toBe(bodySlam.power + 5);
+
+    const steadyNerve = applyMoveTree(bodySlam, ["unbothered", "settled_ease", "unhurried_reset", "no_quarrel", "quiet_ground", "steady_nerve"]);
+    expect(bodySlam.tree!.steady_nerve.grantsPassive).toEqual({ kind: "regen", value: 0.02 });
+    expect(steadyNerve.power).toBe(bodySlam.power + 5);
   });
 
   it("second_slam and rolling_crush are a real mutually exclusive fork", () => {
-    expect(() => applyMoveTree(bodySlam, ["full_weight", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "second_slam", "rolling_crush"])).toThrow(
+    expect(() => applyMoveTree(bodySlam, ["heavy_step", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "second_slam", "rolling_crush"])).toThrow(
       /conflicts with already-chosen/
     );
   });
@@ -814,33 +859,38 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
     // early, not onto the fork itself" rule every other bridge in this
     // roster follows.
     expect(() =>
-      applyMoveTree(bodySlam, ["full_weight", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "second_slam"])
+      applyMoveTree(bodySlam, ["heavy_step", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "second_slam"])
     ).toThrow(/requires \[rolling_advance\]/);
 
-    const viaAgg = applyMoveTree(bodySlam, ["full_weight", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "rolling_advance"]);
+    const viaAgg = applyMoveTree(bodySlam, ["heavy_step", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "rolling_advance"]);
     expect(viaAgg.statChangeOnHit).toEqual({ target: "self", stat: "defense", stage: 3, ticks: 18 });
     expect(viaAgg.defensePenetration).toBeCloseTo(0.15);
     // None of Aggression's own linear filler chain was ever chosen.
     expect(viaAgg.statusChance).toBe(bodySlam.statusChance);
 
-    const viaBold = applyMoveTree(bodySlam, ["full_weight", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "bracing_follow_through"]);
+    const viaBold = applyMoveTree(bodySlam, ["heavy_step", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "bracing_follow_through"]);
     expect(viaBold.power).toBe(bodySlam.power + 5);
   });
 
-  it("Called to Stand's bridge (Boldness<->Sociability) deepens its own rallyMarked lever, not a generic bolt-on", () => {
+  it("Nothing to Prove's bridge (Boldness<->Sociability) deepens its own calmingPresence lever, not a generic bolt-on", () => {
     const respec = applyMoveTree(bodySlam, [
       "dead_weight",
-      "broad_back",
+      "unbothered",
       "called_to_stand",
       "steadfast_focus",
       "undivided_stand",
-      "herd_pace",
+      "quiet_ground",
     ]);
-    expect(respec.situationalBonus).toEqual({ condition: "rallyMarked", multiplier: 1.65 });
+    // grantsPassive isn't part of the resolved MoveSpec — the real payoff is
+    // asserted on the tree nodes' own accumulated values.
+    expect(bodySlam.tree!.called_to_stand.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.15 });
+    expect(bodySlam.tree!.steadfast_focus.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.15 });
+    expect(bodySlam.tree!.undivided_stand.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.2 });
+    expect(respec.power).toBe(bodySlam.power + 5);
   });
 
   it("Provoked Charge's bridge (Sociability<->Aggression) pairs its lockTicks cost with a real, growing benefit", () => {
-    const respec = applyMoveTree(bodySlam, ["broad_back", "full_weight", "provoked_charge", "full_commitment", "undivided"]);
+    const respec = applyMoveTree(bodySlam, ["unbothered", "heavy_step", "provoked_charge", "full_commitment", "undivided"]);
     expect(respec.lockTicks).toBe(1);
     expect(respec.power).toBe(bodySlam.power + 10 + 10 + 15);
     expect(respec.lifestealFraction).toBeCloseTo(0.05);

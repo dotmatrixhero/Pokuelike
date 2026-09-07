@@ -270,6 +270,8 @@ grepping for "needs" across the whole file.
 | Multi-target/AoE resolution (apply a move to every agent within its resolved shape, not one target) | Growl (its entire premise), Firestorm, Ring of Fire's full fantasy, Boulder Toss/Skipping Stone | **Shipped** — `MoveSpec.hitsArea`, resolved by `resolveAreaHit` (predation.ts): facing derived from attacker->primary-target direction, `resolveShape` finds every living agent in the move's footprint, each gets its own accuracy roll and damage instance; only the deliberately-picked primary target gets status/stat-change/forced-movement/position-swap hooks, incidental targets just take the raw hit. Confirmed in a real fight: a ring-shaped move centered on the attacker landed on both the picked target and an unrelated bystander standing on the same ring. Growl itself still isn't built — see below |
 | AoE ally-exemption (`MoveSpec.excludesAllies`) | A reckless AoE (Earthquake) that a drilled herd learns not to get caught in | **Shipped** — one extra condition in `resolveAreaHit`'s existing target filter, skipping agents whose `herdId` matches the attacker's when the move sets this flag. Without it (the default, and every AoE move's real behavior before this field existed), a same-herd agent caught in the blast takes the hit exactly like an enemy would. First real content: Earthquake's *Herdsafe Trigger* (see below) |
 | Terrain-conditional ally speed aura (`PassiveKind` `"aquaticHaste"`) | Hydro Pump's Pod Tide capstone — direct ask, after two rounds of feedback that its capstone didn't match the branch's own fantasy: "it would be better if it granted all allies greatly more speed when they're on water tiles" | **Shipped** — `support.ts`'s `aquaticHasteMultiplier`, composed into `actionSpeedOf`'s existing multiplier chain (simulation.ts): a same-herd agent within a fixed radius of the passive-holder (itself included) gets a real Speed bonus, but only while THAT agent is currently standing on a `"water"` tile (`world.ts`'s `tileAt`). The first passive in the roster that's both an aura (like `healAura`) AND terrain-conditional (like `terrainSpeedMultiplier`) — neither existing mechanism covered this alone. First real content: Hydro Pump's *Tidal Communion* |
+| Mid-commit charge/wind-up + genuine invulnerability (`MoveSpec.chargeAttack` → `Agent.chargingAttack`) | Body Slam's Boldness keystone (The Reckoning) — direct ask, "you're on the right track but it needs more than just bulk and defense... could add a charge up turn... another notable could make him invulnerable to damage for that charge up... a huge leap/movement tied to the skill" | **Shipped** — `resolveHit` (predation.ts) sets `Agent.chargingAttack` instead of resolving immediately, reusing the existing `actionLockTicks` block for "can't act" (no new no-action guard needed); `resolveHitAgainstTarget` checks it before even rolling accuracy for genuine, unconditional invulnerability; `tickStatusEffects` (status.ts) ticks it down as pure bookkeeping (deliberately not resolving it there — a real status.ts/predation.ts import cycle); `tickAgentNeeds` (needs.ts, which already imports from predation.ts) calls the new `resolveChargedAttack` once ticks hit 0, which looks the original target back up by id (it may have moved, changed layer, or died since), leaps toward wherever it currently is, and lands the hit at a bonus power — or fizzles for nothing if the target's gone. The single biggest new primitive on this whole checklist — a real mid-commit agent state, not just another delta field. First real content: Body Slam's *The Reckoning* |
+| Non-territorial opt-out + de-escalation aura (`PassiveKind` `"nonTerritorial"`/`"calmingPresence"`) | Body Slam's Sociability branch, redesigned after a direct correction on the first draft: "Snorlax tends not to be in a herd. Very solo style... maybe Snorlax is more peaceful and gets along with others easier" — the original branch was built entirely on herd-scoped ally buffs, the wrong fantasy for a solitary animal | **Shipped** — both hook into herdConflict.ts, not a move-hit path: `"nonTerritorial"` is a flat opt-out checked at the top of `applyHerdRivalryConflict` (the holder never initiates a fight over a contested tile, though it can still be found and fought as someone else's rival); `"calmingPresence"` multiplies down `herdConflictChance` for any living, same-layer agent within a fixed radius, deliberately NOT herd-scoped like `healAura`/`aquaticHaste` — a genuinely solitary animal's calm reaches both sides of a nearby standoff, not just its own herd-mates. First real content: Body Slam's *Unbothered*/*No Quarrel*/*Undisturbed* |
 | Persistent stat stages (`Agent`-level Attack/Defense/etc. modifiers, settable by a move, lasting until cured — distinct from burn's one-off computed halving, which just derives a stage from `agent.status` fresh at each `calculateDamage` call rather than storing one) | Growl specifically (`statStageMultiplier` already exists in combat.ts as a pure function; burn now calls it, but from a computed value, not a stored `Agent.statStages` field) | **Shipped** — `Agent.statStages` (an array of `{stat, stage, ticksRemaining?}` entries, `status.ts`'s `applyStatStage`/`getStatStage`), fed into `calculateDamage`'s existing stat-stage machinery for both attacker and defender, and composing additively with burn's own -2 Attack. `MoveSpec.statChangeOnHit` is the move-level lever: `target: "self"` applies the instant the move is used, `target: "defender"` only on a landed, non-killing hit. **Growl itself is still not built** — it needs this primitive plus multi-target/AoE (both now shipped) plus a no-damage/status-move representation, which remains the one open piece |
 | Status-effect system (burn/poison DOT, paralysis/sleep/freeze) | Ember's/Flamethrower's burn chance, previously idle | **Shipped** — see DESIGN.md's "Status effects" section. Constrict's designed root effect still needs a sixth `StatusKind` (`"root"`), not modeled yet |
 | Idle/opportunistic utility-move trigger (`MoveSpec.utilityMove` + `utilityMoves.ts`'s `maybeUseUtilityMove`) | Growth, Agility, Rain Dance, and every other self/tile-effect move on this whole list — the real gap this section's own "why status effects and environmental moves are two different systems" note predicted | **Shipped** — the third trigger path, alongside the hostile hit pipeline and the ally-support one, checked whenever `chooseBehavior(agent.needs) === "idle"` (needs.ts, NOT `agent.behavior === "idle"` — see this section's own note on why that gate under-fired in a real run). `pickBestMove` excludes `utilityMove`-flagged moves from hostile selection, same as `burrow`. First real content: 13 curated moves, see "Environmental utility moves" above |
@@ -1890,70 +1892,102 @@ to fall. Single-species freedom (Snorlax is the only curated learner,
 generic enough to also fit a second body.
 
 - **Aggression ("Landslide")**: stays power-archetype on purpose — more
-  mass, less restraint. *Full Weight* (`weightScaling`, the same lever
-  Tackle's Weighted Charge uses, but here it's the move's own primary
-  identity, not a side branch — nothing in the roster has more `maxHp` to
-  throw around) opens immediately. A real fork, *Second Slam*
-  (`recoilFraction` — commits fully, costs something back) vs. *Rolling
-  Crush* (two lighter hits instead of one), then *Inevitable*
-  (`defensePenetration` — mass doesn't need precision, just enough
-  attempts). Keystone *Avalanche* turns the single point-target slam into
-  a real `hitsArea` `burst` — the one shape/AoE change in the whole tree,
-  spent at capstone tier per template v3's own rule, not filler.
+  mass, less restraint. *Heavy Step* (a modest opening lunge) → a real
+  fork, *Second Slam* (`recoilFraction` — commits fully, costs something
+  back) vs. *Rolling Crush* (two lighter hits instead of one), then
+  *Inevitable* (`defensePenetration` — mass doesn't need precision, just
+  enough attempts). Keystone *Avalanche* turns the single point-target
+  slam into a real `hitsArea` `burst` AND is where `weightScaling` finally
+  lands — moved down from the original opener (*Full Weight*) after direct
+  feedback that starting the tree at its own biggest lever was backwards:
+  "Full weight is probably too strong to be so early." By the time this
+  move can end a fight this way, its whole mass moves with it — the shape
+  change and the weight payoff arriving together, at capstone tier, per
+  template v3's own rule.
 - **Boldness ("Unbudging")**: earned tankiness, not a default reach —
   nothing on this whole roster fits "doesn't move" better than a sleeping
   giant, and Snorlax's own curated moveset already primes this fantasy
   with Defense Curl. *Dead Weight* (`damageReduction`, same earned
   exception this doc's own "stop overusing damageReduction" note carves
   out for a fiction that actually justifies it) → *Unbudging*
-  (`immovable` — the passive fits nothing in the roster better than this)
-  → a real fork, *Sink In* (`regen`, less power — laziness as sustain) vs.
-  *Full Bulk* (more `damageReduction`, -accuracy) → *Weathered Giant*
-  (`defenseBoost`, a second armor lever earned by a branch whose entire
-  identity is refusing to budge) → keystone *Mountain's Answer* (`thorns`
-  — anyone who keeps hitting something this heavy eventually hurts
-  themselves more than they hurt it).
-- **Sociability ("Gentle Giant")**: the real canonical Snorlax trait —
-  famously peaceful despite its size — turned into the herd's actual
-  shelter, not a flat ally buff copied from elsewhere. *Broad Back*
-  (`targetsAlly`/`allyEffect` defense buff) → *Watchful Rest*
-  (`allyEffectOnAttack`, broadened to heal too — protecting by
-  neutralizing what threatens the herd, not just buffing from a distance)
-  → a real fork, *Wake the Giant* (`rallyCall` — getting a lazy giant to
-  actually engage a specific threat is itself the herd's whole strategy)
-  vs. *Steady Ground* (`jamCooldownTicks` — standing perfectly still
-  disrupts an attacker's own rhythm) → *Herd's Shade* (`healAura`, the
-  herd finally gets real recovery near the giant) → keystone *Sanctuary
-  Slam* (`grantsPassives`, both `healAura` and `defenseBoost` at once —
-  the giant fully settles into place, a real "two passives, one keystone"
-  finale, same shape as Scratch's Colony Warmth, not a bigger number on a
-  single existing lever).
+  (`immovable`) → a real fork, *Sink In* (`regen`, less power) vs. *Full
+  Bulk* (more `damageReduction`, -accuracy) → *Weathered Giant*
+  (`defenseBoost`) → keystone **The Reckoning** — direct follow-up
+  feedback that bulk/defense alone read as bland, real "intention" needed:
+  "could add a charge up turn, to make it stronger. Maybe... invulnerable
+  to damage for that charge up... a huge leap/movement tied to the skill."
+  A genuine mid-commit wind-up (`chargeAttack`, the single biggest new
+  engine primitive this whole doc has needed — see the checklist above):
+  the giant rears back, is truly invulnerable the entire time (not a
+  defense buff — nothing lands at all), then leaps 5 tiles and lands a
+  +40-power hit — or fizzles for nothing if the target's gone by then, a
+  real risk for committing this hard, not a guaranteed payoff.
+- **Sociability ("Undisturbed")**: rebuilt from scratch after a direct
+  correction on the first draft — "Snorlax tends not to be in a herd. Very
+  solo style... maybe Snorlax is more peaceful and gets along with others
+  easier." The original branch (*Broad Back*, ally heals/buffs, a
+  `healAura` keystone) was a real fantasy mismatch: it assumed a herd this
+  specific animal usually doesn't have. The real trait — famously placid
+  despite its size — is now a genuine non-territorial, de-escalating
+  presence, not a flat ally buff: *Unbothered* (`"nonTerritorial"`, a new
+  passive — it never picks a fight over a resource) → *No Quarrel*
+  (`"calmingPresence"`, another new passive — anything nearby, herd or
+  not, calms down too) → a real fork, *Wide Berth* (deepens
+  `calmingPresence` further) vs. *Steady Nerve* (`regen` instead) → *Left
+  in Peace* (`thorns` — doesn't start anything, but whatever finds it
+  anyway regrets it) → keystone *Undisturbed* (`grantsPassives`, both
+  `calmingPresence` and `thorns` at once — a real "two passives, one
+  keystone" finale, all-new content, not the old herd-scoped heal wearing
+  a new name).
 - **Crosslinks**, each deepening its own introduced lever rather than a
   generic bolt-on (principle 13), each reaching both branches it actually
   touches (principle 11), each landing one step before its target fork,
   not on it (principle 12): *Braced Commitment* (Aggression↔Boldness —
   bracing first is what lets the giant commit its full weight without
   losing its footing; deepens a self `statChangeOnHit` Defense stage
-  three times across its own root→filler→notable chain) · *Called to
-  Stand* (Boldness↔Sociability — once the herd has actually marked
-  something, the most unmovable thing in the roster simply doesn't miss
-  what's right in front of it; deepens `situationalBonus: "rallyMarked"`)
-  · *Provoked Charge* (Sociability↔Aggression — an animal this placid
+  three times across its own root→filler→notable chain) · **Nothing to
+  Prove** (Boldness↔Sociability, redesigned alongside Sociability's own
+  rebuild — the old version leaned on a herd-mark primitive this branch no
+  longer has any use for; new fantasy: an immovable thing that also isn't
+  looking for a fight is the ultimate "just go around it," deepening
+  `calmingPresence` across its own root→filler→notable chain) ·
+  *Provoked Charge* (Sociability↔Aggression — an animal this placid
   doesn't pull the hit once actually roused, the restraint was the only
   thing holding the full weight back; pairs a real `lockTicks` wind-up
   cost with a growing power payoff, per principle 4).
 
-39 nodes total (10 per branch + 3 crosslinks × 3), zero new engine
-primitives — every lever was already shipped; this was purely about
-picking the *right* one per node instead of the same three by default.
+39 nodes total (10 per branch + 3 crosslinks × 3). First shipped tree to
+need genuinely new engine primitives rather than just picking the right
+existing lever — two of them, both direct follow-up asks after the first
+version shipped: `chargeAttack`/`Agent.chargingAttack` (a real mid-commit
+wind-up with genuine invulnerability, powering The Reckoning) and
+`"nonTerritorial"`/`"calmingPresence"` (herdConflict.ts hooks, powering
+the whole Sociability rebuild). `packages/engine/test/predation.test.ts`
+covers the charge mechanic directly (commits without hitting immediately,
+genuine invulnerability against a real attacker, resolves after its ticks
+elapse with a real leap, fizzles for no damage if the target's gone);
+`packages/engine/test/herdConflict.test.ts` covers both new passives
+(opts out of initiating, can still be targeted as someone else's rival,
+dampens a third agent's own chance regardless of herd, no effect beyond
+its radius). Engine suite green (1004/1004, aside from one pre-existing,
+unseeded-RNG flake in `reproduction.test.ts` unrelated to this work).
 `packages/data/test/moveTrees.test.ts`'s generic per-tree suite covers
-structural integrity automatically; a dedicated "Body Slam tree" describe
-block adds move-specific assertions for the keystone AoE, both real
-multi-passive/passive-vs-delta gotchas, both forks' genuine tradeoffs, and
-all three crosslink bridges' own wiring and lever-deepening. Full data
-suite green (207/207). Atlas rebuilt (verified: no null bytes, inline
-script re-parses, `computeLayout` produces a complete, non-overlapping
-position for all 39 nodes) and republished.
+structural integrity automatically; the dedicated "Body Slam tree"
+describe block was rewritten alongside the redesign — the keystone AoE
+and its relocated `weightScaling`, The Reckoning's real `chargeAttack`,
+Undisturbed's two passives, the solitary Sociability branch's real
+passives (and a direct check that no `targetsAlly`/`allyEffect` survives
+anywhere on it), both forks, and all three crosslink bridges' own wiring
+and lever-deepening. Full data suite green (210/210). Atlas rebuilt
+(verified: no null bytes, inline script re-parses, `computeLayout`
+produces a complete, non-overlapping position for all 39 nodes; the
+`PASSIVE_LABEL`/`describeDelta` maps in the template gained real entries
+for `nonTerritorial`, `calmingPresence`, and `chargeAttack`) and
+republished. Also fixed in the same pass: the Atlas's `MOVE_ORDER` picker
+list is hand-maintained, separate from the tree data itself — Body Slam's
+tree had been in the data all along but never appeared in the move picker
+because it was never added there; added a new "Single-species" group for
+it.
 
 ### Pending brainstorm — Earthquake / Hydro Pump / Solar Beam (not yet built)
 
