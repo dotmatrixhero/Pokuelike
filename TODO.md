@@ -4813,3 +4813,44 @@ not something this pathfinding pass itself caused or is positioned to fix.
         same question as "is there one in the systems I've already read."
         The gathering system was shipped, and its own comments already
         said "moves can be used to dig faster."
+- [x] **Crosslink bridge tails — the structural gap the new trees were
+      missing versus the flagships.** Direct feedback: "Compare the skill
+      trees for all your new moves with hydro pump/earthquake. You're
+      missing stuff." Measuring rather than guessing found it: the
+      flagships sat at 39-40 nodes / 9-10 `prerequisitesAnyOf`, the six
+      new trees at 33 / 6. Reading Earthquake's actual source (not
+      inferring from the shape) showed why — each of its crosslinks is a
+      three-node **bridge**, not a one-node dead end:
+      `cracking_momentum` (crosslink, forced movement 1 tile) ->
+      `momentum_footing` "Deeper Lunge" (filler that deepens the
+      crosslink's OWN lever to 2 tiles) -> `fault_convergence` (cost-2
+      notable). And it has two rungs of shortcut, not one: an early filler
+      accepts the flanking crosslinks directly, and the pre-fork node
+      accepts the bridge notables.
+      - Added 36 nodes (18 bridges x filler + cost-2 notable) across
+        vine_whip, flamethrower, rock_slide, wing_attack, dig, leech_seed.
+      - Rewired every pre-fork node to accept its bridge notables, and
+        restored the early-filler shortcuts so each bridge still reaches
+        BOTH branches its crosslink connects (principle 11).
+      - Each bridge's content deepens its own crosslink's lever rather
+        than grabbing a generic stat (principle 13).
+      - Result: all six now at 9 `prerequisitesAnyOf`, matching the
+        flagships; vine_whip/flamethrower/rock_slide/wing_attack at 39
+        nodes, dig 29 and leech_seed 31 (deliberately smaller — their
+        honest lever sets are smaller, and padding them would be the
+        template problem the whole guide exists to avoid).
+      - Atlas layout re-verified: no missing or overlapping positions in
+        any of the 17 trees. Fixing that check caught two real bugs —
+        first my own harness (`computeLayout` returns
+        `{positions, crosslinks, maxR}`, not a bare id->{x,y} map, so it
+        was silently reporting every tree broken), then, once it worked,
+        two nodes that had lost their `leaning` field
+        (`dig.never_still`, `leech_seed.wider_reach`) and would have
+        rendered invisibly in the Atlas.
+- [ ] **Side note: two intermittent full-suite test failures.** Seen once
+      each in back-to-back full runs — `predation.test.ts` and
+      `reproduction.test.ts > lays a real egg (not an instant newborn)...`
+      — different test each time, both pass in isolation, and two
+      subsequent full runs were clean (1334/1334). Unrelated to the move
+      trees (data-only change), but worth chasing: likely shared state or
+      ordering across parallel test files rather than true randomness.

@@ -176,6 +176,36 @@ keystone) itself. If two different trees' crosslinks in the same
 structural position end up mechanically identical, that's the tell to
 rework one of them.
 
+**A crosslink is a three-node bridge, not a single node.** This is the
+single biggest structural difference between the flagship trees and a
+first draft, and it was found by *measuring* (node and
+`prerequisitesAnyOf` counts off the exported JSON) rather than eyeballing
+silhouettes — flagships sit at ~39 nodes / 9-10 `anyOf`, an unbridged
+draft at ~33 / 6. The shape:
+
+```
+<crosslink>            its own distinctive lever
+  -> <filler>          deepens that SAME lever (not "+5 Power")
+  -> <notable, cost 2> the payoff for committing to the detour
+```
+
+and it must land on **two rungs of shortcut, not one**:
+
+- the cost-2 notable is an alternate route into the **pre-fork node of
+  both flanking branches**, and
+- the crosslink itself *stays* a shallower alternate route on an **early
+  filler** in each of those branches.
+
+So a build can dip into the bridge cheaply and bail, or commit and arrive
+one step short of a fork. A bridge that only reaches one of the two
+branches it connects is a spur wearing a bridge's node count.
+
+**Do not pad a tree to hit the flagship node count.** Match the
+*structure*, not the number. A move with a genuinely smaller honest lever
+set should ship smaller (dig at 29 and leech_seed at 31 are deliberate);
+inflating them with invented nodes is precisely the template failure every
+other step here exists to catch.
+
 ### 9. Verify feasibility before writing code
 
 For every lever the draft leans on, confirm the exact function that runs
@@ -185,6 +215,15 @@ buildable from what's already shipped, that's exactly as useful a finding
 as confirming it IS buildable — say so and get a scope decision before
 starting new engine work, rather than deciding unilaterally or guessing
 through it.
+
+**And verify the verifier.** A check that has never once printed a failure
+has not been verified — it may simply be reading nothing. The Atlas layout
+check went through two silently-wrong versions (one crashing on every tree
+because `computeLayout` returns `{positions, crosslinks, maxR}` rather
+than a bare id->position map; one reporting every tree clean because it
+was reaching for a JSON shape the exporter doesn't produce) before the
+third version actually found the real defect. Before trusting a green
+check, break something on purpose and confirm it goes red.
 
 ### 10. Self-audit before shipping
 

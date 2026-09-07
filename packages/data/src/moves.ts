@@ -804,7 +804,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "deeper_hold",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["crushing_coil"],
+        prerequisitesAnyOf: [["crushing_coil"], ["hauled_in"], ["bloom_of_thorns"]],
         leaning: "aggression",
         delta: { cooldownTicks: -1 },
       },
@@ -878,6 +878,26 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { range: { max: 3 }, forcedMovement: { mover: "defender", direction: "closer", tiles: 1, timing: "onHit" } },
       },
+      reeling_lash: {
+        id: "reeling_lash",
+        name: "Reeling Lash",
+        cost: 1,
+        prerequisites: ["snapback_lash"],
+        leaning: "aggression",
+        // Bridge tail (SKILL_TREE_GUIDE.md step 8 / MOVES_DESIGN.md principle 7):
+        // deepens Snapback Lash's own drag rather than bolting on a stat.
+        delta: { forcedMovement: { mover: "defender", direction: "closer", tiles: 2, timing: "onHit" } },
+      },
+      hauled_in: {
+        id: "hauled_in",
+        name: "Hauled In",
+        cost: 2,
+        prerequisites: ["reeling_lash"],
+        leaning: "boldness",
+        // Hauling something in that hard costs precision — a real tradeoff in
+        // the same node, not a flat power bolt-on.
+        delta: { power: 15, accuracy: -5 },
+      },
       // --- Boldness: "Root and Bind" — a plant that digs in and refuses to
       // be moved, its own hide toughening the longer a fight runs.
       deep_roots: {
@@ -920,7 +940,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "deeper_roots",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["unyielding_stem"],
+        prerequisitesAnyOf: [["unyielding_stem"], ["hauled_in"], ["living_trellis"]],
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
       },
@@ -987,6 +1007,25 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { positionSwap: true, positionSwapPull: 1 },
       },
+      deeper_graft: {
+        id: "deeper_graft",
+        name: "Deeper Graft",
+        cost: 1,
+        prerequisites: ["grafted_vines"],
+        leaning: "sociability",
+        // Deepens Grafted Vines' own swap-pull — the ally comes further out.
+        delta: { positionSwapPull: 1 },
+      },
+      living_trellis: {
+        id: "living_trellis",
+        name: "Living Trellis",
+        cost: 2,
+        prerequisites: ["deeper_graft"],
+        leaning: "boldness",
+        // The same lattice that hauls an ally clear also braces the holder.
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        delta: { positionSwapPull: 1 },
+      },
       // Crosslink: Sociability <-> Aggression — the gentlest touch turns
       // vicious in a heartbeat once something's actually threatened.
       thorned_bouquet: {
@@ -996,6 +1035,25 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["nurturing_tendrils", "choking_grip"],
         leaning: "aggression",
         delta: { critRateStage: 1 },
+      },
+      honed_thorns: {
+        id: "honed_thorns",
+        name: "Honed Thorns",
+        cost: 1,
+        prerequisites: ["thorned_bouquet"],
+        leaning: "aggression",
+        // Deepens Thorned Bouquet's own crit lever directly.
+        delta: { critRateStage: 1 },
+      },
+      bloom_of_thorns: {
+        id: "bloom_of_thorns",
+        name: "Bloom of Thorns",
+        cost: 2,
+        prerequisites: ["honed_thorns"],
+        leaning: "sociability",
+        // A landed crit now feeds straight back into tempo — the real
+        // crit-fisher payoff that crit stage alone was only half of.
+        delta: { critCooldownReset: true },
       },
       // --- Sociability: "Shared Growth" — Bulbasaur's own real nurturing
       // instinct (the same fantasy leech_seed already leans on), tending to
@@ -1019,7 +1077,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "binding_roots",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["verdant_reach"], ["grafted_vines"]],
+        prerequisitesAnyOf: [["verdant_reach"], ["grafted_vines"], ["thorned_bouquet"]],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
@@ -1035,7 +1093,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "quickening_growth",
         name: "Quickening Growth",
         cost: 1,
-        prerequisites: ["shared_vigor"],
+        prerequisitesAnyOf: [["shared_vigor"], ["living_trellis"], ["bloom_of_thorns"]],
         leaning: "sociability",
         // Direct correction: "Vine whip too... Reduce the amount of time
         // to harvest crops." Vine Whip already qualifies as a canopy
@@ -1483,7 +1541,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "steadier_aim",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["hotter_flame"], ["molten_edge"]],
+        prerequisitesAnyOf: [["hotter_flame"], ["molten_edge"], ["flashpoint"]],
         leaning: "aggression",
         delta: { accuracy: 10 },
       },
@@ -1499,7 +1557,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "faster_ignition",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["melting_blast"],
+        prerequisitesAnyOf: [["melting_blast"], ["slagged_guard"], ["chain_ignition"]],
         leaning: "aggression",
         delta: { cooldownTicks: -1 },
       },
@@ -1561,6 +1619,25 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { defensePenetration: 0.1 },
       },
+      white_heat: {
+        id: "white_heat",
+        name: "White Heat",
+        cost: 1,
+        prerequisites: ["molten_edge"],
+        leaning: "aggression",
+        // Deepens Molten Edge's own armor-punching lever.
+        delta: { defensePenetration: 0.1 },
+      },
+      slagged_guard: {
+        id: "slagged_guard",
+        name: "Slagged Guard",
+        cost: 2,
+        prerequisites: ["white_heat"],
+        leaning: "boldness",
+        // Past a certain heat a resistance stops being much of a resistance —
+        // the natural escalation of punching through guard.
+        delta: { resistanceBreaker: { multiplier: 1.4 } },
+      },
       // --- Boldness: "Banked Flame" — a controlled, enduring fire instead
       // of an explosive burst.
       thick_scales: {
@@ -1600,7 +1677,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "slower_burn",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["banked_coals"],
+        prerequisitesAnyOf: [["banked_coals"], ["slagged_guard"], ["warding_pyre"]],
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
       },
@@ -1666,6 +1743,30 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "thorns", value: 0.06 },
         delta: {},
       },
+      banked_ward: {
+        id: "banked_ward",
+        name: "Banked Ward",
+        cost: 1,
+        prerequisites: ["ember_ward"],
+        leaning: "sociability",
+        // Deepens Ember Ward's own retaliatory heat.
+        grantsPassive: { kind: "thorns", value: 0.06 },
+        delta: {},
+      },
+      warding_pyre: {
+        id: "warding_pyre",
+        name: "Warding Pyre",
+        cost: 2,
+        prerequisites: ["banked_ward"],
+        leaning: "boldness",
+        // Standing this close to it is its own problem, and the heat shields
+        // whoever it's guarding too.
+        grantsPassives: [
+          { kind: "thorns", value: 0.06 },
+          { kind: "damageReduction", value: 0.05 },
+        ],
+        delta: {},
+      },
       // --- Sociability: "Rally Flame" — a shared fire that sharpens and
       // warms whoever's near it.
       kindling_call: {
@@ -1687,7 +1788,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "quicker_call",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["warmth_shared"], ["ember_ward"]],
+        prerequisitesAnyOf: [["warmth_shared"], ["ember_ward"], ["flashpoint"]],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
@@ -1703,7 +1804,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "brighter_blaze",
         name: "+5 Power",
         cost: 1,
-        prerequisites: ["deepening_warmth"],
+        prerequisitesAnyOf: [["deepening_warmth"], ["warding_pyre"], ["chain_ignition"]],
         leaning: "sociability",
         delta: { power: 5 },
       },
@@ -1767,6 +1868,25 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["kindling_call", "searing_heat"],
         leaning: "aggression",
         delta: { critRateStage: 1 },
+      },
+      hair_trigger: {
+        id: "hair_trigger",
+        name: "Hair Trigger",
+        cost: 1,
+        prerequisites: ["flashpoint"],
+        leaning: "aggression",
+        // Deepens Flashpoint's own crit lever.
+        delta: { critRateStage: 1 },
+      },
+      chain_ignition: {
+        id: "chain_ignition",
+        name: "Chain Ignition",
+        cost: 2,
+        prerequisites: ["hair_trigger"],
+        leaning: "sociability",
+        // A fire that catches this fast doesn't stay on one target — the burn
+        // jumps to whoever's standing next to it.
+        delta: { statusSpreads: true },
       },
     },
   },
@@ -4485,7 +4605,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "steadier_aim",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["heavier_boulders"], ["quarried_weight"]],
+        prerequisitesAnyOf: [["heavier_boulders"], ["quarried_weight"], ["second_wave"]],
         leaning: "aggression",
         delta: { accuracy: 10 },
       },
@@ -4501,7 +4621,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "faster_collapse",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["crushing_debris"],
+        prerequisitesAnyOf: [["crushing_debris"], ["mountainfall"], ["no_respite"]],
         leaning: "aggression",
         delta: { cooldownTicks: -1 },
       },
@@ -4563,6 +4683,26 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { weightScaling: { factor: 0.08 } },
       },
+      heaved_mass: {
+        id: "heaved_mass",
+        name: "Heaved Mass",
+        cost: 1,
+        prerequisites: ["quarried_weight"],
+        leaning: "aggression",
+        // Deepens Quarried Weight's own mass scaling (overwrite — restates the
+        // full factor, not an increment).
+        delta: { weightScaling: { factor: 0.14 } },
+      },
+      mountainfall: {
+        id: "mountainfall",
+        name: "Mountainfall",
+        cost: 2,
+        prerequisites: ["heaved_mass"],
+        leaning: "boldness",
+        // Heaving that much rock is genuinely exhausting — a real per-use cost
+        // in the same node as its payoff.
+        delta: { power: 12, selfCostPerUse: { need: "energy", amount: 0.05 } },
+      },
       // --- Boldness: "Bedrock Stance" — standing unmoved in the middle of
       // its own rockfall.
       stone_shield: {
@@ -4585,7 +4725,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "craggy_hide",
         name: "Craggy Hide",
         cost: 1,
-        prerequisitesAnyOf: [["firmer_footing"], ["steadfast_warning"]],
+        prerequisitesAnyOf: [["firmer_footing"], ["quarried_weight"], ["steadfast_warning"]],
         leaning: "boldness",
         grantsPassive: { kind: "defenseBoost", value: 0.05 },
         delta: {},
@@ -4602,7 +4742,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "settled_stance",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["denser_stone"],
+        prerequisitesAnyOf: [["denser_stone"], ["mountainfall"], ["unmoved_sentinel"]],
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
       },
@@ -4673,6 +4813,29 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "defenseBoost", value: 0.04 },
         delta: {},
       },
+      braced_footing: {
+        id: "braced_footing",
+        name: "Braced Footing",
+        cost: 1,
+        prerequisites: ["steadfast_warning"],
+        leaning: "boldness",
+        // Deepens Steadfast Warning's own defense lever.
+        grantsPassive: { kind: "defenseBoost", value: 0.04 },
+        delta: {},
+      },
+      unmoved_sentinel: {
+        id: "unmoved_sentinel",
+        name: "Unmoved Sentinel",
+        cost: 2,
+        prerequisites: ["braced_footing"],
+        leaning: "sociability",
+        // Holds the line while everything else is still getting clear.
+        grantsPassives: [
+          { kind: "defenseBoost", value: 0.04 },
+          { kind: "damageReduction", value: 0.04 },
+        ],
+        delta: {},
+      },
       // --- Sociability: "Warning Rumble" — the tremor before the rockfall
       // gives everyone nearby, herd or rival, a real chance to get clear.
       herd_warning: {
@@ -4696,7 +4859,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "faster_warning",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["clearer_warning"], ["steadfast_warning"]],
+        prerequisitesAnyOf: [["clearer_warning"], ["steadfast_warning"], ["second_wave"]],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
@@ -4713,7 +4876,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "deeper_rumble",
         name: "+5 Power",
         cost: 1,
-        prerequisites: ["settling_rumble"],
+        prerequisitesAnyOf: [["settling_rumble"], ["unmoved_sentinel"], ["no_respite"]],
         leaning: "sociability",
         delta: { power: 5 },
       },
@@ -4782,6 +4945,25 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["herd_warning", "raining_stones"],
         leaning: "aggression",
         delta: { jamCooldownTicks: 1 },
+      },
+      rolling_aftershock: {
+        id: "rolling_aftershock",
+        name: "Rolling Aftershock",
+        cost: 1,
+        prerequisites: ["second_wave"],
+        leaning: "aggression",
+        // Deepens Second Wave's own tempo denial.
+        delta: { jamCooldownTicks: 1 },
+      },
+      no_respite: {
+        id: "no_respite",
+        name: "No Respite",
+        cost: 2,
+        prerequisites: ["rolling_aftershock"],
+        leaning: "sociability",
+        // Whatever's still pinned under the aftershocks gets marked for
+        // everything else nearby — denial turning into focus fire.
+        delta: { rallyCall: { ticks: 15 } },
       },
     },
   },
@@ -4874,7 +5056,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "steady_approach",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["sharpened_talons"], ["riding_the_gust"]],
+        prerequisitesAnyOf: [["sharpened_talons"], ["riding_the_gust"], ["scattering_strike"]],
         leaning: "aggression",
         delta: { accuracy: 10 },
       },
@@ -4890,7 +5072,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "quicker_wings",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["talon_rake"],
+        prerequisitesAnyOf: [["talon_rake"], ["stooping_dive"], ["broken_formation"]],
         leaning: "aggression",
         delta: { cooldownTicks: -1 },
       },
@@ -4955,6 +5137,25 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" } },
       },
+      gathering_updraft: {
+        id: "gathering_updraft",
+        name: "Gathering Updraft",
+        cost: 1,
+        prerequisites: ["riding_the_gust"],
+        leaning: "aggression",
+        // Deepens Riding the Gust's own approach lunge — a longer run-up.
+        delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 2, timing: "beforeHit" } },
+      },
+      stooping_dive: {
+        id: "stooping_dive",
+        name: "Stooping Dive",
+        cost: 2,
+        prerequisites: ["gathering_updraft"],
+        leaning: "boldness",
+        // All that gathered speed lands as a sharper strike, not just a
+        // longer approach.
+        delta: { power: 10, critRateStage: 1 },
+      },
       // --- Boldness: "Wind Rider" — a bird doesn't tank a hit, it's just
       // not there when the hit arrives. Air superiority, not raw bulk.
       evasive_flight: {
@@ -4995,7 +5196,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "steadier_wings",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["wind_shear"],
+        prerequisitesAnyOf: [["wind_shear"], ["stooping_dive"], ["wingmate_shield"]],
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
       },
@@ -5062,6 +5263,26 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { positionSwap: true },
       },
+      covering_wing: {
+        id: "covering_wing",
+        name: "Covering Wing",
+        cost: 1,
+        prerequisites: ["screening_dive"],
+        leaning: "sociability",
+        // Deepens Screening Dive's own intercept — carries the threat further
+        // past the ally it just swapped with.
+        delta: { positionSwapPull: 2 },
+      },
+      wingmate_shield: {
+        id: "wingmate_shield",
+        name: "Wingmate Shield",
+        cost: 2,
+        prerequisites: ["covering_wing"],
+        leaning: "boldness",
+        // Interposing for real, not just repositioning.
+        grantsPassive: { kind: "damageReduction", value: 0.06 },
+        delta: {},
+      },
       // --- Sociability: "Flock Signal" — a prey bird's real defense isn't
       // toughness, it's the flock: a warning cry, then the whole group
       // converging on whatever's threatening it.
@@ -5084,7 +5305,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "quicker_call",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["sharper_call"], ["screening_dive"]],
+        prerequisitesAnyOf: [["sharper_call"], ["screening_dive"], ["scattering_strike"]],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
@@ -5102,7 +5323,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "louder_call",
         name: "+5 Power",
         cost: 1,
-        prerequisites: ["mob_the_threat"],
+        prerequisitesAnyOf: [["mob_the_threat"], ["wingmate_shield"], ["broken_formation"]],
         leaning: "sociability",
         delta: { power: 5 },
       },
@@ -5168,6 +5389,25 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["warning_cry", "diving_strike"],
         leaning: "aggression",
         delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" } },
+      },
+      harder_scatter: {
+        id: "harder_scatter",
+        name: "Harder Scatter",
+        cost: 1,
+        prerequisites: ["scattering_strike"],
+        leaning: "aggression",
+        // Deepens Scattering Strike's own knockback.
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 2, timing: "onHit" } },
+      },
+      broken_formation: {
+        id: "broken_formation",
+        name: "Broken Formation",
+        cost: 2,
+        prerequisites: ["harder_scatter"],
+        leaning: "sociability",
+        // Knocked out of position AND out of rhythm — the scatter becomes real
+        // tempo denial, deepening what the knockback was already doing.
+        delta: { jamCooldownTicks: 1 },
       },
     },
   },
@@ -5725,7 +5965,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "shallow_dive",
         name: "-2 Cooldown",
         cost: 2,
-        prerequisitesAnyOf: [["quick_reflexes"], ["braced_dive"]],
+        prerequisitesAnyOf: [["quick_reflexes"], ["braced_dive"], ["quick_warning"]],
         leaning: "aggression",
         // Consolidated from two separate "-1 Cooldown" nodes into one —
         // this branch's honestly-narrow lever set (only cooldownTicks and
@@ -5738,7 +5978,8 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "never_still",
         name: "Never Still",
         cost: 1,
-        prerequisites: ["shallow_dive"],
+        prerequisitesAnyOf: [["shallow_dive"], ["unflinching_burrow"], ["first_to_ground"]],
+        leaning: "aggression",
         // This branch's real "notable" is tempo, not power — there's
         // nothing else honest to give it.
         delta: { cooldownTicks: -2 },
@@ -5789,6 +6030,29 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "damageReduction", value: 0.04 },
         delta: {},
       },
+      hardened_dive: {
+        id: "hardened_dive",
+        name: "Hardened Dive",
+        cost: 1,
+        prerequisites: ["braced_dive"],
+        leaning: "boldness",
+        // Deepens Braced Dive's own mitigation.
+        grantsPassive: { kind: "damageReduction", value: 0.04 },
+        delta: {},
+      },
+      unflinching_burrow: {
+        id: "unflinching_burrow",
+        name: "Unflinching Burrow",
+        cost: 2,
+        prerequisites: ["hardened_dive"],
+        leaning: "aggression",
+        // Takes the hit mid-dive and keeps going.
+        grantsPassives: [
+          { kind: "damageReduction", value: 0.04 },
+          { kind: "defenseBoost", value: 0.04 },
+        ],
+        delta: {},
+      },
       // --- Boldness: "Iron Burrow" — toughens up between dives instead of
       // just vanishing faster.
       sturdy_return: {
@@ -5823,7 +6087,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "bedrock_grip",
         name: "Bedrock Grip",
         cost: 1,
-        prerequisites: ["packed_earth"],
+        prerequisitesAnyOf: [["packed_earth"], ["unflinching_burrow"], ["communal_warren"]],
         grantsPassive: { kind: "defenseBoost", value: 0.05 },
         leaning: "boldness",
         delta: {},
@@ -5873,6 +6137,27 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "calmingPresence", value: 0.1 },
         delta: {},
       },
+      wider_shelter: {
+        id: "wider_shelter",
+        name: "Wider Shelter",
+        cost: 1,
+        prerequisites: ["shared_shelter"],
+        leaning: "sociability",
+        // Deepens Shared Shelter's own calming reach.
+        grantsPassive: { kind: "calmingPresence", value: 0.1 },
+        delta: {},
+      },
+      communal_warren: {
+        id: "communal_warren",
+        name: "Communal Warren",
+        cost: 2,
+        prerequisites: ["wider_shelter"],
+        leaning: "boldness",
+        // A warren dug together is dug faster — the shelter fantasy finally
+        // paying into this move's own gathering identity, not just another aura.
+        grantsPassive: { kind: "calmingPresence", value: 0.1 },
+        delta: { gatherBurst: 3 },
+      },
       // --- Sociability: "Shared Ground" — Diglett and Sandshrew genuinely
       // coexist underground (species.ts's own note); this branch is that,
       // mechanically.
@@ -5906,7 +6191,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "quiet_ground",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["wider_burrow"], ["quick_warning"]],
+        prerequisitesAnyOf: [["wider_burrow"], ["shared_shelter"], ["quick_warning"]],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
@@ -5914,7 +6199,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "settling_earth",
         name: "Settling Earth",
         cost: 1,
-        prerequisitesAnyOf: [["quiet_ground"], ["shared_shelter"]],
+        prerequisitesAnyOf: [["quiet_ground"], ["communal_warren"], ["first_to_ground"]],
         leaning: "sociability",
         grantsPassive: { kind: "calmingPresence", value: 0.2 },
         delta: {},
@@ -5963,6 +6248,26 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         grantsPassive: { kind: "regen", value: 0.02 },
         delta: { cooldownTicks: -1 },
+      },
+      sharper_warning: {
+        id: "sharper_warning",
+        name: "Sharper Warning",
+        cost: 1,
+        prerequisites: ["quick_warning"],
+        leaning: "sociability",
+        // Deepens Quick Warning's own tempo lever.
+        delta: { cooldownTicks: -1 },
+      },
+      first_to_ground: {
+        id: "first_to_ground",
+        name: "First to Ground",
+        cost: 2,
+        prerequisites: ["sharper_warning"],
+        leaning: "aggression",
+        // Underground before anything else has reacted, and recovering while
+        // it waits.
+        grantsPassive: { kind: "regen", value: 0.02 },
+        delta: { cooldownTicks: -2 },
       },
     },
   },
@@ -6185,7 +6490,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "spreading_roots",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["quicker_seeding"], ["grounded_hunger"]],
+        prerequisitesAnyOf: [["quicker_seeding"], ["grounded_hunger"], ["feeding_ground"]],
         leaning: "aggression",
         delta: { cooldownTicks: -1 },
       },
@@ -6194,6 +6499,7 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Wider Reach",
         cost: 1,
         prerequisites: ["spreading_roots"],
+        leaning: "aggression",
         // Restates the full drainNeeds object — overwrite, not a merge.
         delta: { drainNeeds: { need: "hunger", amount: 0.35, radius: 5 } },
       },
@@ -6201,7 +6507,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "hungrier_roots",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["wider_reach"],
+        prerequisitesAnyOf: [["wider_reach"], ["ironroot"], ["endless_bounty"]],
         leaning: "aggression",
         delta: { cooldownTicks: -1 },
       },
@@ -6248,6 +6554,29 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "defenseBoost", value: 0.04 },
         delta: {},
       },
+      thickened_stalk: {
+        id: "thickened_stalk",
+        name: "Thickened Stalk",
+        cost: 1,
+        prerequisites: ["grounded_hunger"],
+        leaning: "boldness",
+        // Deepens Grounded Hunger's own defensive lever.
+        grantsPassive: { kind: "defenseBoost", value: 0.04 },
+        delta: {},
+      },
+      ironroot: {
+        id: "ironroot",
+        name: "Ironroot",
+        cost: 2,
+        prerequisites: ["thickened_stalk"],
+        leaning: "aggression",
+        // Everything it takes goes into the stalk.
+        grantsPassives: [
+          { kind: "defenseBoost", value: 0.04 },
+          { kind: "damageReduction", value: 0.05 },
+        ],
+        delta: {},
+      },
       // --- Boldness: "Deep Taproot" — a slower, safer, more sustainable
       // draw, not a bigger single theft.
       steady_roots: {
@@ -6279,7 +6608,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "resilient_growth",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["patient_taproot"],
+        prerequisitesAnyOf: [["patient_taproot"], ["ironroot"], ["grove_mind"]],
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
       },
@@ -6330,6 +6659,26 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "calmingPresence", value: 0.1 },
         delta: {},
       },
+      spreading_taproot: {
+        id: "spreading_taproot",
+        name: "Spreading Taproot",
+        cost: 1,
+        prerequisites: ["communal_taproot"],
+        leaning: "sociability",
+        // Deepens Communal Taproot's own calming reach.
+        grantsPassive: { kind: "calmingPresence", value: 0.1 },
+        delta: {},
+      },
+      grove_mind: {
+        id: "grove_mind",
+        name: "Grove Mind",
+        cost: 2,
+        prerequisites: ["spreading_taproot"],
+        leaning: "boldness",
+        // The shared root system enriches a whole patch of ground, not just
+        // the tile underfoot — a real escalation of Feed the Soil's own lever.
+        delta: { fertilityBoost: { amount: 0.25, radius: 2 } },
+      },
       // --- Sociability: "Shared Harvest" — what the roots take doesn't
       // stay with the caster. Real follow-up on a self-critique: the first
       // draft never actually shared anything it stole, just re-ran Vine
@@ -6360,7 +6709,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "feed_the_soil",
         name: "Feed the Soil",
         cost: 1,
-        prerequisitesAnyOf: [["rooted_calm"], ["communal_taproot"]],
+        prerequisitesAnyOf: [["rooted_calm"], ["communal_taproot"], ["feeding_ground"]],
         leaning: "sociability",
         // SKILL_TREE_GUIDE.md step 2, and the fix for this branch's
         // sharpest self-criticism: "Shared Harvest" never actually shared
@@ -6378,7 +6727,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "settled_growth",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["feed_the_soil"],
+        prerequisitesAnyOf: [["feed_the_soil"], ["grove_mind"], ["endless_bounty"]],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
@@ -6425,6 +6774,26 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["gentle_roots", "ravenous_bite"],
         leaning: "aggression",
         grantsPassive: { kind: "regen", value: 0.02 },
+        delta: { cooldownTicks: -1 },
+      },
+      richer_ground: {
+        id: "richer_ground",
+        name: "Richer Ground",
+        cost: 1,
+        prerequisites: ["feeding_ground"],
+        leaning: "aggression",
+        // Deepens Feeding Ground's own recovery lever.
+        grantsPassive: { kind: "regen", value: 0.02 },
+        delta: {},
+      },
+      endless_bounty: {
+        id: "endless_bounty",
+        name: "Endless Bounty",
+        cost: 2,
+        prerequisites: ["richer_ground"],
+        leaning: "sociability",
+        // Never quite empty, and never waiting long.
+        grantsPassive: { kind: "regen", value: 0.03 },
         delta: { cooldownTicks: -1 },
       },
     },

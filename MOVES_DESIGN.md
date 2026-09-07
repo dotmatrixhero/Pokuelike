@@ -2578,3 +2578,64 @@ output's embedded JSON still parses with every node still having a
    DESIGN.md's "Status effects" section; unlocks Aromatherapy/Safeguard's
    counterplay whenever those get built.
 7. Everything else, roughly in the order listed above within each round.
+
+## Crosslinks are bridges, not spurs (the flagship structure, measured)
+
+Prompted by a direct comparison ask: "Compare the skill trees for all your
+new moves with hydro pump/earthquake. You're missing stuff."
+
+The right move here was to **measure before theorising**. Node counts and
+`prerequisitesAnyOf` counts per tree, straight off the exported JSON:
+
+| | flagships (hydro_pump / earthquake / solar_beam) | six new trees, before |
+|---|---|---|
+| nodes | 38-40 | 33 |
+| `prerequisitesAnyOf` | 9-10 | 6 |
+
+A ~6-node, 3-anyOf gap in every one of them is a structural difference, not
+a content preference. Reading Earthquake's actual source rather than
+inferring from its silhouette named it: **its crosslinks are three-node
+bridges**.
+
+```
+cracking_momentum   crosslink; forcedMovement 1 tile
+  -> momentum_footing  "Deeper Lunge"; filler, forcedMovement 2 tiles
+  -> fault_convergence cost 2; power +15, recoilFraction 0.08
+```
+
+Two things make that a bridge instead of a longer dead end:
+
+1. **The filler deepens the crosslink's own lever.** Not "+5 Power" — the
+   same forced-movement idea, escalated. That is principle 13 doing real
+   work: a bridge whose middle node is a generic stat grab is just a
+   corridor with a toll.
+2. **It lands on two rungs of shortcut, not one.** The bridge's cost-2
+   notable is wired as an alternate route into the pre-fork nodes of
+   *both* flanking branches, and the crosslink itself *also* stays a
+   shallower alternate route on an early filler in each. So a build can
+   enter the bridge cheaply and bail early, or commit and arrive one step
+   short of a fork. That is what the extra 3 `anyOf` per tree actually are.
+
+Applied across vine_whip, flamethrower, rock_slide, wing_attack, dig and
+leech_seed: 18 bridges, 36 new nodes, every pre-fork node rewired, every
+early filler restored to accept both flanking crosslinks (principle 11 —
+a bridge must reach every branch its crosslink connects, or it is a spur
+wearing a bridge's node count).
+
+All six now sit at 9 `anyOf`. The four full trees reached 39 nodes; **dig
+(29) and leech_seed (31) were deliberately left short.** Their honest lever
+sets are smaller, and inflating them to hit a number is exactly the
+template failure the rest of this document exists to prevent. Matching the
+flagships' *structure* was the finding; matching their *node count* was
+not.
+
+**Process note worth keeping.** The Atlas layout check that verified this
+found two real defects, in order: first that my own verification harness
+was wrong (`computeLayout` returns `{positions, crosslinks, maxR}`, not a
+bare id->position map, so it reported all 17 trees broken, then — once
+"fixed" against the wrong JSON shape — cheerfully reported all 17 clean
+without examining a single one). Only the third version of the harness was
+actually reading the data, and it immediately found `dig.never_still` and
+`leech_seed.wider_reach` had lost their `leaning` field and would have
+rendered invisibly. A verification step that has never once printed a
+failure has not been verified.
