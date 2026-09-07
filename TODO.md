@@ -4626,3 +4626,38 @@ not something this pathfinding pass itself caused or is positioned to fix.
         nonTerritorial/calmingPresence/unshaken work) is currently only
         reachable through unit tests, never a live run. Still open; not
         addressed this round.
+- [x] **Shipped two more real v2 trees: Flamethrower and Leech Seed** —
+      direct follow-up: "i just want more more moves" -> clarified: "i
+      just mean implement more skill trees for commonly available moves.
+      we have so many skill trees we gotta work through. i wont even be
+      able to review em all." Picked the same way as the first four
+      (a real signature move of an actually-common species, still bare).
+      - **Flamethrower** (Charmeleon/Charizard, reachable via in-sim
+        leveling from the always-spawned Charmander): 33 nodes, zero new
+        engine work. Built as the design template's own "Power move"
+        archetype reference example — a genuine mutually-exclusive final
+        fork (*Focused Beam* single-target nuke vs. *Wildfire Cone* wide
+        AoE), not just a longer grind to one ending.
+      - **Leech Seed** (Bulbasaur/Ivysaur/Venusaur): 24 nodes, honestly
+        scoped like Dig — `utilityMove`-flagged, never resolved as an
+        actual hit, so only `drainNeeds`/`cooldownTicks`/`statChangeOnHit`
+        (self)/`grantsPassive` are real. Needed two small new
+        `MoveTreeNode.delta` fields (`drainNeeds`, `matingRadiusBoost`,
+        both plain overwrites) to be worth building at all — added to
+        `moves.ts` and unit-tested in `moves.test.ts`'s existing "kitchen
+        sink" merge suite. Real fork highlight: Boldness's *Twin Taproot*
+        switches `drainNeeds.need` from `"hunger"` to `"thirst"` entirely.
+      - Verified live: Leech Seed auto-respecs for a real Bulbasaur in an
+        8000-tick run across all three branches. Full data suite green
+        (236/236), engine suite green (1094/1094). MOVES_DESIGN.md and
+        Atlas updated/republished.
+      - Direct follow-up mid-round, queued for next: "i think for fire
+        based move we gotta add the fire burning down flora mechanic...
+        and it deals dot damage to units standing in fire... gotta have a
+        rendering for it too." A real new engine feature (persistent fire
+        terrain/hazard — not the existing instant `terrainBurn` reversion),
+        not a skill-tree change. Not yet started as of this entry.
+      - Still-open backlog from this same pass, not started: Sweet Scent
+        and Growth are the next candidates (both Bulbasaur's own moves,
+        both need small new delta support the same way Leech Seed did —
+        `matingRadiusBoost` is already added; `fertilityBoost` isn't yet).

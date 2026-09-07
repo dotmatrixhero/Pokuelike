@@ -560,6 +560,17 @@ export interface MoveTreeNode {
     terrainFill?: { terrain: TerrainKind };
     /** Overwrite, like `shape` — a move has at most one charge commitment at a time. */
     chargeAttack?: { ticks: number; bonusPower: number; leapTiles: number };
+    /**
+     * Overwrite, like `shape` — restate the full object (need/amount/radius),
+     * not just whichever sub-field changed, since a later node's value
+     * replaces the earlier one entirely rather than merging field-by-field.
+     * Only meaningful on a move that already has a base `drainNeeds` (e.g.
+     * Leech Seed) — utilityMoves.ts's `maybeUseUtilityMove` is what actually
+     * reads it.
+     */
+    drainNeeds?: { need: "hunger" | "thirst"; amount: number; radius: number };
+    /** Overwrite, like `shape`. Only meaningful on a move that already has a base `matingRadiusBoost` (e.g. Sweet Scent). */
+    matingRadiusBoost?: { multiplier: number; ticks: number };
   };
 }
 
@@ -719,6 +730,8 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       consumesOwnTerrain: delta.consumesOwnTerrain ?? result.consumesOwnTerrain,
       terrainFill: delta.terrainFill ?? result.terrainFill,
       chargeAttack: delta.chargeAttack ?? result.chargeAttack,
+      drainNeeds: delta.drainNeeds ?? result.drainNeeds,
+      matingRadiusBoost: delta.matingRadiusBoost ?? result.matingRadiusBoost,
     };
   }
 

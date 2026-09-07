@@ -1414,6 +1414,315 @@ export const MOVES: Record<string, MoveSpec> = {
     statusChance: 0.1,
     statusKind: "burn",
     range: { min: 0, max: 4 },
+    // v2 (MOVES_DESIGN.md's own template) — Charmeleon/Charizard's real
+    // upgrade from Ember, reached purely through in-sim leveling from
+    // Charmander (spawned every run). This is the template's own reference
+    // example for the "Power move" archetype: a real mutually-exclusive
+    // final fork between two distinct "sick" end-states (Focused Beam's
+    // single-target nuke vs. Wildfire Cone's wide AoE), not just a longer
+    // grind to one ending. Every lever here is standard, already-shipped
+    // damage-move plumbing — no new engine work needed for this one.
+    tree: {
+      // --- Aggression: "Inferno Focus" — hotter, harder, ending in the
+      // archetype's own real fork.
+      searing_heat: {
+        id: "searing_heat",
+        name: "Searing Heat",
+        cost: 1,
+        leaning: "aggression",
+        delta: { statusChance: 0.1 },
+      },
+      hotter_flame: {
+        id: "hotter_flame",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["searing_heat"],
+        leaning: "aggression",
+        delta: { power: 5 },
+      },
+      steadier_aim: {
+        id: "steadier_aim",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisitesAnyOf: [["hotter_flame"], ["tempered_strike"]],
+        leaning: "aggression",
+        delta: { accuracy: 10 },
+      },
+      melting_blast: {
+        id: "melting_blast",
+        name: "Melting Blast",
+        cost: 1,
+        prerequisites: ["steadier_aim"],
+        leaning: "aggression",
+        delta: { defensePenetration: 0.15 },
+      },
+      faster_ignition: {
+        id: "faster_ignition",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["melting_blast"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -1 },
+      },
+      focused_beam: {
+        id: "focused_beam",
+        name: "Focused Beam",
+        cost: 2,
+        prerequisites: ["faster_ignition"],
+        excludes: ["wildfire_cone"],
+        leaning: "aggression",
+        // A single-target nuke — narrows to a long, precise line.
+        delta: { shape: { kind: "line", length: 6 }, range: { max: 6 }, power: 15 },
+      },
+      wildfire_cone: {
+        id: "wildfire_cone",
+        name: "Wildfire Cone",
+        cost: 2,
+        prerequisites: ["faster_ignition"],
+        excludes: ["focused_beam"],
+        leaning: "aggression",
+        // A wide AoE instead — spread thinner, but everyone caught in the
+        // cone burns.
+        delta: { shape: { kind: "cone", length: 3, width: 3 }, hitsArea: true, power: -10 },
+      },
+      combustion: {
+        id: "combustion",
+        name: "Combustion",
+        cost: 2,
+        prerequisitesAnyOf: [["focused_beam"], ["wildfire_cone"]],
+        leaning: "aggression",
+        // An overwhelming blast that costs the user something too.
+        delta: { power: 10, recoilFraction: 0.05 },
+      },
+      lingering_heat: {
+        id: "lingering_heat",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["combustion"],
+        leaning: "aggression",
+        delta: { power: 5 },
+      },
+      wildfires_reach: {
+        id: "wildfires_reach",
+        name: "Wildfire's Reach",
+        cost: 2,
+        prerequisites: ["lingering_heat"],
+        leaning: "aggression",
+        // Badly burns whatever it catches, and burns down any bush it was
+        // hiding in — the fire doesn't leave anything the way it found it.
+        delta: { statusSeverity: 2, terrainBurn: true },
+      },
+      // Crosslink: Aggression <-> Boldness — a hotter flame tempered by a
+      // steadier hand.
+      tempered_strike: {
+        id: "tempered_strike",
+        name: "Tempered Strike",
+        cost: 1,
+        prerequisites: ["searing_heat", "thick_scales"],
+        leaning: "aggression",
+        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 12 } },
+      },
+      // --- Boldness: "Banked Flame" — a controlled, enduring fire instead
+      // of an explosive burst.
+      thick_scales: {
+        id: "thick_scales",
+        name: "Thick Scales",
+        cost: 1,
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.08 },
+        delta: {},
+      },
+      hardened_plates: {
+        id: "hardened_plates",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["thick_scales"],
+        leaning: "boldness",
+        delta: { accuracy: 10 },
+      },
+      steady_burn: {
+        id: "steady_burn",
+        name: "+5 Power",
+        cost: 1,
+        prerequisitesAnyOf: [["hardened_plates"], ["tempered_strike"], ["guardian_ember"]],
+        leaning: "boldness",
+        delta: { power: 5 },
+      },
+      banked_coals: {
+        id: "banked_coals",
+        name: "Banked Coals",
+        cost: 1,
+        prerequisites: ["steady_burn"],
+        leaning: "boldness",
+        grantsPassive: { kind: "defenseBoost", value: 0.05 },
+        delta: {},
+      },
+      slower_burn: {
+        id: "slower_burn",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["banked_coals"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      smoldering_core: {
+        id: "smoldering_core",
+        name: "Smoldering Core",
+        cost: 1,
+        prerequisites: ["slower_burn"],
+        excludes: ["flame_wreath"],
+        leaning: "boldness",
+        grantsPassive: { kind: "regen", value: 0.03 },
+        delta: {},
+      },
+      flame_wreath: {
+        id: "flame_wreath",
+        name: "Flame Wreath",
+        cost: 1,
+        prerequisites: ["slower_burn"],
+        excludes: ["smoldering_core"],
+        leaning: "boldness",
+        grantsPassive: { kind: "thorns", value: 0.12 },
+        delta: {},
+      },
+      unburnt: {
+        id: "unburnt",
+        name: "Unburnt",
+        cost: 2,
+        prerequisitesAnyOf: [["smoldering_core"], ["flame_wreath"]],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.06 },
+        delta: {},
+      },
+      hotter_scales: {
+        id: "hotter_scales",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["unburnt"],
+        leaning: "boldness",
+        delta: { accuracy: 10 },
+      },
+      living_furnace: {
+        id: "living_furnace",
+        name: "Living Furnace",
+        cost: 2,
+        prerequisites: ["hotter_scales"],
+        leaning: "boldness",
+        grantsPassives: [
+          { kind: "defenseBoost", value: 0.08 },
+          { kind: "thorns", value: 0.08 },
+        ],
+        delta: {},
+      },
+      // Crosslink: Boldness <-> Sociability — the same banked heat shields
+      // whoever's fighting alongside it.
+      guardian_ember: {
+        id: "guardian_ember",
+        name: "Guardian Ember",
+        cost: 1,
+        prerequisites: ["thick_scales", "kindling_call"],
+        leaning: "sociability",
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        delta: {},
+      },
+      // --- Sociability: "Rally Flame" — a shared fire that sharpens and
+      // warms whoever's near it.
+      kindling_call: {
+        id: "kindling_call",
+        name: "Kindling Call",
+        cost: 1,
+        leaning: "sociability",
+        delta: { targetsAlly: true, allyEffect: { buff: { stat: "spAttack", stage: 1, ticks: 20 } } },
+      },
+      warmth_shared: {
+        id: "warmth_shared",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["kindling_call"],
+        leaning: "sociability",
+        delta: { accuracy: 10 },
+      },
+      quicker_call: {
+        id: "quicker_call",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisitesAnyOf: [["warmth_shared"], ["guardian_ember"]],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      deepening_warmth: {
+        id: "deepening_warmth",
+        name: "Deepening Warmth",
+        cost: 1,
+        prerequisites: ["quicker_call"],
+        leaning: "sociability",
+        delta: { allyEffect: { healFraction: 0.15, buff: { stat: "spAttack", stage: 1, ticks: 20 } } },
+      },
+      brighter_blaze: {
+        id: "brighter_blaze",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["deepening_warmth"],
+        leaning: "sociability",
+        delta: { power: 5 },
+      },
+      rousing_flame: {
+        id: "rousing_flame",
+        name: "Rousing Flame",
+        cost: 1,
+        prerequisites: ["brighter_blaze"],
+        excludes: ["calming_ash"],
+        leaning: "sociability",
+        // Trades the healing lean for a real Attack buff instead.
+        delta: { allyEffect: { healFraction: 0.05, buff: { stat: "attack", stage: 1, ticks: 20 } } },
+      },
+      calming_ash: {
+        id: "calming_ash",
+        name: "Calming Ash",
+        cost: 1,
+        prerequisites: ["brighter_blaze"],
+        excludes: ["rousing_flame"],
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.2 },
+        delta: {},
+      },
+      united_blaze: {
+        id: "united_blaze",
+        name: "United Blaze",
+        cost: 2,
+        prerequisitesAnyOf: [["rousing_flame"], ["calming_ash"]],
+        leaning: "sociability",
+        // The ally effect now also fires the instant this hits an enemy.
+        delta: { allyEffectOnAttack: true },
+      },
+      steadfast_blaze: {
+        id: "steadfast_blaze",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["united_blaze"],
+        leaning: "sociability",
+        delta: { power: 5 },
+      },
+      hearth_of_the_flock: {
+        id: "hearth_of_the_flock",
+        name: "Hearth of the Flock",
+        cost: 2,
+        prerequisites: ["steadfast_blaze"],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.01 },
+        delta: {},
+      },
+      // Crosslink: Sociability <-> Aggression — a fire this shared doesn't
+      // stay banked once something actually threatens the group.
+      provoked_blaze: {
+        id: "provoked_blaze",
+        name: "Provoked Blaze",
+        cost: 1,
+        prerequisites: ["kindling_call", "searing_heat"],
+        leaning: "aggression",
+        delta: { situationalBonus: { condition: "flanking", multiplier: 1.25 } },
+      },
+    },
   },
   peck: {
     id: "peck",
@@ -5756,5 +6065,257 @@ export const MOVES: Record<string, MoveSpec> = {
     // than a sustained drain (this sim has no per-turn "planted seed"
     // concept to tick down).
     drainNeeds: { need: "hunger", amount: 0.15, radius: 4 },
+    // v2 (MOVES_DESIGN.md's own template), honestly scoped like Dig's tree
+    // — Leech Seed is `utilityMove`-flagged, so `pickBestMove` (combat.ts)
+    // excludes it from hostile selection same as `burrow` moves: it's never
+    // resolved as an actual hit. Every damage-facing lever this template
+    // usually leans on is dead weight here too. Built instead from the
+    // levers that ARE real: `drainNeeds` itself (need/amount/radius — see
+    // the new delta field's own doc comment, moves.ts), `cooldownTicks`,
+    // `statChangeOnHit` (self, already real for a `utilityMove` — see
+    // `maybeUseUtilityMove`, utilityMoves.ts), and `grantsPassive`. Real
+    // fork highlight: Boldness's *Twin Taproot* switches `drainNeeds.need`
+    // from `"hunger"` to `"thirst"` entirely — a genuinely different
+    // resource, not just a bigger number. Bulbasaur/Ivysaur/Venusaur only.
+    tree: {
+      // --- Aggression: "Ravenous Roots" — takes more, and the surplus
+      // sharpens its own other attacks (a real cross-move Attack stage,
+      // not something Leech Seed itself ever swings with).
+      ravenous_bite: {
+        id: "ravenous_bite",
+        name: "Ravenous Bite",
+        cost: 1,
+        leaning: "aggression",
+        delta: { drainNeeds: { need: "hunger", amount: 0.25, radius: 4 } },
+      },
+      quicker_seeding: {
+        id: "quicker_seeding",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["ravenous_bite"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -1 },
+      },
+      spreading_roots: {
+        id: "spreading_roots",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisitesAnyOf: [["quicker_seeding"], ["grounded_hunger"]],
+        leaning: "aggression",
+        delta: { cooldownTicks: -1 },
+      },
+      wider_reach: {
+        id: "wider_reach",
+        name: "Wider Reach",
+        cost: 1,
+        prerequisites: ["spreading_roots"],
+        // Restates the full drainNeeds object — overwrite, not a merge.
+        delta: { drainNeeds: { need: "hunger", amount: 0.35, radius: 5 } },
+      },
+      hungrier_roots: {
+        id: "hungrier_roots",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["wider_reach"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -1 },
+      },
+      insatiable: {
+        id: "insatiable",
+        name: "Insatiable",
+        cost: 1,
+        prerequisites: ["hungrier_roots"],
+        excludes: ["twin_drain"],
+        leaning: "aggression",
+        delta: { drainNeeds: { need: "hunger", amount: 0.5, radius: 5 } },
+      },
+      twin_drain: {
+        id: "twin_drain",
+        name: "Twin Drain",
+        cost: 1,
+        prerequisites: ["hungrier_roots"],
+        excludes: ["insatiable"],
+        leaning: "aggression",
+        // Keeps Wider Reach's drain, but the vigor it takes sharpens this
+        // agent's OWN Attack stage — a real, felt boost to whatever it
+        // actually fights with, since Leech Seed itself never lands a hit.
+        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 20 } },
+      },
+      feeding_frenzy: {
+        id: "feeding_frenzy",
+        name: "Feeding Frenzy",
+        cost: 2,
+        prerequisitesAnyOf: [["insatiable"], ["twin_drain"]],
+        leaning: "aggression",
+        // The constant draining keeps it topped up even between successful
+        // casts.
+        grantsPassive: { kind: "regen", value: 0.03 },
+        delta: { cooldownTicks: -1 },
+      },
+      // Crosslink: Aggression <-> Boldness — the hunger it takes goes
+      // straight into a hardier hide.
+      grounded_hunger: {
+        id: "grounded_hunger",
+        name: "Grounded Hunger",
+        cost: 1,
+        prerequisites: ["ravenous_bite", "steady_roots"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.04 },
+        delta: {},
+      },
+      // --- Boldness: "Deep Taproot" — a slower, safer, more sustainable
+      // draw, not a bigger single theft.
+      steady_roots: {
+        id: "steady_roots",
+        name: "Steady Roots",
+        cost: 1,
+        leaning: "boldness",
+        grantsPassive: { kind: "regen", value: 0.02 },
+        delta: {},
+      },
+      thick_bark: {
+        id: "thick_bark",
+        name: "Thick Bark",
+        cost: 1,
+        prerequisites: ["steady_roots"],
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        leaning: "boldness",
+        delta: {},
+      },
+      patient_taproot: {
+        id: "patient_taproot",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisitesAnyOf: [["thick_bark"], ["grounded_hunger"], ["communal_taproot"]],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      resilient_growth: {
+        id: "resilient_growth",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["patient_taproot"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      bountiful_roots: {
+        id: "bountiful_roots",
+        name: "Bountiful Roots",
+        cost: 1,
+        prerequisites: ["resilient_growth"],
+        excludes: ["twin_taproot"],
+        leaning: "boldness",
+        // Gentler per-cast, but reaches further and lands more reliably.
+        delta: { drainNeeds: { need: "hunger", amount: 0.2, radius: 6 } },
+      },
+      twin_taproot: {
+        id: "twin_taproot",
+        name: "Twin Taproot",
+        cost: 1,
+        prerequisites: ["resilient_growth"],
+        excludes: ["bountiful_roots"],
+        leaning: "boldness",
+        // Draws moisture instead — a genuinely different resource, not
+        // just a bigger number on the same one.
+        delta: { drainNeeds: { need: "thirst", amount: 0.2, radius: 4 } },
+      },
+      ancient_roots: {
+        id: "ancient_roots",
+        name: "Ancient Roots",
+        cost: 2,
+        prerequisitesAnyOf: [["bountiful_roots"], ["twin_taproot"]],
+        leaning: "boldness",
+        grantsPassives: [
+          { kind: "damageReduction", value: 0.05 },
+          { kind: "regen", value: 0.02 },
+        ],
+        delta: {},
+      },
+      // Crosslink: Boldness <-> Sociability — a taproot deep enough to
+      // share.
+      communal_taproot: {
+        id: "communal_taproot",
+        name: "Communal Taproot",
+        cost: 1,
+        prerequisites: ["steady_roots", "gentle_roots"],
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.1 },
+        delta: {},
+      },
+      // --- Sociability: "Shared Harvest" — the same nurturing fantasy
+      // Vine Whip's own Sociability branch leans on.
+      gentle_roots: {
+        id: "gentle_roots",
+        name: "Gentle Roots",
+        cost: 1,
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.15 },
+        delta: {},
+      },
+      rooted_calm: {
+        id: "rooted_calm",
+        name: "Rooted Calm",
+        cost: 1,
+        prerequisites: ["gentle_roots"],
+        leaning: "sociability",
+        delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 20 } },
+      },
+      quieter_ground: {
+        id: "quieter_ground",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisitesAnyOf: [["rooted_calm"], ["communal_taproot"]],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      settled_growth: {
+        id: "settled_growth",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["quieter_ground"],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      deepening_calm: {
+        id: "deepening_calm",
+        name: "Deepening Calm",
+        cost: 1,
+        prerequisites: ["settled_growth"],
+        excludes: ["watchful_roots"],
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.15 },
+        delta: {},
+      },
+      watchful_roots: {
+        id: "watchful_roots",
+        name: "Watchful Roots",
+        cost: 1,
+        prerequisites: ["settled_growth"],
+        excludes: ["deepening_calm"],
+        leaning: "sociability",
+        grantsPassive: { kind: "regen", value: 0.03 },
+        delta: {},
+      },
+      roots_that_feed_the_grove: {
+        id: "roots_that_feed_the_grove",
+        name: "Roots That Feed the Grove",
+        cost: 2,
+        prerequisitesAnyOf: [["deepening_calm"], ["watchful_roots"]],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.01 },
+        delta: {},
+      },
+      // Crosslink: Sociability <-> Aggression — even a shared harvest
+      // takes what it needs.
+      feeding_ground: {
+        id: "feeding_ground",
+        name: "Feeding Ground",
+        cost: 1,
+        prerequisites: ["gentle_roots", "ravenous_bite"],
+        leaning: "aggression",
+        grantsPassive: { kind: "regen", value: 0.02 },
+        delta: { cooldownTicks: -1 },
+      },
+    },
   },
 };

@@ -1096,6 +1096,40 @@ prerequisites/excludes/forks the same way it does every shipped tree, and
 `applyMoveTree` itself doesn't distinguish one tree from another. Full data
 suite green (228/228), engine suite unaffected (1094/1094).
 
+**Round two, direct follow-up ("i just want more more moves" ->
+clarified: "i just mean implement more skill trees for commonly available
+moves. we have so many skill trees we gotta work through. i wont even be
+able to review em all")** — two more real trees, chosen the same way as
+the first four (an actually-common species' own real signature move, still
+bare):
+- **Flamethrower (Charmeleon/Charizard, reachable purely through in-sim
+  leveling from the always-spawned Charmander)** — 33 nodes, zero new
+  engine work. This is the design template's own reference example for the
+  "Power move" archetype, finally built: a genuine mutually-exclusive final
+  fork between two distinct end-states (*Focused Beam*'s single-target
+  nuke vs. *Wildfire Cone*'s wide AoE), not just a longer grind to one
+  ending. Keystone *Wildfire's Reach* pairs `statusSeverity` with
+  `terrainBurn` — the fire doesn't leave anything the way it found it.
+- **Leech Seed (Bulbasaur/Ivysaur/Venusaur)** — 24 nodes, honestly scoped
+  like Dig: it's `utilityMove`-flagged, so `pickBestMove` excludes it from
+  hostile selection same as `burrow` — never resolved as an actual hit.
+  Needed two small new `MoveTreeNode.delta` fields to be worth building at
+  all: `drainNeeds` and `matingRadiusBoost` (both plain overwrites, mirror
+  every other object-shaped delta field, merged in `applyMoveTree` and
+  unit-tested directly in `moves.test.ts`'s existing "kitchen sink" merge
+  suite). Real fork highlight: Boldness's *Twin Taproot* switches
+  `drainNeeds.need` from `"hunger"` to `"thirst"` entirely — a genuinely
+  different resource, not a bigger number on the same one. Aggression's
+  *Twin Drain* is a real cross-move payoff: the vigor it takes sharpens
+  this agent's own Attack stage for whatever it actually fights with,
+  since Leech Seed itself never lands a hit.
+
+Verified live: Leech Seed auto-respecs for real Bulbasaur in an 8000-tick
+run (`gentle_roots`, `steady_roots`, `ravenous_bite`, `wider_reach`, and
+more, across all three branches). Full data suite green (236/236), engine
+suite green (1094/1094, including two new `applyMoveTree` merge
+assertions for `drainNeeds`/`matingRadiusBoost`).
+
 **Tackle, Slash, and Ember have all now
 shipped their full v2 trees** (`packages/data/src/moves.ts`) — three
 branches (Aggression/Boldness/Sociability) plus a crosslink triangle each,
