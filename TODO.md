@@ -4235,3 +4235,16 @@ not something this pathfinding pass itself caused or is positioned to fix.
       this was about picking the *right* one per bridge. Two test
       assertions updated to match the new mechanics; full suite green
       (193/193 data). Atlas rebuilt and republished.
+- [x] **Fixed the range panel's expand button — a real bug, not device-
+      specific** — direct report: "The expand part of the range visualizer
+      does not work." Root cause: `toggleBtn`'s own click handler only
+      called `e.stopPropagation()`, on the mistaken assumption the click
+      would still bubble up and get handled by the head bar's own click
+      listener — but `stopPropagation()` prevents exactly that bubbling,
+      so the button did nothing at all. Since the collapsed state shows
+      *only* this button (the eyebrow label is hidden via CSS), that made
+      expanding from collapsed completely non-functional. Fixed by giving
+      the toggle button its own real toggle call (still guarded against
+      double-firing via the head listener, and still respecting the
+      drag-vs-tap `moved` check). Verified the template's encoding and
+      script syntax before rebuilding. Atlas rebuilt and republished.

@@ -2053,14 +2053,25 @@
 
     // A real drag vs. a tap-to-toggle are disambiguated by whether the
     // pointer actually moved past the threshold above.
-    head.addEventListener("click", function (e) {
-      if (moved) { moved = false; return; }
+    function toggleCollapsed() {
       panelState.collapsed = !panelState.collapsed;
       save(panelState);
       applyCollapsed();
+    }
+    head.addEventListener("click", function (e) {
+      if (moved) { moved = false; return; }
+      toggleCollapsed();
     });
+    // Direct bug: this used to only call stopPropagation() here, on the
+    // (wrong) assumption the click would still bubble up and toggle via
+    // head's own listener above — stopPropagation prevents exactly that,
+    // so the button — the ONLY clickable area once collapsed — did
+    // nothing. Fixed to actually toggle here too, still guarding against
+    // the same click also firing head's listener a second time.
     toggleBtn.addEventListener("click", function (e) {
-      e.stopPropagation(); // avoid double-toggling via the bubbled head click above
+      e.stopPropagation();
+      if (moved) { moved = false; return; }
+      toggleCollapsed();
     });
   }
 
