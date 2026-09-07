@@ -159,19 +159,7 @@ Solar Beam is single-target everywhere else in its own tree, so turning
 one bridge's notable into a real `hitsArea` cone was the standout of the
 whole rollout, not an arbitrary pick.
 
-**15. A generated diagram's layout math is real code and deserves the
-same "read the function, don't eyeball it" discipline as gameplay code.**
-A crosslink whose edge visually "cut across the graph" wasn't a rendering
-quirk — `computeLayout` placed every crosslink at the same fixed hub
-radius regardless of how deep its actual prerequisite sat, so a crosslink
-rooted at depth 7 got drawn as if it were rooted at depth 0. The direct
-report ("hydro pump marked undertow has some weird bridges that are not
-correct") was correct on the merits; fixed by scaling each crosslink's
-radius to the real depth of its own deepest prerequisite. Same instinct
-as principle 9, but the root cause this time was positional math, not an
-incorrect delta.
-
-**16. When feedback comes back twice on the same node, check whether two
+**15. When feedback comes back twice on the same node, check whether two
 separate asks are being crammed onto one point before writing a third
 version of it.** Hydro Pump's Tidal Communion took three passes: a flat
 `healAura` didn't match the branch's own fantasy; the `excludesAllies`
@@ -182,17 +170,64 @@ genuinely different asks) onto two different nodes: `excludesAllies`
 moved down onto the opener next to its existing heal, which freed the
 capstone to become something the roster didn't have yet (`aquaticHaste`).
 
-**17. Confirming a mechanic ISN'T buildable from existing primitives is
+**16. Confirming a mechanic ISN'T buildable from existing primitives is
 exactly as load-bearing as confirming it IS, and still needs the user's
 go-ahead before new engine work starts.** Before building `aquaticHaste`,
-the closed `PassiveKind` union, `actionSpeedOf`'s multiplier chain, and
-`terrainSpeedMultiplier`'s per-terrain-only signature were all read
-directly to confirm no existing primitive covered "ally aura +
+the closed `PassiveKind` union and `actionSpeedOf`'s multiplier chain were
+read directly to confirm no existing primitive covered "ally aura +
 terrain-conditional" together — then the scope question went to the user
-(AskUserQuestion) rather than being decided unilaterally, per principle
-#10. Guessing "this probably needs new code" from a field name alone
-would have skipped the exact verification step principle #3 already
-demands.
+rather than being decided unilaterally, per principle #10.
+
+### What actually makes a tree interesting, distilled from the roster so far
+
+The principles above are mostly about catching mistakes. These are about
+the other half — recognizable, repeatable patterns behind every node in
+this doc that actually landed well, worth reaching for on purpose rather
+than rediscovering per move:
+
+- **A move's own "flaw" is a branch's best possible payoff, not something
+  to quietly patch over.** Earthquake's AoE doesn't distinguish friend
+  from foe — Sociability's whole identity is a drilled herd that finally
+  doesn't get caught in its own blast, turning the exact same
+  indiscriminate hit into the branch's hook. Hydro Pump's canonically bad
+  accuracy became Boldness's entire fantasy (a patient, controlled deluge
+  instead of a wild spray) rather than a flat "-accuracy" tax filler
+  quietly apologizes for elsewhere. Look for the thing that reads as the
+  move's weakness first — it's usually a branch waiting to happen.
+- **Physical/positional levers are the most memorable interactions in the
+  whole roster, ahead of any number.** A drag, a lunge, a swap, a boulder
+  consumed underfoot, a puddle left behind — these are things an observer
+  can *see happen* mid-fight, unlike "+10% power." `forcedMovement`,
+  `positionSwap`, `consumesOwnTerrain`, `terrainBurn`/`terrainFill` earn
+  disproportionate design time per move specifically because of this (see
+  template v3's rule 3) — reach for one of these before reaching for
+  another accuracy/power filler.
+- **A condition worth gating a payoff on is one the move's own fantasy
+  would obviously care about, not whatever's cheapest to check.**
+  `aquaticHaste` only firing on water, Rock Throw's own boulder tile
+  consumed for real bonus damage, a night-hunter's bonus specifically at
+  night — the condition IS the flavor, not a tax attached to an otherwise
+  generic bonus. A situational bonus that could be swapped for any other
+  situational bonus with no loss of sense is a tell it was picked for
+  convenience, not fit.
+- **Rally/mark-style mechanics are richer than a same-sized buff, because
+  they change what *other* agents independently choose to do, not just a
+  number on the caster.** `rallyMarked`/`preferMarked` turning several
+  agents' separately-run targeting logic onto the same threat is a
+  qualitatively different payoff than the same points spent on flat
+  damage — coordination itself is the reward, not a means to more damage.
+- **A capstone's mechanic should be something the roster doesn't already
+  have, not a bigger number on a lever some other move already uses.**
+  Tidal Communion's own history makes the point directly: both a flat
+  heal and a reused `excludesAllies` were mechanically sound and still
+  felt lame, specifically because neither one was new. When a capstone
+  idea can be described as "like [other move]'s but bigger," that's the
+  signal to keep looking, not to ship it.
+- **The real test that three branches earned three separate identities:
+  can each one be described without naming the move it's attached to?**
+  If a branch's writeup would read exactly the same pasted onto a
+  different move, it's a template wearing that move's name, not a real
+  answer to what that move's own Aggression/Boldness/Sociability means.
 
 ## Engine primitives needed — running checklist
 
@@ -1998,35 +2033,11 @@ and edited like any other file) — never regenerate it from a screenshot or
 from memory of what the artifact looked like; that's exactly the
 "scratch every time" failure mode this process exists to avoid.
 
-**Verify every template edit before rebuilding — not optional, learned
-from a real incident.** An `Edit` tool call once silently wrote two
-literal NUL bytes into the template (surfaced only because `file` then
-reported "data" instead of text on a file that had always been plain
-HTML). Since then, every template edit gets two checks before the two
-build steps run, every time, no exceptions:
-1. **File integrity** — a quick Python check: `data =
-   open(path,'rb').read()`, confirm `data.count(b'\x00') == 0` and
-   `data.decode('utf-8')` doesn't raise.
-2. **Inline-script syntax** — extract the `<script>...</script>` IIFE by
-   string-slicing the file, then `new Function(js)` it in Node with the
-   `__TREE_DATA__` JSON parse stubbed to `"{}"` (the real data isn't
-   present yet at this point in the pipeline) — a syntax error surfaces
-   here, immediately, instead of silently in the published page.
-
-**Whenever `computeLayout` itself changes, verify the actual output
-against real data before publishing — a layout bug reads as a cosmetic
-UI complaint until it isn't.** Two real, non-cosmetic bugs shipped past a
-"looks fine" glance and were only caught by a direct report against the
-live artifact (see "Deeper crosslinks — round 2" above: the branch-pair
-overlap bug and Marked Undertow's fixed-hub-radius bug). The check: string-
-slice `computeLayout` back out of the template, `new
-Function('tree', snippet + 'return computeLayout(tree);')`, and run it
-against the real exported tree JSON (step 1's `/tmp/trees.json`) for
-*every* tree in the roster — not just the one being changed, since a
-shared layout function's bug rarely stays confined to one tree. Check the
-result for missing positions, exact-duplicate positions, and
-near-overlaps (anything under ~20px apart) before rebuilding and
-republishing.
+Sanity-check any template edit the same way this process itself was
+verified: confirm the file has no stray null bytes (a past `Edit` call
+once silently corrupted it), the inline script still parses, and the
+output's embedded JSON still parses with every node still having a
+`leaning`.
 
 1. **Rock Throw / Peck / Scratch / Water Gun** — designed above, zero new
    primitives needed, purely porting work identical to what Tackle/Slash/
