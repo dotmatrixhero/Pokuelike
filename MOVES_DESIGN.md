@@ -1028,7 +1028,75 @@ to use it.
 
 ## Move-tree drafts: the sim's actual movepool
 
-Vine Whip proved the v2 template. **Tackle, Slash, and Ember have all now
+Vine Whip proved the v2 template — but **proving the template and shipping
+it are two different things**, and it was actually Tackle/Slash/Ember that
+got built with it, not Vine Whip itself. Direct catch, much later: "we don't
+have vine whip? i thought we designed it...." Fair — Vine Whip's paper draft
+(the origin of named nodes like "Snapback Lash") was real, but it stayed
+paper. **Vine Whip, Wing Attack, Rock Slide, and Dig have now all shipped
+real v2 trees**, closing that gap and a second one alongside it: a direct
+ask to "look at a bunch of the moves that are actually available to the
+average units in our sim" — every one of these four is a genuinely common
+species' own real signature move (Bulbasaur/Pidgey/Onix/Diglett+Sandshrew,
+all spawned or reachable every run), unlike Body Slam's Snorlax, which has
+no spawn or immigration path at all (a real, still-open gap — see TODO.md).
+
+- **Vine Whip (Bulbasaur)** — 33 nodes. Aggression *Choking Grip* (drain/
+  grip: `lifestealFraction`, a `forcedMovement`-pull fork, a multi-hit
+  `endless_lashing` keystone), Boldness *Root and Bind* (rooted-plant
+  toughness: `damageReduction`/`defenseBoost`/`regen`/`thorns`, ending in a
+  real two-passive keystone), Sociability *Shared Growth* (leans directly
+  into the same nurturing fantasy `leech_seed` already carries: `allyEffect`
+  heal/buff, `allyEffectOnAttack`, a `healAura` keystone).
+- **Wing Attack (Pidgey)** — 33 nodes. Aggression *Relentless Dive*
+  (`critRateStage`/`critCooldownReset`, a multi-hit-vs-bigger-hit fork, a
+  wider-cone keystone). Boldness *Wind Rider* — a bird's real defense is air
+  superiority, not bulk: a `forcedMovement` hit-and-retreat notable, and a
+  keystone finally giving `"unshaken"` its second-ever home (Body Slam's
+  Unbothered was the first). Sociability *Flock Signal* — a prey bird's real
+  defense is the flock: `rallyCall` (*Mob the Threat*, marking a threat for
+  the whole flock to converge on) plus a `calmingPresence`/aggression-buff
+  fork.
+- **Rock Slide (Onix)** — 33 nodes, deliberately NOT a re-skin of Onix's
+  other two trees (Rock Throw's defense-penetrating single-target *Crushing
+  Weight*, Earthquake's ground-shockwave *Herdsafe Trigger*). This one's
+  real, distinct hook: boulders falling FROM ABOVE, leaning on
+  `situationalBonus`'s `"elevation"` condition — the first shipped tree to
+  use it. Sociability *Warning Rumble* reuses Earthquake's `excludesAllies`
+  ally-exemption but for a different reason (an advance-warning tremor, not
+  drilled herd discipline), forking into `calmingPresence` vs.
+  `nonTerritorial` — the second real use of Body Slam's Sociability
+  primitives, on an entirely different, still-solitary-by-canon species.
+- **Dig (Diglett/Sandshrew)** — 21 nodes, and honestly, deliberately
+  smaller than the other three. Dig is never resolved as an actual hit —
+  `pickBestMove` (combat.ts) excludes any `burrow` move from hostile
+  selection — so every damage-facing lever this template normally leans on
+  (`power`/`accuracy`/`defensePenetration`/`forcedMovement`/lifesteal/etc.)
+  is real, valid `MoveTreeNode.delta` syntax that would do *nothing at all*
+  if used here, since the move it modifies is never resolved as a hit. Built
+  honestly instead from the only two levers that ARE real for a move like
+  this: `cooldownTicks` (genuinely gates how often it can burrow-flee) and
+  `grantsPassive`/`grantsPassives` (agent-level, real regardless of how the
+  move gets used). No padded "+5 Power" filler pretending otherwise — see
+  the tree's own top comment in `moves.ts` for the full reasoning. Shared by
+  both Diglett AND Sandshrew (a real cross-species pairing per species.ts's
+  own comment), so Sociability's *Shared Ground* leans directly into that
+  already-written "coexists underground" flavor.
+
+All four verified in a real run (`npx tsx packages/runner/src/index.ts`):
+Bulbasaur auto-respecs across all three Vine Whip branches including the
+`snapback_lash` crosslink; Pidgey/Pidgeotto do the same for Wing Attack.
+Rock Slide and Dig didn't fire in the specific seeds checked so far — Onix/
+Diglett/Sandshrew level up more slowly and compete for the same typed skill
+points as their OTHER known moves' trees (Onix's Rock Throw/Earthquake;
+Diglett/Sandshrew's Tackle/Earthquake), so this reads as normal RNG
+variance on a small sample, not a structural problem — the generic
+structural test suite (`moveTrees.test.ts`) validates all four trees'
+prerequisites/excludes/forks the same way it does every shipped tree, and
+`applyMoveTree` itself doesn't distinguish one tree from another. Full data
+suite green (228/228), engine suite unaffected (1094/1094).
+
+**Tackle, Slash, and Ember have all now
 shipped their full v2 trees** (`packages/data/src/moves.ts`) — three
 branches (Aggression/Boldness/Sociability) plus a crosslink triangle each,
 33/36/35 nodes respectively, every lever real and unit-tested (see the

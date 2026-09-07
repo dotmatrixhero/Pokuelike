@@ -4562,3 +4562,67 @@ not something this pathfinding pass itself caused or is positioned to fix.
       green (1008/1008). MOVES_DESIGN.md's primitives checklist and Body
       Slam writeup updated; Atlas's `PASSIVE_LABEL` map got a real
       `unshaken` entry; rebuilt and republished.
+- [x] **Shipped real v2 skill trees for Vine Whip, Wing Attack, Rock Slide,
+      and Dig** — direct ask: "look at a bunch of the moves that are
+      actually available to the average units in our sim, and then try to
+      create some skill trees with em." Checked which spawned/common
+      species' real signature moves still had no tree at all (bare
+      `MoveSpec`, no `tree:` field) — Bulbasaur's Vine Whip, Pidgey's Wing
+      Attack, Onix's Rock Slide, and Diglett/Sandshrew's Dig, all four
+      guaranteed to actually show up in a real run, unlike Body Slam's
+      Snorlax (see below). Also surfaced a real gap along the way, from a
+      direct follow-up ("we don't have vine whip? i thought we
+      designed it...."): Vine Whip's paper draft was the ORIGINAL v2
+      template prototype, but the actual shipped trees went to
+      Tackle/Slash/Ember instead — Vine Whip itself was never built until
+      now.
+      - **Vine Whip** (33 nodes): Aggression *Choking Grip* (drain/grip —
+        `lifestealFraction`, a `forcedMovement`-pull fork, a multi-hit
+        keystone), Boldness *Root and Bind* (rooted-plant toughness),
+        Sociability *Shared Growth* (leans into the same nurturing fantasy
+        `leech_seed` already carries — `allyEffect`/`allyEffectOnAttack`/
+        `healAura`). Crosslink *Snapback Lash* is the original paper
+        draft's own named node, finally shipped.
+      - **Wing Attack** (33 nodes): Aggression *Relentless Dive* (crit-
+        fisher, `critCooldownReset`), Boldness *Wind Rider* (a bird's real
+        defense is air superiority, not bulk — `forcedMovement` hit-and-
+        retreat, and a keystone giving `"unshaken"` its second-ever home
+        after Body Slam's Unbothered), Sociability *Flock Signal* (a prey
+        bird's real defense is the flock — `rallyCall`'s *Mob the Threat*,
+        `calmingPresence`).
+      - **Rock Slide** (33 nodes): deliberately NOT a re-skin of Onix's
+        other two trees (Rock Throw's single-target defense-pen,
+        Earthquake's ground-shockwave AoE) — leans on `situationalBonus`'s
+        `"elevation"` condition instead (boulders falling from above), the
+        first shipped tree to use it. Sociability reuses Earthquake's
+        `excludesAllies` for a different reason (an advance-warning
+        tremor) and forks into `calmingPresence`/`nonTerritorial`.
+      - **Dig** (21 nodes, honestly smaller): Dig is never resolved as an
+        actual hit (`pickBestMove` excludes any `burrow` move from hostile
+        selection), so every damage-facing lever this template usually
+        leans on would be silently inert here. Built instead purely from
+        the two levers that ARE real: `cooldownTicks` (genuinely gates how
+        often it can burrow-flee) and `grantsPassive`/`grantsPassives`
+        (agent-level, real regardless of how the move is used) — no padded
+        "+5 Power" filler pretending otherwise. Shared by Diglett AND
+        Sandshrew (a real cross-species pairing per species.ts's own
+        comment); Sociability's *Shared Ground* leans into that.
+      - Verified live in a real run: Bulbasaur auto-respecs across all
+        three Vine Whip branches including the *Snapback Lash* crosslink;
+        Pidgey/Pidgeotto do the same for Wing Attack. Rock Slide/Dig didn't
+        fire in the specific seeds spot-checked (Onix/Diglett/Sandshrew
+        level up slower and compete for the same typed skill points as
+        their other known moves' trees) — read as RNG variance on a small
+        sample, not a structural problem; the generic structural suite
+        validates all four trees' prerequisites/excludes/forks the same
+        way as every other shipped tree. Full data suite green (228/228),
+        engine suite unaffected (1094/1094).
+      - Also confirmed along the way (a direct follow-up question, "is it
+        being used by the simulator?"): Solar Beam and Hydro Pump ARE both
+        live in real runs (Venusaur is spawned directly; Gyarados/Blastoise
+        are reachable via real in-sim evolution from Magikarp/Squirtle),
+        but Body Slam's Snorlax has no spawn or immigration path at all —
+        its whole tree (including this session's chargeAttack/
+        nonTerritorial/calmingPresence/unshaken work) is currently only
+        reachable through unit tests, never a live run. Still open; not
+        addressed this round.

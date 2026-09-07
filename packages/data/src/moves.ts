@@ -754,6 +754,315 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("VINE_WHIP"),
     cooldownTicks: 2,
     range: { min: 0, max: 2 },
+    // v2 (MOVES_DESIGN.md's own template). Direct follow-up: "we don't
+    // have vine whip? i thought we designed it..." — a fair catch. Vine
+    // Whip's paper draft (named nodes like "Snapback Lash") was the
+    // original prototype that PROVED the v2 template, but the actual
+    // shipped v2 trees ended up going to Tackle/Slash/Ember/Body Slam
+    // instead — Vine Whip itself was never built. This is that build,
+    // finally, using the same three-branch-plus-crosslink-triangle shape
+    // (10 nodes/branch + 3 crosslinks = 33), Bulbasaur's own real
+    // signature move (spawned in every run, unlike Body Slam's Snorlax).
+    // Every lever below is already-shipped engine plumbing (see the
+    // primitives checklist) — no new engine work needed for this one.
+    tree: {
+      // --- Aggression: "Choking Grip" — the vines don't just strike, they
+      // squeeze, drain, and drag the target in close.
+      choking_grip: {
+        id: "choking_grip",
+        name: "Choking Grip",
+        cost: 1,
+        leaning: "aggression",
+        delta: { lifestealFraction: 0.1 },
+      },
+      tendril_lash: {
+        id: "tendril_lash",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["choking_grip"],
+        leaning: "aggression",
+        delta: { power: 5 },
+      },
+      reaching_vines: {
+        id: "reaching_vines",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisitesAnyOf: [["tendril_lash"], ["snapback_lash"]],
+        leaning: "aggression",
+        delta: { accuracy: 10 },
+      },
+      crushing_coil: {
+        id: "crushing_coil",
+        name: "Crushing Coil",
+        cost: 1,
+        prerequisites: ["reaching_vines"],
+        leaning: "aggression",
+        // The wrap tightens past whatever guard the target's got up.
+        delta: { defensePenetration: 0.15 },
+      },
+      deeper_hold: {
+        id: "deeper_hold",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["crushing_coil"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -1 },
+      },
+      throttling_grip: {
+        id: "throttling_grip",
+        name: "Throttling Grip",
+        cost: 1,
+        prerequisites: ["deeper_hold"],
+        excludes: ["constricting_pull"],
+        leaning: "aggression",
+        // A harder squeeze at the cost of precision.
+        delta: { lifestealFraction: 0.1, accuracy: -5 },
+      },
+      constricting_pull: {
+        id: "constricting_pull",
+        name: "Constricting Pull",
+        cost: 1,
+        prerequisites: ["deeper_hold"],
+        excludes: ["throttling_grip"],
+        leaning: "aggression",
+        // Drags the target in close instead — sets up whatever comes next.
+        delta: { power: 5, forcedMovement: { mover: "defender", direction: "closer", tiles: 1, timing: "onHit" } },
+      },
+      unbreakable_hold: {
+        id: "unbreakable_hold",
+        name: "Unbreakable Hold",
+        cost: 2,
+        prerequisitesAnyOf: [["throttling_grip"], ["constricting_pull"]],
+        leaning: "aggression",
+        delta: { power: 10, cooldownTicks: -1 },
+      },
+      sapping_reach: {
+        id: "sapping_reach",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["unbreakable_hold"],
+        leaning: "aggression",
+        delta: { power: 5 },
+      },
+      endless_lashing: {
+        id: "endless_lashing",
+        name: "Endless Lashing",
+        cost: 2,
+        prerequisites: ["sapping_reach"],
+        leaning: "aggression",
+        // A flurry of draining lashes instead of one grip — more chances to
+        // land, more life drained doing it.
+        delta: { hits: { min: 2, max: 3 }, lifestealFraction: 0.1 },
+      },
+      // Crosslink: Aggression <-> Boldness — the original paper draft's own
+      // named node. A rooted plant's reach doesn't just strike, it can drag
+      // what it catches in close.
+      snapback_lash: {
+        id: "snapback_lash",
+        name: "Snapback Lash",
+        cost: 1,
+        prerequisites: ["choking_grip", "deep_roots"],
+        leaning: "aggression",
+        delta: { range: { max: 3 }, forcedMovement: { mover: "defender", direction: "closer", tiles: 1, timing: "onHit" } },
+      },
+      // --- Boldness: "Root and Bind" — a plant that digs in and refuses to
+      // be moved, its own hide toughening the longer a fight runs.
+      deep_roots: {
+        id: "deep_roots",
+        name: "Deep Roots",
+        cost: 1,
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.08 },
+        delta: {},
+      },
+      thick_vines: {
+        id: "thick_vines",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["deep_roots"],
+        leaning: "boldness",
+        delta: { accuracy: 10 },
+      },
+      tangled_growth: {
+        id: "tangled_growth",
+        name: "+5 Power",
+        cost: 1,
+        prerequisitesAnyOf: [["thick_vines"], ["snapback_lash"], ["shared_roots"]],
+        leaning: "boldness",
+        delta: { power: 5 },
+      },
+      unyielding_stem: {
+        id: "unyielding_stem",
+        name: "Unyielding Stem",
+        cost: 1,
+        prerequisites: ["tangled_growth"],
+        leaning: "boldness",
+        grantsPassive: { kind: "defenseBoost", value: 0.05 },
+        delta: {},
+      },
+      deeper_roots: {
+        id: "deeper_roots",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["unyielding_stem"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      verdant_recovery: {
+        id: "verdant_recovery",
+        name: "Verdant Recovery",
+        cost: 1,
+        prerequisites: ["deeper_roots"],
+        excludes: ["thornbound"],
+        leaning: "boldness",
+        // Draws steady nourishment straight from the ground it's rooted in.
+        grantsPassive: { kind: "regen", value: 0.04 },
+        delta: {},
+      },
+      thornbound: {
+        id: "thornbound",
+        name: "Thornbound",
+        cost: 1,
+        prerequisites: ["deeper_roots"],
+        excludes: ["verdant_recovery"],
+        leaning: "boldness",
+        grantsPassive: { kind: "thorns", value: 0.12 },
+        delta: {},
+      },
+      ironbark: {
+        id: "ironbark",
+        name: "Ironbark",
+        cost: 2,
+        prerequisitesAnyOf: [["verdant_recovery"], ["thornbound"]],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.06 },
+        delta: {},
+      },
+      hardened_bark: {
+        id: "hardened_bark",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["ironbark"],
+        leaning: "boldness",
+        delta: { accuracy: 10 },
+      },
+      bramble_ward: {
+        id: "bramble_ward",
+        name: "Bramble Ward",
+        cost: 2,
+        prerequisites: ["hardened_bark"],
+        leaning: "boldness",
+        // The woodier hide grows thorns of its own — a real "two passives,
+        // one keystone" finale.
+        grantsPassives: [
+          { kind: "defenseBoost", value: 0.08 },
+          { kind: "thorns", value: 0.08 },
+        ],
+        delta: {},
+      },
+      // Crosslink: Boldness <-> Sociability — a rooted plant sharing its own
+      // ground with whoever's fighting alongside it.
+      shared_roots: {
+        id: "shared_roots",
+        name: "Shared Roots",
+        cost: 1,
+        prerequisites: ["deep_roots", "nurturing_tendrils"],
+        leaning: "sociability",
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        delta: {},
+      },
+      // --- Sociability: "Shared Growth" — Bulbasaur's own real nurturing
+      // instinct (the same fantasy leech_seed already leans on), tending to
+      // whoever's fighting alongside it instead of just itself.
+      nurturing_tendrils: {
+        id: "nurturing_tendrils",
+        name: "Nurturing Tendrils",
+        cost: 1,
+        leaning: "sociability",
+        delta: { targetsAlly: true, allyEffect: { healFraction: 0.15 } },
+      },
+      verdant_reach: {
+        id: "verdant_reach",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["nurturing_tendrils"],
+        leaning: "sociability",
+        delta: { accuracy: 10 },
+      },
+      binding_roots: {
+        id: "binding_roots",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisitesAnyOf: [["verdant_reach"], ["shared_roots"]],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      shared_vigor: {
+        id: "shared_vigor",
+        name: "Shared Vigor",
+        cost: 1,
+        prerequisites: ["binding_roots"],
+        leaning: "sociability",
+        delta: { allyEffect: { healFraction: 0.2, buff: { stat: "defense", stage: 1, ticks: 20 } } },
+      },
+      quickening_growth: {
+        id: "quickening_growth",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["shared_vigor"],
+        leaning: "sociability",
+        delta: { power: 5 },
+      },
+      vine_network: {
+        id: "vine_network",
+        name: "Vine Network",
+        cost: 1,
+        prerequisites: ["quickening_growth"],
+        excludes: ["bracing_growth"],
+        leaning: "sociability",
+        // Deepens the heal, keeping the defense buff it's already carrying.
+        delta: { allyEffect: { healFraction: 0.3, buff: { stat: "defense", stage: 1, ticks: 20 } } },
+      },
+      bracing_growth: {
+        id: "bracing_growth",
+        name: "Bracing Growth",
+        cost: 1,
+        prerequisites: ["quickening_growth"],
+        excludes: ["vine_network"],
+        leaning: "sociability",
+        // Trades the healing lean for a real Attack buff instead.
+        delta: { allyEffect: { healFraction: 0.1, buff: { stat: "attack", stage: 1, ticks: 20 } } },
+      },
+      reaching_growth: {
+        id: "reaching_growth",
+        name: "Reaching Growth",
+        cost: 2,
+        prerequisitesAnyOf: [["vine_network"], ["bracing_growth"]],
+        leaning: "sociability",
+        // The ally effect now also fires the instant this hits an enemy,
+        // on top of its own dedicated idle-tick use — no extra cost.
+        delta: { allyEffectOnAttack: true },
+      },
+      deep_bond: {
+        id: "deep_bond",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["reaching_growth"],
+        leaning: "sociability",
+        delta: { power: 5 },
+      },
+      verdant_grove: {
+        id: "verdant_grove",
+        name: "Verdant Grove",
+        cost: 2,
+        prerequisites: ["deep_bond"],
+        leaning: "sociability",
+        // Just growing near this Bulbasaur mends the herd, slowly, on its
+        // own — no move needed, no cooldown to manage.
+        grantsPassive: { kind: "healAura", value: 0.01 },
+        delta: {},
+      },
+    },
   },
   ember: {
     id: "ember",
@@ -3791,6 +4100,327 @@ export const MOVES: Record<string, MoveSpec> = {
     cooldownTicks: 3,
     range: { min: 0, max: 1 },
     hitsArea: true,
+    // v2 (MOVES_DESIGN.md's own template). Onix's third real move —
+    // already has Rock Throw's defense-penetrating single-target tree and
+    // Earthquake's ground-shockwave AoE tree, so this one earns a genuinely
+    // different fantasy: boulders literally falling FROM ABOVE, not thrown
+    // or shaken up from the ground. Leans on `situationalBonus`'s
+    // `"elevation"` condition (attacker on a strictly higher tile) as its
+    // own real hook, distinct from either sibling tree. Same three-branch-
+    // plus-crosslink-triangle shape (10 nodes/branch + 3 crosslinks = 33).
+    tree: {
+      // --- Aggression: "Landslide Fury" — more stone, falling harder,
+      // from higher up.
+      raining_stones: {
+        id: "raining_stones",
+        name: "Raining Stones",
+        cost: 1,
+        leaning: "aggression",
+        delta: { situationalBonus: { condition: "elevation", multiplier: 1.3 } },
+      },
+      heavier_boulders: {
+        id: "heavier_boulders",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["raining_stones"],
+        leaning: "aggression",
+        delta: { power: 5 },
+      },
+      steadier_aim: {
+        id: "steadier_aim",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisitesAnyOf: [["heavier_boulders"], ["braced_throw"]],
+        leaning: "aggression",
+        delta: { accuracy: 10 },
+      },
+      crushing_debris: {
+        id: "crushing_debris",
+        name: "Crushing Debris",
+        cost: 1,
+        prerequisites: ["steadier_aim"],
+        leaning: "aggression",
+        delta: { defensePenetration: 0.1 },
+      },
+      faster_collapse: {
+        id: "faster_collapse",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["crushing_debris"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -1 },
+      },
+      wider_slide: {
+        id: "wider_slide",
+        name: "Wider Slide",
+        cost: 1,
+        prerequisites: ["faster_collapse"],
+        excludes: ["heavier_stones"],
+        leaning: "aggression",
+        // A broader wall of falling stone, spread thinner.
+        delta: { shape: { kind: "burst", radius: 2 }, power: -10 },
+      },
+      heavier_stones: {
+        id: "heavier_stones",
+        name: "Heavier Stones",
+        cost: 1,
+        prerequisites: ["faster_collapse"],
+        excludes: ["wider_slide"],
+        leaning: "aggression",
+        // Fewer, bigger boulders, harder to line up.
+        delta: { power: 15, accuracy: -10 },
+      },
+      ground_shaking_impact: {
+        id: "ground_shaking_impact",
+        name: "Ground-Shaking Impact",
+        cost: 2,
+        prerequisitesAnyOf: [["wider_slide"], ["heavier_stones"]],
+        leaning: "aggression",
+        // Whatever's still standing after the rockfall gets no time to
+        // recover before the next one.
+        delta: { power: 10, jamCooldownTicks: 1 },
+      },
+      settling_dust: {
+        id: "settling_dust",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["ground_shaking_impact"],
+        leaning: "aggression",
+        delta: { power: 5 },
+      },
+      avalanche_wall: {
+        id: "avalanche_wall",
+        name: "Avalanche Wall",
+        cost: 2,
+        prerequisites: ["settling_dust"],
+        leaning: "aggression",
+        // The whole slope comes down at once, Onix's own real mass adding
+        // to the weight of what's already falling.
+        delta: { shape: { kind: "burst", radius: 2 }, weightScaling: { factor: 0.1 } },
+      },
+      // Crosslink: Aggression <-> Boldness — a braced stance behind every
+      // throw, Boldness's sturdiness feeding Aggression's follow-through.
+      braced_throw: {
+        id: "braced_throw",
+        name: "Braced Throw",
+        cost: 1,
+        prerequisites: ["raining_stones", "stone_shield"],
+        leaning: "aggression",
+        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 12 } },
+      },
+      // --- Boldness: "Bedrock Stance" — standing unmoved in the middle of
+      // its own rockfall.
+      stone_shield: {
+        id: "stone_shield",
+        name: "Stone Shield",
+        cost: 1,
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.08 },
+        delta: {},
+      },
+      firmer_footing: {
+        id: "firmer_footing",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["stone_shield"],
+        leaning: "boldness",
+        delta: { accuracy: 10 },
+      },
+      craggy_hide: {
+        id: "craggy_hide",
+        name: "Craggy Hide",
+        cost: 1,
+        prerequisitesAnyOf: [["firmer_footing"], ["watchful_bulk"]],
+        leaning: "boldness",
+        grantsPassive: { kind: "defenseBoost", value: 0.05 },
+        delta: {},
+      },
+      denser_stone: {
+        id: "denser_stone",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["craggy_hide"],
+        leaning: "boldness",
+        delta: { power: 5 },
+      },
+      settled_stance: {
+        id: "settled_stance",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["denser_stone"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      weathering: {
+        id: "weathering",
+        name: "Weathering",
+        cost: 1,
+        prerequisites: ["settled_stance"],
+        excludes: ["jagged_edges"],
+        leaning: "boldness",
+        grantsPassive: { kind: "regen", value: 0.03 },
+        delta: {},
+      },
+      jagged_edges: {
+        id: "jagged_edges",
+        name: "Jagged Edges",
+        cost: 1,
+        prerequisites: ["settled_stance"],
+        excludes: ["weathering"],
+        leaning: "boldness",
+        grantsPassive: { kind: "thorns", value: 0.12 },
+        delta: {},
+      },
+      unbroken: {
+        id: "unbroken",
+        name: "Unbroken",
+        cost: 2,
+        prerequisitesAnyOf: [["weathering"], ["jagged_edges"]],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.06 },
+        delta: {},
+      },
+      time_worn: {
+        id: "time_worn",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["unbroken"],
+        leaning: "boldness",
+        delta: { accuracy: 10 },
+      },
+      mountains_weight: {
+        id: "mountains_weight",
+        name: "Mountain's Weight",
+        cost: 2,
+        prerequisites: ["time_worn"],
+        leaning: "boldness",
+        // A real "two passives, one keystone" finale — the craggy hide
+        // grows edges of its own.
+        grantsPassives: [
+          { kind: "defenseBoost", value: 0.08 },
+          { kind: "thorns", value: 0.08 },
+        ],
+        delta: {},
+      },
+      // Crosslink: Boldness <-> Sociability — the same steady stance that
+      // shrugs off falling rock also shelters whoever's standing near it.
+      watchful_bulk: {
+        id: "watchful_bulk",
+        name: "Watchful Bulk",
+        cost: 1,
+        prerequisites: ["stone_shield", "herd_warning"],
+        leaning: "sociability",
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        delta: {},
+      },
+      // --- Sociability: "Warning Rumble" — the tremor before the rockfall
+      // gives everyone nearby, herd or rival, a real chance to get clear.
+      herd_warning: {
+        id: "herd_warning",
+        name: "Herd Warning",
+        cost: 1,
+        leaning: "sociability",
+        // Same real ally-exemption Earthquake's own Herdsafe Trigger uses —
+        // a same-herd agent caught in the burst takes nothing.
+        delta: { excludesAllies: true },
+      },
+      clearer_warning: {
+        id: "clearer_warning",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["herd_warning"],
+        leaning: "sociability",
+        delta: { accuracy: 10 },
+      },
+      faster_warning: {
+        id: "faster_warning",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisitesAnyOf: [["clearer_warning"], ["watchful_bulk"]],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      settling_rumble: {
+        id: "settling_rumble",
+        name: "Settling Rumble",
+        cost: 1,
+        prerequisites: ["faster_warning"],
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.2 },
+        delta: {},
+      },
+      deeper_rumble: {
+        id: "deeper_rumble",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["settling_rumble"],
+        leaning: "sociability",
+        delta: { power: 5 },
+      },
+      wider_warning: {
+        id: "wider_warning",
+        name: "Wider Warning",
+        cost: 1,
+        prerequisites: ["deeper_rumble"],
+        excludes: ["sharpened_call"],
+        leaning: "sociability",
+        // Deepens the calm further — an even bigger radius of rivals that
+        // just... don't bother.
+        grantsPassive: { kind: "calmingPresence", value: 0.15 },
+        delta: {},
+      },
+      sharpened_call: {
+        id: "sharpened_call",
+        name: "Sharpened Call",
+        cost: 1,
+        prerequisites: ["deeper_rumble"],
+        excludes: ["wider_warning"],
+        leaning: "sociability",
+        // An Onix this reliably loud about warning everyone off doesn't
+        // pick fights it doesn't need either.
+        grantsPassive: { kind: "nonTerritorial", value: 1 },
+        delta: {},
+      },
+      toppling_call: {
+        id: "toppling_call",
+        name: "Toppling Call",
+        cost: 2,
+        prerequisitesAnyOf: [["wider_warning"], ["sharpened_call"]],
+        leaning: "sociability",
+        // Whatever's still standing after the warning gets marked for
+        // anything else nearby to finish.
+        delta: { rallyCall: { ticks: 15 } },
+      },
+      lasting_rumble: {
+        id: "lasting_rumble",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["toppling_call"],
+        leaning: "sociability",
+        delta: { power: 5 },
+      },
+      stone_circle: {
+        id: "stone_circle",
+        name: "Stone Circle",
+        cost: 2,
+        prerequisites: ["lasting_rumble"],
+        leaning: "sociability",
+        // Denning together, tending each other, slowly, no move needed.
+        grantsPassive: { kind: "healAura", value: 0.01 },
+        delta: {},
+      },
+      // Crosslink: Sociability <-> Aggression — while everything nearby is
+      // still reacting to the warning rumble, this is exactly when it
+      // strikes whatever didn't move fast enough.
+      opportunists_fall: {
+        id: "opportunists_fall",
+        name: "Opportunist's Fall",
+        cost: 1,
+        prerequisites: ["herd_warning", "raining_stones"],
+        leaning: "aggression",
+        delta: { situationalBonus: { condition: "flanking", multiplier: 1.25 } },
+      },
+    },
   },
   sludge: {
     id: "sludge",
@@ -3853,6 +4483,319 @@ export const MOVES: Record<string, MoveSpec> = {
     cooldownTicks: 2,
     range: { min: 0, max: 2 },
     hitsArea: true,
+    // v2 (MOVES_DESIGN.md's own template). Pidgey's real signature move,
+    // spawned every run — a small, fast prey bird whose actual defense is
+    // the flock, not raw toughness. Same three-branch-plus-crosslink-
+    // triangle shape as Tackle/Vine Whip (10 nodes/branch + 3 crosslinks =
+    // 33), every lever already-shipped engine plumbing.
+    tree: {
+      // --- Aggression: "Relentless Dive" — quick, repeated diving strikes,
+      // built around landing a real crit and following up before the
+      // target can recover.
+      diving_strike: {
+        id: "diving_strike",
+        name: "Diving Strike",
+        cost: 1,
+        leaning: "aggression",
+        delta: { critRateStage: 1 },
+      },
+      sharpened_talons: {
+        id: "sharpened_talons",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["diving_strike"],
+        leaning: "aggression",
+        delta: { power: 5 },
+      },
+      steady_approach: {
+        id: "steady_approach",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisitesAnyOf: [["sharpened_talons"], ["feint_and_strike"]],
+        leaning: "aggression",
+        delta: { accuracy: 10 },
+      },
+      talon_rake: {
+        id: "talon_rake",
+        name: "Talon Rake",
+        cost: 1,
+        prerequisites: ["steady_approach"],
+        leaning: "aggression",
+        delta: { defensePenetration: 0.12 },
+      },
+      quicker_wings: {
+        id: "quicker_wings",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["talon_rake"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -1 },
+      },
+      rapid_wingbeats: {
+        id: "rapid_wingbeats",
+        name: "Rapid Wingbeats",
+        cost: 1,
+        prerequisites: ["quicker_wings"],
+        excludes: ["full_talon_dive"],
+        leaning: "aggression",
+        // Two quick, lighter strikes instead of one committed dive.
+        delta: { hits: { min: 2, max: 2 }, power: -10 },
+      },
+      full_talon_dive: {
+        id: "full_talon_dive",
+        name: "Full Talon Dive",
+        cost: 1,
+        prerequisites: ["quicker_wings"],
+        excludes: ["rapid_wingbeats"],
+        leaning: "aggression",
+        // Commits fully to one reckless dive.
+        delta: { power: 15, cooldownTicks: 1, recoilFraction: 0.05 },
+      },
+      killing_stoop: {
+        id: "killing_stoop",
+        name: "Killing Stoop",
+        cost: 2,
+        prerequisitesAnyOf: [["rapid_wingbeats"], ["full_talon_dive"]],
+        leaning: "aggression",
+        // A landed crit means the wings never actually slow down.
+        delta: { power: 10, critCooldownReset: true },
+      },
+      diving_momentum: {
+        id: "diving_momentum",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["killing_stoop"],
+        leaning: "aggression",
+        delta: { power: 5 },
+      },
+      storm_of_talons: {
+        id: "storm_of_talons",
+        name: "Storm of Talons",
+        cost: 2,
+        prerequisites: ["diving_momentum"],
+        leaning: "aggression",
+        // A wider dive-bomb spread — the whole flock's worth of danger from
+        // one bird.
+        delta: { shape: { kind: "cone", length: 3, width: 3 }, power: 10 },
+      },
+      // Crosslink: Aggression <-> Boldness — a feint on the wind before the
+      // real strike, Boldness's air control feeding Aggression's dive.
+      feint_and_strike: {
+        id: "feint_and_strike",
+        name: "Feint and Strike",
+        cost: 1,
+        prerequisites: ["diving_strike", "evasive_flight"],
+        leaning: "aggression",
+        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 12 } },
+      },
+      // --- Boldness: "Wind Rider" — a bird doesn't tank a hit, it's just
+      // not there when the hit arrives. Air superiority, not raw bulk.
+      evasive_flight: {
+        id: "evasive_flight",
+        name: "Evasive Flight",
+        cost: 1,
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.06 },
+        delta: {},
+      },
+      riding_thermals: {
+        id: "riding_thermals",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["evasive_flight"],
+        leaning: "boldness",
+        delta: { accuracy: 10 },
+      },
+      banking_turn: {
+        id: "banking_turn",
+        name: "+5 Power",
+        cost: 1,
+        prerequisitesAnyOf: [["riding_thermals"], ["feint_and_strike"], ["guard_the_flock"]],
+        leaning: "boldness",
+        delta: { power: 5 },
+      },
+      wind_shear: {
+        id: "wind_shear",
+        name: "Wind Shear",
+        cost: 1,
+        prerequisites: ["banking_turn"],
+        leaning: "boldness",
+        // Strikes, then peels straight back out of range — hit and run,
+        // for real.
+        delta: { forcedMovement: { mover: "attacker", direction: "away", tiles: 1, timing: "onHit" } },
+      },
+      steadier_wings: {
+        id: "steadier_wings",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["wind_shear"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      tailwind_recovery: {
+        id: "tailwind_recovery",
+        name: "Tailwind Recovery",
+        cost: 1,
+        prerequisites: ["steadier_wings"],
+        excludes: ["storm_wings"],
+        leaning: "boldness",
+        grantsPassive: { kind: "regen", value: 0.03 },
+        delta: {},
+      },
+      storm_wings: {
+        id: "storm_wings",
+        name: "Storm Wings",
+        cost: 1,
+        prerequisites: ["steadier_wings"],
+        excludes: ["tailwind_recovery"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        delta: { accuracy: -5 },
+      },
+      sky_dominance: {
+        id: "sky_dominance",
+        name: "Sky Dominance",
+        cost: 2,
+        prerequisitesAnyOf: [["tailwind_recovery"], ["storm_wings"]],
+        leaning: "boldness",
+        delta: { accuracy: 10 },
+        grantsPassive: { kind: "defenseBoost", value: 0.04 },
+      },
+      surer_wings: {
+        id: "surer_wings",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["sky_dominance"],
+        leaning: "boldness",
+        delta: { power: 5 },
+      },
+      wind_dancer: {
+        id: "wind_dancer",
+        name: "Wind Dancer",
+        cost: 2,
+        prerequisites: ["surer_wings"],
+        leaning: "boldness",
+        // The wing simply isn't there when the blow lands — once, then it
+        // needs a moment before it can pull that off again.
+        grantsPassive: { kind: "unshaken", value: 1 },
+        delta: {},
+      },
+      // Crosslink: Boldness <-> Sociability — the same air control that
+      // keeps this bird alive extends to covering the flock.
+      guard_the_flock: {
+        id: "guard_the_flock",
+        name: "Guard the Flock",
+        cost: 1,
+        prerequisites: ["evasive_flight", "warning_cry"],
+        leaning: "sociability",
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        delta: {},
+      },
+      // --- Sociability: "Flock Signal" — a prey bird's real defense isn't
+      // toughness, it's the flock: a warning cry, then the whole group
+      // converging on whatever's threatening it.
+      warning_cry: {
+        id: "warning_cry",
+        name: "Warning Cry",
+        cost: 1,
+        leaning: "sociability",
+        delta: { targetsAlly: true, allyEffect: { buff: { stat: "speed", stage: 1, ticks: 20 } } },
+      },
+      sharper_call: {
+        id: "sharper_call",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["warning_cry"],
+        leaning: "sociability",
+        delta: { accuracy: 10 },
+      },
+      quicker_call: {
+        id: "quicker_call",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisitesAnyOf: [["sharper_call"], ["guard_the_flock"]],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      mob_the_threat: {
+        id: "mob_the_threat",
+        name: "Mob the Threat",
+        cost: 1,
+        prerequisites: ["quicker_call"],
+        leaning: "sociability",
+        // The cry doesn't just warn the flock off — it marks exactly what
+        // to converge on.
+        delta: { rallyCall: { ticks: 15 } },
+      },
+      louder_call: {
+        id: "louder_call",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["mob_the_threat"],
+        leaning: "sociability",
+        delta: { power: 5 },
+      },
+      rousing_call: {
+        id: "rousing_call",
+        name: "Rousing Call",
+        cost: 1,
+        prerequisites: ["louder_call"],
+        excludes: ["calming_call"],
+        leaning: "sociability",
+        // Trades the speed lean for a real Attack buff instead.
+        delta: { allyEffect: { buff: { stat: "attack", stage: 1, ticks: 20 } } },
+      },
+      calming_call: {
+        id: "calming_call",
+        name: "Calming Call",
+        cost: 1,
+        prerequisites: ["louder_call"],
+        excludes: ["rousing_call"],
+        leaning: "sociability",
+        // Once the threat's named out loud, the flock itself settles.
+        grantsPassive: { kind: "calmingPresence", value: 0.2 },
+        delta: {},
+      },
+      united_front: {
+        id: "united_front",
+        name: "United Front",
+        cost: 2,
+        prerequisitesAnyOf: [["rousing_call"], ["calming_call"]],
+        leaning: "sociability",
+        // `rallyCall` is an overwrite, not additive — this replaces Mob the
+        // Threat's 15-tick mark with a genuinely longer one, not a stack.
+        delta: { rallyCall: { ticks: 25 }, cooldownTicks: -1 },
+      },
+      steadfast_call: {
+        id: "steadfast_call",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["united_front"],
+        leaning: "sociability",
+        delta: { power: 5 },
+      },
+      flocks_eye: {
+        id: "flocks_eye",
+        name: "Flock's Eye",
+        cost: 2,
+        prerequisites: ["steadfast_call"],
+        leaning: "sociability",
+        // Just staying alert together mends the flock, slowly, all on its
+        // own.
+        grantsPassive: { kind: "healAura", value: 0.01 },
+        delta: {},
+      },
+      // Crosslink: Sociability <-> Aggression — the same cry that warns the
+      // flock also tells this one exactly when the target's off guard.
+      ambush_call: {
+        id: "ambush_call",
+        name: "Ambush Call",
+        cost: 1,
+        prerequisites: ["warning_cry", "diving_strike"],
+        leaning: "aggression",
+        delta: { situationalBonus: { condition: "flanking", multiplier: 1.25 } },
+      },
+    },
   },
   body_slam: {
     id: "body_slam",
@@ -4377,6 +5320,257 @@ export const MOVES: Record<string, MoveSpec> = {
     // cooldown — unlike an ordinary flee step, which costs nothing and can
     // be repeated every tick, this can't be spammed.
     burrow: { ticks: 20 },
+    // v2 (MOVES_DESIGN.md's own template), but honestly scoped smaller than
+    // Vine Whip/Wing Attack/Rock Slide above — Dig is genuinely never
+    // resolved as a hit (see the comment above), so power/accuracy/
+    // defensePenetration/forcedMovement/lifesteal/every damage-facing lever
+    // this template usually leans on are all dead weight here; there's
+    // nothing for them to modify. The only two real levers left are
+    // `cooldownTicks` (this move's own real cooldown, genuinely gating how
+    // often Diglett/Sandshrew can burrow-flee) and `grantsPassive`/
+    // `grantsPassives` (agent-level, real regardless of how the move is
+    // used). Every node below is one or the other — no padded "+5 Power"
+    // filler pretending this move deals damage. Shared by Diglett AND
+    // Sandshrew (species.ts's own comment: they coexist underground, a
+    // real cross-species breeding pair) — Sociability leans directly into
+    // that literal, already-written flavor.
+    tree: {
+      // --- Aggression: "Quick Vanish" — gone before anything can react,
+      // burrowing so often the cooldown itself is the whole build.
+      quick_reflexes: {
+        id: "quick_reflexes",
+        name: "Quick Reflexes",
+        cost: 1,
+        leaning: "aggression",
+        // Already tensed to bolt underground the instant something lands —
+        // the first hit against it does nothing at all.
+        grantsPassive: { kind: "unshaken", value: 1 },
+        delta: {},
+      },
+      looser_grip: {
+        id: "looser_grip",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["quick_reflexes"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -1 },
+      },
+      shallow_dive: {
+        id: "shallow_dive",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisitesAnyOf: [["looser_grip"], ["braced_dive"]],
+        leaning: "aggression",
+        delta: { cooldownTicks: -1 },
+      },
+      never_still: {
+        id: "never_still",
+        name: "Never Still",
+        cost: 1,
+        prerequisites: ["shallow_dive"],
+        // This branch's real "notable" is tempo, not power — there's
+        // nothing else honest to give it.
+        delta: { cooldownTicks: -2 },
+      },
+      instant_vanish: {
+        id: "instant_vanish",
+        name: "Instant Vanish",
+        cost: 1,
+        prerequisites: ["never_still"],
+        excludes: ["false_surface"],
+        leaning: "aggression",
+        // Recovers fast between dives instead of biting on the way past.
+        grantsPassive: { kind: "regen", value: 0.03 },
+        delta: {},
+      },
+      false_surface: {
+        id: "false_surface",
+        name: "False Surface",
+        cost: 1,
+        prerequisites: ["never_still"],
+        excludes: ["instant_vanish"],
+        leaning: "aggression",
+        // Surfaces just long enough to bite before vanishing again.
+        grantsPassive: { kind: "thorns", value: 0.1 },
+        delta: {},
+      },
+      gone_before_it_lands: {
+        id: "gone_before_it_lands",
+        name: "Gone Before It Lands",
+        cost: 2,
+        prerequisitesAnyOf: [["instant_vanish"], ["false_surface"]],
+        leaning: "aggression",
+        grantsPassive: { kind: "damageReduction", value: 0.06 },
+        delta: { cooldownTicks: -1 },
+      },
+      // Crosslink: Aggression <-> Boldness — braces for real before every
+      // dive, Boldness's own sturdiness feeding Aggression's speed.
+      braced_dive: {
+        id: "braced_dive",
+        name: "Braced Dive",
+        cost: 1,
+        prerequisites: ["quick_reflexes", "sturdy_return"],
+        leaning: "aggression",
+        grantsPassive: { kind: "damageReduction", value: 0.04 },
+        delta: {},
+      },
+      // --- Boldness: "Iron Burrow" — toughens up between dives instead of
+      // just vanishing faster.
+      sturdy_return: {
+        id: "sturdy_return",
+        name: "Sturdy Return",
+        cost: 1,
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.08 },
+        delta: {},
+      },
+      thicker_hide: {
+        id: "thicker_hide",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["sturdy_return"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      packed_earth: {
+        id: "packed_earth",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisitesAnyOf: [["thicker_hide"], ["braced_dive"], ["shared_shelter"]],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      bedrock_grip: {
+        id: "bedrock_grip",
+        name: "Bedrock Grip",
+        cost: 1,
+        prerequisites: ["packed_earth"],
+        grantsPassive: { kind: "defenseBoost", value: 0.05 },
+        leaning: "boldness",
+        delta: {},
+      },
+      weathered_scales: {
+        id: "weathered_scales",
+        name: "Weathered Scales",
+        cost: 1,
+        prerequisites: ["bedrock_grip"],
+        excludes: ["stone_hide"],
+        leaning: "boldness",
+        grantsPassive: { kind: "regen", value: 0.04 },
+        delta: {},
+      },
+      stone_hide: {
+        id: "stone_hide",
+        name: "Stone Hide",
+        cost: 1,
+        prerequisites: ["bedrock_grip"],
+        excludes: ["weathered_scales"],
+        leaning: "boldness",
+        // Stacks with Sturdy Return's own damageReduction for a real,
+        // cumulative toughness.
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        delta: {},
+      },
+      unshakable_ground: {
+        id: "unshakable_ground",
+        name: "Unshakable Ground",
+        cost: 2,
+        prerequisitesAnyOf: [["weathered_scales"], ["stone_hide"]],
+        leaning: "boldness",
+        grantsPassives: [
+          { kind: "defenseBoost", value: 0.05 },
+          { kind: "damageReduction", value: 0.05 },
+        ],
+        delta: {},
+      },
+      // Crosslink: Boldness <-> Sociability — a sturdy den shared with
+      // whoever else is burrowed nearby.
+      shared_shelter: {
+        id: "shared_shelter",
+        name: "Shared Shelter",
+        cost: 1,
+        prerequisites: ["sturdy_return", "peaceful_tunnels"],
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.1 },
+        delta: {},
+      },
+      // --- Sociability: "Shared Ground" — Diglett and Sandshrew genuinely
+      // coexist underground (species.ts's own note); this branch is that,
+      // mechanically.
+      peaceful_tunnels: {
+        id: "peaceful_tunnels",
+        name: "Peaceful Tunnels",
+        cost: 1,
+        leaning: "sociability",
+        grantsPassive: { kind: "nonTerritorial", value: 1 },
+        delta: {},
+      },
+      wider_burrow: {
+        id: "wider_burrow",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["peaceful_tunnels"],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      quiet_ground: {
+        id: "quiet_ground",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisitesAnyOf: [["wider_burrow"], ["quick_warning"]],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      settling_earth: {
+        id: "settling_earth",
+        name: "Settling Earth",
+        cost: 1,
+        prerequisitesAnyOf: [["quiet_ground"], ["shared_shelter"]],
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.2 },
+        delta: {},
+      },
+      deeper_calm: {
+        id: "deeper_calm",
+        name: "Deeper Calm",
+        cost: 1,
+        prerequisites: ["settling_earth"],
+        excludes: ["watchful_rest"],
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.15 },
+        delta: {},
+      },
+      watchful_rest: {
+        id: "watchful_rest",
+        name: "Watchful Rest",
+        cost: 1,
+        prerequisites: ["settling_earth"],
+        excludes: ["deeper_calm"],
+        leaning: "sociability",
+        grantsPassive: { kind: "regen", value: 0.03 },
+        delta: {},
+      },
+      denning_together: {
+        id: "denning_together",
+        name: "Denning Together",
+        cost: 2,
+        prerequisitesAnyOf: [["deeper_calm"], ["watchful_rest"]],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.01 },
+        delta: {},
+      },
+      // Crosslink: Sociability <-> Aggression — even the quick-vanishing
+      // ones know the tunnels are shared ground.
+      quick_warning: {
+        id: "quick_warning",
+        name: "Quick Warning",
+        cost: 1,
+        prerequisites: ["peaceful_tunnels", "quick_reflexes"],
+        leaning: "sociability",
+        grantsPassive: { kind: "regen", value: 0.02 },
+        delta: { cooldownTicks: -1 },
+      },
+    },
   },
 
   // --- Environmental/utility moves below. Direct ask: "moves that affect
