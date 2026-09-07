@@ -2,7 +2,7 @@ import type { Agent, HuntRules, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import type { RegionDispersalContext } from "./dispersal.js";
-import { growCanopyFood, growFlora, maybeDropSeed } from "./flora.js";
+import { growCanopyFood, growFlora, growUndergroundFlora, maybeDropSeed } from "./flora.js";
 import { decayShelters } from "./shelter.js";
 import { tickEgg } from "./eggs.js";
 import { updateHerdMigrations } from "./herdMigration.js";
@@ -220,6 +220,13 @@ export function tickWorld(
     }
   }
   growFlora(world, log, rng);
+  // Once per tick, not once per agent — same "world-level system, one pass"
+  // shape as growFlora above, its Underground counterpart: real crops
+  // (Potato/Pumpkin) down there now regrow and spread too instead of just
+  // decaying after worldgen — see flora.ts's own doc comment on
+  // growUndergroundFlora for why it's a genuine second copy of the loop
+  // rather than growFlora reused.
+  growUndergroundFlora(world, log, rng);
   // Once per tick, not once per agent — same "world-level system, one pass"
   // shape as growFlora above, its own much smaller Canopy-only counterpart
   // (real growth-stage rendering, CROPS_DESIGN.md) — see flora.ts's own doc

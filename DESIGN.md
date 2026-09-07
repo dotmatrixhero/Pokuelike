@@ -12720,3 +12720,63 @@ data suite (104 tests) green throughout.
   `maxCount` were judged against one real grid and left as-is; genuinely
   playing the game on a real map may reveal some types read too sparse or
   too common.
+
+## Underground crop regrowth/spread
+
+Direct question, then a direct follow-up: "Do crops propagate? Any way to
+spread?" and, after investigating, "Regrowth! Apples can just regrow
+infinitely from same tree. Spread! Potatoes and stuff can spread. Be spread
+by seedlings and by just growing in nearby patches."
+
+**Apple regrowth already worked, no code changed for it.** Canopy's Apple
+ripens in place: `growCanopyFood` picks up any canopy tile reading
+`stock === 0` after `CANOPY_APPLE_RIPEN_TICKS` and re-ripens it, and
+`needs.ts`'s eating logic only ever decrements `stock` — it never touches
+`terrain` — so a fully-eaten apple tile looks identical to a freshly-placed
+unripe one and regrows the same way. Confirmed live: a canopy apple tile
+forced to `stock: 0` came back to a nonzero stock (0.8) by tick ~199 of a
+plain `tickWorld` loop, no changes needed.
+
+**Underground crops (Potato/Pumpkin, `crops.ts`'s `nativeLayer:
+"underground"`) had no propagation mechanism at all.** `flora.ts`'s whole
+seedling/germination/spread system — `maybeDropSeed` (agents dropping seeds
+as they move), `trySpread` (a mature food tile spreading to a floor
+neighbor), and the seedling-maturation loop — was Surface-only by
+construction. Underground worldgen itself never places any food tiles
+either (`generateUndergroundCaves` only ever writes wall/floor/water) — so
+a fresh world starts with zero underground food, full stop, and had no way
+to ever get any.
+
+Fixed by generalizing the surface-only pieces and adding Underground's own
+growth pass:
+- `trySpread(world, layer, pos, log, rng)` now takes a `layer` parameter
+  instead of hardcoding `"surface"`, so the same spread-to-a-neighbor logic
+  works for either layer.
+- `maybeDropSeed`'s early-return guard now allows `"underground"` alongside
+  `"surface"` (Canopy stays excluded — it was never part of this seedling
+  system; Apple's regrowth works the separate way described above).
+- New `growUndergroundFlora(world, log, rng)`, called once per tick in
+  `simulation.ts` alongside `growFlora`/`growCanopyFood`: a genuine second
+  copy of `growFlora`'s core loop scoped to `world.tiles.underground`, not
+  a parameterized reuse of it — Underground has no sunbeam tiles at all (no
+  sun-loving bonus, no `nearSun` doubling in `pickCrop`), and
+  `floraDecayDivisor` already returns a flat 1 (no weather effect) for any
+  non-Surface layer, so the rain/drought decay-and-spread modulation
+  Surface food gets simply doesn't apply down here — that's real, not an
+  oversight. Same tuning constants otherwise (`MATURATION_TICKS`,
+  `FOOD_SPREAD_CHANCE`, `NATURAL_DECAY_PER_TICK`, etc.) — no underground-
+  specific run data yet to justify different numbers.
+
+### Real-run findings
+
+A fresh `createDemoWorld` genuinely starts with 0 underground food tiles.
+Over an 8000-tick `tickWorld` run with the fix in place: the first
+underground seedling/food tile appeared by tick ~601 (an underground-layer
+agent dropping a seed on a cave floor tile), 109 distinct underground tiles
+sprouted food/flora over the run (a real second tile sprouting by tick
+~579 — spread, not just one tile germinating repeatedly), and underground
+food/flora counts rose and fell in bursts (e.g. 0 -> 15 food + 27 flora
+tiles around tick 2601) tracking how many agents were actually down there
+at the time — the same traffic-driven boom/decay pattern Surface crops
+already show, now working Underground too. Full engine suite (1083 tests)
+green throughout.
