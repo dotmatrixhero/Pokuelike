@@ -1514,32 +1514,50 @@ take the crosslink, invest a filler and a notable *off of it*, and that
 notable becomes a genuine shortcut deeper into one of the two parent
 branches, skipping that branch's own linear filler grind.
 
-**Pattern, piloted on Earthquake (Shipped)**: *Coordinated Tremor*
-(crosslink) → *Marked Rupture* (filler) → *Converged Ruin* (notable). That
-notable is then added to `total_collapse`/`focused_rupture`'s own
-`prerequisitesAnyOf` — a REAL alternate route into the branch, not just
-another leaf hanging off the crosslink. Two rules that came out of
-building this one, worth keeping for every future bridge:
-- **Shortcut the grind, never the decision.** The fork itself
-  (`total_collapse` vs. `focused_rupture`) is still mutually exclusive and
-  still has to be chosen — the bridge only skips the *linear filler* nodes
-  leading up to it. A bridge that let you skip the fork itself, or land
-  straight on a capstone, would trivialize the branch's own real content
-  instead of offering a genuine alternate path to it.
+**Pattern, piloted on Earthquake (Shipped, revised once already)**:
+*Coordinated Tremor* (crosslink) → *Marked Rupture* (filler) → *Converged
+Ruin* (notable). Two rounds of real feedback shaped the final version:
+
+- **v1** wired Converged Ruin directly onto `total_collapse`/
+  `focused_rupture`'s own `prerequisitesAnyOf` — landing the shortcut
+  straight on the branch's fork. Direct correction: "the deeper cross
+  link going straight to the choice of 2 nodes are a bit too much." Also
+  v1 only reached into Aggression, even though Coordinated Tremor bridges
+  *two* branches (Sociability and Aggression) — direct correction: "make
+  them connect to the other branch too. Like it can go to either branch."
+- **v2 (current)**: Converged Ruin is instead wired one step *before*
+  each side's own fork — `seismic_feed`'s `prerequisitesAnyOf` on the
+  Aggression side, `tremor_reach`'s on the Sociability side (the two
+  nodes that structurally mirror each other: last plain filler before
+  each branch's own exclusive fork). Reaching either fork from here still
+  takes the same one extra node it would from the branch's own path — the
+  bridge saves the *grind*, not the *last step to the decision* — and it
+  now genuinely goes "to either branch," matching what Coordinated Tremor
+  itself actually connects.
+
+Two rules that came out of building this, worth keeping for every future
+bridge:
+- **Shortcut the grind, land the same distance from the decision as the
+  normal path would.** Not just "never skip the fork" (v1's fix already
+  tried that name, but still landed adjacent to the fork with an
+  anyOf grant into the fork nodes themselves, which was still read as
+  "too much") — land at the same *node depth relative to the decision*
+  a normal walk would, so the fork remains an equally-weighted choice
+  either way you arrived.
+- **A bridge should reach every branch its crosslink actually touches,
+  not just the one its own `leaning` happens to match.** Converged Ruin
+  is `leaning: "aggression"`, but Coordinated Tremor bridges Sociability
+  too — the shortcut needs its own wiring on *both* sides, not just the
+  side that matches the descendant node's own leaning field.
 - **No new engine primitive needed.** This is pure tree authoring —
   `prerequisitesAnyOf` already supports "any one of several alternative
-  sets," so adding a crosslink-rooted node as one more alternative is
-  exactly what that field is for. There's already a smaller-scale
-  precedent for this in the roster (Earthquake's own `overload_footing`
-  already listed `coordinated_tremor` itself as an alternate early-filler
-  prerequisite) — this pilot is that same idea, deliberately pushed
-  farther down the branch, to a real decision point instead of an early
-  filler.
+  sets," so adding a crosslink-rooted node as one more alternative on
+  each side's own pre-fork node is exactly what that field is for.
 
 Not yet done: rolling this same bridge pattern out to the other
 crosslinks in Earthquake, or to Hydro Pump/Solar Beam/Rock Throw at all —
-this was a single pilot, built to be checked before repeating the
-pattern everywhere.
+this was a single pilot, built to be checked (twice, now) before
+repeating the pattern everywhere.
 
 - **`SituationalCondition: "rallyMarked"` (Shipped)** — the defender
   currently has an active `rallyMarkTicksRemaining`. Same one-line-
@@ -1556,16 +1574,16 @@ pattern everywhere.
     the mark still has to be granted by something): `situationalBonus:
     "rallyMarked"`, a real payoff for calling out a target with Herdsafe
     Trigger, then burying it with the AoE-size fork.
-  - *Converged Ruin* (**Shipped** — the "deeper crosslinks" pilot, see
-    "Crosslinks as bridges" below) — extends that same chain one node
-    further: *Coordinated Tremor* → *Marked Rupture* → *Converged Ruin*.
-    Converged Ruin is wired into `total_collapse`/`focused_rupture`'s own
-    `prerequisitesAnyOf` as a real alternate route — a build that took the
-    Sociability opener plus this 3-node crosslink chain reaches the
-    Aggression branch's AoE-size fork without ever touching Aggression's
-    own five-node filler grind (Fault Trigger through Seismic Feed). The
-    fork itself is still a real, mutually-exclusive choice either way —
-    the shortcut skips the filler, not the decision.
+  - *Converged Ruin* (**Shipped**, revised — the "deeper crosslinks"
+    pilot, see "Crosslinks as bridges" below for the full v1→v2 story) —
+    extends that same chain one node further: *Coordinated Tremor* →
+    *Marked Rupture* → *Converged Ruin*. Wired into BOTH `seismic_feed`'s
+    (Aggression) and `tremor_reach`'s (Sociability) own
+    `prerequisitesAnyOf` — one step before each side's own fork, not onto
+    the fork itself. A build that took the Sociability opener plus this
+    3-node crosslink chain reaches either branch's own decision point
+    without walking that branch's own filler grind, but still has to take
+    the actual fork from there, same as anyone else.
   - *Braced Convergence* (Boldness↔Sociability) — the stillness Fissure
     Grip's brace fork already costs (`lockTicks`) buys a real payoff on
     the *other* branch: a much longer `rallyCall.ticks` window, since not

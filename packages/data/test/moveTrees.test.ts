@@ -499,23 +499,58 @@ describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to rea
     expect(respec.recoilFraction).toBeCloseTo(0.1);
   });
 
-  it("the crosslink bridge (Coordinated Tremor -> Marked Rupture -> Converged Ruin) reaches the Aggression fork without Aggression's own filler chain", () => {
+  it("the crosslink bridge (Coordinated Tremor -> Marked Rupture -> Converged Ruin) reaches Aggression's fork one step early, not directly", () => {
+    // Converged Ruin alone does NOT satisfy the fork nodes anymore — it only
+    // shortcuts into Seismic Feed, one step before the fork, same as the
+    // normal path (direct feedback: landing straight on "the choice of 2
+    // nodes" was too much).
+    expect(() =>
+      applyMoveTree(earthquake, ["herdsafe_trigger", "fault_trigger", "coordinated_tremor", "marked_rupture", "converged_ruin", "total_collapse"])
+    ).toThrow(/requires \[seismic_feed\]/);
+
     const viaBridge = applyMoveTree(earthquake, [
       "herdsafe_trigger",
       "fault_trigger",
       "coordinated_tremor",
       "marked_rupture",
       "converged_ruin",
+      "seismic_feed",
       "total_collapse",
     ]);
     expect(viaBridge.shape).toEqual({ kind: "burst", radius: 3 });
-    // None of the branch's own linear filler chain was ever chosen.
+    // None of the branch's own linear filler chain (Shaking Ground through
+    // Aftershock Barrage) was ever chosen.
     expect(viaBridge.recoilFraction).toBeUndefined();
 
     // The fork itself is still a real, mutually-exclusive choice either way.
     expect(() =>
-      applyMoveTree(earthquake, ["herdsafe_trigger", "fault_trigger", "coordinated_tremor", "marked_rupture", "converged_ruin", "total_collapse", "focused_rupture"])
+      applyMoveTree(earthquake, [
+        "herdsafe_trigger",
+        "fault_trigger",
+        "coordinated_tremor",
+        "marked_rupture",
+        "converged_ruin",
+        "seismic_feed",
+        "total_collapse",
+        "focused_rupture",
+      ])
     ).toThrow(/conflicts with already-chosen/);
+  });
+
+  it("the same bridge also reaches into Sociability's own fork, not just Aggression", () => {
+    // Reachable without Tremor Reach's own normal prerequisite (Bracing
+    // Call) or anything earlier in Sociability's filler chain.
+    const viaBridge = applyMoveTree(earthquake, [
+      "herdsafe_trigger",
+      "fault_trigger",
+      "coordinated_tremor",
+      "marked_rupture",
+      "converged_ruin",
+      "tremor_reach",
+      "guardians_ground",
+    ]);
+    expect(viaBridge.power).toBe(earthquake.power - 5); // Guardian's Ground's own delta
+    expect(viaBridge.excludesAllies).toBe(true); // from Herdsafe Trigger, still present
   });
 
   it("Ruinous Ground keystone fixes Ground's real Grass/Bug resists", () => {

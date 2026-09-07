@@ -3181,7 +3181,16 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "seismic_feed",
         name: "+8% Lifesteal",
         cost: 1,
-        prerequisites: ["aftershock_barrage"],
+        // Reachable the normal way (walk the branch's own filler chain
+        // from Fault Trigger) OR via the Coordinated Tremor -> Marked
+        // Rupture -> Converged Ruin crosslink bridge — see that node's own
+        // comment. Direct follow-up feedback scaled this back from an
+        // earlier version that shortcut straight to the fork below
+        // ("going straight to the choice of 2 nodes are a bit too much"):
+        // the bridge now lands one step before the fork, same as the
+        // normal path — it still has to be chosen from here, same as
+        // anyone else.
+        prerequisitesAnyOf: [["aftershock_barrage"], ["converged_ruin"]],
         leaning: "aggression",
         delta: { lifestealFraction: 0.08 },
       },
@@ -3189,10 +3198,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "total_collapse",
         name: "Total Collapse",
         cost: 1,
-        // Reachable the normal way (walk the branch's own filler chain to
-        // Seismic Feed) OR via the Coordinated Tremor -> Marked Rupture ->
-        // Converged Ruin crosslink bridge — see that node's own comment.
-        prerequisitesAnyOf: [["seismic_feed"], ["converged_ruin"]],
+        prerequisites: ["seismic_feed"],
         excludes: ["focused_rupture"],
         leaning: "aggression",
         // Widens the blast itself — a real AoE-size decision point, not
@@ -3203,7 +3209,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "focused_rupture",
         name: "Focused Rupture",
         cost: 1,
-        prerequisitesAnyOf: [["seismic_feed"], ["converged_ruin"]],
+        prerequisites: ["seismic_feed"],
         excludes: ["total_collapse"],
         leaning: "aggression",
         // Pulls the blast back in tight and puts everything into what it
@@ -3362,7 +3368,13 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "tremor_reach",
         name: "+1 Range",
         cost: 1,
-        prerequisites: ["bracing_call"],
+        // The bridge reaches into this branch too, not just Aggression —
+        // direct ask: "make them connect to the other branch too. Like it
+        // can go to either branch." Coordinated Tremor bridges Sociability
+        // and Aggression, so Converged Ruin is a real shortcut into
+        // either side of what it connects, landing one step before each
+        // branch's own fork rather than on it (see Seismic Feed's comment).
+        prerequisitesAnyOf: [["bracing_call"], ["converged_ruin"]],
         leaning: "sociability",
         delta: { range: { max: 3 } },
       },
@@ -3462,15 +3474,16 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       // Pilot: a crosslink that's a real bridge, not a dead-end leaf.
       // Coordinated Tremor -> Marked Rupture -> Converged Ruin is its own
-      // short filler+notable tail, and Converged Ruin is wired as a real
-      // alternate route into the Aggression branch's own AoE-size fork
-      // (see `total_collapse`/`focused_rupture`'s `prerequisitesAnyOf`
-      // below) — a build that invested in the Sociability opener plus this
-      // short crosslink chain reaches that fork without also walking
-      // Aggression's own five-node filler grind (Fault Trigger through
-      // Seismic Feed). The fork itself — the branch's one real, meaningful
-      // decision — still has to be made either way; this only shortcuts
-      // the filler grind leading up to it, not the decision.
+      // short filler+notable tail. Converged Ruin is wired as a real
+      // alternate route into BOTH branches Coordinated Tremor bridges —
+      // Aggression's `seismic_feed` and Sociability's `tremor_reach` (see
+      // each node's own `prerequisitesAnyOf`) — not just the one branch it
+      // happens to lean toward. Revised after direct feedback on the first
+      // version: landing the shortcut straight on a branch's own fork
+      // ("the choice of 2 nodes") was too much; it now lands one step
+      // *before* each fork instead, same distance-to-decision as the
+      // normal path, and reaches into either side of the crosslink rather
+      // than only Aggression.
       converged_ruin: {
         id: "converged_ruin",
         name: "Converged Ruin",

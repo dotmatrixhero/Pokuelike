@@ -4166,3 +4166,22 @@ not something this pathfinding pass itself caused or is positioned to fix.
       encoding and script syntax before rebuilding. Full data suite still
       green (184/184, unaffected — this pass never touched
       `packages/data/src/moves.ts`). Atlas rebuilt and republished.
+- [x] **Softened the crosslink bridge and made it two-directional** — direct
+      feedback: "the deeper cross link going straight to the choice of 2
+      nodes are a bit too much. Maybe don't let then go to the two nodes.
+      And then make them connect to the other branch too. Like it can go
+      to either branch." Converged Ruin no longer wires directly onto
+      `total_collapse`/`focused_rupture` (the fork itself) — it now wires
+      onto `seismic_feed` and `tremor_reach`, the last plain filler
+      *before* each of Aggression's and Sociability's own forks (the two
+      branches Coordinated Tremor actually bridges). Reaching either fork
+      from the bridge now takes the same one extra node it would from the
+      branch's own path, and the bridge reaches into both sides instead of
+      only the one matching Converged Ruin's own `leaning`. Two rules
+      recorded in MOVES_DESIGN.md for the next bridge: land the shortcut
+      the same distance from the decision the normal path would, and wire
+      it into every branch the crosslink actually touches, not just the
+      leaning-matched one. Tests updated to assert the new one-step-early
+      landing on both sides and that the fork itself still requires an
+      explicit extra pick; full suite green (185/185 data). Atlas rebuilt
+      and republished.
