@@ -4960,6 +4960,35 @@ not something this pathfinding pass itself caused or is positioned to fix.
       converting the low-tier nodes to flat damage reduction the way regen
       went flat. Not urgent, but it is the same bug wearing a different
       passive.
+- [ ] **REGRESSION I INTRODUCED: flat healing now stacks HIGHER than the
+      percentage it replaced, on exactly the units it was meant to help.**
+      Seed 777 post-fix shows a 51 HP ivysaur at **17.65%/tick** effective
+      passive healing — above the 11%/tick maximum that started this whole
+      investigation. Confirmed analytically rather than trusting the run:
+      a 14-point budget in `dig` alone reaches 4.5 HP/tick flat, which is
+      15%/tick on a 30 HP unit, 9% on a 50 HP one — and agents know several
+      moves, so it sums across every tree they hold.
+      - This is the SAME bug class I had just finished writing into
+        MOVES_DESIGN.md as the lesson ("the sum of every node granting a
+        passive has never been the unit of analysis") — and then repeated,
+        with flat healing, in the same session. Flat values stack additively
+        exactly like percentages do; dividing by a small maxHp then makes
+        them worse, not better, for small units. The 1.5x bump compounded it.
+      - Importantly this is NOT the original "unkillable mid-fight" problem
+        returning: the out-of-combat gate still holds, so none of it applies
+        while a unit is being hit. It is a between-fights recovery problem —
+        roughly a 6-tick full heal for a small unit.
+      - NOT re-tuned unilaterally, because the magnitudes were an explicit
+        call ("maybe bump it a tiny bit") and this needs a decision, not a
+        quiet revert. Options, cheapest first: cap total effective passive
+        healing at some %/tick of maxHp (bounds the early-game case without
+        touching the flat shape at all); apply the same `x / (1 + x)`
+        diminishing returns to accumulated `regenFlat`; or simply undo the
+        1.5x bump, which only gets it back to ~11%/tick and does not fix
+        the stacking.
+      - Recommendation: the maxHp-relative cap. It preserves exactly the
+        early-strong/late-weak curve that was wanted and only removes the
+        stacked tail.
 - [ ] **METHODOLOGY: stop trusting single-seed population numbers.**
       Adding one extra `rng()` draw per skill-point grant, with its effect
       disabled, moved a seed's 20k population from 129 to 3. Across 6 seeds
