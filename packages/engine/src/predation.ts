@@ -8,6 +8,7 @@ import type { Direction } from "./moves.js";
 import { resolveShape } from "./moves.js";
 import type { MoveSpec } from "./moves.js";
 import { canBreed, grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
+import { GIANT_SLAYER_LEVEL_GAP } from "./notables.js";
 import { FINISHING_POOL_FRACTION, applyAllyEffect, nearestAllyEffectTarget } from "./support.js";
 import { RAPPORT_MOB_DEFENSE_DELTA, strengthenRapportMutual } from "./rapport.js";
 import { effectiveDisposition } from "./herdLeadership.js";
@@ -546,6 +547,19 @@ const EGG_THREAT_RADIUS = 4;
  * preference, not a last resort.
  */
 const EGG_EAT_HUNGER_THRESHOLD = 0.9;
+/**
+ * How far away a genuinely edible egg (`!canBreed`) can be for a hungry
+ * agent to actually notice and walk toward it — real bug fix, confirmed by
+ * a direct report: "I don't see eggs being eaten, watched a predator just
+ * ignore an egg." `applyEggEating` used to require the egg already be
+ * adjacent (`manhattan(...) <= 1`) with no seek/travel step of its own — an
+ * agent that wasn't already standing right next to an egg had no mechanism
+ * to ever close that distance, so eating one only ever happened by the
+ * coincidence of already being adjacent. Same order of magnitude as
+ * `HUNT_DETECT_RADIUS` (5) — real prey-sensing scale, not a tile-adjacent
+ * afterthought.
+ */
+const EGG_EAT_DETECT_RADIUS = 5;
 
 /**
  * Every living, unhatched egg this agent is territorial about — its own
@@ -682,8 +696,10 @@ function applyEggDefense(world: World, agent: Agent, ctx: LevelingContext | unde
  * `reproduction.ts`) is willing to eat it, prey and non-prey species alike.
  * A separate, simpler "opportunistic, instant" check is the better fit for
  * that: an egg can't fight back or flee, so there's no real combat
- * encounter to resolve the way a live hunt has one — eating an egg is a
- * single action once adjacent, not a multi-hit fight.
+ * encounter to resolve the way a live hunt has one — the eating itself is a
+ * single action once adjacent, not a multi-hit fight (getting there,
+ * however, is a real walk — see `EGG_EAT_DETECT_RADIUS`'s own doc comment
+ * for the bug that fix addresses).
  *
  * Reuses the real kill-exp/hunger-restore formulas verbatim (`grantKillExp`,
  * `agent.needs.hunger = 1`) rather than inventing new numbers, per direct
@@ -706,10 +722,20 @@ export function applyEggEating(world: World, agent: Agent, ctx: LevelingContext 
       other.alive !== false &&
       other.layer === agent.layer &&
       !canBreed(agent.species, other.species, ctx) &&
-      manhattan(agent.pos, other.pos) <= 1
+      manhattan(agent.pos, other.pos) <= EGG_EAT_DETECT_RADIUS
   );
   const egg = nearest(agent, candidates);
   if (!egg) return false;
+
+  if (manhattan(agent.pos, egg.pos) > 1) {
+    // Spotted, but not adjacent yet — walk toward it instead of ignoring it
+    // (the real bug this fixes). stopAdjacent=true — see stepToward's own
+    // doc comment for why this never lands on the egg's own tile.
+    logBehaviorChange(log, world, agent, "seekFood");
+    agent.behavior = "seekFood";
+    agent.pos = stepToward(world, agent.layer, agent.pos, egg.pos, agent, undefined, true);
+    return true;
+  }
 
   grantKillExp(world, agent, egg, ctx, log, rng);
   agent.needs.hunger = 1;
@@ -986,6 +1012,12 @@ function applySingleDamageInstance(
     // ordinary hunt path ("killed") and the guardian mob-defense finishing
     // blow ("defeated") — see Agent.lifetimeKills's doc comment.
     attacker.lifetimeKills = (attacker.lifetimeKills ?? 0) + 1;
+    // Notables: The Giant Slayer — direct ask: "add a title for knocking
+    // out a pokemon more than 5 lvls above you." See Agent.
+    // lifetimeGiantSlayerKills's doc comment.
+    if ((defender.level ?? 0) - (attacker.level ?? 0) >= GIANT_SLAYER_LEVEL_GAP) {
+      attacker.lifetimeGiantSlayerKills = (attacker.lifetimeGiantSlayerKills ?? 0) + 1;
+    }
     return true;
   }
 

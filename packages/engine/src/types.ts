@@ -1135,6 +1135,50 @@ export interface Agent {
    */
   lifetimeKills?: number;
   /**
+   * Lifetime count of real kills against a target at least
+   * `GIANT_SLAYER_LEVEL_GAP` (5) levels above this agent's own level at the
+   * moment of the kill — set alongside `lifetimeKills` at every real kill
+   * site (predation.ts's finishing blow, herdConflict.ts's lethal
+   * escalation). Direct ask: "add a title for knocking out a pokemon more
+   * than 5 lvls above you. it makes you notable." The record `notableTitle:
+   * "giantSlayer"` (The Giant Slayer) is judged against — deliberately a
+   * LOW threshold (see `NOTABLE_TITLE_MIN_THRESHOLDS`), since a single such
+   * kill is already the notable moment, not something that needs repeating
+   * the way Hero's ordinary kill count does. Never decremented. Absent/0 =
+   * never landed one.
+   */
+  lifetimeGiantSlayerKills?: number;
+  /**
+   * Lifetime count of real herd-conflict "wins" — this agent as the
+   * attacker on a `herdConflict.ts` hit that made the defender retreat, or
+   * (rarer) a lethal escalation — set in `resolveRivalryHit`. Direct ask:
+   * "'alpha' - which is win over 40 clashes." The record `notableTitle:
+   * "alpha"` (The Alpha) is judged against. Never decremented. Absent/0 =
+   * never won one.
+   */
+  lifetimeClashWins?: number;
+  /**
+   * Lifetime count of real ally-support acts (a heal and/or buff actually
+   * applied to a herd-mate) this agent personally delivered as the
+   * supporter — set in `support.ts`'s `applyAllyEffect`, the one shared
+   * function both a dedicated idle-tick support move (`applySupportMove`)
+   * and a hostile attack's piggybacked ally effect (`allyEffectOnAttack`,
+   * predation.ts) route through. Direct ask: "'shaman' for healing or
+   * supporting units in battle a lot giving them buffs." The record
+   * `notableTitle: "shaman"` (The Shaman) is judged against. Never
+   * decremented. Absent/0 = never supported an ally.
+   */
+  lifetimeSupportActs?: number;
+  /**
+   * Lifetime count of real herd-conflict "losses" — this agent as the
+   * DEFENDER on a `herdConflict.ts` hit that made it retreat, faint, or
+   * die — set in `resolveRivalryHit`, the mirror image of
+   * `lifetimeClashWins`. Direct ask: "'underdog' for losing 40 clashes."
+   * The record `notableTitle: "underdog"` (The Underdog) is judged against.
+   * Never decremented. Absent/0 = never lost one.
+   */
+  lifetimeClashLosses?: number;
+  /**
    * Lifetime real shelter-construction ticks actually invested (shelter.ts's
    * `applyShelterBuilding`, incremented every real build tick alongside the
    * per-attempt `shelterBuildTicks`, unlike which this one is never reset —
@@ -1213,11 +1257,25 @@ export interface RapportEdge {
 }
 
 /**
- * The seven rare, earned individual titles — see notables.ts/DESIGN.md's
+ * The nine rare, earned individual titles — see notables.ts/DESIGN.md's
  * "Notables" section for the full record-holder mechanism and real-run
- * calibration.
+ * calibration. `giantSlayer`/`savant` are the newest two — direct ask:
+ * "add a title for knocking out a pokemon more than 5 lvls above you...
+ * maybe like 'savant' for maxing out a branch of skill points for a move."
  */
-export type NotableTitleId = "hero" | "builder" | "gatherer" | "rival" | "beloved" | "elder" | "wanderer";
+export type NotableTitleId =
+  | "hero"
+  | "builder"
+  | "gatherer"
+  | "rival"
+  | "beloved"
+  | "elder"
+  | "wanderer"
+  | "giantSlayer"
+  | "savant"
+  | "alpha"
+  | "shaman"
+  | "underdog";
 
 /** One entry of `World.notables` — the current record-holder for a title, and the live stat value that earned it. */
 export interface NotableRecord {

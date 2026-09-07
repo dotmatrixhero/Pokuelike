@@ -636,6 +636,9 @@ export function applyAllyEffect(world: World, supporter: Agent, target: Agent, e
     buffed = true;
   }
 
+  // Notables: The Shaman — see Agent.lifetimeSupportActs's doc comment.
+  if (healed || buffed) supporter.lifetimeSupportActs = (supporter.lifetimeSupportActs ?? 0) + 1;
+
   log?.record({
     kind: "supported",
     tick: world.tick,

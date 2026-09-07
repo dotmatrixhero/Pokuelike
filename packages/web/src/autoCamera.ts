@@ -40,9 +40,12 @@ const COURTSHIP_DWELL_TICKS = 10;
  * timing here was really just a proxy for real time anyway (nothing about
  * the epilogue cares how many ticks passed), so this reads `performance.now()`
  * directly instead of waiting for however many battle-step ticks happen to
- * land in that window.
+ * land in that window. Raised back up to 3000ms — direct follow-up ask,
+ * after living with 1000ms: "battles not end after 1000ms. i think it needs
+ * to be liek 3000 ms" — 1000ms cut away before a viewer had time to actually
+ * register the finishing blow.
  */
-const BATTLE_EPILOGUE_MS = 1000;
+const BATTLE_EPILOGUE_MS = 3000;
 /**
  * A battle with no new `fought`/`missed`/`herdClash` hit involving either
  * participant for this many ticks is treated as silently disengaged (one

@@ -1,6 +1,7 @@
 import type { Agent, NotableTitleId, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { rapportScore } from "./rapport.js";
+import type { LevelingContext } from "./leveling.js";
 
 /**
  * Notables — rare, earned individual titles. Direct, verbatim asks from the
@@ -89,10 +90,65 @@ export const NOTABLE_TITLE_MIN_THRESHOLDS: Record<NotableTitleId, number> = {
   // two-thirds of the map's shorter dimension), not an agent that merely
   // wandered its home range.
   wanderer: 60,
+  // A single real kill against a target GIANT_SLAYER_LEVEL_GAP levels above
+  // the killer is already the whole notable moment — direct ask: "it makes
+  // you notable" — unlike Hero's ordinary kill count, this deliberately
+  // does NOT need repetition to earn the title.
+  giantSlayer: 1,
+  // One genuinely maxed branch (see SAVANT_MIN_BRANCH_NODES) is a real,
+  // deliberate specialization — same "the single instance is already
+  // notable" reasoning as giantSlayer above, not a count that needs
+  // padding out.
+  savant: 1,
+  // Direct ask: "'alpha' - which is win over 40 clashes" — exact number as given.
+  alpha: 40,
+  // Sim-original guess, to be judged against a real run like every other
+  // tuning number in this file — DESIGN.md's Rapport section found the
+  // OTHER real support trigger (foodDelivered) fires 0-1 times per
+  // 8000-tick run under its own gate; ally-effect support moves need a
+  // real targetsAlly move build in the first place (not every agent ever
+  // gets one via the respec tree), so this is likely similarly rare. 5 is
+  // a real, repeated pattern rather than a single lucky heal, without
+  // assuming a frequency this hasn't actually been run against yet.
+  shaman: 5,
+  // Direct ask: "'underdog' for losing 40 clashes" — same exact number as Alpha, mirrored.
+  underdog: 40,
 };
 
 /** Fixed, documented priority order for resolving "one title per agent" — see this module's top-of-file doc comment. */
-const TITLE_ORDER: NotableTitleId[] = ["hero", "builder", "gatherer", "rival", "beloved", "elder", "wanderer"];
+const TITLE_ORDER: NotableTitleId[] = [
+  "hero",
+  "builder",
+  "gatherer",
+  "rival",
+  "beloved",
+  "elder",
+  "wanderer",
+  "giantSlayer",
+  "savant",
+  "alpha",
+  "shaman",
+  "underdog",
+];
+
+/**
+ * How far above the attacker's own level a defeated target has to be for
+ * the kill to count toward `Agent.lifetimeGiantSlayerKills` — direct ask:
+ * "add a title for knocking out a pokemon more than 5 lvls above you."
+ * Exported so the two real kill sites (predation.ts's finishing blow,
+ * herdConflict.ts's lethal escalation) share the exact same bar rather than
+ * two independently-tuned numbers.
+ */
+export const GIANT_SLAYER_LEVEL_GAP = 5;
+
+/**
+ * Minimum distinct nodes chosen within a single move-tree "branch" (all
+ * nodes sharing one `MoveTreeNode.leaning`) for `statValueFor`'s "savant"
+ * case to count it as maxed — see that function's own doc comment for why
+ * this can't mean literally every node in the group (a real fork's mutually
+ * `excludes`-ing pair can never both be chosen at once).
+ */
+const SAVANT_MIN_BRANCH_NODES = 6;
 
 /**
  * This agent's own current live stat value for `title`, or `undefined` if
@@ -102,10 +158,18 @@ const TITLE_ORDER: NotableTitleId[] = ["hero", "builder", "gatherer", "rival", "
  * counters/`birthPos` this feature itself adds (see types.ts's `Agent` doc
  * comments for each).
  */
-function statValueFor(title: NotableTitleId, agent: Agent, world: World): number | undefined {
+function statValueFor(title: NotableTitleId, agent: Agent, world: World, ctx?: LevelingContext): number | undefined {
   switch (title) {
     case "hero":
       return agent.lifetimeKills ?? 0;
+    case "giantSlayer":
+      return agent.lifetimeGiantSlayerKills ?? 0;
+    case "alpha":
+      return agent.lifetimeClashWins ?? 0;
+    case "shaman":
+      return agent.lifetimeSupportActs ?? 0;
+    case "underdog":
+      return agent.lifetimeClashLosses ?? 0;
     case "builder":
       return agent.lifetimeShelterTicks ?? 0;
     case "gatherer":
@@ -142,6 +206,33 @@ function statValueFor(title: NotableTitleId, agent: Agent, world: World): number
       }
       return mostNegative < 0 ? -mostNegative : undefined; // magnitude — 0/positive reads as "no real grudge," not a valid challenge
     }
+    case "savant": {
+      // Direct ask: "'savant' for maxing out a branch of skill points for a
+      // move." A "branch" here is every node sharing one `MoveTreeNode.
+      // leaning` within a single move's tree — real, already-authored
+      // structure (moves.ts), no new data needed. Counts every DISTINCT
+      // (move, leaning) pair this agent has driven to `SAVANT_MIN_BRANCH_
+      // NODES` chosen nodes or more — a real multi-move specialist ranks
+      // higher than a single-branch dabbler, and (since `moveTreeChoices`
+      // only ever grows — see maybeAutoRespec's own doc comment) this stays
+      // a genuine, non-decreasing lifetime record like every other title.
+      if (!ctx || !agent.moveTreeChoices) return undefined;
+      let maxedBranches = 0;
+      for (const [moveId, chosen] of Object.entries(agent.moveTreeChoices)) {
+        const base = ctx.resolveMove(moveId);
+        if (!base?.tree) continue;
+        const chosenSet = new Set(chosen);
+        const countByLeaning = new Map<string, number>();
+        for (const node of Object.values(base.tree)) {
+          if (!node.leaning || !chosenSet.has(node.id)) continue;
+          countByLeaning.set(node.leaning, (countByLeaning.get(node.leaning) ?? 0) + 1);
+        }
+        for (const count of countByLeaning.values()) {
+          if (count >= SAVANT_MIN_BRANCH_NODES) maxedBranches++;
+        }
+      }
+      return maxedBranches > 0 ? maxedBranches : undefined;
+    }
   }
 }
 
@@ -156,7 +247,7 @@ function isLivingNonEgg(agent: Agent): boolean {
  * top-of-file doc comment for the full mechanism. Pure bookkeeping plus
  * `titleClaimed`/`titleLost` event emission; no rng.
  */
-export function updateNotables(world: World, log?: EventLog): void {
+export function updateNotables(world: World, log?: EventLog, ctx?: LevelingContext): void {
   for (const title of TITLE_ORDER) {
     const holderRecord = world.notables?.[title];
     // The holder may no longer even be in `world.agents` (a corpse pruned by
@@ -175,7 +266,7 @@ export function updateNotables(world: World, log?: EventLog): void {
       // put, and this title's slot goes to the next-best untitled (or
       // already-this-title, for the incumbent) agent instead.
       if (agent.notableTitle !== undefined && agent.notableTitle !== title) continue;
-      const value = statValueFor(title, agent, world);
+      const value = statValueFor(title, agent, world, ctx);
       if (value === undefined) continue;
       if (value > bestValue) {
         bestValue = value;

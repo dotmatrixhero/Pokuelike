@@ -176,6 +176,40 @@ describe("notables: record-holder transfer mechanism", () => {
     expect(world.notables?.builder?.agentId).toBe("c");
   });
 
+  it("The Giant Slayer: keys off its own lifetime counter, same as Beloved/Gatherer/Builder", () => {
+    const world = createWorld(10, 10);
+    const a = agent("a", { lifetimeGiantSlayerKills: NOTABLE_TITLE_MIN_THRESHOLDS.giantSlayer });
+    world.agents.push(a);
+
+    updateNotables(world);
+
+    expect(world.notables?.giantSlayer?.agentId).toBe("a");
+    expect(a.notableTitle).toBe("giantSlayer");
+  });
+
+  it("The Savant: a real, deeply-chosen move-tree branch (by leaning) qualifies; a shallow one doesn't", () => {
+    const world = createWorld(10, 10);
+    const tree = {
+      n1: { id: "n1", name: "n1", cost: 1, leaning: "aggression" as const },
+      n2: { id: "n2", name: "n2", cost: 1, leaning: "aggression" as const },
+      n3: { id: "n3", name: "n3", cost: 1, leaning: "aggression" as const },
+      n4: { id: "n4", name: "n4", cost: 1, leaning: "aggression" as const },
+      n5: { id: "n5", name: "n5", cost: 1, leaning: "aggression" as const },
+      n6: { id: "n6", name: "n6", cost: 1, leaning: "aggression" as const },
+    };
+    const ctx = { getProfile: () => undefined, resolveMove: () => ({ id: "m", name: "m", shape: { kind: "point" as const }, type: "normal" as const, category: "physical" as const, power: 10, accuracy: 100, cooldownTicks: 1, tree }) };
+
+    const shallow = agent("shallow", { moveTreeChoices: { M: ["n1", "n2", "n3"] } });
+    const deep = agent("deep", { moveTreeChoices: { M: ["n1", "n2", "n3", "n4", "n5", "n6"] } });
+    world.agents.push(shallow, deep);
+
+    updateNotables(world, undefined, ctx);
+
+    expect(world.notables?.savant?.agentId).toBe("deep");
+    expect(deep.notableTitle).toBe("savant");
+    expect(shallow.notableTitle).toBeUndefined();
+  });
+
   it("an egg is never eligible for any title (isLivingNonEgg excludes it)", () => {
     const world = createWorld(10, 10);
     const egg = agent("egg", { isEgg: true, lifetimeKills: 1000, age: 1000 });

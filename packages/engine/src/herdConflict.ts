@@ -10,6 +10,7 @@ import { SCARCITY_SCORE_THRESHOLD } from "./herdMigration.js";
 import { foodStockNear, countTerrainNear } from "./resourceIndex.js";
 import { canBreed, grantKillExp, type LevelingContext } from "./leveling.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
+import { GIANT_SLAYER_LEVEL_GAP } from "./notables.js";
 
 /**
  * Herd-vs-herd resource conflict — the direct ask ("I think escalated
@@ -385,6 +386,14 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
     defender.diedAtTick = world.tick;
     grantKillExp(world, attacker, defender, ctx, log, rng);
     attacker.lifetimeKills = (attacker.lifetimeKills ?? 0) + 1;
+    // Notables: The Giant Slayer — see Agent.lifetimeGiantSlayerKills's doc comment.
+    if ((defender.level ?? 0) - (attacker.level ?? 0) >= GIANT_SLAYER_LEVEL_GAP) {
+      attacker.lifetimeGiantSlayerKills = (attacker.lifetimeGiantSlayerKills ?? 0) + 1;
+    }
+    // Notables: The Alpha — a lethal escalation is as real a "win" as a retreat. See Agent.lifetimeClashWins's doc comment.
+    attacker.lifetimeClashWins = (attacker.lifetimeClashWins ?? 0) + 1;
+    // Notables: The Underdog — see Agent.lifetimeClashLosses's doc comment.
+    defender.lifetimeClashLosses = (defender.lifetimeClashLosses ?? 0) + 1;
     log?.record({
       kind: "defeated",
       tick: world.tick,
@@ -407,6 +416,8 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
     defender.fainted = true;
     defender.finishingPool = FINISHING_POOL_FRACTION * defender.maxHp;
     defender.status = undefined;
+    // Notables: The Underdog — a knockout is as real a loss as a retreat. See Agent.lifetimeClashLosses's doc comment.
+    defender.lifetimeClashLosses = (defender.lifetimeClashLosses ?? 0) + 1;
     log?.record({ kind: "fainted", tick: world.tick, agentId: defender.id, species: defender.species, pos: defender.pos });
     return;
   }
@@ -415,6 +426,10 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
     defender.pos = stepAway(world, defender.layer, defender.pos, attacker.pos, defender, defender);
     defender.herdConflictCooldownTicks = HERD_CONFLICT_COOLDOWN_TICKS;
     attacker.herdConflictCooldownTicks = HERD_CONFLICT_COOLDOWN_TICKS;
+    // Notables: The Alpha — see Agent.lifetimeClashWins's doc comment.
+    attacker.lifetimeClashWins = (attacker.lifetimeClashWins ?? 0) + 1;
+    // Notables: The Underdog — see Agent.lifetimeClashLosses's doc comment.
+    defender.lifetimeClashLosses = (defender.lifetimeClashLosses ?? 0) + 1;
   } else {
     // A real hit landed and the defender is still standing its ground —
     // direct ask: "there isn't any fighting back, is there?" A retreating
