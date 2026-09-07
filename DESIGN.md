@@ -5604,6 +5604,94 @@ zero behavior change to anything that doesn't opt in.
   `POP_HARD_CAP`) is unit-tested but not yet exercised by a real multi-
   thousand-tick run that actually reaches it — see TODO.md.
 
+### A big batch: longer battle epilogue, terminology, 6 new Notables, real egg-eating bug fix, move-use visuals, legend
+
+One long message thread, several distinct direct asks, handled together:
+
+**Autocam.** Battle epilogue hold `1000ms -> 3000ms` — "battles not end
+after 1000ms. i think it needs to be liek 3000 ms," the earlier 1000ms cut
+away before a viewer had time to register the finishing blow.
+
+**Battle-log terminology.** "immigrant" -> "nomad", "invented" -> "native",
+"born" -> "hatched" (reusing the real `eggHatched` event kind rather than
+inventing a new word) — `notableTitles.ts`'s `originWord`. "The Hero" ->
+"The Warrior" (display text only; the internal id `hero` and every doc
+comment referencing it are unchanged).
+
+**Six new Notable titles**, each keyed to a real, already-tracked (or
+newly-added lifetime-counter) stat, same record-holder mechanism every
+existing title uses:
+- **Giant Slayer** — a real kill against a target 5+ levels above you
+  (`GIANT_SLAYER_LEVEL_GAP`), threshold 1 (the kill itself is the notable
+  moment, no repetition needed).
+- **Savant** — a move-tree branch (grouped by `MoveTreeNode.leaning`) driven
+  to `SAVANT_MIN_BRANCH_NODES` (6) chosen nodes — a real, structural
+  "branch," since a fork's mutually-`excludes`-ing pair can never both be
+  chosen, so "every node" isn't achievable; this measures genuine deep
+  commitment instead.
+- **Alpha** — 40 herd-conflict wins (a defender retreat, or a lethal
+  escalation), exact number as given.
+- **Underdog** — 40 herd-conflict losses, the mirror stat.
+- **Shaman** — 5 real ally heal/buff acts delivered
+  (`support.ts`'s `applyAllyEffect`, the one shared function both the
+  dedicated support move and a hostile attack's piggybacked ally effect
+  route through) — a sim-original guess pending real-run frequency data,
+  same as this file's other new tuning numbers.
+
+**Real bug fix, confirmed by direct report** ("watched a predator just
+ignore an egg"): `applyEggEating` required an egg already be adjacent, with
+literally no seek/travel step — an agent not already standing next to an
+egg had no mechanism to ever notice or walk toward one; eating one only
+ever happened by the coincidence of already being adjacent on a hungry
+tick. Added `EGG_EAT_DETECT_RADIUS` (5, matching `HUNT_DETECT_RADIUS`'s real
+prey-sensing scale) and a walk-toward-it step when an edible egg is spotted
+but not yet adjacent — the same "if adjacent, act; else step toward" shape
+`herdConflict.ts`'s own triggers already use.
+
+**Move-use visuals** ("light up the square it effects... maybe make the
+tile/sprite sorta jiggle when its using a move"): new `moveEffects.ts`
+tracks every real `fought`/`herdClash` hit (any outcome, including a miss —
+the ask is about using a move, not landing one) for a brief 350ms window —
+a fading ring flash on the affected tile (`drawMoveFlashes`) and a small
+per-agent shake on the attacker's own sprite (`drawAgent`'s new `jiggling`
+param, a deterministic per-id phase so several simultaneous jigglers don't
+move in lockstep).
+
+**Legend gap fix**, surfaced while investigating a related report ("the
+other food sources. are they in the game? idk if i see em"): the real 12-
+crop `FOOD_CROPS` registry (crops.ts) each render with a distinct sprite/
+color on the map, but the legend only ever listed one generic "food" glyph
+— a player had no way to learn which glyph/color meant which crop. Added a
+real "Food crops" legend section (`legend.ts`) listing every crop by its
+actual name and on-map look (real emoji for the 7 crops that have one, a
+color swatch matching `FLAVOR_FG` for the 4 original berries).
+
+**Investigated, no code bug found**: "i just watched a charmeleon starve to
+death after evolving... should've done something." Traced `grantExp`'s
+evolution branch (leveling.ts) and confirmed it touches only `species`/
+`stats`/`hp`/a dispersal-check flag — never `behavior`, `fightTarget`, or
+any other field that could leave an agent behaviorally stuck; `chooseBehavior`
+is unconditionally recomputed near the end of every action tick unless an
+earlier branch commits, and every commit branch already re-checks urgency
+first (the same "committed no matter what" bug class already fixed earlier
+this project for dispersal/shelter/support-move). One real, narrower gap
+found but confirmed NOT the cause here: a few `Agent` fields
+(`isPredator`/`preferredTerrain`/`activityPattern`/`obligateAquatic`/
+`buildsShelter`) are denormalized from `SpeciesDef` at spawn and never
+refreshed on evolution — for Charmander -> Charmeleon specifically this is a
+non-issue (both share the same `activityPattern`/`biomes`, neither is
+`isPredator`), so it doesn't explain this death; likely an ordinary death
+(crowded food tile, a bad `blockedResourceTiles` streak, thirst-relocate
+walking away from food) that happened to coincide with a recent evolution.
+Flagged as a real, narrower follow-up (stale denormalized fields on
+evolution) rather than fixed here, since it wasn't the actual cause.
+
+Full suite (1083 + 177 tests) and typecheck green throughout; new tests for
+Giant Slayer/Savant's stat logic. Live smoke-tested the web app end to end
+(vite + headless Chromium) after the rendering changes — tile-mode drawing,
+the jiggle/flash effects' code paths, and the new legend section all
+confirmed working with no new console errors.
+
 ### Herd conflict: rare lethal escalation, and a cap on multi-way brawls
 
 Direct ask, after walking through how the mechanic works: "i think that's
