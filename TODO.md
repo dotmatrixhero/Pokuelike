@@ -4989,6 +4989,31 @@ not something this pathfinding pass itself caused or is positioned to fix.
       - Recommendation: the maxHp-relative cap. It preserves exactly the
         early-strong/late-weak curve that was wanted and only removes the
         stacked tail.
+- [ ] **The percentage tier of BOTH passives is now dead content in
+      practice.** Post-fix seed 777: effective `damageReduction` is
+      **median 0%, p90 0%, max 0%** across 568 living agents — nobody has
+      any. Flat armor: median 2, max 5.5. The diminishing-returns curve is
+      correct and tested, and currently has nothing to act on.
+      - Cause is structural, not a bug: 39 of 41 DR nodes (and 31 of 38
+        regen nodes) moved to flat, leaving percentage only on terminal
+        capstones — and capstones are reached ~21 times out of 144 even
+        after the `SKILLPOINT_SAVE_CHANCE` fix. "Reserve percent for
+        capstones" and "capstones are barely reachable" combine into
+        "percent never happens."
+      - So the flat/percent split is doing only half its job: the flat half
+        is live (arguably too live, see the regression above), the percent
+        half is theoretical. Worth deciding whether percent belongs on some
+        reachable mid-branch nodes instead, or whether capstone reachability
+        needs another push, or whether percent-as-a-rare-payoff is actually
+        the intent.
+      - Same lesson as the fire mechanic: content gated behind a cost or a
+        depth nothing reaches is not shipped, however well built.
+- [ ] **Starvation is now the dominant cause of death.** Same run: 117
+      starved vs 20 killed across 209 fights, at a population of 568.
+      Unremarked on so far and possibly fine (a crowded world should run
+      out of food) but it means combat balance is no longer what governs
+      the population — food supply is. Worth knowing before reading any
+      further balance measurement.
 - [ ] **METHODOLOGY: stop trusting single-seed population numbers.**
       Adding one extra `rng()` draw per skill-point grant, with its effect
       disabled, moved a seed's 20k population from 129 to 3. Across 6 seeds
