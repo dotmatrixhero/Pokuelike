@@ -586,13 +586,23 @@ export const SPECIES: Record<string, SpeciesDef> = {
   // --- New base species below: direct ask ("more species? more biome
   // types???") following the new desert/jungle/beach biomes (worldgen.ts/
   // macroGrid.ts) — real residents for all three, plus a few more for the
-  // existing roster's thinner biomes (grassland/highland/snow). All 14 keep
-  // this batch's own predator-guild caution from the badlands/highland pass
-  // above: none tagged `isPredator` (Zubat/Golbat's real "drains life
-  // energy" flavor would qualify, but the existing predator guild already
-  // crashes toward extinction in a real run per TODO.md — adding another
-  // hunter to an already-struggling guild isn't this batch's problem to
-  // solve). Each evolution reachable purely by in-sim leveling (checked
+  // existing roster's thinner biomes (grassland/highland/snow). Originally
+  // ALL 14 kept this batch's own predator-guild caution from the badlands/
+  // highland pass above: none tagged `isPredator`, even the ones (Ekans/
+  // Arbok's real egg-eating, Zubat/Golbat's real "drains life energy"
+  // flavor) that clearly qualified, since the existing predator guild
+  // already crashed toward extinction in a real run per TODO.md. Direct
+  // follow-up ask, later in the same project: "I think ekans and arbok are
+  // predators... make sure we accurately mark em... try to have at least
+  // some predators + prey per each zone" — those four are now tagged for
+  // real (see each one's own comment below), alongside the actual fix for
+  // the fragility this caution was guarding against:
+  // macroGrid.ts's `pickZoneSpeciesPool` now deliberately balances a zone's
+  // invented population toward a SMALL number of predators against more
+  // prey, and TODO.md's own "one predator species = 100% of pressure"
+  // finding is directly addressed by there now being real predator variety
+  // instead of one single species carrying the whole guild. Each evolution
+  // reachable purely by in-sim leveling (checked
   // against the dex's own `evolutions` data, `conditions: {}` only — same
   // bar `leveling.ts`'s `computeProfileFromDexEntry` itself uses) gets its
   // own curated entry too, same "don't let an evolved agent quietly lose
@@ -636,8 +646,14 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Poison Sting is Ekans's real level-1 move.
     moves: ["tackle", "poison_sting"],
     // "Moves silently and stealthily... eats bird eggs whole" per mainline
-    // flavor text — a nocturnal ambush hunter's hours, even though it isn't
-    // tagged `isPredator` here (see this batch's top comment).
+    // flavor text — a nocturnal ambush hunter's hours. Direct ask ("I think
+    // ekans and arbok are predators... make sure we accurately mark em"):
+    // this batch's own original top comment deliberately left it untagged,
+    // citing the predator guild's real extinction fragility (see TODO.md) —
+    // now tagged for real, alongside the zone-composition guarantee
+    // (macroGrid.ts's `pickZoneSpeciesPool`) that was the actual missing
+    // piece keeping that fragility in check, not species accuracy itself.
+    isPredator: true,
     activityPattern: "nocturnal",
     biomes: ["grassland", "jungle"],
   }),
@@ -646,6 +662,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     placeholderColor: "#785888",
     homeLayer: "surface",
     moves: ["tackle", "poison_sting", "sludge"],
+    // See ekans's own comment immediately above — same direct ask, same reasoning.
+    isPredator: true,
     activityPattern: "nocturnal",
     biomes: ["grassland", "jungle"],
   }),
@@ -838,6 +856,14 @@ export const SPECIES: Record<string, SpeciesDef> = {
     homeLayer: "underground",
     // Poison Sting is Zubat's real level-1 move.
     moves: ["tackle", "poison_sting"],
+    // Real "drains life energy" vampiric flavor — the exact case this
+    // batch's own original top comment named as qualifying but left
+    // untagged over predator-guild fragility (see TODO.md). Direct ask
+    // ("make a pass on predators, make sure we accurately mark em"): tagged
+    // for real now, alongside macroGrid.ts's `pickZoneSpeciesPool` zone-
+    // composition guarantee — see ekans's own comment above for the full
+    // reasoning.
+    isPredator: true,
     // Avoids daylight entirely per mainline flavor text.
     activityPattern: "nocturnal",
     biomes: ["highland", "badlands"],
@@ -847,6 +873,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     placeholderColor: "#6848a0",
     homeLayer: "underground",
     moves: ["tackle", "poison_sting", "wing_attack"],
+    // See zubat's own comment immediately above — same direct ask, same reasoning.
+    isPredator: true,
     activityPattern: "nocturnal",
     // Real further evolution (Crobat) needs a FRIENDSHIP condition, not a
     // plain level — same "never evolves in-sim" limitation as Growlithe/

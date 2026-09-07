@@ -5604,6 +5604,64 @@ zero behavior change to anything that doesn't opt in.
   `POP_HARD_CAP`) is unit-tested but not yet exercised by a real multi-
   thousand-tick run that actually reaches it — see TODO.md.
 
+### Predator accuracy pass + guaranteed predator/prey mix per zone
+
+Direct ask: "I think ekans and arbok are predators. So we should make a pass
+on predators, make sure we accurately mark em and try to have at least some
+predators + prey per each zone typically. With a smaller number of
+predators." Checked the correction against what the user had actually
+observed (an "arbok killed ivysaur" cut in an earlier auto-camera run) —
+that specific kill was real but NOT predation: it was `applyEggDefense`
+(predation.ts), Arbok fighting to the death defending its own eggs against
+a non-herd threat, a completely separate mechanic from species-level
+hunting. Ekans/Arbok genuinely were untagged (`isPredator` absent) — a
+deliberate prior tradeoff, documented right in species.ts's own comment: a
+2-Pokémon predator guild (Scyther/Spearow/Onix/Gyarados/Tentacruel) already
+crashed toward extinction in a real run (TODO.md's "one predator species =
+100% of pressure" finding), so a follow-up batch that added Ekans/Arbok/
+Zubat/Golbat deliberately left all of them untagged rather than making that
+fragility worse, even though their real mainline flavor text clearly
+qualifies (Ekans/Arbok: "eats bird eggs whole"; Zubat/Golbat: drains life
+energy, vampiric).
+
+**Built, in the order the fragility risk actually needed**:
+1. **Accuracy**: Ekans, Arbok, Zubat, Golbat all tagged `isPredator: true`
+   for real now — the roster's other five stay as they were (Scyther/
+   Spearow/Onix/Gyarados/Tentacruel), no over-correction beyond the
+   species the user named plus the one other pair species.ts's own comment
+   had already flagged as the obvious next candidate.
+2. **The actual fragility fix**: `ImmigrationSpeciesInfo`/`ZoneSpeciesEstimate`
+   gained `isPredator`, carried through from `species.ts`. `macroGrid.ts`'s
+   `pickZoneSpeciesPool` (the same pocket-of-3-6-species mechanic from the
+   zone-diversity fix above) now splits a zone's fitting-species list into
+   predators and prey, picks up to `ZONE_PREDATOR_POOL_CAP` (1, +1 for a
+   congregation landmark) predator species FIRST, then fills the rest of
+   the pool with prey — so a zone whose habitat has real hunters in it
+   typically gets exactly one, never left out entirely, but never
+   dominated by them either. A habitat with zero fitting predator species
+   (this roster's beach/snow biomes, currently) simply gets an all-prey
+   pool. `PREDATOR_POPULATION_DISCOUNT` (0.4x) also scales down a predator
+   estimate's own invented population relative to the same formula's
+   ordinary prey result — real ecology (a hunting guild is always thinner
+   on the ground than what it hunts) backing the same "smaller number"
+   ask at the individual-count level, not just the species-pool level.
+
+This is also a direct, real answer to TODO.md's own "killing the sole
+predator species removed 100% of predator pressure for the whole herd"
+finding — the guild is real predator variety now (7 species with their own
+per-zone spread) instead of a handful of species that happened to all be
+tagged, so no single kill anywhere can zero out predation pressure for an
+entire zone's ecosystem the way it used to.
+
+Live-validated across the same real 10x10 never-visited-zone grid used to
+validate the diversity fix: 75/100 promoted zones landed exactly one
+predator species (tentacruel/gyarados/ekans/zubat/golbat/scyther,
+biome-appropriate each time), 100/100 had at least one prey species, and
+predator population counts stayed consistently well below prey counts in
+every zone that had both (e.g. `wetland: gyarados predCount=4,
+preySpecies=4 preyCount=35`). Full suite (1077 + 177 tests) and typecheck
+green.
+
 ### Auto-camera: throttling same-category one-shot clusters ("skips around a lot and focuses on boring shit")
 
 Direct ask: "autocam is still so uncomfortable. Can you like try it and see

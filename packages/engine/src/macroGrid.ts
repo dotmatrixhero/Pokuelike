@@ -516,6 +516,8 @@ export interface ZoneSpeciesEstimate {
   minLevel?: number;
   /** Carried straight from the roster entry's own `ImmigrationSpeciesInfo.singleStage` — see that field's doc comment. */
   singleStage?: boolean;
+  /** Carried straight from the roster entry's own `ImmigrationSpeciesInfo.isPredator` — see that field's doc comment. */
+  isPredator?: boolean;
 }
 
 /** Lower/upper bound (before the `estimateZoneResourceIndex`-scaled nudge below) on a never-visited zone's guessed starting population per matching species — settles toward the abstract tier's own capacity-driven equilibrium (`advanceAbstractRegion`) after a few ticks regardless, so this only needs to be in the right ballpark. */
@@ -603,24 +605,45 @@ const ZONE_SPECIES_POOL_MAX = 6;
  * being trimmed the same way.
  */
 const LANDMARK_SPECIES_POOL_BONUS = 3;
+/**
+ * How many of a zone's pool slots can be predator species — direct ask:
+ * "try to have at least some predators + prey per each zone typically. With
+ * a smaller number of predators." Deliberately small relative to
+ * `ZONE_SPECIES_POOL_MIN`/`_MAX` (3-6, or up to 9 with a congregation
+ * landmark's bonus): a zone should feel like it has real hunters in it, not
+ * be dominated by them — see `pickZoneSpeciesPool`'s own doc comment for how
+ * this actually gets enforced. A congregation landmark's real "draw multiple
+ * species together" bonus still applies proportionally more to prey than
+ * predators (only `+1` here vs. prey's full `LANDMARK_SPECIES_POOL_BONUS`),
+ * same "smaller number" intent even at a richer site.
+ */
+const ZONE_PREDATOR_POOL_CAP = 1;
+const LANDMARK_PREDATOR_POOL_BONUS = 1;
+/**
+ * A predator's own invented population is scaled down relative to what the
+ * exact same formula would give an ordinary prey/neutral species — real
+ * ecology (a hunting guild is always thinner on the ground than what it
+ * hunts) backing the same "smaller number of predators" direct ask
+ * `ZONE_PREDATOR_POOL_CAP` addresses at the species level; this is the
+ * individual-count half of it.
+ */
+const PREDATOR_POPULATION_DISCOUNT = 0.4;
 
 /**
- * Deterministically (via `rng`, the zone's own seeded stream) picks a
- * bounded-size subset of `fitting` — see `ZONE_SPECIES_POOL_MIN`/`_MAX`'s
- * doc comment for why. A partial Fisher-Yates shuffle (only as many swaps
- * as the picked pool size needs, not a full shuffle of the whole roster) so
- * this stays cheap even for a large roster. Returns `fitting` itself,
- * unmodified order and all, when it's already at or under the pool size —
- * nothing to trim, and no reason to consume extra `rng()` calls for a
- * shuffle that wouldn't change the outcome.
+ * Deterministically (via `rng`, the zone's own seeded stream) picks up to
+ * `n` entries from `list`, preserving none of the original order (a partial
+ * Fisher-Yates shuffle — only as many swaps as `n` needs, not a full shuffle
+ * of the whole list) — the shared subset-picking primitive behind
+ * `pickZoneSpeciesPool`'s predator/prey balance below. Returns every entry,
+ * unmodified order and all, when `list` is already at or under `n` — nothing
+ * to trim, and no reason to consume extra `rng()` calls for a shuffle that
+ * wouldn't change the outcome.
  */
-function pickZoneSpeciesPool(fitting: readonly ImmigrationSpeciesInfo[], poolBonus: number, rng: () => number): ImmigrationSpeciesInfo[] {
-  const poolSize = ZONE_SPECIES_POOL_MIN + poolBonus + Math.floor(rng() * (ZONE_SPECIES_POOL_MAX - ZONE_SPECIES_POOL_MIN + 1));
-  if (fitting.length <= poolSize) return [...fitting];
-
-  const pool = [...fitting];
-  const picked: ImmigrationSpeciesInfo[] = [];
-  for (let i = 0; i < poolSize; i++) {
+function pickRandomSubset<T>(list: readonly T[], n: number, rng: () => number): T[] {
+  if (list.length <= n) return [...list];
+  const pool = [...list];
+  const picked: T[] = [];
+  for (let i = 0; i < n; i++) {
     const idx = i + Math.floor(rng() * (pool.length - i));
     [pool[i], pool[idx]] = [pool[idx]!, pool[i]!];
     picked.push(pool[i]!);
@@ -628,19 +651,46 @@ function pickZoneSpeciesPool(fitting: readonly ImmigrationSpeciesInfo[], poolBon
   return picked;
 }
 
+/**
+ * A never-visited zone's species pool, deliberately balanced rather than a
+ * plain random draw across every fitting species — direct ask: "try to have
+ * at least some predators + prey per each zone typically. With a smaller
+ * number of predators." Splits `fitting` into predators and everything else
+ * (prey/neutral), picks up to `ZONE_PREDATOR_POOL_CAP` (+ a landmark's own
+ * small bonus) predators first, then fills the REST of the pool with
+ * prey/neutral species — so a zone whose habitat has any real hunters in it
+ * gets at least one, but is never dominated by them the way a plain uniform
+ * random draw across all fitting species occasionally would. A habitat with
+ * zero fitting predator species (this roster's desert biome, say) simply
+ * gets an all-prey pool — nothing to force.
+ */
+function pickZoneSpeciesPool(fitting: readonly ImmigrationSpeciesInfo[], poolBonus: number, isCongregationLandmark: boolean, rng: () => number): ImmigrationSpeciesInfo[] {
+  const poolSize = ZONE_SPECIES_POOL_MIN + poolBonus + Math.floor(rng() * (ZONE_SPECIES_POOL_MAX - ZONE_SPECIES_POOL_MIN + 1));
+  if (fitting.length <= poolSize) return [...fitting];
+
+  const predators = fitting.filter((s) => s.isPredator);
+  const prey = fitting.filter((s) => !s.isPredator);
+  const predatorCap = ZONE_PREDATOR_POOL_CAP + (isCongregationLandmark ? LANDMARK_PREDATOR_POOL_BONUS : 0);
+  const pickedPredators = pickRandomSubset(predators, Math.min(predatorCap, poolSize), rng);
+  const pickedPrey = pickRandomSubset(prey, poolSize - pickedPredators.length, rng);
+  return [...pickedPredators, ...pickedPrey];
+}
+
 export function estimateZoneSpecies(zone: MacroZone, roster: readonly ImmigrationSpeciesInfo[], rng: () => number): ZoneSpeciesEstimate[] {
   const estimates: ZoneSpeciesEstimate[] = [];
   const multiplier = zone.landmark ? (LANDMARK_POPULATION_MULTIPLIER[zone.landmark] ?? 1) : 1;
   const isCongregationLandmark = zone.landmark !== undefined && LANDMARK_POPULATION_MULTIPLIER[zone.landmark] !== undefined;
   const fitting = roster.filter((species) => speciesFitsZone(species, zone));
-  const pool = pickZoneSpeciesPool(fitting, isCongregationLandmark ? LANDMARK_SPECIES_POOL_BONUS : 0, rng);
+  const pool = pickZoneSpeciesPool(fitting, isCongregationLandmark ? LANDMARK_SPECIES_POOL_BONUS : 0, isCongregationLandmark, rng);
   for (const species of pool) {
+    const predatorDiscount = species.isPredator ? PREDATOR_POPULATION_DISCOUNT : 1;
     estimates.push({
       speciesId: species.id,
       homeLayer: species.homeLayer,
-      population: (SEED_POPULATION_BASE + rng() * SEED_POPULATION_VARIANCE) * multiplier,
+      population: (SEED_POPULATION_BASE + rng() * SEED_POPULATION_VARIANCE) * multiplier * predatorDiscount,
       minLevel: species.minLevel,
       singleStage: species.singleStage,
+      isPredator: species.isPredator,
     });
   }
   return estimates;

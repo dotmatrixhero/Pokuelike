@@ -64,6 +64,15 @@ export interface ImmigrationSpeciesInfo {
    * unchanged existing behavior. See `rollImmigrantLevel`.
    */
   singleStage?: boolean;
+  /**
+   * See species.ts's `SpeciesDef.isPredator`. Carried through so
+   * `macroGrid.ts`'s `pickZoneSpeciesPool` can deliberately balance a fresh
+   * zone's invented population — direct ask: "try to have at least some
+   * predators + prey per each zone typically. With a smaller number of
+   * predators." Absent/false = an ordinary prey/neutral species, unchanged
+   * existing behavior.
+   */
+  isPredator?: boolean;
 }
 
 export interface ImmigrationContext {

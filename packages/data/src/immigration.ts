@@ -25,6 +25,7 @@ export const IMMIGRATION_CONTEXT: ImmigrationContext = {
     // Direct ask: "make all Pokémon with just base form have a wider range
     // of base level." See `isSingleStageSpecies`'s own doc comment.
     singleStage: isSingleStageSpecies(species.id),
+    isPredator: species.isPredator,
   })),
   spawnAgent,
 };
