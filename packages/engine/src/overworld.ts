@@ -1,7 +1,7 @@
 import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import type { LevelingContext } from "./leveling.js";
-import { IMMIGRANT_BASE_LEVEL_FLOOR, IMMIGRANT_LEVEL_JITTER, SINGLE_STAGE_LEVEL_JITTER, type ImmigrationContext, type ImmigrationSpeciesInfo } from "./immigration.js";
+import { IMMIGRANT_BASE_LEVEL_FLOOR, IMMIGRANT_LEVEL_JITTER, SINGLE_STAGE_LEVEL_JITTER, PREDATOR_LEVEL_BOOST, type ImmigrationContext, type ImmigrationSpeciesInfo } from "./immigration.js";
 import type { RegionDispersalContext } from "./dispersal.js";
 import { tickWorld } from "./simulation.js";
 import { findPosInBiome, findWalkableNear, generateWorld } from "./worldgen.js";
@@ -295,8 +295,12 @@ function estimateInitialAggregates(mw: MacroWorld, row: number, col: number, ctx
       // ask: "make all Pokémon with just base form have a wider range of
       // base level" — so a fresh zone's guessed population age spread
       // varies zone to zone, not just the later per-individual jitter below.
+      // `PREDATOR_LEVEL_BOOST` mirrors `rollImmigrantLevel`'s own predator
+      // floor bump — direct ask: "a lot of em are too low leveled... we
+      // need at least a couple higher leveld predators."
       avgLevel:
         Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, estimate.minLevel ?? 1) +
+        (estimate.isPredator ? PREDATOR_LEVEL_BOOST : 0) +
         Math.floor(mw.rng() * (estimate.singleStage ? SINGLE_STAGE_LEVEL_JITTER : IMMIGRANT_LEVEL_JITTER)),
       baseResourceIndex: resourceIndex,
       resourceIndex,

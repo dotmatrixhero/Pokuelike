@@ -174,6 +174,22 @@ export const IMMIGRANT_LEVEL_JITTER = 8;
  * JITTER`.
  */
 export const SINGLE_STAGE_LEVEL_JITTER = 30;
+/**
+ * Added on top of a predator species' own ordinary floor — direct ask,
+ * after the earlier predator pass: "a lot of em are too low leveled... we
+ * need at least a couple higher leveld predators." A BASE-form predator
+ * (Scyther/Spearow/Onix/Ekans/Zubat — real `minLevel` 1, same as any
+ * ordinary base-form prey species) previously floored at the exact same
+ * 5-12 range as anything else, which reads as a weak, unthreatening
+ * "predator" — real apex hunters are established, mature individuals, not
+ * fresh hatchlings. `species.isPredator` (`ImmigrationSpeciesInfo`,
+ * `@pokuelike/data`'s `SpeciesDef.isPredator`) adds this flat boost before
+ * jitter, on top of whichever floor (ordinary or evolution-threshold-based)
+ * already applied — an evolved predator (Gyarados/Tentacruel/Arbok/Golbat,
+ * already floored higher via their own real evolution level) gets pushed
+ * higher still, same as a base-form one.
+ */
+export const PREDATOR_LEVEL_BOOST = 15;
 
 /**
  * A real, species-aware immigrant level — direct ask, after noticing every
@@ -186,14 +202,16 @@ export const SINGLE_STAGE_LEVEL_JITTER = 30;
  * existing 5+ range unchanged, while a genuinely evolved species floors
  * meaningfully higher (its own real evolution-level threshold) before a
  * real jitter on top — wider (`SINGLE_STAGE_LEVEL_JITTER`) for a species
- * that never evolves at all (`species.singleStage`), narrower otherwise.
- * Exported (like `accumulateActionEnergy` in simulation.ts) so it's
- * directly, deterministically testable without needing to
- * reverse-engineer `maybeImmigrate`'s own internal rng call order just to
- * isolate this one roll.
+ * that never evolves at all (`species.singleStage`), narrower otherwise. A
+ * predator (`species.isPredator`) also gets `PREDATOR_LEVEL_BOOST` added to
+ * its floor — see that constant's own doc comment. Exported (like
+ * `accumulateActionEnergy` in simulation.ts) so it's directly,
+ * deterministically testable without needing to reverse-engineer
+ * `maybeImmigrate`'s own internal rng call order just to isolate this one
+ * roll.
  */
 export function rollImmigrantLevel(species: ImmigrationSpeciesInfo, rng: () => number): number {
-  const floor = Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, species.minLevel ?? 1);
+  const floor = Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, species.minLevel ?? 1) + (species.isPredator ? PREDATOR_LEVEL_BOOST : 0);
   const jitter = species.singleStage ? SINGLE_STAGE_LEVEL_JITTER : IMMIGRANT_LEVEL_JITTER;
   return floor + Math.floor(rng() * jitter);
 }

@@ -5604,6 +5604,76 @@ zero behavior change to anything that doesn't opt in.
   `POP_HARD_CAP`) is unit-tested but not yet exercised by a real multi-
   thousand-tick run that actually reaches it — see TODO.md.
 
+### Auto-camera clash: retaliation-required bar dropped, replaced with a promotion cooldown
+
+Direct follow-up after the earlier one-shot cluster fix shipped: "i think
+auto cam is now skipping boring stuff. but i'm not seeing like any battles.
+like these move usages are interesting! but i dont get to see any of em..."
+Traced to the retaliation-required bar built two sessions earlier
+(`CLASH_ESCALATION_WINDOW_TICKS`, "auto cam shouldn't focus at all until
+retaliation hit"): `herdConflict.ts`'s own design ("cannot faint or kill,
+full stop... loser retreats once meaningfully hurt") means most real
+skirmishes are genuinely one-sided — a defender backing off rather than
+trading hits — so requiring a real direction-reversed retaliation before
+ever engaging the camera made almost every real, damage-dealing hit
+invisible, not just the boring ones. The event log the user was watching
+showed real moves connecting (tackle/acid/ember, real damage, weight/
+flanking modifiers) that auto-camera never once cut to.
+
+**Built**: dropped the retaliation requirement — any real (non-"missed")
+`herdClash` hit is camera-worthy again, same as the mechanic's very first
+version. To avoid regressing into the EARLIER complaint that requirement
+was built to fix ("a lot more clashing now. But they aren't fighting...
+clashes that don't do anything are lame"), a brand-new pair's first
+promotion is now throttled by `CLASH_PROMOTION_COOLDOWN_TICKS` (40 ticks) —
+the same clustering-cooldown idea `ONE_SHOT_CLUSTER_COOLDOWN_TICKS` already
+uses for one-shot categories, just applied to clash promotions instead. A
+pair already on screen still gets every real hit immediately (widening,
+not gated) — the cooldown only limits how often a genuinely NEW pair gets
+picked up, so a herd's many simultaneous one-sided skirmishes surface an
+occasional real one instead of spamming a cut per hit.
+
+`clashPendingFirstHit`/`maybeEscalateClash` removed entirely, replaced by a
+single `lastClashPromotedTick` field and `maybeEngageClash`. Verified
+directly (ingest a single one-sided hit for a fresh pair — promotes
+immediately now; a second fresh pair within the cooldown — throttled; a
+third past the cooldown — promotes). Typecheck clean; `packages/web` has no
+test suite of its own (see the earlier auto-camera fix's own note on this).
+
+### Predator level and per-zone variety were both too thin
+
+Direct follow-up, same message thread: "i also think our species changes
+have removed too many predators. and a liot of em are too low leveled...
+we need at least a couple higher leveld predators." Two real, separate
+gaps in the predator pass from earlier this session:
+
+1. **Zone variety was capped too tight.** `ZONE_PREDATOR_POOL_CAP` was
+   exactly 1 — a zone whose biome had several real predator species
+   fitting it (badlands: Onix/Growlithe/Zubat/Golbat) only ever showed a
+   single one, every single time, regardless of how much real predator
+   diversity the roster now has. Raised 1 -> 2 (landmark bonus 1 -> 2 to
+   match), and `PREDATOR_POPULATION_DISCOUNT` 0.4 -> 0.55 — still
+   meaningfully thinner than prey, just not negligible.
+2. **Base-form predators floored at the same low level as any ordinary
+   prey species.** Scyther/Spearow/Onix/Ekans/Zubat all have a real
+   `minLevel` of 1 (no level-gated evolution of their own, or not yet
+   evolved), so they floored at the exact same 5-12 immigrant/invented
+   range as a harmless base-form prey species — a real predator reading as
+   just as weak as anything else. Added `PREDATOR_LEVEL_BOOST` (15),
+   applied on top of whichever floor already applied (ordinary or
+   evolution-threshold-based) in BOTH spawn paths —
+   `immigration.ts`'s `rollImmigrantLevel` and `overworld.ts`'s
+   `estimateInitialAggregates` — via the same `ImmigrationSpeciesInfo`/
+   `ZoneSpeciesEstimate.isPredator` field the zone-composition balance
+   already threads through.
+
+Live-validated across a real 12x12 never-visited-zone grid: predator
+levels now land well above the old flat range — Ekans 19-29 (was ~5-12),
+Zubat/Onix ~18-28, Arbok/Golbat ~38-45, Gyarados 34-44, Tentacruel 43-54 —
+and 18/144 promoted zones now show more than one predator species (was
+architecturally impossible at cap=1). Full suite (1077 + 177 tests) and
+typecheck green.
+
 ### Zone species floor raised to 4-7, plus two new species to actually make that possible
 
 Direct ask: "Can you add like a little species. More throughout? Each zone

@@ -619,20 +619,28 @@ const LANDMARK_SPECIES_POOL_BONUS = 3;
  * be dominated by them — see `pickZoneSpeciesPool`'s own doc comment for how
  * this actually gets enforced. A congregation landmark's real "draw multiple
  * species together" bonus still applies proportionally more to prey than
- * predators (only `+1` here vs. prey's full `LANDMARK_SPECIES_POOL_BONUS`),
- * same "smaller number" intent even at a richer site.
+ * predators, same "smaller number" intent even at a richer site. Raised
+ * from 1 (+1 landmark) to 2 (+2 landmark) — direct follow-up ask once a cap
+ * of exactly 1 shipped: "our species changes have removed too many
+ * predators" — a hard cap of 1 meant a zone with several real predator
+ * species fitting its biome (e.g. badlands: Onix/Growlithe/Zubat/Golbat) only
+ * ever showed a single one, every time, never any actual variety even
+ * though the roster has real predator diversity now.
  */
-const ZONE_PREDATOR_POOL_CAP = 1;
-const LANDMARK_PREDATOR_POOL_BONUS = 1;
+const ZONE_PREDATOR_POOL_CAP = 2;
+const LANDMARK_PREDATOR_POOL_BONUS = 2;
 /**
  * A predator's own invented population is scaled down relative to what the
  * exact same formula would give an ordinary prey/neutral species — real
  * ecology (a hunting guild is always thinner on the ground than what it
  * hunts) backing the same "smaller number of predators" direct ask
  * `ZONE_PREDATOR_POOL_CAP` addresses at the species level; this is the
- * individual-count half of it.
+ * individual-count half of it. Raised from 0.4 to 0.55 alongside the pool
+ * cap above, same direct follow-up ask ("removed too many predators") —
+ * still meaningfully thinner than prey, just not so thin a real predator
+ * presence read as negligible.
  */
-const PREDATOR_POPULATION_DISCOUNT = 0.4;
+const PREDATOR_POPULATION_DISCOUNT = 0.55;
 
 /**
  * Deterministically (via `rng`, the zone's own seeded stream) picks up to
