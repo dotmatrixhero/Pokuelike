@@ -5556,3 +5556,76 @@ not something this pathfinding pass itself caused or is positioned to fix.
       breeding gate (level 16 or evolved, DESIGN.md) is sitting right at a
       cliff edge for some worlds and not others. Worth a multi-seed look at
       what fraction of a population ever reaches the gate at all.
+
+- [ ] **Cross-zone migration is architecturally present and practically
+      dead.** Prompted by: "it is very confusing to have 100+ krabbys in one
+      zone and 0 in an adjacent one. We have random immigration. But do we
+      have real herd based migration? Can they spill over?"
+      Measured over 8,000 ticks per seed, not reasoned about:
+
+      | | seed 20260903 | seed 11 |
+      |---|---|---|
+      | `herdMigrating` (within a zone) | 22 | 35 |
+      | `dispersed` (individual leaves home) | 0 | 9 |
+      | `regionCrossed` (actually left the zone) | **0** | **1** |
+      | `immigrated` (arrived from off-map) | 12 | 11 |
+      | zones tracked, of 4,096 | **1** | **2** |
+
+      - **Within-zone herd migration is real and works.** `herdMigration.ts`
+        moves a whole herd as a group on five triggers (scarcity, predator
+        pressure, weather, territorial, wanderlust), every member pulling
+        toward one shared point. 22-35 of these per run, and they show up in
+        the chronicle ("Moved on — the food had run out"). That half of the
+        question is a clean yes.
+      - **Cross-zone movement is not.** Random immigration outnumbers actual
+        emigration by 12:1 and 11:1. Population can arrive from off-map but
+        essentially never leaves, which is exactly the reported symptom: one
+        stuffed zone, empty neighbours.
+      - **The abstract spillover mechanism cannot run, by construction.**
+        `maybeEmigrate` is the thing designed to spread population across
+        the grid (10% of a species into a random adjacent zone). It
+        explicitly skips the FOCUSED zone — reasonably, since that zone has
+        real individuals rather than an aggregate — so it only ever operates
+        between two *background* zones. But a zone only becomes tracked when
+        something puts population there, and the only thing that can is an
+        individual walking out of the focused zone. Chicken and egg: the one
+        zone that has anything to export is the one zone forbidden from
+        exporting, so with 1 tracked zone `maybeEmigrate` has nothing to do
+        on any tick of the run. Seed 11 is the proof — a single crossing
+        created a second zone, and only then did the mechanism have two
+        zones to move between.
+      - **Not a level gate, which was my first guess and was wrong.**
+        `DISPERSAL_MIN_LEVEL` is 15 and 19 of 20 living agents were at or
+        above it, with a max of 52. The throttle is further down: dispersal
+        itself is rare (0-9 per run), and `REGION_DISPERSAL_CHANCE` then
+        keeps only 25% of those, and that survivor still has to walk to the
+        map edge without dying.
+      - **Nothing anywhere is density-driven.** `EMIGRATION_CHANCE_PER_TICK`
+        is a flat 0.002 whether a zone holds 4 animals or 400, and herd
+        migration's triggers are all local-resource or threat based, never
+        crowding. There is no carrying-capacity pressure pushing a packed
+        zone outward — which is precisely the force that would fix the
+        reported symptom.
+
+      Options, none applied — this is a design call:
+      1. **Herd-level zone crossing** (what was actually asked for): when a
+         herd's existing scarcity/territorial migration picks a destination
+         and the herd is near a map edge, let the WHOLE herd walk out into
+         the neighbouring zone instead of a lone disperser. Reuses the
+         migration pipeline that already works, and makes the overworld
+         story "the Krabbies of the Bright Coast moved east" rather than
+         "one Krabby wandered off."
+      2. **Density-driven emigration pressure**: scale emigration on
+         population against the zone's own `resourceIndex`/
+         `baseResourceIndex` (both already tracked), so a crowded zone
+         pushes out and an empty one does not.
+      3. **Let the focused zone shed a slice at the aggregate tier** — the
+         cheap deadlock-breaker: remove N real agents and add them to a
+         neighbour's aggregate. Least interesting, but it alone would end
+         the chicken-and-egg.
+      4. Separately: should the world START with populated neighbours? Right
+         now every zone but one is genuinely empty at tick 0, so even a
+         perfect migration system begins from a single point of life.
+
+      Recommendation: 1 + 2 together. 1 is the mechanic the question asks
+      for and 2 is the force that makes it fire when a zone is overfull.
