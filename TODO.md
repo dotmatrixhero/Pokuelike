@@ -69,6 +69,54 @@ pass rather than a rushed bolt-on:
       on the map and 2 real permanently-degraded peat tiles. Tree-climbing/
       canopy access (the traversal half of the original ask) is still a
       separate, unbuilt follow-up — deliberately kept out of this pass.
+- [x] **Water body types (ocean/river/lake/pond), real rivers, ice,
+      shore-biased drought — built.** Direct follow-up ask: "what about
+      rivers vs ocean vs lakes and ice." New `WaterKind`
+      ("ocean" | "river" | "lake" | "pond"), `Tile.waterKind` — reuses
+      three signals that already existed but were never persisted
+      per-tile: the ocean mask, the river-carving pass, and
+      `waterBody.ts`'s connected-size lake/pond split. Salt vs fresh isn't
+      a separate field — it falls out of `waterKind` directly (ocean =
+      salt). Gameplay effects (per direct instruction) deliberately
+      deferred — this pass is the visible/data layer only.
+      **Rivers now have a real flow direction and real width** — direct
+      ask: "I want water to potentially sorta flow for elevation if
+      possible. like it wants to move in a direction, and I want thicker
+      than one sparse tiles." New `Tile.flowDirection` (the step-to-step
+      steepest-descent movement vector the carving pass already computed,
+      now persisted instead of discarded); `carveRiverWidening`
+      (worldgen.ts) carves one extra tile perpendicular to the flow on
+      whichever side reads as lower ground, so a river reads as a real bed
+      rather than a single-file stream. No gameplay effect from
+      `flowDirection` yet (a current pushing a swimmer, say) — the data is
+      there for a real follow-up.
+      **Ice**: new "ice" `TerrainKind`, walkable by default (the whole
+      point of freezing over) and no longer "water" for every
+      `terrain === "water"` check elsewhere (drinking, fishing) — a real
+      consequence, not just a skin. `weather.ts`'s `advanceWaterCycle`
+      freezes small (non-large) water bodies during winter
+      (`ICE_FREEZE_CHANCE_PER_TICK`) and thaws them back once winter ends
+      (`ICE_THAW_CHANCE_PER_TICK`) — direct ask: "global winter on smaller
+      water" (not biome-gated, and oceans/big lakes stay liquid).
+      **Ocean/lake drought no longer goes patchy** — direct report: "ocean
+      shouldn't become patchy when hit by drought. it needs to not
+      evaporate random tiles, it should be the shallower ones." Root
+      cause: a large body's drought-drying roll used to fire independently
+      per-tile with no position awareness at all, punching random holes in
+      a deep interior the same as a true shoreline tile. New
+      `isShoreWaterTile` (the cheap "touches a non-water neighbor"
+      check — this codebase's only real per-tile shallow/deep signal
+      before this was connected-body SIZE, the same value for every tile
+      in one body) now gates large-body drying to shore tiles only, so a
+      drying ocean/lake visibly recedes from its edge inward instead of
+      developing random interior holes.
+      Verified live: a real 150x150 `generateWorld` run placed all four
+      `waterKind`s (ocean 9900, lake 1320, river 188, pond 13 tiles), 186/
+      188 river tiles carrying a real `flowDirection`, and 94 river tiles
+      with 2+ river neighbors (real width, not a single-file stream); a
+      real 4000-tick scenario run produced 518 real freeze events, 394
+      real thaw events, and 33 real (now shore-gated) drought-dry events,
+      ending with 124 ice tiles on the map.
 - [ ] **Bug-type Pokémon as a more commonly preferred prey target.** Direct
       ask: "bug pokemon be more common preferred prey target because
       they're easier to eat" — i.e. a predator's prey-selection logic

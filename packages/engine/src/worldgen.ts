@@ -1,8 +1,8 @@
-import type { Agent, BiomeSeedInfo, GroundType, Layer, Vec2, World } from "./types.js";
+import type { Agent, BiomeSeedInfo, GroundType, Layer, Vec2, WaterKind, World } from "./types.js";
 import { createWorld, setElevation, setTile, tileAt } from "./world.js";
 import { CANOPY_APPLE_RIPEN_TICKS, pickCrop } from "./crops.js";
 import { mulberry32 } from "./rng.js";
-import { canEnterWater } from "./waterBody.js";
+import { canEnterWater, isLargeWaterBody, waterBodySizeAt } from "./waterBody.js";
 import type { ZoneDirection } from "./directions.js";
 import type { LandmarkType } from "./landmarks.js";
 
@@ -723,6 +723,7 @@ function carveRiver(
     }
 
     setTile(world, "surface", x, y, "water", 0);
+    tileAt(world, "surface", x, y)!.waterKind = "river";
 
     // Steepest-descent search reads `elevationSnapshot` — the terrain's
     // elevation as generated, frozen before any river started carving —
@@ -749,9 +750,70 @@ function carveRiver(
     }
 
     if (bestX === -1) return; // no lower ground anywhere adjacent — pools into a new lake right here
+
+    // Real flow direction, and a real width — direct ask: "I want water to
+    // potentially sorta flow for elevation if possible. like it wants to
+    // move in a direction, and I want thicker than one sparse tiles."
+    // `flowDirection` is just the step-to-step movement vector this
+    // steepest-descent search already computes above, persisted for the
+    // first time rather than discarded. Widening carves ONE extra tile
+    // perpendicular to that flow, on whichever of the two perpendicular
+    // sides reads as lower ground (same steepest-descent spirit as the
+    // main path) — a real, if modest, riverbed rather than a single-file
+    // stream. Never carved across the ocean-mouth/existing-water/visited
+    // checks a normal step already respects.
+    const flowDx = Math.sign(bestX - x);
+    const flowDy = Math.sign(bestY - y);
+    tileAt(world, "surface", x, y)!.flowDirection = { x: flowDx, y: flowDy };
+    carveRiverWidening(world, width, height, x, y, flowDx, flowDy, oceanMask, visited, elevationSnapshot);
+
     x = bestX;
     y = bestY;
   }
+}
+
+/**
+ * Carves ONE extra water tile perpendicular to `(flowDx, flowDy)` at
+ * `(x, y)` — see `carveRiver`'s own "real width" doc comment. Tries
+ * whichever of the two perpendicular sides (a 90° rotation of the flow
+ * vector, both directions) reads as lower ground first, falling back to
+ * the other side if the first is out of bounds, already visited, touches
+ * the ocean, or is already water (a tributary/the river's own far bank) —
+ * a silent no-op (river stays single-tile there) if neither side
+ * qualifies, same "don't force it" spirit as `carveRiver` giving up when
+ * there's no lower ground to descend to.
+ */
+function carveRiverWidening(
+  world: World,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  flowDx: number,
+  flowDy: number,
+  oceanMask: MacroElevation,
+  visited: Set<string>,
+  elevationSnapshot: Float64Array
+): void {
+  const sides: readonly [number, number][] = [
+    [-flowDy, flowDx],
+    [flowDy, -flowDx],
+  ];
+  const candidates = sides
+    .map(([dx, dy]) => ({ dx, dy, nx: x + dx, ny: y + dy }))
+    .filter(({ nx, ny }) => nx >= 0 && ny >= 0 && nx < width && ny < height)
+    .filter(({ nx, ny }) => !visited.has(`${nx},${ny}`))
+    .filter(({ nx, ny }) => !oceanMask.isOcean(nx, ny))
+    .filter(({ nx, ny }) => tileAt(world, "surface", nx, ny)?.terrain !== "water")
+    .sort((a, b) => elevationSnapshot[a.ny * width + a.nx]! - elevationSnapshot[b.ny * width + b.nx]!);
+
+  const pick = candidates[0];
+  if (!pick) return;
+  visited.add(`${pick.nx},${pick.ny}`);
+  setTile(world, "surface", pick.nx, pick.ny, "water", 0);
+  const widenedTile = tileAt(world, "surface", pick.nx, pick.ny)!;
+  widenedTile.waterKind = "river";
+  widenedTile.flowDirection = { x: flowDx, y: flowDy };
 }
 
 /** Carves every river for this map — see `carveRiver`'s doc comment for the per-river rule. Runs once, after the full terrain grid (land/ocean/biome/obstacle) is already in place, so steepest descent has real final elevations to work from. */
@@ -1407,6 +1469,32 @@ function assignGroundTypes(world: World, width: number, height: number, rng: () 
       tile.groundType = groundType;
       const startingFertility = GROUND_TYPE_STARTING_FERTILITY[groundType];
       if (startingFertility !== undefined) tile.fertility = startingFertility;
+    }
+  }
+}
+
+/**
+ * Tags every still-untagged "water" tile "lake" or "pond" — direct ask:
+ * "what about rivers vs ocean vs lakes." Ocean tiles were already tagged
+ * the moment they were placed (the ocean mask is right there), and river
+ * tiles by `carveRiver`/`carveRiverWidening` — this pass only ever sees
+ * the moisture-field-placed water `generateWorld`'s main loop drops
+ * straight onto land, which never got either tag. Split by the same
+ * connected-component body SIZE `waterBody.ts` already computes for real
+ * gameplay (crossing safety) and rendering (depth darkening) — a real
+ * lake (`isLargeWaterBody`) vs an ordinary pond, not a new size concept.
+ * Runs after `carveSuicuneRivers` so a river tile is never miscounted as
+ * lake/pond, and after the massif/badlands/landmark passes so a body a
+ * later step happened to carve into or shrink is measured as it actually
+ * ended up.
+ */
+function assignWaterKinds(world: World, width: number, height: number): void {
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const tile = tileAt(world, "surface", x, y);
+      if (!tile || tile.terrain !== "water" || tile.waterKind !== undefined) continue;
+      const size = waterBodySizeAt(world, { x, y });
+      tile.waterKind = isLargeWaterBody(size) ? "lake" : "pond";
     }
   }
 }
@@ -2365,6 +2453,7 @@ export function generateWorld(width: number, height: number, seed: number, bias?
       // level is ocean regardless of which biome it blends toward.
       if (macroElevation.isOcean(x, y)) {
         setTile(world, "surface", x, y, "water", 0);
+        tileAt(world, "surface", x, y)!.waterKind = "ocean";
         continue;
       }
 
@@ -2474,6 +2563,12 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   // massifs, landmark) already settled it. See assignGroundTypes's own doc
   // comment.
   assignGroundTypes(world, width, height, mulberry32(seed ^ 0x2f2f5a3f));
+
+  // Water body identity — ocean/river tiles are already tagged as they're
+  // placed above; this just fills in lake vs pond for everything the
+  // moisture field dropped onto land. See assignWaterKinds's own doc
+  // comment.
+  assignWaterKinds(world, width, height);
 
   return world;
 }

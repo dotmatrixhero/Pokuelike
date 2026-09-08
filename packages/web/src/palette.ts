@@ -52,6 +52,7 @@ export const TERRAIN_BG: Record<TerrainKind, Rgb> = {
   mud: [42, 34, 22],
   shelter: [64, 50, 34],
   fire: [96, 32, 10],
+  ice: [30, 58, 74],
 };
 
 export const TERRAIN_FG: Record<TerrainKind, Rgb> = {
@@ -69,6 +70,7 @@ export const TERRAIN_FG: Record<TerrainKind, Rgb> = {
   mud: [110, 90, 60],
   shelter: [196, 158, 108],
   fire: [255, 168, 64],
+  ice: [200, 232, 240],
 };
 
 /**
@@ -157,6 +159,7 @@ export const TERRAIN_GLYPH: Record<TerrainKind, string> = {
   mud: "=",
   shelter: "h",
   fire: "*",
+  ice: "%",
 };
 
 export const FLAVOR_GLYPH: Record<string, string> = {

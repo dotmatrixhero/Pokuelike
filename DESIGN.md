@@ -14595,3 +14595,90 @@ Direct scenario checks (`tsx`, not just code-reading):
   — no existing test needed updating, confirming the ceiling-aware
   `raiseFertility`/harvest-recovery changes stayed behaviorally identical
   for ordinary "loam" ground (the overwhelming majority of the map).
+
+## Water body types, real river flow/width, ice, shore-biased drought
+
+Direct follow-up ask, right after the ground/soil-type pass: "what about
+rivers vs ocean vs lakes and ice an shit?" Then, once scoped: "yeah. pull
+and merge. then. global winter on smaller water. and gameplay effects can
+wait. but also i want water to potentially sorta flow for elevation if
+possible. like it wants to move in a direction, and i want thicker than
+one spare tiles. also like ocean shouldnt become patchy when hit by
+drought. it needs to not evaporate random tiles, it should be the
+shallower ones."
+
+Same shape as ground types: most of the underlying data already existed,
+just never persisted per-tile. New `WaterKind` ("ocean" | "river" |
+"lake" | "pond"), `Tile.waterKind` — ocean tagged the instant it's placed
+(the sea-level mask was already right there), river tagged by the
+existing steepest-descent carving pass, lake vs pond split by
+`waterBody.ts`'s existing connected-component size check
+(`assignWaterKinds`, worldgen.ts, run last). Salt vs fresh isn't a
+separate field — it falls straight out of `waterKind` (ocean = salt).
+Gameplay effects deliberately deferred per direct instruction — this pass
+is the visible/data layer, not a mechanics pass.
+
+**Rivers: real flow + real width.** `carveRiver`'s steepest-descent search
+already computed a step-to-step movement vector every tick — it was just
+discarded. Now persisted as `Tile.flowDirection`. Widening
+(`carveRiverWidening`) carves one extra tile perpendicular to that flow,
+picking whichever of the two perpendicular sides reads as lower ground
+(falling back to the other, or staying single-width, if that side is out
+of bounds/already visited/ocean/already water) — a real riverbed, not a
+single-file stream. No gameplay effect from `flowDirection` yet (a real
+current pushing a swimmer downstream, say) — the data is there for that
+follow-up, not built here.
+
+**Ice.** New "ice" `TerrainKind` — walkable and non-opaque by default
+(absent from `UNWALKABLE_TERRAIN`/`OPAQUE_TERRAIN`, world.ts), which is
+the entire point: a small water body freezing over becomes crossable by a
+land agent that couldn't cross the water underneath it. Also, critically,
+no longer "water" for every `terrain === "water"` check elsewhere
+(drinking, fishing) — a real, not cosmetic, consequence. `weather.ts`'s
+`advanceWaterCycle` now runs a season-driven freeze/thaw check FIRST, for
+every tile, deliberately NOT gated on an active weather cell the way
+drought/rain are (a season is a much broader, slower condition — "global
+winter," not a drifting cell): small (non-large) water bodies roll to
+freeze during `seasonName === "winter"` (`ICE_FREEZE_CHANCE_PER_TICK`,
+1/60 — ~99% likely to freeze at some point across a full 250-tick winter)
+and ice tiles roll to thaw back once winter ends
+(`ICE_THAW_CHANCE_PER_TICK`, 1/30 — faster than freezing, so ice doesn't
+linger into spring). Large bodies (oceans/big lakes) are untouched —
+"global winter on smaller water" was explicit about scope.
+
+**Ocean/lake drought no longer punches random interior holes.** Root
+cause: the existing large-body drought-drying roll fired independently
+per tile with zero position awareness — an ocean's deep interior tile had
+exactly the same drying chance as a true edge tile, so a sustained drought
+could visibly "swiss-cheese" the middle of an ocean instead of receding
+from its coastline. The only existing per-tile-ish depth signal
+(`waterDepthFactor`, palette.ts) is honestly documented as a body-SIZE
+proxy, not a real per-tile depth — every tile in one connected body reads
+identically "deep." Fixed with a new, cheap `isShoreWaterTile` (touches at
+least one non-water/non-ice neighbor, or the map edge) that now gates
+large-body drying to shore tiles only — no new stored field, no BFS, just
+an O(1) neighbor check per candidate tile. A small body (pond/puddle) is
+essentially all-shore anyway, so its own drying behavior — the thing that
+was never the complaint — is unchanged.
+
+### Verification
+
+Direct scenario checks (`tsx`, not just code-reading):
+- A real 150x150 `generateWorld` run placed all four `waterKind`s with a
+  real distribution (ocean 9900, lake 1320, river 188, pond 13 tiles);
+  186/188 river tiles carried a real `flowDirection`; 94 river tiles had
+  2+ river neighbors, confirming real width rather than a single-file
+  stream.
+- A real 4000-tick scenario run: 518 real freeze events, 394 real thaw
+  events (both directions of the ice cycle genuinely firing), and 33 real
+  drought-dry events still occurring under the new shore-only gate
+  (confirming the fix didn't just silently disable ocean/lake drying
+  entirely) — ending the run with 124 ice tiles present on the map.
+- Full monorepo typecheck clean, including the exhaustive
+  `Record<TerrainKind, ...>` tables the new "ice" kind required updating
+  in three places (palette.ts's TERRAIN_BG/FG/GLYPH, runner's ascii.ts,
+  and the unwired-but-still-typechecked legend.ts). Engine (46 files, 1262
+  tests) and data (2 files, 240 tests) suites green — no existing test
+  needed updating, confirming the new ice/shore-drought checks stayed
+  behaviorally inert for every seed/scenario those tests already cover
+  (summer runs, non-large water bodies, etc.).

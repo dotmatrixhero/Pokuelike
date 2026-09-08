@@ -230,7 +230,41 @@ export type TerrainKind =
    * `Tile.burnTicksRemaining` and reverts to scorched "floor", spreading
    * into adjacent `FLAMMABLE_TERRAIN` on the way.
    */
-  | "fire";
+  | "fire"
+  /**
+   * A frozen "water" tile — weather.ts's `advanceWaterCycle`, "global
+   * winter on smaller water" (direct ask, following the ground/soil-type
+   * pass: "what about rivers vs ocean vs lakes and ice"). Walkable and not
+   * opaque by default (absent from `UNWALKABLE_TERRAIN`/`OPAQUE_TERRAIN`,
+   * world.ts) — the whole point of freezing is that it becomes crossable
+   * by a land agent that couldn't cross the water underneath it. Not
+   * "water" any more for every terrain === "water" check elsewhere
+   * (drinking, fishing, Water-type terrain bonuses) — a real, not just
+   * cosmetic, consequence of freezing over. Reverts back to "water" on its
+   * own once winter ends (same function, thaw roll) — `Tile.waterKind`/
+   * `flowDirection` are left untouched by the water<->ice transition (see
+   * `setTile`'s own doc comment for which fields it does and doesn't
+   * reset), so a frozen river tile still remembers it's a river once it
+   * thaws.
+   */
+  | "ice";
+
+/**
+ * Which real body of water a "water" (or currently-frozen "ice") tile
+ * belongs to — an orthogonal tag, same shape as `groundType`. Direct ask:
+ * "what about rivers vs ocean vs lakes." "ocean" comes from worldgen.ts's
+ * existing sea-level mask; "river" from the existing steepest-descent
+ * river-carving pass; "lake" vs "pond" split by the existing connected-
+ * component body-SIZE check (`waterBody.ts`'s `isLargeWaterBody`) already
+ * used for gameplay (crossing safety) and rendering (depth darkening) —
+ * every one of these three signals already existed, just never persisted
+ * per-tile. Salt vs fresh isn't its own field: it falls straight out of
+ * this one ("ocean" = salt, everything else = fresh) unless a real
+ * brackish/salt-lake case gets built later. `undefined` on a "water"/"ice"
+ * tile defaults to "pond" (a small, ordinary body) for rendering/logic
+ * purposes; meaningless (and always `undefined`) on every other terrain.
+ */
+export type WaterKind = "ocean" | "river" | "lake" | "pond";
 
 /**
  * Ground/soil composition — an orthogonal tag on top of `TerrainKind`, same
@@ -426,6 +460,27 @@ export interface Tile {
    * bricked forever. `undefined`/0 == undamaged.
    */
   groundDegraded?: number;
+  /**
+   * "water"/"ice" tiles only: which real body this tile belongs to — see
+   * `WaterKind`'s own doc comment. Set once at generation (worldgen.ts's
+   * `assignWaterKinds`/`carveSuicuneRivers`) and by weather.ts's
+   * `advanceWaterCycle` for water freshly formed by rain (a new pond).
+   * `undefined` defaults to "pond" for rendering/logic purposes.
+   */
+  waterKind?: WaterKind;
+  /**
+   * "water"/"river"-tagged tiles only: the direction this river tile's
+   * current actually flows, in tile-steps (`{-1,0,1}` per axis) — the
+   * literal step-to-step movement direction worldgen.ts's existing
+   * steepest-descent river carving already computes but never used to
+   * persist anything. Direct ask: "I want water to potentially sorta flow
+   * for elevation if possible. like it wants to move in a direction."
+   * Gameplay effects (a real current pushing a swimmer, say) are a real
+   * follow-up — this is the data the mechanic would read, not the
+   * mechanic itself yet. `undefined` on non-river water (a lake/pond/ocean
+   * has no single flow direction) and on every non-water terrain.
+   */
+  flowDirection?: Vec2;
   /**
    * "shelter" tiles only: which species most recently finished building
    * (part of) this shelter — purely a rendering hint (packages/web's
