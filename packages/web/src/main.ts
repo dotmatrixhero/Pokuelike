@@ -144,7 +144,7 @@ let battleStepMode = false;
 let selectedAgentId: string | undefined;
 let lastLoggedEventCount = 0;
 let inspectorDirty = true;
-let renderStyle: RenderStyle = "ascii";
+let renderStyle: RenderStyle = "tile";
 let zoom = DEFAULT_ZOOM;
 
 const eventLogPanel = new EventLogPanel(eventLogEl);
