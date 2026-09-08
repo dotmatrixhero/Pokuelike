@@ -14488,3 +14488,109 @@ despite plain FIFO order saying the first should. Live Playwright run at
 appearing repeatedly across several distinct live clashes. Full monorepo
 typecheck clean; engine (46 files, 1257 tests) and data (2 files, 240
 tests) suites green (this feature is web-only — no engine/data changes).
+
+## Ground/soil types, and socialize's real isolation pressure
+
+Two features, discussed together against `NARRATIVE_PILLARS.md`: the
+socialize action (previous entry, above) leaned on Pillar 3 ("the rugged
+individual is a myth") but wasn't yet load-bearing — rapport went up, but
+nothing genuinely depended on it. Ground types were originally scoped as a
+scalar overlay on `fertility`; re-read through Pillar 4 ("all that you
+change, changes you... the land remembers") and Pillar 1 (farming needs
+real ecological cost), the ask became: soil should be a real, visible,
+persistent-consequence system, not a hidden number.
+
+### Socialize: isolation as a real, patient pressure
+
+Direct ask: "if they don't have same species around them, they should try
+to find other species or emigrate. like they can survive a long time, but
+eventually it becomes important to socialize and build connections. even
+with other herds." Mirrors a pattern already in the codebase almost
+exactly — reproduction.ts's `ticksSinceEligibleMate`/`MATE_ISOLATION_TICKS`
+(200) and dispersal.ts's `"no_eligible_mates"` guaranteed-fallback trigger.
+
+New `Agent.ticksSinceSocialContact`, same shape. `applySocializing` (needs.ts)
+now has two tiers: below `SOCIALIZE_ISOLATION_TICKS` (400) only a same-herd
+candidate counts (the original behavior); past it, ANY nearby agent counts
+— any species, any herd, a herdless wanderer too — at half the rapport
+delta (`SOCIALIZE_STRANGER_DELTA_FRACTION`, a stranger's company is real
+but not the same instant familiarity a herd-mate's is). Past a much longer
+`SOCIALIZE_DISPERSAL_TICKS` (1200, dispersal.ts) with even the widened
+search still coming up empty, a new dispersal "Trigger 3" fires — a new
+`"isolation"` `DispersalReason`, dispersal.ts's `maybeTriggerDispersal`
+extended with exactly the same shape as its existing mate trigger — sending
+a truly, persistently isolated agent off to go find people, reusing the
+existing dispersal target-selection machinery rather than inventing a new
+one.
+
+### Ground types: a real, visible, persistent-consequence soil system
+
+New `Tile.groundType` ("loam" | "sandy" | "clay" | "rocky" | "peat") — an
+orthogonal tag on top of `TerrainKind`, the same shape `Tile.flavor` already
+uses for food/flora, not a new set of `TerrainKind` values (so it composes
+with every existing "floor" consumer for free). Assigned once at generation
+(`worldgen.ts`'s `assignGroundTypes`, run LAST — after rivers/badlands/
+massifs/landmark have all already settled the map — so it reads the real
+final biome-dominant reality of each tile), biome-correlated via the same
+runtime `dominantBiomeAt` lookup weather.ts's own biome-influenced weather
+already relies on: highland/snow/badlands → rocky, desert/beach → sandy,
+wetland → mostly clay with a real chance of a rarer peat pocket, everything
+else → loam (the fertile, unremarkable default — `undefined` on a tile
+means "loam").
+
+Real mechanics, not just a label — `flora.ts`'s `GROUND_TYPE_PARAMS`:
+- `fertilityCeiling` — the highest `fertility` a tile of this type can ever
+  reach (loam 1.0, sandy 0.6, rocky 0.25 — barely grows anything, clay/peat
+  1.0). `raiseFertility` now clamps to this instead of a flat 1, and a
+  freshly-generated tile gets a real STARTING `fertility` at its own
+  ceiling (worldgen.ts's `assignGroundTypes`) rather than staying
+  `undefined` — several places already read `fertility ?? 1` as "fully
+  fertile," which would have been actively wrong for a never-yet-harvested
+  rocky tile otherwise.
+- `regenMultiplier` — scales `FERTILITY_REGEN_PER_TICK` (sandy drains/dries
+  fast, regenerating quickly toward its own low ceiling; clay is slow to
+  recover).
+- `harvestRecoveryFraction` — scales `FERTILITY_AFTER_HARVEST` against the
+  tile's own ceiling, so e.g. rocky's poor ceiling AND poor recovery
+  fraction compound into a genuinely harsh post-harvest low.
+- `digMultiplier` — scales needs.ts's `cropDigThreshold` (the layer-gated
+  crop-access dig mechanic) — direct ask: "certain dirt is easier to dig."
+  Sandy 0.6x, clay 1.8x, rocky 2.5x.
+
+**Peat doesn't fully forgive.** New `Tile.groundDegraded` (0-1) — every
+other ground type's `fertility` fully recovers given enough time; peat
+specifically has a real chance (`PEAT_DEGRADE_CHANCE` 0.4) on every
+harvest-death to permanently shave a little off its OWN ceiling
+(`maybeDegradePeat`), capped well short of 1 so a tile is scarred, not
+bricked forever. This is the concrete answer to Pillar 4's own "still
+open" question ("how much does the land remember, and for how long?") for
+at least one real case.
+
+Rendered as a real, subtle color cast in tile mode (`GROUND_TYPE_TINT`,
+palette.ts, drawn via a new `drawGroundTypeTint` in renderer.ts, on both
+the plain-floor and food/flora/seedling branches) — direct design
+principle already on record: "mechanics should be visible on the map, not
+hidden in a meter." Tree-climbing/canopy access — the traversal half of
+the original ask — is deliberately NOT part of this pass; it's about tree
+tiles specifically, not ground composition, and stays a separate follow-up
+in TODO.md.
+
+### Verification
+
+Direct scenario checks (`tsx`, not just code-reading):
+- A real 120x120 `generateWorld` run placed all 5 ground types with a
+  sensible distribution (loam 3557, rocky 1350, sandy 1330, clay 606, peat
+  184 tiles) and exactly the expected starting fertility per ceiling
+  (rocky avg 0.250, sandy avg 0.600, clay/peat avg 1.000).
+- A real 6000-tick scenario run: zero fertility-ceiling violations found
+  anywhere on the map (every tile's `fertility` stayed at or under its own
+  `groundType`'s ceiling, including through real harvest/regen cycles), 2
+  real peat tiles ended the run with permanent `groundDegraded` damage, 1
+  real `"isolation"`-reason dispersal event fired, and a max observed
+  `ticksSinceSocialContact` of 2889 on a still-living agent — confirming
+  the widened-search tier and the dispersal escape hatch both actually
+  engage in a real run, not just in theory. Full monorepo typecheck clean;
+  engine (46 files, 1257 tests) and data (2 files, 240 tests) suites green
+  — no existing test needed updating, confirming the ceiling-aware
+  `raiseFertility`/harvest-recovery changes stayed behaviorally identical
+  for ordinary "loam" ground (the overwhelming majority of the map).

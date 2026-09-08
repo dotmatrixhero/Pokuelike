@@ -1,4 +1,4 @@
-import type { PokemonType, TerrainKind, Vec2, World } from "@pokuelike/engine";
+import type { GroundType, PokemonType, TerrainKind, Vec2, World } from "@pokuelike/engine";
 import { waterBodySizeAt } from "@pokuelike/engine";
 
 /**
@@ -124,6 +124,21 @@ export const CROP_EMOJI: Partial<Record<string, string>> = {
   pumpkin: "🎃",
   herbs: "🌿",
   honey: "🍯",
+};
+
+/**
+ * A subtle color cast per `GroundType`, drawn as a low-opacity wash over
+ * plain floor (and food/flora/seedling) ground — direct design principle:
+ * "mechanics should be visible on the map, not hidden in a meter." "loam"
+ * gets no entry (the fertile, unremarkable default keeps the existing dirt
+ * texture as-is) — every other ground type reads as a genuinely different
+ * kind of ground at a glance, not just a different number underneath.
+ */
+export const GROUND_TYPE_TINT: Partial<Record<GroundType, Rgb>> = {
+  sandy: [214, 188, 133],
+  clay: [178, 98, 62],
+  rocky: [120, 118, 112],
+  peat: [69, 58, 40],
 };
 
 /** Direct port of ascii.ts's TERRAIN_GLYPH/FLAVOR_GLYPH — the "ASCII classic" render mode's glyph set, Brogue-style. */

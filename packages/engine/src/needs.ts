@@ -5,7 +5,7 @@ import { stepAlongPath } from "./pathfinding.js";
 import { agentsWithin, applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan, resolveChargedAttack } from "./predation.js";
 import { RAPPORT_SOCIALIZE_DELTA, rapportScore, strengthenRapportMutual } from "./rapport.js";
 import { applyMateSeeking } from "./reproduction.js";
-import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing, tendSoil } from "./flora.js";
+import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, groundTypeParams, recordGrazing, tendSoil } from "./flora.js";
 import { tickCooldowns, useMove } from "./combat.js";
 import { DIG_TICKS_DEFAULT, FOOD_CROPS, type CropId } from "./crops.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
@@ -491,18 +491,49 @@ const TRAINING_STEP_OFFSETS: readonly Vec2[] = [
 const SOCIALIZE_RADIUS = 1;
 
 /**
+ * How many consecutive idle-stack ticks with nobody to socialize with
+ * (`Agent.ticksSinceSocialContact`) before `applySocializing` stops
+ * requiring a same-herd target and starts accepting ANY nearby agent —
+ * direct follow-up ask: "if they don't have same species around them, they
+ * should try to find other species or emigrate. they can survive a long
+ * time, but eventually it becomes important to socialize and build
+ * connections. even with other herds." Deliberately a real, patient
+ * threshold, not an urgent one (contrast `MATE_ISOLATION_TICKS` = 200,
+ * reproduction.ts) — same order of magnitude as `SOCIALIZE_DISPERSAL_TICKS`
+ * below being noticeably longer than `NO_MATES_DISPERSAL_TICKS`, matching
+ * "they can survive a long time."
+ */
+const SOCIALIZE_ISOLATION_TICKS = 400;
+
+/**
+ * How much smaller a socialize interaction's rapport delta is when the
+ * target is a stranger (a different herd, or a different species) rather
+ * than a herd-mate — only ever reachable once genuinely isolated (see
+ * `SOCIALIZE_ISOLATION_TICKS`). A stranger's company is real, but it isn't
+ * the same instant familiarity a herd-mate's is.
+ */
+const SOCIALIZE_STRANGER_DELTA_FRACTION = 0.5;
+
+/**
  * Called after `applyExploration` has genuinely found nothing to do, before
  * falling all the way back to solo `applyTraining` — direct ask: "socialize
  * as an intention/unit action to spend time, could help create rapport with
  * your herd, but has to be like pretty close quarters to your rapport
  * target." A real, deliberate use of otherwise-idle time (same "idle stack"
  * spirit as `applyTraining`, see its own doc comment) that only fires when
- * a genuine herd-mate is already within `SOCIALIZE_RADIUS` — this is
+ * a genuine candidate is already within `SOCIALIZE_RADIUS` — this is
  * opportunistic company, not a travel goal, so an agent with nobody nearby
  * just falls through to training instead, exactly like `applyExploration`
  * finding nothing.
  *
- * Target selection deliberately prefers the herd-mate with the LOWEST
+ * Below `SOCIALIZE_ISOLATION_TICKS` of sustained loneliness, only a
+ * same-herd candidate counts (the originally-shipped behavior); past it,
+ * ANY nearby agent counts — see that constant's own doc comment. `dispersal.ts`'s
+ * guaranteed fallback trigger (`SOCIALIZE_DISPERSAL_TICKS`, much longer
+ * still) is what actually sends a truly, persistently isolated agent off to
+ * go find people, once even this widened search keeps coming up empty.
+ *
+ * Target selection deliberately prefers the candidate with the LOWEST
  * current `rapportScore` among those close enough (ties broken by nearest,
  * then by id for determinism) — the whole point is building relationships
  * that don't already exist, or that have faded, not repeatedly reinforcing
@@ -512,9 +543,12 @@ const SOCIALIZE_RADIUS = 1;
  * already uses for its own "did I actually find something to do" signal.
  */
 function applySocializing(world: World, agent: Agent, log: EventLog | undefined, rng: () => number): boolean {
-  if (!agent.herdId) return false;
-  const nearby = agentsWithin(world, agent, SOCIALIZE_RADIUS).filter((other) => other.herdId === agent.herdId);
-  if (nearby.length === 0) return false;
+  const isolated = (agent.ticksSinceSocialContact ?? 0) >= SOCIALIZE_ISOLATION_TICKS;
+  // Below the isolation threshold: same herd only (herdless matches only
+  // another herdless neighbor — a coherent fallback, not a special case).
+  // Past it: any species, any herd, any solitary wanderer — "even with
+  // other herds."
+  const nearby = agentsWithin(world, agent, SOCIALIZE_RADIUS).filter((other) => isolated || other.herdId === agent.herdId);
 
   let target: Agent | undefined;
   let targetScore = Infinity;
@@ -528,11 +562,19 @@ function applySocializing(world: World, agent: Agent, log: EventLog | undefined,
       targetDistance = distance;
     }
   }
-  if (!target) return false;
+  if (!target) {
+    agent.ticksSinceSocialContact = (agent.ticksSinceSocialContact ?? 0) + 1;
+    return false;
+  }
 
   logBehaviorChange(log, world, agent, "socialize");
   agent.behavior = "socialize";
-  strengthenRapportMutual(world, agent, target, RAPPORT_SOCIALIZE_DELTA, rng);
+  // Cross-species/cross-herd contact (only reachable once genuinely
+  // isolated) builds rapport slower than a same-herd interaction — a
+  // stranger's company is real, but it isn't the same as a herd-mate's.
+  const delta = target.herdId === agent.herdId ? RAPPORT_SOCIALIZE_DELTA : RAPPORT_SOCIALIZE_DELTA * SOCIALIZE_STRANGER_DELTA_FRACTION;
+  strengthenRapportMutual(world, agent, target, delta, rng);
+  agent.ticksSinceSocialContact = 0;
   return true;
 }
 
@@ -971,12 +1013,16 @@ const CANOPY_HARVEST_RANGE_BONUS_PER_POINT = 2;
  * Pumpkin are underground-native, so a surface agent pays this real
  * process-time tax while an underground agent standing on the same tile
  * pays nothing.
+ *
+ * Scaled by this tile's own `groundType` (flora.ts's `groundTypeParams` —
+ * direct ask: "certain dirt is easier to dig") — the same crop takes
+ * noticeably longer to dig up out of clay than out of sand.
  */
 function cropDigThreshold(tile: Tile | undefined, agentLayer: Layer): number | undefined {
   if (!tile?.flavor || !(tile.flavor in FOOD_CROPS)) return undefined;
   const def = FOOD_CROPS[tile.flavor as CropId];
   if (!def.nativeLayer || def.nativeLayer === agentLayer) return undefined;
-  return def.digTicks ?? DIG_TICKS_DEFAULT;
+  return (def.digTicks ?? DIG_TICKS_DEFAULT) * groundTypeParams(tile).digMultiplier;
 }
 
 function yieldsToHigherRankedFeeder(world: World, agent: Agent, tileStock: number | undefined): boolean {

@@ -1,4 +1,4 @@
-import type { Agent, BiomeSeedInfo, Layer, Vec2, World } from "./types.js";
+import type { Agent, BiomeSeedInfo, GroundType, Layer, Vec2, World } from "./types.js";
 import { createWorld, setElevation, setTile, tileAt } from "./world.js";
 import { CANOPY_APPLE_RIPEN_TICKS, pickCrop } from "./crops.js";
 import { mulberry32 } from "./rng.js";
@@ -1340,6 +1340,78 @@ export function dominantBiomeAt(seeds: readonly BiomeSeedInfo[] | undefined, x: 
 }
 
 /**
+ * Which `GroundType` a biome dominantly generates — see `assignGroundTypes`.
+ * "wetland" splits between clay (common) and peat (rarer pocket) rather
+ * than picking one outright, so a wetland zone reads as mostly-clay with
+ * real peat patches in it, not a uniform block of either.
+ */
+function groundTypeForBiome(biome: string | undefined, rng: () => number): GroundType {
+  switch (biome) {
+    case "highland":
+    case "snow":
+    case "badlands":
+      return "rocky";
+    case "desert":
+    case "beach":
+      return "sandy";
+    case "wetland":
+      return rng() < 0.25 ? "peat" : "clay";
+    default:
+      return "loam";
+  }
+}
+
+/**
+ * Ground/soil composition, biome-correlated — direct ask: "more interesting
+ * ground tiles and sims around them. soil type, rock type, etc." Runs after
+ * every other surface generation step (rivers/badlands/massifs/landmark all
+ * already ran) so it reads the FINAL biome-dominant reality of each tile,
+ * not a snapshot from before those overlays. Reuses the same runtime
+ * biome-blend lookup (`dominantBiomeAt`) weather.ts's own biome-influenced
+ * weather already relies on, rather than a new independent noise field —
+ * see flora.ts's `GROUND_TYPE_PARAMS` for what each type actually changes.
+ * Only ever touches "loam"'s baseline-equivalent default when there's no
+ * real biome data at all (`world.biomeSeeds` empty), same no-op contract
+ * every other biome-aware function in this file follows.
+ */
+/**
+ * Every non-"loam" `GroundType`'s `fertilityCeiling` — a duplicate of
+ * flora.ts's own `GROUND_TYPE_PARAMS.fertilityCeiling` values, kept here
+ * (not imported) specifically to avoid a circular import: flora.ts already
+ * imports FROM this file (`dominantBiomeAt`/`effectiveWaterDensityAt`).
+ * Keep these two tables in sync by hand. Only used to give a freshly
+ * generated tile a real STARTING `fertility` at its own ceiling instead of
+ * leaving it `undefined` — `fertility ?? 1` is how most of the rest of the
+ * codebase reads "fully fertile," which would be actively wrong for e.g. a
+ * brand-new rocky tile (ceiling 0.25) that's never yet been through a
+ * harvest-death cycle to get a real value written.
+ */
+const GROUND_TYPE_STARTING_FERTILITY: Partial<Record<GroundType, number>> = {
+  sandy: 0.6,
+  clay: 1.0,
+  rocky: 0.25,
+  peat: 1.0,
+};
+
+function assignGroundTypes(world: World, width: number, height: number, rng: () => number): void {
+  const seeds = world.biomeSeeds;
+  if (!seeds || seeds.length === 0) return;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const tile = tileAt(world, "surface", x, y);
+      if (!tile || tile.terrain === "water") continue;
+      const biome = dominantBiomeAt(seeds, x, y);
+      const groundType = groundTypeForBiome(biome, rng);
+      if (groundType === "loam") continue;
+      tile.groundType = groundType;
+      const startingFertility = GROUND_TYPE_STARTING_FERTILITY[groundType];
+      if (startingFertility !== undefined) tile.fertility = startingFertility;
+    }
+  }
+}
+
+/**
  * Carves BSP chamber/canyon boundaries into every Badlands-dominant tile —
  * see this section's doc comment. A no-op on a world with no biome data at
  * all (`world.biomeSeeds` absent/empty), same contract every other biome-
@@ -2396,6 +2468,12 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   // promoted zone's footprint, same "distinct xor'd seed per generation
   // concern" pattern as every other step above.
   applyLandmarkFeature(world, width, height, mulberry32(seed ^ 0x9e3779b1), bias?.landmark);
+
+  // Ground/soil composition runs last of all — reads the FINAL biome-dominant
+  // reality of every tile, after every overlay above (rivers, badlands,
+  // massifs, landmark) already settled it. See assignGroundTypes's own doc
+  // comment.
+  assignGroundTypes(world, width, height, mulberry32(seed ^ 0x2f2f5a3f));
 
   return world;
 }

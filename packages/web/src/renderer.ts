@@ -1,4 +1,4 @@
-import type { Agent, TerrainKind, World } from "@pokuelike/engine";
+import type { Agent, TerrainKind, Tile, World } from "@pokuelike/engine";
 import { biomeWeightsAt, lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import {
@@ -21,6 +21,7 @@ import {
   CROP_EMOJI,
   FLAVOR_FG,
   FLAVOR_GLYPH,
+  GROUND_TYPE_TINT,
   TERRAIN_BG,
   TERRAIN_FG,
   TERRAIN_GLYPH,
@@ -171,6 +172,24 @@ function drawGroundBacking(ctx: CanvasRenderingContext2D, world: World, x: numbe
   // nice" — see drawBiomeEdgeBlend's own doc comment for why this is a
   // generated gradient blend rather than real edge art.
   drawBiomeEdgeBlend(ctx, world, x, y, elevation, biome);
+}
+
+/**
+ * A low-opacity color wash for this tile's `groundType` — direct design
+ * principle ("mechanics should be visible on the map, not hidden in a
+ * meter") applied to the new soil/rock system: sandy/clay/rocky/peat each
+ * read as a genuinely different-looking patch of ground, not just a
+ * different number underneath the same dirt texture. "loam" (the default)
+ * has no `GROUND_TYPE_TINT` entry, so this is a no-op for the overwhelming
+ * majority of ordinary ground — deliberately subtle (low alpha) so it
+ * reads as a color CAST over the real floor texture/decals already drawn,
+ * not a flat paint-over.
+ */
+function drawGroundTypeTint(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number): void {
+  const tint = GROUND_TYPE_TINT[tile.groundType ?? "loam"];
+  if (!tint) return;
+  ctx.fillStyle = rgbaToCss(tint, 0.16);
+  ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
 }
 
 /**
@@ -557,6 +576,7 @@ function drawWorldTiles(
         // to be faded down to avoid looking like a flat loud fill the way
         // a single solid color would.
         drawGroundBacking(ctx, world, x, y, tile.elevation);
+        drawGroundTypeTint(ctx, tile, x, y);
         ctx.fillStyle = rgbaToCss(shade([120, 128, 140], tile.elevation), 0.35);
         ctx.fillText(".", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
         drawTileVignette(ctx, x, y);
@@ -640,6 +660,7 @@ function drawWorldTiles(
         // above, since the real berry-plant art (below) also has transparent
         // corners around the plant itself.
         drawGroundBacking(ctx, world, x, y, tile.elevation);
+        drawGroundTypeTint(ctx, tile, x, y);
 
         // A green "fertile ground" patch under the plant itself — direct
         // ask: "can we decal a little green patch under the plants...

@@ -118,11 +118,17 @@ export type MigrationReason = "scarcity" | "predator_pressure" | "wanderlust" | 
  * "the flavorful disposition-weighted trigger" from "the guaranteed
  * mechanical fallback," not which specific occasion of the former fired.
  * `"no_eligible_mates"` is that guaranteed fallback: a sustained stretch
- * mature with zero eligible mate candidates found nearby. Shared by
+ * mature with zero eligible mate candidates found nearby. `"isolation"` is
+ * its social counterpart — direct ask: "they can survive a long time, but
+ * eventually it becomes important to socialize and build connections. even
+ * with other herds" — a sustained stretch with nobody at all to socialize
+ * with (needs.ts's `applySocializing`/`ticksSinceSocialContact`), separate
+ * from the mate-specific trigger since an agent can have plenty of eligible
+ * mates nearby and still be socially isolated (or vice versa). Shared by
  * `Agent.dispersalReason` (internal, set the moment dispersal triggers) and
  * `SimEvent`'s `dispersed.reason` (external/narrative surface).
  */
-export type DispersalReason = "matured" | "no_eligible_mates";
+export type DispersalReason = "matured" | "no_eligible_mates" | "isolation";
 
 /**
  * A minimal, name-only view of a biome seed point (worldgen.ts's `BiomeSeed`
@@ -225,6 +231,20 @@ export type TerrainKind =
    * into adjacent `FLAMMABLE_TERRAIN` on the way.
    */
   | "fire";
+
+/**
+ * Ground/soil composition — an orthogonal tag on top of `TerrainKind`, same
+ * shape as `Tile.flavor` (a "food" tile's flavor is which berry; a "floor"
+ * tile's ground type is what the ground under it is actually made of).
+ * Direct ask: "more interesting ground tiles and sims around them. soil
+ * type, rock type... what can grow there, what the implications are" —
+ * see `Tile.groundType`'s own doc comment and flora.ts's `GROUND_TYPE_PARAMS`
+ * for the real mechanics each one drives (fertility ceiling/regen rate,
+ * dig difficulty). `undefined` on a tile means "loam" — the fertile,
+ * unremarkable default, same "missing == baseline" convention `flavor`/
+ * `fertility` already use.
+ */
+export type GroundType = "loam" | "sandy" | "clay" | "rocky" | "peat";
 
 /**
  * Three layers share one x,y footprint. A species is native to one layer
@@ -383,6 +403,29 @@ export interface Tile {
    * Cleared back to `undefined` when the patch dies.
    */
   quality?: number;
+  /**
+   * Ground/soil composition, set once at generation (worldgen.ts's
+   * `assignGroundTypes`, biome-correlated) and otherwise static — unlike
+   * `fertility` this doesn't drift tick to tick, it's what KIND of ground
+   * this tile is, not how depleted it currently is. `undefined` == "loam".
+   * See `GroundType`'s own doc comment and flora.ts's `GROUND_TYPE_PARAMS`
+   * for what each type actually changes: `fertility`'s own ceiling and
+   * regen rate, how low a harvest knocks it down, and (needs.ts's
+   * `cropDigThreshold`) how long a mismatched-layer dig takes.
+   */
+  groundType?: GroundType;
+  /**
+   * Permanent fertility damage, 0-1, currently only ever set on "peat"
+   * ground — direct ask, generalizing Pillar 4 ("all that you change,
+   * changes you... the land remembers"): most ground recovers fully given
+   * time (`fertility` climbing back to its `groundType` ceiling), but peat
+   * is written to NOT fully forgive sustained over-harvesting. Each food/
+   * flora death on a peat tile has a real chance to permanently shave a
+   * little off this tile's own effective ceiling (flora.ts's
+   * `maybeDegradePeat`) — capped well short of 1 so a tile is scarred, not
+   * bricked forever. `undefined`/0 == undamaged.
+   */
+  groundDegraded?: number;
   /**
    * "shelter" tiles only: which species most recently finished building
    * (part of) this shelter — purely a rendering hint (packages/web's
@@ -1014,6 +1057,19 @@ export interface Agent {
    * agent, or one that's never yet gone a tick without a candidate.
    */
   ticksSinceEligibleMate?: number;
+  /**
+   * Same shape as `ticksSinceEligibleMate` just above, but for social
+   * contact rather than mating — needs.ts's `applySocializing` resets this
+   * to 0 whenever it actually finds someone to socialize with, and
+   * increments it otherwise (only on the ticks it's actually reached in
+   * the idle stack — see that function's own doc comment). Widens who
+   * counts as a valid socialize target past `SOCIALIZE_ISOLATION_TICKS`
+   * (same-species/herd only below that), and is dispersal.ts's guaranteed
+   * fallback trigger for the `"isolation"` `DispersalReason` past
+   * `SOCIALIZE_DISPERSAL_TICKS`. Absent/0 for an agent that's never yet
+   * gone an idle tick without someone to socialize with.
+   */
+  ticksSinceSocialContact?: number;
   /**
    * Set for exactly one tick by leveling.ts's `grantExp` the instant this
    * agent's level crosses `dispersal.ts`'s `DISPERSAL_MIN_LEVEL` (dispersal

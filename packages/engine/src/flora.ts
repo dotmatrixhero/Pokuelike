@@ -1,4 +1,4 @@
-import type { Layer, Tile, Vec2, World } from "./types.js";
+import type { GroundType, Layer, Tile, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { tileAt } from "./world.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
@@ -234,14 +234,15 @@ const OVERGRAZED_GROWTH_MULTIPLIER = 0.15;
  * types.ts for why `undefined`/1 (fully fertile) is the default so the
  * map's initial growth is completely unaffected.
  */
-/** A tile's fertility drops to this once whatever grew on it dies — not to 0, so recovery is real but not glacial even with zero help. */
+/** A "loam" tile's fertility drops to this once whatever grew on it dies — not to 0, so recovery is real but not glacial even with zero help. Other ground types scale this by their own `harvestRecoveryFraction` against their own ceiling — see `GROUND_TYPE_PARAMS`. */
 const FERTILITY_AFTER_HARVEST = 0.35;
 /**
  * Passive fertility regen per tick, whether or not anything's helping —
- * reaches full from `FERTILITY_AFTER_HARVEST` in ~130 ticks on its own,
- * comfortably inside one food-patch lifecycle (`FOOD_LIFESPAN_TICKS` +
- * `MATURATION_TICKS` = 90) so a spot that's never actively tended still
- * recovers rather than staying gated forever, just not instantly.
+ * reaches full from `FERTILITY_AFTER_HARVEST` in ~130 ticks on "loam" ground
+ * on its own, comfortably inside one food-patch lifecycle
+ * (`FOOD_LIFESPAN_TICKS` + `MATURATION_TICKS` = 90) so a spot that's never
+ * actively tended still recovers rather than staying gated forever, just
+ * not instantly. Other ground types scale this by `regenMultiplier`.
  */
 const FERTILITY_REGEN_PER_TICK = 0.005;
 /** A landed Water-type hit's puddle also counts as "watering" the ground it hits — a real, immediate boost, not just a faster passive rate. */
@@ -249,10 +250,53 @@ const FERTILITY_WATER_BOOST = 0.35;
 /** Per tick a Grass-type agent spends standing on a tile — slower than watering's one-off boost, but sustained presence adds up ("tilling/planting it"). */
 const FERTILITY_TEND_PER_TICK = 0.02;
 
-/** Bumps this tile's fertility (capped at 1) — shared by waterSoil/tendSoil below, the harvest-recovery reset in growFlora, and utilityMoves.ts's `fertilityBoost` effect (Growth/Grassy Terrain). */
+/**
+ * What each `GroundType` actually changes — direct ask: "more interesting
+ * ground tiles and sims around them. soil type, rock type... what can grow
+ * there, what the implications are."
+ *
+ * - `fertilityCeiling`: the highest `fertility` this ground can ever reach
+ *   (relative to "loam"'s 1.0) — the real "what can grow here" lever.
+ * - `regenMultiplier`: scales `FERTILITY_REGEN_PER_TICK` — how fast it
+ *   climbs back toward its own ceiling.
+ * - `harvestRecoveryFraction`: what fraction of its OWN ceiling a tile
+ *   drops to once whatever grew on it dies (scales `FERTILITY_AFTER_HARVEST`
+ *   the same way "loam" already used it directly).
+ * - `digMultiplier`: scales needs.ts's `cropDigThreshold` — "certain dirt
+ *   is easier to dig."
+ *
+ * Character, not just numbers: loam is the fertile, easy baseline; sandy
+ * drains fast (poor ceiling, quick regen, easy digging); clay holds
+ * nutrients well once established but is slow to recover and hard to dig;
+ * rocky barely grows anything and is brutal to dig; peat is excellent soil
+ * that does NOT fully forgive being over-harvested — see
+ * `Tile.groundDegraded`/`maybeDegradePeat`.
+ */
+const GROUND_TYPE_PARAMS: Record<GroundType, { fertilityCeiling: number; regenMultiplier: number; harvestRecoveryFraction: number; digMultiplier: number }> = {
+  loam: { fertilityCeiling: 1.0, regenMultiplier: 1.0, harvestRecoveryFraction: 1.0, digMultiplier: 1.0 },
+  sandy: { fertilityCeiling: 0.6, regenMultiplier: 1.3, harvestRecoveryFraction: 0.7, digMultiplier: 0.6 },
+  clay: { fertilityCeiling: 1.0, regenMultiplier: 0.5, harvestRecoveryFraction: 0.55, digMultiplier: 1.8 },
+  rocky: { fertilityCeiling: 0.25, regenMultiplier: 1.0, harvestRecoveryFraction: 0.4, digMultiplier: 2.5 },
+  peat: { fertilityCeiling: 1.0, regenMultiplier: 0.9, harvestRecoveryFraction: 0.85, digMultiplier: 1.5 },
+};
+
+/** This tile's `GROUND_TYPE_PARAMS` entry — `undefined`/missing `groundType` reads as "loam", same default convention as `flavor`/`fertility`. */
+export function groundTypeParams(tile: Tile | undefined) {
+  return GROUND_TYPE_PARAMS[tile?.groundType ?? "loam"];
+}
+
+/** The highest `fertility` this SPECIFIC tile can currently reach — its ground type's own ceiling, further reduced by any permanent `groundDegraded` damage (see `maybeDegradePeat`). Floored well above 0 so a scarred tile is never fully dead, just badly diminished. */
+export function fertilityCeiling(tile: Tile | undefined): number {
+  const base = groundTypeParams(tile).fertilityCeiling;
+  const degraded = tile?.groundDegraded ?? 0;
+  return Math.max(0.05, base * (1 - degraded));
+}
+
+/** Bumps this tile's fertility, capped at its own `fertilityCeiling` (not a flat 1 any more — see `GroundType`) — shared by waterSoil/tendSoil below, the harvest-recovery reset in growFlora, and utilityMoves.ts's `fertilityBoost` effect (Growth/Grassy Terrain). */
 export function raiseFertility(tile: Tile | undefined, amount: number): void {
   if (!tile) return;
-  tile.fertility = Math.min(1, (tile.fertility ?? 1) + amount);
+  const ceiling = fertilityCeiling(tile);
+  tile.fertility = Math.min(ceiling, (tile.fertility ?? ceiling) + amount);
 }
 
 /** Call when a Water-type move's hit lands and creates a puddle (predation.ts's `terrainFill` site) — the ground it hits gets a real, immediate fertility boost. */
@@ -263,6 +307,24 @@ export function waterSoil(tile: Tile | undefined): void {
 /** Call once per tick for every Grass-type agent, at the tile under its own position (needs.ts) — sustained presence gradually enriches the ground it stands on. */
 export function tendSoil(tile: Tile | undefined): void {
   raiseFertility(tile, FERTILITY_TEND_PER_TICK);
+}
+
+/** `fertility`'s reset value the moment whatever grew on this tile dies — `FERTILITY_AFTER_HARVEST` scaled by this ground type's own `harvestRecoveryFraction` against its own ceiling, so e.g. "rocky" (poor ceiling, poor recovery fraction) drops to a much smaller absolute value than "loam" does. */
+function harvestRecoveryFertility(tile: Tile | undefined): number {
+  return fertilityCeiling(tile) * FERTILITY_AFTER_HARVEST * groundTypeParams(tile).harvestRecoveryFraction;
+}
+
+/** Chance a "peat" tile's ceiling permanently shaves down a little on any given harvest-death — see `Tile.groundDegraded`'s own doc comment. No-op for every other ground type. */
+const PEAT_DEGRADE_CHANCE = 0.4;
+/** How much `groundDegraded` climbs on a real hit — capped well short of 1 (see `fertilityCeiling`'s own floor) so repeated over-harvesting scars a peat tile badly without ever fully bricking it. */
+const PEAT_DEGRADE_PER_HIT = 0.05;
+const PEAT_DEGRADE_MAX = 0.7;
+
+/** Called from every harvest-death site below (a food/flora patch dying, either layer) — only "peat" ground actually does anything here. */
+function maybeDegradePeat(tile: Tile | undefined, rng: () => number): void {
+  if (tile?.groundType !== "peat") return;
+  if (rng() >= PEAT_DEGRADE_CHANCE) return;
+  tile.groundDegraded = Math.min(PEAT_DEGRADE_MAX, (tile.groundDegraded ?? 0) + PEAT_DEGRADE_PER_HIT);
 }
 
 /**
@@ -469,8 +531,8 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
     // `fertility === undefined` already means "fully fertile" (see
     // types.ts), so this only ever does real work on a tile that's
     // actually recovering from a recent harvest.
-    if (tile.fertility !== undefined && tile.fertility < 1) {
-      tile.fertility = Math.min(1, tile.fertility + FERTILITY_REGEN_PER_TICK);
+    if (tile.fertility !== undefined && tile.fertility < fertilityCeiling(tile)) {
+      tile.fertility = Math.min(fertilityCeiling(tile), tile.fertility + FERTILITY_REGEN_PER_TICK * groundTypeParams(tile).regenMultiplier);
     }
 
     if (tile.terrain === "seedling") {
@@ -550,7 +612,8 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
         tile.stock = undefined;
         tile.flavor = undefined;
         tile.quality = undefined;
-        tile.fertility = FERTILITY_AFTER_HARVEST; // the ground that just fed something needs a little time before it's this ready again
+        tile.fertility = harvestRecoveryFertility(tile); // the ground that just fed something needs a little time before it's this ready again — see GROUND_TYPE_PARAMS
+        maybeDegradePeat(tile, rng);
         invalidateResourceIndex(world); // a "food" tile just reverted to "floor"
         log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos, stage: "died" });
         continue;
@@ -569,7 +632,8 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
         tile.stock = undefined;
         tile.flavor = undefined;
         tile.quality = undefined;
-        tile.fertility = FERTILITY_AFTER_HARVEST; // same recovery-time reasoning as the food-death branch above
+        tile.fertility = harvestRecoveryFertility(tile); // same recovery-time reasoning as the food-death branch above
+        maybeDegradePeat(tile, rng);
         log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos, stage: "died" });
       }
     }
@@ -609,8 +673,8 @@ export function growUndergroundFlora(world: World, log?: EventLog, rng: () => nu
     const tile = tiles[i]!;
     const pos = { x: i % world.width, y: Math.floor(i / world.width) };
     decayGrazing(world, tile, pos, log);
-    if (tile.fertility !== undefined && tile.fertility < 1) {
-      tile.fertility = Math.min(1, tile.fertility + FERTILITY_REGEN_PER_TICK);
+    if (tile.fertility !== undefined && tile.fertility < fertilityCeiling(tile)) {
+      tile.fertility = Math.min(fertilityCeiling(tile), tile.fertility + FERTILITY_REGEN_PER_TICK * groundTypeParams(tile).regenMultiplier);
     }
 
     if (tile.terrain === "seedling") {
@@ -653,7 +717,8 @@ export function growUndergroundFlora(world: World, log?: EventLog, rng: () => nu
         tile.stock = undefined;
         tile.flavor = undefined;
         tile.quality = undefined;
-        tile.fertility = FERTILITY_AFTER_HARVEST;
+        tile.fertility = harvestRecoveryFertility(tile);
+        maybeDegradePeat(tile, rng);
         invalidateResourceIndex(world);
         log?.record({ kind: "floraChanged", tick: world.tick, layer: "underground", pos, stage: "died" });
         continue;
@@ -672,7 +737,8 @@ export function growUndergroundFlora(world: World, log?: EventLog, rng: () => nu
         tile.stock = undefined;
         tile.flavor = undefined;
         tile.quality = undefined;
-        tile.fertility = FERTILITY_AFTER_HARVEST;
+        tile.fertility = harvestRecoveryFertility(tile);
+        maybeDegradePeat(tile, rng);
         log?.record({ kind: "floraChanged", tick: world.tick, layer: "underground", pos, stage: "died" });
       }
     }

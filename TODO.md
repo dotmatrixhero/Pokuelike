@@ -8,35 +8,67 @@ place to park trains of thought so they don't get lost.
 Three direct asks raised together, each substantial enough to want its own
 pass rather than a rushed bolt-on:
 
-- [x] **"Socialize" as an intention/unit action** — built. New `"socialize"`
-      `BehaviorKind` + `applySocializing` (needs.ts), slotted into the idle
-      stack right before `applyTraining` (herd cohesion, shelter-resting,
-      exploration all still get first refusal). Only fires when a genuine
-      herd-mate is within `SOCIALIZE_RADIUS` (1 — Manhattan-adjacent only,
-      "pretty close quarters"), picking the nearest-rapport-neediest
-      neighbor (lowest current `|rapportScore|`, so it spreads bonds rather
-      than always reinforcing the same closest pair) and applying a new
-      `RAPPORT_SOCIALIZE_DELTA` (0.04, rapport.ts) via the existing
-      `strengthenRapportMutual`. AI-controlled only for now (an idle-stack
-      fallback, same as training) — a player-directed version is a real
-      follow-up once player-controlled units exist at all. Verified live:
-      1472 real `behaviorChanged`-to-"socialize" events over 4000 ticks on
-      a real scenario run, 17 real rapport edges standing afterward.
-- [ ] **More interesting ground tiles — soil/rock type, with real mechanical
-      depth.** Direct ask: "we need more interesting ground tiles and sims
-      around them. soil type, rock type, etc... what can grow there, what
-      [the] implications are." Named examples: surface units climbing trees
-      to reach the canopy layer directly (rather than the canopy being a
-      separate, only-flying-accessible layer as it is now — see
-      `Layer`/`crossedLayer` in types.ts/events.ts), certain dirt being
-      easier to dig (digging already exists — the crop-access/underground
-      mechanic — but soil type doesn't yet vary its cost), certain soil
-      growing crops better (crop growth doesn't yet read tile-level soil
-      variation at all, just terrain kind + flavor). A real design pass,
-      not a quick tile-property add: needs a soil/rock taxonomy, which
-      terrain kinds/biomes generate which types, and which existing systems
-      (crops.ts, the dig mechanic, canopy access) actually read the new
-      property before it means anything.
+- [x] **"Socialize" as an intention/unit action** — built, then extended
+      with real isolation pressure. New `"socialize"` `BehaviorKind` +
+      `applySocializing` (needs.ts), slotted into the idle stack right
+      before `applyTraining` (herd cohesion, shelter-resting, exploration
+      all still get first refusal). Only fires when a genuine candidate is
+      within `SOCIALIZE_RADIUS` (1 — Manhattan-adjacent only, "pretty close
+      quarters"), picking the rapport-neediest neighbor (lowest current
+      `|rapportScore|`, so it spreads bonds rather than always reinforcing
+      the same closest pair) and applying `RAPPORT_SOCIALIZE_DELTA` (0.04,
+      rapport.ts) via `strengthenRapportMutual`.
+      **Follow-up, direct ask: "if they don't have same species around
+      them, they should try to find other species or emigrate... they can
+      survive a long time, but eventually it becomes important to
+      socialize and build connections. even with other herds."** New
+      `Agent.ticksSinceSocialContact` (same shape as reproduction.ts's own
+      `ticksSinceEligibleMate`) — below `SOCIALIZE_ISOLATION_TICKS` (400),
+      only a same-herd candidate counts (original behavior); past it, ANY
+      nearby agent counts (any species, any herd, herdless included), at a
+      reduced `SOCIALIZE_STRANGER_DELTA_FRACTION` (0.5) rapport delta. Past
+      a much longer `SOCIALIZE_DISPERSAL_TICKS` (1200, dispersal.ts) with
+      the widened search STILL empty, a real new dispersal "Trigger 3"
+      fires — new `"isolation"` `DispersalReason`, the direct social
+      counterpart to dispersal.ts's existing `"no_eligible_mates"`
+      guaranteed fallback — sending a truly, persistently isolated agent
+      off to go find people.
+      AI-controlled only for now — a player-directed version is a real
+      follow-up once player-controlled units exist at all.
+      Verified live: 1472 real `behaviorChanged`-to-"socialize" events over
+      4000 ticks on a real scenario run, 17 real rapport edges standing
+      afterward (original pass); a separate 6000-tick run after the
+      isolation follow-up found 1 real `"isolation"`-reason dispersal event
+      and a max observed `ticksSinceSocialContact` of 2889 on a still-living
+      agent, confirming the widened search and the dispersal escape hatch
+      both actually engage in a real run, not just in theory.
+- [x] **Ground/soil types — built.** Direct ask, then a follow-up
+      reframe: "I think I want more types of tiles, you know?" New
+      `GroundType` ("loam" | "sandy" | "clay" | "rocky" | "peat"),
+      `Tile.groundType` — an orthogonal tag on `TerrainKind`, same shape as
+      `Tile.flavor`, biome-correlated at worldgen (`assignGroundTypes`,
+      worldgen.ts: highland/snow/badlands → rocky, desert/beach → sandy,
+      wetland → mostly clay with real peat pockets, everything else →
+      loam). Real mechanics, not just a color (flora.ts's
+      `GROUND_TYPE_PARAMS`): each type sets `fertility`'s own ceiling
+      (rocky barely grows anything; sandy/clay have their own character —
+      see the table), regen speed, and how hard a harvest knocks it down;
+      needs.ts's `cropDigThreshold` scales by the same table's
+      `digMultiplier` ("certain dirt is easier to dig"). **Peat doesn't
+      fully forgive over-harvesting** — `Tile.groundDegraded`, a real
+      permanent ceiling reduction with a real chance per harvest-death
+      (`maybeDegradePeat`) — the concrete, mechanical answer to Pillar 4
+      ("all that you change, changes you... the land remembers") being
+      underbuilt. Rendered as a real, subtle color cast in tile mode
+      (`GROUND_TYPE_TINT`, palette.ts/renderer.ts) — "mechanics should be
+      visible on the map, not hidden in a meter."
+      Verified: a real 120x120 `generateWorld` run placed all 5 types with
+      sensible distribution (loam 3557, rocky 1350, sandy 1330, clay 606,
+      peat 184) and correct starting fertility per ceiling; a real 6000-
+      tick scenario run found zero fertility-ceiling violations anywhere
+      on the map and 2 real permanently-degraded peat tiles. Tree-climbing/
+      canopy access (the traversal half of the original ask) is still a
+      separate, unbuilt follow-up — deliberately kept out of this pass.
 - [ ] **Bug-type Pokémon as a more commonly preferred prey target.** Direct
       ask: "bug pokemon be more common preferred prey target because
       they're easier to eat" — i.e. a predator's prey-selection logic

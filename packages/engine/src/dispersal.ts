@@ -103,6 +103,24 @@ function dispersalChance(world: World, agent: Agent): number {
 export const NO_MATES_DISPERSAL_TICKS = 1000;
 
 /**
+ * `NO_MATES_DISPERSAL_TICKS`'s social counterpart — a third, independent
+ * guaranteed-fallback trigger (`Trigger 3` in `maybeTriggerDispersal`),
+ * `"isolation"` `DispersalReason`. Direct ask: "they can survive a long
+ * time, but eventually it becomes important to socialize and build
+ * connections. even with other herds." Reads `Agent.ticksSinceSocialContact`
+ * (needs.ts's `applySocializing` — already widened to accept ANY nearby
+ * agent, not just a herd-mate, well before this fires; see
+ * `SOCIALIZE_ISOLATION_TICKS`) rather than `ticksSinceEligibleMate` — an
+ * agent can have plenty of eligible mates nearby and still have nobody to
+ * genuinely socialize with, or vice versa, so these are deliberately
+ * separate counters and separate triggers. Slightly higher than
+ * `NO_MATES_DISPERSAL_TICKS` — this is the LAST resort after the widened
+ * search has already come up empty for a long stretch, not the first sign
+ * of trouble.
+ */
+export const SOCIALIZE_DISPERSAL_TICKS = 1200;
+
+/**
  * How close another same-species herd's member must land to a disperser's
  * arrival point to count as "found nearby, join it" rather than "found
  * nothing, found a new one." 3x `herding.ts`'s `COHESION_DISTANCE` — wide
@@ -227,6 +245,13 @@ export function maybeTriggerDispersal(world: World, agent: Agent, log: EventLog 
   // fired or even applies to this agent at all this tick.
   if (isMature(agent) && (agent.ticksSinceEligibleMate ?? 0) >= NO_MATES_DISPERSAL_TICKS) {
     startDispersal(world, agent, "no_eligible_mates", rng, regionCtx);
+    return;
+  }
+
+  // Trigger 3, the social counterpart to trigger 2 — see
+  // `SOCIALIZE_DISPERSAL_TICKS`'s own doc comment.
+  if (isMature(agent) && (agent.ticksSinceSocialContact ?? 0) >= SOCIALIZE_DISPERSAL_TICKS) {
+    startDispersal(world, agent, "isolation", rng, regionCtx);
   }
 }
 
@@ -237,8 +262,9 @@ function startDispersal(world: World, agent: Agent, reason: DispersalReason, rng
     agent.dispersalReason = reason;
     agent.crossingToRegionId = targetRegionId;
     // Same "fresh start" reasoning as the ordinary path below — the
-    // no-mates counter shouldn't immediately re-fire mid-walk.
+    // no-mates/isolation counters shouldn't immediately re-fire mid-walk.
     agent.ticksSinceEligibleMate = 0;
+    agent.ticksSinceSocialContact = 0;
     return;
   }
 
@@ -246,15 +272,17 @@ function startDispersal(world: World, agent: Agent, reason: DispersalReason, rng
   // Nowhere reachable to disperse to this tick (e.g. a fully boxed-in map) —
   // stay put rather than getting stuck in a half-triggered state; trigger 1
   // won't get another shot until the next maturity/evolution occasion (rare
-  // enough this doesn't need its own retry loop), and trigger 2 simply tries
-  // again on `agent`'s next action tick since `ticksSinceEligibleMate` isn't
+  // enough this doesn't need its own retry loop), and triggers 2/3 simply
+  // try again on `agent`'s next action tick since neither counter is
   // touched here.
   if (!target) return;
   agent.dispersalTarget = target;
   agent.dispersalReason = reason;
-  // A fresh start — the no-mates counter shouldn't immediately re-fire
-  // mid-walk just because the agent hasn't found a mate while traveling.
+  // A fresh start — the no-mates/isolation counters shouldn't immediately
+  // re-fire mid-walk just because the agent hasn't found a mate/company
+  // while traveling.
   agent.ticksSinceEligibleMate = 0;
+  agent.ticksSinceSocialContact = 0;
 }
 
 /**
