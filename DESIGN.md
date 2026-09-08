@@ -14224,3 +14224,53 @@ DOM, but only 2 actually visible (`getComputedStyle(...).display`), with
 `.battle-screen-extra` visible and reading "+3 more in this fight". Full
 monorepo typecheck clean; engine (46 files, 1250 tests) and data (2
 files, 240 tests) suites unaffected and still green.
+
+## Battle Screen: blank log after a mid-fight widening; battle-step gave no speed feedback
+
+Direct report after a live check: "auto cam seems broken. Things move too
+fast? It's not slowing down. It's also not showing msgs during evolutions
+and stuff in battle log."
+
+Ran the live app under Playwright (32x speed, Auto Camera on) and polled
+`#battle-screen`'s DOM every 2s across ~800 real ticks — reproduced twice,
+both times a `battle-screen-log` div present with zero `battle-screen-line`
+children (not the empty-state placeholder, a genuinely blank scrollback)
+right after a "clash"/"battle" engagement's `ids` had widened (an extra
+combatant joining mid-fight). Root cause, `battleScreenPanel.ts`'s
+`render()`: a widening (`idsWidened`, detected via a participant id
+`combatantEls` hasn't seen yet) tears down and rebuilds the whole panel —
+fresh empty `logEl` — same as a genuinely new engagement (`isNewEngagement`).
+But the line-repaint block right below it only ran on
+`isNewEngagement || linesChanged` — `idsWidened` alone didn't count, so if
+the exact tick the widening landed on didn't *also* produce a fresh battle
+line (`ingest` setting `dirty`), the just-rebuilt log stayed blank until
+the next real hit — which, for a fight that ends shortly after, could be
+never. Fixed by introducing `containerRebuilt = isNewEngagement ||
+idsWidened` and gating the repaint on that instead of `isNewEngagement`
+alone, so a widening-triggered rebuild always repaints whatever's already
+been revealed. (One-shot categories — evolution included — never widen,
+so despite how the report read, this was never actually about them; it
+just happened to look the same from the outside: a blank battle log.)
+
+Separately, real: a "battle" engagement pauses ordinary ticking for
+`enterBattleStep`'s one-tick-at-a-time cadence (verified live — ticks
+during an "engaging"/"fighting" status genuinely paced at ~650ms each,
+matching `BATTLE_STEP_INTERVAL_MS`), but the speed label kept showing
+whatever ordinary speed was selected before the battle (e.g. "32x") the
+entire time, since `enterBattleStep`/`exitBattleStep` never touch it — a
+real slowdown that gave no visual confirmation it had happened, reading
+as "not slowing down." `AutoCameraHost.enterBattleStep`/`exitBattleStep`
+in main.ts now swap the label to "Battle!" (`.battle-step-active` CSS,
+an accent color) for the duration and restore the numeric speed label the
+moment battle-step ends.
+
+### Verification
+
+Reproduced the blank-log bug live via Playwright twice (same seed, same
+speed/auto-cam setup) before the fix; same run repeated after the fix
+found no blank log across a longer run at the same tick range. The
+"Battle!" label swap verified live too: watched a real battle promote
+(label flips from "32x" to "Battle!" the same tick `enterBattleStep`
+fires) and conclude (label reverts to the prior numeric speed the same
+tick `exitBattleStep` fires). Full monorepo typecheck clean; engine (46
+files, 1257 tests) and data (2 files, 240 tests) suites green.

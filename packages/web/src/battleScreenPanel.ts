@@ -290,8 +290,19 @@ export class BattleScreenPanel {
     // `isNewEngagement`, but `updateVsHeader` below has nothing to update
     // for an id it's never seen, so this still needs a real rebuild.
     const idsWidened = !isNewEngagement && !!this.ids && !!this.combatantEls && [...this.ids].some((id) => !this.combatantEls!.has(id));
+    // Either branch below tears down and rebuilds `this.logEl` from scratch
+    // (a fresh, empty element) — the population check further down has to
+    // treat that the same as `isNewEngagement` or the rebuilt log stays
+    // empty until the next tick that happens to also set `dirty`. Direct
+    // bug report, reproduced live: a mid-clash/battle widening (a third
+    // combatant assisting) landing on a tick with no fresh battle line of
+    // its own left the just-rebuilt log panel blank — "not showing msgs
+    // during evolutions and stuff in battle log" turned out to be this,
+    // not evolution/one-shot categories (those never widen, so never hit
+    // this path) but any continuous engagement that widens on a quiet tick.
+    const containerRebuilt = isNewEngagement || idsWidened;
 
-    if (isNewEngagement || idsWidened) {
+    if (containerRebuilt) {
       this.container.replaceChildren();
       this.headerEl = hasRichBattleScreen(this.activeCategory) && this.ids ? this.renderVsHeader(world) : undefined;
       if (this.headerEl) this.container.appendChild(this.headerEl);
@@ -312,8 +323,8 @@ export class BattleScreenPanel {
 
     this.container.classList.toggle("battle-screen-concluded", this.concluded);
 
-    if (this.logEl && (isNewEngagement || linesChanged)) {
-      const wasAtBottom = isNewEngagement || this.logEl.scrollTop + this.logEl.clientHeight >= this.logEl.scrollHeight - 4;
+    if (this.logEl && (containerRebuilt || linesChanged)) {
+      const wasAtBottom = containerRebuilt || this.logEl.scrollTop + this.logEl.clientHeight >= this.logEl.scrollHeight - 4;
       // Only ever paints what's actually been revealed so far — see
       // `revealedCount`'s own doc comment. A still-pending line simply isn't
       // in the DOM yet; it appears on a later frame once its own turn comes.
