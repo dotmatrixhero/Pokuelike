@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createWorld, setTile } from "../src/world.js";
 import { createNeeds, tickAgentNeeds, tickAgentAction } from "../src/needs.js";
-import { tickWorld, accumulateActionEnergy, actionSpeedOf, ACTION_THRESHOLD } from "../src/simulation.js";
+import { tickWorld, accumulateActionEnergy, actionSpeedOf, ACTION_THRESHOLD, SPEED_ACTION_COMPRESSION } from "../src/simulation.js";
 import { useMove, tickCooldowns } from "../src/combat.js";
 import { EventLog } from "../src/events.js";
 import { DAY_LENGTH_TICKS, isNight, lightLevel } from "../src/daynight.js";
+import { PARALYSIS_SPEED_MULTIPLIER } from "../src/status.js";
 import type { Agent } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 
@@ -67,7 +68,7 @@ describe("accumulateActionEnergy", () => {
 });
 
 describe("actionSpeedOf: paralysis halves effective Speed", () => {
-  it("a paralyzed agent's action speed is half of the same agent unparalyzed", () => {
+  it("a paralyzed agent's action speed is a real, but SPEED_ACTION_COMPRESSION-softened, fraction of the same agent unparalyzed", () => {
     const world = createWorld(5, 1);
     const healthy = makeAgent({ stats: { maxHp: 50, attack: 10, defense: 10, spAttack: 10, spDefense: 10, speed: 20 }, hp: 50, maxHp: 50 });
     const paralyzed = makeAgent({
@@ -76,7 +77,18 @@ describe("actionSpeedOf: paralysis halves effective Speed", () => {
       maxHp: 50,
       status: { kind: "paralysis" },
     });
-    expect(actionSpeedOf(world, paralyzed, 0)).toBeCloseTo(actionSpeedOf(world, healthy, 0) / 2);
+    // `actionSpeedOf` compresses its whole multiplier stack (see
+    // `SPEED_ACTION_COMPRESSION`'s own doc comment), applied AFTER
+    // PARALYSIS_SPEED_MULTIPLIER — so raw paralysis no longer halves the
+    // *compressed* action speed exactly. What it does preserve is a clean
+    // mathematical property: since compression is a power on the ratio to
+    // ACTION_THRESHOLD, and a power distributes over multiplication, the
+    // compressed ratio is exactly PARALYSIS_SPEED_MULTIPLIER raised to
+    // SPEED_ACTION_COMPRESSION (≈0.574, softer than a flat 0.5x) —
+    // independent of the agent's base Speed.
+    const ratio = actionSpeedOf(world, paralyzed, 0) / actionSpeedOf(world, healthy, 0);
+    expect(ratio).toBeCloseTo(Math.pow(PARALYSIS_SPEED_MULTIPLIER, SPEED_ACTION_COMPRESSION));
+    expect(actionSpeedOf(world, paralyzed, 0)).toBeLessThan(actionSpeedOf(world, healthy, 0));
   });
 });
 
@@ -109,8 +121,11 @@ describe("action economy via tickWorld", () => {
     const thirstBefore = slowAgent.needs.thirst;
     tickWorld(world);
 
-    // Speed 1 << ACTION_THRESHOLD, so this agent did not act this tick...
-    expect(slowAgent.actionEnergy).toBe(1);
+    // Speed 1 << ACTION_THRESHOLD, so this agent did not act this tick —
+    // still true post-SPEED_ACTION_COMPRESSION (raw 1 compresses to ~2.09,
+    // still nowhere near the 40 needed to cross)...
+    expect(slowAgent.actionEnergy).toBeCloseTo(2.0912791051825463);
+    expect(slowAgent.actionEnergy).toBeLessThan(ACTION_THRESHOLD);
     // ...but its needs decayed anyway.
     expect(slowAgent.needs.thirst).toBeLessThan(thirstBefore);
   });

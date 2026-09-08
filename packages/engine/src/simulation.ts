@@ -34,6 +34,35 @@ import { updateHerdLeadership } from "./herdLeadership.js";
 export const ACTION_THRESHOLD = 40;
 
 /**
+ * How much an agent's computed Speed still drives its action frequency,
+ * applied in `actionSpeedOf` as `ACTION_THRESHOLD * (speed /
+ * ACTION_THRESHOLD) ** SPEED_ACTION_COMPRESSION` — 1 would be today's
+ * uncompressed behavior (pure Speed, linear); lower narrows the gap between
+ * a fast and a slow agent's action rate without erasing it. Direct ask,
+ * after watching a much-faster Arbok land two Sludge hits before a slower
+ * Ivysaur got a single action: "tweak the speed to action economy tick calc
+ * to be a little less influential. To give Pokémon who are weaker a chance
+ * to actually escape or use a move."
+ *
+ * A power on the *ratio* to `ACTION_THRESHOLD`, not a flat additive floor —
+ * it leaves speed 0 at 0 (a genuinely stat-less agent isn't granted false
+ * actions), and leaves speed `ACTION_THRESHOLD` exactly fixed (an agent
+ * already "acting every tick" at 1:1 stays there), while everything below
+ * that pivot gets pulled disproportionately upward the slower it already
+ * was — because raising a fraction below 1 to a power below 1 moves it
+ * closer to 1, and moves it further the smaller the fraction started out.
+ * Worked example against this file's own demo-roster numbers above: raw
+ * Bulbasaur/Venusaur action-rate ratio 37/9 ≈ 4.11x narrows to roughly
+ * 37.6/12.1 ≈ 3.11x at 0.8 — Bulbasaur still acts markedly less often, but
+ * the gap closes by about a quarter, not to zero. Applied uniformly to
+ * every multiplier this function already composes (paralysis, injury,
+ * terrain, and the rest) rather than singled out to base Speed alone —
+ * simpler, and it's the *net* frequency gap between two agents this was
+ * asked to soften, not just the raw stat's share of it.
+ */
+export const SPEED_ACTION_COMPRESSION = 0.8;
+
+/**
  * Adds `speed` to `agent.actionEnergy` and returns whether that crosses
  * `ACTION_THRESHOLD` this tick. On a crossing, exactly `ACTION_THRESHOLD` is
  * subtracted and the remainder is clamped to at most `ACTION_THRESHOLD` —
@@ -114,7 +143,10 @@ export function actionSpeedOf(world: World, agent: Agent, tick: number): number 
     // specifically, so a landed Agility (or any other speed-stage grant)
     // had no way to actually change how often its user acts.
     statStageMultiplier(getStatStage(agent, "speed"));
-  return effectiveSpeed(agent, baseSpeed);
+  const speed = effectiveSpeed(agent, baseSpeed);
+  // See `SPEED_ACTION_COMPRESSION`'s own doc comment for why this is a
+  // power on the ratio to `ACTION_THRESHOLD`, not a flat floor.
+  return ACTION_THRESHOLD * Math.pow(Math.max(0, speed) / ACTION_THRESHOLD, SPEED_ACTION_COMPRESSION);
 }
 
 // A plain function call (rather than an inline `agent.alive === false` check)

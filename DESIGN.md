@@ -13310,3 +13310,73 @@ tick" event sequence, and running it through both orderings:
   left: 0) diglett (1) fainted!"`
 
 Full monorepo typecheck clean.
+
+## Action economy: softening how much Speed drives action frequency
+
+Direct ask, after watching an Arbok land two Sludge hits before a much
+slower Ivysaur got a single action: "I think maybe we should try to tweak
+the speed to action economy tick calc to be A LITTLE less influential. To
+give Pokémon who are weaker a chance to actually escape or use a move."
+
+Confirmed first (see the immediately preceding "Is cooldown working?"
+exchange) that cooldown itself was working as designed — a move's
+`cooldownTicks` counts down on the *owner's own action turns*, and how often
+an agent gets a turn at all is Speed-gated (`accumulateActionEnergy`/
+`ACTION_THRESHOLD`, `simulation.ts`). Checked the real numbers: Arbok's base
+Speed (80) only beats Ivysaur's (60) by ~1.24-1.28x at matched levels — most
+of a visible "2 hits before 1" gap comes from `actionSpeedOf`'s other
+multipliers compounding on top (nocturnal Arbok at full speed at night while
+diurnal Ivysaur eats the `OFF_HOURS_SPEED_MULTIPLIER` penalty, plus
+`effectiveSpeed`'s injury scaling once poison damage starts landing) — not a
+bug, just several real slowdowns stacking against the weaker side at once.
+
+Added `SPEED_ACTION_COMPRESSION` (`simulation.ts`, 0.8): `actionSpeedOf`'s
+final return is now `ACTION_THRESHOLD * (speed / ACTION_THRESHOLD) **
+SPEED_ACTION_COMPRESSION` instead of the raw composed `speed`. A power on
+the *ratio* to `ACTION_THRESHOLD`, not a flat additive floor — chosen
+specifically to avoid a floor's failure mode (disproportionately inflating
+a genuinely near-zero Speed into something misleadingly fast). Two fixed
+points fall out for free: speed 0 stays 0 (a stat-less agent isn't granted
+false actions), and speed exactly `ACTION_THRESHOLD` stays fixed (an agent
+already acting every tick is unaffected) — everything below that pivot gets
+pulled disproportionately upward the slower it already was, since raising a
+sub-1 fraction to a sub-1 power moves it closer to 1, and moves it further
+the smaller the fraction started. Applied once, after every other
+multiplier `actionSpeedOf` already composes (paralysis, terrain, injury,
+activity window, cold snap, aquatic haste) rather than only to the base
+Speed stat — it's the *net* frequency gap between two agents this was asked
+to soften, not just raw Speed's own share of it. A clean side effect of
+compressing a ratio: any single multiplier's own effect (e.g. paralysis's
+flat 0.5x) is itself softened by the same curve, to
+`multiplier ** SPEED_ACTION_COMPRESSION` — 0.5 → ≈0.574 for paralysis, real
+math confirmed in `simulation.test.ts`'s regression check, not just prose.
+
+Worked numbers against this file's own demo-roster comment
+(`ACTION_THRESHOLD`'s doc comment, `simulation.ts`): raw Bulbasaur/Venusaur
+action-rate ratio 37/9 ≈ 4.11x narrows to ≈37.6/12.1 ≈ 3.11x — a real, but
+deliberately modest ("a little less influential," not flattened) softening;
+Bulbasaur still acts markedly less often than Venusaur. Real Arbok/Ivysaur
+base-Speed-only ratio softens similarly, ~1.28x → ~1.22x at level 20 — the
+bulk of what a viewer actually notices in that specific matchup comes from
+the multiplier stack, not the base stat gap, and every one of those
+multipliers gets the same softening applied on top.
+
+### Test updates
+
+Two `simulation.test.ts` cases encoded the OLD, uncompressed exact
+arithmetic and needed updating, not just re-passing: the paralysis test
+used to assert a flat halving of action speed, which compression breaks (see
+above) — rewritten to assert the real post-compression invariant
+(`PARALYSIS_SPEED_MULTIPLIER ** SPEED_ACTION_COMPRESSION`) instead of a
+stale flat ratio. A second test's `slowAgent.actionEnergy` literal (`1`,
+for a raw Speed-1 fixture after one tick) is now the actual compressed value
+(~2.09) — still nowhere near crossing `ACTION_THRESHOLD`, so the test's real
+point (needs decay even on a non-action tick) still holds; only the exact
+number changed.
+
+### Real-run findings
+
+Full engine test suite green (41 files, 1169 tests) and full monorepo
+typecheck clean. Verified the real species-stat math directly (a throwaway
+runner script, deleted after use) against `calculateStats` output for Arbok
+and Ivysaur at levels 10/15/20, confirming the worked numbers above.
