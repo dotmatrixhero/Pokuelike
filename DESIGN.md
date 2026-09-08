@@ -14682,3 +14682,64 @@ Direct scenario checks (`tsx`, not just code-reading):
   needed updating, confirming the new ice/shore-drought checks stayed
   behaviorally inert for every seed/scenario those tests already cover
   (summer runs, non-large water bodies, etc.).
+
+## Fixed: crop emoji rendered correctly, then got erased by night — eggs were fine
+
+Direct report, after the earlier crop/egg-emoji-visibility fix (see "Autocam:
+more linger..." entry above): "Cool. Crops and eggs are still hard to see.
+Are they semi. Transparent or behind the tiles?" — a direct challenge to
+that earlier fix, per this session's standing rule to verify live rather
+than trust a code read.
+
+**Investigation.** Loaded the real dev server with Playwright (no debug
+hook existed to jump the camera to a specific tile/agent, so a temporary
+`window.__debug = { world, jumpTo }` was added to `main.ts` for this
+session only, removed before committing). Located a real food tile
+(`herbs`, stock 0.8) and read its rendered pixels directly off the live
+`#scene` canvas via `toDataURL`/`getImageData` — not a screenshot, the
+actual backbuffer. The tile showed only a flat dark green-gray blob: the
+fertile-patch decal and the emoji's own dark backing disc, but no leaf.
+
+Instrumented `CanvasRenderingContext2D.prototype.fillText`/`fillRect` on
+the live page to log every draw touching that tile's pixels, in order, for
+real running frames. The emoji **did** render — confirmed by sampling
+`getImageData` immediately after the real `fillText` call in the real
+render loop (243/256 sampled pixels came back leaf-green) — but the very
+next draw touching that same 20×20 region was `drawDayNightTint`'s
+whole-canvas `fillRect(0, 0, W, H, "rgba(4, 6, 16, 0.55)")`, run straight
+after the tile loop. A 0.55-alpha near-black wash over a leaf-green emoji
+comes out dark enough to read as an indistinct blob — same treatment as
+the plain dirt tile next to it. Confirmed the demo world's tick 0 is
+literally midnight (`daynight.ts`: `lightLevel(0) = 0`, so `darkness = 1`,
+hitting the tint's alpha cap) — meaning this was in effect from the very
+first frame anyone ever sees.
+
+The code already had the fix for this exact failure mode, just scoped to
+the wrong layer: `drawWorldTiles`'s own comment says "Night darkening
+applies to the ground only... Pokémon should always read at full
+brightness regardless of time of day" — agents are drawn *after*
+`drawDayNightTint` specifically so the tint never touches them. Crops
+never got that same exemption; they were drawn inline in the tile loop,
+*before* the tint, same as the plain ground underneath them.
+
+Eggs did **not** reproduce as a bug — eggs are real `Agent`s, drawn via
+`drawAgent` in the loop that already runs after `drawDayNightTint`, so
+they get the same "always full brightness" treatment Pokémon do. Two
+separate live captures (one showed a garbled pink/purple artifact instead
+of the 🥚, but four more captures spaced over the following six seconds all
+showed a clean, unmistakable egg) — the odd one was a one-off first-paint
+glitch, not a persistent rendering bug, so no egg-side change was made.
+
+**Fix** (`packages/web/src/renderer.ts`): extracted the crop-identity
+drawing (real emoji / plant sprite / growing sprout / fallback glyph — NOT
+the ground backing, ground-type tint, or fertile-patch decal underneath,
+which should still legitimately darken with the rest of the terrain) into
+its own `drawCropIdentity` function. The main tile loop now just collects
+`{x, y, tile}` for every food/flora/seedling tile into a `cropIdentityTiles`
+array instead of drawing the identity mark inline, and a new pass calls
+`drawCropIdentity` for each of them right after `drawDayNightTint`, mirroring
+exactly where/why agents are drawn after it. Re-verified live: the same
+`herbs` tile that used to render a flat blob at tick 0 now shows a clear,
+vivid 🌿 at the same midnight tick, no code path double-drawing or flickering
+across frames. Engine test suite (46 files, 1262 tests) still green — this
+was a web-only rendering-order fix, no engine logic touched.
