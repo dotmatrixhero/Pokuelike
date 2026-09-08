@@ -5789,3 +5789,38 @@ not something this pathfinding pass itself caused or is positioned to fix.
         biomes their elevation still steps (seed 11: 0.47 against a 0.03
         control). Biome seeds scattered per macro cell and blended across
         neighbours is the next layer.
+
+- [x] **Seamless zones, layer 2: fuzzy biomes.** Direct ask: "I want fuzzy
+      biomes." Biome seeds now live on one world-shared 17-tile lattice
+      instead of being scattered per zone, returned in zone-local coordinates
+      (negatives included) so `blendBiomeParams`/`biomeWeightsAt`/
+      `World.biomeSeeds` all work unchanged — two neighbours express the same
+      seed in their own frames and compute the same blend between them.
+      - **Each seed's biome is chosen fuzzily**, weighted by proximity to the
+        four surrounding macro-zone centres rather than snapped to the
+        nearest. A hard nearest-cell lookup would have moved the seam, not
+        removed it: every seed one side of a midpoint desert, every seed the
+        other grassland, and the blend still flips at a line. The weighted
+        roll gives border zones a real mixture, so the fade happens over a
+        band tens of tiles wide.
+      - `dominantBiome`'s extra seeds are skipped on this path — the macro
+        grid already sets each seed's biome, and re-weighting toward "this
+        zone's biome" would undo the fuzzy border entirely.
+      - **Result: seams now match or beat the within-zone control on every
+        seed tested.** 37%/0.851 -> 92%/0.017 (control 90%/0.028). Dominant
+        biome across a seam 7% -> 93%, and one zone still blends three
+        biomes, so this bought fuzziness rather than uniformity.
+      - Also seeded an unseeded `createWorld(5, 1)` in simulation.test.ts that
+        flaked once in a full-suite run and passed alone and on three
+        re-runs — the same class of flake this repo already fixed in
+        needs.test.ts. Four clean full runs since.
+
+- [ ] **Zone-to-zone transition (the "walk south, arrive at the top" step).**
+      Clarified: not smooth scrolling — a screen transition, Zelda-style.
+      Walk off an edge, the neighbour promotes, and you appear at the mirrored
+      position on its opposite edge. Now that terrain is seamless this should
+      read as one continuous world rather than a jump cut. Needs: promote the
+      neighbour on crossing, place the crosser at the mirrored edge position
+      instead of folding it into an aggregate, and move the camera. The known
+      cost is the existing lossy demote — the zone you leave turns its
+      individuals back into aggregate numbers.

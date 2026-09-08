@@ -955,6 +955,63 @@ interface BiomeSeed {
   biome: BiomeDef;
 }
 
+/**
+ * Biome seeds on one world-shared lattice, so neighbouring zones blend from
+ * the SAME seeds instead of each scattering its own.
+ *
+ * This is layer 2 of seamless zones, and it was the whole of the residual
+ * seam after layer 1: measured, the dominant biome matched across a border
+ * only 7% of the time against 92% within a zone. Biome drives
+ * `elevationBase`/`elevationVariance` and every terrain weight, so two zones
+ * blending to different biomes step apart at their shared edge however well
+ * the noise underneath lines up.
+ *
+ * Same trick as the noise lattice and the macro influence points: divide the
+ * world into fixed cells, give each exactly one seed hashed from its own
+ * global coordinates, and gather the cells around whatever is being
+ * generated. Cell size preserves the old density — ~18 seeds across a 90x60
+ * zone is one per ~300 tiles, so a 17-tile cell holds about one.
+ *
+ * The returned seeds are in ZONE-LOCAL coordinates (including negative ones,
+ * for seeds that live in a neighbour), which is what lets `blendBiomeParams`,
+ * `biomeWeightsAt` and the persisted `World.biomeSeeds` keep working
+ * unchanged — two adjacent zones simply express the same seed in their own
+ * frames and therefore compute the same blend at the tiles between them.
+ */
+const BIOME_SEED_CELL_SIZE = 17;
+/** How many cells beyond the zone to gather, so an edge tile's nearest seeds are all present. At 17 tiles a cell, two cells is 34 tiles of reach — comfortably past the 3 nearest seeds. */
+const BIOME_SEED_MARGIN_CELLS = 2;
+
+function placeGlobalBiomeSeeds(
+  fieldSeed: number,
+  origin: Vec2,
+  width: number,
+  height: number,
+  biomeAt: ((wx: number, wy: number, roll: number) => string | undefined) | undefined
+): BiomeSeed[] {
+  // Relative frequencies from `seedCount`, so the fallback (no macro grid to
+  // ask) still produces the same biome mix the scattered version did.
+  const weighted: BiomeDef[] = [];
+  for (const biome of BIOMES) for (let i = 0; i < biome.seedCount; i++) weighted.push(biome);
+
+  const seeds: BiomeSeed[] = [];
+  const c0x = Math.floor(origin.x / BIOME_SEED_CELL_SIZE) - BIOME_SEED_MARGIN_CELLS;
+  const c0y = Math.floor(origin.y / BIOME_SEED_CELL_SIZE) - BIOME_SEED_MARGIN_CELLS;
+  const c1x = Math.floor((origin.x + width) / BIOME_SEED_CELL_SIZE) + BIOME_SEED_MARGIN_CELLS;
+  const c1y = Math.floor((origin.y + height) / BIOME_SEED_CELL_SIZE) + BIOME_SEED_MARGIN_CELLS;
+  for (let cy = c0y; cy <= c1y; cy++) {
+    for (let cx = c0x; cx <= c1x; cx++) {
+      const wx = (cx + hashUnit(fieldSeed, cx, cy, 0x11)) * BIOME_SEED_CELL_SIZE;
+      const wy = (cy + hashUnit(fieldSeed, cx, cy, 0x12)) * BIOME_SEED_CELL_SIZE;
+      const roll = hashUnit(fieldSeed, cx, cy, 0x13);
+      const name = biomeAt?.(wx, wy, roll);
+      const biome = (name ? BIOME_BY_NAME[name] : undefined) ?? weighted[Math.floor(hashUnit(fieldSeed, cx, cy, 0x14) * weighted.length)]!;
+      seeds.push({ x: wx - origin.x, y: wy - origin.y, biome });
+    }
+  }
+  return seeds;
+}
+
 function placeBiomeSeeds(rng: () => number, width: number, height: number): BiomeSeed[] {
   const seeds: BiomeSeed[] = [];
   for (const biome of BIOMES) {
@@ -2166,6 +2223,15 @@ function addDominantBiomeSeeds(seeds: BiomeSeed[], biomeName: string | undefined
 export interface WorldPlacement {
   origin: Vec2;
   fieldSeed: number;
+  /**
+   * The macro grid's biome at a world position, used to choose what each
+   * global biome seed actually is. `roll` is a deterministic 0..1 the caller
+   * can use to pick FUZZILY between neighbouring macro cells rather than
+   * snapping to the nearest — which is what makes a desert bleed into
+   * grassland over a band of seeds instead of changing at a hard line.
+   * Omit it and seeds fall back to the roster's own relative frequencies.
+   */
+  biomeAt?: (wx: number, wy: number, roll: number) => string | undefined;
 }
 
 export function generateWorld(width: number, height: number, seed: number, bias?: ZoneGenerationBias, placement?: WorldPlacement): World {
@@ -2173,8 +2239,16 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   const fieldSeed = placement?.fieldSeed ?? seed;
   const world = createWorld(width, height, seed ^ BEHAVIOR_RNG_SEED_XOR);
   const placementRng = mulberry32(seed);
-  const seeds = placeBiomeSeeds(placementRng, width, height);
-  addDominantBiomeSeeds(seeds, bias?.dominantBiome, mulberry32(seed ^ 0x6a09e667), width, height);
+  // A zone of a macro world draws its biome seeds from the world-shared
+  // lattice; a standalone map still scatters its own, unchanged.
+  const seeds = placement
+    ? placeGlobalBiomeSeeds(fieldSeed, origin, width, height, placement.biomeAt)
+    : placeBiomeSeeds(placementRng, width, height);
+  // The dominant-biome boost only applies to the scattered path. On the
+  // shared lattice the macro grid already decides each seed's biome
+  // directly, so re-weighting toward "this zone's biome" would just undo the
+  // fuzzy border that is the entire point.
+  if (!placement) addDominantBiomeSeeds(seeds, bias?.dominantBiome, mulberry32(seed ^ 0x6a09e667), width, height);
   // Name-only projection persisted on the World — see types.ts's
   // `BiomeSeedInfo` doc comment for why weather.ts needs this and can't just
   // reuse the full internal `BiomeSeed[]` (private to this module's own

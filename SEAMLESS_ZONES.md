@@ -27,28 +27,23 @@ within a zone       73% same terrain, mean elevation jump 0.131
 A **6.5x elevation discontinuity**. Walking south today would be a hard cut, not
 an expansion.
 
-## Layer 1: done. Results.
+## Layers 1 and 2: done. Results.
 
 ```
-seed 20260903   east seam  80% same terrain, elevation jump 0.291
-                south seam 70%                              0.257
-                CONTROL    77%                              0.368
-
-seed 42         east seam  82%                              0.199
-                south seam 66%                              0.149
-                CONTROL    82%                              0.106
+                       east seam      south seam     CONTROL
+seed 20260903    92% / 0.017    88% / 0.014    90% / 0.028
+seed 11          87% / 0.004    81% / 0.010    80% / 0.011
+seed 42          85% / 0.039    76% / 0.051    67% / 0.182
 ```
 
-Terrain continuity at a seam is now **indistinguishable from the control** —
-which is the pass condition, since the control is what continuity looks like
-for this generator, not a perfect score. From 37%/0.851 to 80%/0.291.
+(% same terrain / mean elevation jump.) Seams now **match or beat the
+within-zone control on every seed** — the pass condition, since the control
+is what continuity looks like for this generator rather than a perfect score.
+From 37% / 0.851 to 92% / 0.017.
 
-A residual remains on some seeds (seed 11: elevation jump 0.47 against a 0.03
-control) and it is **layer 2, measured**: the dominant biome matches across a
-seam only **7%** of the time against **92%** within a zone, and biome drives
-`elevationBase`/`elevationVariance`. So where two zones blend to different
-biomes, their elevations still step. That is the next layer, exactly as
-scoped.
+Dominant biome agreement across a seam went **7% -> 93%** (98% within a
+zone), and a single zone still blends three biomes, so fuzziness was gained
+rather than uniformity.
 
 ## Why it was broken
 
@@ -91,16 +86,26 @@ zones calibrate slightly differently, so "10% food" means a different raw
 threshold on each side and the seam survives in the food/water layer even after
 the noise is shared. Calibrate once over a fixed global window and share it.
 
-### Layer 2 — biome seeds. Contained.
+### Layer 2 — biome seeds. Done.
 
-`placeBiomeSeeds` scatters seed points in zone-local space and
-`blendBiomeParams` blends from them, so biome identity jumps at the border.
-Scatter seeds per macro cell deterministically from `(row, col, worldSeed)`, and
-when generating a zone include the seeds from the 8 neighbouring cells so the
-blend is continuous across the edge.
+Biome seeds now live on one world-shared lattice (17-tile cells, one hashed
+seed each, gathered with a two-cell margin) instead of being scattered per
+zone. They are returned in ZONE-LOCAL coordinates including negative ones, so
+`blendBiomeParams`, `biomeWeightsAt` and the persisted `World.biomeSeeds` all
+keep working unchanged — two adjacent zones simply express the same seed in
+their own frames and therefore compute the same blend between them.
 
-Bonus: this also makes `biomeWeightsAt` globally coherent, which weather
-(`pickWeatherType`) and herd place-naming both read.
+**Each seed's biome is picked fuzzily**, weighted by proximity to the four
+surrounding macro-zone centres rather than snapped to the nearest. That
+distinction matters: a hard nearest-cell lookup would have MOVED the seam,
+not removed it — every seed on one side of a midpoint desert, every seed on
+the other grassland, so the blend would still flip at a line. Weighting the
+roll means zones near a border get a real mixture of desert and grassland
+seeds, and the blend then fades over a band tens of tiles wide.
+
+The per-zone `dominantBiome` boost is skipped on this path. The macro grid
+already decides each seed's biome directly, and re-weighting toward "this
+zone's biome" would undo exactly the fuzzy border that is the point.
 
 ### Layer 3 — the iterative passes. The genuinely hard part of generation.
 

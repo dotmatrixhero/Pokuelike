@@ -253,6 +253,55 @@ function freshHerdId(speciesId: string, regionKey: string): string {
 }
 
 /**
+ * Picks a macro biome for a world position, **fuzzily** — weighted by
+ * proximity to the four surrounding zone centres rather than snapped to the
+ * nearest one.
+ *
+ * Direct ask: "I want fuzzy biomes." A hard nearest-cell lookup would move
+ * the seam rather than remove it: every biome seed on one side of a
+ * midpoint would be desert and every seed on the other grassland, so the
+ * blend would still flip at a line — just a different line. Choosing each
+ * seed's biome by a weighted roll means the zones near a border get a real
+ * MIXTURE of desert and grassland seeds, and `blendBiomeParams` then
+ * interpolates between them over a band tens of tiles wide. Desert fades
+ * into grassland the way it does on a real map.
+ *
+ * Deterministic: `roll` comes from the seed's own cell hash, so the same
+ * cell always picks the same biome and re-running a world reproduces it.
+ * Ocean zones are skipped as a source — an "ocean" seed has no `BiomeDef`
+ * and the tile-level sea level already decides what is underwater.
+ */
+function macroBiomeSampler(mw: MacroWorld): (wx: number, wy: number, roll: number) => string | undefined {
+  return (wx: number, wy: number, roll: number) => {
+    const fx = wx / mw.zoneWidth - 0.5;
+    const fy = wy / mw.zoneHeight - 0.5;
+    const c0 = Math.floor(fx);
+    const r0 = Math.floor(fy);
+    const tx = fx - c0;
+    const ty = fy - r0;
+    const candidates: { name: string; weight: number }[] = [];
+    const consider = (r: number, c: number, weight: number): void => {
+      if (weight <= 0) return;
+      const zone = zoneAt(mw.grid, Math.max(0, Math.min(mw.grid.rows - 1, r)), Math.max(0, Math.min(mw.grid.cols - 1, c)));
+      if (!zone || zone.isOcean) return;
+      candidates.push({ name: zone.biome, weight });
+    };
+    consider(r0, c0, (1 - tx) * (1 - ty));
+    consider(r0, c0 + 1, tx * (1 - ty));
+    consider(r0 + 1, c0, (1 - tx) * ty);
+    consider(r0 + 1, c0 + 1, tx * ty);
+    const total = candidates.reduce((n, c) => n + c.weight, 0);
+    if (total <= 0) return undefined;
+    let pick = roll * total;
+    for (const candidate of candidates) {
+      pick -= candidate.weight;
+      if (pick <= 0) return candidate.name;
+    }
+    return candidates[candidates.length - 1]!.name;
+  };
+}
+
+/**
  * The elevation below which the macro grid itself calls a zone ocean,
  * derived from the grid rather than re-guessed: the highest elevation among
  * zones the grid marked ocean, which is exactly the cutoff its own sea-level
@@ -494,6 +543,7 @@ export function promoteZone(mw: MacroWorld, row: number, col: number, ctx: Immig
     region.world = generateWorld(mw.zoneWidth, mw.zoneHeight, zoneSeed(mw.worldSeed, row, col), bias, {
       origin: { x: col * mw.zoneWidth, y: row * mw.zoneHeight },
       fieldSeed: mw.worldSeed,
+      biomeAt: macroBiomeSampler(mw),
     });
     // Carry the named region down from the macro map, so herds founded in
     // this zone can be named after a place that exists on the overworld
