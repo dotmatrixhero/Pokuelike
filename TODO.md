@@ -3,6 +3,47 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Simulation-mechanics ideas, raised mid-session, not yet built
+
+Three direct asks raised together, each substantial enough to want its own
+pass rather than a rushed bolt-on:
+
+- [ ] **"Socialize" as an intention/unit action** — a deliberate use of a
+      tick to build rapport with a herdmate, distinct from rapport that
+      currently only accrues as a side effect of other actions (mob defense,
+      shared clashes — see rapport.ts). Needs: what counts as "close
+      quarters" to the rapport target (adjacent? within N tiles?), whether
+      it competes with survival needs (food/water/sleep) for priority, and
+      whether it's player-directed only or something AI-controlled agents
+      also choose on their own between more urgent needs.
+- [ ] **More interesting ground tiles — soil/rock type, with real mechanical
+      depth.** Direct ask: "we need more interesting ground tiles and sims
+      around them. soil type, rock type, etc... what can grow there, what
+      [the] implications are." Named examples: surface units climbing trees
+      to reach the canopy layer directly (rather than the canopy being a
+      separate, only-flying-accessible layer as it is now — see
+      `Layer`/`crossedLayer` in types.ts/events.ts), certain dirt being
+      easier to dig (digging already exists — the crop-access/underground
+      mechanic — but soil type doesn't yet vary its cost), certain soil
+      growing crops better (crop growth doesn't yet read tile-level soil
+      variation at all, just terrain kind + flavor). A real design pass,
+      not a quick tile-property add: needs a soil/rock taxonomy, which
+      terrain kinds/biomes generate which types, and which existing systems
+      (crops.ts, the dig mechanic, canopy access) actually read the new
+      property before it means anything.
+- [ ] **Bug-type Pokémon as a more commonly preferred prey target.** Direct
+      ask: "bug pokemon be more common preferred prey target because
+      they're easier to eat" — i.e. a predator's prey-selection logic
+      (predation.ts) doesn't currently weight target choice by type at all
+      (see `isPreyOfAnything`/threat detection). Needs a real design
+      decision on the mechanism first (a flat preference multiplier on bug
+      types specifically? a broader "some types are easier prey" axis
+      predators already implicitly care about, e.g. lower effective
+      defense?) and then validation the same way `herdConflict.ts`'s own
+      predator-fragility constraint got validated — bug-type populations
+      are not obviously more resilient than average, so this needs a real
+      before/after population check, not just "seems right."
+
 ## Your call: battle log reveal pace (LINE_REVEAL_INTERVAL_MS)
 
 Two branches independently tuned the same number and disagreed. Merged in
