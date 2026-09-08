@@ -40,6 +40,8 @@ export interface HerdRecord {
   peakSize: number;
   /** Last tick this herd had at least one living member. */
   lastSeenTick: number;
+  /** This herd's living-member centroid as of `lastSeenTick` — where a consumer (e.g. the web app's Auto Camera, focusing a `herdDissolved` moment with no living agent left to find a position from) should point a camera at a herd that's gone. Absent only for a herd that predates this field (none in practice — set on every `tickHerds` pass a herd has members). */
+  lastSeenPos?: Vec2;
   /** Set once the herd has no living members left — a herd ends, and that ending is part of its story. */
   dissolvedTick?: number;
 }
@@ -309,6 +311,7 @@ export function tickHerds(world: World, log?: EventLog): void {
     const record = ensureHerd(world, herdId, { species, pos, origin: "founding", types }, log);
     record.peakSize = Math.max(record.peakSize, count);
     record.lastSeenTick = world.tick;
+    record.lastSeenPos = pos;
     record.dissolvedTick = undefined;
   }
 

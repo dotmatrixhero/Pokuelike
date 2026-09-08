@@ -14319,3 +14319,104 @@ battle/clash still rightly outranks a one-shot), so the isolated test
 above is what actually confirms the fix; the live run just confirms
 preemption still works the same as before. Full monorepo typecheck clean;
 engine (46 files, 1257 tests) and data (2 files, 240 tests) suites green.
+
+## Autocam: more linger, herd extinction + notable-claim moments, flee wording; crop/egg emoji
+
+Batch of direct follow-ups in one message, plus a mid-turn addition:
+- "Add more linger to autocam. It feels too fast still on 32x."
+- "Make sure herd extinction events are captured on autocam and clearly
+  explained."
+- "I don't see eggs and crops on the map. Can we make them very apparent
+  emoji even in tile mode?"
+- (mid-turn) "Also like.. When a unit become notable. That should be an
+  auto cam moment."
+- (mid-turn) "I also don't love like units fleeing battles multiple
+  times... the fleeing should be the final signal the battle is over not a
+  continuous intention... ensure that battle logs read like real story
+  rather than just mechanical output."
+
+**More linger**: `DWELL_MS` 2500→4000, `COURTSHIP_DWELL_MS` 1200→2000,
+`CLASH_STALE_MS` 1200→1800, `CLASH_EPILOGUE_MS` 400→700. The earlier
+real-ms conversion (previous session) fixed the SPEED-dependent shrinkage;
+this is the separate "still just feels short" follow-up on top of that.
+
+**Herd extinction, captured for real**: `herdDissolved` (herds.ts, already
+existed — "a herd's last living member is gone") is now a new "extinction"
+`NotableCategory`, with a clear label ("the Bulbasaurs of Thornhollow have
+died out — the last bulbasaur here") built from `world.herds[herdId]`
+(species) and a new `HerdRecord.lastSeenPos` field (herds.ts, updated every
+`tickHerds` pass) since a dissolved herd has no living agent left to read a
+position from. First pass just enqueued it as an ordinary clustered
+one-shot — a real empirical check (same method as the earlier courtship-
+starvation fix) found 10 real `herdDissolved` events and 16 real
+`titleClaimed` (see below) events over 8000 ticks producing **zero**
+promotions of either. Root cause, worse than the courtship case: in a
+world busy enough that some clash is essentially always sitting in the
+queue (this run: 55 clash + 30 battle promotions in the same window),
+`popNextEngagement`'s unconditional "battle/clash always outranks a
+one-shot" rule has no floor at all — the entire one-shot tier, not just
+courtship, can starve forever. Fixed with a new, category-agnostic
+`ONE_SHOT_HARD_STARVATION_TICKS` (900) guard that runs BEFORE even the
+battle/clash check — the one deliberate exception to "battle/clash always
+wins." Also fixed `MAX_QUEUE` overflow eviction (`trimQueueOverflow`):
+used to always drop the oldest queued entry outright, which could silently
+delete a rare one-shot (a queued extinction) to make room for the Nth
+near-duplicate clash before it ever got a chance — now evicts the oldest
+*continuous* (battle/clash) entry first when one exists, since those
+regenerate on their own (the next real hit just re-queues the pair) and a
+one-shot moment doesn't. Re-ran the same empirical check after both fixes:
+extinction 7/10 promoted, notable 10/16 promoted, with real, readable
+labels.
+
+**Notable-claim moments**: `titleClaimed` (notables.ts, already existed) is
+a new "notable" `NotableCategory` — `idLabel` already renders the freshly-
+claimed title correctly (notables.ts sets `agent.notableTitle` in the same
+synchronous step the event is recorded in), so the label is just that plus
+`TITLE_DISPLAY_NAME[event.title]`: "🎖️ Surgeshade Single-Minded (Kingler)
+has become The Savant."
+
+**Flee wording + "final signal"**: `battleLinesFor`'s `behaviorChanged`-to-
+"flee" line was "X flees from the battle!" — a claimed SUCCESS every time,
+when the underlying event is really just the agent's own decision to TRY
+to disengage (predation.ts) — it can still get hit again before actually
+getting away, or the same pair can re-engage into a fresh fight shortly
+after, which is what read as "fleeing multiple times." Reworded to "X
+tries to break away!" (honest about being an attempt, not a guaranteed
+outcome), and `BattleScreenPanel.ingest` now stops appending any further
+lines the instant a conclusion signal (conclusion/faint/retreat) is
+produced — mid-batch, not just on the next tick — so that line is always,
+unconditionally, the last thing shown for that fight, not a passing
+intention buried under more combat that happens to follow it during the
+epilogue hold.
+
+**Crop/egg emoji**: an egg is a real `Agent` with `isEgg: true` and its
+eventual hatchling's own `species` already set (eggs.ts) — before this it
+fell straight into the ordinary sprite/letter-fallback path in `drawAgent`
+and rendered as a full-grown Pokémon walking around, nothing about it read
+as "egg." Now draws a large 🥚 on a soft dark backing disc, ahead of every
+other branch. The 8 real-crop flavors with no dedicated pixel art yet
+(`CROP_EMOJI` — wheat/tomato/corn/rice/apple/potato/pumpkin/herbs/honey)
+already had an emoji fallback in tile mode, but only when `plantSprite`
+was null AND behind a fade-with-stock opacity that could read as faint —
+moved the check ahead of `plantSprite` (so it's never quietly displaced if
+pixel art for one of these flavors shows up later either), raised the
+opacity floor, bumped the font size, and added the same dark backing disc
+the egg gets so it stays legible against a bright grass tile.
+
+### Verification
+
+Real empirical scenario checks (`tsx`, not just code-reading) for the
+starvation-guard fix — see above (extinction 7/10, notable 10/16, with
+real labels printed and inspected). Live Playwright run at 32x/Auto Camera
+on: watched real "has become The Savant/Wanderer/Kingslayer" notable-claim
+moments promote and display correctly across a live ~1200-tick run
+alongside ordinary clash/battle/courtship/immigration activity (a 3-way
+battle relabel also confirmed still working). Crop/egg emoji verified by
+code-path review and the isolated render-order change; the specific live
+screenshot taken landed on a water-heavy stretch of this seed's map with
+no food-crop tiles in frame, so the emoji rendering itself wasn't caught
+on camera this round — logic is a straightforward branch-order/opacity
+change with no new failure mode, same rendering primitives (`fillText` +
+backing disc) already used and confirmed working for the egg case. Full
+monorepo typecheck clean; engine (46 files, 1257 tests) and data (2 files,
+240 tests) suites green.

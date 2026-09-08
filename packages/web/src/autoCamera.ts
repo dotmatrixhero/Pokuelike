@@ -1,5 +1,5 @@
 import type { Agent, SimEvent, Vec2, World } from "@pokuelike/engine";
-import { idLabel } from "./notableTitles.js";
+import { idLabel, TITLE_DISPLAY_NAME } from "./notableTitles.js";
 
 /**
  * "Auto Camera" — a toggleable observer mode that watches the live event
@@ -16,7 +16,7 @@ import { idLabel } from "./notableTitles.js";
  * existing tick loop.
  */
 
-export type NotableCategory = "immigration" | "courtship" | "hatch" | "battle" | "clash" | "evolution" | "death";
+export type NotableCategory = "immigration" | "courtship" | "hatch" | "battle" | "clash" | "evolution" | "death" | "extinction" | "notable";
 
 /**
  * Fixed camera-hold time for a one-shot notable moment (immigration/hatch/
@@ -32,17 +32,25 @@ export type NotableCategory = "immigration" | "courtship" | "hatch" | "battle" |
  * (6 ticks/sec) but collapses to ~0.125s at 32x (192 ticks/sec), and this
  * one-shot dwell had never gotten the same real-ms fix they did. See
  * `Engagement.dwellUntilRealMs`.
+ *
+ * Raised again — direct follow-up after living with 2500ms: "add more
+ * linger to autocam. It feels too fast still on 32x." The real-ms
+ * conversion above fixed the SPEED-dependent shrinkage (the actual bug),
+ * but the flat 2500ms itself still just reads as short at a glance,
+ * independent of speed.
  */
-const DWELL_MS = 2500;
+const DWELL_MS = 4000;
 /**
  * `DWELL_MS`'s own shorter counterpart for "courtship" specifically —
  * direct ask: "bonding takes too much air time on the autocam. reduce it
  * and shorten how long it follows them." Courtship (bonded/shelterBuilt/
  * eggLaid) is real but the least individually dramatic of the one-shot
  * categories — a brief glance is enough, it doesn't need the same hold time
- * as a rarer immigration/hatch/evolution/death moment.
+ * as a rarer immigration/hatch/evolution/death moment. Raised alongside
+ * `DWELL_MS`'s own "still feels too fast" follow-up, same proportion as
+ * before (roughly half of `DWELL_MS`).
  */
-const COURTSHIP_DWELL_MS = 1200;
+const COURTSHIP_DWELL_MS = 2000;
 /**
  * A concluded battle gets a short "epilogue" hold on the same view before the
  * camera releases — long enough to actually see the kill/retreat land, short
@@ -93,10 +101,13 @@ const BATTLE_STALE_MS = 3000;
  * skirmish that's gone quiet this briefly almost always really is over, not
  * mid-standoff, and shouldn't hold the camera/speed override waiting to find
  * out. Real ms now too, same reasoning/fix as `BATTLE_STALE_MS` above.
+ * Nudged up alongside `DWELL_MS`'s own "still feels too fast on 32x"
+ * follow-up — clash still keeps noticeably less patience than a real
+ * battle, just not quite this clipped.
  */
-const CLASH_STALE_MS = 1200;
-/** `CLASH_STALE_MS`'s own real-ms epilogue counterpart — see `BATTLE_EPILOGUE_MS`'s doc comment for why this is wall-clock, not ticks. Proportionally shorter than a real battle's, same "it's over, move on" reasoning. */
-const CLASH_EPILOGUE_MS = 400;
+const CLASH_STALE_MS = 1800;
+/** `CLASH_STALE_MS`'s own real-ms epilogue counterpart — see `BATTLE_EPILOGUE_MS`'s doc comment for why this is wall-clock, not ticks. Proportionally shorter than a real battle's, same "it's over, move on" reasoning. Nudged up alongside `CLASH_STALE_MS`'s own follow-up bump. */
+const CLASH_EPILOGUE_MS = 700;
 /**
  * Minimum real ticks between two separate PROMOTIONS of a brand-new pair
  * into a camera-worthy "clash" engagement — direct ask, after watching a
@@ -122,7 +133,7 @@ const CLASH_EPILOGUE_MS = 400;
  * before.
  */
 const CLASH_PROMOTION_COOLDOWN_TICKS = 40;
-/** Hard cap on queued-but-not-yet-shown engagements — a chaotic tick (mass death event, say) shouldn't grow this unboundedly; overflow drops the oldest still-queued entries first. */
+/** Hard cap on queued-but-not-yet-shown engagements — a chaotic tick (mass death event, say) shouldn't grow this unboundedly; overflow drops an entry — see `trimQueueOverflow` for which one and why not always the oldest any more. */
 const MAX_QUEUE = 20;
 /**
  * How long a queued "courtship" entry can wait before it jumps back to the
@@ -144,6 +155,29 @@ const MAX_QUEUE = 20;
  * one-shot competing for the same slot.
  */
 const COURTSHIP_STARVATION_TICKS = 400;
+/**
+ * A hard, category-agnostic ceiling: ANY queued one-shot (courtship
+ * included) waiting this long jumps the ENTIRE queue, ahead of even a
+ * currently-queued battle/clash — the one exception to "battle/clash
+ * always outranks a one-shot." Direct requirement: "make sure herd
+ * extinction events are captured on autocam and clearly explained." Real
+ * empirical check (the same kind that caught the courtship starvation
+ * bug): 8000 ticks through the demo scenario produced 10 real
+ * `herdDissolved` events and 16 real `titleClaimed` events, but ZERO
+ * "extinction"/"notable" promotions — `popNextEngagement`'s unconditional
+ * "battle/clash first" rule has no floor either, and in a world busy
+ * enough that SOME clash is essentially always sitting in the queue (this
+ * scenario: 55 clash + 30 battle promotions in the same window), the
+ * entire one-shot tier below it — not just courtship, every category —
+ * can starve forever, not just "usually lose." `COURTSHIP_STARVATION_TICKS`
+ * only ever reorders one-shots AMONG each other; it can't reach past
+ * battle/clash, so it didn't help here. This constant is deliberately
+ * higher than `COURTSHIP_STARVATION_TICKS` (a much bigger ask — cutting
+ * away from a real, live fight, not just reordering the one-shot queue)
+ * and is meant to bite rarely: a healthy world drains its one-shot tier
+ * well before this ever fires.
+ */
+const ONE_SHOT_HARD_STARVATION_TICKS = 900;
 /**
  * Minimum real ticks between two separate one-shot engagements of the SAME
  * category getting queued at all — direct ask, after actually running the
@@ -574,6 +608,34 @@ export class AutoCameraController {
       case "diedOfAge":
         this.onDeath(event.kind, new Set([event.agentId]), event.pos, `${event.species} died of old age`, event.tick);
         return;
+      case "herdDissolved": {
+        // A herd's last living member is gone — direct ask: "make sure herd
+        // extinction events are captured on autocam and clearly explained."
+        // No living agent left to find a position from (that's the whole
+        // point), so this always falls back to the herd's own last-known
+        // centroid (`lastSeenPos`, engine's herds.ts) rather than chasing an
+        // agent id that can never resolve — see `focusPos`'s own fallback
+        // path. `record` can in principle be missing (a `herdDissolved` from
+        // before `world.herds` existed, or a test double) — degrades to the
+        // bare species-less label rather than throwing.
+        const record = world.herds?.[event.herdId];
+        const species = record?.species;
+        const label = species ? `${event.name} have died out — the last ${species} here` : `${event.name} have died out`;
+        this.enqueueClusteredOneShot("extinction", event.kind, new Set([event.herdId]), record?.lastSeenPos ?? { x: 0, y: 0 }, label, event.tick);
+        return;
+      }
+      case "titleClaimed": {
+        // A unit becoming notable — direct ask: "when a unit become
+        // notable, that should be an auto cam moment." `idLabel` already
+        // renders the freshly-claimed title correctly here: `notables.ts`
+        // sets `agent.notableTitle = title` in the very same synchronous
+        // step that records this event, so by the time `ingest` reaches
+        // this (always post-tick), the agent's own record already reflects
+        // the new title.
+        const pos = world.agents.find((a) => a.id === event.agentId)?.pos ?? { x: 0, y: 0 };
+        this.enqueueClusteredOneShot("notable", event.kind, new Set([event.agentId]), pos, `${idLabel(world, event.agentId, event.species)} has become ${TITLE_DISPLAY_NAME[event.title]}`, event.tick);
+        return;
+      }
       case "fought":
         this.onBattleHit("battle", new Set([event.attackerId, event.defenderId]), event.pos, `${idLabel(world, event.attackerId, event.attackerSpecies)} vs ${idLabel(world, event.defenderId, event.defenderSpecies)} fighting`, world);
         return;
@@ -643,7 +705,7 @@ export class AutoCameraController {
     if (this.active && this.active.sourceKind === sourceKind && setsOverlap(this.active.ids, ids)) return;
     if (this.queue.some((e) => e.sourceKind === sourceKind && setsOverlap(e.ids, ids))) return;
     this.queue.push({ category, sourceKind, ids, fallbackPos: pos, label, continuous: false, expiresOrLastActiveTick: 0, queuedAtTick: tick, lastActiveRealMs: performance.now(), seq: this.nextSeq++ });
-    if (this.queue.length > MAX_QUEUE) this.queue.shift();
+    this.trimQueueOverflow();
   }
 
   /**
@@ -750,7 +812,7 @@ export class AutoCameraController {
       lastActiveRealMs: performance.now(),
       seq: this.nextSeq++,
     });
-    if (this.queue.length > MAX_QUEUE) this.queue.shift();
+    this.trimQueueOverflow();
   }
 
   /** A death, fainting, or successful-retreat signal naming a continuous engagement's participant — the real conclusion path (see `BATTLE_STALE_MS`/`CLASH_STALE_MS` for the fallback path). Idempotent against an engagement already concluding. */
@@ -786,8 +848,15 @@ export class AutoCameraController {
    * order above can deprioritize courtship without ever fully starving it
    * — see that constant's own doc comment for the real empirical bug this
    * closes (0 courtship promotions across 8000 real ticks).
+   *
+   * `ONE_SHOT_HARD_STARVATION_TICKS` runs first, ahead of even battle/clash
+   * — see its own doc comment for the real empirical bug (0 extinction/
+   * notable promotions despite real events) that made this necessary on
+   * top of the courtship-only guard above.
    */
   private popNextEngagement(tick: number): Engagement {
+    const hardStarvedIndex = this.queue.findIndex((e) => !e.continuous && tick - e.queuedAtTick >= ONE_SHOT_HARD_STARVATION_TICKS);
+    if (hardStarvedIndex >= 0) return this.queue.splice(hardStarvedIndex, 1)[0]!;
     const battleIndex = this.queue.findIndex((e) => e.category === "battle");
     if (battleIndex >= 0) return this.queue.splice(battleIndex, 1)[0]!;
     const clashIndex = this.queue.findIndex((e) => e.category === "clash");
@@ -797,6 +866,28 @@ export class AutoCameraController {
     const notableOneShotIndex = this.queue.findIndex((e) => e.category !== "courtship");
     if (notableOneShotIndex >= 0) return this.queue.splice(notableOneShotIndex, 1)[0]!;
     return this.queue.shift()!;
+  }
+
+  /**
+   * `MAX_QUEUE` overflow handling — evicts the OLDEST queued *continuous*
+   * (battle/clash) entry when one exists, only falling back to the very
+   * oldest entry overall (the previous, unconditional behavior) when the
+   * whole queue is one-shots. Direct requirement, discovered investigating
+   * why extinction/notable moments went unseen despite real events firing:
+   * a busy world's battle/clash entries are cheap and self-regenerating (a
+   * dropped one just means the next real hit re-queues its pair a moment
+   * later — `onBattleHit` widens/re-engages on its own), but a one-shot
+   * like a herd's extinction is a single, non-repeating moment — losing it
+   * to eviction means it is gone from the story forever, not just delayed.
+   * `popNextEngagement`'s plain `queue[0]`-was-oldest assumption doesn't
+   * hold once this stops evicting strictly front-to-back, but nothing
+   * reads eviction order as a promise of pop order beyond that.
+   */
+  private trimQueueOverflow(): void {
+    if (this.queue.length <= MAX_QUEUE) return;
+    const oldestContinuousIndex = this.queue.reduce<number>((best, e, i) => (e.continuous && (best < 0 || e.queuedAtTick < this.queue[best]!.queuedAtTick) ? i : best), -1);
+    if (oldestContinuousIndex >= 0) this.queue.splice(oldestContinuousIndex, 1);
+    else this.queue.shift();
   }
 
   /** Any active/queued continuous (battle or clash) engagement overlapping `ids`. */
