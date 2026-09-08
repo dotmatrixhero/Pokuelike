@@ -2877,3 +2877,45 @@ never a badly-tuned node, it was that **the sum of every node granting a
 passive had never been the unit of analysis.** That question — "what does
 this look like on an agent that took all of them" — is now the first one to
 ask of any new passive.
+
+## Three tiers, one cap, and a flake that was never what it looked like
+
+Closing out the passive-stacking work. Three changes, each correcting an
+earlier one in this same document.
+
+**A soft cap on total passive healing.** Converting the common healing nodes
+to flat was supposed to make healing strong early and weak late. It did —
+and it also pushed peak healing *up*, to 17.65%/tick on a 51 HP unit,
+because flat values stack additively exactly like percentages and dividing
+by a small maxHp makes a stack worse rather than better. `softCapHealShare`
+now bounds the total. It is piecewise rather than the plain hyperbolic used
+for `damageReductionOf`, because a hyperbolic shaves ~20% off even a single
+small node and healing needed to keep the rule that a node delivers what it
+says: everything up to `PASSIVE_HEAL_KNEE` (3%/tick) passes through
+untouched, only the excess is compressed, and the whole thing asymptotes at
+`PASSIVE_HEAL_CEILING` (8%/tick). The 17.65% case lands at 6.7%.
+
+**Three tiers instead of two.** Reserving percentage for capstones sounded
+principled and measured as zero: effective `damageReduction` across 568
+living agents was median 0%, p90 0%, max 0%, because capstones are reached
+~21 times in 144. The fix is a middle tier — cost-1 common nodes grant flat,
+the 27 cost-2 mid-branch keystones grant percentage, and terminal capstones
+grant a larger percentage as the rare payoff. Percent is live again without
+becoming common.
+
+**The intermittent test flake, which was never cross-file state.** Chased
+most of a session on the theory that parallel workers shared something.
+Wrong. Damage carries a 0.85-1.0 random roll, and dozens of A/B tests built
+two unseeded `createWorld` worlds and asserted one hit harder than the
+other. A different test lost the coin flip each run — which is precisely why
+it looked like shared state and why each one passed in isolation. Seeding
+those worlds took ten consecutive full runs to clean, from roughly one
+failure every two runs. I wrote one of these flaky tests myself this session
+and then hit it, which is what finally exposed the pattern.
+
+And a second verification miss worth recording next to the first: after
+seeding, I declared eight runs clean while grepping only for failed *tests*.
+A test *file* was failing to collect — my inserted constant had landed
+inside a multi-line import block — so its 62 tests silently disappeared from
+the total and the run still read green. **Check `Test Files` alongside
+`Tests`.** A count that drops is a failure that does not announce itself.

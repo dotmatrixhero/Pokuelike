@@ -114,6 +114,18 @@ needed" checklist for the exact code paths behind each one):
     balanced" but "what does the SUM of every node granting this look like
     on a long-lived agent." That went unasked for `regen` and produced
     agents healing 11% of max HP per tick, mid-fight (see MOVES_DESIGN.md).
+  - **Flat does not mean bounded.** Flat values stack additively exactly
+    like percentages, and dividing by a small maxHp makes a stack *worse*,
+    not better, for small units. Converting healing to flat pushed peak
+    healing from 11%/tick to 17.65%/tick before a cap was added. Any
+    accumulating passive needs a bound on the TOTAL —
+    `damageReductionOf`'s hyperbolic curve or `softCapHealShare`'s
+    knee-then-compress — not just a well-chosen per-node value.
+  - **Three tiers, not two.** Flat on cost-1 common nodes, percentage on
+    cost-2 mid-branch keystones, larger percentage on terminal capstones.
+    Reserving percentage for capstones alone measured as literally zero in
+    play (median 0%, p90 0%, max 0% across 568 agents) because capstones
+    are reached ~21 times in 144 — see step 10b.
   - Healing specifically: reach for **`regenFlat`** (flat HP) by default.
     It is worth proportionally more to a small early unit than a big late
     one, which is the curve you almost always want. Reserve percentage
@@ -279,6 +291,19 @@ tree" is not the same as "it happens."
 Implement in `moves.ts`, typecheck, run the generic structural test suite,
 then actually confirm it live — a real sim run showing the tree getting
 auto-respecced, not just passing structural validation.
+
+**Seed every world in a comparison test.** Damage carries a 0.85-1.0
+random roll, so an A/B test that builds two unseeded worlds and asserts one
+hit harder is flaky by construction. Dozens of these existed and presented
+as a mysterious cross-file failure — a different test failing on each full
+run, all of them passing in isolation — which sent a whole session chasing
+shared parallel state that was never there.
+
+**Read `Test Files`, not just `Tests`.** A file that fails to *collect*
+(a syntax error from a bad edit, say) takes its tests out of the total
+without reporting a single failure, so the run still looks green while
+silently testing less. A dropped count is a failure that does not announce
+itself.
 
 **Average across seeds before claiming any behavioral effect.** Population
 in this sim is violently RNG-sensitive: adding a single extra `rng()` draw

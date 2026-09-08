@@ -418,7 +418,58 @@ function applyRegenPassive(agent: Agent): void {
   // the kind that needs an out-of-combat gate.
   if (isPassiveHealingSuppressed(agent)) return;
   if (agent.hp === undefined || agent.maxHp === undefined) return;
-  agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * fraction + flat);
+  const share = softCapHealShare(fraction + flat / agent.maxHp);
+  agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * share);
+}
+
+/**
+ * Below this share of max HP per tick, passive healing is worth exactly its
+ * face value — a node that says it heals 2 HP heals 2 HP. Above it, the
+ * excess is squeezed toward `PASSIVE_HEAL_CEILING` and never reaches it.
+ */
+export const PASSIVE_HEAL_KNEE = 0.03;
+
+/** Hard asymptote on passive healing per tick, as a share of max HP. Approached, never attained. */
+export const PASSIVE_HEAL_CEILING = 0.08;
+
+/**
+ * Soft-caps total passive healing (percentage `regen` plus `regenFlat`
+ * expressed as a share of max HP) for the same reason `damageReductionOf`
+ * has diminishing returns: passives accumulate permanently across every
+ * move a unit knows, so what matters is the SUM, not any single node.
+ *
+ * This one is a correction of a mistake made in this very system. Converting
+ * the common healing nodes from percentage to flat was supposed to make
+ * healing weaker late and stronger early — and it did — but flat values
+ * stack additively just like percentages, and dividing by a SMALL maxHp
+ * makes a stack worse rather than better. Measured after that change: a 51
+ * HP unit at 17.65%/tick, above the 11%/tick that prompted the original
+ * work. The shape was right; nothing bounded the total.
+ *
+ * Piecewise rather than a plain hyperbolic, deliberately. `x / (1 + x/C)`
+ * would asymptote correctly but shaves ~20% off even a single small node,
+ * which breaks the rule that a node delivers what it says. Instead
+ * everything up to `PASSIVE_HEAL_KNEE` passes through untouched, and only
+ * the excess is compressed:
+ *
+ * | raw share | effective |
+ * |---|---|
+ * | 0.02 | 0.020 (untouched) |
+ * | 0.03 | 0.030 (untouched) |
+ * | 0.05 | 0.044 |
+ * | 0.09 | 0.058 |
+ * | 0.1765 | 0.067 |
+ * | infinity | 0.080 |
+ *
+ * So a couple of healing nodes are exactly as good as they read, a heavily
+ * stacked build still heals faster than a light one, and no build reaches
+ * the six-tick full heal the flat conversion had accidentally created.
+ */
+export function softCapHealShare(raw: number): number {
+  if (raw <= PASSIVE_HEAL_KNEE) return Math.max(0, raw);
+  const excess = raw - PASSIVE_HEAL_KNEE;
+  const headroom = PASSIVE_HEAL_CEILING - PASSIVE_HEAL_KNEE;
+  return PASSIVE_HEAL_KNEE + excess / (1 + excess / headroom);
 }
 
 /** The flat fraction of damage taken the `"thorns"` passive reflects back at the attacker — read by `applySingleDamageInstance` (predation.ts). 0 if the agent has none. */

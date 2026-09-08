@@ -4960,6 +4960,25 @@ not something this pathfinding pass itself caused or is positioned to fix.
       converting the low-tier nodes to flat damage reduction the way regen
       went flat. Not urgent, but it is the same bug wearing a different
       passive.
+- [x] **FIXED: the intermittent test flake — and it was never cross-file
+      state.** Chased all session on the theory that parallel workers were
+      sharing something. Wrong. The cause was plain unseeded randomness
+      inside individual tests: damage carries a 0.85-1.0 roll, and dozens of
+      A/B comparison tests built two `createWorld(w, h)` worlds with no seed
+      and asserted one hit harder than the other. A different test lost the
+      coin flip on each run, which is exactly why it looked like shared
+      state and why every one of them passed in isolation.
+      - Seeded every world in predation/needs/reproduction/status tests.
+        Ten consecutive full runs clean, 43/43 files, 1367/1367 tests
+        (previously roughly one failure every two runs).
+      - I wrote one of these flaky tests myself this session, then hit it,
+        which is what finally exposed the pattern.
+      - **Second "verify the verifier" miss in the same session:** I first
+        declared 8 runs clean while grepping only for failed TESTS. A test
+        FILE was failing to collect (my seed constant landed inside a
+        multi-line import block), so its 62 tests silently vanished from
+        the count and the run still looked green. Always check
+        `Test Files` alongside `Tests`.
 - [ ] **REGRESSION I INTRODUCED: flat healing now stacks HIGHER than the
       percentage it replaced, on exactly the units it was meant to help.**
       Seed 777 post-fix shows a 51 HP ivysaur at **17.65%/tick** effective
@@ -4986,11 +5005,14 @@ not something this pathfinding pass itself caused or is positioned to fix.
         diminishing returns to accumulated `regenFlat`; or simply undo the
         1.5x bump, which only gets it back to ~11%/tick and does not fix
         the stacking.
-      - Recommendation: the maxHp-relative cap. It preserves exactly the
-        early-strong/late-weak curve that was wanted and only removes the
-        stacked tail.
-- [ ] **The percentage tier of BOTH passives is now dead content in
-      practice.** Post-fix seed 777: effective `damageReduction` is
+      - RESOLVED: the maxHp-relative soft cap was chosen and built
+        (`softCapHealShare`, status.ts). Piecewise rather than plain
+        hyperbolic so a light build is untouched — everything up to
+        `PASSIVE_HEAL_KNEE` (3%/tick) passes through at face value and only
+        the excess is compressed, asymptotically toward
+        `PASSIVE_HEAL_CEILING` (8%/tick). The 17.65%/tick case now lands at
+        6.7%, and no build can reach the six-tick full heal.
+- [x] **FIXED: the percentage tier of both passives was dead content.** Post-fix seed 777: effective `damageReduction` is
       **median 0%, p90 0%, max 0%** across 568 living agents — nobody has
       any. Flat armor: median 2, max 5.5. The diminishing-returns curve is
       correct and tested, and currently has nothing to act on.
@@ -5008,6 +5030,12 @@ not something this pathfinding pass itself caused or is positioned to fix.
         the intent.
       - Same lesson as the fire mechanic: content gated behind a cost or a
         depth nothing reaches is not shipped, however well built.
+      - RESOLVED by making it a three-tier system instead of two: cost-1
+        common nodes grant flat (early-strong, late-marginal), the 27
+        cost-2 mid-branch KEYSTONES grant percentage (reached ~15% of the
+        time, so genuinely live), and terminal capstones grant a larger
+        percentage as the rare payoff. Percent is no longer capstone-only,
+        which is what made it unreachable.
 - [ ] **Starvation is now the dominant cause of death.** Same run: 117
       starved vs 20 killed across 209 fights, at a population of 568.
       Unremarked on so far and possibly fine (a crowded world should run

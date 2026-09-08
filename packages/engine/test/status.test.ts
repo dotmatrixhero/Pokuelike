@@ -5,7 +5,9 @@ import { EventLog } from "../src/events.js";
 import type { Agent } from "../src/types.js";
 import {
   BURN_DAMAGE_FRACTION,
+  PASSIVE_HEAL_CEILING,
   REGEN_COMBAT_SUPPRESSION_TICKS,
+  softCapHealShare,
   suppressPassiveHealing,
   FREEZE_THAW_CHANCE,
   POISON_DAMAGE_FRACTION,
@@ -29,6 +31,15 @@ import {
   thornsOf,
   tickStatusEffects,
 } from "../src/status.js";
+
+/**
+ * Seed for every world in this file, so a test never depends on an unseeded
+ * RNG draw. Chasing an intermittent full-suite failure showed the cause was
+ * not shared state across files (the theory for most of a session) but
+ * plain unseeded randomness inside individual tests — a different test lost
+ * a coin flip on each run, and every one of them passed in isolation.
+ */
+const DETERMINISTIC_TEST_SEED = 12345;
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -72,7 +83,7 @@ describe("maybeInflictStatus", () => {
   const BURN_MOVE = { statusKind: "burn" as const, statusChance: 0.5 };
 
   it("inflicts the status on a successful roll", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const log = new EventLog();
     const defender = makeAgent({ types: ["grass"] });
     maybeInflictStatus(defender, "attacker-1", BURN_MOVE, world, log, () => 0.1); // 0.1 < 0.5
@@ -83,42 +94,42 @@ describe("maybeInflictStatus", () => {
   });
 
   it("does nothing on a failed roll", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const defender = makeAgent({ types: ["grass"] });
     maybeInflictStatus(defender, "attacker-1", BURN_MOVE, world, undefined, () => 0.9); // 0.9 >= 0.5
     expect(defender.status).toBeUndefined();
   });
 
   it("respects type immunity even on a guaranteed roll", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const defender = makeAgent({ types: ["fire"] });
     maybeInflictStatus(defender, "attacker-1", BURN_MOVE, world, undefined, () => 0);
     expect(defender.status).toBeUndefined();
   });
 
   it("never overwrites an existing status — at most one at a time", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const defender = makeAgent({ types: ["grass"], status: { kind: "paralysis" } });
     maybeInflictStatus(defender, "attacker-1", BURN_MOVE, world, undefined, () => 0);
     expect(defender.status).toEqual({ kind: "paralysis" });
   });
 
   it("carries statusSeverity from the move onto the inflicted status, for a 'badly poisons' move", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const defender = makeAgent({ types: ["grass"] });
     maybeInflictStatus(defender, "attacker-1", { statusKind: "poison", statusChance: 1, statusSeverity: 2 }, world, undefined, () => 0);
     expect(defender.status).toEqual({ kind: "poison", ticksRemaining: undefined, severityMultiplier: 2 });
   });
 
   it("no-ops when the move carries no statusKind or statusChance", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const defender = makeAgent({ types: ["grass"] });
     maybeInflictStatus(defender, "attacker-1", {}, world, undefined, () => 0);
     expect(defender.status).toBeUndefined();
   });
 
   it("gives sleep a bounded random duration; other kinds get none", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const asleep = makeAgent();
     maybeInflictStatus(asleep, "a", { statusKind: "sleep", statusChance: 1 }, world, undefined, () => 0.5);
     expect(asleep.status?.ticksRemaining).toBeGreaterThanOrEqual(SLEEP_TICKS_MIN);
@@ -132,7 +143,7 @@ describe("maybeInflictStatus", () => {
 
 describe("maybeThawOnFireHit", () => {
   it("thaws a frozen agent hit by a fire-type move", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const log = new EventLog();
     const agent = makeAgent({ status: { kind: "freeze" } });
     maybeThawOnFireHit(agent, "fire", world, log);
@@ -141,14 +152,14 @@ describe("maybeThawOnFireHit", () => {
   });
 
   it("does nothing for a non-fire hit", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ status: { kind: "freeze" } });
     maybeThawOnFireHit(agent, "water", world, undefined);
     expect(agent.status).toEqual({ kind: "freeze" });
   });
 
   it("does nothing if the agent isn't frozen", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ status: { kind: "burn" } });
     maybeThawOnFireHit(agent, "fire", world, undefined);
     expect(agent.status).toEqual({ kind: "burn" });
@@ -157,35 +168,35 @@ describe("maybeThawOnFireHit", () => {
 
 describe("tickStatusEffects: burn/poison DOT", () => {
   it("burn deals 1/16 maxHp damage per tick", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ status: { kind: "burn" } });
     tickStatusEffects(agent, world);
     expect(agent.hp).toBeCloseTo(50 - 50 * BURN_DAMAGE_FRACTION);
   });
 
   it("poison deals 1/8 maxHp damage per tick", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ status: { kind: "poison" } });
     tickStatusEffects(agent, world);
     expect(agent.hp).toBeCloseTo(50 - 50 * POISON_DAMAGE_FRACTION);
   });
 
   it("statusSeverity multiplies the DOT fraction — a 'badly poisons' move hits harder every tick, not just once", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ status: { kind: "poison", severityMultiplier: 2 } });
     tickStatusEffects(agent, world);
     expect(agent.hp).toBeCloseTo(50 - 50 * POISON_DAMAGE_FRACTION * 2);
   });
 
   it("no severityMultiplier set behaves exactly like normal-severity poison", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ status: { kind: "poison", severityMultiplier: undefined } });
     tickStatusEffects(agent, world);
     expect(agent.hp).toBeCloseTo(50 - 50 * POISON_DAMAGE_FRACTION);
   });
 
   it("DOT that brings hp to 0 faints — it does not kill outright, and clears the status", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const log = new EventLog();
     const agent = makeAgent({ hp: 1, maxHp: 50, status: { kind: "poison" } });
     tickStatusEffects(agent, world, log);
@@ -198,7 +209,7 @@ describe("tickStatusEffects: burn/poison DOT", () => {
   });
 
   it("no-ops on a corpse or an already-fainted agent", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const corpse = makeAgent({ alive: false, status: { kind: "poison" } });
     tickStatusEffects(corpse, world);
     expect(corpse.hp).toBe(50); // untouched
@@ -211,14 +222,14 @@ describe("tickStatusEffects: burn/poison DOT", () => {
 
 describe("tickStatusEffects: sleep", () => {
   it("counts ticksRemaining down without waking early", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ status: { kind: "sleep", ticksRemaining: 3 } });
     tickStatusEffects(agent, world);
     expect(agent.status).toEqual({ kind: "sleep", ticksRemaining: 2 });
   });
 
   it("wakes and clears status once ticksRemaining reaches 0", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const log = new EventLog();
     const agent = makeAgent({ status: { kind: "sleep", ticksRemaining: 1 } });
     tickStatusEffects(agent, world, log);
@@ -229,7 +240,7 @@ describe("tickStatusEffects: sleep", () => {
 
 describe("tickStatusEffects: freeze", () => {
   it("thaws on a successful per-tick roll", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const log = new EventLog();
     const agent = makeAgent({ status: { kind: "freeze" } });
     tickStatusEffects(agent, world, log, () => 0); // 0 < FREEZE_THAW_CHANCE
@@ -238,7 +249,7 @@ describe("tickStatusEffects: freeze", () => {
   });
 
   it("stays frozen on a failed roll", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ status: { kind: "freeze" } });
     tickStatusEffects(agent, world, undefined, () => FREEZE_THAW_CHANCE); // not < chance
     expect(agent.status).toEqual({ kind: "freeze" });
@@ -247,7 +258,7 @@ describe("tickStatusEffects: freeze", () => {
 
 describe("tickStatusEffects: paralysis has no per-tick effect here", () => {
   it("leaves a paralyzed agent's status and hp untouched", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ status: { kind: "paralysis" } });
     tickStatusEffects(agent, world);
     expect(agent.status).toEqual({ kind: "paralysis" });
@@ -265,7 +276,7 @@ describe("applyStatStage / getStatStage", () => {
   });
 
   it("a permanent entry (no ticksRemaining) survives tickStatusEffects indefinitely", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent();
     applyStatStage(agent, "defense", 1);
     tickStatusEffects(agent, world);
@@ -274,7 +285,7 @@ describe("applyStatStage / getStatStage", () => {
   });
 
   it("a temporary entry (ticksRemaining set) counts down and is removed on expiry", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent();
     applyStatStage(agent, "speed", 2, 2);
     tickStatusEffects(agent, world);
@@ -285,7 +296,7 @@ describe("applyStatStage / getStatStage", () => {
   });
 
   it("a temporary and a permanent entry on the same stat coexist until the temporary one expires", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent();
     applyStatStage(agent, "attack", 1); // permanent
     applyStatStage(agent, "attack", 3, 1); // temporary, 1 tick
@@ -295,7 +306,7 @@ describe("applyStatStage / getStatStage", () => {
   });
 
   it("tickStatusEffects on a corpse leaves stat stages untouched", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ alive: false });
     applyStatStage(agent, "speed", 1, 1);
     tickStatusEffects(agent, world);
@@ -372,17 +383,19 @@ describe("agent-modifying passives (grantPassive/damageReductionOf/isImmovable)"
   });
 
   it("the regen passive heals a fraction of maxHp every tick, independent of being fed/watered", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ hp: 10, maxHp: 50, needs: createNeeds({ hunger: 0, thirst: 0 }) });
     grantPassive(agent, "regen", 0.1);
     tickStatusEffects(agent, world);
-    expect(agent.hp).toBeCloseTo(15);
+    // 0.1 of maxHp is well past PASSIVE_HEAL_KNEE, so the soft cap applies:
+    // an effective share of ~0.0592, not the raw 0.1.
+    expect(agent.hp).toBeCloseTo(10 + 50 * softCapHealShare(0.1), 5);
   });
 });
 
 describe("multi-action lock (Agent.actionLockTicks)", () => {
   it("tickStatusEffects counts an action lock down to 0", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ actionLockTicks: 2 });
     tickStatusEffects(agent, world);
     expect(agent.actionLockTicks).toBe(1);
@@ -391,7 +404,7 @@ describe("multi-action lock (Agent.actionLockTicks)", () => {
   });
 
   it("does not go negative once already at 0", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ actionLockTicks: 0 });
     tickStatusEffects(agent, world);
     expect(agent.actionLockTicks).toBe(0);
@@ -400,7 +413,7 @@ describe("multi-action lock (Agent.actionLockTicks)", () => {
 
 describe("rally-call focus-fire mark (Agent.rallyMarkTicksRemaining)", () => {
   it("tickStatusEffects counts a rally mark down to 0", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ rallyMarkTicksRemaining: 2 });
     tickStatusEffects(agent, world);
     expect(agent.rallyMarkTicksRemaining).toBe(1);
@@ -409,7 +422,7 @@ describe("rally-call focus-fire mark (Agent.rallyMarkTicksRemaining)", () => {
   });
 
   it("does not go negative once already at 0, and no-ops when never set", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const zeroed = makeAgent({ rallyMarkTicksRemaining: 0 });
     tickStatusEffects(zeroed, world);
     expect(zeroed.rallyMarkTicksRemaining).toBe(0);
@@ -420,7 +433,7 @@ describe("rally-call focus-fire mark (Agent.rallyMarkTicksRemaining)", () => {
   });
 
   it("does not tick down on a corpse", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ alive: false, rallyMarkTicksRemaining: 3 });
     tickStatusEffects(agent, world);
     expect(agent.rallyMarkTicksRemaining).toBe(3);
@@ -443,7 +456,7 @@ describe("thornsOf", () => {
 
 describe("healAura passive", () => {
   it("heals every living same-herd, same-layer agent within radius, holder included", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const healer = makeAgent({ id: "healer", herdId: "h1", pos: { x: 2, y: 2 }, hp: 10, maxHp: 50 });
     grantPassive(healer, "healAura", 0.1);
     const nearbyAlly = makeAgent({ id: "ally", herdId: "h1", pos: { x: 3, y: 2 }, hp: 10, maxHp: 50 });
@@ -460,7 +473,7 @@ describe("healAura passive", () => {
   });
 
   it("no-ops without the passive or without a herdId", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ hp: 10, maxHp: 50 });
     world.agents.push(agent);
     tickStatusEffects(agent, world);
@@ -470,7 +483,7 @@ describe("healAura passive", () => {
 
 describe("maybeSpreadStatus", () => {
   it("spreads the same status to a nearby living agent on a successful roll", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const source = makeAgent({ id: "source", pos: { x: 2, y: 2 }, status: { kind: "burn" } });
     const neighbor = makeAgent({ id: "neighbor", pos: { x: 3, y: 2 }, types: ["grass"] });
     world.agents.push(source, neighbor);
@@ -479,7 +492,7 @@ describe("maybeSpreadStatus", () => {
   });
 
   it("does nothing on a failed spread roll", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const source = makeAgent({ id: "source", pos: { x: 2, y: 2 }, status: { kind: "burn" } });
     const neighbor = makeAgent({ id: "neighbor", pos: { x: 3, y: 2 }, types: ["grass"] });
     world.agents.push(source, neighbor);
@@ -488,7 +501,7 @@ describe("maybeSpreadStatus", () => {
   });
 
   it("doesn't spread to an agent out of radius or on a different layer", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     const source = makeAgent({ id: "source", pos: { x: 2, y: 2 }, status: { kind: "burn" } });
     const farNeighbor = makeAgent({ id: "far", pos: { x: 9, y: 9 }, types: ["grass"] });
     world.agents.push(source, farNeighbor);
@@ -508,13 +521,21 @@ describe("status predicates", () => {
 });
 
 describe("passive healing: flat vs percent, and the out-of-combat gate", () => {
-  it("regenFlat heals an absolute amount, independent of max HP", () => {
-    const small = makeAgent({ hp: 10, maxHp: 30, passives: { regenFlat: 1 } });
-    const big = makeAgent({ id: "a2", hp: 10, maxHp: 100, passives: { regenFlat: 1 } });
-    tickStatusEffects(small);
+  it("regenFlat heals its stated amount while a build's total healing stays under the knee", () => {
+    // 1 HP is 1% of a 100 HP unit — comfortably below PASSIVE_HEAL_KNEE, so
+    // it is delivered exactly. Flat healing is absolute where it matters:
+    // on a light build. Only a heavily stacked one meets the soft cap.
+    const big = makeAgent({ hp: 10, maxHp: 100, passives: { regenFlat: 1 } });
     tickStatusEffects(big);
-    expect(small.hp).toBe(11);
     expect(big.hp).toBe(11);
+
+    // On a 30 HP unit the same 1 HP is a 3.3% share, just over the knee, so
+    // it is shaved very slightly rather than delivered whole. This is the
+    // deliberate consequence of capping healing as a share of max HP.
+    const small = makeAgent({ id: "a2", hp: 10, maxHp: 30, passives: { regenFlat: 1 } });
+    tickStatusEffects(small);
+    expect(small.hp!).toBeGreaterThan(10.98);
+    expect(small.hp!).toBeLessThan(11);
   });
 
   it("is worth proportionally more to a small unit than a big one — the whole point of flat", () => {
@@ -535,10 +556,37 @@ describe("passive healing: flat vs percent, and the out-of-combat gate", () => {
     expect(big.hp! - 10).toBeGreaterThan(small.hp! - 10);
   });
 
-  it("flat and percent stack additively in one tick", () => {
+  it("flat and percent combine into one share, then meet the soft cap together", () => {
+    // Raw share is 0.1 + 2/100 = 0.12; the cap is on the TOTAL, which is the
+    // whole point — it is the sum of every healing node that matters, not
+    // any one of them.
     const agent = makeAgent({ hp: 10, maxHp: 100, passives: { regen: 0.1, regenFlat: 2 } });
     tickStatusEffects(agent);
-    expect(agent.hp).toBe(22); // 10 + 100*0.1 + 2
+    expect(agent.hp).toBeCloseTo(10 + 100 * softCapHealShare(0.12), 5);
+    expect(agent.hp!).toBeLessThan(22); // what it would have been uncapped
+  });
+
+  it("passive healing can never exceed PASSIVE_HEAL_CEILING, however much is stacked", () => {
+    const agent = makeAgent({ hp: 0, maxHp: 100, passives: { regen: 5, regenFlat: 500 } });
+    tickStatusEffects(agent);
+    expect(agent.hp!).toBeLessThan(100 * PASSIVE_HEAL_CEILING);
+    expect(agent.hp!).toBeGreaterThan(100 * PASSIVE_HEAL_CEILING * 0.9);
+  });
+
+  it("a light healing build is untouched by the cap — a node delivers what it says", () => {
+    const agent = makeAgent({ hp: 10, maxHp: 100, passives: { regenFlat: 2 } });
+    tickStatusEffects(agent);
+    expect(agent.hp).toBe(12);
+  });
+
+  it("more healing is always worth something, just progressively less", () => {
+    let prev = 0;
+    for (const flat of [1, 2, 4, 8, 16, 32]) {
+      const a = makeAgent({ hp: 0, maxHp: 50, passives: { regenFlat: flat } });
+      tickStatusEffects(a);
+      expect(a.hp!).toBeGreaterThan(prev);
+      prev = a.hp!;
+    }
   });
 
   it("recent damage suppresses BOTH flat and percent passive healing", () => {

@@ -355,7 +355,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // A last line that doesn't move and doesn't quit — soaks up real
         // damage doing it.
-        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        grantsPassive: { kind: "damageReduction", value: 0.08 },
         delta: { power: 10 },
       },
       sociability_capstone_filler: {
@@ -714,7 +714,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // A relentless, all-in style that shrugs off punishment better than
         // it has any right to.
-        grantsPassive: { kind: "damageReductionFlat", value: 2 },
+        grantsPassive: { kind: "damageReduction", value: 0.1 },
         delta: { power: 10 },
       },
       pack_capstone_filler: {
@@ -971,7 +971,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["verdant_recovery"], ["thornbound"]],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReductionFlat", value: 1.25 },
+        grantsPassive: { kind: "damageReduction", value: 0.07 },
         delta: {},
       },
       hardened_bark: {
@@ -1023,7 +1023,7 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["deeper_graft"],
         leaning: "boldness",
         // The same lattice that hauls an ally clear also braces the holder.
-        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        grantsPassive: { kind: "damageReduction", value: 0.06 },
         delta: { positionSwapPull: 1 },
       },
       // Crosslink: Sociability <-> Aggression — the gentlest touch turns
@@ -1369,7 +1369,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         // Standing inside your own ring of fire discourages anyone from
         // closing in.
-        grantsPassive: { kind: "damageReductionFlat", value: 2 },
+        grantsPassive: { kind: "damageReduction", value: 0.1 },
         delta: {},
       },
       unquenchable: {
@@ -1379,7 +1379,7 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisitesAnyOf: [["lingering_ring"], ["searing_wall"]],
         leaning: "boldness",
         // The fire never really goes out.
-        grantsPassive: { kind: "regenFlat", value: 0.75 },
+        grantsPassive: { kind: "regen", value: 0.02 },
         delta: { cooldownTicks: -1 },
       },
       ring_capstone_filler: {
@@ -1493,7 +1493,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // A blaze that never really needs tending anymore — it just keeps
         // giving a little back, tick after tick.
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regen", value: 0.025 },
         delta: { statusChance: 0.1 },
       },
       hearth_capstone_filler: {
@@ -1815,7 +1815,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // whoever it's guarding too.
         grantsPassives: [
           { kind: "thorns", value: 0.06 },
-          { kind: "damageReductionFlat", value: 1 },
+          { kind: "damageReduction", value: 0.06 },
         ],
         delta: {},
       },
@@ -2190,7 +2190,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["screening_wings"], ["harriers_charge"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 2.25 },
+        grantsPassive: { kind: "regen", value: 0.03 },
         delta: {},
       },
       flock_instinct: {
@@ -2410,7 +2410,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["retreating_slash"], ["cornered_fury"]],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        grantsPassive: { kind: "damageReduction", value: 0.08 },
         delta: {},
       },
       burrow_resolve: {
@@ -2499,7 +2499,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["colony_guard"], ["tunnel_runner"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 2.25 },
+        grantsPassive: { kind: "regen", value: 0.03 },
         delta: {},
       },
       den_instinct: {
@@ -2864,7 +2864,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["vanguard_call"], ["bulwark_call"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 2.25 },
+        grantsPassive: { kind: "regen", value: 0.03 },
         delta: {},
       },
       tremor_focus: {
@@ -2950,7 +2950,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // Deepens the bracing lever Warning Tremor already granted, instead
         // of a generic lifesteal bolt-on — the herd's own care extends into
         // real, ongoing recovery.
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regen", value: 0.025 },
         delta: {},
       },
       // Crosslink: Sociability <-> Aggression — a marked target that's
@@ -3169,7 +3169,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["undertow"], ["bubble_shield"]],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        grantsPassive: { kind: "damageReduction", value: 0.08 },
         delta: {},
       },
       tidal_precision: {
@@ -3256,7 +3256,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["undertow_guard"], ["riptide_rush"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 2.25 },
+        grantsPassive: { kind: "regen", value: 0.03 },
         delta: {},
       },
       tide_instinct: {
@@ -3725,7 +3725,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // The shared current becomes real shared protection, not just
         // shared healing — ties Boldness's own defensive identity into the
         // bridge instead of a flat lifesteal bolt-on.
-        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        grantsPassive: { kind: "damageReduction", value: 0.06 },
         delta: {},
       },
       // Crosslink: Sociability <-> Aggression — once the pod's converged
@@ -4476,7 +4476,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisitesAnyOf: [["guardians_ground"], ["rally_quake"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 2.25 },
+        grantsPassive: { kind: "regen", value: 0.03 },
         delta: {},
       },
       herd_precision: {
@@ -4565,7 +4565,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // The warning becomes real protection — ties into the herd's own
         // bracing instead of a generic jam-again bolt-on.
-        grantsPassive: { kind: "damageReductionFlat", value: 0.75 },
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
         delta: {},
       },
       // Crosslink: Sociability <-> Aggression — once the herd's clear and
@@ -4900,7 +4900,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // Holds the line while everything else is still getting clear.
         grantsPassives: [
           { kind: "defenseBoost", value: 0.04 },
-          { kind: "damageReductionFlat", value: 0.75 },
+          { kind: "damageReduction", value: 0.05 },
         ],
         delta: {},
       },
@@ -5348,7 +5348,7 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["covering_wing"],
         leaning: "boldness",
         // Interposing for real, not just repositioning.
-        grantsPassive: { kind: "damageReductionFlat", value: 1.25 },
+        grantsPassive: { kind: "damageReduction", value: 0.07 },
         delta: {},
       },
       // --- Sociability: "Flock Signal" — a prey bird's real defense isn't
@@ -5682,7 +5682,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         // The longer it just sits there, the more it recovers — laziness
         // as sustain.
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regen", value: 0.025 },
         delta: { power: -5 },
       },
       full_bulk: {
@@ -5694,7 +5694,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         // An even heavier stance — harder to line up, nearly impossible to
         // hurt once it lands.
-        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        grantsPassive: { kind: "damageReduction", value: 0.06 },
         delta: { accuracy: -8 },
       },
       weathered_giant: {
@@ -5828,7 +5828,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // Content and undisturbed, it simply isn't worn down the way
         // something always looking over its shoulder would be.
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regen", value: 0.025 },
         delta: {},
       },
       left_in_peace: {
@@ -6116,7 +6116,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         // Takes the hit mid-dive and keeps going.
         grantsPassives: [
-          { kind: "damageReductionFlat", value: 0.75 },
+          { kind: "damageReduction", value: 0.05 },
           { kind: "defenseBoost", value: 0.04 },
         ],
         delta: {},
@@ -6334,7 +6334,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         // Underground before anything else has reacted, and recovering while
         // it waits.
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        grantsPassive: { kind: "regen", value: 0.025 },
         delta: { cooldownTicks: -2 },
       },
     },
@@ -6641,7 +6641,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // Everything it takes goes into the stalk.
         grantsPassives: [
           { kind: "defenseBoost", value: 0.04 },
-          { kind: "damageReductionFlat", value: 1 },
+          { kind: "damageReduction", value: 0.06 },
         ],
         delta: {},
       },
@@ -6861,7 +6861,7 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["richer_ground"],
         leaning: "sociability",
         // Never quite empty, and never waiting long.
-        grantsPassive: { kind: "regenFlat", value: 2.25 },
+        grantsPassive: { kind: "regen", value: 0.03 },
         delta: { cooldownTicks: -1 },
       },
     },
