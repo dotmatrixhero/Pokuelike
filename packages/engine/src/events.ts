@@ -422,9 +422,11 @@ export type SimEvent =
        * `advanceWaterCycle` (sustained water-cycle drying/forming); "dug"
        * from needs.ts's dig-a-spring last resort (CROPS_DESIGN.md's water
        * rework: an agent with no reachable water anywhere digs a real new
-       * spring at its own position instead of migrating away).
+       * spring at its own position instead of migrating away); "freeze"/
+       * "thaw" from weather.ts's own seasonal ice cycle (small water bodies
+       * only — see `ICE_FREEZE_CHANCE_PER_TICK`'s own doc comment).
        */
-      cause: "drought" | "rain" | "dug" | "fire";
+      cause: "drought" | "rain" | "dug" | "fire" | "freeze" | "thaw";
     }
   | {
       kind: "herdClash";

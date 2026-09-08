@@ -286,6 +286,12 @@
       }
       #speed { width: 90px; accent-color: var(--accent); }
       #speed-label { min-width: 30px; text-align: center; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--text-dim); }
+      /* Direct bug report: a real battle pauses ordinary speed-driven ticking
+         for one-tick-at-a-time battle-step (see AutoCameraHost.enterBattleStep
+         in main.ts), but the speed readout kept showing the old "32x" value
+         with nothing to say ticking had actually slowed to a crawl — read as
+         "auto cam isn't slowing down" even though it genuinely was. */
+      #speed-label.battle-step-active { color: var(--accent, #ffb347); font-weight: 600; min-width: 50px; }
 
       /* --- Mini-map corner widget --------------------------------------
          A quick jump between the zoomed-in zone and the overworld without a

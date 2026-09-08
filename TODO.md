@@ -3,6 +3,133 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Simulation-mechanics ideas, raised mid-session, not yet built
+
+Three direct asks raised together, each substantial enough to want its own
+pass rather than a rushed bolt-on:
+
+- [x] **"Socialize" as an intention/unit action** — built, then extended
+      with real isolation pressure. New `"socialize"` `BehaviorKind` +
+      `applySocializing` (needs.ts), slotted into the idle stack right
+      before `applyTraining` (herd cohesion, shelter-resting, exploration
+      all still get first refusal). Only fires when a genuine candidate is
+      within `SOCIALIZE_RADIUS` (1 — Manhattan-adjacent only, "pretty close
+      quarters"), picking the rapport-neediest neighbor (lowest current
+      `|rapportScore|`, so it spreads bonds rather than always reinforcing
+      the same closest pair) and applying `RAPPORT_SOCIALIZE_DELTA` (0.04,
+      rapport.ts) via `strengthenRapportMutual`.
+      **Follow-up, direct ask: "if they don't have same species around
+      them, they should try to find other species or emigrate... they can
+      survive a long time, but eventually it becomes important to
+      socialize and build connections. even with other herds."** New
+      `Agent.ticksSinceSocialContact` (same shape as reproduction.ts's own
+      `ticksSinceEligibleMate`) — below `SOCIALIZE_ISOLATION_TICKS` (400),
+      only a same-herd candidate counts (original behavior); past it, ANY
+      nearby agent counts (any species, any herd, herdless included), at a
+      reduced `SOCIALIZE_STRANGER_DELTA_FRACTION` (0.5) rapport delta. Past
+      a much longer `SOCIALIZE_DISPERSAL_TICKS` (1200, dispersal.ts) with
+      the widened search STILL empty, a real new dispersal "Trigger 3"
+      fires — new `"isolation"` `DispersalReason`, the direct social
+      counterpart to dispersal.ts's existing `"no_eligible_mates"`
+      guaranteed fallback — sending a truly, persistently isolated agent
+      off to go find people.
+      AI-controlled only for now — a player-directed version is a real
+      follow-up once player-controlled units exist at all.
+      Verified live: 1472 real `behaviorChanged`-to-"socialize" events over
+      4000 ticks on a real scenario run, 17 real rapport edges standing
+      afterward (original pass); a separate 6000-tick run after the
+      isolation follow-up found 1 real `"isolation"`-reason dispersal event
+      and a max observed `ticksSinceSocialContact` of 2889 on a still-living
+      agent, confirming the widened search and the dispersal escape hatch
+      both actually engage in a real run, not just in theory.
+- [x] **Ground/soil types — built.** Direct ask, then a follow-up
+      reframe: "I think I want more types of tiles, you know?" New
+      `GroundType` ("loam" | "sandy" | "clay" | "rocky" | "peat"),
+      `Tile.groundType` — an orthogonal tag on `TerrainKind`, same shape as
+      `Tile.flavor`, biome-correlated at worldgen (`assignGroundTypes`,
+      worldgen.ts: highland/snow/badlands → rocky, desert/beach → sandy,
+      wetland → mostly clay with real peat pockets, everything else →
+      loam). Real mechanics, not just a color (flora.ts's
+      `GROUND_TYPE_PARAMS`): each type sets `fertility`'s own ceiling
+      (rocky barely grows anything; sandy/clay have their own character —
+      see the table), regen speed, and how hard a harvest knocks it down;
+      needs.ts's `cropDigThreshold` scales by the same table's
+      `digMultiplier` ("certain dirt is easier to dig"). **Peat doesn't
+      fully forgive over-harvesting** — `Tile.groundDegraded`, a real
+      permanent ceiling reduction with a real chance per harvest-death
+      (`maybeDegradePeat`) — the concrete, mechanical answer to Pillar 4
+      ("all that you change, changes you... the land remembers") being
+      underbuilt. Rendered as a real, subtle color cast in tile mode
+      (`GROUND_TYPE_TINT`, palette.ts/renderer.ts) — "mechanics should be
+      visible on the map, not hidden in a meter."
+      Verified: a real 120x120 `generateWorld` run placed all 5 types with
+      sensible distribution (loam 3557, rocky 1350, sandy 1330, clay 606,
+      peat 184) and correct starting fertility per ceiling; a real 6000-
+      tick scenario run found zero fertility-ceiling violations anywhere
+      on the map and 2 real permanently-degraded peat tiles. Tree-climbing/
+      canopy access (the traversal half of the original ask) is still a
+      separate, unbuilt follow-up — deliberately kept out of this pass.
+- [x] **Water body types (ocean/river/lake/pond), real rivers, ice,
+      shore-biased drought — built.** Direct follow-up ask: "what about
+      rivers vs ocean vs lakes and ice." New `WaterKind`
+      ("ocean" | "river" | "lake" | "pond"), `Tile.waterKind` — reuses
+      three signals that already existed but were never persisted
+      per-tile: the ocean mask, the river-carving pass, and
+      `waterBody.ts`'s connected-size lake/pond split. Salt vs fresh isn't
+      a separate field — it falls out of `waterKind` directly (ocean =
+      salt). Gameplay effects (per direct instruction) deliberately
+      deferred — this pass is the visible/data layer only.
+      **Rivers now have a real flow direction and real width** — direct
+      ask: "I want water to potentially sorta flow for elevation if
+      possible. like it wants to move in a direction, and I want thicker
+      than one sparse tiles." New `Tile.flowDirection` (the step-to-step
+      steepest-descent movement vector the carving pass already computed,
+      now persisted instead of discarded); `carveRiverWidening`
+      (worldgen.ts) carves one extra tile perpendicular to the flow on
+      whichever side reads as lower ground, so a river reads as a real bed
+      rather than a single-file stream. No gameplay effect from
+      `flowDirection` yet (a current pushing a swimmer, say) — the data is
+      there for a real follow-up.
+      **Ice**: new "ice" `TerrainKind`, walkable by default (the whole
+      point of freezing over) and no longer "water" for every
+      `terrain === "water"` check elsewhere (drinking, fishing) — a real
+      consequence, not just a skin. `weather.ts`'s `advanceWaterCycle`
+      freezes small (non-large) water bodies during winter
+      (`ICE_FREEZE_CHANCE_PER_TICK`) and thaws them back once winter ends
+      (`ICE_THAW_CHANCE_PER_TICK`) — direct ask: "global winter on smaller
+      water" (not biome-gated, and oceans/big lakes stay liquid).
+      **Ocean/lake drought no longer goes patchy** — direct report: "ocean
+      shouldn't become patchy when hit by drought. it needs to not
+      evaporate random tiles, it should be the shallower ones." Root
+      cause: a large body's drought-drying roll used to fire independently
+      per-tile with no position awareness at all, punching random holes in
+      a deep interior the same as a true shoreline tile. New
+      `isShoreWaterTile` (the cheap "touches a non-water neighbor"
+      check — this codebase's only real per-tile shallow/deep signal
+      before this was connected-body SIZE, the same value for every tile
+      in one body) now gates large-body drying to shore tiles only, so a
+      drying ocean/lake visibly recedes from its edge inward instead of
+      developing random interior holes.
+      Verified live: a real 150x150 `generateWorld` run placed all four
+      `waterKind`s (ocean 9900, lake 1320, river 188, pond 13 tiles), 186/
+      188 river tiles carrying a real `flowDirection`, and 94 river tiles
+      with 2+ river neighbors (real width, not a single-file stream); a
+      real 4000-tick scenario run produced 518 real freeze events, 394
+      real thaw events, and 33 real (now shore-gated) drought-dry events,
+      ending with 124 ice tiles on the map.
+- [ ] **Bug-type Pokémon as a more commonly preferred prey target.** Direct
+      ask: "bug pokemon be more common preferred prey target because
+      they're easier to eat" — i.e. a predator's prey-selection logic
+      (predation.ts) doesn't currently weight target choice by type at all
+      (see `isPreyOfAnything`/threat detection). Needs a real design
+      decision on the mechanism first (a flat preference multiplier on bug
+      types specifically? a broader "some types are easier prey" axis
+      predators already implicitly care about, e.g. lower effective
+      defense?) and then validation the same way `herdConflict.ts`'s own
+      predator-fragility constraint got validated — bug-type populations
+      are not obviously more resilient than average, so this needs a real
+      before/after population check, not just "seems right."
+
 ## Your call: movement is 8-way but combat range is 4-way (Manhattan)
 
 Checked in response to "can all units do 8 way movement?" — **yes, all of

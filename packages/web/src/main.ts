@@ -228,11 +228,23 @@ const autoCamHost: AutoCameraHost = {
     if (battleStepMode) return;
     battleStepMode = true;
     scheduleLoop();
+    // The speed slider's own value/label is untouched by battle-step mode
+    // (it isn't driving ticking at all right now — see `scheduleLoop`), so
+    // left alone it just keeps showing whatever speed the viewer had picked
+    // (often 16x/32x). Direct bug report: "auto cam seems broken... it's
+    // not slowing down" during an actual real-fight pause-and-step — the
+    // state machine genuinely was pausing ordinary ticking (verified live:
+    // exactly one tick per `BATTLE_STEP_INTERVAL_MS`), the speed readout
+    // just never said so, so a real slowdown read as "nothing changed."
+    speedLabel.textContent = "Battle!";
+    speedLabel.classList.add("battle-step-active");
   },
   exitBattleStep(): void {
     if (!battleStepMode) return;
     battleStepMode = false;
     scheduleLoop();
+    speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
+    speedLabel.classList.remove("battle-step-active");
   },
   setLogFilter(ids: Set<string> | undefined): void {
     eventLogPanel.setAutoCamFilter(ids);

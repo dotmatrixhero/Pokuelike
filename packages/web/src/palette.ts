@@ -1,4 +1,4 @@
-import type { PokemonType, TerrainKind, Vec2, World } from "@pokuelike/engine";
+import type { GroundType, PokemonType, TerrainKind, Vec2, World } from "@pokuelike/engine";
 import { waterBodySizeAt } from "@pokuelike/engine";
 
 /**
@@ -52,6 +52,7 @@ export const TERRAIN_BG: Record<TerrainKind, Rgb> = {
   mud: [42, 34, 22],
   shelter: [64, 50, 34],
   fire: [96, 32, 10],
+  ice: [30, 58, 74],
 };
 
 export const TERRAIN_FG: Record<TerrainKind, Rgb> = {
@@ -69,6 +70,7 @@ export const TERRAIN_FG: Record<TerrainKind, Rgb> = {
   mud: [110, 90, 60],
   shelter: [196, 158, 108],
   fire: [255, 168, 64],
+  ice: [200, 232, 240],
 };
 
 /**
@@ -126,6 +128,21 @@ export const CROP_EMOJI: Partial<Record<string, string>> = {
   honey: "🍯",
 };
 
+/**
+ * A subtle color cast per `GroundType`, drawn as a low-opacity wash over
+ * plain floor (and food/flora/seedling) ground — direct design principle:
+ * "mechanics should be visible on the map, not hidden in a meter." "loam"
+ * gets no entry (the fertile, unremarkable default keeps the existing dirt
+ * texture as-is) — every other ground type reads as a genuinely different
+ * kind of ground at a glance, not just a different number underneath.
+ */
+export const GROUND_TYPE_TINT: Partial<Record<GroundType, Rgb>> = {
+  sandy: [214, 188, 133],
+  clay: [178, 98, 62],
+  rocky: [120, 118, 112],
+  peat: [69, 58, 40],
+};
+
 /** Direct port of ascii.ts's TERRAIN_GLYPH/FLAVOR_GLYPH — the "ASCII classic" render mode's glyph set, Brogue-style. */
 export const TERRAIN_GLYPH: Record<TerrainKind, string> = {
   floor: ".",
@@ -142,6 +159,7 @@ export const TERRAIN_GLYPH: Record<TerrainKind, string> = {
   mud: "=",
   shelter: "h",
   fire: "*",
+  ice: "%",
 };
 
 export const FLAVOR_GLYPH: Record<string, string> = {

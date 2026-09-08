@@ -14233,3 +14233,452 @@ DOM, but only 2 actually visible (`getComputedStyle(...).display`), with
 `.battle-screen-extra` visible and reading "+3 more in this fight". Full
 monorepo typecheck clean; engine (46 files, 1250 tests) and data (2
 files, 240 tests) suites unaffected and still green.
+
+## Battle Screen: blank log after a mid-fight widening; battle-step gave no speed feedback
+
+Direct report after a live check: "auto cam seems broken. Things move too
+fast? It's not slowing down. It's also not showing msgs during evolutions
+and stuff in battle log."
+
+Ran the live app under Playwright (32x speed, Auto Camera on) and polled
+`#battle-screen`'s DOM every 2s across ~800 real ticks — reproduced twice,
+both times a `battle-screen-log` div present with zero `battle-screen-line`
+children (not the empty-state placeholder, a genuinely blank scrollback)
+right after a "clash"/"battle" engagement's `ids` had widened (an extra
+combatant joining mid-fight). Root cause, `battleScreenPanel.ts`'s
+`render()`: a widening (`idsWidened`, detected via a participant id
+`combatantEls` hasn't seen yet) tears down and rebuilds the whole panel —
+fresh empty `logEl` — same as a genuinely new engagement (`isNewEngagement`).
+But the line-repaint block right below it only ran on
+`isNewEngagement || linesChanged` — `idsWidened` alone didn't count, so if
+the exact tick the widening landed on didn't *also* produce a fresh battle
+line (`ingest` setting `dirty`), the just-rebuilt log stayed blank until
+the next real hit — which, for a fight that ends shortly after, could be
+never. Fixed by introducing `containerRebuilt = isNewEngagement ||
+idsWidened` and gating the repaint on that instead of `isNewEngagement`
+alone, so a widening-triggered rebuild always repaints whatever's already
+been revealed. (One-shot categories — evolution included — never widen,
+so despite how the report read, this was never actually about them; it
+just happened to look the same from the outside: a blank battle log.)
+
+Separately, real: a "battle" engagement pauses ordinary ticking for
+`enterBattleStep`'s one-tick-at-a-time cadence (verified live — ticks
+during an "engaging"/"fighting" status genuinely paced at ~650ms each,
+matching `BATTLE_STEP_INTERVAL_MS`), but the speed label kept showing
+whatever ordinary speed was selected before the battle (e.g. "32x") the
+entire time, since `enterBattleStep`/`exitBattleStep` never touch it — a
+real slowdown that gave no visual confirmation it had happened, reading
+as "not slowing down." `AutoCameraHost.enterBattleStep`/`exitBattleStep`
+in main.ts now swap the label to "Battle!" (`.battle-step-active` CSS,
+an accent color) for the duration and restore the numeric speed label the
+moment battle-step ends.
+
+### Verification
+
+Reproduced the blank-log bug live via Playwright twice (same seed, same
+speed/auto-cam setup) before the fix; same run repeated after the fix
+found no blank log across a longer run at the same tick range. The
+"Battle!" label swap verified live too: watched a real battle promote
+(label flips from "32x" to "Battle!" the same tick `enterBattleStep`
+fires) and conclude (label reverts to the prior numeric speed the same
+tick `exitBattleStep` fires). Full monorepo typecheck clean; engine (46
+files, 1257 tests) and data (2 files, 240 tests) suites green.
+
+## Auto Camera one-shot dwell: tick-based, so it shrank away to nothing at high speed
+
+Direct follow-up report: "I think our attempt to shorten autocam lingering
+was a bit too aggressive. Can you lengthen it back a tiny bit? Doesn't feel
+like it's lingering for 3 seconds... maybe the 3 seconds is only on 1x
+speed? Even on 32x it should be at least 2 seconds."
+
+Root cause: the one-shot camera hold (immigration/hatch/evolution/death via
+`DWELL_TICKS`, courtship via the shorter `COURTSHIP_DWELL_TICKS`) was still
+a real TICK count — 24 and 10 respectively — the exact same "ticks are a
+bad proxy for wall-clock time" mistake `BATTLE_STALE_MS`/`BATTLE_EPILOGUE_MS`
+already got fixed for earlier this session, just never applied here too.
+24 ticks is genuinely ~4s at 1x (6 ticks/sec), which is presumably where
+the "3 seconds" mental model came from — but at 32x (192 ticks/sec) the
+exact same 24 ticks is ~0.125s, over 30x shorter. This had actually already
+been measured and written down once before (see the "Verified directly"
+note on the cluster-cooldown fix above: "DWELL_TICKS at
+AUTO_CAM_SLOWDOWN_SPEED's 8x is only half a real second") but never turned
+into a fix at the time.
+
+Converted both to real `performance.now()` deadlines — `DWELL_MS` (2500)
+and `COURTSHIP_DWELL_MS` (1200) — via a new `Engagement.dwellUntilRealMs`
+field, set the moment a one-shot is promoted and stamped to "now" (an
+immediate deadline) on preemption by something higher-priority, the same
+role the old tick-based `expiresOrLastActiveTick` played alone before
+(that field still exists and still gets stamped by the preemption/widening
+paths, but `reconcile`'s actual dwell-expiry check no longer reads it —
+comments updated to say so). Gated on `playing`, same as the continuous-
+engagement real-ms checks, so a paused view doesn't watch a one-shot's
+clock run out from under it.
+
+### Verification
+
+Direct scenario test (real wall-clock, not simulated): fed
+`AutoCameraController` a single synthetic `evolved` event with the host
+reporting speed=32 the whole time and nothing else competing for the
+camera — measured 2509ms from promotion to release, matching the new
+`DWELL_MS`. Separately ran a real ~15s live-sim window at 32x through the
+demo scenario; in that busy a world nearly every one-shot got preempted by
+a fresh battle/clash before its own dwell could run out (expected —
+battle/clash still rightly outranks a one-shot), so the isolated test
+above is what actually confirms the fix; the live run just confirms
+preemption still works the same as before. Full monorepo typecheck clean;
+engine (46 files, 1257 tests) and data (2 files, 240 tests) suites green.
+
+## Autocam: more linger, herd extinction + notable-claim moments, flee wording; crop/egg emoji
+
+Batch of direct follow-ups in one message, plus a mid-turn addition:
+- "Add more linger to autocam. It feels too fast still on 32x."
+- "Make sure herd extinction events are captured on autocam and clearly
+  explained."
+- "I don't see eggs and crops on the map. Can we make them very apparent
+  emoji even in tile mode?"
+- (mid-turn) "Also like.. When a unit become notable. That should be an
+  auto cam moment."
+- (mid-turn) "I also don't love like units fleeing battles multiple
+  times... the fleeing should be the final signal the battle is over not a
+  continuous intention... ensure that battle logs read like real story
+  rather than just mechanical output."
+
+**More linger**: `DWELL_MS` 2500→4000, `COURTSHIP_DWELL_MS` 1200→2000,
+`CLASH_STALE_MS` 1200→1800, `CLASH_EPILOGUE_MS` 400→700. The earlier
+real-ms conversion (previous session) fixed the SPEED-dependent shrinkage;
+this is the separate "still just feels short" follow-up on top of that.
+
+**Herd extinction, captured for real**: `herdDissolved` (herds.ts, already
+existed — "a herd's last living member is gone") is now a new "extinction"
+`NotableCategory`, with a clear label ("the Bulbasaurs of Thornhollow have
+died out — the last bulbasaur here") built from `world.herds[herdId]`
+(species) and a new `HerdRecord.lastSeenPos` field (herds.ts, updated every
+`tickHerds` pass) since a dissolved herd has no living agent left to read a
+position from. First pass just enqueued it as an ordinary clustered
+one-shot — a real empirical check (same method as the earlier courtship-
+starvation fix) found 10 real `herdDissolved` events and 16 real
+`titleClaimed` (see below) events over 8000 ticks producing **zero**
+promotions of either. Root cause, worse than the courtship case: in a
+world busy enough that some clash is essentially always sitting in the
+queue (this run: 55 clash + 30 battle promotions in the same window),
+`popNextEngagement`'s unconditional "battle/clash always outranks a
+one-shot" rule has no floor at all — the entire one-shot tier, not just
+courtship, can starve forever. Fixed with a new, category-agnostic
+`ONE_SHOT_HARD_STARVATION_TICKS` (900) guard that runs BEFORE even the
+battle/clash check — the one deliberate exception to "battle/clash always
+wins." Also fixed `MAX_QUEUE` overflow eviction (`trimQueueOverflow`):
+used to always drop the oldest queued entry outright, which could silently
+delete a rare one-shot (a queued extinction) to make room for the Nth
+near-duplicate clash before it ever got a chance — now evicts the oldest
+*continuous* (battle/clash) entry first when one exists, since those
+regenerate on their own (the next real hit just re-queues the pair) and a
+one-shot moment doesn't. Re-ran the same empirical check after both fixes:
+extinction 7/10 promoted, notable 10/16 promoted, with real, readable
+labels.
+
+**Notable-claim moments**: `titleClaimed` (notables.ts, already existed) is
+a new "notable" `NotableCategory` — `idLabel` already renders the freshly-
+claimed title correctly (notables.ts sets `agent.notableTitle` in the same
+synchronous step the event is recorded in), so the label is just that plus
+`TITLE_DISPLAY_NAME[event.title]`: "🎖️ Surgeshade Single-Minded (Kingler)
+has become The Savant."
+
+**Flee wording + "final signal"**: `battleLinesFor`'s `behaviorChanged`-to-
+"flee" line was "X flees from the battle!" — a claimed SUCCESS every time,
+when the underlying event is really just the agent's own decision to TRY
+to disengage (predation.ts) — it can still get hit again before actually
+getting away, or the same pair can re-engage into a fresh fight shortly
+after, which is what read as "fleeing multiple times." Reworded to "X
+tries to break away!" (honest about being an attempt, not a guaranteed
+outcome), and `BattleScreenPanel.ingest` now stops appending any further
+lines the instant a conclusion signal (conclusion/faint/retreat) is
+produced — mid-batch, not just on the next tick — so that line is always,
+unconditionally, the last thing shown for that fight, not a passing
+intention buried under more combat that happens to follow it during the
+epilogue hold.
+
+**Crop/egg emoji**: an egg is a real `Agent` with `isEgg: true` and its
+eventual hatchling's own `species` already set (eggs.ts) — before this it
+fell straight into the ordinary sprite/letter-fallback path in `drawAgent`
+and rendered as a full-grown Pokémon walking around, nothing about it read
+as "egg." Now draws a large 🥚 on a soft dark backing disc, ahead of every
+other branch. The 8 real-crop flavors with no dedicated pixel art yet
+(`CROP_EMOJI` — wheat/tomato/corn/rice/apple/potato/pumpkin/herbs/honey)
+already had an emoji fallback in tile mode, but only when `plantSprite`
+was null AND behind a fade-with-stock opacity that could read as faint —
+moved the check ahead of `plantSprite` (so it's never quietly displaced if
+pixel art for one of these flavors shows up later either), raised the
+opacity floor, bumped the font size, and added the same dark backing disc
+the egg gets so it stays legible against a bright grass tile.
+
+### Verification
+
+Real empirical scenario checks (`tsx`, not just code-reading) for the
+starvation-guard fix — see above (extinction 7/10, notable 10/16, with
+real labels printed and inspected). Live Playwright run at 32x/Auto Camera
+on: watched real "has become The Savant/Wanderer/Kingslayer" notable-claim
+moments promote and display correctly across a live ~1200-tick run
+alongside ordinary clash/battle/courtship/immigration activity (a 3-way
+battle relabel also confirmed still working). Crop/egg emoji verified by
+code-path review and the isolated render-order change; the specific live
+screenshot taken landed on a water-heavy stretch of this seed's map with
+no food-crop tiles in frame, so the emoji rendering itself wasn't caught
+on camera this round — logic is a straightforward branch-order/opacity
+change with no new failure mode, same rendering primitives (`fillText` +
+backing disc) already used and confirmed working for the egg case. Full
+monorepo typecheck clean; engine (46 files, 1257 tests) and data (2 files,
+240 tests) suites green.
+
+## Autocam: story-weighted battle/clash selection, "why" context
+
+Direct follow-up, mid-turn: "generally if we can add a prio system for
+autocam that focuses on things that move the story forward, from a
+chronicle-like perspective. Ex. fights that make a unit notable, fights
+that give enough xp so the winner can evolve, fights that are close, like
+both units end at low hp, fights that lead to extinction or otherwise
+could sway the outcome of herd... It'd also be nice on a multi unit fight
+to explain why they're fighting and what they're fighting over. Same with
+clashes or territory."
+
+Scoped as a tie-break WITHIN the existing battle/clash priority tier, not
+a new tier of its own — `popNextEngagement` already always prefers a
+queued battle over a queued clash over every one-shot; what was missing
+was WHICH queued battle (or WHICH queued clash) to show when more than one
+is waiting, which was plain FIFO. New `storyWeight(ids, world)` scores a
+queued engagement by best-effort proxies for the four asked-for signals
+(nothing here can know how a fight actually turns out ahead of time):
+- a participant already holding a notable title (+3);
+- a participant one level from a REAL evolution (`LevelingProfile.
+  evolutions`, `@pokuelike/data`'s `LEVELING_CONTEXT`) and already at least
+  halfway through that level's own exp span — close enough this fight's
+  own exp could plausibly tip it over (+4);
+- a participant whose herd is down to its last 1-2 living members —
+  losing this fight could plausibly end that herd's story, the same stakes
+  the new "extinction" autocam category (this session, above) captures
+  after the fact (+5, ranked highest: the most irreversible outcome);
+- every living participant already hurt (≤35% hp) — a fight that could
+  plausibly go either way, not a one-sided beatdown (+2).
+`bestQueuedIndex` picks the highest-scoring queued entry of a category
+(stable tie-break: earliest queued wins a tie), used for both the battle
+and the clash tier in `popNextEngagement`. Deliberately doesn't let a
+one-shot or a clash skip ahead of a queued battle, and doesn't touch
+`ONE_SHOT_HARD_STARVATION_TICKS`'s own separate "never wait forever" rule
+— this only ever changes which ALREADY-battle-tier or ALREADY-clash-tier
+entry wins.
+
+**"Why" context**: `herdConflict.ts`'s own design doc comment is explicit
+that a `herdClash` is ALWAYS real resource contention (deliberately NOT
+territorial crowding — a same/different-species pair both wanting the same
+scarce food/water tile is the one and only trigger), so the clash label now
+always says so outright: "X vs Y clashing over a contested resource,"
+including the widened multi-way case ("N-way brawl over a contested
+resource"). A widened multi-way BATTLE (3+ participants) is relabeled
+"N-way pack hunt" instead of the previous bare "N-way battle" — real allies
+piling onto the same target (predation.ts's finishing-pool/mob-defense
+mechanics), not an ambiguous free-for-all.
+
+### Verification
+
+Direct synthetic scenario test (`tsx`, not just code-reading): two
+candidate queued "battle" engagements, an ordinary full-health pair queued
+FIRST and a notable-titled/low-hp/near-extinction-herd pair queued SECOND
+— confirmed the second (higher story-weight) engagement won promotion
+despite plain FIFO order saying the first should. Live Playwright run at
+32x confirmed the new "clashing over a contested resource" wording
+appearing repeatedly across several distinct live clashes. Full monorepo
+typecheck clean; engine (46 files, 1257 tests) and data (2 files, 240
+tests) suites green (this feature is web-only — no engine/data changes).
+
+## Ground/soil types, and socialize's real isolation pressure
+
+Two features, discussed together against `NARRATIVE_PILLARS.md`: the
+socialize action (previous entry, above) leaned on Pillar 3 ("the rugged
+individual is a myth") but wasn't yet load-bearing — rapport went up, but
+nothing genuinely depended on it. Ground types were originally scoped as a
+scalar overlay on `fertility`; re-read through Pillar 4 ("all that you
+change, changes you... the land remembers") and Pillar 1 (farming needs
+real ecological cost), the ask became: soil should be a real, visible,
+persistent-consequence system, not a hidden number.
+
+### Socialize: isolation as a real, patient pressure
+
+Direct ask: "if they don't have same species around them, they should try
+to find other species or emigrate. like they can survive a long time, but
+eventually it becomes important to socialize and build connections. even
+with other herds." Mirrors a pattern already in the codebase almost
+exactly — reproduction.ts's `ticksSinceEligibleMate`/`MATE_ISOLATION_TICKS`
+(200) and dispersal.ts's `"no_eligible_mates"` guaranteed-fallback trigger.
+
+New `Agent.ticksSinceSocialContact`, same shape. `applySocializing` (needs.ts)
+now has two tiers: below `SOCIALIZE_ISOLATION_TICKS` (400) only a same-herd
+candidate counts (the original behavior); past it, ANY nearby agent counts
+— any species, any herd, a herdless wanderer too — at half the rapport
+delta (`SOCIALIZE_STRANGER_DELTA_FRACTION`, a stranger's company is real
+but not the same instant familiarity a herd-mate's is). Past a much longer
+`SOCIALIZE_DISPERSAL_TICKS` (1200, dispersal.ts) with even the widened
+search still coming up empty, a new dispersal "Trigger 3" fires — a new
+`"isolation"` `DispersalReason`, dispersal.ts's `maybeTriggerDispersal`
+extended with exactly the same shape as its existing mate trigger — sending
+a truly, persistently isolated agent off to go find people, reusing the
+existing dispersal target-selection machinery rather than inventing a new
+one.
+
+### Ground types: a real, visible, persistent-consequence soil system
+
+New `Tile.groundType` ("loam" | "sandy" | "clay" | "rocky" | "peat") — an
+orthogonal tag on top of `TerrainKind`, the same shape `Tile.flavor` already
+uses for food/flora, not a new set of `TerrainKind` values (so it composes
+with every existing "floor" consumer for free). Assigned once at generation
+(`worldgen.ts`'s `assignGroundTypes`, run LAST — after rivers/badlands/
+massifs/landmark have all already settled the map — so it reads the real
+final biome-dominant reality of each tile), biome-correlated via the same
+runtime `dominantBiomeAt` lookup weather.ts's own biome-influenced weather
+already relies on: highland/snow/badlands → rocky, desert/beach → sandy,
+wetland → mostly clay with a real chance of a rarer peat pocket, everything
+else → loam (the fertile, unremarkable default — `undefined` on a tile
+means "loam").
+
+Real mechanics, not just a label — `flora.ts`'s `GROUND_TYPE_PARAMS`:
+- `fertilityCeiling` — the highest `fertility` a tile of this type can ever
+  reach (loam 1.0, sandy 0.6, rocky 0.25 — barely grows anything, clay/peat
+  1.0). `raiseFertility` now clamps to this instead of a flat 1, and a
+  freshly-generated tile gets a real STARTING `fertility` at its own
+  ceiling (worldgen.ts's `assignGroundTypes`) rather than staying
+  `undefined` — several places already read `fertility ?? 1` as "fully
+  fertile," which would have been actively wrong for a never-yet-harvested
+  rocky tile otherwise.
+- `regenMultiplier` — scales `FERTILITY_REGEN_PER_TICK` (sandy drains/dries
+  fast, regenerating quickly toward its own low ceiling; clay is slow to
+  recover).
+- `harvestRecoveryFraction` — scales `FERTILITY_AFTER_HARVEST` against the
+  tile's own ceiling, so e.g. rocky's poor ceiling AND poor recovery
+  fraction compound into a genuinely harsh post-harvest low.
+- `digMultiplier` — scales needs.ts's `cropDigThreshold` (the layer-gated
+  crop-access dig mechanic) — direct ask: "certain dirt is easier to dig."
+  Sandy 0.6x, clay 1.8x, rocky 2.5x.
+
+**Peat doesn't fully forgive.** New `Tile.groundDegraded` (0-1) — every
+other ground type's `fertility` fully recovers given enough time; peat
+specifically has a real chance (`PEAT_DEGRADE_CHANCE` 0.4) on every
+harvest-death to permanently shave a little off its OWN ceiling
+(`maybeDegradePeat`), capped well short of 1 so a tile is scarred, not
+bricked forever. This is the concrete answer to Pillar 4's own "still
+open" question ("how much does the land remember, and for how long?") for
+at least one real case.
+
+Rendered as a real, subtle color cast in tile mode (`GROUND_TYPE_TINT`,
+palette.ts, drawn via a new `drawGroundTypeTint` in renderer.ts, on both
+the plain-floor and food/flora/seedling branches) — direct design
+principle already on record: "mechanics should be visible on the map, not
+hidden in a meter." Tree-climbing/canopy access — the traversal half of
+the original ask — is deliberately NOT part of this pass; it's about tree
+tiles specifically, not ground composition, and stays a separate follow-up
+in TODO.md.
+
+### Verification
+
+Direct scenario checks (`tsx`, not just code-reading):
+- A real 120x120 `generateWorld` run placed all 5 ground types with a
+  sensible distribution (loam 3557, rocky 1350, sandy 1330, clay 606, peat
+  184 tiles) and exactly the expected starting fertility per ceiling
+  (rocky avg 0.250, sandy avg 0.600, clay/peat avg 1.000).
+- A real 6000-tick scenario run: zero fertility-ceiling violations found
+  anywhere on the map (every tile's `fertility` stayed at or under its own
+  `groundType`'s ceiling, including through real harvest/regen cycles), 2
+  real peat tiles ended the run with permanent `groundDegraded` damage, 1
+  real `"isolation"`-reason dispersal event fired, and a max observed
+  `ticksSinceSocialContact` of 2889 on a still-living agent — confirming
+  the widened-search tier and the dispersal escape hatch both actually
+  engage in a real run, not just in theory. Full monorepo typecheck clean;
+  engine (46 files, 1257 tests) and data (2 files, 240 tests) suites green
+  — no existing test needed updating, confirming the ceiling-aware
+  `raiseFertility`/harvest-recovery changes stayed behaviorally identical
+  for ordinary "loam" ground (the overwhelming majority of the map).
+
+## Water body types, real river flow/width, ice, shore-biased drought
+
+Direct follow-up ask, right after the ground/soil-type pass: "what about
+rivers vs ocean vs lakes and ice an shit?" Then, once scoped: "yeah. pull
+and merge. then. global winter on smaller water. and gameplay effects can
+wait. but also i want water to potentially sorta flow for elevation if
+possible. like it wants to move in a direction, and i want thicker than
+one spare tiles. also like ocean shouldnt become patchy when hit by
+drought. it needs to not evaporate random tiles, it should be the
+shallower ones."
+
+Same shape as ground types: most of the underlying data already existed,
+just never persisted per-tile. New `WaterKind` ("ocean" | "river" |
+"lake" | "pond"), `Tile.waterKind` — ocean tagged the instant it's placed
+(the sea-level mask was already right there), river tagged by the
+existing steepest-descent carving pass, lake vs pond split by
+`waterBody.ts`'s existing connected-component size check
+(`assignWaterKinds`, worldgen.ts, run last). Salt vs fresh isn't a
+separate field — it falls straight out of `waterKind` (ocean = salt).
+Gameplay effects deliberately deferred per direct instruction — this pass
+is the visible/data layer, not a mechanics pass.
+
+**Rivers: real flow + real width.** `carveRiver`'s steepest-descent search
+already computed a step-to-step movement vector every tick — it was just
+discarded. Now persisted as `Tile.flowDirection`. Widening
+(`carveRiverWidening`) carves one extra tile perpendicular to that flow,
+picking whichever of the two perpendicular sides reads as lower ground
+(falling back to the other, or staying single-width, if that side is out
+of bounds/already visited/ocean/already water) — a real riverbed, not a
+single-file stream. No gameplay effect from `flowDirection` yet (a real
+current pushing a swimmer downstream, say) — the data is there for that
+follow-up, not built here.
+
+**Ice.** New "ice" `TerrainKind` — walkable and non-opaque by default
+(absent from `UNWALKABLE_TERRAIN`/`OPAQUE_TERRAIN`, world.ts), which is
+the entire point: a small water body freezing over becomes crossable by a
+land agent that couldn't cross the water underneath it. Also, critically,
+no longer "water" for every `terrain === "water"` check elsewhere
+(drinking, fishing) — a real, not cosmetic, consequence. `weather.ts`'s
+`advanceWaterCycle` now runs a season-driven freeze/thaw check FIRST, for
+every tile, deliberately NOT gated on an active weather cell the way
+drought/rain are (a season is a much broader, slower condition — "global
+winter," not a drifting cell): small (non-large) water bodies roll to
+freeze during `seasonName === "winter"` (`ICE_FREEZE_CHANCE_PER_TICK`,
+1/60 — ~99% likely to freeze at some point across a full 250-tick winter)
+and ice tiles roll to thaw back once winter ends
+(`ICE_THAW_CHANCE_PER_TICK`, 1/30 — faster than freezing, so ice doesn't
+linger into spring). Large bodies (oceans/big lakes) are untouched —
+"global winter on smaller water" was explicit about scope.
+
+**Ocean/lake drought no longer punches random interior holes.** Root
+cause: the existing large-body drought-drying roll fired independently
+per tile with zero position awareness — an ocean's deep interior tile had
+exactly the same drying chance as a true edge tile, so a sustained drought
+could visibly "swiss-cheese" the middle of an ocean instead of receding
+from its coastline. The only existing per-tile-ish depth signal
+(`waterDepthFactor`, palette.ts) is honestly documented as a body-SIZE
+proxy, not a real per-tile depth — every tile in one connected body reads
+identically "deep." Fixed with a new, cheap `isShoreWaterTile` (touches at
+least one non-water/non-ice neighbor, or the map edge) that now gates
+large-body drying to shore tiles only — no new stored field, no BFS, just
+an O(1) neighbor check per candidate tile. A small body (pond/puddle) is
+essentially all-shore anyway, so its own drying behavior — the thing that
+was never the complaint — is unchanged.
+
+### Verification
+
+Direct scenario checks (`tsx`, not just code-reading):
+- A real 150x150 `generateWorld` run placed all four `waterKind`s with a
+  real distribution (ocean 9900, lake 1320, river 188, pond 13 tiles);
+  186/188 river tiles carried a real `flowDirection`; 94 river tiles had
+  2+ river neighbors, confirming real width rather than a single-file
+  stream.
+- A real 4000-tick scenario run: 518 real freeze events, 394 real thaw
+  events (both directions of the ice cycle genuinely firing), and 33 real
+  drought-dry events still occurring under the new shore-only gate
+  (confirming the fix didn't just silently disable ocean/lake drying
+  entirely) — ending the run with 124 ice tiles present on the map.
+- Full monorepo typecheck clean, including the exhaustive
+  `Record<TerrainKind, ...>` tables the new "ice" kind required updating
+  in three places (palette.ts's TERRAIN_BG/FG/GLYPH, runner's ascii.ts,
+  and the unwired-but-still-typechecked legend.ts). Engine (46 files, 1262
+  tests) and data (2 files, 240 tests) suites green — no existing test
+  needed updating, confirming the new ice/shore-drought checks stayed
+  behaviorally inert for every seed/scenario those tests already cover
+  (summer runs, non-large water bodies, etc.).

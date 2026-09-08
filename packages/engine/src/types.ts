@@ -118,11 +118,17 @@ export type MigrationReason = "scarcity" | "predator_pressure" | "wanderlust" | 
  * "the flavorful disposition-weighted trigger" from "the guaranteed
  * mechanical fallback," not which specific occasion of the former fired.
  * `"no_eligible_mates"` is that guaranteed fallback: a sustained stretch
- * mature with zero eligible mate candidates found nearby. Shared by
+ * mature with zero eligible mate candidates found nearby. `"isolation"` is
+ * its social counterpart — direct ask: "they can survive a long time, but
+ * eventually it becomes important to socialize and build connections. even
+ * with other herds" — a sustained stretch with nobody at all to socialize
+ * with (needs.ts's `applySocializing`/`ticksSinceSocialContact`), separate
+ * from the mate-specific trigger since an agent can have plenty of eligible
+ * mates nearby and still be socially isolated (or vice versa). Shared by
  * `Agent.dispersalReason` (internal, set the moment dispersal triggers) and
  * `SimEvent`'s `dispersed.reason` (external/narrative surface).
  */
-export type DispersalReason = "matured" | "no_eligible_mates";
+export type DispersalReason = "matured" | "no_eligible_mates" | "isolation";
 
 /**
  * A minimal, name-only view of a biome seed point (worldgen.ts's `BiomeSeed`
@@ -224,7 +230,55 @@ export type TerrainKind =
    * `Tile.burnTicksRemaining` and reverts to scorched "floor", spreading
    * into adjacent `FLAMMABLE_TERRAIN` on the way.
    */
-  | "fire";
+  | "fire"
+  /**
+   * A frozen "water" tile — weather.ts's `advanceWaterCycle`, "global
+   * winter on smaller water" (direct ask, following the ground/soil-type
+   * pass: "what about rivers vs ocean vs lakes and ice"). Walkable and not
+   * opaque by default (absent from `UNWALKABLE_TERRAIN`/`OPAQUE_TERRAIN`,
+   * world.ts) — the whole point of freezing is that it becomes crossable
+   * by a land agent that couldn't cross the water underneath it. Not
+   * "water" any more for every terrain === "water" check elsewhere
+   * (drinking, fishing, Water-type terrain bonuses) — a real, not just
+   * cosmetic, consequence of freezing over. Reverts back to "water" on its
+   * own once winter ends (same function, thaw roll) — `Tile.waterKind`/
+   * `flowDirection` are left untouched by the water<->ice transition (see
+   * `setTile`'s own doc comment for which fields it does and doesn't
+   * reset), so a frozen river tile still remembers it's a river once it
+   * thaws.
+   */
+  | "ice";
+
+/**
+ * Which real body of water a "water" (or currently-frozen "ice") tile
+ * belongs to — an orthogonal tag, same shape as `groundType`. Direct ask:
+ * "what about rivers vs ocean vs lakes." "ocean" comes from worldgen.ts's
+ * existing sea-level mask; "river" from the existing steepest-descent
+ * river-carving pass; "lake" vs "pond" split by the existing connected-
+ * component body-SIZE check (`waterBody.ts`'s `isLargeWaterBody`) already
+ * used for gameplay (crossing safety) and rendering (depth darkening) —
+ * every one of these three signals already existed, just never persisted
+ * per-tile. Salt vs fresh isn't its own field: it falls straight out of
+ * this one ("ocean" = salt, everything else = fresh) unless a real
+ * brackish/salt-lake case gets built later. `undefined` on a "water"/"ice"
+ * tile defaults to "pond" (a small, ordinary body) for rendering/logic
+ * purposes; meaningless (and always `undefined`) on every other terrain.
+ */
+export type WaterKind = "ocean" | "river" | "lake" | "pond";
+
+/**
+ * Ground/soil composition — an orthogonal tag on top of `TerrainKind`, same
+ * shape as `Tile.flavor` (a "food" tile's flavor is which berry; a "floor"
+ * tile's ground type is what the ground under it is actually made of).
+ * Direct ask: "more interesting ground tiles and sims around them. soil
+ * type, rock type... what can grow there, what the implications are" —
+ * see `Tile.groundType`'s own doc comment and flora.ts's `GROUND_TYPE_PARAMS`
+ * for the real mechanics each one drives (fertility ceiling/regen rate,
+ * dig difficulty). `undefined` on a tile means "loam" — the fertile,
+ * unremarkable default, same "missing == baseline" convention `flavor`/
+ * `fertility` already use.
+ */
+export type GroundType = "loam" | "sandy" | "clay" | "rocky" | "peat";
 
 /**
  * Three layers share one x,y footprint. A species is native to one layer
@@ -384,6 +438,50 @@ export interface Tile {
    */
   quality?: number;
   /**
+   * Ground/soil composition, set once at generation (worldgen.ts's
+   * `assignGroundTypes`, biome-correlated) and otherwise static — unlike
+   * `fertility` this doesn't drift tick to tick, it's what KIND of ground
+   * this tile is, not how depleted it currently is. `undefined` == "loam".
+   * See `GroundType`'s own doc comment and flora.ts's `GROUND_TYPE_PARAMS`
+   * for what each type actually changes: `fertility`'s own ceiling and
+   * regen rate, how low a harvest knocks it down, and (needs.ts's
+   * `cropDigThreshold`) how long a mismatched-layer dig takes.
+   */
+  groundType?: GroundType;
+  /**
+   * Permanent fertility damage, 0-1, currently only ever set on "peat"
+   * ground — direct ask, generalizing Pillar 4 ("all that you change,
+   * changes you... the land remembers"): most ground recovers fully given
+   * time (`fertility` climbing back to its `groundType` ceiling), but peat
+   * is written to NOT fully forgive sustained over-harvesting. Each food/
+   * flora death on a peat tile has a real chance to permanently shave a
+   * little off this tile's own effective ceiling (flora.ts's
+   * `maybeDegradePeat`) — capped well short of 1 so a tile is scarred, not
+   * bricked forever. `undefined`/0 == undamaged.
+   */
+  groundDegraded?: number;
+  /**
+   * "water"/"ice" tiles only: which real body this tile belongs to — see
+   * `WaterKind`'s own doc comment. Set once at generation (worldgen.ts's
+   * `assignWaterKinds`/`carveSuicuneRivers`) and by weather.ts's
+   * `advanceWaterCycle` for water freshly formed by rain (a new pond).
+   * `undefined` defaults to "pond" for rendering/logic purposes.
+   */
+  waterKind?: WaterKind;
+  /**
+   * "water"/"river"-tagged tiles only: the direction this river tile's
+   * current actually flows, in tile-steps (`{-1,0,1}` per axis) — the
+   * literal step-to-step movement direction worldgen.ts's existing
+   * steepest-descent river carving already computes but never used to
+   * persist anything. Direct ask: "I want water to potentially sorta flow
+   * for elevation if possible. like it wants to move in a direction."
+   * Gameplay effects (a real current pushing a swimmer, say) are a real
+   * follow-up — this is the data the mechanic would read, not the
+   * mechanic itself yet. `undefined` on non-river water (a lake/pond/ocean
+   * has no single flow direction) and on every non-water terrain.
+   */
+  flowDirection?: Vec2;
+  /**
    * "shelter" tiles only: which species most recently finished building
    * (part of) this shelter — purely a rendering hint (packages/web's
    * renderer.ts/palette.ts tint a shelter tile per owner species) with no
@@ -424,7 +522,8 @@ export type BehaviorKind =
   | "sleep"
   | "restAtShelter"
   | "scavenge"
-  | "train";
+  | "train"
+  | "socialize";
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
 export interface InventoryItem {
@@ -1013,6 +1112,19 @@ export interface Agent {
    * agent, or one that's never yet gone a tick without a candidate.
    */
   ticksSinceEligibleMate?: number;
+  /**
+   * Same shape as `ticksSinceEligibleMate` just above, but for social
+   * contact rather than mating — needs.ts's `applySocializing` resets this
+   * to 0 whenever it actually finds someone to socialize with, and
+   * increments it otherwise (only on the ticks it's actually reached in
+   * the idle stack — see that function's own doc comment). Widens who
+   * counts as a valid socialize target past `SOCIALIZE_ISOLATION_TICKS`
+   * (same-species/herd only below that), and is dispersal.ts's guaranteed
+   * fallback trigger for the `"isolation"` `DispersalReason` past
+   * `SOCIALIZE_DISPERSAL_TICKS`. Absent/0 for an agent that's never yet
+   * gone an idle tick without someone to socialize with.
+   */
+  ticksSinceSocialContact?: number;
   /**
    * Set for exactly one tick by leveling.ts's `grantExp` the instant this
    * agent's level crosses `dispersal.ts`'s `DISPERSAL_MIN_LEVEL` (dispersal

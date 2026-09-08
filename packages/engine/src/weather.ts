@@ -2,6 +2,7 @@ import type { Layer, TerrainKind, Vec2, WeatherCell, WeatherType, World } from "
 import type { EventLog } from "./events.js";
 import { setElevation, setTile, tileAt } from "./world.js";
 import { biomeWeightsAt, effectiveWaterDensityAt } from "./worldgen.js";
+import { seasonName } from "./crops.js";
 import { LARGE_WATER_BODY_MIN_SIZE, isLargeWaterBody, waterBodySizeAt } from "./waterBody.js";
 
 /**
@@ -580,6 +581,31 @@ function isAdjacentToWater(world: World, pos: Vec2): boolean {
   return false;
 }
 
+/**
+ * True if this water tile touches land (or the map edge) on at least one
+ * side — the real, cheap "shoreline vs open interior" distinction this
+ * codebase doesn't otherwise track per-tile (see palette.ts's
+ * `waterDepthFactor` own doc comment: connected-body SIZE is the only
+ * existing depth-ish proxy, the same for every tile in a body regardless
+ * of position). Direct report: "ocean shouldn't become patchy when hit by
+ * drought. it needs to not evaporate random tiles, it should be the
+ * shallower ones." Root cause: `advanceWaterCycle`'s drought roll used to
+ * fire independently for every large-body tile, including a deep interior
+ * one, punching random holes in the middle of an ocean/lake instead of a
+ * real, visible shoreline receding inward. Ice counts as still-water here
+ * (freezing over doesn't create new "shore"), and off the map edge counts
+ * as shore too, same convention this file's water-edge rendering already
+ * relies on.
+ */
+function isShoreWaterTile(world: World, pos: Vec2): boolean {
+  for (const offset of WATER_NEIGHBOR_OFFSETS) {
+    const neighbor = tileAt(world, "surface", pos.x + offset.x, pos.y + offset.y);
+    if (!neighbor) return true;
+    if (neighbor.terrain !== "water" && neighbor.terrain !== "ice") return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Biome-aware water-cycle rates — TODO.md's flagged gap: `generateWorld`
 // (worldgen.ts) blends a real, biome-specific `waterDensity` per tile at
@@ -639,12 +665,40 @@ function biomeWaterRateMultiplier(world: World, pos: Vec2, invert: boolean): num
 }
 
 /**
+ * Per-tick chance a "water" tile belonging to a SMALL body (below
+ * `LARGE_WATER_BODY_MIN_SIZE`) freezes to "ice" while `seasonName` reads
+ * "winter" — direct ask: "global winter on smaller water." Deliberately
+ * NOT gated on an active weather cell the way drought/rain are (a real
+ * season is a much broader, slower-changing condition than a drifting
+ * weather cell — see `seasonName`'s own `SEASON_LENGTH` = 1000 doc
+ * comment) and deliberately NOT applied to large bodies (an ocean/big lake
+ * freezing solid isn't the ask; a pond/puddle/small pool is). Winter is
+ * `[0.75, 1]` of `SEASON_LENGTH` (250 ticks) — at this rate, `1 - (1 -
+ * 1/60)^250 ≈ 0.99`, so a small body sitting through a full winter is
+ * very likely to freeze at some point, without freezing on literally the
+ * first tick of winter every time.
+ */
+export const ICE_FREEZE_CHANCE_PER_TICK = 1 / 60;
+/**
+ * `ICE_FREEZE_CHANCE_PER_TICK`'s thaw counterpart — checked once
+ * `seasonName` reads anything OTHER than "winter". Deliberately faster
+ * than freezing (ice shouldn't linger deep into spring) — over the ~750
+ * non-winter ticks a real ice tile from last winter is essentially
+ * guaranteed to thaw well before the next winter comes back around.
+ */
+export const ICE_THAW_CHANCE_PER_TICK = 1 / 30;
+
+/**
  * Once per world tick (called from simulation.ts's `tickWorld`, alongside
- * `growFlora` — same "world-level system, one full-grid pass" shape). Every
- * surface tile currently under an active weather cell is checked once:
- * "water" tiles under drought roll to dry to `DRIED_WATER_TERRAIN`;
+ * `growFlora` — same "world-level system, one full-grid pass" shape).
+ * Every surface "water"/"ice" tile is checked once for the season-driven
+ * ice cycle FIRST (not gated on an active weather cell — see
+ * `ICE_FREEZE_CHANCE_PER_TICK`'s own doc comment), then every tile
+ * currently under an active weather cell is checked for the drought/rain
+ * cycle: "water" tiles under drought roll to dry to `DRIED_WATER_TERRAIN`
+ * (large bodies only from their shore inward — see `isShoreWaterTile`);
  * `RAIN_CONVERTIBLE_TERRAIN` tiles under rain, adjacent to existing water,
- * roll to become water. Both branches go through `setTile` (not a hand-
+ * roll to become water. Every branch goes through `setTile` (not a hand-
  * rolled field assignment) so walkable/opaque/stock/flavor/concealment and
  * `invalidateResourceIndex` (resourceIndex.ts indexes "water" tiles for
  * thirst-seeking) all stay consistent with every other terrain-change call
@@ -670,9 +724,32 @@ export function advanceWaterCycle(world: World, log?: EventLog, rng: () => numbe
     bodySizeByIndex[i] = waterBodySizeAt(world, pos);
   }
 
+  const winter = seasonName(world.tick) === "winter";
+
   for (let i = 0; i < tiles.length; i++) {
     const tile = tiles[i]!;
     const pos = { x: i % world.width, y: Math.floor(i / world.width) };
+
+    // Ice: global, season-driven — checked first, and deliberately NOT
+    // gated on an active weather cell (see ICE_FREEZE_CHANCE_PER_TICK's
+    // own doc comment). A tile that freezes/thaws this tick is done for
+    // this tick either way — the drought/rain checks below only ever see
+    // a tile still in its PRE-ice-check terrain.
+    if (tile.terrain === "water" && winter && !isLargeWaterBody(bodySizeByIndex[i]!)) {
+      if (rng() < ICE_FREEZE_CHANCE_PER_TICK) {
+        setTile(world, "surface", pos.x, pos.y, "ice", tile.elevation);
+        log?.record({ kind: "terrainChanged", tick: world.tick, layer: "surface", pos, from: "water", to: "ice", cause: "freeze" });
+      }
+      continue;
+    }
+    if (tile.terrain === "ice" && !winter) {
+      if (rng() < ICE_THAW_CHANCE_PER_TICK) {
+        setTile(world, "surface", pos.x, pos.y, "water", tile.elevation);
+        log?.record({ kind: "terrainChanged", tick: world.tick, layer: "surface", pos, from: "ice", to: "water", cause: "thaw" });
+      }
+      continue;
+    }
+
     const cell = activeWeatherAt(world, pos);
     if (!cell) continue;
 
@@ -682,6 +759,12 @@ export function advanceWaterCycle(world: World, log?: EventLog, rng: () => numbe
       // The "never run out" hard floor — a large body already at or below
       // this size doesn't dry any further this tick, regardless of roll.
       if (large && bodySize <= LARGE_WATER_BODY_FLOOR_SIZE) continue;
+      // A large body only dries from its SHORE inward — see
+      // `isShoreWaterTile`'s own doc comment for the "patchy ocean" bug
+      // this closes. A small body (pond/puddle) is basically all shore
+      // anyway, so it keeps drying uniformly — no visible difference for
+      // the case that was never the complaint.
+      if (large && !isShoreWaterTile(world, pos)) continue;
       const baseDryChance = large ? LARGE_WATER_BODY_DRY_CHANCE_PER_TICK : DROUGHT_WATER_DRY_CHANCE_PER_TICK;
       const dryChance = baseDryChance * biomeWaterRateMultiplier(world, pos, true);
       if (rng() < dryChance) {

@@ -1,4 +1,4 @@
-import type { Agent, TerrainKind, World } from "@pokuelike/engine";
+import type { Agent, TerrainKind, Tile, World } from "@pokuelike/engine";
 import { biomeWeightsAt, lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import {
@@ -21,6 +21,7 @@ import {
   CROP_EMOJI,
   FLAVOR_FG,
   FLAVOR_GLYPH,
+  GROUND_TYPE_TINT,
   TERRAIN_BG,
   TERRAIN_FG,
   TERRAIN_GLYPH,
@@ -171,6 +172,24 @@ function drawGroundBacking(ctx: CanvasRenderingContext2D, world: World, x: numbe
   // nice" — see drawBiomeEdgeBlend's own doc comment for why this is a
   // generated gradient blend rather than real edge art.
   drawBiomeEdgeBlend(ctx, world, x, y, elevation, biome);
+}
+
+/**
+ * A low-opacity color wash for this tile's `groundType` — direct design
+ * principle ("mechanics should be visible on the map, not hidden in a
+ * meter") applied to the new soil/rock system: sandy/clay/rocky/peat each
+ * read as a genuinely different-looking patch of ground, not just a
+ * different number underneath the same dirt texture. "loam" (the default)
+ * has no `GROUND_TYPE_TINT` entry, so this is a no-op for the overwhelming
+ * majority of ordinary ground — deliberately subtle (low alpha) so it
+ * reads as a color CAST over the real floor texture/decals already drawn,
+ * not a flat paint-over.
+ */
+function drawGroundTypeTint(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number): void {
+  const tint = GROUND_TYPE_TINT[tile.groundType ?? "loam"];
+  if (!tint) return;
+  ctx.fillStyle = rgbaToCss(tint, 0.16);
+  ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
 }
 
 /**
@@ -557,6 +576,7 @@ function drawWorldTiles(
         // to be faded down to avoid looking like a flat loud fill the way
         // a single solid color would.
         drawGroundBacking(ctx, world, x, y, tile.elevation);
+        drawGroundTypeTint(ctx, tile, x, y);
         ctx.fillStyle = rgbaToCss(shade([120, 128, 140], tile.elevation), 0.35);
         ctx.fillText(".", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
         drawTileVignette(ctx, x, y);
@@ -640,6 +660,7 @@ function drawWorldTiles(
         // above, since the real berry-plant art (below) also has transparent
         // corners around the plant itself.
         drawGroundBacking(ctx, world, x, y, tile.elevation);
+        drawGroundTypeTint(ctx, tile, x, y);
 
         // A green "fertile ground" patch under the plant itself — direct
         // ask: "can we decal a little green patch under the plants...
@@ -694,7 +715,29 @@ function drawWorldTiles(
         // it over to real stock and clears `growth`, at which point this
         // tile falls straight through to the ordinary `cropEmoji` branch.
         const unripe = tile.terrain === "food" && (tile.stock ?? 0) <= 0 && tile.growth !== undefined;
-        if (plantSprite) {
+        if (cropEmoji && !unripe) {
+          // Real emoji art for the 8 new crops (direct ask: "do them for
+          // tile mode at least", then a direct follow-up: "I don't see eggs
+          // and crops on the map. Can we make them very apparent emoji even
+          // in tile mode?"). Checked BEFORE `plantSprite` (not just as its
+          // fallback) so a crop's own real look is never a barely-there
+          // colored letter and never quietly displaced if pixel art for one
+          // of these 8 flavors ever gets added later — bigger than before,
+          // a higher opacity floor so a low-stock patch still reads clearly
+          // instead of fading toward invisible, and a soft dark backing
+          // disc so the emoji stays legible against a bright grass tile the
+          // same way the egg emoji below does.
+          ctx.save();
+          const cropAlpha = tile.stock !== undefined ? 0.65 + 0.35 * tile.stock : 0.95;
+          ctx.globalAlpha = cropAlpha;
+          ctx.beginPath();
+          ctx.ellipse(x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2, TILE_SIZE * 0.44, TILE_SIZE * 0.44, 0, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
+          ctx.fill();
+          ctx.font = `${TILE_SIZE * 0.85}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+          ctx.fillText(cropEmoji, x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
+          ctx.restore();
+        } else if (plantSprite) {
           ctx.save();
           ctx.globalAlpha = tile.terrain === "seedling" ? 0.7 : 0.4 + (tile.stock ?? 1) * 0.6;
           ctx.drawImage(plantSprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
@@ -704,18 +747,6 @@ function drawWorldTiles(
           ctx.globalAlpha = 0.55;
           ctx.font = `${TILE_SIZE * 0.55}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
           ctx.fillText("🌱", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
-          ctx.restore();
-        } else if (cropEmoji) {
-          // Real emoji art for the 8 new crops (direct ask: "do them for
-          // tile mode at least") — no dedicated pixel art of their own yet,
-          // so this is their actual look until some exists, same role the
-          // colored-letter glyph plays for everything else below. Emoji
-          // carry their own real color, so no fillStyle tint — just the
-          // same stock-based fade every other plant-tile visual gets.
-          ctx.save();
-          ctx.globalAlpha = tile.stock !== undefined ? 0.4 + 0.6 * tile.stock : 0.9;
-          ctx.font = `${TILE_SIZE * 0.7}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
-          ctx.fillText(cropEmoji, x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
           ctx.restore();
         } else {
           const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_FG[tile.terrain];
@@ -988,7 +1019,25 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
   ctx.save();
   ctx.globalAlpha = isCorpse ? 0.4 : agent.fainted ? 0.7 : 1;
 
-  if (sprite) {
+  if (agent.isEgg) {
+    // Direct ask: "I don't see eggs and crops on the map. Can we make them
+    // very apparent emoji even in tile mode?" Root cause: an egg is a real
+    // `Agent` with `isEgg: true` and its eventual hatchling's own
+    // `species` already set (eggs.ts), so before this it fell straight
+    // into the ordinary `sprite`/letter-fallback branch below and rendered
+    // as a full-grown Bulbasaur sprite walking around — nothing about it
+    // read as "egg" at all. A big, unmistakable 🥚 on a soft dark backing
+    // circle (so it still reads against a light grass tile) takes priority
+    // over every other branch here.
+    ctx.beginPath();
+    ctx.ellipse(px + TILE_SIZE / 2 + jitterX, py + TILE_SIZE / 2 + jitterY, TILE_SIZE * 0.42, TILE_SIZE * 0.42, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
+    ctx.fill();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `${TILE_SIZE * 0.85}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.fillText("🥚", px + TILE_SIZE / 2 + jitterX, py + TILE_SIZE / 2 + jitterY);
+  } else if (sprite) {
     // Bigger than one tile (see SPRITE_SCALE) and bottom-anchored so the
     // sprite's feet sit on its actual tile instead of the whole thing being
     // centered/squished into TILE_SIZE. No canvas mirroring needed — see

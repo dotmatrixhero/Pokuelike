@@ -213,23 +213,44 @@ export class BattleScreenPanel {
     this.lastRevealAtMs = undefined;
   }
 
-  /** Feed every event from the tick that just ran — only ever produces turn-by-turn lines for a "battle"/"clash" category engagement (see `hasRichBattleScreen`); one-shot categories already got their single scene line from `setActive`. */
+  /**
+   * Feed every event from the tick that just ran — only ever produces
+   * turn-by-turn lines for a "battle"/"clash" category engagement (see
+   * `hasRichBattleScreen`); one-shot categories already got their single
+   * scene line from `setActive`.
+   *
+   * Stops appending the moment `this.concluded` is set (including mid-batch,
+   * the instant the conclusion-causing line itself is pushed) — direct
+   * report: "the fleeing should be the final signal the battle is over,
+   * not a continuous intention." Root cause: a flee/faint/conclusion line
+   * used to just be flagged as the conclusion for `autoCamera.ts`'s own
+   * epilogue-hold bookkeeping while this kept right on appending whatever
+   * MORE combat the two participants produced during that same epilogue
+   * hold (the fleeing side isn't safe the instant it decides to flee — it
+   * can still get hit again before it's actually clear) — so the log's
+   * last visible line often wasn't the flee/faint/conclusion moment at all,
+   * just whatever happened to land after it. Now the conclusion line is
+   * always, unconditionally, the last thing shown for that fight.
+   */
   ingest(events: readonly SimEvent[], world: World): void {
-    if (events.length === 0 || !hasRichBattleScreen(this.activeCategory) || !this.ids) return;
+    if (events.length === 0 || !hasRichBattleScreen(this.activeCategory) || !this.ids || this.concluded) return;
     for (const event of events) {
       if (!eventNamesAnyOf(event, this.ids)) continue;
       const produced = battleLinesFor(event, world);
       if (produced.length === 0) continue;
       this.lines.push(...produced);
+      this.dirty = true;
       // "conclusion" (a true death), "faint" (recoverable knockout), and
-      // "retreat" (a successful flee/backing-off) are exactly the three real
+      // "retreat" (a flee attempt/backing-off) are exactly the three real
       // conclusion signals `autoCamera.ts`'s `onBattleParticipantLeft`
       // recognizes — the stale-timeout fallback path produces no event at
       // all, so it has no line to key off here and just keeps the last-drawn
       // state through the epilogue hold, an accepted gap for a silent
       // disengagement.
-      if (produced.some((l) => l.kind === "conclusion" || l.kind === "faint" || l.kind === "retreat")) this.concluded = true;
-      this.dirty = true;
+      if (produced.some((l) => l.kind === "conclusion" || l.kind === "faint" || l.kind === "retreat")) {
+        this.concluded = true;
+        break;
+      }
     }
     const overflow = this.lines.length - BattleScreenPanel.MAX_LINES;
     if (overflow > 0) {
@@ -304,8 +325,19 @@ export class BattleScreenPanel {
     // `isNewEngagement`, but `updateVsHeader` below has nothing to update
     // for an id it's never seen, so this still needs a real rebuild.
     const idsWidened = !isNewEngagement && !!this.ids && !!this.combatantEls && [...this.ids].some((id) => !this.combatantEls!.has(id));
+    // Either branch below tears down and rebuilds `this.logEl` from scratch
+    // (a fresh, empty element) — the population check further down has to
+    // treat that the same as `isNewEngagement` or the rebuilt log stays
+    // empty until the next tick that happens to also set `dirty`. Direct
+    // bug report, reproduced live: a mid-clash/battle widening (a third
+    // combatant assisting) landing on a tick with no fresh battle line of
+    // its own left the just-rebuilt log panel blank — "not showing msgs
+    // during evolutions and stuff in battle log" turned out to be this,
+    // not evolution/one-shot categories (those never widen, so never hit
+    // this path) but any continuous engagement that widens on a quiet tick.
+    const containerRebuilt = isNewEngagement || idsWidened;
 
-    if (isNewEngagement || idsWidened) {
+    if (containerRebuilt) {
       this.container.replaceChildren();
       this.headerEl = hasRichBattleScreen(this.activeCategory) && this.ids ? this.renderVsHeader(world) : undefined;
       if (this.headerEl) this.container.appendChild(this.headerEl);
@@ -326,8 +358,8 @@ export class BattleScreenPanel {
 
     this.container.classList.toggle("battle-screen-concluded", this.concluded);
 
-    if (this.logEl && (isNewEngagement || linesChanged)) {
-      const wasAtBottom = isNewEngagement || this.logEl.scrollTop + this.logEl.clientHeight >= this.logEl.scrollHeight - 4;
+    if (this.logEl && (containerRebuilt || linesChanged)) {
+      const wasAtBottom = containerRebuilt || this.logEl.scrollTop + this.logEl.clientHeight >= this.logEl.scrollHeight - 4;
       // Only ever paints what's actually been revealed so far — see
       // `revealedCount`'s own doc comment. A still-pending line simply isn't
       // in the DOM yet; it appears on a later frame once its own turn comes.
@@ -572,6 +604,10 @@ function sceneLine(category: NotableCategory, label: string): string {
       return `${label}!`;
     case "clash":
       return `${label}!`;
+    case "extinction":
+      return `${label}...`;
+    case "notable":
+      return `${label}!`;
   }
 }
 
@@ -613,7 +649,20 @@ function battleLinesFor(event: SimEvent, world: World): BattleLine[] {
     case "fainted":
       return [{ kind: "faint", text: `${battleName(world, event.agentId, event.species)} fainted!` }];
     case "behaviorChanged":
-      return event.to === "flee" ? [{ kind: "retreat", text: `${battleName(world, event.agentId, event.species)} flees from the battle!` }] : [];
+      // Direct report: "I don't love units fleeing battles multiple
+      // times... it should say they try to run away, and maybe even when
+      // they fail." Root cause: `behaviorChanged` to "flee" is the AGENT'S
+      // OWN DECISION to try to disengage (predation.ts), not a guaranteed
+      // "successfully got away" outcome — the fleeing agent can still be
+      // caught and hit again before it actually escapes, or the same pair
+      // can re-engage into a fresh fight shortly after. "Flees from the
+      // battle!" claimed a clean success every time regardless of what
+      // actually happened next; "tries to break away!" is honest about it
+      // being an attempt either way. See `ingest`'s own doc comment for the
+      // other half of the fix — this line is now always the LAST thing
+      // shown for the fight, not a passing intention buried under more
+      // combat lines that follow it.
+      return event.to === "flee" ? [{ kind: "retreat", text: `${battleName(world, event.agentId, event.species)} tries to break away!` }] : [];
     case "killed":
       return [{ kind: "conclusion", text: `${battleName(world, event.preyId, event.preySpecies)} was defeated by ${battleName(world, event.predatorId, event.predatorSpecies)}!` }];
     case "defeated":
