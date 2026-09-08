@@ -10,14 +10,31 @@ import { speciesDisplayName } from "@pokuelike/engine";
  * `${species}-immigrant-${tick}-${i}`, `overworld.ts`'s
  * `${species}-${region}-invented-${tick}-${i}`, `eggs.ts`'s
  * `egg-${species}-${tick}-${seq}`) ends in a real per-batch index that's
- * already small — pulling just the TRAILING digits (not the whole id) skips
- * right past the large embedded tick number in the middle, giving a short,
- * stable-enough-to-recognize number without ever needing to know which of
- * these four shapes a given id actually is.
+ * already small.
+ *
+ * Real bug found (not the original ask): pulling just the trailing digit
+ * run skipped right past the tick number, which is the part that actually
+ * made the id unique — that per-batch index resets small every wave, so
+ * two completely different individuals from two different immigration
+ * waves routinely landed on the same trailing index and rendered with an
+ * IDENTICAL label. Direct report, a real screenshot: a battle log reading
+ * "Tentacruel (3, nomad) used water_gun on Tentacruel (3, nomad)" for
+ * several ticks straight, reasonably read as "it's fighting itself" — it
+ * was actually two distinct Tentacruel immigrants that happened to share
+ * batch index 3 from two different arrivals. Now keeps the trailing
+ * `tick-index` PAIR when the id has one (still one short token, just two
+ * numbers instead of one) — collision would need the same species, origin,
+ * tick, AND batch index all at once, rather than just the index alone.
+ * Falls back to the single trailing number for an id shape with only one
+ * (`scenario.ts`'s founder ids, `${species}-${i}`, already collision-free
+ * since each species founds only once), or the raw id if there's no
+ * trailing number at all.
  */
 export function shortId(id: string): string {
-  const match = /(\d+)$/.exec(id);
-  return match ? match[1]! : id;
+  const pair = /(\d+-\d+)$/.exec(id);
+  if (pair) return pair[1]!;
+  const single = /(\d+)$/.exec(id);
+  return single ? single[1]! : id;
 }
 
 /**

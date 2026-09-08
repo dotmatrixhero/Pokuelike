@@ -13806,3 +13806,49 @@ existing empty-set floor, preserved); and `knownMoves` reflects the same
 widened set as `agent.moves`, not just the curated subset. Full data suite
 green (2 files, 240 tests) and full monorepo typecheck clean; engine suite
 unaffected and still green (46 files, 1243 tests).
+
+## Fixed: "this tentacruel killed himself" — a display collision, not a real bug
+
+Direct report, a live screenshot: a battle log reading "Tentacruel (3,
+nomad) used water_gun on Tentacruel (3, nomad)" for several ticks in a
+row, with the alarmed reaction "what the heck, this tentacruel killedh
+imself."
+
+Root cause, once traced: NOT a real self-targeting bug. Every threat/prey
+filter in the actual combat path (`agentsWithin`'s `other.id !== agent.id`,
+`isPreyOf`'s same-species exclusion, `isGenuineThreat`'s same-species
+exclusion) already rules out an agent ever fighting itself. The real bug
+was purely in the battle log's DISPLAY: `shortId` (`notableTitles.ts`)
+pulled only the trailing digit run off an agent's id for the short
+`(id, origin)` label — e.g. `"tentacruel-immigrant-2210-3"` rendered as
+just `"3"`. Every non-founder id shape in this codebase
+(`immigration.ts`'s `${species}-immigrant-${tick}-${i}`, `overworld.ts`'s
+invented-population ids, `eggs.ts`'s egg ids) ends in exactly that
+`tick-index` pair, and `i` is a small per-batch index that resets low every
+wave — so two genuinely different individuals from two different
+immigration waves routinely landed on the same trailing index and
+rendered with an IDENTICAL, indistinguishable label. The screenshot's
+"Tentacruel (3, nomad)" vs. "Tentacruel (3, nomad)" was two separate real
+Tentacruel, arrived on different waves, both happening to be the 3rd
+immigrant of their respective batch — not one fish spraying itself with
+Water Gun.
+
+Fixed by keeping the trailing `tick-index` PAIR when an id has one (still
+one short token, just two numbers joined by a dash instead of one),
+falling back to the single trailing number for a founder id (already
+collision-free — each species founds only once) or the raw id if neither
+pattern matches. A real collision now needs the same species, origin,
+tick, AND batch index all at once, instead of just the index alone.
+
+### Verification
+
+No vitest suite exists for `packages/web`; verified live via Playwright
+against the real dev server, importing the real module directly:
+`shortId("tentacruel-immigrant-2210-3")` and
+`shortId("tentacruel-immigrant-1500-3")` — the exact shape behind the
+reported screenshot — now render as `"2210-3"` and `"1500-3"`
+respectively (distinct), while `shortId("bulbasaur-0")` (founder),
+`shortId("egg-cubone-1204-3")` (egg), and an invented-population id all
+still resolve correctly. Full monorepo typecheck clean; engine (46 files,
+1246 tests) and data (2 files, 240 tests) suites unaffected and still
+green — this fix touches web-only display code.
