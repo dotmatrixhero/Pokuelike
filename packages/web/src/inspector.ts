@@ -1,7 +1,8 @@
 import type { Agent, MoveSpec, World } from "@pokuelike/engine";
 import { LEVELING_CONTEXT, SPECIES } from "@pokuelike/data";
+import { rapportScore, speciesDisplayName } from "@pokuelike/engine";
 import { TYPE_COLOR, rgbToCss } from "./palette.js";
-import { agentDisplayName, herdDisplayName, LEADER_ICON, TITLE_ICON } from "./notableTitles.js";
+import { agentDisplayName, herdDisplayName, shortId, LEADER_ICON, TITLE_ICON } from "./notableTitles.js";
 import { buildMoveTreeSvg, describeMoveTreeNode, summarizeBuildEffects } from "./moveTreeSvg.js";
 
 // --- Small shared DOM helpers ------------------------------------------------
@@ -129,6 +130,9 @@ function sexBadge(sex: "male" | "female"): HTMLElement {
   el.setAttribute("aria-label", sex);
   return el;
 }
+
+/** How many rapport edges the inspector lists. A real agent averages ~11 (cap 16); showing all of them would bury the ones that matter under faint acquaintances. */
+const RAPPORT_ROWS_SHOWN = 6;
 
 function typeColorCss(type: string): string {
   const rgb = (TYPE_COLOR as Record<string, [number, number, number]>)[type];
@@ -316,7 +320,14 @@ function renderMoveRow(agent: Agent, move: MoveSpec): HTMLElement {
   const uses = agent.moveUseCounts?.[move.id] ?? 0;
   const useCount = document.createElement("span");
   useCount.className = "move-use-count";
-  useCount.textContent = `used ${uses}×`;
+  // How much of this move's tree the animal has actually bought, alongside
+  // how often it uses it — direct ask: "next to move it shows how many times
+  // used. can you also show how many nodes allocated?" Shown only for a move
+  // that HAS a tree, since "0 nodes" on a treeless move (most of a real
+  // moveset — an 11-move Kingler had 2 trees) is noise, not information.
+  const nodeCount = hasTree ? chosenNodesFor(agent, move).length : 0;
+  useCount.textContent = hasTree ? `${nodeCount} node${nodeCount === 1 ? "" : "s"} · used ${uses}×` : `used ${uses}×`;
+  if (hasTree) useCount.title = `${nodeCount} of ${Object.keys(move.tree!).length} skill nodes allocated`;
 
   header.append(swatch, name, summary, useCount);
 
@@ -430,6 +441,67 @@ function renderOverview(container: HTMLElement, world: World, hooks: InspectorHo
 
 // --- Per-agent panel, grouped ------------------------------------------------
 
+/**
+ * Who this animal actually knows — its rapport graph (engine's rapport.ts),
+ * strongest feelings first. Direct ask: "we want rapport added to inspector
+ * per unit."
+ *
+ * Shaped by what a real run actually contains rather than by what the -1..1
+ * range suggests. Measured over 4,000 ticks: 49 of 57 living agents had
+ * rapport, averaging **10.9 edges each** against a hard cap of 16 — far too
+ * many to list — and the scores are overwhelmingly small positives (613
+ * positive against 1 negative, most between 0.02 and 0.17, with a single
+ * maxed 1.00 bond). So:
+ *
+ * - Only the strongest few are listed, by absolute score, so a real grudge
+ *   is never buried under a dozen faint acquaintances.
+ * - The bar is scaled to the row's own strongest edge, not to the full
+ *   -1..1 range. Against the true range a typical 0.05 bond is a bar two
+ *   pixels wide and every relationship looks identical; scaled relatively,
+ *   you can see who this animal favours.
+ * - The raw score is shown as text next to it, so the relative bar can
+ *   never imply a 0.05 bond is a strong one.
+ *
+ * Edges routinely point at EGGS and at agents that have since died — an edge
+ * outlives its subject until decay prunes it. Both are labelled rather than
+ * silently dropped: "a lost friend" is a real thing to know about a unit.
+ */
+function renderRapportGroup(agent: Agent, world: World): HTMLElement | undefined {
+  const edges = Object.keys(agent.rapport ?? {});
+  if (edges.length === 0) return undefined;
+
+  const scored = edges
+    .map((id) => ({ id, score: rapportScore(agent, id, world.tick) }))
+    .filter((e) => e.score !== 0)
+    .sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
+  if (scored.length === 0) return undefined;
+
+  const g = group("Rapport");
+  const shown = scored.slice(0, RAPPORT_ROWS_SHOWN);
+  const strongest = Math.max(...shown.map((e) => Math.abs(e.score)));
+
+  for (const edge of shown) {
+    const other = world.agents.find((a) => a.id === edge.id);
+    const isEgg = other?.isEgg === true || edge.id.startsWith("egg-");
+    const gone = !other || other.alive === false;
+    const species = other ? SPECIES[other.species]?.name ?? speciesDisplayName(other.species) : "someone";
+    const label = isEgg ? `${species} egg` : gone ? `${species} (lost)` : `${species} ${shortId(edge.id)}`;
+    // Relative to the strongest edge shown — see this function's doc comment
+    // for why the raw -1..1 range makes every real bond look like nothing.
+    const fraction = strongest > 0 ? Math.abs(edge.score) / strongest : 0;
+    const meterRow = meter(label, fraction, edge.score >= 0 ? "#5fd18a" : "#d1605f");
+    const value = meterRow.querySelector(".inspect-meter-value");
+    if (value) value.textContent = edge.score.toFixed(2);
+    if (gone && !isEgg) meterRow.style.opacity = "0.6";
+    g.appendChild(meterRow);
+  }
+
+  if (scored.length > shown.length) {
+    g.appendChild(row("", `+${scored.length - shown.length} weaker`, true));
+  }
+  return g;
+}
+
 /** Renders the click-to-inspect panel for `agent`, or a world-overview summary if nothing is selected, into `container`. */
 export function renderInspector(container: HTMLElement, agent: Agent | undefined, world: World, hooks?: InspectorHooks): void {
   if (!agent) {
@@ -531,6 +603,9 @@ export function renderInspector(container: HTMLElement, agent: Agent | undefined
   if (agent.huntTarget) social.appendChild(row("Hunting", agent.huntTarget, true));
   if (agent.fightTarget) social.appendChild(row("Fighting", agent.fightTarget, true));
   container.appendChild(social);
+
+  const rapport = renderRapportGroup(agent, world);
+  if (rapport) container.appendChild(rapport);
 
   // --- Stats / exp ----------------------------------------------------------
   if (agent.stats || agent.exp !== undefined) {

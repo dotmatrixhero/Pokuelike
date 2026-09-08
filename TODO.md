@@ -6721,3 +6721,31 @@ not something this pathfinding pass itself caused or is positioned to fix.
       itself, or auto-expanding the panel when a tree is opened. Not chosen
       unilaterally — the native scale was a deliberate call and reversing it
       is a design decision, not a bug fix.
+
+- [x] **Move rows show nodes allocated; inspector gains a Rapport group.**
+      Direct ask: "next to move it shows how many times used. can you also
+      show how many nodes allocated? and then also we want rapport added to
+      inspector per unit."
+      - Move row now reads `4 nodes · used 0×`, with a tooltip giving
+        `N of M skill nodes allocated`. Shown only for a move that HAS a
+        tree — "0 nodes" on a treeless move is noise, and most of a real
+        moveset is treeless (an 11-move Kingler had 2 trees).
+      - **Rapport shaped by what a real run contains, not by the -1..1 range
+        the type suggests.** Measured at two points: by tick 1,800 agents
+        average 2.9 edges (max 8) with 12 negatives among 86; by tick 4,000
+        it is 10.9 each against the hard cap of 16, and 613 of 614 edges are
+        positive, mostly 0.02-0.17.
+        - Only the strongest 6 by ABSOLUTE score are listed, so one real
+          grudge is never buried under a dozen faint acquaintances, with a
+          "+N weaker" line for the rest.
+        - The bar is scaled to the row's own strongest edge, not to -1..1.
+          Against the true range a typical 0.05 bond is a two-pixel bar and
+          every relationship looks identical. The raw score sits beside it as
+          text so the relative bar can never imply 0.05 is a strong bond.
+        - Edges routinely point at EGGS and at agents that have since died
+          (an edge outlives its subject until decay prunes it). Both are
+          labelled — "Krabby egg", "(lost)" — rather than silently dropped.
+      - Verified in the running app: a Kingler showing `4 nodes · used 0×`
+        and a Rapport group with a 1.00 bond to a Krabby egg. The multi-row
+        and negative-score paths are confirmed present in the data but were
+        not visually exercised — the agent the harness landed on had one edge.
