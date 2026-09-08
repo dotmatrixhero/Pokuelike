@@ -129,6 +129,8 @@ export type SimEvent =
       agentId: string;
       species: string;
       pos: Vec2;
+      /** The subject's herd at the moment it happened — stamped so a chronicle can say whose story this belongs to. See herds.ts. */
+      herdId?: string;
     }
   | {
       kind: "diedOfAge";

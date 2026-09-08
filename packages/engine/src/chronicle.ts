@@ -51,6 +51,13 @@ export interface NotableStory {
   /** Everyone who held it before, most recent last. */
   predecessors: string[];
   herd?: HerdRecord;
+  /**
+   * The "a Rapidash of the Rapidash of the Crag Heights" line, already
+   * de-stuttered — a herd named after its own species would otherwise repeat
+   * it, which is what the first version printed. Renderers should use this
+   * rather than composing species and herd themselves.
+   */
+  subtitle: string;
 }
 
 export interface ChronicleOptions {
@@ -137,16 +144,18 @@ export function chronicleFor(world: World, events: readonly SimEvent[], options:
 
     // Deaths, clustered — a bad season is one event, not five.
     const deaths = own
-      .filter((e) => e.kind === "killed" || e.kind === "starved")
+      .filter((e) => e.kind === "killed" || e.kind === "starved" || e.kind === "burned")
       .sort((a, b) => a.tick - b.tick);
     let cluster: SimEvent[] = [];
     const flush = (): void => {
       if (cluster.length >= DEFAULTS.minClusterDeaths) {
         const killed = cluster.filter((e) => e.kind === "killed").length;
-        const starved = cluster.length - killed;
+        const burned = cluster.filter((e) => e.kind === "burned").length;
+        const starved = cluster.length - killed - burned;
         const parts: string[] = [];
         if (killed) parts.push(`${killed} taken by predators`);
         if (starved) parts.push(`${starved} starved`);
+        if (burned) parts.push(`${burned} lost to fire`);
         beats.push({
           tick: cluster[0]!.tick,
           weight: 60 + cluster.length * 5,
@@ -222,7 +231,12 @@ export function chronicleFor(world: World, events: readonly SimEvent[], options:
     }
 
     if (herd.dissolvedTick !== undefined) {
-      beats.push({ tick: herd.dissolvedTick, weight: 100, kind: "end", text: `The last of them was gone.` });
+      beats.push({
+        tick: herd.dissolvedTick,
+        weight: 100,
+        kind: "end",
+        text: endingText(herd, deaths, nameOf, opts.deathClusterWindow),
+      });
     }
 
     const all = dedupe(beats);
@@ -231,6 +245,104 @@ export function chronicleFor(world: World, events: readonly SimEvent[], options:
   }
 
   return stories.sort((a, b) => b.herd.peakSize - a.herd.peakSize);
+}
+
+
+/**
+ * What actually ended a herd, rather than the placeholder this used to
+ * print. Direct verdict on that placeholder: "Are we not following what
+ * kills them? Just dying out is sad and vague."
+ *
+ * We were, in fact, already following it — every death this simulation can
+ * inflict records a typed event (`killed` with the predator's own species,
+ * `starved` with hunger vs thirst, `burned` from fire.ts) and each one is
+ * stamped with the victim's herd. The chronicle simply was not reading them
+ * at the one moment they matter most. This reads the herd's own deaths in
+ * the stretch leading up to its dissolution and names the dominant cause.
+ *
+ * **The honest cases matter as much as the dramatic ones.** A herd can end
+ * without a single death: its last members can walk into another region and
+ * be folded into a different herd there (overworld.ts's
+ * `foldAgentIntoAggregate`), or split away entirely. Inventing a death for
+ * that would be a lie in the record, so it gets its own line.
+ *
+ * Nothing dies of old age here, so "they grew old" is a sentence this
+ * function can never write — but that is a DELIBERATE removal ("dying of
+ * old age is kinda dumb"), not a gap. `ageMortalityChance` still exists in
+ * needs.ts, unwired, and needs.test.ts asserts it stays that way.
+ */
+function endingText(
+  herd: HerdRecord,
+  deaths: readonly SimEvent[],
+  nameOf: (species: string | undefined) => string,
+  window: number
+): string {
+  const end = herd.dissolvedTick ?? herd.lastSeenTick;
+  // The final stretch, not the whole run: a herd that lost half its number
+  // to predators a thousand ticks ago and then quietly starved should be
+  // remembered for the starving.
+  const last = deaths.filter((e) => e.tick >= end - window);
+  const final = last.length > 0 ? last : deaths;
+  if (final.length === 0) {
+    return `The herd came to an end without a death to mark it — the last of them moved on and were counted among others.`;
+  }
+
+  const predators = new Map<string, number>();
+  let killed = 0;
+  let hunger = 0;
+  let thirst = 0;
+  let burned = 0;
+  for (const e of final) {
+    if (e.kind === "killed") {
+      killed++;
+      predators.set(e.predatorSpecies, (predators.get(e.predatorSpecies) ?? 0) + 1);
+    } else if (e.kind === "burned") burned++;
+    else if (e.kind === "starved") {
+      if (e.cause === "thirst") thirst++;
+      else hunger++;
+    }
+  }
+
+  // "the last one" rather than "1 of them" — a herd's final member deserves
+  // better than a count of one.
+  const them = (n: number): string => (n === 1 ? "the last one" : `${n} of them`);
+  const causes: { n: number; text: string }[] = [
+    {
+      n: killed,
+      text: (() => {
+        const worst = [...predators.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([sp]) => nameOf(sp));
+        // Naming the animal that did it is the whole point — "hunted to the
+        // last by Spearow" is a story, "predation" is a statistic.
+        return worst.length > 0
+          ? `Hunted to the last — ${them(killed)} taken by **${worst.join(" and ")}**.`
+          : `Hunted to the last — ${them(killed)} taken by predators.`;
+      })(),
+    },
+    { n: hunger, text: `Starved out — ${them(hunger)} died with nothing left to eat.` },
+    { n: thirst, text: `The water failed them — ${them(thirst)} died of thirst.` },
+    { n: burned, text: `Fire took them — ${them(burned)} burned in their final days.` },
+  ].filter((c) => c.n > 0);
+  causes.sort((a, b) => b.n - a.n);
+
+  const primary = causes[0]!.text;
+  // A second cause is named only when it is a real share of the ending, not
+  // a single stray death that would read as more important than it was.
+  const second = causes[1];
+  if (second && second.n * 2 >= causes[0]!.n) {
+    return `${primary} ${second.text}`;
+  }
+  return primary;
+}
+
+/**
+ * "an Ivysaur of the Bulbasaurs of Saltrun" — or just "of the Rapidash of
+ * the Crag Heights" when the herd is already named for the species, since
+ * repeating it reads as a bug.
+ */
+function notableSubtitle(species: string, herd: HerdRecord | undefined): string {
+  if (!herd) return withArticle(species);
+  const namedForSpecies = herd.name.toLowerCase().startsWith(`the ${species.toLowerCase()}`);
+  return namedForSpecies ? `of ${herd.name}` : `${withArticle(species)} of ${herd.name}`;
 }
 
 /** The individuals the world will remember, and how each earned it. */
@@ -281,6 +393,7 @@ export function notableStoriesFor(world: World, events: readonly SimEvent[], opt
         ),
       ],
       herd: latest.herdId ? world.herds?.[latest.herdId] : undefined,
+      subtitle: notableSubtitle(nameOf(latest.species), latest.herdId ? world.herds?.[latest.herdId] : undefined),
     });
   }
   return stories.sort((a, b) => a.label.localeCompare(b.label));

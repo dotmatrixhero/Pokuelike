@@ -5333,3 +5333,132 @@ not something this pathfinding pass itself caused or is positioned to fix.
         Wandering Kin of the Crag Heights". Names are now unique across
         every herd in the world and stay spent after a herd dies, because a
         name is an identity in the chronicle's permanent record.
+
+- [x] **What actually killed a herd.** Direct verdict on the ending beat the
+      chronicle used to print — "The last of them was gone." — "Are we not
+      following what kills them? Just dying out is sad and vague."
+      - We *were* following it. Every death this engine can inflict already
+        records a typed event stamped with the victim's herd: `killed`
+        carries the predator's own species, `starved` distinguishes hunger
+        from thirst, `burned` comes from fire.ts. The chronicle simply was
+        not reading any of it at the one moment it matters most. That is the
+        recurring shape of this project's bugs — the data was there and
+        nothing looked at it.
+      - New `endingText` in `chronicle.ts` reads the herd's own deaths in the
+        final stretch (the death-cluster window, not the whole run — a herd
+        mauled early and starved at the end is remembered for the starving)
+        and names the dominant cause: "Hunted to the last — 3 of them taken
+        by **Spearow**", "Starved out — the last one died with nothing left
+        to eat", "The water failed them", "Fire took them". A second cause is
+        named only when it is at least half the first, so a single stray
+        death does not read as more important than it was.
+      - Naming the animal is the whole point. "Hunted to the last by Spearow"
+        is a story; "predation" is a statistic.
+      - One real fix underneath: `burned` was the only death event with no
+        `herdId` on it, so fire deaths were invisible to every herd story,
+        not just the ending. Stamped now, and fire deaths also join the
+        "hard stretch" loss clusters they were being left out of.
+      - **An honest case that matters as much as the dramatic ones.** A herd
+        can end with no death at all — its last members walk into another
+        region and get folded into a herd there (`foldAgentIntoAggregate`) —
+        and that gets its own line rather than an invented death.
+      - Nothing dies of old age, so the chronicle can never write "they grew
+        old" — but that is a deliberate removal, not a gap. See the
+        correction below.
+      - Across six seeds the endings are dominated by thirst, which is a
+        balance signal rather than a writing one and is logged separately.
+
+- [~] **CORRECTION: "nothing dies of old age" is not a bug.** Logged here
+      as a wrong finding rather than deleted, because the way it was reached
+      is the instructive part. `grep 'kind: "diedOfAge"'` over the engine
+      returned zero record sites, and I reported that as an oversight — an
+      event type declared and never fired. It is nothing of the sort:
+      `ageMortalityChance` is fully implemented in needs.ts with an onset,
+      a ramp and a cap, and was then deliberately UNWIRED on direct
+      instruction — "dying of old age is kinda dumb." needs.test.ts even
+      has a test asserting no agent ever dies of age, with the reasoning in
+      a comment right above it.
+      - The grep was accurate and the conclusion drawn from it was wrong.
+        Absence of a call site tells you a feature is not running; it says
+        nothing about whether that is an accident or a decision. The
+        decision was recorded in a test, which is exactly where it should
+        have been looked for and was not.
+
+- [x] **Names: infix removed, and a parity bug it was hiding.** Direct
+      verdict: "waspdraseeker and foamthalborn and flarewynwing is a bit
+      much. Waspseeker and foamborn and flarewing and pincerheart accomplish
+      the same thing better." They do. Names are strictly root + end now.
+      - The infix was buying pool size (~9,600 per type) at the cost of the
+        names themselves. Paid for it by growing the pools instead: 24 -> 36
+        roots per type and 40 -> 78 ends, giving ~2,800 per type.
+      - **The interesting part is what removing it exposed.** Measuring the
+        new pool showed exactly 1,404 reachable names out of 2,808 possible
+        pairings — precisely half, which is never a coincidence. FNV-1a
+        preserves parity: every step is an xor with a char code and a
+        multiply by an odd constant, so the low bit of the output is just the
+        seed parity xored with the parity of the input bytes. Salting an id
+        with the fixed suffix `":end"` (one odd byte) therefore flipped that
+        bit *every single time*, locking the root index and the end index
+        into opposite parities. Half the name space was unreachable and the
+        output looked completely fine. Fixed with an avalanche finalizer on
+        the hash; all 2,808 are now reachable.
+      - This is the second correlated-hash bug in this one file (the first
+        was bit-shifting a single hash for three indices). The lesson that
+        actually generalizes: a generated-content pool needs a test that
+        asserts the *whole* pool is reachable, because partial reachability
+        is invisible in the output by construction.
+      - `names.test.ts` now asserts a measured collision RATE (1.4% of
+        12-animal cohorts, 5.2% of 20-animal cohorts contain any duplicate)
+        instead of the "zero collisions at 80 animals" it used to claim.
+        With a 2,800-name pool that claim is simply false — it only ever held
+        for the one hand-picked set of ids the test happened to use.
+
+- [ ] **Thirst is over half of all herd endings — and the water never
+      shrank.** Measured over three seeds x 6,000 ticks, 19 herds ended: 10
+      of thirst, 5 hunted to the last, 3 with no death at all, 1 of hunger,
+      0 to fire. Prompted by the obvious question — did the water dry up? —
+      the answer is no, and the real cause is more interesting.
+      - **Water is permanent.** Water is terrain, not stock. Drinking never
+        depletes a tile, worldgen never removes one, and `seekWater` can
+        even DIG a new water tile on bare floor when nothing is nearby
+        (needs.ts, `setTile(..., "water", 0)`). Watering holes stay put and
+        stay accessible, exactly as you would expect. This is not a
+        resource-availability problem at all.
+      - **It is a clock asymmetry.** Three things compound, all measured:
+        1. *Total budget.* Thirst is linear at 0.00125/tick: 801 ticks to
+           empty plus 150 grace = 951. Hunger's exponential curve takes
+           1,709 plus 100 grace = 1,809. Thirst gives you 53% of the runway
+           hunger does — and thirst is 53% of the endings. That is not a
+           coincidence, it is the same number twice.
+        2. *Curve shape, which matters more than the total.* Hunger decays
+           as a fraction of what remains, so it self-brakes: the last 20% of
+           the hunger bar takes 816 ticks. Thirst is flat all the way down,
+           so the last 20% takes 160. Once an agent is actually in trouble
+           it has 5x less time to reach water than to reach food, and that
+           is precisely the window in which it has to cross terrain to get
+           there.
+        3. *Weather is one-sided.* Drought multiplies thirst decay by 1.8
+           (dropping the budget to 595) and rain eases it by 0.6. There is
+           no weather term on hunger whatsoever — the only hunger multiplier
+           in `decayNeeds` is the post-kill digesting slowdown, which is a
+           bonus and predator-only. So every drought cell on the map is a
+           thirst event and never a famine.
+      - **The doc comment on `THIRST_STARVATION_GRACE_TICKS` is stale and
+        should be fixed whatever we decide.** It claims thirst empties in
+        ~200 ticks for a ~350 total against hunger's ~527, and concludes the
+        gap is "narrower but not by a principle-violating margin." Those
+        numbers predate the quartering pass. The real figures are 951 vs
+        1,809, and at nearly 2x the margin arguably IS the thing that
+        comment was written to rule out.
+      - Options, cheapest first, none applied yet:
+        - Give thirst hunger's exponential shape. Fixes the danger-zone
+          asymmetry (2) directly, which is the one that actually kills, and
+          leaves the flavor of thirst-as-urgent intact.
+        - Slow the flat rate to ~0.00065 to match hunger's total runway.
+          Simplest, but keeps the brutal linear tail.
+        - Add a drought hunger multiplier so weather stops being a
+          thirst-only hazard.
+      - Worth saying: none of this is necessarily *wrong*. A world where
+        water is the binding constraint is a legitimate world. But it should
+        be a choice, and right now it is a side effect of hunger getting a
+        curve that thirst never got.

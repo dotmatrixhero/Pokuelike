@@ -214,7 +214,7 @@ export function applyFireDamage(world: World, log?: EventLog, rng: () => number 
     if (agent.hp <= 0) {
       agent.alive = false;
       agent.diedAtTick = world.tick;
-      log?.record({ kind: "burned", tick: world.tick, agentId: agent.id, species: agent.species, pos: agent.pos });
+      log?.record({ kind: "burned", tick: world.tick, agentId: agent.id, species: agent.species, pos: agent.pos, herdId: agent.herdId });
     }
   }
 }
