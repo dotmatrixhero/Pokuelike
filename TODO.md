@@ -3,6 +3,48 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Your call: movement is 8-way but combat range is 4-way (Manhattan)
+
+Checked in response to "can all units do 8 way movement?" — **yes, all of
+them do**, but the range metric doesn't agree with the movement metric.
+
+- `movement.ts`'s `stepToward`/`stepAway` try the true diagonal first.
+- `pathfinding.ts`'s BFS expands all 8 `NEIGHBOR_OFFSETS` at unweighted
+  cost 1 (orthogonal first, then diagonals, for determinism).
+- **But** every range check uses `manhattan()`, where a diagonal neighbor is
+  distance **2**, and a point-shape move derives range **1**.
+
+So BFS says a diagonal step costs 1 while Manhattan says that same target is
+2 away. An agent one step from its target is out of melee range.
+
+Measured (`npx tsx packages/runner/src/validateDiagonalReach.ts`), 40 trials
+each, identical setups apart from the attacker's position:
+
+| Arrangement | Attacks resolved |
+|---|---|
+| Orthogonally adjacent (manhattan 1) | **39 / 40** |
+| Diagonally adjacent (manhattan 2) | **0 / 40** |
+
+What it costs today:
+- Standing diagonally adjacent to a melee attacker is **safe** until it
+  steps orthogonally. A player will find this immediately and corner-dance.
+- "Range 2" means "one diagonal, or two orthogonal" — not a clean radius.
+- Every 8-way tactical idea in `PLAYER_ACTIONS.md` (positioning, range
+  bands, holding a corridor) is built on a reach shape that reads as a
+  diamond while the movement reads as a square.
+
+Options:
+- **Chebyshev distance** (`max(|dx|, |dy|)`) at the range checks — the
+  standard metric for an 8-way unweighted grid. Diagonal becomes 1, melee
+  reaches all 8 neighbours, and the two metrics finally agree. Recommended.
+- Leave it, and treat diagonals as genuinely longer — defensible, but then
+  BFS should cost diagonals more too, which is a bigger change.
+- Make movement 4-way — rejected, 8-way is wanted.
+
+Not changed unilaterally: it raises effective melee reach for every unit in
+the sim, so it needs a real before/after on combat frequency and predation
+balance, not just a metric swap.
+
 ## Your call: is elevation's accuracy effect big enough to feel?
 
 Elevation is now wired into the accuracy roll (attacker's elevation minus
