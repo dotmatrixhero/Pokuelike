@@ -11,6 +11,34 @@ into humans design."
 Nothing here is built. Where this doc makes a recommendation it says so;
 where it needs a call it asks rather than assuming.
 
+## Decided
+
+Answers to this doc's own open questions, given directly. Recorded as
+settled.
+
+1. **Humans are simulated.** ("Simulated would be cool.") The recommendation
+   below stands — a real species in the sim, with a thin authored overlay
+   for campaign-critical individuals.
+2. **The world generates wild and gets settled by a history pass.** See
+   "History" below, including the honest caveat about what this costs and
+   the cheaper fallback if it misbehaves.
+3. **Humans hunting Pokémon exists in lore, but is never shown.** ("Eh. In
+   lore but you don't see em.") Concretely: no hunting behavior in the live
+   sim, no villager killing a Pokémon on screen — but generated history,
+   old stories, shrine lore and dialogue can all reference it. This keeps
+   humans sympathetic in the present while leaving the world honest about
+   its past, and it's cheaper than the alternative (no hunting behavior to
+   build or balance).
+4. **No domesticated Pokémon — at least not here.** ("Just say nah. At least
+   not in this village/region.") The starting region has none: no working
+   animals, no penned livestock, no partnership of any kind. Deliberately
+   scoped to *this* region rather than the whole world, so a distant
+   culture that does something different remains available later without
+   contradicting anything now.
+5. **Roles are inherited.** A quest-giver can die; *the elder* is an office,
+   not a person. Someone else takes it up, and the fact that they had to is
+   itself a story.
+
 ## The fork everything else hangs off
 
 **Are humans simulated agents, or authored content?**
@@ -100,10 +128,7 @@ the numbers, not just the fiction:
 This is the part with no existing analog — every other species in the sim
 consumes what the world provides. Humans change the world to provide more.
 
-- **Farm.** Crops already grow biome/season/moisture-gated; a farming
-  village plants them deliberately in a cleared area near the settlement,
-  and a bad season is a real shortage. This makes `crops.ts`'s existing
-  season model load-bearing for the first time.
+- **Farm.** The defining human activity — see its own section below.
 - **Fish.** Ports and coastal villages draw from water instead of soil,
   which is what makes a coastal settlement mechanically distinct rather
   than just a village that happens to be on a beach.
@@ -126,6 +151,94 @@ fisher, forager, builder, guard, elder — should work the same way: an
 individual who has spent their life building *becomes* the builder. It
 costs nothing extra structurally and it means a village's composition is a
 real fact about its history rather than a spawn table.
+
+## Farming
+
+Direct emphasis: "Oh and farming. Humans grow crops."
+
+This is the single clearest mechanical line between humans and every other
+species in the sim. **Everything else in this world forages — takes what the
+land already produced. Humans are the only thing that makes the land produce
+more.** That one difference generates most of what a village needs to be
+interesting: a reason to stay put, a reason seasons matter, a reason to
+store, a reason to trade, and — most usefully — a real, recurring reason to
+come into conflict with Pokémon.
+
+### `crops.ts` already provides most of the substrate
+
+Not a new system; a new *user* of an existing one. Already built:
+
+- **12 crops** — herbs, four berries (Oran/Sitrus/Pecha/Cheri), and seven
+  real staples: wheat, tomato, corn, rice, apple, potato, pumpkin.
+- **Real season gating** — a `seasonWindow` per crop over a genuine
+  spring/summer/autumn/winter cycle, riding the same slow wave `flora.ts`'s
+  decay/spread already uses.
+- **Biome and runtime-moisture gating** — a crop grows where the land and
+  the current weather actually support it.
+- **Growth stages** — `Tile.growth` counts toward harvestable, with
+  growth-stage rendering already designed.
+- **`nutritionMultiplier`** — scarcer, fussier crops are worth more per
+  harvest.
+
+So the crops, the calendar, the growth curve and the payoff differences all
+exist. What's missing is *agriculture*: the deliberate act of choosing.
+
+### What farming adds on top
+
+- **Cleared fields.** A farm is a real, visible change to the land around a
+  settlement — tilled ground as a terrain state, not just "crops happen to
+  spawn here." This is the most legible sign of human presence on a map,
+  and it's what the influence gradient should be drawn from as much as the
+  buildings.
+- **Deliberate planting.** Wild crops appear where conditions allow; a
+  farmer *plants what they chose* — which means a village can plant badly,
+  plant a crop that fails in an unusual season, or plant the wrong thing
+  for its biome. Choice creates the possibility of a mistake, which is
+  where stories come from.
+- **Tending as labour.** Weeding/watering as a real repeated investment
+  that raises yield, reusing `shelter.ts`'s travel-and-invest shape rather
+  than a new mechanic. Fields near the settlement get tended; outlying ones
+  get neglected, which is a natural reason for a village's footprint to
+  have a soft edge.
+- **Irrigation.** Fields sited near `riverEdges`/lake zones do better —
+  another place the macro grid's existing facts pay off, and a real reason
+  settlements hug water beyond drinking.
+- **Harvest and storage.** The piece that makes the calendar bite: you eat
+  in winter from what you stored in autumn. A granary is a real settlement
+  stat, and **"how full is the store" is the single number that drives the
+  Survive motivation** and the quests that come with it.
+
+### Farming is the friction generator (the best part)
+
+A field is a concentrated, undefended pile of food sitting in the middle of
+an ecosystem full of hungry animals. That is not a problem to design around
+— it's the most valuable thing farming produces.
+
+- **`herdConflict.ts` already fires on genuine resource contention**,
+  cross-species included. A herbivore herd moving into a wheat field is
+  *exactly* the condition that system was built to detect. No new mechanic
+  needed for "something is eating the crops."
+- **It makes the conflict morally interesting rather than flat.** A Tauros
+  herd in the barley isn't evil, it's hungry — and it was probably pushed
+  there by a bad season the same weather system caused. That is a far
+  better quest than a monster spawning because a quest needed one, and it
+  lands directly on the reverent/fearful/pragmatic attitude axis: a reverent
+  village wants them *moved*, a pragmatic one wants them *gone*, and the
+  player gets to have an opinion.
+- **It gives the player's partner an obvious job.** Scaring a herd off a
+  field is a use for a bonded Pokémon that isn't combat, which is worth
+  having early.
+- **It closes the loop with the seasons.** Bad season → poor harvest → thin
+  stores → hungrier wildlife *and* a hungrier village → more raids on
+  fields → the Survive motivation → quests. Every link in that chain is a
+  system that already exists; farming is what connects them.
+
+### Scope note
+
+Farming is genuinely comparable in size to `crops.ts` or `shelter.ts` — each
+of which was its own project. It's also the piece with the highest ratio of
+payoff to new machinery, because so much of it is pointing existing systems
+at each other.
 
 ## The human–Pokémon relationship (the important part)
 
@@ -249,10 +362,62 @@ lineage really does trace back to it. Generated history is the only way to
 get that at scale, and it's exactly the kind of thing this project already
 does for herds.
 
-**Open: how deep?** A few hundred compressed "years" as an abstract pass is
-my recommendation — enough for lineage and ruins, not so much that it
-becomes its own simulation project. Simulating human history tick-by-tick
-is a different and much larger thing.
+### Do I actually recommend this? Yes — with one real caveat
+
+Asked directly ("settled by history pass — would you recommend that?"), so
+here's the honest version rather than just agreement.
+
+**Yes, and the reasons are concrete:**
+
+- **It's genuinely cheap at this scale.** A few hundred settlement records
+  stepped over a few hundred compressed years is nothing next to the macro
+  grid itself, which generates a million zones of elevation/biome/river data
+  in ~2.5s. This is not the expensive part of the world.
+- **It produces things authoring can't cheaply fake** — ruins in
+  surprising-but-plausible places, roads that exist because they were
+  walked, lineages that actually connect, and the occasional weird outcome
+  (a big settlement in a place you wouldn't have picked) that makes a world
+  feel like it happened rather than was arranged.
+- **It's the same thesis as everything else here.** The geology already has
+  real causes; a hand-placed civilisation on top of a caused landscape would
+  be the one arbitrary layer in the world.
+- **It makes the whole doc's other ideas work.** Inherited roles, lost
+  techniques, era events, shrines-at-landmarks and truthful elder dialogue
+  all need a past to refer to. Without a history pass they're decoration;
+  with one they're records.
+
+**The caveat, from this project's own scar tissue:** every forward-simulated
+system built here has needed a real tuning pass, and the failure mode is
+always the same shape — a feedback loop nobody predicted. The overworld's
+own carrying-capacity bug is the precedent: capacity derived from a value
+that drifted toward "headroom under capacity" chased 1 forever, and it was
+only caught by an actual multi-thousand-tick run, not by reading the code.
+
+A history sim has exactly that class of risk, with three likely degenerate
+outcomes worth naming in advance:
+- **Collapse** — everything fails, the map is all ruins.
+- **Monoculture** — one settlement wins and eats the continent.
+- **Sameness** — every seed produces a recognisably identical history,
+  which is worse than no history at all because it costs the same and
+  delivers nothing.
+
+**The mitigation is the discipline this project already has**: it's cheap to
+run, so it's cheap to validate. Generate 50 seeds, look at the distribution
+of settlement counts, ages, ruin counts and lineage depth, and tune against
+real numbers — the same way the macro grid's biome thresholds and the
+abstract tier's capacity constants were tuned. Budget for that pass; don't
+assume the first parameters are right.
+
+**The cheaper fallback, if it does misbehave**: derive history *backward*
+instead of simulating it forward — place settlements sensibly, then invent a
+plausible lineage and a set of ruins to match. You keep truthful-sounding
+dialogue and lose emergent surprise. Worth knowing this exists so a bad
+first attempt doesn't sink the idea.
+
+**On depth**: a few hundred compressed years as an abstract pass — enough
+for lineage, ruins and era events, not so much that it becomes its own
+simulation project. Tick-by-tick human history is a different and much
+larger thing, and nothing in the campaign needs it.
 
 ## Motivations: what people want
 
@@ -403,39 +568,30 @@ shrines, left by whoever came before. That:
   (farm/fish/gather/build/trade) is comparable in size to the crops or
   shelter systems, each of which was its own project.
 
-## Open questions — yours to call
+## Open questions — still yours to call
 
-1. **Simulated species with an authored overlay** — is that the right
-   answer, or do you want villagers fully authored and static (much cheaper,
-   much deader)?
-2. **Can villagers die permanently?** And if a quest-giver dies, is the role
-   inherited by someone else, or is that quest gone?
-3. **Do humans hunt Pokémon?** The attitude axis lets some settlements do it
-   and others revile it. Is that range right, or should humans never hunt
-   (softer world), or commonly hunt (harsher, and makes the player's
-   partnership genuinely subversive)?
-4. **Any domesticated Pokémon at all before the player?** Not partners, but
-   e.g. penned Miltank, a Tauros pulling a plough. It's a real tonal fork:
-   "nobody has ever worked with them" is cleaner, but "they're livestock,
-   never companions" is a more pointed thing to say about the world the
-   player changes.
-5. **How populated is the world?** One starting village and a lot of
+Five of the original nine are now answered — see "Decided" at the top.
+What's left:
+
+1. **How populated is the world?** One starting village and a lot of
    wilderness, or a real scattering of settlements with trade between them?
-   This changes the geo pass's density constants and how much content Act 2
-   needs.
-6. **Are humans on the macro map from the start of a run**, or does the
-   world generate wild and get settled during a simulated history pass? The
-   second is much more in the spirit of the geological history phase, and
-   much more expensive. (The History section above assumes the second and
-   argues it's cheaper than it sounds at macro scale — but it's still the
-   single biggest scope call in this doc.)
-7. **How deep does generated history go?** My recommendation is a few
-   hundred compressed years as an abstract pass — enough for lineage, ruins
-   and era events, without becoming its own simulation project.
-8. **Do roads accrete from history, or get computed by MST?** History is
-   better (a road exists because it was walked) but only exists if the
-   history pass does. MST is the standalone fallback.
-9. **TMs as ancient relics rather than crafted goods** — does that fit the
-   world you want? It solves a real awkwardness (pre-industrial people
-   manufacturing move-teaching devices) and seeds the "knowledge was lost"
-   thread, but it does commit to there having been a *before*.
+   Changes the history pass's density constants and how much content Act 2
+   needs. (The history pass makes this partly self-answering — you set
+   founding sites and expansion pressure, not a settlement count — but the
+   target it's tuned toward is still a call.)
+2. **How deep does generated history go?** Recommendation above: a few
+   hundred compressed years, abstract, not tick-by-tick.
+3. **Do roads accrete from history, or get computed by MST?** History is
+   better (a road exists because it was walked) and is now viable given
+   decision 2. MST stays the fallback if the history pass slips.
+4. **TMs as ancient relics rather than crafted goods** — solves a real
+   awkwardness and seeds the "knowledge was lost" thread, but commits to
+   there having been a *before*. Does that fit the world you want?
+5. **What does a settlement's attitude drift on?** The reverent/fearful/
+   pragmatic axis is set at generation from local facts, but what moves it
+   afterward — a raid, a good harvest, the player's own actions? The last
+   one is the most interesting and the most work.
+6. **Does the player's arrival with a bonded partner change how villages
+   treat them**, mechanically? It's the most obvious payoff of the whole
+   premise ("you're the first"), and the attitude axis is already the right
+   place to hang it — but it's unbuilt and unscoped.

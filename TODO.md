@@ -117,11 +117,74 @@ Proposals in that doc worth a decision, not just noting:
       die" — *the elder* persists as an office even when the person doesn't.
       The only option that turns the problem into a feature.
 
-Open questions listed at the end of HUMANS_DESIGN.md (9 of them) — the big
-ones are whether humans are simulated at all, whether the world generates
-wild and gets settled by a history pass (vs. placed pre-settled), how deep
-history goes, whether humans hunt Pokémon, and whether any domesticated
-Pokémon exist before the player.
+**Five of the original nine questions are now decided:**
+
+- [x] **Humans are simulated** (with a thin authored overlay for
+      campaign-critical individuals).
+- [x] **The world generates wild and gets settled by a history pass** —
+      recommended with a real caveat about tuning (see below), and a named
+      cheaper fallback (derive history backward instead of simulating it
+      forward) if it misbehaves.
+- [x] **Humans hunting Pokémon is lore-only, never shown** — no hunting
+      behavior in the live sim; generated history, old stories and shrine
+      lore can reference it. Keeps humans sympathetic in the present, keeps
+      the world honest about its past, and is cheaper than the alternative.
+- [x] **No domesticated Pokémon** — at least not in the starting region.
+      Scoped locally on purpose so a distant culture doing otherwise stays
+      available later.
+- [x] **Roles are inherited** — a quest-giver can die; *the elder* is an
+      office, not a person, and the fact someone had to take it up is a
+      story.
+
+- [ ] **Budget a real tuning pass for the history sim.** Named risk, from
+      this project's own scar tissue (the overworld capacity feedback loop
+      that chased 1 forever, caught only by a real multi-thousand-tick run):
+      a forward history sim's likely degenerate outcomes are **collapse**
+      (all ruins), **monoculture** (one settlement eats the continent), and
+      **sameness** (every seed produces the same history — worst of the
+      three, since it costs the same and delivers nothing). Mitigation is
+      the discipline already used everywhere else here: it's cheap to run,
+      so generate ~50 seeds and tune against the real distribution of
+      settlement counts, ages, ruin counts and lineage depth.
+
+## Farming: the defining human activity — designed, see HUMANS_DESIGN.md
+
+Direct emphasis: "Oh and farming. Humans grow crops." Given its own section
+because it's the clearest mechanical line between humans and everything else
+in the sim — **everything else forages; humans make the land produce more.**
+
+`crops.ts` already supplies most of the substrate: 12 crops with real
+`seasonWindow` gating over a genuine spring/summer/autumn/winter cycle,
+biome and runtime-moisture gating, growth stages via `Tile.growth`, and
+`nutritionMultiplier` payoff differences. Farming is a new *user* of that,
+not a new system.
+
+- [ ] What farming adds on top: cleared/tilled field terrain (the most
+      legible sign of human presence on a map), deliberate planting (which
+      makes planting *badly* possible — where stories come from), tending as
+      repeated labour investment (reusing `shelter.ts`'s travel-and-invest
+      shape), irrigation near `riverEdges`, and harvest/storage.
+- [ ] **Granary fullness is the single number driving the Survive
+      motivation** — it's what makes the season calendar actually bite (you
+      eat in winter from what you stored in autumn) and what generates the
+      food quests.
+- [ ] **Farming is the friction generator, and that's the point.** A field
+      is a concentrated undefended pile of food in an ecosystem full of
+      hungry animals. `herdConflict.ts` already fires on genuine
+      cross-species resource contention, so "something is eating the crops"
+      needs no new mechanic. It's also morally interesting rather than flat
+      — a Tauros herd in the barley isn't evil, it's hungry, probably pushed
+      there by a bad season the weather system caused — which lands directly
+      on the reverent/fearful/pragmatic attitude axis and gives a bonded
+      partner an obvious non-combat job (scaring a herd off a field).
+- [ ] Scope: comparable to `crops.ts` or `shelter.ts`, each its own project
+      — but the highest payoff-to-new-machinery ratio in the humans design,
+      since most of it is pointing existing systems at each other.
+
+Still open (see HUMANS_DESIGN.md's own list): how populated the world is,
+how deep history goes, roads-from-history vs. MST, TMs as ancient relics,
+what makes a settlement's attitude drift, and whether arriving with a bonded
+partner mechanically changes how villages treat you.
 
 ## Human geo pass: roads, villages, ports, shrines — designed, see CAMPAIGN_DESIGN.md
 
