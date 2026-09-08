@@ -3,6 +3,65 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Narrative pillars — written, see NARRATIVE_PILLARS.md
+
+What the game is *about*, and what that lets us refuse. Written because of a
+claim worth taking seriously: simulator games **cannot help** but encode
+their creator's model of how reality works — "an interpretation of reality
+that is baked in code." In a sim there's no "just flavour"; the ruleset *is*
+the ontology. Sharpening added: **omission is a claim too** — we currently
+don't model disease, aging, lasting injury, or non-food scarcity, and each
+silence asserts something about what a life consists of.
+
+Four pillars, each with a **refusal test** (a pillar that never rejects
+anything is a mood, not a pillar):
+
+1. **Humans are animals too** — already structural (humans are a
+   `SpeciesDef` on the same needs/herd/rapport machinery; no capture ever).
+   The difference from Pokémon is *practice, not kind*, so every human
+   capability must carry ecological cost. Refuses: costless human
+   capabilities, and any problem solved by domination.
+2. **Stories everywhere, if you look closely** — mostly built (chronicle,
+   herd histories, notables, generated history). The load-bearing word is
+   **curation**: "stories everywhere" without it becomes stories nowhere,
+   which is DF's real limitation. Mandate: the game must notice on the
+   player's behalf. Refuses: systems whose output is only readable as a log,
+   single-cause events, backstory that isn't true in the data.
+3. **The rugged individual is a myth** — and **the campaign deliberately
+   invokes that trope in order to break it.** Act 1's lone-survivor opening
+   is intentional setup: solitude is *endured, not mastered*; you escape
+   because you stopped being alone. "First" means unsupported, not
+   exceptional. Refuses: any moment the player succeeds alone at something
+   that mattered, including single-handedly saving the village.
+4. **All that you change, changes you** — least built, highest potential.
+   Converges with the Pokopia contrast ("humans become what they do") into
+   **no class selection, only accreted identity** — for the player, the
+   partner, and the land, which remembers (`fire.ts` already leaves scorched
+   ground). Refuses: costless menu-pick identity, changes that leave no
+   trace.
+
+**The method these serve**: deliberate expectation-inversion, proven by
+play. And the hardest discipline that follows — **let the systems make the
+argument, never the dialogue.** If an NPC has to explain the theme, the
+systems failed. (Same restraint LORE_NOTES.md reached independently.)
+
+- [ ] **Decide which omissions are deliberate** — disease, aging, lasting
+      injury, non-food scarcity are all currently unmodelled by default
+      rather than by decision.
+- [ ] **The curation layer is a mandate with no design yet** — what promotes
+      one generated event over the thousands around it into something the
+      player actually sees? Separate job from simulation, real cost.
+- [ ] **How much does the land remember, and for how long?** Pillar 4 wants
+      persistence; the demoted-zone model currently *freezes* terrain rather
+      than ageing it. Real tension.
+- [ ] **Does accreted identity feed back into mechanics**, or stay
+      narrative/reputation only? First is much stronger and much more work.
+- [ ] **Watch pillar 3 vs. the roguelike form** — roguelikes are
+      structurally solitary, and we're using the form to argue against its
+      own premise. Elegant but fragile: if the solo stretch is fun in the
+      wrong way, the inversion fails and it's just a competent lone-survivor
+      game.
+
 ## Campaign pitch 1: cave escape -> village -> Jirachi — captured, see CAMPAIGN_DESIGN.md
 
 The first pitch for what the *game* is rather than what the sim is: start

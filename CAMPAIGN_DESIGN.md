@@ -11,6 +11,16 @@ same way DESIGN.md's own vision sections are: quote the ask, don't
 compress the specifics away, and separate "this exists" from "this is new"
 so a future slicing pass isn't guessing.
 
+**Read NARRATIVE_PILLARS.md alongside this.** It states what the game is
+*about* and what that lets us refuse — and several beats below are
+deliberate expectation-inversions serving those pillars rather than
+straightforward genre moves. Most importantly: **Act 1's lone-survivor
+opening is invoked on purpose so the simulation can disprove it.** Solitude
+is endured, not mastered; "you're the first" means *unsupported*, not
+exceptional; and the player must not single-handedly save the village in
+Act 2. Those aren't tonal preferences — they're the point of the structure,
+and they should survive contact with implementation.
+
 ## The pitch, as given
 
 Direct, verbatim in the parts that matter — the specifics *are* the pitch:
