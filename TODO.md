@@ -41,24 +41,6 @@ goes ahead: "help it get to the right position/elevation" needs the bonus to
 be worth a turn of walking. Not changed unilaterally — it's a balance number.
 Re-measure with `npx tsx packages/runner/src/validateElevationAccuracy.ts`.
 
-## Pre-existing test flake (not caused by the elevation work)
-
-`support.test.ts` > "a real tick applies the last step's terrain factor to
-the NEXT action's pace" failed once in ~8 full-suite runs, then passed 7
-times consecutively.
-
-It is not related to any recent change — the test has a single agent, so
-combat (and therefore the elevation/accuracy path) is unreachable in it. The
-cause is that it calls `createWorld(10, 1)` with **no seed**, and
-`createWorld`'s own doc comment says an omitted seed "falls back to a real
-(non-reproducible) seed." `predation.test.ts` already documents this exact
-flake class and fixed itself with a shared `SAFE_RNG = mulberry32(...)`.
-
-Fix would be one line — pass a fixed seed, or thread a seeded rng into the
-`tickWorld` call — but it changes what the test exercises, so it's left
-alone pending a call. Same treatment as `predation.test.ts`'s `SAFE_RNG` is
-probably right.
-
 ## Your call: battle log reveal pace (LINE_REVEAL_INTERVAL_MS)
 
 Two branches independently tuned the same number and disagreed. Merged in
