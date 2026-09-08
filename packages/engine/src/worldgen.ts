@@ -2065,12 +2065,72 @@ export function generateWorld(width: number, height: number, seed: number, bias?
 }
 
 /**
+ * How many tiles a candidate spawn tile's own connected walkable region
+ * needs to contain before it's trusted as a real place to live, not a
+ * mountain-locked dead end — see `hasViableRegion`'s own doc comment. Picked
+ * comfortably above what a single stray gap in a massif's wall could ever
+ * enclose (real pockets checked by hand during this fix topped out in the
+ * single digits), while staying cheap: the bounded flood-fill below stops
+ * counting the instant it crosses this many tiles, so even a huge open
+ * region costs at most `MIN_VIABLE_SPAWN_REGION` node visits, never a full
+ * map scan.
+ */
+const MIN_VIABLE_SPAWN_REGION = 20;
+
+/**
+ * Is `pos`'s connected walkable region (4-directional, same layer) at least
+ * `MIN_VIABLE_SPAWN_REGION` tiles, or does it hit the map edge/an existing
+ * agent-reachable area before running out? Direct report: "Pokémon can
+ * spawn in little alcove surrounded by mountain and that'll starve em cuz
+ * they cannot pass" — `findWalkableNear`'s ring search below used to accept
+ * the FIRST walkable tile it found, with no idea whether that tile was
+ * actually reachable to anywhere else; a walkable pocket fully enclosed by
+ * "wall" (mountain massif) terrain passed every existing check while being
+ * a guaranteed starvation trap the moment something spawned there. A bounded
+ * flood-fill (capped at `MIN_VIABLE_SPAWN_REGION` nodes, so this never scans
+ * more of the map than it needs to) is a good, defensible proxy for "can
+ * this agent actually reach food and water somewhere" without needing to
+ * search for real resource tiles specifically — a region this size that
+ * DOESN'T touch either would itself be a genuinely unusual, tiny generation
+ * artifact.
+ */
+export function hasViableRegion(world: World, layer: Layer, pos: Vec2): boolean {
+  if (!tileAt(world, layer, pos.x, pos.y)?.walkable) return false;
+  const seen = new Set<string>([`${pos.x},${pos.y}`]);
+  const stack: Vec2[] = [pos];
+  let count = 0;
+  while (stack.length > 0 && count < MIN_VIABLE_SPAWN_REGION) {
+    const p = stack.pop()!;
+    count++;
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]) {
+      const nx = p.x + dx!;
+      const ny = p.y + dy!;
+      const key = `${nx},${ny}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!tileAt(world, layer, nx, ny)?.walkable) continue;
+      stack.push({ x: nx, y: ny });
+    }
+  }
+  return count >= MIN_VIABLE_SPAWN_REGION;
+}
+
+/**
  * Finds the nearest walkable tile to (x, y) via an expanding ring search —
  * used to place a scenario's starting agents on a procedurally generated map
  * without needing to know in advance whether the exact anchor coordinate
- * happens to be an obstacle or water. Falls back to the clamped anchor
- * itself if nothing walkable exists anywhere on the map (shouldn't happen in
- * practice; obstacle/water densities never approach 100%).
+ * happens to be an obstacle or water. A candidate also has to clear
+ * `hasViableRegion` — see that function's own doc comment — so this never
+ * strands something in a mountain-locked pocket it can't actually live in.
+ * Falls back to the clamped anchor itself if nothing walkable (with a real,
+ * viable region) exists anywhere on the map (shouldn't happen in practice;
+ * obstacle/water densities never approach 100%, and a real map is dominated
+ * by one large connected region, not scattered tiny pockets).
  */
 export function findWalkableNear(world: World, layer: Layer, x: number, y: number): Vec2 {
   const cx = Math.min(world.width - 1, Math.max(0, Math.round(x)));
@@ -2085,7 +2145,9 @@ export function findWalkableNear(world: World, layer: Layer, x: number, y: numbe
         const ny = cy + dy;
         if (nx < 0 || ny < 0 || nx >= world.width || ny >= world.height) continue;
         const tile = tileAt(world, layer, nx, ny);
-        if (tile?.walkable && canEnterWater(world, LAND_PROBE, layer, { x: nx, y: ny })) return { x: nx, y: ny };
+        if (tile?.walkable && canEnterWater(world, LAND_PROBE, layer, { x: nx, y: ny }) && hasViableRegion(world, layer, { x: nx, y: ny })) {
+          return { x: nx, y: ny };
+        }
       }
     }
   }

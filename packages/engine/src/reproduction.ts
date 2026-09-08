@@ -343,8 +343,8 @@ export function applyMateSeeking(
   log?: EventLog,
   ctx?: LevelingContext,
   rng: () => number = Math.random
-): void {
-  if (!agent.sex || !isMature(agent) || !meetsBreedingRequirement(agent, ctx)) return;
+): boolean {
+  if (!agent.sex || !isMature(agent) || !meetsBreedingRequirement(agent, ctx)) return false;
 
   const candidates = world.agents.filter(
     (other) => isEligibleMate(agent, other, ctx) && manhattan(agent.pos, other.pos) <= mateSearchRadius(world, agent)
@@ -356,7 +356,16 @@ export function applyMateSeeking(
   // whether a partner ends up close enough to actually breed with this tick.
   agent.ticksSinceEligibleMate = candidates.length > 0 ? 0 : (agent.ticksSinceEligibleMate ?? 0) + 1;
   const partner = nearestMate(world, agent, candidates);
-  if (!partner) return;
+  // Direct report: "I still see a lot of 'seek mate' result in just
+  // standing still." Root cause: with no candidate anywhere in range, this
+  // whole function used to be a complete no-op — chooseBehavior picks
+  // "seekMate" off mateDrive alone, with no idea whether anyone eligible is
+  // actually nearby, and this had nothing to fall back to. Returning false
+  // here lets tickAgentAction's seekMate branch fall through to the same
+  // explore/train fallback chain idle already uses (below) instead of
+  // freezing in place — wandering is also a real chance to stumble across a
+  // mate it couldn't see from here.
+  if (!partner) return false;
 
   if (manhattan(agent.pos, partner.pos) <= 1) {
     if (agent.sex === "female") {
@@ -442,4 +451,5 @@ export function applyMateSeeking(
     // `stepToward` or `stepAlongPath`'s static-target cache match.
     agent.pos = stepTowardMovingTarget(world, agent, partner); // stepTowardMovingTarget threads `agent` through internally for the water-crossing check
   }
+  return true;
 }

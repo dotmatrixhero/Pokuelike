@@ -1374,7 +1374,20 @@ export function tickAgentAction(
   }
 
   if (agent.behavior === "seekMate") {
-    applyMateSeeking(world, agent, log, ctx, rng);
+    const sought = applyMateSeeking(world, agent, log, ctx, rng);
+    // Direct report: "I still see a lot of 'seek mate' result in just
+    // standing still... with alternate things to do like explore or
+    // train." No eligible candidate anywhere in mate-search range used to
+    // leave this a complete no-op, tick after tick — same "nothing to fall
+    // back to" gap `applyExploration`/`applyTraining` already closed for
+    // idle. Wandering (and, failing that, training) isn't wasted time
+    // either: `applyExploration`'s own resource-discovery side effect and
+    // simply covering more ground both give a real chance of stumbling
+    // onto a mate this exact scan couldn't see.
+    if (!sought) {
+      const explored = applyExploration(world, agent, log, ctx, rng);
+      if (!explored) applyTraining(world, agent, log, ctx, rng);
+    }
     return;
   }
 

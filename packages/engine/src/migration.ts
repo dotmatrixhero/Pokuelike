@@ -4,6 +4,7 @@ import { logBehaviorChange } from "./events.js";
 import { stepToward } from "./movement.js";
 import { canEnterTile } from "./occupancy.js";
 import { tileAt } from "./world.js";
+import { hasViableRegion } from "./worldgen.js";
 
 const MIN_RELOCATE_DISTANCE = 8;
 const RELOCATE_ATTEMPTS = 10;
@@ -12,11 +13,19 @@ function manhattan(a: Vec2, b: Vec2): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
+/**
+ * `hasViableRegion` (worldgen.ts) rules out a randomly-sampled candidate
+ * that's real, walkable ground but boxed in by mountain/wall terrain with
+ * nowhere real to go — same "little alcove surrounded by mountain" trap
+ * `findWalkableNear` was fixed against, applying here too since a relocate/
+ * dispersal target picked this way is otherwise just as capable of stranding
+ * whoever gets sent to walk toward it.
+ */
 export function findRandomWalkableTile(world: World, layer: Layer, from: Vec2, rng: () => number = Math.random): Vec2 | undefined {
   for (let i = 0; i < RELOCATE_ATTEMPTS; i++) {
     const candidate = { x: Math.floor(rng() * world.width), y: Math.floor(rng() * world.height) };
     if (manhattan(candidate, from) < MIN_RELOCATE_DISTANCE) continue;
-    if (tileAt(world, layer, candidate.x, candidate.y)?.walkable) return candidate;
+    if (tileAt(world, layer, candidate.x, candidate.y)?.walkable && hasViableRegion(world, layer, candidate)) return candidate;
   }
   return undefined;
 }

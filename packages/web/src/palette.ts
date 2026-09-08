@@ -35,7 +35,11 @@ export const TYPE_COLOR: Record<PokemonType, Rgb> = {
 
 export const TERRAIN_BG: Record<TerrainKind, Rgb> = {
   floor: [22, 24, 29],
-  wall: [44, 47, 54],
+  // Direct ask: mountain sections should look "more solid rock... almost
+  // blacked out... to show impassable" — darker than ordinary floor, not
+  // the lighter tone it used to be. See `terrainBgColor`'s own doc comment
+  // for why elevation shading is skipped for this terrain specifically.
+  wall: [8, 8, 10],
   water: [12, 45, 74],
   food: [58, 42, 18],
   flora: [26, 40, 24],
@@ -201,6 +205,24 @@ export function shade(rgb: Rgb, elevation: number): Rgb {
   }
   const amount = Math.min(0.35, elevation * 0.07);
   return mix(rgb, WHITE, amount);
+}
+
+/**
+ * The real per-tile background color a renderer should draw, folding in
+ * `shade`'s elevation brightening for every terrain EXCEPT "wall" — direct
+ * ask: mountain sections should look "more solid rock... almost blacked
+ * out... to show impassable." A wall tile's elevation is deliberately
+ * boosted (worldgen.ts's mountain-massif generation, "should read taller
+ * than an ordinary boulder outcrop") specifically so it reads as higher
+ * ground — but `shade`'s own elevation response is to brighten (mix toward
+ * white) at higher elevation, which directly fights the "blacked out"
+ * ask for this one terrain kind. `TERRAIN_BG.wall` is set dark enough on
+ * its own that skipping the brightening step is what actually makes it
+ * read as solid rock rather than a lit ridge.
+ */
+export function terrainBgColor(terrain: TerrainKind, elevation: number): Rgb {
+  if (terrain === "wall") return TERRAIN_BG.wall;
+  return shade(TERRAIN_BG[terrain], elevation);
 }
 
 /**

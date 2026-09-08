@@ -1,5 +1,5 @@
 import type { Agent, World } from "@pokuelike/engine";
-import { TERRAIN_BG, TYPE_COLOR, rgbToCss, shade } from "./palette.js";
+import { TYPE_COLOR, rgbToCss, terrainBgColor } from "./palette.js";
 
 /**
  * A real, zoomed-all-the-way-out satellite view of one region's own
@@ -14,7 +14,7 @@ import { TERRAIN_BG, TYPE_COLOR, rgbToCss, shade } from "./palette.js";
  * pixel on top of the terrain, so population presence/clustering is visible
  * at a glance even at this scale.
  *
- * Deliberately reuses `TERRAIN_BG`/`shade` — the exact same palette
+ * Deliberately reuses `terrainBgColor` — the exact same palette
  * `renderer.ts`'s ordinary tile view derives its colors from — so a region's
  * minimap and its full drilled-in view always agree on what a biome "looks
  * like," just at wildly different zoom levels.
@@ -28,7 +28,7 @@ export function drawRegionThumbnail(canvas: HTMLCanvasElement, world: World): vo
 
   for (let i = 0; i < surface.length; i++) {
     const tile = surface[i]!;
-    const [r, g, b] = shade(TERRAIN_BG[tile.terrain], tile.elevation);
+    const [r, g, b] = terrainBgColor(tile.terrain, tile.elevation);
     const o = i * 4;
     image.data[o] = r;
     image.data[o + 1] = g;

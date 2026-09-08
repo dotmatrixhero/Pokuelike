@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mulberry32, makeNoise2D, makeDensityField, generateWorld, generateMacroElevation, findWalkableNear, blendBiomeParams, biomeWeightsAt, effectiveWaterDensityAt, type MacroElevationBias } from "../src/worldgen.js";
 import { generateMacroGrid, biasForZone } from "../src/macroGrid.js";
-import { tileAt, setTile } from "../src/world.js";
+import { tileAt, setTile, createWorld } from "../src/world.js";
 import { CANOPY_APPLE_RIPEN_TICKS } from "../src/crops.js";
 
 describe("mulberry32 (seeded PRNG)", () => {
@@ -759,6 +759,35 @@ describe("findWalkableNear", () => {
     setTile(world, "surface", 10, 10, "boulder");
     const found = findWalkableNear(world, "surface", 10, 10);
     expect(tileAt(world, "surface", found.x, found.y)?.walkable).toBe(true);
+  });
+
+  // Direct report: "Pokémon can spawn in little alcove surrounded by
+  // mountain and that'll starve em cuz they cannot pass."
+  it("skips a walkable tile fully enclosed by wall terrain — a real spawn there would be a guaranteed starvation trap", () => {
+    const world = createWorld(20, 20); // all "floor" (walkable) by default
+    // Wall off a tiny 3x3 pocket at (10,10) — its own walkable interior
+    // (the center tile) is real, but has no path anywhere else.
+    for (const [x, y] of [
+      [9, 9], [10, 9], [11, 9],
+      [9, 10], [11, 10],
+      [9, 11], [10, 11], [11, 11],
+    ]) {
+      setTile(world, "surface", x, y, "wall");
+    }
+
+    const found = findWalkableNear(world, "surface", 10, 10);
+
+    // Never lands inside the sealed pocket (its only walkable tile is its
+    // own center) — the rest of the map is one large open floor, so it
+    // finds real, viable ground just past the wall ring instead.
+    expect(found).not.toEqual({ x: 10, y: 10 });
+    expect(tileAt(world, "surface", found.x, found.y)?.walkable).toBe(true);
+  });
+
+  it("still accepts a walkable tile whose own connected region is genuinely large enough to live in", () => {
+    const world = createWorld(20, 20);
+    const found = findWalkableNear(world, "surface", 10, 10);
+    expect(found).toEqual({ x: 10, y: 10 }); // already walkable, and the whole 20x20 floor is one big open region
   });
 });
 

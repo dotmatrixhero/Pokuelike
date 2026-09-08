@@ -13592,3 +13592,70 @@ un-rescued fainted agent was on an unconditional path to starving. Full
 engine suite green (44 files, 1206 tests, including new dedicated coverage
 for both the Kingslayer kill-site wiring and the fainted-agent starvation/
 heal behavior) and full monorepo typecheck clean.
+
+## Two of "the 5, by easiness": seekMate standing still, and mountain-locked spawn traps
+
+Direct ask, batching a punch list from an earlier session: "Can you go and
+knock out the 5 by easiness?" Two done here; the rest (minimap accuracy,
+a move skill-tree visualization, spec/allocation display) are bigger and
+tracked separately.
+
+**`seekMate` reading as standing still.** Follow-up on this session's
+earlier idle/explore/train fix: "I still see a lot of 'seek mate' result in
+just standing still. Thought we fixed the stand still and do nothing
+behaviors. Like with alternate things to do like explore or train." Root
+cause: `chooseBehavior` picks `"seekMate"` off `mateDrive` alone, with no
+idea whether anyone eligible is actually in range — `applyMateSeeking`
+(reproduction.ts) used to be a complete no-op when it found no candidate,
+the exact "nothing to fall back to" gap already fixed for idle. Now returns
+a real `boolean` (found a candidate, or not), and `needs.ts`'s `seekMate`
+branch falls through to the same `applyExploration`/`applyTraining` chain
+idle already uses when it comes back false — wandering (and its own
+resource-discovery side effect) is a real chance to stumble onto a mate
+this exact scan couldn't see, not wasted motion.
+
+**Mountain-locked spawn traps.** Direct report: "Pokémon can spawn in
+little alcove surrounded by mountain and that'll starve em cuz they cannot
+pass." Confirmed: mountain "wall" terrain was already unwalkable and
+already excluded from spawn placement — the real bug was one level up.
+`findWalkableNear` (worldgen.ts, the shared placement primitive behind
+founder/immigrant/invented-population spawning) accepted the FIRST
+walkable tile an expanding ring search found, with no idea whether that
+tile was actually reachable to anywhere else. A walkable pocket fully
+enclosed by wall terrain passed every existing check while being a
+guaranteed starvation trap for whatever spawned there.
+
+Fixed with a new `hasViableRegion` (worldgen.ts): a bounded flood-fill
+(capped at `MIN_VIABLE_SPAWN_REGION = 20` tiles, so even a huge open map
+costs at most 20 node visits, never a full scan) that a candidate tile now
+has to clear before `findWalkableNear` accepts it — a real, defensible
+proxy for "can this agent actually reach food and water somewhere" without
+needing to search for resource tiles specifically. Every real placement
+call site (`scenario.ts`'s founder anchors, `immigration.ts`'s arrivals,
+`overworld.ts`'s invented-population placement) already funnels through
+`findWalkableNear`, so the fix is centralized. `migration.ts`'s
+`findRandomWalkableTile` (predator/prey relocate targets, natal dispersal
+destinations) got the same `hasViableRegion` check for the same reason — a
+random target picked there is just as capable of stranding whoever walks
+toward it.
+
+**The visual half of the same ask**: "make mountain sections... more solid
+rock looking? Like they should almost be blacked out sections of the map to
+show impassable." `TERRAIN_BG.wall` was actually LIGHTER than ordinary
+floor before this — the opposite of "looks impassable." Darkened it to a
+near-black tone, and added `terrainBgColor` (palette.ts): wall tiles skip
+the ordinary elevation-based brightening `shade()` applies to everything
+else (mountain massifs get a real elevation boost specifically so they read
+as *higher* ground, which fights directly against reading as *darker*
+ground). Wired into both the tile-art and ASCII render paths
+(`renderer.ts`) and the region thumbnail/minimap (`overworldMap.ts`), so
+every view of the map agrees.
+
+### Test updates / new coverage
+
+New tests: `reproduction.test.ts`/`needs.test.ts` for the seekMate fallback
+(explore, then train, when nobody's in range); `worldgen.test.ts` for
+`findWalkableNear` rejecting a hand-built sealed 3x3 pocket in favor of real
+open ground just past its wall ring, and still accepting an ordinary
+walkable tile when the whole map is one big region. Full engine suite green
+(45 files, 1231 tests) and full monorepo typecheck clean.

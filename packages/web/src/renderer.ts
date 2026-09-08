@@ -31,6 +31,7 @@ import {
   rgbaToCss,
   shade,
   shelterOwnerTint,
+  terrainBgColor,
   tileLight,
   waterDepthFactor,
   waterDepthShade,
@@ -720,7 +721,7 @@ function drawWorldTiles(
         continue;
       }
 
-      const bg = shade(tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies) : TERRAIN_BG[tile.terrain], tile.elevation);
+      const bg = tile.terrain === "shelter" ? shade(shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies), tile.elevation) : terrainBgColor(tile.terrain, tile.elevation);
       ctx.fillStyle = rgbToCss(bg);
       ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
       drawTileVignette(ctx, x, y);
@@ -839,7 +840,9 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
         const bg =
           tile.terrain === "water"
             ? waterDepthShade(TERRAIN_BG.water, waterDepthFactor(world, { x, y }))
-            : shade(tile.terrain === "shelter" ? shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies) : TERRAIN_BG[tile.terrain], tile.elevation);
+            : tile.terrain === "shelter"
+              ? shade(shelterOwnerTint(TERRAIN_BG.shelter, tile.shelterOwnerSpecies), tile.elevation)
+              : terrainBgColor(tile.terrain, tile.elevation);
         ctx.fillStyle = rgbaToCss(bg, (tile.terrain === "floor" ? 0.25 : 0.55) * light);
         ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
         ctx.fillStyle = rgbaToCss(accent, (tile.terrain === "floor" ? 0.45 : 0.9) * light);

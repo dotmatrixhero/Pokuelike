@@ -774,6 +774,28 @@ describe("exp-motivated exploration", () => {
     expect(agent.behavior).toBe("train");
     expect(Math.abs(agent.pos.x - 1) + Math.abs(agent.pos.y - 1)).toBeLessThanOrEqual(1);
   });
+
+  // Direct report: "I still see a lot of 'seek mate' result in just
+  // standing still. Thought we fixed the stand still and do nothing
+  // behaviors. Like with alternate things to do like explore or train."
+  it("a mate-driven agent with nobody eligible anywhere in range explores instead of standing still", () => {
+    const world = createWorld(40, 40, DETERMINISTIC_TEST_SEED);
+    const agent = makeAgent({ pos: { x: 20, y: 20 }, sex: "male", needs: createNeeds({ hunger: 1, thirst: 1, mateDrive: 1 }) });
+
+    tickAgent(world, agent);
+
+    expect(agent.behavior).toBe("explore");
+    expect(agent.pos).not.toEqual({ x: 20, y: 20 });
+  });
+
+  it("falls all the way to training when a mate-driven agent has nobody in range AND nothing left to explore either", () => {
+    const world = createWorld(3, 3, DETERMINISTIC_TEST_SEED);
+    const agent = makeAgent({ pos: { x: 1, y: 1 }, sex: "male", needs: createNeeds({ hunger: 1, thirst: 1, mateDrive: 1 }) });
+
+    tickAgent(world, agent, undefined, undefined, undefined, world.rng);
+
+    expect(agent.behavior).toBe("train");
+  });
 });
 
 describe("tile preference (Agent.preferredTerrain, applyExploration)", () => {
