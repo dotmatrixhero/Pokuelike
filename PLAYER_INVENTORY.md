@@ -168,13 +168,116 @@ saves you is a better arc than finding it exactly when it becomes useful.
 | Clothes / armor | worn | +defense, −Speed (fewer actions) |
 | Herbs | — | crafting input; `herbs` is already a real crop id in `crops.ts` |
 | Food | — | already exists (`FOOD_ITEM_KEY`) |
-| Torch | held | light radius (feeds `computeVisible`'s darkness penalty); no threat |
+| Torch | held | light radius (feeds `computeVisible`'s darkness penalty) — **and raises your own detection radius to everything else**; see the pillar-1 test below |
 
 Five entries. Everything else in the pitch — fishing rod, TMs, stones,
 bigger backpack — layers on without changing the model. A bigger backpack is
 just a carry-capacity modifier over the existing weight economy.
 
 ---
+
+---
+
+## Running the refusal tests against this design
+
+`NARRATIVE_PILLARS.md` says a pillar that never causes a rejection "isn't a
+pillar, it's a mood." So, applied properly — three of these changed the
+design above rather than endorsing it.
+
+### Pillar 1 refuses "any human capability with no ecological cost attached"
+
+The stick pays (threat signature) and armor pays (Speed, so fewer actions).
+**The torch as I first wrote it doesn't pay, and that's a miss.** A light
+source in a dark cave is the most visible thing in the world. It should
+*raise your detection radius to everything else* — you see further and you
+are seen further. That is a better mechanic than the free one I proposed,
+and `computeVisible` already has the darkness term to hang it on.
+
+Standing rule for every future item: **name the ecological cost or it
+doesn't ship.** A bigger backpack costs carried weight and therefore Speed.
+A fishing rod ties you to water. Nothing is pure upside.
+
+### Pillar 3 refuses "any moment where the player succeeds alone at something that mattered"
+
+This is the sharpest constraint on equipment and it gives a hard, testable
+power ceiling:
+
+> **If a player can clear Act 1 with good equipment and no partner, the
+> equipment is too strong.**
+
+Gear must make solitude *survivable*, never *sufficient*. The pillar says
+solitude is "endured, not mastered" and that bonding is "the mechanic that
+makes progress possible, not a reward for having already succeeded alone."
+`HUMANS_DESIGN.md` independently agrees on the item itself — *"a large
+stick — the whole point is that it's barely a weapon."*
+
+That's checkable in playtest rather than a matter of taste, which is what
+makes it a real test.
+
+### Pillar 4 refuses "any player-facing identity choice that's a costless menu pick"
+
+**An equipment-slot screen is very nearly a class-selection menu**, and I
+didn't catch that when proposing it. "Am I a stick person or an armor
+person" becomes a costless pick if gear is freely swappable — exactly what
+the pillar rejects, and it's the pillar's own stated rule that there is
+"no class selection, only accreted identity."
+
+The resolution, and it's already built: `notables.ts` earns titles from real
+accumulated stats. So **identity accretes from use, not from the slot.**
+Carrying a stick makes you a person carrying a stick. Swinging it a thousand
+times makes you something, and the game should notice *that*, not the
+loadout. Equipment stays a tactical choice; who you become is downstream of
+what you actually did with it.
+
+### What the myth structures demand of the player's violence
+
+`MYTH_STRUCTURES.md`'s central finding is that every violent myth in the
+corpus is a harvest rule — and specifically that **the transgression is
+excess and mutilation, not hunting.** Killing to eat is permitted; killing
+beyond need is the sin (The Trial, The Original Sin).
+
+It also names the trigger it wants from our data: *"a settlement (or the
+player) whose recorded history includes killing far beyond consumption in a
+territory."*
+
+So the equipment system's real long-term hook is not a morality prompt at
+the moment of the kill. It is:
+
+> **The chronicle counts kills against food actually taken. The world draws
+> its own conclusions.**
+
+No meter, no dialogue, no choice popup. A pattern accumulates and the world
+responds — prey warier in that territory, a settlement's attitude shifting,
+eventually a generated myth about you. This is the correct form of the
+"harvest respectfully vs. take the meat" idea that was rightly rejected
+earlier: **the unit is the pattern, not the instance**, and nothing ever
+asks you to choose at the moment you're least informed.
+
+It also satisfies the hardest discipline in the pillars — *"let the systems
+make the argument, never the dialogue."* No NPC ever explains that carrying
+a club makes Pokémon skittish. You watch them flee sooner and you work it
+out.
+
+### Armor is social, not just physical
+
+`HUMANS_DESIGN.md`: armor *"reads as social status as much as protection."*
+So the worn slot should eventually feed how **humans** react to you in Act 2,
+against the reverent / fearful / pragmatic attitude axis — a fearful village
+reads an armed stranger very differently from a reverent one. Same
+signature idea, different audience. Nothing to build now; worth not
+designing it out.
+
+### One tension the pillars raise and don't resolve
+
+`DESIGN.md` says *"fragility has to bite — a misread on a predator is a real
+injury, not a redo."* But `NARRATIVE_PILLARS.md`'s own "omission is a claim
+too" section lists **injury that doesn't heal** as currently unmodelled by
+default rather than by decision.
+
+If all damage heals, fragility doesn't actually bite; injury is just a timer.
+Equipment sharpens this rather than causing it — armor is only meaningful
+against a consequence that persists. Flagged as a real open question rather
+than silently assumed either way.
 
 ## Honest gaps
 
