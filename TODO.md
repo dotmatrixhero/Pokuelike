@@ -6487,3 +6487,33 @@ not something this pathfinding pass itself caused or is positioned to fix.
       - `CLASH_PROMOTION_COOLDOWN_TICKS` 40 -> 100, since each clash now holds
         the camera for seconds and 594 per 6,000 ticks would otherwise
         monopolise Auto Camera and crowd out every other kind of moment.
+
+- [x] **Skill-tree allocations were never visible — a key-space mismatch.**
+      Direct report: "i don't see the actual skill allocations being
+      visible."
+      - `agent.moveTreeChoices` is keyed by the `knownMoves` DEX KEY
+        (`"WATER_GUN"`); `agent.moves` is keyed by the `MoveSpec`'s own id
+        (`"water_gun"`). Both the old flat-row tree and the new radial Move
+        Tree Atlas did `agent.moveTreeChoices?.[move.id]`, which never
+        matched. Measured over a real 4,000-tick run: that lookup lit **0
+        nodes across 70 rendered trees**; resolving properly lights **726
+        across 64**. A level-31 Kingler with 28 bought Water Gun nodes
+        displayed as having bought none.
+      - leveling.ts documents the trap at its write site ("those two are
+        frequently different casings/names for the same move") and handles it
+        for `agent.moves`. Fixed by resolving each stored key through
+        `LEVELING_CONTEXT.resolveMove` — the engine's own mapping — rather
+        than upper-casing, which that comment warns is not enough.
+      - **Note on how this landed.** A parallel session had meanwhile built
+        the radial Move Tree Atlas (`moveTreeSvg.ts`), replacing the flat
+        BFS row grid. My first pass fixed the OLD renderer and also centred
+        its rows; on merging, the row-centring work was discarded as
+        obsolete and only the lookup fix was re-applied on top of the atlas.
+        The atlas had the identical bug, so the visualization was correct and
+        drawing an empty build the whole time.
+
+- [ ] **Side note: duplicate node display names.** The Tackle tree renders two
+      separate nodes both labelled "+10 Accuracy" in the same row (plus a
+      "+5 Power" that repeats a row later). Not a rendering bug — the tree
+      data really does give distinct nodes identical display names, which
+      makes a tree impossible to read. Wants real names.
