@@ -30,6 +30,11 @@ const EPITHETS: Record<NotableTitleId, readonly string[]> = {
   beloved: ["the Beloved", "the Fruitful", "Root-of-the-Line", "Many-Mothered"],
   elder: ["the Ancient", "the Long-Lived", "Grey-Muzzle", "Who Remembers"],
   wanderer: ["the Far-Walked", "Horizon-Chaser", "the Restless", "Who Left"],
+  giantSlayer: ["Giantsbane", "the Undaunted", "Who Felled the Mountain", "the Reckless"],
+  savant: ["the Adept", "Single-Minded", "the Perfected", "Who Mastered One Thing"],
+  alpha: ["the Alpha", "the Undefeated", "Crown-Taker", "Who Never Yielded"],
+  shaman: ["the Mender", "Kind-Handed", "the Wellspring", "Who Tends the Fallen"],
+  underdog: ["the Unbowed", "Ever-Beaten", "the Stubborn", "Who Rose Again"],
 };
 
 /** Plain-language label for a title, for UI that wants the category rather than the flourish. */
@@ -41,6 +46,11 @@ export const NOTABLE_TITLE_LABEL: Record<NotableTitleId, string> = {
   beloved: "Beloved",
   elder: "Elder",
   wanderer: "Wanderer",
+  giantSlayer: "Giant-Slayer",
+  savant: "Savant",
+  alpha: "Alpha",
+  shaman: "Shaman",
+  underdog: "Underdog",
 };
 
 function hash(id: string): number {
@@ -102,6 +112,18 @@ export function notableTale(title: NotableTitleId, ctx: NotableTaleContext): str
       return `${v} ticks alive, having outlasted everything they were born beside.`;
     case "wanderer":
       return `They walked ${v} tiles from the place they hatched, and kept going where nothing else would.`;
+    case "giantSlayer":
+      return v > 1
+        ? `${v} times they brought down something far above their own weight — and lived.`
+        : `They brought down something far above their own weight, once, and that was enough.`;
+    case "savant":
+      return `They took one branch of one move as far as it goes, ignoring every other path — mastery of a single thing, bought by giving up all the rest.`;
+    case "alpha":
+      return `${v} clashes won. Others learned to look elsewhere for a fight.`;
+    case "shaman":
+      return `${v} times they turned their strength to mending a herdmate instead of harming a rival.`;
+    case "underdog":
+      return `${v} clashes lost — and they came back for every one of them.`;
   }
 }
 

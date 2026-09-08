@@ -50,6 +50,10 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.carrierSpecies} (${event.carrierId}) picked up fainted ${event.carriedSpecies} (${event.carriedId})`;
     case "setDown":
       return `[tick ${event.tick}] ${event.carrierSpecies} (${event.carrierId}) set down ${event.carriedSpecies} (${event.carriedId}) (${event.reason})`;
+    case "herdFounded":
+      return `[tick ${event.tick}] ${event.name} came into being (${event.origin})${event.parentHerdId ? `, split from ${event.parentHerdId}` : ""}`;
+    case "herdDissolved":
+      return `[tick ${event.tick}] ${event.name} is no more — last seen t${event.lastTick}`;
     case "herdMigrating":
       return `[tick ${event.tick}] herd ${event.herdId} is migrating from (${event.from.x},${event.from.y}) to (${event.to.x},${event.to.y}) — ${event.reason}`;
     case "herdSettled":

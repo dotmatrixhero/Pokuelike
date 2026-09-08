@@ -118,6 +118,10 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `${idLabel(world, event.carrierId, event.carrierSpecies)} picked up fainted ${idLabel(world, event.carriedId, event.carriedSpecies)}`;
     case "setDown":
       return `${idLabel(world, event.carrierId, event.carrierSpecies)} set down ${idLabel(world, event.carriedId, event.carriedSpecies)} (${event.reason})`;
+    case "herdFounded":
+      return `${event.name} came into being${event.origin === "split" ? ", splitting from an older herd" : event.origin === "immigration" ? ", arriving from beyond the map" : ""}`;
+    case "herdDissolved":
+      return `${event.name} is no more`;
     case "herdMigrating": {
       const herdName = world ? herdDisplayName(world, event.herdId) : event.herdId;
       return `herd ${herdName} is migrating (${event.reason})`;
