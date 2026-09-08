@@ -20,7 +20,13 @@ import { promoteZone, tileAt } from "@pokuelike/engine";
 const seed = Number(process.argv[2] ?? 20260903);
 const mw = createDemoMacroWorld(seed) as never as {
   regions: Map<string, { world?: unknown }>;
+  focusedKey: string;
 };
+// The focused zone and its neighbours, not a hard-coded pair. An arbitrary
+// cell of a 64x64 grid is very likely open ocean (59% of this grid is), and
+// two all-water zones agree at their seam trivially — a measurement that
+// looks perfect while testing nothing.
+const [FR, FC] = mw.focusedKey.split(",").map(Number) as [number, number];
 
 type AnyWorld = Parameters<typeof tileAt>[0];
 const promote = (row: number, col: number): AnyWorld =>
@@ -40,13 +46,13 @@ function compare(label: string, n: number, sample: (i: number) => [[string, numb
   console.log(`${label.padEnd(18)} ${((same / n) * 100).toFixed(0).padStart(3)}% same terrain, mean elevation jump ${(elevDelta / n).toFixed(3)}`);
 }
 
-const a = promote(32, 32);
-const east = promote(32, 33);
-const south = promote(33, 32);
+const a = promote(FR, FC);
+const east = promote(FR, FC + 1);
+const south = promote(FR + 1, FC);
 const w = (a as { width: number }).width;
 const h = (a as { height: number }).height;
 
-console.log(`seed ${seed}, zone size ${w}x${h}\n`);
+console.log(`seed ${seed}, zone size ${w}x${h}, focused zone ${FR},${FC}\n`);
 compare("east seam", h, (y) => [
   [kindAt(a, w - 1, y), elevAt(a, w - 1, y)],
   [kindAt(east, 0, y), elevAt(east, 0, y)],
@@ -62,7 +68,6 @@ compare("within a zone", h, (y) => [
 ]);
 
 console.log(
-  "\nA seam is seamless when its two rows read like the control. Today they do" +
-    "\nnot: every zone is generated from its own seed with noise sampled in" +
-    "\nZONE-LOCAL coordinates, so neighbouring zones share no field at all."
+  "\nA seam is seamless when its two rows read like the control — the control" +
+    "\nis what continuity looks like for this generator, not a perfect score."
 );

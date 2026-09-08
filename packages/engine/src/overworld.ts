@@ -252,6 +252,68 @@ function freshHerdId(speciesId: string, regionKey: string): string {
   return `${speciesId}-zone-${regionKey}`;
 }
 
+/**
+ * The elevation below which the macro grid itself calls a zone ocean,
+ * derived from the grid rather than re-guessed: the highest elevation among
+ * zones the grid marked ocean, which is exactly the cutoff its own sea-level
+ * percentile drew. One number for the whole world, so every zone's coastline
+ * lands in the same place.
+ *
+ * Cached on the grid — it is a pure function of it, and promotion would
+ * otherwise re-scan 4,096 zones every time.
+ */
+const seaLevelCache = new WeakMap<MacroGrid, number>();
+function macroSeaLevel(grid: MacroGrid): number {
+  const cached = seaLevelCache.get(grid);
+  if (cached !== undefined) return cached;
+  let highestOcean = 0;
+  let lowestLand = 1;
+  for (const zone of grid.zones) {
+    if (zone.isOcean) highestOcean = Math.max(highestOcean, zone.elevation);
+    else lowestLand = Math.min(lowestLand, zone.elevation);
+  }
+  // Midway between the two when they do not overlap; the ocean side's own
+  // ceiling when they do (a grid whose land/ocean split is not a clean
+  // threshold, which `pruneNoiseSpeckIslands` can produce).
+  const level = lowestLand > highestOcean ? (highestOcean + lowestLand) / 2 : highestOcean;
+  seaLevelCache.set(grid, level);
+  return level;
+}
+
+/**
+ * The macro grid's own elevation, sampled at any tile of zone (row, col) in
+ * zone-local coordinates and **bilinearly interpolated between neighbouring
+ * zone centres** so it is continuous across a boundary.
+ *
+ * This is the piece that makes seamless elevation work. A macro zone's
+ * elevation is a single number for a whole 90x60 tile block; applied
+ * directly it produces a hard step at every boundary — exactly the seam.
+ * Anchoring each zone's value at its CENTRE and interpolating between the
+ * four surrounding centres means two adjacent zones evaluate the same
+ * function at their shared edge and necessarily agree.
+ *
+ * Edge zones clamp to the grid, so the interpolation flattens toward the
+ * border of the world rather than reading off the end.
+ */
+function macroElevationSampler(mw: MacroWorld, row: number, col: number): (x: number, y: number) => number {
+  const elevationAt = (r: number, c: number): number => {
+    const clamped = zoneAt(mw.grid, Math.max(0, Math.min(mw.grid.rows - 1, r)), Math.max(0, Math.min(mw.grid.cols - 1, c)));
+    return clamped?.elevation ?? 0.5;
+  };
+  return (x: number, y: number) => {
+    // Fractional macro coordinates with zone centres on the integers.
+    const fx = col + x / mw.zoneWidth - 0.5;
+    const fy = row + y / mw.zoneHeight - 0.5;
+    const c0 = Math.floor(fx);
+    const r0 = Math.floor(fy);
+    const tx = fx - c0;
+    const ty = fy - r0;
+    const top = elevationAt(r0, c0) + (elevationAt(r0, c0 + 1) - elevationAt(r0, c0)) * tx;
+    const bottom = elevationAt(r0 + 1, c0) + (elevationAt(r0 + 1, c0 + 1) - elevationAt(r0 + 1, c0)) * tx;
+    return top + (bottom - top) * ty;
+  };
+}
+
 /** Ensures a `Region` shell exists in `mw.regions` for (row, col), without seeding any aggregate data — used by migration paths that already have (or are about to build) exactly the one species entry they need, so they don't need the full roster-driven `estimateInitialAggregates` a fresh promotion does. */
 function ensureTrackedRegion(mw: MacroWorld, row: number, col: number): Region {
   const key = zoneKey(row, col);
@@ -419,7 +481,20 @@ export function promoteZone(mw: MacroWorld, row: number, col: number, ctx: Immig
   }
   if (!region.world) {
     const bias = biasForZone(mw.grid, row, col);
-    region.world = generateWorld(mw.zoneWidth, mw.zoneHeight, zoneSeed(mw.worldSeed, row, col), bias);
+    // The zone's own seed still drives everything local and discrete; the
+    // shared `worldSeed` plus this zone's world-space origin drive every
+    // continuous field, so neighbouring zones read one unbroken landscape.
+    // See worldgen.ts's `WorldPlacement`.
+    // The macro grid's per-zone elevation, smoothed across zone boundaries —
+    // this is what makes the tile-level field agree with the macro map about
+    // where the land is high, WITHOUT stepping at the seam. See
+    // `macroElevationSampler`.
+    bias.elevation.macroShiftAt = macroElevationSampler(mw, row, col);
+    bias.elevation.macroSeaLevel = macroSeaLevel(mw.grid);
+    region.world = generateWorld(mw.zoneWidth, mw.zoneHeight, zoneSeed(mw.worldSeed, row, col), bias, {
+      origin: { x: col * mw.zoneWidth, y: row * mw.zoneHeight },
+      fieldSeed: mw.worldSeed,
+    });
     // Carry the named region down from the macro map, so herds founded in
     // this zone can be named after a place that exists on the overworld
     // rather than an invented one (see herds.ts).

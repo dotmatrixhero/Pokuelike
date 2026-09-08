@@ -9,7 +9,7 @@ and it is a much bigger thing. They are worth treating as separate projects,
 because the first is useful on its own — the overworld map and any future
 zoomed-out view both look better whether or not you can ever walk across.
 
-## How bad is it today
+## How bad it was (before layer 1)
 
 Measured, not assumed — `packages/runner/src/validateZoneSeams.ts` compares the
 two columns that MEET at a shared edge against a control pair of genuinely
@@ -27,7 +27,30 @@ within a zone       73% same terrain, mean elevation jump 0.131
 A **6.5x elevation discontinuity**. Walking south today would be a hard cut, not
 an expansion.
 
-## Why
+## Layer 1: done. Results.
+
+```
+seed 20260903   east seam  80% same terrain, elevation jump 0.291
+                south seam 70%                              0.257
+                CONTROL    77%                              0.368
+
+seed 42         east seam  82%                              0.199
+                south seam 66%                              0.149
+                CONTROL    82%                              0.106
+```
+
+Terrain continuity at a seam is now **indistinguishable from the control** —
+which is the pass condition, since the control is what continuity looks like
+for this generator, not a perfect score. From 37%/0.851 to 80%/0.291.
+
+A residual remains on some seeds (seed 11: elevation jump 0.47 against a 0.03
+control) and it is **layer 2, measured**: the dominant biome matches across a
+seam only **7%** of the time against **92%** within a zone, and biome drives
+`elevationBase`/`elevationVariance`. So where two zones blend to different
+biomes, their elevations still step. That is the next layer, exactly as
+scoped.
+
+## Why it was broken
 
 `promoteZone` calls `generateWorld(zoneWidth, zoneHeight, zoneSeed(worldSeed,
 row, col), bias)`. Every zone is generated **independently from its own seed**,
@@ -126,3 +149,71 @@ underneath still disagrees across the border.
 
 Then decide whether layer 4 is actually wanted, because it is the expensive one
 and the visual fix may well be enough for how the overworld is actually used.
+
+## What layer 1 actually took, including two wrong turns
+
+The noise change itself was the easy half and went in as described: hash the
+global lattice coordinate instead of reading a per-zone array, thread an
+`origin`, calibrate density thresholds over a fixed global window rather than
+each zone's own extent. That alone moved terrain agreement from 37% to 67%
+and barely touched elevation.
+
+Elevation took two failed attempts, and both failures were the same mistake
+in different clothes.
+
+**Attempt one: make the elevation point field global, keep everything else.**
+Result: a zone went from 70% floor to 97% water. The cause is that a zone's
+ocean-ness came from taking its own `oceanFraction` percentile OF ITS OWN
+VALUES — which guarantees "85% of an ocean zone is ocean" by construction.
+Ask for the 85th percentile of a *world-shared* distribution and you drown a
+perfectly ordinary zone. A per-zone fraction and a shared field cannot both
+be right.
+
+**Attempt two: add a macro shift, keep a global sea level.** Result: 100%
+water. The sea level was calibrated on the unshifted field while the actual
+values included the shift.
+
+**What actually worked** was to stop having two independent opinions about
+where the ocean is. The macro grid ALREADY is a global elevation field —
+64x64 normalized values with its own sea level — and the tile-level field was
+a second one that had been steered toward agreeing with it. Now the macro
+grid is simply the truth, sampled continuously (bilinear between zone
+CENTRES, so two zones evaluate the same function at their shared edge and
+necessarily agree), with global noise as local texture on top. One field, one
+sea level, no seam.
+
+This also fixed a real pre-existing incoherence nobody had reported: zones the
+macro map called **ocean** were generating as **70% dry land**. The map said
+ocean, the terrain said grassland, and the region got named accordingly.
+
+## A regression this caused, and how it was caught
+
+Making the calibration global broke the STANDALONE path, which the macro grid
+itself uses. A single map's own extremes are narrower than the whole field's,
+so nothing reached the top of the 0..1 range: the macro grid's land elevation
+maximum fell from 1.000 to 0.741 and the **snow biome vanished entirely**
+(1,012 zones to 0 on one grid), taking the `frozenGrotto` landmark with it —
+11 of 11 landmark types placing across eight large grids became 10 of 11.
+
+Caught by two tests that looked unrelated (a landmark-coverage count and a
+resource-estimate comparison that crashed on a missing zone), then confirmed
+by measuring the biome distribution before and after rather than guessing. A
+standalone map is its own world and has to span its own range; the shared
+normalization is only correct for zones of a shared world.
+
+Three other tests failed and each needed a different, honest answer rather
+than a threshold bump:
+
+- **`findWalkableNear` "returns the anchor when walkable"** was asserting
+  `if (tile.walkable)` — vacuous whenever generation happened to put an
+  obstacle at (0,0), and wrong once it put WATER there, since water is
+  `walkable` but the function's land probe correctly rejects it. Now forces a
+  floor tile, so it tests the actual promise unconditionally.
+- **BSP chamber wobble** expected a longest-straight-run under 15. Measured
+  across 24 seeds the real spread is 3-17 with a median of 11, so 15 sat
+  inside the natural distribution and any rng change would trip it. Raised to
+  20, still far below the 20-30+ a genuinely straight edge produces.
+- **Arid biome stretches** expected the largest contiguous run above 50; the
+  five test seeds now give 182, 739, 437, 37 and 172. One seed simply makes a
+  wet world. 37 is still emphatically a stretch — the speckle the test rules
+  out is single digits — so the bar moved to 25.
