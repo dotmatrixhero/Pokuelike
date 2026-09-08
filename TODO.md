@@ -6559,3 +6559,38 @@ not something this pathfinding pass itself caused or is positioned to fix.
       "+5 Power" that repeats a row later). Not a rendering bug — the tree
       data really does give distinct nodes identical display names, which
       makes a tree impossible to read. Wants real names.
+
+- [x] **Move Tree Atlas opened at its empty top-left corner.** Direct
+      follow-up: "are the nodes centered and easy to see on expand?" — asked
+      after I had verified only the DATA (nodes chosen) and not the layout.
+      They were not.
+      - Measured on a real 106-node Tackle tree: the SVG renders **1204px
+        wide inside a 306px holder** (panel 378px), so `svgRightGap` was
+        **-898** — it overflowed by 898px, with the first content 140px in
+        and 758px of it off the right edge. A scroll container starts at 0,0,
+        which for a RADIAL layout is the empty corner diagonally away from
+        the root.
+      - **Not fixed by shrinking it.** The native scale is deliberate: an
+        earlier fit-to-width version squeezed a ~1,200-unit tree into ~300px
+        and turned every node into a speck ("it looks like it's missing a
+        bunch"). Fixed by scrolling the box to centre on load instead —
+        on the union of CHOSEN nodes when a build exists (the reason to open
+        a tree at all, and on a big tree the specced cluster is often
+        nowhere near the middle), otherwise on the whole tree.
+      - After: left/right gaps symmetric at **-449 / -449**, content gaps
+        **-309 / -309**, focus offset from centre **0, 0**, scroll at
+        **449, 392** instead of 0, 0.
+      - Caught one of my own selector mistakes en route: the first version
+        looked for `[data-chosen='1']`, an attribute I had invented and that
+        `moveTreeSvg.ts` never sets — it would have silently fallen back to
+        centring the whole tree and looked like it worked. The real class is
+        `.node-chosen`.
+
+- [ ] **Still open: a 1200px tree in a 306px panel means scrolling.** The
+      centring makes it open in the right place, but you still see roughly a
+      quarter of a large tree at a time. There is an existing
+      `#expand-panel` button that widens the panel, which helps. Real
+      options if that is not enough: a fit/native zoom toggle on the tree
+      itself, or auto-expanding the panel when a tree is opened. Not chosen
+      unilaterally — the native scale was a deliberate call and reversing it
+      is a design decision, not a bug fix.

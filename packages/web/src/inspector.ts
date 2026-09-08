@@ -249,6 +249,38 @@ function renderMoveTree(move: MoveSpec, chosenIds: string[]): HTMLElement {
   canvas.className = "skilltree-canvas";
   canvas.appendChild(svg);
 
+  // Open the scroll box ON the tree, not at its top-left corner.
+  //
+  // The SVG is deliberately rendered at native scale (see
+  // `buildMoveTreeSvg` — a previous fit-to-width version shrank an ~1,200px
+  // tree into a ~300px panel and turned every node into a speck), so it is
+  // genuinely much wider than the panel and the box scrolls. But a scroll
+  // container starts at 0,0, which for a RADIAL layout is the empty corner
+  // diagonally away from the root — measured on a real 106-node Tackle
+  // tree in a 306px-wide holder: the SVG was 1204px wide, overflowing by
+  // 898px, with the first actual content 140px in and 758px of it off the
+  // right edge. Direct report: "they're awkwardly positioning from the top
+  // left... are the nodes centered and easy to see on expand?"
+  //
+  // Centring on the CHOSEN nodes rather than the geometric middle when a
+  // build exists: the whole reason to open a tree is to see what this
+  // animal actually bought, and on a big tree the specced cluster is often
+  // nowhere near the centre.
+  requestAnimationFrame(() => {
+    const cr = canvas.getBoundingClientRect();
+    if (cr.width === 0) return;
+    // The union of every chosen node (class set by `buildMoveTreeSvg`), or
+    // the whole tree when nothing is specced yet.
+    const picked = Array.from(svg.querySelectorAll<SVGGraphicsElement>(".node-chosen"));
+    const rects = picked.length > 0 ? picked.map((n) => n.getBoundingClientRect()) : [svg.getBoundingClientRect()];
+    const left = Math.min(...rects.map((r) => r.left));
+    const right = Math.max(...rects.map((r) => r.right));
+    const top = Math.min(...rects.map((r) => r.top));
+    const bottom = Math.max(...rects.map((r) => r.bottom));
+    canvas.scrollLeft += left - cr.left - (cr.width - (right - left)) / 2;
+    canvas.scrollTop += top - cr.top - (cr.height - (bottom - top)) / 2;
+  });
+
   wrap.append(summary, canvas, detail);
   return wrap;
 }
