@@ -48,12 +48,29 @@ const COURTSHIP_DWELL_TICKS = 10;
 const BATTLE_EPILOGUE_MS = 3000;
 /**
  * A battle with no new `fought`/`missed`/`herdClash` hit involving either
- * participant for this many ticks is treated as silently disengaged (one
+ * participant for this many real ms is treated as silently disengaged (one
  * side wandered off without a clean "flee"/death signal) — a fallback, not
  * the primary conclusion path; see the three explicit conclusion checks in
  * `maybeConcludeBattle`.
+ *
+ * Real wall-clock ms, not ticks — direct report: "Sometimes if autocam
+ * doesn't have anything happen it lingers way too long. If nothing else to
+ * cut to, just give it 3 seconds and then resume speed." Root cause: this
+ * used to be a real TICK count (40), which reads fine on paper but a
+ * "battle" engagement always runs in `enterBattleStep`'s fixed one-tick-
+ * per-`BATTLE_STEP_INTERVAL_MS` (650ms) cadence the moment it becomes
+ * active (see `applySlowdownIfNeeded`) — so 40 quiet ticks was actually 26
+ * real seconds of a frozen, silent slow-motion camera before staleness was
+ * even detected, before the (already real-ms) `BATTLE_EPILOGUE_MS` hold
+ * even started counting down. Same "ticks are a bad proxy for wall-clock
+ * time under a fixed real-time cadence" lesson `BATTLE_EPILOGUE_MS`'s own
+ * doc comment already documents for the post-conclusion hold — this is the
+ * same fix applied to the PRE-conclusion staleness check instead. `onBattle
+ * Hit` now stamps `Engagement.lastActiveRealMs` on every real hit, and
+ * `reconcile` compares against that directly (gated on `playing`, exactly
+ * like `BATTLE_EPILOGUE_MS`'s check).
  */
-const BATTLE_STALE_TICKS = 40;
+const BATTLE_STALE_MS = 3000;
 /**
  * A `herdClash` skirmish — direct ask: "clashes that don't do nothing are
  * lame... time out faster." A herd rivalry fight is non-lethal by design
@@ -61,10 +78,10 @@ const BATTLE_STALE_TICKS = 40;
  * so it doesn't earn a real battle's patience for a lull between hits — a
  * skirmish that's gone quiet this briefly almost always really is over, not
  * mid-standoff, and shouldn't hold the camera/speed override waiting to find
- * out.
+ * out. Real ms now too, same reasoning/fix as `BATTLE_STALE_MS` above.
  */
-const CLASH_STALE_TICKS = 8;
-/** `CLASH_STALE_TICKS`'s own real-ms epilogue counterpart — see `BATTLE_EPILOGUE_MS`'s doc comment for why this is wall-clock, not ticks. Proportionally shorter than a real battle's, same "it's over, move on" reasoning. */
+const CLASH_STALE_MS = 1200;
+/** `CLASH_STALE_MS`'s own real-ms epilogue counterpart — see `BATTLE_EPILOGUE_MS`'s doc comment for why this is wall-clock, not ticks. Proportionally shorter than a real battle's, same "it's over, move on" reasoning. */
 const CLASH_EPILOGUE_MS = 400;
 /**
  * Minimum real ticks between two separate PROMOTIONS of a brand-new pair
@@ -185,9 +202,11 @@ interface Engagement {
   label: string;
   /** True only for "battle" — kept alive tick-to-tick by new hits instead of expiring after one fixed dwell. */
   continuous: boolean;
-  /** Tick this engagement should stop being displayed (for a one-shot) or was last kept alive by a relevant hit (for a continuous battle, compared against `BATTLE_STALE_TICKS`). */
+  /** Tick this engagement should stop being displayed (for a one-shot); unused for a continuous battle/clash — see `lastActiveRealMs` for its staleness clock instead. */
   expiresOrLastActiveTick: number;
-  /** Set once conclusion fires on a continuous engagement — it keeps a short epilogue hold rather than vanishing on the same tick as the kill/retreat. Still used for the -1 "marked, not yet stamped" sentinel (see `onBattleParticipantLeft`) and by `BATTLE_STALE_TICKS`'s own tick-based check; the actual epilogue hold duration is real-ms, via `concludedAtRealMs` below. */
+  /** `performance.now()` at the last real hit involving this continuous (battle/clash) engagement — what `BATTLE_STALE_MS`/`CLASH_STALE_MS` count elapsed real time against (see their own doc comments for why real ms, not ticks). Stamped on construction and on every widening hit in `onBattleHit`; unused for a one-shot engagement. */
+  lastActiveRealMs: number;
+  /** Set once conclusion fires on a continuous engagement — it keeps a short epilogue hold rather than vanishing on the same tick as the kill/retreat. Still used for the -1 "marked, not yet stamped" sentinel (see `onBattleParticipantLeft`) and by `BATTLE_STALE_MS`'s own real-ms staleness check; the actual epilogue hold duration is real-ms too, via `concludedAtRealMs` below. */
   concludedAtTick?: number;
   /** `performance.now()` at the same moment `concludedAtTick` gets its real (non-sentinel) value — what `BATTLE_EPILOGUE_MS` actually counts against, since the epilogue hold is real wall-clock time, not ticks (see `BATTLE_EPILOGUE_MS`'s own doc comment for why). */
   concludedAtRealMs?: number;
@@ -480,7 +499,7 @@ export class AutoCameraController {
         // "clash" — a lower-drama, faster-timing-out category than "battle",
         // direct ask: real fights ("fought") are the dramatic thing worth a
         // hard one-tick-at-a-time pause; a non-lethal herd resource
-        // skirmish isn't. See `CLASH_STALE_TICKS`/`CLASH_EPILOGUE_MS`'s own
+        // skirmish isn't. See `CLASH_STALE_MS`/`CLASH_EPILOGUE_MS`'s own
         // doc comments. Any real (non-"missed") hit is camera-worthy on its
         // own — see `maybeEngageClash`'s own doc comment for why this no
         // longer waits for a retaliating hit first.
@@ -540,7 +559,7 @@ export class AutoCameraController {
     // comment for why a shared category isn't enough here.
     if (this.active && this.active.sourceKind === sourceKind && setsOverlap(this.active.ids, ids)) return;
     if (this.queue.some((e) => e.sourceKind === sourceKind && setsOverlap(e.ids, ids))) return;
-    this.queue.push({ category, sourceKind, ids, fallbackPos: pos, label, continuous: false, expiresOrLastActiveTick: 0, seq: this.nextSeq++ });
+    this.queue.push({ category, sourceKind, ids, fallbackPos: pos, label, continuous: false, expiresOrLastActiveTick: 0, lastActiveRealMs: performance.now(), seq: this.nextSeq++ });
     if (this.queue.length > MAX_QUEUE) this.queue.shift();
   }
 
@@ -586,7 +605,7 @@ export class AutoCameraController {
    * engagement for this pair, or keeps an existing one (for either
    * participant) alive. `category` distinguishes a real fight ("battle",
    * `enterBattleStep`-worthy) from a herd rivalry skirmish ("clash", faster
-   * timeouts, never `enterBattleStep` — see `CLASH_STALE_TICKS`).
+   * timeouts, never `enterBattleStep` — see `CLASH_STALE_MS`).
    */
   private onBattleHit(category: "battle" | "clash", ids: Set<string>, pos: Vec2, label: string, world: World): void {
     const existing = this.findContinuous(ids);
@@ -600,6 +619,7 @@ export class AutoCameraController {
       for (const id of ids) existing.ids.add(id);
       existing.fallbackPos = pos;
       existing.expiresOrLastActiveTick = world.tick;
+      existing.lastActiveRealMs = performance.now();
       // Direct ask: "multi-way 6 unit free for alls that get really
       // confusing" — once widening pulls a THIRD participant into what
       // started as an ordinary pair, the original "X vs Y" label no longer
@@ -635,12 +655,13 @@ export class AutoCameraController {
       label,
       continuous: true,
       expiresOrLastActiveTick: world.tick,
+      lastActiveRealMs: performance.now(),
       seq: this.nextSeq++,
     });
     if (this.queue.length > MAX_QUEUE) this.queue.shift();
   }
 
-  /** A death, fainting, or successful-retreat signal naming a continuous engagement's participant — the real conclusion path (see `BATTLE_STALE_TICKS`/`CLASH_STALE_TICKS` for the fallback path). Idempotent against an engagement already concluding. */
+  /** A death, fainting, or successful-retreat signal naming a continuous engagement's participant — the real conclusion path (see `BATTLE_STALE_MS`/`CLASH_STALE_MS` for the fallback path). Idempotent against an engagement already concluding. */
   private onBattleParticipantLeft(agentId: string): void {
     const engagement = this.findContinuous(new Set([agentId]));
     if (engagement && engagement.concludedAtTick === undefined) engagement.concludedAtTick = -1; // marked now, epilogue tick stamped once we know world.tick in reconcile()
@@ -699,18 +720,21 @@ export class AutoCameraController {
     if (this.active) {
       if (this.active.continuous) {
         // "clash" (a non-lethal herd skirmish) gets a much shorter leash on
-        // both halves than a real "battle" — see CLASH_STALE_TICKS/
+        // both halves than a real "battle" — see CLASH_STALE_MS/
         // CLASH_EPILOGUE_MS's own doc comments for why.
-        const staleTicks = this.active.category === "clash" ? CLASH_STALE_TICKS : BATTLE_STALE_TICKS;
+        const staleMs = this.active.category === "clash" ? CLASH_STALE_MS : BATTLE_STALE_MS;
         const epilogueMs = this.active.category === "clash" ? CLASH_EPILOGUE_MS : BATTLE_EPILOGUE_MS;
-        if (this.active.concludedAtTick === undefined && tick - this.active.expiresOrLastActiveTick > staleTicks) {
+        // Gated on `playing` — same real-time-needs-a-pause-guard reasoning
+        // as the epilogue check right below (see `update`'s own doc
+        // comment): staleness is now real-ms too (`BATTLE_STALE_MS`'s own
+        // doc comment), so it's the second real-time check here that needs
+        // the guard, not just the epilogue.
+        if (playing && this.active.concludedAtTick === undefined && performance.now() - this.active.lastActiveRealMs > staleMs) {
           // Fallback path: no explicit death/flee/retreat signal, but nothing's landed a hit in a while either — treat as disengaged.
           this.active.concludedAtTick = tick;
           this.active.concludedAtRealMs = performance.now();
         }
-        // Gated on `playing` — see `update`'s own doc comment for why: this
-        // is the one real-time (not tick-gated) expiry check here, so it's
-        // the one that needs an explicit pause guard.
+        // The epilogue hold itself — same `playing` guard, see `update`'s own doc comment.
         if (playing && this.active.concludedAtRealMs !== undefined && performance.now() - this.active.concludedAtRealMs >= epilogueMs) {
           this.finishActive(world, playing);
         }

@@ -13852,3 +13852,49 @@ respectively (distinct), while `shortId("bulbasaur-0")` (founder),
 still resolve correctly. Full monorepo typecheck clean; engine (46 files,
 1246 tests) and data (2 files, 240 tests) suites unaffected and still
 green — this fix touches web-only display code.
+
+## Fixed: Auto Camera lingering on a quiet battle for far too long
+
+Direct report: "Sometimes if autocam doesn't have anything happen it
+lingers way too long. If nothing else to cut to, just give it 3 seconds
+and then resume speed."
+
+Root cause: a "battle" engagement's staleness fallback ("no hit landed in
+a while, treat as silently disengaged — one side probably wandered off
+without a clean flee/death signal") was measured in real TICKS
+(`BATTLE_STALE_TICKS = 40`), not real time. That reads fine in isolation,
+but the moment a battle becomes the active engagement it always enters
+`enterBattleStep`'s fixed one-tick-per-650ms cadence (`applySlowdownIfNeeded`)
+— so 40 quiet ticks was actually **26 real seconds** of a frozen,
+silent slow-motion camera before staleness was even detected, before the
+already-real-ms 3-second epilogue hold even started counting down. Same
+"ticks are a bad proxy for wall-clock time under a fixed real-time
+cadence" lesson this file's own `BATTLE_EPILOGUE_MS` had already learned
+once (its own doc comment documents an earlier, identical fix for the
+POST-conclusion hold) — this is that same fix applied to the
+PRE-conclusion staleness check that was still missing it.
+
+Fixed by giving `Engagement` a new `lastActiveRealMs` field (stamped by
+`onBattleHit` on every real hit, both for a brand-new engagement and every
+widening hit on an existing one), and replacing `BATTLE_STALE_TICKS`/
+`CLASH_STALE_TICKS` with real-ms counterparts (`BATTLE_STALE_MS = 3000`,
+`CLASH_STALE_MS = 1200`) that `reconcile` compares `performance.now()`
+against directly — gated on `playing`, exactly like the existing epilogue
+check right next to it, so pausing still freezes this the same way
+`update`'s own doc comment already explains for the epilogue.
+
+### Real-run findings
+
+A deterministic in-page script (no vitest suite exists for `packages/web`)
+built a real `AutoCameraController` with a stub host, fed it one `fought`
+event to start a "battle" engagement (confirming `enterBattleStep` fires),
+then polled `update()` across real wall-clock time with NO further hits.
+Before this fix, the same scenario would have taken ~29 real seconds to
+release (`captureHomeView`/`enterBattleStep`, but no `exitBattleStep`/
+`restoreHomeView` until 26s staleness + 3s epilogue). After the fix,
+`exitBattleStep`/`restoreHomeView` both fired at **~6.0 real seconds**
+(3s staleness + 3s epilogue) — matching the direct ask's "give it 3
+seconds" shape far more closely, on top of an already-correct `playing`
+pause guard. Full monorepo typecheck clean; engine (46 files, 1246 tests)
+and data (2 files, 240 tests) suites unaffected and still green — this
+fix touches web-only auto-camera state machine code.
