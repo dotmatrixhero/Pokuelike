@@ -333,23 +333,70 @@ were easy to overlook because they're spinoffs.
 ### Pokémon Conquest [CANON-ish, spinoff] — bonding without capture, already shipped
 
 A Nobunaga's Ambition crossover set in **Ransei**, a feudal-Japanese region
-of 17 kingdoms, each aligned to a type. Two things make it directly
-relevant:
+of 17 kingdoms, each aligned to a type (Aurora is the starting neutral one;
+Dragnor is Nobunaga's). *Confidence note: I'm solid on the systems and the
+premise, shakier on the full kingdom roster and specific perfect-link
+pairings — treat named specifics as needing a check.*
 
-- **There are no Poké Balls. The entire mechanic is bonding.** A warlord
-  forms a **link** with a Pokémon, and that link has a real numeric strength
-  that grows through fighting and acting together. Link strength drives
-  stats and gates evolution. Warlords have **perfect links** with particular
-  species — a specific person and a specific kind of Pokémon who suit each
-  other.
-- **Ransei is shaped like Arceus**, and was created by it; uniting all 17
-  kingdoms summons the legendary.
+**The link system, which is the whole reason this matters to us:**
 
-So the "no capture, a relationship that deepens through shared action, with
-a compatibility element" design is not only viable, it's shipped and it's
-the best precedent we have for what our rapport graph is being asked to do.
-The affinity idea — that certain people and certain species *fit* — is worth
-considering for our bonding stages.
+- **No Poké Balls anywhere in the game.** The entire mechanic is bonding.
+- A warlord forms a **link** with a Pokémon, expressed as a real **link
+  percentage** that grows through fighting and acting together.
+- Link strength **drives stats and gates evolution** — a Pokémon evolves when
+  the relationship is strong enough, not when a number on the Pokémon alone
+  is. Progression is a property of the *pair*, not the creature.
+- **Perfect Links**: each warlord has particular species they can link with
+  far higher, and far faster, than others. Oichi and Jigglypuff is the
+  best-known. So **compatibility is unevenly distributed and personal** —
+  who you can bond with easily is a fact about *you*.
+- A warlord typically has one main partner rather than a collection.
+
+**The world premise:** Ransei is **shaped like Arceus** and was created by
+it; legend says whoever unites all 17 kingdoms will meet the Pokémon that
+made the region. Nobunaga is the antagonist, and — this is the part worth
+knowing — his motive isn't straightforward conquest. It's tangled up in
+what he believes about whether bonds between people and Pokémon are real.
+*(I'd verify the exact framing before quoting it.)*
+
+**Warlords are Sengoku figures** — Nobunaga, Hideyoshi, Ieyasu, Shingen,
+Kenshin, Masamune, Motonari, Motochika, Mitsuhide, Ranmaru, Oichi, Hanbei,
+Kanbei. Lore reaches you almost entirely through **pre- and post-battle
+dialogue and per-warlord postgame episodes**, not through books — worth
+noting as a delivery style: character-first, ambient, no lore repository.
+
+**Why it's the best precedent we have:** "no capture, a relationship that
+deepens through shared action, with a compatibility element, where
+progression belongs to the pair" is not a theory — it shipped, and it works.
+The piece I'd most want to steal is **Perfect Links**: uneven, personal
+affinity is a much better answer than "anyone can bond with anything given
+enough grinding," and it makes a first partner feel found rather than
+selected.
+
+### Two more no-capture precedents worth knowing
+
+- **Pokémon Ranger** — you don't catch anything permanently. The Capture
+  Styler draws loops around a Pokémon to earn its temporary help; it assists
+  with a task and then **returns to the wild**. An entire series built on
+  borrowed cooperation rather than ownership.
+- **New Pokémon Snap / Snap** — a game whose whole verb is **observing**.
+  No capture, no combat; the skill is learning behaviour well enough to
+  predict and provoke interesting moments. That is remarkably close to the
+  "read the ecosystem's tells" skill DESIGN.md's player-character section
+  already says our bonding depends on.
+
+Between Conquest, Ranger and Snap, the franchise has shipped *three*
+different games where the core loop isn't capture. Our no-capture decision
+is well-precedented, not exotic.
+
+### Orre [CANON, spinoff] — a region with no wild Pokémon
+
+Worth one line because it's an ecological statement baked into a map:
+**Pokémon Colosseum / XD's Orre region is a desert where wild Pokémon
+essentially don't appear.** The ecosystem is gone. Everything you encounter
+is somebody's — mostly stolen, or a "Shadow Pokémon" whose heart has been
+artificially closed. A region designed as an ecological absence, with a
+plot about creatures deliberately damaged out of relationship.
 
 ### Pokémon Mystery Dungeon [CANON-ish, spinoff] — this is the genre precedent
 
@@ -616,6 +663,107 @@ artifact, no way to tell from here.
   piece of fan mythology the series has.
 
 ---
+
+## How lore actually reaches a player — the delivery channels
+
+The most directly useful survey for us, because our generated history needs
+**channels**, and "the game must notice on the player's behalf" (pillar 2)
+is unbuildable until we know what the noticing looks like. Six distinct
+mechanisms the franchise actually uses, with real examples:
+
+### 1. Environmental text — found, unexplained, nobody comments
+
+The archetype, and the most affecting. You walk into a place and read
+something nobody wrote for you.
+
+- **The Pokémon Mansion journals** (Gen 1) — the Mewtwo diary, read in the
+  ruins it caused.
+- **Braille chambers** (Gen 3) — the Regi seals and Sealed Chamber, written
+  in a script the game makes *you* decode.
+- **The Hammerlocke Vault tapestries** (Gen 8) — the Darkest Day told in
+  woven images before anyone explains it.
+- **Celestic Town's cave painting** (Gen 4).
+- **Sea Mauville** (ORAS) — an abandoned ship whose story is entirely in
+  left-behind notes.
+
+**For us:** ruins from the history pass, with a real recorded cause. The
+discipline is that nobody explains it afterward.
+
+### 2. Institutional text — collected, organised, and sometimes wrong
+
+Someone gathered this and put it on a shelf. Which means it can be
+incomplete, biased, or contradicted by another shelf.
+
+- **Canalave Library** (Gen 4) — seven texts, covered above, including the
+  one whose Japanese and Western versions differ.
+- **The Nacrene City Museum library** (Gen 5).
+- **The Ruins of Alph research centre** (Gen 2) — active archaeology.
+- **"Sinnoh's Beginning as Told on Plates"** — a hiker compiles inscriptions
+  he found into a book and donates it. The book exists because a character
+  did the work.
+
+**For us:** a settlement's own written record — which our chronicle can
+generate, and which can *disagree* with the chronicle's ground truth.
+
+### 3. NPC testimony — personal, partial, contradictory
+
+- Elders, gossip, rumour-NPCs, the one villager who saw something.
+- **AZ** (Gen 6) tells you his own story, in person, having lived it.
+- Contradictory route-NPC rumours are a real, longstanding pattern.
+
+**For us:** the most natural home for a myth's *telling*, and the easiest
+place for a village to be sincerely wrong.
+
+### 4. Ritual and behaviour — the norm itself is the lore
+
+**The best one, and the one we're most set up for.** No text at all: the
+lore is what people *do*.
+
+- **Lacunosa Town** (Gen 5) — a walled town whose people **stay indoors at
+  night**, because of a legend about something that came from the sky and
+  took people. The curfew *is* the story. You learn the myth by noticing the
+  behaviour.
+- **Snowpoint Temple** — the ritual of gathering the three Regis, engraved
+  on Regigigas itself.
+- **Legends: Arceus wardens** — a person whose whole life is tending one
+  revered Pokémon. The practice is the belief.
+- **Mt. Pyre** (Gen 3) — a mountain of graves, tended.
+
+**For us:** this is exactly the per-settlement attitude axis made visible.
+A village that walls itself, or leaves offerings, or won't hunt in the north
+woods, is *telling you its history without a line of dialogue.* Pillar 2's
+"let the systems make the argument" lives here.
+
+### 5. Live historiography — watching someone assemble it
+
+Rarer, and very strong. The player watches a character *do research* and
+revise their conclusions.
+
+- **Sonia** (Gen 8) researches the Darkest Day across the whole game and
+  publishes a book at the end — you see the history get made.
+- **Cynthia** (Gen 4) reasons from plates and cave art to the conclusion
+  that Giratina was deliberately edited out of the official story.
+
+**For us:** a genuinely appealing option for the curation layer — rather
+than surfacing generated history as UI, give it to a **character who is
+trying to work it out**, and who can be wrong in front of you.
+
+### 6. Ambient distributed text — dex and item descriptions
+
+Pokédex entries, item flavour, plate inscriptions. Individually trivial,
+collectively the largest lore surface in the franchise — and, as established,
+mutually contradictory.
+
+**For us:** the unreliable-narrator idea has a natural home here.
+
+---
+
+**The pattern across all six:** the franchise almost never delivers its deep
+past through a narrator. It delivers it through *artifacts, institutions,
+gossip, practice, and people doing research*. Every one of those is
+something our generated history could feed, and four of the six need no
+prose generation at all — a ruin, a wall, a curfew and a shrine are all lore
+delivered as *world state*.
 
 ## What we should actually steal
 

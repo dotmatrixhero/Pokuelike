@@ -242,6 +242,82 @@ keep the restraint.
       species is canon-accurate rather than sloppy. Worth building toward
       deliberately.
 
+**Delivery channels** are now surveyed in LORE_NOTES.md too — six real
+mechanisms the franchise uses, which matters because pillar 2's "the game
+must notice on the player's behalf" is unbuildable until we know what
+noticing looks like:
+
+- [ ] **Ritual/behaviour is the channel we're most set up for and should
+      lead with.** Lacunosa Town's people stay indoors at night because of a
+      legend — the *curfew is the story*, learned by noticing, with no text.
+      A village that walls itself, leaves offerings, or won't hunt the north
+      woods is telling you its history without a line of dialogue. This is
+      pillar 2's "let the systems make the argument" made concrete, and
+      **four of the six channels need no prose generation at all** — a ruin,
+      a wall, a curfew and a shrine are lore delivered as *world state*.
+- [ ] **Live historiography as the curation layer** — rather than surfacing
+      generated history through UI, give it to a character who is *trying to
+      work it out* and can be wrong in front of you (Sonia researching and
+      publishing across Gen 8; Cynthia reasoning that Giratina was edited
+      out of the official story). Strong candidate answer to the otherwise
+      undesigned curation mandate.
+- [ ] Other four channels: environmental text (found, unexplained — the
+      Mewtwo journals archetype), institutional text (a settlement's own
+      written record, which can *disagree* with the chronicle), NPC
+      testimony (partial, contradictory), ambient dex/item text.
+
+**Pokémon Conquest** is now written up properly, and the piece to steal is
+**Perfect Links** — compatibility is uneven and personal, so who you can bond
+with easily is a fact about *you*, not a grind. Also: link % gates evolution,
+meaning **progression belongs to the pair rather than the creature**.
+Alongside Ranger (borrowed cooperation, Pokémon return to the wild) and Snap
+(the verb is *observing*), the franchise has shipped **three** games whose
+core loop isn't capture — our no-capture decision is well-precedented.
+
+## Myth structures — see MYTH_STRUCTURES.md
+
+Structural analysis of the leaked species folktales (form and function only;
+the standing "don't build on the content" position is unchanged). This is
+the spec for what a generated etiological myth would actually look like.
+
+**Headline:** every violent myth in the corpus is a rule about taking life —
+take males without offspring, never breeding females or young; return
+remains by the species-specific protocol; killing for food is fine but
+mutilation and excess are not; killing for amusement is the original sin.
+Those are ecologically sound harvest rules, which means **respect and
+sustainability are the same rule** — and in our sim that can be *literally
+true*: overhunt breeding females and the population model actually crashes.
+The folklore would be an accurate folk description of the sim.
+
+Six skeletons identified, each with a trigger pattern our chronicle could
+detect and a norm it outputs: **the Trial** (excess → summons → unarmed duel
+→ witnesses carry the rule), **the Contract** (restraint rewarded, terms
+stated, violation punished by ironic reversal), **the Ritual Error** (right
+intent, wrong protocol, irreversible), **the Original Sin** (cruelty for
+amusement → harm made personal → a death → the norm changes), **the
+Crossing** (union across the boundary; the village's cruelty is the real
+sin), and **the Bond Through Change** (Wurmple — the outlier, not
+etiological, and the one that keeps the corpus from being uniformly grim).
+
+- [ ] **Which norms are mechanically real vs. culturally held?** "Don't take
+      breeding females" can be enforced by the population model; "return the
+      horns skyward" can only ever be belief. Both worth having, but
+      mistaking one for the other is how you get a preachy game.
+- [ ] **A myth needs a norm to output, or it needs to be the outlier.** If a
+      generated story doesn't change how a village behaves and isn't a
+      Wurmple, it's noise — the curation problem arriving early.
+- [ ] **Swords vs. bows, from the myths.** The corpus is explicit: *"No bow
+      and no spear, only the sword."* Bow and spear are hunting tools with
+      rites attached; the sword is *found* (taken from Sharpedo), carries no
+      custom, and immediately enables atrocity — and at the trial it won't
+      even draw. Suggests a real mechanical split: hunting tools tied to
+      norms and sustainable use, vs. a weapon that's effective, ungoverned,
+      and **corrosive** (reputation, attitude drift, ecological damage).
+      Satisfies pillar 1's refusal test — no human capability without cost.
+- [ ] **Violence is mutual in every one of these.** The swordsman and the
+      Ursaring both die; the careless hunter dies wearing the skin he stole.
+      Tonal target: combat as mutual destruction, not a skill check.
+
 **Pokopia** (post-apocalyptic Kanto life-sim, March 2026) is now written up
 too — research supplied by the project owner, since the base game sits at my
 knowledge edge and the Aug 2026 expansion is past it. It's the exact mirror
