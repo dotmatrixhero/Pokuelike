@@ -148,6 +148,11 @@ export const NOTABLE_TITLE_MIN_THRESHOLDS: Record<NotableTitleId, number> = {
   // Raised to match Alpha's own new bar, mirrored from the original direct
   // ask ("'underdog' for losing 40 clashes") the same way Alpha was.
   underdog: 100,
+  // A single real kill against a herd leader or another notable is already
+  // the whole notable moment — same "the single instance is already
+  // notable" reasoning as giantSlayer/savant above, not a count that needs
+  // padding out; the random-chance grant gate slows this one down instead.
+  kingslayer: 1,
 };
 
 /**
@@ -174,6 +179,7 @@ const TITLE_ORDER: NotableTitleId[] = [
   "alpha",
   "shaman",
   "underdog",
+  "kingslayer",
 ];
 
 /**
@@ -209,6 +215,8 @@ function statValueFor(title: NotableTitleId, agent: Agent, world: World, ctx?: L
       return agent.lifetimeKills ?? 0;
     case "giantSlayer":
       return agent.lifetimeGiantSlayerKills ?? 0;
+    case "kingslayer":
+      return agent.lifetimeKingslayerKills ?? 0;
     case "alpha":
       return agent.lifetimeClashWins ?? 0;
     case "shaman":

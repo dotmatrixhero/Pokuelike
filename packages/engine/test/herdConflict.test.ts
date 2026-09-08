@@ -224,6 +224,19 @@ describe("applyHerdRivalryConflict", () => {
     expect(defeated).toMatchObject({ winnerId: "a", loserId: "b" });
   });
 
+  it("Notables: a lethal escalation against a herd leader counts toward lifetimeKingslayerKills; an ordinary rival doesn't", () => {
+    const rng = () => 0.01; // same flat-chance-lethal roll as the test above
+    const world = createWorld(20, 20);
+    const a = bumpedUp(agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD, moves: [{ ...TEST_MOVE, power: 400 }] }));
+    const leaderRival = agent("b", "pidgey", "herd-b", TARGET, { isHerdLeader: true });
+    world.agents.push(a, leaderRival);
+
+    expect(applyHerdRivalryConflict(world, a, RULES, TARGET, undefined, rng)).toBe(true);
+
+    expect(leaderRival.alive).toBe(false);
+    expect(a.lifetimeKingslayerKills).toBe(1);
+  });
+
   it("a deep, pre-existing grudge makes the next knockout lethal even when the flat chance fails", () => {
     // Same 0.1 as the "faints, not kills" test above — the ONLY difference
     // here is the attacker's own real grudge toward this specific rival,

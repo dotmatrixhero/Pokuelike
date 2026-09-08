@@ -187,6 +187,17 @@ describe("notables: record-holder transfer mechanism", () => {
     expect(a.notableTitle).toBe("giantSlayer");
   });
 
+  it("The Kingslayer: keys off its own lifetime counter, same as Beloved/Gatherer/Builder", () => {
+    const world = createWorld(10, 10);
+    const a = agent("a", { lifetimeKingslayerKills: NOTABLE_TITLE_MIN_THRESHOLDS.kingslayer });
+    world.agents.push(a);
+
+    updateNotables(world, undefined, undefined, () => 0);
+
+    expect(world.notables?.kingslayer?.agentId).toBe("a");
+    expect(a.notableTitle).toBe("kingslayer");
+  });
+
   it("The Savant: a real, deeply-chosen move-tree branch (by leaning) qualifies; a shallow one doesn't", () => {
     const world = createWorld(10, 10);
     const tree = {

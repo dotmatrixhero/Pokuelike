@@ -35,6 +35,7 @@ const EPITHETS: Record<NotableTitleId, readonly string[]> = {
   alpha: ["the Alpha", "the Undefeated", "Crown-Taker", "Who Never Yielded"],
   shaman: ["the Mender", "Kind-Handed", "the Wellspring", "Who Tends the Fallen"],
   underdog: ["the Unbowed", "Ever-Beaten", "the Stubborn", "Who Rose Again"],
+  kingslayer: ["Kingslayer", "the Crownless-Maker", "Who Struck the Throne", "the Usurper"],
 };
 
 /** Plain-language label for a title, for UI that wants the category rather than the flourish. */
@@ -51,6 +52,7 @@ export const NOTABLE_TITLE_LABEL: Record<NotableTitleId, string> = {
   alpha: "Alpha",
   shaman: "Shaman",
   underdog: "Underdog",
+  kingslayer: "Kingslayer",
 };
 
 function hash(id: string): number {
@@ -124,6 +126,10 @@ export function notableTale(title: NotableTitleId, ctx: NotableTaleContext): str
       return `${v} times they turned their strength to mending a herdmate instead of harming a rival.`;
     case "underdog":
       return `${v} clashes lost — and they came back for every one of them.`;
+    case "kingslayer":
+      return v > 1
+        ? `${v} times they struck down whoever led or was known across the world — proof that no title, held by anyone, was ever truly safe.`
+        : `They struck down a herd's leader — or a name every animal in the world already knew — and that alone was enough to be remembered for it.`;
   }
 }
 

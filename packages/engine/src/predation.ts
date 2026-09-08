@@ -1069,6 +1069,13 @@ function applySingleDamageInstance(
     if ((defender.level ?? 0) - (attacker.level ?? 0) >= GIANT_SLAYER_LEVEL_GAP) {
       attacker.lifetimeGiantSlayerKills = (attacker.lifetimeGiantSlayerKills ?? 0) + 1;
     }
+    // Notables: The Kingslayer — checked BEFORE this tick's own leadership/
+    // notable-reassignment passes run, so `defender` still genuinely held
+    // whatever it held at the moment of death. See Agent.
+    // lifetimeKingslayerKills's doc comment.
+    if (defender.isHerdLeader || defender.notableTitle !== undefined) {
+      attacker.lifetimeKingslayerKills = (attacker.lifetimeKingslayerKills ?? 0) + 1;
+    }
     return true;
   }
 

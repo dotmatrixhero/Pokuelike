@@ -565,6 +565,43 @@ describe("starvation", () => {
     expect(agent.alive).toBe(false);
   });
 
+  it("a FAINTED agent never starves to death, no matter how long the grace period is exceeded — direct ask: 'they should not just die of hunger and thirst'", () => {
+    const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED);
+    // No hp/maxHp set — applyHealOverTime/maybeRecoverFromFaint both no-op
+    // without them, so this agent stays fainted (and therefore exempt) for
+    // the whole run, isolating the starvation-exemption behavior on its own
+    // from the separate "heals back up and wakes" behavior (tested directly
+    // in support.test.ts's "heal over time" suite instead).
+    const agent = makeAgent({ needs: createNeeds({ hunger: 0 }), fainted: true });
+
+    // Well past both the ordinary hunger grace period AND the point where an
+    // un-exempted agent would already be long dead.
+    for (let i = 0; i < 500; i++) tickAgent(world, agent);
+
+    expect(agent.alive).not.toBe(false);
+    expect(agent.fainted).toBe(true);
+  });
+
+  it("once a fainted agent wakes back up, its starvation clock reflects only time actually spent conscious and unfed — not a delayed death sentence for the whole time it was down", () => {
+    const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED);
+    setTile(world, "surface", 1, 0, "food");
+    const agent = makeAgent({ pos: { x: 1, y: 0 }, needs: createNeeds({ hunger: 0 }), fainted: true, hp: 0, maxHp: 10 });
+
+    // Stay fainted for a long stretch — starvationTicks would be deep past
+    // STARVATION_GRACE_TICKS (100) by now under the OLD (un-frozen) behavior.
+    for (let i = 0; i < 200; i++) tickAgent(world, agent);
+    expect(agent.alive).not.toBe(false);
+
+    // Its own small unfed self-heal trickle (support.test.ts covers the
+    // exact rate) eventually crosses WAKE_HP_FRACTION and it wakes up here.
+    expect(agent.fainted).toBe(false);
+    // If starvationTicks had kept accumulating while fainted, it would already
+    // be far past the grace period and die on literally the next tick. It
+    // doesn't — the clock was frozen, so it gets a fair, fresh shot at the
+    // food tile it's already standing on.
+    expect(agent.alive).not.toBe(false);
+  });
+
   it("records a starved event with the right cause", () => {
     const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED);
     // Real, undiggable trap: no floor at the agent's own position, so the

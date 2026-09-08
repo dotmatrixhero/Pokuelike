@@ -951,19 +951,44 @@ export function tickAgentNeeds(
   // correctly judge two different thresholds once hunger and thirst can
   // independently cross 0 at different ticks (see `Agent.thirstStarvationTicks`'s
   // doc comment).
-  if (world && agent.needs.hunger <= 0) {
-    agent.starvationTicks = (agent.starvationTicks ?? 0) + 1;
-  } else {
-    agent.starvationTicks = 0;
-  }
-  if (world && agent.needs.thirst <= 0) {
-    agent.thirstStarvationTicks = (agent.thirstStarvationTicks ?? 0) + 1;
-  } else {
-    agent.thirstStarvationTicks = 0;
+  //
+  // Frozen entirely while fainted (`!agent.fainted` below), not just the
+  // death check further down — direct ask: "if a Pokémon faints but doesn't
+  // get finished... they should get a chance to heal back up a little."
+  // Letting these counters keep climbing while incapacitated (only skipping
+  // the actual kill) would mean a long-fainted agent wakes up already deep
+  // past its grace period and dies on its very next tick regardless — a
+  // delayed death sentence, not a real chance. Freezing them here means the
+  // clock only ever reflects time spent actually conscious and unfed, so a
+  // newly-woken agent gets the same fair shot at finding food/water any
+  // other hungry agent would.
+  if (world && !agent.fainted) {
+    if (agent.needs.hunger <= 0) {
+      agent.starvationTicks = (agent.starvationTicks ?? 0) + 1;
+    } else {
+      agent.starvationTicks = 0;
+    }
+    if (agent.needs.thirst <= 0) {
+      agent.thirstStarvationTicks = (agent.thirstStarvationTicks ?? 0) + 1;
+    } else {
+      agent.thirstStarvationTicks = 0;
+    }
   }
 
+  // Direct ask: "if a Pokémon faints but doesn't get finished, do they get
+  // back up ever? They should not just die of hunger and thirst." A fainted
+  // agent can't act at all (tickAgentAction returns immediately for one —
+  // see its own doc comment), so it has no way to feed/drink itself; without
+  // this guard, one that faints with a hunger/thirst clock already running
+  // simply starves to death lying there, unable to do anything about it,
+  // whether or not a herd-mate ever comes to help. The counters above still
+  // climb normally while fainted (this isn't a "pause," it's a "don't let
+  // this specific clock kill someone who's already down") — a long-fainted
+  // agent that finally wakes up is still in real, immediate danger if it
+  // doesn't find food/water right away, same as before.
   if (
     world &&
+    !agent.fainted &&
     ((agent.starvationTicks ?? 0) >= STARVATION_GRACE_TICKS ||
       (agent.thirstStarvationTicks ?? 0) >= THIRST_STARVATION_GRACE_TICKS)
   ) {

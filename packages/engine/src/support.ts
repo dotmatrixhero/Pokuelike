@@ -36,6 +36,22 @@ export const HEAL_PER_TICK_FRACTION = 0.01;
  * inventing a second, unrelated "satisfied" concept.
  */
 export const FED_THRESHOLD = 0.7;
+/**
+ * A much smaller, unconditional per-tick heal (as a fraction of maxHp) for a
+ * FAINTED agent that isn't fed/watered — a quarter of `HEAL_PER_TICK_
+ * FRACTION`. Direct ask: "if a Pokémon faints but doesn't get finished...
+ * they should get a chance to heal back up a little." A fainted agent
+ * cannot act at all, so it can never satisfy `isFedAndWatered` on its own —
+ * without this, its only path back to consciousness is a herd-mate
+ * physically delivering food/water to it (real, and still clearly the
+ * BETTER, faster path — a rescued agent still heals 4x faster via the
+ * ordinary fed/watered rate), leaving a solo agent (no herd, or no
+ * herd-mate nearby) with zero chance at all. At this rate, climbing from 0
+ * to `WAKE_HP_FRACTION` (18%) unaided takes ~72 ticks, vs. ~18 fed/watered —
+ * genuinely "a little," not free full-speed healing that would make rescue
+ * pointless.
+ */
+export const FAINTED_UNFED_HEAL_FRACTION = HEAL_PER_TICK_FRACTION / 4;
 /** Size of the finishing pool at the moment of fainting, as a fraction of maxHp. */
 export const FINISHING_POOL_FRACTION = 0.75;
 /** HP fraction a fainted agent must heal back up to before it wakes on its own, discarding the finishing pool. Picked mid-range of the "~15-20%" the design calls for. */
@@ -339,12 +355,21 @@ export function coldSnapSpeedMultiplier(world: World, layer: Layer, pos: Vec2): 
  * multiplier shape `decayNeeds`'s `thirstMultiplier` already uses. Every
  * pre-existing caller that doesn't pass it heals at exactly the original
  * flat rate.
+ *
+ * A FAINTED agent that isn't fed/watered still gets a much smaller,
+ * unconditional trickle instead of nothing at all — see `FAINTED_UNFED_
+ * HEAL_FRACTION`'s own doc comment for why. A conscious, unfed agent still
+ * gets no heal-over-time at all; this fallback is specifically for the
+ * "can't act, can't feed itself, has no other way back up" case.
  */
 export function applyHealOverTime(agent: Agent, multiplier = 1): void {
   if (agent.alive === false) return;
   if (agent.hp === undefined || agent.maxHp === undefined || agent.hp >= agent.maxHp) return;
-  if (!isFedAndWatered(agent)) return;
-  agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * HEAL_PER_TICK_FRACTION * multiplier);
+  if (isFedAndWatered(agent)) {
+    agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * HEAL_PER_TICK_FRACTION * multiplier);
+  } else if (agent.fainted) {
+    agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * FAINTED_UNFED_HEAL_FRACTION * multiplier);
+  }
 }
 
 /**

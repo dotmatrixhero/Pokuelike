@@ -420,6 +420,13 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
     attacker.lifetimeClashWins = (attacker.lifetimeClashWins ?? 0) + 1;
     // Notables: The Underdog — see Agent.lifetimeClashLosses's doc comment.
     defender.lifetimeClashLosses = (defender.lifetimeClashLosses ?? 0) + 1;
+    // Notables: The Kingslayer — see Agent.lifetimeKingslayerKills's doc
+    // comment. Checked before this tick's own leadership/notable-
+    // reassignment passes run, so `defender` still genuinely held whatever
+    // it held at the moment of death.
+    if (defender.isHerdLeader || defender.notableTitle !== undefined) {
+      attacker.lifetimeKingslayerKills = (attacker.lifetimeKingslayerKills ?? 0) + 1;
+    }
     log?.record({
       kind: "defeated",
       tick: world.tick,

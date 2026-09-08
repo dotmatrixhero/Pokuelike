@@ -1191,6 +1191,30 @@ describe("multi-hit wired into real combat (resolveHit)", () => {
     expect(target.alive).toBe(false);
     expect(log.events.filter((e) => e.kind === "fought")).toHaveLength(1);
   });
+
+  it("Notables: a finishing blow against a herd leader or notable counts toward lifetimeKingslayerKills; an ordinary target doesn't", () => {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const leaderTarget = prey({ x: 5, y: 5 }, { hp: 0, maxHp: 10, fainted: true, finishingPool: 1, isHerdLeader: true });
+    const hunter = predator({ x: 6, y: 5 });
+    world.agents.push(hunter, leaderTarget);
+
+    tickWorld(world, undefined, RULES);
+
+    expect(leaderTarget.alive).toBe(false);
+    expect(hunter.lifetimeKingslayerKills).toBe(1);
+  });
+
+  it("Notables: an ordinary (non-leader, non-notable) finishing blow does NOT count toward lifetimeKingslayerKills", () => {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const ordinaryTarget = prey({ x: 5, y: 5 }, { hp: 0, maxHp: 10, fainted: true, finishingPool: 1 });
+    const hunter = predator({ x: 6, y: 5 });
+    world.agents.push(hunter, ordinaryTarget);
+
+    tickWorld(world, undefined, RULES);
+
+    expect(ordinaryTarget.alive).toBe(false);
+    expect(hunter.lifetimeKingslayerKills ?? 0).toBe(0);
+  });
 });
 
 describe("positionSwap wired into real combat (resolveHit)", () => {

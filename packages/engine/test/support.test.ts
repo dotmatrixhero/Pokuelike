@@ -6,6 +6,8 @@ import { EventLog } from "../src/events.js";
 import type { Agent, HuntRules } from "../src/types.js";
 import {
   applyHealOverTime,
+  FAINTED_UNFED_HEAL_FRACTION,
+  HEAL_PER_TICK_FRACTION,
   applyLooting,
   carryCapacityOf,
   maybeRecoverFromFaint,
@@ -67,6 +69,29 @@ describe("heal over time", () => {
     const corpse = makeAgent({ hp: 0, maxHp: 10, alive: false, needs: createNeeds({ hunger: 1, thirst: 1 }) });
     applyHealOverTime(corpse);
     expect(corpse.hp).toBe(0);
+  });
+
+  // Direct ask: "if a Pokémon faints but doesn't get finished... they should
+  // get a chance to heal back up a little" — a fainted agent can't act at
+  // all, so it can never satisfy isFedAndWatered on its own; without a
+  // fallback it has zero chance of recovery absent a herd-mate's help.
+  it("a fainted, unfed/unwatered agent still gets a small unconditional trickle heal — much smaller than the fed/watered rate", () => {
+    const strandedFainted = makeAgent({ hp: 0, maxHp: 100, fainted: true, needs: createNeeds({ hunger: 0.1, thirst: 0.1 }) });
+    applyHealOverTime(strandedFainted);
+    expect(strandedFainted.hp).toBeCloseTo(100 * FAINTED_UNFED_HEAL_FRACTION);
+    expect(FAINTED_UNFED_HEAL_FRACTION).toBeLessThan(HEAL_PER_TICK_FRACTION);
+  });
+
+  it("a CONSCIOUS, unfed/unwatered agent still gets no heal at all — the fainted fallback doesn't leak to the ordinary case", () => {
+    const strandedConscious = makeAgent({ hp: 5, maxHp: 100, needs: createNeeds({ hunger: 0.1, thirst: 0.1 }) });
+    applyHealOverTime(strandedConscious);
+    expect(strandedConscious.hp).toBe(5);
+  });
+
+  it("a fed/watered fainted agent still heals at the ordinary, faster rate — rescue (herd food delivery) stays clearly better than lying there alone", () => {
+    const rescuedFainted = makeAgent({ hp: 0, maxHp: 100, fainted: true, needs: createNeeds({ hunger: 1, thirst: 1 }) });
+    applyHealOverTime(rescuedFainted);
+    expect(rescuedFainted.hp).toBeCloseTo(100 * HEAL_PER_TICK_FRACTION);
   });
 });
 

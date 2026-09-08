@@ -13529,3 +13529,66 @@ box to inspect, right now click focuses the fight."
    a real, working release gesture, as directly asked.
 
 Full monorepo typecheck clean.
+
+## The Kingslayer notable, and fainted agents no longer die of neglect
+
+Two direct asks from the same message. First: "Are another notable for
+killing another herd leader or notable. Do we have that already?" — checked
+first (none of the 12 existing titles track WHO the victim was, only
+generic kill counts/level-gap/clash tallies) — confirmed no, then built it
+on "Yeah."
+
+**The Kingslayer**: a new `NotableTitleId`, wired the same way as
+`giantSlayer` (a single qualifying kill is already the notable moment,
+threshold 1, random-chance grant gate slows it down instead of a count).
+`Agent.lifetimeKingslayerKills` increments at the same two real kill sites
+`lifetimeKills`/`lifetimeGiantSlayerKills` already use (predation.ts's
+finishing blow, herdConflict.ts's lethal escalation), gated on
+`defender.isHerdLeader || defender.notableTitle !== undefined` — checked at
+the exact moment of death, before that same tick's separate periodic
+leadership/notable-reassignment passes would clear either flag. Full
+plumbing: `notables.ts` (threshold, `statValueFor`, `TITLE_ORDER`),
+`notableLore.ts` (epithets, label, tale), `web/notableTitles.ts` (display
+name, icon). A real 20k-tick run confirmed it firing multiple times
+(4 claims/transfers observed, e.g. a Venusaur claiming it at tick 11290).
+
+**Fainted agents no longer die of neglect.** Follow-up: "if a Pokémon
+faints but doesn't get finished, do they get back up ever? They should not
+just die of hunger and thirst... they should get a chance to heal back up
+a little." Traced the mechanism: a fainted agent can't act at all
+(`tickAgentAction` returns immediately for one), so it can never satisfy
+`applyHealOverTime`'s fed-and-watered gate on its own — its only path back
+to consciousness was a herd-mate physically delivering food, and hunger/
+thirst decayed and could cross the starvation-death threshold the whole
+time regardless, with zero exemption for being incapacitated. A solo agent
+(no herd, or no herd-mate nearby) had no chance at all.
+
+Two changes, both in the always-runs needs tick (`needs.ts`'s
+`tickAgentNeeds`) and heal-over-time (`support.ts`'s `applyHealOverTime`):
+
+1. **A fainted agent gets a small, unconditional trickle heal** even when
+   not fed/watered — `FAINTED_UNFED_HEAL_FRACTION` (a quarter of the
+   ordinary `HEAL_PER_TICK_FRACTION`). Deliberately much slower than the
+   fed/watered rate (~72 ticks to reach `WAKE_HP_FRACTION` unaided vs. ~18
+   fed/watered) — real, but "a little," not free healing that would make
+   herd rescue pointless. A fed/watered fainted agent still heals at the
+   full, faster rate.
+2. **The starvation-death check, AND the consecutive-zero-ticks counters
+   that feed it, are frozen entirely while fainted.** Not just skipping the
+   kill — a first attempt that only skipped the death check left the
+   counters climbing in the background, so a long-fainted agent would wake
+   up already deep past its grace period and die on literally its next
+   tick regardless, a delayed death sentence rather than a real chance.
+   Freezing the counters too means a newly-woken agent's clock reflects
+   only time actually spent conscious and unfed — the same fair shot any
+   other hungry agent gets.
+
+### Real-run findings
+
+A 20k-tick run (seed `SCENARIO_SEED`) showed 501 faint events, 438 real
+recoveries (waking back up — ~87%), and only 5 starvation deaths total
+across the whole population's lifetime — down from a state where every
+un-rescued fainted agent was on an unconditional path to starving. Full
+engine suite green (44 files, 1206 tests, including new dedicated coverage
+for both the Kingslayer kill-site wiring and the fainted-agent starvation/
+heal behavior) and full monorepo typecheck clean.

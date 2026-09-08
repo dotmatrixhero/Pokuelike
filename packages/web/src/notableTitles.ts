@@ -89,6 +89,9 @@ export const TITLE_DISPLAY_NAME: Record<NotableTitleId, string> = {
   shaman: "The Shaman",
   // Direct ask: "'underdog' for losing 40 clashes."
   underdog: "The Underdog",
+  // Direct ask: "another notable for killing another herd leader or
+  // notable."
+  kingslayer: "The Kingslayer",
 };
 
 /** One emoji per title, matching this file's `STORY_ICON` convention in eventText.ts. */
@@ -105,6 +108,7 @@ export const TITLE_ICON: Record<NotableTitleId, string> = {
   alpha: "\u{1F43A}", // wolf — pack dominance
   shaman: "\u{1F33F}", // herb — healing/buffing
   underdog: "\u{1F415}", // dog — scrappy, keeps getting back up
+  kingslayer: "\u{1F5E1}️", // dagger — struck down a leader or a name everyone knew
 };
 
 /**

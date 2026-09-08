@@ -1316,6 +1316,22 @@ export interface Agent {
    */
   lifetimeGiantSlayerKills?: number;
   /**
+   * Lifetime count of real kills against a defender that was, at the exact
+   * moment of the kill, either a herd leader (`defender.isHerdLeader`) or a
+   * current notable-title holder (`defender.notableTitle` set) — set
+   * alongside `lifetimeKills` at the same two real kill sites
+   * (predation.ts's finishing blow, herdConflict.ts's lethal escalation),
+   * checked BEFORE either flag would get cleared by the separate periodic
+   * leadership/notable-reassignment passes later in the tick. Direct ask:
+   * "another notable for killing another herd leader or notable." The
+   * record `notableTitle: "kingslayer"` (The Kingslayer) is judged against
+   * — deliberately a low threshold (see `NOTABLE_TITLE_MIN_THRESHOLDS`),
+   * same "a single such kill is already the notable moment" reasoning
+   * `lifetimeGiantSlayerKills` uses. Never decremented. Absent/0 = never
+   * landed one.
+   */
+  lifetimeKingslayerKills?: number;
+  /**
    * Lifetime count of real herd-conflict "wins" — this agent as the
    * attacker on a `herdConflict.ts` hit that made the defender retreat, or
    * (rarer) a lethal escalation — set in `resolveRivalryHit`. Direct ask:
@@ -1442,7 +1458,8 @@ export type NotableTitleId =
   | "savant"
   | "alpha"
   | "shaman"
-  | "underdog";
+  | "underdog"
+  | "kingslayer";
 
 /** One entry of `World.notables` — the current record-holder for a title, and the live stat value that earned it. */
 export interface NotableRecord {
