@@ -99,7 +99,8 @@ handles and fuel come from. The map teaches that without a word of text.
 
 | Material | Grows / found | Gated by |
 |---|---|---|
-| **Timber** | `tree` tiles | forest/jungle biome |
+| **Timber** | `tree` tiles — **requires an axe** | forest/jungle biome; costs canopy |
+| **Stone** | `boulder` tiles, mined `wall` — **requires a pick** | anywhere with rock |
 | **Reeds** | Pond and lake margins | `waterKind: pond`/`lake` |
 | **Plant fiber** | Grassland flora | biome |
 | **Sand** | `sandy` ground, beach | `groundType: sandy` |
@@ -110,6 +111,106 @@ grid" applied to the player: two villages a hundred zones apart make
 different things because their ground is different, and so do you.
 
 ---
+
+## Harvest nodes: trees and stone
+
+> "wood from trees too, maybe we can chop em down and shit with an axe.
+> stone. idk pull from typical crafter game knowledge too"
+
+Both node types already exist as real terrain: **`tree`** and **`boulder`**,
+plus **`wall`** underground. So "chop a tree" is a terrain transition, not a
+new object system.
+
+### Chopping a tree has a consequence no crafter game has
+
+`worldgen.ts`'s `deriveCanopyFromSurface` builds the **canopy layer out of
+surface trees** — a tile is canopy-walkable if it's a tree or sits in a
+tree island (`CANOPY_TREE_LINK_RADIUS` / `CANOPY_TREE_LINK_MIN_NEIGHBORS`),
+and canopy apples are placed on exactly those tiles.
+
+So felling trees **destroys the layer above them.** Canopy-dwelling species
+lose walkable ground and a food source; clear enough and an island fragments
+into gaps that only Flying types can cross (`canFlyOverObstacle`).
+
+That is habitat loss as a real, already-modelled mechanic — you can watch it
+happen on the canopy layer — and it's the single strongest argument for
+sourcing wood from trees rather than hand-waving it. In Minecraft you can
+level a forest and the world doesn't notice. Here it does, without a line of
+new code.
+
+Regrowth should reuse `flora.ts`: a felled tree leaves a `seedling`, which
+matures back through the existing growth machinery. Fast enough that a
+forest recovers, slow enough that clear-cutting is a real decision.
+
+### Stone, boulders, and digging walls
+
+- **`boulder` tiles** break into stone with a pick.
+- **`wall` tiles underground** can be mined — which changes the cave's shape.
+  This is powerful (any obstacle becomes passable given time) and needs to
+  stay expensive. `digMultiplier` already parameterises exactly this:
+  `rocky` 2.5×, `clay` 1.8×, `sandy` 0.6×.
+
+Digging through walls is the biggest single power grant in this document and
+should be gated behind a real tool and real time, or it dissolves every
+spatial problem in Act 1.
+
+### Tool gating — the ladder worth stealing
+
+The cleanest progression structure crafting games ever invented: **the tool
+you have decides which materials exist for you.**
+
+| Tool | Unlocks | Made from |
+|---|---|---|
+| *(bare hands)* | Lichen, fiber, loose deadwood, surface flint | — |
+| **Flint knife** | Better yields, reeds, butchering | haft + knapped flint |
+| **Axe** | **Trees → timber** | haft + knapped flint |
+| **Pick** | **Boulders → stone; walls → digging** | haft + ground stone |
+| **Metal tools** | Faster everything; Act 2 | smithing settlement |
+
+Each tool is a genuine unlock rather than a stat bump, which is rule 3 of
+this document satisfied by the structure itself.
+
+### The bootstrap, and the three-input problem
+
+Real hafted tools are head + handle + binding — three inputs, which breaks
+this document's two-input rule. The fix is one shared intermediate:
+
+```
+lichen/reeds  →  fiber
+fiber ×2      →  cordage
+deadwood + cordage  →  BOUND HAFT
+haft + knapped flint  →  knife / axe / spear
+haft + ground stone   →  pick / maul
+```
+
+Depth 2, two inputs everywhere, and it gives the classic Minecraft bootstrap
+shape — gather by hand, make the first crude thing, that thing unlocks the
+next material — without a recipe tree.
+
+**Open collision:** axe and spear currently take the same two inputs.
+Recommend differentiating the worked material (a knapped *edge* vs a heavy
+*head*) rather than adding a third input or quantities.
+
+### What to take from crafter games, and what not to
+
+Worth being explicit, because the genre's defaults conflict with this
+project's pillars in one specific way.
+
+**Take:**
+- Tool gating as progression (above).
+- Harvest nodes visible in the world, broken with the right tool.
+- The bootstrap ladder — it teaches crafting with no tutorial.
+- Stations that unlock recipe tiers (campfire → crafting table).
+
+**Don't take:**
+- **Consequence-free infinite resources.** Minecraft's world doesn't care
+  how much you take. This one has `fertility`, `fertilityCeiling`,
+  `groundDegraded` and now canopy loss — the whole point is that it does.
+- **Volume progression.** "Collect 64 wood" is tedium. Keep quantities
+  tiny; get depth from variety and tool gating, never from grinding counts.
+- **Durability.** A classic tedium generator. Consumables are consumed;
+  tools are permanent (see open questions).
+- **A recipe spreadsheet.** Unknown recipes are invisible, not greyed out.
 
 ## Harvesting
 
@@ -138,7 +239,10 @@ is exactly when unseen things notice you and leave, and you hear them go.
 | Output | From | Why it exists |
 |---|---|---|
 | **Fiber** | Lichen / reeds | The universal binding input |
-| **Cordage** | Fiber ×2 | The one intermediate; depth stops here |
+| **Cordage** | Fiber ×2 | Binding |
+| **Bound haft** | Deadwood + cordage | The shared handle for every hafted tool — see the three-input problem above |
+| **Knapped flint** | Flint | A cutting edge |
+| **Ground stone** | Stone | A heavy head |
 
 ### Tier 1 — the real items (2 inputs)
 
@@ -146,9 +250,11 @@ is exactly when unseen things notice you and leave, and you hear them go.
 |---|---|---|---|
 | **Torch** | Deadwood + fiber | Light in the dark | **Seen from much further**; burns out |
 | **Firestarter** | Flint + fiber | Fire anywhere | Consumed on use |
-| **Club** | Deadwood + cordage | `swing` — real damage | Threat signature up; prey flee sooner |
-| **Flint knife** | Flint + cordage | Better harvest yield; butchering | Weight; it is a visible blade |
-| **Spear** | Deadwood + flint | **Reach 2** — the first genuine upgrade | Heavy; high threat signature |
+| **Club** | Bound haft (alone) | `swing` — real damage | Threat signature up; prey flee sooner |
+| **Flint knife** | Haft + knapped flint | Better harvest yield; butchering; reeds | Weight; it is a visible blade |
+| **Axe** | Haft + knapped flint | **Fell trees → timber** | Costs canopy habitat |
+| **Pick** | Haft + ground stone | **Break boulders; dig walls** | Slow; `digMultiplier` gated |
+| **Spear** | Haft + knapped flint | **Reach 2** — the first genuine upgrade | Heavy; high threat signature |
 | **Poultice** | Herbs + lichen | Heal away from shelter | Single use; herbs are slow to regrow |
 | **Clay vessel** | Clay + fire (station) | Carry water — travel past a water source | Weight; breaks |
 | **Snare** | Cordage + deadwood | **Passive trapping** — see below | Kills without you there |
@@ -161,34 +267,26 @@ Twelve items, two tiers, nothing needing a third. `HUMANS_DESIGN.md` already
 placed the ladder above this: spear → bow → bronze/iron at a smithing
 settlement, and crafting tables as the village-tier campfire.
 
-### The armor decision is the best thing in this list
+### Two armor paths, as a plain tradeoff
 
-Two paths to protection, and they cost different currencies:
+- **Woven wrap** — plant fiber. Weak, cheap, nothing dies.
+- **Hide armor** — real protection, needs a kill.
 
-- **Woven wrap** — plant fiber, weak, no death involved.
-- **Hide armor** — genuinely protective, and **you have to kill something for
-  it.**
+That's the whole thing: a cheap weak option and a better one with a
+prerequisite you may not want to meet on a peaceful layer. **Scoped as a
+small reputation modifier, not a morality system** — direct correction, and
+a fair one: *"beyond need scope isn't real right now. it's a reputation
+modifier not like a crucial thing."* No transgression tracking, no myth
+trigger, no ledger. Kill things and prey get a bit warier of you. That's it.
 
-Layer 1 is peaceful and prey-only. So the good armor means killing a member
-of a herd you are simultaneously trying to earn trust from, in the one place
-where trust is the objective. Nobody prompts you. Nothing calls it a moral
-choice. Prey get warier, the reputation system notices what you've become,
-and you wear the consequence.
+### The snare
 
-That is `MYTH_STRUCTURES.md`'s harvest-rule logic arriving as a mechanic —
-*"killing for food is permitted; excess is not"* — with no morality meter and
-no dialogue, which is exactly what the pillars demand.
-
-### The snare is the most interesting and the most dangerous
-
-A snare catches prey **while you are somewhere else.** It interacts with the
-live agent simulation rather than with a menu, which is the most
+Catches prey **while you are somewhere else** — it interacts with the live
+agent simulation rather than a menu, which makes it the most
 this-project-shaped item on the list.
 
-Risks worth naming now: it could trivialise food, and it kills without you
-present — which is the exact shape of the myths' "killing beyond need"
-transgression. Both are features if the reputation system is watching, and
-problems if it isn't. **Build it after reputation, not before.**
+Real risk: it could trivialise food. Worth tuning against a real run rather
+than assuming.
 
 ---
 
