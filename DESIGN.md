@@ -13806,3 +13806,190 @@ existing empty-set floor, preserved); and `knownMoves` reflects the same
 widened set as `agent.moves`, not just the curated subset. Full data suite
 green (2 files, 240 tests) and full monorepo typecheck clean; engine suite
 unaffected and still green (46 files, 1243 tests).
+
+## Fixed: "this tentacruel killed himself" — a display collision, not a real bug
+
+Direct report, a live screenshot: a battle log reading "Tentacruel (3,
+nomad) used water_gun on Tentacruel (3, nomad)" for several ticks in a
+row, with the alarmed reaction "what the heck, this tentacruel killedh
+imself."
+
+Root cause, once traced: NOT a real self-targeting bug. Every threat/prey
+filter in the actual combat path (`agentsWithin`'s `other.id !== agent.id`,
+`isPreyOf`'s same-species exclusion, `isGenuineThreat`'s same-species
+exclusion) already rules out an agent ever fighting itself. The real bug
+was purely in the battle log's DISPLAY: `shortId` (`notableTitles.ts`)
+pulled only the trailing digit run off an agent's id for the short
+`(id, origin)` label — e.g. `"tentacruel-immigrant-2210-3"` rendered as
+just `"3"`. Every non-founder id shape in this codebase
+(`immigration.ts`'s `${species}-immigrant-${tick}-${i}`, `overworld.ts`'s
+invented-population ids, `eggs.ts`'s egg ids) ends in exactly that
+`tick-index` pair, and `i` is a small per-batch index that resets low every
+wave — so two genuinely different individuals from two different
+immigration waves routinely landed on the same trailing index and
+rendered with an IDENTICAL, indistinguishable label. The screenshot's
+"Tentacruel (3, nomad)" vs. "Tentacruel (3, nomad)" was two separate real
+Tentacruel, arrived on different waves, both happening to be the 3rd
+immigrant of their respective batch — not one fish spraying itself with
+Water Gun.
+
+Fixed by keeping the trailing `tick-index` PAIR when an id has one (still
+one short token, just two numbers joined by a dash instead of one),
+falling back to the single trailing number for a founder id (already
+collision-free — each species founds only once) or the raw id if neither
+pattern matches. A real collision now needs the same species, origin,
+tick, AND batch index all at once, instead of just the index alone.
+
+### Verification
+
+No vitest suite exists for `packages/web`; verified live via Playwright
+against the real dev server, importing the real module directly:
+`shortId("tentacruel-immigrant-2210-3")` and
+`shortId("tentacruel-immigrant-1500-3")` — the exact shape behind the
+reported screenshot — now render as `"2210-3"` and `"1500-3"`
+respectively (distinct), while `shortId("bulbasaur-0")` (founder),
+`shortId("egg-cubone-1204-3")` (egg), and an invented-population id all
+still resolve correctly. Full monorepo typecheck clean; engine (46 files,
+1246 tests) and data (2 files, 240 tests) suites unaffected and still
+green — this fix touches web-only display code.
+
+## Fixed: Auto Camera lingering on a quiet battle for far too long
+
+Direct report: "Sometimes if autocam doesn't have anything happen it
+lingers way too long. If nothing else to cut to, just give it 3 seconds
+and then resume speed."
+
+Root cause: a "battle" engagement's staleness fallback ("no hit landed in
+a while, treat as silently disengaged — one side probably wandered off
+without a clean flee/death signal") was measured in real TICKS
+(`BATTLE_STALE_TICKS = 40`), not real time. That reads fine in isolation,
+but the moment a battle becomes the active engagement it always enters
+`enterBattleStep`'s fixed one-tick-per-650ms cadence (`applySlowdownIfNeeded`)
+— so 40 quiet ticks was actually **26 real seconds** of a frozen,
+silent slow-motion camera before staleness was even detected, before the
+already-real-ms 3-second epilogue hold even started counting down. Same
+"ticks are a bad proxy for wall-clock time under a fixed real-time
+cadence" lesson this file's own `BATTLE_EPILOGUE_MS` had already learned
+once (its own doc comment documents an earlier, identical fix for the
+POST-conclusion hold) — this is that same fix applied to the
+PRE-conclusion staleness check that was still missing it.
+
+Fixed by giving `Engagement` a new `lastActiveRealMs` field (stamped by
+`onBattleHit` on every real hit, both for a brand-new engagement and every
+widening hit on an existing one), and replacing `BATTLE_STALE_TICKS`/
+`CLASH_STALE_TICKS` with real-ms counterparts (`BATTLE_STALE_MS = 3000`,
+`CLASH_STALE_MS = 1200`) that `reconcile` compares `performance.now()`
+against directly — gated on `playing`, exactly like the existing epilogue
+check right next to it, so pausing still freezes this the same way
+`update`'s own doc comment already explains for the epilogue.
+
+### Real-run findings
+
+A deterministic in-page script (no vitest suite exists for `packages/web`)
+built a real `AutoCameraController` with a stub host, fed it one `fought`
+event to start a "battle" engagement (confirming `enterBattleStep` fires),
+then polled `update()` across real wall-clock time with NO further hits.
+Before this fix, the same scenario would have taken ~29 real seconds to
+release (`captureHomeView`/`enterBattleStep`, but no `exitBattleStep`/
+`restoreHomeView` until 26s staleness + 3s epilogue). After the fix,
+`exitBattleStep`/`restoreHomeView` both fired at **~6.0 real seconds**
+(3s staleness + 3s epilogue) — matching the direct ask's "give it 3
+seconds" shape far more closely, on top of an already-correct `playing`
+pause guard. Full monorepo typecheck clean; engine (46 files, 1246 tests)
+and data (2 files, 240 tests) suites unaffected and still green — this
+fix touches web-only auto-camera state machine code.
+
+## Battle Screen log: lines reveal one at a time, not a whole hit at once
+
+Direct ask: "It'd be nice to have battle logs and go loss and moves and
+the moves in a battle pop up in animated form, like just for human eye to
+follow along. One log entry at a time."
+
+Root gap: `BattleScreenPanel.ingest` already received a whole tick's
+worth of lines as one batch — a single landed hit routinely produces 3-4
+(`"X used Move!"`, `"A critical hit!"`, `"It's super effective!"`, `"Y
+takes N damage!"`), and `render` painted every one of them into the DOM
+in the same frame. Fine for reading back after the fact, but nothing for
+a human eye to actually watch unfold in real time, which was the whole
+point of the ask.
+
+Fixed with a `revealedCount` field tracking how many of `lines` (the full
+authoritative history, unchanged) have actually been painted to the DOM.
+`render` — already running every frame regardless of `dirty`, for the HP
+header's own live-state reasons — now also advances `revealedCount` by
+at most one line per `LINE_REVEAL_INTERVAL_MS` (160ms, chosen well under
+`BATTLE_STEP_INTERVAL_MS`'s 650ms so a typical hit finishes revealing
+itself before the next tick's beat lands a new batch on top), and the log
+only ever paints `lines.slice(0, revealedCount)`. A fresh engagement's
+opening line still shows instantly (`revealedCount` seeded to 1 right
+after `setActive` pushes it, not left to wait on the timer), and a
+backlog that grows past `MAX_REVEAL_BACKLOG` (6 — a mob fight landing
+several hits in one tick, or the tab having been backgrounded) catches up
+instantly instead of drawing out an ever-growing lag between what
+happened and what's on screen.
+
+### Verification
+
+No vitest suite exists for `packages/web`; verified live via Playwright
+against the real dev server. After the opening line rendered (1 line),
+ingesting a synthetic 3-line hit event did NOT jump straight to 4 lines
+in the DOM — it showed 2, then 3 at ~215ms, then the full 4 at ~425ms,
+roughly matching `LINE_REVEAL_INTERVAL_MS`'s cadence, then held steady
+once caught up. Full monorepo typecheck clean; engine (46 files, 1246
+tests) and data (2 files, 240 tests) suites unaffected and still green —
+this fix touches web-only display code.
+
+## Fixed: the corner mini-map widget wasn't real — now a live snapshot
+
+Direct report: "The mini map is cool but does not show an accurate
+overworld or zone snapshot."
+
+Root cause, found by actually looking rather than assuming: the corner
+mini-map widget (the small "jump to the other map view" button, top-right
+of the canvas) was, verbatim per its own CSS doc comment, "a simplified
+static thumbnail (not a live-rendered copy of the macro grid)" — a
+generic repeating-gradient texture (grass-colored stripes for the zone
+preview, a different stripe pattern for the overworld preview), with a
+hardcoded fixed-position highlight box. It never showed real data at all;
+"inaccurate" was true by construction, not a bug in any rendering math.
+The much bigger, later-built `MacroMapView`/`overworldMap.ts`'s region
+thumbnail (both already real, already used elsewhere) made this corner
+widget's gap obvious once actually looked at side by side.
+
+Fixed by replacing both `<span>` art elements with real `<canvas>`
+elements, drawn by a new `renderMinimapWidget()` (main.ts) using the
+EXACT same functions the full-size views already use — no new rendering
+logic, no duplicated palette: `drawRegionThumbnail` (overworldMap.ts) for
+the "focused zone" preview, `drawMacroMap` (macroMap.ts) for the
+"overworld" preview, both drawn at a native resolution computed to fit
+the widget's small box (bounded regardless of how large the real macro
+grid is — see `MINIMAP_OVERWORLD_TARGET_W`/`_H`'s own doc comment) and
+scaled crisp via `image-rendering: pixelated`, the same "draw native, let
+CSS scale" convention the region thumbnail already established. The
+overworld preview's highlight box is now computed live from
+`MacroWorld.focusedKey`/`grid.rows`/`grid.cols` instead of a fixed
+guessed position. Redraws on every view-toggle/zone-focus/world-load
+(instant) plus a throttled per-frame refresh (1s — both previews are of
+the view the viewer ISN'T currently looking at, so perfect live freshness
+doesn't matter the way it does for the actively-viewed map).
+
+### Real-run findings
+
+Verified live via Playwright screenshots against the real dev server. The
+overworld preview now shows the actual landmass shape (matching the
+full-size Overworld view exactly — same lake, same mountain range, same
+coastline) with the focus marker correctly sitting at the real focused
+zone's coastal position. The zone preview looked suspiciously dark at
+first glance — a pixel-color scan confirmed why and that it's correct,
+not a bug: the visible on-screen viewport is a bright, scrolled-in corner
+of a much bigger 90x60-tile region, and the thumbnail (like the real
+`drawRegionThumbnail` it reuses) draws the WHOLE region — most of which
+is legitimately darker terrain (mountain "wall" tiles at their own
+near-black color from this session's earlier mountain-visibility fix,
+water, low-elevation floor) that the current viewport simply isn't
+scrolled to. A brightness scan found real bright pixels too (255/5400,
+max `[201,201,184]`, a genuine sand tone matching the viewport's own
+colors) — confirming a real, accurate mix, not a systematically-broken
+render. Full monorepo typecheck clean; engine (46 files, 1250 tests) and
+data (2 files, 240 tests) suites unaffected and still green — this fix
+touches web-only display code.

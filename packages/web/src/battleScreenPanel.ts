@@ -47,6 +47,34 @@ import { getSprite } from "./sprites.js";
 function hasRichBattleScreen(category: NotableCategory | undefined): boolean {
   return category === "battle" || category === "clash";
 }
+
+/**
+ * How long a freshly-ingested line waits before it's actually revealed in
+ * the log, one at a time — direct ask: "It'd be nice to have battle logs
+ * and go loss and moves and the moves in a battle pop up in animated form,
+ * like just for human eye to follow along. One log entry at a time." Root
+ * gap: `ingest` already received a whole tick's lines as one batch (a
+ * single hit routinely produces 3-4: "X used Move!", "A critical hit!",
+ * "It's super effective!", "Y takes N damage!") and `render` used to paint
+ * every one of them into the DOM in the same frame — readable on replay,
+ * but nothing for a human eye to actually follow *as it happens*. Chosen
+ * well under `BATTLE_STEP_INTERVAL_MS` (main.ts, 650ms) so a typical
+ * 3-4-line hit finishes revealing itself before the NEXT tick's beat lands
+ * a new batch on top of it, rather than the reveal queue perpetually
+ * trailing the sim.
+ */
+const LINE_REVEAL_INTERVAL_MS = 160;
+/**
+ * If the reveal queue ever falls behind by more than this many lines (a
+ * mob fight landing several simultaneous hits in one tick, or the viewer
+ * having been away/backgrounded), catch up by revealing the overflow
+ * instantly instead of drawing out an ever-growing lag between "what
+ * happened" and "what's on screen" — the one-at-a-time reveal is for
+ * *readability*, not a hard guarantee, and a real backlog defeats its own
+ * purpose past this point.
+ */
+const MAX_REVEAL_BACKLOG = 6;
+
 export class BattleScreenPanel {
   private static readonly MAX_LINES = 60;
 
@@ -55,6 +83,10 @@ export class BattleScreenPanel {
   private ids: ReadonlySet<string> | undefined;
   private label: string | undefined;
   private lines: BattleLine[] = [];
+  /** How many of `lines`, from the front, have actually been revealed to the DOM — see `LINE_REVEAL_INTERVAL_MS`. `render` advances this at most one line per interval (or catches up instantly past `MAX_REVEAL_BACKLOG`), so a freshly-`ingest`-ed batch of lines animates in individually rather than appearing all at once. */
+  private revealedCount = 0;
+  /** `performance.now()` the last time `revealedCount` advanced — what `LINE_REVEAL_INTERVAL_MS` counts elapsed real time against. `undefined` means "reveal immediately," used right after a reset/new engagement so the opening line never waits on the timer. */
+  private lastRevealAtMs: number | undefined;
   /** Set once a battle's conclusion (a death/faint/flee) has been rendered — the epilogue hold that follows shouldn't add a fresh "battle begins" framing if somehow re-entered, and gets a distinct "concluded" visual treatment (see render's `.battle-screen-concluded`). */
   private concluded = false;
   private dirty = true;
@@ -76,6 +108,8 @@ export class BattleScreenPanel {
     this.ids = undefined;
     this.label = undefined;
     this.lines = [];
+    this.revealedCount = 0;
+    this.lastRevealAtMs = undefined;
     this.concluded = false;
     this.dirty = true;
     this.logEl = undefined;
@@ -111,6 +145,10 @@ export class BattleScreenPanel {
     } else if (info) {
       this.lines.push({ kind: "intro", text: `${info.label}!` });
     }
+    // The opening line shows immediately — only lines `ingest` adds AFTER
+    // this point wait on `LINE_REVEAL_INTERVAL_MS`'s one-at-a-time reveal.
+    this.revealedCount = this.lines.length;
+    this.lastRevealAtMs = undefined;
   }
 
   /** Feed every event from the tick that just ran — only ever produces turn-by-turn lines for a "battle"/"clash" category engagement (see `hasRichBattleScreen`); one-shot categories already got their single scene line from `setActive`. */
@@ -132,7 +170,10 @@ export class BattleScreenPanel {
       this.dirty = true;
     }
     const overflow = this.lines.length - BattleScreenPanel.MAX_LINES;
-    if (overflow > 0) this.lines.splice(0, overflow);
+    if (overflow > 0) {
+      this.lines.splice(0, overflow);
+      this.revealedCount = Math.max(0, this.revealedCount - overflow);
+    }
   }
 
   /**
@@ -168,6 +209,23 @@ export class BattleScreenPanel {
     }
 
     const isNewEngagement = this.renderedSeq !== this.activeSeq;
+
+    // Advance the one-at-a-time reveal — see `LINE_REVEAL_INTERVAL_MS`'s own
+    // doc comment. Runs every frame (not gated on `dirty`, same reasoning as
+    // the HP header below it) so lines keep animating in on their own timer
+    // even on a frame `ingest` didn't touch at all.
+    if (this.revealedCount < this.lines.length) {
+      const now = performance.now();
+      const backlog = this.lines.length - this.revealedCount;
+      const dueByTimer = this.lastRevealAtMs === undefined || now - this.lastRevealAtMs >= LINE_REVEAL_INTERVAL_MS;
+      const toReveal = backlog > MAX_REVEAL_BACKLOG ? backlog - MAX_REVEAL_BACKLOG : dueByTimer ? 1 : 0;
+      if (toReveal > 0) {
+        this.revealedCount = Math.min(this.lines.length, this.revealedCount + toReveal);
+        this.lastRevealAtMs = now;
+        this.dirty = true;
+      }
+    }
+
     const linesChanged = this.dirty;
 
     if (isNewEngagement) {
@@ -191,7 +249,10 @@ export class BattleScreenPanel {
 
     if (this.logEl && (isNewEngagement || linesChanged)) {
       const wasAtBottom = isNewEngagement || this.logEl.scrollTop + this.logEl.clientHeight >= this.logEl.scrollHeight - 4;
-      const shown = this.lines.slice(-40);
+      // Only ever paints what's actually been revealed so far — see
+      // `revealedCount`'s own doc comment. A still-pending line simply isn't
+      // in the DOM yet; it appears on a later frame once its own turn comes.
+      const shown = this.lines.slice(0, this.revealedCount).slice(-40);
       this.logEl.replaceChildren();
       shown.forEach((line, i) => this.logEl!.appendChild(renderLine(line, i === shown.length - 1)));
       if (wasAtBottom) this.logEl.scrollTop = this.logEl.scrollHeight;
