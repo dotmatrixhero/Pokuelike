@@ -579,7 +579,11 @@ export function maybeImmigrate(world: World, ctx: ImmigrationContext | undefined
   if (!joinedHerd) {
     // Marked as an arrival rather than a founding, so a chronicle can say
     // "arrived from beyond the map" instead of implying it was always here.
-    ensureHerd(world, herdId, { species: species.id, pos: edgePos, origin: "immigration" }, log);
+    // Types come from a spawned agent, not from `species` — the immigration
+    // roster carries no typing, and without it every immigrant herd fell
+    // back to the generic "normal" word pool and came out as "the Wandering
+    // Kin" regardless of what actually walked in.
+    ensureHerd(world, herdId, { species: species.id, pos: edgePos, origin: "immigration", types: newAgents[0]!.types }, log);
   }
   for (const agent of newAgents) {
     agent.herdId = herdId;

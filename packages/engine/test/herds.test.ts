@@ -90,3 +90,74 @@ describe("agentDisplayName", () => {
     expect(names.size).toBeGreaterThan(3);
   });
 });
+
+describe("herd naming: territory, then type-flavoured qualifiers", () => {
+  function worldWithTerritory(): World {
+    const world = createWorld(8, 8, SEED);
+    world.territoryName = "the Elderwood";
+    return world;
+  }
+
+  it("names the first herd of a species after the territory", () => {
+    const world = worldWithTerritory();
+    ensureHerd(world, "h1", { species: "bulbasaur", pos: { x: 1, y: 1 }, origin: "founding", types: ["grass"] });
+    expect(world.herds!.h1!.name).toBe("the Bulbasaurs of the Elderwood");
+  });
+
+  it("gives a SECOND herd of the same species a qualifier instead", () => {
+    const world = worldWithTerritory();
+    ensureHerd(world, "h1", { species: "charmeleon", pos: { x: 1, y: 1 }, origin: "founding", types: ["fire"] });
+    ensureHerd(world, "h2", { species: "charmeleon", pos: { x: 5, y: 5 }, origin: "split", types: ["fire"] });
+    const second = world.herds!.h2!.name;
+    expect(second).not.toBe(world.herds!.h1!.name);
+    expect(second).toMatch(/of the Elderwood$/);
+    expect(second).not.toMatch(/Charmeleons/);
+  });
+
+  it("flavours the qualifier by the herd's typing — a fire herd gets fire words", () => {
+    const world = worldWithTerritory();
+    ensureHerd(world, "h1", { species: "charmeleon", pos: { x: 1, y: 1 }, origin: "founding", types: ["fire"] });
+    ensureHerd(world, "h2", { species: "charmeleon", pos: { x: 5, y: 5 }, origin: "split", types: ["fire"] });
+    expect(world.herds!.h2!.name).toMatch(/Flame|Ember|Cinder|Pyre|Ashen|Burning|Molten|Smoldering/);
+  });
+
+  it("a grass herd and a water herd get different words for the same situation", () => {
+    const grass = worldWithTerritory();
+    ensureHerd(grass, "a", { species: "ivysaur", pos: { x: 1, y: 1 }, origin: "founding", types: ["grass"] });
+    ensureHerd(grass, "b", { species: "ivysaur", pos: { x: 2, y: 2 }, origin: "split", types: ["grass"] });
+    const water = worldWithTerritory();
+    ensureHerd(water, "a", { species: "squirtle", pos: { x: 1, y: 1 }, origin: "founding", types: ["water"] });
+    ensureHerd(water, "b", { species: "squirtle", pos: { x: 2, y: 2 }, origin: "split", types: ["water"] });
+    expect(grass.herds!.b!.name).not.toBe(water.herds!.b!.name);
+  });
+
+  it("never reuses a name, even across different species", () => {
+    // A real run produced a Golbat herd and an Onix herd both called
+    // "the Wandering Kin of the Crag Heights".
+    const world = worldWithTerritory();
+    const names = new Set<string>();
+    const species: Array<[string, "poison" | "rock" | "fire"]> = [
+      ["golbat", "poison"], ["golbat", "poison"], ["onix", "rock"], ["onix", "rock"],
+      ["charmeleon", "fire"], ["charmeleon", "fire"],
+    ];
+    species.forEach(([id, type], i) => {
+      ensureHerd(world, `h${i}`, { species: id, pos: { x: i, y: 1 }, origin: "immigration", types: [type] });
+      names.add(world.herds![`h${i}`]!.name);
+    });
+    expect(names.size).toBe(species.length);
+  });
+
+  it("keeps a dead herd's name spent — the record has to stay unambiguous", () => {
+    const world = worldWithTerritory();
+    ensureHerd(world, "h1", { species: "onix", pos: { x: 1, y: 1 }, origin: "founding", types: ["rock"] });
+    world.herds!.h1!.dissolvedTick = 500;
+    ensureHerd(world, "h2", { species: "onix", pos: { x: 2, y: 2 }, origin: "immigration", types: ["rock"] });
+    expect(world.herds!.h2!.name).not.toBe(world.herds!.h1!.name);
+  });
+
+  it("falls back to an invented place when there is no overworld above this world", () => {
+    const world = createWorld(8, 8, SEED); // no territoryName
+    ensureHerd(world, "h1", { species: "bulbasaur", pos: { x: 1, y: 1 }, origin: "founding", types: ["grass"] });
+    expect(world.herds!.h1!.name).toMatch(/^the Bulbasaurs of \w+$/);
+  });
+});

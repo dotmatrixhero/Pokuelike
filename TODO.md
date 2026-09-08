@@ -5304,3 +5304,32 @@ not something this pathfinding pass itself caused or is positioned to fix.
       feature, name herds after the territory only for the first herd
       founded there, or show the territory as context in the chronicle
       rather than in the name.
+- [x] **Herds named after their territory, with type-flavoured qualifiers.**
+      Direct asks, in order: "do the zone name, unless one herd of that type
+      already exists. Then give it a second name like 'the exiles of the
+      elder wood'", then "try to make the qualifiers flavorful to the typing
+      of the Pokemon too? The severed flame sounds super cool for example",
+      then "The sinister vine. The aquatic zealots".
+      - `promoteZone` now stamps the macro territory's name onto the
+        promoted world, so a herd's name points at a place that exists on
+        the overworld map. A standalone scenario world with no overworld
+        above it still falls back to an invented local place name.
+      - First herd of a species in a place gets the species: "the Rapidash
+        of the Crag Heights". Every later one gets a qualifier built from
+        TWO shapes in rotation, since one pattern for a whole world gets
+        samey however good it is:
+        - origin adjective + type noun — "the Sundered Ember", "the Severed
+          Flame", "the Sinister Vine"
+        - type adjective + collective noun — "the Burning Zealots", "the
+          Aquatic Zealots"
+      - The origin half carries WHY a second herd exists (a splinter group
+        really is severed, immigrants really are wandering), and the type
+        half makes it a group you can picture.
+      - Two defects caught by running it rather than reading it: the
+        immigration path never passed typing (the roster has none), so every
+        immigrant herd fell back to the generic pool and came out "the
+        Wandering Kin" whatever walked in; and uniqueness was checked
+        per-species, so a Golbat herd and an Onix herd were both "the
+        Wandering Kin of the Crag Heights". Names are now unique across
+        every herd in the world and stay spent after a herd dies, because a
+        name is an identity in the chronicle's permanent record.

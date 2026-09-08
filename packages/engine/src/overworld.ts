@@ -8,6 +8,7 @@ import { findPosInBiome, findWalkableNear, generateWorld } from "./worldgen.js";
 import { countTerrainNear, findNearestIndexed, foodStockNear } from "./resourceIndex.js";
 import { mulberry32 } from "./rng.js";
 import { type MacroGrid, type MacroZone, zoneAt, zoneKey, parseZoneKey, zoneNeighbors, biasForZone, estimateZoneResourceIndex, estimateZoneSpecies, speciesFitsZone } from "./macroGrid.js";
+import { territoryAt } from "./territories.js";
 
 /**
  * The overworld system — a macro grid of thousands of zone-cells (see
@@ -419,6 +420,10 @@ export function promoteZone(mw: MacroWorld, row: number, col: number, ctx: Immig
   if (!region.world) {
     const bias = biasForZone(mw.grid, row, col);
     region.world = generateWorld(mw.zoneWidth, mw.zoneHeight, zoneSeed(mw.worldSeed, row, col), bias);
+    // Carry the named region down from the macro map, so herds founded in
+    // this zone can be named after a place that exists on the overworld
+    // rather than an invented one (see herds.ts).
+    region.world.territoryName = territoryAt(mw.grid, row, col)?.name;
   }
 
   const aggregates = region.aggregates ?? {};
