@@ -334,6 +334,22 @@ function step(): void {
   eventPopups.ingest(displayEvents, world);
   moveEffects.ingest(displayEvents);
   autoCamera.ingest(displayEvents, world);
+  // `ingest` above only queues a newly-detected engagement; promoting it to
+  // `active` (what `currentEngagement()` actually reads) used to happen only
+  // in `update()`, called once per animation frame in `frame()` below — fully
+  // decoupled from tick cadence. Direct report: "battle log... just sorta
+  // says... not much... I can't see what happens and it goes away." Root
+  // cause: a fast kill (often the entire fight, for a one/two-shot) could
+  // start AND finish inside this exact step() call, all before the next
+  // requestAnimationFrame ever got to promote+sync it — battleScreenPanel's
+  // `ingest` was gated on `setActive` having already run with the promoted
+  // engagement, so every real fought/damage/faint event from that fight was
+  // dropped, leaving only the generic "X vs Y fighting!" intro line
+  // `setActive` itself synthesizes. Calling `update` (idempotent — see its
+  // own doc comment) and re-syncing `battleScreenPanel` here, every tick
+  // rather than every frame, closes that gap.
+  autoCamera.update(world);
+  battleScreenPanel.setActive(autoCamera.currentEngagement());
   battleScreenPanel.ingest(displayEvents, world);
   lastLoggedEventCount = log.events.length;
   // Always dirty, not just when something's selected — the no-selection
