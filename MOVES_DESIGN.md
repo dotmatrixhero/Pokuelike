@@ -314,7 +314,7 @@ trigger paths, not one unified "use a move" abstraction:
 
 ## Status effects
 
-**Shipped** — see DESIGN.md's "Status effects: burn, poison, paralysis, sleep, freeze" section for the full writeup (data model, application, resolution, confirmed working end-to-end). Kept here only as a pointer: the roster currently has real inflicters for burn only (Ember/Flamethrower); paralysis/poison/sleep/freeze coverage is real content for whichever future move actually causes one — Vine Whip's designed Constrict node (a `"root"` effect, not one of the five kinds modeled yet) is the natural next case, not Thunder Wave/Poison Sting (inventing moves not yet in the curated roster, which the original draft here suggested — narrowed to "a move already being built" instead).
+**Shipped** — see DESIGN.md's "Status effects: burn, poison, paralysis, sleep, freeze" section for the full writeup (data model, application, resolution, confirmed working end-to-end). Kept here only as a pointer: the roster now has real inflicters for burn, poison, paralysis and freeze — see the re-measured table at the end of this doc; sleep alone still has none — Vine Whip's designed Constrict node (a `"root"` effect, not one of the five kinds modeled yet) is the natural next case, not Thunder Wave/Poison Sting (inventing moves not yet in the curated roster, which the original draft here suggested — narrowed to "a move already being built" instead).
 
 ## Environmental utility moves
 
@@ -3044,3 +3044,87 @@ Two details did more work than expected:
   ticks read "500 ticks alive" forever. Using the world's live record for a
   holder who still sits on the title turns that into "7154 ticks alive,
   having outlasted everything they were born beside."
+
+## Roster census: where the tree content actually is (measured)
+
+Design session opener, after "OK I want us to get to designing more. Moves
+again." Before proposing anything new, a straight count of what the roster
+actually contains today — every number below read out of `MOVES`/`SPECIES`
+at runtime, not from this doc's own prose.
+
+**35 moves. 17 have a tree, 18 are bare.** The bare 18 are not obscure:
+
+| Bare move | Species that learn it |
+|---|---|
+| `agility` | 8 (scyther, sandshrew, growlithe, horsea, seadra, beedrill, ponyta, rapidash) |
+| `harden` | 5 (metapod, kakuna, krabby, kingler, shellder) |
+| `poison_sting` | 5 (ekans, arbok, weedle, zubat, golbat) |
+| `surf`, `safeguard` | 4 each |
+| `withdraw`, `sweet_scent`, `ice_beam`, `psybeam` | 3 each |
+| `growth`, `grassy_terrain`, `defense_curl`, `rain_dance`, `sludge` | 2 each |
+| `twineedle` | 1 (beedrill) |
+| `synthesis`, `moonlight` | **0 — no species learns either** |
+
+`synthesis` and `moonlight` are literally unreachable: they exist in the
+data and no species in the game can ever have them. By this project's own
+standing principle ("unreachable content is a bug"), that's a defect, not a
+backlog item.
+
+### The real finding: node budget per species varies 4.5x
+
+Summing the tree nodes across everything a species can learn:
+
+| Node budget | Species |
+|---|---|
+| **33** (Tackle only) | ekans, arbok, weedle, kakuna, metapod, caterpie, zubat, jynx, oddish, gloom, shellder, butterfree, beedrill, seadra, cubone |
+| 35–36 | charmander, growlithe, vulpix, ponyta, scyther |
+| 66–75 | squirtle, seel, krabby, kingler, psyduck, golduck, lapras, pidgey, snorlax, gyarados, charizard, … |
+| 101–106 | diglett, sandshrew, bulbasaur, blastoise |
+| **141–149** | venusaur, ivysaur, onix, geodude |
+
+The floor group is the problem, and it's worse than the number looks: for
+those species the *only* treed move is **Tackle** — the generic one every
+one of 36 species shares. Their actual identity moves are all bare. An
+Ekans progresses by speccing the same Tackle tree a Magikarp specs; Poison
+Sting, the thing that makes it an Ekans, has nothing in it. Same for Jynx
+(Ice Beam, Psybeam), Oddish (Growth), Beedrill (Twineedle), the whole
+Caterpie/Weedle line (Harden).
+
+Four **types have zero tree content anywhere in the game**: Poison, Ice,
+Psychic, Bug. Not "thin" — zero.
+
+### Lever distribution is still top-heavy
+
+~700 lever uses across all 17 trees. The three cheapest account for 280:
+
+`power` 131 · `accuracy` 91 · `cooldownTicks` 58 · `situationalBonus` 32 ·
+`allyEffect` 30 · `forcedMovement` 27 · … · `statusSeverity` 2 ·
+`terrainFill` 2 · `consumesOwnTerrain` 1 · `aquaticHaste` 1 ·
+`selfCostPerUse` 1 · `chargeAttack` 1
+
+This is the same failure mode the v3 principles section already names
+("use the whole lever list, not just power/accuracy/cooldown"), now with a
+number on it. Note the tail: five primitives that took real engine work
+have exactly one node each using them.
+
+### Status coverage, re-measured (this doc was stale on it)
+
+The "Status effects" section above says the roster "currently has real
+inflicters for burn only." **That is out of date** — measured against the
+live data:
+
+| Status | Sources |
+|---|---|
+| poison | 4 — `sludge` 30%, `poison_sting` 30%, `twineedle` 20% base; `scratch` via 3 tree nodes |
+| burn | 2 — `ember`, `flamethrower` (plus 8 tree nodes deepening them) |
+| paralysis | 1 — `body_slam` 30% base |
+| freeze | 1 — `ice_beam` 10% base |
+| **sleep** | **0 — nothing in the game can put anything to sleep** |
+
+So `sleep` joins `synthesis`/`moonlight` on the unreachable list: modeled in
+the engine, cured, ticked, tested, and impossible to cause.
+
+Note the shape of the poison/freeze rows: three of the four poison sources
+and the only freeze source are **bare moves with no tree**. The status
+variety is already in the roster — it's sitting on exactly the moves that
+have nothing to spec into.
