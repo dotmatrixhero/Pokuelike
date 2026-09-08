@@ -3,6 +3,577 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Your call: battle log reveal pace (LINE_REVEAL_INTERVAL_MS)
+
+Two branches independently tuned the same number and disagreed. Merged in
+favour of the direct ask, but this is a balance number and it's yours.
+
+- **450ms** (kept) — from the direct ask "Need more pause between each log
+  line", plus `POST_CATCHUP_HOLD_MS` = 1000ms from "a 1000 ms pause after
+  the last one."
+- **200ms** (the other branch) — reasoned against the tick cadence, which
+  is now `BATTLE_STEP_INTERVAL_MS` = 950ms. A four-line hit at 200ms uses
+  800 of 950 and still leaves an inter-exchange gap.
+
+The tension is real: at 450ms a four-line hit needs 1800ms against a 950ms
+tick, so during a sustained exchange the reveal falls behind and
+`MAX_PENDING_LINES`'s instant-catch-up is what bounds the lag. In practice
+that means long fights may snap-reveal rather than pace evenly.
+
+Options: keep 450 and accept snap-catch-up on long exchanges; drop to ~200;
+or raise `BATTLE_STEP_INTERVAL_MS` so 450 fits. Not measured live yet.
+
+## Narrative pillars — written, see NARRATIVE_PILLARS.md
+
+What the game is *about*, and what that lets us refuse. Written because of a
+claim worth taking seriously: simulator games **cannot help** but encode
+their creator's model of how reality works — "an interpretation of reality
+that is baked in code." In a sim there's no "just flavour"; the ruleset *is*
+the ontology. Sharpening added: **omission is a claim too** — we currently
+don't model disease, aging, lasting injury, or non-food scarcity, and each
+silence asserts something about what a life consists of.
+
+Four pillars, each with a **refusal test** (a pillar that never rejects
+anything is a mood, not a pillar):
+
+1. **Humans are animals too** — already structural (humans are a
+   `SpeciesDef` on the same needs/herd/rapport machinery; no capture ever).
+   The difference from Pokémon is *practice, not kind*, so every human
+   capability must carry ecological cost. Refuses: costless human
+   capabilities, and any problem solved by domination.
+2. **Stories everywhere, if you look closely** — mostly built (chronicle,
+   herd histories, notables, generated history). The load-bearing word is
+   **curation**: "stories everywhere" without it becomes stories nowhere,
+   which is DF's real limitation. Mandate: the game must notice on the
+   player's behalf. Refuses: systems whose output is only readable as a log,
+   single-cause events, backstory that isn't true in the data.
+3. **The rugged individual is a myth** — and **the campaign deliberately
+   invokes that trope in order to break it.** Act 1's lone-survivor opening
+   is intentional setup: solitude is *endured, not mastered*; you escape
+   because you stopped being alone. "First" means unsupported, not
+   exceptional. Refuses: any moment the player succeeds alone at something
+   that mattered, including single-handedly saving the village.
+4. **All that you change, changes you** — least built, highest potential.
+   Converges with the Pokopia contrast ("humans become what they do") into
+   **no class selection, only accreted identity** — for the player, the
+   partner, and the land, which remembers (`fire.ts` already leaves scorched
+   ground). Refuses: costless menu-pick identity, changes that leave no
+   trace.
+
+**The method these serve**: deliberate expectation-inversion, proven by
+play. And the hardest discipline that follows — **let the systems make the
+argument, never the dialogue.** If an NPC has to explain the theme, the
+systems failed. (Same restraint LORE_NOTES.md reached independently.)
+
+- [ ] **Decide which omissions are deliberate** — disease, aging, lasting
+      injury, non-food scarcity are all currently unmodelled by default
+      rather than by decision.
+- [ ] **The curation layer is a mandate with no design yet** — what promotes
+      one generated event over the thousands around it into something the
+      player actually sees? Separate job from simulation, real cost.
+- [ ] **How much does the land remember, and for how long?** Pillar 4 wants
+      persistence; the demoted-zone model currently *freezes* terrain rather
+      than ageing it. Real tension.
+- [ ] **Does accreted identity feed back into mechanics**, or stay
+      narrative/reputation only? First is much stronger and much more work.
+- [ ] **Watch pillar 3 vs. the roguelike form** — roguelikes are
+      structurally solitary, and we're using the form to argue against its
+      own premise. Elegant but fragile: if the solo stretch is fun in the
+      wrong way, the inversion fails and it's just a competent lone-survivor
+      game.
+
+## Campaign pitch 1: cave escape -> village -> Jirachi — captured, see CAMPAIGN_DESIGN.md
+
+The first pitch for what the *game* is rather than what the sim is: start
+alone at the bottom of a 5-6 layer cave, survive (eat/drink/fire/shelter/
+craft), befriend your first Pokémon out of a prey herd, fight or evade your
+way up, emerge with an evolution stone, then save and rebuild a village.
+Full pitch captured verbatim in CAMPAIGN_DESIGN.md, along with an audit of
+what already exists versus what's genuinely new.
+
+**Headline finding from that audit**: far more of this exists than expected
+— needs/hunger/thirst, herbs and crops, real spreading fire, shelter
+building, moves, named herds, the rapport graph, leveling/move-specing,
+CA cave generation, and cave/village landmarks (`deepCavern`,
+`tunnelWarren`, `sanctuary`, `crossroads`) are all real, shipped systems.
+The four player-bonding verbs (Feed / Fight alongside / Rescue / Presence)
+are already locked in from an earlier design pass too.
+
+**The one genuinely huge gap**: there is no player agent at all — the sim is
+an observer sim with a camera, no controlled entity, no input→action path.
+Everything else in the pitch is content on top of that single change.
+
+**All four opening decisions are now made** (see CAMPAIGN_DESIGN.md's
+"Decided" section for the reasoning):
+
+- [x] **Turn based.** World steps when the player acts. `tickWorld` is
+      already deterministic per tick, so this is a scheduling change at the
+      driver level, not a sim rewrite — but it does make the existing
+      continuous observer view a second, different mode.
+- [x] **"A well designed randomly generated bespoke level."** Authored
+      generator, random instance — not hand-placed rooms, not "hope a level
+      falls out of the ecosystem sim."
+- [x] **Layer, zone and Z-level collapse into one concept**: zones on
+      different Z levels with stairs between them. "Layer" as a separate
+      spatial noun goes away; a Z level can span several zones horizontally.
+- [x] **Forced fights come from level design, not combat tuning** — tight
+      corridors, a bespoke-generator concern. Today's pursuit/give-up rules
+      don't need retuning to hit a balance target.
+
+Still genuinely open, left by the Z-level decision:
+
+- [ ] **What happens to `Layer` (`surface`/`underground`/`canopy`)** once Z
+      levels exist — sub-layers within each Z level, or does Z replace the
+      enum? DESIGN.md's Z-level section raised this and left it open.
+      Cheapest coherent guess: a cave Z level IS underground at a given
+      depth, and surface/canopy only exist at the top level.
+- [ ] **How a zone addresses itself with Z** — third coordinate on the same
+      dense grid, or caves as a sparse structure hanging off the surface
+      zone containing their entrance? The second is likely much cheaper
+      (caves are rare; a dense 3D grid would be almost entirely empty) and
+      leaves the existing surface macro grid untouched.
+
+## Humans: what they actually are — designed, see HUMANS_DESIGN.md
+
+Direct instruction, gating the geo pass below: "before we do that we gotta
+go deep into humans design... like history and motivations and tools and
+shit." The geo pass knows how to *place* villages; nothing had decided what
+was in one.
+
+Core recommendation: **humans are a simulated species with a thin authored
+overlay**, not static NPCs — because a village turns out to map almost
+exactly onto machinery that already exists (`herds.ts` for named groups with
+founding/splits/history, `herding.ts` cohesion, `herdLeadership.ts`,
+`notables.ts` for earned reputations, `shelter.ts` for building, `crops.ts`
+for farming, `territories.ts`, `herdConflict.ts` for real resource
+pressure, `chronicle.ts` for the record). A `SpeciesDef` already carries
+`buildsShelter`/`biomes`/`preferredTerrain`/`activityPattern`/`isPredator`,
+so "human" is expressible as a species entry today with no new fields.
+
+Three things the doc goes deep on, each with a genuinely cheap hook:
+
+- [ ] **Generated history**, sibling to the geological pass — founding
+      sites, expansion over generations, settlements that split/stagnate/
+      fail, ruins with real recorded causes, era events. Reuses the herd
+      vocabulary almost exactly (**a settlement founding is a herd split**;
+      `HerdRecord` already has `foundedTick`, a parent for splits, and an
+      origin). Payoff: an elder's backstory is *true in the data*.
+- [ ] **Motivations** — individual drives (provide / standing / curiosity /
+      safety / devotion / grievance) biased by the `Disposition` vector
+      (`boldness`/`aggression`/`sociability`) that `nature.ts` already
+      carries. Plus one dominant **settlement** motivation (survive /
+      rebuild / defend / expand / trade / worship) which turns out to be
+      **the quest generator** — both of the pitch's own example quests fall
+      out of it unmodified.
+- [ ] **Tools and material culture** — pre-industrial ladder shared with the
+      player's Act 1 crafting (village = better tables, not different
+      physics). What a settlement can make is **already determined by the
+      geology pass** (forest→timber/bows, highland/`geothermalVent`→ore/
+      smithing, coast→boats/nets), so regional variation is free. Techniques
+      diffuse along trade roads over historical time, and can be *lost* when
+      a settlement falls.
+
+Proposals in that doc worth a decision, not just noting:
+
+- [ ] **Shrines sited at real generated landmarks** (`sacredSpring`,
+      `geothermalVent`, `meteorCrater`, `boneGrounds`) — the world's geology
+      IS its mythology, and a shrine is the evidence someone noticed. Nearly
+      free to implement, gives every generated world its own religion.
+- [ ] **Per-settlement attitude toward Pokémon** (reverent / fearful /
+      pragmatic) set from local facts and drifting with events — decides
+      quests, reactions to the player's bonded partner, and whether "clear
+      the Krabby nest" is pest control or a moral problem.
+- [ ] **Why nobody has bonded before**: bonding needs close-range reading of
+      a dangerous animal, which is exactly what a society surviving by
+      keeping its distance trains itself never to do. The player is first
+      because they were desperate and alone, not chosen.
+- [ ] **TMs as ancient relics, not human technology** — found in ruins/
+      caverns/shrines rather than crafted. Fixes the awkwardness of
+      pre-industrial people manufacturing move-teaching devices, makes ruins
+      worth exploring, and seeds a "the knowledge was lost" runway toward
+      Act 3.
+- [ ] **Inherited roles** as the answer to "a simulated quest-giver can
+      die" — *the elder* persists as an office even when the person doesn't.
+      The only option that turns the problem into a feature.
+
+**Five of the original nine questions are now decided:**
+
+- [x] **Humans are simulated** (with a thin authored overlay for
+      campaign-critical individuals).
+- [x] **The world generates wild and gets settled by a history pass** —
+      recommended with a real caveat about tuning (see below), and a named
+      cheaper fallback (derive history backward instead of simulating it
+      forward) if it misbehaves.
+- [x] **Humans hunting Pokémon is lore-only, never shown** — no hunting
+      behavior in the live sim; generated history, old stories and shrine
+      lore can reference it. Keeps humans sympathetic in the present, keeps
+      the world honest about its past, and is cheaper than the alternative.
+- [x] **No domesticated Pokémon** — at least not in the starting region.
+      Scoped locally on purpose so a distant culture doing otherwise stays
+      available later.
+- [x] **Roles are inherited** — a quest-giver can die; *the elder* is an
+      office, not a person, and the fact someone had to take it up is a
+      story.
+- [x] **Populated world, but wilderness stays dominant** ("just gotta not
+      be... everything") — a tuning target for the history pass, not a
+      design change. Add "fraction of land zones settled / roaded / inside a
+      settlement's influence radius" to what the 50-seed validation run
+      measures.
+
+## Lore research — see LORE_NOTES.md
+
+Canon gathered to check this design against, tiered into what's actual
+in-game text, what's fan theory, and what's fan fiction (so we don't end up
+building on a creepypasta).
+
+**The finding that matters most**: Legends: Arceus's **Hisui** is very close
+to our premise — a frontier settlement where ordinary people fear Pokémon,
+partnership is brand new, and clans revere them. Its villagers / clans /
+expedition split independently reproduces our reverent / fearful / pragmatic
+attitude axis, which is decent evidence the axis is right. LORE_NOTES.md
+ends with a deliberate difference table (no capture at all, generated world
+and history, turn-based, settlement simulation, and a nobody protagonist
+rather than one chosen by a god).
+
+**The pattern worth stealing outright**: in canon, *every modern power
+system is the residue of an ancient catastrophe* — Mega stones are debris
+from AZ's weapon, Dynamax ties to the Darkest Day, Terastallization comes
+out of the Area Zero crater. Our **TMs-as-ancient-relics** proposal is
+therefore house style, not a departure. The second pattern: the deep past is
+revealed **archaeologically** (ruins, murals, folk tales, a diary in a
+burnt-out lab), almost never by a character explaining it — which our
+generated history + ruins + chronicle stack is already a machine for, if we
+keep the restraint.
+
+- [ ] **Nobles and wardens** (Legends: Arceus) is the single best mechanic to
+      borrow: a revered local Pokémon, tended by a human who has never owned
+      it, that can go *frenzied* and must be **calmed rather than killed**.
+      Fits reverent settlements, gives a non-combat job to a bonded partner,
+      matches the pitch's "befriending a predator is hard but possible," and
+      is structurally close to what `herdConflict.ts` already produces (a
+      pressured animal behaving badly for real reasons).
+- [ ] **"Humans and Pokémon once ate at the same table"** (Sinnoh folk tale,
+      real in-game text) is the strongest canon backing for our premise — a
+      world of distance and reverence is a plausible *middle* of a story
+      canon already tells, not a departure from it.
+- [ ] **The dex is an unreliable narrator** — entries contradict each other
+      across versions. For per-settlement culture plus generated history,
+      two villages holding contradictory sincere beliefs about the same
+      species is canon-accurate rather than sloppy. Worth building toward
+      deliberately.
+
+**Delivery channels** are now surveyed in LORE_NOTES.md too — six real
+mechanisms the franchise uses, which matters because pillar 2's "the game
+must notice on the player's behalf" is unbuildable until we know what
+noticing looks like:
+
+- [ ] **Ritual/behaviour is the channel we're most set up for and should
+      lead with.** Lacunosa Town's people stay indoors at night because of a
+      legend — the *curfew is the story*, learned by noticing, with no text.
+      A village that walls itself, leaves offerings, or won't hunt the north
+      woods is telling you its history without a line of dialogue. This is
+      pillar 2's "let the systems make the argument" made concrete, and
+      **four of the six channels need no prose generation at all** — a ruin,
+      a wall, a curfew and a shrine are lore delivered as *world state*.
+- [ ] **Live historiography as the curation layer** — rather than surfacing
+      generated history through UI, give it to a character who is *trying to
+      work it out* and can be wrong in front of you (Sonia researching and
+      publishing across Gen 8; Cynthia reasoning that Giratina was edited
+      out of the official story). Strong candidate answer to the otherwise
+      undesigned curation mandate.
+- [ ] Other four channels: environmental text (found, unexplained — the
+      Mewtwo journals archetype), institutional text (a settlement's own
+      written record, which can *disagree* with the chronicle), NPC
+      testimony (partial, contradictory), ambient dex/item text.
+
+**Pokémon Conquest** is now written up properly, and the piece to steal is
+**Perfect Links** — compatibility is uneven and personal, so who you can bond
+with easily is a fact about *you*, not a grind. Also: link % gates evolution,
+meaning **progression belongs to the pair rather than the creature**.
+Alongside Ranger (borrowed cooperation, Pokémon return to the wild) and Snap
+(the verb is *observing*), the franchise has shipped **three** games whose
+core loop isn't capture — our no-capture decision is well-precedented.
+
+## Myth structures — see MYTH_STRUCTURES.md
+
+Structural analysis of the leaked species folktales (form and function only;
+the standing "don't build on the content" position is unchanged). This is
+the spec for what a generated etiological myth would actually look like.
+
+**Headline:** every violent myth in the corpus is a rule about taking life —
+take males without offspring, never breeding females or young; return
+remains by the species-specific protocol; killing for food is fine but
+mutilation and excess are not; killing for amusement is the original sin.
+Those are ecologically sound harvest rules, which means **respect and
+sustainability are the same rule** — and in our sim that can be *literally
+true*: overhunt breeding females and the population model actually crashes.
+The folklore would be an accurate folk description of the sim.
+
+Six skeletons identified, each with a trigger pattern our chronicle could
+detect and a norm it outputs: **the Trial** (excess → summons → unarmed duel
+→ witnesses carry the rule), **the Contract** (restraint rewarded, terms
+stated, violation punished by ironic reversal), **the Ritual Error** (right
+intent, wrong protocol, irreversible), **the Original Sin** (cruelty for
+amusement → harm made personal → a death → the norm changes), **the
+Crossing** (union across the boundary; the village's cruelty is the real
+sin), and **the Bond Through Change** (Wurmple — the outlier, not
+etiological, and the one that keeps the corpus from being uniformly grim).
+
+- [ ] **Which norms are mechanically real vs. culturally held?** "Don't take
+      breeding females" can be enforced by the population model; "return the
+      horns skyward" can only ever be belief. Both worth having, but
+      mistaking one for the other is how you get a preachy game.
+- [ ] **A myth needs a norm to output, or it needs to be the outlier.** If a
+      generated story doesn't change how a village behaves and isn't a
+      Wurmple, it's noise — the curation problem arriving early.
+- [ ] **Swords vs. bows, from the myths.** The corpus is explicit: *"No bow
+      and no spear, only the sword."* Bow and spear are hunting tools with
+      rites attached; the sword is *found* (taken from Sharpedo), carries no
+      custom, and immediately enables atrocity — and at the trial it won't
+      even draw. Suggests a real mechanical split: hunting tools tied to
+      norms and sustainable use, vs. a weapon that's effective, ungoverned,
+      and **corrosive** (reputation, attitude drift, ecological damage).
+      Satisfies pillar 1's refusal test — no human capability without cost.
+- [ ] **Violence is mutual in every one of these.** The swordsman and the
+      Ursaring both die; the careless hunter dies wearing the skin he stole.
+      Tonal target: combat as mutual destruction, not a skill check.
+
+**Pokopia** (post-apocalyptic Kanto life-sim, March 2026) is now written up
+too — research supplied by the project owner, since the base game sits at my
+knowledge edge and the Aug 2026 expansion is past it. It's the exact mirror
+of our premise (humans evacuated off-world and never came back; you're a
+Ditto wearing your dead trainer's shape), which completes a bracket showing
+our game sits deliberately at *the moment before partnership is invented*.
+Four things worth acting on:
+
+- [ ] **"Pokémon are what they are; humans become what they do."** Pokopia
+      derives a Pokémon's civic role from typing/moveset — instinct IS the
+      job. HUMANS_DESIGN.md independently proposed the opposite for humans
+      (roles *earned* through accumulated history). Both are right for their
+      species, and the contrast is a cheap rule that says something real.
+      Species-derived specialties could come off `SpeciesDef` data we
+      already have; earned titles already exist in `notables.ts`.
+- [ ] **"Comfort, not capture" implies our endgame.** Our villages keep
+      Pokémon *out*; the player is the first who can do the opposite. So the
+      late-game payoff of "you're the first" is **building a place where
+      both can live, and Pokémon start choosing to be there** —
+      mechanically real, and mostly reusing `speciesFitsZone`/
+      `estimateZoneSpecies` with the player changing the inputs.
+- [ ] **Knowledge physically present but socially lost.** Pokopia's Pokémon
+      can't read human writing, so only the player learns the truth. Invert
+      it: ruins hold records nobody in the village can read any more (already
+      canon-shaped — Braille, Unown). Also: **places outlive their names** —
+      `territories.ts` plus a history pass could carry both a current name
+      and an older one that only survives in records.
+- [ ] **Don't drift cozy.** Pokopia removes aggression and territory
+      disputes entirely. That's exactly wrong for us — predation, territory
+      and resource conflict are the engine of the whole simulation, and the
+      friction is what makes eventual coexistence mean anything. Named so we
+      notice if we start sanding it off.
+
+**The Teraleak material** is also written up (owner-supplied research, kept
+with all its caveats: unconfirmed, machine-translation-layered, a ~2005
+pre-Giratina draft, from a criminal breach, and with a documented case of a
+viral misreading that a proper translation walked back). **Standing position:
+don't build on the content** — it isn't canon, it's unstable, and the shipped
+Canalave Library material covers everything we actually want and is citable.
+
+**But the method it reveals is ordinary good worldbuilding and worth taking
+freely**, and it reframes the history pass. Game Freak drafted a full dark
+mythology and shipped a sanded-down fraction; the unshipped text earned its
+keep by keeping the *shipped* fragments consistent with something real.
+
+- [ ] **The history pass IS the internal bible** — this resolves a real
+      worry that a generated history nobody reads is wasted computation. Its
+      job is to make every fragment the player *does* meet (a ruin, an
+      elder's account, a place name, a chronicle line) consistent with actual
+      events. So: generate it all, expose slivers. **Restraint is the
+      technique**, not a limitation.
+- [ ] **Rules-myths vs. character-myths.** The shipped Pokémon myths are
+      almost all mechanism-explaining (why Pokémon leap from grass, why you
+      battle instead of fight, why the Regis must be gathered); the unshipped
+      drafts have protagonists and grief. Split ours the same way — ship the
+      rules-myths (they make systems feel reasoned rather than arbitrary),
+      keep character-myths internal and surface them rarely.
+- [ ] **Generated etiological myths — highest-value output of the history
+      pass.** Every shipped canon myth explains a *present norm* via a *past
+      event*, which is exactly what our chronicle records. So a settlement's
+      culture can be derived from its own history: a recorded catastrophe
+      involving a species → fearful, plus a myth saying why; saved by a
+      landmark's water in a drought → reverent, with a shrine and a story.
+      **The attitude axis stops being a generation-time roll and becomes a
+      consequence** — the village isn't just reverent, it's reverent
+      *because of something that happened to it*, and it can tell you.
+- [ ] **Myths as swappable templates** — the leaked folktales were written
+      as reusable structures with the species swapped (the same story exists
+      in Octillery and Lapras versions). That's literally our generation
+      strategy: *template + real recorded event + the species/place/people
+      involved*. A dozen skeletons filled from the chronicle gives every
+      village its own true stories, and lets two villages tell the same
+      template about different events — which is how real folklore behaves.
+- [ ] **Myths can be wrong, and that's a feature.** Cynthia's in-universe
+      reading is that Giratina was *deliberately edited out* of the official
+      story, and the Canalave folk tale differs between JP and Western text.
+      Since our chronicle holds what actually happened, a village's myth can
+      omit the shameful part, credit the wrong ancestor, or blame the wrong
+      species. That gives the unreliable-narrator idea real teeth (there's a
+      ground truth to be wrong about), a genuine reason to visit ruins (the
+      record contradicts the story), and contradictory myths about the same
+      real event.
+
+- [ ] **Budget a real tuning pass for the history sim.** Named risk, from
+      this project's own scar tissue (the overworld capacity feedback loop
+      that chased 1 forever, caught only by a real multi-thousand-tick run):
+      a forward history sim's likely degenerate outcomes are **collapse**
+      (all ruins), **monoculture** (one settlement eats the continent), and
+      **sameness** (every seed produces the same history — worst of the
+      three, since it costs the same and delivers nothing). Mitigation is
+      the discipline already used everywhere else here: it's cheap to run,
+      so generate ~50 seeds and tune against the real distribution of
+      settlement counts, ages, ruin counts and lineage depth.
+
+## Farming: the defining human activity — designed, see HUMANS_DESIGN.md
+
+Direct emphasis: "Oh and farming. Humans grow crops." Given its own section
+because it's the clearest mechanical line between humans and everything else
+in the sim — **everything else forages; humans make the land produce more.**
+
+`crops.ts` already supplies most of the substrate: 12 crops with real
+`seasonWindow` gating over a genuine spring/summer/autumn/winter cycle,
+biome and runtime-moisture gating, growth stages via `Tile.growth`, and
+`nutritionMultiplier` payoff differences. Farming is a new *user* of that,
+not a new system.
+
+- [ ] What farming adds on top: cleared/tilled field terrain (the most
+      legible sign of human presence on a map), deliberate planting (which
+      makes planting *badly* possible — where stories come from), tending as
+      repeated labour investment (reusing `shelter.ts`'s travel-and-invest
+      shape), irrigation near `riverEdges`, and harvest/storage.
+- [ ] **Granary fullness is the single number driving the Survive
+      motivation** — it's what makes the season calendar actually bite (you
+      eat in winter from what you stored in autumn) and what generates the
+      food quests.
+- [ ] **Farming is the friction generator, and that's the point.** A field
+      is a concentrated undefended pile of food in an ecosystem full of
+      hungry animals. `herdConflict.ts` already fires on genuine
+      cross-species resource contention, so "something is eating the crops"
+      needs no new mechanic. It's also morally interesting rather than flat
+      — a Tauros herd in the barley isn't evil, it's hungry, probably pushed
+      there by a bad season the weather system caused — which lands directly
+      on the reverent/fearful/pragmatic attitude axis and gives a bonded
+      partner an obvious non-combat job (scaring a herd off a field).
+- [ ] Scope: comparable to `crops.ts` or `shelter.ts`, each its own project
+      — but the highest payoff-to-new-machinery ratio in the humans design,
+      since most of it is pointing existing systems at each other.
+
+Still open (see HUMANS_DESIGN.md's own list): how populated the world is,
+how deep history goes, roads-from-history vs. MST, TMs as ancient relics,
+what makes a settlement's attitude drift, and whether arriving with a bonded
+partner mechanically changes how villages treat you.
+
+## Human geo pass: roads, villages, ports, shrines — designed, see CAMPAIGN_DESIGN.md
+
+Direct ask: "We also need to do 'human' geo passes to add human-ness to it
+all. Like roads and villages and ports and boats and homes and shrines and
+shit." This is the phase DESIGN.md deliberately deferred ("it's after the
+geological stuff") — now designed, still unbuilt. Slots into `macroGrid.ts`
+after `placeLandmarks`, following that function's existing eligibility-gated
+/capped/spaced placement pattern.
+
+Most of the inputs already exist as per-zone macro facts: `riverEdges`/
+`isLake` (fresh water), `coastEdges` (ports — already computed for every
+land zone), `estimateZoneResourceIndex` (arable land), `minLandNeighbors`
+(junctions), and the greedy min-spacing loop from `selectMacroRiverSources`.
+Settlement tiers (hamlet/village/town/port) fall out of the site score
+rather than needing three separate placement passes.
+
+- [ ] **Roads are the one genuinely new algorithm** — the first *connective*
+      human feature (rivers are the only existing one, and steepest descent
+      is exactly wrong for a road). Shape: MST over settlements plus a few
+      extra edges for loops, then cost-based pathing per edge (cheap on
+      grassland/beach, expensive on highland/jungle/snow, very expensive
+      crossing rivers except at a bridge/ford, impassable on ocean), marking
+      `roadEdges` in the same compass-edge vocabulary `riverEdges`/
+      `coastEdges` already use.
+- [ ] **Sea routes between ports** — same MST idea over water; what makes a
+      port mechanically distinct from a coastal village rather than flavor.
+- [ ] **Per-zone human influence gradient** (0..1, distance-decay from
+      settlements/roads) — already called for by DESIGN.md's "life pass"
+      as "extent of human influence"; falls straight out of this pass.
+      Feeds species density/wariness near towns and what generates on
+      promotion.
+- [ ] **Roads will hit the known river gap**, identically: `biasForZone`
+      currently consumes only elevation/ocean/biome, so macro edge facts
+      (`riverEdges`, and now `roadEdges`) are recorded but never turned into
+      real tiles entering at the right edge. Argument for fixing it **once**,
+      generically — one "macro edge features → tiles at the correct edge"
+      mechanism serves rivers, roads and coastlines together, instead of
+      three versions of the same thing.
+- [ ] **Boats are not a geo pass** — ports are terrain, a boat is a vehicle
+      that carries the player between coastal zones. Different kind of thing,
+      needs its own design (does it move on the macro map? is there a sea
+      zone to sail through?).
+- [ ] Shrines/homes: `sacredSpring` and `sanctuary` landmarks already exist
+      as the natural-world cousins; shrines are the human-built version and
+      could plausibly be sited near them or on high ground.
+
+## Villages, quests and content — not designed, own pass needed
+
+Direct ask, stated as scope: "Need to design villages and quests and
+content. Lots work." Agreed — biggest unstarted piece, needs its own design
+pass, deliberately not attempted in CAMPAIGN_DESIGN.md.
+
+- [ ] **Design order matters**: human geo pass first (villages exist as
+      places on the map), then village content (what's *in* one), then
+      quests (what you do for them). Out of order means designing quests for
+      places with no defined shape.
+- [ ] The premise already justifies quest-giving for free: "trainers aren't
+      really a thing yet... you're the first to train one, so people ask for
+      your help." Not a chosen one — the only person with a capability
+      nobody else has.
+- [ ] **Keep quests sim-shaped, not scripted.** Both examples given ("clear
+      out Krabby nests by the beach," "collect materials") are things the
+      existing sim can actually express — a real herd with a real territory
+      in a real coastal zone. Worth holding onto that property deliberately
+      as quest design grows.
+- [ ] Village crafting tables are the progression spine linking Act 1
+      survival crafting to Act 2 — same system upgraded, not a separate
+      village-economy system.
+
+## Implement more moves — real backlog, known ceiling
+
+Direct ask: "And implement more moves." Real numbers, checked: **~35 moves
+implemented** as sim mechanics (`packages/data/src/moves.ts`) against
+**~951 imported** into the dex as data (`dex/moves.generated.ts`, which
+explicitly "does NOT reimplement move battle logic").
+
+- [ ] Every dex move already has canon power/accuracy/type/category — the
+      work is what each one *does* beyond damage, plus effect fields the
+      engine doesn't understand yet. Three distinct pipelines already exist
+      to hang them on: hostile hits (`predation.ts`), ally support
+      (`support.ts`), self/tile utility (`utilityMoves.ts`), so most of the
+      work is picking the next batch and deciding which pipeline each
+      belongs to. See MOVES_DESIGN.md, which owns this thread.
+
+Unbuilt systems the pitch implies, each a real project of its own, none
+started: inventory/equipment (armor, stick, backpack, fishing rod, TMs,
+stones), crafting + recipes + crafting tables, cooking (fire and food both
+exist; the verb connecting them doesn't), the Wary→Tolerant→Curious→Bonded
+trust stage machine, tactical partner commands (move + target tile, with the
+UX risk the pitch itself flags), and all of Act 2's village/NPC/quest tissue.
+
+- [ ] **Suggested first slice, if/when this gets built**: one cave layer,
+      one player, one bond — a player agent using the existing `needs.ts`
+      wholesale, player-driven turns, a real prey herd + water + crops (all
+      of which already generate), the four bonding verbs wired to the
+      existing rapport graph with legible trust stages, and an exit once
+      bonded. Everything else deliberately excluded. The one question that
+      can't be answered on paper — does "earn a partner by reading the
+      ecosystem" read as a puzzle or as trial-and-error — is answerable with
+      exactly that slice.
+- [ ] Act 3 (Jirachi/wish) is a direction, not a design — the pitch says so
+      itself ("or something. Idk."). Nothing to scope yet.
+
 ## Food crops (Oran/Sitrus/Pecha/Cheri berries kept + Corn/Wheat/Rice/Tomato/Apple/Potato/Pumpkin/Herbs) — built, see CROPS_DESIGN.md
 
 Direct ask: "more kinds of food, not just berries... nutrition dense, grow
