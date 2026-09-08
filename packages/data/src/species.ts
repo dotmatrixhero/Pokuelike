@@ -730,8 +730,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Direct ask: "make arboks less common. I just don't like em lol" — a
     // real, judged-per-species dial (see `SpeciesDef.rarity`'s own doc
     // comment), not a change to Ekans (its own base form) or any other
-    // species on the roster.
-    rarity: 0.35,
+    // species on the roster. Follow-up ask ("further reduce arbok spawn")
+    // after 0.35 still wasn't rare enough — dropped further rather than
+    // to 0, so it can still show up, just uncommonly.
+    rarity: 0.12,
   }),
   caterpie: speciesFromDex("CATERPIE", {
     spriteKey: "caterpie",
