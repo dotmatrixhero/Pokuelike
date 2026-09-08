@@ -200,6 +200,7 @@ export function tickEgg(world: World, agent: Agent, log: EventLog | undefined, c
     species: agent.species,
     layer: agent.layer,
     pos: { ...agent.pos },
+    herdId: agent.herdId,
   });
 }
 

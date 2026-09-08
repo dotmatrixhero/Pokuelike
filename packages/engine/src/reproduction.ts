@@ -423,6 +423,7 @@ export function applyMateSeeking(
             species: egg.species,
             layer: egg.layer,
             pos: { ...egg.pos },
+            herdId: egg.herdId,
           });
         }
       }

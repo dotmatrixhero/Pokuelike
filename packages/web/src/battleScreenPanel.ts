@@ -1,7 +1,7 @@
-import { typeEffectiveness, type Agent, type SimEvent, type World } from "@pokuelike/engine";
+import { notableFullName, speciesDisplayName, typeEffectiveness, type Agent, type SimEvent, type World } from "@pokuelike/engine";
 import type { ActiveEngagementInfo, NotableCategory } from "./autoCamera.js";
 import { eventNamesAnyOf, findMoveUsed } from "./eventText.js";
-import { idLabel, LEADER_ICON, TITLE_DISPLAY_NAME } from "./notableTitles.js";
+import { herdNameOf, idLabel, LEADER_ICON } from "./notableTitles.js";
 import { agentAccentColor } from "./palette.js";
 import { getSprite } from "./sprites.js";
 
@@ -305,11 +305,27 @@ export class BattleScreenPanel {
     const name = document.createElement("div");
     name.className = "battle-screen-name";
     name.style.color = accent;
+    // A notable fights under its full earned name ("Surgeshade
+    // Single-Minded"), not the bare title ("The Warrior") this used to show
+    // — direct ask, and it is the same name the chronicle and the event log
+    // now use for the same animal.
     name.textContent = agent
-      ? `${agent.isHerdLeader ? `${LEADER_ICON} ` : ""}${agent.notableTitle ? TITLE_DISPLAY_NAME[agent.notableTitle] : agent.species} (${agent.alive === false ? "down" : "Lv" + (agent.level ?? "?")})`
+      ? `${agent.isHerdLeader ? `${LEADER_ICON} ` : ""}${agent.notableTitle ? notableFullName(agent.notableTitle, agent.id, agent.types) : speciesDisplayName(agent.species)} (${agent.alive === false ? "down" : "Lv" + (agent.level ?? "?")})`
       : id;
     identRow.appendChild(name);
     box.appendChild(identRow);
+
+    // Which group this animal is fighting for. Direct ask: "in battle logs
+    // and their hp bar, use herd name." It earns its line here more than
+    // anywhere else — a mob fight is a wrapped row of same-species chips,
+    // and the herd is the only thing that says which side each one is on.
+    const herd = agent ? herdNameOf(world, agent) : undefined;
+    if (herd) {
+      const herdEl = document.createElement("div");
+      herdEl.className = "battle-screen-herd";
+      herdEl.textContent = herd;
+      box.appendChild(herdEl);
+    }
     if (agent && agent.maxHp) {
       // Rounded for display only — combat math elsewhere in the engine can
       // leave HP as a non-integer fraction (partial-tick regen, fractional

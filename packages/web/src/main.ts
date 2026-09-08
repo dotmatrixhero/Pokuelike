@@ -1,11 +1,11 @@
-import { EventLog, tickWorld, tickMacroWorld, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World } from "@pokuelike/engine";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World } from "@pokuelike/engine";
 import { createDemoWorld, createDemoMacroWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
 import { EventPopups } from "./eventPopups.js";
 import { MoveEffects } from "./moveEffects.js";
-import { renderInspector } from "./inspector.js";
+import { renderInspector, type GroupSelection } from "./inspector.js";
 import { renderLegend } from "./legend.js";
 import { AutoCameraController, type AutoCameraHost } from "./autoCamera.js";
 import { BattleScreenPanel } from "./battleScreenPanel.js";
@@ -116,6 +116,7 @@ const minimapButton = document.getElementById("minimap-button") as HTMLButtonEle
 const minimapArtZone = document.getElementById("minimap-art-zone") as HTMLElement;
 const minimapArtOverworld = document.getElementById("minimap-art-overworld") as HTMLElement;
 const minimapCaption = document.getElementById("minimap-caption") as HTMLElement;
+const regionBannerEl = document.getElementById("region-banner") as HTMLElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -263,10 +264,33 @@ function resetUiForNewWorld(): void {
   updateStatusLabels();
 }
 
+/**
+ * Registers every herd in a freshly-loaded world, before the first frame is
+ * drawn.
+ *
+ * Herd records are created by `tickHerds`, which the engine runs once per
+ * tick — so a world that has not been ticked yet has agents carrying
+ * `herdId`s that no record exists for, and every UI that names a herd falls
+ * back to the raw id. Normally invisible (it lasts one tick), but this app
+ * boots PAUSED: the very first thing a viewer sees was the inspector listing
+ * "spearow-zone-32,32" instead of "the Spearows of the Green Plain", and it
+ * stayed that way until they pressed play. Caught by screenshotting the real
+ * app rather than by any test — every test and the runner tick first.
+ *
+ * Calling the engine's own once-per-tick pass rather than reimplementing
+ * registration here: it is idempotent (it returns the existing record for a
+ * herd it has already seen), so this is exactly the state tick 1 would
+ * produce, just one frame earlier.
+ */
+function registerHerdsForFirstFrame(): void {
+  tickHerds(world, log);
+}
+
 function loadWorld(seed: number): void {
   macroWorld = undefined;
   world = createDemoWorld(seed);
   log = new EventLog();
+  registerHerdsForFirstFrame();
   resetUiForNewWorld();
 
   seedInput.value = String(seed);
@@ -289,6 +313,7 @@ function loadMacroWorld(seed: number = SCENARIO_SEED): void {
   macroWorld = createDemoMacroWorld(seed);
   world = findRegion(macroWorld, macroWorld.focusedKey)!.world!;
   log = new EventLog();
+  registerHerdsForFirstFrame();
   resetUiForNewWorld();
   macroMapView.render(macroWorld, true);
 
@@ -304,6 +329,9 @@ function focusZone(row: number, col: number): void {
   if (!macroWorld) return;
   setFocusedZone(macroWorld, row, col, IMMIGRATION_CONTEXT, log);
   world = findRegion(macroWorld, macroWorld.focusedKey)!.world!;
+  // A newly promoted zone has never been ticked either — same first-frame
+  // gap as a fresh load, see `registerHerdsForFirstFrame`.
+  registerHerdsForFirstFrame();
   resetUiForNewWorld();
   macroMapView.render(macroWorld, true);
 }
@@ -423,11 +451,71 @@ function selectAgent(agent: Agent | undefined): void {
   inspectorDirty = true;
 }
 
+/**
+ * The species or herd the viewer asked to see, or `undefined` — direct ask:
+ * "clicking on herd name or species should auto zoom to them and highlight
+ * them on the map."
+ *
+ * Stored as the query, never as the ids matching it. Resolved fresh every
+ * frame by `focusGroupIds` below, so a herd that loses a member, gains a
+ * hatchling, or walks across the map stays correctly highlighted instead of
+ * slowly becoming a highlight of whoever used to be in it.
+ */
+let focusedGroup: GroupSelection | undefined;
+
+/** Every living surface member of `focusedGroup` right now. Empty (not undefined) when the group has died out — the highlight simply stops drawing, which is the honest outcome. */
+function focusGroupIds(): ReadonlySet<string> | undefined {
+  if (!focusedGroup) return undefined;
+  const ids = new Set<string>();
+  for (const a of world.agents) {
+    if (a.alive === false) continue;
+    if (focusedGroup.kind === "species" ? a.species === focusedGroup.key : a.herdId === focusedGroup.key) ids.add(a.id);
+  }
+  return ids;
+}
+
+/**
+ * Frames the whole group rather than centring on one member: a herd is
+ * spread out, and centring on an arbitrary member would leave the rest off
+ * screen at Auto Camera's tight zoom. Zooms out far enough to fit the group's
+ * bounding box (never in past the default), then centres it.
+ */
+function focusOnGroup(selection: GroupSelection): void {
+  // Clicking the active row again clears it — a row is a toggle, so there is
+  // always an obvious way to get the highlight off screen.
+  if (focusedGroup && focusedGroup.kind === selection.kind && focusedGroup.key === selection.key) {
+    focusedGroup = undefined;
+    inspectorDirty = true;
+    return;
+  }
+  focusedGroup = selection;
+  inspectorDirty = true;
+
+  const ids = focusGroupIds();
+  if (!ids || ids.size === 0) return;
+  const bounds = highlightBounds(world, ids);
+  if (!bounds) return;
+  const spanX = bounds.right - bounds.left;
+  const spanY = bounds.bottom - bounds.top;
+  // Fit the group with a little margin, clamped so a single animal does not
+  // slam the view to maximum zoom and a map-wide species does not zoom past
+  // what the canvas can show.
+  const fit = Math.min(canvasWrap.clientWidth / Math.max(1, spanX), canvasWrap.clientHeight / Math.max(1, spanY)) * 0.8;
+  setZoom(Math.max(ZOOM_MIN, Math.min(AUTO_CAM_ZOOM, fit)));
+  const cx = (bounds.left + bounds.right) / 2;
+  const cy = (bounds.top + bounds.bottom) / 2;
+  const targetLeft = Math.max(0, cx * zoom - canvasWrap.clientWidth / 2);
+  const targetTop = Math.max(0, cy * zoom - canvasWrap.clientHeight / 2);
+  autoCamLastScroll = { left: targetLeft, top: targetTop };
+  canvasWrap.scrollLeft = targetLeft;
+  canvasWrap.scrollTop = targetTop;
+}
+
 function refreshSelection(): void {
   if (!inspectorDirty) return;
   inspectorDirty = false;
   const agent = selectedAgentId ? world.agents.find((a) => a.id === selectedAgentId) : undefined;
-  renderInspector(inspectorEl, agent, world);
+  renderInspector(inspectorEl, agent, world, { onFocusGroup: focusOnGroup, focused: focusedGroup });
 }
 
 // --- Unified side panel: Inspector / Battle / Events / Legend tabs ---------
@@ -880,6 +968,32 @@ autoCamToggleBtn.addEventListener("click", () => {
 type OverworldSubView = "overworld" | "zone";
 let overworldSubView: OverworldSubView = "overworld";
 
+/**
+ * Names the land under the zone view — direct ask: "the name of the region
+ * like bright coast should be prominently displayed somewhere, maybe right
+ * above the play bar."
+ *
+ * Read live from `world.territoryName` every frame rather than set once when
+ * a zone loads: promoting a different zone swaps `world` wholesale, and a
+ * banner updated at load time would have to be re-poked from every one of
+ * those paths. One string comparison a frame is cheaper than that coupling.
+ *
+ * Hidden, not blanked, when there is no name — the macro map has its own
+ * territory labels drawn on it (macroMap.ts) so a second floating name there
+ * would be redundant, and a plain non-overworld world has no territories at
+ * all.
+ */
+let lastRegionBannerText = "";
+function refreshRegionBanner(): void {
+  const name = overworldSubView === "zone" ? world.territoryName : undefined;
+  const text = name ?? "";
+  if (text !== lastRegionBannerText) {
+    lastRegionBannerText = text;
+    regionBannerEl.textContent = text;
+  }
+  regionBannerEl.hidden = text === "";
+}
+
 function applyOverworldSubView(view: OverworldSubView): void {
   overworldSubView = view;
   canvasWrap.classList.toggle("force-hide", view === "overworld");
@@ -995,6 +1109,7 @@ function frame(): void {
   // the follow-up ask ("draw the yellow bounding box anyways on all cool
   // events happening around the map") — every other currently-tracked
   // battle, shown dimmer, clickable (see the canvas click handler above).
+  refreshRegionBanner();
   drawWorld(
     ctx,
     world,
@@ -1002,7 +1117,8 @@ function frame(): void {
     renderStyle,
     engagement?.ids,
     autoCamera.listBattleEngagements().map((e) => e.ids),
-    moveEffects.jigglingAgentIds()
+    moveEffects.jigglingAgentIds(),
+    focusGroupIds()
   );
   drawEventPopups(ctx, eventPopups.active());
   drawMoveFlashes(ctx, moveEffects.activeFlashes());

@@ -1,5 +1,5 @@
 import type { Agent, NotableTitleId, World } from "@pokuelike/engine";
-import { speciesDisplayName } from "@pokuelike/engine";
+import { notableFullName, speciesDisplayName } from "@pokuelike/engine";
 
 /**
  * Real agent/egg ids are internal bookkeeping strings, not display text —
@@ -54,26 +54,47 @@ function originWord(id: string): string | undefined {
 }
 
 /**
- * `"Species (id)"` for an ordinary agent, or `"The Hero (Species)"` for a
- * current title-holder — the shared "look up an id, render its display
- * identity" helper every consumer that only has a bare id/species pair on
- * hand (a `SimEvent`'s fields, not a live `Agent` reference) uses, so
- * `eventText.ts` and `autoCamera.ts` render the same identity for the same
- * agent rather than two independent conventions. `world` is optional —
- * without it, this always falls back to the plain `"Species (id)"` form
- * (the same "no world, same plain text as before" contract `eventText.ts`'s
- * `formatEvent` already established). The `(id)` part itself is now the
- * short `(shortId)` / `(shortId, origin)` form — see `shortId`/`originWord`
- * above — never the full raw id.
+ * The display identity for an id/species pair — the shared helper every
+ * consumer that only has a bare id and species on hand (a `SimEvent`'s
+ * fields, not a live `Agent` reference) uses, so `eventText.ts` and
+ * `autoCamera.ts` render the same identity for the same agent rather than
+ * two independent conventions. `world` is optional — without it this falls
+ * back to the plain `"Species (id)"` form, the same "no world, same plain
+ * text as before" contract `formatEvent` already established.
+ *
+ * Two shapes, both driven by direct asks:
+ *
+ * - Ordinary agent: `"Kingler (32, the Kinglers of the Bright Coast)"` —
+ *   "in battle logs and their hp bar, use herd name in the logs like kingler
+ *   (kinglers of the bright coast) takes 7 damage."
+ * - Title-holder: `"Surgeshade Single-Minded (Kingler, the Kinglers of the
+ *   Bright Coast)"` — "notables should have their full name like Surgeshade
+ *   Single-Minded in battle logs and in hp bar." That is the engine's own
+ *   `notableFullName`, the same name the chronicle prints, rather than the
+ *   bare title ("The Warrior") this used to show.
+ *
+ * **The short id survives on purpose.** The obvious reading of the ask is to
+ * replace the id outright with the herd name, but a herd routinely holds
+ * several animals of one species — two Kinglers of the same herd would then
+ * be literally identical in the log, which is the exact problem an earlier
+ * ask ("shrink the Id and origin... like cubone (32, immigrant)") had
+ * already been fixed. So the herd name takes the *origin* word's slot
+ * instead: a herd name strictly dominates it (an immigrant herd is called
+ * "the Wandering Kin", a splinter "the Severed Flame"), so nothing is lost.
+ * An agent with no herd at all still gets the old `(32, nomad)` form.
  */
 export function idLabel(world: World | undefined, id: string, rawSpecies: string): string {
   // Pokemon names are proper nouns — the roster stores ids lowercase.
   const species = speciesDisplayName(rawSpecies);
   const agent = world?.agents.find((a) => a.id === id);
   const leader = agent ? leaderPrefix(agent) : "";
-  if (agent?.notableTitle) return `${leader}${TITLE_DISPLAY_NAME[agent.notableTitle]} (${species})`;
-  const origin = originWord(id);
-  const suffix = origin ? `${shortId(id)}, ${origin}` : shortId(id);
+  const herd = agent?.herdId ? world?.herds?.[agent.herdId]?.name : undefined;
+  if (agent?.notableTitle) {
+    const full = notableFullName(agent.notableTitle, agent.id, agent.types);
+    return `${leader}${full} (${herd ? `${species}, ${herd}` : species})`;
+  }
+  const qualifier = herd ?? originWord(id);
+  const suffix = qualifier ? `${shortId(id)}, ${qualifier}` : shortId(id);
   return `${leader}${species} (${suffix})`;
 }
 
@@ -132,16 +153,19 @@ export const TITLE_ICON: Record<NotableTitleId, string> = {
 };
 
 /**
- * "The Hero (bulbasaur)" — a title-holder's display identity wherever an
- * agent is normally shown as `${species}-${idSuffix}`. Keeps the raw id out
- * of the common case (a title is meant to read as a real, earned identity,
- * not a decorated id) while still surfacing the species, since "The Hero" on
- * its own loses which specific Pokémon that is at a glance.
+ * "Surgeshade Single-Minded (Kingler)" — a title-holder's display identity
+ * wherever an agent is normally shown as a bare species name. Keeps the raw
+ * id out of the common case (a title is meant to read as a real, earned
+ * identity, not a decorated id) while still surfacing the species, since a
+ * name on its own loses which Pokémon it belongs to at a glance.
  */
 export function agentDisplayName(agent: Agent, def: { name: string } | undefined): string {
   const speciesName = def?.name ?? speciesDisplayName(agent.species);
   const leader = leaderPrefix(agent);
-  if (agent.notableTitle) return `${leader}${TITLE_DISPLAY_NAME[agent.notableTitle]} (${speciesName})`;
+  // The engine's own generated name ("Surgeshade Single-Minded"), not the
+  // bare title ("The Warrior") — direct ask, and it matches what the
+  // chronicle already calls this same animal.
+  if (agent.notableTitle) return `${leader}${notableFullName(agent.notableTitle, agent.id, agent.types)} (${speciesName})`;
   return `${leader}${speciesName}`;
 }
 
@@ -166,63 +190,30 @@ export function leaderPrefix(agent: Agent): string {
 // --- Herd naming ---------------------------------------------------------
 
 /**
- * A small, curated flavor-name pool — deliberately not a random-name
- * generator (out of scope per the task brief: "No procedurally-generated
- * individual names beyond the title itself"). Picking deterministically from
- * a fixed list by hashing the title-holder's own id keeps this stable across
- * re-renders and re-simulations of the same run without inventing new
- * per-run state to store it in.
- */
-const HERD_NAME_POOL = [
-  "Ember",
-  "Thistle",
-  "Briar",
-  "Moss",
-  "Flint",
-  "Hollow",
-  "Sable",
-  "Wren",
-  "Cinder",
-  "Bramble",
-  "Frost",
-  "Copper",
-  "Slate",
-  "Marigold",
-  "Rowan",
-  "Onyx",
-];
-
-function hashString(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h;
-}
-
-/**
- * Wherever herd identity is shown, a herd names itself after its actual
- * current LEADER specifically (see DESIGN.md's "Herd Leadership" section) —
- * upgraded from this feature's original "any titled member" behavior once a
- * real leadership concept existed to name it after instead. Falls back to
- * the old "any living titled member" behavior only when the herd genuinely
- * has titled member(s) but no leader yet — a real, possible transient state,
- * not a bug: `updateHerdLeadership` promotes a leader the same tick a herd
- * gains its first eligible (titled) member, so this gap is normally
- * invisible, but a title CLAIMED and a herd's leadership BOTH being resolved
- * the same tick as `updateNotables`/`updateHerdLeadership`'s own internal
- * ordering (see simulation.ts) means there's no tick where a titled member
- * exists but hasn't yet been considered for leadership — this fallback exists
- * for defensiveness (a titled member of a species/scenario with no `herdId`
- * at all still can't lead, since leadership requires herd membership) rather
- * than a gap actually observed in a real run. Falls back further to the raw
- * `herdId` for a herd with no titled member at all, unchanged from before
- * this feature. Deterministic (a pure hash of the holder's own id, no rng)
- * so the same holder always gets the same name across renders.
+ * A herd's display name — now the engine's own `HerdRecord.name` ("the
+ * Kinglers of the Bright Coast"), the same name the chronicle tells its
+ * story under.
+ *
+ * This used to hash a titled member's id into a 16-word flavor pool and
+ * return "Ember's Pack". That pool predates herds being real entities at
+ * all: at the time a herd was nothing but an opaque `Agent.herdId` string,
+ * so naming one after whichever member happened to hold a title was the only
+ * material available. Herds now have records with a founding, an origin, a
+ * lineage and a permanent name (engine's herds.ts), and having the UI invent
+ * a *second*, unrelated name for the same herd meant the inspector and the
+ * chronicle disagreed about what a group was called — direct ask: "inspector
+ * should show the names of the chronicle herds."
+ *
+ * The old pool is gone rather than kept as a fallback: an unnamed herd id is
+ * a herd `tickHerds` has not registered yet (it registers every herd it sees
+ * once per tick), so the raw id shows for at most one tick, and a stable
+ * wrong name would be worse than a momentary ugly one.
  */
 export function herdDisplayName(world: World, herdId: string): string {
-  const leaderId = world.herdLeaders?.[herdId];
-  const leader = leaderId ? world.agents.find((a) => a.id === leaderId && a.alive !== false) : undefined;
-  const holder = leader ?? world.agents.find((a) => a.herdId === herdId && a.alive !== false && a.notableTitle !== undefined);
-  if (!holder) return herdId;
-  const name = HERD_NAME_POOL[hashString(holder.id) % HERD_NAME_POOL.length];
-  return `${name}'s Pack`;
+  return world.herds?.[herdId]?.name ?? herdId;
+}
+
+/** A herd's name for an agent, or `undefined` for one with no herd — the lookup every "show which group this animal belongs to" caller wants. */
+export function herdNameOf(world: World | undefined, agent: Agent): string | undefined {
+  return agent.herdId ? world?.herds?.[agent.herdId]?.name : undefined;
 }

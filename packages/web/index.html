@@ -223,6 +223,29 @@
          map itself (not the header) so it's reachable regardless of which
          panel tab or map mode is showing, and reads as a media-player
          control rather than one more toolbar row. */
+      #region-banner {
+        position: absolute;
+        left: 50%;
+        /* Clears the 52px-tall HUD pill (16px from the bottom) with a small
+           gap, so the two read as one stacked group. */
+        bottom: 78px;
+        transform: translateX(-50%);
+        z-index: 20;
+        pointer-events: none;
+        max-width: min(70vw, 520px);
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.6px;
+        color: #f2e7c9;
+        /* No panel behind it — a solid chip here would read as another
+           control. The shadow is what keeps it legible over both a bright
+           desert and a dark forest without boxing it in. */
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.75);
+      }
       #playback-hud {
         position: absolute;
         left: 50%;
@@ -464,6 +487,10 @@
       .battle-screen-combatant-ident { display: flex; align-items: center; gap: 5px; }
       .battle-screen-sprite { width: 20px; height: 20px; image-rendering: pixelated; flex: 0 0 auto; }
       .battle-screen-name { font-weight: 700; font-size: 13px; }
+      /* The herd a combatant fights for — deliberately quieter than the name
+         above it: in a mob fight several chips share one herd, so it reads as
+         a grouping mark rather than competing with each animal's identity. */
+      .battle-screen-herd { font-size: 10px; opacity: 0.62; margin-top: 1px; letter-spacing: 0.2px; }
       .battle-screen-hp-track { height: 7px; border-radius: 4px; background: #232a34; overflow: hidden; }
       .battle-screen-hp-fill { height: 100%; border-radius: 4px; transition: width 0.25s ease; }
       .battle-screen-hp-value { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
@@ -557,6 +584,20 @@
       #inspector .inspect-value { text-align: left; }
       #inspector .inspect-row.inspect-row-compact { gap: 6px; }
       #inspector .inspect-row.inspect-row-compact .inspect-label { min-width: 0; }
+      /* A species/herd row that answers a click by framing that group on the
+         map. The hover affordance is deliberately louder than the resting
+         state — these sit in a dense list of read-only rows, so they have to
+         announce that they do something without turning the list into a wall
+         of buttons. */
+      .inspect-focusable { cursor: pointer; border-radius: 4px; margin: 0 -4px; padding-left: 4px; padding-right: 4px; user-select: none; -webkit-user-select: none; }
+      .inspect-focusable:hover { background: #1d2531; }
+      .inspect-focused { background: #17313a; box-shadow: inset 2px 0 0 #5fe3ff; }
+      .inspect-focused .inspect-label { color: #9fe9ff; }
+      /* Herds nest under the species they belong to — the indent and the
+         smaller, quieter type are what make it read as "these are the groups
+         of the animal above" rather than another top-level row. */
+      #inspector .inspect-herd-row { padding-left: 14px; font-size: 11px; opacity: 0.78; }
+      #inspector .inspect-herd-row.inspect-focused { opacity: 1; }
 
       .inspect-group {
         border: 1px solid var(--panel-border);
@@ -765,6 +806,14 @@
             </button>
             <div id="minimap-caption" class="minimap-caption">overworld</div>
           </div>
+
+          <!-- The name of the land you are looking at. Direct ask: "in map,
+               the name of the region like bright coast should be prominently
+               displayed somewhere, maybe right above the play bar." Its own
+               floating element rather than a row inside the HUD: the HUD is a
+               pill of controls and dropping a wide piece of prose into it
+               would stretch the pill and push the buttons off centre. -->
+          <div id="region-banner" hidden></div>
 
           <div id="playback-hud">
             <button id="play-pause" title="Play/Pause">

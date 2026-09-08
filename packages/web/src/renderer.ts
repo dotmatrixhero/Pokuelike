@@ -495,14 +495,23 @@ export function drawWorld(
    */
   passiveHighlights?: readonly ReadonlySet<string>[],
   /** Ids of agents that used a move recently enough to still be jiggling — see moveEffects.ts's `MoveEffects.jigglingAgentIds`. */
-  jigglingAgentIds?: ReadonlySet<string>
+  jigglingAgentIds?: ReadonlySet<string>,
+  /**
+   * Every member of the herd/species the viewer clicked in the inspector —
+   * direct ask: "clicking on herd name or species should auto zoom to them
+   * and highlight them on the map." Drawn distinctly from the yellow
+   * battle boxes (see `drawGroupHighlight`) because it answers a different
+   * question: those say "something is happening here", this says "these are
+   * the ones you asked about."
+   */
+  focusGroupIds?: ReadonlySet<string>
 ): void {
   // Always advance the animation clock, even in ASCII mode (which ignores
   // `dt` entirely) — so switching from ASCII back to tile mode doesn't hand
   // `interpolatedPos` one huge accumulated `dt` and produce a visible warp.
   const dt = frameDeltaSeconds();
   if (style === "ascii") return drawWorldAscii(ctx, world, selectedAgentId);
-  return drawWorldTiles(ctx, world, selectedAgentId, dt, autoCamHighlightIds, passiveHighlights, jigglingAgentIds);
+  return drawWorldTiles(ctx, world, selectedAgentId, dt, autoCamHighlightIds, passiveHighlights, jigglingAgentIds, focusGroupIds);
 }
 
 function drawWorldTiles(
@@ -512,7 +521,8 @@ function drawWorldTiles(
   dt: number,
   autoCamHighlightIds?: ReadonlySet<string>,
   passiveHighlights?: readonly ReadonlySet<string>[],
-  jigglingAgentIds?: ReadonlySet<string>
+  jigglingAgentIds?: ReadonlySet<string>,
+  focusGroupIds?: ReadonlySet<string>
 ): void {
   const surface = world.tiles.surface;
 
@@ -753,6 +763,9 @@ function drawWorldTiles(
       drawPassiveHighlight(ctx, world, ids);
     }
   }
+  // Last of the three, so the group the viewer explicitly asked to see is
+  // never drawn under a battle box it happens to overlap.
+  if (focusGroupIds && focusGroupIds.size > 0) drawGroupHighlight(ctx, world, focusGroupIds);
 
   if (selectedAgentId) {
     const selected = world.agents.find((a) => a.id === selectedAgentId);
@@ -1005,7 +1018,60 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
 
   ctx.restore();
 
+  if (agent.notableTitle && !isCorpse) drawNotableStar(ctx, px, py);
   if (isSelected) drawSelectionRing(ctx, px, py);
+}
+
+/**
+ * A small persistent star at a notable's upper right — direct ask:
+ * "notables on zone map should have a persistent star above their heads,
+ * small, to the right to show they are special."
+ *
+ * Persistent is the operative word, and it is why this is drawn here rather
+ * than reusing the popup/flash machinery: everything else that marks an
+ * agent on this map is transient (a move flash, an event popup, a battle
+ * box) and disappears within a second or two. A title is a permanent fact
+ * about an animal, so its mark has to survive being looked at.
+ *
+ * Hand-drawn as a path rather than a "*" glyph or an emoji: at this size a
+ * text star renders differently on every platform and an emoji star brings
+ * its own colour, which fights the type-coloured sprites underneath. A
+ * stroked path also gets a dark outline for free, which is what keeps it
+ * legible over both a snow tile and a night-shaded forest one.
+ *
+ * Corpses are skipped — `Agent.notableTitle` is not cleared on death (the
+ * chronicle still wants to know who this was), but a star floating over a
+ * body reads as a live marker.
+ */
+function drawNotableStar(ctx: CanvasRenderingContext2D, px: number, py: number): void {
+  const cx = px + TILE_SIZE * 0.80;
+  const cy = py + TILE_SIZE * 0.18;
+  // Sized by measurement, not by eye. The first version used 0.17 of a tile
+  // (a ~3px star at TILE_SIZE 20) and a full-width dark outline, which left
+  // 7 fill pixels on screen at default zoom — a pixel-scan of the live canvas
+  // found it, a screenshot could not. Small was the ask; invisible was not.
+  const outer = TILE_SIZE * 0.26;
+  const inner = outer * 0.44;
+  ctx.save();
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outer : inner;
+    // -90deg start so a point faces up rather than the star sitting rotated.
+    const angle = (Math.PI / 5) * i - Math.PI / 2;
+    const x = cx + Math.cos(angle) * r;
+    const y = cy + Math.sin(angle) * r;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = "#ffd94a";
+  // A hairline outline, not a full pixel: at this size a 1px stroke centred
+  // on the path eats half the fill from both sides.
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+  ctx.lineWidth = 0.75;
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
 }
 
 /** A brief icon floating up and fading out over an event's own tile — see eventPopups.ts. */
@@ -1144,6 +1210,43 @@ function drawPassiveHighlight(ctx: CanvasRenderingContext2D, world: World, ids: 
   ctx.globalAlpha = 0.55;
   ctx.setLineDash([3, 5]);
   ctx.strokeRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
+  ctx.restore();
+}
+
+/**
+ * The inspector's "show me this group" highlight — a ring around each
+ * member plus one box around the lot of them.
+ *
+ * Cyan, not the highlights' yellow, and solid rather than dashed: the yellow
+ * dashed boxes mean "a battle is happening here" and are driven by the
+ * simulation, while this is driven by the viewer asking a question. Two
+ * different meanings sharing one visual language would make both harder to
+ * read, especially since they can be on screen at the same time.
+ *
+ * The per-member rings matter more than the box. A herd spread across a
+ * quarter of the map produces a bounding box so large it says nothing; the
+ * rings are what actually let a viewer pick its members out of a crowd of
+ * the same species.
+ */
+function drawGroupHighlight(ctx: CanvasRenderingContext2D, world: World, ids: ReadonlySet<string>): void {
+  ctx.save();
+  ctx.strokeStyle = "#5fe3ff";
+  ctx.lineWidth = 1.75;
+  for (const id of ids) {
+    const agent = world.agents.find((a) => a.id === id);
+    if (!agent || agent.layer !== "surface" || agent.alive === false) continue;
+    const pos = renderPos.get(id) ?? agent.pos;
+    ctx.beginPath();
+    ctx.arc((pos.x + 0.5) * TILE_SIZE, (pos.y + 0.5) * TILE_SIZE, TILE_SIZE * 0.62, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  const bounds = highlightBounds(world, ids);
+  if (bounds) {
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([2, 4]);
+    ctx.strokeRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
+  }
   ctx.restore();
 }
 

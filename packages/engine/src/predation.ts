@@ -816,6 +816,10 @@ export function applyEggEating(world: World, agent: Agent, ctx: LevelingContext 
     eggSpecies: egg.species,
     layer: egg.layer,
     pos: { ...egg.pos },
+    // The EGG's herd, not the eater's — a raided nest is the victim herd's
+    // story ("eggs were eaten :(" was called out by name as a beat worth
+    // telling), and the predator's own chapter has its successful hunts.
+    herdId: egg.herdId,
   });
   logBehaviorChange(log, world, agent, "seekFood");
   agent.behavior = "seekFood";

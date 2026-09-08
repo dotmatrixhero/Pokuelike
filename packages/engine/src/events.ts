@@ -493,6 +493,8 @@ export type SimEvent =
       species: string;
       layer: Layer;
       pos: Vec2;
+      /** The subject's herd at the moment it happened — stamped so a chronicle can say whose story this belongs to. See herds.ts. */
+      herdId?: string;
     }
   | {
       kind: "eggHatched";
@@ -501,6 +503,8 @@ export type SimEvent =
       species: string;
       layer: Layer;
       pos: Vec2;
+      /** The subject's herd at the moment it happened — stamped so a chronicle can say whose story this belongs to. See herds.ts. */
+      herdId?: string;
     }
   | {
       kind: "eggEaten";
@@ -511,6 +515,8 @@ export type SimEvent =
       eggSpecies: string;
       layer: Layer;
       pos: Vec2;
+      /** The subject's herd at the moment it happened — stamped so a chronicle can say whose story this belongs to. See herds.ts. */
+      herdId?: string;
     }
   | {
       kind: "eggDefended";
