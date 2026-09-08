@@ -5824,3 +5824,43 @@ not something this pathfinding pass itself caused or is positioned to fix.
       instead of folding it into an aggregate, and move the camera. The known
       cost is the existing lossy demote — the zone you leave turns its
       individuals back into aggregate numbers.
+
+- [x] **Battles were unwatchable — and it was clashes, not battles.** Direct
+      report: "battles are so short now, i can't follow em at all... its too
+      fast too follow", then "it doesnt even seem to linger at all to me. on
+      4x speed it barely flashes."
+      - **Measured first.** Real fights in the simulation are genuinely tiny:
+        over 6,000 ticks, 20 engagements with a **median duration of 1 tick**
+        and a 90th percentile of 6. So part of "too short" was not a bug at
+        all — a one-tick fight is a single exchange, and the camera was
+        correctly framing it, showing one beat and releasing.
+      - **The actual bug was that most of what you watch is a `clash`, not a
+        `battle`.** Seed 20260903 over 6,000 ticks: **594 herdClash against 45
+        fought** — 13 to 1. An earlier merge gave clashes the same rich Battle
+        Screen as a real battle (same move/crit/damage lines, same HP bars)
+        but none of the pacing that makes one readable. A clash:
+        - never entered `enterBattleStep`, so it ran at whatever the speed
+          slider said — at 4x, a 1-7 tick fight is a literal flash;
+        - never triggered `maybeAutoSwitchTab`, so the panel it renders into
+          usually was not even on screen;
+        - held for `CLASH_EPILOGUE_MS` 400ms after concluding;
+        - went stale after `CLASH_STALE_MS` 1200ms, which at a battle-step
+          cadence is barely one tick.
+      - Fixes: clashes now enter battle-step and auto-switch the tab like
+        battles; `CLASH_STALE_MS` 1200 -> 2800, `CLASH_EPILOGUE_MS` 400 ->
+        1500, and a new `CLASH_MIN_ONSCREEN_MS` of 3000.
+      - Separately, `BATTLE_STALE_MS` (3000ms) was **shorter than the p99 gap
+        between hits in one fight** (7 ticks ~ 4.6s), so real battles were
+        being cut off while still going. Raised to 4500.
+      - New `BATTLE_MIN_ONSCREEN_MS` (5000) is the honest lever for a
+        one-exchange fight: it does not lie about the simulation (the fight
+        really is over) but keeps the result on screen long enough to read.
+        The alternative — a long staleness timeout — was tried at 40 ticks
+        and produced ~26s of dead air, which is what an earlier fix removed.
+      - Pacing: `BATTLE_STEP_INTERVAL_MS` 650 -> 950 and
+        `LINE_REVEAL_INTERVAL_MS` 160 -> 200. At 650/160 a four-line hit used
+        640 of the 650ms tick, so lines arrived as an unbroken stream; 800 of
+        950 leaves a real gap between exchanges.
+      - `CLASH_PROMOTION_COOLDOWN_TICKS` 40 -> 100, since each clash now holds
+        the camera for seconds and 594 per 6,000 ticks would otherwise
+        monopolise Auto Camera and crowd out every other kind of moment.

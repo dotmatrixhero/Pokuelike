@@ -58,12 +58,18 @@ function hasRichBattleScreen(category: NotableCategory | undefined): boolean {
  * "It's super effective!", "Y takes N damage!") and `render` used to paint
  * every one of them into the DOM in the same frame — readable on replay,
  * but nothing for a human eye to actually follow *as it happens*. Chosen
- * well under `BATTLE_STEP_INTERVAL_MS` (main.ts, 650ms) so a typical
+ * well under `BATTLE_STEP_INTERVAL_MS` (main.ts, now 950ms) so a typical
  * 3-4-line hit finishes revealing itself before the NEXT tick's beat lands
  * a new batch on top of it, rather than the reveal queue perpetually
  * trailing the sim.
+ *
+ * Raised 160 -> 200ms alongside that cadence. At 160ms against a 650ms tick
+ * a four-line hit consumed 640 of the available 650, so lines arrived in an
+ * essentially unbroken stream; 800 of 950 leaves a real gap between
+ * exchanges, which is what lets the eye find the boundary between one hit
+ * and the next.
  */
-const LINE_REVEAL_INTERVAL_MS = 160;
+const LINE_REVEAL_INTERVAL_MS = 200;
 /**
  * If the reveal queue ever falls behind by more than this many lines (a
  * mob fight landing several simultaneous hits in one tick, or the viewer
