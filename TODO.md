@@ -5333,3 +5333,89 @@ not something this pathfinding pass itself caused or is positioned to fix.
         Wandering Kin of the Crag Heights". Names are now unique across
         every herd in the world and stay spent after a herd dies, because a
         name is an identity in the chronicle's permanent record.
+
+- [x] **What actually killed a herd.** Direct verdict on the ending beat the
+      chronicle used to print — "The last of them was gone." — "Are we not
+      following what kills them? Just dying out is sad and vague."
+      - We *were* following it. Every death this engine can inflict already
+        records a typed event stamped with the victim's herd: `killed`
+        carries the predator's own species, `starved` distinguishes hunger
+        from thirst, `burned` comes from fire.ts. The chronicle simply was
+        not reading any of it at the one moment it matters most. That is the
+        recurring shape of this project's bugs — the data was there and
+        nothing looked at it.
+      - New `endingText` in `chronicle.ts` reads the herd's own deaths in the
+        final stretch (the death-cluster window, not the whole run — a herd
+        mauled early and starved at the end is remembered for the starving)
+        and names the dominant cause: "Hunted to the last — 3 of them taken
+        by **Spearow**", "Starved out — the last one died with nothing left
+        to eat", "The water failed them", "Fire took them". A second cause is
+        named only when it is at least half the first, so a single stray
+        death does not read as more important than it was.
+      - Naming the animal is the whole point. "Hunted to the last by Spearow"
+        is a story; "predation" is a statistic.
+      - One real fix underneath: `burned` was the only death event with no
+        `herdId` on it, so fire deaths were invisible to every herd story,
+        not just the ending. Stamped now, and fire deaths also join the
+        "hard stretch" loss clusters they were being left out of.
+      - **Two honest cases that matter as much as the dramatic ones.** A herd
+        can end with no death at all — its last members walk into another
+        region and get folded into a herd there (`foldAgentIntoAggregate`) —
+        and that gets its own line rather than an invented death. And there
+        is genuinely no death-by-old-age in this engine: the `diedOfAge`
+        event type exists in events.ts and **nothing anywhere records it**.
+        "They grew old" is a sentence the chronicle can never truthfully
+        write today. Worth fixing, but it is a simulation change, not a
+        prose one — see below.
+      - Across six seeds the endings are dominated by thirst, which is a
+        balance signal rather than a writing one and is logged separately.
+
+- [ ] **Nothing dies of old age.** `diedOfAge` is a declared event kind with
+      zero record sites in the engine — `grep` finds only the type definition
+      and four consumers waiting for an event that never arrives. Agents have
+      an `age`, it drives maturity and the Elder title, and it is never fatal.
+      Consequence: a herd's story can never end with a generation simply
+      running out, which is the one ending a stable, well-fed herd should
+      eventually get. Wants a species-scaled lifespan and a gentle
+      senescence rather than a hard cutoff.
+
+- [x] **Names: infix removed, and a parity bug it was hiding.** Direct
+      verdict: "waspdraseeker and foamthalborn and flarewynwing is a bit
+      much. Waspseeker and foamborn and flarewing and pincerheart accomplish
+      the same thing better." They do. Names are strictly root + end now.
+      - The infix was buying pool size (~9,600 per type) at the cost of the
+        names themselves. Paid for it by growing the pools instead: 24 -> 36
+        roots per type and 40 -> 78 ends, giving ~2,800 per type.
+      - **The interesting part is what removing it exposed.** Measuring the
+        new pool showed exactly 1,404 reachable names out of 2,808 possible
+        pairings — precisely half, which is never a coincidence. FNV-1a
+        preserves parity: every step is an xor with a char code and a
+        multiply by an odd constant, so the low bit of the output is just the
+        seed parity xored with the parity of the input bytes. Salting an id
+        with the fixed suffix `":end"` (one odd byte) therefore flipped that
+        bit *every single time*, locking the root index and the end index
+        into opposite parities. Half the name space was unreachable and the
+        output looked completely fine. Fixed with an avalanche finalizer on
+        the hash; all 2,808 are now reachable.
+      - This is the second correlated-hash bug in this one file (the first
+        was bit-shifting a single hash for three indices). The lesson that
+        actually generalizes: a generated-content pool needs a test that
+        asserts the *whole* pool is reachable, because partial reachability
+        is invisible in the output by construction.
+      - `names.test.ts` now asserts a measured collision RATE (1.4% of
+        12-animal cohorts, 5.2% of 20-animal cohorts contain any duplicate)
+        instead of the "zero collisions at 80 animals" it used to claim.
+        With a 2,800-name pool that claim is simply false — it only ever held
+        for the one hand-picked set of ids the test happened to use.
+
+- [ ] **Thirst is over half of all herd endings.** Falls straight out of the
+      new ending beat, which is exactly what it was for. Measured over three
+      seeds x 6,000 ticks, 19 herds ended: 10 of thirst, 5 hunted to the
+      last, 3 with no death at all (absorbed into another herd), 1 of hunger,
+      0 to fire. Water is doing more killing than predators and famine
+      combined, and hunger — the need with the whole flora system behind it —
+      barely registers. Two candidates worth separating before touching a
+      number: thirst may simply be crossing its grace threshold sooner than
+      hunger does, or water sources may be too sparse/too clustered on the
+      map for a migrating herd to reach. Compare `THIRST_STARVATION_GRACE_TICKS`
+      against `STARVATION_GRACE_TICKS` first, then water coverage per zone.

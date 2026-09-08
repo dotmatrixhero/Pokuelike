@@ -18,12 +18,38 @@ describe("displayNameFor", () => {
     expect(displayNameFor("a-1")).toMatch(/^[A-Z][a-z]+$/);
   });
 
-  it("has no collisions at a realistic same-species population", () => {
-    // The original 240-name pool collided 56% of the time at 20 animals.
-    for (const n of [20, 40, 80]) {
-      const names = new Set(Array.from({ length: n }, (_, i) => displayNameFor(`bulbasaur-${i}`, ["grass"])));
-      expect(names.size, `${n} animals`).toBe(n);
-    }
+  it("reaches its whole pool — no correlation between the two halves", () => {
+    // This is the assertion that caught a real bug twice. Plain FNV-1a
+    // preserves parity, so salting the id with `":end"` flipped the low bit
+    // every time and locked root and end into opposite parities: exactly
+    // half the pairings (1,404 of 2,808) were unreachable, with nothing
+    // visibly wrong in the output. Asserting the pool is FULLY reachable is
+    // the only thing that surfaces that class of failure.
+    const names = new Set(Array.from({ length: 200_000 }, (_, i) => displayNameFor(`z-${i}`, ["grass"])));
+    expect(names.size).toBeGreaterThan(2_700);
+  });
+
+  it("keeps same-species collisions rare at the scale a real run reaches", () => {
+    // Deliberately a measured RATE, not the "zero collisions" the previous
+    // version claimed. Dropping the infix (see names.ts) shrank the pool
+    // from ~9,600 per type to ~2,800, and at 2,800 names the birthday
+    // problem makes zero collisions in a 40-animal cohort simply false —
+    // asserting it would only have held for the one hand-picked id set the
+    // test happened to use. Measured over 500 independent cohorts: 1.4% of
+    // 12-animal cohorts and 5.2% of 20-animal cohorts contain any duplicate
+    // at all. A herd peaks around a dozen and a species runs a few dozen
+    // world-wide, so that is the range that matters.
+    const cohorts = 500;
+    const dupRate = (n: number): number => {
+      let withDup = 0;
+      for (let c = 0; c < cohorts; c++) {
+        const names = new Set(Array.from({ length: n }, (_, i) => displayNameFor(`bulbasaur-${c}-${i}`, ["grass"])));
+        if (names.size !== n) withDup++;
+      }
+      return withDup / cohorts;
+    };
+    expect(dupRate(12), "12 animals").toBeLessThan(0.05);
+    expect(dupRate(20), "20 animals").toBeLessThan(0.12);
   });
 
   it("never doubles a letter across a join — no 'Sapathhide'", () => {
@@ -36,11 +62,12 @@ describe("displayNameFor", () => {
     }
   });
 
-  it("keeps three-part names the exception, not the norm", () => {
-    const withInfix = Array.from({ length: 400 }, (_, i) => displayNameFor(`n-${i}`, ["fire"]))
-      .filter((n) => /wyn|dra|mor|thal/.test(n)).length;
-    expect(withInfix).toBeGreaterThan(0);
-    expect(withInfix).toBeLessThan(200); // under half
+  it("is strictly two parts — no spliced middle syllable", () => {
+    // Direct verdict on the old three-part form: "waspdraseeker and
+    // foamthalborn and flarewynwing is a bit much. Waspseeker and foamborn
+    // and flarewing and pincerheart accomplish the same thing better."
+    const names = Array.from({ length: 400 }, (_, i) => displayNameFor(`n-${i}`, ["fire"]));
+    for (const name of names) expect(name, name).not.toMatch(/wyn|dra|thal/);
   });
 });
 

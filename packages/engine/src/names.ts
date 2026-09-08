@@ -28,35 +28,28 @@ import type { PokemonType } from "./typing.js";
 
 /** Roots by type — the flavour half of the name. */
 const ROOTS_BY_TYPE: Partial<Record<PokemonType, readonly string[]>> = {
-  grass: ["Bram", "Thorn", "Vine", "Bloom", "Fern", "Root", "Verd", "Moss", "Seed", "Grove", "Bri", "Sap", "Petal", "Leaf", "Nettle", "Bough", "Yarrow", "Tendril", "Husk", "Bramble", "Wilt", "Canopy", "Spore", "Green"],
-  fire: ["Ember", "Pyro", "Cinder", "Scorch", "Blaze", "Ash", "Coal", "Sear", "Flare", "Kindle", "Smolder", "Char", "Forge", "Ignis", "Wick", "Molten", "Furnace", "Brand", "Soot", "Fume", "Torch", "Balefire", "Roast", "Glow"],
-  water: ["Tide", "Brine", "Mael", "Current", "Surge", "Wave", "Drift", "Foam", "Undert", "Rill", "Spray", "Marsh", "Kelp", "Shoal", "Rain", "Deluge", "Eddy", "Silt", "Pool", "Frost", "Mist", "Torrent", "Wash", "Cove"],
-  rock: ["Bedrock", "Crag", "Quarry", "Stone", "Granite", "Slate", "Boulder", "Scree", "Flint", "Basalt", "Shale", "Rubble", "Cairn", "Tor", "Gravel", "Obsid", "Mountain", "Cliff", "Marble", "Chalk", "Grit", "Pumice", "Ledge", "Spire"],
-  ground: ["Burrow", "Delve", "Loam", "Furrow", "Tunnel", "Warren", "Dust", "Clay", "Mire", "Trench", "Hollow", "Under", "Grave", "Sink", "Dune", "Silt", "Barrow", "Fissure", "Bore", "Deep", "Sod", "Quake", "Rift", "Mound"],
-  bug: ["Vex", "Sting", "Chitin", "Swarm", "Mandi", "Hive", "Drone", "Carapace", "Nettle", "Weave", "Silk", "Scuttle", "Larva", "Pincer", "Buzz", "Cocoon", "Thrum", "Wasp", "Mite", "Husk", "Gall", "Spindle", "Creep", "Antenna"],
-  flying: ["Gale", "Wind", "Zephyr", "Talon", "Plume", "Cirrus", "Updraft", "Skye", "Feather", "Squall", "Loft", "Soar", "Aerie", "Kestrel", "Storm", "Vane", "Drift", "Wing", "Crest", "Perch", "Thermal", "Swift", "High", "Cloud"],
-  electric: ["Volt", "Arc", "Spark", "Storm", "Static", "Ion", "Jolt", "Surge", "Fulmin", "Thunder", "Coil", "Flash", "Bolt", "Charge", "Tesla", "Crackle", "Dynamo", "Zap", "Gleam", "Livewire", "Filament", "Shock", "Amp", "Glare"],
-  ice: ["Frost", "Rime", "Glaci", "Hoar", "Sleet", "Shiver", "Floe", "Crystal", "Chill", "Snow", "Icicle", "Blizzard", "Pale", "Winter", "Drift", "Freeze", "Bitter", "Cold", "Thaw", "Wither", "Crisp", "Boreal", "Flurry", "Still"],
-  poison: ["Venom", "Blight", "Toxin", "Miasma", "Fester", "Sludge", "Bane", "Wither", "Acrid", "Fume", "Rot", "Spore", "Corrode", "Gall", "Noxi", "Seep", "Reek", "Curdle", "Taint", "Bile", "Murk", "Vile", "Drip", "Pall"],
-  psychic: ["Psy", "Mind", "Aether", "Trance", "Echo", "Vision", "Lucid", "Wraith", "Thought", "Veil", "Rift", "Augur", "Reverie", "Halo", "Silence", "Whisper", "Ora", "Numen", "Dream", "Sight", "Astral", "Hush", "Fathom", "Cipher"],
-  fighting: ["Iron", "Fist", "Bulwark", "Vanguard", "Brawn", "Grapple", "Strike", "Guard", "Bracer", "Hammer", "Steel", "Resolve", "Onset", "Fury", "Mettle", "Stalwart", "Rally", "Break", "Sinew", "Clash", "Bout", "Anvil", "Blow", "Stand"],
-  dark: ["Shade", "Umbra", "Night", "Gloom", "Raven", "Dusk", "Hollow", "Grim", "Sable", "Murk", "Shadow", "Ebon", "Creep", "Blackt", "Malice", "Prowl", "Stalk", "Veil", "Pitch", "Wane", "Cruel", "Fell", "Lurk", "Bleak"],
-  ghost: ["Wraith", "Shroud", "Pall", "Spectre", "Hollow", "Mourn", "Grave", "Wisp", "Lament", "Revenant", "Haunt", "Dirge", "Shade", "Fade", "Keen", "Barrow", "Rest", "Requiem", "Chill", "Moan", "Vigil", "Cere", "Gloam", "Knell"],
-  steel: ["Iron", "Forge", "Rivet", "Chrome", "Alloy", "Bastion", "Girder", "Temper", "Plate", "Cog", "Anvil", "Slag", "Ward", "Bolt", "Keen", "Burnish", "Lathe", "Sheen", "Bar", "Gild", "Rust", "Mail", "Weld", "Edge"],
-  dragon: ["Wyrm", "Drake", "Scale", "Talon", "Ancient", "Tyrant", "Saur", "Rend", "Cata", "Sovereign", "Titan", "Maw", "Regal", "Emberwyrm", "Sunder", "Vast", "Elder", "Ruin", "Storm", "Fang", "Crown", "Doom", "Wing", "Ravage"],
-  fairy: ["Glim", "Lumen", "Petal", "Chime", "Dawn", "Whimsy", "Gossamer", "Trill", "Silver", "Wish", "Charm", "Hallow", "Bright", "Fey", "Sprite", "Bell", "Mirth", "Glade", "Shimmer", "Blessing", "Lilt", "Rosy", "Spell", "Kind"],
-  normal: ["Thorn", "Ash", "Bram", "Fen", "Gale", "Hollow", "Iron", "Kes", "Lark", "Mor", "Nim", "Oak", "Pike", "Quill", "Rook", "Sable", "Tarn", "Vex", "Wren", "Yarrow", "Bracken", "Elder", "Harrow", "Marrow"],
+  grass: ["Bram", "Thorn", "Vine", "Bloom", "Fern", "Root", "Verd", "Moss", "Seed", "Grove", "Bri", "Sap", "Petal", "Leaf", "Nettle", "Bough", "Yarrow", "Tendril", "Husk", "Bramble", "Wilt", "Canopy", "Spore", "Green", "Briar", "Sprout", "Ivy", "Reed", "Bud", "Amber", "Fen", "Loam", "Willow", "Hedge", "Sedge", "Bloomroot"],
+  fire: ["Ember", "Pyro", "Cinder", "Scorch", "Blaze", "Ash", "Coal", "Sear", "Flare", "Kindle", "Smolder", "Char", "Forge", "Ignis", "Wick", "Molten", "Furnace", "Brand", "Soot", "Fume", "Torch", "Balefire", "Roast", "Glow", "Pyre", "Flick", "Blister", "Spark", "Cauter", "Kiln", "Bellow", "Scald", "Ashen", "Firebrand", "Cinderfall", "Sunder"],
+  water: ["Tide", "Brine", "Mael", "Current", "Surge", "Wave", "Drift", "Foam", "Undert", "Rill", "Spray", "Marsh", "Kelp", "Shoal", "Rain", "Deluge", "Eddy", "Silt", "Pool", "Frost", "Mist", "Torrent", "Wash", "Cove", "Fathom", "Ripple", "Sluice", "Brack", "Trough", "Wharf", "Squall", "Estu", "Gill", "Reef", "Nautil", "Bilge"],
+  rock: ["Bedrock", "Crag", "Quarry", "Stone", "Granite", "Slate", "Boulder", "Scree", "Flint", "Basalt", "Shale", "Rubble", "Cairn", "Tor", "Gravel", "Obsid", "Mountain", "Cliff", "Marble", "Chalk", "Grit", "Pumice", "Ledge", "Spire", "Menhir", "Talus", "Quartz", "Sandstone", "Bluff", "Karst", "Sill", "Dolmen", "Cobble", "Fossil", "Ridge", "Anvil"],
+  ground: ["Burrow", "Delve", "Loam", "Furrow", "Tunnel", "Warren", "Dust", "Clay", "Mire", "Trench", "Hollow", "Under", "Grave", "Sink", "Dune", "Silt", "Barrow", "Fissure", "Bore", "Deep", "Sod", "Quake", "Rift", "Mound", "Terra", "Peat", "Gully", "Ravine", "Furrowe", "Molewor", "Sandpit", "Bedland", "Culvert", "Adit", "Shaft", "Drift"],
+  bug: ["Vex", "Sting", "Chitin", "Swarm", "Mandi", "Hive", "Drone", "Carapace", "Nettle", "Weave", "Silk", "Scuttle", "Larva", "Pincer", "Buzz", "Cocoon", "Thrum", "Wasp", "Mite", "Husk", "Gall", "Spindle", "Creep", "Antenna", "Thorax", "Molt", "Bristle", "Wasp", "Chirr", "Nymph", "Spiracle", "Gnaw", "Skitter", "Elytra", "Clutch", "Prong"],
+  flying: ["Gale", "Wind", "Zephyr", "Talon", "Plume", "Cirrus", "Updraft", "Skye", "Feather", "Squall", "Loft", "Soar", "Aerie", "Kestrel", "Storm", "Vane", "Drift", "Wing", "Crest", "Perch", "Thermal", "Swift", "High", "Cloud", "Cumul", "Aloft", "Pinion", "Rush", "Glide", "Roost", "Alba", "Sirocco", "Downdraft", "Trill", "Kite", "Vault"],
+  electric: ["Volt", "Arc", "Spark", "Storm", "Static", "Ion", "Jolt", "Surge", "Fulmin", "Thunder", "Coil", "Flash", "Bolt", "Charge", "Tesla", "Crackle", "Dynamo", "Zap", "Gleam", "Livewire", "Filament", "Shock", "Amp", "Glare", "Anode", "Fuse", "Wire", "Ohm", "Circuit", "Pylon", "Spike", "Thrash", "Kindler", "Glint", "Volter", "Fray"],
+  ice: ["Frost", "Rime", "Glaci", "Hoar", "Sleet", "Shiver", "Floe", "Crystal", "Chill", "Snow", "Icicle", "Blizzard", "Pale", "Winter", "Drift", "Freeze", "Bitter", "Cold", "Thaw", "Wither", "Crisp", "Boreal", "Flurry", "Still", "Berg", "Nival", "Frore", "Hail", "Slush", "Verglas", "Cryo", "Numb", "Whiteout", "Glass", "Hush", "Brume"],
+  poison: ["Venom", "Blight", "Toxin", "Miasma", "Fester", "Sludge", "Bane", "Wither", "Acrid", "Fume", "Rot", "Spore", "Corrode", "Gall", "Noxi", "Seep", "Reek", "Curdle", "Taint", "Bile", "Murk", "Vile", "Drip", "Pall", "Vitriol", "Dross", "Squalor", "Cankere", "Pustule", "Reeking", "Ichor", "Sump", "Effluv", "Bligh", "Fen", "Slake"],
+  psychic: ["Psy", "Mind", "Aether", "Trance", "Echo", "Vision", "Lucid", "Wraith", "Thought", "Veil", "Rift", "Augur", "Reverie", "Halo", "Silence", "Whisper", "Ora", "Numen", "Dream", "Sight", "Astral", "Hush", "Fathom", "Cipher", "Nous", "Sooth", "Portent", "Mesmer", "Quiet", "Prescien", "Umbral", "Lore", "Scry", "Focus", "Riddle", "Muse"],
+  fighting: ["Iron", "Fist", "Bulwark", "Vanguard", "Brawn", "Grapple", "Strike", "Guard", "Bracer", "Hammer", "Steel", "Resolve", "Onset", "Fury", "Mettle", "Stalwart", "Rally", "Break", "Sinew", "Clash", "Bout", "Anvil", "Blow", "Stand", "Gauntlet", "Pummel", "Grit", "Valor", "Temper", "Warder", "Buckler", "Endure", "Charge", "Havoc", "Duel", "Marrow"],
+  dark: ["Shade", "Umbra", "Night", "Gloom", "Raven", "Dusk", "Hollow", "Grim", "Sable", "Murk", "Shadow", "Ebon", "Creep", "Blackt", "Malice", "Prowl", "Stalk", "Veil", "Pitch", "Wane", "Cruel", "Fell", "Lurk", "Bleak", "Vile", "Wicked", "Slink", "Scheme", "Cinderd", "Blot", "Ravenou", "Spite", "Nether", "Cinder", "Glower", "Skulk"],
+  ghost: ["Wraith", "Shroud", "Pall", "Spectre", "Hollow", "Mourn", "Grave", "Wisp", "Lament", "Revenant", "Haunt", "Dirge", "Shade", "Fade", "Keen", "Barrow", "Rest", "Requiem", "Chill", "Moan", "Vigil", "Cere", "Gloam", "Knell", "Cerement", "Tomb", "Sepul", "Wailer", "Ashen", "Pale", "Ossu", "Threnody", "Hollowe", "Gloom", "Ether", "Umbra"],
+  steel: ["Iron", "Forge", "Rivet", "Chrome", "Alloy", "Bastion", "Girder", "Temper", "Plate", "Cog", "Anvil", "Slag", "Ward", "Bolt", "Keen", "Burnish", "Lathe", "Sheen", "Bar", "Gild", "Rust", "Mail", "Weld", "Edge", "Ingot", "Quench", "Filings", "Buckle", "Spanner", "Mandrel", "Cinder", "Brace", "Hasp", "Tine", "Ferrous", "Scoria"],
+  dragon: ["Wyrm", "Drake", "Scale", "Talon", "Ancient", "Tyrant", "Saur", "Rend", "Cata", "Sovereign", "Titan", "Maw", "Regal", "Emberwyrm", "Sunder", "Vast", "Elder", "Ruin", "Storm", "Fang", "Crown", "Doom", "Wing", "Ravage", "Geas", "Aeon", "Wyvern", "Cinder", "Sovran", "Hoard", "Warlord", "Primal", "Grand", "Pyroclas", "Verdig", "Nemean"],
+  fairy: ["Glim", "Lumen", "Petal", "Chime", "Dawn", "Whimsy", "Gossamer", "Trill", "Silver", "Wish", "Charm", "Hallow", "Bright", "Fey", "Sprite", "Bell", "Mirth", "Glade", "Shimmer", "Blessing", "Lilt", "Rosy", "Spell", "Kind", "Faun", "Nixie", "Halcyon", "Tinsel", "Rune", "Solace", "Lullab", "Merry", "Grace", "Fable", "Wisp", "Star"],
+  normal: ["Thorn", "Ash", "Bram", "Fen", "Gale", "Hollow", "Iron", "Kes", "Lark", "Mor", "Nim", "Oak", "Pike", "Quill", "Rook", "Sable", "Tarn", "Vex", "Wren", "Yarrow", "Bracken", "Elder", "Harrow", "Marrow", "Corb", "Dun", "Fallow", "Gorse", "Heath", "Juni", "Linden", "Mel", "Nettle", "Osier", "Pallid", "Rook"],
 };
 
 /** Used when a species' type is unknown — the original neutral, woodsy set. */
 const FALLBACK_ROOTS = ROOTS_BY_TYPE.normal!;
-
-/**
- * Optional middle syllable. Mostly empty on purpose: a two-part name like
- * "Bramclaw" is the house style, and a three-part one ("Bramwynclaw") should
- * be the rarer, grander-sounding exception rather than the norm.
- */
-const INFIXES = ["", "", "", "", "", "", "", "", "wyn", "dra", "mor", "thal"];
 
 /** The second half — mostly body parts, bearings and verbs, so a name reads like a creature's. */
 const ENDS = [
@@ -64,35 +57,61 @@ const ENDS = [
   "bark", "spur", "maw", "scale", "horn", "pelt", "tooth", "shell", "quill", "hoof",
   "gaze", "cry", "call", "tread", "pace", "shade", "heart", "sworn", "born", "bane",
   "seeker", "walker", "singer", "watcher", "biter", "runner", "keeper", "breaker", "warden", "hunter",
+  "coat", "vein", "spine", "talon", "beak", "snout", "paw", "flank", "jaw", "grin",
+  "howl", "roar", "stride", "leap", "crest", "wake", "hold", "brand", "veil", "reach",
+  "bearer", "binder", "render", "ranger", "stalker", "shaper", "tamer", "caller", "chaser", "climber",
+  "digger", "weaver", "drinker", "dreamer", "wanderer", "scarred", "marked", "blessed",
 ];
 
+/**
+ * FNV-1a with an avalanche finalizer, and the finalizer is not decoration.
+ * Plain FNV-1a preserves parity: every step is an xor with a char code and a
+ * multiply by an odd constant, so the low bit of the result is just the seed
+ * parity xored with the parity of the input bytes. Salting an id with a
+ * fixed suffix (`":end"`, one odd byte) therefore FLIPPED the low bit every
+ * single time, locking the root index and the end index into opposite
+ * parities — measured: 1,404 reachable names out of 2,808 possible pairings,
+ * exactly half the pool, silently. The mix below breaks that: 2,741 of 2,808
+ * are now reachable (the shortfall is `join`'s seam dedupe genuinely
+ * merging some pairs into the same string, e.g. "Nettle" + "eye").
+ */
 function hash(id: string): number {
   let h = 2166136261;
   for (let i = 0; i < id.length; i++) {
     h ^= id.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
-  return Math.abs(h);
+  h ^= h >>> 16;
+  h = Math.imul(h, 2246822507);
+  h ^= h >>> 13;
+  h = Math.imul(h, 3266489909);
+  h ^= h >>> 16;
+  return h >>> 0;
 }
 
 /**
  * A stable, human-readable name for an individual, derived from its id and
  * flavoured by its primary type.
  *
- * Pool size is roughly 24 roots x 10 infixes x 40 ends = ~9,600 per type,
- * which keeps same-species collisions rare at the scale a real run reaches
- * (a herd peaks around a dozen; a species maybe a few dozen world-wide).
+ * **Strictly two parts.** An earlier version spliced an optional middle
+ * syllable in ("wyn", "dra", "mor", "thal"), which bought pool size at the
+ * cost of the names themselves — direct verdict: "waspdraseeker and
+ * foamthalborn and flarewynwing is a bit much. Waspseeker and foamborn and
+ * flarewing and pincerheart accomplish the same thing better." They do, so
+ * the infix is gone and the pools it was propping up grew instead: 36 roots
+ * x 78 ends, ~2,800 names per type. That is a real reduction from the
+ * ~9,600 the three-part form reached, and the collision numbers below are
+ * measured rather than assumed — see names.test.ts, which now asserts a
+ * bounded collision RATE instead of the zero it used to claim.
  */
 export function displayNameFor(agentId: string, types?: readonly PokemonType[]): string {
   const roots = (types && types.length > 0 && ROOTS_BY_TYPE[types[0]!]) || FALLBACK_ROOTS;
-  // Three INDEPENDENT hashes rather than bit-shifts of one. Shifting a
-  // single FNV hash left the three indices correlated: in a sample of eight
-  // grass names, seven drew a non-empty infix even though the table is
-  // two-thirds empty, producing a run of "Boughdrahorn"-style clunkers.
+  // Two INDEPENDENT hashes rather than bit-shifts of one. Shifting a single
+  // FNV hash left the indices correlated, which visibly skewed which halves
+  // paired up; salting the string is cheap and removes the correlation.
   const root = roots[hash(agentId) % roots.length]!;
-  const infix = INFIXES[hash(`${agentId}:infix`) % INFIXES.length]!;
   const end = ENDS[hash(`${agentId}:end`) % ENDS.length]!;
-  return join(join(root, infix), end);
+  return join(root, end);
 }
 
 /**
