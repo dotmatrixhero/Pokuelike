@@ -187,3 +187,38 @@ describe("IMMIGRATION_CONTEXT wiring", () => {
     expect(geodude?.biomes).toEqual(["badlands", "highland"]);
   });
 });
+
+describe("spawnAgent: a fresh spawn/immigrant's moveset matches what organic leveling would already know", () => {
+  // Direct report: "I see a lv 42 Charizard with only slash. That makes no
+  // sense to me.. It should know other moves." Charizard's curated
+  // species.moves list (species.ts) is just ["slash", "flamethrower"] — real
+  // dex thresholds 27 and 44 respectively, a 17-level gap. Before this fix,
+  // spawnAgent gated ONLY against that curated list, so any spawn/immigrant
+  // landing in [27, 43] knew exactly one move.
+  it("a level-42 Charizard spawn knows more than just Slash", () => {
+    const agent = spawnAgent("charizard", "charizard-test", { x: 0, y: 0 }, 42, () => 0.5);
+    expect(agent.moves.length).toBeGreaterThan(1);
+    expect(agent.moves.map((m) => m.id)).toContain("slash");
+    // Flamethrower's real threshold (44) is still above this spawn's level
+    // (42) — this isn't "give it everything," just the real accumulated
+    // learnset up to its own level, same as organic leveling would produce.
+    expect(agent.moves.map((m) => m.id)).not.toContain("flamethrower");
+  });
+
+  it("a level-50 Charizard spawn (past Flamethrower's real threshold) knows Flamethrower too", () => {
+    const agent = spawnAgent("charizard", "charizard-test-2", { x: 0, y: 0 }, 50, () => 0.5);
+    expect(agent.moves.map((m) => m.id)).toContain("flamethrower");
+    expect(agent.moves.map((m) => m.id)).toContain("slash");
+  });
+
+  it("a low-level spawn still gets at least its earliest curated move — the existing floor is preserved", () => {
+    const agent = spawnAgent("charizard", "charizard-test-3", { x: 0, y: 0 }, 1, () => 0.5);
+    expect(agent.moves.length).toBeGreaterThan(0);
+  });
+
+  it("knownMoves reflects the same widened set as agent.moves, not just the curated subset", () => {
+    const agent = spawnAgent("charizard", "charizard-test-4", { x: 0, y: 0 }, 42, () => 0.5);
+    expect(agent.knownMoves).toContain("SLASH");
+    expect(agent.knownMoves!.length).toBeGreaterThan(1);
+  });
+});

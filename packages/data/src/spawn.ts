@@ -5,11 +5,13 @@ import {
   dispositionFromNature,
   MATURITY_AGE,
   type Agent,
+  type MoveSpec,
   type Vec2,
 } from "@pokuelike/engine";
 import { SPECIES } from "./species.js";
 import { MOVES } from "./moves.js";
 import { SPECIES_DEX_BY_KEY } from "./dex/index.js";
+import { LEVELING_CONTEXT } from "./leveling.js";
 
 /**
  * The real level a species learns `moveId` at, per the imported dex's own
@@ -54,6 +56,25 @@ function moveUnlockLevel(speciesId: string, moveId: string): number {
  * in the list if every one of them would otherwise be gated out (so a very
  * low spawn level never leaves an agent with zero moves at all).
  *
+ * Direct report: "I see a lv 42 Charizard with only slash. That makes no
+ * sense to me.. It should know other moves." Root cause: this used to gate
+ * ONLY against the small curated `species.moves` list above — fine for
+ * species whose curated moves are evenly spread, but Charizard's own two
+ * curated moves are Slash (real dex threshold: level 27) and Flamethrower
+ * (level 44), a 17-level gap. Any spawn/immigrant landing in it (very
+ * likely — see `naturalMinLevelFor`/immigrant level-matching) knew exactly
+ * one move for a long stretch of its life. A naturally-leveled agent never
+ * had this problem: `grantExp` accumulates from the FULL real dex learnset
+ * as it climbs, not just the curated subset. `learnedMovesForLevel` below
+ * does the same at spawn time, so a fresh spawn/immigrant at a given level
+ * knows everything a specimen that organically leveled up to that point
+ * would already know — curated roster moves ARE still included (added
+ * first, so a curated `MoveSpec` wins over `resolveMove`'s generic
+ * dex-derived fallback whenever both exist for the same move), and a
+ * curated move with no real dex learnset entry at all (`moveUnlockLevel`'s
+ * own "reads as level 1" case — e.g. a TM-only move hand-added to a
+ * species' curated list) still spawns available from level 1, unchanged.
+ *
  * `age` starts at `MATURITY_AGE` — a fresh spawn (worldgen founder or
  * immigrant) is a grown specimen arriving already mature, same as before
  * `age` was tracked here at all (`reproduction.ts`'s `isMature` reads
@@ -82,11 +103,30 @@ export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5, 
     eligibleMoveIds = [earliest];
   }
 
-  const moves = eligibleMoveIds.map((moveId) => {
+  // Curated moves come first (a curated `MoveSpec` — not `resolveMove`'s
+  // generic dex-derived fallback — wins whenever both exist for the same
+  // move), then unioned with the FULL real dex learnset up to `level`, same
+  // accumulation `grantExp` (leveling.ts) already does for an agent that
+  // levels up in-sim. See this function's own doc comment for why: the
+  // curated list alone can leave a wide real gap (Charizard: Slash at 27,
+  // Flamethrower at 44) that left anything spawned/immigrated inside it
+  // knowing exactly one move.
+  const movesById = new Map<string, MoveSpec>();
+  const knownMoveKeys: string[] = [];
+  for (const moveId of eligibleMoveIds) {
     const move = MOVES[moveId];
     if (!move) throw new Error(`Species ${speciesId} references unknown move: ${moveId}`);
-    return move;
-  });
+    movesById.set(move.id, move);
+    knownMoveKeys.push(moveId.toUpperCase());
+  }
+  const profile = LEVELING_CONTEXT.getProfile(speciesId);
+  for (const [unlockLevel, moveKey] of profile?.levelMoves ?? []) {
+    if (unlockLevel > level || knownMoveKeys.includes(moveKey)) continue;
+    knownMoveKeys.push(moveKey);
+    const spec = LEVELING_CONTEXT.resolveMove(moveKey);
+    if (spec && !movesById.has(spec.id)) movesById.set(spec.id, spec);
+  }
+  const moves = [...movesById.values()];
 
   return {
     id,
@@ -110,8 +150,9 @@ export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5, 
     // Stored uppercase to match the dex move-key convention leveling.ts's
     // level-move lookups use ("vine_whip" -> "VINE_WHIP") — every curated
     // MOVES id happens to be the lowercased form of its dex key, so this is
-    // a safe, cheap normalization rather than a real key lookup.
-    knownMoves: eligibleMoveIds.map((moveId) => moveId.toUpperCase()),
+    // a safe, cheap normalization rather than a real key lookup. Includes
+    // the dex-learnset top-up above, not just the curated subset.
+    knownMoves: knownMoveKeys,
     types: species.types,
     moves,
     stats,

@@ -13763,3 +13763,46 @@ shows real per-event lines ("Bulbasaur (1) clashes with Squirtle (1)!",
 "Squirtle (1) takes 5 damage! (HP left: 20)") instead of a single flavor
 line. Full monorepo typecheck clean; full engine suite unaffected and
 still green (46 files, 1243 tests — this fix touches web-only code).
+
+## Fixed: a fresh spawn/immigrant could know just one move for a huge level window
+
+Direct report: "I see a lv 42 Charizard with only slash. That makes no
+sense to me.. It should know other moves."
+
+Root cause: `spawnAgent` (data/src/spawn.ts) gated a fresh spawn/immigrant's
+starting moveset ONLY against the small hand-curated `species.moves` list
+(species.ts), filtered by each move's real dex level threshold
+(`moveUnlockLevel`). Charizard's curated list is just `["slash",
+"flamethrower"]` — real thresholds 27 and 44 — a 17-level gap. Any spawn or
+immigrant landing anywhere in `[27, 43]` (very plausible: immigrants match
+local population level, per this file's earlier "Immigrants match local
+level" section) knew exactly one move for a long stretch of its life. A
+naturally-leveled agent never had this problem: `grantExp` (engine
+leveling.ts) accumulates from the FULL real dex learnset as it climbs
+in-sim, not just the curated subset — so an organically-leveled level-42
+Charizard already knows Scratch/Ember/Metal Claw/Dragon Breath/Fury Swipes/
+Fire Fang/Dragon Rage/Slash/Flame Burst and more, picked up one real
+threshold at a time along the way.
+
+Fixed by giving `spawnAgent` the same accumulation: curated moves are still
+added first (so a curated `MoveSpec` wins over the generic dex-derived
+fallback whenever both exist for the same move, and a curated move with no
+real dex learnset entry at all — e.g. a hand-added TM-only move — still
+spawns available from level 1, unchanged), then unioned with every real
+dex-learnset move at or below the spawn level, resolved the same way
+`leveling.ts`'s own `LEVELING_CONTEXT.resolveMove` already does (prefer a
+curated `MoveSpec`, else derive a sensible one from the dex's raw numbers,
+else skip status moves entirely — no combat-usable `MoveSpec` to build). A
+fresh spawn/immigrant now knows everything an organically-leveled specimen
+at the same level already would.
+
+### Test updates
+
+New `describe` block in `data/test/species.test.ts`: a level-42 Charizard
+spawn now knows more than just Slash (and still correctly doesn't know
+Flamethrower yet — its real 44 threshold is still ahead); a level-50 spawn
+does know Flamethrower; a level-1 spawn still gets at least one move (the
+existing empty-set floor, preserved); and `knownMoves` reflects the same
+widened set as `agent.moves`, not just the curated subset. Full data suite
+green (2 files, 240 tests) and full monorepo typecheck clean; engine suite
+unaffected and still green (46 files, 1243 tests).
