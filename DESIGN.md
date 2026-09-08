@@ -13029,3 +13029,105 @@ top-of-file doc comment already documents this exact "unseeded `Math.random`
 in a few older tests" flakiness class): "burn halves the burned attacker's
 physical damage output" and "storm/drought/rain check the active weather
 cell." Neither test was touched by this work.
+
+## Web UI redesign: floating playback HUD, unified side panel, one map-mode switch
+
+Direct ask: "UI is a bit rough. Can we make pause and play floating
+buttons, rethink ux to make logs/battle log/inspectors and overworld map
+easier to navigate?" A design proposal (a mockup canvas, matching the
+app's own colors/radii/type exactly) was drafted and approved first, then
+built into the real app. Same visual language throughout — no new tokens,
+just reorganized chrome.
+
+- **Floating playback HUD** (`#playback-hud` in index.html): Play/Pause,
+  Step, and the speed slider move out of the header into a floating pill
+  docked over the map itself (`#map-area`, `position: absolute`, bottom-
+  center), reachable regardless of which panel tab or map mode is
+  showing. The play/pause button swaps a play/pause SVG icon (`playIcon`/
+  `pauseIcon` in main.ts) rather than relabeling text, and turns accent-
+  blue while running — the same convention any media player uses.
+- **One map-mode segmented switch** (`#map-mode-zone`/`#map-mode-
+  overworld`) replaces the old single button that relabeled itself ("Show
+  Zone View" / "Show Overworld") — both states are visible at once now,
+  and `applyOverworldSubView` toggles `.playing` on whichever is active.
+  A new **mini-map corner widget** (`#minimap-widget`, a simplified static
+  thumbnail rather than a live-rendered copy of the macro grid) sits in
+  the map's own corner offering the same jump, so switching scales
+  doesn't require a trip back to the header. The rare "flat mode, no
+  regions at all" escape hatch (the original `overworld-toggle` behavior)
+  moved into the overflow menu instead of sharing header space with the
+  everyday Zone/Overworld switch.
+- **One side panel, four tabs** (`#side-panel`/`#panel-tabs`): Inspector,
+  Battle, Events, and Legend used to live in two different places — a
+  docked tab pair under the map, and an off-canvas drawer only reachable
+  via a hamburger button. They're now one always-visible panel (desktop)
+  with four tabs, each toggled by the same `[hidden]` convention the old
+  two-tab system already used (`selectTab` in main.ts now drives all
+  four via `TAB_PAGES`/`TAB_BUTTONS` lookup tables instead of two
+  hardcoded branches). `#toggle-panel` collapses the whole panel away for
+  more map space; `renderInspector`/`BattleScreenPanel`/`renderLegend`/
+  `EventLogPanel` all still render into their own unchanged `#inspector`/
+  `#battle-screen`/`#legend`/`#event-log` divs — only the chrome around
+  them moved.
+- **Compact filter chips**: the event log's three checkboxes (with full
+  sentence labels, previously a wrapping header row of their own) are
+  still real `<input type="checkbox">` elements underneath, just restyled
+  as small toggle pills (`syncChip` in main.ts toggles a `chip-active`
+  class alongside the existing `change` handlers — no filtering-logic
+  changes).
+- **Seed chip + overflow menu**: the header's old always-visible Seed
+  input/Load/Random/Copy cluster condenses into a click-to-open popover;
+  Render style/Zoom/Flat-mode condense into a `⋯` overflow menu. Both are
+  plain click-toggled popovers (closed on an outside click), not a second
+  drawer.
+
+### Real bugs found and fixed during implementation
+
+All three are the same underlying footgun this codebase's own `.force-hide`
+comment already flags elsewhere: an element's own unconditional `display`
+declaration (or equal-specificity class rule) beats the browser's default
+`[hidden] { display: none }` regardless of source order/specificity
+intuition, so hiding an element needs an explicit, sufficiently-specific
+override — not just toggling the attribute/class and assuming it'll work.
+
+1. `#seed-popover`'s own `display: flex` defeated its `hidden` attribute —
+   it rendered permanently open. Fixed with an explicit `#seed-popover
+   [hidden] { display: none; }` rule.
+2. Same bug on `#battle-screen`/`#events-page`/`#legend`, each of which
+   sets its own unconditional `display` for internal layout — the Events
+   tab was rendering Battle Screen's empty-state message underneath
+   because `[data-panel-page][hidden]`'s generic attribute-selector rule
+   (specificity 0-2-0) lost to `#battle-screen`'s own ID rule (0-1-0-0)
+   regardless of source order. Fixed with explicit per-ID `[hidden]`
+   overrides, matching the ID selectors they're overriding.
+3. `.segmented button.playing`'s accent-blue active state never showed —
+   `.segmented button`'s own `background: transparent` rule has the exact
+   same specificity (one class + one type each) and, being later in
+   source order, won the tie. Fixed by adding an explicit two-class
+   `.segmented button.playing` rule.
+4. A genuine layout bug (not a `hidden` footgun): the auto-camera badge
+   and mini-map widget are positioned absolutely relative to the whole
+   `#map-area`, but the macro-map view has its own toolbar row (zoom +
+   hint) above the canvas that they'd otherwise sit on top of. Fixed with
+   a sibling-selector rule (`#macro-map-wrap:not([hidden]):not(.force-
+   hide) ~ #auto-cam-badge`) that pushes both down only while that
+   toolbar is actually showing.
+5. The auto-camera badge's visibility used to rely on a CSS `:empty`
+   selector, which never matches an element that always contains child
+   nodes (the dot + status spans) regardless of whether the status text
+   itself is empty — the badge would have always shown, even with
+   nothing to say. Fixed by toggling its `hidden` attribute directly in
+   `main.ts`'s `frame()` loop alongside setting the status text.
+
+### Real-run findings
+
+Full monorepo typecheck clean. Verified live with a headless-Chromium
+Playwright driver (`playwright-core` + the pre-installed `/opt/pw-browsers/
+chromium` binary) against the real dev server: default zone view, playing/
+paused HUD states, all four side-panel tabs, Zone<->Overworld switching via
+both the header segmented control and the mini-map widget, the seed
+popover, the overflow menu, panel collapse, and a 390x844 mobile viewport
+(header wraps to two rows, panel stacks below the map, floating HUD/mini-
+map stay correctly positioned) — all confirmed via screenshots, with the
+five bugs above each caught and fixed from a real rendered discrepancy,
+not read off the source.

@@ -57,11 +57,18 @@ const BATTLE_STEP_INTERVAL_MS = 650;
 const canvas = document.getElementById("scene") as HTMLCanvasElement;
 const canvasWrap = document.getElementById("canvas-wrap") as HTMLElement;
 const ctx = canvas.getContext("2d")!;
+const mapAreaEl = document.getElementById("map-area") as HTMLElement;
 const seedInput = document.getElementById("seed-input") as HTMLInputElement;
 const loadSeedBtn = document.getElementById("load-seed") as HTMLButtonElement;
 const randomSeedBtn = document.getElementById("random-seed") as HTMLButtonElement;
 const copySeedBtn = document.getElementById("copy-seed") as HTMLButtonElement;
+const seedChipWrap = document.getElementById("seed-chip-wrap") as HTMLElement;
+const seedChipBtn = document.getElementById("seed-chip") as HTMLButtonElement;
+const seedChipLabel = document.getElementById("seed-chip-label") as HTMLElement;
+const seedPopover = document.getElementById("seed-popover") as HTMLElement;
 const playPauseBtn = document.getElementById("play-pause") as HTMLButtonElement;
+const playIcon = document.getElementById("play-icon") as unknown as HTMLElement;
+const pauseIcon = document.getElementById("pause-icon") as unknown as HTMLElement;
 const stepBtn = document.getElementById("step") as HTMLButtonElement;
 const speedSlider = document.getElementById("speed") as HTMLInputElement;
 const speedLabel = document.getElementById("speed-label") as HTMLElement;
@@ -71,25 +78,41 @@ const eventLogEl = document.getElementById("event-log") as HTMLElement;
 const inspectorEl = document.getElementById("inspector") as HTMLElement;
 const clearSelectionBtn = document.getElementById("clear-selection") as HTMLButtonElement;
 const expandPanelBtn = document.getElementById("expand-panel") as HTMLButtonElement;
-const inspectorPanelEl = document.getElementById("inspector-panel") as HTMLElement;
+const panelBodyEl = document.getElementById("panel-body") as HTMLElement;
 const hideNoiseCheckbox = document.getElementById("hide-noise") as HTMLInputElement;
 const hideLevelUpsCheckbox = document.getElementById("hide-levelups") as HTMLInputElement;
 const headlinesOnlyCheckbox = document.getElementById("headlines-only") as HTMLInputElement;
+const chipHideNoise = document.getElementById("chip-hide-noise") as HTMLElement;
+const chipHideLevelUps = document.getElementById("chip-hide-levelups") as HTMLElement;
+const chipHeadlinesOnly = document.getElementById("chip-headlines-only") as HTMLElement;
 const styleTileBtn = document.getElementById("style-tile") as HTMLButtonElement;
 const styleAsciiBtn = document.getElementById("style-ascii") as HTMLButtonElement;
 const legendEl = document.getElementById("legend") as HTMLElement;
-const toggleLegendBtn = document.getElementById("toggle-legend") as HTMLButtonElement;
-const sidebarEl = document.getElementById("sidebar") as HTMLElement;
-const drawerBackdrop = document.getElementById("drawer-backdrop") as HTMLElement;
-const toggleDrawerBtn = document.getElementById("toggle-drawer") as HTMLButtonElement;
 const zoomOutBtn = document.getElementById("zoom-out") as HTMLButtonElement;
 const zoomInBtn = document.getElementById("zoom-in") as HTMLButtonElement;
 const zoomLabel = document.getElementById("zoom-label") as HTMLElement;
 const autoCamToggleBtn = document.getElementById("auto-cam-toggle") as HTMLButtonElement;
 const autoCamStatusEl = document.getElementById("auto-cam-status") as HTMLElement;
+const autoCamBadgeEl = document.getElementById("auto-cam-badge") as HTMLElement;
 const battleScreenEl = document.getElementById("battle-screen") as HTMLElement;
+const eventsPageEl = document.getElementById("events-page") as HTMLElement;
 const tabInspectorBtn = document.getElementById("tab-inspector") as HTMLButtonElement;
 const tabBattleScreenBtn = document.getElementById("tab-battle-screen") as HTMLButtonElement;
+const tabEventsBtn = document.getElementById("tab-events") as HTMLButtonElement;
+const tabLegendBtn = document.getElementById("tab-legend") as HTMLButtonElement;
+const togglePanelBtn = document.getElementById("toggle-panel") as HTMLButtonElement;
+const sidePanelEl = document.getElementById("side-panel") as HTMLElement;
+const moreMenuWrap = document.getElementById("more-menu-wrap") as HTMLElement;
+const moreMenuToggleBtn = document.getElementById("more-menu-toggle") as HTMLButtonElement;
+const moreMenuEl = document.getElementById("more-menu") as HTMLElement;
+const mapModeSwitchEl = document.getElementById("map-mode-zone")!.parentElement as HTMLElement;
+const mapModeZoneBtn = document.getElementById("map-mode-zone") as HTMLButtonElement;
+const mapModeOverworldBtn = document.getElementById("map-mode-overworld") as HTMLButtonElement;
+const minimapWidgetEl = document.getElementById("minimap-widget") as HTMLElement;
+const minimapButton = document.getElementById("minimap-button") as HTMLButtonElement;
+const minimapArtZone = document.getElementById("minimap-art-zone") as HTMLElement;
+const minimapArtOverworld = document.getElementById("minimap-art-overworld") as HTMLElement;
+const minimapCaption = document.getElementById("minimap-caption") as HTMLElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -111,7 +134,6 @@ const macroMapZoomLabel = document.getElementById("macro-map-zoom-label") as HTM
 const macroMapZoomInBtn = document.getElementById("macro-map-zoom-in") as HTMLButtonElement;
 const macroMapZoomOutBtn = document.getElementById("macro-map-zoom-out") as HTMLButtonElement;
 const macroMapScrollEl = document.getElementById("macro-map-scroll") as HTMLElement;
-const macroViewToggleBtn = document.getElementById("macro-view-toggle") as HTMLButtonElement;
 const macroMapView = new MacroMapView(macroMapCanvas, macroMapZoomLabel, focusZone);
 let log: EventLog;
 let playing = false;
@@ -244,6 +266,7 @@ function loadWorld(seed: number): void {
   resetUiForNewWorld();
 
   seedInput.value = String(seed);
+  seedChipLabel.textContent = String(seed);
   const url = new URL(location.href);
   url.searchParams.set("seed", String(seed));
   history.replaceState(null, "", url);
@@ -266,6 +289,7 @@ function loadMacroWorld(seed: number = SCENARIO_SEED): void {
   macroMapView.render(macroWorld, true);
 
   seedInput.value = String(seed);
+  seedChipLabel.textContent = String(seed);
   const url = new URL(location.href);
   url.searchParams.set("seed", String(seed));
   history.replaceState(null, "", url);
@@ -357,8 +381,14 @@ function scheduleLoop(): void {
 
 function setPlaying(next: boolean): void {
   playing = next;
-  playPauseBtn.textContent = playing ? "Pause" : "Play";
+  playPauseBtn.title = playing ? "Pause" : "Play";
   playPauseBtn.classList.toggle("playing", playing);
+  // Floating HUD button (direct ask: "make pause and play floating
+  // buttons") swaps its icon rather than its text — a pause glyph while
+  // running, a play triangle once paused, same convention any media
+  // player uses.
+  pauseIcon.hidden = !playing;
+  playIcon.hidden = playing;
   scheduleLoop();
 }
 
@@ -377,52 +407,67 @@ function refreshSelection(): void {
   renderInspector(inspectorEl, agent, world);
 }
 
-// --- Inspector / Battle Screen tabs -----------------------------------------
-// Battle Screen used to be its own docked panel; direct follow-up ask: it
-// "obscures the map," so it now shares the Inspector panel's footprint as a
-// second tab instead (see index.html's `#inspector-panel` markup). Both
-// `renderInspector`/`BattleScreenPanel` keep rendering into their own
-// `#inspector`/`#battle-screen` divs exactly as before — this is purely a
-// thin visibility switch over the two, the same `[hidden]` convention the
-// drawer/legend toggles already use.
+// --- Unified side panel: Inspector / Battle / Events / Legend tabs ---------
+// Direct UX-redesign ask: these four used to live in two different places —
+// Inspector/Battle Screen shared a docked tab pair under the map, while
+// Legend/Event Log hid behind a hamburger-triggered off-canvas drawer. One
+// panel, four tabs, always in the same spot. `renderInspector`/
+// `BattleScreenPanel`/`renderLegend`/`EventLogPanel` all keep rendering into
+// their own `#inspector`/`#battle-screen`/`#legend`/`#event-log` divs exactly
+// as before — this is purely a thin visibility switch over the four, the
+// same `[hidden]` convention the old drawer/tab toggles already used.
 
-type PanelTab = "inspector" | "battle-screen";
+type PanelTab = "inspector" | "battle-screen" | "events" | "legend";
 let activeTab: PanelTab = "inspector";
 /**
  * The `seq` of the battle engagement the viewer last manually switched away
- * from Battle Screen *during* (back to Inspector) — mirrors
+ * from Battle Screen *during* (back to another tab) — mirrors
  * `AutoCameraController`'s own `viewerTookOver` sticky-override pattern:
  * auto-switching won't re-steal the tab back for *this* battle, but a
  * genuinely new battle (a different seq) is a fresh thing to show and earns
  * the auto-switch back. `undefined` when there's no active override.
  */
 let tabManualOverrideForBattleSeq: number | undefined;
-/** The `seq` of the battle engagement auto-switch has already acted on — so a battle that's still ongoing next frame doesn't keep re-triggering the switch (which would also stomp a manual switch back to Inspector on every single frame). */
+/** The `seq` of the battle engagement auto-switch has already acted on — so a battle that's still ongoing next frame doesn't keep re-triggering the switch (which would also stomp a manual switch away from Battle Screen on every single frame). */
 let lastAutoSwitchedBattleSeq: number | undefined;
+
+const TAB_BUTTONS: Record<PanelTab, HTMLButtonElement> = {
+  inspector: tabInspectorBtn,
+  "battle-screen": tabBattleScreenBtn,
+  events: tabEventsBtn,
+  legend: tabLegendBtn,
+};
+const TAB_PAGES: Record<PanelTab, HTMLElement> = {
+  inspector: inspectorEl,
+  "battle-screen": battleScreenEl,
+  events: eventsPageEl,
+  legend: legendEl,
+};
 
 function selectTab(tab: PanelTab, manual: boolean): void {
   activeTab = tab;
-  inspectorEl.hidden = tab !== "inspector";
-  battleScreenEl.hidden = tab !== "battle-screen";
+  for (const key of Object.keys(TAB_PAGES) as PanelTab[]) {
+    TAB_PAGES[key].hidden = key !== tab;
+    TAB_BUTTONS[key].classList.toggle("playing", key === tab);
+    TAB_BUTTONS[key].setAttribute("aria-selected", String(key === tab));
+  }
   clearSelectionBtn.hidden = tab !== "inspector"; // "Clear [selection]" only means anything on the Inspector tab
-  tabInspectorBtn.classList.toggle("playing", tab === "inspector");
-  tabInspectorBtn.setAttribute("aria-selected", String(tab === "inspector"));
-  tabBattleScreenBtn.classList.toggle("playing", tab === "battle-screen");
-  tabBattleScreenBtn.setAttribute("aria-selected", String(tab === "battle-screen"));
 
   if (!manual) return;
   // A deliberate click always wins over auto-switch's own bookkeeping — see
   // the two fields' doc comments above.
   const battleSeq = autoCamera.currentEngagement()?.category === "battle" ? autoCamera.currentEngagement()!.seq : undefined;
-  if (tab === "inspector" && battleSeq !== undefined) {
-    tabManualOverrideForBattleSeq = battleSeq;
-  } else if (tab === "battle-screen") {
+  if (tab === "battle-screen") {
     tabManualOverrideForBattleSeq = undefined;
+  } else if (battleSeq !== undefined) {
+    tabManualOverrideForBattleSeq = battleSeq;
   }
 }
 
 tabInspectorBtn.addEventListener("click", () => selectTab("inspector", true));
 tabBattleScreenBtn.addEventListener("click", () => selectTab("battle-screen", true));
+tabEventsBtn.addEventListener("click", () => selectTab("events", true));
+tabLegendBtn.addEventListener("click", () => selectTab("legend", true));
 
 /**
  * Auto-switches to the Battle Screen tab the moment Auto Camera starts
@@ -450,11 +495,13 @@ loadSeedBtn.addEventListener("click", () => {
   if (!Number.isFinite(value)) return;
   if (macroWorld) loadMacroWorld(value);
   else loadWorld(value);
+  seedPopover.hidden = true;
 });
 
 randomSeedBtn.addEventListener("click", () => {
   if (macroWorld) loadMacroWorld(randomSeed());
   else loadWorld(randomSeed());
+  seedPopover.hidden = true;
 });
 
 copySeedBtn.addEventListener("click", () => {
@@ -512,27 +559,48 @@ clearSelectionBtn.addEventListener("click", () => selectAgent(undefined));
 // Direct ask: "the actual battle log... needs to be scrollable on mobile.
 // Or more expandable." The real scroll bug is fixed in CSS
 // (-webkit-overflow-scrolling: touch); this is the "more expandable" half —
-// a much taller reading mode for the Inspector/Battle Screen panel, toggled
-// on demand rather than always eating that much vertical space.
+// a much taller reading mode for the side panel's body, toggled on demand
+// rather than always eating that much vertical space.
 expandPanelBtn.addEventListener("click", () => {
-  const expanded = inspectorPanelEl.classList.toggle("panel-expanded");
+  const expanded = panelBodyEl.classList.toggle("panel-expanded");
   expandPanelBtn.classList.toggle("playing", expanded);
 });
 
+/**
+ * A checkbox's own wrapping `<label class="filter-chip">` gets a
+ * `chip-active` class in sync with its `checked` state — direct UX-redesign
+ * ask: the three event-log filters read as small toggle chips now instead
+ * of checkbox+sentence rows, but they're still real `<input type=
+ * "checkbox">` elements underneath (no change to the actual filtering
+ * logic below), just restyled via this one class.
+ */
+function syncChip(checkbox: HTMLInputElement, chip: HTMLElement): void {
+  chip.classList.toggle("chip-active", checkbox.checked);
+}
+
 hideNoiseCheckbox.addEventListener("change", () => {
+  syncChip(hideNoiseCheckbox, chipHideNoise);
   eventLogPanel.setHideNoise(hideNoiseCheckbox.checked);
   eventLogPanel.render();
 });
 
 hideLevelUpsCheckbox.addEventListener("change", () => {
+  syncChip(hideLevelUpsCheckbox, chipHideLevelUps);
   eventLogPanel.setHideLevelUps(hideLevelUpsCheckbox.checked);
   eventLogPanel.render();
 });
 
 headlinesOnlyCheckbox.addEventListener("change", () => {
+  syncChip(headlinesOnlyCheckbox, chipHeadlinesOnly);
   eventLogPanel.setHeadlinesOnly(headlinesOnlyCheckbox.checked);
   eventLogPanel.render();
 });
+// Reflect each checkbox's own `checked` default (both "on" checkboxes are
+// checked by default in index.html) the moment the page loads, not just on
+// the next manual toggle.
+syncChip(hideNoiseCheckbox, chipHideNoise);
+syncChip(hideLevelUpsCheckbox, chipHideLevelUps);
+syncChip(headlinesOnlyCheckbox, chipHeadlinesOnly);
 
 function setRenderStyle(style: RenderStyle): void {
   renderStyle = style;
@@ -543,21 +611,49 @@ styleTileBtn.addEventListener("click", () => setRenderStyle("tile"));
 styleAsciiBtn.addEventListener("click", () => setRenderStyle("ascii"));
 
 renderLegend(legendEl);
-toggleLegendBtn.addEventListener("click", () => {
-  const hidden = legendEl.hidden;
-  legendEl.hidden = !hidden;
-  toggleLegendBtn.textContent = hidden ? "Hide" : "Show";
+
+// --- Side panel collapse, seed popover, overflow menu -----------------------
+// Direct UX-redesign ask: Legend/Event Log no longer live behind a
+// hamburger-triggered off-canvas drawer — they're ordinary tabs in the same
+// always-visible side panel as Inspector/Battle (see the tab section
+// above). `toggle-panel` instead collapses that whole panel away (more room
+// for the map), and the old header's seed/style/zoom controls condense into
+// a click-to-open chip and overflow menu so the header itself stays a
+// single slim row instead of wrapping across several.
+togglePanelBtn.addEventListener("click", () => {
+  sidePanelEl.classList.toggle("panel-collapsed");
 });
 
-// Legend + event log live in a drawer that floats over the canvas from the
-// right (see index.html/#sidebar) — closed by default so a narrow/mobile
-// viewport isn't permanently missing canvas width to a docked sidebar.
-function setDrawerOpen(open: boolean): void {
-  sidebarEl.classList.toggle("open", open);
-  drawerBackdrop.classList.toggle("open", open);
+function closePopovers(): void {
+  seedPopover.hidden = true;
+  moreMenuEl.classList.remove("open");
 }
-toggleDrawerBtn.addEventListener("click", () => setDrawerOpen(!sidebarEl.classList.contains("open")));
-drawerBackdrop.addEventListener("click", () => setDrawerOpen(false));
+
+seedChipBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const opening = seedPopover.hidden;
+  closePopovers();
+  seedPopover.hidden = !opening;
+});
+
+moreMenuToggleBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const opening = !moreMenuEl.classList.contains("open");
+  closePopovers();
+  if (opening) moreMenuEl.classList.add("open");
+});
+
+// Clicking anywhere outside either popover closes it — the same "click
+// elsewhere dismisses it" convention the old drawer's backdrop provided,
+// without needing a dedicated full-screen backdrop element for two small
+// header popovers.
+document.addEventListener("click", (event) => {
+  const target = event.target as Node;
+  if (!seedChipWrap.contains(target)) seedPopover.hidden = true;
+  if (!moreMenuWrap.contains(target)) moreMenuEl.classList.remove("open");
+});
+seedPopover.addEventListener("click", (event) => event.stopPropagation());
+moreMenuEl.addEventListener("click", (event) => event.stopPropagation());
 
 // Scales the canvas's *displayed* size only (CSS width/height), leaving its
 // backing pixel buffer at native TILE_SIZE resolution — agentAtCanvasPos's
@@ -723,10 +819,13 @@ autoCamToggleBtn.addEventListener("click", () => {
  * shipping them stacked: "they are competing too much... I want one map on
  * the screen at a time", then a direct follow-up to make desktop match the
  * mobile-only version of that fix: "let's make desktop match mobile, where
- * the whole map is either overworld or zone"). `macro-view-toggle` (only
- * visible inside `#macro-map-wrap`, so already hidden outside Overworld
- * mode) swaps which one shows — same strict either/or on every viewport
- * size now, no desktop-only "show both" carve-out.
+ * the whole map is either overworld or zone"). Direct UX-redesign follow-up:
+ * the header's old single button (relabeling itself "Show Zone View" /
+ * "Show Overworld") became a real two-button segmented control
+ * (`mapModeZoneBtn`/`mapModeOverworldBtn`) so both states are visible at
+ * once instead of only ever showing the NEXT state — plus a corner
+ * mini-map widget (`minimapButton`) offering the same swap right on the map
+ * itself. All three call this one function.
  *
  * `.force-hide` (not the plain `hidden` attribute) is what actually hides
  * either wrap: both set an unconditional `display: flex` of their own, an
@@ -741,7 +840,14 @@ function applyOverworldSubView(view: OverworldSubView): void {
   overworldSubView = view;
   canvasWrap.classList.toggle("force-hide", view === "overworld");
   macroMapWrapEl.classList.toggle("force-hide", view === "zone");
-  macroViewToggleBtn.textContent = view === "zone" ? "Show Overworld" : "Show Zone View";
+  mapModeZoneBtn.classList.toggle("playing", view === "zone");
+  mapModeOverworldBtn.classList.toggle("playing", view === "overworld");
+  // The mini-map widget offers a jump to whichever view ISN'T showing —
+  // its own thumbnail/caption always describe the destination, not the
+  // current view.
+  minimapArtZone.hidden = view === "zone";
+  minimapArtOverworld.hidden = view !== "zone";
+  minimapCaption.textContent = view === "zone" ? "overworld" : "focused zone";
 }
 
 /**
@@ -753,12 +859,13 @@ function applyOverworldSubView(view: OverworldSubView): void {
  * needed, landing straight on the focused zone's own tile view (`subView`
  * lets boot ask for "zone" specifically) rather than the more abstract
  * macro map — that's the one detailed, actually-useful view per the direct
- * ask, with the macro map still one click away via `macroViewToggleBtn`
- * for whenever the big picture is what's wanted instead.
+ * ask, with the macro map still one click away via the segmented switch or
+ * the mini-map widget for whenever the big picture is what's wanted instead.
  */
 function enterOverworldMode(seed: number, subView: OverworldSubView): void {
   macroMapWrapEl.hidden = false;
-  macroViewToggleBtn.hidden = false;
+  mapModeSwitchEl.hidden = false;
+  minimapWidgetEl.hidden = false;
   overworldToggleBtn.textContent = "Overworld: On";
   overworldToggleBtn.classList.add("playing");
   applyOverworldSubView(subView);
@@ -778,18 +885,20 @@ overworldToggleBtn.addEventListener("click", () => {
     // ordinary single-map mode, so nothing here may leave it (or the now-
     // irrelevant macro map) force-hidden.
     macroMapWrapEl.hidden = true;
-    macroViewToggleBtn.hidden = true;
+    mapModeSwitchEl.hidden = true;
+    minimapWidgetEl.hidden = true;
     overworldToggleBtn.textContent = "Overworld: Off";
     overworldToggleBtn.classList.remove("playing");
     canvasWrap.classList.remove("force-hide");
     macroMapWrapEl.classList.remove("force-hide");
     loadWorld(SCENARIO_SEED);
   }
+  moreMenuEl.classList.remove("open");
 });
 
-macroViewToggleBtn.addEventListener("click", () => {
-  applyOverworldSubView(overworldSubView === "zone" ? "overworld" : "zone");
-});
+mapModeZoneBtn.addEventListener("click", () => applyOverworldSubView("zone"));
+mapModeOverworldBtn.addEventListener("click", () => applyOverworldSubView("overworld"));
+minimapButton.addEventListener("click", () => applyOverworldSubView(overworldSubView === "zone" ? "overworld" : "zone"));
 
 macroMapZoomInBtn.addEventListener("click", () => {
   if (macroWorld) macroMapView.zoomIn(macroWorld);
@@ -850,7 +959,9 @@ function frame(): void {
   );
   drawEventPopups(ctx, eventPopups.active());
   drawMoveFlashes(ctx, moveEffects.activeFlashes());
-  autoCamStatusEl.textContent = autoCamera.currentLabel() ?? (autoCamera.isEnabled() ? "watching…" : "");
+  const autoCamText = autoCamera.currentLabel() ?? (autoCamera.isEnabled() ? "watching…" : "");
+  autoCamStatusEl.textContent = autoCamText;
+  autoCamBadgeEl.hidden = autoCamText === "";
   battleScreenPanel.setActive(engagement);
   maybeAutoSwitchTab();
   battleScreenPanel.render(world);
