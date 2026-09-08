@@ -51,6 +51,13 @@ export interface NotableStory {
   /** Everyone who held it before, most recent last. */
   predecessors: string[];
   herd?: HerdRecord;
+  /**
+   * The "a Rapidash of the Rapidash of the Crag Heights" line, already
+   * de-stuttered — a herd named after its own species would otherwise repeat
+   * it, which is what the first version printed. Renderers should use this
+   * rather than composing species and herd themselves.
+   */
+  subtitle: string;
 }
 
 export interface ChronicleOptions {
@@ -233,6 +240,17 @@ export function chronicleFor(world: World, events: readonly SimEvent[], options:
   return stories.sort((a, b) => b.herd.peakSize - a.herd.peakSize);
 }
 
+/**
+ * "an Ivysaur of the Bulbasaurs of Saltrun" — or just "of the Rapidash of
+ * the Crag Heights" when the herd is already named for the species, since
+ * repeating it reads as a bug.
+ */
+function notableSubtitle(species: string, herd: HerdRecord | undefined): string {
+  if (!herd) return withArticle(species);
+  const namedForSpecies = herd.name.toLowerCase().startsWith(`the ${species.toLowerCase()}`);
+  return namedForSpecies ? `of ${herd.name}` : `${withArticle(species)} of ${herd.name}`;
+}
+
 /** The individuals the world will remember, and how each earned it. */
 export function notableStoriesFor(world: World, events: readonly SimEvent[], options: ChronicleOptions = {}): NotableStory[] {
   const info = options.speciesInfo ?? (() => undefined);
@@ -281,6 +299,7 @@ export function notableStoriesFor(world: World, events: readonly SimEvent[], opt
         ),
       ],
       herd: latest.herdId ? world.herds?.[latest.herdId] : undefined,
+      subtitle: notableSubtitle(nameOf(latest.species), latest.herdId ? world.herds?.[latest.herdId] : undefined),
     });
   }
   return stories.sort((a, b) => a.label.localeCompare(b.label));

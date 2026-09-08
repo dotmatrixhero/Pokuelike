@@ -115,13 +115,12 @@ export class ChroniclePanel {
     if (notables.length > 0) {
       parts.push(`<h2 class="chron-notables-head">The Notables</h2>`);
       for (const n of notables) {
-        const article = /^[AEIOU]/.test(n.species) ? "an" : "a";
-        const of = n.herd ? ` of ${escapeHtml(titleCase(n.herd.name))}` : "";
+
         parts.push(`<section class="chron-notable">`);
         parts.push(`<div class="chron-notable-label">${escapeHtml(n.label)}</div>`);
         parts.push(`<h3>${escapeHtml(n.name)}</h3>`);
         parts.push(
-          `<div class="chron-sub">${article} ${escapeHtml(n.species)}${of}, crowned t${n.tick}` +
+          `<div class="chron-sub">${escapeHtml(n.subtitle)}, crowned t${n.tick}` +
             `${n.usurpation ? `, ${escapeHtml(n.usurpation)}` : ""}</div>`
         );
         parts.push(`<p class="chron-tale">${escapeHtml(n.tale)}</p>`);
