@@ -3,6 +3,68 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Campaign pitch 1: cave escape -> village -> Jirachi — captured, see CAMPAIGN_DESIGN.md
+
+The first pitch for what the *game* is rather than what the sim is: start
+alone at the bottom of a 5-6 layer cave, survive (eat/drink/fire/shelter/
+craft), befriend your first Pokémon out of a prey herd, fight or evade your
+way up, emerge with an evolution stone, then save and rebuild a village.
+Full pitch captured verbatim in CAMPAIGN_DESIGN.md, along with an audit of
+what already exists versus what's genuinely new.
+
+**Headline finding from that audit**: far more of this exists than expected
+— needs/hunger/thirst, herbs and crops, real spreading fire, shelter
+building, moves, named herds, the rapport graph, leveling/move-specing,
+CA cave generation, and cave/village landmarks (`deepCavern`,
+`tunnelWarren`, `sanctuary`, `crossroads`) are all real, shipped systems.
+The four player-bonding verbs (Feed / Fight alongside / Rescue / Presence)
+are already locked in from an earlier design pass too.
+
+**The one genuinely huge gap**: there is no player agent at all — the sim is
+an observer sim with a camera, no controlled entity, no input→action path.
+Everything else in the pitch is content on top of that single change.
+
+Decisions worth making before anything is built (all open, none of them
+mine to make):
+
+- [ ] **Tick model vs. turn model.** `tickWorld` advances everything on a
+      timer; a "traditional roguelike" is world-steps-when-you-act. Both work
+      on a deterministic tick, but the choice shapes the whole UX. My
+      instinct is turn-based for player actions, which makes the existing
+      continuous observer view a second mode rather than the same one.
+- [ ] **How much of the cave is simulated vs. authored?** "Layer 4 always
+      has the stone" and "the ecosystem decides what's here" pull opposite
+      ways. The pitch threads this well (layer 1 is a real ecosystem, not a
+      corridor) but the ratio should be picked deliberately.
+- [ ] **Layer vs. zone vs. Z-level** — three overlapping spatial concepts
+      wearing similar names now. The pitch's "layers are 2-3 zones together"
+      needs reconciling with `Layer` (the fixed 3-value enum) and with the
+      macro grid's zone promotion. A 5-6 layer stacked cave is the
+      Dwarf-Fortress Z-level generalization DESIGN.md already flags as a
+      real structural change, not a number bump.
+- [ ] **Escape-vs-forced-fight balance** — "you can run by them but some
+      predators will catch you... basically force a fight" is a specific
+      tuning goal today's pursuit/give-up rules were never written to hit.
+
+Unbuilt systems the pitch implies, each a real project of its own, none
+started: inventory/equipment (armor, stick, backpack, fishing rod, TMs,
+stones), crafting + recipes + crafting tables, cooking (fire and food both
+exist; the verb connecting them doesn't), the Wary→Tolerant→Curious→Bonded
+trust stage machine, tactical partner commands (move + target tile, with the
+UX risk the pitch itself flags), and all of Act 2's village/NPC/quest tissue.
+
+- [ ] **Suggested first slice, if/when this gets built**: one cave layer,
+      one player, one bond — a player agent using the existing `needs.ts`
+      wholesale, player-driven turns, a real prey herd + water + crops (all
+      of which already generate), the four bonding verbs wired to the
+      existing rapport graph with legible trust stages, and an exit once
+      bonded. Everything else deliberately excluded. The one question that
+      can't be answered on paper — does "earn a partner by reading the
+      ecosystem" read as a puzzle or as trial-and-error — is answerable with
+      exactly that slice.
+- [ ] Act 3 (Jirachi/wish) is a direction, not a design — the pitch says so
+      itself ("or something. Idk."). Nothing to scope yet.
+
 ## Food crops (Oran/Sitrus/Pecha/Cheri berries kept + Corn/Wheat/Rice/Tomato/Apple/Potato/Pumpkin/Herbs) — built, see CROPS_DESIGN.md
 
 Direct ask: "more kinds of food, not just berries... nutrition dense, grow
