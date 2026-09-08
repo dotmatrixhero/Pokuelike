@@ -9,7 +9,8 @@ import { renderInspector, type GroupSelection } from "./inspector.js";
 import { renderLegend } from "./legend.js";
 import { AutoCameraController, type AutoCameraHost } from "./autoCamera.js";
 import { BattleScreenPanel } from "./battleScreenPanel.js";
-import { MacroMapView, MACRO_MAP_DEFAULT_BLOCK_PX } from "./macroMap.js";
+import { MacroMapView, MACRO_MAP_DEFAULT_BLOCK_PX, drawMacroMap } from "./macroMap.js";
+import { drawRegionThumbnail } from "./overworldMap.js";
 
 /**
  * Ticks per real second at speed multiplier 1x. Multiplied by `SPEED_STEPS`
@@ -113,8 +114,10 @@ const mapModeZoneBtn = document.getElementById("map-mode-zone") as HTMLButtonEle
 const mapModeOverworldBtn = document.getElementById("map-mode-overworld") as HTMLButtonElement;
 const minimapWidgetEl = document.getElementById("minimap-widget") as HTMLElement;
 const minimapButton = document.getElementById("minimap-button") as HTMLButtonElement;
-const minimapArtZone = document.getElementById("minimap-art-zone") as HTMLElement;
+const minimapArtZone = document.getElementById("minimap-art-zone") as HTMLCanvasElement;
 const minimapArtOverworld = document.getElementById("minimap-art-overworld") as HTMLElement;
+const minimapOverworldCanvas = document.getElementById("minimap-overworld-canvas") as HTMLCanvasElement;
+const minimapMarkerEl = document.getElementById("minimap-marker") as HTMLElement;
 const minimapCaption = document.getElementById("minimap-caption") as HTMLElement;
 const regionBannerEl = document.getElementById("region-banner") as HTMLElement;
 
@@ -139,6 +142,9 @@ const macroMapZoomInBtn = document.getElementById("macro-map-zoom-in") as HTMLBu
 const macroMapZoomOutBtn = document.getElementById("macro-map-zoom-out") as HTMLButtonElement;
 const macroMapScrollEl = document.getElementById("macro-map-scroll") as HTMLElement;
 const macroMapView = new MacroMapView(macroMapCanvas, macroMapZoomLabel, focusZone);
+/** Real ms between the corner mini-map widget's own redraws — see its call site in `frame()`'s own doc comment for why a modest lag here is fine. */
+const MINIMAP_WIDGET_RENDER_THROTTLE_MS = 1000;
+let lastMinimapWidgetRenderAt = 0;
 let log: EventLog;
 let playing = false;
 let speedIndex = DEFAULT_SPEED_INDEX;
@@ -316,6 +322,7 @@ function loadMacroWorld(seed: number = SCENARIO_SEED): void {
   registerHerdsForFirstFrame();
   resetUiForNewWorld();
   macroMapView.render(macroWorld, true);
+  renderMinimapWidget();
 
   seedInput.value = String(seed);
   seedChipLabel.textContent = String(seed);
@@ -334,6 +341,7 @@ function focusZone(row: number, col: number): void {
   registerHerdsForFirstFrame();
   resetUiForNewWorld();
   macroMapView.render(macroWorld, true);
+  renderMinimapWidget();
 }
 
 function step(): void {
@@ -994,6 +1002,44 @@ function refreshRegionBanner(): void {
   regionBannerEl.hidden = text === "";
 }
 
+/**
+ * Native-resolution target for the corner widget's overworld preview canvas
+ * — a real 2x-ish oversample of the 108x78 CSS box (the CSS below lets
+ * `image-rendering: pixelated` do the final crisp scale-down/up, same
+ * "draw at native res, let CSS handle it" convention `overworldMap.ts`'s
+ * own region thumbnail already uses), computed against the REAL macro
+ * grid's `cols`/`rows` rather than a fixed block size — a huge grid still
+ * produces exactly this many canvas pixels, never an oversized draw.
+ */
+const MINIMAP_OVERWORLD_TARGET_W = 216;
+const MINIMAP_OVERWORLD_TARGET_H = 156;
+
+/**
+ * Redraws the corner mini-map widget's two previews from real live data —
+ * see this widget's own CSS doc comment (index.html) for the bug this
+ * replaces (a purely decorative static texture). Cheap: both canvases are
+ * tiny, and `drawMacroMap`'s per-zone `fillRect` cost is bounded by
+ * `MINIMAP_OVERWORLD_TARGET_W/H` regardless of how large the real macro
+ * grid is (see that constant's own doc comment).
+ */
+function renderMinimapWidget(): void {
+  if (world) drawRegionThumbnail(minimapArtZone, world);
+  if (!macroWorld) return;
+  const { grid } = macroWorld;
+  const blockPx = Math.max(0.05, Math.min(MINIMAP_OVERWORLD_TARGET_W / grid.cols, MINIMAP_OVERWORLD_TARGET_H / grid.rows));
+  drawMacroMap(minimapOverworldCanvas, macroWorld, blockPx);
+
+  // Highlights the real focused zone's position within the overworld
+  // preview — computed from the actual grid coordinates, not a fixed guess.
+  const [rowStr, colStr] = macroWorld.focusedKey.split(",");
+  const row = Number(rowStr);
+  const col = Number(colStr);
+  minimapMarkerEl.style.left = `${(col / grid.cols) * 100}%`;
+  minimapMarkerEl.style.top = `${(row / grid.rows) * 100}%`;
+  minimapMarkerEl.style.width = `${Math.max(100 / grid.cols, 3)}%`;
+  minimapMarkerEl.style.height = `${Math.max(100 / grid.rows, 3)}%`;
+}
+
 function applyOverworldSubView(view: OverworldSubView): void {
   overworldSubView = view;
   canvasWrap.classList.toggle("force-hide", view === "overworld");
@@ -1005,6 +1051,7 @@ function applyOverworldSubView(view: OverworldSubView): void {
   // current view.
   minimapArtZone.hidden = view === "zone";
   minimapArtOverworld.hidden = view !== "zone";
+  renderMinimapWidget();
   minimapCaption.textContent = view === "zone" ? "overworld" : "focused zone";
 }
 
@@ -1138,6 +1185,15 @@ function frame(): void {
   // own doc comment) since the macro grid's data doesn't change fast enough
   // to justify a full redraw every animation frame at real grid scale.
   if (macroWorld) macroMapView.render(macroWorld);
+  // Same "doesn't need every-frame freshness" reasoning as macroMapView
+  // above — both of the widget's previews are of the view the viewer ISN'T
+  // currently looking at, so a modest lag between real state and this tiny
+  // corner preview is unnoticeable, and self-throttling here keeps a big
+  // macro grid's `drawMacroMap` cost off the hot per-frame path.
+  if (!minimapWidgetEl.hidden && performance.now() - lastMinimapWidgetRenderAt >= MINIMAP_WIDGET_RENDER_THROTTLE_MS) {
+    lastMinimapWidgetRenderAt = performance.now();
+    renderMinimapWidget();
+  }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

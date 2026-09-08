@@ -289,9 +289,17 @@
 
       /* --- Mini-map corner widget --------------------------------------
          A quick jump between the zoomed-in zone and the overworld without a
-         trip back to the header's segmented switch. A simplified static
-         thumbnail (not a live-rendered copy of the macro grid) — the real
-         detail lives one click away. */
+         trip back to the header's segmented switch.
+         Direct report: "The mini map is cool but does not show an accurate
+         overworld or zone snapshot." Root cause: this used to be a purely
+         decorative static CSS gradient, explicitly documented as "not a
+         live-rendered copy of the macro grid" — it never showed real data
+         at all, so "inaccurate" was true by design. Now a real `<canvas>`,
+         drawn by `main.ts`'s `renderMinimapWidget` via the exact same
+         `drawRegionThumbnail`/`drawMacroMap` functions the full-size views
+         use — same convention as `overworldMap.ts`'s own region thumbnail:
+         draw at native resolution, let this CSS's `image-rendering:
+         pixelated` handle the final crisp upscale into the small box. */
       #minimap-widget {
         position: absolute;
         right: 14px;
@@ -308,25 +316,28 @@
         border-radius: 6px;
         overflow: hidden;
         position: relative;
+        background: #1c2b1f;
       }
       #minimap-widget .minimap-caption {
         font-size: 9.5px;
         color: var(--text-dim);
         margin-top: 4px;
       }
-      .minimap-zone-art {
+      .minimap-zone-art,
+      .minimap-overworld-art,
+      .minimap-overworld-art canvas {
         position: absolute;
         inset: 0;
-        background:
-          repeating-conic-gradient(#2e4a33 0% 25%, #35532f 0% 50%) 0 0/16px 16px;
       }
-      .minimap-overworld-art {
-        position: absolute;
-        inset: 0;
-        background:
-          repeating-linear-gradient(90deg, #2b3a2c 0 11px, #263424 11px 22px),
-          repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.1) 0 11px, transparent 11px 22px);
+      #minimap-widget canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        image-rendering: pixelated;
       }
+      /* Highlights the currently-focused zone's real position within the
+         overworld preview — computed live in `renderMinimapWidget` from
+         `macroWorld.focusedKey`/`grid.rows`/`grid.cols`, not a fixed guess. */
       .minimap-marker { position: absolute; border: 2px solid #ffb238; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
 
       /* --- Auto-camera status badge -------------------------------------
@@ -797,11 +808,10 @@
 
           <div id="minimap-widget">
             <button id="minimap-button" title="Jump to the other map view">
-              <span id="minimap-art-zone" class="minimap-zone-art">
-                <span class="minimap-marker" style="left: 38%; top: 30%; width: 22%; height: 30%;"></span>
-              </span>
+              <canvas id="minimap-art-zone" class="minimap-zone-art"></canvas>
               <span id="minimap-art-overworld" class="minimap-overworld-art" hidden>
-                <span class="minimap-marker" style="left: 42%; top: 34%; width: 18%; height: 26%;"></span>
+                <canvas id="minimap-overworld-canvas"></canvas>
+                <span id="minimap-marker" class="minimap-marker"></span>
               </span>
             </button>
             <div id="minimap-caption" class="minimap-caption">overworld</div>

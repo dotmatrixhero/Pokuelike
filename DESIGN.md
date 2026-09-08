@@ -13938,3 +13938,58 @@ roughly matching `LINE_REVEAL_INTERVAL_MS`'s cadence, then held steady
 once caught up. Full monorepo typecheck clean; engine (46 files, 1246
 tests) and data (2 files, 240 tests) suites unaffected and still green —
 this fix touches web-only display code.
+
+## Fixed: the corner mini-map widget wasn't real — now a live snapshot
+
+Direct report: "The mini map is cool but does not show an accurate
+overworld or zone snapshot."
+
+Root cause, found by actually looking rather than assuming: the corner
+mini-map widget (the small "jump to the other map view" button, top-right
+of the canvas) was, verbatim per its own CSS doc comment, "a simplified
+static thumbnail (not a live-rendered copy of the macro grid)" — a
+generic repeating-gradient texture (grass-colored stripes for the zone
+preview, a different stripe pattern for the overworld preview), with a
+hardcoded fixed-position highlight box. It never showed real data at all;
+"inaccurate" was true by construction, not a bug in any rendering math.
+The much bigger, later-built `MacroMapView`/`overworldMap.ts`'s region
+thumbnail (both already real, already used elsewhere) made this corner
+widget's gap obvious once actually looked at side by side.
+
+Fixed by replacing both `<span>` art elements with real `<canvas>`
+elements, drawn by a new `renderMinimapWidget()` (main.ts) using the
+EXACT same functions the full-size views already use — no new rendering
+logic, no duplicated palette: `drawRegionThumbnail` (overworldMap.ts) for
+the "focused zone" preview, `drawMacroMap` (macroMap.ts) for the
+"overworld" preview, both drawn at a native resolution computed to fit
+the widget's small box (bounded regardless of how large the real macro
+grid is — see `MINIMAP_OVERWORLD_TARGET_W`/`_H`'s own doc comment) and
+scaled crisp via `image-rendering: pixelated`, the same "draw native, let
+CSS scale" convention the region thumbnail already established. The
+overworld preview's highlight box is now computed live from
+`MacroWorld.focusedKey`/`grid.rows`/`grid.cols` instead of a fixed
+guessed position. Redraws on every view-toggle/zone-focus/world-load
+(instant) plus a throttled per-frame refresh (1s — both previews are of
+the view the viewer ISN'T currently looking at, so perfect live freshness
+doesn't matter the way it does for the actively-viewed map).
+
+### Real-run findings
+
+Verified live via Playwright screenshots against the real dev server. The
+overworld preview now shows the actual landmass shape (matching the
+full-size Overworld view exactly — same lake, same mountain range, same
+coastline) with the focus marker correctly sitting at the real focused
+zone's coastal position. The zone preview looked suspiciously dark at
+first glance — a pixel-color scan confirmed why and that it's correct,
+not a bug: the visible on-screen viewport is a bright, scrolled-in corner
+of a much bigger 90x60-tile region, and the thumbnail (like the real
+`drawRegionThumbnail` it reuses) draws the WHOLE region — most of which
+is legitimately darker terrain (mountain "wall" tiles at their own
+near-black color from this session's earlier mountain-visibility fix,
+water, low-elevation floor) that the current viewport simply isn't
+scrolled to. A brightness scan found real bright pixels too (255/5400,
+max `[201,201,184]`, a genuine sand tone matching the viewport's own
+colors) — confirming a real, accurate mix, not a systematically-broken
+render. Full monorepo typecheck clean; engine (46 files, 1250 tests) and
+data (2 files, 240 tests) suites unaffected and still green — this fix
+touches web-only display code.
