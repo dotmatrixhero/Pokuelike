@@ -5241,3 +5241,95 @@ not something this pathfinding pass itself caused or is positioned to fix.
         "Nettleelmaw", so joins now drop a repeated letter at the seam.
       - Still deterministic: no rng draw, so naming cannot perturb a seeded
         run, and re-running a seed reproduces every name exactly.
+- [x] **Chronicle in the renderer.** Direct ask: "make it pretty in the
+      renderer."
+      - Extracted the story logic into the engine (`chronicle.ts`) FIRST,
+        because there are now two consumers: the runner prints text, the web
+        app renders a panel. The valuable half of this feature is the
+        filtering — which moments are worth telling and what gets thrown
+        away — and two copies of that would have drifted within a week. The
+        runner script is now a thin renderer over the shared module.
+      - New Chronicle tab in the web app, between Events and Legend. Each
+        beat carries a coarse `kind` (founding / loss / movement / conflict /
+        notable / growth / split / end) so the panel can colour its left
+        border and pick an icon without parsing prose — a chapter is
+        skimmable without being read.
+      - Cheap by construction: the panel no-ops entirely while its tab is
+        hidden and re-derives at most once every 200 ticks while open. A
+        chronicle is a whole-run summary; deriving it 60x a second would be
+        pure waste.
+      - Verified by actually looking at it in a browser rather than assuming
+        — which caught a stutter no test would have: the founding beat
+        repeated the herd's own name, so the panel read "The Spearows of
+        Stormfen" as a heading and then "the Spearows of Stormfen were here
+        when the world began" directly under it, lowercase mid-sentence.
+        Founding beats no longer name their own herd.
+- [ ] **Chronicle: still to do.** Migration paths drawn on the map; a family
+      tree of splits; clicking a herd to focus the camera on it; weather and
+      drought as named disasters a herd survived.
+- [x] **Named territories, labelled on the overworld.** Direct ask: "what if
+      zones or collections of zones were named? Can we do that based on
+      biome too, and even label it on the overworld?"
+      - COLLECTIONS, not zones — the overworld grid is 64x64, so naming
+        every zone would mean four thousand labels and no map. New
+        `territories.ts` flood-fills adjacent same-biome LAND zones into
+        regions and names those: 55-78 per world, covering ~90% of the land.
+        "the Endless Rainwood", "the Thirsting Dunes", "the Ash Scar",
+        "the Heron Wash", "the Cloud Tors".
+      - Names are `<prefix><suffix>` with biome-specific pools, joined
+        without a space for a lowercase word-ending ("Elderwood") and with
+        one for a standalone noun ("the Ashen Waste"). That one distinction
+        is most of what separates a place name from a generated string.
+      - Deliberately does NOT name a territory after a landmark inside it,
+        though the first version did: landmarks are already a separate
+        labelled POI layer AND they are not unique, so that produced three
+        different regions all called "the Crossroads" in one world. A
+        landmark sits IN a region; it is not the region.
+      - Two more defects found by looking at real output: "the Crag Crags"
+        (prefix repeating the suffix — now re-rolled), and duplicate names
+        across regions (now tracked and re-rolled per world).
+      - Labelled on the macro map, drawn in one pass after every zone so no
+        block paints over a label, with a size threshold that scales with
+        zoom so a zoomed-out map only names the big regions. Screenshotting
+        the real app caught two more: labels clipped at the canvas edge
+        ("un Meadows", "the Riot Car") now clamp inward, and overlapping
+        labels are skipped biggest-region-first rather than nudged, since a
+        label moved far enough to clear a collision no longer points at its
+        own territory.
+- [ ] **Territories: not yet wired to herd names.** A herd's place name is
+      still invented locally ("of Saltrun") rather than drawn from the
+      territory it was founded in. The obstacle is real: a run simulates ONE
+      promoted zone, so every herd in it shares a single territory and would
+      share a single name. Options: qualify the territory name with a local
+      feature, name herds after the territory only for the first herd
+      founded there, or show the territory as context in the chronicle
+      rather than in the name.
+- [x] **Herds named after their territory, with type-flavoured qualifiers.**
+      Direct asks, in order: "do the zone name, unless one herd of that type
+      already exists. Then give it a second name like 'the exiles of the
+      elder wood'", then "try to make the qualifiers flavorful to the typing
+      of the Pokemon too? The severed flame sounds super cool for example",
+      then "The sinister vine. The aquatic zealots".
+      - `promoteZone` now stamps the macro territory's name onto the
+        promoted world, so a herd's name points at a place that exists on
+        the overworld map. A standalone scenario world with no overworld
+        above it still falls back to an invented local place name.
+      - First herd of a species in a place gets the species: "the Rapidash
+        of the Crag Heights". Every later one gets a qualifier built from
+        TWO shapes in rotation, since one pattern for a whole world gets
+        samey however good it is:
+        - origin adjective + type noun — "the Sundered Ember", "the Severed
+          Flame", "the Sinister Vine"
+        - type adjective + collective noun — "the Burning Zealots", "the
+          Aquatic Zealots"
+      - The origin half carries WHY a second herd exists (a splinter group
+        really is severed, immigrants really are wandering), and the type
+        half makes it a group you can picture.
+      - Two defects caught by running it rather than reading it: the
+        immigration path never passed typing (the roster has none), so every
+        immigrant herd fell back to the generic pool and came out "the
+        Wandering Kin" whatever walked in; and uniqueness was checked
+        per-species, so a Golbat herd and an Onix herd were both "the
+        Wandering Kin of the Crag Heights". Names are now unique across
+        every herd in the world and stay spent after a herd dies, because a
+        name is an identity in the chronicle's permanent record.

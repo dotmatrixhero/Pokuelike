@@ -1651,6 +1651,15 @@ export interface World {
    * after a herd dissolves so its story survives its last member.
    */
   herds?: Record<string, import("./herds.js").HerdRecord>;
+  /**
+   * The named territory this world's macro zone sits in, if it was promoted
+   * from an overworld grid (territories.ts). Herds founded here are named
+   * after it — "the Bulbasaurs of the Elderwood" — so a herd's name points
+   * at somewhere you can actually find on the map. Absent for a standalone
+   * scenario world with no overworld above it, which falls back to an
+   * invented local place name.
+   */
+  territoryName?: string;
   biomeSeeds?: BiomeSeedInfo[];
   /**
    * Parallel array to `biomeSeeds` (same index — absent or a shorter array

@@ -336,7 +336,7 @@ function finishDispersal(world: World, agent: Agent, log?: EventLog): void {
   // sweep would register it as an ordinary founding and the family tree
   // would be lost.
   if (!joinedHerd) {
-    ensureHerd(world, toHerd, { species: agent.species, pos: agent.pos, origin: "split", parentHerdId: fromHerd, founderId: agent.id }, log);
+    ensureHerd(world, toHerd, { species: agent.species, pos: agent.pos, origin: "split", parentHerdId: fromHerd, founderId: agent.id, types: agent.types }, log);
   }
   // A founder's/joiner's new home range starts here, not wherever it was
   // born — see `Agent.homePos`'s doc comment (carryAlly's rescue destination

@@ -1,4 +1,5 @@
 import type { Agent, NotableTitleId, World } from "@pokuelike/engine";
+import { speciesDisplayName } from "@pokuelike/engine";
 
 /**
  * Real agent/egg ids are internal bookkeeping strings, not display text —
@@ -48,7 +49,9 @@ function originWord(id: string): string | undefined {
  * short `(shortId)` / `(shortId, origin)` form — see `shortId`/`originWord`
  * above — never the full raw id.
  */
-export function idLabel(world: World | undefined, id: string, species: string): string {
+export function idLabel(world: World | undefined, id: string, rawSpecies: string): string {
+  // Pokemon names are proper nouns — the roster stores ids lowercase.
+  const species = speciesDisplayName(rawSpecies);
   const agent = world?.agents.find((a) => a.id === id);
   const leader = agent ? leaderPrefix(agent) : "";
   if (agent?.notableTitle) return `${leader}${TITLE_DISPLAY_NAME[agent.notableTitle]} (${species})`;
@@ -119,7 +122,7 @@ export const TITLE_ICON: Record<NotableTitleId, string> = {
  * its own loses which specific Pokémon that is at a glance.
  */
 export function agentDisplayName(agent: Agent, def: { name: string } | undefined): string {
-  const speciesName = def?.name ?? agent.species;
+  const speciesName = def?.name ?? speciesDisplayName(agent.species);
   const leader = leaderPrefix(agent);
   if (agent.notableTitle) return `${leader}${TITLE_DISPLAY_NAME[agent.notableTitle]} (${speciesName})`;
   return `${leader}${speciesName}`;

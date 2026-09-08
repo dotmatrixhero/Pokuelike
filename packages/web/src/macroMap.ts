@@ -109,6 +109,75 @@ function drawZoneInset(ctx: CanvasRenderingContext2D, world: World, px: number, 
 }
 
 /** Draws the whole macro grid at `blockPx` native pixels per zone — see this file's top doc comment for the zoom model. Resizes `canvas` to exactly fit the grid at this zoom level. */
+/**
+ * Smallest block size at which territory labels are drawn at all. Zoomed
+ * further out the text would be unreadable and would cover more of the map
+ * than it explains — a label nobody can read is worse than no label.
+ */
+const LABEL_MIN_BLOCK_PX = 4;
+
+/** A territory needs to be at least this many zones to earn a label at the current zoom, scaled so a zoomed-out map only labels the big regions. */
+function labelSizeThreshold(blockPx: number): number {
+  if (blockPx >= 14) return 4;
+  if (blockPx >= 9) return 10;
+  if (blockPx >= 6) return 24;
+  return 60;
+}
+
+/**
+ * Draws territory names over the map — the layer that turns a coloured
+ * biome grid into somewhere with places in it.
+ *
+ * Drawn in one pass AFTER every zone, so a label is never painted over by a
+ * neighbouring block, and with a dark stroke behind the fill so the text
+ * stays readable over both a pale desert and a dark forest without needing a
+ * background plate that would hide the map underneath.
+ */
+function drawTerritoryLabels(ctx: CanvasRenderingContext2D, grid: MacroWorld["grid"], blockPx: number): void {
+  const territories = grid.territories;
+  if (!territories || blockPx < LABEL_MIN_BLOCK_PX) return;
+  const threshold = labelSizeThreshold(blockPx);
+  const fontPx = Math.max(9, Math.min(15, blockPx * 1.1));
+
+  ctx.save();
+  ctx.font = `600 ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = Math.max(2, fontPx * 0.3);
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.72)";
+  ctx.fillStyle = "rgba(255, 252, 244, 0.94)";
+
+  // Biggest regions first, so when two labels compete for the same space the
+  // more important place keeps its name.
+  const ordered = [...territories]
+    .filter((t) => t.zoneIndices.length >= threshold)
+    .sort((a, b) => b.zoneIndices.length - a.zoneIndices.length);
+
+  const placed: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
+  const padY = fontPx * 0.62;
+
+  for (const territory of ordered) {
+    const width = ctx.measureText(territory.name).width;
+    // Clamp into the canvas — an uncentred label is far better than
+    // "un Meadows" or "the Riot Car" sliced off at the edge, which is what
+    // the first version drew.
+    const half = width / 2 + 2;
+    const x = Math.min(Math.max((territory.labelCol + 0.5) * blockPx, half), ctx.canvas.width - half);
+    const y = Math.min(Math.max((territory.labelRow + 0.5) * blockPx, padY), ctx.canvas.height - padY);
+
+    const box = { x0: x - half, y0: y - padY, x1: x + half, y1: y + padY };
+    // Skip rather than nudge: a label shifted far enough to clear a
+    // collision is no longer pointing at its own territory.
+    if (placed.some((p) => box.x0 < p.x1 && box.x1 > p.x0 && box.y0 < p.y1 && box.y1 > p.y0)) continue;
+    placed.push(box);
+
+    ctx.strokeText(territory.name, x, y);
+    ctx.fillText(territory.name, x, y);
+  }
+  ctx.restore();
+}
+
 export function drawMacroMap(canvas: HTMLCanvasElement, mw: MacroWorld, blockPx: number): void {
   const { grid } = mw;
   canvas.width = grid.cols * blockPx;
@@ -154,6 +223,9 @@ export function drawMacroMap(canvas: HTMLCanvasElement, mw: MacroWorld, blockPx:
       }
     }
   }
+
+  // One pass after every zone, so no block can paint over a label.
+  drawTerritoryLabels(ctx, grid, blockPx);
 }
 
 /**

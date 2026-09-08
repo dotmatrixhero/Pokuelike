@@ -2,6 +2,7 @@ import { EventLog, tickWorld, tickMacroWorld, setFocusedZone, findRegion, random
 import { createDemoWorld, createDemoMacroWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { EventLogPanel } from "./eventLogPanel.js";
+import { ChroniclePanel } from "./chroniclePanel.js";
 import { EventPopups } from "./eventPopups.js";
 import { MoveEffects } from "./moveEffects.js";
 import { renderInspector } from "./inspector.js";
@@ -97,6 +98,8 @@ const autoCamBadgeEl = document.getElementById("auto-cam-badge") as HTMLElement;
 const battleScreenEl = document.getElementById("battle-screen") as HTMLElement;
 const eventsPageEl = document.getElementById("events-page") as HTMLElement;
 const tabInspectorBtn = document.getElementById("tab-inspector") as HTMLButtonElement;
+const tabChronicleBtn = document.getElementById("tab-chronicle") as HTMLButtonElement;
+const chronicleEl = document.getElementById("chronicle-page") as HTMLElement;
 const tabBattleScreenBtn = document.getElementById("tab-battle-screen") as HTMLButtonElement;
 const tabEventsBtn = document.getElementById("tab-events") as HTMLButtonElement;
 const tabLegendBtn = document.getElementById("tab-legend") as HTMLButtonElement;
@@ -148,6 +151,7 @@ let renderStyle: RenderStyle = "tile";
 let zoom = DEFAULT_ZOOM;
 
 const eventLogPanel = new EventLogPanel(eventLogEl);
+const chroniclePanel = new ChroniclePanel(chronicleEl);
 const battleScreenPanel = new BattleScreenPanel(battleScreenEl);
 const eventPopups = new EventPopups();
 const moveEffects = new MoveEffects();
@@ -436,7 +440,7 @@ function refreshSelection(): void {
 // as before — this is purely a thin visibility switch over the four, the
 // same `[hidden]` convention the old drawer/tab toggles already used.
 
-type PanelTab = "inspector" | "battle-screen" | "events" | "legend";
+type PanelTab = "inspector" | "battle-screen" | "events" | "chronicle" | "legend";
 let activeTab: PanelTab = "inspector";
 /**
  * The `seq` of the battle engagement the viewer last manually switched away
@@ -454,12 +458,14 @@ const TAB_BUTTONS: Record<PanelTab, HTMLButtonElement> = {
   inspector: tabInspectorBtn,
   "battle-screen": tabBattleScreenBtn,
   events: tabEventsBtn,
+  chronicle: tabChronicleBtn,
   legend: tabLegendBtn,
 };
 const TAB_PAGES: Record<PanelTab, HTMLElement> = {
   inspector: inspectorEl,
   "battle-screen": battleScreenEl,
   events: eventsPageEl,
+  chronicle: chronicleEl,
   legend: legendEl,
 };
 
@@ -470,6 +476,8 @@ function selectTab(tab: PanelTab, manual: boolean): void {
     TAB_BUTTONS[key].classList.toggle("playing", key === tab);
     TAB_BUTTONS[key].setAttribute("aria-selected", String(key === tab));
   }
+  // A chronicle is a whole-run summary, so it only does work while visible.
+  chroniclePanel.setOpen(tab === "chronicle");
   clearSelectionBtn.hidden = tab !== "inspector"; // "Clear [selection]" only means anything on the Inspector tab
 
   if (!manual) return;
@@ -484,6 +492,7 @@ function selectTab(tab: PanelTab, manual: boolean): void {
 }
 
 tabInspectorBtn.addEventListener("click", () => selectTab("inspector", true));
+tabChronicleBtn.addEventListener("click", () => selectTab("chronicle", true));
 tabBattleScreenBtn.addEventListener("click", () => selectTab("battle-screen", true));
 tabEventsBtn.addEventListener("click", () => selectTab("events", true));
 tabLegendBtn.addEventListener("click", () => selectTab("legend", true));
@@ -1004,6 +1013,10 @@ function frame(): void {
   maybeAutoSwitchTab();
   battleScreenPanel.render(world);
   eventLogPanel.render();
+  // Reads the full log rather than the incremental slice — a chronicle is a
+  // whole-run summary. It throttles itself and no-ops entirely while its tab
+  // is hidden, so this is cheap on every other frame.
+  chroniclePanel.render(world, log.events);
   refreshSelection();
   // Not forced — macroMapView.render internally throttles redraws (see its
   // own doc comment) since the macro grid's data doesn't change fast enough
