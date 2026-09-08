@@ -120,7 +120,7 @@ function beatsFor(herd: HerdRecord, own: any[]): Beat[] {
         beats.push({
           tick: e.tick,
           weight: 98,
-          text: `**${notableFullName(e.title, e.agentId, typesOf(e.species))}** rose to become the world's ${NOTABLE_TITLE_LABEL[e.title]}.`,
+          text: `**${notableFullName(e.title, e.agentId, typesOf(e.species))}** rose to become the world's ${NOTABLE_TITLE_LABEL[e.title as keyof typeof NOTABLE_TITLE_LABEL]}.`,
         });
         break;
 
