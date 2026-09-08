@@ -666,27 +666,44 @@
       .move-use-count { color: var(--text-dim); font-size: 11px; margin-left: auto; font-variant-numeric: tabular-nums; }
       .move-caret { color: var(--text-dim); font-size: 10px; width: 1em; text-align: center; }
 
+      /* Real radial skill-tree visualization, ported from the standalone
+         "Move Tree Atlas" artifact (see moveTreeSvg.ts's own doc comment) —
+         direct ask: "we have these super sick skill tree visualizations in
+         move atlas... when you click a Pokémon unit, look at their moves."
+         Node/edge classes below are set by moveTreeSvg.ts's JS, kept here
+         (rather than inline styles) purely for the hover hit-test hooks. */
       .skilltree {
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 8px;
         padding: 8px 4px 6px 18px;
         margin-top: 2px;
         border-left: 2px solid var(--panel-border);
       }
-      .skilltree-row { display: flex; flex-wrap: wrap; gap: 8px; }
-      .skilltree-node {
-        border: 1px solid var(--panel-border);
-        border-radius: 5px;
-        padding: 4px 8px;
-        min-width: 84px;
-        background: #1b2129;
-        cursor: default;
+      .skilltree-svg { display: block; width: 100%; height: auto; max-height: 340px; }
+      .skilltree-node-label { font-size: 11px; fill: var(--text); pointer-events: none; font-weight: 600; }
+      .skilltree-node-hit { cursor: default; }
+      .skilltree-node-hit:hover circle.ring { filter: brightness(1.35); }
+      .skilltree .edge-normal { stroke-width: 1.4; opacity: 0.55; }
+      .skilltree .edge-anyof { stroke-width: 1.3; stroke-dasharray: 2 4; opacity: 0.55; }
+      .skilltree .edge-cross { stroke-width: 1.6; opacity: 0.8; }
+      .skilltree .edge-bridge { stroke-width: 2; stroke-dasharray: 4 3; opacity: 0.9; }
+      .skilltree .edge-dim { opacity: 0.12 !important; }
+      .skilltree .edge-lit { opacity: 1 !important; stroke-width: 2.2 !important; }
+      .skilltree .node-dim { opacity: 0.28; }
+      .skilltree .node-lit circle.ring { filter: brightness(1.4); }
+      .skilltree .node-chosen circle.ring { stroke-width: 3.4; filter: drop-shadow(0 0 3px currentColor); }
+      .skilltree .node-chosen .node-check { opacity: 1; }
+      .skilltree .node-locked { opacity: 0.32; }
+      .skilltree .node-locked circle:not(.ring) { opacity: 0.35 !important; }
+      .skilltree .node-check { opacity: 0; pointer-events: none; }
+      .skilltree-detail {
+        font-size: 11px;
+        color: var(--text-dim);
+        padding: 4px 6px;
+        border-top: 1px solid var(--panel-border-soft, var(--panel-border));
+        min-height: 1.2em;
       }
-      .skilltree-node-dim { opacity: 0.45; }
-      .skilltree-node-chosen { opacity: 1; background: #232b1f; }
-      .skilltree-node-name { font-size: 11.5px; font-weight: 600; }
-      .skilltree-node-cost { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
 
       /* Narrow viewports: stack the map above the panel instead of side by
          side, and give the panel a bounded height rather than splitting the

@@ -1,7 +1,8 @@
-import type { Agent, MoveSpec, MoveTreeNode, World } from "@pokuelike/engine";
+import type { Agent, MoveSpec, World } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
-import { TYPE_COLOR, rgbToCss, rgbaToCss } from "./palette.js";
+import { TYPE_COLOR, rgbToCss } from "./palette.js";
 import { agentDisplayName, herdDisplayName, LEADER_ICON, TITLE_ICON } from "./notableTitles.js";
+import { buildMoveTreeSvg, describeMoveTreeNode } from "./moveTreeSvg.js";
 
 // --- Small shared DOM helpers ------------------------------------------------
 
@@ -152,91 +153,34 @@ function moveKey(agent: Agent, move: MoveSpec): string {
   return `${agent.id}:${move.id}`;
 }
 
-/** BFS depth from any root (a node with no prerequisites of either kind) — good enough for a simple layered layout without a real graph-layout algorithm. */
-function layerNodes(tree: Record<string, MoveTreeNode>): MoveTreeNode[][] {
-  const ids = Object.keys(tree);
-  const depth = new Map<string, number>();
-  const prereqsOf = (node: MoveTreeNode): string[] => [
-    ...(node.prerequisites ?? []),
-    ...(node.prerequisitesAnyOf ?? []).flat(),
-  ];
-
-  // Roots first (BFS frontier), then relax repeatedly until stable — the
-  // tree is a DAG (possibly with `prerequisitesAnyOf` alternate paths of
-  // different lengths), so a node's depth is the *max* of its prereqs' + 1,
-  // not just the first path found.
-  for (const id of ids) if (prereqsOf(tree[id]!).length === 0) depth.set(id, 0);
-  let changed = true;
-  let guard = 0;
-  while (changed && guard++ < ids.length + 1) {
-    changed = false;
-    for (const id of ids) {
-      const node = tree[id]!;
-      const prereqs = prereqsOf(node);
-      if (prereqs.length === 0) continue;
-      const prereqDepths = prereqs.map((p) => depth.get(p));
-      if (prereqDepths.some((d) => d === undefined)) continue;
-      const next = Math.max(...(prereqDepths as number[])) + 1;
-      if (depth.get(id) !== next) {
-        depth.set(id, next);
-        changed = true;
-      }
-    }
-  }
-  // Anything still unresolved (a malformed/cyclic prereq, shouldn't happen
-  // in real data) falls back to depth 0 rather than being silently dropped.
-  for (const id of ids) if (!depth.has(id)) depth.set(id, 0);
-
-  const maxDepth = Math.max(0, ...depth.values());
-  const rows: MoveTreeNode[][] = Array.from({ length: maxDepth + 1 }, () => []);
-  for (const id of ids) rows[depth.get(id)!]!.push(tree[id]!);
-  for (const r of rows) r.sort((a, b) => a.name.localeCompare(b.name));
-  return rows;
-}
-
-/** Renders the inline skill-tree visualization for one move, with the agent's chosen nodes lit up. */
+/**
+ * Renders the inline skill-tree visualization for one move — the real
+ * radial layout ported from the "Move Tree Atlas" artifact, see
+ * `moveTreeSvg.ts`'s own doc comment. The agent's actual `moveTreeChoices`
+ * nodes render lit with a checkmark badge; everything else dims according
+ * to whether it's still reachable from here. Clicking a node shows its
+ * plain-English effect below the tree instead of only a hover tooltip —
+ * direct ask: "I don't see how they're specced either. It'd be nice to see
+ * their actual allocations."
+ */
 function renderMoveTree(move: MoveSpec, chosenIds: string[]): HTMLElement {
   const tree = move.tree!;
-  const chosen = new Set(chosenIds);
   const wrap = document.createElement("div");
   wrap.className = "skilltree";
 
-  const accent = typeColorCss(move.type);
-  const rows = layerNodes(tree);
-  for (const rowNodes of rows) {
-    const rowEl = document.createElement("div");
-    rowEl.className = "skilltree-row";
-    for (const node of rowNodes) {
-      const isChosen = chosen.has(node.id);
-      const nodeEl = document.createElement("div");
-      nodeEl.className = `skilltree-node${isChosen ? " skilltree-node-chosen" : " skilltree-node-dim"}`;
-      if (isChosen) {
-        nodeEl.style.borderColor = accent;
-        nodeEl.style.boxShadow = `0 0 6px 1px ${rgbaToCss((TYPE_COLOR as Record<string, [number, number, number]>)[move.type] ?? [139, 147, 161], 0.55)}`;
-      }
-      const nameEl = document.createElement("div");
-      nameEl.className = "skilltree-node-name";
-      nameEl.textContent = node.name;
-      const costEl = document.createElement("div");
-      costEl.className = "skilltree-node-cost";
-      costEl.textContent = `${node.cost} pt${node.cost === 1 ? "" : "s"}`;
-      nodeEl.append(nameEl, costEl);
+  const detail = document.createElement("div");
+  detail.className = "skilltree-detail";
+  detail.textContent = chosenIds.length
+    ? `${chosenIds.length} node${chosenIds.length === 1 ? "" : "s"} chosen — click a node below for details.`
+    : "No nodes chosen yet — click a node below for details.";
 
-      // Nice-to-have detail (delta/leaning/passive) as a native tooltip — cheap, not shipped as its own UI.
-      const details: string[] = [];
-      if (node.leaning) details.push(`leans: ${node.leaning}`);
-      if (node.grantsPassive) details.push(`grants: ${node.grantsPassive.kind} +${node.grantsPassive.value}`);
-      for (const p of node.grantsPassives ?? []) details.push(`grants: ${p.kind} +${p.value}`);
-      const deltaBits = Object.entries(node.delta)
-        .filter(([k]) => k !== "shape" && k !== "range")
-        .map(([k, v]) => `${k}: ${typeof v === "number" && v > 0 ? "+" : ""}${JSON.stringify(v)}`);
-      details.push(...deltaBits);
-      nodeEl.title = `${node.name} (${isChosen ? "chosen" : "not chosen"})${details.length ? "\n" + details.join("\n") : ""}`;
+  const svg = buildMoveTreeSvg(tree, chosenIds, (node) => {
+    const isChosen = chosenIds.includes(node.id);
+    const details = describeMoveTreeNode(node);
+    detail.textContent = `${node.name} (${node.cost} pt${node.cost === 1 ? "" : "s"}, ${isChosen ? "chosen" : "not chosen"})${details.length ? " — " + details.join(", ") : ""}`;
+  });
 
-      rowEl.appendChild(nodeEl);
-    }
-    wrap.appendChild(rowEl);
-  }
+  wrap.append(svg, detail);
   return wrap;
 }
 

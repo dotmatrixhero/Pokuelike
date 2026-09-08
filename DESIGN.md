@@ -13993,3 +13993,63 @@ colors) — confirming a real, accurate mix, not a systematically-broken
 render. Full monorepo typecheck clean; engine (46 files, 1250 tests) and
 data (2 files, 240 tests) suites unaffected and still green — this fix
 touches web-only display code.
+
+## The real Move Tree Atlas radial visualization, in-game
+
+Direct ask: "The moves don't really show a tree - we have these super sick
+skill tree visualizations in move atlas. It'd be really cool to have that
+when you click a Pokémon unit, look at their moves... I don't see how
+they're specced either. It'd be nice to see their actual allocations." A
+direct follow-up: "Pull the visualization from our html move atlas thing.
+It should help a lot."
+
+Found, on investigation, that `inspector.ts`'s move list already had a
+click-to-expand tree slot wired to a real `Agent.moveTreeChoices` lookup
+(`leveling.ts`'s `maybeAutoRespec` sets it as a wild agent auto-respecs) —
+so "their actual allocations" were already there to show. It was just
+drawing a plain BFS-layered row grid instead of anything resembling the
+Move Tree Atlas's real three-branch radial layout
+(`packages/data/scripts/move-tree-atlas.template.html`, the standalone
+design-tool artifact this session's move-tree/species work has referenced
+throughout).
+
+New `moveTreeSvg.ts` (packages/web) IS that atlas's layout/render code —
+`computeLayout` (branch angles, per-depth radius, fork spreading,
+crosslink-bridge positioning scaled to how deep its real prerequisites
+sit, crosslink-chain descendants radiating from their own hub) ported
+near-verbatim from the atlas's vanilla JS to real DOM/SVG-element
+construction (this codebase's own idiom, matching `overworldMap.ts`/
+`renderer.ts`, rather than the atlas's `innerHTML`/`el()` helper). The
+atlas's OWN interactive "try a hypothetical build" half — its whole
+purpose as a design tool — is deliberately not ported: an agent's
+`moveTreeChoices` is real, already-decided history (auto-respec'd by the
+engine, never player-chosen), so there's nothing to simulate. What's kept
+from the atlas: chosen nodes get the real green checkmark badge and glow
+ring; not-yet-chosen nodes dim further the less reachable they are
+(`isEligible`, a direct port of the atlas's own `checkEligible` —
+prerequisite AND exclusion aware, so a fork's excluded sibling reads as
+locked even though its own prerequisite is satisfied); hover lights up a
+node and its edges, dimming the rest; crosslink/bridge/anyOf/exclusion
+edges keep their distinct dash styles and gold coloring. Clicking a node
+now shows its plain-English effect (leaning/passives/delta) in a small
+detail line below the tree, replacing the old version's hover-only
+native tooltip.
+
+### Verification
+
+No vitest suite exists for `packages/web`; verified live via Playwright
+against the real dev server, using a synthetic tree exercising every
+layout feature at once (a branch opener, an excludes-pair fork, a
+cost-2 capstone with a passive, a second branch, and a crosslink bridge
+with a chained descendant): all 7 nodes rendered, exactly 3 marked
+`node-chosen` (matching the given `chosenIds`) and exactly 3 marked
+`node-locked` — confirmed by hand that the locked set is right: the
+excluded fork sibling (its own prerequisite met, but excluded by an
+already-chosen node), plus the crosslink bridge and its chained
+descendant (both still missing an unchosen prerequisite), while the
+OTHER branch's unrelated opener correctly read as eligible-but-not-
+locked. A follow-up click on a capstone node produced the correct detail
+text ("Inferno — Leans: aggression, Grants: damageReduction +0.1, power:
++20"). Full monorepo typecheck clean; engine (46 files, 1250 tests) and
+data (2 files, 240 tests) suites unaffected and still green — this fix
+touches web-only display code.
