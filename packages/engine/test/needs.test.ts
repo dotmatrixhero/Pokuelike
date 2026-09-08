@@ -878,27 +878,81 @@ describe("water-graze foraging (Agent.obligateAquatic / preferredTerrain water)"
   });
 });
 
-describe("decayNeeds: thirstMultiplier composes with the flat decay rate (Phase 3 weather)", () => {
-  it("defaults to the original flat rate when no multiplier is passed", () => {
+// The first tick's drop from a full bar: `thirst * RATE + FLOOR` at
+// thirst = 1, i.e. 1 * 0.002 + 0.0001. Thirst is no longer a flat rate —
+// see needs.ts's `THIRST_DECAY_RATE`.
+const THIRST_FIRST_TICK_DROP = 0.0021;
+
+describe("thirst decays on hunger's curve, not a flat rate", () => {
+  // The property that actually matters, and the reason for the change:
+  // thirst must SELF-BRAKE as it empties. A flat rate does not, which made
+  // the last stretch of the thirst bar drain 5x faster than the same
+  // stretch of hunger and turned thirst into the leading cause of death in
+  // the simulation (10 of 19 herd endings across three seeds). Asserting
+  // the shape rather than a magic number is what keeps that from silently
+  // coming back if the constants are retuned.
+  it("drains more slowly the emptier it gets", () => {
+    const full = createNeeds({ thirst: 1 });
+    const low = createNeeds({ thirst: 0.1 });
+    decayNeeds(full);
+    decayNeeds(low);
+    expect(1 - full.thirst).toBeGreaterThan(0.1 - low.thirst);
+  });
+
+  it("gives its last stretch a comparable runway to hunger's", () => {
+    const drain = (need: "thirst" | "hunger"): number => {
+      const needs = createNeeds({ [need]: 0.2 });
+      let ticks = 0;
+      while (needs[need] > 0 && ticks < 100_000) {
+        decayNeeds(needs);
+        ticks++;
+      }
+      return ticks;
+    };
+    const thirstTail = drain("thirst");
+    const hungerTail = drain("hunger");
+    // Was 160 vs 815 — a 5x gap. Now within a small factor of each other.
+    expect(thirstTail).toBeGreaterThan(hungerTail * 0.75);
+  });
+
+  it("still comes on faster than hunger — animals drink more often than they eat", () => {
+    const needs = createNeeds();
+    let thirstTicks = 0;
+    while (needs.thirst > 0.7) {
+      decayNeeds(needs);
+      thirstTicks++;
+    }
+    const hungerNeeds = createNeeds();
+    let hungerTicks = 0;
+    while (hungerNeeds.hunger > 0.7) {
+      decayNeeds(hungerNeeds);
+      hungerTicks++;
+    }
+    expect(thirstTicks).toBeLessThan(hungerTicks);
+  });
+});
+
+describe("decayNeeds: thirstMultiplier composes with the thirst curve (Phase 3 weather)", () => {
+  it("defaults to an unmodified curve when no multiplier is passed", () => {
     const needs = createNeeds();
     decayNeeds(needs);
-    expect(needs.thirst).toBeCloseTo(1 - 0.00125, 10);
+    expect(needs.thirst).toBeCloseTo(1 - THIRST_FIRST_TICK_DROP, 10);
   });
 
   it("a multiplier below 1 (rain) eases thirst decay relative to the base rate", () => {
     const needs = createNeeds();
     decayNeeds(needs, 0.6);
     const eased = 1 - needs.thirst;
-    expect(eased).toBeCloseTo(0.00125 * 0.6, 10);
-    expect(eased).toBeLessThan(0.00125);
+    expect(eased).toBeCloseTo(THIRST_FIRST_TICK_DROP * 0.6, 10);
+    expect(eased).toBeLessThan(THIRST_FIRST_TICK_DROP);
   });
 
   it("a multiplier above 1 (drought) raises thirst decay relative to the base rate", () => {
     const needs = createNeeds();
-    decayNeeds(needs, 1.8);
+    decayNeeds(needs, 1.2);
     const raised = 1 - needs.thirst;
-    expect(raised).toBeCloseTo(0.00125 * 1.8, 10);
-    expect(raised).toBeGreaterThan(0.00125);
+    expect(raised).toBeCloseTo(THIRST_FIRST_TICK_DROP * 1.2, 10);
+    expect(raised).toBeGreaterThan(THIRST_FIRST_TICK_DROP);
   });
 
   it("does not touch hunger/energy/mateDrive — only thirst is weather-modulated", () => {
@@ -936,7 +990,7 @@ describe("tickAgentNeeds: local weather composes with thirst decay through a rea
     ];
     const farAgent = makeAgent({ pos: { x: 1, y: 1 } });
     tickAgentNeeds(farAgent, world);
-    expect(farAgent.needs.thirst).toBeCloseTo(1 - 0.00125, 10);
+    expect(farAgent.needs.thirst).toBeCloseTo(1 - THIRST_FIRST_TICK_DROP, 10);
   });
 });
 

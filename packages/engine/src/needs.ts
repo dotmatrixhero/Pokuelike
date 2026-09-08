@@ -44,18 +44,6 @@ import { thirstDecayMultiplier } from "./weather.js";
 import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
 
 const DECAY_PER_TICK = {
-  /**
-   * Quartered again from 0.005 — direct ask: "thirst and hunger... much
-   * much much slower... like 1/4 the time it is now." At 0.00125, thirst
-   * empties in ~800 ticks (was ~200), on top of `THIRST_STARVATION_GRACE_TICKS`,
-   * without touching thirst's deliberately-kept-linear curve. Motivated by
-   * the breeding-level gate (agents now need to survive to level 16 or
-   * evolve before they can reproduce at all) — see DESIGN.md's "Breeding
-   * requires a real earned edge" section, whose real-run findings showed
-   * near-zero breeding because agents weren't surviving long enough to
-   * level up; giving needs a much longer runway is the direct fix.
-   */
-  thirst: 0.00125,
   energy: 0.005,
   mateDrive: 0.01,
 } as const;
@@ -82,21 +70,52 @@ const DECAY_PER_TICK = {
 const HUNGER_DECAY_RATE = 0.0015;
 const HUNGER_DECAY_FLOOR = 0.000125;
 
+/**
+ * Thirst uses hunger's curve shape now, not a flat rate. It used to be
+ * linear at 0.00125/tick and that turned out to be the single biggest
+ * cause of death in the whole simulation — thirst was 10 of 19 herd
+ * endings across three seeds (see the chronicle's ending beat, which is
+ * what surfaced it).
+ *
+ * **The total budget was never the real problem; the shape was.** Hunger
+ * decays as a fraction of what remains, so it self-brakes as it empties:
+ * the last 20% of the hunger bar took 815 ticks. Flat thirst had no such
+ * brake — the same last 20% took 160. An agent in real trouble therefore
+ * had 5x less time to reach water than to reach food, and that is exactly
+ * the window in which it has to cross terrain to get there. Two needs, two
+ * different physics, for no design reason: hunger got a curve during an
+ * earlier "much much slower" pass and thirst only got a smaller flat
+ * number.
+ *
+ * Tuned so thirst keeps its character rather than just becoming a second
+ * hunger. It still comes on FASTER — it crosses `chooseBehavior`'s 0.7
+ * urgency cutoff at ~169 ticks against hunger's ~216, so animals still
+ * drink more often than they eat — but the tail is now forgiving in the
+ * same way: 1,521 ticks to empty plus `THIRST_STARVATION_GRACE_TICKS`
+ * = ~1,671 total against hunger's ~1,809 (92%, where it used to be 53%),
+ * and the last 20% of the bar takes 804 ticks against hunger's 815. Urgent
+ * to manage, no longer disproportionately lethal.
+ */
+const THIRST_DECAY_RATE = 0.002;
+const THIRST_DECAY_FLOOR = 0.0001;
+
 /** Ticks an agent can sit at 0 hunger before it dies of it. */
 const STARVATION_GRACE_TICKS = 100;
 /**
- * Thirst's own, longer, grace period — see "Extend thirst's survival
- * margin" in DESIGN.md. Hunger's full curve (exponential decay of the
- * remaining value, see `HUNGER_DECAY_RATE`'s doc comment) now takes ~427
- * ticks to empty, then 100 more before death — ~527 total. Thirst's flat
- * rate empties in ~200 ticks (`DECAY_PER_TICK.thirst`); this 150-tick grace
- * period brings its total survival budget to ~350 — narrower than hunger's
- * but not by a principle-violating margin, and thirst deliberately stays
- * linear rather than getting hunger's exponential shape. Tracked
- * independently of `STARVATION_GRACE_TICKS` via `Agent.thirstStarvationTicks`
- * (a separate counter from `Agent.starvationTicks`) since hunger and thirst
- * can cross 0 at different ticks — a single shared counter can't correctly
- * judge two different thresholds.
+ * Thirst's own grace period, tracked independently of
+ * `STARVATION_GRACE_TICKS` via `Agent.thirstStarvationTicks` (a separate
+ * counter, since hunger and thirst can cross 0 at different ticks and a
+ * single shared counter cannot correctly judge two thresholds).
+ *
+ * The margin this is part of used to be described here as "narrower than
+ * hunger's but not by a principle-violating margin," citing ~350 against
+ * ~527. Those numbers were stale — written before the quartering pass that
+ * gave hunger its curve — and the real figures were 951 against 1,809,
+ * nearly 2x, which is precisely the margin that comment existed to rule
+ * out. With thirst now on hunger's curve (see `THIRST_DECAY_RATE`) the
+ * totals are ~1,671 against ~1,809 and the claim is true again. Kept
+ * longer than hunger's 100 because thirst still empties sooner, so the
+ * grace period is doing real work at the moment it matters.
  */
 const THIRST_STARVATION_GRACE_TICKS = 150;
 /**
@@ -543,7 +562,7 @@ export function createNeeds(overrides: Partial<Needs> = {}): Needs {
 export function decayNeeds(needs: Needs, thirstMultiplier = 1, asleep = false, hungerMultiplier = 1, shelterMultiplier = 1): void {
   const needsMultiplier = (asleep ? SLEEP_NEEDS_DECAY_MULTIPLIER : 1) * shelterMultiplier;
   needs.hunger = Math.max(0, needs.hunger - (needs.hunger * HUNGER_DECAY_RATE + HUNGER_DECAY_FLOOR) * needsMultiplier * hungerMultiplier);
-  needs.thirst = Math.max(0, needs.thirst - DECAY_PER_TICK.thirst * thirstMultiplier * needsMultiplier);
+  needs.thirst = Math.max(0, needs.thirst - (needs.thirst * THIRST_DECAY_RATE + THIRST_DECAY_FLOOR) * thirstMultiplier * needsMultiplier);
   needs.energy = asleep
     ? Math.min(1, needs.energy + SLEEP_ENERGY_RESTORE_RATE)
     : Math.max(0, needs.energy - DECAY_PER_TICK.energy);

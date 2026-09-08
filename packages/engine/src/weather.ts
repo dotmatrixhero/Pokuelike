@@ -303,9 +303,28 @@ export function floraDecayDivisor(world: World, layer: Layer, pos: Vec2): number
   return 1;
 }
 
-/** Rain eases thirst decay, drought raises it — see needs.ts's `decayNeeds` call site. Sim-original magnitudes, same "noticeable but not dominant" order as the off-hours Speed penalty (Phase 2). */
+/**
+ * Rain eases thirst decay, drought raises it — see needs.ts's `decayNeeds`
+ * call site.
+ *
+ * Drought was 1.8, and that was too much of the wrong kind of pressure.
+ * Weather here is deliberately ONE-SIDED — there is no drought term on
+ * hunger at all (the only hunger multiplier in `decayNeeds` is the
+ * predator-only post-kill digesting slowdown), so every drought cell on the
+ * map was purely a thirst event and never a famine, which is a large part
+ * of why thirst dominated deaths.
+ *
+ * The fix is not to make the number bigger on both sides. Drought already
+ * has two much better ways to hurt, both real terrain effects a player can
+ * SEE: it dries small water bodies out (`DROUGHT_WATER_DRY_CHANCE_PER_TICK`)
+ * and it kills food patches four times faster
+ * (`DROUGHT_FLORA_DECAY_DIVISOR`). Making the herd walk further to a
+ * shrinking pond is a better drought than silently draining a hidden meter
+ * faster, so the meter effect steps back to a light 1.2x nudge and lets the
+ * map do the work.
+ */
 export const RAIN_THIRST_DECAY_MULTIPLIER = 0.6;
-export const DROUGHT_THIRST_DECAY_MULTIPLIER = 1.8;
+export const DROUGHT_THIRST_DECAY_MULTIPLIER = 1.2;
 
 /** `1` outside rain/drought or off the surface layer — composes multiplicatively with needs.ts's flat per-tick thirst decay rate. */
 export function thirstDecayMultiplier(world: World, layer: Layer, pos: Vec2): number {
