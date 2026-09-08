@@ -369,14 +369,64 @@ function pickEdgePos(world: World, rng: () => number): Vec2 {
  */
 const UNTAGGED_MATCH_FLOOR = 0.15;
 
+/**
+ * Predator share of the living population the world drifts back toward. Not
+ * a cap or a quota — only the immigration weighting notices it, and only to
+ * make a hunter more likely to WALK IN when the niche is empty.
+ */
+export const PREDATOR_TARGET_SHARE = 0.2;
+
+/** Strongest immigration boost a predator species gets, applied when there are none left alive at all. */
+export const PREDATOR_EMPTY_NICHE_BOOST = 6;
+
+/**
+ * How much more likely a predator species is to be the one that immigrates,
+ * given the current predator share of the living population. 1 (no boost)
+ * once the share reaches `PREDATOR_TARGET_SHARE`, rising to
+ * `PREDATOR_EMPTY_NICHE_BOOST` when there are no predators left.
+ *
+ * This exists because the ecosystem measurably falls off both sides of the
+ * ridge: across four 8k-tick seeds, two ended with zero living predators
+ * and one with 77% predators (having eaten out its own prey). A world with
+ * no hunters still has herd conflict, but nothing is being hunted, and
+ * predation is where most of the interesting combat comes from.
+ *
+ * Deliberately only a nudge on WHICH species arrives, never on whether
+ * immigration happens or how many — an empty niche makes a hunter's arrival
+ * likelier, it does not conjure one on demand, and a healthy predator
+ * population turns this off entirely.
+ */
+export function predatorNicheBoost(species: { isPredator?: boolean }, predatorShare: number): number {
+  if (!species.isPredator) return 1;
+  const deficit = Math.max(0, 1 - predatorShare / PREDATOR_TARGET_SHARE);
+  return 1 + (PREDATOR_EMPTY_NICHE_BOOST - 1) * deficit;
+}
+
 function pickImmigrantSpecies(world: World, roster: readonly ImmigrationSpeciesInfo[], biomeWeights: Record<string, number>, rng: () => number): ImmigrationSpeciesInfo | undefined {
   if (roster.length === 0) return undefined;
+
+  const predatorIds = new Set(roster.filter((species) => species.isPredator).map((species) => species.id));
 
   const counts = new Map<string, number>();
   for (const agent of world.agents) {
     if (agent.alive === false) continue;
     counts.set(agent.species, (counts.get(agent.species) ?? 0) + 1);
   }
+
+  // Share of the living population that currently hunts. The existing
+  // `repWeight` already favours rare SPECIES, but a predator is only ever
+  // one rare species among many, which is not enough to refill an empty
+  // predatory niche — measured across four seeds, two ended with literally
+  // zero living predators and a third with 77% (the prey eaten out
+  // instead). Both ends kill predation as a source of conflict.
+  let living = 0;
+  let livingPredators = 0;
+  for (const agent of world.agents) {
+    if (agent.alive === false) continue;
+    living++;
+    if (predatorIds.has(agent.species)) livingPredators++;
+  }
+  const predatorShare = living > 0 ? livingPredators / living : 0;
 
   const weights = roster.map((species) => {
     const repWeight = 1 / ((counts.get(species.id) ?? 0) + 1);
@@ -388,8 +438,9 @@ function pickImmigrantSpecies(world: World, roster: readonly ImmigrationSpeciesI
     // Direct ask: "make arboks less common" — a per-species dial
     // (`ImmigrationSpeciesInfo.rarity`) on top of the under-representation/
     // biome-match weighting above, absent = 1 (no change) for every other
-    // species.
-    return repWeight * biomeMatch * (species.rarity ?? 1);
+    // species — combined with the predator-niche boost below, both are
+    // independent multipliers on the same base weight.
+    return repWeight * biomeMatch * (species.rarity ?? 1) * predatorNicheBoost(species, predatorShare);
   });
 
   const total = weights.reduce((a, b) => a + b, 0);

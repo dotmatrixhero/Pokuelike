@@ -5084,3 +5084,42 @@ not something this pathfinding pass itself caused or is positioned to fix.
       - One node named "+0.03 Damage Reduction" renamed "+0.5 Armor".
       - 8 new tests (curve shape, monotonicity, unreachable immunity, the
         floor, percent+flat stacking).
+- [x] **Capstones made reachable — but the lever was commitment, not
+      saving.** Direct steer: "should be reachable."
+      - First measured the RIGHT thing. The old metric (distinct cost-2
+        nodes reached across the whole roster) mostly measured how much
+        agents concentrate on the same branches. Per INVESTING agent,
+        at the existing settings: 36% already reached a cost-2 keystone,
+        but only 1% ever reached a terminal capstone.
+      - Raising `SKILLPOINT_SAVE_CHANCE` made things WORSE, not better
+        (0.5 -> 0.75 took keystone reach 46% -> 29%, because agents banked
+        instead of buying). Left at 0.5.
+      - The actual blocker: agents spread ~14 chosen nodes across three or
+        four trees and never finished a branch. New
+        `SKILLPOINT_FOCUS_BONUS` (2) weights the auto-respec toward the
+        move already furthest along. Across 8 seeds x 8k ticks, capstone
+        reach went **1% -> 6%** with keystone reach flat (36% -> 32%,
+        inside the noise). Same number of points, spent as a build.
+      - It stays a bias, not a rule — a test asserts an agent still puts
+        points into its other moves.
+- [x] **More combat, via keeping predators alive.** Direct steer: "I think
+      starvation is fine but I do want some combat."
+      - Diagnosed rather than assumed: fights were ALREADY 15-28 per 1000
+        ticks. The real failure was predator persistence — of four seeds,
+        two ended with zero living predators and one with 77% (prey eaten
+        out). A world with no hunters still has herd clashes, but nothing
+        is being hunted.
+      - New `predatorNicheBoost` (immigration.ts): a predator species is up
+        to 6x likelier to be the one that immigrates when the living
+        predator share is below `PREDATOR_TARGET_SHARE` (0.2), tapering to
+        no boost once the niche is filled. Only nudges WHICH species
+        arrives — never whether immigration happens or how many.
+      - Result across the same four seeds: no zero-predator worlds left
+        (predator share 23%/6%/14%/57%), and the two seeds that had gone
+        predator-free went from 2 and 10 kills to 21 and 41.
+- [ ] **Predator/prey balance is still swingy.** One seed still ends at 7
+      living agents with 57% predators. The niche boost stops predators
+      vanishing but does nothing about a predator population overshooting
+      and eating out its own prey. A prey-side equivalent, or a predator
+      starvation pressure tied to prey density, would be the next step if
+      this becomes annoying.

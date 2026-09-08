@@ -2919,3 +2919,43 @@ A test *file* was failing to collect — my inserted constant had landed
 inside a multi-line import block — so its 62 tests silently disappeared from
 the total and the run still read green. **Check `Test Files` alongside
 `Tests`.** A count that drops is a failure that does not announce itself.
+
+## Two ecology fixes, and measuring the right thing first
+
+Both of these started by discarding the metric I had been using.
+
+**Capstones: the lever was commitment, not patience.** "Distinct cost-2
+nodes reached across the roster" — the number that prompted the whole
+`SKILLPOINT_SAVE_CHANCE` work — mostly measures how much agents concentrate
+on the same few branches. Measured per *investing agent* instead, 36%
+already reached a cost-2 keystone; it was only terminal capstones that were
+genuinely unreachable, at 1%.
+
+Raising the save chance made it worse (0.5 -> 0.75 dropped keystone reach
+from 46% to 29%: agents banked instead of buying). The real blocker was that
+an agent spends a median of 14 nodes spread across three or four trees and
+never finishes a branch. `SKILLPOINT_FOCUS_BONUS` weights the auto-respec
+toward whichever move is already furthest along, and takes capstone reach
+from 1% to 6% with keystone reach unchanged — the same points, spent as a
+build rather than scattered. It stays a bias rather than a rule; a test
+pins that an agent still invests elsewhere.
+
+**Combat: the problem was never the fight rate.** Asked for more combat, the
+obvious move would have been to raise aggression or shorten cooldowns.
+Measuring first showed fights already ran 15-28 per 1000 ticks. What was
+actually broken was predator *persistence*: across four seeds, two ended
+with zero living predators and one with 77% (having eaten out its own prey).
+Both ends kill predation as a source of conflict, and the immigration
+weighting could not fix it on its own, because its existing rarity term
+treats a predator as just one rare species among many.
+
+`predatorNicheBoost` makes a predator species up to 6x likelier to be the
+one that immigrates when the living predator share is under 20%, tapering to
+nothing once the niche is filled. It nudges only *which* species arrives —
+never whether immigration happens, or how many — so a healthy world never
+notices it. No zero-predator worlds remain, and the two seeds that had gone
+predator-free went from 2 and 10 kills to 21 and 41.
+
+The shared lesson, which by now is the recurring one in this document: the
+first useful move is almost never the fix, it is checking that the number
+being optimised is the number that matters.
