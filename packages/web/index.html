@@ -680,7 +680,23 @@
         margin-top: 2px;
         border-left: 2px solid var(--panel-border);
       }
-      .skilltree-svg { display: block; width: 100%; height: auto; max-height: 340px; }
+      /* Real bug report: squeezing a real (often 30+ node) tree's native
+         size down to fit a fixed small box via `width:100%;height:auto`
+         shrank node circles/labels to near-invisible specks, reading as
+         "missing a bunch" even though every node genuinely rendered. The
+         SVG now carries its own true-to-scale pixel `width`/`height`
+         (moveTreeSvg.ts) instead of stretching to the panel — this wrapper
+         scrolls (both axes) rather than the tree shrinking to fit. */
+      .skilltree-canvas { overflow: auto; max-height: 420px; border-radius: 4px; }
+      .skilltree-svg { display: block; }
+      .skilltree-build-summary {
+        font-size: 11px;
+        color: var(--text-dim);
+        padding: 4px 6px 6px;
+        border-bottom: 1px solid var(--panel-border-soft, var(--panel-border));
+      }
+      .skilltree-build-summary b { color: var(--text); font-weight: 600; }
+      .skilltree-build-summary .passive-line { color: #7be08a; }
       .skilltree-node-label { font-size: 11px; fill: var(--text); pointer-events: none; font-weight: 600; }
       .skilltree-node-hit { cursor: default; }
       .skilltree-node-hit:hover circle.ring { filter: brightness(1.35); }

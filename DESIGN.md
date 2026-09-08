@@ -14053,3 +14053,51 @@ text ("Inferno — Leans: aggression, Grants: damageReduction +0.1, power:
 +20"). Full monorepo typecheck clean; engine (46 files, 1250 tests) and
 data (2 files, 240 tests) suites unaffected and still green — this fix
 touches web-only display code.
+
+## Move tree follow-up: real node visibility, and a whole-build summary
+
+Direct report on the radial visualization above, from a screenshot of a
+small synthetic test tree: "I think you should be able to see all the
+skills, even if they aren't specced. In your screenshot it looks like
+it's missing a bunch. It'd also be nice to show what all the effects are
+of the entire build."
+
+**Every node was already rendering** — confirmed against ember's real
+35-node tree (`missingIds: []`, all 35 got a `.skilltree-node-hit`). The
+actual bug: `.skilltree-svg { width:100%; height:auto; max-height:340px }`
+was forcing a real tree's true ~1300×1300-unit layout down into a fixed
+~340px box — roughly a quarter of native scale, shrinking an 11px node
+radius and 11px label text to a handful of CSS pixels each. At that scale
+a node reads as a faint speck, easy to mistake for "not there." Fixed by
+giving the SVG explicit native pixel `width`/`height` attributes (1 SVG
+unit = 1 CSS px, matching the atlas's own true-to-source scale) instead
+of stretching to the container, wrapped in a new `.skilltree-canvas` box
+that scrolls (both axes) rather than squishing an oversized tree to fit.
+
+**Whole-build summary**: added `combineDeltas` (merges every chosen
+node's `delta` using the identical additive/OR-merge/overwrite rules the
+atlas's own `applyBuildJS` — itself a faithful port of the real engine's
+`applyMoveTree` — already used) plus a full port of the atlas's
+`describeDelta`/`describePassive` plain-English translators (all ~35
+delta fields, all 13 passive kinds). `summarizeBuildEffects` now runs
+those translators over the whole build's COMBINED net delta, not one
+node's — a `.skilltree-build-summary` block above the tree shows it
+always, not just on click. One wording glitch fixed while porting:
+`conditionLabel`'s `targetBurning`/`targetStatused` entries were full
+clauses ("the target is burning") getting concatenated after the
+template's own "when the target is ", producing "the target is the
+target is burning" — trimmed to adjective phrases like every other entry.
+
+### Verification
+
+Real ember tree, 8 chosen nodes: `summarizeBuildEffects` produced
+`["+10 power.", "-5 accuracy.", "-2 ticks cooldown.", "×2 damage when the
+target is burning.", "Hits everyone caught in the move's shape, not just
+the one target picked.", "+30% status chance.", "Changes its own shape to
+a burst of radius 1.", "Changes its max reach to 2 tiles.", "Sets fire to
+the terrain wherever it lands."]` — real, readable sentences instead of
+raw `JSON.stringify` dumps or floating-point noise (`statusChance`'s
+`0.30000000000000004` from naive summing is gone — `describeDelta` always
+rounds it for display). Full monorepo typecheck clean; engine (46 files,
+1250 tests) and data (2 files, 240 tests) suites unaffected and still
+green.

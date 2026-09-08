@@ -2,7 +2,7 @@ import type { Agent, MoveSpec, World } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import { TYPE_COLOR, rgbToCss } from "./palette.js";
 import { agentDisplayName, herdDisplayName, LEADER_ICON, TITLE_ICON } from "./notableTitles.js";
-import { buildMoveTreeSvg, describeMoveTreeNode } from "./moveTreeSvg.js";
+import { buildMoveTreeSvg, describeMoveTreeNode, summarizeBuildEffects } from "./moveTreeSvg.js";
 
 // --- Small shared DOM helpers ------------------------------------------------
 
@@ -162,25 +162,63 @@ function moveKey(agent: Agent, move: MoveSpec): string {
  * plain-English effect below the tree instead of only a hover tooltip —
  * direct ask: "I don't see how they're specced either. It'd be nice to see
  * their actual allocations."
+ *
+ * The tree itself lives in its own scrolling `.skilltree-canvas` box at
+ * true native scale — direct report: "I think you should be able to see
+ * all the skills, even if they aren't specced. In your screenshot it
+ * looks like it's missing a bunch." Every node was always rendered; a real
+ * ~30-node tree squeezed to fit a fixed small CSS box just made each one a
+ * near-invisible speck (see `buildMoveTreeSvg`'s own doc comment). A
+ * `.skilltree-build-summary` above the tree shows the whole build's
+ * cumulative effect at a glance — direct follow-up ask: "It'd also be nice
+ * to show what all the effects are of the entire build," which the old
+ * click-one-node-at-a-time detail line never covered.
  */
 function renderMoveTree(move: MoveSpec, chosenIds: string[]): HTMLElement {
   const tree = move.tree!;
   const wrap = document.createElement("div");
   wrap.className = "skilltree";
 
+  const summary = document.createElement("div");
+  summary.className = "skilltree-build-summary";
+  const { totalCost, deltaLines, passiveLines } = summarizeBuildEffects(tree, chosenIds);
+  if (chosenIds.length === 0) {
+    summary.textContent = "No nodes chosen yet.";
+  } else {
+    const header = document.createElement("div");
+    const countB = document.createElement("b");
+    countB.textContent = String(chosenIds.length);
+    const costB = document.createElement("b");
+    costB.textContent = String(totalCost);
+    header.append(countB, ` node${chosenIds.length === 1 ? "" : "s"} chosen, `, costB, ` pt${totalCost === 1 ? "" : "s"} spent`);
+    summary.appendChild(header);
+    for (const line of deltaLines) {
+      const lineEl = document.createElement("div");
+      lineEl.textContent = line;
+      summary.appendChild(lineEl);
+    }
+    for (const line of passiveLines) {
+      const lineEl = document.createElement("div");
+      lineEl.className = "passive-line";
+      lineEl.textContent = line;
+      summary.appendChild(lineEl);
+    }
+  }
+
   const detail = document.createElement("div");
   detail.className = "skilltree-detail";
-  detail.textContent = chosenIds.length
-    ? `${chosenIds.length} node${chosenIds.length === 1 ? "" : "s"} chosen — click a node below for details.`
-    : "No nodes chosen yet — click a node below for details.";
+  detail.textContent = "Click a node below for its own details.";
 
   const svg = buildMoveTreeSvg(tree, chosenIds, (node) => {
     const isChosen = chosenIds.includes(node.id);
     const details = describeMoveTreeNode(node);
-    detail.textContent = `${node.name} (${node.cost} pt${node.cost === 1 ? "" : "s"}, ${isChosen ? "chosen" : "not chosen"})${details.length ? " — " + details.join(", ") : ""}`;
+    detail.textContent = `${node.name} (${node.cost} pt${node.cost === 1 ? "" : "s"}, ${isChosen ? "chosen" : "not chosen"})${details.length ? " — " + details.join(" ") : ""}`;
   });
+  const canvas = document.createElement("div");
+  canvas.className = "skilltree-canvas";
+  canvas.appendChild(svg);
 
-  wrap.append(svg, detail);
+  wrap.append(summary, canvas, detail);
   return wrap;
 }
 
