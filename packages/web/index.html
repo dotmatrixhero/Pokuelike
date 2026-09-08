@@ -498,12 +498,26 @@
       .battle-screen-combatant-ident { display: flex; align-items: center; gap: 5px; }
       .battle-screen-sprite { width: 20px; height: 20px; image-rendering: pixelated; flex: 0 0 auto; }
       .battle-screen-name { font-weight: 700; font-size: 13px; }
+      /* Direct ask: "Lets remove the parentheses altogether in the battle
+         log" — level/down-status used to be squeezed into the name line as
+         "Name (Lv42)"/"Name (down)"; now its own quiet line, and a downed
+         combatant still shows its level too ("A downed unit should still
+         say their lvl") instead of "down" replacing it outright. */
+      .battle-screen-level { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
       /* The herd a combatant fights for — deliberately quieter than the name
          above it: in a mob fight several chips share one herd, so it reads as
          a grouping mark rather than competing with each animal's identity. */
       .battle-screen-herd { font-size: 10px; opacity: 0.62; margin-top: 1px; letter-spacing: 0.2px; }
       .battle-screen-hp-track { height: 7px; border-radius: 4px; background: #232a34; overflow: hidden; }
-      .battle-screen-hp-fill { height: 100%; border-radius: 4px; transition: width 0.25s ease; }
+      /* Direct ask: "Hp should be interpolating down, animated when unit
+         takes damage." The transition itself was already here — what
+         actually blocked it is fixed in battleScreenPanel.ts's
+         `combatantEls`/`applyCombatantState` (the header used to be torn
+         down and rebuilt every frame, which meant `width` never had a
+         PRIOR value on the SAME element left to transition from). Nudged
+         a little longer (0.25s -> 0.4s) now that it actually plays, so the
+         drop reads as a real interpolation rather than a quick snap. */
+      .battle-screen-hp-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
       .battle-screen-hp-value { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
       .battle-screen-vs-label { flex: 0 0 auto; color: var(--text-dim); font-weight: 700; font-size: 12px; }
       .battle-screen-extra { flex: 0 0 auto; color: var(--text-dim); font-size: 11px; }

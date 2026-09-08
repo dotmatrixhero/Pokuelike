@@ -14101,3 +14101,60 @@ raw `JSON.stringify` dumps or floating-point noise (`statusChance`'s
 rounds it for display). Full monorepo typecheck clean; engine (46 files,
 1250 tests) and data (2 files, 240 tests) suites unaffected and still
 green.
+
+## Battle Screen QoL: real HP animation, no parentheses, slower reveal pacing
+
+Four direct follow-up asks on the Battle Screen panel in one message:
+"Battle logs need more qol. Hp should be interpolating down, animated
+when unit takes damage. A downed unit should still say their lvl. Lets
+remove the parentheses altogether in the battle log (but keep the herd
+name above hp bar). Need more pause between each log line and a 1000 ms
+pause after the last one."
+
+**HP animation.** `.battle-screen-hp-fill` already had a CSS `transition`
+on `width` — it just never got a chance to play: the header was torn down
+and rebuilt (`headerEl.replaceWith(fresh)`) every single frame regardless
+of whether anything changed, so the fill bar's width always "changed" on
+a brand-new element with no prior width to transition FROM, snapping
+instantly no matter what the CSS said. Fixed with a new `combatantEls`
+map of persistent per-combatant DOM handles, built once by `renderVsHeader`
+and then mutated in place every ordinary frame by `updateVsHeader`/
+`applyCombatantState` — the fill bar is now the SAME element across
+frames, so its `width` change genuinely interpolates. Nudged the
+transition itself a little longer (0.25s → 0.4s) now that it actually
+runs. Still rebuilds fully on a genuinely new engagement, or if `ids`
+widens mid-battle (a pack-hunt assist joining — `idsWidened`), since
+`updateVsHeader` has nothing to update for a combatant it's never seen.
+
+**Downed unit keeps its level; no more parentheses.** The header used to
+squeeze level/status into the name line as `"Name (Lv42)"`/`"Name
+(down)"` — the latter REPLACING the level entirely once dead. Now two
+separate lines: the name, and a `.battle-screen-level` line reading
+`"Lv 42"` normally or `"Down · Lv 42"` once fainted/dead — level always
+shown, no parens anywhere. The herd name keeps its existing separate line
+above the HP bar, unchanged, per the ask's own parenthetical carve-out.
+The scrolling combat lines had a second, easy-to-miss source of
+parentheses too: every line used the shared `idLabel` (notableTitles.ts),
+which appends `"(id, herd)"` — redundant here since the header chips
+already show full identity per combatant. New `battleName` (battle-
+Screen-local, not touching `idLabel` itself, which the plain Event Log
+and Chronicle still want in full) is just leader-icon + notable-full-name-
+or-species, no id/herd suffix — used everywhere this file previously
+called `idLabel`. The `"(HP left: N)"` parenthetical on damage lines is
+gone outright rather than de-parenthesized — redundant now that the HP
+bar animates live right above the log.
+
+**Reveal pacing.** `LINE_REVEAL_INTERVAL_MS` raised from 160ms to 450ms
+("more pause between each log line"). New `POST_CATCHUP_HOLD_MS = 1000`:
+once the reveal has fully caught up (nothing left pending), the FIRST
+line of the next batch waits this longer gap before appearing — "a 1000
+ms pause after the last one" — while every line after that within the
+same batch still just uses the ordinary interval. Tracked via a new
+`caughtUpAtMs` field, stamped the frame `revealedCount` reaches
+`lines.length` and cleared the moment that hold gets spent on the next
+reveal.
+
+Verified via typecheck and the existing engine/data suites only, at the
+user's direction (no live Playwright pass this round) — pure web-display
+changes, engine (46 files, 1250 tests) and data (2 files, 240 tests)
+suites unaffected and still green.
