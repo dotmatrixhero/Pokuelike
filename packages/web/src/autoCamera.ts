@@ -849,6 +849,11 @@ export class AutoCameraController {
     if (!this.active && this.queue.length > 0) {
       const next = this.popNextEngagement();
       if (!next.continuous) next.expiresOrLastActiveTick = tick + (next.category === "courtship" ? COURTSHIP_DWELL_TICKS : DWELL_TICKS);
+      // Stamped here, at the moment this engagement actually takes the
+      // screen, rather than when it was created — an engagement can wait in
+      // the queue behind another, and the minimum hold is about how long it
+      // was VISIBLE. See `BATTLE_MIN_ONSCREEN_MS`.
+      next.activeSinceRealMs = performance.now();
       this.active = next;
       this.viewerTookOver = false; // a genuinely new thing to look at re-earns camera control even if the viewer panned away from the last one
       // Promotion bookkeeping (`this.active`/`viewerTookOver` above) always

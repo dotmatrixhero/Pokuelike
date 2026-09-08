@@ -5861,6 +5861,20 @@ not something this pathfinding pass itself caused or is positioned to fix.
         `LINE_REVEAL_INTERVAL_MS` 160 -> 200. At 650/160 a four-line hit used
         640 of the 650ms tick, so lines arrived as an unbroken stream; 800 of
         950 leaves a real gap between exchanges.
+      - **A fix of mine that shipped as dead code, caught only by measuring.**
+        The first commit added `BATTLE_MIN_ONSCREEN_MS`/`CLASH_MIN_ONSCREEN_MS`
+        and the check that reads them — but the line that STAMPS
+        `activeSinceRealMs` never landed, because the string replace that was
+        meant to insert it silently no-op'd on an indentation mismatch. The
+        field was therefore always `undefined`, the guard
+        (`activeSinceRealMs === undefined || ...`) short-circuited to true,
+        and the entire minimum-hold feature did nothing. It typechecked, it
+        built, and the constants were right there in the file. Live
+        measurement at 4x is the only thing that found it: median on-screen
+        time 1.7s, nowhere near the 3s floor that was supposedly in force.
+        After stamping it: **median 3.0s**, and the tick counter advances
+        more slowly over the same wall-clock (433 vs 577 ticks in 200s),
+        which independently confirms battle-step now engages for clashes.
       - `CLASH_PROMOTION_COOLDOWN_TICKS` 40 -> 100, since each clash now holds
         the camera for seconds and 594 per 6,000 ticks would otherwise
         monopolise Auto Camera and crowd out every other kind of moment.
