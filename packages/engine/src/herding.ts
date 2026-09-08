@@ -1,5 +1,5 @@
 import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
-import { stepToward } from "./movement.js";
+import { stepAway, stepToward } from "./movement.js";
 import { isPreyOfAnything } from "./predation.js";
 
 /**
@@ -31,6 +31,16 @@ const GUARDIAN_COHESION_DISTANCE = 3;
 const LOW_LEVEL_COHESION_GAP = 5;
 /** Tighter leash than the ordinary `COHESION_DISTANCE` — same magnitude as `GUARDIAN_COHESION_DISTANCE`, for the same reason: staying close to the group is a real survival behavior, not just idle drift-correction. */
 const LOW_LEVEL_COHESION_DISTANCE = 3;
+/**
+ * Direct report, after the earlier attraction-only cohesion shipped:
+ * herd-mates that are ALREADY within their leash never move for their own
+ * sake, so they pile onto the same tile/cluster and then just sit —
+ * TODO.md's own "no personal-space/repulsion behavior" gap. Adjacent
+ * (Manhattan 1, "practically touching") is the trigger — genuinely tight,
+ * not a general spacing-out rule that would fight the attraction leash
+ * above at longer range.
+ */
+const PERSONAL_SPACE_RADIUS = 1;
 
 function manhattan(a: Vec2, b: Vec2): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
@@ -131,6 +141,23 @@ function protectedHerdCentroid(world: World, herdId: string, layer: Layer, rules
   return { x: Math.round(sum.x / members.length), y: Math.round(sum.y / members.length) };
 }
 
+/** The nearest OTHER living, same-herd, same-layer agent within `PERSONAL_SPACE_RADIUS`, if any — backs `applyHerdCohesion`'s repulsion step below. Ties (equal distance) break by `id` for a stable, deterministic pick, same convention `herdRank` already uses. */
+function nearestCrowdingHerdmate(world: World, agent: Agent): Agent | undefined {
+  let best: Agent | undefined;
+  let bestDist = Infinity;
+  for (const other of world.agents) {
+    if (other.id === agent.id || other.alive === false || other.isEgg) continue;
+    if (other.herdId !== agent.herdId || other.layer !== agent.layer) continue;
+    const dist = manhattan(agent.pos, other.pos);
+    if (dist > PERSONAL_SPACE_RADIUS) continue;
+    if (dist < bestDist || (dist === bestDist && best && other.id < best.id)) {
+      best = other;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
 /**
  * Called when an agent is idle (no need urgent enough to act on) and
  * already on its home layer. If it's drifted too far from where it should
@@ -158,6 +185,14 @@ function protectedHerdCentroid(world: World, herdId: string, layer: Layer, rules
  * separate "vicinity of the target" offset) — a deliberate scope call,
  * documented here and in DESIGN.md, not a distinction the design doc forced
  * either way.
+ *
+ * **Personal-space repulsion**: once an agent is already within its leash
+ * (nothing pulling it toward the centroid), it still nudges away from a
+ * herd-mate standing right on top of it (`PERSONAL_SPACE_RADIUS`) instead
+ * of just stopping there — direct report: idle herd-mates end up clustered
+ * on the same tile and then visibly "just stand still." Attraction always
+ * takes priority (a genuinely far-flung agent heads home first, spacing
+ * out only matters once it's actually back with the group).
  */
 export function applyHerdCohesion(world: World, agent: Agent, rules?: HuntRules): boolean {
   if (!agent.herdId) return false;
@@ -177,7 +212,13 @@ export function applyHerdCohesion(world: World, agent: Agent, rules?: HuntRules)
   // guardian stays close).
   const isLowLevel = !isGuardian && herdMaxLevel(world, agent.herdId) - (agent.level ?? 1) >= LOW_LEVEL_COHESION_GAP;
   const distance = isGuardian ? GUARDIAN_COHESION_DISTANCE : isLowLevel ? LOW_LEVEL_COHESION_DISTANCE : COHESION_DISTANCE;
-  if (!centroid || manhattan(agent.pos, centroid) <= distance) return false;
+  if (!centroid || manhattan(agent.pos, centroid) <= distance) {
+    const crowder = nearestCrowdingHerdmate(world, agent);
+    if (!crowder) return false;
+    const before = { ...agent.pos };
+    agent.pos = stepAway(world, agent.layer, agent.pos, crowder.pos, agent);
+    return agent.pos.x !== before.x || agent.pos.y !== before.y;
+  }
 
   agent.pos = stepToward(world, agent.layer, agent.pos, centroid, agent);
   return true;

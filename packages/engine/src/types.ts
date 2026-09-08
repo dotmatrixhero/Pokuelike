@@ -423,7 +423,8 @@ export type BehaviorKind =
   | "buildShelter"
   | "sleep"
   | "restAtShelter"
-  | "scavenge";
+  | "scavenge"
+  | "train";
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
 export interface InventoryItem {
@@ -558,6 +559,33 @@ export interface Agent {
    * oscillation-prevention reasoning.
    */
   blockedResourceTiles?: Vec2[];
+  /**
+   * The single resource tile (food or water) this agent most recently
+   * consumed from, and when — direct report: agents "move back and forth
+   * repeatedly between one plant and water." When a fresh seekWater/
+   * seekFood search's nearest candidate is this exact tile AND it's still
+   * recent, needs.ts prefers a genuinely different nearby tile if one
+   * exists within a small extra-distance tolerance, rather than immediately
+   * re-targeting the tile it just left. Unlike `blockedResourceTiles`
+   * (a whole seeking *episode's* crowded-tile memory, cleared when the
+   * episode ends), this is a single persistent value that survives across
+   * episodes — the whole point is remembering the LAST visit even after a
+   * clean, uncrowded consume.
+   */
+  lastResourceVisit?: { pos: Vec2; kind: "food" | "water"; tick: number };
+  /**
+   * Distinct food/water tiles this agent has personally stumbled onto while
+   * idly exploring (`needs.ts`'s `applyExploration`) — not from ordinary
+   * need-driven seeking, which already finds the map's nearest resource
+   * instantly via `resourceIndex.ts` regardless of memory. Direct ask:
+   * "exploring as a drive; finding more crop locations and water for
+   * later." A capped, FIFO-evicted list (`MAX_KNOWN_RESOURCE_TILES`,
+   * needs.ts) — a real, growing personal record of "places I've found,"
+   * mirroring `visitedSectors`'/`encounteredSpecies`' own capped-list
+   * pattern, and each genuinely new discovery earns a real one-time exp
+   * bonus (`EXP_ON_RESOURCE_DISCOVERY`) on top of the flat per-sector one.
+   */
+  knownResourceTiles?: Vec2[];
   /**
    * Ticks spent standing on a layer-mismatched crop's tile actually digging
    * it out (CROPS_DESIGN.md's "layer-gated crop access" pitch) — the real

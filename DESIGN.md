@@ -13131,3 +13131,133 @@ popover, the overflow menu, panel collapse, and a 390x844 mobile viewport
 map stay correctly positioned) — all confirmed via screenshots, with the
 five bugs above each caught and fixed from a real rendered discrepancy,
 not read off the source.
+
+## Deeper idle/wander behavior: revisit-avoidance, herd personal space, resource memory, and training
+
+Direct report after the UI redesign shipped: "A lot of Pokémon it seems
+like.. Just stand still. Maybe they're sleeping but it's like.. Hm.. Or
+they move back and forth repeatedly between one plant and water. I dunno..
+Our behavior feels shallow to me." Diagnosis: a strict, memory-less
+`chooseBehavior` urgency picker (seekWater/seekFood/seekMate/idle) plus
+attraction-only herd cohesion together explain both halves — nothing
+remembers where it just was, and nothing already "close enough" to its herd
+ever moves for its own sake. Follow-up ask, approved together: "Yeah do
+those two. But also like... Exploring as a drive; finding more crop
+locations and water for later. Maybe making shelter. Training/getting xp
+would be cool" — five features, all in `needs.ts`/`herding.ts` unless noted.
+
+1. **Resource revisit-avoidance** (needs.ts): `Agent.lastResourceVisit`
+   records the single food/water tile an agent most recently consumed
+   from, and when. When a fresh seekWater/seekFood target search's nearest
+   candidate is that exact tile and the visit is still recent
+   (`RESOURCE_REVISIT_AVOID_TICKS`), a second search additionally excludes
+   it; the alternate is used only if it isn't meaningfully farther
+   (`RESOURCE_REVISIT_EXTRA_DISTANCE_TOLERANCE`) — a real find beats
+   walking back to the same tile, but not at a large detour cost.
+   Deliberately a nudge, not a hard ban: with only two resources nearby,
+   the agent still returns to the one it knows once the recency window
+   passes.
+
+2. **Herd personal-space repulsion** (herding.ts): `applyHerdCohesion` used
+   to be attraction-only, so herd-mates already within their leash never
+   moved for their own sake — TODO.md's long-standing "no personal-space/
+   repulsion behavior" gap, and the direct cause of visible stacking. Once
+   an agent is within its cohesion distance, it now steps away from the
+   nearest same-herd, same-layer agent standing adjacent
+   (`PERSONAL_SPACE_RADIUS = 1`) via the existing `stepAway` helper.
+   Attraction still always wins — a genuinely far-flung straggler heads
+   home first; spacing out only matters once it's actually back with the
+   group.
+
+3. **Exploration resource-discovery memory** (needs.ts): idle-time
+   wandering (`applyExploration`) already existed for its own sake
+   (visiting unvisited sectors / preferred terrain); `maybeDiscoverResource`
+   now also checks the agent's immediate surroundings each explore step
+   for a food/water tile it hasn't personally recorded before, adding it to
+   a capped, FIFO-evicted `Agent.knownResourceTiles` list
+   (`MAX_KNOWN_RESOURCE_TILES = 20`) — mirroring the existing
+   `visitedSectors`/`encounteredSpecies` capped-list pattern — and granting
+   a one-time `EXP_ON_RESOURCE_DISCOVERY` bonus. Purely a reward/flavor
+   layer: `resourceIndex.ts`'s `findNearestIndexed` is always-fresh world
+   truth, so ordinary need-driven seeking never actually depends on this
+   memory to find anything.
+
+4. **Training/XP idle fallback** (needs.ts, types.ts): the literal "just
+   stand still" complaint had a real root cause — an idle agent with
+   nothing left to explore (every nearby sector visited, no reachable
+   preferred terrain) used to leave `applyExploration` a no-op, and nothing
+   filled that gap. `applyExploration` now returns whether it actually did
+   something; when it returns `false` (and shelter-resting was also a
+   no-op), the idle-stack tail calls a new `applyTraining`: a new `"train"`
+   `BehaviorKind`, a small flat per-tick exp trickle
+   (`EXP_ON_TRAINING_TICK`), a small chance of a bonus skill point
+   (`TRAINING_SKILLPOINT_CHANCE`, typed by one of the agent's own types, or
+   `"wildcard"` if typeless), and a small chance of a one-tile shuffle
+   (`TRAINING_STEP_CHANCE`) so it doesn't read as frozen. Gated on
+   `MIN_EXPLORE_AGE` for the same "too young to be doing this unsupervised"
+   reasoning `applyExploration` already uses — confirmed via a real
+   `predation.test.ts` regression (see below) that skipping this gate would
+   have broken.
+   `BehaviorKind` gained `"train"` as a plain string variant; confirmed via
+   grep that nothing in `packages/web` switches on it exhaustively (only
+   generic string display), so this needed zero web-side changes.
+
+5. **Proactive shelter-building — verified, not changed** (task from the
+   same batch: "maybe making shelter"). `shelter.ts` already builds a
+   universal, world-tile shelter whenever an idle agent's hunger AND thirst
+   both clear `SHELTER_COMFORT_THRESHOLD = 0.85` (minus discounts) with
+   none reachable nearby — this predates this batch. A live 20k-tick run
+   (`validateBehaviorDepth.ts`, seed `SCENARIO_SEED`) showed 298
+   `buildShelter` behavior transitions, 3 shelter tiles standing on the map
+   at the end, and 20 `restAtShelter` uses — a modest, non-degenerate rate,
+   not the "never happens" or "everyone building constantly" failure modes
+   that would call for retuning the threshold. No changes made.
+
+### A real regression found and fixed: `applyTraining` needs its own age gate
+
+`predation.test.ts`'s "bush concealment" test deliberately keeps a prey
+agent motionless via `age: 0` (below `MIN_EXPLORE_AGE`) specifically so
+`applyExploration` won't move it and corrupt the exact predator-prey
+distance the test depends on. `applyTraining`, invoked when
+`applyExploration` returns `false` for that same young agent, had no
+equivalent age gate — it could move the prey (`TRAINING_STEP_CHANCE`) and
+consume extra `rng()` draws, shifting the shared sequential `world.rng`
+stream's downstream hunt-detection roll. Fixed by reusing the exact same
+`MIN_EXPLORE_AGE` guard `applyExploration` already has, as the first line
+of `applyTraining`.
+
+### Test updates
+
+`herding.test.ts`'s two adjacent-fixture cohesion tests ("does nothing once
+within the cohesion distance", "an ordinary member keeps the wider leash...")
+placed their two herd-mates 1 tile apart — now inside
+`PERSONAL_SPACE_RADIUS`, so the new repulsion correctly fires where the old
+attraction-only code did nothing. Repositioned both fixtures to 3 tiles
+apart (still within `COHESION_DISTANCE`, outside personal space) to keep
+testing what they originally meant to test, and added a dedicated new test
+for the repulsion behavior itself.
+
+`needs.test.ts`'s three "stays idle" tests hit the same fallback: with
+nothing left to explore, the new `applyTraining` correctly changes
+`agent.behavior` away from `"idle"`. Updated to expect `"train"`, and
+switched from the bare `tickAgent(world, agent)` call (which defaults to
+unseeded `Math.random`, previously harmless since idle never consumed rng)
+to passing the world's own seeded `rng` explicitly, asserting the position
+only stays within one tile of its start rather than pinned exactly — training's
+own step is at most one tile, but which tile depends on the rng draw.
+
+### Real-run findings
+
+Full engine test suite green (41 files, 1163 tests) and full monorepo
+typecheck clean. `validateBehaviorDepth.ts` against a real `createDemoWorld`
+run (20k ticks, `SCENARIO_SEED`) confirmed: every living agent carries
+`lastResourceVisit` (revisit-avoidance tracking live), shelters build and
+get used at a modest rate (see above), and the `explore`/`train` fallback
+chain fires only rarely in this small, threat-heavy 12-agent population —
+herd cohesion and shelter-homing dominate most idle ticks before the chain
+ever reaches training, which tracks with these being deliberately the
+lowest-priority fallback, not a bug. `knownResourceTiles` stayed empty in
+this particular run (population too busy fleeing/fighting/mating to
+idle-explore much) — expected given how rarely `explore` itself fired, not
+evidence the discovery logic is broken (it's exercised directly by unit
+tests).

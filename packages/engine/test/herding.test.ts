@@ -58,15 +58,32 @@ describe("applyHerdCohesion", () => {
     expect(straggler.pos.x).toBeGreaterThan(0);
   });
 
-  it("does nothing once within the cohesion distance", () => {
+  it("does nothing once within the cohesion distance and not crowded by a herd-mate", () => {
     const world = createWorld(20, 20);
     const nearby = member("a", { x: 5, y: 5 });
-    world.agents.push(nearby, member("b", { x: 6, y: 5 }));
+    // 3 tiles away: within COHESION_DISTANCE(5) so attraction is satisfied,
+    // but past PERSONAL_SPACE_RADIUS(1) so repulsion doesn't fire either.
+    world.agents.push(nearby, member("b", { x: 8, y: 5 }));
 
     const moved = applyHerdCohesion(world, nearby);
 
     expect(moved).toBe(false);
     expect(nearby.pos).toEqual({ x: 5, y: 5 });
+  });
+
+  it("nudges away from a herd-mate standing right on top of it, even though it's already within the cohesion leash", () => {
+    // Direct report, after cohesion shipped: idle herd-mates already "close
+    // enough" never move for their own sake, so they pile up and just sit —
+    // TODO.md's "no personal-space/repulsion behavior" gap.
+    const world = createWorld(20, 20);
+    const crowded = member("a", { x: 5, y: 5 });
+    world.agents.push(crowded, member("b", { x: 6, y: 5 }));
+
+    const moved = applyHerdCohesion(world, crowded);
+
+    expect(moved).toBe(true);
+    // Stepped away from (6, 5), not toward it.
+    expect(crowded.pos.x).toBeLessThan(5);
   });
 
   it("does nothing for an agent with no herdId", () => {
@@ -131,7 +148,9 @@ describe("applyHerdCohesion", () => {
   it("an ordinary (non-guardian) herd member keeps the wider leash and whole-herd centroid even when rules are provided", () => {
     const world = createWorld(20, 20);
     const nearby = member("a", { x: 5, y: 5 }, { species: "bulbasaur" });
-    world.agents.push(nearby, member("b", { x: 6, y: 5 }, { species: "bulbasaur" }));
+    // Same non-adjacent spacing as the plain "does nothing" case above, so
+    // this stays a pure leash/centroid check, not a personal-space one.
+    world.agents.push(nearby, member("b", { x: 8, y: 5 }, { species: "bulbasaur" }));
 
     const moved = applyHerdCohesion(world, nearby, RULES);
 

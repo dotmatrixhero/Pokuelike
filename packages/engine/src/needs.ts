@@ -26,11 +26,13 @@ import {
   EXP_TRICKLE_PER_TICK,
   MAX_TRACKED_SPECIES,
   grantExp,
+  grantSkillPoint,
   markSectorVisited,
   markSpeciesEncountered,
   sectorId,
   type LevelingContext,
 } from "./leveling.js";
+import type { PokemonType } from "./typing.js";
 import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
 import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
@@ -254,6 +256,24 @@ const EXPLORE_SEARCH_ATTEMPTS = 8;
  */
 const MIN_EXPLORE_AGE = 10;
 
+/**
+ * Direct ask: "exploring as a drive; finding more crop locations and water
+ * for later." Ordinary need-driven seeking already finds the map's real
+ * nearest resource instantly via resourceIndex.ts regardless of memory —
+ * this doesn't change that. What it adds is a genuine "personal discovery
+ * record": the first time idle exploration wanders onto/near a live food or
+ * water tile this agent hasn't logged before, it remembers the tile
+ * (`Agent.knownResourceTiles`, capped like `visitedSectors`/
+ * `encounteredSpecies`) and earns a real one-time exp bonus on top of the
+ * flat per-sector one — a genuinely new find is worth more than just
+ * stepping into a new sector of empty ground.
+ */
+const EXP_ON_RESOURCE_DISCOVERY = 15;
+/** Same order of magnitude as `visitedSectors`'s own cap intent — enough to feel like a real, accumulating memory without an unbounded per-agent array. */
+const MAX_KNOWN_RESOURCE_TILES = 20;
+/** How close exploring has to land an agent to a food/water tile for it to count as "found" — mirrors `PREFERRED_TERRAIN_SATISFIED_RADIUS`'s own "close enough to count" reasoning. */
+const RESOURCE_DISCOVERY_RADIUS = 1;
+
 /** A random nearby walkable tile that lands in a sector this agent hasn't visited yet, if one can be found in a few tries. */
 function findNearbyUnvisitedTile(world: World, agent: Agent, rng: () => number): Vec2 | undefined {
   for (let i = 0; i < EXPLORE_SEARCH_ATTEMPTS; i++) {
@@ -361,14 +381,49 @@ function locatePreferredTerrain(world: World, agent: Agent): "arrived" | Vec2 | 
  * driven wander is exactly as droppable by an urgent need as ordinary
  * exploration already is, since both live in the same `exploreTarget`.
  */
-function applyExploration(world: World, agent: Agent, log: EventLog | undefined, rng: () => number): void {
-  if (agent.age !== undefined && agent.age < MIN_EXPLORE_AGE) return;
+/**
+ * Direct ask: "exploring as a drive; finding more crop locations and water
+ * for later." Called after `applyExploration` moves (or arrives) — checks
+ * `agent`'s CURRENT tile and its immediate neighborhood for a live food or
+ * water tile, and if it's genuinely new to this agent (not already in
+ * `knownResourceTiles`), remembers it and grants a real discovery bonus.
+ * See `EXP_ON_RESOURCE_DISCOVERY`'s own doc comment for why this doesn't
+ * change how seeking finds resources — it's a personal record, not a
+ * prerequisite.
+ */
+function maybeDiscoverResource(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): void {
+  const r = RESOURCE_DISCOVERY_RADIUS;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const x = agent.pos.x + dx;
+      const y = agent.pos.y + dy;
+      const tile = tileAt(world, agent.layer, x, y);
+      if (!tile) continue;
+      if (tile.terrain !== "food" && tile.terrain !== "water") continue;
+      if (tile.terrain === "food" && (tile.stock ?? 0) <= 0) continue;
+      if (agent.knownResourceTiles?.some((known) => known.x === x && known.y === y)) continue;
+      agent.knownResourceTiles = [...(agent.knownResourceTiles ?? []), { x, y }].slice(-MAX_KNOWN_RESOURCE_TILES);
+      grantExp(world, agent, EXP_ON_RESOURCE_DISCOVERY, ctx, log, rng);
+      return; // one genuine discovery per exploration step is plenty — not a full-neighborhood sweep every tick
+    }
+  }
+}
+
+/**
+ * Returns `true` if this call actually moved (or kept moving) the agent as
+ * "explore" — `false` for every early-return case (too young, already
+ * content near preferred terrain, or genuinely nowhere new reachable) —
+ * see `applyTraining`'s own doc comment for why callers care about telling
+ * these apart now.
+ */
+function applyExploration(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
+  if (agent.age !== undefined && agent.age < MIN_EXPLORE_AGE) return false;
 
   if (!agent.exploreTarget) {
     const preferred = locatePreferredTerrain(world, agent);
-    if (preferred === "arrived") return;
+    if (preferred === "arrived") return false;
     agent.exploreTarget = preferred ?? findNearbyUnvisitedTile(world, agent, rng);
-    if (!agent.exploreTarget) return;
+    if (!agent.exploreTarget) return false;
   }
 
   logBehaviorChange(log, world, agent, "explore");
@@ -379,6 +434,66 @@ function applyExploration(world: World, agent: Agent, log: EventLog | undefined,
     agent.exploreTarget = undefined;
   } else {
     agent.pos = stepToward(world, agent.layer, agent.pos, agent.exploreTarget, agent, agent);
+  }
+  maybeDiscoverResource(world, agent, log, ctx, rng);
+  return true;
+}
+
+/**
+ * Small trickle exp on top of `EXP_TRICKLE_PER_TICK` (which every living
+ * agent already earns every tick regardless of behavior) — the real,
+ * deliberate "practicing" bonus, only while genuinely training.
+ */
+const EXP_ON_TRAINING_TICK = 3;
+/** Per-tick chance of a genuine bonus skill point while training — small; this isn't meant to out-pace combat/growth as the main way to build a moveset, just make idle time with nothing else to do feel productive. */
+const TRAINING_SKILLPOINT_CHANCE = 0.01;
+/** Per-tick chance of a small in-place step while training — real, visible motion (drilling/practicing on the spot) rather than a second kind of frozen standing-still, without actually going anywhere (unlike `explore`, which has a real destination). */
+const TRAINING_STEP_CHANCE = 0.3;
+const TRAINING_STEP_OFFSETS: readonly Vec2[] = [
+  { x: 1, y: 0 },
+  { x: -1, y: 0 },
+  { x: 0, y: 1 },
+  { x: 0, y: -1 },
+];
+
+/**
+ * Called only once `applyExploration` has genuinely found nothing to do —
+ * no preferred terrain to linger near, no unvisited sector reachable
+ * nearby. Direct ask: "training/getting XP would be cool" — and the direct
+ * report this closes: previously that dead end just left the agent doing
+ * NOTHING, tick after tick, which is exactly the "shallow... just stand
+ * still" complaint. A real, small, ongoing exp trickle plus an occasional
+ * bonus skill point (`grantSkillPoint`, in one of this agent's own types —
+ * "practicing a move," not a random one) turns that dead time into a real,
+ * visible ("train" — a new `BehaviorKind`) activity instead of a silent gap.
+ * Never interrupts anything else: this is the last fallback in the idle
+ * stack (herd cohesion, then shelter-resting, then exploration all get
+ * first refusal), so an agent only ever trains when it truly has nothing
+ * better to do. Reuses `MIN_EXPLORE_AGE` — same "too young to be doing this
+ * unsupervised" reasoning `applyExploration` already applies (a newborn
+ * settles in near its birthplace first; it doesn't drill combat moves
+ * alone either), so a young agent below that age just stays genuinely idle
+ * here too, rather than training being the one idle-stack fallback with no
+ * age floor at all.
+ */
+function applyTraining(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): void {
+  if (agent.age !== undefined && agent.age < MIN_EXPLORE_AGE) return;
+
+  logBehaviorChange(log, world, agent, "train");
+  agent.behavior = "train";
+
+  grantExp(world, agent, EXP_ON_TRAINING_TICK, ctx, log, rng);
+  if (rng() < TRAINING_SKILLPOINT_CHANCE) {
+    const types = agent.types;
+    const pointType: PokemonType | "wildcard" = types && types.length > 0 ? types[Math.floor(rng() * types.length)]! : "wildcard";
+    grantSkillPoint(agent, pointType, world, log, ctx, rng);
+  }
+  if (rng() < TRAINING_STEP_CHANCE) {
+    const offset = TRAINING_STEP_OFFSETS[Math.floor(rng() * TRAINING_STEP_OFFSETS.length)]!;
+    const candidate = { x: agent.pos.x + offset.x, y: agent.pos.y + offset.y };
+    if (tileAt(world, agent.layer, candidate.x, candidate.y)?.walkable && canEnterWater(world, agent, agent.layer, candidate) && canEnterLand(world, agent, agent.layer, candidate)) {
+      agent.pos = candidate;
+    }
   }
 }
 
@@ -494,6 +609,29 @@ export function findNearestTerrain(
  * a large body's tricky-shaped coastline ever pay for more than one lookup.
  */
 const WATER_REACHABILITY_MAX_ATTEMPTS = 24;
+
+/**
+ * Direct report: agents seem to "just stand still... or move back and forth
+ * repeatedly between one plant and water." A real cause: `chooseBehavior`
+ * has no memory at all — the instant a fresh episode starts, it just
+ * targets whatever's geometrically nearest right now, which is very often
+ * the exact tile this agent JUST consumed from (a nearby food/water pair
+ * with balanced decay rates oscillates between the same two spots forever).
+ * `RESOURCE_REVISIT_AVOID_TICKS`: how long a tile stays "too recent to
+ * revisit without at least checking for an alternative" after a consume —
+ * short enough that a genuinely isolated resource (no real alternative
+ * nearby) still gets revisited constantly, this is a soft nudge toward
+ * variety, not a hard ban.
+ */
+const RESOURCE_REVISIT_AVOID_TICKS = 40;
+/**
+ * How much farther an alternative tile is allowed to be than the just-
+ * visited one before the detour isn't worth it — an agent shouldn't trek
+ * across the map just to avoid revisiting its own backyard pond; a small
+ * tolerance still catches the common "the other food tile is basically
+ * right there too" case this feature is actually for.
+ */
+const RESOURCE_REVISIT_EXTRA_DISTANCE_TOLERANCE = 4;
 
 /**
  * `findNearestTerrain(..., "water", ...)`, additionally skipping any
@@ -1164,7 +1302,7 @@ export function tickAgentAction(
   // need always wins).
   if (agent.exploreTarget) {
     if (chooseBehavior(agent.needs) === "idle") {
-      applyExploration(world, agent, log, rng);
+      applyExploration(world, agent, log, ctx, rng);
       return;
     }
     agent.exploreTarget = undefined;
@@ -1235,10 +1373,32 @@ export function tickAgentAction(
   if (agent.behavior === "seekWater" || agent.behavior === "seekFood") {
     const terrain = agent.behavior === "seekWater" ? "water" : "food";
     const excluded = agent.blockedResourceTiles ?? [];
-    const target =
+    let target =
       agent.behavior === "seekWater"
         ? findReachableWaterTarget(world, agent, excluded)
         : findReachableFoodTarget(world, agent, excluded);
+
+    // See RESOURCE_REVISIT_AVOID_TICKS's own doc comment. Only even looked
+    // at when the freshly-picked nearest target is literally the tile this
+    // agent just consumed from, recently — every other tick pays nothing
+    // extra for this check.
+    const lastVisit = agent.lastResourceVisit;
+    if (
+      target &&
+      lastVisit &&
+      lastVisit.kind === terrain &&
+      lastVisit.pos.x === target.x &&
+      lastVisit.pos.y === target.y &&
+      world.tick - lastVisit.tick < RESOURCE_REVISIT_AVOID_TICKS
+    ) {
+      const alternate =
+        agent.behavior === "seekWater"
+          ? findReachableWaterTarget(world, agent, [...excluded, target])
+          : findReachableFoodTarget(world, agent, [...excluded, target]);
+      if (alternate && manhattan(agent.pos, alternate) <= manhattan(agent.pos, target) + RESOURCE_REVISIT_EXTRA_DISTANCE_TOLERANCE) {
+        target = alternate;
+      }
+    }
 
     if (target) {
       agent.ticksWithoutResource = 0;
@@ -1312,6 +1472,11 @@ export function tickAgentAction(
           }
         }
         grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
+        // See RESOURCE_REVISIT_AVOID_TICKS's own doc comment — remembered
+        // regardless of how this consume was reached (a fresh search, the
+        // shelter-cache fallback bypasses this block entirely) so the NEXT
+        // episode's target search can prefer a different tile.
+        agent.lastResourceVisit = { pos: { x: target.x, y: target.y }, kind: terrain, tick: world.tick };
         log?.record({
           kind: "consumed",
           tick: world.tick,
@@ -1530,7 +1695,17 @@ export function tickAgentAction(
       // to ordinary exploration) when this herd has no shelter anywhere
       // findable yet.
       const wentHome = applyShelterResting(world, agent, log);
-      if (!wentHome) applyExploration(world, agent, log, rng);
+      if (!wentHome) {
+        const explored = applyExploration(world, agent, log, ctx, rng);
+        // Direct report: agents seem to "just stand still... it's like...
+        // shallow" — this was the literal cause for a genuinely idle agent
+        // with nothing left to explore (every nearby sector already
+        // visited, no preferred terrain reachable): `applyExploration`
+        // returning without a target used to leave `agent.behavior` however
+        // it last was, doing nothing at all, tick after tick. See
+        // `applyTraining`'s own doc comment for what fills that gap now.
+        if (!explored) applyTraining(world, agent, log, ctx, rng);
+      }
     }
   }
 }
