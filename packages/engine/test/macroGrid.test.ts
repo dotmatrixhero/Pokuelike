@@ -295,6 +295,69 @@ describe("estimateZoneResourceIndex / estimateZoneSpecies", () => {
     expect(craterPop).toBeGreaterThan(plainPop);
   });
 
+  it("gives a Sanctuary a higher resource estimate than a plain zone of the same biome — direct ask: 'make certain zones more hospitable'", () => {
+    const grid = generateMacroGrid(2024, 200, 200);
+    const sanctuary = grid.zones.find((z) => z.landmark === "sanctuary")!;
+    const plain = grid.zones.find((z) => !z.landmark && !z.isOcean && z.biome === sanctuary.biome)!;
+    expect(estimateZoneResourceIndex(sanctuary)).toBeGreaterThan(estimateZoneResourceIndex(plain));
+  });
+
+  it("a Sanctuary thins predator population further and boosts prey population, relative to a plain zone of the same biome — direct ask: 'prey friendly'", () => {
+    const grid = generateMacroGrid(2024, 200, 200);
+    const sanctuary = grid.zones.find((z) => z.landmark === "sanctuary")!;
+    const plain = grid.zones.find((z) => !z.landmark && !z.isOcean && z.biome === sanctuary.biome)!;
+    const roster = [
+      { id: "hunter", homeLayer: "surface" as const, isPredator: true },
+      { id: "grazer", homeLayer: "surface" as const },
+    ];
+    const rng = () => 0.5;
+
+    const sanctuaryEstimates = estimateZoneSpecies(sanctuary, roster, rng);
+    const plainEstimates = estimateZoneSpecies(plain, roster, rng);
+    const sanctuaryPredatorPop = sanctuaryEstimates.find((e) => e.speciesId === "hunter")?.population ?? 0;
+    const plainPredatorPop = plainEstimates.find((e) => e.speciesId === "hunter")?.population ?? 0;
+    const sanctuaryPreyPop = sanctuaryEstimates.find((e) => e.speciesId === "grazer")?.population ?? 0;
+    const plainPreyPop = plainEstimates.find((e) => e.speciesId === "grazer")?.population ?? 0;
+
+    expect(sanctuaryPredatorPop).toBeLessThan(plainPredatorPop);
+    expect(sanctuaryPreyPop).toBeGreaterThan(plainPreyPop);
+  });
+
+  it("a Sanctuary's predator species pool is capped tighter than an ordinary zone's", () => {
+    const grid = generateMacroGrid(2024, 200, 200);
+    const sanctuary = grid.zones.find((z) => z.landmark === "sanctuary")!;
+    const plain = grid.zones.find((z) => !z.landmark && !z.isOcean && z.biome === sanctuary.biome)!;
+    // Several fitting predator species — more than the whole pool could ever
+    // hold (ZONE_SPECIES_POOL_MAX is 7), so the early "fewer fitting species
+    // than the pool size" bypass never kicks in and which cap actually
+    // applies is the only thing determining how many predators survive.
+    const roster = Array.from({ length: 10 }, (_, i) => ({ id: `predator-${i}`, homeLayer: "surface" as const, isPredator: true }));
+    const rng = () => 0.5;
+
+    const sanctuaryPredatorCount = estimateZoneSpecies(sanctuary, roster, rng).filter((e) => e.isPredator).length;
+    const plainPredatorCount = estimateZoneSpecies(plain, roster, rng).filter((e) => e.isPredator).length;
+
+    expect(sanctuaryPredatorCount).toBeLessThanOrEqual(1); // SANCTUARY_PREDATOR_POOL_CAP
+    expect(plainPredatorCount).toBeLessThanOrEqual(2); // ZONE_PREDATOR_POOL_CAP
+    expect(sanctuaryPredatorCount).toBeLessThan(plainPredatorCount);
+  });
+
+  it("a species with a lower `rarity` gets a smaller invented population than an otherwise-identical species — direct ask: 'make arboks less common'", () => {
+    const grid = generateMacroGrid(2024, 200, 200);
+    const zone = grid.zones.find((z) => !z.isOcean && !z.landmark)!;
+    const roster = [
+      { id: "common-species", homeLayer: "surface" as const },
+      { id: "rare-species", homeLayer: "surface" as const, rarity: 0.35 },
+    ];
+    const rng = () => 0.5;
+
+    const estimates = estimateZoneSpecies(zone, roster, rng);
+    const commonPop = estimates.find((e) => e.speciesId === "common-species")?.population ?? 0;
+    const rarePop = estimates.find((e) => e.speciesId === "rare-species")?.population ?? 0;
+    expect(rarePop).toBeLessThan(commonPop);
+    expect(rarePop).toBeCloseTo(commonPop * 0.35, 5);
+  });
+
   it("leaves a non-bonus landmark's (Bone Grounds) resource estimate unchanged from a plain zone of the same biome", () => {
     const grid = generateMacroGrid(2024, 200, 200);
     const boneGrounds = grid.zones.find((z) => z.landmark === "boneGrounds")!;

@@ -19,11 +19,19 @@ export function shortId(id: string): string {
   return match ? match[1]! : id;
 }
 
-/** The "origin" word the battle log's `(id, origin)` pairing wants — `undefined` for an ordinary founding-population agent, which gets no second word at all. */
+/**
+ * The "origin" word the battle log's `(id, origin)` pairing wants —
+ * `undefined` for an ordinary founding-population agent, which gets no
+ * second word at all. Direct ask: "in battle log can we not call em
+ * immigrant? call em 'nomad'. and 'native' instead of 'invented'. and idk,
+ * somethign else cool instead of just 'born'" — "hatched" reused rather
+ * than invented from scratch, matching this exact origin's own real event
+ * kind (`eggHatched`, eggs.ts) instead of a new, disconnected word.
+ */
 function originWord(id: string): string | undefined {
-  if (id.startsWith("egg-")) return "born";
-  if (id.includes("-immigrant-")) return "immigrant";
-  if (id.includes("-invented-")) return "invented";
+  if (id.startsWith("egg-")) return "hatched";
+  if (id.includes("-immigrant-")) return "nomad";
+  if (id.includes("-invented-")) return "native";
   return undefined;
 }
 
@@ -57,13 +65,30 @@ export function idLabel(world: World | undefined, id: string, species: string): 
 
 /** Human-readable display name per title, e.g. "The Hero" — used everywhere a title-holder's identity is rendered. */
 export const TITLE_DISPLAY_NAME: Record<NotableTitleId, string> = {
-  hero: "The Hero",
+  // Direct ask: "shoudl rename hero to warrior probably" — display text
+  // only; the internal id ("hero") and every doc comment referencing it
+  // elsewhere are unchanged, same "id is plumbing, this is the name a
+  // player actually sees" split every other title already has.
+  hero: "The Warrior",
   builder: "The Builder",
   gatherer: "The Gatherer",
   rival: "The Rival",
   beloved: "The Beloved",
   elder: "The Elder",
   wanderer: "The Wanderer",
+  // Direct ask: "add a title for knocking out a pokemon more than 5 lvls
+  // above you. it makes you notable."
+  giantSlayer: "The Giant Slayer",
+  // Direct ask: "maybe like 'savant' for maxing out a branch of skill
+  // points for a move."
+  savant: "The Savant",
+  // Direct ask: "'alpha' - which is win over 40 clashes."
+  alpha: "The Alpha",
+  // Direct ask: "'shaman' for healing or supporting units in battle a lot
+  // giving them buffs."
+  shaman: "The Shaman",
+  // Direct ask: "'underdog' for losing 40 clashes."
+  underdog: "The Underdog",
 };
 
 /** One emoji per title, matching this file's `STORY_ICON` convention in eventText.ts. */
@@ -75,6 +100,11 @@ export const TITLE_ICON: Record<NotableTitleId, string> = {
   beloved: "\u{1F495}", // two hearts
   elder: "\u{1F9D3}", // older person
   wanderer: "\u{1F9ED}", // compass
+  giantSlayer: "\u{1F409}", // dragon — felled something much bigger
+  savant: "\u{1F393}", // graduation cap
+  alpha: "\u{1F43A}", // wolf — pack dominance
+  shaman: "\u{1F33F}", // herb — healing/buffing
+  underdog: "\u{1F415}", // dog — scrappy, keeps getting back up
 };
 
 /**

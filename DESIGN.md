@@ -5604,6 +5604,156 @@ zero behavior change to anything that doesn't opt in.
   `POP_HARD_CAP`) is unit-tested but not yet exercised by a real multi-
   thousand-tick run that actually reaches it — see TODO.md.
 
+### A big batch: longer battle epilogue, terminology, 6 new Notables, real egg-eating bug fix, move-use visuals, legend
+
+One long message thread, several distinct direct asks, handled together:
+
+**Autocam.** Battle epilogue hold `1000ms -> 3000ms` — "battles not end
+after 1000ms. i think it needs to be liek 3000 ms," the earlier 1000ms cut
+away before a viewer had time to register the finishing blow.
+
+**Battle-log terminology.** "immigrant" -> "nomad", "invented" -> "native",
+"born" -> "hatched" (reusing the real `eggHatched` event kind rather than
+inventing a new word) — `notableTitles.ts`'s `originWord`. "The Hero" ->
+"The Warrior" (display text only; the internal id `hero` and every doc
+comment referencing it are unchanged).
+
+**Six new Notable titles**, each keyed to a real, already-tracked (or
+newly-added lifetime-counter) stat, same record-holder mechanism every
+existing title uses:
+- **Giant Slayer** — a real kill against a target 5+ levels above you
+  (`GIANT_SLAYER_LEVEL_GAP`), threshold 1 (the kill itself is the notable
+  moment, no repetition needed).
+- **Savant** — a move-tree branch (grouped by `MoveTreeNode.leaning`) driven
+  to `SAVANT_MIN_BRANCH_NODES` (6) chosen nodes — a real, structural
+  "branch," since a fork's mutually-`excludes`-ing pair can never both be
+  chosen, so "every node" isn't achievable; this measures genuine deep
+  commitment instead.
+- **Alpha** — 40 herd-conflict wins (a defender retreat, or a lethal
+  escalation), exact number as given.
+- **Underdog** — 40 herd-conflict losses, the mirror stat.
+- **Shaman** — 5 real ally heal/buff acts delivered
+  (`support.ts`'s `applyAllyEffect`, the one shared function both the
+  dedicated support move and a hostile attack's piggybacked ally effect
+  route through) — a sim-original guess pending real-run frequency data,
+  same as this file's other new tuning numbers.
+
+**Real bug fix, confirmed by direct report** ("watched a predator just
+ignore an egg"): `applyEggEating` required an egg already be adjacent, with
+literally no seek/travel step — an agent not already standing next to an
+egg had no mechanism to ever notice or walk toward one; eating one only
+ever happened by the coincidence of already being adjacent on a hungry
+tick. Added `EGG_EAT_DETECT_RADIUS` (5, matching `HUNT_DETECT_RADIUS`'s real
+prey-sensing scale) and a walk-toward-it step when an edible egg is spotted
+but not yet adjacent — the same "if adjacent, act; else step toward" shape
+`herdConflict.ts`'s own triggers already use.
+
+**Move-use visuals** ("light up the square it effects... maybe make the
+tile/sprite sorta jiggle when its using a move"): new `moveEffects.ts`
+tracks every real `fought`/`herdClash` hit (any outcome, including a miss —
+the ask is about using a move, not landing one) for a brief 350ms window —
+a fading ring flash on the affected tile (`drawMoveFlashes`) and a small
+per-agent shake on the attacker's own sprite (`drawAgent`'s new `jiggling`
+param, a deterministic per-id phase so several simultaneous jigglers don't
+move in lockstep).
+
+**Legend gap fix**, surfaced while investigating a related report ("the
+other food sources. are they in the game? idk if i see em"): the real 12-
+crop `FOOD_CROPS` registry (crops.ts) each render with a distinct sprite/
+color on the map, but the legend only ever listed one generic "food" glyph
+— a player had no way to learn which glyph/color meant which crop. Added a
+real "Food crops" legend section (`legend.ts`) listing every crop by its
+actual name and on-map look (real emoji for the 7 crops that have one, a
+color swatch matching `FLAVOR_FG` for the 4 original berries).
+
+**Investigated, no code bug found**: "i just watched a charmeleon starve to
+death after evolving... should've done something." Traced `grantExp`'s
+evolution branch (leveling.ts) and confirmed it touches only `species`/
+`stats`/`hp`/a dispersal-check flag — never `behavior`, `fightTarget`, or
+any other field that could leave an agent behaviorally stuck; `chooseBehavior`
+is unconditionally recomputed near the end of every action tick unless an
+earlier branch commits, and every commit branch already re-checks urgency
+first (the same "committed no matter what" bug class already fixed earlier
+this project for dispersal/shelter/support-move). One real, narrower gap
+found but confirmed NOT the cause here: a few `Agent` fields
+(`isPredator`/`preferredTerrain`/`activityPattern`/`obligateAquatic`/
+`buildsShelter`) are denormalized from `SpeciesDef` at spawn and never
+refreshed on evolution — for Charmander -> Charmeleon specifically this is a
+non-issue (both share the same `activityPattern`/`biomes`, neither is
+`isPredator`), so it doesn't explain this death; likely an ordinary death
+(crowded food tile, a bad `blockedResourceTiles` streak, thirst-relocate
+walking away from food) that happened to coincide with a recent evolution.
+Flagged as a real, narrower follow-up (stale denormalized fields on
+evolution) rather than fixed here, since it wasn't the actual cause.
+
+Full suite (1083 + 177 tests) and typecheck green throughout; new tests for
+Giant Slayer/Savant's stat logic. Live smoke-tested the web app end to end
+(vite + headless Chromium) after the rendering changes — tile-mode drawing,
+the jiggle/flash effects' code paths, and the new legend section all
+confirmed working with no new console errors.
+
+### Herd conflict: rare lethal escalation, and a cap on multi-way brawls
+
+Direct ask, after walking through how the mechanic works: "i think that's
+fine, i think mostly i want that to be the case. but i think i do want them
+to escalate to death sometimes. it's just not dramatic enuogh. i think
+another thing that's happening is like multi-way 6 unit free for alls that
+get really confusing." Two real, separate changes, both scoped by follow-up
+answers (grudge-based-AND-flat-chance for lethality, capped simultaneous
+local fights for the brawls) — clarified further: "they could always fight
+til hp = 0 but not fully kill them, unlike predation," meaning the fix
+isn't "sometimes skip the floor," it's "the floor is gone — a knockout is
+now always possible — but a knockout only rarely goes all the way to a real
+death."
+
+**Lethal escalation.** `HERD_CONFLICT_HP_FLOOR_FRACTION` (the old "can never
+go below 15% hp" clamp) is gone — `resolveRivalryHit` can now genuinely
+bring a defender to 0 hp. Reaching 0 hp faints the defender — the exact same
+`fainted`/`finishingPool` state predation.ts uses, so it heals and wakes up
+via the same already-existing `applyHealOverTime`/`maybeRecoverFromFaint`
+every fainted agent gets (or can be carried to safety, support.ts) — but
+this mechanic never automatically continues into predation's finishing-blow
+loop the way an actual hunt would; a herd-conflict participant doesn't chase
+down a downed rival. A TRUE death only happens when the exact hit that
+causes the knockout clears `isLethalEscalation`'s bar — two independent
+paths, either enough: a deep, real pre-existing grudge between these two
+specific individuals (`HERD_CONFLICT_LETHAL_GRUDGE_THRESHOLD = -0.85`,
+checked against rapport BEFORE this hit's own rapport shift, so it reflects
+real history, not a grudge the hit itself just created), or a small,
+independent flat chance (`HERD_CONFLICT_LETHAL_CHANCE = 0.04`) so a fight
+can rarely go all the way even between total strangers. A real death grants
+kill exp and increments `lifetimeKills` (Notables) same as a predation kill,
+and logs `defeated` (the same non-predation-death event kind egg-defense
+already uses) — auto-camera already treats that as a death-worthy cut with
+no changes needed there.
+
+**Local fight cap.** New `Agent.lastHerdConflictTick`, stamped on both
+participants every real herd-conflict hit. `tooManyLocalFights` refuses to
+let a BRAND-NEW pair start fighting at all once
+`MAX_LOCAL_FIGHT_PARTICIPANTS` (4 — two concurrent pairs) other agents are
+already actively fighting (hit within the last 20 ticks) within 4 tiles of
+where the new one would start. Checked only by `applyHerdRivalryConflict`/
+`applyTerritorialGuard` (the two triggers that start something NEW) —
+`applyRivalryRetaliation`, a direct one-shot continuation of a fight already
+in progress, is deliberately exempt, so an ongoing pair's own back-and-forth
+is never capped, only OTHER unrelated agents piling onto an already-busy
+area. On the display side, `autoCamera.ts`'s `onBattleHit` now relabels an
+engagement once widening pulls a third participant in (`"N-way battle/
+brawl"` instead of a stale two-name label that no longer describes what's
+actually on screen).
+
+Live-validated over a real 12,000-tick `createDemoWorld` run
+(`validateLethalClashes.ts`): 96 real herd-clash hits produced 19 knockouts
+and 2 true deaths — roughly one in ten knockouts escalating, both grudge-
+and chance-driven paths structurally reachable, neither routine. New engine
+tests cover both lethal paths directly (a fresh pair's knockout faints, a
+flat-chance roll makes a first-ever knockout lethal, a pre-set deep grudge
+makes the next knockout lethal regardless of the flat chance) plus the
+local-fight cap (a brand-new pair refused when the area's already at
+`MAX_LOCAL_FIGHT_PARTICIPANTS`, but a retaliation continuation still goes
+through under the same busy conditions). Full suite (1081 + 177 tests) and
+typecheck green.
+
 ### Auto-camera: courtship gets its own shorter dwell and longer cooldown
 
 Direct ask: "bonding takes too much air time on the autocam. reduce it and
@@ -12570,3 +12720,812 @@ data suite (104 tests) green throughout.
   `maxCount` were judged against one real grid and left as-is; genuinely
   playing the game on a real map may reveal some types read too sparse or
   too common.
+
+## Underground crop regrowth/spread
+
+Direct question, then a direct follow-up: "Do crops propagate? Any way to
+spread?" and, after investigating, "Regrowth! Apples can just regrow
+infinitely from same tree. Spread! Potatoes and stuff can spread. Be spread
+by seedlings and by just growing in nearby patches."
+
+**Apple regrowth already worked, no code changed for it.** Canopy's Apple
+ripens in place: `growCanopyFood` picks up any canopy tile reading
+`stock === 0` after `CANOPY_APPLE_RIPEN_TICKS` and re-ripens it, and
+`needs.ts`'s eating logic only ever decrements `stock` — it never touches
+`terrain` — so a fully-eaten apple tile looks identical to a freshly-placed
+unripe one and regrows the same way. Confirmed live: a canopy apple tile
+forced to `stock: 0` came back to a nonzero stock (0.8) by tick ~199 of a
+plain `tickWorld` loop, no changes needed.
+
+**Underground crops (Potato/Pumpkin, `crops.ts`'s `nativeLayer:
+"underground"`) had no propagation mechanism at all.** `flora.ts`'s whole
+seedling/germination/spread system — `maybeDropSeed` (agents dropping seeds
+as they move), `trySpread` (a mature food tile spreading to a floor
+neighbor), and the seedling-maturation loop — was Surface-only by
+construction. Underground worldgen itself never places any food tiles
+either (`generateUndergroundCaves` only ever writes wall/floor/water) — so
+a fresh world starts with zero underground food, full stop, and had no way
+to ever get any.
+
+Fixed by generalizing the surface-only pieces and adding Underground's own
+growth pass:
+- `trySpread(world, layer, pos, log, rng)` now takes a `layer` parameter
+  instead of hardcoding `"surface"`, so the same spread-to-a-neighbor logic
+  works for either layer.
+- `maybeDropSeed`'s early-return guard now allows `"underground"` alongside
+  `"surface"` (Canopy stays excluded — it was never part of this seedling
+  system; Apple's regrowth works the separate way described above).
+- New `growUndergroundFlora(world, log, rng)`, called once per tick in
+  `simulation.ts` alongside `growFlora`/`growCanopyFood`: a genuine second
+  copy of `growFlora`'s core loop scoped to `world.tiles.underground`, not
+  a parameterized reuse of it — Underground has no sunbeam tiles at all (no
+  sun-loving bonus, no `nearSun` doubling in `pickCrop`), and
+  `floraDecayDivisor` already returns a flat 1 (no weather effect) for any
+  non-Surface layer, so the rain/drought decay-and-spread modulation
+  Surface food gets simply doesn't apply down here — that's real, not an
+  oversight. Same tuning constants otherwise (`MATURATION_TICKS`,
+  `FOOD_SPREAD_CHANCE`, `NATURAL_DECAY_PER_TICK`, etc.) — no underground-
+  specific run data yet to justify different numbers.
+
+### Real-run findings
+
+A fresh `createDemoWorld` genuinely starts with 0 underground food tiles.
+Over an 8000-tick `tickWorld` run with the fix in place: the first
+underground seedling/food tile appeared by tick ~601 (an underground-layer
+agent dropping a seed on a cave floor tile), 109 distinct underground tiles
+sprouted food/flora over the run (a real second tile sprouting by tick
+~579 — spread, not just one tile germinating repeatedly), and underground
+food/flora counts rose and fell in bursts (e.g. 0 -> 15 food + 27 flora
+tiles around tick 2601) tracking how many agents were actually down there
+at the time — the same traffic-driven boom/decay pattern Surface crops
+already show, now working Underground too. Full engine suite (1083 tests)
+green throughout.
+
+## Notable titles: slower, random, and fair to founders/immigrants
+
+Direct report: "The elder is being granted to hatched Pokémon 400 ticks old
+while native Pokémon don't have ticks old. Titles seems too common in
+general. I see a savant, elder, beloved, shaman all in the same group.
+That's incorrect. Maybe we need to slow it down a lot more. And make it a
+random chance to obtain the title."
+
+**The real bug.** `Agent.age` was only ever initialized at egg hatch
+(`eggs.ts`'s `tickEgg`, `agent.age = 0`) — every worldgen founder and every
+immigrant (`spawn.ts`'s shared `spawnAgent`, used by both paths) left `age`
+`undefined` forever, since `needs.ts`'s per-tick increment only bumps an
+*already-defined* age. `notables.ts`'s Elder title correctly treats absent
+age as "never tracked" rather than "age 0" (so a founder can't silently
+out-rank a real elder) — the practical effect was that only hatched
+Pokémon could ever become Elder at all. Fixed in `spawn.ts`: every fresh
+spawn now starts at `age: MATURITY_AGE` (200) — already mature immediately
+(preserving `isMature`'s old "absent age = mature" behavior exactly, so no
+breeding-eligibility regression), but now a real, growing number that
+competes for Elder on equal footing with hatchlings.
+
+**Slower.** Every threshold in `NOTABLE_TITLE_MIN_THRESHOLDS` was raised
+well past its previous bar (roughly 2.5-3x on the counters that scale;
+Elder's own bar went from 500 to 1500 ticks alive).
+
+**Random.** A challenger clearing a title's threshold no longer claims it
+instantly — `updateNotables` now rolls `NOTABLE_GRANT_CHANCE_PER_TICK`
+(1.25%, ~1-in-80 ticks) each tick an eligible-but-uncrowned challenger
+exists, so the actual hand-of-title lands at an unpredictable, spread-out
+point rather than snapping the instant a stat crosses its bar. A title
+genuinely vacating because its holder died is NOT gated by this roll — no
+reason to keep it artificially unclaimed once nobody's actually racing for
+it. `updateNotables` now takes an explicit `rng` (threaded from
+`tickWorld`, same as `growFlora` etc.) — determinism is unaffected (same
+seed still produces the same draw sequence), just a real new draw site.
+
+### Real-run findings
+
+An 8000-tick `createDemoWorld` run: first title claimed at tick 773 (was
+near-instant before this fix, since several agents already start well past
+the old, lower thresholds). By the end of the run three different titles
+were held by three agents in three different herds (`elder`/`savant`/
+`wanderer`, herds `undefined`/`undefined`/`golbat-immigrant-lineage-5708`)
+— no same-herd clustering. The living Elder's age read 8200, comfortably
+past the new 1500 threshold. Full engine suite (1099 tests) green
+throughout, including new coverage in `notables.test.ts` for the grant-roll
+gate (an eligible challenger stays uncrowned on a miss, claims on a hit;
+vacating a dead incumbent's title is never gated).
+
+## Lower-level survival: grouping, earlier flight, migration, and immigrant level matching
+
+Direct report, after noticing a lot of one-sided fights from the level
+spread: "I think it's fine to have the difference in power level, but
+ideally Pokémon that are lower level travel together more and also run
+away faster against high level opponents. Maybe they migrate away from
+high level Pokemon too. And the ones that migrate in come in matching the
+level a little more. I think the power level difference is acceptable, but
+lower level Pokemon need to try to survive more."
+
+Four separate, real mechanics, all gated on the same reused "5+ levels is a
+genuine gap" bar (`predation.ts`'s `SEVERE_LEVEL_GAP`, aliased to the
+existing `GIANT_SLAYER_LEVEL_GAP` rather than a fresh number):
+
+- **Travel together more** (`herding.ts`): `applyHerdCohesion` now checks
+  an agent's level against its own herd's current top living level
+  (`herdMaxLevel`). A member trailing by `LOW_LEVEL_COHESION_GAP` (5) or
+  more uses a tighter `LOW_LEVEL_COHESION_DISTANCE` (3) leash instead of
+  the ordinary `COHESION_DISTANCE` (5) — the same magnitude leash a
+  guardian already gets, for the same underlying reason (staying close to
+  the group is a real survival behavior).
+- **Flee sooner and skip doomed fights** (`predation.ts`):
+  `applyPredationInstincts`'s threat-detection query now searches out to
+  `effectiveFleeRadius + SEVERE_THREAT_EXTRA_FLEE_RADIUS` (3 extra tiles),
+  but only actually reacts to anything beyond the ordinary radius if that
+  specific threat clears `SEVERE_LEVEL_GAP` — an evenly-matched threat at
+  the same distance still doesn't register early. Separately, the
+  mob-fight branch (enough nearby allies to turn and fight instead of
+  fleeing) is now also gated on `levelGap(threat, agent) < SEVERE_LEVEL_GAP`
+  — a badly outleveled herd no longer commits to a fight it can't win just
+  because the headcount math says "enough allies," and falls through to
+  flee instead.
+- **Migrate away from high-level threats** (`herdMigration.ts`):
+  `recordPredatorPressure` now takes a `weight` (default 1); `predation.ts`'s
+  call site computes it as `1 + floor(levelGap / SEVERE_LEVEL_GAP)`, so a
+  hit from a much stronger predator counts as several ordinary hits toward
+  the existing `PREDATOR_PRESSURE_THRESHOLD` migration trigger. The
+  trigger and its "score away from the threat" destination logic
+  (`pickDestination`'s `AWAY_WEIGHT`) were already real; this just makes a
+  genuinely dangerous predator reach that trigger faster than a merely
+  persistent, evenly-matched one.
+- **Immigrants match the local level** (`immigration.ts`): new
+  `localAverageLevel(world, speciesId)` computes the real average level of
+  that species' current living population. `rollImmigrantLevel` takes it
+  as an optional third argument and, when given, re-centers its existing
+  jitter band on it (`max(floor, round(localAvgLevel - jitter/2))`)
+  instead of the bare species floor — still clamped so a struggling local
+  population's low average can never push a new arrival below the
+  species' own real minimum. `maybeImmigrate` computes it once per
+  immigration event and threads it through. A genuinely first arrival (no
+  living member of that species yet) falls back to the original
+  species-only floor+jitter roll unchanged.
+
+### Real-run findings
+
+Full engine suite (1099 tests) green, including new direct coverage: a
+mob-sized herd that would have fought under the old headcount-only rule now
+flees when the threat clears `SEVERE_LEVEL_GAP`; a severely outleveled prey
+reacts to a threat at distance 7 (beyond the ordinary radius) while an
+evenly-matched one at the same distance doesn't; a low-level herd member
+moves back toward centroid at a distance an ordinary member would tolerate;
+a single severe-gap hit alone can cross `PREDATOR_PRESSURE_THRESHOLD` and
+trigger migration; `rollImmigrantLevel`/`localAverageLevel` re-centering
+and floor-clamping both verified directly.
+
+## Flying Pokémon fly over canopy obstacles and water everywhere
+
+Direct ask: "Flying Pokémon should be able to fly over obstacles and water
+in canopy." Two real exemptions, both keyed off `agent.types?.includes
+("flying")` (types come straight from the imported dex data via
+`speciesFromDex`, so Charizard/Pidgey/Spearow/Zubat/Golbat — anything
+dex-tagged Flying — already qualify with zero data changes):
+
+- **Water, everywhere** (`waterBody.ts`'s `canEnterWater`): a Flying-type
+  agent is now unrestricted on any water tile, any layer — the same total
+  exemption Water-types already got, checked first.
+- **Canopy obstacles specifically** (`movement.ts`'s new `canFlyOverObstacle`,
+  read by both `movement.ts`'s `firstWalkable` and `pathfinding.ts`'s
+  `isWalkableFor` — the two real walkability chokepoints): a Flying-type
+  agent ignores canopy's own `"wall"` tiles (the gaps `worldgen.ts`'s
+  `deriveCanopyFromSurface` leaves between tree-linked "islands" and
+  massif ridges) entirely. Deliberately scoped to the canopy layer only —
+  a Flying-type still can't walk through a surface tree/mountain wall
+  tile, which is a separate, not-yet-asked-for exemption.
+
+### Real-run findings
+
+New direct tests: a flying-type agent steps straight through a canopy wall
+tile a non-flying agent can't; that same flying agent's exemption does NOT
+extend to a surface obstacle (layer-scoped, not species-wide); a
+flying-type agent freely enters a large water body's interior the same way
+a water-type does. Full engine suite (1099 tests) green throughout.
+
+## Charizard and Charmeleon become predators
+
+Direct ask: "Charizard and chameleon should become predators." Both already
+read as apex-predator-flavored in their existing `species.ts` doc comments
+("cruel, savage nature" for Charmeleon; "an apex flyer/predator design in
+the mainline games" for Charizard, in a comment written before this
+feature existed) — just added `isPredator: true` to each `speciesFromDex`
+call. `HUNT_RULES` (`packages/data/src/predation.ts`) derives automatically
+by filtering `SPECIES` for `isPredator`, so no other wiring was needed;
+targeting itself is fully dynamic power-ratio matching
+(`predation.ts`'s `isPreyOf`), not a species-specific prey list.
+
+### Real-run findings
+
+`HUNT_RULES.charizard`/`HUNT_RULES.charmeleon` both confirmed `true` on a
+real `createDemoWorld` build. Full engine (1099 tests) and data (177 tests)
+suites green throughout.
+
+## Zone-spawning tuning: predator/prey level gap, Sanctuary landmark, Arbok rarity
+
+Direct report: "we need to tune spawning a zone more. Predator and prey gap
+level wise is a bit too high. Make em average out to each other. Prey
+should have a wider range of levels. That skew their avg level down. Also
+make certain zones more hospitable and prey friendly." Plus a mid-session
+follow-up: "Make arboks less common. I just don't like em lol."
+
+**Predator/prey level-gap narrowing.** `immigration.ts`'s `rollImmigrantLevel`
+(used both for a walking-in immigrant AND, now, for `overworld.ts`'s
+`estimateInitialAggregates` — a never-visited zone's own "spawn," which
+previously duplicated an out-of-date copy of the same formula instead of
+calling the shared function):
+- `PREDATOR_LEVEL_BOOST` halved (15 -> 6) — predators still read as
+  established individuals, just no longer wide enough on their own to make
+  every encounter one-sided.
+- Prey (non-predator) species get their own, wider jitter band
+  (`PREY_LEVEL_JITTER` = 16, double the old shared 8; `SINGLE_STAGE_PREY_
+  LEVEL_JITTER` = 40 for a `singleStage` prey species, up from 30) —
+  genuinely "a wider range of levels."
+- That wider prey band is sampled with `rng() ** PREY_LEVEL_SKEW` (skew =
+  4, mean fraction 1/5) instead of a uniform roll — the extra range's mass
+  sits toward the LOW end, which is the actual mechanism that pulls the
+  prey average down (a uniform widening alone would have left the average
+  unchanged or raised it). Predators stay a plain uniform roll, unchanged.
+- `overworld.ts`'s `promoteZone` also widens the per-individual variance
+  around an already-invented population's tracked average for prey (±8,
+  was ±4) vs. predators (±4, unchanged) — the "wider range" carries through
+  to the individual-spawn layer too, not just the aggregate estimate.
+
+**Sanctuary landmark** (`landmarks.ts`) — a new, real landmark type, direct
+ask: "make certain zones more hospitable and prey friendly." Eligible in
+grassland/forest/wetland/jungle, same rarity tier as Fertile Basin. Three
+real mechanics, all in `macroGrid.ts`:
+- `LANDMARK_RESOURCE_BONUS.sanctuary = 0.3` — as resource-rich as Fertile
+  Basin.
+- `SANCTUARY_PREDATOR_POOL_CAP = 1` — a Sanctuary's predator species pool
+  is capped tighter than an ordinary zone's `ZONE_PREDATOR_POOL_CAP` (2),
+  via a new `predatorCapOverride` parameter on `pickZoneSpeciesPool` that
+  replaces (rather than composes with) the ordinary cap math.
+- `SANCTUARY_PREDATOR_POPULATION_DISCOUNT` (0.6, composes multiplicatively
+  with the ordinary `PREDATOR_POPULATION_DISCOUNT`) and `SANCTUARY_PREY_
+  POPULATION_MULTIPLIER` (1.4) further thin whatever predator population
+  does show up and boost prey population, on top of the species-pool cap.
+
+Real, distinct terrain too (`worldgen.ts`'s `applySanctuary`, wired into
+`applyLandmarkFeature`): a small water pocket at the landmark's center,
+obstacles (wall/boulder/tree) thinned out across its footprint — open
+sightlines a prey animal can actually see a threat coming across — and
+dense food/bush growth throughout.
+
+**Arbok rarity.** New `SpeciesDef.rarity` field (default `1`, unchanged
+frequency) — a per-species multiplier threaded through both
+`immigration.ts`'s `pickImmigrantSpecies` selection weight and
+`macroGrid.ts`'s `estimateZoneSpecies` invented population size. Arbok set
+to `0.35`. Deliberately does NOT weight `pickZoneSpeciesPool`'s species-pool
+*inclusion* roll (a zone with grassland/jungle habitat can still list Arbok
+among its fitting predators) — only how large a population it gets once
+included, and how often it's picked as a live immigrant. Ekans (its own
+base form) is untouched.
+
+### Real-run findings
+
+A 400x400 macro grid: Sanctuary's resource index read 0.82 vs. 0.52 for a
+plain zone of the same biome; its predator species count read 1 vs. 2 for
+the same plain zone. A controlled (`rng() => 0.5`) single-zone A/B (the
+same fixed-roll technique the new unit tests use) confirmed the prey
+population bump directly — an uncontrolled continuous-rng comparison across
+two different zones is NOT a fair A/B here (pool size and which specific
+species get picked both roll independently per call), which is why the
+unit tests fix `rng` rather than sampling a real stream. Arbok's real
+population share: across a 20,001-zone scan, Arbok's total estimated
+population (7311.9) came in well under Onix's (13664.3) — a same-tier
+predator with a narrower biome tag but no rarity discount — confirming the
+`0.35` multiplier bites at the population level even though Arbok, being
+eligible in more common biomes, still appears in more zones' species lists
+than Onix does. Full engine suite (1129 tests) and data suite (236 tests)
+green throughout, including new direct coverage for the level-gap skew
+mechanism, the Sanctuary's three population mechanics, and Arbok's reduced
+immigrant-selection weight and invented population.
+
+Two flaky pre-existing failures were seen during this work, both in
+`predation.test.ts`, both confirmed unrelated to these changes (pass
+reliably every time when that file is run in isolation — the file's own
+top-of-file doc comment already documents this exact "unseeded `Math.random`
+in a few older tests" flakiness class): "burn halves the burned attacker's
+physical damage output" and "storm/drought/rain check the active weather
+cell." Neither test was touched by this work.
+
+## Web UI redesign: floating playback HUD, unified side panel, one map-mode switch
+
+Direct ask: "UI is a bit rough. Can we make pause and play floating
+buttons, rethink ux to make logs/battle log/inspectors and overworld map
+easier to navigate?" A design proposal (a mockup canvas, matching the
+app's own colors/radii/type exactly) was drafted and approved first, then
+built into the real app. Same visual language throughout — no new tokens,
+just reorganized chrome.
+
+- **Floating playback HUD** (`#playback-hud` in index.html): Play/Pause,
+  Step, and the speed slider move out of the header into a floating pill
+  docked over the map itself (`#map-area`, `position: absolute`, bottom-
+  center), reachable regardless of which panel tab or map mode is
+  showing. The play/pause button swaps a play/pause SVG icon (`playIcon`/
+  `pauseIcon` in main.ts) rather than relabeling text, and turns accent-
+  blue while running — the same convention any media player uses.
+- **One map-mode segmented switch** (`#map-mode-zone`/`#map-mode-
+  overworld`) replaces the old single button that relabeled itself ("Show
+  Zone View" / "Show Overworld") — both states are visible at once now,
+  and `applyOverworldSubView` toggles `.playing` on whichever is active.
+  A new **mini-map corner widget** (`#minimap-widget`, a simplified static
+  thumbnail rather than a live-rendered copy of the macro grid) sits in
+  the map's own corner offering the same jump, so switching scales
+  doesn't require a trip back to the header. The rare "flat mode, no
+  regions at all" escape hatch (the original `overworld-toggle` behavior)
+  moved into the overflow menu instead of sharing header space with the
+  everyday Zone/Overworld switch.
+- **One side panel, four tabs** (`#side-panel`/`#panel-tabs`): Inspector,
+  Battle, Events, and Legend used to live in two different places — a
+  docked tab pair under the map, and an off-canvas drawer only reachable
+  via a hamburger button. They're now one always-visible panel (desktop)
+  with four tabs, each toggled by the same `[hidden]` convention the old
+  two-tab system already used (`selectTab` in main.ts now drives all
+  four via `TAB_PAGES`/`TAB_BUTTONS` lookup tables instead of two
+  hardcoded branches). `#toggle-panel` collapses the whole panel away for
+  more map space; `renderInspector`/`BattleScreenPanel`/`renderLegend`/
+  `EventLogPanel` all still render into their own unchanged `#inspector`/
+  `#battle-screen`/`#legend`/`#event-log` divs — only the chrome around
+  them moved.
+- **Compact filter chips**: the event log's three checkboxes (with full
+  sentence labels, previously a wrapping header row of their own) are
+  still real `<input type="checkbox">` elements underneath, just restyled
+  as small toggle pills (`syncChip` in main.ts toggles a `chip-active`
+  class alongside the existing `change` handlers — no filtering-logic
+  changes).
+- **Seed chip + overflow menu**: the header's old always-visible Seed
+  input/Load/Random/Copy cluster condenses into a click-to-open popover;
+  Render style/Zoom/Flat-mode condense into a `⋯` overflow menu. Both are
+  plain click-toggled popovers (closed on an outside click), not a second
+  drawer.
+
+### Real bugs found and fixed during implementation
+
+All three are the same underlying footgun this codebase's own `.force-hide`
+comment already flags elsewhere: an element's own unconditional `display`
+declaration (or equal-specificity class rule) beats the browser's default
+`[hidden] { display: none }` regardless of source order/specificity
+intuition, so hiding an element needs an explicit, sufficiently-specific
+override — not just toggling the attribute/class and assuming it'll work.
+
+1. `#seed-popover`'s own `display: flex` defeated its `hidden` attribute —
+   it rendered permanently open. Fixed with an explicit `#seed-popover
+   [hidden] { display: none; }` rule.
+2. Same bug on `#battle-screen`/`#events-page`/`#legend`, each of which
+   sets its own unconditional `display` for internal layout — the Events
+   tab was rendering Battle Screen's empty-state message underneath
+   because `[data-panel-page][hidden]`'s generic attribute-selector rule
+   (specificity 0-2-0) lost to `#battle-screen`'s own ID rule (0-1-0-0)
+   regardless of source order. Fixed with explicit per-ID `[hidden]`
+   overrides, matching the ID selectors they're overriding.
+3. `.segmented button.playing`'s accent-blue active state never showed —
+   `.segmented button`'s own `background: transparent` rule has the exact
+   same specificity (one class + one type each) and, being later in
+   source order, won the tie. Fixed by adding an explicit two-class
+   `.segmented button.playing` rule.
+4. A genuine layout bug (not a `hidden` footgun): the auto-camera badge
+   and mini-map widget are positioned absolutely relative to the whole
+   `#map-area`, but the macro-map view has its own toolbar row (zoom +
+   hint) above the canvas that they'd otherwise sit on top of. Fixed with
+   a sibling-selector rule (`#macro-map-wrap:not([hidden]):not(.force-
+   hide) ~ #auto-cam-badge`) that pushes both down only while that
+   toolbar is actually showing.
+5. The auto-camera badge's visibility used to rely on a CSS `:empty`
+   selector, which never matches an element that always contains child
+   nodes (the dot + status spans) regardless of whether the status text
+   itself is empty — the badge would have always shown, even with
+   nothing to say. Fixed by toggling its `hidden` attribute directly in
+   `main.ts`'s `frame()` loop alongside setting the status text.
+
+### Real-run findings
+
+Full monorepo typecheck clean. Verified live with a headless-Chromium
+Playwright driver (`playwright-core` + the pre-installed `/opt/pw-browsers/
+chromium` binary) against the real dev server: default zone view, playing/
+paused HUD states, all four side-panel tabs, Zone<->Overworld switching via
+both the header segmented control and the mini-map widget, the seed
+popover, the overflow menu, panel collapse, and a 390x844 mobile viewport
+(header wraps to two rows, panel stacks below the map, floating HUD/mini-
+map stay correctly positioned) — all confirmed via screenshots, with the
+five bugs above each caught and fixed from a real rendered discrepancy,
+not read off the source.
+
+## Deeper idle/wander behavior: revisit-avoidance, herd personal space, resource memory, and training
+
+Direct report after the UI redesign shipped: "A lot of Pokémon it seems
+like.. Just stand still. Maybe they're sleeping but it's like.. Hm.. Or
+they move back and forth repeatedly between one plant and water. I dunno..
+Our behavior feels shallow to me." Diagnosis: a strict, memory-less
+`chooseBehavior` urgency picker (seekWater/seekFood/seekMate/idle) plus
+attraction-only herd cohesion together explain both halves — nothing
+remembers where it just was, and nothing already "close enough" to its herd
+ever moves for its own sake. Follow-up ask, approved together: "Yeah do
+those two. But also like... Exploring as a drive; finding more crop
+locations and water for later. Maybe making shelter. Training/getting xp
+would be cool" — five features, all in `needs.ts`/`herding.ts` unless noted.
+
+1. **Resource revisit-avoidance** (needs.ts): `Agent.lastResourceVisit`
+   records the single food/water tile an agent most recently consumed
+   from, and when. When a fresh seekWater/seekFood target search's nearest
+   candidate is that exact tile and the visit is still recent
+   (`RESOURCE_REVISIT_AVOID_TICKS`), a second search additionally excludes
+   it; the alternate is used only if it isn't meaningfully farther
+   (`RESOURCE_REVISIT_EXTRA_DISTANCE_TOLERANCE`) — a real find beats
+   walking back to the same tile, but not at a large detour cost.
+   Deliberately a nudge, not a hard ban: with only two resources nearby,
+   the agent still returns to the one it knows once the recency window
+   passes.
+
+2. **Herd personal-space repulsion** (herding.ts): `applyHerdCohesion` used
+   to be attraction-only, so herd-mates already within their leash never
+   moved for their own sake — TODO.md's long-standing "no personal-space/
+   repulsion behavior" gap, and the direct cause of visible stacking. Once
+   an agent is within its cohesion distance, it now steps away from the
+   nearest same-herd, same-layer agent standing adjacent
+   (`PERSONAL_SPACE_RADIUS = 1`) via the existing `stepAway` helper.
+   Attraction still always wins — a genuinely far-flung straggler heads
+   home first; spacing out only matters once it's actually back with the
+   group.
+
+3. **Exploration resource-discovery memory** (needs.ts): idle-time
+   wandering (`applyExploration`) already existed for its own sake
+   (visiting unvisited sectors / preferred terrain); `maybeDiscoverResource`
+   now also checks the agent's immediate surroundings each explore step
+   for a food/water tile it hasn't personally recorded before, adding it to
+   a capped, FIFO-evicted `Agent.knownResourceTiles` list
+   (`MAX_KNOWN_RESOURCE_TILES = 20`) — mirroring the existing
+   `visitedSectors`/`encounteredSpecies` capped-list pattern — and granting
+   a one-time `EXP_ON_RESOURCE_DISCOVERY` bonus. Purely a reward/flavor
+   layer: `resourceIndex.ts`'s `findNearestIndexed` is always-fresh world
+   truth, so ordinary need-driven seeking never actually depends on this
+   memory to find anything.
+
+4. **Training/XP idle fallback** (needs.ts, types.ts): the literal "just
+   stand still" complaint had a real root cause — an idle agent with
+   nothing left to explore (every nearby sector visited, no reachable
+   preferred terrain) used to leave `applyExploration` a no-op, and nothing
+   filled that gap. `applyExploration` now returns whether it actually did
+   something; when it returns `false` (and shelter-resting was also a
+   no-op), the idle-stack tail calls a new `applyTraining`: a new `"train"`
+   `BehaviorKind`, a small flat per-tick exp trickle
+   (`EXP_ON_TRAINING_TICK`), a small chance of a bonus skill point
+   (`TRAINING_SKILLPOINT_CHANCE`, typed by one of the agent's own types, or
+   `"wildcard"` if typeless), and a small chance of a one-tile shuffle
+   (`TRAINING_STEP_CHANCE`) so it doesn't read as frozen. Gated on
+   `MIN_EXPLORE_AGE` for the same "too young to be doing this unsupervised"
+   reasoning `applyExploration` already uses — confirmed via a real
+   `predation.test.ts` regression (see below) that skipping this gate would
+   have broken.
+   `BehaviorKind` gained `"train"` as a plain string variant; confirmed via
+   grep that nothing in `packages/web` switches on it exhaustively (only
+   generic string display), so this needed zero web-side changes.
+
+5. **Proactive shelter-building — verified, not changed** (task from the
+   same batch: "maybe making shelter"). `shelter.ts` already builds a
+   universal, world-tile shelter whenever an idle agent's hunger AND thirst
+   both clear `SHELTER_COMFORT_THRESHOLD = 0.85` (minus discounts) with
+   none reachable nearby — this predates this batch. A live 20k-tick run
+   (`validateBehaviorDepth.ts`, seed `SCENARIO_SEED`) showed 298
+   `buildShelter` behavior transitions, 3 shelter tiles standing on the map
+   at the end, and 20 `restAtShelter` uses — a modest, non-degenerate rate,
+   not the "never happens" or "everyone building constantly" failure modes
+   that would call for retuning the threshold. No changes made.
+
+### A real regression found and fixed: `applyTraining` needs its own age gate
+
+`predation.test.ts`'s "bush concealment" test deliberately keeps a prey
+agent motionless via `age: 0` (below `MIN_EXPLORE_AGE`) specifically so
+`applyExploration` won't move it and corrupt the exact predator-prey
+distance the test depends on. `applyTraining`, invoked when
+`applyExploration` returns `false` for that same young agent, had no
+equivalent age gate — it could move the prey (`TRAINING_STEP_CHANCE`) and
+consume extra `rng()` draws, shifting the shared sequential `world.rng`
+stream's downstream hunt-detection roll. Fixed by reusing the exact same
+`MIN_EXPLORE_AGE` guard `applyExploration` already has, as the first line
+of `applyTraining`.
+
+### Test updates
+
+`herding.test.ts`'s two adjacent-fixture cohesion tests ("does nothing once
+within the cohesion distance", "an ordinary member keeps the wider leash...")
+placed their two herd-mates 1 tile apart — now inside
+`PERSONAL_SPACE_RADIUS`, so the new repulsion correctly fires where the old
+attraction-only code did nothing. Repositioned both fixtures to 3 tiles
+apart (still within `COHESION_DISTANCE`, outside personal space) to keep
+testing what they originally meant to test, and added a dedicated new test
+for the repulsion behavior itself.
+
+`needs.test.ts`'s three "stays idle" tests hit the same fallback: with
+nothing left to explore, the new `applyTraining` correctly changes
+`agent.behavior` away from `"idle"`. Updated to expect `"train"`, and
+switched from the bare `tickAgent(world, agent)` call (which defaults to
+unseeded `Math.random`, previously harmless since idle never consumed rng)
+to passing the world's own seeded `rng` explicitly, asserting the position
+only stays within one tile of its start rather than pinned exactly — training's
+own step is at most one tile, but which tile depends on the rng draw.
+
+### Real-run findings
+
+Full engine test suite green (41 files, 1163 tests) and full monorepo
+typecheck clean. `validateBehaviorDepth.ts` against a real `createDemoWorld`
+run (20k ticks, `SCENARIO_SEED`) confirmed: every living agent carries
+`lastResourceVisit` (revisit-avoidance tracking live), shelters build and
+get used at a modest rate (see above), and the `explore`/`train` fallback
+chain fires only rarely in this small, threat-heavy 12-agent population —
+herd cohesion and shelter-homing dominate most idle ticks before the chain
+ever reaches training, which tracks with these being deliberately the
+lowest-priority fallback, not a bug. `knownResourceTiles` stayed empty in
+this particular run (population too busy fleeing/fighting/mating to
+idle-explore much) — expected given how rarely `explore` itself fired, not
+evidence the discovery logic is broken (it's exercised directly by unit
+tests).
+
+## Battle Screen: real turn-by-turn combat lines, not just an intro that vanishes
+
+Direct report: "In the battle log... Just sorta says... Like... Not much.
+And I can't see what happens and it goes away. I want a real battle log."
+
+Root cause, found by tracing `main.ts`'s `step()`/`frame()` split against
+`autoCamera.ts`: `AutoCameraController.ingest()` (called every tick, from
+`step()`) only *detects* a new engagement and pushes it onto an internal
+queue — promoting it to the `active` engagement that `BattleScreenPanel`
+actually reads happens in `AutoCameraController.update()`, called once per
+*animation frame* (`frame()`), fully decoupled from tick cadence.
+`BattleScreenPanel.ingest()` is itself gated on its own `setActive()` having
+already run with that promoted engagement. A fast kill — often the entire
+fight, for a one/two-shot — could start and finish inside a single `step()`
+call, entirely between two animation frames: every real `fought`/`damage`/
+`faint` event for it got silently dropped, leaving only the generic "X vs Y
+fighting!" intro line `setActive()` itself synthesizes. That's exactly what
+a viewer sees as "just sorta says... not much... and it goes away."
+
+Fix (`main.ts`'s `step()`): call `autoCamera.update(world)` (idempotent —
+promoting/expiring engagements is pure state-machine logic, safe to run more
+than once per tick) and re-sync `battleScreenPanel.setActive(...)` right
+there, every tick, instead of relying solely on the once-per-frame call in
+`frame()`.
+
+### Verification
+
+Live-run verification (headless Chromium via Playwright against the real
+dev server) turned out to be a poor tool for reproducing this specific bug
+on demand: it's exactly the *fast* kills that trigger it, and the demo
+scenario's population is too sparse/guarded for one to occur reliably within
+several minutes of real 32x-speed play. Instead, verified deterministically
+by loading the real `AutoCameraController`/`BattleScreenPanel` modules
+(unmodified) into a live browser page via Vite's dev-server module graph,
+constructing a synthetic "fight starts and a one-shot kill lands, all in one
+tick" event sequence, and running it through both orderings:
+
+- **Old ordering** (`ingest` only, `setActive` deferred to "next frame"):
+  panel content right after the killing tick is empty; only once a
+  simulated "next frame" finally runs does anything show, and even then it's
+  just the intro line — `"spearow (Lv13) 33/33 HP VS diglett (down) 0/23 HP
+  spearow (1) vs diglett (1) engaging!"` — never the actual hit.
+- **Fixed ordering** (`update`+`setActive` synced inside the same tick):
+  the exact same event sequence produces the full turn-by-turn log —
+  `"...engaging! spearow (1) used peck! diglett (1) takes 23 damage! (HP
+  left: 0) diglett (1) fainted!"`
+
+Full monorepo typecheck clean.
+
+## Action economy: softening how much Speed drives action frequency
+
+Direct ask, after watching an Arbok land two Sludge hits before a much
+slower Ivysaur got a single action: "I think maybe we should try to tweak
+the speed to action economy tick calc to be A LITTLE less influential. To
+give Pokémon who are weaker a chance to actually escape or use a move."
+
+Confirmed first (see the immediately preceding "Is cooldown working?"
+exchange) that cooldown itself was working as designed — a move's
+`cooldownTicks` counts down on the *owner's own action turns*, and how often
+an agent gets a turn at all is Speed-gated (`accumulateActionEnergy`/
+`ACTION_THRESHOLD`, `simulation.ts`). Checked the real numbers: Arbok's base
+Speed (80) only beats Ivysaur's (60) by ~1.24-1.28x at matched levels — most
+of a visible "2 hits before 1" gap comes from `actionSpeedOf`'s other
+multipliers compounding on top (nocturnal Arbok at full speed at night while
+diurnal Ivysaur eats the `OFF_HOURS_SPEED_MULTIPLIER` penalty, plus
+`effectiveSpeed`'s injury scaling once poison damage starts landing) — not a
+bug, just several real slowdowns stacking against the weaker side at once.
+
+Added `SPEED_ACTION_COMPRESSION` (`simulation.ts`, 0.8): `actionSpeedOf`'s
+final return is now `ACTION_THRESHOLD * (speed / ACTION_THRESHOLD) **
+SPEED_ACTION_COMPRESSION` instead of the raw composed `speed`. A power on
+the *ratio* to `ACTION_THRESHOLD`, not a flat additive floor — chosen
+specifically to avoid a floor's failure mode (disproportionately inflating
+a genuinely near-zero Speed into something misleadingly fast). Two fixed
+points fall out for free: speed 0 stays 0 (a stat-less agent isn't granted
+false actions), and speed exactly `ACTION_THRESHOLD` stays fixed (an agent
+already acting every tick is unaffected) — everything below that pivot gets
+pulled disproportionately upward the slower it already was, since raising a
+sub-1 fraction to a sub-1 power moves it closer to 1, and moves it further
+the smaller the fraction started. Applied once, after every other
+multiplier `actionSpeedOf` already composes (paralysis, terrain, injury,
+activity window, cold snap, aquatic haste) rather than only to the base
+Speed stat — it's the *net* frequency gap between two agents this was asked
+to soften, not just raw Speed's own share of it. A clean side effect of
+compressing a ratio: any single multiplier's own effect (e.g. paralysis's
+flat 0.5x) is itself softened by the same curve, to
+`multiplier ** SPEED_ACTION_COMPRESSION` — 0.5 → ≈0.574 for paralysis, real
+math confirmed in `simulation.test.ts`'s regression check, not just prose.
+
+Worked numbers against this file's own demo-roster comment
+(`ACTION_THRESHOLD`'s doc comment, `simulation.ts`): raw Bulbasaur/Venusaur
+action-rate ratio 37/9 ≈ 4.11x narrows to ≈37.6/12.1 ≈ 3.11x — a real, but
+deliberately modest ("a little less influential," not flattened) softening;
+Bulbasaur still acts markedly less often than Venusaur. Real Arbok/Ivysaur
+base-Speed-only ratio softens similarly, ~1.28x → ~1.22x at level 20 — the
+bulk of what a viewer actually notices in that specific matchup comes from
+the multiplier stack, not the base stat gap, and every one of those
+multipliers gets the same softening applied on top.
+
+### Test updates
+
+Two `simulation.test.ts` cases encoded the OLD, uncompressed exact
+arithmetic and needed updating, not just re-passing: the paralysis test
+used to assert a flat halving of action speed, which compression breaks (see
+above) — rewritten to assert the real post-compression invariant
+(`PARALYSIS_SPEED_MULTIPLIER ** SPEED_ACTION_COMPRESSION`) instead of a
+stale flat ratio. A second test's `slowAgent.actionEnergy` literal (`1`,
+for a raw Speed-1 fixture after one tick) is now the actual compressed value
+(~2.09) — still nowhere near crossing `ACTION_THRESHOLD`, so the test's real
+point (needs decay even on a non-action tick) still holds; only the exact
+number changed.
+
+### Real-run findings
+
+Full engine test suite green (41 files, 1169 tests) and full monorepo
+typecheck clean. Verified the real species-stat math directly (a throwaway
+runner script, deleted after use) against `calculateStats` output for Arbok
+and Ivysaur at levels 10/15/20, confirming the worked numbers above.
+
+## No shared tiles: strict one-occupant-per-tile, everywhere
+
+Direct report, after watching a fainted Scyther and a fleeing Diglett
+visibly standing on the same tile mid-fight: "It seems like scyther and
+diglet on the same tile... I can't tell. Like fleeing should have them leave
+the area I would think?" Investigated first (see the "on the same tile"
+exchange in this session): confirmed real, not a rendering glitch — melee
+moves' `range: {min: 0, max: 1}` legally includes distance 0, and the
+existing `occupancy.ts` explicitly allowed multiple agents per tile (a real,
+separately-tuned earlier feature: a weight cap on surface, a flat 5-headcount
+cap underground/canopy, same-species-only sharing). Direct follow-up: "I
+think we want to avoid units on the same tile altogether" — clarified scope
+(combat-only vs. everywhere) via a direct question; answer: **everywhere,
+always**, with shelter's own separate multi-occupant "den" mechanic
+(pair-bonding/nesting, `SHELTER_TILE_ADULT_CAP`/`_EGG_CAP`) explicitly kept
+as its one deliberate exception.
+
+**`occupancy.ts`'s `canEnterTile`** is now a flat rule outside shelter
+terrain: an empty tile admits exactly one agent, an occupied one admits
+none. The old weight/headcount/species-exclusivity system is gone entirely
+— not layered under, replaced. One real subtlety: `agent` itself doesn't
+count toward its own blocking check (`canEnterTile(world, agent, layer,
+agent.pos)` must read "yes" for an agent re-confirming/staying at a tile it
+already occupies — `applyDispersal`/`migrate`'s own arrival checks need
+exactly this, see below), while still fully counting toward anyone else's.
+
+**Movement call sites** — this codebase already had a partial version of
+this rule (`movement.ts`'s `stepToward`'s `stopAdjacent` flag, from an
+earlier "two units in combat should never share the same tile" ask, plus a
+`mover` capacity-aware parameter many call sites already threaded). This
+pass closed the remaining gaps:
+- `dispersal.ts`'s `applyDispersal` and `migration.ts`'s `migrate` used to
+  snap straight onto their target tile once close enough, bypassing
+  occupancy entirely — now check `canEnterTile` first, falling through to
+  an ordinary capacity-aware step if something else has since taken the
+  spot.
+- `herding.ts`'s cohesion movement, `shelter.ts`'s two travel-to-site/home
+  steps, and `support.ts`'s food-tile/home/carry-home steps threaded
+  `mover` (capacity-aware) for the first time — all of these seek a *static*
+  destination tile, not a live moving target, so making them capacity-aware
+  carries none of the risk documented below.
+- `pathfinding.ts`'s `stepTowardMovingTarget` (hunt/mate pursuit) and
+  `support.ts`'s food-delivery-to-an-ally step stay deliberately
+  capacity-BLIND for their approach — a real, measured earlier finding
+  (this same session, `stepTowardMovingTarget`'s own doc comment): gating
+  *routing toward a live moving target* on tile capacity misreads ordinary
+  herd density as "unreachable" and tanked births by ~90% on one seed. Both
+  now consistently use `stopAdjacent` instead (added to
+  `stepTowardMovingTarget`'s two greedy-fallback paths, which were missing
+  it) — never landing on the live target's own tile, without needing to be
+  capacity-aware about the approach itself.
+
+**`simulation.ts`'s `resolveTileOverlaps`** — a new, once-per-tick
+correction pass, run right after every agent has acted, rather than chasing
+every remaining direct `agent.pos =` assignment across the engine (birth/
+hatch/immigration placement, and `occupancy.ts`'s own documented same-tick
+race where two agents independently choosing the same currently-empty tile
+in the same tick both get admitted). For any tile still holding more than
+one living, uncarried, non-shelter occupant: an egg (if present) always
+stays put (eggs are stationary by design), otherwise the lowest `id` stays,
+and every other occupant gets nudged onto the nearest free neighbor (8
+directions, orthogonal then diagonal) — genuinely boxed-in tiles (no free
+neighbor at all) are left as a rare, accepted edge case rather than a reason
+to search further.
+
+**A real bug found while writing this pass**: it originally called
+`occupancy.ts`'s own cached `canEnterTile` to judge whether a neighbor was
+free — but that cache is a tick-*start* snapshot by design (see its own doc
+comment), already stale by the time this pass runs at the tick's end, after
+every agent has already potentially moved. A live-run check (5000 ticks,
+seed `SCENARIO_SEED`) caught this directly: 150/5000 ticks still showed a
+real overlap (up to 3 agents stacked) even with the pass running. Fixed by
+having `resolveTileOverlaps` build and maintain its own live occupied-set
+from actual current positions instead of trusting the stale cache — the
+same live-run check afterward showed 0/5000 ticks with any non-shelter
+overlap, confirmed with a fresh throwaway runner script (deleted after use).
+
+### Test updates
+
+`occupancy.test.ts`'s weight-capacity/species-exclusivity/flat-headcount
+describe blocks tested a system that no longer exists — rewritten to test
+the new one-occupant rule directly (including the "an agent can re-enter/
+stay at its own current tile" edge case the fix above depends on); the
+shelter-capacity tests were untouched (shelter's own rule didn't change).
+Added a new `resolveTileOverlaps` describe block in `simulation.test.ts`:
+basic nudge-off, egg-stays-put, carried-ally-doesn't-double-count,
+shelter-tiles-are-exempt, and a genuinely-boxed-in (walled on every side)
+case that confirms the accepted "leave it be" edge case actually leaves it
+be rather than throwing or looping. Full engine suite green (41 files, 1172
+tests) and full monorepo typecheck clean.
+
+## Battle Screen while paused: scrollable log, no unwanted refocus, click-to-inspect
+
+Three direct reports about the paused/watching experience, sent together:
+"1. I can't scroll and see battle log [when paused]. 2. It loses focus after
+a while. If I pause it I don't want to focus on something else unless I
+click outside the box. 3. I should be able to click specific units in the
+box to inspect, right now click focuses the fight."
+
+1. **Can't scroll while paused.** `BattleScreenPanel.render` used to tear
+   down and rebuild its ENTIRE DOM (`container.replaceChildren()`, a brand
+   new `.battle-screen-log` div) every single animation frame, regardless of
+   whether anything actually changed — a fresh DOM node has no scroll
+   position, so any manual scroll attempt was destroyed within one frame
+   (~16ms) even with zero new lines, exactly the case while paused (no new
+   ticks -> no new lines -> `dirty` never true, but the whole panel still
+   got rebuilt anyway). Fixed by keeping the header/log DOM nodes persistent
+   across frames (`logEl`/`headerEl`/`renderedSeq`): the log's own children
+   are only touched when `dirty` says real new content arrived, and even
+   then only re-snapped to the bottom if the viewer was already reading from
+   the bottom — scrolled up to reread something, a fresh line no longer
+   yanks them back down (a real, free improvement to the live/playing case
+   too, not just paused). Verified deterministically (real DOM via a
+   throwaway Playwright script importing the real module) — 20 idle
+   re-renders with no new content now leave a manually-set scroll position
+   completely untouched; a genuinely new line while scrolled up doesn't
+   force it back to the bottom; a genuinely new line while already at the
+   bottom still does.
+
+2. **Loses focus after a while, even paused.** Root cause: a concluded
+   battle's epilogue hold (`BATTLE_EPILOGUE_MS`/`CLASH_EPILOGUE_MS`) counts
+   down in real wall-clock time (`performance.now()`), deliberately — this
+   session's own earlier fix, so the hold can't stall forever behind
+   `step()` (which only fires on a timer, not at all while paused). But that
+   meant the epilogue kept expiring in the background even while the world
+   itself was frozen, moving the camera on to whatever queued next without
+   the viewer ever choosing that. `AutoCameraController.update`/`reconcile`
+   now take a `playing` flag and freeze just that one real-time comparison
+   while paused — every other check in `reconcile` is already tick-gated
+   and therefore naturally frozen while `world.tick` isn't advancing; this
+   was the one real gap. `main.ts` threads the real `playing` state in from
+   `frame()`, and `true` from `step()` (which only ever runs while playing
+   in the first place).
+
+3. **Click on a unit inspects the fight, not the unit.** The canvas click
+   handler checked "did this land inside a tracked engagement's box" BEFORE
+   the ordinary agent hit-test, on a deliberate earlier design ("a click
+   inside one of these boxes is clearly 'I want that fight'"). Reversed:
+   a real hit on a specific agent now wins outright and selects/inspects it,
+   regardless of whether it's also sitting inside a highlighted box: tapping
+   a specific combatant is unambiguous. The box hit-test now only fires for
+   a click that missed every actual agent. A click that misses BOTH (empty
+   space) now also calls `noteManualViewChange()` — the existing "viewer
+   took manual control, stop re-centering" mechanism (previously only
+   triggered by panning/zooming the map) — giving "click outside the box"
+   a real, working release gesture, as directly asked.
+
+Full monorepo typecheck clean.

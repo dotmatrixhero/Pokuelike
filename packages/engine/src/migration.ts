@@ -2,6 +2,7 @@ import type { Agent, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { stepToward } from "./movement.js";
+import { canEnterTile } from "./occupancy.js";
 import { tileAt } from "./world.js";
 
 const MIN_RELOCATE_DISTANCE = 8;
@@ -37,12 +38,15 @@ export function migrate(world: World, agent: Agent, log?: EventLog, rng: () => n
   logBehaviorChange(log, world, agent, "relocate");
   agent.behavior = "relocate";
 
-  if (manhattan(agent.pos, agent.relocateTarget) <= 1) {
+  // Direct ask: "avoid units on the same tile altogether... everywhere,
+  // always" — don't snap onto the target tile if something else has since
+  // taken it; keep stepping (capacity-aware) instead.
+  if (manhattan(agent.pos, agent.relocateTarget) <= 1 && canEnterTile(world, agent, agent.layer, agent.relocateTarget)) {
     agent.pos = agent.relocateTarget;
     agent.relocateTarget = undefined;
     return "arrived";
   }
 
-  agent.pos = stepToward(world, agent.layer, agent.pos, agent.relocateTarget, agent);
+  agent.pos = stepToward(world, agent.layer, agent.pos, agent.relocateTarget, agent, agent);
   return "traveling";
 }

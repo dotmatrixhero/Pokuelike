@@ -36,6 +36,29 @@ describe("stepToward / stepAway", () => {
     expect(result).not.toEqual({ x: 6, y: 5 });
   });
 
+  it("a flying-type agent steps right through a canopy wall tile — direct ask: 'fly over obstacles ... in canopy'", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "canopy", 6, 5, "wall");
+    const flyer = makeAgent({ layer: "canopy", types: ["flying"] });
+    expect(stepToward(world, "canopy", { x: 5, y: 5 }, { x: 8, y: 5 }, flyer)).toEqual({ x: 6, y: 5 });
+  });
+
+  it("a non-flying agent still can't step through that same canopy wall tile", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "canopy", 6, 5, "wall");
+    const grounded = makeAgent({ layer: "canopy", types: ["normal"] });
+    const result = stepToward(world, "canopy", { x: 5, y: 5 }, { x: 8, y: 5 }, grounded);
+    expect(result).not.toEqual({ x: 6, y: 5 });
+  });
+
+  it("a flying-type agent's canopy exemption does NOT extend to surface obstacles — layer-scoped, not species-wide", () => {
+    const world = createWorld(10, 10);
+    setTile(world, "surface", 6, 5, "tree");
+    const flyer = makeAgent({ types: ["flying"] });
+    const result = stepToward(world, "surface", { x: 5, y: 5 }, { x: 8, y: 5 }, flyer);
+    expect(result).not.toEqual({ x: 6, y: 5 });
+  });
+
   it("without a capacity mover argument, capacity is ignored entirely (pre-existing, capacity-blind behavior)", () => {
     const world = createWorld(10, 10);
     world.agents = [

@@ -1,4 +1,4 @@
-import type { Agent, HuntRules, Vec2, World } from "./types.js";
+import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { calculateDamage, pickBestMove, rollAccuracy, rollCritical, useMove } from "./combat.js";
 import { stepAway, stepToward } from "./movement.js";
@@ -8,7 +8,9 @@ import { RAPPORT_HERD_CLASH_DELTA, rapportScore, strengthenRapportMutual } from 
 import { effectiveDisposition } from "./herdLeadership.js";
 import { SCARCITY_SCORE_THRESHOLD } from "./herdMigration.js";
 import { foodStockNear, countTerrainNear } from "./resourceIndex.js";
-import { canBreed, type LevelingContext } from "./leveling.js";
+import { canBreed, grantKillExp, type LevelingContext } from "./leveling.js";
+import { FINISHING_POOL_FRACTION } from "./support.js";
+import { GIANT_SLAYER_LEVEL_GAP } from "./notables.js";
 
 /**
  * Herd-vs-herd resource conflict — the direct ask ("I think escalated
@@ -45,21 +47,28 @@ import { canBreed, type LevelingContext } from "./leveling.js";
  * herd, or a predator muscling a herbivore off a water hole, are both real
  * follow-up ideas (see TODO.md) but neither is built here.
  *
- * **Lethality model: cannot faint or kill, full stop.** Real animal
+ * **Lethality model: can knock out, rarely truly kills.** Real animal
  * conflicts over a resource are almost always about establishing who backs
  * off, not a fight to the death — and given the predator-fragility
- * constraint above, "more fighting" absolutely cannot mean "a new,
- * unbounded death channel." Rather than reusing predation.ts's faint/
- * finishing-pool machinery (which CAN kill) and trying to tune around it,
- * `resolveRivalryHit` below clamps the defender's hp at
- * `HERD_CONFLICT_HP_FLOOR_FRACTION * maxHp` — real damage from the same
- * `calculateDamage` formula predator/prey combat uses, but this mechanic
- * itself can never bring an agent to 0 hp, never faints it, and never kills
- * it, regardless of how many times it fires. The defender retreats (steps
- * away, gets a cooldown) once its hp crosses `HERD_CONFLICT_RETREAT_HP_FRACTION`
- * — a real, felt cost (an agent can walk away from a rivalry fight
- * meaningfully hurt and take longer to heal) without ever being a death
- * mechanism.
+ * constraint above, real death here can never be routine. Originally this
+ * clamped the defender's hp at `HERD_CONFLICT_HP_FLOOR_FRACTION * maxHp`
+ * (never reachable-0, never fainted, never killed, full stop) — direct
+ * follow-up ask, after living with that for a while: "i think mostly i want
+ * that to be the case. but i think i do want them to escalate to death
+ * sometimes. it's just not dramatic enough... they could always fight til
+ * hp = 0 but not fully kill them, unlike predation." The floor is gone: a
+ * rivalry hit can now genuinely bring a defender to 0 hp, same as real
+ * combat — but reaching 0 hp faints it (same `fainted`/`finishingPool`
+ * state predation.ts uses, so it can passively heal and wake back up via
+ * the same `applyHealOverTime`/`maybeRecoverFromFaint` every fainted agent
+ * already gets, or be carried to safety — support.ts), it does NOT
+ * automatically continue into predation's finishing-blow loop (this
+ * mechanic never opportunistically hunts down a downed rival the way an
+ * actual predator would). A true kill only happens when the SAME knockout
+ * hit clears `isLethalEscalation`'s own bar — a deep, real grudge between
+ * these exact two individuals, or (independently) a small flat chance —
+ * see that function's own doc comment. Still zero risk for predator
+ * species either side (unchanged, out of scope per the constraint above).
  *
  * **Gating: disposition-weighted roll + real relative strength, not a flat
  * chance.** `herdConflictChance` follows the exact same shape as
@@ -72,6 +81,14 @@ import { canBreed, type LevelingContext } from "./leveling.js";
  * additionally refuses to let a badly outmatched agent start a fight it has
  * no real chance of winning — comparably-matched, confident herds fight;
  * mismatched ones still just avoid/relocate.
+ *
+ * **Local fight cap: no more 6-unit free-for-alls.** Direct ask: "multi-way
+ * 6 unit free for alls that get really confusing." `applyHerdRivalryConflict`/
+ * `applyTerritorialGuard` (the two triggers that start a BRAND NEW fight,
+ * never `applyRivalryRetaliation`'s own direct continuation of one already
+ * happening) both refuse to start one at all once too many agents are
+ * already actively fighting nearby — see `tooManyLocalFights`'s own doc
+ * comment.
  */
 
 /** How many consecutive ticks an agent must already have been blocked from a resource tile before it's even eligible to consider fighting over it — a fresh block tries waiting first, same as before this feature; only a genuinely sustained standoff considers escalating. */
@@ -124,15 +141,72 @@ const HERD_CONFLICT_GRUDGE_SCALE = 0.4;
 /** A rival occupant this much weaker (or more) than the acting agent isn't worth fighting for it to be "comparably matched, confident" rather than a hopeless mismatch — see this module's doc comment. Symmetric: also refuses if the agent itself is this much weaker than the rival. */
 export const HERD_CONFLICT_MIN_POWER_RATIO = 0.6;
 
-/** Once the defender's hp falls to/below this fraction of its max, it backs off rather than the fight continuing — "loser retreats once meaningfully hurt," not fight-to-faint. */
+/** Once the defender's hp falls to/below this fraction of its max, it backs off rather than the fight continuing — "loser retreats once meaningfully hurt," not fight-to-faint. Only applies while the defender is still conscious above 0 hp — see this module's own doc comment for what happens at a genuine knockout instead. */
 export const HERD_CONFLICT_RETREAT_HP_FRACTION = 0.6;
-/** Hard floor: this mechanic can never push a defender's hp below this fraction of its max — the population-safety guarantee. See this module's doc comment. */
-export const HERD_CONFLICT_HP_FLOOR_FRACTION = 0.15;
+
+/**
+ * The real grudge bar `isLethalEscalation` checks — a knockout hit between
+ * two individuals whose mutual rapport (`rapport.ts`, -1..1) has sunk to or
+ * below this counts as a long-simmering rivalry finally boiling over, real
+ * death instead of an ordinary faint. Deep and close to the -1 floor on
+ * purpose: this needs real, repeated history between these exact two
+ * individuals (each landed clash already darkens rapport by
+ * `RAPPORT_HERD_CLASH_DELTA`), not a rivalry that just started.
+ */
+export const HERD_CONFLICT_LETHAL_GRUDGE_THRESHOLD = -0.85;
+/**
+ * `isLethalEscalation`'s OTHER, independent path to a real death — a small
+ * flat chance on any knockout hit, regardless of history, so a fight can
+ * rarely go all the way even between two individuals meeting for the first
+ * time. Deliberately small: this is meant to read as "sometimes, dramatic,
+ * surprising," not a routine outcome.
+ */
+export const HERD_CONFLICT_LETHAL_CHANCE = 0.04;
 
 /** Ticks a defender that just retreated (or an attacker that just fought) won't re-engage in a rivalry fight — prevents the same pair grinding on each other every eligible tick once one side is already backing off. */
 export const HERD_CONFLICT_COOLDOWN_TICKS = 80;
 
+/**
+ * How many agents can be actively fighting (any `herdConflict.ts` rivalry
+ * pair, hit within the last `LOCAL_FIGHT_RECENCY_TICKS`) within
+ * `LOCAL_FIGHT_CAP_RADIUS` of a brand-new fight's own location before that
+ * new one is refused entirely — direct ask: "multi-way 6 unit free for alls
+ * that get really confusing." 4 is exactly two concurrent pairs — enough
+ * real simultaneous drama to still feel alive, not so much that a viewer
+ * can no longer tell who's fighting whom. See `tooManyLocalFights`.
+ */
+export const MAX_LOCAL_FIGHT_PARTICIPANTS = 4;
+/** Same radius `applyTerritorialGuard`'s own area scan already uses — "nearby," not "anywhere on the map." */
+const LOCAL_FIGHT_CAP_RADIUS = 4;
+/** How many ticks after its own last hit an agent still counts as "actively fighting" for `tooManyLocalFights`'s purposes — long enough to span a real back-and-forth exchange (retaliation's own action-tick cadence), short enough that a fight which genuinely ended stops holding the cap open. */
+const LOCAL_FIGHT_RECENCY_TICKS = 20;
+
 const FALLBACK_DAMAGE = 1;
+
+/**
+ * Refuses to let a BRAND-NEW herd-conflict pair start fighting at all once
+ * `MAX_LOCAL_FIGHT_PARTICIPANTS` other agents are already actively fighting
+ * within `LOCAL_FIGHT_CAP_RADIUS` of `pos` — direct ask: "multi-way 6 unit
+ * free for alls that get really confusing." Checked only by
+ * `applyHerdRivalryConflict`/`applyTerritorialGuard` (the two triggers that
+ * start something new); `applyRivalryRetaliation` — a direct, one-shot
+ * continuation of a fight already in progress — is deliberately exempt, so
+ * an ongoing pair's own back-and-forth is never itself capped, only OTHER,
+ * unrelated agents piling on top of an already-busy area.
+ */
+function tooManyLocalFights(world: World, layer: Layer, pos: Vec2): boolean {
+  let count = 0;
+  for (const other of world.agents) {
+    if (other.alive === false) continue;
+    if (other.layer !== layer) continue;
+    if (other.lastHerdConflictTick === undefined) continue;
+    if (world.tick - other.lastHerdConflictTick > LOCAL_FIGHT_RECENCY_TICKS) continue;
+    if (manhattan(other.pos, pos) > LOCAL_FIGHT_CAP_RADIUS) continue;
+    count++;
+    if (count >= MAX_LOCAL_FIGHT_PARTICIPANTS) return true;
+  }
+  return false;
+}
 
 function powerOf(agent: Agent): number {
   return agent.maxHp ?? agent.stats?.maxHp ?? FALLBACK_MAX_HP;
@@ -230,13 +304,30 @@ function findRivalOccupant(world: World, agent: Agent, rules: HuntRules, target:
 }
 
 /**
+ * Whether a knockout hit (this rivalry hit brought `defender` to 0 hp) goes
+ * all the way — a real, permanent death — instead of an ordinary faint. Two
+ * independent paths, either one enough: `grudge` (read BEFORE this hit's own
+ * `strengthenRapportMutual` call, so the bar reflects real pre-existing
+ * history, not a grudge this exact hit just created) at or below
+ * `HERD_CONFLICT_LETHAL_GRUDGE_THRESHOLD`, or a flat
+ * `HERD_CONFLICT_LETHAL_CHANCE` roll. See this module's own top doc comment
+ * for the direct ask this answers.
+ */
+function isLethalEscalation(grudge: number, rng: () => number): boolean {
+  return grudge <= HERD_CONFLICT_LETHAL_GRUDGE_THRESHOLD || rng() < HERD_CONFLICT_LETHAL_CHANCE;
+}
+
+/**
  * A single rivalry hit, reusing the same accuracy/crit/damage pipeline
  * predator/prey combat uses (`rollAccuracy`/`rollCritical`/`calculateDamage`
- * — combat.ts) but with its own non-lethal resolution (see this module's doc
- * comment) rather than predation.ts's faint/finishing-pool machinery, which
- * this mechanic deliberately never touches.
+ * — combat.ts). Can now genuinely knock a defender out (0 hp, `fainted` —
+ * same state predation.ts uses, so it heals/wakes or gets carried to safety
+ * through those same existing mechanisms) and, rarely, kill it for real —
+ * see this module's own top doc comment and `isLethalEscalation`. `ctx`
+ * (optional, same as every other exp-granting call site) is only used on an
+ * actual kill, to grant real kill exp the same way a predation kill does.
  */
-function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: EventLog | undefined, rng: () => number): void {
+function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: EventLog | undefined, rng: () => number, ctx?: LevelingContext): void {
   defender.maxHp = defender.maxHp ?? defender.stats?.maxHp ?? FALLBACK_MAX_HP;
   defender.hp = defender.hp ?? defender.maxHp;
 
@@ -245,6 +336,8 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
   if (!move) return; // nothing off-cooldown/in-range — no-op this tick, tried again on a later eligible tick
 
   useMove(attacker, move, world.tick);
+  attacker.lastHerdConflictTick = world.tick;
+  defender.lastHerdConflictTick = world.tick;
 
   if (!rollAccuracy(move, 0, 0, rng, stormAccuracyMultiplier(world, attacker.layer, attacker.pos))) {
     log?.record({
@@ -275,18 +368,26 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
         ).damage
       : FALLBACK_DAMAGE;
 
-  const floor = Math.max(1, Math.floor(HERD_CONFLICT_HP_FLOOR_FRACTION * defender.maxHp));
   const hpBefore = defender.hp;
-  defender.hp = Math.max(floor, hpBefore - rawDamage);
+  defender.hp = Math.max(0, hpBefore - rawDamage);
   const damageDealt = hpBefore - defender.hp;
+  const knockedOut = defender.hp <= 0;
 
-  const retreated = defender.hp / defender.maxHp <= HERD_CONFLICT_RETREAT_HP_FRACTION;
+  // Grudge read BEFORE this hit's own rapport shift below — see
+  // `isLethalEscalation`'s own doc comment for why.
+  const grudgeBeforeThisHit = rapportScore(attacker, defender.id, world.tick);
+  const lethal = knockedOut && isLethalEscalation(grudgeBeforeThisHit, rng);
+
+  const retreated = !knockedOut && defender.hp / defender.maxHp <= HERD_CONFLICT_RETREAT_HP_FRACTION;
 
   // Rapport: a real, negative shift between exactly these two individuals —
   // never a species-/herd-level effect — for a hit that actually landed
   // (never for "missed", which never connected). This is the grudge
   // `HERD_CONFLICT_GRUDGE_SCALE`/`RAPPORT_TARGET_BIAS_TILES` above read back
-  // on a later contested tile. See rapport.ts's doc comment.
+  // on a later contested tile, and (see `isLethalEscalation`) the same
+  // grudge a deep-enough history can eventually turn lethal. Still applied
+  // even on a lethal hit — harmless (the target won't be around to read it
+  // back), kept unconditional for simplicity.
   strengthenRapportMutual(world, attacker, defender, RAPPORT_HERD_CLASH_DELTA, rng);
 
   log?.record({
@@ -306,10 +407,55 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
     outcome: retreated ? "retreated" : "hit",
   });
 
+  if (lethal) {
+    defender.alive = false;
+    defender.diedAtTick = world.tick;
+    grantKillExp(world, attacker, defender, ctx, log, rng);
+    attacker.lifetimeKills = (attacker.lifetimeKills ?? 0) + 1;
+    // Notables: The Giant Slayer — see Agent.lifetimeGiantSlayerKills's doc comment.
+    if ((defender.level ?? 0) - (attacker.level ?? 0) >= GIANT_SLAYER_LEVEL_GAP) {
+      attacker.lifetimeGiantSlayerKills = (attacker.lifetimeGiantSlayerKills ?? 0) + 1;
+    }
+    // Notables: The Alpha — a lethal escalation is as real a "win" as a retreat. See Agent.lifetimeClashWins's doc comment.
+    attacker.lifetimeClashWins = (attacker.lifetimeClashWins ?? 0) + 1;
+    // Notables: The Underdog — see Agent.lifetimeClashLosses's doc comment.
+    defender.lifetimeClashLosses = (defender.lifetimeClashLosses ?? 0) + 1;
+    log?.record({
+      kind: "defeated",
+      tick: world.tick,
+      winnerId: attacker.id,
+      winnerSpecies: attacker.species,
+      loserId: defender.id,
+      loserSpecies: defender.species,
+      pos: defender.pos,
+    });
+    return;
+  }
+
+  if (knockedOut) {
+    // A real knockout, but not a lethal one this time — faints exactly like
+    // a predation kill would leave a target (same fields, same recovery
+    // paths: passive healing/waking via support.ts's applyHealOverTime/
+    // maybeRecoverFromFaint, or a herd-mate carrying it to safety), just
+    // never automatically finished off the way predation's own hunt loop
+    // would keep hitting a downed target — this mechanic doesn't chase.
+    defender.fainted = true;
+    defender.finishingPool = FINISHING_POOL_FRACTION * defender.maxHp;
+    defender.status = undefined;
+    // Notables: The Underdog — a knockout is as real a loss as a retreat. See Agent.lifetimeClashLosses's doc comment.
+    defender.lifetimeClashLosses = (defender.lifetimeClashLosses ?? 0) + 1;
+    log?.record({ kind: "fainted", tick: world.tick, agentId: defender.id, species: defender.species, pos: defender.pos });
+    return;
+  }
+
   if (retreated) {
     defender.pos = stepAway(world, defender.layer, defender.pos, attacker.pos, defender, defender);
     defender.herdConflictCooldownTicks = HERD_CONFLICT_COOLDOWN_TICKS;
     attacker.herdConflictCooldownTicks = HERD_CONFLICT_COOLDOWN_TICKS;
+    // Notables: The Alpha — see Agent.lifetimeClashWins's doc comment.
+    attacker.lifetimeClashWins = (attacker.lifetimeClashWins ?? 0) + 1;
+    // Notables: The Underdog — see Agent.lifetimeClashLosses's doc comment.
+    defender.lifetimeClashLosses = (defender.lifetimeClashLosses ?? 0) + 1;
   } else {
     // A real hit landed and the defender is still standing its ground —
     // direct ask: "there isn't any fighting back, is there?" A retreating
@@ -331,7 +477,7 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
  * was even there, so the caller falls through to its existing wait/relocate
  * logic unchanged.
  */
-export function applyHerdRivalryConflict(world: World, agent: Agent, rules: HuntRules, target: Vec2, log: EventLog | undefined, rng: () => number): boolean {
+export function applyHerdRivalryConflict(world: World, agent: Agent, rules: HuntRules, target: Vec2, log: EventLog | undefined, rng: () => number, ctx?: LevelingContext): boolean {
   if ((agent.herdConflictCooldownTicks ?? 0) > 0) return false;
   if (rules[agent.species]) return false; // predator — out of scope, see doc comment
   // A flat opt-out (`"nonTerritorial"` passive) — this agent never picks a
@@ -349,7 +495,9 @@ export function applyHerdRivalryConflict(world: World, agent: Agent, rules: Hunt
   const grudge = rapportScore(agent, rival.id, world.tick);
   if (rng() >= herdConflictChance(world, agent, grudge)) return false;
 
-  resolveRivalryHit(world, agent, rival, log, rng);
+  if (tooManyLocalFights(world, agent.layer, target)) return false;
+
+  resolveRivalryHit(world, agent, rival, log, rng, ctx);
   return true;
 }
 
@@ -377,7 +525,7 @@ export const RETALIATION_LEVEL_TOLERANCE = 5;
  * backing away) — caller should treat it as consumed, same contract as the
  * other two herdConflict.ts triggers.
  */
-export function applyRivalryRetaliation(world: World, agent: Agent, rules: HuntRules, log: EventLog | undefined, rng: () => number): boolean {
+export function applyRivalryRetaliation(world: World, agent: Agent, rules: HuntRules, log: EventLog | undefined, rng: () => number, ctx?: LevelingContext): boolean {
   const targetId = agent.retaliateAgainstId;
   if (!targetId) return false;
   agent.retaliateAgainstId = undefined; // one evaluation opportunity, consumed regardless of what happens below
@@ -400,7 +548,11 @@ export function applyRivalryRetaliation(world: World, agent: Agent, rules: HuntR
     return true;
   }
 
-  resolveRivalryHit(world, agent, target, log, rng);
+  // No `tooManyLocalFights` check here, deliberately — this is a direct
+  // continuation of a fight already in progress, not a new one starting; see
+  // `tooManyLocalFights`'s own doc comment for why only the two "start
+  // something new" triggers are capped.
+  resolveRivalryHit(world, agent, target, log, rng, ctx);
   return true;
 }
 
@@ -533,10 +685,12 @@ export function applyTerritorialGuard(world: World, agent: Agent, rules: HuntRul
   const chance = herdConflictChance(world, agent, grudge, GUARD_BASE_CHANCE, GUARD_DISPOSITION_SCALE) + needUrgencyOf(agent) * GUARD_NEED_URGENCY_SCALE;
   if (rng() >= chance) return false;
 
+  if (tooManyLocalFights(world, agent.layer, agent.pos)) return false;
+
   agent.behavior = "fight";
   agent.fightTarget = rival.id;
   if (manhattan(agent.pos, rival.pos) <= 1) {
-    resolveRivalryHit(world, agent, rival, log, rng);
+    resolveRivalryHit(world, agent, rival, log, rng, ctx);
   } else {
     // stopAdjacent=true — see stepToward's doc comment.
     agent.pos = stepToward(world, agent.layer, agent.pos, rival.pos, agent, undefined, true);

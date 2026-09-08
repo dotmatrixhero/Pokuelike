@@ -3,6 +3,7 @@ import {
   createNeeds,
   randomNature,
   dispositionFromNature,
+  MATURITY_AGE,
   type Agent,
   type Vec2,
 } from "@pokuelike/engine";
@@ -52,6 +53,18 @@ function moveUnlockLevel(speciesId: string, moveId: string): number {
  * from scratch already uses. Falls back to the single lowest-threshold move
  * in the list if every one of them would otherwise be gated out (so a very
  * low spawn level never leaves an agent with zero moves at all).
+ *
+ * `age` starts at `MATURITY_AGE` — a fresh spawn (worldgen founder or
+ * immigrant) is a grown specimen arriving already mature, same as before
+ * `age` was tracked here at all (`reproduction.ts`'s `isMature` reads
+ * absent age as "already mature," so this preserves that immediately, no
+ * breeding-eligibility regression). The real fix this closes: previously
+ * `age` was left entirely unset for every spawn path except egg hatching
+ * (`eggs.ts`'s `tickEgg`), so a hatchling could ever claim the Elder
+ * notable while every founder/immigrant was permanently ineligible —
+ * direct report: "elder is being granted to hatched Pokémon 400 ticks old
+ * while native Pokémon don't have ticks old." Both now age from a real
+ * starting point and compete for Elder on equal footing.
  */
 export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5, rng: () => number = Math.random): Agent {
   const species = SPECIES[speciesId];
@@ -85,6 +98,7 @@ export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5, 
     // rescue destination (support.ts) — see DESIGN.md's carry-capacity/home-
     // range scope call.
     homePos: { ...pos },
+    age: MATURITY_AGE,
     // Notables: The Wanderer's anchor, set once and never mutated again
     // (unlike `homePos`) — a founder/immigrant's real birth position is
     // wherever it entered the sim. See Agent.birthPos's doc comment.

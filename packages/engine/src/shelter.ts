@@ -348,7 +348,7 @@ export function applyShelterBuilding(world: World, agent: Agent, log?: EventLog)
   agent.behavior = "buildShelter";
 
   if (agent.pos.x !== agent.shelterTarget.x || agent.pos.y !== agent.shelterTarget.y) {
-    agent.pos = stepToward(world, agent.layer, agent.pos, agent.shelterTarget, agent);
+    agent.pos = stepToward(world, agent.layer, agent.pos, agent.shelterTarget, agent, agent);
     return;
   }
 
@@ -515,7 +515,7 @@ export function applyShelterResting(world: World, agent: Agent, log?: EventLog):
   agent.behavior = "restAtShelter";
 
   if (manhattan(agent.pos, home) > SHELTER_REST_RADIUS) {
-    agent.pos = stepToward(world, agent.layer, agent.pos, home, agent);
+    agent.pos = stepToward(world, agent.layer, agent.pos, home, agent, agent);
     return true;
   }
 

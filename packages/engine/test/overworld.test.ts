@@ -179,12 +179,13 @@ describe("promoteZone", () => {
     expect(region.aggregates).toBeUndefined();
     for (const agent of world.agents) {
       expect(agent.species).toBe("bulbasaur");
-      // A small +/-2 real per-individual jitter around the aggregate's own
-      // tracked average (8) — direct ask: "some randomness in starting
-      // rolls would be good" — not every invented individual landing on
-      // the exact same level any more.
-      expect(agent.level).toBeGreaterThanOrEqual(6);
-      expect(agent.level).toBeLessThanOrEqual(10);
+      // A small +/-4 real per-individual jitter around the aggregate's own
+      // tracked average (8) for a non-predator (prey) species — direct ask:
+      // "some randomness in starting rolls would be good," widened further
+      // by the later "Prey should have a wider range of levels" ask — not
+      // every invented individual landing on the exact same level any more.
+      expect(agent.level).toBeGreaterThanOrEqual(4);
+      expect(agent.level).toBeLessThanOrEqual(12);
       expect(agent.sex === "male" || agent.sex === "female").toBe(true);
       expect(agent.needs.hunger).toBeGreaterThanOrEqual(0);
       expect(agent.needs.hunger).toBeLessThanOrEqual(1);

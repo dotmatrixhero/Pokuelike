@@ -1,8 +1,8 @@
-import type { Agent, HuntRules, World } from "./types.js";
+import type { Agent, HuntRules, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import type { RegionDispersalContext } from "./dispersal.js";
-import { growCanopyFood, growFlora, maybeDropSeed } from "./flora.js";
+import { growCanopyFood, growFlora, growUndergroundFlora, maybeDropSeed } from "./flora.js";
 import { applyFireDamage, tickFires } from "./fire.js";
 import { tickHerds } from "./herds.js";
 import { decayShelters } from "./shelter.js";
@@ -18,6 +18,8 @@ import { PARALYSIS_SPEED_MULTIPLIER, isParalyzed, getStatStage } from "./status.
 import { statStageMultiplier } from "./combat.js";
 import { updateNotables } from "./notables.js";
 import { updateHerdLeadership } from "./herdLeadership.js";
+import { canEnterWater, canEnterLand } from "./waterBody.js";
+import { canFlyOverObstacle } from "./movement.js";
 
 /**
  * Energy an agent needs to accumulate before it gets to act. Chosen against
@@ -33,6 +35,35 @@ import { updateHerdLeadership } from "./herdLeadership.js";
  * still open about it.
  */
 export const ACTION_THRESHOLD = 40;
+
+/**
+ * How much an agent's computed Speed still drives its action frequency,
+ * applied in `actionSpeedOf` as `ACTION_THRESHOLD * (speed /
+ * ACTION_THRESHOLD) ** SPEED_ACTION_COMPRESSION` — 1 would be today's
+ * uncompressed behavior (pure Speed, linear); lower narrows the gap between
+ * a fast and a slow agent's action rate without erasing it. Direct ask,
+ * after watching a much-faster Arbok land two Sludge hits before a slower
+ * Ivysaur got a single action: "tweak the speed to action economy tick calc
+ * to be a little less influential. To give Pokémon who are weaker a chance
+ * to actually escape or use a move."
+ *
+ * A power on the *ratio* to `ACTION_THRESHOLD`, not a flat additive floor —
+ * it leaves speed 0 at 0 (a genuinely stat-less agent isn't granted false
+ * actions), and leaves speed `ACTION_THRESHOLD` exactly fixed (an agent
+ * already "acting every tick" at 1:1 stays there), while everything below
+ * that pivot gets pulled disproportionately upward the slower it already
+ * was — because raising a fraction below 1 to a power below 1 moves it
+ * closer to 1, and moves it further the smaller the fraction started out.
+ * Worked example against this file's own demo-roster numbers above: raw
+ * Bulbasaur/Venusaur action-rate ratio 37/9 ≈ 4.11x narrows to roughly
+ * 37.6/12.1 ≈ 3.11x at 0.8 — Bulbasaur still acts markedly less often, but
+ * the gap closes by about a quarter, not to zero. Applied uniformly to
+ * every multiplier this function already composes (paralysis, injury,
+ * terrain, and the rest) rather than singled out to base Speed alone —
+ * simpler, and it's the *net* frequency gap between two agents this was
+ * asked to soften, not just the raw stat's share of it.
+ */
+export const SPEED_ACTION_COMPRESSION = 0.8;
 
 /**
  * Adds `speed` to `agent.actionEnergy` and returns whether that crosses
@@ -115,7 +146,105 @@ export function actionSpeedOf(world: World, agent: Agent, tick: number): number 
     // specifically, so a landed Agility (or any other speed-stage grant)
     // had no way to actually change how often its user acts.
     statStageMultiplier(getStatStage(agent, "speed"));
-  return effectiveSpeed(agent, baseSpeed);
+  const speed = effectiveSpeed(agent, baseSpeed);
+  // See `SPEED_ACTION_COMPRESSION`'s own doc comment for why this is a
+  // power on the ratio to `ACTION_THRESHOLD`, not a flat floor.
+  return ACTION_THRESHOLD * Math.pow(Math.max(0, speed) / ACTION_THRESHOLD, SPEED_ACTION_COMPRESSION);
+}
+
+/** The eight neighbors (orthogonal first, then diagonal), fixed order — deterministic, no rng, matching this codebase's "same seed, same result" requirement. See `resolveTileOverlaps`. */
+const OVERLAP_RESOLVE_OFFSETS: readonly Vec2[] = [
+  { x: 0, y: -1 },
+  { x: 1, y: 0 },
+  { x: 0, y: 1 },
+  { x: -1, y: 0 },
+  { x: 1, y: -1 },
+  { x: 1, y: 1 },
+  { x: -1, y: 1 },
+  { x: -1, y: -1 },
+];
+
+/**
+ * Direct ask, after watching a fainted Scyther and a fleeing Diglett
+ * visibly sharing a tile mid-fight: "avoid units on the same tile
+ * altogether... everywhere, always." `stopAdjacent`/capacity-aware
+ * `stepToward`/`stepAway` (movement.ts, threaded through most of the
+ * engine's own movement call sites) already stop a *deliberate* step from
+ * landing on an occupied tile — but a few genuinely-unconditional position
+ * snaps still exist (dispersal/migration arrival when nothing else claimed
+ * the spot first, birth/hatch/immigration placement), plus
+ * occupancy.ts's own documented same-tick race: two agents that each
+ * independently pick the same currently-empty tile in the same tick both
+ * see the same tick-start snapshot and can both be admitted at once.
+ * Rather than chase every direct `agent.pos =` assignment across the engine
+ * individually (a wide, ever-growing surface as new features add new ones),
+ * this is a single, cheap, once-per-tick correction pass, run right after
+ * every agent has acted (see `tickWorld`): for any tile still holding more
+ * than one living, uncarried occupant, every occupant but one gets nudged
+ * onto the nearest free orthogonal neighbor.
+ *
+ * An egg, if present, is always the one left in place — eggs are stationary
+ * by design (eggs.ts's own doc comment); a living agent that ended up
+ * sharing its tile is the one that moves. Otherwise the lowest `id` stays
+ * put, the same deterministic tie-break `herdRank`/`nearestCrowdingHerdmate`
+ * already use elsewhere. Shelter tiles are exempt — the multi-occupant
+ * "den" rule (`SHELTER_TILE_ADULT_CAP`/`_EGG_CAP`, occupancy.ts) is a
+ * separate, still-deliberate feature this pass was never meant to unwind.
+ *
+ * Checks the 8 neighbors (orthogonal, then diagonal), not a wider search —
+ * real overlaps are almost always between a small handful of agents with
+ * open space nearby; a tile with no free neighbor at all (fully boxed in)
+ * is left as-is, a rare, accepted edge case rather than a reason to search
+ * further.
+ *
+ * Deliberately builds its own live `occupied` set from every agent's
+ * CURRENT position, rather than reusing `occupancy.ts`'s `canEnterTile`/
+ * cached index — that cache is a tick-START snapshot (by design, see its
+ * own doc comment), already stale by the time this runs at the END of the
+ * same tick, after every agent has already potentially moved. Checking
+ * candidates against the stale cache here would misjudge which neighbors
+ * are actually free right now, undermining the very thing this pass exists
+ * to guarantee.
+ */
+export function resolveTileOverlaps(world: World): void {
+  const byKey = new Map<string, Agent[]>();
+  const occupied = new Set<string>();
+  for (const agent of world.agents) {
+    if (agent.alive === false || agent.beingCarriedBy) continue;
+    const key = `${agent.layer}:${agent.pos.x},${agent.pos.y}`;
+    if (tileAt(world, agent.layer, agent.pos.x, agent.pos.y)?.terrain === "shelter") continue;
+    occupied.add(key);
+    const list = byKey.get(key);
+    if (list) list.push(agent);
+    else byKey.set(key, [agent]);
+  }
+
+  for (const occupants of byKey.values()) {
+    if (occupants.length <= 1) continue;
+    occupants.sort((a, b) => {
+      if (a.isEgg !== b.isEgg) return a.isEgg ? -1 : 1;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+    for (const agent of occupants.slice(1)) {
+      for (const offset of OVERLAP_RESOLVE_OFFSETS) {
+        const candidate = { x: agent.pos.x + offset.x, y: agent.pos.y + offset.y };
+        const candidateKey = `${agent.layer}:${candidate.x},${candidate.y}`;
+        if (occupied.has(candidateKey)) continue;
+        const tile = tileAt(world, agent.layer, candidate.x, candidate.y);
+        // Never nudge someone onto shelter terrain via this mechanism — that
+        // tile kind has its own separate, capacity-aware entry path
+        // (occupancy.ts's `canEnterShelter`); simplest to just leave it to
+        // that path rather than duplicate its rules here.
+        if (!tile || tile.terrain === "shelter") continue;
+        if (!tile.walkable && !canFlyOverObstacle(agent, agent.layer)) continue;
+        if (!canEnterWater(world, agent, agent.layer, candidate)) continue;
+        if (!canEnterLand(world, agent, agent.layer, candidate)) continue;
+        agent.pos = candidate;
+        occupied.add(candidateKey);
+        break;
+      }
+    }
+  }
 }
 
 // A plain function call (rather than an inline `agent.alive === false` check)
@@ -229,6 +358,10 @@ export function tickWorld(
       maybeDropSeed(world, agent.layer, agent.pos, log, rng);
     }
   }
+  // Once per tick, after every agent has acted — see `resolveTileOverlaps`'s
+  // own doc comment for why this exists on top of `stopAdjacent`/capacity-
+  // aware stepping rather than instead of it.
+  resolveTileOverlaps(world);
   // Before growFlora, so a tile that burned out this tick is already
   // scorched "floor" when the flora pass considers regrowth — fire clears
   // ground first, then the world decides what grows back into it.
@@ -240,6 +373,13 @@ export function tickWorld(
   tickFires(world, log, rng);
   applyFireDamage(world, log, rng);
   growFlora(world, log, rng);
+  // Once per tick, not once per agent — same "world-level system, one pass"
+  // shape as growFlora above, its Underground counterpart: real crops
+  // (Potato/Pumpkin) down there now regrow and spread too instead of just
+  // decaying after worldgen — see flora.ts's own doc comment on
+  // growUndergroundFlora for why it's a genuine second copy of the loop
+  // rather than growFlora reused.
+  growUndergroundFlora(world, log, rng);
   // Once per tick, not once per agent — same "world-level system, one pass"
   // shape as growFlora above, its own much smaller Canopy-only counterpart
   // (real growth-stage rendering, CROPS_DESIGN.md) — see flora.ts's own doc
@@ -264,7 +404,7 @@ export function tickWorld(
   // more simply than a bespoke hook at each of the four separate trigger
   // sites plus a second periodic scan for the three "currently highest"
   // titles (rival/elder/wanderer).
-  updateNotables(world, log);
+  updateNotables(world, log, ctx, rng);
   // Herd Leadership builds directly on Notables — must run strictly after
   // updateNotables so a title lost/claimed THIS tick is already reflected in
   // `Agent.notableTitle` before leadership eligibility is re-checked. See

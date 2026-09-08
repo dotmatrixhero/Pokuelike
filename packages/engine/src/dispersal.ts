@@ -2,6 +2,7 @@ import type { Agent, DispersalReason, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { logBehaviorChange } from "./events.js";
 import { stepToward } from "./movement.js";
+import { canEnterTile } from "./occupancy.js";
 import { findRandomWalkableTile } from "./migration.js";
 import { isMature } from "./reproduction.js";
 import { COHESION_DISTANCE } from "./herding.js";
@@ -261,14 +262,19 @@ export function applyDispersal(world: World, agent: Agent, log?: EventLog): void
   logBehaviorChange(log, world, agent, "disperse");
   agent.behavior = "disperse";
 
-  if (manhattan(agent.pos, agent.dispersalTarget) <= 1) {
+  // Direct ask: "avoid units on the same tile altogether... everywhere,
+  // always" — this used to snap straight onto `dispersalTarget` once close
+  // enough, bypassing occupancy entirely. If something else has since taken
+  // that exact tile, fall through to the ordinary capacity-aware step
+  // instead of arriving anyway.
+  if (manhattan(agent.pos, agent.dispersalTarget) <= 1 && canEnterTile(world, agent, agent.layer, agent.dispersalTarget)) {
     agent.pos = agent.dispersalTarget;
     agent.dispersalTarget = undefined;
     finishDispersal(world, agent, log);
     return;
   }
 
-  agent.pos = stepToward(world, agent.layer, agent.pos, agent.dispersalTarget, agent);
+  agent.pos = stepToward(world, agent.layer, agent.pos, agent.dispersalTarget, agent, agent);
 }
 
 /**

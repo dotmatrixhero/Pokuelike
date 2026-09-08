@@ -74,6 +74,14 @@ export interface ImmigrationSpeciesInfo {
    * existing behavior.
    */
   isPredator?: boolean;
+  /**
+   * See `@pokuelike/data`'s `SpeciesDef.rarity` — a multiplier on how often
+   * this species shows up, both as an immigrant (`pickImmigrantSpecies`'s
+   * weight, below) and in how large its invented population is
+   * (`macroGrid.ts`'s `estimateZoneSpecies`). Absent = `1`, ordinary
+   * frequency.
+   */
+  rarity?: number;
 }
 
 export interface ImmigrationContext {
@@ -195,8 +203,69 @@ export const SINGLE_STAGE_LEVEL_JITTER = 30;
  * already applied — an evolved predator (Gyarados/Tentacruel/Arbok/Golbat,
  * already floored higher via their own real evolution level) gets pushed
  * higher still, same as a base-form one.
+ *
+ * Halved from 15, direct follow-up ask after that predator pass shipped:
+ * "Predator and prey gap level wise is a bit too high. Make em average out
+ * to each other." Still a real, meaningful bump (predators read as
+ * established individuals, not fresh hatchlings) — just no longer wide
+ * enough on its own to make every encounter one-sided; see
+ * `PREY_LEVEL_JITTER`'s own doc comment for the other half of the fix, on
+ * the prey side.
  */
-export const PREDATOR_LEVEL_BOOST = 15;
+export const PREDATOR_LEVEL_BOOST = 6;
+/**
+ * Prey's own (non-predator) jitter width, replacing `IMMIGRANT_LEVEL_JITTER`
+ * for a base-form prey species — direct ask, same report as
+ * `PREDATOR_LEVEL_BOOST`'s reduction: "Prey should have a wider range of
+ * levels. That skew their avg level down." Twice `IMMIGRANT_LEVEL_JITTER`
+ * (8), so a wild prey population genuinely spans more of its possible range
+ * — from fresh hatchlings up to real veterans — rather than clustering in
+ * the same narrow band every base-form species got before. Composed with
+ * `PREY_LEVEL_SKEW` below (not sampled uniformly), so the wider range's
+ * extra mass sits toward the LOW end: more young/weak individuals pulling
+ * the population's average down, which is what actually narrows the
+ * predator/prey average-level gap alongside `PREDATOR_LEVEL_BOOST`'s own
+ * reduction — a uniform-random widening alone would have left the average
+ * unchanged (or pushed it up), not down.
+ */
+export const PREY_LEVEL_JITTER = 16;
+/**
+ * The `singleStage` prey counterpart to `PREY_LEVEL_JITTER` — replaces
+ * `SINGLE_STAGE_LEVEL_JITTER` for a non-predator `singleStage` species.
+ * Widened further still (from 30 to 40): a `singleStage` species already
+ * plausibly spans its whole adult lifespan (see `SINGLE_STAGE_LEVEL_JITTER`'s
+ * own doc comment), so the same "wider range, skewed low" treatment applies
+ * with an even bigger ceiling.
+ */
+export const SINGLE_STAGE_PREY_LEVEL_JITTER = 40;
+/**
+ * The exponent `rollLevelJitter` raises a `[0,1)` roll to before scaling it
+ * by a prey species' jitter width — `rng() ** PREY_LEVEL_SKEW` has mean
+ * `1 / (PREY_LEVEL_SKEW + 1)`, so a value of 4 means the "average" fraction
+ * of the jitter band actually used is 1/5 (20%), not the 50% a uniform roll
+ * would give: most rolls land near the low end, with a real but
+ * infrequent tail reaching the wider ceiling above. This is the mechanism
+ * behind `PREY_LEVEL_JITTER`'s "wider range... skewed low" — see that
+ * constant's own doc comment. Predators are NOT skewed (still a plain
+ * uniform `rng() * jitter`, same as before this feature) — the ask was
+ * specifically about prey.
+ */
+const PREY_LEVEL_SKEW = 4;
+
+/** The real jitter-band width `rollImmigrantLevel` uses for `species` — see `PREY_LEVEL_JITTER`/`SINGLE_STAGE_PREY_LEVEL_JITTER`'s own doc comments for why prey and predators use different widths. Exported so `overworld.ts`'s zone-promotion individual-variance spread can reuse the identical width instead of a second, possibly-diverging guess. */
+export function levelJitterWidth(species: Pick<ImmigrationSpeciesInfo, "isPredator" | "singleStage">): number {
+  if (species.isPredator) {
+    return species.singleStage ? SINGLE_STAGE_LEVEL_JITTER : IMMIGRANT_LEVEL_JITTER;
+  }
+  return species.singleStage ? SINGLE_STAGE_PREY_LEVEL_JITTER : PREY_LEVEL_JITTER;
+}
+
+/** One real jitter roll for `species`, already scaled to its own width — a plain uniform roll for a predator, `PREY_LEVEL_SKEW`-biased-low for prey. See `levelJitterWidth`/`PREY_LEVEL_SKEW`'s own doc comments. */
+function rollLevelJitter(species: Pick<ImmigrationSpeciesInfo, "isPredator" | "singleStage">, rng: () => number): number {
+  const width = levelJitterWidth(species);
+  const fraction = species.isPredator ? rng() : Math.pow(rng(), PREY_LEVEL_SKEW);
+  return Math.floor(fraction * width);
+}
 
 /**
  * A real, species-aware immigrant level — direct ask, after noticing every
@@ -208,19 +277,52 @@ export const PREDATOR_LEVEL_BOOST = 15;
  * ordinary base-form floor so an unclassified/base species keeps its
  * existing 5+ range unchanged, while a genuinely evolved species floors
  * meaningfully higher (its own real evolution-level threshold) before a
- * real jitter on top — wider (`SINGLE_STAGE_LEVEL_JITTER`) for a species
- * that never evolves at all (`species.singleStage`), narrower otherwise. A
- * predator (`species.isPredator`) also gets `PREDATOR_LEVEL_BOOST` added to
- * its floor — see that constant's own doc comment. Exported (like
+ * real jitter on top (`rollLevelJitter` — see `levelJitterWidth`/
+ * `PREY_LEVEL_SKEW` for the real predator/prey asymmetry that narrows the
+ * two populations' average levels toward each other). A predator
+ * (`species.isPredator`) also gets `PREDATOR_LEVEL_BOOST` added to its
+ * floor — see that constant's own doc comment. Exported (like
  * `accumulateActionEnergy` in simulation.ts) so it's directly,
  * deterministically testable without needing to reverse-engineer
  * `maybeImmigrate`'s own internal rng call order just to isolate this one
  * roll.
+ *
+ * `localAvgLevel`, when given (see `localAverageLevel` — the real average
+ * level of this species' own currently-living population in the world),
+ * re-centers the same jitter band on it instead of on the bare species
+ * floor — direct ask, after a report of one-sided fights from the level
+ * spread: "the ones that migrate in come in matching the level a little
+ * more." Still clamped at `floor` (an evolved/predator species never
+ * arrives below its own real minimum just because a struggling local
+ * population's average happens to be lower). Absent (no living member of
+ * this species yet to match against — a genuinely first arrival) falls back
+ * to the original species-only floor+jitter roll unchanged.
  */
-export function rollImmigrantLevel(species: ImmigrationSpeciesInfo, rng: () => number): number {
+export function rollImmigrantLevel(species: ImmigrationSpeciesInfo, rng: () => number, localAvgLevel?: number): number {
   const floor = Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, species.minLevel ?? 1) + (species.isPredator ? PREDATOR_LEVEL_BOOST : 0);
-  const jitter = species.singleStage ? SINGLE_STAGE_LEVEL_JITTER : IMMIGRANT_LEVEL_JITTER;
-  return floor + Math.floor(rng() * jitter);
+  if (localAvgLevel === undefined) {
+    return floor + rollLevelJitter(species, rng);
+  }
+  const width = levelJitterWidth(species);
+  const center = Math.max(floor, Math.round(localAvgLevel - width / 2));
+  return center + rollLevelJitter(species, rng);
+}
+
+/**
+ * The real average level of `speciesId`'s currently-living, non-egg
+ * population in `world` — `undefined` if none exist yet (a genuinely first
+ * arrival has nothing local to match). See `rollImmigrantLevel`'s own doc
+ * comment for why this is what an immigrant's level gets centered on.
+ */
+export function localAverageLevel(world: World, speciesId: string): number | undefined {
+  let sum = 0;
+  let count = 0;
+  for (const agent of world.agents) {
+    if (agent.alive === false || agent.isEgg || agent.species !== speciesId) continue;
+    sum += agent.level ?? 1;
+    count++;
+  }
+  return count > 0 ? sum / count : undefined;
 }
 
 /**
@@ -380,7 +482,12 @@ function pickImmigrantSpecies(world: World, roster: readonly ImmigrationSpeciesI
       const matched = species.biomes.reduce((sum, name) => sum + (biomeWeights[name] ?? 0), 0);
       biomeMatch = Math.max(UNTAGGED_MATCH_FLOOR, matched);
     }
-    return repWeight * biomeMatch * predatorNicheBoost(species, predatorShare);
+    // Direct ask: "make arboks less common" — a per-species dial
+    // (`ImmigrationSpeciesInfo.rarity`) on top of the under-representation/
+    // biome-match weighting above, absent = 1 (no change) for every other
+    // species — combined with the predator-niche boost below, both are
+    // independent multipliers on the same base weight.
+    return repWeight * biomeMatch * (species.rarity ?? 1) * predatorNicheBoost(species, predatorShare);
   });
 
   const total = weights.reduce((a, b) => a + b, 0);
@@ -452,10 +559,11 @@ export function maybeImmigrate(world: World, ctx: ImmigrationContext | undefined
     return waterPos;
   }
 
+  const localAvgLevel = localAverageLevel(world, species.id);
   const newAgents: Agent[] = [];
   for (let i = 0; i < groupSize; i++) {
     const pos = nextArrivalPos(i);
-    const agent = ctx.spawnAgent(species.id, `${species.id}-immigrant-${world.tick}-${i}`, pos, rollImmigrantLevel(species, rng), rng);
+    const agent = ctx.spawnAgent(species.id, `${species.id}-immigrant-${world.tick}-${i}`, pos, rollImmigrantLevel(species, rng, localAvgLevel), rng);
     agent.sex = rng() < 0.5 ? "male" : "female";
     newAgents.push(agent);
   }

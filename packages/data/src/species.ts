@@ -100,6 +100,19 @@ export interface SpeciesDef {
    * (spawn.ts), same pattern as `isPredator`/`buildsShelter`.
    */
   obligateAquatic?: boolean;
+  /**
+   * A multiplier on how often this species shows up — both as a walking-in
+   * immigrant (`@pokuelike/engine`'s `immigration.ts`'s `pickImmigrantSpecies`
+   * weight) and in how large its invented population is wherever a
+   * never-visited zone estimates one owning it (`macroGrid.ts`'s
+   * `estimateZoneSpecies`). Direct ask: "make arboks less common. I just
+   * don't like em lol" — a real, judged-per-species dial rather than a
+   * zone-wide/global rule change (same "judged per-species" standard as
+   * `isPredator`/`buildsShelter`/`obligateAquatic` above), so ONE species can
+   * be dialed down without touching anything else on the roster. Absent =
+   * `1`, ordinary/unchanged frequency for every other species.
+   */
+  rarity?: number;
 }
 
 /**
@@ -133,6 +146,7 @@ export function speciesFromDex(dexKey: string, sim: SimSpeciesFields): SpeciesDe
     biomes: sim.biomes,
     preferredTerrain: sim.preferredTerrain,
     obligateAquatic: sim.obligateAquatic,
+    rarity: sim.rarity,
   };
 }
 
@@ -484,6 +498,11 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "charmeleon",
     placeholderColor: "#f5701c",
     homeLayer: "surface",
+    // Direct ask: "Charizard and chameleon should become predators" — this
+    // stage already reads as a real hunter in mainline flavor text ("cruel,
+    // savage nature," burns anything that resists), not merely a scaled-up
+    // Charmander.
+    isPredator: true,
     // Bigger flame, same fuel source — "scratch" as a real physical attack
     // alongside Ember now that it's grown claws worth using, rather than
     // just a hotter Charmander.
@@ -496,6 +515,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "charizard",
     placeholderColor: "#e8712c",
     homeLayer: "surface",
+    // Direct ask: "Charizard and chameleon should become predators" — the
+    // comment right below already called this "an apex flyer/predator
+    // design in the mainline games"; this makes that read a real mechanic.
+    isPredator: true,
     // The roster's one curated Flamethrower user — its tail flame is
     // "said to burn even more intensely" per mainline flavor text, so the
     // upgrade from Ember is the whole point of finally reaching this stage.
@@ -704,6 +727,13 @@ export const SPECIES: Record<string, SpeciesDef> = {
     isPredator: true,
     activityPattern: "nocturnal",
     biomes: ["grassland", "jungle"],
+    // Direct ask: "make arboks less common. I just don't like em lol" — a
+    // real, judged-per-species dial (see `SpeciesDef.rarity`'s own doc
+    // comment), not a change to Ekans (its own base form) or any other
+    // species on the roster. Follow-up ask ("further reduce arbok spawn")
+    // after 0.35 still wasn't rare enough — dropped further rather than
+    // to 0, so it can still show up, just uncommonly.
+    rarity: 0.12,
   }),
   caterpie: speciesFromDex("CATERPIE", {
     spriteKey: "caterpie",

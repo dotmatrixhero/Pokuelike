@@ -1,7 +1,7 @@
 import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import type { LevelingContext } from "./leveling.js";
-import { IMMIGRANT_BASE_LEVEL_FLOOR, IMMIGRANT_LEVEL_JITTER, SINGLE_STAGE_LEVEL_JITTER, PREDATOR_LEVEL_BOOST, type ImmigrationContext, type ImmigrationSpeciesInfo } from "./immigration.js";
+import { rollImmigrantLevel, type ImmigrationContext, type ImmigrationSpeciesInfo } from "./immigration.js";
 import type { RegionDispersalContext } from "./dispersal.js";
 import { tickWorld } from "./simulation.js";
 import { findPosInBiome, findWalkableNear, generateWorld } from "./worldgen.js";
@@ -283,25 +283,19 @@ function estimateInitialAggregates(mw: MacroWorld, row: number, col: number, ctx
       avgHunger: 0.5,
       avgThirst: 0.5,
       avgEnergy: 0.5,
-      // Same real evolution-aware floor (+ jitter) `immigration.ts`'s
-      // `rollImmigrantLevel` uses — direct ask: "why does everything spawn
-      // at lv5. Especially evolved Pokemon they should be higher
-      // distributed." A never-visited zone's estimated population is
-      // exactly as real a "spawn" as an immigrant group; a flat `5` here
-      // was the same bug under a different name, just for a species this
-      // codebase's own macro-grid ever *guesses* already lives somewhere
-      // instead of walking in from an edge. Wider jitter
-      // (`SINGLE_STAGE_LEVEL_JITTER`) for a `singleStage` species — direct
-      // ask: "make all Pokémon with just base form have a wider range of
-      // base level" — so a fresh zone's guessed population age spread
-      // varies zone to zone, not just the later per-individual jitter below.
-      // `PREDATOR_LEVEL_BOOST` mirrors `rollImmigrantLevel`'s own predator
-      // floor bump — direct ask: "a lot of em are too low leveled... we
-      // need at least a couple higher leveld predators."
-      avgLevel:
-        Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, estimate.minLevel ?? 1) +
-        (estimate.isPredator ? PREDATOR_LEVEL_BOOST : 0) +
-        Math.floor(mw.rng() * (estimate.singleStage ? SINGLE_STAGE_LEVEL_JITTER : IMMIGRANT_LEVEL_JITTER)),
+      // The exact same real, species-aware roll `immigration.ts`'s
+      // `rollImmigrantLevel` uses for a walking-in immigrant — direct ask:
+      // "why does everything spawn at lv5. Especially evolved Pokemon they
+      // should be higher distributed," plus its own follow-up "we need to
+      // tune spawning a zone more" once the predator/prey gap and prey
+      // range were separately reported too. A never-visited zone's
+      // estimated population is exactly as real a "spawn" as an immigrant
+      // group; calling the shared function (rather than re-deriving the
+      // same formula here) means this zone-estimate path picks up every
+      // future tuning change to that one place automatically, instead of
+      // silently drifting out of sync with it the way the old duplicated
+      // formula eventually would have.
+      avgLevel: rollImmigrantLevel({ id: estimate.speciesId, homeLayer: estimate.homeLayer, minLevel: estimate.minLevel, singleStage: estimate.singleStage, isPredator: estimate.isPredator }, mw.rng),
       baseResourceIndex: resourceIndex,
       resourceIndex,
       lastEventPopulation: estimate.population,
@@ -451,8 +445,13 @@ export function promoteZone(mw: MacroWorld, row: number, col: number, ctx: Immig
       // Wider spread for a `singleStage` species (never evolves, so a wild
       // population plausibly spans its whole adult lifespan rather than
       // clustering near "just hatched") — same direct ask as the aggregate's
-      // own wider jitter in `estimateInitialAggregates`.
-      const individualSpread = speciesInfo.singleStage ? 16 : 4;
+      // own wider jitter in `estimateInitialAggregates`. Non-predator (prey)
+      // species also get a wider spread than a predator at the same
+      // evolution stage — direct follow-up ask: "Prey should have a wider
+      // range of levels" — a predator stays a tighter, more uniformly
+      // "established individual" band (see `PREDATOR_LEVEL_BOOST`'s own doc
+      // comment), prey spans more of its real population age structure.
+      const individualSpread = speciesInfo.singleStage ? 16 : speciesInfo.isPredator ? 4 : 8;
       const level = Math.max(1, Math.round(aggregate.avgLevel + (mw.rng() - 0.5) * individualSpread));
       const agent: Agent = ctx.spawnAgent(aggregate.species, `${aggregate.species}-${region.key}-invented-${mw.tick}-${i}`, pos, level, mw.rng);
       agent.needs = {

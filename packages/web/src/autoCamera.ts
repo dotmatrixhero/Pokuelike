@@ -40,9 +40,12 @@ const COURTSHIP_DWELL_TICKS = 10;
  * timing here was really just a proxy for real time anyway (nothing about
  * the epilogue cares how many ticks passed), so this reads `performance.now()`
  * directly instead of waiting for however many battle-step ticks happen to
- * land in that window.
+ * land in that window. Raised back up to 3000ms — direct follow-up ask,
+ * after living with 1000ms: "battles not end after 1000ms. i think it needs
+ * to be liek 3000 ms" — 1000ms cut away before a viewer had time to actually
+ * register the finishing blow.
  */
-const BATTLE_EPILOGUE_MS = 1000;
+const BATTLE_EPILOGUE_MS = 3000;
 /**
  * A battle with no new `fought`/`missed`/`herdClash` hit involving either
  * participant for this many ticks is treated as silently disengaged (one
@@ -362,9 +365,22 @@ export class AutoCameraController {
    * apply the active engagement's camera focus. `reconcile` itself always
    * runs (detection/expiry needs to keep working while disabled — see
    * `ingest`); only the actual camera pan is gated here.
+   *
+   * `playing` — direct report: "it loses focus after a while [while paused].
+   * If I pause it I don't want to focus on something else unless I click
+   * outside the box." Root cause: a concluded battle's epilogue hold
+   * (`BATTLE_EPILOGUE_MS`/`CLASH_EPILOGUE_MS`) counts down in real wall-clock
+   * time (`performance.now()`), deliberately, so it can't stall forever
+   * behind a `step()` that only fires on a timer (see `ingest`'s own doc
+   * comment) — but that means it kept expiring in the background even while
+   * the world itself was frozen, moving the camera on to whatever queued
+   * next without the viewer ever choosing that. `reconcile` now takes
+   * `playing` and freezes just that one real-time comparison while paused —
+   * every other tick-gated check here is already naturally frozen (ticks
+   * don't advance while paused), so this is the one real gap.
    */
-  update(world: World): void {
-    this.reconcile(world);
+  update(world: World, playing: boolean): void {
+    this.reconcile(world, playing);
     if (this.enabled && this.active && !this.viewerTookOver) this.host.focusOn(this.focusPos(this.active, world));
   }
 
@@ -575,12 +591,24 @@ export class AutoCameraController {
   private onBattleHit(category: "battle" | "clash", ids: Set<string>, pos: Vec2, label: string, world: World): void {
     const existing = this.findContinuous(ids);
     if (existing) {
-      // A new participant can join mid-fight (e.g. a pack-hunt assist) —
-      // widen the tracked id set so the log filter/camera follow both
-      // pick it up, rather than starting a second, competing engagement.
+      // A new participant can join mid-fight (e.g. a pack-hunt assist, or —
+      // now that herd-conflict fights can genuinely coexist nearby — two
+      // separate pairs whose own ids happen to overlap through a shared
+      // participant) — widen the tracked id set so the log filter/camera
+      // follow both pick it up, rather than starting a second, competing
+      // engagement.
       for (const id of ids) existing.ids.add(id);
       existing.fallbackPos = pos;
       existing.expiresOrLastActiveTick = world.tick;
+      // Direct ask: "multi-way 6 unit free for alls that get really
+      // confusing" — once widening pulls a THIRD participant into what
+      // started as an ordinary pair, the original "X vs Y" label no longer
+      // describes what's actually on screen. Relabel to something that
+      // reads as a real multi-agent brawl instead of a stale two-name
+      // string quietly tracking more than it says.
+      if (existing.ids.size > 2) {
+        existing.label = `${existing.ids.size}-way ${category === "battle" ? "battle" : "brawl"}`;
+      }
       return;
     }
     // A real battle is the single most important thing on screen — direct
@@ -657,7 +685,7 @@ export class AutoCameraController {
 
   // --- state machine -----------------------------------------------------------
 
-  private reconcile(world: World): void {
+  private reconcile(world: World, playing: boolean): void {
     const tick = world.tick;
 
     // Stamp any continuous engagement marked-concluded-this-batch (see onBattleParticipantLeft's -1 sentinel) with a real epilogue deadline now that we know the tick — and the real-ms clock its own epilogue duration actually counts against.
@@ -680,11 +708,14 @@ export class AutoCameraController {
           this.active.concludedAtTick = tick;
           this.active.concludedAtRealMs = performance.now();
         }
-        if (this.active.concludedAtRealMs !== undefined && performance.now() - this.active.concludedAtRealMs >= epilogueMs) {
-          this.finishActive(world);
+        // Gated on `playing` — see `update`'s own doc comment for why: this
+        // is the one real-time (not tick-gated) expiry check here, so it's
+        // the one that needs an explicit pause guard.
+        if (playing && this.active.concludedAtRealMs !== undefined && performance.now() - this.active.concludedAtRealMs >= epilogueMs) {
+          this.finishActive(world, playing);
         }
       } else if (tick >= this.active.expiresOrLastActiveTick) {
-        this.finishActive(world);
+        this.finishActive(world, playing);
       }
     }
 
@@ -704,12 +735,12 @@ export class AutoCameraController {
     if (!this.active && this.enabled) this.releaseControl();
   }
 
-  private finishActive(world: World): void {
+  private finishActive(world: World, playing: boolean): void {
     this.active = undefined;
     // Immediately try to promote the next queued engagement on the same
     // reconcile pass so a back-to-back run of events (e.g. a kill right as
     // an evolution fires elsewhere) doesn't sit on an empty frame first.
-    this.reconcile(world);
+    this.reconcile(world, playing);
   }
 
   private applySlowdownIfNeeded(): void {

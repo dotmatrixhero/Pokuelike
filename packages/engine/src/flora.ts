@@ -374,11 +374,11 @@ const NEIGHBOR_OFFSETS: Vec2[] = [
  * this is the one growth path with other, un-scarred neighbors usually
  * available to fall back to instead.
  */
-function trySpread(world: World, pos: Vec2, log: EventLog | undefined, rng: () => number): void {
+function trySpread(world: World, layer: Layer, pos: Vec2, log: EventLog | undefined, rng: () => number): void {
   const shuffled = [...NEIGHBOR_OFFSETS].sort(() => rng() - 0.5);
   for (const offset of shuffled) {
     const nx = pos.x + offset.x, ny = pos.y + offset.y;
-    const tile = tileAt(world, "surface", nx, ny);
+    const tile = tileAt(world, layer, nx, ny);
     if (tile?.terrain !== "floor" || tile.overgrazed) continue;
     // Low fertility (a recently-harvested neighbor still recovering) is a
     // real but probabilistic setback, same "reduce, don't ban" shape as
@@ -388,7 +388,7 @@ function trySpread(world: World, pos: Vec2, log: EventLog | undefined, rng: () =
     if (rng() >= (tile.fertility ?? 1)) continue;
     tile.terrain = "seedling";
     tile.growth = 0;
-    log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos: { x: nx, y: ny }, stage: "seeded" });
+    log?.record({ kind: "floraChanged", tick: world.tick, layer, pos: { x: nx, y: ny }, stage: "seeded" });
     return;
   }
 }
@@ -398,10 +398,17 @@ function trySpread(world: World, pos: Vec2, log: EventLog | undefined, rng: () =
  * open ground, which itself has a smaller chance to germinate — deliberately
  * not modeling *why* (no need to simulate what leaves the seed), just the
  * outcome: Pokémon traveling through an area occasionally start new growth
- * there.
+ * there. Surface and Underground both grow real food this way now — direct
+ * ask: "Potatoes and stuff can spread. Be spread by seedlings and by just
+ * growing in nearby patches" (Underground's own real crops — Potato/
+ * Pumpkin — were placed once at worldgen and never regrew or spread at
+ * all; see `growUndergroundFlora`'s own doc comment for the other half of
+ * this fix). Canopy stays excluded — flora.ts's whole seedling/germination
+ * mechanism has never applied there; Apple's own regrowth already works a
+ * completely different way (`growCanopyFood`'s ripen-in-place cycle).
  */
 export function maybeDropSeed(world: World, layer: Layer, pos: Vec2, log?: EventLog, rng: () => number = Math.random): void {
-  if (layer !== "surface") return; // flora is a surface-layer thing for now
+  if (layer !== "surface" && layer !== "underground") return;
   if (rng() >= SEED_DROP_CHANCE) return;
 
   const tile = tileAt(world, layer, pos.x, pos.y);
@@ -550,7 +557,7 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
       }
 
       if (rng() < FOOD_SPREAD_CHANCE * (0.5 + season) * weatherDivisor) {
-        trySpread(world, pos, log, rng);
+        trySpread(world, "surface", pos, log, rng);
       }
     }
 
@@ -564,6 +571,109 @@ export function growFlora(world: World, log?: EventLog, rng: () => number = Math
         tile.quality = undefined;
         tile.fertility = FERTILITY_AFTER_HARVEST; // same recovery-time reasoning as the food-death branch above
         log?.record({ kind: "floraChanged", tick: world.tick, layer: "surface", pos, stage: "died" });
+      }
+    }
+  }
+}
+
+/**
+ * `growFlora`'s counterpart for the Underground layer — direct report,
+ * after confirming Canopy's Apple already regrows in place
+ * (`growCanopyFood`'s ripen-in-place cycle picks up a tile the instant its
+ * stock reads 0, regardless of whether that's from worldgen placement or
+ * ordinary eating): "Regrowth! Apples can just regrow infinitely from same
+ * tree. Spread! Potatoes and stuff can spread. Be spread by seedlings and
+ * by just growing in nearby patches." Underground's own real crops
+ * (Potato/Pumpkin, `crops.ts`'s `nativeLayer: "underground"`) were placed
+ * once at worldgen and then only ever decayed — this module's seedling/
+ * germination/spread system was Surface-only in its entirety, so an eaten-
+ * out underground patch was permanently gone with no way back.
+ *
+ * A genuine second copy of `growFlora`'s core loop, not a parameterized
+ * reuse of it — Underground has no sunbeam tiles at all (`isNearSunbeam`
+ * always reads false here, so no sun-loving bonus chance and no `nearSun`
+ * `pickCrop` doubling), and `floraDecayDivisor` already returns a flat 1
+ * (no effect) for any non-Surface layer, so the weather-driven decay/
+ * spread modulation surface food gets from rain/drought simply doesn't
+ * apply down here — real, not an oversight (see that function's own
+ * layer check). Same tuning constants otherwise (`MATURATION_TICKS`,
+ * `FOOD_SPREAD_CHANCE`, `NATURAL_DECAY_PER_TICK`, etc.) — no real-run data
+ * yet to justify Underground-specific numbers, same "judge against a real
+ * run, not vibes" standard as every other constant in this file.
+ */
+export function growUndergroundFlora(world: World, log?: EventLog, rng: () => number = Math.random): void {
+  const season = seasonalMultiplier(world.tick);
+  const tiles = world.tiles.underground;
+
+  for (let i = 0; i < tiles.length; i++) {
+    const tile = tiles[i]!;
+    const pos = { x: i % world.width, y: Math.floor(i / world.width) };
+    decayGrazing(world, tile, pos, log);
+    if (tile.fertility !== undefined && tile.fertility < 1) {
+      tile.fertility = Math.min(1, tile.fertility + FERTILITY_REGEN_PER_TICK);
+    }
+
+    if (tile.terrain === "seedling") {
+      tile.growth = (tile.growth ?? 0) + (tile.overgrazed ? OVERGRAZED_GROWTH_MULTIPLIER : 1);
+      if (tile.growth >= MATURATION_TICKS) {
+        const biome = dominantBiomeAt(world.biomeSeeds, pos.x, pos.y);
+        const moisture = effectiveWaterDensityAt(world.biomeSeeds, world.biomeSeedDrift, pos.x, pos.y);
+        const crop = pickCrop(biome, moisture, world.tick, false, rng, ["canopy"]);
+        const winterPenalty = seasonName(world.tick) === "winter" && !FOOD_CROPS[crop].winterHardy ? WINTER_NON_HARDY_FOOD_CHANCE_MULTIPLIER : 1;
+        const becomesFood = rng() < FOOD_CHANCE * winterPenalty;
+        const quality = tile.fertility ?? 1;
+        tile.quality = quality;
+
+        if (becomesFood) {
+          tile.terrain = "food";
+          tile.stock = FOOD_MAX_STOCK * yieldFactor(quality);
+          tile.flavor = crop;
+          invalidateResourceIndex(world);
+        } else {
+          tile.terrain = "flora";
+          tile.stock = 1;
+          tile.flavor = pickFlavor(FLORA_FLAVORS, rng);
+        }
+        tile.growth = undefined;
+        log?.record({ kind: "floraChanged", tick: world.tick, layer: "underground", pos, stage: "sprouted", flavor: tile.flavor });
+      }
+      continue;
+    }
+
+    if (tile.terrain === "food" && tile.stock !== undefined) {
+      const crop = tile.flavor !== undefined && tile.flavor in FOOD_CROPS ? FOOD_CROPS[tile.flavor as CropId] : undefined;
+      let weatherDivisor = floraDecayDivisor(world, "underground", pos); // always 1 — see this function's own doc comment
+      if (crop?.droughtResistant && weatherDivisor < 1) {
+        weatherDivisor += (1 - weatherDivisor) * DROUGHT_RESISTANCE_DAMPING;
+      }
+      tile.stock -= (NATURAL_DECAY_PER_TICK * (1.5 - season) * decayFactor(tile.quality ?? 1)) / weatherDivisor;
+
+      if (tile.stock <= 0) {
+        tile.terrain = "floor";
+        tile.stock = undefined;
+        tile.flavor = undefined;
+        tile.quality = undefined;
+        tile.fertility = FERTILITY_AFTER_HARVEST;
+        invalidateResourceIndex(world);
+        log?.record({ kind: "floraChanged", tick: world.tick, layer: "underground", pos, stage: "died" });
+        continue;
+      }
+
+      if (rng() < FOOD_SPREAD_CHANCE * (0.5 + season) * weatherDivisor) {
+        trySpread(world, "underground", pos, log, rng);
+      }
+    }
+
+    if (tile.terrain === "flora" && tile.stock !== undefined) {
+      tile.stock -= (FLORA_DECAY_PER_TICK * (1.5 - season) * decayFactor(tile.quality ?? 1)) / floraDecayDivisor(world, "underground", pos);
+
+      if (tile.stock <= 0) {
+        tile.terrain = "floor";
+        tile.stock = undefined;
+        tile.flavor = undefined;
+        tile.quality = undefined;
+        tile.fertility = FERTILITY_AFTER_HARVEST;
+        log?.record({ kind: "floraChanged", tick: world.tick, layer: "underground", pos, stage: "died" });
       }
     }
   }

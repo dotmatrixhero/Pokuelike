@@ -423,7 +423,8 @@ export type BehaviorKind =
   | "buildShelter"
   | "sleep"
   | "restAtShelter"
-  | "scavenge";
+  | "scavenge"
+  | "train";
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
 export interface InventoryItem {
@@ -533,6 +534,17 @@ export interface Agent {
    */
   retaliateAgainstId?: string;
   /**
+   * World tick this agent last took part in a `herdConflict.ts` rivalry hit
+   * (either side — attacker or defender, hit or miss) — direct ask: "6 unit
+   * free for alls that get really confusing." Backs
+   * `herdConflict.ts`'s local-fight cap: before a brand-new pair is allowed
+   * to start its own separate fight, nearby agents with a recent-enough
+   * value here count as "already busy," so only so many concurrent
+   * skirmishes can pile into the same small area at once. Absent = never
+   * fought (or long enough ago not to count), the default.
+   */
+  lastHerdConflictTick?: number;
+  /**
    * Rolling memory of resource tiles (same terrain kind as the current
    * seekWater/seekFood target) found crowded during the current seeking
    * episode — excluded from the next nearest-tile pick once
@@ -547,6 +559,33 @@ export interface Agent {
    * oscillation-prevention reasoning.
    */
   blockedResourceTiles?: Vec2[];
+  /**
+   * The single resource tile (food or water) this agent most recently
+   * consumed from, and when — direct report: agents "move back and forth
+   * repeatedly between one plant and water." When a fresh seekWater/
+   * seekFood search's nearest candidate is this exact tile AND it's still
+   * recent, needs.ts prefers a genuinely different nearby tile if one
+   * exists within a small extra-distance tolerance, rather than immediately
+   * re-targeting the tile it just left. Unlike `blockedResourceTiles`
+   * (a whole seeking *episode's* crowded-tile memory, cleared when the
+   * episode ends), this is a single persistent value that survives across
+   * episodes — the whole point is remembering the LAST visit even after a
+   * clean, uncrowded consume.
+   */
+  lastResourceVisit?: { pos: Vec2; kind: "food" | "water"; tick: number };
+  /**
+   * Distinct food/water tiles this agent has personally stumbled onto while
+   * idly exploring (`needs.ts`'s `applyExploration`) — not from ordinary
+   * need-driven seeking, which already finds the map's nearest resource
+   * instantly via `resourceIndex.ts` regardless of memory. Direct ask:
+   * "exploring as a drive; finding more crop locations and water for
+   * later." A capped, FIFO-evicted list (`MAX_KNOWN_RESOURCE_TILES`,
+   * needs.ts) — a real, growing personal record of "places I've found,"
+   * mirroring `visitedSectors`'/`encounteredSpecies`' own capped-list
+   * pattern, and each genuinely new discovery earns a real one-time exp
+   * bonus (`EXP_ON_RESOURCE_DISCOVERY`) on top of the flat per-sector one.
+   */
+  knownResourceTiles?: Vec2[];
   /**
    * Ticks spent standing on a layer-mismatched crop's tile actually digging
    * it out (CROPS_DESIGN.md's "layer-gated crop access" pitch) — the real
@@ -1263,6 +1302,50 @@ export interface Agent {
    */
   lifetimeKills?: number;
   /**
+   * Lifetime count of real kills against a target at least
+   * `GIANT_SLAYER_LEVEL_GAP` (5) levels above this agent's own level at the
+   * moment of the kill — set alongside `lifetimeKills` at every real kill
+   * site (predation.ts's finishing blow, herdConflict.ts's lethal
+   * escalation). Direct ask: "add a title for knocking out a pokemon more
+   * than 5 lvls above you. it makes you notable." The record `notableTitle:
+   * "giantSlayer"` (The Giant Slayer) is judged against — deliberately a
+   * LOW threshold (see `NOTABLE_TITLE_MIN_THRESHOLDS`), since a single such
+   * kill is already the notable moment, not something that needs repeating
+   * the way Hero's ordinary kill count does. Never decremented. Absent/0 =
+   * never landed one.
+   */
+  lifetimeGiantSlayerKills?: number;
+  /**
+   * Lifetime count of real herd-conflict "wins" — this agent as the
+   * attacker on a `herdConflict.ts` hit that made the defender retreat, or
+   * (rarer) a lethal escalation — set in `resolveRivalryHit`. Direct ask:
+   * "'alpha' - which is win over 40 clashes." The record `notableTitle:
+   * "alpha"` (The Alpha) is judged against. Never decremented. Absent/0 =
+   * never won one.
+   */
+  lifetimeClashWins?: number;
+  /**
+   * Lifetime count of real ally-support acts (a heal and/or buff actually
+   * applied to a herd-mate) this agent personally delivered as the
+   * supporter — set in `support.ts`'s `applyAllyEffect`, the one shared
+   * function both a dedicated idle-tick support move (`applySupportMove`)
+   * and a hostile attack's piggybacked ally effect (`allyEffectOnAttack`,
+   * predation.ts) route through. Direct ask: "'shaman' for healing or
+   * supporting units in battle a lot giving them buffs." The record
+   * `notableTitle: "shaman"` (The Shaman) is judged against. Never
+   * decremented. Absent/0 = never supported an ally.
+   */
+  lifetimeSupportActs?: number;
+  /**
+   * Lifetime count of real herd-conflict "losses" — this agent as the
+   * DEFENDER on a `herdConflict.ts` hit that made it retreat, faint, or
+   * die — set in `resolveRivalryHit`, the mirror image of
+   * `lifetimeClashWins`. Direct ask: "'underdog' for losing 40 clashes."
+   * The record `notableTitle: "underdog"` (The Underdog) is judged against.
+   * Never decremented. Absent/0 = never lost one.
+   */
+  lifetimeClashLosses?: number;
+  /**
    * Lifetime real shelter-construction ticks actually invested (shelter.ts's
    * `applyShelterBuilding`, incremented every real build tick alongside the
    * per-attempt `shelterBuildTicks`, unlike which this one is never reset —
@@ -1341,11 +1424,25 @@ export interface RapportEdge {
 }
 
 /**
- * The seven rare, earned individual titles — see notables.ts/DESIGN.md's
+ * The nine rare, earned individual titles — see notables.ts/DESIGN.md's
  * "Notables" section for the full record-holder mechanism and real-run
- * calibration.
+ * calibration. `giantSlayer`/`savant` are the newest two — direct ask:
+ * "add a title for knocking out a pokemon more than 5 lvls above you...
+ * maybe like 'savant' for maxing out a branch of skill points for a move."
  */
-export type NotableTitleId = "hero" | "builder" | "gatherer" | "rival" | "beloved" | "elder" | "wanderer";
+export type NotableTitleId =
+  | "hero"
+  | "builder"
+  | "gatherer"
+  | "rival"
+  | "beloved"
+  | "elder"
+  | "wanderer"
+  | "giantSlayer"
+  | "savant"
+  | "alpha"
+  | "shaman"
+  | "underdog";
 
 /** One entry of `World.notables` — the current record-holder for a title, and the live stat value that earned it. */
 export interface NotableRecord {

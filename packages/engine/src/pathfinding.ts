@@ -1,13 +1,15 @@
 import type { Agent, Layer, Vec2, World } from "./types.js";
 import { tileAt } from "./world.js";
-import { stepToward } from "./movement.js";
+import { stepToward, canFlyOverObstacle } from "./movement.js";
 import { canEnterTile } from "./occupancy.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
 
-/** `tileAt(...)?.walkable`, ADDITIONALLY gated on the hard water-crossing constraint (`waterBody.ts`'s `canEnterWater`) AND its land-side mirror (`canEnterLand`, for obligate-aquatic agents) for `agent` — the one always-on pair of checks every walkability test in this module must apply, capacity-blind pursuit paths included. */
+/** `tileAt(...)?.walkable` (or a Flying-type agent's canopy exemption — see `canFlyOverObstacle`), ADDITIONALLY gated on the hard water-crossing constraint (`waterBody.ts`'s `canEnterWater`) AND its land-side mirror (`canEnterLand`, for obligate-aquatic agents) for `agent` — the one always-on set of checks every walkability test in this module must apply, capacity-blind pursuit paths included. */
 function isWalkableFor(world: World, layer: Layer, pos: Vec2, agent: Agent): boolean {
   const tile = tileAt(world, layer, pos.x, pos.y);
-  return !!tile?.walkable && canEnterWater(world, agent, layer, pos) && canEnterLand(world, agent, layer, pos);
+  if (!tile) return false;
+  if (!tile.walkable && !canFlyOverObstacle(agent, layer)) return false;
+  return canEnterWater(world, agent, layer, pos) && canEnterLand(world, agent, layer, pos);
 }
 
 /**
@@ -294,9 +296,12 @@ export function stepTowardMovingTarget(world: World, agent: Agent, target: Agent
       // Genuinely unreachable right now — give up on routing and fall back
       // to the pre-existing greedy approach rather than freezing in place.
       // (Greedy `stepToward` also carries the same water-crossing check, so
-      // this fallback can't be used to route around it either.)
+      // this fallback can't be used to route around it either.) `stopAdjacent`
+      // — same "never share a tile with a live pursuit target" invariant the
+      // main routed path enforces below — this fallback shouldn't be a
+      // loophole for it.
       agent.pathCache = undefined;
-      return stepToward(world, agent.layer, agent.pos, target.pos, agent);
+      return stepToward(world, agent.layer, agent.pos, target.pos, agent, undefined, true);
     }
     if (fresh.length === 0) {
       // Already standing on the target's own tile (shouldn't normally
@@ -315,7 +320,7 @@ export function stepTowardMovingTarget(world: World, agent: Agent, target: Agent
     const fresh = findPath(world, agent.layer, agent.pos, target.pos, agent);
     if (!fresh) {
       agent.pathCache = undefined;
-      return stepToward(world, agent.layer, agent.pos, target.pos, agent);
+      return stepToward(world, agent.layer, agent.pos, target.pos, agent, undefined, true);
     }
     if (fresh.length === 0) {
       agent.pathCache = undefined;

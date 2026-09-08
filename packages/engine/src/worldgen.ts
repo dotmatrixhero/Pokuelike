@@ -1789,6 +1789,35 @@ function applyFertileBasin(world: World, width: number, height: number, rng: () 
   });
 }
 
+/**
+ * Sanctuary's own signature — direct ask: "make certain zones more
+ * hospitable and prey friendly." A real, open, food-rich clearing: a small
+ * water pocket at its heart (same "spring" idiom `applySacredSpring` uses),
+ * obstacles (wall/boulder/tree) thinned out across the whole footprint —
+ * open sightlines a prey animal can actually see a threat coming across,
+ * not a thicket predation.ts's line-of-sight check would otherwise block —
+ * and dense food/bush growth throughout, well beyond an ordinary zone's
+ * incidental crop placement.
+ */
+const SANCTUARY_RADIUS = 7;
+const SANCTUARY_WATER_POCKET_RADIUS = 2;
+function applySanctuary(world: World, width: number, height: number, rng: () => number): void {
+  const center = pickLandmarkCenter(rng, width, height);
+  forEachTileInJitteredCircle(center, SANCTUARY_WATER_POCKET_RADIUS, width, height, rng, (x, y) => {
+    setTile(world, "surface", x, y, "water", 0);
+  });
+  forEachTileInJitteredCircle(center, SANCTUARY_RADIUS, width, height, rng, (x, y, distFrac) => {
+    const tile = tileAt(world, "surface", x, y);
+    if (!tile || tile.terrain === "water") return;
+    if (distFrac < SANCTUARY_WATER_POCKET_RADIUS / SANCTUARY_RADIUS) return; // the water pocket itself, already handled above
+    if ((tile.terrain === "wall" || tile.terrain === "boulder" || tile.terrain === "tree") && rng() < 0.7) {
+      setTile(world, "surface", x, y, "floor", tile.elevation);
+      return;
+    }
+    if (tile.terrain === "floor" && rng() < 0.5) setTile(world, "surface", x, y, rng() < 0.5 ? "food" : "bush", tile.elevation);
+  });
+}
+
 function applyLandmarkFeature(world: World, width: number, height: number, rng: () => number, landmark: LandmarkType | undefined): void {
   switch (landmark) {
     case "greatLake":
@@ -1811,6 +1840,8 @@ function applyLandmarkFeature(world: World, width: number, height: number, rng: 
       return applyFrozenGrotto(world, width, height, rng);
     case "crossroads":
       return applyCrossroads(world, width, height, rng);
+    case "sanctuary":
+      return applySanctuary(world, width, height, rng);
     case undefined:
       return;
   }

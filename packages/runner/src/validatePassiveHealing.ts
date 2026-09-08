@@ -36,7 +36,7 @@ for (const kind of ["regen","regenFlat","healAura","damageReduction","damageRedu
 // effective %/tick of maxHp, combining flat and percent, for the worst offenders
 const eff = alive.map((a:any)=>({sp:a.species, maxHp:a.maxHp,
   pct:(a.passives?.regen??0) + (a.passives?.regenFlat??0)/(a.maxHp||1)}));
-eff.sort((x,y)=>y.pct-x.pct);
+eff.sort((x: { pct: number }, y: { pct: number })=>y.pct-x.pct);
 console.log("\ntop effective passive heal (%/tick of maxHp), when NOT suppressed:");
 for(const e of eff.slice(0,5)) console.log(`  ${e.sp.padEnd(12)} ${(e.pct*100).toFixed(2)}%/tick  maxHp ${e.maxHp} => full heal in ${(1/e.pct).toFixed(0)} ticks`);
 // Effective damage reduction after diminishing returns (status.ts) — the

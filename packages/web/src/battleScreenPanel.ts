@@ -42,6 +42,14 @@ export class BattleScreenPanel {
   /** Set once a battle's conclusion (a death/faint/flee) has been rendered — the epilogue hold that follows shouldn't add a fresh "battle begins" framing if somehow re-entered, and gets a distinct "concluded" visual treatment (see render's `.battle-screen-concluded`). */
   private concluded = false;
   private dirty = true;
+  /**
+   * Persistent DOM handles + the `activeSeq` they were last built for — see
+   * `render`'s own doc comment for why these survive frame to frame instead
+   * of being torn down and rebuilt every time.
+   */
+  private logEl: HTMLElement | undefined;
+  private headerEl: HTMLElement | undefined;
+  private renderedSeq: number | undefined;
 
   constructor(private readonly container: HTMLElement) {}
 
@@ -54,6 +62,9 @@ export class BattleScreenPanel {
     this.lines = [];
     this.concluded = false;
     this.dirty = true;
+    this.logEl = undefined;
+    this.headerEl = undefined;
+    this.renderedSeq = undefined;
   }
 
   /**
@@ -115,28 +126,61 @@ export class BattleScreenPanel {
    * DoT-style status tick, or simply the very next hit not having landed
    * yet) — same "live, recomputed every frame" spirit as `autoCamera.ts`'s
    * own `focusPos`. Cheap: this panel is only ever a handful of DOM nodes.
+   *
+   * Direct report: "when I pause while autocam focuses on a battle, I can't
+   * scroll and see battle log." Root cause: this used to tear down and
+   * rebuild the ENTIRE panel (`container.replaceChildren()`, a brand new
+   * `log` div) every single frame, regardless of whether anything actually
+   * changed — a fresh DOM node has no scroll position, so any manual scroll
+   * was destroyed within one frame (~16ms) even with zero new lines, which
+   * is exactly the case while paused. Now the header/log DOM nodes persist
+   * across frames (`headerEl`/`logEl`/`renderedSeq`): the log's own children
+   * (and its scroll position) are only touched when `dirty` says real new
+   * content arrived, and even then only re-snapped to the bottom if the
+   * viewer was already reading from the bottom — scrolled up to reread
+   * something, a fresh line no longer yanks them back down.
    */
   render(world: World): void {
     if (!this.activeCategory) {
       if (!this.dirty) return;
       this.dirty = false;
       this.container.replaceChildren(emptyNote("Nothing to show — Auto Camera will frame a battle here once one breaks out."));
+      this.logEl = undefined;
+      this.headerEl = undefined;
+      this.renderedSeq = undefined;
       return;
     }
 
-    this.container.replaceChildren();
-    this.container.classList.toggle("battle-screen-concluded", this.concluded);
+    const isNewEngagement = this.renderedSeq !== this.activeSeq;
+    const linesChanged = this.dirty;
 
-    if (this.activeCategory === "battle" && this.ids) {
-      this.container.appendChild(this.renderVsHeader(world));
+    if (isNewEngagement) {
+      this.container.replaceChildren();
+      this.headerEl = this.activeCategory === "battle" && this.ids ? this.renderVsHeader(world) : undefined;
+      if (this.headerEl) this.container.appendChild(this.headerEl);
+      this.logEl = document.createElement("div");
+      this.logEl.className = "battle-screen-log";
+      this.container.appendChild(this.logEl);
+      this.renderedSeq = this.activeSeq;
+    } else if (this.activeCategory === "battle" && this.ids && this.headerEl) {
+      // HP/names are live state — refresh the header in place every frame
+      // without touching the log element at all (that's what preserves its
+      // scroll position across frames it isn't otherwise dirty).
+      const fresh = this.renderVsHeader(world);
+      this.headerEl.replaceWith(fresh);
+      this.headerEl = fresh;
     }
 
-    const log = document.createElement("div");
-    log.className = "battle-screen-log";
-    const shown = this.lines.slice(-40);
-    shown.forEach((line, i) => log.appendChild(renderLine(line, i === shown.length - 1)));
-    this.container.appendChild(log);
-    log.scrollTop = log.scrollHeight;
+    this.container.classList.toggle("battle-screen-concluded", this.concluded);
+
+    if (this.logEl && (isNewEngagement || linesChanged)) {
+      const wasAtBottom = isNewEngagement || this.logEl.scrollTop + this.logEl.clientHeight >= this.logEl.scrollHeight - 4;
+      const shown = this.lines.slice(-40);
+      this.logEl.replaceChildren();
+      shown.forEach((line, i) => this.logEl!.appendChild(renderLine(line, i === shown.length - 1)));
+      if (wasAtBottom) this.logEl.scrollTop = this.logEl.scrollHeight;
+    }
+
     this.dirty = false;
   }
 

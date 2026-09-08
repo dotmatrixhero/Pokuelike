@@ -56,14 +56,19 @@ describe("tickAgent", () => {
     expect(agent.pos.x).toBeGreaterThan(0);
   });
 
-  it("stays idle when all needs are satisfied", () => {
+  it("trains (instead of just standing still) when all needs are satisfied and there's nothing left to explore", () => {
     const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ pos: { x: 2, y: 0 } });
 
-    tickAgent(world, agent);
+    tickAgent(world, agent, undefined, undefined, undefined, world.rng);
 
-    expect(agent.behavior).toBe("idle");
-    expect(agent.pos).toEqual({ x: 2, y: 0 });
+    // A satisfied agent with an already-visited world falls through to
+    // applyTraining rather than sitting fully idle — direct ask: "training/
+    // getting xp would be cool." Position isn't pinned exactly: training's
+    // step is a single tile at most, seeded here via world.rng for
+    // determinism rather than left on unseeded Math.random.
+    expect(agent.behavior).toBe("train");
+    expect(Math.abs(agent.pos.x - 2) + Math.abs(agent.pos.y - 0)).toBeLessThanOrEqual(1);
   });
 
   it("drinks and restores thirst once it reaches the water tile", () => {
@@ -722,14 +727,15 @@ describe("exp-motivated exploration", () => {
     expect(agent.exploreTarget).toBeUndefined();
   });
 
-  it("does nothing (stays idle) when the entire reachable world is already one visited sector", () => {
+  it("falls back to training when the entire reachable world is already one visited sector", () => {
     const world = createWorld(3, 3, DETERMINISTIC_TEST_SEED); // one sector total (SECTOR_SIZE=5) — markSectorVisited marks it before exploration is even considered
     const agent = makeAgent({ pos: { x: 1, y: 1 } });
 
-    tickAgent(world, agent);
+    tickAgent(world, agent, undefined, undefined, undefined, world.rng);
 
-    expect(agent.behavior).toBe("idle");
-    expect(agent.pos).toEqual({ x: 1, y: 1 });
+    // Nothing left to explore -> applyTraining, not a fully idle stall.
+    expect(agent.behavior).toBe("train");
+    expect(Math.abs(agent.pos.x - 1) + Math.abs(agent.pos.y - 1)).toBeLessThanOrEqual(1);
   });
 });
 
@@ -760,16 +766,18 @@ describe("tile preference (Agent.preferredTerrain, applyExploration)", () => {
     expect(agent.pos.x).toBeLessThan(20);
   });
 
-  it("an agent already lingering near its preferred terrain stays idle instead of wandering off to a new spot", () => {
+  it("an agent already lingering near its preferred terrain trains in place instead of wandering off to a new spot", () => {
     const world = createWorld(40, 40, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 21, 20, "flora"); // 1 tile away, inside the "already satisfied" radius
     const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["flora"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
-    tickAgent(world, agent);
+    tickAgent(world, agent, undefined, undefined, undefined, world.rng);
 
-    expect(agent.behavior).toBe("idle");
-    expect(agent.pos).toEqual({ x: 20, y: 20 });
+    // Already at its preferred spot -> applyExploration bails ("arrived"),
+    // falling through to applyTraining rather than wandering to a new one.
+    expect(agent.behavior).toBe("train");
     expect(agent.exploreTarget).toBeUndefined();
+    expect(Math.abs(agent.pos.x - 20) + Math.abs(agent.pos.y - 20)).toBeLessThanOrEqual(1);
   });
 
   it("falls back to a bounded local scan for a preference kind outside the cheap resource index (e.g. boulder)", () => {

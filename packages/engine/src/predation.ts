@@ -8,6 +8,7 @@ import type { Direction } from "./moves.js";
 import { resolveShape } from "./moves.js";
 import type { MoveSpec } from "./moves.js";
 import { canBreed, grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
+import { GIANT_SLAYER_LEVEL_GAP } from "./notables.js";
 import { FINISHING_POOL_FRACTION, applyAllyEffect, nearestAllyEffectTarget } from "./support.js";
 import { RAPPORT_MOB_DEFENSE_DELTA, strengthenRapportMutual } from "./rapport.js";
 import { effectiveDisposition } from "./herdLeadership.js";
@@ -152,6 +153,24 @@ function effectiveFleeRadius(world: World, agent: Agent): number {
   const boldness = effectiveDisposition(world, agent).boldness;
   const radius = FLEE_DETECT_RADIUS + (0.5 - boldness) * (2 * FLEE_RADIUS_SPREAD);
   return Math.max(FLEE_RADIUS_FLOOR, radius);
+}
+
+/**
+ * How far above the fleeing agent's own level a threat has to be before it
+ * counts as a "severe" mismatch — reused, not re-derived, from
+ * `GIANT_SLAYER_LEVEL_GAP` (the same "5+ levels" bar already established
+ * for "this is a real power gap," not a fresh number). Direct report:
+ * seeing a lot of one-sided fights from the level spread, with the ask that
+ * "lower level Pokémon need to try to survive more" — this is the shared
+ * threshold `applyPredationInstincts` uses both to widen detection range
+ * (see `severeThreatFleeRadius`) and to skip a doomed mob-fight below.
+ */
+const SEVERE_LEVEL_GAP = GIANT_SLAYER_LEVEL_GAP;
+/** Extra flee-detection range on top of `effectiveFleeRadius` for a threat that clears `SEVERE_LEVEL_GAP` — a badly outleveled agent notices real danger sooner, not just at the same range as an evenly-matched one. */
+const SEVERE_THREAT_EXTRA_FLEE_RADIUS = 3;
+
+function levelGap(threat: Agent, agent: Agent): number {
+  return (threat.level ?? 1) - (agent.level ?? 1);
 }
 
 /**
@@ -559,6 +578,19 @@ const EGG_THREAT_RADIUS = 4;
  * preference, not a last resort.
  */
 const EGG_EAT_HUNGER_THRESHOLD = 0.9;
+/**
+ * How far away a genuinely edible egg (`!canBreed`) can be for a hungry
+ * agent to actually notice and walk toward it — real bug fix, confirmed by
+ * a direct report: "I don't see eggs being eaten, watched a predator just
+ * ignore an egg." `applyEggEating` used to require the egg already be
+ * adjacent (`manhattan(...) <= 1`) with no seek/travel step of its own — an
+ * agent that wasn't already standing right next to an egg had no mechanism
+ * to ever close that distance, so eating one only ever happened by the
+ * coincidence of already being adjacent. Same order of magnitude as
+ * `HUNT_DETECT_RADIUS` (5) — real prey-sensing scale, not a tile-adjacent
+ * afterthought.
+ */
+const EGG_EAT_DETECT_RADIUS = 5;
 
 /**
  * Every living, unhatched egg this agent is territorial about — its own
@@ -695,8 +727,10 @@ function applyEggDefense(world: World, agent: Agent, ctx: LevelingContext | unde
  * `reproduction.ts`) is willing to eat it, prey and non-prey species alike.
  * A separate, simpler "opportunistic, instant" check is the better fit for
  * that: an egg can't fight back or flee, so there's no real combat
- * encounter to resolve the way a live hunt has one — eating an egg is a
- * single action once adjacent, not a multi-hit fight.
+ * encounter to resolve the way a live hunt has one — the eating itself is a
+ * single action once adjacent, not a multi-hit fight (getting there,
+ * however, is a real walk — see `EGG_EAT_DETECT_RADIUS`'s own doc comment
+ * for the bug that fix addresses).
  *
  * Reuses the real kill-exp/hunger-restore formulas verbatim (`grantKillExp`,
  * `agent.needs.hunger = 1`) rather than inventing new numbers, per direct
@@ -719,10 +753,20 @@ export function applyEggEating(world: World, agent: Agent, ctx: LevelingContext 
       other.alive !== false &&
       other.layer === agent.layer &&
       !canBreed(agent.species, other.species, ctx) &&
-      manhattan(agent.pos, other.pos) <= 1
+      manhattan(agent.pos, other.pos) <= EGG_EAT_DETECT_RADIUS
   );
   const egg = nearest(agent, candidates);
   if (!egg) return false;
+
+  if (manhattan(agent.pos, egg.pos) > 1) {
+    // Spotted, but not adjacent yet — walk toward it instead of ignoring it
+    // (the real bug this fixes). stopAdjacent=true — see stepToward's own
+    // doc comment for why this never lands on the egg's own tile.
+    logBehaviorChange(log, world, agent, "seekFood");
+    agent.behavior = "seekFood";
+    agent.pos = stepToward(world, agent.layer, agent.pos, egg.pos, agent, undefined, true);
+    return true;
+  }
 
   grantKillExp(world, agent, egg, ctx, log, rng);
   agent.needs.hunger = 1;
@@ -978,8 +1022,14 @@ function applySingleDamageInstance(
   // "updated at the event-emission site" this landed on, rather than a
   // per-tick EventLog scan. Recorded here (once, above both "fought"
   // log sites below) since both the finishing-blow and normal-hit phases
-  // are equally real pressure on the defender's herd.
-  recordPredatorPressure(world, defender.herdId, attacker.pos);
+  // are equally real pressure on the defender's herd. Weighted by the real
+  // level gap (one extra "hit" of pressure per SEVERE_LEVEL_GAP levels the
+  // attacker outlevels the defender by) — direct ask: "migrate away from
+  // high-level Pokemon too," so a herd facing a genuinely dangerous
+  // predator reaches the migration threshold sooner than one facing an
+  // evenly-matched pest.
+  const pressureWeight = 1 + Math.max(0, Math.floor(levelGap(attacker, defender) / SEVERE_LEVEL_GAP));
+  recordPredatorPressure(world, defender.herdId, attacker.pos, pressureWeight);
 
   if (defender.fainted) {
     // Finishing-blow phase: the (already-zero) hp bar is untouched; damage
@@ -1013,6 +1063,12 @@ function applySingleDamageInstance(
     // ordinary hunt path ("killed") and the guardian mob-defense finishing
     // blow ("defeated") — see Agent.lifetimeKills's doc comment.
     attacker.lifetimeKills = (attacker.lifetimeKills ?? 0) + 1;
+    // Notables: The Giant Slayer — direct ask: "add a title for knocking
+    // out a pokemon more than 5 lvls above you." See Agent.
+    // lifetimeGiantSlayerKills's doc comment.
+    if ((defender.level ?? 0) - (attacker.level ?? 0) >= GIANT_SLAYER_LEVEL_GAP) {
+      attacker.lifetimeGiantSlayerKills = (attacker.lifetimeGiantSlayerKills ?? 0) + 1;
+    }
     return true;
   }
 
@@ -1549,13 +1605,22 @@ export function applyPredationInstincts(
   // predator's faint silently ending the encounter — see resolveHit/DESIGN.md.
   // Skipped entirely while `agent.asleep` — a sleeping agent doesn't flee or
   // mob on its own initiative, per this function's doc comment above.
+  // A threat clearing SEVERE_LEVEL_GAP is detected from farther out than an
+  // evenly-matched one — direct ask: lower-level Pokémon should react to a
+  // much stronger opponent sooner, not just at the same baseline range.
+  // Widened once here (the search radius) rather than filtered afterward,
+  // so an agent genuinely notices the severe threat from beyond its normal
+  // flee range in the first place.
+  const baseFleeRadius = effectiveFleeRadius(world, agent);
+  const wideFleeRadius = baseFleeRadius + SEVERE_THREAT_EXTRA_FLEE_RADIUS;
   const threats = agent.asleep
     ? []
-    : agentsWithin(world, agent, effectiveFleeRadius(world, agent)).filter(
-        (other) =>
-          isHunterSpecies(rules, other.species, agent.species) &&
-          isDetectable(world, agent.pos, other, effectiveFleeRadius(world, agent))
-      );
+    : agentsWithin(world, agent, wideFleeRadius).filter((other) => {
+        if (!isHunterSpecies(rules, other.species, agent.species)) return false;
+        const distance = manhattan(agent.pos, other.pos);
+        if (distance <= baseFleeRadius) return isDetectable(world, agent.pos, other, baseFleeRadius);
+        return levelGap(other, agent) >= SEVERE_LEVEL_GAP && isDetectable(world, agent.pos, other, wideFleeRadius);
+      });
   const threat = preferMarked(agent, threats);
   if (threat) {
     const distance = manhattan(agent.pos, threat.pos);
@@ -1564,7 +1629,12 @@ export function applyPredationInstincts(
     // waiting for backup that's still several tiles away.
     const mobSize = countHerdAllies(world, agent.id, agent.species, agent.herdId, agent.layer, threat.pos, MOB_TRIGGER_RADIUS) + 1;
 
-    if (distance <= MOB_TRIGGER_RADIUS && mobSize >= mobThreshold(world, agent)) {
+    // A severely outleveled prey doesn't commit to a mob-fight no matter how
+    // many allies are nearby — headcount alone used to be enough to trigger
+    // "fight" even against a hopelessly stronger threat. Falls through to
+    // the flee logic below instead — direct ask: lower-level Pokémon "need
+    // to try to survive more."
+    if (distance <= MOB_TRIGGER_RADIUS && mobSize >= mobThreshold(world, agent) && levelGap(threat, agent) < SEVERE_LEVEL_GAP) {
       logBehaviorChange(log, world, agent, "fight");
       agent.behavior = "fight";
       agent.fightTarget = threat.id;
