@@ -7,6 +7,9 @@ import {
   maybeImmigrate,
   rollImmigrantLevel,
   IMMIGRATION_BASE_CHANCE,
+  FOUNDER_REINFORCE_BOOST,
+  FOUNDER_VIABLE_COUNT,
+  founderWeight,
   PREDATOR_EMPTY_NICHE_BOOST,
   PREDATOR_TARGET_SHARE,
   predatorNicheBoost,
@@ -317,5 +320,27 @@ describe("predatorNicheBoost", () => {
       expect(b).toBeLessThanOrEqual(prev);
       prev = b;
     }
+  });
+});
+
+describe("founderWeight", () => {
+  it("still seeds brand-new species — absent species are not shut out", () => {
+    expect(founderWeight(0)).toBeGreaterThan(0);
+  });
+
+  it("reinforces a present-but-struggling species above a plain rarity weighting", () => {
+    // The bug this fixes: plain 1/(count+1) peaks at count 0, so immigration
+    // maximised diversity and produced nothing but unbreedable singletons.
+    const plainRarity = (n: number) => 1 / (n + 1);
+    expect(founderWeight(1)).toBeGreaterThan(plainRarity(1) * (FOUNDER_REINFORCE_BOOST - 0.001));
+    expect(founderWeight(1)).toBeGreaterThan(founderWeight(0));
+  });
+
+  it("stops reinforcing once a species is established", () => {
+    expect(founderWeight(FOUNDER_VIABLE_COUNT)).toBeCloseTo(1 / (FOUNDER_VIABLE_COUNT + 1), 6);
+  });
+
+  it("never rewards an already-abundant species over a struggling one", () => {
+    expect(founderWeight(2)).toBeGreaterThan(founderWeight(20));
   });
 });

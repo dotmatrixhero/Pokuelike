@@ -5123,3 +5123,40 @@ not something this pathfinding pass itself caused or is positioned to fix.
       and eating out its own prey. A prey-side equivalent, or a predator
       starvation pressure tied to prey density, would be the next step if
       this becomes annoying.
+- [x] **Ecosystem equilibrium: founder viability was the missing feedback.**
+      Direct ask: "let's try to get it more balanced. Try our best to get
+      equilibrium."
+      - Measured the DYNAMICS, not endpoints (new
+        `validateEcology.ts`, which sparklines predator/prey/food over a
+        run). An endpoint cannot tell a healthy oscillation from a collapse.
+      - Two false leads, both corrected by measuring rather than reasoning:
+        (1) `born 0` in every seed looked like reproduction was dead — it
+        is simply a live-birth event, and egg-laying is the real path
+        (161 eggs hatched in one seed). (2) The shelter comfort threshold
+        (0.85, vs a median agent at 0.72 hunger / 0.68 thirst) looked like
+        the blocker; lowering it changed nothing and was reverted.
+      - The real cause: immigration's `1 / (count + 1)` weighting peaks for
+        an ABSENT species, so it relentlessly maximised diversity. Measured:
+        16 living agents across 11 species, 7 singletons, only 2 species
+        with both sexes present. Nothing could breed, so those worlds sat on
+        immigration life-support forever while a luckier seed bootstrapped
+        to 167.
+      - Fixes: `founderWeight` adds an Allee-style boost for a species that
+        is present but below `FOUNDER_VIABLE_COUNT`, and `MIN_GROUP_SIZE`
+        goes 1 -> 2 (a lone arrival has no possible mate).
+      - Result across 8 seeds x 12k ticks:
+
+        | | before | after |
+        |---|---|---|
+        | predator share p90 | 57% | **31%** |
+        | samples with zero predators | 14% | **9%** |
+        | population volatility (cv) | 0.55 | **0.36** |
+        | worst-seed volatility | 0.69 | **0.49** |
+
+      - The remaining zero-predator samples are cycle TROUGHS that recover,
+        visible in the sparklines, not extinctions — which is what
+        equilibrium actually looks like.
+      - Tuning note: cranking the predator niche boost makes it worse on
+        every axis (target 0.3 / boost 12 puts p90 back to 53% and cv to
+        0.47). A hard shove replaces extinction with overshoot; the gentle
+        setting is the one that cycles.
