@@ -2959,3 +2959,51 @@ predator-free went from 2 and 10 kills to 21 and 41.
 The shared lesson, which by now is the recurring one in this document: the
 first useful move is almost never the fix, it is checking that the number
 being optimised is the number that matters.
+
+## Equilibrium: the fix was letting founder populations establish
+
+Asked to get the ecosystem into equilibrium. The obvious levers — predator
+aggression, food abundance, starvation rates — were all wrong, and finding
+that out needed a look at the *dynamics* rather than end-of-run numbers, so
+`validateEcology.ts` now sparklines predator, prey and food across a run.
+
+Two false leads worth recording, both killed by measurement:
+
+- **"Reproduction is completely broken"** — `born 0` in all four seeds.
+  It is not: `born` is the live-birth event and this sim reproduces by
+  egg-laying, which was working fine (161 hatched in one seed). I read a
+  zero on the wrong counter and nearly redesigned a healthy system.
+- **"Shelter is the blocker"** — egg-laying needs a nearby shelter, shelter
+  needs an agent at 85% fed AND watered, and the median agent sits at 0.72
+  hunger / 0.68 thirst. Compelling, and wrong: lowering the threshold
+  changed nothing measurable. Reverted.
+
+The actual cause was in immigration. Its species weighting was
+`1 / (count + 1)`, which is **maximal for a species that is entirely
+absent** — so every arrival preferred a brand-new species over reinforcing
+one already here. In a sparse world that produces nothing but singletons: 16
+living agents across 11 species, 7 of them singletons, and only 2 species
+with two or more members of both sexes. Nothing could find a mate, so those
+worlds sat on immigration life-support indefinitely while a luckier seed
+bootstrapped to 167 and thrived. That bimodality *was* the instability.
+
+`founderWeight` keeps the rarity term but adds an Allee-style boost for a
+species that is present and below `FOUNDER_VIABLE_COUNT`, and groups now
+arrive at a minimum of 2, since a lone immigrant has no possible mate of its
+own species. Across 8 seeds x 12k ticks:
+
+| | before | after |
+|---|---|---|
+| predator share p90 | 57% | **31%** |
+| samples with zero predators | 14% | **9%** |
+| population volatility (cv) | 0.55 | **0.36** |
+
+The remaining zero-predator samples are visible in the sparklines as cycle
+troughs that recover, not extinctions — a predator line reading
+`█▄▂▁▃▆▂▅▆▃▃▄▄▂▁▅▂▅▂▁▃▂▆▄` is the system working. Permanent extinction was
+the bug; oscillation is the goal.
+
+One tuning lesson: pushing the predator niche boost harder makes everything
+worse (target 0.3 / boost 12 returns p90 to 53% and volatility to 0.47). A
+hard corrective just trades extinction for overshoot. The gentle setting is
+the one that cycles.

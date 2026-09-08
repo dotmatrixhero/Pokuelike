@@ -149,8 +149,14 @@ function immigrationScale(livingCount: number): number {
 }
 
 /** How many new agents arrive together in one immigration event — a small founding group, not a single wanderer or a whole herd's worth. */
-const MIN_GROUP_SIZE = 1;
-const MAX_GROUP_SIZE = 3;
+/**
+ * A lone immigrant can never found anything — it has no possible mate of
+ * its own species, so unless another of the same species happens to arrive
+ * later it is a dead end that only ever adds to the singleton count. Groups
+ * start at 2 so an arriving species has a real chance at a breeding pair.
+ */
+const MIN_GROUP_SIZE = 2;
+const MAX_GROUP_SIZE = 4;
 
 /**
  * Floor level for a base-form immigrant (no real evolution threshold of its
@@ -370,6 +376,39 @@ function pickEdgePos(world: World, rng: () => number): Vec2 {
 const UNTAGGED_MATCH_FLOOR = 0.15;
 
 /**
+ * A species with at least this many living members is treated as
+ * established, and stops getting founder reinforcement.
+ */
+export const FOUNDER_VIABLE_COUNT = 6;
+
+/** How much likelier a struggling-but-present species is to be reinforced, versus the plain rarity weighting. */
+export const FOUNDER_REINFORCE_BOOST = 4;
+
+/**
+ * Immigration weight for a species by how many of it are already alive.
+ *
+ * The original weighting was a plain `1 / (count + 1)`, which is maximal for
+ * a species that is entirely ABSENT — so immigration relentlessly maximised
+ * diversity and, in a sparse world, produced nothing but singletons. A
+ * measured example: 16 living agents spread across 11 species, 7 of them
+ * singletons, and only 2 species with two or more members of both sexes.
+ * Nothing could breed, so the population never left immigration life-support
+ * while a luckier seed bootstrapped to 167.
+ *
+ * This keeps the rarity term but adds an Allee-style founder boost: a
+ * species that is present and struggling (1 to `FOUNDER_VIABLE_COUNT`) is
+ * reinforced rather than passed over for yet another brand-new species.
+ * Absent species still arrive — seeding is how anything starts — they just
+ * no longer outrank a founder population that is one arrival away from
+ * viable.
+ */
+export function founderWeight(count: number): number {
+  const rarity = 1 / (count + 1);
+  if (count === 0 || count >= FOUNDER_VIABLE_COUNT) return rarity;
+  return rarity * FOUNDER_REINFORCE_BOOST;
+}
+
+/**
  * Predator share of the living population the world drifts back toward. Not
  * a cap or a quota — only the immigration weighting notices it, and only to
  * make a hunter more likely to WALK IN when the niche is empty.
@@ -395,6 +434,12 @@ export const PREDATOR_EMPTY_NICHE_BOOST = 6;
  * immigration happens or how many — an empty niche makes a hunter's arrival
  * likelier, it does not conjure one on demand, and a healthy predator
  * population turns this off entirely.
+ *
+ * Tuned against measured equilibrium rather than by feel. Cranking it up
+ * makes the system WORSE on every axis — at target 0.3 / boost 12 the
+ * predator share's p90 goes from 36% back to 53% and population volatility
+ * rises from 0.39 to 0.47, because a hard shove just replaces extinction
+ * with overshoot. The gentle setting is the one that cycles.
  */
 export function predatorNicheBoost(species: { isPredator?: boolean }, predatorShare: number): number {
   if (!species.isPredator) return 1;
@@ -429,7 +474,8 @@ function pickImmigrantSpecies(world: World, roster: readonly ImmigrationSpeciesI
   const predatorShare = living > 0 ? livingPredators / living : 0;
 
   const weights = roster.map((species) => {
-    const repWeight = 1 / ((counts.get(species.id) ?? 0) + 1);
+    const count = counts.get(species.id) ?? 0;
+    const repWeight = founderWeight(count);
     let biomeMatch = 1;
     if (species.biomes && species.biomes.length > 0) {
       const matched = species.biomes.reduce((sum, name) => sum + (biomeWeights[name] ?? 0), 0);
