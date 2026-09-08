@@ -5413,52 +5413,67 @@ not something this pathfinding pass itself caused or is positioned to fix.
         With a 2,800-name pool that claim is simply false — it only ever held
         for the one hand-picked set of ids the test happened to use.
 
-- [ ] **Thirst is over half of all herd endings — and the water never
+- [x] **Thirst is over half of all herd endings — and the water never
       shrank.** Measured over three seeds x 6,000 ticks, 19 herds ended: 10
       of thirst, 5 hunted to the last, 3 with no death at all, 1 of hunger,
       0 to fire. Prompted by the obvious question — did the water dry up? —
-      the answer is no, and the real cause is more interesting.
-      - **Water is permanent.** Water is terrain, not stock. Drinking never
-        depletes a tile, worldgen never removes one, and `seekWater` can
-        even DIG a new water tile on bare floor when nothing is nearby
-        (needs.ts, `setTile(..., "water", 0)`). Watering holes stay put and
-        stay accessible, exactly as you would expect. This is not a
-        resource-availability problem at all.
-      - **It is a clock asymmetry.** Three things compound, all measured:
-        1. *Total budget.* Thirst is linear at 0.00125/tick: 801 ticks to
-           empty plus 150 grace = 951. Hunger's exponential curve takes
-           1,709 plus 100 grace = 1,809. Thirst gives you 53% of the runway
-           hunger does — and thirst is 53% of the endings. That is not a
-           coincidence, it is the same number twice.
-        2. *Curve shape, which matters more than the total.* Hunger decays
-           as a fraction of what remains, so it self-brakes: the last 20% of
-           the hunger bar takes 816 ticks. Thirst is flat all the way down,
-           so the last 20% takes 160. Once an agent is actually in trouble
-           it has 5x less time to reach water than to reach food, and that
-           is precisely the window in which it has to cross terrain to get
-           there.
-        3. *Weather is one-sided.* Drought multiplies thirst decay by 1.8
-           (dropping the budget to 595) and rain eases it by 0.6. There is
-           no weather term on hunger whatsoever — the only hunger multiplier
-           in `decayNeeds` is the post-kill digesting slowdown, which is a
-           bonus and predator-only. So every drought cell on the map is a
-           thirst event and never a famine.
-      - **The doc comment on `THIRST_STARVATION_GRACE_TICKS` is stale and
-        should be fixed whatever we decide.** It claims thirst empties in
-        ~200 ticks for a ~350 total against hunger's ~527, and concludes the
-        gap is "narrower but not by a principle-violating margin." Those
-        numbers predate the quartering pass. The real figures are 951 vs
-        1,809, and at nearly 2x the margin arguably IS the thing that
-        comment was written to rule out.
-      - Options, cheapest first, none applied yet:
-        - Give thirst hunger's exponential shape. Fixes the danger-zone
-          asymmetry (2) directly, which is the one that actually kills, and
-          leaves the flavor of thirst-as-urgent intact.
-        - Slow the flat rate to ~0.00065 to match hunger's total runway.
-          Simplest, but keeps the brutal linear tail.
-        - Add a drought hunger multiplier so weather stops being a
-          thirst-only hazard.
-      - Worth saying: none of this is necessarily *wrong*. A world where
-        water is the binding constraint is a legitimate world. But it should
-        be a choice, and right now it is a side effect of hunger getting a
-        curve that thirst never got.
+      the answer was no, and the real cause was more interesting.
+      - **Water is permanent, and the drought/rain terrain cycle already
+        existed.** Water is terrain, not stock: drinking never depletes a
+        tile and `seekWater` can even dig a new one. And the "drought should
+        dry up water, rain should refill it, drought should kill berries"
+        behavior asked for in this round turned out to be **already built
+        and already wired** from an earlier ask — `advanceWaterCycle` (small
+        puddles dry at 1/150 under drought, large lakes shrink at 1/3000 but
+        never below a floor, rain re-forms water adjacent to existing water)
+        and `floraDecayDivisor` (drought decays food 4x faster and
+        suppresses spread; rain slows decay 3x and spreads more). Checked
+        before building, so nothing was duplicated.
+      - **It was a clock asymmetry, not a resource one.** Thirst was linear
+        at 0.00125/tick (801 ticks + 150 grace = 951); hunger decays as a
+        fraction of what remains (1,709 + 100 = 1,809). Thirst gave 53% of
+        the runway and was 53% of endings — the same number twice. The
+        curve SHAPE mattered more than the total: hunger self-brakes as it
+        empties, so its last 20% took 815 ticks while thirst's took 160. An
+        agent in real trouble had 5x less time to reach water than food,
+        which is exactly the window where it must cross terrain to get
+        there. Two needs with two different physics, for no design reason:
+        hunger got a curve in an earlier "much much slower" pass and thirst
+        only got a smaller flat number.
+      - **Fix: thirst now uses hunger's curve** (`THIRST_DECAY_RATE` 0.002 +
+        `THIRST_DECAY_FLOOR` 0.0001), tuned to keep its character rather
+        than become a second hunger — it still crosses the 0.7 seek-water
+        cutoff FASTER than hunger (169 vs 216 ticks, so animals still drink
+        more often than they eat) but the tail is forgiving: ~1,671 total
+        against hunger's ~1,809 (92%, was 53%), last 20% at 804 vs 815.
+      - **And drought's thirst multiplier drops 1.8 -> 1.2.** Weather here is
+        one-sided — there is no drought term on hunger at all — so every
+        drought cell was purely a thirst event and never a famine. The
+        answer is not a bigger number on both sides: drought already has two
+        better, *visible* ways to hurt (drying ponds, killing food patches).
+        Making a herd walk further to a shrinking pond is a better drought
+        than silently draining a hidden meter faster, so the meter effect
+        steps back and lets the map do the work.
+      - **Real-run result, same three seeds, before -> after:**
+        - Ending causes: thirst 10 -> 6, hunger 1 -> 8, hunted 5 -> 3, no
+          death 3 -> 5. Thirst went from 53% of endings to 27%; hunger from
+          5% to 36%.
+        - Starvation deaths by cause: seed 11 22 thirst/6 hunger -> 11/12;
+          seed 22 **26 thirst / 0 hunger** -> 24/23; seed 33 20/4 -> 9/11.
+          Hunger was not merely under-represented before, it was very nearly
+          a non-mechanic — one seed recorded zero hunger deaths in 6,000
+          ticks despite the whole flora/season/drought system feeding it.
+        - Population (3 seeds): 15/16/25 -> 15/35/20. Not a wipeout in
+          either direction; seed 22 more than doubled and gained living
+          herds (9 -> 13), seed 33 dipped. Within the run-to-run variance
+          this sim has always had, so no conclusion is drawn from it beyond
+          "nothing collapsed."
+      - The stale `THIRST_STARVATION_GRACE_TICKS` doc comment is fixed: it
+        claimed ~350 vs ~527 from before the quartering pass and concluded
+        the gap was not "principle-violating," where the real figures were
+        951 vs 1,809. At the new 1,671 vs 1,809 that claim is true again.
+      - `needs.test.ts` now asserts the SHAPE (thirst drains more slowly the
+        emptier it gets; its last stretch is within a small factor of
+        hunger's; it still crosses 0.7 sooner) rather than only a magic
+        first-tick number, so retuning the constants cannot silently
+        reintroduce the flat tail.
