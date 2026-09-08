@@ -301,7 +301,48 @@ export class AutoCameraController {
   /** Per-category tick a one-shot engagement was last actually queued — backs `ONE_SHOT_CLUSTER_COOLDOWN_TICKS`'s throttle; see that constant's own doc comment. Absent entry = never queued yet (or cleared by `reset`). */
   private lastEnqueuedTickByCategory = new Map<NotableCategory, number>();
 
+  /**
+   * The agent the viewer has selected in the inspector, if any — while set,
+   * Auto Camera only follows moments that involve THIS animal.
+   *
+   * Direct ask: "if you're focused on a Pokémon in inspector while autocam is
+   * going, just filter to all notable autocam events that involve that unit.
+   * Filter out all else while it's focused."
+   *
+   * Applied at the queue, not at render time, so a filtered-out moment never
+   * occupies a slot, never starts a dwell timer, and never counts against
+   * the one-shot cluster cooldowns — the queue behaves as if the rest of the
+   * world's moments simply were not notable. Rendering-time filtering would
+   * leave the camera idling through moments it had decided not to show.
+   */
+  private focusAgentId: string | undefined;
+
   constructor(private readonly host: AutoCameraHost) {}
+
+  /**
+   * Point Auto Camera at one agent, or `undefined` to follow the world
+   * again. Immediately drops anything queued (and the active engagement)
+   * that does not involve the new focus — selecting an animal mid-battle
+   * should cut to that animal's story now, not after the current fight
+   * finishes playing out.
+   */
+  setFocusAgent(id: string | undefined): void {
+    if (this.focusAgentId === id) return;
+    this.focusAgentId = id;
+    if (id === undefined) return;
+    this.queue = this.queue.filter((e) => e.ids.has(id));
+    if (this.active && !this.active.ids.has(id)) {
+      this.active = undefined;
+      // Keep `controllingView` as-is: `update` gives the view back on its own
+      // once the queue drains, and yanking it back here would fight a
+      // still-queued engagement that DOES involve the focused agent.
+    }
+  }
+
+  /** Whether a moment involving `ids` is allowed through the focus filter. */
+  private passesFocusFilter(ids: ReadonlySet<string>): boolean {
+    return this.focusAgentId === undefined || ids.has(this.focusAgentId);
+  }
 
   isEnabled(): boolean {
     return this.enabled;
@@ -367,6 +408,9 @@ export class AutoCameraController {
     this.active = undefined;
     this.lastClashPromotedTick = undefined;
     this.lastEnqueuedTickByCategory.clear();
+    // A new world's agent ids are meaningless here — a stale focus id would
+    // match nothing and silently filter out every moment in the new world.
+    this.focusAgentId = undefined;
     this.releaseControl();
   }
 
@@ -573,6 +617,7 @@ export class AutoCameraController {
   }
 
   private enqueueOneShot(category: NotableCategory, sourceKind: SimEvent["kind"], ids: Set<string>, pos: Vec2, label: string, tick: number): void {
+    if (!this.passesFocusFilter(ids)) return;
     // Same *exact* moment (same originating event kind, overlapping
     // participants) already the subject of the currently-active or a
     // still-queued engagement (e.g. a hatch that immediately re-triggers via
@@ -631,6 +676,10 @@ export class AutoCameraController {
    */
   private onBattleHit(category: "battle" | "clash", ids: Set<string>, pos: Vec2, label: string, world: World): void {
     const existing = this.findContinuous(ids);
+    // Gated only for a BRAND-NEW engagement, below — an already-tracked
+    // fight the focused agent is in must still be allowed to widen when a
+    // third participant joins, or the engagement would stop following the
+    // very fight it exists for.
     if (existing) {
       // A new participant can join mid-fight (e.g. a pack-hunt assist, or —
       // now that herd-conflict fights can genuinely coexist nearby — two
@@ -653,6 +702,7 @@ export class AutoCameraController {
       }
       return;
     }
+    if (!this.passesFocusFilter(ids)) return;
     // A real battle is the single most important thing on screen — direct
     // ask: "prioritize battles if there are multiple things going on." A
     // brand new fight preempts whatever one-shot moment (immigration/

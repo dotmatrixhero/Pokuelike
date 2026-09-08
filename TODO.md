@@ -5556,3 +5556,172 @@ not something this pathfinding pass itself caused or is positioned to fix.
       breeding gate (level 16 or evolved, DESIGN.md) is sitting right at a
       cliff edge for some worlds and not others. Worth a multi-seed look at
       what fraction of a population ever reaches the gate at all.
+
+- [ ] **Cross-zone migration is architecturally present and practically
+      dead.** Prompted by: "it is very confusing to have 100+ krabbys in one
+      zone and 0 in an adjacent one. We have random immigration. But do we
+      have real herd based migration? Can they spill over?"
+      Measured over 8,000 ticks per seed, not reasoned about:
+
+      | | seed 20260903 | seed 11 |
+      |---|---|---|
+      | `herdMigrating` (within a zone) | 22 | 35 |
+      | `dispersed` (individual leaves home) | 0 | 9 |
+      | `regionCrossed` (actually left the zone) | **0** | **1** |
+      | `immigrated` (arrived from off-map) | 12 | 11 |
+      | zones tracked, of 4,096 | **1** | **2** |
+
+      - **Within-zone herd migration is real and works.** `herdMigration.ts`
+        moves a whole herd as a group on five triggers (scarcity, predator
+        pressure, weather, territorial, wanderlust), every member pulling
+        toward one shared point. 22-35 of these per run, and they show up in
+        the chronicle ("Moved on — the food had run out"). That half of the
+        question is a clean yes.
+      - **Cross-zone movement is not.** Random immigration outnumbers actual
+        emigration by 12:1 and 11:1. Population can arrive from off-map but
+        essentially never leaves, which is exactly the reported symptom: one
+        stuffed zone, empty neighbours.
+      - **The abstract spillover mechanism cannot run, by construction.**
+        `maybeEmigrate` is the thing designed to spread population across
+        the grid (10% of a species into a random adjacent zone). It
+        explicitly skips the FOCUSED zone — reasonably, since that zone has
+        real individuals rather than an aggregate — so it only ever operates
+        between two *background* zones. But a zone only becomes tracked when
+        something puts population there, and the only thing that can is an
+        individual walking out of the focused zone. Chicken and egg: the one
+        zone that has anything to export is the one zone forbidden from
+        exporting, so with 1 tracked zone `maybeEmigrate` has nothing to do
+        on any tick of the run. Seed 11 is the proof — a single crossing
+        created a second zone, and only then did the mechanism have two
+        zones to move between.
+      - **Not a level gate, which was my first guess and was wrong.**
+        `DISPERSAL_MIN_LEVEL` is 15 and 19 of 20 living agents were at or
+        above it, with a max of 52. The throttle is further down: dispersal
+        itself is rare (0-9 per run), and `REGION_DISPERSAL_CHANCE` then
+        keeps only 25% of those, and that survivor still has to walk to the
+        map edge without dying.
+      - **Nothing anywhere is density-driven.** `EMIGRATION_CHANCE_PER_TICK`
+        is a flat 0.002 whether a zone holds 4 animals or 400, and herd
+        migration's triggers are all local-resource or threat based, never
+        crowding. There is no carrying-capacity pressure pushing a packed
+        zone outward — which is precisely the force that would fix the
+        reported symptom.
+
+      Options, none applied — this is a design call:
+      1. **Herd-level zone crossing** (what was actually asked for): when a
+         herd's existing scarcity/territorial migration picks a destination
+         and the herd is near a map edge, let the WHOLE herd walk out into
+         the neighbouring zone instead of a lone disperser. Reuses the
+         migration pipeline that already works, and makes the overworld
+         story "the Krabbies of the Bright Coast moved east" rather than
+         "one Krabby wandered off."
+      2. **Density-driven emigration pressure**: scale emigration on
+         population against the zone's own `resourceIndex`/
+         `baseResourceIndex` (both already tracked), so a crowded zone
+         pushes out and an empty one does not.
+      3. **Let the focused zone shed a slice at the aggregate tier** — the
+         cheap deadlock-breaker: remove N real agents and add them to a
+         neighbour's aggregate. Least interesting, but it alone would end
+         the chicken-and-egg.
+      4. Separately: should the world START with populated neighbours? Right
+         now every zone but one is genuinely empty at tick 0, so even a
+         perfect migration system begins from a single point of life.
+
+      Recommendation: 1 + 2 together. 1 is the mechanic the question asks
+      for and 2 is the force that makes it fire when a zone is overfull.
+
+- [x] **Herd-level zone crossing + density-driven emigration.** The fix for
+      the diagnosis above ("100+ krabbys in one zone and 0 in an adjacent
+      one"). Chosen approach: options 1 and 2 together — the mechanic the
+      question asked for, plus the force that makes it fire.
+
+      **A/B over 6 seeds x 8,000 ticks:**
+
+      | | before | after |
+      |---|---|---|
+      | zones populated | 18 | **167** |
+      | `regionCrossed` | 6 | **97** |
+      | off-map population | 113 | **7,604** |
+      | focused-zone population | 234 | **369** |
+
+      The map fills in, and the focused zone was not drained doing it — the
+      thing worth checking, since a migration system that empties the zone
+      you are watching would be a cure worse than the disease.
+
+      - **Crowding trigger** (`CROWDING_CAPACITY_PER_ABUNDANCE`): local
+        headcount against what the land supports, expressed with the same
+        capacity notion the aggregate tier already uses
+        (`baseResourceIndex * CAPACITY_SCALE`) rather than a second invented
+        one. It outranks scarcity deliberately: the two can be true at once
+        and want opposite things — scarcity hunts for the richest patch left
+        in this zone, which for an overfull zone means marching the herd to
+        the least-stripped corner and stripping that too.
+      - **Whole-herd zone crossing** (`tryZoneCrossing`): built entirely out
+        of the existing crossing pipeline rather than a new one. An
+        individual disperser already leaves by carrying `crossingToRegionId`
+        plus an edge `dispersalTarget`; `finishDispersal` already
+        early-returns for a crosser so its herd identity survives, and
+        `applyRegionCrossings` already folds it into the destination. The
+        only thing missing was anything that set those fields on more than
+        one animal at once. Every trigger can now cross, at a per-reason
+        chance — crowding highest (0.85, since no in-zone move relieves it),
+        weather and predators lowest (0.15, since both are local by nature).
+      - **Density-driven `maybeEmigrate`**: the flat 0.002/tick now scales
+        with how far over capacity a zone is, up to 6x. A zone holding 400
+        used to shed population at exactly the rate of one holding 4.
+
+- [x] **Three bugs found while verifying the above, none by reading the
+      code.** Recording them because the pattern keeps repeating: the code
+      looked right in every case.
+      - **Herds set off and never arrived.** 24 animals told to leave across
+        9 emigrations; *zero* arrived in 8,000 ticks. The dispersal walk only
+        advances while `chooseBehavior` reads "idle" — hunger AND thirst
+        above 0.7 — and the stuck crossers sat at 0.50-0.65 forever. The
+        mechanism was self-defeating: the crowded, hungry zone that makes a
+        herd want to leave is precisely the condition that pins it in place.
+        Fixed with `CROSSING_URGENCY_TOLERANCE` (0.55) for zone crossers
+        only, which keeps the substance of the earlier "agents died of thirst
+        standing next to water" fix — a genuinely desperate animal still
+        breaks off and resumes after — while letting a merely peckish one
+        walk. This is what the original instruction actually said: needs jump
+        the queue *based on urgency*, not on any shortfall at all.
+      - **The crossing re-fired every tick.** A crossing deliberately creates
+        no `herdMigrations` entry (the herd is about to stop existing in this
+        world), so nothing marked the herd busy and every trigger
+        re-evaluated it every tick. A test asserting one emigration event
+        caught **201** — one per tick. Fixed with an explicit
+        `isHerdCrossing` check at the top of the per-herd loop.
+      - **My own test was testing the wrong trigger.** The crowding tests
+        used an always-zero rng, which fires *wanderlust* on tick 1 — so they
+        were exercising a wanderlust crossing while claiming to test crowding.
+        Now uses an rng tuned to fail wanderlust and pass the crowding roll.
+        A test that passes for the wrong reason is worse than no test.
+
+- [ ] **Aggregate zones can settle above their own capacity.** Noticed in the
+      A/B: seed 44 ended with 5,989 animals across 80 zones, ~75 per zone
+      against a capacity of at most 50 (`baseResourceIndex * CAPACITY_SCALE`
+      with the index capped at 1). The world filling up is the intent, but
+      sitting *above* capacity is not — emigration keeps adding to zones
+      already full while the logistic term only pulls them down slowly. Worth
+      checking whether an arriving slice should be refused (or bounce onward)
+      when the destination is already at capacity.
+
+- [x] **Auto Camera follows only the inspected Pokémon.** Direct ask: "if
+      you're focused on a Pokémon in inspector while autocam is going, just
+      filter to all notable autocam events that involve that unit. Filter out
+      all else while it's focused."
+      - Applied at the QUEUE, not at render time: a filtered-out moment never
+        occupies a queue slot, never starts a dwell timer, and never counts
+        against the per-category cluster cooldowns. Filtering at render time
+        would leave the camera idling through moments it had already decided
+        not to show.
+      - An already-tracked fight the focused agent is in can still widen when
+        a third participant joins — the gate is only on creating a NEW
+        engagement, or the camera would stop following the very fight it
+        exists for.
+      - Selecting mid-battle cuts away immediately rather than waiting for
+        the current fight to finish. `reset()` clears the focus, since a new
+        world's ids would match nothing and silently filter out everything.
+      - The dim passive battle boxes are deliberately NOT filtered: they are
+        how a viewer sees the rest of the world is still alive and clicks
+        away to something else. Filtering those too would leave no way out.

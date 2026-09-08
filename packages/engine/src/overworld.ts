@@ -569,6 +569,20 @@ const EMIGRATION_MIN_POPULATION = 4;
  * like `foldAgentIntoAggregate`'s identical pattern below; no species
  * roster needed for this (unlike a fresh zone's first-ever `promoteZone`).
  */
+/**
+ * How much harder an over-capacity zone pushes population out — 1 at or
+ * below capacity (no change from the flat rate this replaced), rising
+ * linearly with the overshoot and capped so a runaway aggregate cannot
+ * empty itself in a handful of ticks.
+ */
+export const EMIGRATION_CROWDING_MAX = 6;
+
+function crowdingPressure(aggregate: RegionAggregate): number {
+  const capacity = Math.max(MIN_CAPACITY, aggregate.baseResourceIndex * CAPACITY_SCALE);
+  const ratio = aggregate.population / capacity;
+  return Math.min(EMIGRATION_CROWDING_MAX, Math.max(1, ratio));
+}
+
 function maybeEmigrate(mw: MacroWorld, region: Region, log?: EventLog): void {
   const aggregates = region.aggregates;
   if (!aggregates) return;
@@ -585,7 +599,17 @@ function maybeEmigrate(mw: MacroWorld, region: Region, log?: EventLog): void {
 
   for (const aggregate of Object.values(aggregates)) {
     if (aggregate.population < minPopulation) continue;
-    if (mw.rng() >= chance) continue;
+    // Crowding pressure. Direct report: "100+ krabbys in one zone and 0 in
+    // an adjacent one." Part of the reason was that this roll was a FLAT
+    // per-tick chance — a zone holding 400 animals shed population at
+    // exactly the rate of one holding 4, so nothing ever relieved a packed
+    // zone. Scaled by the same capacity the logistic growth term above
+    // already uses (`baseResourceIndex * CAPACITY_SCALE`), so "full" means
+    // the same thing to both halves of the model rather than being two
+    // independent guesses. A zone at or under capacity is unchanged from
+    // before; one at twice capacity spills roughly `EMIGRATION_CROWDING_MAX`
+    // times as eagerly.
+    if (mw.rng() >= chance * crowdingPressure(aggregate)) continue;
 
     const target = neighborCoords[Math.floor(mw.rng() * neighborCoords.length)]!;
     const destination = ensureTrackedRegion(mw, target.row, target.col);
@@ -927,8 +951,15 @@ export function tickMacroWorld(mw: MacroWorld, log?: EventLog, rules?: HuntRules
   advanceMacroWeatherFronts(mw, log);
   for (const region of mw.regions.values()) {
     if (region.key === mw.focusedKey) {
-      const neighborIds = zoneNeighbors(mw.grid, region.row, region.col).map((n) => zoneKey(n.row, n.col));
-      const regionDispersal: RegionDispersalContext = { neighborRegionIds: neighborIds };
+      const neighbors = zoneNeighbors(mw.grid, region.row, region.col);
+      const neighborIds = neighbors.map((n) => zoneKey(n.row, n.col));
+      // Which way each neighbor lies, so a whole-herd crossing can leave by
+      // the edge that actually faces its destination rather than a random
+      // one — see herdMigration.ts's `tryZoneCrossing`. Only this module
+      // knows the grid, so only this module can supply it.
+      const neighborDirections: Record<string, { dx: number; dy: number }> = {};
+      for (const n of neighbors) neighborDirections[zoneKey(n.row, n.col)] = { dx: n.col - region.col, dy: n.row - region.row };
+      const regionDispersal: RegionDispersalContext = { neighborRegionIds: neighborIds, neighborDirections };
       const world = region.world!;
       tickWorld(world, log, rules, ctx, world.rng, immigration, regionDispersal);
       applyRegionCrossings(mw, region, log);

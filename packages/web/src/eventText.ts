@@ -127,6 +127,10 @@ export function formatEvent(event: SimEvent, world?: World): string {
       const herdName = world ? herdDisplayName(world, event.herdId) : event.herdId;
       return `herd ${herdName} is migrating (${event.reason})`;
     }
+    case "herdEmigrating": {
+      const herdName = world ? herdDisplayName(world, event.herdId) : event.herdId;
+      return `${herdName} is leaving for zone ${event.toRegionId} — ${event.count} setting off (${event.reason})`;
+    }
     case "herdSettled": {
       const herdName = world ? herdDisplayName(world, event.herdId) : event.herdId;
       return `herd ${herdName} ${event.outcome === "arrived" ? "settled" : "gave up migrating"}`;

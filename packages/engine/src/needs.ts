@@ -575,15 +575,61 @@ export function decayNeeds(needs: Needs, thirstMultiplier = 1, asleep = false, h
  * tune these thresholds once real playtesting exists.
  */
 export function chooseBehavior(needs: Needs): BehaviorKind {
+  const [behavior, score] = topUrgency(needs);
+  return score > IDLE_URGENCY_THRESHOLD ? behavior : "idle";
+}
+
+/** The most pressing need and how pressing it is, 0-1 — the shared half of `chooseBehavior`, split out so a caller can ask "how urgent is this agent" without also being told what to do about it. */
+function topUrgency(needs: Needs): [BehaviorKind, number] {
   const urgency: Array<[BehaviorKind, number]> = [
     ["seekWater", 1 - needs.thirst],
     ["seekFood", 1 - needs.hunger],
     ["seekMate", needs.mateDrive * 0.5],
   ];
   urgency.sort((a, b) => b[1] - a[1]);
-  const [behavior, score] = urgency[0]!;
-  return score > 0.3 ? behavior : "idle";
+  return urgency[0]!;
 }
+
+/** Above this, an agent has something better to do than stand around. */
+const IDLE_URGENCY_THRESHOLD = 0.3;
+
+/**
+ * Whether a dispersal walk gets to advance this tick. An agent leaving the
+ * zone entirely tolerates a lot more discomfort before breaking off than one
+ * relocating within it — see `CROSSING_URGENCY_TOLERANCE` for the measured
+ * reason that distinction has to exist.
+ */
+function canContinueDispersal(agent: Agent): boolean {
+  const tolerance = agent.crossingToRegionId ? CROSSING_URGENCY_TOLERANCE : IDLE_URGENCY_THRESHOLD;
+  return topUrgency(agent.needs)[1] <= tolerance;
+}
+
+/**
+ * How urgent a need has to get before it interrupts an agent that is
+ * WALKING OUT OF THE ZONE (`Agent.crossingToRegionId` — herdMigration.ts's
+ * whole-herd emigration, or an individual natal disperser targeting a
+ * neighbour). Deliberately far more tolerant than `IDLE_URGENCY_THRESHOLD`.
+ *
+ * A dispersal walk is pausable, and that pause is a real fix that must not
+ * be undone: an earlier "commits no matter what" version had agents dying of
+ * thirst standing next to water for the whole multi-hundred-tick walk. But
+ * pausing at the ORDINARY idle threshold makes a long walk impossible rather
+ * than merely slow. Measured: 24 animals were told to leave across 9 herd
+ * emigrations and not one arrived in 8,000 ticks — they sat at hunger
+ * 0.50-0.65, which is under the 0.7 idle bar, so the walk never advanced a
+ * single step. And it is precisely the crowded, hungry zone that triggers
+ * emigration in the first place, so the mechanism was self-defeating: the
+ * condition that makes a herd want to leave is the condition that pins it in
+ * place.
+ *
+ * 0.55 keeps the substance of the original fix — a genuinely desperate
+ * animal (below ~0.45 hunger or thirst) still breaks off to eat or drink,
+ * and resumes after — while letting a merely peckish one keep walking. This
+ * is what the original instruction actually asked for: "needs should be able
+ * to jump queue in priority, definitely based on URGENCY," not on any
+ * shortfall at all.
+ */
+const CROSSING_URGENCY_TOLERANCE = 0.55;
 
 /**
  * Nearest tile of the given terrain kind, if any — delegates to
@@ -1213,14 +1259,14 @@ export function tickAgentAction(
   // `agent.dispersalTarget` is already set, so this never re-triggers a
   // dispersal already in progress.
   if (agent.dispersalTarget) {
-    if (chooseBehavior(agent.needs) === "idle") {
+    if (canContinueDispersal(agent)) {
       applyDispersal(world, agent, log);
       return;
     }
     // Paused, not abandoned — resumes on a later tick once satisfied again.
   } else {
     maybeTriggerDispersal(world, agent, log, rng, regionDispersal);
-    if (agent.dispersalTarget && chooseBehavior(agent.needs) === "idle") {
+    if (agent.dispersalTarget && canContinueDispersal(agent)) {
       applyDispersal(world, agent, log);
       return;
     }
