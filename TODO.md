@@ -42,6 +42,21 @@ pass rather than a rushed bolt-on:
       and a max observed `ticksSinceSocialContact` of 2889 on a still-living
       agent, confirming the widened search and the dispersal escape hatch
       both actually engage in a real run, not just in theory.
+      **Second follow-up, direct report after actually watching a run:
+      "are you sure socializing is in? I just watched a psyduck train and
+      never socialize."** Measured before changing anything (real 3000-tick
+      scenario): at the original `SOCIALIZE_RADIUS` (1), only 4.3% of
+      sampled idle-eligible agents had ANY herd-mate that close — herds
+      routinely spread ~25 tiles apart during ordinary wandering/feeding
+      (`herding.ts`'s `COHESION_DISTANCE`, 5, is only where cohesion starts
+      pulling an agent BACK, not the herd's typical spread), and
+      `train`:`socialize` promotions came out 31:1. The feature was real
+      but essentially unreachable for a typical agent — the psyduck report
+      was correct, not a fluke. Raised `SOCIALIZE_RADIUS` 1 → 3 (matching
+      `herding.ts`'s own existing `GUARDIAN_COHESION_DISTANCE`/
+      `LOW_LEVEL_COHESION_DISTANCE`, not a newly-invented number) —
+      re-measured: reachability jumped to 18.1%, ratio to a real, felt
+      4.2:1.
 - [x] **Ground/soil types — built.** Direct ask, then a follow-up
       reframe: "I think I want more types of tiles, you know?" New
       `GroundType` ("loam" | "sandy" | "clay" | "rocky" | "peat"),
