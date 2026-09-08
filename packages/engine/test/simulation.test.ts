@@ -111,7 +111,12 @@ describe("actionSpeedOf: a real Speed stat-stage grant (e.g. Agility) actually c
 
 describe("action economy via tickWorld", () => {
   it("needs still decay every tick even for an agent that doesn't act that tick", () => {
-    const world = createWorld(5, 1);
+    // Seeded. Unseeded, this world falls back to `Math.random`, and a single
+    // `tickWorld` runs weather/immigration/sleep against it — the test failed
+    // once in a full-suite run and passed on its own and on three re-runs,
+    // which is the signature of exactly that. Same fix this repo already
+    // applied to the same class of flake in needs.test.ts.
+    const world = createWorld(5, 1, 12345);
     const slowAgent = makeAgent({
       needs: createNeeds({ thirst: 1 }),
       stats: { maxHp: 1, attack: 1, defense: 1, spAttack: 1, spDefense: 1, speed: 1 }, // far below ACTION_THRESHOLD
