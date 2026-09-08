@@ -202,39 +202,126 @@ than invent one. If there's more recent deep-past material (a Legends game
 after Arceus, for instance), treat this file as incomplete on that point
 rather than authoritative.
 
-### Pokopia [GAP — needs filling in by someone who's actually played it]
+### Pokopia [CANON, spinoff] — the far end of the bracket
 
-Raised directly as having "a ton of far future interesting lore," and this
-is past the edge of what I can speak to reliably, so it's marked as a gap
-rather than written up badly.
+*Research supplied by the project owner (Sept 2026), not from my own
+knowledge — the base game released March 2026, right at the edge of what I
+can speak to, and the expansion material (announced June 2026, first part
+August 2026) is past it entirely. Treat this section as their account, which
+is more reliable than mine would have been.*
 
-What I *think* I know, at low confidence and explicitly not to be built on
-until confirmed: a recent title in which the player is a **Ditto that has
-taken human form**, in a world **without humans in it**, building and
-terraforming a place with Pokémon. If that's right, the setting is
-**post-human**, which is genuinely interesting for us — not as material to
-copy, but as the far end of a bracket:
+**Pokémon Pokopia** (Switch 2, Game Freak + Omega Force, March 2026) — a
+cozy life-sim in **post-apocalyptic Kanto**. No battling, no levelling, no
+evolution. And it is, thematically, the exact mirror of what we're building.
+
+**The catastrophe.** A slow-building climate collapse — worsening storms,
+rising seas — forced humanity to **evacuate off-world**, intending to return
+once Earth stabilised. Contact was lost. Hundreds of years have passed. Two
+details make it much darker than the cozy surface suggests:
+- **Team Rocket built the evacuation rockets** — a genuinely bleak pun.
+- **The trip was one-way.** Insufficient return fuel, and silence from the
+  colony ever since.
+
+**You are the last "human," and you aren't one.** The player is a **Ditto**
+that took the shape of its missing trainer *from memory* — wearing a ghost.
+The backstory comes out through diary pages, newspaper scraps and letters —
+and **the Pokémon around you cannot read human writing**, so you are the
+only one who ever learns what happened. A deliberately melancholy thing to
+put under a cozy varnish.
+
+**The PC as an ark.** The Pokémon Storage System is retconned into a literal
+survival vault — the **Pokémon Conservation Project**, housed at Silph Co.
+HQ — which held Pokémon in stasis with a failsafe to release them once a
+biome registered as livable again. That's *why* habitat restoration gates
+progress: every biome you heal literally releases a batch of stored Pokémon
+back into the world. A tidy piece of retroactive logic for a mechanic that
+never had an in-universe explanation.
+
+**Biomes map 1:1 onto ruined Kanto cities** — Withered Wasteland (Fuchsia),
+Bleak Beach (Vermilion), Rocky Ridges (Pewter), Sparkling Skylands
+(Celadon/Saffron), Palette Town (Pallet). The places kept working; the names
+didn't survive.
+
+#### Pokémon society after the collapse
+
+With combat removed, Game Freak had to invent a replacement social layer,
+and what they built is a **civic labour economy**:
+
+- Every Pokémon has a **Specialty** derived from its typing/moveset — Build
+  (Cubone, Timburr, Heracross — the carpenters), Bulldoze, Engineering
+  (Magnemite and kin), Gather/Chop/Recycle, Water, and singleton jobs
+  (Smearguru paints, Chef Dente cooks, Porygon-Z refines, **Professor
+  Tangrowth appraises**).
+- **Role-based, not hierarchical.** No alpha, no dominance structure — an
+  ant-colony/guild economy rather than a pack. Notably, **no aggression and
+  no territory disputes at all**: cohabitation is the default once comfort
+  needs are met, a real departure from mainline encounter design.
+- **You don't command specialties.** A Pokémon just does its job when near
+  the right task. The design claim is explicit: **instinct *is* the job**,
+  not something taught.
+- **Comfort, not capture.** Habitats are furniture arrangements (200+
+  configurations), and Pokémon self-select into them based on habitat type,
+  weather and time of day. You attract residents by building conditions they
+  would choose, then offer favourite food to earn trust.
+- **Professor Tangrowth** is the sole elder figure — the last non-Ditto
+  resident found alive, alone in the wasteland for years, positioned as a
+  surviving witness rather than an authority.
+- **Legendaries sit outside the labour economy entirely** — visitors, not
+  residents. Ho-Oh and Lugia pass overhead in the right weather and drop
+  feathers; Dream Islands hold the roaming beasts; Mewtwo is a fixed
+  encounter on the Celadon Department Store rooftop (a nod to the original
+  dev-room placement). Forces that pass through and bless the world.
+
+#### The individual backstories are the dark part
+
+Named NPCs carry real biography tied to the apocalypse:
+- **Peakychu** — a Pikachu who spent all her electricity trying to heal sick
+  friends during the crisis, permanently draining herself. Her fur turned
+  ghostly white.
+- **Mosslax** — a Snorlax who tried to sleep off a bad mood and slept
+  through the entire apocalypse, waking up overgrown with moss and vines.
+- **Professor Tangrowth** — waited faithfully at his post for humans who
+  were never coming back, holding out hope against the fuel logs and the
+  silence.
+
+#### Confirmed additional material
+
+- **Expansion Pass** (announced June 2026): Part 1 **Bubbly Basin** (Aug
+  2026) added an underwater town and Dive, taught to Ditto by Manaphy —
+  another biome recovering in parallel. Part 2 (late 2026) is cosmetics;
+  Part 3 (2027) another town. **Nothing so far expands the humanity-side
+  mystery** — additive worldbuilding, not plot.
+- The **Sparkling Skylands hidden room** turned out to be a developer-room
+  easter egg (a homage to the Gen 1 Celadon dev room), **not** a lore
+  payoff about humanity's fate.
+
+#### Still open (from the source notes)
+
+- The Cubone "grave with flowers" habitat beat, and the Paras/Parasect
+  dialogue exchange — both flagged as lore-relevant, detail not yet pulled.
+- Whether species-level social-structure flavour text (herd sizes, pack
+  structure) exists as a documented pattern — genuinely unresolved rather
+  than confirmed absent.
+- Re-check after Expansion Parts 2 and 3.
+- A circulating claim that Pokémon "haven't been part of the world since
+  ancient times" (citing Magcargo flavour text) is **fan speculation**, not
+  dev-stated canon. [THEORY] at best.
+
+### The bracket, now complete
+
+With Pokopia confirmed, the franchise reads as one long arc about proximity
+and distance between two kinds of life:
 
 | Era | Human–Pokémon relationship |
 |---|---|
 | Celestica / Sinnoh folk tales | Once close — "ate at the same table" |
-| **Our game** | Apart. Feared, revered, kept at distance. Partnership is about to be reinvented |
+| **Our game** | Apart. Feared, revered, kept at distance. Partnership about to be reinvented |
 | Hisui | Partnership newly, awkwardly beginning |
 | Mainline | Partnership normalised and industrialised |
-| Pokopia (?) | Humans gone. Pokémon inherit it, and the only "human" is something wearing the shape |
+| Pokopia | Humans gone. Pokémon inherit the world, and the only "human" is a Ditto wearing a dead man's shape |
 
-If that framing holds, the whole franchise reads as one long arc about
-proximity and distance between two kinds of life — and our game is
-deliberately sited at the moment *before* the turn. That's a good place to
-be, and worth knowing we're there on purpose.
-
-There's also a neat resonance in the premise itself: a **Ditto** wearing a
-human shape is the mirror of our own protagonist — a human learning to be
-understood by Pokémon — and Ditto carries the old failed-Mew-clone theory
-with it.
-
-**To do**: tell me the actual lore here and I'll write it up properly and
-attribute it. I'd rather have your account of it than my half-memory.
+**We are deliberately sited at the moment before the turn** — and it's worth
+knowing that's a choice, not a default.
 
 ---
 
@@ -490,7 +577,88 @@ solutions are worth studying before we invent our own — particularly its
 gives us something PMD never had (a real ecology, a settled world, and
 consequences that persist between visits).
 
-### 7. Environmental, unexplained storytelling
+### 7. Pokopia's "instinct is the job" — use it, but split by species
+
+Pokopia derives a Pokémon's civic role from its typing and moveset:
+personality *is* the job, nothing is taught. HUMANS_DESIGN.md independently
+proposed the opposite for humans — roles **earned** through accumulated
+history, so the person who spent their life building *becomes* the builder.
+
+Both are right, for different species, and the contrast is worth making
+load-bearing:
+
+> **Pokémon are what they are. Humans become what they do.**
+
+That's a clean, cheap rule that says something real about the world, and it
+gives us two role systems that don't compete: species-derived specialties on
+one side (which our `SpeciesDef` typing/`preferredTerrain` data could
+already drive), earned notable titles on the other (which `notables.ts`
+already does).
+
+### 8. "Comfort, not capture" — and the endgame it implies
+
+Pokopia's attraction loop is: build the conditions a Pokémon would choose,
+then offer food to earn trust. No capture anywhere in it. That's strong
+validation for our bonding design, but the more interesting part is what it
+suggests for our *late* game.
+
+Our villages currently keep Pokémon **out** — walls, watchfires, distance.
+The player is the first person who can do the opposite. So: **the player
+eventually builds a place where both can live**, and Pokémon start choosing
+to be there. That's a mechanically real expression of "you're the first,"
+it's the natural Act 2/3 payoff of the whole premise, and the machinery is
+mostly present already (`speciesFitsZone`/`estimateZoneSpecies` decide where
+a species belongs; the player would be *changing the inputs*).
+
+The in-fiction line from Pokopia players is almost exactly our thesis: if
+building good habitats brings Pokémon back, maybe building a good town
+brings people back too.
+
+### 9. Knowledge that is physically present but socially lost
+
+The best melancholy detail in Pokopia: the Pokémon can't read human writing,
+so the player is the only one who ever learns the truth. Invert it for us:
+**ruins hold records nobody in the village can read any more** — which is
+already canon-shaped (Braille in the Regi chambers, Unown at the Ruins of
+Alph) and pairs perfectly with our generated history. The information
+survives; the ability to interpret it didn't.
+
+Also worth stealing: **places outlive their names.** Pokopia's biomes are
+ruined Kanto cities under new names. Our `territories.ts` naming plus a
+history pass could hold *two* names for a place — the current one, and an
+older one that only appears in records and ruins.
+
+### 10. Recontextualising a mechanic as lore is the house move
+
+Pokopia retcons the storage PC into a literal survival vault with a
+livability failsafe — giving a decades-old convenience mechanic a real
+in-world reason. That is precisely the move behind **TMs-as-ancient-relics**,
+and it suggests the technique generalises: any mechanic we ship can be given
+an in-world cause by our history pass rather than existing as pure UI.
+
+### 11. Irreplaceable individuals vs. inherited offices
+
+Pokopia has **singleton specialties** — only Tangrowth appraises, only
+Smearguru paints — which quietly makes those individuals personally known
+and irreplaceable. We decided the opposite for humans (inherited roles, so
+*the elder* is an office that survives the person).
+
+Both are good; they just serve different feelings. Suggested split:
+**inherited offices for humans** (resilient, keeps quests alive, and someone
+having to step up is itself a story) and **irreplaceability for notable
+Pokémon** (a specific revered individual whose loss is permanent and
+grievable). That also lines up neatly with the nobles/wardens idea above.
+
+### 12. What we deliberately do NOT take from Pokopia
+
+Pokopia removes aggression and territory disputes entirely — cohabitation is
+the default. That's the right call for a cozy game and exactly the wrong one
+for us: **predation, territory and resource conflict are the engine of our
+whole simulation.** Our world is one where a herd in the barley is a real
+problem, and that friction is what makes the eventual coexistence mean
+anything. Worth naming so we don't drift cozy by accident.
+
+### 13. Environmental, unexplained storytelling
 
 The best old lore is archaeological, not expository. You learn the darkest
 thing in Gen 1 by reading a diary in an abandoned building, and no character

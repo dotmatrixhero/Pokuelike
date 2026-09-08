@@ -183,6 +183,39 @@ keep the restraint.
       species is canon-accurate rather than sloppy. Worth building toward
       deliberately.
 
+**Pokopia** (post-apocalyptic Kanto life-sim, March 2026) is now written up
+too — research supplied by the project owner, since the base game sits at my
+knowledge edge and the Aug 2026 expansion is past it. It's the exact mirror
+of our premise (humans evacuated off-world and never came back; you're a
+Ditto wearing your dead trainer's shape), which completes a bracket showing
+our game sits deliberately at *the moment before partnership is invented*.
+Four things worth acting on:
+
+- [ ] **"Pokémon are what they are; humans become what they do."** Pokopia
+      derives a Pokémon's civic role from typing/moveset — instinct IS the
+      job. HUMANS_DESIGN.md independently proposed the opposite for humans
+      (roles *earned* through accumulated history). Both are right for their
+      species, and the contrast is a cheap rule that says something real.
+      Species-derived specialties could come off `SpeciesDef` data we
+      already have; earned titles already exist in `notables.ts`.
+- [ ] **"Comfort, not capture" implies our endgame.** Our villages keep
+      Pokémon *out*; the player is the first who can do the opposite. So the
+      late-game payoff of "you're the first" is **building a place where
+      both can live, and Pokémon start choosing to be there** —
+      mechanically real, and mostly reusing `speciesFitsZone`/
+      `estimateZoneSpecies` with the player changing the inputs.
+- [ ] **Knowledge physically present but socially lost.** Pokopia's Pokémon
+      can't read human writing, so only the player learns the truth. Invert
+      it: ruins hold records nobody in the village can read any more (already
+      canon-shaped — Braille, Unown). Also: **places outlive their names** —
+      `territories.ts` plus a history pass could carry both a current name
+      and an older one that only survives in records.
+- [ ] **Don't drift cozy.** Pokopia removes aggression and territory
+      disputes entirely. That's exactly wrong for us — predation, territory
+      and resource conflict are the engine of the whole simulation, and the
+      friction is what makes eventual coexistence mean anything. Named so we
+      notice if we start sanding it off.
+
 - [ ] **Budget a real tuning pass for the history sim.** Named risk, from
       this project's own scar tissue (the overworld capacity feedback loop
       that chased 1 forever, caught only by a real multi-thousand-tick run):
