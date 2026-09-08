@@ -674,7 +674,13 @@
         margin-top: 2px;
         border-left: 2px solid var(--panel-border);
       }
-      .skilltree-row { display: flex; flex-wrap: wrap; gap: 8px; }
+      /* Each depth layer is centred, so the tree hangs from its root the way
+         a tree should. It used to default to flex-start, which left every
+         row jammed against the left edge and made a 2-node layer under a
+         5-node one look like an unrelated list rather than a branch —
+         direct report: "they're awkwardly positioning from the top left of
+         the skill node, not center." */
+      .skilltree-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: stretch; }
       .skilltree-node {
         border: 1px solid var(--panel-border);
         border-radius: 5px;
@@ -682,10 +688,22 @@
         min-width: 84px;
         background: #1b2129;
         cursor: default;
+        /* Centres the name/cost within the node too — with a `min-width` a
+           short name would otherwise sit hard against the left padding while
+           the box around it stayed wide. */
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
       }
       .skilltree-node-dim { opacity: 0.45; }
-      .skilltree-node-chosen { opacity: 1; background: #232b1f; }
+      /* A bought node has to read as bought at a glance. The old treatment
+         was opacity 1 against 0.45 plus a #232b1f fill against #1b2129 —
+         two greys three points apart, which is not a signal. */
+      .skilltree-node-chosen { opacity: 1; background: #24301f; border-color: #4d7c3a; }
       .skilltree-node-name { font-size: 11.5px; font-weight: 600; }
+      .skilltree-node-chosen .skilltree-node-name { color: #cdebb6; }
       .skilltree-node-cost { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
 
       /* Narrow viewports: stack the map above the panel instead of side by

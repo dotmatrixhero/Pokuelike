@@ -5878,3 +5878,40 @@ not something this pathfinding pass itself caused or is positioned to fix.
       - `CLASH_PROMOTION_COOLDOWN_TICKS` 40 -> 100, since each clash now holds
         the camera for seconds and 594 per 6,000 ticks would otherwise
         monopolise Auto Camera and crowd out every other kind of moment.
+
+- [x] **Skill-tree UI: allocations were never visible, and rows hung off the
+      left.** Direct report: "they're awkwardly positioning from the top left
+      of the skill node, not center. and i don't see the actual skill
+      allocations being visible."
+      - **The allocations bug was a key-space mismatch, not styling.**
+        `agent.moveTreeChoices` is keyed by the `knownMoves` DEX KEY
+        (`"WATER_GUN"`), while `agent.moves` is keyed by the `MoveSpec`'s own
+        id (`"water_gun"`). The inspector did
+        `agent.moveTreeChoices?.[move.id]`, which never matched. Measured
+        over a real 4,000-tick run: the old lookup lit **0 nodes across 70
+        rendered trees**; the corrected one lights **726 nodes across 64**.
+        A level-31 Kingler with 28 bought nodes in Water Gun displayed as
+        having none.
+      - leveling.ts documents this exact trap at the write site ("those two
+        are frequently different casings/names for the same move") and
+        handles it correctly for `agent.moves`. The web simply never got the
+        memo. Fixed by resolving each stored key through
+        `LEVELING_CONTEXT.resolveMove` — the same mapping the engine uses —
+        rather than upper-casing, which that comment explicitly warns would
+        not be enough.
+      - **Layout:** `.skilltree-row` had no `justify-content`, so every depth
+        layer sat flush left and a 3-node layer under a 6-node one read as an
+        unrelated list rather than a branch. Now centred, with the node's own
+        name/cost centred inside it too (a `min-width` was leaving short
+        names jammed against the left padding).
+      - **Chosen styling was not a signal:** `#232b1f` against `#1b2129` is
+        two greys three points apart. Bought nodes now get a green border and
+        light-green name.
+      - Verified in the running app: 6 rows measured with leftGap exactly
+        equal to rightGap, and a bought "Iron Hide" node rendering green.
+
+- [ ] **Side note: duplicate node display names.** The Tackle tree renders two
+      separate nodes both labelled "+10 Accuracy" in the same row (plus a
+      "+5 Power" that repeats a row later). Not a rendering bug — the tree
+      data really does give distinct nodes identical display names, which
+      makes a tree impossible to read. Wants real names.

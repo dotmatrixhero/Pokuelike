@@ -1,5 +1,5 @@
 import type { Agent, MoveSpec, MoveTreeNode, World } from "@pokuelike/engine";
-import { SPECIES } from "@pokuelike/data";
+import { LEVELING_CONTEXT, SPECIES } from "@pokuelike/data";
 import { TYPE_COLOR, rgbToCss, rgbaToCss } from "./palette.js";
 import { agentDisplayName, herdDisplayName, LEADER_ICON, TITLE_ICON } from "./notableTitles.js";
 
@@ -152,6 +152,37 @@ function moveKey(agent: Agent, move: MoveSpec): string {
   return `${agent.id}:${move.id}`;
 }
 
+/**
+ * The skill nodes this agent has actually bought for `move`.
+ *
+ * **`agent.moveTreeChoices` is not keyed the way `agent.moves` is**, and
+ * reading it as though it were is why allocations never showed up. Direct
+ * report: "i don't see the actual skill allocations being visible." A real
+ * level-31 Kingler had 28 nodes bought under `"WATER_GUN"` while its own
+ * `MoveSpec.id` is `"water_gun"`, so the obvious
+ * `agent.moveTreeChoices[move.id]` lookup returned `undefined` every single
+ * time and every node rendered as un-chosen.
+ *
+ * leveling.ts documents the distinction at the write site — choices are
+ * keyed by the `knownMoves` dex key (`"EMBER"`), `agent.moves` by the
+ * `MoveSpec`'s own id (`"ember"`), and the two are "frequently different
+ * casings/names for the same move." So this resolves each key through
+ * `LEVELING_CONTEXT.resolveMove`, the exact same mapping the engine itself
+ * uses, rather than upper-casing and hoping: a pair that differs by more
+ * than case (which that comment explicitly warns about) would silently
+ * break a casing hack and not this.
+ */
+function chosenNodesFor(agent: Agent, move: MoveSpec): string[] {
+  const choices = agent.moveTreeChoices;
+  if (!choices) return [];
+  const direct = choices[move.id];
+  if (direct) return direct;
+  for (const [key, nodes] of Object.entries(choices)) {
+    if (LEVELING_CONTEXT.resolveMove(key)?.id === move.id) return nodes;
+  }
+  return [];
+}
+
 /** BFS depth from any root (a node with no prerequisites of either kind) — good enough for a simple layered layout without a real graph-layout algorithm. */
 function layerNodes(tree: Record<string, MoveTreeNode>): MoveTreeNode[][] {
   const ids = Object.keys(tree);
@@ -285,7 +316,7 @@ function renderMoveRow(agent: Agent, move: MoveSpec): HTMLElement {
   wrap.appendChild(header);
 
   if (hasTree && expandedKey === moveKey(agent, move)) {
-    const chosen = agent.moveTreeChoices?.[move.id] ?? [];
+    const chosen = chosenNodesFor(agent, move);
     wrap.appendChild(renderMoveTree(move, chosen));
   }
 
