@@ -215,6 +215,14 @@ Direct ask, opening a new front: "We also need to do 'human' geo passes to
 add human-ness to it all. Like roads and villages and ports and boats and
 homes and shrines and shit."
 
+**Read HUMANS_DESIGN.md first.** Direct instruction before building any of
+this: "before we do that we gotta go deep into humans design... like history
+and motivations and tools and shit." That doc covers what a human actually
+is — simulated species vs. authored NPC, generated settlement history,
+individual and settlement motivations (which turn out to be the natural
+quest generator), and material culture. This section is only the
+*placement* half; it assumes that doc's answers.
+
 This is the phase DESIGN.md deferred on purpose — "I think we do need to
 simulate human society and stuff but we can do a separate pass for that.
 It's after the geological stuff" — now being asked for concretely. The

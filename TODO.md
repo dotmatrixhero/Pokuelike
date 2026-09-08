@@ -54,6 +54,75 @@ Still genuinely open, left by the Z-level decision:
       (caves are rare; a dense 3D grid would be almost entirely empty) and
       leaves the existing surface macro grid untouched.
 
+## Humans: what they actually are — designed, see HUMANS_DESIGN.md
+
+Direct instruction, gating the geo pass below: "before we do that we gotta
+go deep into humans design... like history and motivations and tools and
+shit." The geo pass knows how to *place* villages; nothing had decided what
+was in one.
+
+Core recommendation: **humans are a simulated species with a thin authored
+overlay**, not static NPCs — because a village turns out to map almost
+exactly onto machinery that already exists (`herds.ts` for named groups with
+founding/splits/history, `herding.ts` cohesion, `herdLeadership.ts`,
+`notables.ts` for earned reputations, `shelter.ts` for building, `crops.ts`
+for farming, `territories.ts`, `herdConflict.ts` for real resource
+pressure, `chronicle.ts` for the record). A `SpeciesDef` already carries
+`buildsShelter`/`biomes`/`preferredTerrain`/`activityPattern`/`isPredator`,
+so "human" is expressible as a species entry today with no new fields.
+
+Three things the doc goes deep on, each with a genuinely cheap hook:
+
+- [ ] **Generated history**, sibling to the geological pass — founding
+      sites, expansion over generations, settlements that split/stagnate/
+      fail, ruins with real recorded causes, era events. Reuses the herd
+      vocabulary almost exactly (**a settlement founding is a herd split**;
+      `HerdRecord` already has `foundedTick`, a parent for splits, and an
+      origin). Payoff: an elder's backstory is *true in the data*.
+- [ ] **Motivations** — individual drives (provide / standing / curiosity /
+      safety / devotion / grievance) biased by the `Disposition` vector
+      (`boldness`/`aggression`/`sociability`) that `nature.ts` already
+      carries. Plus one dominant **settlement** motivation (survive /
+      rebuild / defend / expand / trade / worship) which turns out to be
+      **the quest generator** — both of the pitch's own example quests fall
+      out of it unmodified.
+- [ ] **Tools and material culture** — pre-industrial ladder shared with the
+      player's Act 1 crafting (village = better tables, not different
+      physics). What a settlement can make is **already determined by the
+      geology pass** (forest→timber/bows, highland/`geothermalVent`→ore/
+      smithing, coast→boats/nets), so regional variation is free. Techniques
+      diffuse along trade roads over historical time, and can be *lost* when
+      a settlement falls.
+
+Proposals in that doc worth a decision, not just noting:
+
+- [ ] **Shrines sited at real generated landmarks** (`sacredSpring`,
+      `geothermalVent`, `meteorCrater`, `boneGrounds`) — the world's geology
+      IS its mythology, and a shrine is the evidence someone noticed. Nearly
+      free to implement, gives every generated world its own religion.
+- [ ] **Per-settlement attitude toward Pokémon** (reverent / fearful /
+      pragmatic) set from local facts and drifting with events — decides
+      quests, reactions to the player's bonded partner, and whether "clear
+      the Krabby nest" is pest control or a moral problem.
+- [ ] **Why nobody has bonded before**: bonding needs close-range reading of
+      a dangerous animal, which is exactly what a society surviving by
+      keeping its distance trains itself never to do. The player is first
+      because they were desperate and alone, not chosen.
+- [ ] **TMs as ancient relics, not human technology** — found in ruins/
+      caverns/shrines rather than crafted. Fixes the awkwardness of
+      pre-industrial people manufacturing move-teaching devices, makes ruins
+      worth exploring, and seeds a "the knowledge was lost" runway toward
+      Act 3.
+- [ ] **Inherited roles** as the answer to "a simulated quest-giver can
+      die" — *the elder* persists as an office even when the person doesn't.
+      The only option that turns the problem into a feature.
+
+Open questions listed at the end of HUMANS_DESIGN.md (9 of them) — the big
+ones are whether humans are simulated at all, whether the world generates
+wild and gets settled by a history pass (vs. placed pre-settled), how deep
+history goes, whether humans hunt Pokémon, and whether any domesticated
+Pokémon exist before the player.
+
 ## Human geo pass: roads, villages, ports, shrines — designed, see CAMPAIGN_DESIGN.md
 
 Direct ask: "We also need to do 'human' geo passes to add human-ness to it
