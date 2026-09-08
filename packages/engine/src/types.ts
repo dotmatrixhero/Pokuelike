@@ -109,7 +109,7 @@ export type PassiveKind =
  * state, also feeds destination scoring) and `SimEvent`'s
  * `herdMigrating.reason` (external/narrative surface) so both always agree.
  */
-export type MigrationReason = "scarcity" | "predator_pressure" | "wanderlust" | "territorial" | "weather";
+export type MigrationReason = "scarcity" | "predator_pressure" | "wanderlust" | "territorial" | "weather" | "crowding";
 
 /**
  * Why an agent dispersed — see dispersal.ts/DESIGN.md's "Natal dispersal"
@@ -1585,6 +1585,8 @@ export interface World {
    * ordinary centroid-based cohesion applies.
    */
   herdMigrations?: Record<string, { target: Vec2; reason: MigrationReason; startedTick: number }>;
+  /** Consecutive ticks each herd has sat over the local carrying capacity — the crowding trigger's counter, mirroring `herdScarcityTicks` exactly. See herdMigration.ts's `CROWDING_CAPACITY_PER_ABUNDANCE`. */
+  herdCrowdingTicks?: Record<string, number>;
   /**
    * Per-herd current leader — see herdLeadership.ts/DESIGN.md's "Herd
    * Leadership" section. Keyed by `herdId`, matching `herdMigrations`'s exact

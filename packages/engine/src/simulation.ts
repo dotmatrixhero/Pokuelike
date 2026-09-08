@@ -323,7 +323,7 @@ export function tickWorld(
   // this tick's pre-move positions, which is fine: sustained-scarcity
   // detection is a slow-moving signal, not something that needs to react to
   // the exact order agents move in within the same tick.
-  updateHerdMigrations(world, log, rng);
+  updateHerdMigrations(world, log, rng, regionDispersal);
   // Once per tick, not once per agent — same "world-level system, one pass"
   // shape as `updateHerdMigrations` above (see immigration.ts). A newly
   // arrived immigrant pushed here is picked up by this same tick's agent

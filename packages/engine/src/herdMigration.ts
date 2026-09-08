@@ -1,4 +1,5 @@
-import type { Layer, MigrationReason, Vec2, World } from "./types.js";
+import type { Agent, Layer, MigrationReason, Vec2, World } from "./types.js";
+import type { RegionDispersalContext } from "./dispersal.js";
 import type { EventLog } from "./events.js";
 import { herdCentroid, COHESION_DISTANCE } from "./herding.js";
 import { foodStockNear, countTerrainNear } from "./resourceIndex.js";
@@ -95,6 +96,59 @@ export const ARRIVAL_DISTANCE = COHESION_DISTANCE;
  * migrate forever toward an unreachable/no-longer-relevant point).
  */
 export const MIGRATION_TIMEOUT_TICKS = 2000;
+
+/**
+ * Crowding — the trigger that answers "why is there a stuffed zone next to
+ * an empty one?"
+ *
+ * Direct report: "it is very confusing to have 100+ krabbys in one zone and
+ * 0 in an adjacent one." Measured before building anything: over 8,000
+ * ticks a run produced 22-35 within-zone herd migrations but 0-1 actual zone
+ * crossings, against 11-12 arrivals from off-map. Population could arrive
+ * and essentially never leave.
+ *
+ * The missing force was density. Every existing trigger is about the local
+ * land or a local threat — scarcity, predators, storms, a rival herd,
+ * restlessness — and none of them ask whether there are simply too many
+ * animals here. A zone can be rich enough that scarcity never fires while
+ * being far past what it can support, which is exactly the state that
+ * produces the reported symptom.
+ *
+ * Capacity is expressed the same way the abstract tier already expresses it
+ * (`overworld.ts`'s `capacity = baseResourceIndex * CAPACITY_SCALE`):
+ * headcount per unit of local abundance. Deliberately the same idea rather
+ * than a second invented one, so a zone's crowding means the same thing
+ * whether it is being simulated in full or ticked as an aggregate.
+ */
+export const CROWDING_CAPACITY_PER_ABUNDANCE = 2.2;
+/** Local headcount must exceed capacity by this factor before crowding counts at all — a zone at exactly its capacity is full, not overfull. */
+export const CROWDING_RATIO_THRESHOLD = 1.15;
+/** Sustained, like scarcity: a single crowded tick is a herd bunching up to drink, not a population problem. */
+export const CROWDING_SUSTAIN_TICKS = 200;
+
+/**
+ * Per-reason chance that a triggered migration leaves the ZONE entirely
+ * rather than relocating inside it — whole-herd, not a lone disperser.
+ *
+ * Crowding is highest by a wide margin because it is the one reason with no
+ * possible in-zone answer: if the zone is over capacity, walking 25 tiles
+ * across it relieves nothing. Scarcity and territorial pressure are often
+ * but not always zone-wide, so they get a real but minority chance. Weather
+ * cells and predators are local by nature — the far side of the same map is
+ * usually a perfectly good answer — so those stay low, and wanderlust is
+ * aimless by design.
+ */
+const ZONE_CROSSING_CHANCE: Record<MigrationReason, number> = {
+  crowding: 0.85,
+  scarcity: 0.4,
+  territorial: 0.35,
+  wanderlust: 0.2,
+  weather: 0.15,
+  predator_pressure: 0.15,
+};
+
+/** How far along the destination-facing edge a crossing herd spreads out, so a dozen animals don't all target one tile. */
+const CROSSING_EDGE_SPREAD = 6;
 /** Candidate destinations are probed this many tiles out from the centroid, in each of `CANDIDATE_DIRECTIONS`. */
 const CANDIDATE_DISTANCES = [15, 25, 40];
 const CANDIDATE_DIRECTIONS: readonly Vec2[] = [
@@ -454,7 +508,7 @@ function pairKey(a: string, b: string): string {
  *   by disposition, no bad condition required). The first one that fires
  *   wins; the rest aren't even evaluated that tick for that herd.
  */
-export function updateHerdMigrations(world: World, log?: EventLog, rng: () => number = Math.random): void {
+export function updateHerdMigrations(world: World, log?: EventLog, rng: () => number = Math.random, regionCtx?: RegionDispersalContext): void {
   const herdIds = new Set<string>();
   for (const agent of world.agents) {
     if (agent.alive !== false && agent.herdId) herdIds.add(agent.herdId);
@@ -465,6 +519,14 @@ export function updateHerdMigrations(world: World, log?: EventLog, rng: () => nu
     if (!layer) continue;
     const centroid = herdCentroid(world, herdId, layer);
     if (!centroid) continue;
+
+    // A herd already walking out of the zone is busy, and unlike an in-zone
+    // migration it has no `herdMigrations` entry to say so (see
+    // `tryZoneCrossing` for why it deliberately creates none). Without this
+    // check every trigger re-evaluates a departing herd every tick and
+    // re-fires: a test asserting one emigration event caught 201 of them,
+    // one per tick, each re-targeting members who were already leaving.
+    if (isHerdCrossing(world, herdId)) continue;
 
     const active = world.herdMigrations?.[herdId];
     if (active) {
@@ -486,11 +548,18 @@ export function updateHerdMigrations(world: World, log?: EventLog, rng: () => nu
       continue; // an already-migrating herd doesn't also re-run trigger detection this tick
     }
 
-    if (tryScarcityTrigger(world, log, herdId, layer, centroid)) continue;
-    if (tryPredatorPressureTrigger(world, log, herdId, layer, centroid)) continue;
-    if (tryWeatherTrigger(world, log, herdId, layer, centroid)) continue;
-    if (tryTerritorialTrigger(world, log, herdId, layer, centroid, herdIds)) continue;
-    tryWanderlustTrigger(world, log, herdId, layer, centroid, rng);
+    // Crowding runs FIRST, ahead of even scarcity. The two can be true at
+    // once and they want opposite things: scarcity's `pickDestination`
+    // hunts for the richest patch left in this zone, which for an overfull
+    // zone means marching the herd to whatever corner is least stripped and
+    // stripping that too. Crowding's answer — leave — is the correct one
+    // whenever both fire, so it gets to claim the tick.
+    if (tryCrowdingTrigger(world, log, herdId, layer, centroid, regionCtx, rng)) continue;
+    if (tryScarcityTrigger(world, log, herdId, layer, centroid, regionCtx, rng)) continue;
+    if (tryPredatorPressureTrigger(world, log, herdId, layer, centroid, regionCtx, rng)) continue;
+    if (tryWeatherTrigger(world, log, herdId, layer, centroid, regionCtx, rng)) continue;
+    if (tryTerritorialTrigger(world, log, herdId, layer, centroid, herdIds, regionCtx, rng)) continue;
+    tryWanderlustTrigger(world, log, herdId, layer, centroid, rng, regionCtx);
   }
 }
 
@@ -500,8 +569,165 @@ function startMigration(world: World, log: EventLog | undefined, herdId: string,
   log?.record({ kind: "herdMigrating", tick: world.tick, herdId, from, to, reason });
 }
 
+/** Whether any living member of this herd is already mid-crossing out of the zone. */
+function isHerdCrossing(world: World, herdId: string): boolean {
+  return world.agents.some((a) => a.herdId === herdId && a.alive !== false && a.crossingToRegionId !== undefined);
+}
+
+/** Every living, walking member of a herd on `layer` — eggs and the fainted are not going anywhere. */
+function herdMembers(world: World, herdId: string, layer: Layer): Agent[] {
+  return world.agents.filter((a) => a.herdId === herdId && a.layer === layer && a.alive !== false && !a.isEgg && !a.fainted);
+}
+
+/**
+ * Walks a WHOLE herd out of this zone and into a neighbouring one, instead
+ * of relocating it inside the current map.
+ *
+ * Direct ask, after the measurement above showed cross-zone movement
+ * essentially never happened: real herd-based migration, so a group can
+ * spill over into the next zone rather than one animal occasionally
+ * wandering off.
+ *
+ * **Built entirely out of the existing crossing pipeline rather than a new
+ * one.** An individual natal disperser already leaves a zone by carrying
+ * `crossingToRegionId` plus a `dispersalTarget` on the map edge;
+ * `applyDispersal` walks it there, `finishDispersal` deliberately
+ * early-returns for a crosser (so it does NOT get reassigned to a new herd),
+ * and `overworld.ts`'s `applyRegionCrossings` removes it and folds it into
+ * the destination's aggregate with its `herdId` intact. All of that is
+ * exactly what a herd crossing needs; the only thing missing was anything
+ * that set those fields on more than one animal at a time. So this sets them
+ * on every member at once and lets the tested machinery do the rest.
+ *
+ * Consequences worth stating plainly:
+ * - No `world.herdMigrations` entry is created. The members are walking
+ *   under dispersal, not cohesion, and a migration record whose herd is
+ *   about to stop existing in this world would linger until it timed out.
+ * - Members are those alive at trigger time. Anything hatched mid-walk stays
+ *   behind, which is a real (and fairly natural) way for a herd to leave a
+ *   remnant.
+ * - The walk is pausable exactly like any dispersal: a member that gets
+ *   hungry or thirsty stops to deal with it and resumes after (see needs.ts,
+ *   which learned that the hard way — agents once died of thirst mid-walk
+ *   standing next to water).
+ */
+function tryZoneCrossing(
+  world: World,
+  log: EventLog | undefined,
+  herdId: string,
+  layer: Layer,
+  centroid: Vec2,
+  reason: MigrationReason,
+  regionCtx: RegionDispersalContext | undefined,
+  rng: () => number
+): boolean {
+  if (!regionCtx || regionCtx.neighborRegionIds.length === 0) return false;
+  if (rng() >= ZONE_CROSSING_CHANCE[reason]) return false;
+
+  const members = herdMembers(world, herdId, herdId ? layer : layer);
+  if (members.length === 0) return false;
+
+  const targetRegionId = regionCtx.neighborRegionIds[Math.floor(rng() * regionCtx.neighborRegionIds.length)]!;
+  // Leave by the edge that actually faces the destination when we know which
+  // way that is. A herd walking east to reach the zone to the east is the
+  // whole readability point; without directions it still works, just via an
+  // arbitrary edge.
+  const dir = regionCtx.neighborDirections?.[targetRegionId];
+  const exit = edgeTowards(world, layer, centroid, dir, rng);
+
+  for (const member of members) {
+    member.crossingToRegionId = targetRegionId;
+    // Spread along the edge so a dozen animals aren't all pathing to one
+    // tile and jamming on capacity.
+    const jitter = Math.round((rng() - 0.5) * 2 * CROSSING_EDGE_SPREAD);
+    const spread = { x: exit.x + (dir && dir.dx !== 0 ? 0 : jitter), y: exit.y + (dir && dir.dy !== 0 ? 0 : jitter) };
+    const clamped = { x: Math.min(world.width - 1, Math.max(0, spread.x)), y: Math.min(world.height - 1, Math.max(0, spread.y)) };
+    member.dispersalTarget = layer === "surface" ? findWalkableNear(world, layer, clamped.x, clamped.y) : clamped;
+  }
+
+  log?.record({
+    kind: "herdEmigrating",
+    tick: world.tick,
+    herdId,
+    from: centroid,
+    toRegionId: targetRegionId,
+    reason,
+    count: members.length,
+  });
+  return true;
+}
+
+/** A point on the map edge facing `dir`, or a random edge when the direction is unknown. */
+function edgeTowards(world: World, layer: Layer, from: Vec2, dir: { dx: number; dy: number } | undefined, rng: () => number): Vec2 {
+  const raw: Vec2 = dir
+    ? dir.dx > 0
+      ? { x: world.width - 1, y: from.y }
+      : dir.dx < 0
+        ? { x: 0, y: from.y }
+        : dir.dy > 0
+          ? { x: from.x, y: world.height - 1 }
+          : { x: from.x, y: 0 }
+    : [
+        { x: Math.round(rng() * (world.width - 1)), y: 0 },
+        { x: world.width - 1, y: Math.round(rng() * (world.height - 1)) },
+        { x: Math.round(rng() * (world.width - 1)), y: world.height - 1 },
+        { x: 0, y: Math.round(rng() * (world.height - 1)) },
+      ][Math.floor(rng() * 4)]!;
+  return layer === "surface" ? findWalkableNear(world, layer, raw.x, raw.y) : raw;
+}
+
+/**
+ * Local headcount against what the land here can support — see
+ * `CROWDING_CAPACITY_PER_ABUNDANCE`. Counts every living agent near the
+ * centroid, not just this herd's own: a herd is crowded out by whoever else
+ * is eating the same patch, regardless of which group they belong to.
+ */
+export function crowdingRatioAt(world: World, layer: Layer, pos: Vec2): number {
+  const abundance = abundanceAt(world, layer, pos, SAMPLE_RADIUS);
+  let nearby = 0;
+  for (const agent of world.agents) {
+    if (agent.alive === false || agent.isEgg || agent.layer !== layer) continue;
+    if (manhattan(agent.pos, pos) <= SAMPLE_RADIUS) nearby++;
+  }
+  const capacity = Math.max(1, abundance * CROWDING_CAPACITY_PER_ABUNDANCE);
+  return nearby / capacity;
+}
+
+/**
+ * Too many mouths for the local land, sustained. See
+ * `CROWDING_CAPACITY_PER_ABUNDANCE` for why this trigger exists at all and
+ * why it outranks scarcity.
+ */
+function tryCrowdingTrigger(
+  world: World,
+  log: EventLog | undefined,
+  herdId: string,
+  layer: Layer,
+  centroid: Vec2,
+  regionCtx: RegionDispersalContext | undefined,
+  rng: () => number
+): boolean {
+  world.herdCrowdingTicks ??= {};
+  if (crowdingRatioAt(world, layer, centroid) >= CROWDING_RATIO_THRESHOLD) {
+    world.herdCrowdingTicks[herdId] = (world.herdCrowdingTicks[herdId] ?? 0) + 1;
+  } else {
+    world.herdCrowdingTicks[herdId] = 0;
+  }
+  if (world.herdCrowdingTicks[herdId] < CROWDING_SUSTAIN_TICKS) return false;
+  world.herdCrowdingTicks[herdId] = 0;
+
+  if (tryZoneCrossing(world, log, herdId, layer, centroid, "crowding", regionCtx, rng)) return true;
+  // No neighbour to spill into (a standalone scenario world, or the roll
+  // failed) — fall back to relocating inside the zone. Weaker relief, but a
+  // crowded herd standing still is worse.
+  const destination = pickDestination(world, layer, centroid);
+  if (!destination) return false;
+  startMigration(world, log, herdId, centroid, destination, "crowding");
+  return true;
+}
+
 /** Highest-priority trigger: sustained local food/water scarcity. Unchanged from Phase 0 apart from the `reason` value (`"scarcity"`, not the old ad hoc `"food scarcity"` string). */
-function tryScarcityTrigger(world: World, log: EventLog | undefined, herdId: string, layer: Layer, centroid: Vec2): boolean {
+function tryScarcityTrigger(world: World, log: EventLog | undefined, herdId: string, layer: Layer, centroid: Vec2, regionCtx?: RegionDispersalContext, rng: () => number = Math.random): boolean {
   const abundance = abundanceAt(world, layer, centroid, SAMPLE_RADIUS);
   world.herdScarcityTicks ??= {};
   if (abundance < SCARCITY_SCORE_THRESHOLD) {
@@ -513,6 +739,10 @@ function tryScarcityTrigger(world: World, log: EventLog | undefined, herdId: str
   if (world.herdScarcityTicks[herdId] < SCARCITY_SUSTAIN_TICKS) return false;
 
   world.herdScarcityTicks[herdId] = 0;
+  // A stripped zone is often stripped everywhere, so leaving it entirely is
+  // a real answer to scarcity — but only sometimes, hence the per-reason
+  // roll (see ZONE_CROSSING_CHANCE).
+  if (tryZoneCrossing(world, log, herdId, layer, centroid, "scarcity", regionCtx, rng)) return true;
   const destination = pickDestination(world, layer, centroid);
   if (!destination) return false; // e.g. an underground/canopy herd with nothing anywhere to walk toward — stays put, will retry later
   startMigration(world, log, herdId, centroid, destination, "scarcity");
@@ -520,12 +750,13 @@ function tryScarcityTrigger(world: World, log: EventLog | undefined, herdId: str
 }
 
 /** Second-priority trigger: sustained hunt/fight pressure from a predator. */
-function tryPredatorPressureTrigger(world: World, log: EventLog | undefined, herdId: string, layer: Layer, centroid: Vec2): boolean {
+function tryPredatorPressureTrigger(world: World, log: EventLog | undefined, herdId: string, layer: Layer, centroid: Vec2, regionCtx?: RegionDispersalContext, rng: () => number = Math.random): boolean {
   const pressure = world.herdPredatorPressure?.[herdId];
   if (!pressure || pressure.count < PREDATOR_PRESSURE_THRESHOLD) return false;
 
   const destination = pickDestination(world, layer, centroid, pressure.lastThreatPos);
   delete world.herdPredatorPressure![herdId]; // consumed either way — a fresh window has to build back up before this can trigger again
+  if (tryZoneCrossing(world, log, herdId, layer, centroid, "predator_pressure", regionCtx, rng)) return true;
   if (!destination) return false;
   startMigration(world, log, herdId, centroid, destination, "predator_pressure");
   return true;
@@ -560,7 +791,7 @@ export const STORM_EXPOSURE_SUSTAIN_TICKS = 100;
  * (see `pickDestination`) instead of `awayFrom` — there's no single "threat
  * position" to flee, just a general pull toward better shelter.
  */
-function tryWeatherTrigger(world: World, log: EventLog | undefined, herdId: string, layer: Layer, centroid: Vec2): boolean {
+function tryWeatherTrigger(world: World, log: EventLog | undefined, herdId: string, layer: Layer, centroid: Vec2, regionCtx?: RegionDispersalContext, rng: () => number = Math.random): boolean {
   world.herdStormExposureTicks ??= {};
   if (layer !== "surface") {
     // Weather is a Surface-only system (see weather.ts's top-of-file
@@ -577,6 +808,7 @@ function tryWeatherTrigger(world: World, log: EventLog | undefined, herdId: stri
   if (world.herdStormExposureTicks[herdId] < STORM_EXPOSURE_SUSTAIN_TICKS) return false;
 
   world.herdStormExposureTicks[herdId] = 0;
+  if (tryZoneCrossing(world, log, herdId, layer, centroid, "weather", regionCtx, rng)) return true;
   const destination = pickDestination(world, layer, centroid, undefined, true);
   if (!destination) return false;
   startMigration(world, log, herdId, centroid, destination, "weather");
@@ -590,7 +822,9 @@ function tryTerritorialTrigger(
   herdId: string,
   layer: Layer,
   centroid: Vec2,
-  allHerdIds: Set<string>
+  allHerdIds: Set<string>,
+  regionCtx?: RegionDispersalContext,
+  rng: () => number = Math.random
 ): boolean {
   const species = herdSpecies(world, herdId);
   if (!species) return false;
@@ -631,6 +865,9 @@ function tryTerritorialTrigger(
   if (!isSmaller) return false;
 
   delete world.herdTerritorialTicks[key];
+  // Pushed off this land by a bigger herd — leaving the zone entirely is a
+  // real, and rather characterful, way to lose a territorial dispute.
+  if (tryZoneCrossing(world, log, herdId, layer, centroid, "territorial", regionCtx, rng)) return true;
   const destination = pickDestination(world, layer, centroid, rivalCentroid);
   if (!destination) return false;
   startMigration(world, log, herdId, centroid, destination, "territorial");
@@ -638,8 +875,9 @@ function tryTerritorialTrigger(
 }
 
 /** Lowest-priority (soft) trigger: unconditioned restlessness. */
-function tryWanderlustTrigger(world: World, log: EventLog | undefined, herdId: string, layer: Layer, centroid: Vec2, rng: () => number): boolean {
+function tryWanderlustTrigger(world: World, log: EventLog | undefined, herdId: string, layer: Layer, centroid: Vec2, rng: () => number, regionCtx?: RegionDispersalContext): boolean {
   if (rng() >= wanderlustChance(world, herdId)) return false;
+  if (tryZoneCrossing(world, log, herdId, layer, centroid, "wanderlust", regionCtx, rng)) return true;
   const destination = pickWanderDestination(world, layer, centroid, rng);
   if (!destination) return false;
   startMigration(world, log, herdId, centroid, destination, "wanderlust");

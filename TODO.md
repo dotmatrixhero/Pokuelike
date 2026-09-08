@@ -6107,3 +6107,271 @@ not something this pathfinding pass itself caused or is positioned to fix.
       breeding gate (level 16 or evolved, DESIGN.md) is sitting right at a
       cliff edge for some worlds and not others. Worth a multi-seed look at
       what fraction of a population ever reaches the gate at all.
+
+- [ ] **Cross-zone migration is architecturally present and practically
+      dead.** Prompted by: "it is very confusing to have 100+ krabbys in one
+      zone and 0 in an adjacent one. We have random immigration. But do we
+      have real herd based migration? Can they spill over?"
+      Measured over 8,000 ticks per seed, not reasoned about:
+
+      | | seed 20260903 | seed 11 |
+      |---|---|---|
+      | `herdMigrating` (within a zone) | 22 | 35 |
+      | `dispersed` (individual leaves home) | 0 | 9 |
+      | `regionCrossed` (actually left the zone) | **0** | **1** |
+      | `immigrated` (arrived from off-map) | 12 | 11 |
+      | zones tracked, of 4,096 | **1** | **2** |
+
+      - **Within-zone herd migration is real and works.** `herdMigration.ts`
+        moves a whole herd as a group on five triggers (scarcity, predator
+        pressure, weather, territorial, wanderlust), every member pulling
+        toward one shared point. 22-35 of these per run, and they show up in
+        the chronicle ("Moved on — the food had run out"). That half of the
+        question is a clean yes.
+      - **Cross-zone movement is not.** Random immigration outnumbers actual
+        emigration by 12:1 and 11:1. Population can arrive from off-map but
+        essentially never leaves, which is exactly the reported symptom: one
+        stuffed zone, empty neighbours.
+      - **The abstract spillover mechanism cannot run, by construction.**
+        `maybeEmigrate` is the thing designed to spread population across
+        the grid (10% of a species into a random adjacent zone). It
+        explicitly skips the FOCUSED zone — reasonably, since that zone has
+        real individuals rather than an aggregate — so it only ever operates
+        between two *background* zones. But a zone only becomes tracked when
+        something puts population there, and the only thing that can is an
+        individual walking out of the focused zone. Chicken and egg: the one
+        zone that has anything to export is the one zone forbidden from
+        exporting, so with 1 tracked zone `maybeEmigrate` has nothing to do
+        on any tick of the run. Seed 11 is the proof — a single crossing
+        created a second zone, and only then did the mechanism have two
+        zones to move between.
+      - **Not a level gate, which was my first guess and was wrong.**
+        `DISPERSAL_MIN_LEVEL` is 15 and 19 of 20 living agents were at or
+        above it, with a max of 52. The throttle is further down: dispersal
+        itself is rare (0-9 per run), and `REGION_DISPERSAL_CHANCE` then
+        keeps only 25% of those, and that survivor still has to walk to the
+        map edge without dying.
+      - **Nothing anywhere is density-driven.** `EMIGRATION_CHANCE_PER_TICK`
+        is a flat 0.002 whether a zone holds 4 animals or 400, and herd
+        migration's triggers are all local-resource or threat based, never
+        crowding. There is no carrying-capacity pressure pushing a packed
+        zone outward — which is precisely the force that would fix the
+        reported symptom.
+
+      Options, none applied — this is a design call:
+      1. **Herd-level zone crossing** (what was actually asked for): when a
+         herd's existing scarcity/territorial migration picks a destination
+         and the herd is near a map edge, let the WHOLE herd walk out into
+         the neighbouring zone instead of a lone disperser. Reuses the
+         migration pipeline that already works, and makes the overworld
+         story "the Krabbies of the Bright Coast moved east" rather than
+         "one Krabby wandered off."
+      2. **Density-driven emigration pressure**: scale emigration on
+         population against the zone's own `resourceIndex`/
+         `baseResourceIndex` (both already tracked), so a crowded zone
+         pushes out and an empty one does not.
+      3. **Let the focused zone shed a slice at the aggregate tier** — the
+         cheap deadlock-breaker: remove N real agents and add them to a
+         neighbour's aggregate. Least interesting, but it alone would end
+         the chicken-and-egg.
+      4. Separately: should the world START with populated neighbours? Right
+         now every zone but one is genuinely empty at tick 0, so even a
+         perfect migration system begins from a single point of life.
+
+      Recommendation: 1 + 2 together. 1 is the mechanic the question asks
+      for and 2 is the force that makes it fire when a zone is overfull.
+
+- [x] **Herd-level zone crossing + density-driven emigration.** The fix for
+      the diagnosis above ("100+ krabbys in one zone and 0 in an adjacent
+      one"). Chosen approach: options 1 and 2 together — the mechanic the
+      question asked for, plus the force that makes it fire.
+
+      **A/B over 6 seeds x 8,000 ticks:**
+
+      | | before | after |
+      |---|---|---|
+      | zones populated | 18 | **167** |
+      | `regionCrossed` | 6 | **97** |
+      | off-map population | 113 | **7,604** |
+      | focused-zone population | 234 | **369** |
+
+      The map fills in, and the focused zone was not drained doing it — the
+      thing worth checking, since a migration system that empties the zone
+      you are watching would be a cure worse than the disease.
+
+      - **Crowding trigger** (`CROWDING_CAPACITY_PER_ABUNDANCE`): local
+        headcount against what the land supports, expressed with the same
+        capacity notion the aggregate tier already uses
+        (`baseResourceIndex * CAPACITY_SCALE`) rather than a second invented
+        one. It outranks scarcity deliberately: the two can be true at once
+        and want opposite things — scarcity hunts for the richest patch left
+        in this zone, which for an overfull zone means marching the herd to
+        the least-stripped corner and stripping that too.
+      - **Whole-herd zone crossing** (`tryZoneCrossing`): built entirely out
+        of the existing crossing pipeline rather than a new one. An
+        individual disperser already leaves by carrying `crossingToRegionId`
+        plus an edge `dispersalTarget`; `finishDispersal` already
+        early-returns for a crosser so its herd identity survives, and
+        `applyRegionCrossings` already folds it into the destination. The
+        only thing missing was anything that set those fields on more than
+        one animal at once. Every trigger can now cross, at a per-reason
+        chance — crowding highest (0.85, since no in-zone move relieves it),
+        weather and predators lowest (0.15, since both are local by nature).
+      - **Density-driven `maybeEmigrate`**: the flat 0.002/tick now scales
+        with how far over capacity a zone is, up to 6x. A zone holding 400
+        used to shed population at exactly the rate of one holding 4.
+
+- [x] **Three bugs found while verifying the above, none by reading the
+      code.** Recording them because the pattern keeps repeating: the code
+      looked right in every case.
+      - **Herds set off and never arrived.** 24 animals told to leave across
+        9 emigrations; *zero* arrived in 8,000 ticks. The dispersal walk only
+        advances while `chooseBehavior` reads "idle" — hunger AND thirst
+        above 0.7 — and the stuck crossers sat at 0.50-0.65 forever. The
+        mechanism was self-defeating: the crowded, hungry zone that makes a
+        herd want to leave is precisely the condition that pins it in place.
+        Fixed with `CROSSING_URGENCY_TOLERANCE` (0.55) for zone crossers
+        only, which keeps the substance of the earlier "agents died of thirst
+        standing next to water" fix — a genuinely desperate animal still
+        breaks off and resumes after — while letting a merely peckish one
+        walk. This is what the original instruction actually said: needs jump
+        the queue *based on urgency*, not on any shortfall at all.
+      - **The crossing re-fired every tick.** A crossing deliberately creates
+        no `herdMigrations` entry (the herd is about to stop existing in this
+        world), so nothing marked the herd busy and every trigger
+        re-evaluated it every tick. A test asserting one emigration event
+        caught **201** — one per tick. Fixed with an explicit
+        `isHerdCrossing` check at the top of the per-herd loop.
+      - **My own test was testing the wrong trigger.** The crowding tests
+        used an always-zero rng, which fires *wanderlust* on tick 1 — so they
+        were exercising a wanderlust crossing while claiming to test crowding.
+        Now uses an rng tuned to fail wanderlust and pass the crowding roll.
+        A test that passes for the wrong reason is worse than no test.
+
+- [ ] **Aggregate zones can settle above their own capacity.** Noticed in the
+      A/B: seed 44 ended with 5,989 animals across 80 zones, ~75 per zone
+      against a capacity of at most 50 (`baseResourceIndex * CAPACITY_SCALE`
+      with the index capped at 1). The world filling up is the intent, but
+      sitting *above* capacity is not — emigration keeps adding to zones
+      already full while the logistic term only pulls them down slowly. Worth
+      checking whether an arriving slice should be refused (or bounce onward)
+      when the destination is already at capacity.
+
+- [x] **Auto Camera follows only the inspected Pokémon.** Direct ask: "if
+      you're focused on a Pokémon in inspector while autocam is going, just
+      filter to all notable autocam events that involve that unit. Filter out
+      all else while it's focused."
+      - Applied at the QUEUE, not at render time: a filtered-out moment never
+        occupies a queue slot, never starts a dwell timer, and never counts
+        against the per-category cluster cooldowns. Filtering at render time
+        would leave the camera idling through moments it had already decided
+        not to show.
+      - An already-tracked fight the focused agent is in can still widen when
+        a third participant joins — the gate is only on creating a NEW
+        engagement, or the camera would stop following the very fight it
+        exists for.
+      - Selecting mid-battle cuts away immediately rather than waiting for
+        the current fight to finish. `reset()` clears the focus, since a new
+        world's ids would match nothing and silently filter out everything.
+      - The dim passive battle boxes are deliberately NOT filtered: they are
+        how a viewer sees the rest of the world is still alive and clicks
+        away to something else. Filtering those too would leave no way out.
+
+- [~] **Seamless terrain between zones — LAYER 1 DONE.** Asked: "if I wanted seamless terrain
+      between zones... how hard is that? Like I move south off a zone and just
+      show up like the zone itself sorta expanded?" Full analysis in
+      `SEAMLESS_ZONES.md`; measured with the new
+      `packages/runner/src/validateZoneSeams.ts`.
+      - Today, measured: at a shared edge terrain matches 37% (east) / 50%
+        (south) of the time with a mean elevation jump of 0.85 / 0.77, against
+        a within-zone control of 73% and 0.131. A **6.5x discontinuity** —
+        walking south would be a hard cut, not an expansion.
+      - Cause: every zone is generated independently from its own seed with
+        noise sampled in ZONE-LOCAL coordinates. Neighbouring zones are
+        already *statistically* coherent (`biasForZone` passes down elevation,
+        biome, coast/river/high edges, and massifs already bias toward a
+        higher neighbour) but share no actual field, so they are not
+        *geometrically* continuous.
+      - Layers, cheapest first: (1) global hash-based noise lattices indexed
+        by world coordinate — mechanical, most of the visible win, unambiguous
+        pass/fail via the validator; (2) biome seeds scattered per macro cell
+        and blended across neighbours; (3) generate-with-margin so the
+        cellular-automata passes (massifs, caves, chambers, canopy) agree from
+        both sides; (4) actually walking across, which is an architecture
+        change (promote-on-approach, or a moving window) rather than a
+        generation one.
+      - Rivers stay hard even after (3) — a traced path is not a local rule.
+        `ZoneGenerationBias.riverEdges` anticipated this; lining them up wants
+        a macro-level river trace.
+      - Recommendation: do (1) alone and re-measure. There is no point padding
+        CA margins while the noise underneath still disagrees across the
+        border.
+
+- [x] **Seamless zones, layer 1: global noise + one elevation field.** Full
+      writeup and the two wrong turns in `SEAMLESS_ZONES.md`. Seam terrain
+      agreement went **37% -> 80%**, elevation jump **0.851 -> 0.291**, which
+      is now indistinguishable from the within-zone control (77%, 0.368).
+      - Noise lattices are hashed from GLOBAL coordinates instead of read
+        from a per-zone array, with `origin`/`fieldSeed` threaded through
+        (`WorldPlacement`). Density thresholds calibrate over a fixed global
+        window, or "10% food" would mean a different raw cutoff on each side.
+      - Elevation needed more than global noise, and two attempts failed
+        first — both the same mistake: a per-zone `oceanFraction` percentile
+        cannot be taken of a world-shared distribution (70% floor became 97%
+        water, then 100%). The fix was to stop having two opinions about
+        where the ocean is: the macro grid already IS a global elevation
+        field, so it is now the truth, sampled bilinearly between zone
+        CENTRES so neighbours agree at their shared edge by construction,
+        with noise as local texture.
+      - **Fixed a real pre-existing incoherence:** zones the macro map called
+        ocean were generating as 70% dry land.
+      - **Caused and fixed a regression:** the global calibration also hit the
+        standalone path (which the macro grid itself uses), narrowing its
+        range so the SNOW biome disappeared entirely and `frozenGrotto`
+        became unplaceable (11/11 landmark types -> 10/11). A standalone map
+        has to span its own range.
+      - Three unrelated-looking test failures each got a real answer rather
+        than a threshold bump — a vacuous-then-wrong `findWalkableNear`
+        precondition, a BSP-wobble bar measured to sit inside its own natural
+        3-17 spread, and an arid-stretch bar one seed's luck was holding up.
+      - **Residual is layer 2, now measured:** dominant biome matches across a
+        seam **7%** of the time against **92%** within a zone, and biome
+        drives elevationBase/Variance — so where two zones blend to different
+        biomes their elevation still steps (seed 11: 0.47 against a 0.03
+        control). Biome seeds scattered per macro cell and blended across
+        neighbours is the next layer.
+
+- [x] **Seamless zones, layer 2: fuzzy biomes.** Direct ask: "I want fuzzy
+      biomes." Biome seeds now live on one world-shared 17-tile lattice
+      instead of being scattered per zone, returned in zone-local coordinates
+      (negatives included) so `blendBiomeParams`/`biomeWeightsAt`/
+      `World.biomeSeeds` all work unchanged — two neighbours express the same
+      seed in their own frames and compute the same blend between them.
+      - **Each seed's biome is chosen fuzzily**, weighted by proximity to the
+        four surrounding macro-zone centres rather than snapped to the
+        nearest. A hard nearest-cell lookup would have moved the seam, not
+        removed it: every seed one side of a midpoint desert, every seed the
+        other grassland, and the blend still flips at a line. The weighted
+        roll gives border zones a real mixture, so the fade happens over a
+        band tens of tiles wide.
+      - `dominantBiome`'s extra seeds are skipped on this path — the macro
+        grid already sets each seed's biome, and re-weighting toward "this
+        zone's biome" would undo the fuzzy border entirely.
+      - **Result: seams now match or beat the within-zone control on every
+        seed tested.** 37%/0.851 -> 92%/0.017 (control 90%/0.028). Dominant
+        biome across a seam 7% -> 93%, and one zone still blends three
+        biomes, so this bought fuzziness rather than uniformity.
+      - Also seeded an unseeded `createWorld(5, 1)` in simulation.test.ts that
+        flaked once in a full-suite run and passed alone and on three
+        re-runs — the same class of flake this repo already fixed in
+        needs.test.ts. Four clean full runs since.
+
+- [ ] **Zone-to-zone transition (the "walk south, arrive at the top" step).**
+      Clarified: not smooth scrolling — a screen transition, Zelda-style.
+      Walk off an edge, the neighbour promotes, and you appear at the mirrored
+      position on its opposite edge. Now that terrain is seamless this should
+      read as one continuous world rather than a jump cut. Needs: promote the
+      neighbour on crossing, place the crosser at the mirrored edge position
+      instead of folding it into an aggregate, and move the camera. The known
+      cost is the existing lossy demote — the zone you leave turns its
+      individuals back into aggregate numbers.

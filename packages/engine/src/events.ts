@@ -252,6 +252,18 @@ export type SimEvent =
       lastTick: number;
     }
   | {
+      kind: "herdEmigrating";
+      tick: number;
+      herdId: string;
+      /** The herd's centroid when it set off. */
+      from: Vec2;
+      /** Destination zone key ("row,col") — see overworld.ts. */
+      toRegionId: string;
+      reason: MigrationReason;
+      /** How many members set off. Some may die or be left behind on the walk, so this is the intent, not the arrival count. */
+      count: number;
+    }
+  | {
       kind: "herdMigrating";
       tick: number;
       herdId: string;

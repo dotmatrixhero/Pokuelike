@@ -252,6 +252,117 @@ function freshHerdId(speciesId: string, regionKey: string): string {
   return `${speciesId}-zone-${regionKey}`;
 }
 
+/**
+ * Picks a macro biome for a world position, **fuzzily** — weighted by
+ * proximity to the four surrounding zone centres rather than snapped to the
+ * nearest one.
+ *
+ * Direct ask: "I want fuzzy biomes." A hard nearest-cell lookup would move
+ * the seam rather than remove it: every biome seed on one side of a
+ * midpoint would be desert and every seed on the other grassland, so the
+ * blend would still flip at a line — just a different line. Choosing each
+ * seed's biome by a weighted roll means the zones near a border get a real
+ * MIXTURE of desert and grassland seeds, and `blendBiomeParams` then
+ * interpolates between them over a band tens of tiles wide. Desert fades
+ * into grassland the way it does on a real map.
+ *
+ * Deterministic: `roll` comes from the seed's own cell hash, so the same
+ * cell always picks the same biome and re-running a world reproduces it.
+ * Ocean zones are skipped as a source — an "ocean" seed has no `BiomeDef`
+ * and the tile-level sea level already decides what is underwater.
+ */
+function macroBiomeSampler(mw: MacroWorld): (wx: number, wy: number, roll: number) => string | undefined {
+  return (wx: number, wy: number, roll: number) => {
+    const fx = wx / mw.zoneWidth - 0.5;
+    const fy = wy / mw.zoneHeight - 0.5;
+    const c0 = Math.floor(fx);
+    const r0 = Math.floor(fy);
+    const tx = fx - c0;
+    const ty = fy - r0;
+    const candidates: { name: string; weight: number }[] = [];
+    const consider = (r: number, c: number, weight: number): void => {
+      if (weight <= 0) return;
+      const zone = zoneAt(mw.grid, Math.max(0, Math.min(mw.grid.rows - 1, r)), Math.max(0, Math.min(mw.grid.cols - 1, c)));
+      if (!zone || zone.isOcean) return;
+      candidates.push({ name: zone.biome, weight });
+    };
+    consider(r0, c0, (1 - tx) * (1 - ty));
+    consider(r0, c0 + 1, tx * (1 - ty));
+    consider(r0 + 1, c0, (1 - tx) * ty);
+    consider(r0 + 1, c0 + 1, tx * ty);
+    const total = candidates.reduce((n, c) => n + c.weight, 0);
+    if (total <= 0) return undefined;
+    let pick = roll * total;
+    for (const candidate of candidates) {
+      pick -= candidate.weight;
+      if (pick <= 0) return candidate.name;
+    }
+    return candidates[candidates.length - 1]!.name;
+  };
+}
+
+/**
+ * The elevation below which the macro grid itself calls a zone ocean,
+ * derived from the grid rather than re-guessed: the highest elevation among
+ * zones the grid marked ocean, which is exactly the cutoff its own sea-level
+ * percentile drew. One number for the whole world, so every zone's coastline
+ * lands in the same place.
+ *
+ * Cached on the grid — it is a pure function of it, and promotion would
+ * otherwise re-scan 4,096 zones every time.
+ */
+const seaLevelCache = new WeakMap<MacroGrid, number>();
+function macroSeaLevel(grid: MacroGrid): number {
+  const cached = seaLevelCache.get(grid);
+  if (cached !== undefined) return cached;
+  let highestOcean = 0;
+  let lowestLand = 1;
+  for (const zone of grid.zones) {
+    if (zone.isOcean) highestOcean = Math.max(highestOcean, zone.elevation);
+    else lowestLand = Math.min(lowestLand, zone.elevation);
+  }
+  // Midway between the two when they do not overlap; the ocean side's own
+  // ceiling when they do (a grid whose land/ocean split is not a clean
+  // threshold, which `pruneNoiseSpeckIslands` can produce).
+  const level = lowestLand > highestOcean ? (highestOcean + lowestLand) / 2 : highestOcean;
+  seaLevelCache.set(grid, level);
+  return level;
+}
+
+/**
+ * The macro grid's own elevation, sampled at any tile of zone (row, col) in
+ * zone-local coordinates and **bilinearly interpolated between neighbouring
+ * zone centres** so it is continuous across a boundary.
+ *
+ * This is the piece that makes seamless elevation work. A macro zone's
+ * elevation is a single number for a whole 90x60 tile block; applied
+ * directly it produces a hard step at every boundary — exactly the seam.
+ * Anchoring each zone's value at its CENTRE and interpolating between the
+ * four surrounding centres means two adjacent zones evaluate the same
+ * function at their shared edge and necessarily agree.
+ *
+ * Edge zones clamp to the grid, so the interpolation flattens toward the
+ * border of the world rather than reading off the end.
+ */
+function macroElevationSampler(mw: MacroWorld, row: number, col: number): (x: number, y: number) => number {
+  const elevationAt = (r: number, c: number): number => {
+    const clamped = zoneAt(mw.grid, Math.max(0, Math.min(mw.grid.rows - 1, r)), Math.max(0, Math.min(mw.grid.cols - 1, c)));
+    return clamped?.elevation ?? 0.5;
+  };
+  return (x: number, y: number) => {
+    // Fractional macro coordinates with zone centres on the integers.
+    const fx = col + x / mw.zoneWidth - 0.5;
+    const fy = row + y / mw.zoneHeight - 0.5;
+    const c0 = Math.floor(fx);
+    const r0 = Math.floor(fy);
+    const tx = fx - c0;
+    const ty = fy - r0;
+    const top = elevationAt(r0, c0) + (elevationAt(r0, c0 + 1) - elevationAt(r0, c0)) * tx;
+    const bottom = elevationAt(r0 + 1, c0) + (elevationAt(r0 + 1, c0 + 1) - elevationAt(r0 + 1, c0)) * tx;
+    return top + (bottom - top) * ty;
+  };
+}
+
 /** Ensures a `Region` shell exists in `mw.regions` for (row, col), without seeding any aggregate data — used by migration paths that already have (or are about to build) exactly the one species entry they need, so they don't need the full roster-driven `estimateInitialAggregates` a fresh promotion does. */
 function ensureTrackedRegion(mw: MacroWorld, row: number, col: number): Region {
   const key = zoneKey(row, col);
@@ -419,7 +530,21 @@ export function promoteZone(mw: MacroWorld, row: number, col: number, ctx: Immig
   }
   if (!region.world) {
     const bias = biasForZone(mw.grid, row, col);
-    region.world = generateWorld(mw.zoneWidth, mw.zoneHeight, zoneSeed(mw.worldSeed, row, col), bias);
+    // The zone's own seed still drives everything local and discrete; the
+    // shared `worldSeed` plus this zone's world-space origin drive every
+    // continuous field, so neighbouring zones read one unbroken landscape.
+    // See worldgen.ts's `WorldPlacement`.
+    // The macro grid's per-zone elevation, smoothed across zone boundaries —
+    // this is what makes the tile-level field agree with the macro map about
+    // where the land is high, WITHOUT stepping at the seam. See
+    // `macroElevationSampler`.
+    bias.elevation.macroShiftAt = macroElevationSampler(mw, row, col);
+    bias.elevation.macroSeaLevel = macroSeaLevel(mw.grid);
+    region.world = generateWorld(mw.zoneWidth, mw.zoneHeight, zoneSeed(mw.worldSeed, row, col), bias, {
+      origin: { x: col * mw.zoneWidth, y: row * mw.zoneHeight },
+      fieldSeed: mw.worldSeed,
+      biomeAt: macroBiomeSampler(mw),
+    });
     // Carry the named region down from the macro map, so herds founded in
     // this zone can be named after a place that exists on the overworld
     // rather than an invented one (see herds.ts).
@@ -569,6 +694,20 @@ const EMIGRATION_MIN_POPULATION = 4;
  * like `foldAgentIntoAggregate`'s identical pattern below; no species
  * roster needed for this (unlike a fresh zone's first-ever `promoteZone`).
  */
+/**
+ * How much harder an over-capacity zone pushes population out — 1 at or
+ * below capacity (no change from the flat rate this replaced), rising
+ * linearly with the overshoot and capped so a runaway aggregate cannot
+ * empty itself in a handful of ticks.
+ */
+export const EMIGRATION_CROWDING_MAX = 6;
+
+function crowdingPressure(aggregate: RegionAggregate): number {
+  const capacity = Math.max(MIN_CAPACITY, aggregate.baseResourceIndex * CAPACITY_SCALE);
+  const ratio = aggregate.population / capacity;
+  return Math.min(EMIGRATION_CROWDING_MAX, Math.max(1, ratio));
+}
+
 function maybeEmigrate(mw: MacroWorld, region: Region, log?: EventLog): void {
   const aggregates = region.aggregates;
   if (!aggregates) return;
@@ -585,7 +724,17 @@ function maybeEmigrate(mw: MacroWorld, region: Region, log?: EventLog): void {
 
   for (const aggregate of Object.values(aggregates)) {
     if (aggregate.population < minPopulation) continue;
-    if (mw.rng() >= chance) continue;
+    // Crowding pressure. Direct report: "100+ krabbys in one zone and 0 in
+    // an adjacent one." Part of the reason was that this roll was a FLAT
+    // per-tick chance — a zone holding 400 animals shed population at
+    // exactly the rate of one holding 4, so nothing ever relieved a packed
+    // zone. Scaled by the same capacity the logistic growth term above
+    // already uses (`baseResourceIndex * CAPACITY_SCALE`), so "full" means
+    // the same thing to both halves of the model rather than being two
+    // independent guesses. A zone at or under capacity is unchanged from
+    // before; one at twice capacity spills roughly `EMIGRATION_CROWDING_MAX`
+    // times as eagerly.
+    if (mw.rng() >= chance * crowdingPressure(aggregate)) continue;
 
     const target = neighborCoords[Math.floor(mw.rng() * neighborCoords.length)]!;
     const destination = ensureTrackedRegion(mw, target.row, target.col);
@@ -927,8 +1076,15 @@ export function tickMacroWorld(mw: MacroWorld, log?: EventLog, rules?: HuntRules
   advanceMacroWeatherFronts(mw, log);
   for (const region of mw.regions.values()) {
     if (region.key === mw.focusedKey) {
-      const neighborIds = zoneNeighbors(mw.grid, region.row, region.col).map((n) => zoneKey(n.row, n.col));
-      const regionDispersal: RegionDispersalContext = { neighborRegionIds: neighborIds };
+      const neighbors = zoneNeighbors(mw.grid, region.row, region.col);
+      const neighborIds = neighbors.map((n) => zoneKey(n.row, n.col));
+      // Which way each neighbor lies, so a whole-herd crossing can leave by
+      // the edge that actually faces its destination rather than a random
+      // one — see herdMigration.ts's `tryZoneCrossing`. Only this module
+      // knows the grid, so only this module can supply it.
+      const neighborDirections: Record<string, { dx: number; dy: number }> = {};
+      for (const n of neighbors) neighborDirections[zoneKey(n.row, n.col)] = { dx: n.col - region.col, dy: n.row - region.row };
+      const regionDispersal: RegionDispersalContext = { neighborRegionIds: neighborIds, neighborDirections };
       const world = region.world!;
       tickWorld(world, log, rules, ctx, world.rng, immigration, regionDispersal);
       applyRegionCrossings(mw, region, log);

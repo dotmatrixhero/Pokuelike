@@ -84,6 +84,7 @@ function migrationReason(reason: string): string {
     case "weather": return "the weather turned against them";
     case "wanderlust": return "restlessness, nothing more";
     case "territorial": return "a stronger herd pushed them out";
+    case "crowding": return "there were too many mouths for the land";
     default: return String(reason);
   }
 }
@@ -175,6 +176,17 @@ export function chronicleFor(world: World, events: readonly SimEvent[], options:
       switch (e.kind) {
         case "herdMigrating":
           beats.push({ tick: e.tick, weight: 80, kind: "movement", text: `Moved on — ${migrationReason(e.reason)}.` });
+          break;
+        // Leaving the region entirely is a bigger moment than relocating
+        // within it, and weighted accordingly — for most herds it is the
+        // last thing that happens in this land.
+        case "herdEmigrating":
+          beats.push({
+            tick: e.tick,
+            weight: 94,
+            kind: "movement",
+            text: `Left this country altogether — ${e.count === 1 ? "the last of them" : `all ${e.count} of them`} set out for new land, ${migrationReason(e.reason)}.`,
+          });
           break;
         case "herdClash":
           beats.push({ tick: e.tick, weight: 72, kind: "conflict", text: `Clashed with a rival herd.` });
