@@ -3,6 +3,7 @@ import type { ImmigrationSpeciesInfo } from "./immigration.js";
 import { generateMacroElevation, makeNoise2D, mulberry32, biomeFoodWaterDensity, type MacroElevationBias, type ZoneGenerationBias } from "./worldgen.js";
 import { DIRECTIONS, DIRECTION_DELTA, OPPOSITE_DIRECTION, type ZoneDirection } from "./directions.js";
 import { placeLandmarks, type LandmarkType } from "./landmarks.js";
+import { nameTerritories } from "./territories.js";
 
 /**
  * The macro-scale zone grid — DESIGN.md's "Correction: overworld and zone are
@@ -52,6 +53,8 @@ export interface MacroZone {
    * (`placeLandmarks`), a handful per whole grid, not a per-tile decoration.
    */
   landmark?: LandmarkType;
+  /** The named territory this zone belongs to, if any — see territories.ts. Absent for ocean and for specks too small to name. */
+  territoryId?: string;
 }
 
 export interface MacroGrid {
@@ -59,6 +62,8 @@ export interface MacroGrid {
   cols: number;
   /** Row-major: `zones[row * cols + col]`. Every (row, col) in bounds has a real entry — this is the "cheap, dense, whole-grid" data structure the vision calls for; nothing here is lazy. */
   zones: MacroZone[];
+  /** Named contiguous biome regions — see territories.ts's `nameTerritories`, which populates this. */
+  territories?: import("./territories.js").Territory[];
 }
 
 export function zoneIndex(grid: Pick<MacroGrid, "cols">, row: number, col: number): number {
@@ -407,6 +412,9 @@ export function generateMacroGrid(seed: number, rows: number, cols: number): Mac
   // After rivers/lakes — Great Lake specifically wants to know `isLake`,
   // and Crossroads wants final `coastEdges`-adjusted land shape.
   placeLandmarks(grid, mulberry32(seed ^ 0x7ed55d16));
+  // Last — territories are named after the geography is final, and a
+  // territory containing a landmark takes its name (see territories.ts).
+  nameTerritories(grid);
   return grid;
 }
 

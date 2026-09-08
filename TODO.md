@@ -5267,3 +5267,40 @@ not something this pathfinding pass itself caused or is positioned to fix.
 - [ ] **Chronicle: still to do.** Migration paths drawn on the map; a family
       tree of splits; clicking a herd to focus the camera on it; weather and
       drought as named disasters a herd survived.
+- [x] **Named territories, labelled on the overworld.** Direct ask: "what if
+      zones or collections of zones were named? Can we do that based on
+      biome too, and even label it on the overworld?"
+      - COLLECTIONS, not zones — the overworld grid is 64x64, so naming
+        every zone would mean four thousand labels and no map. New
+        `territories.ts` flood-fills adjacent same-biome LAND zones into
+        regions and names those: 55-78 per world, covering ~90% of the land.
+        "the Endless Rainwood", "the Thirsting Dunes", "the Ash Scar",
+        "the Heron Wash", "the Cloud Tors".
+      - Names are `<prefix><suffix>` with biome-specific pools, joined
+        without a space for a lowercase word-ending ("Elderwood") and with
+        one for a standalone noun ("the Ashen Waste"). That one distinction
+        is most of what separates a place name from a generated string.
+      - Deliberately does NOT name a territory after a landmark inside it,
+        though the first version did: landmarks are already a separate
+        labelled POI layer AND they are not unique, so that produced three
+        different regions all called "the Crossroads" in one world. A
+        landmark sits IN a region; it is not the region.
+      - Two more defects found by looking at real output: "the Crag Crags"
+        (prefix repeating the suffix — now re-rolled), and duplicate names
+        across regions (now tracked and re-rolled per world).
+      - Labelled on the macro map, drawn in one pass after every zone so no
+        block paints over a label, with a size threshold that scales with
+        zoom so a zoomed-out map only names the big regions. Screenshotting
+        the real app caught two more: labels clipped at the canvas edge
+        ("un Meadows", "the Riot Car") now clamp inward, and overlapping
+        labels are skipped biggest-region-first rather than nudged, since a
+        label moved far enough to clear a collision no longer points at its
+        own territory.
+- [ ] **Territories: not yet wired to herd names.** A herd's place name is
+      still invented locally ("of Saltrun") rather than drawn from the
+      territory it was founded in. The obstacle is real: a run simulates ONE
+      promoted zone, so every herd in it shares a single territory and would
+      share a single name. Options: qualify the territory name with a local
+      feature, name herds after the territory only for the first herd
+      founded there, or show the territory as context in the chronicle
+      rather than in the name.
