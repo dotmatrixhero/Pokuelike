@@ -23,6 +23,12 @@ const H = 60;
 
 const terrainTotals = new Map<string, number>();
 const flavorTotals = new Map<string, number>();
+// Orthogonal per-tile tags, NOT terrain kinds — an earlier version of this
+// script counted only `tile.terrain` and therefore missed these entirely,
+// badly understating the available vocabulary. See the report at the bottom.
+const groundTotals = new Map<string, number>();
+const waterKindTotals = new Map<string, number>();
+let degradedTiles = 0;
 let tilesSeen = 0;
 const perSeedKinds: number[] = [];
 
@@ -31,12 +37,19 @@ for (const seed of SEEDS) {
   const kindsHere = new Set<string>();
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      const tile = tileAt(world, "underground", x, y);
+      const tile = tileAt(world, "underground", x, y) as any;
       if (!tile) continue;
       tilesSeen++;
       terrainTotals.set(tile.terrain, (terrainTotals.get(tile.terrain) ?? 0) + 1);
       kindsHere.add(tile.terrain);
       if (tile.flavor) flavorTotals.set(tile.flavor, (flavorTotals.get(tile.flavor) ?? 0) + 1);
+      const ground = tile.groundType ?? "(unset → loam)";
+      groundTotals.set(ground, (groundTotals.get(ground) ?? 0) + 1);
+      if (tile.terrain === "water" || tile.terrain === "ice") {
+        const wk = tile.waterKind ?? "(unset → pond)";
+        waterKindTotals.set(wk, (waterKindTotals.get(wk) ?? 0) + 1);
+      }
+      if ((tile.groundDegraded ?? 0) > 0) degradedTiles++;
     }
   }
   perSeedKinds.push(kindsHere.size);
@@ -61,14 +74,31 @@ if (flavorTotals.size === 0) {
   }
 }
 
+console.log("\n--- ground types (orthogonal tag, every tile) ---");
+for (const [g, count] of [...groundTotals.entries()].sort((a, b) => b[1] - a[1])) {
+  console.log(`  ${g.padEnd(16)} ${String(count).padStart(7)}  ${pct(count)}`);
+}
+
+console.log("\n--- water kinds (water/ice tiles only) ---");
+if (waterKindTotals.size === 0) {
+  console.log("  (none)");
+} else {
+  for (const [k, count] of [...waterKindTotals.entries()].sort((a, b) => b[1] - a[1])) {
+    console.log(`  ${k.padEnd(16)} ${String(count).padStart(7)}`);
+  }
+}
+console.log(`\n  tiles with permanent ground degradation: ${degradedTiles}`);
+
 console.log("\n--- the honest ceiling ---");
 console.log(`  distinct terrain kinds underground: ${terrainTotals.size} (per seed: ${perSeedKinds.join(", ")})`);
+console.log(`  distinct ground types:              ${groundTotals.size}`);
+console.log(`  distinct water kinds:               ${waterKindTotals.size}`);
 console.log(`  distinct flora flavors:             ${flavorTotals.size}`);
 
 // A describer keyed on "terrain kind appeared" plus a handful of derived
 // conditions. Derived ones are estimated, not measured, and named as such.
 const DERIVED = ["passage narrows", "opens out", "floor rising", "floor falling", "small water body", "large water body"];
-const ceiling = terrainTotals.size + flavorTotals.size + DERIVED.length;
+const ceiling = terrainTotals.size + flavorTotals.size + groundTotals.size + waterKindTotals.size + DERIVED.length;
 console.log(`  derived conditions (estimate):      ${DERIVED.length}  [${DERIVED.join(", ")}]`);
 console.log(`  => rough distinct-line ceiling:     ~${ceiling}`);
 console.log();

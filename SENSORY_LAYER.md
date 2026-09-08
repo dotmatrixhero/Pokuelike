@@ -160,6 +160,39 @@ all. Neither does `sunbeam`.
 Rough ceiling: ~9 distinct lines including derived conditions. Over a 5–6
 layer cave at one line per 5 turns, **each line repeats about 17 times.**
 
+### Re-measured after merging master's new tile types — the point stands
+
+Master since added water body kinds (`ocean`/`river`/`lake`/`pond`),
+ground/soil types (`loam`/`sandy`/`clay`/`rocky`/`peat`), `ice`, and
+permanent ground degradation. The first version of the measurement counted
+only `tile.terrain` and therefore missed all of these, since they are
+**orthogonal per-tile tags rather than terrain kinds** — that was a real
+flaw in the script, now fixed.
+
+Counting them properly changes almost nothing underground, for a specific
+reason:
+
+| Underground, 6 seeds | Result |
+|---|---|
+| `groundType` set | **0%** — 100% unset |
+| `waterKind` set | **0%** — 100% unset |
+| Tiles with permanent degradation | 0 |
+| Ceiling | ~9 → **~11** (and only because "unset" counts as a category) |
+
+**The new tile systems are surface-only.** `assignGroundTypes` reads
+`tileAt(world, "surface", x, y)` explicitly, and `assignWaterKinds` runs the
+same pass. None of it reaches the underground layer.
+
+So the sharper version of the finding: it isn't that the *world* is poor in
+detail — the surface is getting steadily richer. It's that **the cave
+specifically is unenriched, and Act 1 happens entirely in the cave.** Every
+enrichment pass so far has gone somewhere the opening never visits.
+
+That also makes the fix concrete and cheap: extending `assignGroundTypes`
+(and harvestable flora) underground would deliver both the mechanical
+substance and the descriptive vocabulary in one change, rather than needing
+a separate "make the cave interesting" project.
+
 The concern wasn't a worry to manage. It was a correct prediction, and the
 version of Part B written before this measurement was overpromising.
 
