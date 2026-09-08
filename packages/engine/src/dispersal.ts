@@ -8,6 +8,7 @@ import { COHESION_DISTANCE } from "./herding.js";
 import { DISPERSAL_MIN_LEVEL } from "./leveling.js";
 import { effectiveDisposition } from "./herdLeadership.js";
 import { findWalkableNear } from "./worldgen.js";
+import { ensureHerd } from "./herds.js";
 
 /**
  * Natal dispersal — see DESIGN.md's "Natal dispersal: real biology's actual
@@ -324,6 +325,13 @@ function finishDispersal(world: World, agent: Agent, log?: EventLog): void {
   const joinedHerd = findNearbyOtherHerd(world, agent);
   const toHerd = joinedHerd ?? `${agent.species}-lineage-${agent.id}-${world.tick}`;
   agent.herdId = toHerd;
+  // Register the lineage link BEFORE `tickHerds` gets to it, so a herd born
+  // from a split remembers the herd it broke away from — without this the
+  // sweep would register it as an ordinary founding and the family tree
+  // would be lost.
+  if (!joinedHerd) {
+    ensureHerd(world, toHerd, { species: agent.species, pos: agent.pos, origin: "split", parentHerdId: fromHerd, founderId: agent.id }, log);
+  }
   // A founder's/joiner's new home range starts here, not wherever it was
   // born — see `Agent.homePos`'s doc comment (carryAlly's rescue destination
   // and a newborn's spawn anchor both already treat homePos as "where this

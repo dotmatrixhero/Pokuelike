@@ -4,6 +4,7 @@ import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import type { RegionDispersalContext } from "./dispersal.js";
 import { growCanopyFood, growFlora, maybeDropSeed } from "./flora.js";
 import { applyFireDamage, tickFires } from "./fire.js";
+import { tickHerds } from "./herds.js";
 import { decayShelters } from "./shelter.js";
 import { tickEgg } from "./eggs.js";
 import { updateHerdMigrations } from "./herdMigration.js";
@@ -232,6 +233,10 @@ export function tickWorld(
   // scorched "floor" when the flora pass considers regrowth — fire clears
   // ground first, then the world decides what grows back into it.
   // Once per tick, not once per agent, same as growFlora below.
+  // Once per tick, not once per agent — registers new herds, tracks peak
+  // size, and closes out herds whose last member died. Same world-level slot
+  // as growFlora below.
+  tickHerds(world, log);
   tickFires(world, log, rng);
   applyFireDamage(world, log, rng);
   growFlora(world, log, rng);

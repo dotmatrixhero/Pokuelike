@@ -1531,6 +1531,12 @@ export interface World {
    * a documented biome-agnostic default rather than crashing or silently
    * favoring one biome.
    */
+  /**
+   * Every herd this world has ever had, by id — name, founding, lineage and
+   * running record. See herds.ts; registered lazily by `tickHerds`, and kept
+   * after a herd dissolves so its story survives its last member.
+   */
+  herds?: Record<string, import("./herds.js").HerdRecord>;
   biomeSeeds?: BiomeSeedInfo[];
   /**
    * Parallel array to `biomeSeeds` (same index — absent or a shorter array

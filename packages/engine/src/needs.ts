@@ -840,6 +840,7 @@ export function tickAgentNeeds(
       // Ties (both thresholds crossed the same tick) report hunger, matching
       // this codebase's pre-existing convention for a tied cause.
       cause: (agent.starvationTicks ?? 0) >= STARVATION_GRACE_TICKS ? "hunger" : "thirst",
+      herdId: agent.herdId,
     });
     return;
   }

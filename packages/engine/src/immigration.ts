@@ -3,6 +3,7 @@ import type { EventLog } from "./events.js";
 import { biomeWeightsAt, findWalkableNear } from "./worldgen.js";
 import { findNearbyOtherHerd } from "./dispersal.js";
 import { findNearestIndexed } from "./resourceIndex.js";
+import { ensureHerd } from "./herds.js";
 
 /**
  * Immigration — new herds arriving into the world from outside it, over the
@@ -467,6 +468,11 @@ export function maybeImmigrate(world: World, ctx: ImmigrationContext | undefined
   // each independently re-deriving the same answer.
   const joinedHerd = findNearbyOtherHerd(world, newAgents[0]!);
   const herdId = joinedHerd ?? `${species.id}-immigrant-lineage-${world.tick}`;
+  if (!joinedHerd) {
+    // Marked as an arrival rather than a founding, so a chronicle can say
+    // "arrived from beyond the map" instead of implying it was always here.
+    ensureHerd(world, herdId, { species: species.id, pos: edgePos, origin: "immigration" }, log);
+  }
   for (const agent of newAgents) {
     agent.herdId = herdId;
     agent.homePos = { ...agent.pos };

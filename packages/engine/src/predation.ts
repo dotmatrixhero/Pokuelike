@@ -1381,6 +1381,7 @@ function logKillOrDefeat(world: World, attacker: Agent, defender: Agent, faintKi
       preyId: defender.id,
       preySpecies: defender.species,
       pos: defender.pos,
+      herdId: defender.herdId,
     });
   } else {
     log?.record({

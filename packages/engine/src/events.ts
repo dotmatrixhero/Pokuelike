@@ -35,6 +35,8 @@ export type SimEvent =
       predatorSpecies: string;
       preyId: string;
       preySpecies: string;
+      /** The subject's herd at the moment it happened — stamped so a chronicle can say whose story this belongs to. See herds.ts. */
+      herdId?: string;
       pos: Vec2;
     }
   | {
@@ -117,6 +119,8 @@ export type SimEvent =
       species: string;
       pos: Vec2;
       cause: "hunger" | "thirst";
+      /** The subject's herd at the moment it happened — stamped so a chronicle can say whose story this belongs to. See herds.ts. */
+      herdId?: string;
     }
   | {
       /** Burned to death standing in a fire tile — see fire.ts's `applyFireDamage`. Deliberately NOT a `killed` event: a fire is not a predator, and the hunt/rapport/feeding consumers of `killed` would all be wrong to count it. */
@@ -150,6 +154,8 @@ export type SimEvent =
       fromSpecies: string;
       toSpecies: string;
       level: number;
+      /** The subject's herd at the moment it happened — stamped so a chronicle can say whose story this belongs to. See herds.ts. */
+      herdId?: string;
     }
   | {
       kind: "learnedMove";
@@ -221,6 +227,27 @@ export type SimEvent =
       carriedId: string;
       carriedSpecies: string;
       reason: "arrived" | "threat";
+    }
+  | {
+      /** A herd came into existence — founded at world start, split off from a parent, or arrived as immigrants. See herds.ts. */
+      kind: "herdFounded";
+      tick: number;
+      herdId: string;
+      name: string;
+      species: string;
+      origin: "founding" | "split" | "immigration";
+      /** The herd it split away from, when origin is "split". */
+      parentHerdId?: string;
+      pos: Vec2;
+    }
+  | {
+      /** A herd's last living member is gone. Kept as an event because a herd ending is part of its story. */
+      kind: "herdDissolved";
+      tick: number;
+      herdId: string;
+      name: string;
+      /** Last tick it still had a living member. */
+      lastTick: number;
     }
   | {
       kind: "herdMigrating";

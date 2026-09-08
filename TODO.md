@@ -5160,3 +5160,34 @@ not something this pathfinding pass itself caused or is positioned to fix.
         every axis (target 0.3 / boost 12 puts p90 back to 53% and cv to
         0.47). A hard shove replaces extinction with overshoot; the gentle
         setting is the one that cycles.
+- [x] **The Chronicle: herds as named entities with a story.** Direct ask:
+      "the story of a herd as an entity... I want to trace what zones they
+      migrated across, what their notables are, what happened to them...
+      I want stories", plus "yes named herd, just [good] bits. Filter hard."
+      - The sim was already recording nearly every beat (migrations, clashes,
+        splits, titles, droughts, eggs eaten). What it could not do was say
+        WHOSE story an event belonged to: a herd was an opaque id string with
+        no identity, no founding and no memory of where it came from.
+      - New `herds.ts`: a `HerdRecord` per herd — evocative name from the
+        biome it formed in ("the Bulbasaurs of Saltrun"), founding tick and
+        place, origin (founding / split / immigration), parent herd for
+        lineage, peak size, and a dissolution tick so a herd's ending is part
+        of its story. Registered by a once-per-tick sweep; splits and
+        immigration register themselves first so lineage is not lost.
+      - `agentDisplayName` gives individuals real names. "egg evolved into an
+        ivysaur" reads like a bug report; "Yarrowhide took the lead" is a
+        story.
+      - `herdId` stamped onto killed/starved/evolved so losses can be
+        attributed to a herd after the fact.
+      - New `chronicle.ts` (runner) turns a run into prose. Filtering hard is
+        the whole design: deaths within 400 ticks collapse into one "hard
+        stretch", repeated beats dedupe (an early draft gave one herd five
+        separate "Quillspur took the lead" lines), evolutions collapse to a
+        single coming-of-age line, and only the 8 strongest beats per herd
+        survive.
+- [ ] **Chronicle: next steps.** Not built yet, in rough priority order:
+      migration paths drawn on a map; a family tree of splits; notable
+      titles woven in (the `titleClaimed` path is wired but no title was
+      earned in the sample run, so it is untested in prose); weather and
+      drought as named events a herd survived; and an Atlas-style artifact
+      instead of terminal text.
