@@ -78,7 +78,19 @@ export interface MoveSpec {
   category: "physical" | "special" | "status";
   /** Mainline-scale base power (Tackle 40, Flamethrower 90, etc.). */
   power: number;
-  /** 0-100. Not yet consumed by combat.ts — every move currently hits; see TODO. */
+  /**
+   * 0-100. **Live** — `combat.ts`'s `rollAccuracy` consumes this on every
+   * real hit, via `resolveHitAgainstTarget` (predation.ts) and
+   * `resolveClashHit` (herdConflict.ts); a failed roll emits a `"missed"`
+   * outcome. A negative value (-1) means "never misses," matching the
+   * mainline convention for moves with no accuracy check.
+   *
+   * `weather.ts`'s `stormAccuracyMultiplier` already composes onto the roll.
+   * Accuracy/evasion *stages* are plumbed through `rollAccuracy` but always
+   * passed as 0 — no agent carries stages yet, and `elevation.ts`'s
+   * `elevationAccuracyModifier`/`elevationEvasionModifier` are written,
+   * exported and tested but still have zero callers.
+   */
   accuracy: number;
   /** Ticks before this move can be used again. */
   cooldownTicks: number;

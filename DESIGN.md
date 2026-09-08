@@ -320,9 +320,10 @@ thing"):
   10`; other stats: `floor(2*base*level/100) + 5`), no IV/EV modeling, just
   mainline-scale numbers. Verified against a real level-5 Bulbasaur's HP.
 - **`packages/engine/src/moves.ts`**: `MoveSpec` now carries `type`,
-  `category` (physical/special), `power`, `accuracy` (not yet consumed —
-  every move currently hits, see TODO), and `cooldownTicks`, replacing the
-  old untyped `tuning` bag.
+  `category` (physical/special), `power`, `accuracy` (live — `rollAccuracy`
+  consumes it on every real hit; this line used to say "not yet consumed,
+  every move currently hits" and was stale), and `cooldownTicks`, replacing
+  the old untyped `tuning` bag.
 - **`packages/engine/src/combat.ts`**: `calculateDamage` is the real
   mainline formula (`((2*level/5+2) * power * atk/def) / 50 + 2`) with
   STAB (1.5x), type effectiveness, and an injectable random-variance
