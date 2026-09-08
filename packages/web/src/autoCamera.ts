@@ -1,4 +1,5 @@
-import type { Agent, SimEvent, Vec2, World } from "@pokuelike/engine";
+import { totalExpForLevel, type Agent, type SimEvent, type Vec2, type World } from "@pokuelike/engine";
+import { LEVELING_CONTEXT } from "@pokuelike/data";
 import { idLabel, TITLE_DISPLAY_NAME } from "./notableTitles.js";
 
 /**
@@ -648,11 +649,18 @@ export class AutoCameraController {
         // own — see `maybeEngageClash`'s own doc comment for why this no
         // longer waits for a retaliating hit first.
         if (event.outcome !== "missed") {
+          // "over a contested resource" — direct ask: "it'd also be nice on
+          // a multi unit fight to explain why they're fighting... same with
+          // clashes or territory." `herdConflict.ts`'s own design doc
+          // comment is explicit that this is ALWAYS true for a `herdClash`
+          // specifically (deliberately NOT territorial crowding — real food/
+          // water tile contention is the one and only trigger), so this is
+          // safe to state outright rather than guess at per-event.
           this.maybeEngageClash(
             event.tick,
             new Set([event.attackerId, event.defenderId]),
             event.pos,
-            `${idLabel(world, event.attackerId, event.attackerSpecies)} vs ${idLabel(world, event.defenderId, event.defenderSpecies)} clashing`,
+            `${idLabel(world, event.attackerId, event.attackerSpecies)} vs ${idLabel(world, event.defenderId, event.defenderSpecies)} clashing over a contested resource`,
             world
           );
         }
@@ -776,7 +784,12 @@ export class AutoCameraController {
       // reads as a real multi-agent brawl instead of a stale two-name
       // string quietly tracking more than it says.
       if (existing.ids.size > 2) {
-        existing.label = `${existing.ids.size}-way ${category === "battle" ? "battle" : "brawl"}`;
+        // "explain why they're fighting" for the multi-way case too — a
+        // battle widening to 3+ is a real pack hunt (predation.ts's own
+        // finishing-pool/mob-defense mechanics: allies piling onto the same
+        // target), and a widened clash is the same resource contention as
+        // any other clash, just with more claimants at once.
+        existing.label = category === "battle" ? `${existing.ids.size}-way pack hunt` : `${existing.ids.size}-way brawl over a contested resource`;
       }
       return;
     }
@@ -853,19 +866,98 @@ export class AutoCameraController {
    * — see its own doc comment for the real empirical bug (0 extinction/
    * notable promotions despite real events) that made this necessary on
    * top of the courtship-only guard above.
+   *
+   * WHICH queued battle wins (when more than one is waiting), and likewise
+   * for clash, is no longer plain FIFO either — see `storyWeight`'s own doc
+   * comment. Direct ask: "add a prio system for autocam that focuses on
+   * things that move the story forward, from a chronicle-like perspective."
    */
-  private popNextEngagement(tick: number): Engagement {
+  private popNextEngagement(tick: number, world: World): Engagement {
     const hardStarvedIndex = this.queue.findIndex((e) => !e.continuous && tick - e.queuedAtTick >= ONE_SHOT_HARD_STARVATION_TICKS);
     if (hardStarvedIndex >= 0) return this.queue.splice(hardStarvedIndex, 1)[0]!;
-    const battleIndex = this.queue.findIndex((e) => e.category === "battle");
+    const battleIndex = this.bestQueuedIndex("battle", world);
     if (battleIndex >= 0) return this.queue.splice(battleIndex, 1)[0]!;
-    const clashIndex = this.queue.findIndex((e) => e.category === "clash");
+    const clashIndex = this.bestQueuedIndex("clash", world);
     if (clashIndex >= 0) return this.queue.splice(clashIndex, 1)[0]!;
     const staleCourtshipIndex = this.queue.findIndex((e) => e.category === "courtship" && tick - e.queuedAtTick >= COURTSHIP_STARVATION_TICKS);
     if (staleCourtshipIndex >= 0) return this.queue.splice(staleCourtshipIndex, 1)[0]!;
     const notableOneShotIndex = this.queue.findIndex((e) => e.category !== "courtship");
     if (notableOneShotIndex >= 0) return this.queue.splice(notableOneShotIndex, 1)[0]!;
     return this.queue.shift()!;
+  }
+
+  /** The index of the highest-`storyWeight` queued entry of `category` — ties keep the earliest-queued one (stable scan, strict `>`). -1 when nothing of that category is queued. */
+  private bestQueuedIndex(category: "battle" | "clash", world: World): number {
+    let bestIndex = -1;
+    let bestWeight = -Infinity;
+    this.queue.forEach((e, i) => {
+      if (e.category !== category) return;
+      const weight = this.storyWeight(e.ids, world);
+      if (weight > bestWeight) {
+        bestWeight = weight;
+        bestIndex = i;
+      }
+    });
+    return bestIndex;
+  }
+
+  /**
+   * How much a queued battle/clash is worth showing over another one
+   * competing for the same "which do we cut to next" slot — direct ask:
+   * "add a prio system for autocam that focuses on things that move the
+   * story forward, from a chronicle-like perspective... fights that make a
+   * unit notable, fights that give enough xp so the winner can evolve,
+   * fights that are close... fights that lead to extinction or otherwise
+   * could sway the outcome of a herd." Purely a tie-break AMONG
+   * already-queued battle entries (and separately clash entries) in
+   * `bestQueuedIndex` above — it never lets a one-shot or a clash skip
+   * ahead of a queued battle, or a fresher fight starve out; that's the
+   * deliberately separate `ONE_SHOT_HARD_STARVATION_TICKS` rule.
+   *
+   * A best-effort proxy for each signal, not a lookahead — nothing here
+   * can know how the fight actually turns out before it plays:
+   *   - a participant already holding a notable title (an established
+   *     character, not just any animal);
+   *   - a participant one level from a real evolution AND already at least
+   *     halfway through that level's exp span — close enough that this
+   *     fight's own exp could plausibly be the one that tips it over,
+   *     without also flagging every fight a low-level animal happens to be
+   *     in as "evolution-adjacent";
+   *   - a participant whose herd is down to its last couple of living
+   *     members — losing this fight could plausibly end that herd's story
+   *     (see the new "extinction" autocam category this session for the
+   *     other half of that same ask);
+   *   - every living participant already hurt (below 35% hp) — a fight
+   *     that could plausibly end either way, not a one-sided beatdown.
+   * Weights are ad hoc, not from any formula — extinction stakes rank
+   * highest (the most irreversible, story-ending outcome of the four).
+   */
+  private storyWeight(ids: ReadonlySet<string>, world: World): number {
+    const agents = [...ids].map((id) => world.agents.find((a) => a.id === id)).filter((a): a is Agent => !!a);
+    if (agents.length === 0) return 0;
+    let weight = 0;
+    for (const agent of agents) {
+      if (agent.notableTitle) weight += 3;
+
+      const profile = LEVELING_CONTEXT.getProfile(agent.species);
+      const level = agent.level ?? 1;
+      const evolvesNextLevel = profile?.evolutions.some((e) => e.level === level + 1);
+      if (profile && evolvesNextLevel) {
+        const currentThreshold = totalExpForLevel(profile.growthRate, level);
+        const nextThreshold = totalExpForLevel(profile.growthRate, level + 1);
+        const span = nextThreshold - currentThreshold;
+        const progress = span > 0 ? ((agent.exp ?? 0) - currentThreshold) / span : 0;
+        if (progress >= 0.5) weight += 4;
+      }
+
+      if (agent.herdId) {
+        const herdSize = world.agents.filter((a) => a.alive !== false && a.herdId === agent.herdId).length;
+        if (herdSize > 0 && herdSize <= 2) weight += 5;
+      }
+    }
+    const hpFractions = agents.filter((a) => a.alive !== false && a.hp !== undefined && a.maxHp).map((a) => a.hp! / a.maxHp!);
+    if (hpFractions.length >= 2 && hpFractions.every((f) => f <= 0.35)) weight += 2;
+    return weight;
   }
 
   /**
@@ -940,7 +1032,7 @@ export class AutoCameraController {
     }
 
     if (!this.active && this.queue.length > 0) {
-      const next = this.popNextEngagement(tick);
+      const next = this.popNextEngagement(tick, world);
       if (!next.continuous) next.dwellUntilRealMs = performance.now() + (next.category === "courtship" ? COURTSHIP_DWELL_MS : DWELL_MS);
       this.active = next;
       this.viewerTookOver = false; // a genuinely new thing to look at re-earns camera control even if the viewer panned away from the last one

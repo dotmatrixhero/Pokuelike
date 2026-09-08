@@ -14420,3 +14420,63 @@ change with no new failure mode, same rendering primitives (`fillText` +
 backing disc) already used and confirmed working for the egg case. Full
 monorepo typecheck clean; engine (46 files, 1257 tests) and data (2 files,
 240 tests) suites green.
+
+## Autocam: story-weighted battle/clash selection, "why" context
+
+Direct follow-up, mid-turn: "generally if we can add a prio system for
+autocam that focuses on things that move the story forward, from a
+chronicle-like perspective. Ex. fights that make a unit notable, fights
+that give enough xp so the winner can evolve, fights that are close, like
+both units end at low hp, fights that lead to extinction or otherwise
+could sway the outcome of herd... It'd also be nice on a multi unit fight
+to explain why they're fighting and what they're fighting over. Same with
+clashes or territory."
+
+Scoped as a tie-break WITHIN the existing battle/clash priority tier, not
+a new tier of its own — `popNextEngagement` already always prefers a
+queued battle over a queued clash over every one-shot; what was missing
+was WHICH queued battle (or WHICH queued clash) to show when more than one
+is waiting, which was plain FIFO. New `storyWeight(ids, world)` scores a
+queued engagement by best-effort proxies for the four asked-for signals
+(nothing here can know how a fight actually turns out ahead of time):
+- a participant already holding a notable title (+3);
+- a participant one level from a REAL evolution (`LevelingProfile.
+  evolutions`, `@pokuelike/data`'s `LEVELING_CONTEXT`) and already at least
+  halfway through that level's own exp span — close enough this fight's
+  own exp could plausibly tip it over (+4);
+- a participant whose herd is down to its last 1-2 living members —
+  losing this fight could plausibly end that herd's story, the same stakes
+  the new "extinction" autocam category (this session, above) captures
+  after the fact (+5, ranked highest: the most irreversible outcome);
+- every living participant already hurt (≤35% hp) — a fight that could
+  plausibly go either way, not a one-sided beatdown (+2).
+`bestQueuedIndex` picks the highest-scoring queued entry of a category
+(stable tie-break: earliest queued wins a tie), used for both the battle
+and the clash tier in `popNextEngagement`. Deliberately doesn't let a
+one-shot or a clash skip ahead of a queued battle, and doesn't touch
+`ONE_SHOT_HARD_STARVATION_TICKS`'s own separate "never wait forever" rule
+— this only ever changes which ALREADY-battle-tier or ALREADY-clash-tier
+entry wins.
+
+**"Why" context**: `herdConflict.ts`'s own design doc comment is explicit
+that a `herdClash` is ALWAYS real resource contention (deliberately NOT
+territorial crowding — a same/different-species pair both wanting the same
+scarce food/water tile is the one and only trigger), so the clash label now
+always says so outright: "X vs Y clashing over a contested resource,"
+including the widened multi-way case ("N-way brawl over a contested
+resource"). A widened multi-way BATTLE (3+ participants) is relabeled
+"N-way pack hunt" instead of the previous bare "N-way battle" — real allies
+piling onto the same target (predation.ts's finishing-pool/mob-defense
+mechanics), not an ambiguous free-for-all.
+
+### Verification
+
+Direct synthetic scenario test (`tsx`, not just code-reading): two
+candidate queued "battle" engagements, an ordinary full-health pair queued
+FIRST and a notable-titled/low-hp/near-extinction-herd pair queued SECOND
+— confirmed the second (higher story-weight) engagement won promotion
+despite plain FIFO order saying the first should. Live Playwright run at
+32x confirmed the new "clashing over a contested resource" wording
+appearing repeatedly across several distinct live clashes. Full monorepo
+typecheck clean; engine (46 files, 1257 tests) and data (2 files, 240
+tests) suites green (this feature is web-only — no engine/data changes).
