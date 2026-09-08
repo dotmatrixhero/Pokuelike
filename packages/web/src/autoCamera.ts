@@ -18,17 +18,31 @@ import { idLabel } from "./notableTitles.js";
 
 export type NotableCategory = "immigration" | "courtship" | "hatch" | "battle" | "clash" | "evolution" | "death";
 
-/** Fixed camera-hold time for a one-shot notable moment (immigration/hatch/evolution/death not extending a battle — "courtship" uses its own, shorter `COURTSHIP_DWELL_TICKS` instead, see that constant's own doc comment). Real ticks, not wall-clock — see `DWELL_TICKS`'s doc comment for why ticks, not ms. */
-const DWELL_TICKS = 24;
 /**
- * `DWELL_TICKS`'s own shorter counterpart for "courtship" specifically —
+ * Fixed camera-hold time for a one-shot notable moment (immigration/hatch/
+ * evolution/death not extending a battle — "courtship" uses its own,
+ * shorter `COURTSHIP_DWELL_MS` instead, see that constant's own doc
+ * comment). Real wall-clock ms, not ticks — direct follow-up report: "our
+ * attempt to shorten autocam lingering was a bit too aggressive... doesn't
+ * feel like it's lingering for 3 seconds... even on 32x it should be at
+ * least 2 seconds." Root cause: this used to be a real TICK count (24),
+ * the same "ticks are a bad proxy for wall-clock time" mistake
+ * `BATTLE_STALE_MS`/`BATTLE_EPILOGUE_MS`'s own doc comments already caught
+ * for the continuous-engagement case — 24 ticks is a real ~4s hold at 1x
+ * (6 ticks/sec) but collapses to ~0.125s at 32x (192 ticks/sec), and this
+ * one-shot dwell had never gotten the same real-ms fix they did. See
+ * `Engagement.dwellUntilRealMs`.
+ */
+const DWELL_MS = 2500;
+/**
+ * `DWELL_MS`'s own shorter counterpart for "courtship" specifically —
  * direct ask: "bonding takes too much air time on the autocam. reduce it
  * and shorten how long it follows them." Courtship (bonded/shelterBuilt/
  * eggLaid) is real but the least individually dramatic of the one-shot
  * categories — a brief glance is enough, it doesn't need the same hold time
  * as a rarer immigration/hatch/evolution/death moment.
  */
-const COURTSHIP_DWELL_TICKS = 10;
+const COURTSHIP_DWELL_MS = 1200;
 /**
  * A concluded battle gets a short "epilogue" hold on the same view before the
  * camera releases — long enough to actually see the kill/retreat land, short
@@ -222,8 +236,10 @@ interface Engagement {
   label: string;
   /** True only for "battle" — kept alive tick-to-tick by new hits instead of expiring after one fixed dwell. */
   continuous: boolean;
-  /** Tick this engagement should stop being displayed (for a one-shot); unused for a continuous battle/clash — see `lastActiveRealMs` for its staleness clock instead. */
+  /** Legacy tick-based bookkeeping, now dead weight for a one-shot's actual expiry (see `dwellUntilRealMs`) — kept only because it's still a convenient "was this preempted" tick stamp elsewhere in the file; not read by `reconcile`'s dwell check any more. Unused for a continuous battle/clash beyond that same stamping. */
   expiresOrLastActiveTick: number;
+  /** `performance.now()` deadline a one-shot engagement's fixed camera hold expires at — what `DWELL_MS`/`COURTSHIP_DWELL_MS` actually count against (see `DWELL_MS`'s own doc comment for why real ms, not ticks). Set the moment a one-shot is popped/promoted to active, and stamped to "now" (an immediate deadline) on preemption by something higher-priority. Unused for a continuous battle/clash. */
+  dwellUntilRealMs?: number;
   /** Tick this engagement was first queued (for a one-shot) — what `COURTSHIP_STARVATION_TICKS` counts elapsed WAITING time against, distinct from `expiresOrLastActiveTick` (which only gets a real dwell deadline once actually popped/active). See `popNextEngagement`'s own doc comment for why this exists. */
   queuedAtTick: number;
   /** `performance.now()` at the last real hit involving this continuous (battle/clash) engagement — what `BATTLE_STALE_MS`/`CLASH_STALE_MS` count elapsed real time against (see their own doc comments for why real ms, not ticks). Stamped on construction and on every widening hit in `onBattleHit`; unused for a one-shot engagement. */
@@ -717,7 +733,10 @@ export class AutoCameraController {
     // second engagement for it.
     if (this.active) {
       const preempt = category === "battle" ? this.active.category !== "battle" : this.active.category !== "battle" && this.active.category !== "clash";
-      if (preempt) this.active.expiresOrLastActiveTick = world.tick;
+      if (preempt) {
+        this.active.expiresOrLastActiveTick = world.tick;
+        this.active.dwellUntilRealMs = performance.now();
+      }
     }
     this.queue.push({
       category,
@@ -820,14 +839,18 @@ export class AutoCameraController {
         if (playing && this.active.concludedAtRealMs !== undefined && performance.now() - this.active.concludedAtRealMs >= epilogueMs) {
           this.finishActive(world, playing);
         }
-      } else if (tick >= this.active.expiresOrLastActiveTick) {
+        // Real-ms dwell, same `playing` guard as the continuous branch above
+        // — see `DWELL_MS`'s own doc comment for why this is wall-clock, not
+        // ticks (the old `tick >= expiresOrLastActiveTick` check no longer
+        // drives this; that field is now only ever the preemption trigger).
+      } else if (playing && this.active.dwellUntilRealMs !== undefined && performance.now() >= this.active.dwellUntilRealMs) {
         this.finishActive(world, playing);
       }
     }
 
     if (!this.active && this.queue.length > 0) {
       const next = this.popNextEngagement(tick);
-      if (!next.continuous) next.expiresOrLastActiveTick = tick + (next.category === "courtship" ? COURTSHIP_DWELL_TICKS : DWELL_TICKS);
+      if (!next.continuous) next.dwellUntilRealMs = performance.now() + (next.category === "courtship" ? COURTSHIP_DWELL_MS : DWELL_MS);
       this.active = next;
       this.viewerTookOver = false; // a genuinely new thing to look at re-earns camera control even if the viewer panned away from the last one
       // Promotion bookkeeping (`this.active`/`viewerTookOver` above) always

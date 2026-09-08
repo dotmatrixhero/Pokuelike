@@ -14274,3 +14274,48 @@ found no blank log across a longer run at the same tick range. The
 fires) and conclude (label reverts to the prior numeric speed the same
 tick `exitBattleStep` fires). Full monorepo typecheck clean; engine (46
 files, 1257 tests) and data (2 files, 240 tests) suites green.
+
+## Auto Camera one-shot dwell: tick-based, so it shrank away to nothing at high speed
+
+Direct follow-up report: "I think our attempt to shorten autocam lingering
+was a bit too aggressive. Can you lengthen it back a tiny bit? Doesn't feel
+like it's lingering for 3 seconds... maybe the 3 seconds is only on 1x
+speed? Even on 32x it should be at least 2 seconds."
+
+Root cause: the one-shot camera hold (immigration/hatch/evolution/death via
+`DWELL_TICKS`, courtship via the shorter `COURTSHIP_DWELL_TICKS`) was still
+a real TICK count — 24 and 10 respectively — the exact same "ticks are a
+bad proxy for wall-clock time" mistake `BATTLE_STALE_MS`/`BATTLE_EPILOGUE_MS`
+already got fixed for earlier this session, just never applied here too.
+24 ticks is genuinely ~4s at 1x (6 ticks/sec), which is presumably where
+the "3 seconds" mental model came from — but at 32x (192 ticks/sec) the
+exact same 24 ticks is ~0.125s, over 30x shorter. This had actually already
+been measured and written down once before (see the "Verified directly"
+note on the cluster-cooldown fix above: "DWELL_TICKS at
+AUTO_CAM_SLOWDOWN_SPEED's 8x is only half a real second") but never turned
+into a fix at the time.
+
+Converted both to real `performance.now()` deadlines — `DWELL_MS` (2500)
+and `COURTSHIP_DWELL_MS` (1200) — via a new `Engagement.dwellUntilRealMs`
+field, set the moment a one-shot is promoted and stamped to "now" (an
+immediate deadline) on preemption by something higher-priority, the same
+role the old tick-based `expiresOrLastActiveTick` played alone before
+(that field still exists and still gets stamped by the preemption/widening
+paths, but `reconcile`'s actual dwell-expiry check no longer reads it —
+comments updated to say so). Gated on `playing`, same as the continuous-
+engagement real-ms checks, so a paused view doesn't watch a one-shot's
+clock run out from under it.
+
+### Verification
+
+Direct scenario test (real wall-clock, not simulated): fed
+`AutoCameraController` a single synthetic `evolved` event with the host
+reporting speed=32 the whole time and nothing else competing for the
+camera — measured 2509ms from promotion to release, matching the new
+`DWELL_MS`. Separately ran a real ~15s live-sim window at 32x through the
+demo scenario; in that busy a world nearly every one-shot got preempted by
+a fresh battle/clash before its own dwell could run out (expected —
+battle/clash still rightly outranks a one-shot), so the isolated test
+above is what actually confirms the fix; the live run just confirms
+preemption still works the same as before. Full monorepo typecheck clean;
+engine (46 files, 1257 tests) and data (2 files, 240 tests) suites green.
