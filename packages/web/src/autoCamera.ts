@@ -365,9 +365,22 @@ export class AutoCameraController {
    * apply the active engagement's camera focus. `reconcile` itself always
    * runs (detection/expiry needs to keep working while disabled — see
    * `ingest`); only the actual camera pan is gated here.
+   *
+   * `playing` — direct report: "it loses focus after a while [while paused].
+   * If I pause it I don't want to focus on something else unless I click
+   * outside the box." Root cause: a concluded battle's epilogue hold
+   * (`BATTLE_EPILOGUE_MS`/`CLASH_EPILOGUE_MS`) counts down in real wall-clock
+   * time (`performance.now()`), deliberately, so it can't stall forever
+   * behind a `step()` that only fires on a timer (see `ingest`'s own doc
+   * comment) — but that means it kept expiring in the background even while
+   * the world itself was frozen, moving the camera on to whatever queued
+   * next without the viewer ever choosing that. `reconcile` now takes
+   * `playing` and freezes just that one real-time comparison while paused —
+   * every other tick-gated check here is already naturally frozen (ticks
+   * don't advance while paused), so this is the one real gap.
    */
-  update(world: World): void {
-    this.reconcile(world);
+  update(world: World, playing: boolean): void {
+    this.reconcile(world, playing);
     if (this.enabled && this.active && !this.viewerTookOver) this.host.focusOn(this.focusPos(this.active, world));
   }
 
@@ -672,7 +685,7 @@ export class AutoCameraController {
 
   // --- state machine -----------------------------------------------------------
 
-  private reconcile(world: World): void {
+  private reconcile(world: World, playing: boolean): void {
     const tick = world.tick;
 
     // Stamp any continuous engagement marked-concluded-this-batch (see onBattleParticipantLeft's -1 sentinel) with a real epilogue deadline now that we know the tick — and the real-ms clock its own epilogue duration actually counts against.
@@ -695,11 +708,14 @@ export class AutoCameraController {
           this.active.concludedAtTick = tick;
           this.active.concludedAtRealMs = performance.now();
         }
-        if (this.active.concludedAtRealMs !== undefined && performance.now() - this.active.concludedAtRealMs >= epilogueMs) {
-          this.finishActive(world);
+        // Gated on `playing` — see `update`'s own doc comment for why: this
+        // is the one real-time (not tick-gated) expiry check here, so it's
+        // the one that needs an explicit pause guard.
+        if (playing && this.active.concludedAtRealMs !== undefined && performance.now() - this.active.concludedAtRealMs >= epilogueMs) {
+          this.finishActive(world, playing);
         }
       } else if (tick >= this.active.expiresOrLastActiveTick) {
-        this.finishActive(world);
+        this.finishActive(world, playing);
       }
     }
 
@@ -719,12 +735,12 @@ export class AutoCameraController {
     if (!this.active && this.enabled) this.releaseControl();
   }
 
-  private finishActive(world: World): void {
+  private finishActive(world: World, playing: boolean): void {
     this.active = undefined;
     // Immediately try to promote the next queued engagement on the same
     // reconcile pass so a back-to-back run of events (e.g. a kill right as
     // an evolution fires elsewhere) doesn't sit on an empty frame first.
-    this.reconcile(world);
+    this.reconcile(world, playing);
   }
 
   private applySlowdownIfNeeded(): void {

@@ -13471,3 +13471,61 @@ shelter-tiles-are-exempt, and a genuinely-boxed-in (walled on every side)
 case that confirms the accepted "leave it be" edge case actually leaves it
 be rather than throwing or looping. Full engine suite green (41 files, 1172
 tests) and full monorepo typecheck clean.
+
+## Battle Screen while paused: scrollable log, no unwanted refocus, click-to-inspect
+
+Three direct reports about the paused/watching experience, sent together:
+"1. I can't scroll and see battle log [when paused]. 2. It loses focus after
+a while. If I pause it I don't want to focus on something else unless I
+click outside the box. 3. I should be able to click specific units in the
+box to inspect, right now click focuses the fight."
+
+1. **Can't scroll while paused.** `BattleScreenPanel.render` used to tear
+   down and rebuild its ENTIRE DOM (`container.replaceChildren()`, a brand
+   new `.battle-screen-log` div) every single animation frame, regardless of
+   whether anything actually changed — a fresh DOM node has no scroll
+   position, so any manual scroll attempt was destroyed within one frame
+   (~16ms) even with zero new lines, exactly the case while paused (no new
+   ticks -> no new lines -> `dirty` never true, but the whole panel still
+   got rebuilt anyway). Fixed by keeping the header/log DOM nodes persistent
+   across frames (`logEl`/`headerEl`/`renderedSeq`): the log's own children
+   are only touched when `dirty` says real new content arrived, and even
+   then only re-snapped to the bottom if the viewer was already reading from
+   the bottom — scrolled up to reread something, a fresh line no longer
+   yanks them back down (a real, free improvement to the live/playing case
+   too, not just paused). Verified deterministically (real DOM via a
+   throwaway Playwright script importing the real module) — 20 idle
+   re-renders with no new content now leave a manually-set scroll position
+   completely untouched; a genuinely new line while scrolled up doesn't
+   force it back to the bottom; a genuinely new line while already at the
+   bottom still does.
+
+2. **Loses focus after a while, even paused.** Root cause: a concluded
+   battle's epilogue hold (`BATTLE_EPILOGUE_MS`/`CLASH_EPILOGUE_MS`) counts
+   down in real wall-clock time (`performance.now()`), deliberately — this
+   session's own earlier fix, so the hold can't stall forever behind
+   `step()` (which only fires on a timer, not at all while paused). But that
+   meant the epilogue kept expiring in the background even while the world
+   itself was frozen, moving the camera on to whatever queued next without
+   the viewer ever choosing that. `AutoCameraController.update`/`reconcile`
+   now take a `playing` flag and freeze just that one real-time comparison
+   while paused — every other check in `reconcile` is already tick-gated
+   and therefore naturally frozen while `world.tick` isn't advancing; this
+   was the one real gap. `main.ts` threads the real `playing` state in from
+   `frame()`, and `true` from `step()` (which only ever runs while playing
+   in the first place).
+
+3. **Click on a unit inspects the fight, not the unit.** The canvas click
+   handler checked "did this land inside a tracked engagement's box" BEFORE
+   the ordinary agent hit-test, on a deliberate earlier design ("a click
+   inside one of these boxes is clearly 'I want that fight'"). Reversed:
+   a real hit on a specific agent now wins outright and selects/inspects it,
+   regardless of whether it's also sitting inside a highlighted box: tapping
+   a specific combatant is unambiguous. The box hit-test now only fires for
+   a click that missed every actual agent. A click that misses BOTH (empty
+   space) now also calls `noteManualViewChange()` — the existing "viewer
+   took manual control, stop re-centering" mechanism (previously only
+   triggered by panning/zooming the map) — giving "click outside the box"
+   a real, working release gesture, as directly asked.
+
+Full monorepo typecheck clean.

@@ -348,7 +348,10 @@ function step(): void {
   // `setActive` itself synthesizes. Calling `update` (idempotent — see its
   // own doc comment) and re-syncing `battleScreenPanel` here, every tick
   // rather than every frame, closes that gap.
-  autoCamera.update(world);
+  // step() only ever runs while playing (it's driven by the tick-loop
+  // interval, only scheduled while `playing` — see scheduleLoop), so this
+  // is always the "playing" call.
+  autoCamera.update(world, true);
   battleScreenPanel.setActive(autoCamera.currentEngagement());
   battleScreenPanel.ingest(displayEvents, world);
   lastLoggedEventCount = log.events.length;
@@ -552,12 +555,24 @@ canvas.addEventListener("click", (event) => {
   const rect = canvas.getBoundingClientRect();
   const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
   const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+  // Direct follow-up ask: "I should be able to click specific units in the
+  // box to inspect them, right now click focuses the fight." A real agent
+  // hit now wins outright — checked BEFORE the engagement-box hit test
+  // below, reversing the original priority (see that block's own comment
+  // for why it used to go the other way): tapping a specific combatant is
+  // unambiguous ("inspect THIS one"), so it no longer gets swallowed by the
+  // box's own "focus the whole fight" handling just because it's also
+  // sitting inside one.
+  const agent = agentAtCanvasPos(world, x, y);
+  if (agent) {
+    selectAgent(agent);
+    return;
+  }
   // Direct ask: "draw the yellow bounding box anyways on all cool events
   // happening around the map, and clicking in it enters auto cam just for
-  // that one event" — checked before the ordinary agent-select hit test
-  // below, since a click inside one of these (deliberately larger than a
-  // single tile) boxes is clearly "I want that fight," not "I want to
-  // inspect whichever agent happens to be under my exact tap."
+  // that one event" — a click that missed every actual agent but still
+  // landed inside one of these (deliberately larger than a single tile)
+  // boxes is "I want that fight."
   for (const engagement of autoCamera.listBattleEngagements()) {
     const bounds = highlightBounds(world, engagement.ids);
     if (bounds && x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) {
@@ -566,8 +581,12 @@ canvas.addEventListener("click", (event) => {
       return;
     }
   }
-  const agent = agentAtCanvasPos(world, x, y);
-  selectAgent(agent);
+  // Missed everything — a real ask for a "release the camera lock" gesture:
+  // "if I pause it I don't want to focus on something else unless I click
+  // outside the box." A click on empty space (not on any agent, not inside
+  // any tracked engagement's box) is exactly that gesture.
+  autoCamera.noteManualViewChange();
+  selectAgent(undefined);
 });
 
 clearSelectionBtn.addEventListener("click", () => selectAgent(undefined));
@@ -954,8 +973,11 @@ speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
 function frame(): void {
   // Run before drawWorld (was after) so this frame's highlight box below
   // reflects the engagement autoCamera just decided on, not last frame's —
-  // update() itself doesn't depend on anything drawWorld does.
-  autoCamera.update(world);
+  // update() itself doesn't depend on anything drawWorld does. `playing`
+  // gates autoCamera's own real-time epilogue expiry — direct report: "it
+  // loses focus after a while [while paused]" — see update's own doc
+  // comment (autoCamera.ts) for the root cause.
+  autoCamera.update(world, playing);
   const engagement = autoCamera.currentEngagement();
   // Direct ask: "on desktop [auto cam] is a bit too wide to know whats
   // going on... draw a box around it" — see drawAutoCamHighlight's own doc
