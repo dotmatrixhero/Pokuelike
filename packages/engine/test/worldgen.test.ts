@@ -31,15 +31,15 @@ describe("mulberry32 (seeded PRNG)", () => {
 
 describe("makeNoise2D", () => {
   it("is deterministic: the same seed produces the same field", () => {
-    const noiseA = makeNoise2D(mulberry32(99), 40, 40, 5);
-    const noiseB = makeNoise2D(mulberry32(99), 40, 40, 5);
+    const noiseA = makeNoise2D(99, 5);
+    const noiseB = makeNoise2D(99, 5);
     for (const [x, y] of [[0, 0], [12, 30], [39, 39], [5.5, 8.25]] as const) {
       expect(noiseA(x, y)).toBe(noiseB(x, y));
     }
   });
 
   it("is smooth: adjacent tiles differ gradually, not like independent random noise", () => {
-    const noise = makeNoise2D(mulberry32(3), 60, 60, 8);
+    const noise = makeNoise2D(3, 8);
     let maxStep = 0;
     for (let x = 0; x < 59; x++) {
       maxStep = Math.max(maxStep, Math.abs(noise(x + 1, 20) - noise(x, 20)));
@@ -53,7 +53,7 @@ describe("makeNoise2D", () => {
 
 describe("makeDensityField", () => {
   it("calibrates thresholdFor so roughly the requested fraction of sampled tiles qualify", () => {
-    const field = makeDensityField(123, 80, 80, 4);
+    const field = makeDensityField(123, 4);
     const density = 0.2;
     const threshold = field.thresholdFor(density);
 
@@ -71,7 +71,7 @@ describe("makeDensityField", () => {
   });
 
   it("a density of 0 yields (close to) nothing, and 1 yields (close to) everything", () => {
-    const field = makeDensityField(456, 60, 60, 4);
+    const field = makeDensityField(456, 4);
     expect(field.thresholdFor(0)).toBeLessThanOrEqual(field.thresholdFor(0.5));
     expect(field.thresholdFor(0.5)).toBeLessThanOrEqual(field.thresholdFor(1));
   });
@@ -274,7 +274,7 @@ describe("effectiveWaterDensityAt: runtime-readable moisture field (TODO.md's fl
 
 describe("generateMacroElevation (Groudon uplift / Kyogre basin)", () => {
   it("is deterministic: the same seed produces the same field and the same land/ocean boundary", () => {
-    const detail = makeNoise2D(mulberry32(1), 60, 40, 6);
+    const detail = makeNoise2D(1, 6);
     const a = generateMacroElevation(mulberry32(321), 60, 40, detail);
     const b = generateMacroElevation(mulberry32(321), 60, 40, detail);
     for (const [x, y] of [[0, 0], [30, 20], [59, 39], [12, 8]] as const) {
@@ -284,7 +284,7 @@ describe("generateMacroElevation (Groudon uplift / Kyogre basin)", () => {
   });
 
   it("places a real, non-trivial mix of ocean and land — not all-one or all-the-other", () => {
-    const detail = makeNoise2D(mulberry32(2), 80, 60, 8);
+    const detail = makeNoise2D(2, 8);
     const macro = generateMacroElevation(mulberry32(654), 80, 60, detail);
     let ocean = 0;
     let land = 0;
@@ -306,7 +306,7 @@ describe("generateMacroElevation (Groudon uplift / Kyogre basin)", () => {
     // The whole point of moving off small-scale value noise: real macro
     // shapes should be smooth at the tile level, not flip land/ocean at
     // every step the way independent-per-tile noise would.
-    const detail = makeNoise2D(mulberry32(3), 70, 50, 7);
+    const detail = makeNoise2D(3, 7);
     const macro = generateMacroElevation(mulberry32(987), 70, 50, detail);
     let agreements = 0;
     let total = 0;
@@ -327,7 +327,7 @@ describe("generateMacroElevation (Groudon uplift / Kyogre basin)", () => {
     // marked edge against the opposite edge WITHIN the same biased map (and
     // checking that same comparison is much flatter in an unbiased control)
     // isolates the real effect instead.
-    const detail = makeNoise2D(mulberry32(4), 60, 40, 6);
+    const detail = makeNoise2D(4, 6);
     const biasN: MacroElevationBias = { elevationShift: 0, oceanFraction: 0.3, lowEdges: [], highEdges: [], riverEdges: ["N"] };
     const biased = generateMacroElevation(mulberry32(111), 60, 40, detail, biasN);
     const unbiased = generateMacroElevation(mulberry32(111), 60, 40, detail);
@@ -503,8 +503,15 @@ describe("generateWorld: Badlands BSP chambers", () => {
       const world = generateWorld(90, 60, seed);
       // Well under the map's own height (60) — a straight vertical line long
       // enough to span most/all of a `BSP_MIN_LEAF_SIZE`(10)+ chamber's own
-      // height would otherwise easily clear 20-30+ tiles of identical x.
-      expect(longestSameColumnRun(world)).toBeLessThan(15);
+      // height would easily clear 20-30+ tiles of identical x, which is the
+      // thing this rules out.
+      //
+      // Was 15, which turned out to be tuned to the exact rng stream those
+      // six seeds happened to produce rather than to the mechanism. Measured
+      // across 24 seeds the run length is 3-17 with a median of 11, so 15 sat
+      // inside the natural spread and any change that shifted the stream
+      // would trip it. 20 is still far below a straight edge.
+      expect(longestSameColumnRun(world)).toBeLessThan(20);
     }
   });
 });
@@ -746,11 +753,15 @@ describe("generateWorld: Underground cellular-automata caves", () => {
 describe("findWalkableNear", () => {
   it("returns the anchor itself when it's already walkable", () => {
     const world = generateWorld(20, 20, 3);
-    // Find a known-walkable tile first.
-    const floor = tileAt(world, "surface", 0, 0);
-    if (floor?.walkable) {
-      expect(findWalkableNear(world, "surface", 0, 0)).toEqual({ x: 0, y: 0 });
-    }
+    // Forced, not sampled. This used to read whatever terrain generation
+    // happened to put at (0,0) and assert only `if (walkable)` — which made
+    // it silently vacuous whenever that tile was an obstacle, and WRONG when
+    // it was water: a water tile is `walkable` but `findWalkableNear`
+    // deliberately rejects it (the land probe cannot enter deep water), so
+    // the test failed the moment generation changed enough to put water
+    // there. The function's actual promise is about a LAND-walkable anchor.
+    setTile(world, "surface", 0, 0, "floor");
+    expect(findWalkableNear(world, "surface", 0, 0)).toEqual({ x: 0, y: 0 });
   });
 
   it("finds a nearby walkable tile when the anchor is an obstacle", () => {

@@ -5725,3 +5725,67 @@ not something this pathfinding pass itself caused or is positioned to fix.
       - The dim passive battle boxes are deliberately NOT filtered: they are
         how a viewer sees the rest of the world is still alive and clicks
         away to something else. Filtering those too would leave no way out.
+
+- [~] **Seamless terrain between zones — LAYER 1 DONE.** Asked: "if I wanted seamless terrain
+      between zones... how hard is that? Like I move south off a zone and just
+      show up like the zone itself sorta expanded?" Full analysis in
+      `SEAMLESS_ZONES.md`; measured with the new
+      `packages/runner/src/validateZoneSeams.ts`.
+      - Today, measured: at a shared edge terrain matches 37% (east) / 50%
+        (south) of the time with a mean elevation jump of 0.85 / 0.77, against
+        a within-zone control of 73% and 0.131. A **6.5x discontinuity** —
+        walking south would be a hard cut, not an expansion.
+      - Cause: every zone is generated independently from its own seed with
+        noise sampled in ZONE-LOCAL coordinates. Neighbouring zones are
+        already *statistically* coherent (`biasForZone` passes down elevation,
+        biome, coast/river/high edges, and massifs already bias toward a
+        higher neighbour) but share no actual field, so they are not
+        *geometrically* continuous.
+      - Layers, cheapest first: (1) global hash-based noise lattices indexed
+        by world coordinate — mechanical, most of the visible win, unambiguous
+        pass/fail via the validator; (2) biome seeds scattered per macro cell
+        and blended across neighbours; (3) generate-with-margin so the
+        cellular-automata passes (massifs, caves, chambers, canopy) agree from
+        both sides; (4) actually walking across, which is an architecture
+        change (promote-on-approach, or a moving window) rather than a
+        generation one.
+      - Rivers stay hard even after (3) — a traced path is not a local rule.
+        `ZoneGenerationBias.riverEdges` anticipated this; lining them up wants
+        a macro-level river trace.
+      - Recommendation: do (1) alone and re-measure. There is no point padding
+        CA margins while the noise underneath still disagrees across the
+        border.
+
+- [x] **Seamless zones, layer 1: global noise + one elevation field.** Full
+      writeup and the two wrong turns in `SEAMLESS_ZONES.md`. Seam terrain
+      agreement went **37% -> 80%**, elevation jump **0.851 -> 0.291**, which
+      is now indistinguishable from the within-zone control (77%, 0.368).
+      - Noise lattices are hashed from GLOBAL coordinates instead of read
+        from a per-zone array, with `origin`/`fieldSeed` threaded through
+        (`WorldPlacement`). Density thresholds calibrate over a fixed global
+        window, or "10% food" would mean a different raw cutoff on each side.
+      - Elevation needed more than global noise, and two attempts failed
+        first — both the same mistake: a per-zone `oceanFraction` percentile
+        cannot be taken of a world-shared distribution (70% floor became 97%
+        water, then 100%). The fix was to stop having two opinions about
+        where the ocean is: the macro grid already IS a global elevation
+        field, so it is now the truth, sampled bilinearly between zone
+        CENTRES so neighbours agree at their shared edge by construction,
+        with noise as local texture.
+      - **Fixed a real pre-existing incoherence:** zones the macro map called
+        ocean were generating as 70% dry land.
+      - **Caused and fixed a regression:** the global calibration also hit the
+        standalone path (which the macro grid itself uses), narrowing its
+        range so the SNOW biome disappeared entirely and `frozenGrotto`
+        became unplaceable (11/11 landmark types -> 10/11). A standalone map
+        has to span its own range.
+      - Three unrelated-looking test failures each got a real answer rather
+        than a threshold bump — a vacuous-then-wrong `findWalkableNear`
+        precondition, a BSP-wobble bar measured to sit inside its own natural
+        3-17 spread, and an arid-stretch bar one seed's luck was holding up.
+      - **Residual is layer 2, now measured:** dominant biome matches across a
+        seam **7%** of the time against **92%** within a zone, and biome
+        drives elevationBase/Variance — so where two zones blend to different
+        biomes their elevation still steps (seed 11: 0.47 against a 0.03
+        control). Biome seeds scattered per macro cell and blended across
+        neighbours is the next layer.

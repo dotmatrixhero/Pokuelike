@@ -52,38 +52,73 @@ function smoothstep(t: number): number {
 }
 
 /**
- * A single-octave value-noise lattice: independent random values at integer
- * grid points spaced `scale` tiles apart, bilinearly interpolated between
- * them with a smoothstep ease (not a raw lerp, so the seams between lattice
- * cells don't show as visible creases). This is plain value noise, not true
- * Perlin noise (no gradient vectors) — deliberately: it's simple, needs no
- * dependency, and is smooth enough for continuous-looking terrain, which is
- * all this needs.
+ * One lattice point's value, derived by hashing its GLOBAL integer
+ * coordinate rather than read from a pre-filled array.
+ *
+ * This is the whole of "layer 1" of seamless zones. The old version filled a
+ * `Float64Array` with sequential `rng()` calls and indexed it in zone-local
+ * coordinates, which meant two neighbouring zones shared no lattice at all —
+ * measured, terrain matched across a seam only 37% of the time against a
+ * 73% within-zone control, with a 6.5x elevation discontinuity. A hash of
+ * the coordinate has no such notion of "this array belongs to this zone":
+ * lattice point (400, 60) has the same value no matter which zone happens to
+ * be asking, so any two zones sampling the same world coordinates agree by
+ * construction. Standard technique for infinite procedural terrain.
+ *
+ * The mix is an avalanche finalizer, not decoration — this file's own naming
+ * module learned the hard way that a weak integer hash leaves neighbouring
+ * inputs correlated, which here would show up as visible grid artifacts.
  */
-function makeValueLattice(rng: () => number, width: number, height: number, scale: number): (x: number, y: number) => number {
-  const lw = Math.floor(width / scale) + 2;
-  const lh = Math.floor(height / scale) + 2;
-  const grid = new Float64Array(lw * lh);
-  for (let i = 0; i < grid.length; i++) grid[i] = rng();
+function latticeValue(seed: number, lx: number, ly: number): number {
+  let h = Math.imul(seed ^ 0x9e3779b9, 0x85ebca6b);
+  h = Math.imul(h ^ (lx | 0), 0xc2b2ae35);
+  h = Math.imul(h ^ (ly | 0), 0x27d4eb2f);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2545f491);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0x3b1c8c9b);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
 
+/**
+ * A single-octave value-noise lattice: independent values at integer grid
+ * points spaced `scale` tiles apart, bilinearly interpolated between them
+ * with a smoothstep ease (not a raw lerp, so the seams between lattice cells
+ * don't show as visible creases). Plain value noise, not true Perlin (no
+ * gradient vectors) — deliberately: simple, no dependency, smooth enough for
+ * continuous-looking terrain.
+ *
+ * `origin` is this sampler's position in WORLD tile coordinates, so a zone
+ * generated at macro cell (row, col) passes `{ x: col * zoneWidth, y: row *
+ * zoneHeight }` and its local (0,0) lands on the correct point of one shared,
+ * unbounded field. It defaults to the origin, so a standalone world (no
+ * overworld above it) behaves exactly as before.
+ *
+ * Note there is no longer any lattice-bounds clamping. The old array-backed
+ * version clamped to its own last row/column, which flattened the field
+ * against a zone's edges — the one place seamlessness needs it not to.
+ */
+function makeValueLattice(seed: number, origin: Vec2, scale: number): (x: number, y: number) => number {
   return (x: number, y: number) => {
-    const gx = x / scale;
-    const gy = y / scale;
+    const gx = (x + origin.x) / scale;
+    const gy = (y + origin.y) / scale;
     const x0 = Math.floor(gx);
     const y0 = Math.floor(gy);
-    const x1 = Math.min(x0 + 1, lw - 1);
-    const y1 = Math.min(y0 + 1, lh - 1);
     const sx = smoothstep(gx - x0);
     const sy = smoothstep(gy - y0);
-    const v00 = grid[y0 * lw + x0]!;
-    const v10 = grid[y0 * lw + x1]!;
-    const v01 = grid[y1 * lw + x0]!;
-    const v11 = grid[y1 * lw + x1]!;
+    const v00 = latticeValue(seed, x0, y0);
+    const v10 = latticeValue(seed, x0 + 1, y0);
+    const v01 = latticeValue(seed, x0, y0 + 1);
+    const v11 = latticeValue(seed, x0 + 1, y0 + 1);
     const top = v00 + (v10 - v00) * sx;
     const bottom = v01 + (v11 - v01) * sx;
     return top + (bottom - top) * sy;
   };
 }
+
+/** A sampler at the world origin — the default for any standalone (non-overworld) world, whose behaviour is unchanged by this. */
+export const WORLD_ORIGIN: Vec2 = { x: 0, y: 0 };
 
 /**
  * A 2-octave smoothed value-noise field over roughly [0, 1] (a weighted sum
@@ -91,9 +126,12 @@ function makeValueLattice(rng: () => number, width: number, height: number, scal
  * enough octaves to avoid the "obviously one blurry blob" look of a single
  * octave without needing real Perlin noise).
  */
-export function makeNoise2D(rng: () => number, width: number, height: number, baseScale: number): (x: number, y: number) => number {
-  const coarse = makeValueLattice(rng, width, height, Math.max(1, baseScale));
-  const fine = makeValueLattice(rng, width, height, Math.max(1, baseScale / 3));
+export function makeNoise2D(seed: number, baseScale: number, origin: Vec2 = WORLD_ORIGIN): (x: number, y: number) => number {
+  // Two independently-seeded octaves. Salting with distinct constants rather
+  // than drawing from one rng stream keeps them independent while both stay
+  // pure functions of world position.
+  const coarse = makeValueLattice(seed ^ 0x1b873593, origin, Math.max(1, baseScale));
+  const fine = makeValueLattice(seed ^ 0xcc9e2d51, origin, Math.max(1, baseScale / 3));
   return (x: number, y: number) => coarse(x, y) * 0.65 + fine(x, y) * 0.35;
 }
 
@@ -116,6 +154,14 @@ export function makeNoise2D(rng: () => number, width: number, height: number, ba
  * fraction of tiles, regardless of the field's actual raw distribution
  * shape.
  */
+/**
+ * How wide a slice of the world the density calibration samples, in tiles.
+ * Large enough to average over many lattice cells at every scale this file
+ * uses (the coarsest is ~`max(width, height) / 8`, so ~11 tiles at a 90x60
+ * zone) rather than measuring one neighbourhood's luck.
+ */
+const DENSITY_CALIBRATION_WINDOW = 2048;
+
 export interface DensityField {
   sample: (x: number, y: number) => number;
   /** The raw-noise threshold below which roughly `density` (0..1) of the map's tiles fall. */
@@ -124,12 +170,20 @@ export interface DensityField {
 
 const DENSITY_CALIBRATION_SAMPLES = 800;
 
-export function makeDensityField(seed: number, width: number, height: number, baseScale: number): DensityField {
-  const sample = makeNoise2D(mulberry32(seed), width, height, baseScale);
+export function makeDensityField(seed: number, baseScale: number, origin: Vec2 = WORLD_ORIGIN): DensityField {
+  const sample = makeNoise2D(seed, baseScale, origin);
   const calibrationRng = mulberry32(seed ^ 0x5bd1e995);
   const samples: number[] = [];
   for (let i = 0; i < DENSITY_CALIBRATION_SAMPLES; i++) {
-    samples.push(sample(calibrationRng() * width, calibrationRng() * height));
+    // Calibrated over a fixed GLOBAL window, not this zone's own extent, and
+    // deliberately not offset by `origin`. Two adjacent zones must map a
+    // given density ("about 10% of tiles are food") to the SAME raw
+    // threshold, or the seam survives in the food/water layer even after the
+    // noise underneath is shared — each side would draw its cutoff at a
+    // different percentile of its own local sample. Sampling one fixed
+    // window makes the lookup a property of the world, which is what a
+    // density is meant to be.
+    samples.push(sample(calibrationRng() * DENSITY_CALIBRATION_WINDOW - origin.x, calibrationRng() * DENSITY_CALIBRATION_WINDOW - origin.y));
   }
   samples.sort((a, b) => a - b);
 
@@ -211,21 +265,118 @@ function macroFalloff(distance: number, radius: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function placeMacroInfluencePoints(rng: () => number, width: number, height: number, count: number, sign: 1 | -1): MacroInfluencePoint[] {
-  const baseRadius = Math.max(width, height) * MACRO_INFLUENCE_RADIUS_FRACTION;
+/**
+ * Influence points on one unbounded, world-shared field, gathered on demand
+ * around a query rather than scattered inside a zone.
+ *
+ * The zone-local version was the reason making the noise global barely moved
+ * the elevation seam: the detail texture lined up, but the uplifts and
+ * basins that actually shape the land were still drawn independently on each
+ * side of the border. Here the world is divided into fixed cells of
+ * `MACRO_POINT_CELL_SIZE` tiles, each holding exactly one point whose
+ * position, strength and radius are hashed from the cell's own global
+ * coordinates. Two zones asking about the same cell get the same point, so
+ * a mountain range straddling a boundary is one mountain range.
+ *
+ * Cell size is chosen to preserve the old density: 12 points (6 uplift, 6
+ * basin) across a 90x60 zone is one per 450 tiles, so a 21-tile cell holds
+ * about one. Sign alternates by a hash bit rather than by two separate
+ * scatters, which keeps uplifts and basins interleaved the way two
+ * independent passes did.
+ */
+const MACRO_POINT_CELL_SIZE = 21;
+
+function hashUnit(seed: number, a: number, b: number, salt: number): number {
+  let h = Math.imul(seed ^ salt, 0x9e3779b9);
+  h = Math.imul(h ^ (a | 0), 0x85ebca6b);
+  h = Math.imul(h ^ (b | 0), 0xc2b2ae35);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2545f491);
+  h ^= h >>> 13;
+  return (h >>> 0) / 4294967296;
+}
+
+/** The single influence point belonging to global cell (cx, cy). */
+function macroPointForCell(seed: number, cx: number, cy: number, baseRadius: number): MacroInfluencePoint {
+  return {
+    x: (cx + hashUnit(seed, cx, cy, 0x1)) * MACRO_POINT_CELL_SIZE,
+    y: (cy + hashUnit(seed, cx, cy, 0x2)) * MACRO_POINT_CELL_SIZE,
+    // Same +/-30% strength and radius variance the scattered version used, so
+    // some uplifts are bigger ranges than others and some basins deeper.
+    strength: (hashUnit(seed, cx, cy, 0x3) < 0.5 ? 1 : -1) * (0.7 + 0.6 * hashUnit(seed, cx, cy, 0x4)),
+    radius: baseRadius * (0.7 + 0.6 * hashUnit(seed, cx, cy, 0x5)),
+  };
+}
+
+/** Every influence point that can reach world position (wx, wy) — the cells within one max radius of it. */
+function macroPointsNear(seed: number, wx: number, wy: number, baseRadius: number): MacroInfluencePoint[] {
+  const reach = baseRadius * 1.3; // the largest radius `macroPointForCell` can produce
+  const cellReach = Math.ceil(reach / MACRO_POINT_CELL_SIZE);
+  const cx0 = Math.floor(wx / MACRO_POINT_CELL_SIZE);
+  const cy0 = Math.floor(wy / MACRO_POINT_CELL_SIZE);
   const points: MacroInfluencePoint[] = [];
-  for (let i = 0; i < count; i++) {
-    points.push({
-      x: rng() * width,
-      y: rng() * height,
-      // +/-30% strength variance and +/-30% radius variance so points don't
-      // all look identical — some uplifts are bigger mountain ranges than
-      // others, some basins are deeper ocean trenches than others.
-      strength: sign * (0.7 + 0.6 * rng()),
-      radius: baseRadius * (0.7 + 0.6 * rng()),
-    });
+  for (let cy = cy0 - cellReach; cy <= cy0 + cellReach; cy++) {
+    for (let cx = cx0 - cellReach; cx <= cx0 + cellReach; cx++) {
+      points.push(macroPointForCell(seed, cx, cy, baseRadius));
+    }
   }
   return points;
+}
+
+/** The raw, unbiased, world-shared elevation value at a world position — points plus detail texture, before any per-zone steering. */
+function rawMacroElevationAt(
+  seed: number,
+  wx: number,
+  wy: number,
+  baseRadius: number,
+  detailAt: (wx: number, wy: number) => number
+): number {
+  let v = 0;
+  for (const p of macroPointsNear(seed, wx, wy, baseRadius)) {
+    v += p.strength * macroFalloff(Math.hypot(p.x - wx, p.y - wy), p.radius);
+  }
+  // Detail noise centered on 0 so it can push the field either way.
+  return v + (detailAt(wx, wy) - 0.5) * 2 * MACRO_DETAIL_WEIGHT;
+}
+
+/**
+ * World-constant normalization for the raw field: the range to map onto
+ * 0..1, and the value below which a tile is ocean.
+ *
+ * This has to be a property of the WORLD, not of each zone. The old version
+ * took each zone's own min/max and its own `oceanFraction` percentile, so
+ * two neighbouring zones mapped identical raw values to different
+ * elevations and disagreed about where the coastline was — a seam that
+ * survives however well the underlying field lines up. Monte-Carlo sampled
+ * once over a wide window, deterministically from the seed.
+ */
+const MACRO_NORMALIZATION_SAMPLES = 4096;
+const MACRO_NORMALIZATION_WINDOW = 2048;
+
+interface MacroNormalization {
+  min: number;
+  range: number;
+  seaLevelFor: (oceanFraction: number) => number;
+}
+
+function calibrateMacroElevation(
+  seed: number,
+  baseRadius: number,
+  detailAt: (wx: number, wy: number) => number
+): MacroNormalization {
+  const rng = mulberry32(seed ^ 0x7ed55d16);
+  const samples: number[] = [];
+  for (let i = 0; i < MACRO_NORMALIZATION_SAMPLES; i++) {
+    samples.push(rawMacroElevationAt(seed, rng() * MACRO_NORMALIZATION_WINDOW, rng() * MACRO_NORMALIZATION_WINDOW, baseRadius, detailAt));
+  }
+  samples.sort((a, b) => a - b);
+  const min = samples[0]!;
+  const max = samples[samples.length - 1]!;
+  return {
+    min,
+    range: max - min || 1,
+    seaLevelFor: (oceanFraction: number) => samples[Math.min(samples.length - 1, Math.floor(oceanFraction * samples.length))]!,
+  };
 }
 
 export interface MacroElevation {
@@ -246,6 +397,15 @@ export interface MacroElevation {
  * independent reroll — see DESIGN.md's "overworld and zone are two distinct
  * levels" correction.
  */
+/**
+ * How strongly the macro grid's own per-zone elevation steers the tile-level
+ * field, as a fraction of the field's full range. High enough that a zone
+ * the macro grid calls ocean really does come out as ocean, since that
+ * classification drives biome, aggregates and naming elsewhere and the
+ * terrain must not contradict it.
+ */
+const MACRO_SHIFT_FRACTION = 0.7;
+
 export interface MacroElevationBias {
   /**
    * Where this zone's macro elevation sits, roughly -1 (deep basin) to 1
@@ -277,6 +437,15 @@ export interface MacroElevationBias {
    * already holds itself to.
    */
   riverEdges: readonly ZoneDirection[];
+  /**
+   * The macro grid's own elevation (0..1) at a tile of this zone, sampled in
+   * ZONE-LOCAL coordinates and interpolated across neighbouring zones by the
+   * caller so it is continuous at the boundary. When present it replaces both
+   * `elevationShift` and `oceanFraction` — see `generateMacroElevation`.
+   */
+  macroShiftAt?: (x: number, y: number) => number;
+  /** The macro grid's own sea level in the same normalized 0..1 space as `macroShiftAt` — one value for the whole world, so every zone agrees where the coast is. */
+  macroSeaLevel?: number;
 }
 
 /** How strongly `lowEdges`/`highEdges` pull the raw macro field toward/away from a tile-grid edge — a linear gradient from 1 at the named edge to 0 at the opposite one, scaled by this. Tuned against a real generated zone (see DESIGN.md) so a coastline reliably lands on the biased edge without flattening the rest of the zone's own local variety. */
@@ -328,25 +497,38 @@ export function generateMacroElevation(
   width: number,
   height: number,
   detailNoise: (x: number, y: number) => number,
-  bias?: MacroElevationBias
+  bias?: MacroElevationBias,
+  placement?: WorldPlacement
 ): MacroElevation {
-  const upliftPoints = placeMacroInfluencePoints(rng, width, height, UPLIFT_POINT_COUNT, 1);
-  const basinPoints = placeMacroInfluencePoints(rng, width, height, BASIN_POINT_COUNT, -1);
-  const allPoints = [...upliftPoints, ...basinPoints];
+  const origin = placement?.origin ?? WORLD_ORIGIN;
+  const fieldSeed = placement?.fieldSeed ?? Math.floor(rng() * 0xffffffff);
+  const baseRadius = Math.max(width, height) * MACRO_INFLUENCE_RADIUS_FRACTION;
+  const detailAt = (wx: number, wy: number): number => detailNoise(wx - origin.x, wy - origin.y);
 
+  const macroShiftAt = bias?.macroShiftAt;
+  if (macroShiftAt) return macroDrivenElevation(width, height, macroShiftAt, bias, detailNoise);
+
+  // --- Standalone map (no macro grid above it) ---------------------------
+  //
+  // Normalized and sea-levelled against THIS map's own values, exactly as
+  // before seamlessness existed. That is deliberate and it is not the same
+  // call as the macro-driven path above.
+  //
+  // A first attempt used the global calibration here too, on the theory that
+  // one shared normalization is more principled. It is, for zones of a shared
+  // world — and it was a real regression for a standalone map, because a
+  // single map's actual extremes are narrower than the whole field's, so
+  // nothing reached the top of the 0..1 range any more. Measured: the macro
+  // grid's own land elevation went from a 1.000 maximum to 0.741, and the
+  // SNOW biome disappeared from generated worlds entirely (1,012 zones to 0
+  // on one grid), taking the frozenGrotto landmark with it. A standalone map
+  // is its own world and has to span its own range.
   const raw = new Float64Array(width * height);
   let min = Infinity;
   let max = -Infinity;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      let v = 0;
-      for (const p of allPoints) {
-        const d = Math.hypot(p.x - x, p.y - y);
-        v += p.strength * macroFalloff(d, p.radius);
-      }
-      // Detail noise centered on 0 so it can push the field either way, same
-      // (-0.5)*2 recentering the tile loop below already uses elsewhere.
-      v += (detailNoise(x, y) - 0.5) * 2 * MACRO_DETAIL_WEIGHT;
+      let v = rawMacroElevationAt(fieldSeed, x + origin.x, y + origin.y, baseRadius, detailAt);
       if (bias) {
         for (const dir of bias.lowEdges) v -= edgeCloseness(dir, x, y, width, height) * EDGE_BIAS_STRENGTH;
         for (const dir of bias.highEdges) v += edgeCloseness(dir, x, y, width, height) * EDGE_BIAS_STRENGTH;
@@ -357,18 +539,70 @@ export function generateMacroElevation(
       if (v > max) max = v;
     }
   }
-
   const range = max - min || 1;
   const sorted = Float64Array.from(raw).sort();
   const oceanFraction = bias?.oceanFraction ?? OCEAN_FRACTION;
   const seaLevel = sorted[Math.min(sorted.length - 1, Math.floor(oceanFraction * sorted.length))]!;
   const shiftTarget = bias ? (bias.elevationShift + 1) / 2 : 0;
-
   return {
     normalized: (x: number, y: number) => {
       const n = Math.max(0, Math.min(1, (raw[y * width + x]! - min) / range));
       return bias ? n * (1 - ELEVATION_SHIFT_WEIGHT) + shiftTarget * ELEVATION_SHIFT_WEIGHT : n;
     },
+    isOcean: (x: number, y: number) => raw[y * width + x]! < seaLevel,
+  };
+}
+
+/** How much of a zone's elevation is local texture rather than the macro grid's own shape — enough to give a coastline real roughness, not enough to contradict the map. */
+const LOCAL_DETAIL_WEIGHT = 0.3;
+
+/**
+ * Elevation for a zone that belongs to a macro grid: the grid's own
+ * elevation, interpolated smoothly across zone boundaries by the caller,
+ * with global noise layered on as local texture.
+ *
+ * **Why this shape, after two failed attempts.** The obvious approach — keep
+ * the tile-level point field and just make it global — does not work, and
+ * the reason is worth writing down. A zone's ocean-ness came from taking its
+ * own `oceanFraction` percentile OF ITS OWN VALUES, which guaranteed "85% of
+ * an ocean zone is ocean" by construction. Against a world-shared field that
+ * same request means "the 85th percentile of the whole world", which drowns
+ * a perfectly ordinary zone: measured, 70% floor became 97% water, and then
+ * 100% water once a macro shift was added on top of a sea level calibrated
+ * without it. A per-zone fraction and a shared field cannot both be right.
+ *
+ * The resolution is to stop having two independent opinions about where the
+ * ocean is. The macro grid ALREADY is a global elevation field — 64x64
+ * normalized values with its own sea level — and the tile field was a second
+ * one that happened to be steered toward agreeing. Here the macro grid is
+ * simply the truth, sampled continuously, and the noise is texture on top.
+ * One sea level, one field, no seam, and the terrain can no longer
+ * contradict the map that named the region.
+ */
+function macroDrivenElevation(
+  width: number,
+  height: number,
+  macroShiftAt: (x: number, y: number) => number,
+  bias: MacroElevationBias,
+  detailNoise: (x: number, y: number) => number
+): MacroElevation {
+  const seaLevel = bias.macroSeaLevel ?? OCEAN_FRACTION;
+  const raw = new Float64Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let v = macroShiftAt(x, y) * (1 - LOCAL_DETAIL_WEIGHT) + detailNoise(x, y) * LOCAL_DETAIL_WEIGHT;
+      // River trenches survive: unlike the high/low edge tilts (which the
+      // interpolation now expresses properly and symmetrically), a river edge
+      // is recorded on BOTH zones that share it, so carving it stays
+      // consistent across the boundary.
+      for (const dir of bias.riverEdges) {
+        v -= edgeCloseness(dir, x, y, width, height) ** RIVER_EDGE_TRENCH_EXPONENT * RIVER_EDGE_TRENCH_STRENGTH * LOCAL_DETAIL_WEIGHT;
+      }
+      raw[y * width + x] = v;
+    }
+  }
+  return {
+    normalized: (x: number, y: number) => Math.max(0, Math.min(1, raw[y * width + x]!)),
     isOcean: (x: number, y: number) => raw[y * width + x]! < seaLevel,
   };
 }
@@ -1071,7 +1305,11 @@ function carveBadlandsChambers(world: World, width: number, height: number, rng:
   // — the fixed coordinate differs per line, so every boundary automatically
   // gets its own independent-looking noise "row" with no extra bookkeeping,
   // while still varying smoothly along any single line's length.
-  const wobbleNoise = makeNoise2D(rng, Math.max(width, height), Math.max(width, height), BSP_WOBBLE_NOISE_SCALE);
+  // A seed drawn from this pass's own rng rather than a shared field seed:
+  // the BSP wobble is a genuinely local, per-zone flourish (see this
+  // function's own doc comment), unlike the terrain fields that now have to
+  // line up across zone boundaries.
+  const wobbleNoise = makeNoise2D(Math.floor(rng() * 0xffffffff), BSP_WOBBLE_NOISE_SCALE);
 
   for (const boundary of boundaries) {
     const safeGapLength = Math.max(1, Math.round(boundary.length * BSP_SAFE_GAP_FRACTION));
@@ -1913,7 +2151,26 @@ function addDominantBiomeSeeds(seeds: BiomeSeed[], biomeName: string | undefined
   }
 }
 
-export function generateWorld(width: number, height: number, seed: number, bias?: ZoneGenerationBias): World {
+/**
+ * Where this zone sits in the world, and which seed its continuous fields
+ * come from — the two things a zone needs in order to be part of one shared
+ * landscape rather than an island.
+ *
+ * `origin` is the zone's top-left corner in world tile coordinates.
+ * `fieldSeed` must be the SAME for every zone in a world (the macro world's
+ * own seed): a per-zone seed would give each zone its own field however
+ * carefully its coordinates were offset, which is the bug this exists to
+ * fix. Omit the whole thing for a standalone world and generation is
+ * bit-for-bit what it always was.
+ */
+export interface WorldPlacement {
+  origin: Vec2;
+  fieldSeed: number;
+}
+
+export function generateWorld(width: number, height: number, seed: number, bias?: ZoneGenerationBias, placement?: WorldPlacement): World {
+  const origin = placement?.origin ?? WORLD_ORIGIN;
+  const fieldSeed = placement?.fieldSeed ?? seed;
   const world = createWorld(width, height, seed ^ BEHAVIOR_RNG_SEED_XOR);
   const placementRng = mulberry32(seed);
   const seeds = placeBiomeSeeds(placementRng, width, height);
@@ -1931,21 +2188,26 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   // coastline-roughness detail component (MACRO_DETAIL_WEIGHT), reusing the
   // same xor constant the old elevation noise used since it plays the same
   // "elevation-ish detail texture" role.
-  const macroDetailNoise = makeNoise2D(mulberry32(seed ^ 0x9e3779b9), width, height, noiseScale / 10);
+  // Every continuous field below is seeded from `fieldSeed` — shared by every
+  // zone in a world — and sampled at `origin`, so neighbouring zones read one
+  // unbroken field instead of each rolling its own. The per-zone `seed` still
+  // drives everything that is genuinely local and discrete (flavor scatter,
+  // cave automata, landmark placement), which SHOULD differ zone to zone.
+  const macroDetailNoise = makeNoise2D(fieldSeed ^ 0x9e3779b9, noiseScale / 10, origin);
   const macroPointsRng = mulberry32(seed ^ 0x51c48a7d);
-  const macroElevation = generateMacroElevation(macroPointsRng, width, height, macroDetailNoise, bias?.elevation);
-  const moistureField = makeDensityField(seed ^ 0x85ebca6b, width, height, noiseScale / 8);
-  const obstacleField = makeDensityField(seed ^ 0xc2b2ae35, width, height, 4);
-  const foodField = makeDensityField(seed ^ 0x27d4eb2f, width, height, 3);
+  const macroElevation = generateMacroElevation(macroPointsRng, width, height, macroDetailNoise, bias?.elevation, placement);
+  const moistureField = makeDensityField(fieldSeed ^ 0x85ebca6b, noiseScale / 8, origin);
+  const obstacleField = makeDensityField(fieldSeed ^ 0xc2b2ae35, 4, origin);
+  const foodField = makeDensityField(fieldSeed ^ 0x27d4eb2f, 3, origin);
   const flavorRng = mulberry32(seed ^ 0x1b873593);
   const sunbeamRng = mulberry32(seed ^ 0x0ff51afd);
 
   const kindNoise: Record<ObstacleKind, (x: number, y: number) => number> = {
-    tree: makeNoise2D(mulberry32(seed ^ 0x1000193), width, height, 5),
-    boulder: makeNoise2D(mulberry32(seed ^ 0x1000197), width, height, 5),
-    bush: makeNoise2D(mulberry32(seed ^ 0x100019b), width, height, 4),
-    sand: makeNoise2D(mulberry32(seed ^ 0x100019f), width, height, 6),
-    mud: makeNoise2D(mulberry32(seed ^ 0x10001a3), width, height, 6),
+    tree: makeNoise2D(fieldSeed ^ 0x1000193, 5, origin),
+    boulder: makeNoise2D(fieldSeed ^ 0x1000197, 5, origin),
+    bush: makeNoise2D(fieldSeed ^ 0x100019b, 4, origin),
+    sand: makeNoise2D(fieldSeed ^ 0x100019f, 6, origin),
+    mud: makeNoise2D(fieldSeed ^ 0x10001a3, 6, origin),
   };
 
   for (let y = 0; y < height; y++) {

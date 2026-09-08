@@ -365,7 +365,7 @@ function pruneNoiseSpeckIslands(zones: MacroZone[], rows: number, cols: number):
 
 export function generateMacroGrid(seed: number, rows: number, cols: number): MacroGrid {
   const noiseScale = Math.max(rows, cols);
-  const detailNoise = makeNoise2D(mulberry32(seed ^ 0x9e3779b9), cols, rows, noiseScale / 10);
+  const detailNoise = makeNoise2D(seed ^ 0x9e3779b9, noiseScale / 10);
   const macroPointsRng = mulberry32(seed ^ 0x51c48a7d);
   // Reuses worldgen.ts's tile-resolution macro-elevation field generator
   // directly, at zone-grid resolution: cols/rows stand in for width/height,
@@ -383,7 +383,7 @@ export function generateMacroGrid(seed: number, rows: number, cols: number): Mac
   // continent to keep multiple biomes represented (not one flat color per
   // landmass) — judged against a real generated grid's biome-region sizes,
   // same convention as every other macro-grid tuning constant here.
-  const moistureNoise = makeNoise2D(mulberry32(seed ^ 0x2545f491), cols, rows, noiseScale / 2.5);
+  const moistureNoise = makeNoise2D(seed ^ 0x2545f491, noiseScale / 2.5);
 
   const zones: MacroZone[] = new Array(rows * cols);
   for (let row = 0; row < rows; row++) {
