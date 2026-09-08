@@ -145,6 +145,27 @@ function statValueFor(title: NotableTitleId, agent: Agent, world: World): number
   }
 }
 
+/**
+ * Who the `rival` title-holder's grudge is actually against — the single
+ * most-negative rapport partner. Recorded on the claim event because "they
+ * nursed a grudge against Brameye" is a story and "they nursed a grudge" is
+ * a stat; the nemesis is the whole point of the title.
+ */
+function nemesisOf(agent: Agent, world: World): string | undefined {
+  const rapport = agent.rapport;
+  if (!rapport) return undefined;
+  let worstId: string | undefined;
+  let worst = 0;
+  for (const otherId of Object.keys(rapport)) {
+    const score = rapportScore(agent, otherId, world.tick);
+    if (score < worst) {
+      worst = score;
+      worstId = otherId;
+    }
+  }
+  return worstId;
+}
+
 function isLivingNonEgg(agent: Agent): boolean {
   return agent.alive !== false && agent.isEgg !== true;
 }
@@ -214,6 +235,8 @@ export function updateNotables(world: World, log?: EventLog): void {
         species: bestAgent!.species,
         value: bestValue,
         previousHolderId: holderAgent?.id,
+        rivalId: title === "rival" ? nemesisOf(bestAgent!, world) : undefined,
+        herdId: bestAgent!.herdId,
       });
     } else if (sameHolder && holderAgent) {
       // Same holder, refreshed value — keep World.notables current (e.g. a

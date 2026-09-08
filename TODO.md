@@ -5191,3 +5191,28 @@ not something this pathfinding pass itself caused or is positioned to fix.
       earned in the sample run, so it is untested in prose); weather and
       drought as named events a herd survived; and an Atlas-style artifact
       instead of terminal text.
+- [x] **Notables as epithets, each with its own tale.** Direct ask: "I need
+      notables as epithets, it'd be cool to tell the tale of the notable as
+      well like how they earned it. Each notable type should spin a story
+      about the individual."
+      - New `notableLore.ts`. Epithets come in SETS per title (4 each) picked
+        deterministically from the holder's id, so two heroes in one world
+        aren't both "the Unbroken" — "Sablesong the Red-Clawed",
+        "Bramclaw Grudge-Keeper", "Nimtail the Far-Walked".
+      - Each of the seven titles spins its own tale from the REAL tracked
+        stat, never a shared template with a number swapped in: the hero's is
+        about violence, the elder's about time, the wanderer's about
+        distance. A test asserts all seven produce distinct prose.
+      - `rival` now records WHO the grudge is against (`nemesisOf`, the
+        most-negative rapport partner) — "they nursed a grudge against
+        Sablesong" is a story; "they nursed a grudge" is a stat. In the very
+        first real run this produced a genuine emergent one: the world's
+        Rival hated the world's Hero.
+      - The claim event also carries `herdId`, so a notable reads as "a
+        venusaur of the Bulbasaurs of Saltrun" — which incidentally shows
+        evolution within a named herd.
+      - The chronicle gives notables their own section rather than burying
+        them as herd footnotes, lists the predecessors a title was taken
+        from, and uses the LIVE stat for a sitting holder (an Elder crowned
+        at exactly the 500-tick threshold now reads "7154 ticks alive"
+        rather than being frozen at the moment they qualified).

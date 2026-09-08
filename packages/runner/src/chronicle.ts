@@ -15,7 +15,16 @@
  *
  * Run: `npx tsx packages/runner/src/chronicle.ts [ticks] [seed]`
  */
-import { EventLog, tickWorld, agentDisplayName, type HerdRecord } from "@pokuelike/engine";
+import {
+  EventLog,
+  tickWorld,
+  agentDisplayName,
+  notableFullName,
+  notableTale,
+  notableUsurpation,
+  NOTABLE_TITLE_LABEL,
+  type HerdRecord,
+} from "@pokuelike/engine";
 import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT } from "@pokuelike/data";
 
 const ticks = Number(process.argv[2] ?? 8000);
@@ -100,8 +109,16 @@ function beatsFor(herd: HerdRecord, own: any[]): Beat[] {
         beats.push({ tick: e.tick, weight: 72, text: `Clashed with a rival herd.` });
         break;
       case "titleClaimed":
-        beats.push({ tick: e.tick, weight: 95, text: `**${agentDisplayName(e.agentId)}** earned the title *${e.titleId}* — the herd's own notable.` });
+        // The herd's line is short — the full tale gets its own section
+        // below, because a notable's story is theirs, not a footnote in
+        // someone else's chapter.
+        beats.push({
+          tick: e.tick,
+          weight: 98,
+          text: `**${notableFullName(e.title, e.agentId)}** rose to become the world's ${NOTABLE_TITLE_LABEL[e.title]}.`,
+        });
         break;
+
       case "leadershipClaimed": {
         // Named, so a repeat claim by the same animal dedupes away while a
         // real change of leadership still reads as a new moment.
@@ -201,4 +218,47 @@ for (const herd of told) {
   for (const beat of kept) console.log(`- **t${beat.tick}** — ${beat.text}`);
   const quiet = beats.length - kept.length;
   if (quiet > 0) console.log(`- _(${quiet} lesser moments not told)_`);
+}
+
+// ---------------------------------------------------------------------------
+// The Notables — the individuals the world will remember, and why.
+// ---------------------------------------------------------------------------
+
+const claims = events.filter((e) => e.kind === "titleClaimed");
+if (claims.length > 0) {
+  console.log(`\n\n# The Notables\n`);
+
+  // Only ever a handful of titles exist at once (one holder each, world-wide),
+  // but a title can change hands many times over a run. Told newest-first per
+  // title, so the current holder leads and their predecessors read as the
+  // lineage they displaced.
+  const byTitle = new Map<string, any[]>();
+  for (const claim of claims) {
+    (byTitle.get(claim.title) ?? byTitle.set(claim.title, []).get(claim.title)!).push(claim);
+  }
+
+  for (const [title, all] of [...byTitle.entries()].sort()) {
+    const latest = all[all.length - 1];
+    const holderHerd = herds[latest.herdId ?? ""];
+    console.log(`\n## ${NOTABLE_TITLE_LABEL[title as keyof typeof NOTABLE_TITLE_LABEL]} — ${notableFullName(latest.title, latest.agentId)}`);
+    const of = holderHerd ? ` of ${holderHerd.name}` : "";
+    const usurped = notableUsurpation(latest);
+    console.log(`_a ${latest.species}${of}, crowned t${latest.tick}${usurped ? `, ${usurped}` : ""}_\n`);
+    // The claim event captured the stat at the moment the threshold was
+    // crossed, so an Elder crowned at exactly 500 ticks still reads "500"
+    // however long they went on to live. For a holder still sitting on the
+    // title, the world's live record is the truer number.
+    const live = (world.notables ?? {})[title];
+    const stillHolds = live?.agentId === latest.agentId;
+    console.log(notableTale(latest.title, { ...latest, value: stillHolds ? live.value : latest.value }));
+
+    const predecessors = [...new Set(
+      all.slice(0, -1)
+        .filter((c: any) => c.agentId !== latest.agentId)
+        .map((c: any) => notableFullName(c.title, c.agentId))
+    )];
+    if (predecessors.length > 0) {
+      console.log(`\nBefore them the title was held by ${predecessors.join(", ")}.`);
+    }
+  }
 }

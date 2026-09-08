@@ -3007,3 +3007,40 @@ One tuning lesson: pushing the predator niche boost harder makes everything
 worse (target 0.3 / boost 12 returns p90 to 53% and volatility to 0.47). A
 hard corrective just trades extinction for overshoot. The gentle setting is
 the one that cycles.
+
+## Notables: epithets, and a tale per title
+
+Direct ask: "I need notables as epithets ... Each notable type should spin a
+story about the individual."
+
+A title id is a database key. `titleClaimed: hero` tells a reader nothing,
+and the first chronicle draft printed exactly that. Two things fix it, and
+both are about making a notable a *character*:
+
+**A name you could say out loud.** Epithets come in sets of four per title,
+picked deterministically from the holder's id, so two heroes in one world are
+not both "the Unbroken" and a re-run of a seed names them identically —
+"Sablesong the Red-Clawed", "Nimtail the Far-Walked", "Bramclaw
+Grudge-Keeper".
+
+**A reason you could repeat.** Every title already had a real tracked stat
+behind it, so each tale is built from the actual number that earned it. The
+important constraint is that the seven tales are genuinely different in
+shape, not one template with a stat swapped in — the hero's is about
+violence, the elder's about time, the wanderer's about distance, the
+gatherer's about going hungry so others could eat. A test asserts all seven
+produce distinct prose, because a shared template is the exact failure the
+chronicle's whole filtering design exists to avoid.
+
+Two details did more work than expected:
+
+- **The rival's nemesis.** `rival` now records *who* the grudge is against.
+  "They nursed a grudge against Sablesong bitter enough to be felt across the
+  whole world" is a story; "they nursed a grudge" is a stat. The very first
+  real run produced an emergent one nobody wrote: the world's Rival hated the
+  world's Hero.
+- **Live stats for a sitting holder.** The claim event captures the stat at
+  the moment the threshold was crossed, so an Elder crowned at exactly 500
+  ticks read "500 ticks alive" forever. Using the world's live record for a
+  holder who still sits on the title turns that into "7154 ticks alive,
+  having outlasted everything they were born beside."

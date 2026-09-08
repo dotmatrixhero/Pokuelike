@@ -530,6 +530,10 @@ export type SimEvent =
       value: number;
       /** The previous holder, if this was a transfer rather than the title's first-ever claim. */
       previousHolderId?: string;
+      /** For the `rival` title only: who the grudge is actually against — see notables.ts's `nemesisOf`. */
+      rivalId?: string;
+      /** The holder's herd at the moment of the claim, so a chronicle can name whose notable this is. */
+      herdId?: string;
     }
   | {
       kind: "titleLost";

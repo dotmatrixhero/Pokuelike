@@ -15,6 +15,7 @@ export * from "./reproduction.js";
 export * from "./flora.js";
 export * from "./fire.js";
 export * from "./herds.js";
+export * from "./notableLore.js";
 export * from "./crops.js";
 export * from "./herding.js";
 export * from "./herdMigration.js";
