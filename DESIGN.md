@@ -10598,6 +10598,14 @@ been discussed or designed yet. The only decided thing so far is the
 sequencing: geological/historical world-shape first, human society layered
 on top of an already-coherent world second, not simultaneously.
 
+**Update — this phase now has a real design**: see CAMPAIGN_DESIGN.md's
+"The human geo pass" section, written after the direct follow-up ask ("we
+also need to do 'human' geo passes to add human-ness to it all. Like roads
+and villages and ports and boats and homes and shrines"). It keeps the
+sequencing this section decided (geology first, humans on top) and slots in
+after `placeLandmarks` in `macroGrid.ts`'s existing pass order. Still
+unbuilt, but no longer just a placeholder.
+
 ### Dwarf-Fortress-style Z-levels within a region
 
 Direct ask, verbatim: "I want Dwarf Fortress style z levels in overworld so

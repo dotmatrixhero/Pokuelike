@@ -68,7 +68,7 @@ const COURTSHIP_DWELL_MS = 2000;
  * to be liek 3000 ms" — 1000ms cut away before a viewer had time to actually
  * register the finishing blow.
  */
-const BATTLE_EPILOGUE_MS = 3000;
+const BATTLE_EPILOGUE_MS = 4000;
 /**
  * A battle with no new `fought`/`missed`/`herdClash` hit involving either
  * participant for this many real ms is treated as silently disengaged (one
@@ -93,7 +93,27 @@ const BATTLE_EPILOGUE_MS = 3000;
  * `reconcile` compares against that directly (gated on `playing`, exactly
  * like `BATTLE_EPILOGUE_MS`'s check).
  */
-const BATTLE_STALE_MS = 3000;
+const BATTLE_STALE_MS = 4500;
+
+/**
+ * The floor on how long a battle stays framed once the camera actually
+ * picks it up, regardless of how quickly it ends.
+ *
+ * Direct report: "battles are so short now, i can't follow em at all... its
+ * too fast too follow." Measured before changing anything, and the headline
+ * is that the SIMULATION's fights really are that short — over 6,000 ticks a
+ * real run produced 20 engagements whose duration was a median of **1 tick**
+ * and a 90th percentile of 6. A one-tick fight is a single exchange, so
+ * without a floor the camera correctly frames it, shows one beat, and
+ * releases. Nothing was broken; there was simply nothing to watch.
+ *
+ * A minimum hold is the right lever precisely because it does not lie about
+ * the simulation — the fight really is over, we just keep looking at the
+ * result long enough to read it. The alternative (a long staleness timeout)
+ * would be worse: it was tried, at 40 ticks, and produced ~26 seconds of
+ * dead air on a quiet battle, which is the thing the previous fix removed.
+ */
+const BATTLE_MIN_ONSCREEN_MS = 5000;
 /**
  * A `herdClash` skirmish — direct ask: "clashes that don't do nothing are
  * lame... time out faster." A herd rivalry fight is non-lethal by design
@@ -106,9 +126,27 @@ const BATTLE_STALE_MS = 3000;
  * follow-up — clash still keeps noticeably less patience than a real
  * battle, just not quite this clipped.
  */
-const CLASH_STALE_MS = 1800;
-/** `CLASH_STALE_MS`'s own real-ms epilogue counterpart — see `BATTLE_EPILOGUE_MS`'s doc comment for why this is wall-clock, not ticks. Proportionally shorter than a real battle's, same "it's over, move on" reasoning. Nudged up alongside `CLASH_STALE_MS`'s own follow-up bump. */
-const CLASH_EPILOGUE_MS = 700;
+const CLASH_STALE_MS = 2800;
+/** `CLASH_STALE_MS`'s own real-ms epilogue counterpart — see `BATTLE_EPILOGUE_MS`'s doc comment for why this is wall-clock, not ticks. Proportionally shorter than a real battle's, same "it's over, move on" reasoning. */
+const CLASH_EPILOGUE_MS = 1500;
+
+/**
+ * A clash's own, shorter counterpart to `BATTLE_MIN_ONSCREEN_MS`.
+ *
+ * Clashes need this MORE than battles do, not less, and the measurement is
+ * stark: over 6,000 ticks a real run produced **594 herd clashes against 45
+ * battle hits** — 13 to 1. So a viewer watching Auto Camera is watching
+ * clashes almost all of the time, and a clash was the one continuous
+ * engagement that never slowed the sim down (see `applySlowdownIfNeeded`)
+ * and held for only 400ms after concluding. Direct report: "on 4x speed it
+ * barely flashes." It did, and at 4x that is exactly what it would look
+ * like.
+ *
+ * Shorter than a battle's floor rather than equal to it, because the same
+ * 13:1 ratio means a clash holding the camera as long as a real battle
+ * would crowd out everything else worth seeing.
+ */
+const CLASH_MIN_ONSCREEN_MS = 3000;
 /**
  * Minimum real ticks between two separate PROMOTIONS of a brand-new pair
  * into a camera-worthy "clash" engagement — direct ask, after watching a
@@ -133,7 +171,13 @@ const CLASH_EPILOGUE_MS = 700;
  * real hit between a pair already on screen still extends it, same as
  * before.
  */
-const CLASH_PROMOTION_COOLDOWN_TICKS = 40;
+/*
+ * Raised 40 -> 100 alongside the clash pacing changes. Each clash now holds
+ * the camera for several seconds rather than flashing past, and at 594
+ * clashes per 6,000 ticks a 40-tick promotion gate would let them monopolise
+ * Auto Camera and crowd out every other kind of moment.
+ */
+const CLASH_PROMOTION_COOLDOWN_TICKS = 100;
 /** Hard cap on queued-but-not-yet-shown engagements — a chaotic tick (mass death event, say) shouldn't grow this unboundedly; overflow drops an entry — see `trimQueueOverflow` for which one and why not always the oldest any more. */
 const MAX_QUEUE = 20;
 /**
@@ -281,6 +325,8 @@ interface Engagement {
   lastActiveRealMs: number;
   /** Set once conclusion fires on a continuous engagement — it keeps a short epilogue hold rather than vanishing on the same tick as the kill/retreat. Still used for the -1 "marked, not yet stamped" sentinel (see `onBattleParticipantLeft`) and by `BATTLE_STALE_MS`'s own real-ms staleness check; the actual epilogue hold duration is real-ms too, via `concludedAtRealMs` below. */
   concludedAtTick?: number;
+  /** `performance.now()` at the moment this engagement actually became the ACTIVE one — what `BATTLE_MIN_ONSCREEN_MS` counts against. Deliberately not creation time: an engagement can sit in the queue behind another, and the hold is about how long it was ON SCREEN. */
+  activeSinceRealMs?: number;
   /** `performance.now()` at the same moment `concludedAtTick` gets its real (non-sentinel) value — what `BATTLE_EPILOGUE_MS` actually counts against, since the epilogue hold is real wall-clock time, not ticks (see `BATTLE_EPILOGUE_MS`'s own doc comment for why). */
   concludedAtRealMs?: number;
   /**
@@ -1018,8 +1064,15 @@ export class AutoCameraController {
           this.active.concludedAtTick = tick;
           this.active.concludedAtRealMs = performance.now();
         }
-        // The epilogue hold itself — same `playing` guard, see `update`'s own doc comment.
-        if (playing && this.active.concludedAtRealMs !== undefined && performance.now() - this.active.concludedAtRealMs >= epilogueMs) {
+        // The epilogue hold itself — same `playing` guard, see `update`'s own
+        // doc comment — plus the minimum-on-screen floor, so a one-exchange
+        // skirmish (the MEDIAN real fight, see `BATTLE_MIN_ONSCREEN_MS`) is
+        // still on screen long enough to read. Only battles get the floor;
+        // a "clash" is deliberately a quick glance.
+        const minOnScreen = this.active.category === "clash" ? CLASH_MIN_ONSCREEN_MS : BATTLE_MIN_ONSCREEN_MS;
+        const heldLongEnough =
+          this.active.activeSinceRealMs === undefined || performance.now() - this.active.activeSinceRealMs >= minOnScreen;
+        if (playing && heldLongEnough && this.active.concludedAtRealMs !== undefined && performance.now() - this.active.concludedAtRealMs >= epilogueMs) {
           this.finishActive(world, playing);
         }
         // Real-ms dwell, same `playing` guard as the continuous branch above
@@ -1034,6 +1087,11 @@ export class AutoCameraController {
     if (!this.active && this.queue.length > 0) {
       const next = this.popNextEngagement(tick, world);
       if (!next.continuous) next.dwellUntilRealMs = performance.now() + (next.category === "courtship" ? COURTSHIP_DWELL_MS : DWELL_MS);
+      // Stamped here, at the moment this engagement actually takes the
+      // screen, rather than when it was created — an engagement can wait in
+      // the queue behind another, and the minimum hold is about how long it
+      // was VISIBLE. See `BATTLE_MIN_ONSCREEN_MS`.
+      next.activeSinceRealMs = performance.now();
       this.active = next;
       this.viewerTookOver = false; // a genuinely new thing to look at re-earns camera control even if the viewer panned away from the last one
       // Promotion bookkeeping (`this.active`/`viewerTookOver` above) always
@@ -1056,7 +1114,13 @@ export class AutoCameraController {
   }
 
   private applySlowdownIfNeeded(): void {
-    if (this.active?.category === "battle") {
+    // Clashes get the one-tick-at-a-time beat too. They were already given
+    // the same rich Battle Screen as a real battle (same move/crit/damage
+    // lines, same HP bars) but not the same pacing, so they played out at
+    // whatever the speed slider said — and they outnumber real battles 13
+    // to 1, so that gap was most of what a viewer actually saw. See
+    // `CLASH_MIN_ONSCREEN_MS`.
+    if (this.active && (this.active.category === "battle" || this.active.category === "clash")) {
       if (!this.battleStepping) {
         this.battleStepping = true;
         this.host.enterBattleStep();

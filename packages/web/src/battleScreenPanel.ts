@@ -77,13 +77,27 @@ function battleName(world: World, id: string, rawSpecies: string): string {
  * "It's super effective!", "Y takes N damage!") and `render` used to paint
  * every one of them into the DOM in the same frame — readable on replay,
  * but nothing for a human eye to actually follow *as it happens*. Chosen
- * well under `BATTLE_STEP_INTERVAL_MS` (main.ts, 650ms) so a typical
+ * well under `BATTLE_STEP_INTERVAL_MS` (main.ts, now 950ms) so a typical
  * 3-4-line hit finishes revealing itself before the NEXT tick's beat lands
  * a new batch on top of it, rather than the reveal queue perpetually
  * trailing the sim.
  *
  * Direct follow-up ask: "Need more pause between each log line" — raised
  * from the original 160ms.
+ *
+ * **Unresolved tension, flagged rather than silently retuned.** A parallel
+ * branch independently raised this to 200ms, reasoning against the tick
+ * cadence (now `BATTLE_STEP_INTERVAL_MS` = 950ms in main.ts): at 200ms a
+ * four-line hit consumes 800 of the available 950, leaving a real gap
+ * between exchanges without the reveal queue ever trailing the sim. At
+ * 450ms that same four-line hit needs 1800ms against a 950ms tick, so
+ * during a sustained exchange the reveal *does* fall behind and
+ * `MAX_PENDING_LINES`'s instant-catch-up path is what bounds the lag.
+ *
+ * 450ms is kept because it came from an explicit direct ask and is the more
+ * recent decision; the cadence argument for 200ms is recorded here because
+ * it is a real objection, not because it has been overruled on the merits.
+ * This is a balance number and belongs to the user — see TODO.md.
  */
 const LINE_REVEAL_INTERVAL_MS = 450;
 /**

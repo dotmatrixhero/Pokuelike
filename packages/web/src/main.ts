@@ -50,8 +50,17 @@ const AUTO_CAM_ZOOM = 1.5;
  * follow" (0.25x was still continuous timer-driven ticking, which could
  * still blur consecutive hits together). Chosen slow enough to read one
  * battle-log line/HP change per beat without feeling like a stall.
+ *
+ * Raised from 650ms on a direct follow-up: "battles are so short now, i
+ * can't follow em at all... its too fast too follow." A landed hit produces
+ * 3-4 log lines and the reveal is one line per
+ * `LINE_REVEAL_INTERVAL_MS` (battleScreenPanel.ts), so at 650ms a
+ * four-line hit had roughly 10ms of slack before the next tick's batch
+ * landed on top of it — the reveal was effectively continuous rather than
+ * beat-by-beat. 950ms against a 200ms reveal leaves a real pause between
+ * exchanges, which is what makes a beat readable.
  */
-const BATTLE_STEP_INTERVAL_MS = 650;
+const BATTLE_STEP_INTERVAL_MS = 950;
 
 // --- DOM references -------------------------------------------------------
 
@@ -621,7 +630,11 @@ tabEventsBtn.addEventListener("click", () => selectTab("events", true));
  */
 function maybeAutoSwitchTab(): void {
   const engagement = autoCamera.currentEngagement();
-  if (!engagement || engagement.category !== "battle") return;
+  // Clashes count too. They render the same rich Battle Screen a real battle
+  // does (same move/crit/damage lines, same HP bars) and outnumber real
+  // battles about 13 to 1 in a run, so excluding them here meant the panel
+  // the viewer was meant to read almost never came into view on its own.
+  if (!engagement || (engagement.category !== "battle" && engagement.category !== "clash")) return;
   if (engagement.seq === lastAutoSwitchedBattleSeq) return;
   lastAutoSwitchedBattleSeq = engagement.seq;
   if (engagement.seq === tabManualOverrideForBattleSeq) return;
