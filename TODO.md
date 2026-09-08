@@ -5358,26 +5358,31 @@ not something this pathfinding pass itself caused or is positioned to fix.
         `herdId` on it, so fire deaths were invisible to every herd story,
         not just the ending. Stamped now, and fire deaths also join the
         "hard stretch" loss clusters they were being left out of.
-      - **Two honest cases that matter as much as the dramatic ones.** A herd
+      - **An honest case that matters as much as the dramatic ones.** A herd
         can end with no death at all — its last members walk into another
         region and get folded into a herd there (`foldAgentIntoAggregate`) —
-        and that gets its own line rather than an invented death. And there
-        is genuinely no death-by-old-age in this engine: the `diedOfAge`
-        event type exists in events.ts and **nothing anywhere records it**.
-        "They grew old" is a sentence the chronicle can never truthfully
-        write today. Worth fixing, but it is a simulation change, not a
-        prose one — see below.
+        and that gets its own line rather than an invented death.
+      - Nothing dies of old age, so the chronicle can never write "they grew
+        old" — but that is a deliberate removal, not a gap. See the
+        correction below.
       - Across six seeds the endings are dominated by thirst, which is a
         balance signal rather than a writing one and is logged separately.
 
-- [ ] **Nothing dies of old age.** `diedOfAge` is a declared event kind with
-      zero record sites in the engine — `grep` finds only the type definition
-      and four consumers waiting for an event that never arrives. Agents have
-      an `age`, it drives maturity and the Elder title, and it is never fatal.
-      Consequence: a herd's story can never end with a generation simply
-      running out, which is the one ending a stable, well-fed herd should
-      eventually get. Wants a species-scaled lifespan and a gentle
-      senescence rather than a hard cutoff.
+- [~] **CORRECTION: "nothing dies of old age" is not a bug.** Logged here
+      as a wrong finding rather than deleted, because the way it was reached
+      is the instructive part. `grep 'kind: "diedOfAge"'` over the engine
+      returned zero record sites, and I reported that as an oversight — an
+      event type declared and never fired. It is nothing of the sort:
+      `ageMortalityChance` is fully implemented in needs.ts with an onset,
+      a ramp and a cap, and was then deliberately UNWIRED on direct
+      instruction — "dying of old age is kinda dumb." needs.test.ts even
+      has a test asserting no agent ever dies of age, with the reasoning in
+      a comment right above it.
+      - The grep was accurate and the conclusion drawn from it was wrong.
+        Absence of a call site tells you a feature is not running; it says
+        nothing about whether that is an accident or a decision. The
+        decision was recorded in a test, which is exactly where it should
+        have been looked for and was not.
 
 - [x] **Names: infix removed, and a parity bug it was hiding.** Direct
       verdict: "waspdraseeker and foamthalborn and flarewynwing is a bit
@@ -5408,14 +5413,52 @@ not something this pathfinding pass itself caused or is positioned to fix.
         With a 2,800-name pool that claim is simply false — it only ever held
         for the one hand-picked set of ids the test happened to use.
 
-- [ ] **Thirst is over half of all herd endings.** Falls straight out of the
-      new ending beat, which is exactly what it was for. Measured over three
-      seeds x 6,000 ticks, 19 herds ended: 10 of thirst, 5 hunted to the
-      last, 3 with no death at all (absorbed into another herd), 1 of hunger,
-      0 to fire. Water is doing more killing than predators and famine
-      combined, and hunger — the need with the whole flora system behind it —
-      barely registers. Two candidates worth separating before touching a
-      number: thirst may simply be crossing its grace threshold sooner than
-      hunger does, or water sources may be too sparse/too clustered on the
-      map for a migrating herd to reach. Compare `THIRST_STARVATION_GRACE_TICKS`
-      against `STARVATION_GRACE_TICKS` first, then water coverage per zone.
+- [ ] **Thirst is over half of all herd endings — and the water never
+      shrank.** Measured over three seeds x 6,000 ticks, 19 herds ended: 10
+      of thirst, 5 hunted to the last, 3 with no death at all, 1 of hunger,
+      0 to fire. Prompted by the obvious question — did the water dry up? —
+      the answer is no, and the real cause is more interesting.
+      - **Water is permanent.** Water is terrain, not stock. Drinking never
+        depletes a tile, worldgen never removes one, and `seekWater` can
+        even DIG a new water tile on bare floor when nothing is nearby
+        (needs.ts, `setTile(..., "water", 0)`). Watering holes stay put and
+        stay accessible, exactly as you would expect. This is not a
+        resource-availability problem at all.
+      - **It is a clock asymmetry.** Three things compound, all measured:
+        1. *Total budget.* Thirst is linear at 0.00125/tick: 801 ticks to
+           empty plus 150 grace = 951. Hunger's exponential curve takes
+           1,709 plus 100 grace = 1,809. Thirst gives you 53% of the runway
+           hunger does — and thirst is 53% of the endings. That is not a
+           coincidence, it is the same number twice.
+        2. *Curve shape, which matters more than the total.* Hunger decays
+           as a fraction of what remains, so it self-brakes: the last 20% of
+           the hunger bar takes 816 ticks. Thirst is flat all the way down,
+           so the last 20% takes 160. Once an agent is actually in trouble
+           it has 5x less time to reach water than to reach food, and that
+           is precisely the window in which it has to cross terrain to get
+           there.
+        3. *Weather is one-sided.* Drought multiplies thirst decay by 1.8
+           (dropping the budget to 595) and rain eases it by 0.6. There is
+           no weather term on hunger whatsoever — the only hunger multiplier
+           in `decayNeeds` is the post-kill digesting slowdown, which is a
+           bonus and predator-only. So every drought cell on the map is a
+           thirst event and never a famine.
+      - **The doc comment on `THIRST_STARVATION_GRACE_TICKS` is stale and
+        should be fixed whatever we decide.** It claims thirst empties in
+        ~200 ticks for a ~350 total against hunger's ~527, and concludes the
+        gap is "narrower but not by a principle-violating margin." Those
+        numbers predate the quartering pass. The real figures are 951 vs
+        1,809, and at nearly 2x the margin arguably IS the thing that
+        comment was written to rule out.
+      - Options, cheapest first, none applied yet:
+        - Give thirst hunger's exponential shape. Fixes the danger-zone
+          asymmetry (2) directly, which is the one that actually kills, and
+          leaves the flavor of thirst-as-urgent intact.
+        - Slow the flat rate to ~0.00065 to match hunger's total runway.
+          Simplest, but keeps the brutal linear tail.
+        - Add a drought hunger multiplier so weather stops being a
+          thirst-only hazard.
+      - Worth saying: none of this is necessarily *wrong*. A world where
+        water is the binding constraint is a legitimate world. But it should
+        be a choice, and right now it is a side effect of hunger getting a
+        curve that thirst never got.

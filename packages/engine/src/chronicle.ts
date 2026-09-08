@@ -264,10 +264,12 @@ export function chronicleFor(world: World, events: readonly SimEvent[], options:
  * without a single death: its last members can walk into another region and
  * be folded into a different herd there (overworld.ts's
  * `foldAgentIntoAggregate`), or split away entirely. Inventing a death for
- * that would be a lie in the record, so it gets its own line. There is also
- * genuinely no death-by-old-age in this engine — nothing anywhere records a
- * `diedOfAge` event, despite the event type existing — so "they grew old"
- * is a sentence this function can never truthfully write.
+ * that would be a lie in the record, so it gets its own line.
+ *
+ * Nothing dies of old age here, so "they grew old" is a sentence this
+ * function can never write — but that is a DELIBERATE removal ("dying of
+ * old age is kinda dumb"), not a gap. `ageMortalityChance` still exists in
+ * needs.ts, unwired, and needs.test.ts asserts it stays that way.
  */
 function endingText(
   herd: HerdRecord,
