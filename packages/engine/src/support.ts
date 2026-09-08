@@ -601,7 +601,14 @@ export function applyHerdSupport(world: World, agent: Agent, log?: EventLog, nee
       }
       logBehaviorChange(log, world, agent, "deliverFood");
       agent.behavior = "deliverFood";
-      agent.pos = stepToward(world, agent.layer, agent.pos, target!.pos, agent);
+      // stopAdjacent, not capacity-aware — same shape as hunt/mate pursuit
+      // (pathfinding.ts's `stepTowardMovingTarget`): `target` is a live,
+      // moving herdmate, so gating this on tile capacity risks the same
+      // measured regression (ordinary herd density misread as
+      // "unreachable"). Delivery itself only needs `ADJACENT_RADIUS`
+      // proximity above, never the target's exact tile, so `stopAdjacent`
+      // alone already satisfies "never share a tile."
+      agent.pos = stepToward(world, agent.layer, agent.pos, target!.pos, agent, undefined, true);
       return true;
     }
 
@@ -621,7 +628,7 @@ export function applyHerdSupport(world: World, agent: Agent, log?: EventLog, nee
         }
         agent.inventory = [...(agent.inventory ?? []), { itemKey: FOOD_ITEM_KEY, weight: FOOD_ITEM_WEIGHT }];
       } else {
-        agent.pos = stepToward(world, agent.layer, agent.pos, foodTile, agent);
+        agent.pos = stepToward(world, agent.layer, agent.pos, foodTile, agent, agent);
       }
       return true;
     }
@@ -825,7 +832,7 @@ export function applyCarrying(world: World, agent: Agent, rules: HuntRules | und
 
   logBehaviorChange(log, world, agent, "carryAlly");
   agent.behavior = "carryAlly";
-  agent.pos = stepToward(world, agent.layer, agent.pos, home, agent);
+  agent.pos = stepToward(world, agent.layer, agent.pos, home, agent, agent);
   carried.pos = { ...agent.pos };
   carried.layer = agent.layer;
   return true;

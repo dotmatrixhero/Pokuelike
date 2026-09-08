@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createWorld, setTile } from "../src/world.js";
 import { createNeeds, tickAgentNeeds, tickAgentAction } from "../src/needs.js";
-import { tickWorld, accumulateActionEnergy, actionSpeedOf, ACTION_THRESHOLD, SPEED_ACTION_COMPRESSION } from "../src/simulation.js";
+import { tickWorld, accumulateActionEnergy, actionSpeedOf, ACTION_THRESHOLD, SPEED_ACTION_COMPRESSION, resolveTileOverlaps } from "../src/simulation.js";
 import { useMove, tickCooldowns } from "../src/combat.js";
 import { EventLog } from "../src/events.js";
 import { DAY_LENGTH_TICKS, isNight, lightLevel } from "../src/daynight.js";
@@ -276,5 +276,90 @@ describe("day/night events (see DESIGN.md's Phase 2)", () => {
 
     const dayNightEvents = log.events.filter((e) => e.kind === "nightfall" || e.kind === "daybreak");
     expect(dayNightEvents.length).toBeLessThan(DAY_LENGTH_TICKS / 4);
+  });
+});
+
+describe("resolveTileOverlaps: no two (non-shelter) living agents ever end up on the same tile — direct ask: 'avoid units on the same tile altogether... everywhere, always'", () => {
+  it("nudges a second agent off a tile it's sharing with another onto a free neighbor", () => {
+    const world = createWorld(10, 10);
+    const pos = { x: 5, y: 5 };
+    world.agents = [makeAgent({ id: "a", pos }), makeAgent({ id: "b", pos })];
+
+    resolveTileOverlaps(world);
+
+    const positions = world.agents.map((a) => `${a.pos.x},${a.pos.y}`);
+    expect(new Set(positions).size).toBe(2); // no longer coincide
+    // The lower id stays put, same deterministic tie-break herdRank/nearestCrowdingHerdmate use.
+    expect(world.agents.find((a) => a.id === "a")!.pos).toEqual(pos);
+  });
+
+  it("keeps an egg in place and moves the living agent instead, when the two share a tile", () => {
+    const world = createWorld(10, 10);
+    const pos = { x: 5, y: 5 };
+    world.agents = [makeAgent({ id: "adult", pos }), makeAgent({ id: "egg", pos, isEgg: true })];
+
+    resolveTileOverlaps(world);
+
+    expect(world.agents.find((a) => a.id === "egg")!.pos).toEqual(pos);
+    expect(world.agents.find((a) => a.id === "adult")!.pos).not.toEqual(pos);
+  });
+
+  it("a fainted-but-carried ally never independently counts as a second occupant", () => {
+    const world = createWorld(10, 10);
+    const pos = { x: 5, y: 5 };
+    world.agents = [makeAgent({ id: "carrier", pos }), makeAgent({ id: "carried", pos, beingCarriedBy: "carrier", fainted: true })];
+
+    resolveTileOverlaps(world);
+
+    expect(world.agents.find((a) => a.id === "carrier")!.pos).toEqual(pos);
+    expect(world.agents.find((a) => a.id === "carried")!.pos).toEqual(pos); // mirrors carrier, untouched
+  });
+
+  it("leaves shelter tiles alone entirely — that's a separate, still-deliberate multi-occupant rule", () => {
+    const world = createWorld(10, 10);
+    const pos = { x: 5, y: 5 };
+    setTile(world, "surface", 5, 5, "shelter");
+    world.agents = [makeAgent({ id: "a", pos }), makeAgent({ id: "b", pos })];
+
+    resolveTileOverlaps(world);
+
+    expect(world.agents.find((a) => a.id === "a")!.pos).toEqual(pos);
+    expect(world.agents.find((a) => a.id === "b")!.pos).toEqual(pos);
+  });
+
+  it("leaves an agent in place when genuinely boxed in with no free neighbor", () => {
+    const world = createWorld(3, 3);
+    // Wall off every neighbor of (1,1) so nothing is reachable from it.
+    for (const [x, y] of [
+      [0, 0],
+      [1, 0],
+      [2, 0],
+      [0, 1],
+      [2, 1],
+      [0, 2],
+      [1, 2],
+      [2, 2],
+    ]) {
+      setTile(world, "surface", x, y, "wall");
+    }
+    const pos = { x: 1, y: 1 };
+    world.agents = [makeAgent({ id: "a", pos }), makeAgent({ id: "b", pos })];
+
+    resolveTileOverlaps(world);
+
+    // No free neighbor exists — both stay exactly where they were, a rare, accepted edge case.
+    expect(world.agents.find((a) => a.id === "b")!.pos).toEqual(pos);
+  });
+
+  it("end-to-end via tickWorld: a real run never leaves two living agents sharing a non-shelter tile", () => {
+    const world = createWorld(15, 15, 999);
+    world.agents = [
+      makeAgent({ id: "a", pos: { x: 7, y: 7 }, stats: { maxHp: 20, attack: 5, defense: 5, spAttack: 5, spDefense: 5, speed: 40 } }),
+      makeAgent({ id: "b", pos: { x: 7, y: 7 }, stats: { maxHp: 20, attack: 5, defense: 5, spAttack: 5, spDefense: 5, speed: 40 } }),
+    ];
+    tickWorld(world);
+    const key = (a: Agent) => `${a.layer}:${a.pos.x},${a.pos.y}`;
+    const keys = world.agents.map(key);
+    expect(new Set(keys).size).toBe(world.agents.length);
   });
 });

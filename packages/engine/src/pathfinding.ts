@@ -296,9 +296,12 @@ export function stepTowardMovingTarget(world: World, agent: Agent, target: Agent
       // Genuinely unreachable right now — give up on routing and fall back
       // to the pre-existing greedy approach rather than freezing in place.
       // (Greedy `stepToward` also carries the same water-crossing check, so
-      // this fallback can't be used to route around it either.)
+      // this fallback can't be used to route around it either.) `stopAdjacent`
+      // — same "never share a tile with a live pursuit target" invariant the
+      // main routed path enforces below — this fallback shouldn't be a
+      // loophole for it.
       agent.pathCache = undefined;
-      return stepToward(world, agent.layer, agent.pos, target.pos, agent);
+      return stepToward(world, agent.layer, agent.pos, target.pos, agent, undefined, true);
     }
     if (fresh.length === 0) {
       // Already standing on the target's own tile (shouldn't normally
@@ -317,7 +320,7 @@ export function stepTowardMovingTarget(world: World, agent: Agent, target: Agent
     const fresh = findPath(world, agent.layer, agent.pos, target.pos, agent);
     if (!fresh) {
       agent.pathCache = undefined;
-      return stepToward(world, agent.layer, agent.pos, target.pos, agent);
+      return stepToward(world, agent.layer, agent.pos, target.pos, agent, undefined, true);
     }
     if (fresh.length === 0) {
       agent.pathCache = undefined;

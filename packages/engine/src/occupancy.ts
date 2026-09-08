@@ -2,10 +2,18 @@ import type { Agent, Layer, Vec2, World } from "./types.js";
 import { tileAt } from "./world.js";
 
 /**
- * Per-tile occupancy/crowding — direct ask: "a weight limit for how many
- * Pokémon can be in a given tile... always allow at least 1." See DESIGN.md's
- * "Tile capacity" section for the full writeup (calibration arithmetic, the
- * per-layer split, and real-run contention/fallback numbers).
+ * Per-tile occupancy — direct ask, evolved twice: first "a weight limit for
+ * how many Pokémon can be in a given tile... always allow at least 1," then
+ * a full reversal after watching a fainted Scyther and a fleeing Diglett
+ * visibly sharing a tile mid-fight: "I think we want to avoid units on the
+ * same tile altogether... everywhere, always." `canEnterTile` below is now a
+ * flat "one living occupant, full stop" rule outside shelter terrain — see
+ * its own doc comment. The old weight/headcount/species-exclusivity system
+ * (`TILE_WEIGHT_CAPACITY`, `FLAT_TILE_HEADCOUNT_CAP`, same-species-only
+ * sharing) is gone; shelter's own separate multi-occupant "den" rule below
+ * is the one deliberate, explicitly-scoped exception this still respects
+ * (that's its own distinct feature — pair-bonding/nesting — not incidental
+ * crowding). See DESIGN.md's "Tile capacity" and "No shared tiles" sections.
  *
  * **Caching shape directly modeled on herdIndex.ts**, per that module's own
  * instruction: keyed by `World` object identity, rebuilt once per
@@ -17,12 +25,9 @@ import { tileAt } from "./world.js";
  * inherits from that same shape: within one tick, several agents that each
  * independently decide to step onto the same currently-empty tile all see
  * the same tick-start snapshot and can all be admitted at once, briefly
- * overshooting capacity until the very next tick's rebuild reflects it —
- * exactly the kind of same-tick race this codebase already accepts
- * elsewhere (needs.ts's `yieldsToHigherRankedFeeder` doc comment describes
- * the same-tile food-stock race in identical terms). A real run showed this
- * doesn't produce runaway overcrowding (see DESIGN.md) — it self-corrects
- * within a tick or two, not a sustained violation.
+ * overshooting capacity — `simulation.ts`'s `resolveTileOverlaps` cleans
+ * this up as a final per-tick pass rather than leaving it to "self-correct
+ * eventually" the way the old, more tolerant weight-cap design could.
  *
  * A carried fainted ally (`Agent.beingCarriedBy`) does NOT independently
  * occupy a tile — its position mirrors its carrier's every tick (support.ts)
@@ -33,27 +38,9 @@ import { tileAt } from "./world.js";
 interface OccupancyIndex {
   tick: number;
   countByKey: Map<string, number>;
-  weightByKey: Map<string, number>;
-  speciesByKey: Map<string, Set<string>>;
 }
 
 const cache = new WeakMap<World, OccupancyIndex>();
-
-/**
- * Deliberately NOT imported from support.ts's `bodyWeightOf`/predation.ts's
- * `FALLBACK_MAX_HP`: `movement.ts` needs this module for capacity-aware
- * stepping, and `support.ts` already imports `movement.ts` (for
- * `stepToward`) — importing support.ts (or predation.ts, which support.ts
- * also depends on) from here would close a `movement.ts -> occupancy.ts ->
- * support.ts -> movement.ts` cycle. This is a small, deliberate duplicate of
- * the exact same fallback figure support.ts's `bodyWeightOf` uses, not a
- * second invented convention.
- */
-const FALLBACK_BODY_WEIGHT = 10;
-
-function bodyWeight(agent: Agent): number {
-  return agent.maxHp ?? FALLBACK_BODY_WEIGHT;
-}
 
 function tileKey(layer: Layer, pos: Vec2): string {
   return `${layer}:${pos.x},${pos.y}`;
@@ -61,21 +48,12 @@ function tileKey(layer: Layer, pos: Vec2): string {
 
 function buildIndex(world: World): OccupancyIndex {
   const countByKey = new Map<string, number>();
-  const weightByKey = new Map<string, number>();
-  const speciesByKey = new Map<string, Set<string>>();
   for (const agent of world.agents) {
     if (agent.alive === false || agent.beingCarriedBy) continue;
     const k = tileKey(agent.layer, agent.pos);
     countByKey.set(k, (countByKey.get(k) ?? 0) + 1);
-    weightByKey.set(k, (weightByKey.get(k) ?? 0) + bodyWeight(agent));
-    let species = speciesByKey.get(k);
-    if (!species) {
-      species = new Set();
-      speciesByKey.set(k, species);
-    }
-    species.add(agent.species);
   }
-  return { tick: world.tick, countByKey, weightByKey, speciesByKey };
+  return { tick: world.tick, countByKey };
 }
 
 function getIndex(world: World): OccupancyIndex {
@@ -86,75 +64,39 @@ function getIndex(world: World): OccupancyIndex {
   return fresh;
 }
 
-/**
- * Surface tiles are weight-limited: calibrated (see DESIGN.md's "Tile
- * capacity" section for the real-run arithmetic) so roughly N average-weight
- * agents from a real, matured population fit on one tile — a real 3000-tick
- * run across seeds 42/7/20260903 put the living population's average
- * `maxHp`-as-body-weight at ~29-32 (mean ~30.6). Tightened from 3x (90) to
- * 2.5x (~76.5, rounded to 75) — direct follow-up ask after confirming the
- * 3x cap was already producing zero starvation deaths and healthy
- * populations across all three seeds: tighter crowding pressure, still with
- * headroom above 2x so a single-tile drink/feed isn't over-restrictive.
- */
-export const TILE_WEIGHT_CAPACITY = 75;
-
-/**
- * Underground and canopy are flat, generic, non-biome-varied layers (no
- * elevation or terrain texture at all — see `createDemoWorld`'s doc
- * comment) — direct ask: "underground and canopy don't have the same weight
- * restriction, just go by hard number - up to 5 max per tile." A plain
- * headcount cap fits a layer with no real terrain texture to justify
- * weight-based crowding logic better than importing the surface's
- * weight-based rule would. `>= 1` is guaranteed automatically (5 >= 1), so
- * no separate "always admit one" carve-out is needed for this branch the
- * way the weight rule needs one below.
- */
-export const FLAT_TILE_HEADCOUNT_CAP = 5;
-
-function isFlatCapacityLayer(layer: Layer): boolean {
-  return layer === "underground" || layer === "canopy";
-}
-
 /** Current occupant headcount of `(layer, pos)` — living, not-currently-carried agents only. Exported for tests/diagnostics. */
 export function tileOccupantCount(world: World, layer: Layer, pos: Vec2): number {
   return getIndex(world).countByKey.get(tileKey(layer, pos)) ?? 0;
 }
 
-/** Current summed occupant body-weight of `(layer, pos)` — see `TILE_WEIGHT_CAPACITY`'s doc comment. Exported for tests/diagnostics. */
-export function tileOccupantWeight(world: World, layer: Layer, pos: Vec2): number {
-  return getIndex(world).weightByKey.get(tileKey(layer, pos)) ?? 0;
-}
-
 /**
- * Can `agent` move onto `(layer, pos)` right now, capacity-wise? An
- * already-empty tile always admits at least one agent regardless of weight
- * or species — direct requirement, so a single heavy/populous species is
- * never unable to stand anywhere. Otherwise: shelter keeps its own universal
- * (any-species) headcount rule (see the section below — a deliberate,
- * already-documented exception, "any species" was the explicit original
- * shelter instruction); every other tile is now also species-exclusive —
- * direct follow-up ask: "generally only units of the same species should
- * share a space" — checked before the existing headcount/weight capacity
- * rules, not instead of them. Underground/canopy use the flat headcount cap,
- * every other layer (surface) uses the weight rule. This is a pure capacity
- * check — it says nothing about terrain walkability, which callers
- * (movement.ts, pathfinding.ts) check separately and first.
+ * Can `agent` move onto `(layer, pos)` right now? Outside shelter terrain,
+ * this is now a flat "one living occupant, full stop" rule: an already-empty
+ * tile admits exactly one agent, an occupied one admits none — direct ask,
+ * after watching two combatants visibly sharing a tile mid-fight: "avoid
+ * units on the same tile altogether... everywhere, always." Replaces the
+ * earlier weight-based (surface) / flat-5 (underground, canopy) / same-
+ * species-only crowding system entirely — those were real, deliberately
+ * tuned features in their own right, but the direct reversal above
+ * supersedes them rather than layering on top. Shelter terrain keeps its
+ * own separate, still-deliberate multi-occupant "den" rule (see the section
+ * below) — a genuinely different feature (pair-bonding/nesting), not
+ * incidental crowding, and the one exception this rule was told to respect.
+ * `agent` matters again now, for one real case: asking "can I enter (or
+ * stay at) `pos`" when `agent` is already standing exactly there itself —
+ * arrival/re-confirmation callers (`applyDispersal`, `migrate`) genuinely
+ * need that to read as "yes," not "no, this tile already has an occupant
+ * (you)." `agent` doesn't count toward its OWN blocking check for that
+ * reason; it still fully counts toward anyone else's. This is a pure
+ * capacity check regardless of any of that — it says nothing about terrain
+ * walkability, which callers (movement.ts, pathfinding.ts) check separately
+ * and first.
  */
 export function canEnterTile(world: World, agent: Agent, layer: Layer, pos: Vec2): boolean {
-  const count = tileOccupantCount(world, layer, pos);
-  if (count === 0) return true;
   if (tileAt(world, layer, pos.x, pos.y)?.terrain === "shelter") return canEnterShelter(world, layer, pos);
-  if (hasOtherSpeciesOccupant(world, agent, layer, pos)) return false;
-  if (isFlatCapacityLayer(layer)) return count < FLAT_TILE_HEADCOUNT_CAP;
-  return tileOccupantWeight(world, layer, pos) + bodyWeight(agent) <= TILE_WEIGHT_CAPACITY;
-}
-
-/** True if `(layer, pos)` currently holds at least one live occupant of a species other than `agent`'s own — see `canEnterTile`'s doc comment. */
-function hasOtherSpeciesOccupant(world: World, agent: Agent, layer: Layer, pos: Vec2): boolean {
-  const species = getIndex(world).speciesByKey.get(tileKey(layer, pos));
-  if (!species) return false;
-  return species.size > 1 || !species.has(agent.species);
+  const count = tileOccupantCount(world, layer, pos);
+  const selfAlreadyThere = agent.alive !== false && !agent.beingCarriedBy && agent.layer === layer && agent.pos.x === pos.x && agent.pos.y === pos.y ? 1 : 0;
+  return count - selfAlreadyThere <= 0;
 }
 
 // --- Shelter capacity (direct instruction: "only 2 units and an egg can

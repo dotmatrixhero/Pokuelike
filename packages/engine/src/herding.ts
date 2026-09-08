@@ -216,10 +216,10 @@ export function applyHerdCohesion(world: World, agent: Agent, rules?: HuntRules)
     const crowder = nearestCrowdingHerdmate(world, agent);
     if (!crowder) return false;
     const before = { ...agent.pos };
-    agent.pos = stepAway(world, agent.layer, agent.pos, crowder.pos, agent);
+    agent.pos = stepAway(world, agent.layer, agent.pos, crowder.pos, agent, agent);
     return agent.pos.x !== before.x || agent.pos.y !== before.y;
   }
 
-  agent.pos = stepToward(world, agent.layer, agent.pos, centroid, agent);
+  agent.pos = stepToward(world, agent.layer, agent.pos, centroid, agent, agent);
   return true;
 }

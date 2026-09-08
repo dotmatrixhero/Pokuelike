@@ -13380,3 +13380,94 @@ Full engine test suite green (41 files, 1169 tests) and full monorepo
 typecheck clean. Verified the real species-stat math directly (a throwaway
 runner script, deleted after use) against `calculateStats` output for Arbok
 and Ivysaur at levels 10/15/20, confirming the worked numbers above.
+
+## No shared tiles: strict one-occupant-per-tile, everywhere
+
+Direct report, after watching a fainted Scyther and a fleeing Diglett
+visibly standing on the same tile mid-fight: "It seems like scyther and
+diglet on the same tile... I can't tell. Like fleeing should have them leave
+the area I would think?" Investigated first (see the "on the same tile"
+exchange in this session): confirmed real, not a rendering glitch — melee
+moves' `range: {min: 0, max: 1}` legally includes distance 0, and the
+existing `occupancy.ts` explicitly allowed multiple agents per tile (a real,
+separately-tuned earlier feature: a weight cap on surface, a flat 5-headcount
+cap underground/canopy, same-species-only sharing). Direct follow-up: "I
+think we want to avoid units on the same tile altogether" — clarified scope
+(combat-only vs. everywhere) via a direct question; answer: **everywhere,
+always**, with shelter's own separate multi-occupant "den" mechanic
+(pair-bonding/nesting, `SHELTER_TILE_ADULT_CAP`/`_EGG_CAP`) explicitly kept
+as its one deliberate exception.
+
+**`occupancy.ts`'s `canEnterTile`** is now a flat rule outside shelter
+terrain: an empty tile admits exactly one agent, an occupied one admits
+none. The old weight/headcount/species-exclusivity system is gone entirely
+— not layered under, replaced. One real subtlety: `agent` itself doesn't
+count toward its own blocking check (`canEnterTile(world, agent, layer,
+agent.pos)` must read "yes" for an agent re-confirming/staying at a tile it
+already occupies — `applyDispersal`/`migrate`'s own arrival checks need
+exactly this, see below), while still fully counting toward anyone else's.
+
+**Movement call sites** — this codebase already had a partial version of
+this rule (`movement.ts`'s `stepToward`'s `stopAdjacent` flag, from an
+earlier "two units in combat should never share the same tile" ask, plus a
+`mover` capacity-aware parameter many call sites already threaded). This
+pass closed the remaining gaps:
+- `dispersal.ts`'s `applyDispersal` and `migration.ts`'s `migrate` used to
+  snap straight onto their target tile once close enough, bypassing
+  occupancy entirely — now check `canEnterTile` first, falling through to
+  an ordinary capacity-aware step if something else has since taken the
+  spot.
+- `herding.ts`'s cohesion movement, `shelter.ts`'s two travel-to-site/home
+  steps, and `support.ts`'s food-tile/home/carry-home steps threaded
+  `mover` (capacity-aware) for the first time — all of these seek a *static*
+  destination tile, not a live moving target, so making them capacity-aware
+  carries none of the risk documented below.
+- `pathfinding.ts`'s `stepTowardMovingTarget` (hunt/mate pursuit) and
+  `support.ts`'s food-delivery-to-an-ally step stay deliberately
+  capacity-BLIND for their approach — a real, measured earlier finding
+  (this same session, `stepTowardMovingTarget`'s own doc comment): gating
+  *routing toward a live moving target* on tile capacity misreads ordinary
+  herd density as "unreachable" and tanked births by ~90% on one seed. Both
+  now consistently use `stopAdjacent` instead (added to
+  `stepTowardMovingTarget`'s two greedy-fallback paths, which were missing
+  it) — never landing on the live target's own tile, without needing to be
+  capacity-aware about the approach itself.
+
+**`simulation.ts`'s `resolveTileOverlaps`** — a new, once-per-tick
+correction pass, run right after every agent has acted, rather than chasing
+every remaining direct `agent.pos =` assignment across the engine (birth/
+hatch/immigration placement, and `occupancy.ts`'s own documented same-tick
+race where two agents independently choosing the same currently-empty tile
+in the same tick both get admitted). For any tile still holding more than
+one living, uncarried, non-shelter occupant: an egg (if present) always
+stays put (eggs are stationary by design), otherwise the lowest `id` stays,
+and every other occupant gets nudged onto the nearest free neighbor (8
+directions, orthogonal then diagonal) — genuinely boxed-in tiles (no free
+neighbor at all) are left as a rare, accepted edge case rather than a reason
+to search further.
+
+**A real bug found while writing this pass**: it originally called
+`occupancy.ts`'s own cached `canEnterTile` to judge whether a neighbor was
+free — but that cache is a tick-*start* snapshot by design (see its own doc
+comment), already stale by the time this pass runs at the tick's end, after
+every agent has already potentially moved. A live-run check (5000 ticks,
+seed `SCENARIO_SEED`) caught this directly: 150/5000 ticks still showed a
+real overlap (up to 3 agents stacked) even with the pass running. Fixed by
+having `resolveTileOverlaps` build and maintain its own live occupied-set
+from actual current positions instead of trusting the stale cache — the
+same live-run check afterward showed 0/5000 ticks with any non-shelter
+overlap, confirmed with a fresh throwaway runner script (deleted after use).
+
+### Test updates
+
+`occupancy.test.ts`'s weight-capacity/species-exclusivity/flat-headcount
+describe blocks tested a system that no longer exists — rewritten to test
+the new one-occupant rule directly (including the "an agent can re-enter/
+stay at its own current tile" edge case the fix above depends on); the
+shelter-capacity tests were untouched (shelter's own rule didn't change).
+Added a new `resolveTileOverlaps` describe block in `simulation.test.ts`:
+basic nudge-off, egg-stays-put, carried-ally-doesn't-double-count,
+shelter-tiles-are-exempt, and a genuinely-boxed-in (walled on every side)
+case that confirms the accepted "leave it be" edge case actually leaves it
+be rather than throwing or looping. Full engine suite green (41 files, 1172
+tests) and full monorepo typecheck clean.

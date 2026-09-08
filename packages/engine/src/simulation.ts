@@ -1,4 +1,4 @@
-import type { Agent, HuntRules, World } from "./types.js";
+import type { Agent, HuntRules, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import type { RegionDispersalContext } from "./dispersal.js";
@@ -17,6 +17,8 @@ import { PARALYSIS_SPEED_MULTIPLIER, isParalyzed, getStatStage } from "./status.
 import { statStageMultiplier } from "./combat.js";
 import { updateNotables } from "./notables.js";
 import { updateHerdLeadership } from "./herdLeadership.js";
+import { canEnterWater, canEnterLand } from "./waterBody.js";
+import { canFlyOverObstacle } from "./movement.js";
 
 /**
  * Energy an agent needs to accumulate before it gets to act. Chosen against
@@ -149,6 +151,101 @@ export function actionSpeedOf(world: World, agent: Agent, tick: number): number 
   return ACTION_THRESHOLD * Math.pow(Math.max(0, speed) / ACTION_THRESHOLD, SPEED_ACTION_COMPRESSION);
 }
 
+/** The eight neighbors (orthogonal first, then diagonal), fixed order — deterministic, no rng, matching this codebase's "same seed, same result" requirement. See `resolveTileOverlaps`. */
+const OVERLAP_RESOLVE_OFFSETS: readonly Vec2[] = [
+  { x: 0, y: -1 },
+  { x: 1, y: 0 },
+  { x: 0, y: 1 },
+  { x: -1, y: 0 },
+  { x: 1, y: -1 },
+  { x: 1, y: 1 },
+  { x: -1, y: 1 },
+  { x: -1, y: -1 },
+];
+
+/**
+ * Direct ask, after watching a fainted Scyther and a fleeing Diglett
+ * visibly sharing a tile mid-fight: "avoid units on the same tile
+ * altogether... everywhere, always." `stopAdjacent`/capacity-aware
+ * `stepToward`/`stepAway` (movement.ts, threaded through most of the
+ * engine's own movement call sites) already stop a *deliberate* step from
+ * landing on an occupied tile — but a few genuinely-unconditional position
+ * snaps still exist (dispersal/migration arrival when nothing else claimed
+ * the spot first, birth/hatch/immigration placement), plus
+ * occupancy.ts's own documented same-tick race: two agents that each
+ * independently pick the same currently-empty tile in the same tick both
+ * see the same tick-start snapshot and can both be admitted at once.
+ * Rather than chase every direct `agent.pos =` assignment across the engine
+ * individually (a wide, ever-growing surface as new features add new ones),
+ * this is a single, cheap, once-per-tick correction pass, run right after
+ * every agent has acted (see `tickWorld`): for any tile still holding more
+ * than one living, uncarried occupant, every occupant but one gets nudged
+ * onto the nearest free orthogonal neighbor.
+ *
+ * An egg, if present, is always the one left in place — eggs are stationary
+ * by design (eggs.ts's own doc comment); a living agent that ended up
+ * sharing its tile is the one that moves. Otherwise the lowest `id` stays
+ * put, the same deterministic tie-break `herdRank`/`nearestCrowdingHerdmate`
+ * already use elsewhere. Shelter tiles are exempt — the multi-occupant
+ * "den" rule (`SHELTER_TILE_ADULT_CAP`/`_EGG_CAP`, occupancy.ts) is a
+ * separate, still-deliberate feature this pass was never meant to unwind.
+ *
+ * Checks the 8 neighbors (orthogonal, then diagonal), not a wider search —
+ * real overlaps are almost always between a small handful of agents with
+ * open space nearby; a tile with no free neighbor at all (fully boxed in)
+ * is left as-is, a rare, accepted edge case rather than a reason to search
+ * further.
+ *
+ * Deliberately builds its own live `occupied` set from every agent's
+ * CURRENT position, rather than reusing `occupancy.ts`'s `canEnterTile`/
+ * cached index — that cache is a tick-START snapshot (by design, see its
+ * own doc comment), already stale by the time this runs at the END of the
+ * same tick, after every agent has already potentially moved. Checking
+ * candidates against the stale cache here would misjudge which neighbors
+ * are actually free right now, undermining the very thing this pass exists
+ * to guarantee.
+ */
+export function resolveTileOverlaps(world: World): void {
+  const byKey = new Map<string, Agent[]>();
+  const occupied = new Set<string>();
+  for (const agent of world.agents) {
+    if (agent.alive === false || agent.beingCarriedBy) continue;
+    const key = `${agent.layer}:${agent.pos.x},${agent.pos.y}`;
+    if (tileAt(world, agent.layer, agent.pos.x, agent.pos.y)?.terrain === "shelter") continue;
+    occupied.add(key);
+    const list = byKey.get(key);
+    if (list) list.push(agent);
+    else byKey.set(key, [agent]);
+  }
+
+  for (const occupants of byKey.values()) {
+    if (occupants.length <= 1) continue;
+    occupants.sort((a, b) => {
+      if (a.isEgg !== b.isEgg) return a.isEgg ? -1 : 1;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+    for (const agent of occupants.slice(1)) {
+      for (const offset of OVERLAP_RESOLVE_OFFSETS) {
+        const candidate = { x: agent.pos.x + offset.x, y: agent.pos.y + offset.y };
+        const candidateKey = `${agent.layer}:${candidate.x},${candidate.y}`;
+        if (occupied.has(candidateKey)) continue;
+        const tile = tileAt(world, agent.layer, candidate.x, candidate.y);
+        // Never nudge someone onto shelter terrain via this mechanism — that
+        // tile kind has its own separate, capacity-aware entry path
+        // (occupancy.ts's `canEnterShelter`); simplest to just leave it to
+        // that path rather than duplicate its rules here.
+        if (!tile || tile.terrain === "shelter") continue;
+        if (!tile.walkable && !canFlyOverObstacle(agent, agent.layer)) continue;
+        if (!canEnterWater(world, agent, agent.layer, candidate)) continue;
+        if (!canEnterLand(world, agent, agent.layer, candidate)) continue;
+        agent.pos = candidate;
+        occupied.add(candidateKey);
+        break;
+      }
+    }
+  }
+}
+
 // A plain function call (rather than an inline `agent.alive === false` check)
 // so TS's control-flow narrowing doesn't lock `agent.alive`'s type down
 // across the loop body — it's still reassigned by tickAgentAction/predation.ts
@@ -260,6 +357,10 @@ export function tickWorld(
       maybeDropSeed(world, agent.layer, agent.pos, log, rng);
     }
   }
+  // Once per tick, after every agent has acted — see `resolveTileOverlaps`'s
+  // own doc comment for why this exists on top of `stopAdjacent`/capacity-
+  // aware stepping rather than instead of it.
+  resolveTileOverlaps(world);
   // Before growFlora, so a tile that burned out this tick is already
   // scorched "floor" when the flora pass considers regrowth — fire clears
   // ground first, then the world decides what grows back into it.

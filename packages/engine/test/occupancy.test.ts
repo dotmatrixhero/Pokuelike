@@ -5,13 +5,10 @@ import {
   canEnterShelter,
   canEnterTile,
   canLayEggAt,
-  FLAT_TILE_HEADCOUNT_CAP,
   SHELTER_TILE_ADULT_CAP,
   SHELTER_TILE_EGG_CAP,
   shelterCluster,
-  TILE_WEIGHT_CAPACITY,
   tileOccupantCount,
-  tileOccupantWeight,
 } from "../src/occupancy.js";
 import type { Agent } from "../src/types.js";
 
@@ -28,133 +25,65 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
   };
 }
 
-describe("occupancy: surface weight-based tile capacity", () => {
-  it("an empty tile always admits an agent, even one heavier than the whole capacity", () => {
+describe("occupancy: one living occupant per tile, everywhere, always", () => {
+  // Direct ask, after a fainted Scyther and a fleeing Diglett were visibly
+  // sharing a tile mid-fight: "I think we want to avoid units on the same
+  // tile altogether... everywhere, always." Replaces the old weight-based
+  // (surface) / flat-5 (underground/canopy) / same-species-only crowding
+  // system entirely — shelter terrain is the one deliberate exception (see
+  // the "shelter capacity" describe block below).
+  it("an empty tile always admits an agent, any species, any layer", () => {
     const world = createWorld(10, 10);
-    const heavy = makeAgent({ id: "heavy", maxHp: TILE_WEIGHT_CAPACITY * 5 });
-    expect(canEnterTile(world, heavy, "surface", { x: 3, y: 3 })).toBe(true);
+    expect(canEnterTile(world, makeAgent({ species: "charmander" }), "surface", { x: 3, y: 3 })).toBe(true);
+    expect(canEnterTile(world, makeAgent({ species: "diglett", layer: "underground" }), "underground", { x: 3, y: 3 })).toBe(true);
   });
 
-  it("admits roughly 3 average-weight agents, then blocks a 4th", () => {
+  it("blocks a second, unrelated agent from entering an already-occupied non-shelter tile", () => {
     const world = createWorld(10, 10);
-    const avgWeight = TILE_WEIGHT_CAPACITY / 3;
     const pos = { x: 4, y: 4 };
-    world.agents = [
-      makeAgent({ id: "a", pos, maxHp: avgWeight }),
-      makeAgent({ id: "b", pos, maxHp: avgWeight }),
-      makeAgent({ id: "c", pos, maxHp: avgWeight }),
-    ];
-    const newcomer = makeAgent({ id: "d", maxHp: avgWeight });
-    expect(canEnterTile(world, newcomer, "surface", pos)).toBe(false);
+    world.agents = [makeAgent({ id: "a", pos })];
+    expect(canEnterTile(world, makeAgent({ id: "b" }), "surface", pos)).toBe(false);
   });
 
-  it("admits a newcomer whose addition would exactly hit the cap", () => {
+  it("blocks a would-be occupant of the SAME species too — no species exemption anymore", () => {
     const world = createWorld(10, 10);
     const pos = { x: 4, y: 4 };
-    world.agents = [makeAgent({ id: "a", pos, maxHp: TILE_WEIGHT_CAPACITY - 10 })];
-    const newcomer = makeAgent({ id: "b", maxHp: 10 });
-    expect(canEnterTile(world, newcomer, "surface", pos)).toBe(true);
+    world.agents = [makeAgent({ id: "a", species: "bulbasaur", pos })];
+    expect(canEnterTile(world, makeAgent({ id: "b", species: "bulbasaur" }), "surface", pos)).toBe(false);
   });
 
-  it("blocks a newcomer that would push total weight over the cap", () => {
+  it("applies the same one-occupant rule underground and in the canopy", () => {
+    const world = createWorld(10, 10);
+    const pos = { x: 2, y: 2 };
+    world.agents = [makeAgent({ id: "a", species: "diglett", pos, layer: "underground" })];
+    expect(canEnterTile(world, makeAgent({ id: "b", species: "sandshrew", layer: "underground" }), "underground", pos)).toBe(false);
+  });
+
+  it("an agent already standing on a tile can still 're-enter'/stay there — it doesn't block itself", () => {
     const world = createWorld(10, 10);
     const pos = { x: 4, y: 4 };
-    world.agents = [makeAgent({ id: "a", pos, maxHp: TILE_WEIGHT_CAPACITY - 5 })];
-    const newcomer = makeAgent({ id: "b", maxHp: 10 });
-    expect(canEnterTile(world, newcomer, "surface", pos)).toBe(false);
+    const agent = makeAgent({ id: "a", pos });
+    world.agents = [agent];
+    expect(canEnterTile(world, agent, "surface", pos)).toBe(true);
   });
 
   it("a fainted ally being carried doesn't count toward occupancy (mirrors its carrier's tile, not a second occupant)", () => {
     const world = createWorld(10, 10);
     const pos = { x: 4, y: 4 };
     world.agents = [
-      makeAgent({ id: "carrier", pos, maxHp: TILE_WEIGHT_CAPACITY - 5 }),
-      makeAgent({ id: "carried", pos, maxHp: 999, beingCarriedBy: "carrier", fainted: true }),
+      makeAgent({ id: "carrier", pos }),
+      makeAgent({ id: "carried", pos, beingCarriedBy: "carrier", fainted: true }),
     ];
-    expect(tileOccupantWeight(world, "surface", pos)).toBe(TILE_WEIGHT_CAPACITY - 5);
     expect(tileOccupantCount(world, "surface", pos)).toBe(1);
+    expect(canEnterTile(world, makeAgent({ id: "newcomer" }), "surface", pos)).toBe(false);
   });
 
   it("a truly dead agent doesn't count toward occupancy", () => {
     const world = createWorld(10, 10);
     const pos = { x: 4, y: 4 };
-    world.agents = [makeAgent({ id: "corpse", pos, maxHp: 999, alive: false })];
+    world.agents = [makeAgent({ id: "corpse", pos, alive: false })];
     expect(tileOccupantCount(world, "surface", pos)).toBe(0);
-    expect(canEnterTile(world, makeAgent({ maxHp: TILE_WEIGHT_CAPACITY * 2 }), "surface", pos)).toBe(true);
-  });
-});
-
-describe("occupancy: only same-species agents share a non-shelter tile", () => {
-  // Direct ask: "I think generally only units of the same species should
-  // share a space." Checked before the ordinary headcount/weight capacity
-  // rules on every non-shelter tile — shelter keeps its own, deliberately
-  // universal (any-species) rule (see the "shelter capacity" describe block
-  // below).
-  it("blocks a different-species newcomer even when there's plenty of weight/headcount capacity left", () => {
-    const world = createWorld(10, 10);
-    const pos = { x: 4, y: 4 };
-    world.agents = [makeAgent({ id: "a", species: "bulbasaur", pos, maxHp: 1 })];
-    const newcomer = makeAgent({ id: "b", species: "charmander", maxHp: 1 });
-    expect(canEnterTile(world, newcomer, "surface", pos)).toBe(false);
-  });
-
-  it("still admits a same-species newcomer, subject to the ordinary weight cap", () => {
-    const world = createWorld(10, 10);
-    const pos = { x: 4, y: 4 };
-    world.agents = [makeAgent({ id: "a", species: "bulbasaur", pos, maxHp: 1 })];
-    const newcomer = makeAgent({ id: "b", species: "bulbasaur", maxHp: 1 });
-    expect(canEnterTile(world, newcomer, "surface", pos)).toBe(true);
-  });
-
-  it("applies the same species rule on the flat-headcount underground/canopy layers too", () => {
-    const world = createWorld(10, 10);
-    const pos = { x: 2, y: 2 };
-    world.agents = [makeAgent({ id: "a", species: "diglett", pos, layer: "underground", maxHp: 1 })];
-    const newcomer = makeAgent({ id: "b", species: "sandshrew", layer: "underground", maxHp: 1 });
-    expect(canEnterTile(world, newcomer, "underground", pos)).toBe(false);
-  });
-
-  it("an empty tile still always admits any species — the species rule only applies once occupied", () => {
-    const world = createWorld(10, 10);
-    const newcomer = makeAgent({ id: "b", species: "charmander", maxHp: 1 });
-    expect(canEnterTile(world, newcomer, "surface", { x: 7, y: 7 })).toBe(true);
-  });
-});
-
-describe("occupancy: underground/canopy flat headcount cap", () => {
-  it("admits up to FLAT_TILE_HEADCOUNT_CAP agents regardless of weight", () => {
-    const world = createWorld(10, 10);
-    const pos = { x: 2, y: 2 };
-    world.agents = Array.from({ length: FLAT_TILE_HEADCOUNT_CAP - 1 }, (_, i) =>
-      makeAgent({ id: `u${i}`, pos, layer: "underground", maxHp: 500 })
-    );
-    const newcomer = makeAgent({ id: "newcomer", layer: "underground", maxHp: 500 });
-    expect(canEnterTile(world, newcomer, "underground", pos)).toBe(true);
-  });
-
-  it("blocks the agent that would exceed FLAT_TILE_HEADCOUNT_CAP, even featherweight ones", () => {
-    const world = createWorld(10, 10);
-    const pos = { x: 2, y: 2 };
-    world.agents = Array.from({ length: FLAT_TILE_HEADCOUNT_CAP }, (_, i) => makeAgent({ id: `c${i}`, pos, layer: "canopy", maxHp: 1 }));
-    const newcomer = makeAgent({ id: "newcomer", layer: "canopy", maxHp: 1 });
-    expect(canEnterTile(world, newcomer, "canopy", pos)).toBe(false);
-  });
-
-  it("an empty underground/canopy tile always admits one agent (5 >= 1 makes this automatic, but confirm it holds)", () => {
-    const world = createWorld(10, 10);
-    const newcomer = makeAgent({ layer: "canopy", maxHp: 99999 });
-    expect(canEnterTile(world, newcomer, "canopy", { x: 1, y: 1 })).toBe(true);
-  });
-
-  it("a heavy surface-legal weight would be blocked at capacity underground/canopy purely by headcount, not weight", () => {
-    const world = createWorld(10, 10);
-    const pos = { x: 2, y: 2 };
-    // 5 featherweight occupants already fill the flat cap even though their
-    // combined weight is nowhere near TILE_WEIGHT_CAPACITY — proves this
-    // branch is headcount-driven, not weight-driven.
-    world.agents = Array.from({ length: FLAT_TILE_HEADCOUNT_CAP }, (_, i) => makeAgent({ id: `f${i}`, pos, layer: "underground", maxHp: 1 }));
-    expect(tileOccupantWeight(world, "underground", pos)).toBeLessThan(TILE_WEIGHT_CAPACITY);
-    expect(canEnterTile(world, makeAgent({ layer: "underground", maxHp: 1 }), "underground", pos)).toBe(false);
+    expect(canEnterTile(world, makeAgent({ id: "scavenger" }), "surface", pos)).toBe(true);
   });
 });
 
@@ -196,14 +125,12 @@ describe("occupancy: shelter capacity (2 adults + 1 egg per tile, adjacency-exte
     expect(canEnterTile(world, makeAgent({ id: "b", species: "charmander", maxHp: 1 }), "surface", pos)).toBe(true);
   });
 
-  it("a shelter tile with only 1 adult still admits a 2nd (weight is irrelevant on shelter terrain)", () => {
+  it("a shelter tile with only 1 adult still admits a 2nd (unlike an ordinary tile, which would block any 2nd occupant)", () => {
     const world = createWorld(10, 10);
     const pos = { x: 5, y: 5 };
     setTile(world, "surface", 5, 5, "shelter");
-    // Heavier than the whole surface weight cap — would fail the ordinary
-    // weight rule, but shelter terrain uses the headcount rule instead.
-    world.agents = [makeAgent({ id: "a", pos, maxHp: TILE_WEIGHT_CAPACITY * 5 })];
-    expect(canEnterTile(world, makeAgent({ id: "b", maxHp: TILE_WEIGHT_CAPACITY * 5 }), "surface", pos)).toBe(true);
+    world.agents = [makeAgent({ id: "a", pos })];
+    expect(canEnterTile(world, makeAgent({ id: "b" }), "surface", pos)).toBe(true);
   });
 
   it("a lone shelter tile admits up to SHELTER_TILE_EGG_CAP eggs, then blocks the next one", () => {
