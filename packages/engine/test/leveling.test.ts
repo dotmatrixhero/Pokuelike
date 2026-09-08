@@ -16,7 +16,7 @@ import {
 } from "../src/leveling.js";
 import { trySpendSkillPoints, applyMoveTreeWithSpend } from "../src/moves.js";
 import type { Agent } from "../src/types.js";
-import type { MoveSpec } from "../src/moves.js";
+import type { MoveSpec, MoveTreeNode } from "../src/moves.js";
 
 // Real per-growth-rate cumulative-exp values, taken from poke_the_spire's raw
 // (pre-blend, see leveling.ts's doc comment) `expLevels` tables for a handful
@@ -521,5 +521,67 @@ describe("maybeAutoRespec (nature-driven specialization)", () => {
     grantSkillPoint(agent, "fire", world);
     expect(agent.skillPoints!.fire).toBe(1); // untouched, no spend
     expect(agent.moveTreeChoices).toBeUndefined();
+  });
+});
+
+describe("SKILLPOINT_FOCUS_BONUS: builds specialise instead of spreading", () => {
+  /** A chain of `n` nodes, each requiring the last — a branch that has to be walked in order. */
+  function chain(prefix: string, n: number): Record<string, MoveTreeNode> {
+    const tree: Record<string, MoveTreeNode> = {};
+    for (let i = 0; i < n; i++) {
+      tree[`${prefix}${i}`] = {
+        id: `${prefix}${i}`,
+        name: `${prefix}${i}`,
+        cost: 1,
+        ...(i > 0 ? { prerequisites: [`${prefix}${i - 1}`] } : {}),
+        delta: {},
+      };
+    }
+    return tree;
+  }
+
+  it("feeds the move it has already invested in rather than splitting evenly", () => {
+    const world = createWorld(5, 5);
+    const base = { type: "normal" as const, category: "physical" as const, power: 10, accuracy: 100, cooldownTicks: 1 };
+    const moveA: MoveSpec = { ...base, id: "mv-a", name: "A", tree: chain("a", 10) };
+    const moveB: MoveSpec = { ...base, id: "mv-b", name: "B", tree: chain("b", 10) };
+    const ctx: LevelingContext = { resolveMove: (id) => (id === "mv-a" ? moveA : moveB) };
+
+    // Deterministic but varied rng, so the weighted pick is exercised rather
+    // than pinned to one end of the candidate list.
+    let seed = 7;
+    const rng = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+
+    const agent = bulbasaur({
+      knownMoves: ["mv-a", "mv-b"],
+      moveTreeChoices: { "mv-a": ["a0", "a1", "a2"] },
+      skillPoints: { normal: 12 },
+      disposition: { aggression: 0.5, boldness: 0.5, sociability: 0.5 },
+    });
+
+    for (let i = 0; i < 12; i++) maybeAutoRespec(agent, world, ctx, undefined, rng);
+
+    const inA = agent.moveTreeChoices?.["mv-a"]?.length ?? 0;
+    const inB = agent.moveTreeChoices?.["mv-b"]?.length ?? 0;
+    expect(inA).toBeGreaterThan(inB);
+  });
+
+  it("does not lock the agent out of the other move entirely — it is a bias, not a rule", () => {
+    const world = createWorld(5, 5);
+    const base = { type: "normal" as const, category: "physical" as const, power: 10, accuracy: 100, cooldownTicks: 1 };
+    const moveA: MoveSpec = { ...base, id: "mv-a", name: "A", tree: chain("a", 4) };
+    const moveB: MoveSpec = { ...base, id: "mv-b", name: "B", tree: chain("b", 4) };
+    const ctx: LevelingContext = { resolveMove: (id) => (id === "mv-a" ? moveA : moveB) };
+    let seed = 11;
+    const rng = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+
+    const agent = bulbasaur({
+      knownMoves: ["mv-a", "mv-b"],
+      moveTreeChoices: { "mv-a": ["a0"] },
+      skillPoints: { normal: 20 },
+      disposition: { aggression: 0.5, boldness: 0.5, sociability: 0.5 },
+    });
+    for (let i = 0; i < 20; i++) maybeAutoRespec(agent, world, ctx, undefined, rng);
+    expect(agent.moveTreeChoices?.["mv-b"]?.length ?? 0).toBeGreaterThan(0);
   });
 });

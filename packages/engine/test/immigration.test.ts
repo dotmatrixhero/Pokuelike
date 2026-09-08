@@ -7,6 +7,9 @@ import {
   maybeImmigrate,
   rollImmigrantLevel,
   IMMIGRATION_BASE_CHANCE,
+  PREDATOR_EMPTY_NICHE_BOOST,
+  PREDATOR_TARGET_SHARE,
+  predatorNicheBoost,
   MIN_TICKS_BETWEEN_IMMIGRATIONS,
   POP_HARD_CAP,
   POP_SOFT_CAP,
@@ -285,5 +288,34 @@ describe("rollImmigrantLevel (direct ask: \"why does everything spawn at lv5... 
     };
     for (let i = 0; i < 20; i++) levels.add(rollImmigrantLevel(BASE_FORM, rng));
     expect(levels.size).toBeGreaterThan(1);
+  });
+});
+
+describe("predatorNicheBoost", () => {
+  it("does nothing to a non-predator, whatever the share", () => {
+    expect(predatorNicheBoost({ isPredator: false }, 0)).toBe(1);
+    expect(predatorNicheBoost({}, 0)).toBe(1);
+  });
+
+  it("boosts a predator hardest when there are none left alive", () => {
+    expect(predatorNicheBoost({ isPredator: true }, 0)).toBe(PREDATOR_EMPTY_NICHE_BOOST);
+  });
+
+  it("stops boosting once the target share is reached", () => {
+    expect(predatorNicheBoost({ isPredator: true }, PREDATOR_TARGET_SHARE)).toBe(1);
+    expect(predatorNicheBoost({ isPredator: true }, 0.9)).toBe(1);
+  });
+
+  it("tapers smoothly in between rather than switching on and off", () => {
+    const half = predatorNicheBoost({ isPredator: true }, PREDATOR_TARGET_SHARE / 2);
+    expect(half).toBeGreaterThan(1);
+    expect(half).toBeLessThan(PREDATOR_EMPTY_NICHE_BOOST);
+    // monotonically decreasing as the niche fills
+    let prev = Infinity;
+    for (const share of [0, 0.05, 0.1, 0.15, 0.2]) {
+      const b = predatorNicheBoost({ isPredator: true }, share);
+      expect(b).toBeLessThanOrEqual(prev);
+      prev = b;
+    }
   });
 });
