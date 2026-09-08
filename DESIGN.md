@@ -13721,3 +13721,45 @@ confirming at most one side ever flees the other; and a regression test
 confirming an ordinary non-predator prey species still flees any predator
 unconditionally, unchanged. Full engine suite green (45 files, 1236
 tests) and full monorepo typecheck clean.
+
+## Fixed: "clash" engagements showed no moves used or HP bars
+
+Direct report: "I also still see clashing as a thing but with no moves used
+or hp bars showing up?" A herd-rivalry "clash" (`herdClash` events) was
+landing on the Battle Screen as a single flavor-text line and no HP header
+at all — the same treatment as a genuinely one-shot moment like a hatch or
+an evolution.
+
+Root cause: `battleScreenPanel.ts`'s `battleLinesFor` already had complete
+`herdClash` handling (move/crit/damage/HP-remaining/retreat lines, the
+exact same shape as a real `fought` battle event) — but `ingest` and
+`render` both gated the rich turn-by-turn scrollback + HP-bar header on
+`activeCategory === "battle"` literally, so that code path was simply
+never reached for a `"clash"` engagement. That gate predates `herdClash`
+having any per-tick event data of its own to show (see `d30698f`); once
+`herdClash` gained real move/damage lines, "clash" should have graduated
+into the rich-treatment bucket alongside "battle" (`autoCamera.ts` already
+tracks them as the same kind of continuous, multi-hit engagement, just
+with a faster stale/epilogue timeout — see `onBattleHit`) but nothing
+here followed that up.
+
+Fixed with one shared `hasRichBattleScreen(category)` helper
+(`category === "battle" || category === "clash"`), used everywhere the
+three call sites used to check `=== "battle"` directly: `setActive`'s
+intro-vs-scene-line choice, `ingest`'s early-return gate, and `render`'s
+header build/refresh. Every other category (immigration, courtship, hatch,
+evolution, death) is still correctly the one-shot single-scene-line path —
+they have no per-tick combat events to ingest at all.
+
+### Verification
+
+No vitest suite exists for `packages/web` (UI-only logic, verified via
+Playwright against the real dev server elsewhere in this codebase — same
+pattern used here). A deterministic in-page script imported the real
+module, drove a synthetic `"clash"` engagement through `setActive` →
+`ingest` (one `herdClash` event) → `render`, and confirmed both
+`.battle-screen-hp-track` and `.battle-screen-vs` now render, and the log
+shows real per-event lines ("Bulbasaur (1) clashes with Squirtle (1)!",
+"Squirtle (1) takes 5 damage! (HP left: 20)") instead of a single flavor
+line. Full monorepo typecheck clean; full engine suite unaffected and
+still green (46 files, 1243 tests — this fix touches web-only code).

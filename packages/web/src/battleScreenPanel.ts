@@ -26,11 +26,27 @@ import { getSprite } from "./sprites.js";
  * battles — a hatch/evolution/immigration/death still gets a single
  * flavor-text "scene" line in the same visual voice, since they read fine in
  * this format too and the task brief explicitly said not to hard-restrict to
- * battles. Only "battle" gets the rich turn-by-turn scrollback + HP bars
- * treatment, though: a one-shot moment doesn't have "turns" to scroll
- * through, and forcing one into that shape would just be an empty box with a
- * single line in it.
+ * battles. Only "battle" and "clash" get the rich turn-by-turn scrollback +
+ * HP bars treatment: those are the only two categories with real per-tick
+ * combat events (`fought`/`missed`/`herdClash`) to ingest turn by turn — a
+ * one-shot moment like a hatch doesn't have "turns" to scroll through, and
+ * forcing one into that shape would just be an empty box with a single line
+ * in it.
+ *
+ * Direct bug report: "I also still see clashing as a thing but with no
+ * moves used or hp bars showing up?" Root cause: `battleLinesFor` below
+ * already had full `herdClash` handling (move/crit/damage/HP-remaining
+ * lines, same shape as a real battle's `fought`), but `ingest`/`render`
+ * both gated the rich treatment on `activeCategory === "battle"` literally
+ * — "clash" fell through to the one-shot single-scene-line path even
+ * though it's exactly as turn-by-turn as a battle (see `autoCamera.ts`'s
+ * own `onBattleHit`, which already tracks "battle" and "clash" as the same
+ * kind of continuous engagement). `hasRichBattleScreen` below is the one
+ * place that decision now lives.
  */
+function hasRichBattleScreen(category: NotableCategory | undefined): boolean {
+  return category === "battle" || category === "clash";
+}
 export class BattleScreenPanel {
   private static readonly MAX_LINES = 60;
 
@@ -90,16 +106,16 @@ export class BattleScreenPanel {
     this.lines = [];
     this.concluded = false;
     this.dirty = true;
-    if (info && info.category !== "battle") {
+    if (info && !hasRichBattleScreen(info.category)) {
       this.lines.push({ kind: "scene", text: sceneLine(info.category, info.label) });
     } else if (info) {
       this.lines.push({ kind: "intro", text: `${info.label}!` });
     }
   }
 
-  /** Feed every event from the tick that just ran — only ever produces turn-by-turn lines for a "battle" category engagement; one-shot categories already got their single scene line from `setActive`. */
+  /** Feed every event from the tick that just ran — only ever produces turn-by-turn lines for a "battle"/"clash" category engagement (see `hasRichBattleScreen`); one-shot categories already got their single scene line from `setActive`. */
   ingest(events: readonly SimEvent[], world: World): void {
-    if (events.length === 0 || this.activeCategory !== "battle" || !this.ids) return;
+    if (events.length === 0 || !hasRichBattleScreen(this.activeCategory) || !this.ids) return;
     for (const event of events) {
       if (!eventNamesAnyOf(event, this.ids)) continue;
       const produced = battleLinesFor(event, world);
@@ -156,13 +172,13 @@ export class BattleScreenPanel {
 
     if (isNewEngagement) {
       this.container.replaceChildren();
-      this.headerEl = this.activeCategory === "battle" && this.ids ? this.renderVsHeader(world) : undefined;
+      this.headerEl = hasRichBattleScreen(this.activeCategory) && this.ids ? this.renderVsHeader(world) : undefined;
       if (this.headerEl) this.container.appendChild(this.headerEl);
       this.logEl = document.createElement("div");
       this.logEl.className = "battle-screen-log";
       this.container.appendChild(this.logEl);
       this.renderedSeq = this.activeSeq;
-    } else if (this.activeCategory === "battle" && this.ids && this.headerEl) {
+    } else if (hasRichBattleScreen(this.activeCategory) && this.ids && this.headerEl) {
       // HP/names are live state — refresh the header in place every frame
       // without touching the log element at all (that's what preserves its
       // scroll position across frames it isn't otherwise dirty).
