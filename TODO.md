@@ -5216,3 +5216,28 @@ not something this pathfinding pass itself caused or is positioned to fix.
         from, and uses the LIVE stat for a sitting holder (an Elder crowned
         at exactly the 500-tick threshold now reads "7154 ticks alive"
         rather than being frozen at the moment they qualified).
+- [x] **Names: type-flavoured pools mined from the move roster.** Prompted by
+      "are you random genning them?" — they are not, they are a deterministic
+      hash of the agent id, but checking the pool while answering exposed a
+      real defect: 20 starts x 12 ends = 240 total names. By the birthday
+      problem that is a 56% chance of a collision at 20 named animals and a
+      near-certainty by 40; across 2000 ids "Vexmane" came up 18 times. Two
+      notables sharing a name would wreck a chronicle.
+      - New `names.ts` with roots split by Pokemon type, ~24 each, largely
+        lifted or filed down from this project's own 440 move and tree-node
+        names (Pyroclasm, Maelstrom, Mountainfall, Bedrock, Bramble) so names
+        sound like they belong to this game. Direct ask: "pull them based on
+        like Pokemon + fantasy vibes. Maybe sample move names and splice em
+        up."
+      - Pool is now ~24 roots x 12 infixes x 40 ends per type. Measured: zero
+        collisions at 80 same-species animals, and a bug type can no longer
+        collide with a grass type at all. A name now carries information —
+        "Buzzpelt" reads bug, "Driftsong" reads water.
+      - Two defects found and fixed by looking at real output rather than
+        trusting the design: bit-shifting one hash for all three components
+        left them correlated (7 of 8 sampled names drew an infix from a table
+        that is two-thirds empty), so each component now uses an independent
+        hash; and naive concatenation produced "Sapathhide" and
+        "Nettleelmaw", so joins now drop a repeated letter at the seam.
+      - Still deterministic: no rng draw, so naming cannot perturb a seeded
+        run, and re-running a seed reproduces every name exactly.

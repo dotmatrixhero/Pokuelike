@@ -25,7 +25,7 @@ import {
   NOTABLE_TITLE_LABEL,
   type HerdRecord,
 } from "@pokuelike/engine";
-import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT } from "@pokuelike/data";
+import { createDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SPECIES } from "@pokuelike/data";
 
 const ticks = Number(process.argv[2] ?? 8000);
 const seed = Number(process.argv[3] ?? 24757);
@@ -56,6 +56,11 @@ for (const e of events) {
   const id = herdOfEvent(e);
   if (!id) continue;
   (byHerd.get(id) ?? byHerd.set(id, []).get(id)!).push(e);
+}
+
+/** A species' typing, so a name sounds like the animal — "Bramroot" for a grass type, "Vexsting" for a bug. */
+function typesOf(species: string | undefined): readonly any[] | undefined {
+  return species ? (SPECIES as any)[species]?.types : undefined;
 }
 
 function plural(n: number, one: string, many = one + "s"): string {
@@ -115,14 +120,14 @@ function beatsFor(herd: HerdRecord, own: any[]): Beat[] {
         beats.push({
           tick: e.tick,
           weight: 98,
-          text: `**${notableFullName(e.title, e.agentId)}** rose to become the world's ${NOTABLE_TITLE_LABEL[e.title]}.`,
+          text: `**${notableFullName(e.title, e.agentId, typesOf(e.species))}** rose to become the world's ${NOTABLE_TITLE_LABEL[e.title]}.`,
         });
         break;
 
       case "leadershipClaimed": {
         // Named, so a repeat claim by the same animal dedupes away while a
         // real change of leadership still reads as a new moment.
-        beats.push({ tick: e.tick, weight: 58, text: `${agentDisplayName(e.agentId)} took the lead.` });
+        beats.push({ tick: e.tick, weight: 58, text: `${agentDisplayName(e.agentId, typesOf(e.species))} took the lead.` });
         break;
       }
       case "shelterBuilt":
@@ -153,7 +158,7 @@ function beatsFor(herd: HerdRecord, own: any[]): Beat[] {
       text: `The young came of age — ${plural(evolutions.length, "evolution")} over the years, into ${forms.join(" and ")}.`,
     });
   } else if (evolutions.length === 1) {
-    beats.push({ tick: evolutions[0].tick, weight: 50, text: `${agentDisplayName(evolutions[0].agentId)} evolved into a ${evolutions[0].toSpecies}.` });
+    beats.push({ tick: evolutions[0].tick, weight: 50, text: `${agentDisplayName(evolutions[0].agentId, typesOf(evolutions[0].species))} evolved into a ${evolutions[0].toSpecies}.` });
   }
 
   // Splits: told from the parent's side too, because losing half your herd is the parent's story as much as the child's.
@@ -240,7 +245,7 @@ if (claims.length > 0) {
   for (const [title, all] of [...byTitle.entries()].sort()) {
     const latest = all[all.length - 1];
     const holderHerd = herds[latest.herdId ?? ""];
-    console.log(`\n## ${NOTABLE_TITLE_LABEL[title as keyof typeof NOTABLE_TITLE_LABEL]} — ${notableFullName(latest.title, latest.agentId)}`);
+    console.log(`\n## ${NOTABLE_TITLE_LABEL[title as keyof typeof NOTABLE_TITLE_LABEL]} — ${notableFullName(latest.title, latest.agentId, typesOf(latest.species))}`);
     const of = holderHerd ? ` of ${holderHerd.name}` : "";
     const usurped = notableUsurpation(latest);
     console.log(`_a ${latest.species}${of}, crowned t${latest.tick}${usurped ? `, ${usurped}` : ""}_\n`);
@@ -250,12 +255,13 @@ if (claims.length > 0) {
     // title, the world's live record is the truer number.
     const live = (world.notables ?? {})[title];
     const stillHolds = live?.agentId === latest.agentId;
-    console.log(notableTale(latest.title, { ...latest, value: stillHolds ? live.value : latest.value }));
+    const nemesis = latest.rivalId ? world.agents.find((a: any) => a.id === latest.rivalId) : undefined;
+    console.log(notableTale(latest.title, { ...latest, value: stillHolds ? live.value : latest.value, rivalTypes: typesOf(nemesis?.species) }));
 
     const predecessors = [...new Set(
       all.slice(0, -1)
         .filter((c: any) => c.agentId !== latest.agentId)
-        .map((c: any) => notableFullName(c.title, c.agentId))
+        .map((c: any) => notableFullName(c.title, c.agentId, typesOf(c.species)))
     )];
     if (predecessors.length > 0) {
       console.log(`\nBefore them the title was held by ${predecessors.join(", ")}.`);

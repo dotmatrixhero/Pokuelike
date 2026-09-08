@@ -1,5 +1,6 @@
 import { agentDisplayName } from "./herds.js";
 import type { NotableTitleId } from "./types.js";
+import type { PokemonType } from "./typing.js";
 
 /**
  * Epithets and tales for notables.
@@ -58,8 +59,8 @@ export function notableEpithet(title: NotableTitleId, agentId: string): string {
 }
 
 /** "Thornhide the Red-Clawed" — the full name a chronicle should use once an animal is titled. */
-export function notableFullName(title: NotableTitleId, agentId: string): string {
-  return `${agentDisplayName(agentId)} ${notableEpithet(title, agentId)}`;
+export function notableFullName(title: NotableTitleId, agentId: string, types?: readonly PokemonType[]): string {
+  return `${agentDisplayName(agentId, types)} ${notableEpithet(title, agentId)}`;
 }
 
 export interface NotableTaleContext {
@@ -69,6 +70,8 @@ export interface NotableTaleContext {
   previousHolderId?: string;
   /** For `rival` only: the specific animal the grudge is against. */
   rivalId?: string;
+  /** The nemesis's typing, so their name is flavoured like their species. */
+  rivalTypes?: readonly PokemonType[];
   species?: string;
 }
 
@@ -91,7 +94,7 @@ export function notableTale(title: NotableTitleId, ctx: NotableTaleContext): str
       return `They carried food to starving herdmates on ${v} separate occasions, when eating it themselves would have been easier.`;
     case "rival":
       return ctx.rivalId
-        ? `They nursed a grudge against ${agentDisplayName(ctx.rivalId)} bitter enough to be felt across the whole world.`
+        ? `They nursed a grudge against ${agentDisplayName(ctx.rivalId, ctx.rivalTypes)} bitter enough to be felt across the whole world.`
         : `They nursed a grudge bitter enough to be felt across the whole world.`;
     case "beloved":
       return `${v} young of theirs lived long enough to hatch — a line that outgrew every other.`;

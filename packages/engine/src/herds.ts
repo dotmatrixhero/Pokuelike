@@ -1,6 +1,8 @@
 import type { EventLog } from "./events.js";
 import type { Agent, Vec2, World } from "./types.js";
 import { biomeWeightsAt } from "./worldgen.js";
+import { displayNameFor } from "./names.js";
+import type { PokemonType } from "./typing.js";
 
 /**
  * Herds as named, persistent entities with a history — not just a string id
@@ -176,25 +178,17 @@ export function tickHerds(world: World, log?: EventLog): void {
 }
 
 /**
- * Syllables for individual names. An agent id like `bulbasaur-egg-3401` is
- * useless in prose — "egg evolved into an ivysaur" reads like a bug report.
- * A real name is what makes a notable land: "Thornhide earned the title The
- * Unbroken" is a story, the id is not.
- */
-const NAME_STARTS = [
-  "Thorn", "Ash", "Bram", "Fen", "Gale", "Hollow", "Iron", "Kes", "Lark", "Mor",
-  "Nim", "Oak", "Pike", "Quill", "Rook", "Sable", "Tarn", "Vex", "Wren", "Yarrow",
-];
-const NAME_ENDS = ["hide", "claw", "step", "song", "fang", "wing", "root", "tail", "eye", "mane", "bark", "spur"];
-
-/**
  * A stable, human-readable name for an individual, derived from its id.
- * Deterministic, so the same animal is called the same thing everywhere and
- * two runs of a seed agree.
+ *
+ * Delegates to names.ts, which holds the real (type-flavoured, much larger)
+ * pools — see that module for why naming is deterministic rather than random
+ * and why the original single 240-name pool had to go. Kept here as the
+ * convenient no-types entry point: callers that know the animal's typing
+ * should prefer `displayNameFor`, which produces a name that actually sounds
+ * like the species.
  */
-export function agentDisplayName(agentId: string): string {
-  const h = hashId(agentId);
-  return NAME_STARTS[h % NAME_STARTS.length]! + NAME_ENDS[(h >> 7) % NAME_ENDS.length]!;
+export function agentDisplayName(agentId: string, types?: readonly PokemonType[]): string {
+  return displayNameFor(agentId, types);
 }
 
 /** The herd record for an agent, if it has one — the lookup a chronicle needs constantly. */
