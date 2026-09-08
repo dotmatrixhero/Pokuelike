@@ -38,6 +38,23 @@ settled.
 5. **Roles are inherited.** A quest-giver can die; *the elder* is an office,
    not a person. Someone else takes it up, and the fact that they had to is
    itself a story.
+6. **A populated world, but wilderness stays dominant.** ("Populated world is
+   good, just gotta not be... everything.") This is a tuning target for the
+   history pass rather than a design change — you set founding sites and
+   expansion pressure, not a settlement count, and tune until the map reads
+   as *scattered settlement in a wild world* rather than a settled
+   continent. Concretely, it's one of the things the 50-seed validation run
+   should be measuring: what fraction of land zones ends up settled, roaded,
+   or inside a settlement's influence radius. Wilderness being the default
+   is what makes a road feel like a thread rather than a grid, and what
+   keeps the cave/frontier tone of Act 1 true for the rest of the world.
+
+See also **LORE_NOTES.md** — canon research gathered for this design,
+clearly separated into what's real in-game text, what's fan theory and
+what's fan fiction. Most relevant: Legends: Arceus's Hisui is very close to
+our premise (a frontier where people fear Pokémon and partnership is new),
+and its villagers/clans/expedition split independently reproduces the same
+reverent / fearful / pragmatic attitude axis proposed below.
 
 ## The fork everything else hangs off
 

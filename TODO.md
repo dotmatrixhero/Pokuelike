@@ -135,6 +135,53 @@ Proposals in that doc worth a decision, not just noting:
 - [x] **Roles are inherited** — a quest-giver can die; *the elder* is an
       office, not a person, and the fact someone had to take it up is a
       story.
+- [x] **Populated world, but wilderness stays dominant** ("just gotta not
+      be... everything") — a tuning target for the history pass, not a
+      design change. Add "fraction of land zones settled / roaded / inside a
+      settlement's influence radius" to what the 50-seed validation run
+      measures.
+
+## Lore research — see LORE_NOTES.md
+
+Canon gathered to check this design against, tiered into what's actual
+in-game text, what's fan theory, and what's fan fiction (so we don't end up
+building on a creepypasta).
+
+**The finding that matters most**: Legends: Arceus's **Hisui** is very close
+to our premise — a frontier settlement where ordinary people fear Pokémon,
+partnership is brand new, and clans revere them. Its villagers / clans /
+expedition split independently reproduces our reverent / fearful / pragmatic
+attitude axis, which is decent evidence the axis is right. LORE_NOTES.md
+ends with a deliberate difference table (no capture at all, generated world
+and history, turn-based, settlement simulation, and a nobody protagonist
+rather than one chosen by a god).
+
+**The pattern worth stealing outright**: in canon, *every modern power
+system is the residue of an ancient catastrophe* — Mega stones are debris
+from AZ's weapon, Dynamax ties to the Darkest Day, Terastallization comes
+out of the Area Zero crater. Our **TMs-as-ancient-relics** proposal is
+therefore house style, not a departure. The second pattern: the deep past is
+revealed **archaeologically** (ruins, murals, folk tales, a diary in a
+burnt-out lab), almost never by a character explaining it — which our
+generated history + ruins + chronicle stack is already a machine for, if we
+keep the restraint.
+
+- [ ] **Nobles and wardens** (Legends: Arceus) is the single best mechanic to
+      borrow: a revered local Pokémon, tended by a human who has never owned
+      it, that can go *frenzied* and must be **calmed rather than killed**.
+      Fits reverent settlements, gives a non-combat job to a bonded partner,
+      matches the pitch's "befriending a predator is hard but possible," and
+      is structurally close to what `herdConflict.ts` already produces (a
+      pressured animal behaving badly for real reasons).
+- [ ] **"Humans and Pokémon once ate at the same table"** (Sinnoh folk tale,
+      real in-game text) is the strongest canon backing for our premise — a
+      world of distance and reverence is a plausible *middle* of a story
+      canon already tells, not a departure from it.
+- [ ] **The dex is an unreliable narrator** — entries contradict each other
+      across versions. For per-settlement culture plus generated history,
+      two villages holding contradictory sincere beliefs about the same
+      species is canon-accurate rather than sloppy. Worth building toward
+      deliberately.
 
 - [ ] **Budget a real tuning pass for the history sim.** Named risk, from
       this project's own scar tissue (the overworld capacity feedback loop
