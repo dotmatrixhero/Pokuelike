@@ -13898,3 +13898,43 @@ seconds" shape far more closely, on top of an already-correct `playing`
 pause guard. Full monorepo typecheck clean; engine (46 files, 1246 tests)
 and data (2 files, 240 tests) suites unaffected and still green — this
 fix touches web-only auto-camera state machine code.
+
+## Battle Screen log: lines reveal one at a time, not a whole hit at once
+
+Direct ask: "It'd be nice to have battle logs and go loss and moves and
+the moves in a battle pop up in animated form, like just for human eye to
+follow along. One log entry at a time."
+
+Root gap: `BattleScreenPanel.ingest` already received a whole tick's
+worth of lines as one batch — a single landed hit routinely produces 3-4
+(`"X used Move!"`, `"A critical hit!"`, `"It's super effective!"`, `"Y
+takes N damage!"`), and `render` painted every one of them into the DOM
+in the same frame. Fine for reading back after the fact, but nothing for
+a human eye to actually watch unfold in real time, which was the whole
+point of the ask.
+
+Fixed with a `revealedCount` field tracking how many of `lines` (the full
+authoritative history, unchanged) have actually been painted to the DOM.
+`render` — already running every frame regardless of `dirty`, for the HP
+header's own live-state reasons — now also advances `revealedCount` by
+at most one line per `LINE_REVEAL_INTERVAL_MS` (160ms, chosen well under
+`BATTLE_STEP_INTERVAL_MS`'s 650ms so a typical hit finishes revealing
+itself before the next tick's beat lands a new batch on top), and the log
+only ever paints `lines.slice(0, revealedCount)`. A fresh engagement's
+opening line still shows instantly (`revealedCount` seeded to 1 right
+after `setActive` pushes it, not left to wait on the timer), and a
+backlog that grows past `MAX_REVEAL_BACKLOG` (6 — a mob fight landing
+several hits in one tick, or the tab having been backgrounded) catches up
+instantly instead of drawing out an ever-growing lag between what
+happened and what's on screen.
+
+### Verification
+
+No vitest suite exists for `packages/web`; verified live via Playwright
+against the real dev server. After the opening line rendered (1 line),
+ingesting a synthetic 3-line hit event did NOT jump straight to 4 lines
+in the DOM — it showed 2, then 3 at ~215ms, then the full 4 at ~425ms,
+roughly matching `LINE_REVEAL_INTERVAL_MS`'s cadence, then held steady
+once caught up. Full monorepo typecheck clean; engine (46 files, 1246
+tests) and data (2 files, 240 tests) suites unaffected and still green —
+this fix touches web-only display code.
