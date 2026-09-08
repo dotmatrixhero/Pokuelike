@@ -3,6 +3,62 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Your call: is elevation's accuracy effect big enough to feel?
+
+Elevation is now wired into the accuracy roll (attacker's elevation minus
+defender's — the gap only, never absolute height). It works, and it is
+**subtle by default**. The constants look like they were written for integer
+elevation tiers, but `Tile.elevation` is a continuous float and the gaps
+between two agents close enough to fight are small.
+
+Measured over 12 seeds x 6000 ticks (4,929 real hit attempts):
+
+| |delta| between combatants | value |
+|---|---|
+| median | 0.015 |
+| p90 | 0.676 |
+| p99 | 2.068 |
+| max observed | 3.661 |
+
+At `ACCURACY_PER_ELEVATION` = 0.05 that is a ~3% accuracy swing at p90 and
+~18% at the largest gap ever observed. `MODIFIER_CAP` (0.3) needs a gap of 6
+and is never reached in a real fight.
+
+Concretely: 3 of the first 6 seeds came out **bit-identical** before and
+after wiring — the nudge was never large enough to flip a single roll in
+those runs.
+
+Options:
+- **Leave it.** Elevation is a real but minor edge; terrain reads as texture.
+- **Raise `ACCURACY_PER_ELEVATION`** (0.15-0.25 would make p90 a 10-17%
+  swing) so high ground is a decision a player would actually take a detour
+  for.
+- **Rescale elevation itself** so terrain has sharper, more legible steps —
+  bigger change, affects FOV and movement too.
+
+Recommend raising the constant if the tactical layer in `PLAYER_ACTIONS.md`
+goes ahead: "help it get to the right position/elevation" needs the bonus to
+be worth a turn of walking. Not changed unilaterally — it's a balance number.
+Re-measure with `npx tsx packages/runner/src/validateElevationAccuracy.ts`.
+
+## Pre-existing test flake (not caused by the elevation work)
+
+`support.test.ts` > "a real tick applies the last step's terrain factor to
+the NEXT action's pace" failed once in ~8 full-suite runs, then passed 7
+times consecutively.
+
+It is not related to any recent change — the test has a single agent, so
+combat (and therefore the elevation/accuracy path) is unreachable in it. The
+cause is that it calls `createWorld(10, 1)` with **no seed**, and
+`createWorld`'s own doc comment says an omitted seed "falls back to a real
+(non-reproducible) seed." `predation.test.ts` already documents this exact
+flake class and fixed itself with a shared `SAFE_RNG = mulberry32(...)`.
+
+Fix would be one line — pass a fixed seed, or thread a seeded rng into the
+`tickWorld` call — but it changes what the test exercises, so it's left
+alone pending a call. Same treatment as `predation.test.ts`'s `SAFE_RNG` is
+probably right.
+
 ## Your call: battle log reveal pace (LINE_REVEAL_INTERVAL_MS)
 
 Two branches independently tuned the same number and disagreed. Merged in

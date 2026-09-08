@@ -4,6 +4,7 @@ import { logBehaviorChange } from "./events.js";
 import { applyForcedMovement, stepAway, stepToward } from "./movement.js";
 import { migrate } from "./migration.js";
 import { calculateDamage, pickBestMove, useMove, rollAccuracy, rollCritical, rollHitCount } from "./combat.js";
+import { elevationAccuracyMultiplier } from "./elevation.js";
 import type { Direction } from "./moves.js";
 import { resolveShape } from "./moves.js";
 import type { MoveSpec } from "./moves.js";
@@ -1189,7 +1190,17 @@ function resolveHitAgainstTarget(
   defender.hp = defender.hp ?? defender.maxHp;
   const wasFaintedBefore = defender.fainted === true;
 
-  if (!rollAccuracy(move, 0, 0, rng, stormAccuracyMultiplier(world, attacker.layer, attacker.pos) * accuracyBonusMultiplier)) {
+  // High ground helps the attacker land the hit, low ground hinders it —
+  // composed onto the same `extraMultiplier` the storm penalty already uses,
+  // so weather and terrain multiply together. Only the accuracy modifier is
+  // applied, never the evasion one: they are exact negatives of each other
+  // for the same pair, so applying both would double-count one height gap
+  // (see elevation.ts's `elevationEvasionModifier` doc comment).
+  const attackerElevation = tileAt(world, attacker.layer, attacker.pos.x, attacker.pos.y)?.elevation ?? 0;
+  const defenderElevation = tileAt(world, defender.layer, defender.pos.x, defender.pos.y)?.elevation ?? 0;
+  const elevationMultiplier = elevationAccuracyMultiplier(attackerElevation, defenderElevation);
+
+  if (!rollAccuracy(move, 0, 0, rng, stormAccuracyMultiplier(world, attacker.layer, attacker.pos) * accuracyBonusMultiplier * elevationMultiplier)) {
     log?.record({
       kind: "missed",
       tick: world.tick,
