@@ -2,7 +2,8 @@ import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Tile, V
 import { otherLayers, setTile, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
-import { applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan, resolveChargedAttack } from "./predation.js";
+import { agentsWithin, applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan, resolveChargedAttack } from "./predation.js";
+import { RAPPORT_SOCIALIZE_DELTA, rapportScore, strengthenRapportMutual } from "./rapport.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing, tendSoil } from "./flora.js";
 import { tickCooldowns, useMove } from "./combat.js";
@@ -476,6 +477,66 @@ const TRAINING_STEP_OFFSETS: readonly Vec2[] = [
 ];
 
 /**
+ * How close a herd-mate has to be for `applySocializing` to consider them —
+ * direct ask: "has to be like pretty close quarters to your rapport
+ * target." Deliberately the tightest radius this file uses for anything
+ * (contrast `SHELTER_REST_RADIUS`/`FLEE_DETECT_RADIUS`, both several tiles):
+ * this is meant to read as "keeping company with whoever's already right
+ * here," an opportunistic use of otherwise-idle time, not a destination an
+ * agent travels toward — see `applySocializing`'s own doc comment for why
+ * it never moves an agent toward a target the way `applyExploration` does.
+ * Manhattan distance <= 1 is exactly the 4 orthogonal neighbor tiles, not
+ * even a diagonal step away.
+ */
+const SOCIALIZE_RADIUS = 1;
+
+/**
+ * Called after `applyExploration` has genuinely found nothing to do, before
+ * falling all the way back to solo `applyTraining` — direct ask: "socialize
+ * as an intention/unit action to spend time, could help create rapport with
+ * your herd, but has to be like pretty close quarters to your rapport
+ * target." A real, deliberate use of otherwise-idle time (same "idle stack"
+ * spirit as `applyTraining`, see its own doc comment) that only fires when
+ * a genuine herd-mate is already within `SOCIALIZE_RADIUS` — this is
+ * opportunistic company, not a travel goal, so an agent with nobody nearby
+ * just falls through to training instead, exactly like `applyExploration`
+ * finding nothing.
+ *
+ * Target selection deliberately prefers the herd-mate with the LOWEST
+ * current `rapportScore` among those close enough (ties broken by nearest,
+ * then by id for determinism) — the whole point is building relationships
+ * that don't already exist, or that have faded, not repeatedly reinforcing
+ * whichever neighbor happens to already be the closest bond. Returns
+ * whether it found anyone to socialize with, so the caller can fall
+ * through to `applyTraining` — same boolean-return shape `applyExploration`
+ * already uses for its own "did I actually find something to do" signal.
+ */
+function applySocializing(world: World, agent: Agent, log: EventLog | undefined, rng: () => number): boolean {
+  if (!agent.herdId) return false;
+  const nearby = agentsWithin(world, agent, SOCIALIZE_RADIUS).filter((other) => other.herdId === agent.herdId);
+  if (nearby.length === 0) return false;
+
+  let target: Agent | undefined;
+  let targetScore = Infinity;
+  let targetDistance = Infinity;
+  for (const other of nearby) {
+    const score = Math.abs(rapportScore(agent, other.id, world.tick));
+    const distance = manhattan(agent.pos, other.pos);
+    if (score < targetScore || (score === targetScore && distance < targetDistance) || (score === targetScore && distance === targetDistance && (!target || other.id < target.id))) {
+      target = other;
+      targetScore = score;
+      targetDistance = distance;
+    }
+  }
+  if (!target) return false;
+
+  logBehaviorChange(log, world, agent, "socialize");
+  agent.behavior = "socialize";
+  strengthenRapportMutual(world, agent, target, RAPPORT_SOCIALIZE_DELTA, rng);
+  return true;
+}
+
+/**
  * Called only once `applyExploration` has genuinely found nothing to do —
  * no preferred terrain to linger near, no unvisited sector reachable
  * nearby. Direct ask: "training/getting XP would be cool" — and the direct
@@ -486,14 +547,15 @@ const TRAINING_STEP_OFFSETS: readonly Vec2[] = [
  * "practicing a move," not a random one) turns that dead time into a real,
  * visible ("train" — a new `BehaviorKind`) activity instead of a silent gap.
  * Never interrupts anything else: this is the last fallback in the idle
- * stack (herd cohesion, then shelter-resting, then exploration all get
- * first refusal), so an agent only ever trains when it truly has nothing
- * better to do. Reuses `MIN_EXPLORE_AGE` — same "too young to be doing this
- * unsupervised" reasoning `applyExploration` already applies (a newborn
- * settles in near its birthplace first; it doesn't drill combat moves
- * alone either), so a young agent below that age just stays genuinely idle
- * here too, rather than training being the one idle-stack fallback with no
- * age floor at all.
+ * stack (herd cohesion, then shelter-resting, then exploration, then
+ * socializing all get first refusal — see `applySocializing`), so an agent
+ * only ever trains when it truly has nothing better to do. Reuses
+ * `MIN_EXPLORE_AGE` — same "too young to be doing this unsupervised"
+ * reasoning `applyExploration` already applies (a newborn settles in near
+ * its birthplace first; it doesn't drill combat moves alone either), so a
+ * young agent below that age just stays genuinely idle here too, rather
+ * than training being the one idle-stack fallback with no age floor at
+ * all.
  */
 function applyTraining(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): void {
   if (agent.age !== undefined && agent.age < MIN_EXPLORE_AGE) return;
@@ -1451,7 +1513,10 @@ export function tickAgentAction(
     // onto a mate this exact scan couldn't see.
     if (!sought) {
       const explored = applyExploration(world, agent, log, ctx, rng);
-      if (!explored) applyTraining(world, agent, log, ctx, rng);
+      if (!explored) {
+        const socialized = applySocializing(world, agent, log, rng);
+        if (!socialized) applyTraining(world, agent, log, ctx, rng);
+      }
     }
     return;
   }
@@ -1808,7 +1873,14 @@ export function tickAgentAction(
         // returning without a target used to leave `agent.behavior` however
         // it last was, doing nothing at all, tick after tick. See
         // `applyTraining`'s own doc comment for what fills that gap now.
-        if (!explored) applyTraining(world, agent, log, ctx, rng);
+        // `applySocializing` gets first refusal ahead of solo training —
+        // see its own doc comment for why (a nearby herd-mate to spend the
+        // idle tick with beats drilling alone, when one happens to be
+        // close enough).
+        if (!explored) {
+          const socialized = applySocializing(world, agent, log, rng);
+          if (!socialized) applyTraining(world, agent, log, ctx, rng);
+        }
       }
     }
   }

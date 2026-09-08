@@ -87,6 +87,19 @@ export const RAPPORT_MAX_EDGES_PER_AGENT = 16;
 export const RAPPORT_FOOD_DELIVERY_DELTA = 0.03;
 
 /**
+ * Deliberately socializing (`needs.ts`'s `applySocializing`, the idle-stack
+ * fallback right before `applyTraining`) — direct ask: "socialize as an
+ * intention/unit action to spend time, could help create rapport with your
+ * herd." Bigger than a food delivery (this is the whole point of the tick,
+ * not an errand's side effect) but still modest — repetition, the same as
+ * every other incremental delta here, is expected to do most of the real
+ * work over a relationship's life. Deliberately NOT as big as
+ * `RAPPORT_MOB_DEFENSE_DELTA` — sitting together costs nothing and risks
+ * nothing, unlike actually fighting for a herd-mate.
+ */
+export const RAPPORT_SOCIALIZE_DELTA = 0.04;
+
+/**
  * Joint mob-defense — predation.ts's guardian mechanic (`findHerdmateInDanger`
  * inside `applyPredationInstincts`), where one herd-mate actually lands a hit
  * defending another that's currently fleeing/fighting a threat. Bigger than a

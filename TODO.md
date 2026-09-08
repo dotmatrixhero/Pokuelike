@@ -8,14 +8,20 @@ place to park trains of thought so they don't get lost.
 Three direct asks raised together, each substantial enough to want its own
 pass rather than a rushed bolt-on:
 
-- [ ] **"Socialize" as an intention/unit action** — a deliberate use of a
-      tick to build rapport with a herdmate, distinct from rapport that
-      currently only accrues as a side effect of other actions (mob defense,
-      shared clashes — see rapport.ts). Needs: what counts as "close
-      quarters" to the rapport target (adjacent? within N tiles?), whether
-      it competes with survival needs (food/water/sleep) for priority, and
-      whether it's player-directed only or something AI-controlled agents
-      also choose on their own between more urgent needs.
+- [x] **"Socialize" as an intention/unit action** — built. New `"socialize"`
+      `BehaviorKind` + `applySocializing` (needs.ts), slotted into the idle
+      stack right before `applyTraining` (herd cohesion, shelter-resting,
+      exploration all still get first refusal). Only fires when a genuine
+      herd-mate is within `SOCIALIZE_RADIUS` (1 — Manhattan-adjacent only,
+      "pretty close quarters"), picking the nearest-rapport-neediest
+      neighbor (lowest current `|rapportScore|`, so it spreads bonds rather
+      than always reinforcing the same closest pair) and applying a new
+      `RAPPORT_SOCIALIZE_DELTA` (0.04, rapport.ts) via the existing
+      `strengthenRapportMutual`. AI-controlled only for now (an idle-stack
+      fallback, same as training) — a player-directed version is a real
+      follow-up once player-controlled units exist at all. Verified live:
+      1472 real `behaviorChanged`-to-"socialize" events over 4000 ticks on
+      a real scenario run, 17 real rapport edges standing afterward.
 - [ ] **More interesting ground tiles — soil/rock type, with real mechanical
       depth.** Direct ask: "we need more interesting ground tiles and sims
       around them. soil type, rock type, etc... what can grow there, what

@@ -424,7 +424,8 @@ export type BehaviorKind =
   | "sleep"
   | "restAtShelter"
   | "scavenge"
-  | "train";
+  | "train"
+  | "socialize";
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
 export interface InventoryItem {
