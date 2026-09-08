@@ -408,52 +408,154 @@ relic threads.
 
 ---
 
-## Leaks and unverified material — handle with care
+## The Teraleak material [RUMOR — unconfirmed, and layered]
 
-Asked about directly ("the weird rumored leaks from the last few years that
-had some strange creation myths and stuff"), so here's an honest answer
-rather than a confident one.
+*Research supplied by the project owner. Kept because the **method** it
+reveals is genuinely valuable to us, not because the content is usable.
+Every caveat below is theirs and I'd keep all of them.*
 
-**What's real that I'm confident about:**
+### Provenance and why it needs a sceptical read
 
-- **The 1997 Spaceworld demo leak** — a genuine build of prototype Gold/
-  Silver surfaced years ago, containing beta designs, unused Pokémon and
-  earlier versions of familiar ones. Real, well documented, and interesting
-  mostly as design archaeology.
-- **The 2024 Game Freak breach** (widely called the "Teraleak") — a large
-  internal data breach that circulated source code, development material and
-  design/concept documents. That it happened, and that lore-adjacent
-  material was among it, is widely reported.
+- A **2024 Game Freak data breach**, reportedly starting from a phishing
+  compromise of a Nintendo developer portal. It dumped beta sprites, concept
+  art, cut content, internal design docs — and story/lore documents,
+  including an origin-myth bible for the universe.
+- A second wave ("Teraleak 2") around **Legends Z-A's October 2025 release**,
+  more roadmap than lore.
+- **Multiple layers of distortion**: Japanese original → machine translation
+  → fan re-summary → aggregation. What you read is rarely what the document
+  said.
+- **The cautionary tale, from the corpus itself**: a leaked Typhlosion short
+  story was widely read as deeply disturbing because of a bad machine
+  translation, then substantially walked back once a proper human
+  translation showed it was mythological allegory. That's the failure mode
+  in miniature.
+- **Datedness**: the core myth document is believed to be from ~**2005**,
+  during Diamond/Pearl development — i.e. **before Giratina existed**. Even
+  if wholly genuine, it's an early draft that may have been revised or
+  abandoned, not "current truth."
+- No official acknowledgement beyond DMCA takedowns.
 
-**What I won't do is repeat specifics I can't stand behind.** There are
-circulated claims about creation-myth material, early notes on where Pokémon
-come from, and human–Pokémon origin concepts. I have only fuzzy awareness of
-these, and leak summaries get distorted heavily as they spread —
-paraphrase-of-a-paraphrase is how "an early concept document" becomes "the
-secret true canon." I'd rather leave a gap here than fabricate a myth and
-have it end up load-bearing in our design.
+**Correct framing: archaeology of an early design document, not a leak of
+canon.**
 
-**Three practical reasons not to build on this material**, beyond accuracy:
+### The myth, in outline
 
-1. **It isn't canon.** Cut concepts and internal drafts are, by definition,
-   things that were not chosen. Their being unused is often the most
-   informative fact about them.
-2. **It's unstable ground.** If a detail turns out to be misattributed or
-   invented, anything we built on it has to be unpicked.
-3. **It's legally and reputationally messy** for a project that might ever
-   be public — which matters more than it would for a private thought
-   experiment.
+Chaos → an egg → **Arceus** ("the Original One"). The shattered eggshell
+becomes **giants** who attack the newborn god; Arceus wins and fills their
+corpses with its own blood. Weakened, it splits into two beings (glossed as
+Dialga and Palkia, though described as **light/dark** rather than the
+released **time/space** — an unresolved discrepancy, possibly early-draft,
+possibly translation). Those two populate the world with people — but nobody
+makes the world livable first, and that first humanity dies out. They then
+have three more children (the **Lake Trio**), who grant **knowledge**,
+**emotion** and **will** — matching the trio's shipped Pokédex flavour text.
+Humans receive a **seed of life** that becomes a world-tree which sustains
+but confines them; the **weather trio** is created specifically to destroy
+it, and its fragments become **land, sea and sky**, each claiming a domain.
+That's where humans and Pokémon begin living together across the world.
 
-**And the honest kicker: we don't need it.** Everything this project wants
-from the lore — a lost civilisation, a catastrophe behind present-day power,
-an era when people and Pokémon were closer, a frontier where partnership is
-new — is *already in published canon*, sitting in the Canalave library, the
-Ruins of Alph, AZ's story and Hisui. The published material is richer than
-the rumours, and we can cite it.
+A cosmological diagram (tied to the Ruins of Alph sigil event) reportedly
+arranges Arceus/Dialga/Palkia at the centre, the Lake Trio next, then the
+weather trio, then the Mythicals — with unexplained links to
+pseudo-legendaries and a couple of names matching no released Pokémon.
 
-If you want to chase specific leak claims, my suggestion is to treat them as
-**inspiration you re-derive independently** — if an idea is good, write our
-own version from our own world's generated history, and don't source it.
+Net effect: **legendaries as a literal generative pantheon** — gods with
+children — rather than powerful wildlife.
+
+### The species folklore
+
+A separate batch of short **etiological myths** about individual species —
+written in a flat, old-world register (Greek/Japanese folklore, "why the
+leopard has spots"), centring on human/Pokémon unions in a mythic past.
+Believed to be raw early drafts of what became the Canalave Library's
+"Sinnoh Folk Stories."
+
+Handling these at the level of structure rather than detail, deliberately:
+
+- They are **etiological** — a tragedy in the past is the stated reason a
+  present-day norm exists. The Slaking/Vigoroth story is the clearest case:
+  a grim sequence of events is explicitly given as the origin of why that
+  village *later* lives more harmoniously with Pokémon.
+- They were **written as reusable templates** — a Lapras version of the
+  Octillery story exists with the species swapped and the structure intact.
+  That's a striking detail for us, and I'll come back to it.
+- This is **the most translation-fragile part of the entire corpus** (see
+  the Typhlosion case above).
+
+### What actually shipped, for contrast [CANON — this part is real]
+
+The genuinely useful comparison, and all of it released and citable. The
+Canalave Library holds seven texts, plus myths delivered via NPCs:
+
+- **Sinnoh Region's Mythology** — why Pokémon leap out of tall grass.
+- **Veilstone's Myth** — a swordsman who kills Pokémon carelessly, finds
+  the world emptied, and renounces the sword. Widely read as Giratina, and
+  as the in-universe reason people *battle* with Pokémon rather than
+  fighting them with weapons.
+- **A Horrific Myth** — three warnings that explain why Uxie keeps its eyes
+  shut, Mesprit flees people, and Azelf can leave its body.
+- **The Original Story** — the shipped creation myth: chaos, egg, the
+  Original One, a split into two, three living things that create spirit,
+  then sleep. **No giants, no battle, no blood.**
+- **Sinnoh Folk Tales** — returning the cleaned bones of eaten Pokémon to
+  their water so they "return" (echoing Ainu *kamuy* practice); a Pokémon
+  that sheds its hide to sleep as a human (a close cousin of selkie
+  folklore); and the regionally-divergent one, where the Japanese text
+  describes past **intermarriage** and the Western localisation softens it
+  to having been "close, treated as equals."
+- **Snowpoint Temple's riddle**, engraved on Regigigas, explaining the
+  gather-the-three mechanic as folklore.
+- **Cynthia on Giratina** — she reads plates and cave art and concludes
+  Giratina was there from the start and was *deliberately left out* of the
+  official story. **In-universe myth-editing**, presented as such.
+
+### The craft lesson — the actually valuable part
+
+The project owner's own observation, and it's the best thing to come out of
+this whole thread:
+
+> The shipped material is almost entirely non-violent and **mechanism-
+> focused** — myths that exist to explain a game rule (why Pokémon appear in
+> grass, why the Regis must be gathered, why you battle instead of fight).
+> The leaked drafts are stories with **protagonists, consequences and
+> grief**.
+
+Which gives a clean split we should adopt outright:
+
+- **Rules-myths** — justify how the world's systems work. Safe, shippable,
+  player-facing.
+- **Character-myths** — carry emotional history. Can stay internal.
+
+And the deeper principle underneath it:
+
+> The unreleased dark text never needed to reach players. It just had to
+> keep the writers' internal logic consistent, so the surviving fragments
+> felt like they belonged to something bigger than what's on the page.
+
+**That is exactly what our history pass is for**, and it reframes it: the
+generated history is *the internal bible*. The player is only ever meant to
+see fragments of it — a ruin, an elder's half-remembered account, a
+chronicle line. The value of simulating the full history isn't that the
+player reads it; it's that everything they *do* see is consistent with
+something real underneath.
+
+### Standing position on using any of it
+
+Unchanged, and the owner's own framing agrees: **don't build on the content.**
+It isn't canon (cut drafts are things that were *not chosen*), it's unstable
+ground, it's sourced from a criminal breach, and we don't need it — the
+shipped Canalave material above covers everything we actually want and is
+citable. If an idea from it is good, re-derive our own version from our own
+world's generated history and don't source it.
+
+**The method, though, is not leaked material at all** — "keep a full
+internal bible, ship only fragments" is ordinary good worldbuilding that
+this case happens to illustrate unusually well. Take that freely.
+
+**Open thread** (owner's): the light/dark vs. time/space discrepancy for
+Dialga/Palkia is unresolved — early-draft difference or translation
+artifact, no way to tell from here.
 
 ---
 
@@ -658,7 +760,98 @@ whole simulation.** Our world is one where a herd in the barley is a real
 problem, and that friction is what makes the eventual coexistence mean
 anything. Worth naming so we don't drift cozy by accident.
 
-### 13. Environmental, unexplained storytelling
+### 13. The internal bible is the history pass — this reframes the whole thing
+
+The single most useful idea in this document. Game Freak drafted a full,
+dark, consequential mythology and shipped a sanded-down fraction of it; the
+unshipped material earned its keep by keeping the *shipped* fragments
+consistent with something real.
+
+**Our history pass is that bible, except we get it for free and it's
+actually true.** Which resolves a worry worth naming: a generated history
+nobody reads could look like wasted computation. It isn't. Its job is to
+make every fragment the player *does* meet — a ruin, an elder's account, a
+place name, a chronicle line — consistent with real events. That's the
+return, and it's the same return Game Freak got from a document players were
+never supposed to see.
+
+Practical consequence: **we should not feel obliged to surface the history.**
+Restraint is the technique. Generate it all; expose slivers.
+
+### 14. Rules-myths vs. character-myths — ship one, keep the other
+
+Straight from the shipped-vs-leaked contrast:
+
+- **Rules-myths** explain how the world works — why you don't go into the
+  north woods, why the bridge is never rebuilt, why that species is never
+  hunted here. Player-facing, safe, and they make systems feel *reasoned*
+  rather than arbitrary.
+- **Character-myths** carry grief and consequence — what actually happened
+  to the family that founded this village. Internal by default; surfaced
+  rarely, and only where it lands.
+
+Both fall out of the same generated history. The split is about what we
+*show*, not what we compute.
+
+### 15. Generated etiological myths — the history pass's best output
+
+This is the concrete mechanism the shipped Canalave texts suggest, and I
+think it's the highest-value thing in this whole lore pass.
+
+Every shipped myth is **etiological**: a story about the past that exists to
+explain a present norm. Veilstone's swordsman explains why people battle
+rather than kill. The Slaking story (leaked) explains why that village
+later lives peaceably with Pokémon.
+
+**Our history pass generates exactly the raw material for this.** It records
+real events with real causes — a famine, a raid, a settlement that failed, a
+herd that took the fields three winters running. So a village's culture can
+be *derived from its own recorded history*:
+
+- A settlement whose recorded past includes a catastrophe involving a
+  species → **fearful** attitude toward it, plus a myth explaining why.
+- A settlement saved by a landmark's water in a drought → **reverent**,
+  with a shrine and a story about it.
+- A village that starved when the road was cut → a norm about hospitality
+  to travellers, and a myth behind it.
+
+The attitude axis stops being a generation-time roll and becomes a
+**consequence**. That's the difference between a village that *is* reverent
+and a village that is reverent *because of something that happened to it* —
+and the second one can tell you about it.
+
+### 16. Myths as swappable templates — how to actually generate them
+
+The most practically useful detail in the leak: those species folktales were
+written as **reusable templates with the species swapped** (the same story
+exists in Octillery and Lapras versions). That's not a curiosity, it's
+literally the generation strategy:
+
+**template + real recorded event + the species/place/people involved.**
+
+A dozen myth skeletons, filled from the chronicle, produce a world where
+every village has its own stories that are all *true* — and where two
+villages can tell the same template about different events, which is exactly
+how real folklore behaves.
+
+### 17. Myths can be wrong — and that's a feature
+
+Cynthia's reading of Giratina is that it was **deliberately left out** of the
+official story: in-universe myth-editing, presented as such. And the
+Canalave folk tale differs between the Japanese and Western texts — the same
+underlying event, told with different comfort levels.
+
+Since our chronicle holds what *actually* happened, a village's myth about
+it can differ — omitting the shameful part, crediting the wrong ancestor,
+blaming a species that wasn't responsible. That gives us, nearly free:
+
+- The unreliable-narrator dex idea (#1) with real teeth, because there's a
+  ground truth to be wrong about.
+- A genuine reason to visit ruins: the record contradicts the story.
+- Two villages with **contradictory myths about the same real event**, which
+  is both canon-accurate and the most human thing a generated world could do.
+
+### 18. Environmental, unexplained storytelling
 
 The best old lore is archaeological, not expository. You learn the darkest
 thing in Gen 1 by reading a diary in an abandoned building, and no character

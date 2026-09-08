@@ -216,6 +216,56 @@ Four things worth acting on:
       friction is what makes eventual coexistence mean anything. Named so we
       notice if we start sanding it off.
 
+**The Teraleak material** is also written up (owner-supplied research, kept
+with all its caveats: unconfirmed, machine-translation-layered, a ~2005
+pre-Giratina draft, from a criminal breach, and with a documented case of a
+viral misreading that a proper translation walked back). **Standing position:
+don't build on the content** — it isn't canon, it's unstable, and the shipped
+Canalave Library material covers everything we actually want and is citable.
+
+**But the method it reveals is ordinary good worldbuilding and worth taking
+freely**, and it reframes the history pass. Game Freak drafted a full dark
+mythology and shipped a sanded-down fraction; the unshipped text earned its
+keep by keeping the *shipped* fragments consistent with something real.
+
+- [ ] **The history pass IS the internal bible** — this resolves a real
+      worry that a generated history nobody reads is wasted computation. Its
+      job is to make every fragment the player *does* meet (a ruin, an
+      elder's account, a place name, a chronicle line) consistent with actual
+      events. So: generate it all, expose slivers. **Restraint is the
+      technique**, not a limitation.
+- [ ] **Rules-myths vs. character-myths.** The shipped Pokémon myths are
+      almost all mechanism-explaining (why Pokémon leap from grass, why you
+      battle instead of fight, why the Regis must be gathered); the unshipped
+      drafts have protagonists and grief. Split ours the same way — ship the
+      rules-myths (they make systems feel reasoned rather than arbitrary),
+      keep character-myths internal and surface them rarely.
+- [ ] **Generated etiological myths — highest-value output of the history
+      pass.** Every shipped canon myth explains a *present norm* via a *past
+      event*, which is exactly what our chronicle records. So a settlement's
+      culture can be derived from its own history: a recorded catastrophe
+      involving a species → fearful, plus a myth saying why; saved by a
+      landmark's water in a drought → reverent, with a shrine and a story.
+      **The attitude axis stops being a generation-time roll and becomes a
+      consequence** — the village isn't just reverent, it's reverent
+      *because of something that happened to it*, and it can tell you.
+- [ ] **Myths as swappable templates** — the leaked folktales were written
+      as reusable structures with the species swapped (the same story exists
+      in Octillery and Lapras versions). That's literally our generation
+      strategy: *template + real recorded event + the species/place/people
+      involved*. A dozen skeletons filled from the chronicle gives every
+      village its own true stories, and lets two villages tell the same
+      template about different events — which is how real folklore behaves.
+- [ ] **Myths can be wrong, and that's a feature.** Cynthia's in-universe
+      reading is that Giratina was *deliberately edited out* of the official
+      story, and the Canalave folk tale differs between JP and Western text.
+      Since our chronicle holds what actually happened, a village's myth can
+      omit the shameful part, credit the wrong ancestor, or blame the wrong
+      species. That gives the unreliable-narrator idea real teeth (there's a
+      ground truth to be wrong about), a genuine reason to visit ruins (the
+      record contradicts the story), and contradictory myths about the same
+      real event.
+
 - [ ] **Budget a real tuning pass for the history sim.** Named risk, from
       this project's own scar tissue (the overworld capacity feedback loop
       that chased 1 forever, caught only by a real multi-thousand-tick run):
