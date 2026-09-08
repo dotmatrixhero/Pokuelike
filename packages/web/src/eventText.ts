@@ -1,5 +1,6 @@
 import type { MoveSpec, SimEvent, World } from "@pokuelike/engine";
 import { TITLE_DISPLAY_NAME, herdDisplayName, idLabel, shortId } from "./notableTitles.js";
+import { speciesDisplayName } from "@pokuelike/engine";
 
 /**
  * The attacker's own live copy of the move it just used, if `world` still
@@ -78,7 +79,7 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `${event.from} at (${event.pos.x},${event.pos.y}) turned to ${event.to} on ${event.layer} (${event.cause})`;
     case "immigrated": {
       const herdName = world ? herdDisplayName(world, event.herdId) : event.herdId;
-      return `${event.agentIds.length} ${event.species} arrived from outside and ${event.outcome === "joined" ? `joined ${herdName}` : `founded ${herdName}`} on ${event.layer}`;
+      return `${event.agentIds.length} ${speciesDisplayName(event.species)} arrived from outside and ${event.outcome === "joined" ? `joined ${herdName}` : `founded ${herdName}`} on ${event.layer}`;
     }
     case "fought": {
       const move = world ? findMoveUsed(event, world) : undefined;
@@ -99,7 +100,7 @@ export function formatEvent(event: SimEvent, world?: World): string {
     case "leveledUp":
       return `${idLabel(world, event.agentId, event.species)} leveled up: ${event.fromLevel} -> ${event.toLevel}`;
     case "evolved":
-      return `${idLabel(world, event.agentId, event.fromSpecies)} evolved: ${event.fromSpecies} -> ${event.toSpecies} at level ${event.level}`;
+      return `${idLabel(world, event.agentId, event.fromSpecies)} evolved: ${speciesDisplayName(event.fromSpecies)} -> ${speciesDisplayName(event.toSpecies)} at level ${event.level}`;
     case "learnedMove":
       return `${idLabel(world, event.agentId, event.species)} learned ${event.moveId} at level ${event.level}`;
     case "gainedSkillPoint":
@@ -180,7 +181,7 @@ export function formatEvent(event: SimEvent, world?: World): string {
     case "eggHatched":
       return `${idLabel(world, event.agentId, event.species)} hatched at (${event.pos.x},${event.pos.y})`;
     case "eggEaten":
-      return `${idLabel(world, event.eaterId, event.eaterSpecies)} ate a ${event.eggSpecies} egg (${shortId(event.eggId)})`;
+      return `${idLabel(world, event.eaterId, event.eaterSpecies)} ate a ${speciesDisplayName(event.eggSpecies)} egg (${shortId(event.eggId)})`;
     case "eggDefended":
       return `${idLabel(world, event.defenderId, event.defenderSpecies)} fought off ${idLabel(world, event.threatId, event.threatSpecies)} to defend its egg`;
     case "titleClaimed":
@@ -200,11 +201,11 @@ export function formatEvent(event: SimEvent, world?: World): string {
     case "regionPromoted":
       return `region ${event.regionId} promoted to full sim (${event.agentIds.length} individuals invented)`;
     case "regionPopulationBoom":
-      return `region ${event.regionId}'s ${event.species} population is booming (~${event.population})`;
+      return `region ${event.regionId}'s ${speciesDisplayName(event.species)} population is booming (~${event.population})`;
     case "regionDieOff":
-      return `region ${event.regionId}'s ${event.species} population is dying off (~${event.population})`;
+      return `region ${event.regionId}'s ${speciesDisplayName(event.species)} population is dying off (~${event.population})`;
     case "regionEmigrated":
-      return `~${event.population} ${event.species} of herd ${event.herdId} emigrated from region ${event.fromRegionId} to region ${event.toRegionId}`;
+      return `~${event.population} ${speciesDisplayName(event.species)} of herd ${event.herdId} emigrated from region ${event.fromRegionId} to region ${event.toRegionId}`;
     case "regionCrossed":
       return `${idLabel(world, event.agentId, event.species)} crossed from region ${event.fromRegionId} into region ${event.toRegionId}, joining herd ${event.herdId}`;
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { displayNameFor } from "../src/names.js";
+import { displayNameFor, speciesDisplayName, withArticle } from "../src/names.js";
 import type { PokemonType } from "../src/typing.js";
 
 describe("displayNameFor", () => {
@@ -41,5 +41,21 @@ describe("displayNameFor", () => {
       .filter((n) => /wyn|dra|mor|thal/.test(n)).length;
     expect(withInfix).toBeGreaterThan(0);
     expect(withInfix).toBeLessThan(200); // under half
+  });
+});
+
+describe("species display", () => {
+  it("capitalises a species id — Pokemon names are proper nouns", () => {
+    expect(speciesDisplayName("ivysaur")).toBe("Ivysaur");
+    expect(speciesDisplayName("bulbasaur")).toBe("Bulbasaur");
+  });
+
+  it("picks the article that matches the name", () => {
+    // Five of the current roster start with a vowel: Onix, Ivysaur, Ekans,
+    // Arbok, Oddish — so "a" cannot be hardcoded.
+    expect(withArticle("Ivysaur")).toBe("an Ivysaur");
+    expect(withArticle("Onix")).toBe("an Onix");
+    expect(withArticle("Bulbasaur")).toBe("a Bulbasaur");
+    expect(withArticle("Charizard")).toBe("a Charizard");
   });
 });

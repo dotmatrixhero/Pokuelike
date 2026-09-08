@@ -109,3 +109,29 @@ function join(left: string, right: string): string {
   const b = right[0]!.toLowerCase();
   return a === b ? left + right.slice(1) : left + right;
 }
+
+/**
+ * Capitalises a species id for display — "ivysaur" -> "Ivysaur".
+ *
+ * Pokemon names are proper nouns and reading "a ivysaur of the Bulbasaurs of
+ * Saltrun" in a chronicle is jarring. Callers with access to the species
+ * table should prefer its real `name` field; this is the engine-side
+ * fallback, since the engine cannot import from the data package.
+ */
+export function speciesDisplayName(species: string): string {
+  return species.charAt(0).toUpperCase() + species.slice(1);
+}
+
+/**
+ * "an Ivysaur", "a Bulbasaur" — the indefinite article that matches the
+ * name. Five of the current roster need "an" (Onix, Ivysaur, Ekans, Arbok,
+ * Oddish), so this cannot be hardcoded to "a".
+ *
+ * Vowel-letter matching rather than real phonetics: it is right for every
+ * name in this roster, and a name like "Umbreon" (which would want "an" by
+ * letter and by sound) does not break it. A future roster with a
+ * "Eucalyptus"-shaped name would need a real exception list.
+ */
+export function withArticle(name: string): string {
+  return `${/^[AEIOUaeiou]/.test(name) ? "an" : "a"} ${name}`;
+}

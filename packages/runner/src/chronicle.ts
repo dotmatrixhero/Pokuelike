@@ -22,6 +22,8 @@ import {
   notableFullName,
   notableTale,
   notableUsurpation,
+  speciesDisplayName,
+  withArticle,
   NOTABLE_TITLE_LABEL,
   type HerdRecord,
 } from "@pokuelike/engine";
@@ -56,6 +58,12 @@ for (const e of events) {
   const id = herdOfEvent(e);
   if (!id) continue;
   (byHerd.get(id) ?? byHerd.set(id, []).get(id)!).push(e);
+}
+
+/** The species' real display name from the roster ("Ivysaur"), falling back to capitalising the id. */
+function speciesName(species: string | undefined): string {
+  if (!species) return "creature";
+  return (SPECIES as any)[species]?.name ?? speciesDisplayName(species);
 }
 
 /** A species' typing, so a name sounds like the animal — "Bramroot" for a grass type, "Vexsting" for a bug. */
@@ -151,14 +159,14 @@ function beatsFor(herd: HerdRecord, own: any[]): Beat[] {
   // One coming-of-age line for the whole run, rather than one beat each.
   const evolutions = own.filter((e) => e.kind === "evolved");
   if (evolutions.length >= 2) {
-    const forms = [...new Set(evolutions.map((e) => e.toSpecies))];
+    const forms = [...new Set(evolutions.map((e) => speciesName(e.toSpecies)))];
     beats.push({
       tick: evolutions[Math.floor(evolutions.length / 2)].tick,
       weight: 54,
       text: `The young came of age — ${plural(evolutions.length, "evolution")} over the years, into ${forms.join(" and ")}.`,
     });
   } else if (evolutions.length === 1) {
-    beats.push({ tick: evolutions[0].tick, weight: 50, text: `${agentDisplayName(evolutions[0].agentId, typesOf(evolutions[0].species))} evolved into a ${evolutions[0].toSpecies}.` });
+    beats.push({ tick: evolutions[0].tick, weight: 50, text: `${agentDisplayName(evolutions[0].agentId, typesOf(evolutions[0].species))} evolved into ${withArticle(speciesName(evolutions[0].toSpecies))}.` });
   }
 
   // Splits: told from the parent's side too, because losing half your herd is the parent's story as much as the child's.
@@ -248,7 +256,7 @@ if (claims.length > 0) {
     console.log(`\n## ${NOTABLE_TITLE_LABEL[title as keyof typeof NOTABLE_TITLE_LABEL]} — ${notableFullName(latest.title, latest.agentId, typesOf(latest.species))}`);
     const of = holderHerd ? ` of ${holderHerd.name}` : "";
     const usurped = notableUsurpation(latest);
-    console.log(`_a ${latest.species}${of}, crowned t${latest.tick}${usurped ? `, ${usurped}` : ""}_\n`);
+    console.log(`_${withArticle(speciesName(latest.species))}${of}, crowned t${latest.tick}${usurped ? `, ${usurped}` : ""}_\n`);
     // The claim event captured the stat at the moment the threshold was
     // crossed, so an Elder crowned at exactly 500 ticks still reads "500"
     // however long they went on to live. For a holder still sitting on the
