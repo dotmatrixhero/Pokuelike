@@ -5725,3 +5725,33 @@ not something this pathfinding pass itself caused or is positioned to fix.
       - The dim passive battle boxes are deliberately NOT filtered: they are
         how a viewer sees the rest of the world is still alive and clicks
         away to something else. Filtering those too would leave no way out.
+
+- [ ] **Seamless terrain between zones.** Asked: "if I wanted seamless terrain
+      between zones... how hard is that? Like I move south off a zone and just
+      show up like the zone itself sorta expanded?" Full analysis in
+      `SEAMLESS_ZONES.md`; measured with the new
+      `packages/runner/src/validateZoneSeams.ts`.
+      - Today, measured: at a shared edge terrain matches 37% (east) / 50%
+        (south) of the time with a mean elevation jump of 0.85 / 0.77, against
+        a within-zone control of 73% and 0.131. A **6.5x discontinuity** —
+        walking south would be a hard cut, not an expansion.
+      - Cause: every zone is generated independently from its own seed with
+        noise sampled in ZONE-LOCAL coordinates. Neighbouring zones are
+        already *statistically* coherent (`biasForZone` passes down elevation,
+        biome, coast/river/high edges, and massifs already bias toward a
+        higher neighbour) but share no actual field, so they are not
+        *geometrically* continuous.
+      - Layers, cheapest first: (1) global hash-based noise lattices indexed
+        by world coordinate — mechanical, most of the visible win, unambiguous
+        pass/fail via the validator; (2) biome seeds scattered per macro cell
+        and blended across neighbours; (3) generate-with-margin so the
+        cellular-automata passes (massifs, caves, chambers, canopy) agree from
+        both sides; (4) actually walking across, which is an architecture
+        change (promote-on-approach, or a moving window) rather than a
+        generation one.
+      - Rivers stay hard even after (3) — a traced path is not a local rule.
+        `ZoneGenerationBias.riverEdges` anticipated this; lining them up wants
+        a macro-level river trace.
+      - Recommendation: do (1) alone and re-measure. There is no point padding
+        CA margins while the noise underneath still disagrees across the
+        border.
