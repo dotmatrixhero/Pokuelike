@@ -134,6 +134,15 @@ export const JOIN_HERD_RADIUS = 3 * COHESION_DISTANCE;
  */
 export interface RegionDispersalContext {
   neighborRegionIds: readonly string[];
+  /**
+   * Which way each neighbor lies, as a unit grid delta — `{ dx: 1, dy: 0 }`
+   * for the zone to the east. Optional and completely unused by this module
+   * (it still only carries ids around, never interprets them); it exists for
+   * `herdMigration.ts`'s whole-herd zone crossing, which needs to walk a herd
+   * to the map edge that actually FACES the destination rather than a random
+   * one. Populated by `overworld.ts`, the only place that knows grid layout.
+   */
+  neighborDirections?: Readonly<Record<string, { dx: number; dy: number }>>;
 }
 
 /**

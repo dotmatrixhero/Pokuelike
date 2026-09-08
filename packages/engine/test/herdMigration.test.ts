@@ -13,8 +13,10 @@ import {
   TERRITORIAL_SUSTAIN_TICKS,
   TERRITORIAL_DISTANCE,
   STORM_EXPOSURE_SUSTAIN_TICKS,
+  CROWDING_SUSTAIN_TICKS,
 } from "../src/herdMigration.js";
 import type { Agent, WeatherCell } from "../src/types.js";
+import { EventLog } from "../src/events.js";
 
 /** Never rolls true for wanderlust (always returns 1, above any real chance) — for tests isolating a different trigger. */
 const NEVER_WANDER = () => 1;
@@ -602,5 +604,99 @@ describe("updateHerdMigrations: trigger precedence", () => {
 
     expect(migration).toBeDefined();
     expect(migration!.reason).toBe("scarcity");
+  });
+});
+
+// --- Crowding + whole-herd zone crossing ------------------------------------
+//
+// Direct ask, after measuring that cross-zone movement essentially never
+// happened: "do we have real herd based migration? Like can they spillover
+// or have people move from one zone to next?"
+
+/** A context with one neighbour to the east — the shape `overworld.ts` builds per tick for the focused zone. */
+const EAST_NEIGHBOR = { neighborRegionIds: ["5,6"], neighborDirections: { "5,6": { dx: 1, dy: 0 } } };
+/**
+ * Rolls 0.5 every time: high enough that wanderlust (a fraction of a percent
+ * per tick) never fires, low enough that the zone-crossing roll for crowding
+ * (0.85) always does. An always-zero rng would fire wanderlust on tick 1 and
+ * these tests would silently be exercising a wanderlust crossing instead of
+ * the crowding one they name.
+ */
+const HALF = () => 0.5;
+
+/** A herd packed onto one spot with no food anywhere — over capacity by construction. */
+function crowdedHerd(world: ReturnType<typeof createWorld>, count: number): void {
+  for (let i = 0; i < count; i++) world.agents.push(member(`c${i}`, { x: 40, y: 40 }));
+}
+
+describe("crowding trigger", () => {
+  it("does not fire on a single crowded tick", () => {
+    const world = createWorld(80, 80);
+    crowdedHerd(world, 30);
+    updateHerdMigrations(world, undefined, NEVER_WANDER, EAST_NEIGHBOR);
+    expect(world.agents.every((a) => a.crossingToRegionId === undefined)).toBe(true);
+  });
+
+  it("stays quiet for a herd that is well within what the land supports", () => {
+    const world = createWorld(80, 80);
+    placeFoodCluster(world, 40, 40, 25);
+    world.agents.push(member("a", { x: 40, y: 40 }), member("b", { x: 40, y: 40 }));
+    for (let t = 0; t < CROWDING_SUSTAIN_TICKS + 10; t++) updateHerdMigrations(world, undefined, NEVER_WANDER, EAST_NEIGHBOR);
+    expect(world.herdCrowdingTicks?.["herd-a"] ?? 0).toBe(0);
+  });
+
+  it("sends the WHOLE herd across, not one disperser", () => {
+    const world = createWorld(80, 80);
+    crowdedHerd(world, 30);
+    for (let t = 0; t <= CROWDING_SUSTAIN_TICKS; t++) updateHerdMigrations(world, undefined, HALF, EAST_NEIGHBOR);
+    const crossing = world.agents.filter((a) => a.crossingToRegionId === "5,6");
+    // Every member, which is the entire point of the feature — the pre-existing
+    // mechanism could only ever move a single natal disperser.
+    expect(crossing).toHaveLength(30);
+    expect(crossing.every((a) => a.dispersalTarget !== undefined)).toBe(true);
+  });
+
+  it("leaves by the edge that faces the destination", () => {
+    const world = createWorld(80, 80);
+    crowdedHerd(world, 30);
+    for (let t = 0; t <= CROWDING_SUSTAIN_TICKS; t++) updateHerdMigrations(world, undefined, HALF, EAST_NEIGHBOR);
+    // East neighbour -> east edge. A herd walking the wrong way to reach its
+    // destination would still work mechanically but reads as a bug on screen.
+    for (const a of world.agents) expect(a.dispersalTarget!.x).toBeGreaterThan(world.width * 0.6);
+  });
+
+  it("keeps the herd's identity across the crossing", () => {
+    const world = createWorld(80, 80);
+    crowdedHerd(world, 30);
+    for (let t = 0; t <= CROWDING_SUSTAIN_TICKS; t++) updateHerdMigrations(world, undefined, HALF, EAST_NEIGHBOR);
+    // `finishDispersal` deliberately early-returns for a crosser rather than
+    // reassigning it to a new herd — a herd that emigrates arrives as itself.
+    expect(world.agents.every((a) => a.herdId === "herd-a")).toBe(true);
+  });
+
+  it("falls back to relocating in-zone when there is nowhere to cross to", () => {
+    const world = createWorld(80, 80);
+    // Food right here, so SCARCITY never fires (it sustains in 150 ticks
+    // against crowding's 200 and would otherwise claim the trigger first) —
+    // this test is about a herd that is well fed and simply too numerous.
+    placeFoodCluster(world, 40, 40, 4);
+    crowdedHerd(world, 40);
+    placeFoodCluster(world, 65, 65, 25); // genuinely richer land, in-map
+    // NEVER_WANDER also fails the zone-crossing roll, which is the point:
+    // no neighbour context AND no crossing roll, so the only path left is an
+    // in-zone relocation.
+    for (let t = 0; t <= CROWDING_SUSTAIN_TICKS; t++) updateHerdMigrations(world, undefined, NEVER_WANDER);
+    expect(world.agents.every((a) => a.crossingToRegionId === undefined)).toBe(true);
+    expect(world.herdMigrations?.["herd-a"]?.reason).toBe("crowding");
+  });
+
+  it("records the emigration as one herd-level event, not N individual ones", () => {
+    const world = createWorld(80, 80);
+    crowdedHerd(world, 30);
+    const log = new EventLog();
+    for (let t = 0; t <= CROWDING_SUSTAIN_TICKS; t++) updateHerdMigrations(world, log, HALF, EAST_NEIGHBOR);
+    const emigrations = log.events.filter((e) => e.kind === "herdEmigrating");
+    expect(emigrations).toHaveLength(1);
+    expect(emigrations[0]).toMatchObject({ herdId: "herd-a", toRegionId: "5,6", reason: "crowding", count: 30 });
   });
 });

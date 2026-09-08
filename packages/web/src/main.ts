@@ -456,6 +456,11 @@ function setPlaying(next: boolean): void {
 function selectAgent(agent: Agent | undefined): void {
   selectedAgentId = agent?.id;
   eventLogPanel.setFilter(selectedAgentId);
+  // Direct ask: "if you're focused on a Pokémon in inspector while autocam is
+  // going, just filter to all notable autocam events that involve that unit.
+  // Filter out all else while it's focused." Deselecting hands the whole
+  // world back to Auto Camera.
+  autoCamera.setFocusAgent(selectedAgentId);
   inspectorDirty = true;
 }
 

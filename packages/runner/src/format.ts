@@ -56,6 +56,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${event.name} is no more — last seen t${event.lastTick}`;
     case "herdMigrating":
       return `[tick ${event.tick}] herd ${event.herdId} is migrating from (${event.from.x},${event.from.y}) to (${event.to.x},${event.to.y}) — ${event.reason}`;
+    case "herdEmigrating":
+      return `[tick ${event.tick}] herd ${event.herdId} is LEAVING for zone ${event.toRegionId} — ${event.count} setting off from (${event.from.x},${event.from.y}) — ${event.reason}`;
     case "herdSettled":
       return `[tick ${event.tick}] herd ${event.herdId} ${event.outcome === "arrived" ? "settled" : "gave up migrating"} near (${event.pos.x},${event.pos.y})`;
     case "nightfall":
