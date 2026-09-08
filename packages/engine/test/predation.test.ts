@@ -2666,3 +2666,102 @@ describe("flat damage reduction (damageReductionFlat) in real combat", () => {
     expect(both).toBeLessThan(pctOnly);
   });
 });
+
+describe("predation.ts: two predator species don't mutually, endlessly flee each other", () => {
+  // Direct bug report, screenshot attached: a Tentacruel and a Charizard
+  // (both flagged `isPredator` in real species data, no severe level gap
+  // between them) observed just "moving back and forth... infinite loop" —
+  // each treating the other as a threat purely for being SOME predator
+  // species (isHunterSpecies), with no regard for whether it could actually
+  // overpower this agent specifically. See predation.ts's `isGenuineThreat`.
+  const RIVAL_RULES: HuntRules = { scyther: true, charizard: true };
+
+  function rival(id: string, pos: { x: number; y: number }, maxHp: number, overrides: Partial<Agent> = {}): Agent {
+    return {
+      id,
+      species: id.startsWith("charizard") ? "charizard" : "scyther",
+      pos,
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds({ hunger: 0.9, thirst: 0.9 }), // satiated: isolates the flee check from this agent's own hunt logic
+      behavior: "idle",
+      moves: [TEST_MOVE],
+      maxHp,
+      hp: maxHp,
+      ...overrides,
+    };
+  }
+
+  it("the weaker of two rival predator species flees the stronger one", () => {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const weak = rival("scyther-weak", { x: 5, y: 5 }, 20);
+    const strong = rival("charizard-strong", { x: 6, y: 5 }, 60);
+    world.agents.push(weak, strong);
+
+    const handled = applyPredationInstincts(world, weak, RIVAL_RULES, undefined, undefined, SAFE_RNG);
+
+    expect(handled).toBe(true);
+    expect(weak.behavior).toBe("flee");
+  });
+
+  it("the stronger of two rival predator species does NOT flee the weaker one", () => {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const weak = rival("scyther-weak", { x: 5, y: 5 }, 20);
+    const strong = rival("charizard-strong", { x: 6, y: 5 }, 60);
+    world.agents.push(weak, strong);
+
+    applyPredationInstincts(world, strong, RIVAL_RULES, undefined, undefined, SAFE_RNG);
+
+    expect(strong.behavior).not.toBe("flee");
+  });
+
+  it("real tickWorld run: mismatched rival predators separate instead of oscillating forever", () => {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const weak = rival("scyther-weak", { x: 5, y: 5 }, 20);
+    const strong = rival("charizard-strong", { x: 6, y: 5 }, 60);
+    world.agents.push(weak, strong);
+    const log = new EventLog();
+
+    for (let i = 0; i < 20; i++) tickWorld(world, log, RIVAL_RULES, undefined, SAFE_RNG);
+
+    // The weak side fled and put real distance between them; the strong side
+    // never flagged a "behaviorChanged ... to: flee" event at all — the old,
+    // symmetric isHunterSpecies-only check would have fired for both.
+    expect(log.events).toContainEqual(
+      expect.objectContaining({ kind: "behaviorChanged", agentId: "scyther-weak", to: "flee" })
+    );
+    expect(log.events).not.toContainEqual(
+      expect.objectContaining({ kind: "behaviorChanged", agentId: "charizard-strong", to: "flee" })
+    );
+  });
+
+  it("equal-power rival predators break the tie asymmetrically — never both flee each other", () => {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const a = rival("charizard-a", { x: 5, y: 5 }, 30);
+    const b = rival("scyther-b", { x: 6, y: 5 }, 30);
+    world.agents.push(a, b);
+
+    applyPredationInstincts(world, a, RIVAL_RULES, undefined, undefined, SAFE_RNG);
+    applyPredationInstincts(world, b, RIVAL_RULES, undefined, undefined, SAFE_RNG);
+
+    const fleeCount = [a.behavior, b.behavior].filter((b) => b === "flee").length;
+    expect(fleeCount).toBeLessThanOrEqual(1);
+  });
+
+  it("a genuine, non-predator prey species still flees any predator unconditionally — unchanged baseline", () => {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    // A much weaker predator, per raw power — but the ordinary prey species
+    // on the other end of this still has no way to know that, so it still
+    // flees on sight, same as before this fix (this is prey()'s/predator()'s
+    // existing, already-covered contract elsewhere in this file, restated
+    // here for direct contrast right next to the mutual-predator cases).
+    const weakPredator = rival("scyther-tiny", { x: 6, y: 5 }, 5);
+    const target = prey({ x: 5, y: 5 });
+    world.agents.push(target, weakPredator);
+
+    const handled = applyPredationInstincts(world, target, RIVAL_RULES, undefined, undefined, SAFE_RNG);
+
+    expect(handled).toBe(true);
+    expect(target.behavior).toBe("flee");
+  });
+});

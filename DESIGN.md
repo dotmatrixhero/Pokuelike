@@ -13659,3 +13659,65 @@ New tests: `reproduction.test.ts`/`needs.test.ts` for the seekMate fallback
 open ground just past its wall ring, and still accepting an ordinary
 walkable tile when the whole map is one big region. Full engine suite green
 (45 files, 1231 tests) and full monorepo typecheck clean.
+
+## Fixed: two rival predator species mutually, endlessly fleeing each other
+
+Direct bug report with a screenshot: a Tentacruel and a Charizard "just
+moving back and forth and thats it lol. like just fleeing from each other
+in infinite loop..." — the Battle Screen log showed nothing but alternating
+`flees from the battle!` lines, no combat.
+
+Root cause: `isHunterSpecies` (predation.ts), the primitive behind every
+flee/threat check, is deliberately NOT power-gated — its own doc comment
+explains why: prey doesn't know how strong a given predator currently is,
+so a temporarily wounded predator is still worth fleeing. That reasoning is
+sound for genuine prey, but `HuntRules` (`Record<string, true>`) has no
+species-to-species prey list at all — it only records "is this species a
+predator of *something*." So the same unconditional check also fired for
+two predator-flagged species encountering each other: each treated the
+other as a threat purely for being *some* predator, with zero regard for
+whether either could plausibly overpower the other. Two similarly-matched
+predators (a level 41 Tentacruel, a level 45 Charizard — no severe level
+gap) would detect each other, both flee, and by fleeing land back within
+`FLEE_DETECT_RADIUS` of each other next tick, repeating indefinitely.
+
+Fixed with a new `isGenuineThreat(rules, agent, candidate)` (predation.ts),
+used everywhere `isHunterSpecies` used to gate an actual flee/threat
+decision (`hasNearbyThreat`, the guardian herdmate-defense scan, and the
+main flee/mob `threats` filter in `applyPredationInstincts`):
+
+- If `agent` is NOT itself a predator species, behavior is unchanged —
+  unconditional flee from any `HuntRules`-flagged species, same as before.
+  A real prey animal still can't tell how dangerous a predator currently
+  is, so it still doesn't take the chance.
+- If `agent` IS itself a predator species, `candidate` only counts as a
+  genuine threat when it's the more powerful of the two (`powerOf`, the
+  same `maxHp`-derived score `isPreyOf` already uses). Ties are broken by
+  id, so the relation is never symmetric — at most one side of any
+  matched pair ever flees the other, never both.
+
+`isHunterSpecies` itself is untouched (species-only primitive, still used
+where power doesn't apply); `isGenuineThreat` is the richer, Agent-aware
+check layered on top of it at the three real decision points.
+
+### Real-run findings
+
+A throwaway script reproducing the exact reported matchup (Tentacruel
+maxHp 116 vs. Charizard maxHp 125, adjacent start, 200 ticks, real
+`HUNT_RULES`/species data): before the fix both sides would re-trigger
+flee on each other indefinitely. After the fix, the weaker Tentacruel fled
+for 17 ticks and then genuinely separated (final Manhattan distance 16,
+far outside `FLEE_DETECT_RADIUS`); the stronger Charizard never entered
+`"flee"` behavior even once. Both stayed alive and just went their own
+ways, matching what a real predator-vs-predator standoff should look like.
+
+### Test updates
+
+New `describe` block in `predation.test.ts`: weaker rival predator flees
+the stronger one; the stronger one never flees the weaker one; a full
+`tickWorld` run shows the pair separating with only the weak side ever
+logging a `flee` behaviorChanged event; an equal-power tie-break test
+confirming at most one side ever flees the other; and a regression test
+confirming an ordinary non-predator prey species still flees any predator
+unconditionally, unchanged. Full engine suite green (45 files, 1236
+tests) and full monorepo typecheck clean.

@@ -437,6 +437,39 @@ export function isHunterSpecies(rules: HuntRules, hunterCandidateSpecies: string
 }
 
 /**
+ * The actual per-agent threat check `applyPredationInstincts` (and its
+ * guardian/sleep-check callers) uses to decide whether `candidate` is worth
+ * fleeing from `agent` — `isHunterSpecies` above plus one extra condition
+ * for the case where `agent` is ITSELF a predator species. Direct bug
+ * report: a Tentacruel and a Charizard (both `isPredator`, neither a severe
+ * level gap above the other) were observed mutually, endlessly fleeing each
+ * other — "just moving back and forth... infinite loop" — because
+ * `isHunterSpecies` alone is symmetric: each treated the other as a threat
+ * simply for being SOME predator species, with no regard for whether it
+ * could plausibly prey on THIS agent specifically (`HuntRules` has no
+ * species-to-species prey list — see its own doc comment — so there's no
+ * "does X actually hunt Y" fact to check other than relative power).
+ *
+ * A genuine non-predator prey species still flees any predator
+ * unconditionally (unchanged — the doc comment on `isHunterSpecies` about
+ * not casually ignoring a temporarily-wounded predator still fully applies
+ * there). But when `agent` is ALSO a predator, `candidate` only counts as a
+ * real threat if it's actually the more powerful of the two — otherwise
+ * two similarly-matched predator species would forever mutually qualify as
+ * each other's "threat" and never separate. Ties (equal `powerOf`) are
+ * broken by id so the relation is never symmetric: at most one side of any
+ * pair ever flees the other.
+ */
+export function isGenuineThreat(rules: HuntRules, agent: Agent, candidate: Agent): boolean {
+  if (!isHunterSpecies(rules, candidate.species, agent.species)) return false;
+  if (!rules[agent.species]) return true;
+  const candidatePower = powerOf(candidate);
+  const agentPower = powerOf(agent);
+  if (candidatePower !== agentPower) return candidatePower > agentPower;
+  return candidate.id < agent.id;
+}
+
+/**
  * Nearby living agents (fainted ones included — a fainted agent is still
  * `alive !== false`, and remains a valid hunt/threat target). Eggs
  * (`Agent.isEgg`) are deliberately excluded — the single choke point that
@@ -468,7 +501,7 @@ export function agentsWithin(world: World, agent: Agent, radius: number): Agent[
  * export those two just for this.
  */
 export function hasNearbyThreat(world: World, agent: Agent, rules: HuntRules): boolean {
-  return agentsWithin(world, agent, FLEE_DETECT_RADIUS).some((other) => isHunterSpecies(rules, other.species, agent.species));
+  return agentsWithin(world, agent, FLEE_DETECT_RADIUS).some((other) => isGenuineThreat(rules, agent, other));
 }
 
 /**
@@ -1575,7 +1608,7 @@ export function applyPredationInstincts(
       // Deliberately includes a fainted predator: a guardian keeps pressing the
       // fight to finish it off, same reasoning as the general threats filter below.
       const herdmateThreats = agentsWithin(world, herdmate, FLEE_DETECT_RADIUS).filter((other) =>
-        isHunterSpecies(rules, other.species, herdmate.species)
+        isGenuineThreat(rules, herdmate, other)
       );
       const threat = preferMarked(herdmate, herdmateThreats);
       if (threat) {
@@ -1623,7 +1656,7 @@ export function applyPredationInstincts(
   const threats = agent.asleep
     ? []
     : agentsWithin(world, agent, wideFleeRadius).filter((other) => {
-        if (!isHunterSpecies(rules, other.species, agent.species)) return false;
+        if (!isGenuineThreat(rules, agent, other)) return false;
         const distance = manhattan(agent.pos, other.pos);
         if (distance <= baseFleeRadius) return isDetectable(world, agent.pos, other, baseFleeRadius);
         return levelGap(other, agent) >= SEVERE_LEVEL_GAP && isDetectable(world, agent.pos, other, wideFleeRadius);
