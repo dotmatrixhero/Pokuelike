@@ -12,6 +12,9 @@
   skip hedging, get to the result.
 - Will ping if you go quiet during long work ("Status report. You stuck?"). On anything that
   runs for minutes, say what you're waiting on before you start waiting.
+- **Number your questions.** Ask 3–5 numbered questions in one block and they come back as
+  "1. Turn based. 2. It's a well design random generated bespoke level. 3. Yeah combine em." —
+  terse, in order, one line each. Unnumbered questions buried in prose get partial answers.
 - Asks for the plain-language version when an explanation gets dense ("Explain it simple I am
   dumb", "I'm just dumb and can't follow"). They are not dumb — they are telling you the
   jargon is doing no work. Lead with the plain version and the tradeoff; put the mechanism
@@ -29,6 +32,14 @@
   how. Direct quotes from the user's own asks are good practice, they anchor the record.
 - Wants a documented TODO/side-notes list for tangents raised mid-task so nothing gets lost
   while you stay focused on the current thread.
+- **A mid-turn correction is cheap for them and expensive to half-apply.** Architecture-level
+  redirects land while you're already building ("single pannable canvas — one canvas the viewer
+  pans/zooms around, not a separate macro-overview-plus-neighborhood-panel split"). Take it
+  literally and rebuild to the new shape; don't bolt the new requirement onto the old structure.
+- **Respect branch scope.** Work stays on its own branch unless asked otherwise — don't merge
+  into a parent/sibling branch, and don't push a default branch, on your own initiative. If a
+  local branch pointer drifts (e.g. a commit lands on `master` by accident), fix it locally and
+  say so rather than pushing to cover it.
 
 ## Design sensibility
 
@@ -59,6 +70,49 @@ Recurring design principles, all stated in their own words at some point:
 - **They want equilibrium and variety, not a dominant answer.** "Let's try to get it more
   balanced. Try our best to get equilibrium." "Starvation is fine but I do want some combat."
   One cause of death at 53%, one strategy dominating, one biome erased — all read as failures.
+
+## Design mode is a different mode — recognize it and switch
+Sessions here swing between *building* (implement, verify, commit) and *designing* (talk it
+through, write it down, don't touch code). The switch is usually explicit and casual: "Before we
+do that we gotta go deep in to humans design", "lets step back for a bit to the basics of what
+the game even allows you to do". Once it's thrown, stay in it. Do not open an editor on
+`packages/` because a design conversation implied a change; the deliverable is the doc and the
+argument, and starting to implement mid-discussion reads as not listening.
+
+- **Push back. Agreement is not the product.** Direct ask: "we want to be really intentional
+  about the design, yeah?" They will state a position and expect it stress-tested. Say when a
+  proposal collides with an established pillar, when a mechanic taxes the player for not knowing
+  something, when a system has no legible consequence. They engage with all of it seriously.
+- **Expect to be pushed back on, and concede specifically.** More than once here they took apart
+  an example I gave ("if youre hunting and you have no idea what they are why would you ever?").
+  When that happens, work out whether the *example* was bad or the *principle* was — usually the
+  example — and say which, rather than abandoning the whole line or defending it wholesale.
+- **A trope that looks like a contradiction may be a deliberate inversion.** I flagged an Act 1
+  lone-survivor opening as clashing with the "rugged individual is a myth" pillar. The answer:
+  "#3 is all deliberate — it's all scenarios set up to carefully invert expectations." Ask
+  whether something is being set up to be disproved before calling it inconsistent.
+- **They dump research and lore in bulk and expect synthesis, not a summary.** Long structured
+  pastes arrive with no instruction attached. Don't play it back to them — they wrote it. Extract
+  what's usable for *this* game, name what you'd steal and what you'd skip, and file it.
+- **Engage with dark and mythic material as literary analysis.** They asked outright: "if i post
+  some myth text are you gonna freak out or be chill about it." Pokémon folklore includes death,
+  war, predation, weapons, sacrifice. Treat it as craft material. No moralizing, no disclaimers,
+  no softening — that reaction is the thing being checked for.
+- **The interesting design unit is the *pattern*, not the instance.** Repeated theme: a system
+  should reward noticing that something is true across many encounters, not punish a single
+  uninformed choice. Knowledge gates content ("something you unlock after talking to people"),
+  it doesn't retroactively fine you.
+- **Decisions must be real and informed.** "the ability to make decisions is core to gameplay,
+  and being informed about what decisions youre making is important." Also: streamline *how many
+  buttons* express a decision, by separating intent from the sequence that carries it out — but
+  don't answer "too many decisions" by removing the decision.
+- **Design docs are the artifact.** `DESIGN.md`, `TODO.md`, `CAMPAIGN_DESIGN.md`,
+  `HUMANS_DESIGN.md`, `LORE_NOTES.md`, `NARRATIVE_PILLARS.md`, `MYTH_STRUCTURES.md`. Write
+  decisions down as they're made, with the user's verbatim words attached to the ones they
+  originated. Keep confidence tiers (canon vs. fan theory vs. leak vs. our invention) and an
+  honest open-questions list — don't launder a guess into a settled decision.
+- **`NARRATIVE_PILLARS.md` arbitrates.** It carries refusal tests — things the game should never
+  do. Use them to settle design disputes instead of re-litigating taste each time.
 
 ## How they make decisions
 - **Give a menu with a recommendation; they pick.** Their answers are short and decisive:
