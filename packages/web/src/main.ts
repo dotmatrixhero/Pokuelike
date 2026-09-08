@@ -6,7 +6,6 @@ import { ChroniclePanel } from "./chroniclePanel.js";
 import { EventPopups } from "./eventPopups.js";
 import { MoveEffects } from "./moveEffects.js";
 import { renderInspector, type GroupSelection } from "./inspector.js";
-import { renderLegend } from "./legend.js";
 import { AutoCameraController, type AutoCameraHost } from "./autoCamera.js";
 import { BattleScreenPanel } from "./battleScreenPanel.js";
 import { MacroMapView, MACRO_MAP_DEFAULT_BLOCK_PX, drawMacroMap } from "./macroMap.js";
@@ -89,7 +88,6 @@ const chipHideLevelUps = document.getElementById("chip-hide-levelups") as HTMLEl
 const chipHeadlinesOnly = document.getElementById("chip-headlines-only") as HTMLElement;
 const styleTileBtn = document.getElementById("style-tile") as HTMLButtonElement;
 const styleAsciiBtn = document.getElementById("style-ascii") as HTMLButtonElement;
-const legendEl = document.getElementById("legend") as HTMLElement;
 const zoomOutBtn = document.getElementById("zoom-out") as HTMLButtonElement;
 const zoomInBtn = document.getElementById("zoom-in") as HTMLButtonElement;
 const zoomLabel = document.getElementById("zoom-label") as HTMLElement;
@@ -103,7 +101,6 @@ const tabChronicleBtn = document.getElementById("tab-chronicle") as HTMLButtonEl
 const chronicleEl = document.getElementById("chronicle-page") as HTMLElement;
 const tabBattleScreenBtn = document.getElementById("tab-battle-screen") as HTMLButtonElement;
 const tabEventsBtn = document.getElementById("tab-events") as HTMLButtonElement;
-const tabLegendBtn = document.getElementById("tab-legend") as HTMLButtonElement;
 const togglePanelBtn = document.getElementById("toggle-panel") as HTMLButtonElement;
 const sidePanelEl = document.getElementById("side-panel") as HTMLElement;
 const moreMenuWrap = document.getElementById("more-menu-wrap") as HTMLElement;
@@ -526,17 +523,22 @@ function refreshSelection(): void {
   renderInspector(inspectorEl, agent, world, { onFocusGroup: focusOnGroup, focused: focusedGroup });
 }
 
-// --- Unified side panel: Inspector / Battle / Events / Legend tabs ---------
+// --- Unified side panel: Inspector / Battle / Chronicle / Events tabs ------
 // Direct UX-redesign ask: these four used to live in two different places —
 // Inspector/Battle Screen shared a docked tab pair under the map, while
 // Legend/Event Log hid behind a hamburger-triggered off-canvas drawer. One
-// panel, four tabs, always in the same spot. `renderInspector`/
-// `BattleScreenPanel`/`renderLegend`/`EventLogPanel` all keep rendering into
-// their own `#inspector`/`#battle-screen`/`#legend`/`#event-log` divs exactly
-// as before — this is purely a thin visibility switch over the four, the
-// same `[hidden]` convention the old drawer/tab toggles already used.
+// panel, tabs always in the same spot. `renderInspector`/`BattleScreenPanel`/
+// `EventLogPanel` all keep rendering into their own `#inspector`/
+// `#battle-screen`/`#event-log` divs exactly as before — this is purely a
+// thin visibility switch over the set, the same `[hidden]` convention the
+// old drawer/tab toggles already used.
+//
+// Direct follow-up ask: "remove the legend tab and move events to the right
+// most" — the Legend tab/page (and `legend.ts`'s `renderLegend` call) are
+// gone; Events moved from third to last in both the tab bar (index.html)
+// and this file's own tab order.
 
-type PanelTab = "inspector" | "battle-screen" | "events" | "chronicle" | "legend";
+type PanelTab = "inspector" | "battle-screen" | "chronicle" | "events";
 let activeTab: PanelTab = "inspector";
 /**
  * The `seq` of the battle engagement the viewer last manually switched away
@@ -553,16 +555,14 @@ let lastAutoSwitchedBattleSeq: number | undefined;
 const TAB_BUTTONS: Record<PanelTab, HTMLButtonElement> = {
   inspector: tabInspectorBtn,
   "battle-screen": tabBattleScreenBtn,
-  events: tabEventsBtn,
   chronicle: tabChronicleBtn,
-  legend: tabLegendBtn,
+  events: tabEventsBtn,
 };
 const TAB_PAGES: Record<PanelTab, HTMLElement> = {
   inspector: inspectorEl,
   "battle-screen": battleScreenEl,
-  events: eventsPageEl,
   chronicle: chronicleEl,
-  legend: legendEl,
+  events: eventsPageEl,
 };
 
 function selectTab(tab: PanelTab, manual: boolean): void {
@@ -591,7 +591,6 @@ tabInspectorBtn.addEventListener("click", () => selectTab("inspector", true));
 tabChronicleBtn.addEventListener("click", () => selectTab("chronicle", true));
 tabBattleScreenBtn.addEventListener("click", () => selectTab("battle-screen", true));
 tabEventsBtn.addEventListener("click", () => selectTab("events", true));
-tabLegendBtn.addEventListener("click", () => selectTab("legend", true));
 
 /**
  * Auto-switches to the Battle Screen tab the moment Auto Camera starts
@@ -749,8 +748,6 @@ function setRenderStyle(style: RenderStyle): void {
 }
 styleTileBtn.addEventListener("click", () => setRenderStyle("tile"));
 styleAsciiBtn.addEventListener("click", () => setRenderStyle("ascii"));
-
-renderLegend(legendEl);
 
 // --- Side panel collapse, seed popover, overflow menu -----------------------
 // Direct UX-redesign ask: Legend/Event Log no longer live behind a

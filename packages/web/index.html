@@ -480,7 +480,7 @@
          the inactive tab's page needs an explicit, equally-specific
          override here or toggling `hidden` in main.ts's `selectTab` would do
          nothing visually. */
-      #inspector[hidden], #battle-screen[hidden], #events-page[hidden], #legend[hidden] { display: none; }
+      #inspector[hidden], #battle-screen[hidden], #events-page[hidden] { display: none; }
 
       /* Battle Screen — styled like a mainline Pokémon battle text box. */
       #battle-screen { padding: 10px 14px; font-size: 12.5px; display: flex; flex-direction: column; gap: 8px; height: 100%; }
@@ -520,7 +520,10 @@
       .battle-screen-hp-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
       .battle-screen-hp-value { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
       .battle-screen-vs-label { flex: 0 0 auto; color: var(--text-dim); font-weight: 700; font-size: 12px; }
-      .battle-screen-extra { flex: 0 0 auto; color: var(--text-dim); font-size: 11px; }
+      /* Hidden by default (desktop shows every participant's own chip —
+         see battleScreenPanel.ts's own doc comment); the mobile media
+         query below is what actually shows this. */
+      .battle-screen-extra { display: none; flex: 0 0 auto; color: var(--text-dim); font-size: 11px; }
       .battle-screen-log {
         flex: 1;
         min-height: 0;
@@ -550,13 +553,6 @@
         to { background: transparent; }
       }
       #battle-screen.battle-screen-concluded .battle-screen-vs { opacity: 0.7; }
-
-      #legend { padding: 10px 14px; font-size: 12px; display: flex; flex-direction: column; gap: 8px; }
-      .legend-group-title { color: var(--text-dim); text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.05em; margin-bottom: 3px; }
-      .legend-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 3px 8px; }
-      .legend-item { display: flex; align-items: center; gap: 5px; }
-      .legend-glyph { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-weight: 700; width: 1.4em; text-align: center; flex: 0 0 auto; }
-      .legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
 
       /* --- Events tab: compact filter chips + log ---------------------
          Direct ask: the old three always-visible checkbox+sentence-label
@@ -742,6 +738,19 @@
         main { flex-direction: column; }
         #side-panel { flex: 0 0 auto; max-height: 42vh; }
         #side-panel.panel-collapsed { max-height: 0; }
+
+        /* Direct ask: "can you just really limit the ui to two units hp
+           bar at a time and just say there's more units in the fight on
+           mobile? It's hard to see what's going on." A mob fight's chips
+           (battleScreenPanel.ts builds one per participant, `data-idx` in
+           order) wrapping across several rows doesn't fit a phone-width
+           panel — only the first two combatants, and the single VS label
+           between them (data-idx="0"), stay visible here; the "+N more"
+           note takes over from there. Desktop (outside this breakpoint)
+           is untouched. */
+        .battle-screen-combatant[data-idx]:not([data-idx="0"]):not([data-idx="1"]) { display: none; }
+        .battle-screen-vs-label:not([data-idx="0"]) { display: none; }
+        .battle-screen-extra { display: block; }
       }
       @media (max-width: 768px) {
         #macro-map-zoom-in, #macro-map-zoom-out, #zoom-in, #zoom-out, #minimap-widget button {
@@ -896,17 +905,13 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/><path d="M4 4l3 1 -1 3-3-1z"/><path d="M20 4l-3 1 1 3 3-1z"/></svg>
               Battle
             </button>
-            <button id="tab-events" class="panel-tab-btn" role="tab" aria-selected="false" title="The scrolling world event log">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h14M5 18h9"/></svg>
-              Events
-            </button>
             <button id="tab-chronicle" class="panel-tab-btn" role="tab" aria-selected="false" title="The story of each herd — foundings, migrations, disasters, splits — and the world's notables">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/></svg>
               Chronicle
             </button>
-            <button id="tab-legend" class="panel-tab-btn" role="tab" aria-selected="false" title="What every glyph/color on the map means">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
-              Legend
+            <button id="tab-events" class="panel-tab-btn" role="tab" aria-selected="false" title="The scrolling world event log">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h14M5 18h9"/></svg>
+              Events
             </button>
           </div>
 
@@ -936,7 +941,6 @@
               <div id="event-log"></div>
             </div>
             <div id="chronicle-page" data-panel-page hidden></div>
-            <div id="legend" data-panel-page hidden></div>
           </div>
         </div>
       </main>

@@ -334,6 +334,20 @@ export class BattleScreenPanel {
    * separator still sits between consecutive chips for the common 1-vs-1
    * case's familiar reading; a mob fight just reads as a longer wrapped row
    * of chips instead of a lost "+N more" count.
+   *
+   * Direct follow-up ask, on a real narrow-viewport screenshot: "can you
+   * just really limit the ui to two units hp bar at a time and just say
+   * there's more units in the fight on mobile? It's hard to see what's
+   * going on." A mob fight's chips wrapping across several rows genuinely
+   * doesn't fit a phone-width panel the way it does on desktop. Rather than
+   * ripping out the richer desktop behavior above, every chip/VS-label
+   * still gets built (`data-idx`, in participant order) and a
+   * `.battle-screen-extra` "+N more" note is always appended when there
+   * are more than two — index.html's own `@media (max-width: 900px)` rule
+   * (the same breakpoint the rest of this app already treats as "mobile
+   * layout") is what actually hides everything past the first two chips
+   * and shows the note; nothing here needs to know the viewport width
+   * itself, or re-run on resize.
    */
   private renderVsHeader(world: World): HTMLElement {
     const wrap = document.createElement("div");
@@ -342,16 +356,24 @@ export class BattleScreenPanel {
     const map = new Map<string, CombatantEls>();
     ids.forEach((id, i) => {
       const els = buildCombatant(id);
+      els.box.dataset.idx = String(i);
       this.applyCombatantState(els, id, world);
       wrap.appendChild(els.box);
       map.set(id, els);
       if (i < ids.length - 1) {
         const vsLabel = document.createElement("div");
         vsLabel.className = "battle-screen-vs-label";
+        vsLabel.dataset.idx = String(i);
         vsLabel.textContent = "VS";
         wrap.appendChild(vsLabel);
       }
     });
+    if (ids.length > 2) {
+      const extra = document.createElement("div");
+      extra.className = "battle-screen-extra";
+      extra.textContent = `+${ids.length - 2} more in this fight`;
+      wrap.appendChild(extra);
+    }
     this.combatantEls = map;
     return wrap;
   }

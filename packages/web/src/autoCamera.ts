@@ -111,6 +111,26 @@ const CLASH_PROMOTION_COOLDOWN_TICKS = 40;
 /** Hard cap on queued-but-not-yet-shown engagements — a chaotic tick (mass death event, say) shouldn't grow this unboundedly; overflow drops the oldest still-queued entries first. */
 const MAX_QUEUE = 20;
 /**
+ * How long a queued "courtship" entry can wait before it jumps back to the
+ * front of the one-shot tier regardless of `popNextEngagement`'s usual
+ * "courtship always loses to a fresher non-courtship one-shot" rule —
+ * direct report, a real empirical check (0 courtship promotions across
+ * 8000 real ticks despite 51 real bonded/eggLaid/shelterBuilt events):
+ * "you got rid of all the other autocam stuff like bonds." Root cause:
+ * that strict, unconditional priority order has no floor — in a busy
+ * world where SOME non-courtship one-shot (or, ranking even higher,
+ * battle/clash) is essentially always available, courtship can lose every
+ * single time, forever, not just "usually." This restores the original
+ * intent (routine bonding/egg-laying shouldn't compete evenly with rarer
+ * immigration/hatch/evolution/death) while guaranteeing courtship still
+ * gets a turn eventually rather than never. Deliberately does NOT also
+ * override battle/clash — those stay the two truly time-sensitive
+ * categories (`popNextEngagement` checks them first, unconditionally) —
+ * this only ever promotes a stale courtship entry ahead of a FRESHER
+ * one-shot competing for the same slot.
+ */
+const COURTSHIP_STARVATION_TICKS = 400;
+/**
  * Minimum real ticks between two separate one-shot engagements of the SAME
  * category getting queued at all — direct ask, after actually running the
  * app and watching auto-camera for a while: "autocam is still so
@@ -204,6 +224,8 @@ interface Engagement {
   continuous: boolean;
   /** Tick this engagement should stop being displayed (for a one-shot); unused for a continuous battle/clash — see `lastActiveRealMs` for its staleness clock instead. */
   expiresOrLastActiveTick: number;
+  /** Tick this engagement was first queued (for a one-shot) — what `COURTSHIP_STARVATION_TICKS` counts elapsed WAITING time against, distinct from `expiresOrLastActiveTick` (which only gets a real dwell deadline once actually popped/active). See `popNextEngagement`'s own doc comment for why this exists. */
+  queuedAtTick: number;
   /** `performance.now()` at the last real hit involving this continuous (battle/clash) engagement — what `BATTLE_STALE_MS`/`CLASH_STALE_MS` count elapsed real time against (see their own doc comments for why real ms, not ticks). Stamped on construction and on every widening hit in `onBattleHit`; unused for a one-shot engagement. */
   lastActiveRealMs: number;
   /** Set once conclusion fires on a continuous engagement — it keeps a short epilogue hold rather than vanishing on the same tick as the kill/retreat. Still used for the -1 "marked, not yet stamped" sentinel (see `onBattleParticipantLeft`) and by `BATTLE_STALE_MS`'s own real-ms staleness check; the actual epilogue hold duration is real-ms too, via `concludedAtRealMs` below. */
@@ -461,7 +483,7 @@ export class AutoCameraController {
   private observe(event: SimEvent, world: World): void {
     switch (event.kind) {
       case "immigrated":
-        this.enqueueOneShot("immigration", event.kind, new Set(event.agentIds), event.pos, `${event.agentIds.length} ${event.species} arrived`);
+        this.enqueueOneShot("immigration", event.kind, new Set(event.agentIds), event.pos, `${event.agentIds.length} ${event.species} arrived`, event.tick);
         return;
       case "bonded":
         this.enqueueClusteredOneShot("courtship", event.kind, new Set([event.agentId, event.partnerId]), event.pos, `${speciesLabel(event.species, event.partnerSpecies)} bonded`, event.tick);
@@ -550,7 +572,7 @@ export class AutoCameraController {
     }
   }
 
-  private enqueueOneShot(category: NotableCategory, sourceKind: SimEvent["kind"], ids: Set<string>, pos: Vec2, label: string): void {
+  private enqueueOneShot(category: NotableCategory, sourceKind: SimEvent["kind"], ids: Set<string>, pos: Vec2, label: string, tick: number): void {
     // Same *exact* moment (same originating event kind, overlapping
     // participants) already the subject of the currently-active or a
     // still-queued engagement (e.g. a hatch that immediately re-triggers via
@@ -559,7 +581,7 @@ export class AutoCameraController {
     // comment for why a shared category isn't enough here.
     if (this.active && this.active.sourceKind === sourceKind && setsOverlap(this.active.ids, ids)) return;
     if (this.queue.some((e) => e.sourceKind === sourceKind && setsOverlap(e.ids, ids))) return;
-    this.queue.push({ category, sourceKind, ids, fallbackPos: pos, label, continuous: false, expiresOrLastActiveTick: 0, lastActiveRealMs: performance.now(), seq: this.nextSeq++ });
+    this.queue.push({ category, sourceKind, ids, fallbackPos: pos, label, continuous: false, expiresOrLastActiveTick: 0, queuedAtTick: tick, lastActiveRealMs: performance.now(), seq: this.nextSeq++ });
     if (this.queue.length > MAX_QUEUE) this.queue.shift();
   }
 
@@ -578,7 +600,7 @@ export class AutoCameraController {
     const last = this.lastEnqueuedTickByCategory.get(category);
     if (last !== undefined && tick - last < cooldown) return;
     const before = this.queue.length;
-    this.enqueueOneShot(category, sourceKind, ids, pos, label);
+    this.enqueueOneShot(category, sourceKind, ids, pos, label, tick);
     if (this.queue.length > before) this.lastEnqueuedTickByCategory.set(category, tick);
   }
 
@@ -655,6 +677,7 @@ export class AutoCameraController {
       label,
       continuous: true,
       expiresOrLastActiveTick: world.tick,
+      queuedAtTick: world.tick,
       lastActiveRealMs: performance.now(),
       seq: this.nextSeq++,
     });
@@ -687,12 +710,21 @@ export class AutoCameraController {
    * Otherwise plain FIFO (unchanged from before this method existed). A
    * currently-*active* one-shot doesn't go through here at all — see
    * `onBattleHit`'s own preemption of `this.active` for that half.
+   *
+   * `COURTSHIP_STARVATION_TICKS`'s own guard runs right after
+   * battle/clash — a courtship entry waiting longer than that jumps back
+   * ahead of a fresher non-courtship one-shot, so the strict priority
+   * order above can deprioritize courtship without ever fully starving it
+   * — see that constant's own doc comment for the real empirical bug this
+   * closes (0 courtship promotions across 8000 real ticks).
    */
-  private popNextEngagement(): Engagement {
+  private popNextEngagement(tick: number): Engagement {
     const battleIndex = this.queue.findIndex((e) => e.category === "battle");
     if (battleIndex >= 0) return this.queue.splice(battleIndex, 1)[0]!;
     const clashIndex = this.queue.findIndex((e) => e.category === "clash");
     if (clashIndex >= 0) return this.queue.splice(clashIndex, 1)[0]!;
+    const staleCourtshipIndex = this.queue.findIndex((e) => e.category === "courtship" && tick - e.queuedAtTick >= COURTSHIP_STARVATION_TICKS);
+    if (staleCourtshipIndex >= 0) return this.queue.splice(staleCourtshipIndex, 1)[0]!;
     const notableOneShotIndex = this.queue.findIndex((e) => e.category !== "courtship");
     if (notableOneShotIndex >= 0) return this.queue.splice(notableOneShotIndex, 1)[0]!;
     return this.queue.shift()!;
@@ -744,7 +776,7 @@ export class AutoCameraController {
     }
 
     if (!this.active && this.queue.length > 0) {
-      const next = this.popNextEngagement();
+      const next = this.popNextEngagement(tick);
       if (!next.continuous) next.expiresOrLastActiveTick = tick + (next.category === "courtship" ? COURTSHIP_DWELL_TICKS : DWELL_TICKS);
       this.active = next;
       this.viewerTookOver = false; // a genuinely new thing to look at re-earns camera control even if the viewer panned away from the last one

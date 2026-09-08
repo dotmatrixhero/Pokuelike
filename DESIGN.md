@@ -14158,3 +14158,69 @@ Verified via typecheck and the existing engine/data suites only, at the
 user's direction (no live Playwright pass this round) — pure web-display
 changes, engine (46 files, 1250 tests) and data (2 files, 240 tests)
 suites unaffected and still green.
+
+## Fixed: courtship (bonds/eggs/shelters) could be starved out entirely
+
+Direct report, after the deploy above went live: "you got rid of all the
+other autocam stuff like bonds and evos and hatching in the battle logs."
+
+Confirmed empirically before touching anything — a real 8000-tick run,
+threading every real event through a live `AutoCameraController`, counted
+how many times each category actually became the active engagement:
+`clash: 45, immigration: 9, battle: 26, evolution: 6, hatch: 4, death: 4,
+courtship: 0` — zero, despite 51 real bonded/eggLaid/shelterBuilt events
+happening in that same run. Every other category got shown at least a
+handful of times; only courtship was fully erased.
+
+Root cause: `popNextEngagement`'s existing, intentional priority order
+(battle > clash > any other one-shot > courtship, from an earlier
+session's own direct ask) has no floor. In a living world, SOME
+non-courtship one-shot or continuous fight is essentially always
+available, so courtship — always compared last — can lose literally every
+single time forever, not just "usually." Fixed with a starvation guard:
+a new `queuedAtTick` field (stamped when an engagement is first queued,
+distinct from `expiresOrLastActiveTick`'s dwell-deadline meaning once
+active) lets `popNextEngagement` check how long the oldest queued
+courtship entry has been waiting; past `COURTSHIP_STARVATION_TICKS`
+(400), it jumps back to the front of the one-shot tier — still behind
+battle/clash (genuinely time-sensitive, unconditionally first), but ahead
+of a fresher non-courtship one-shot that would otherwise keep bumping it
+forever. Re-ran the same empirical check after the fix: `courtship: 20`,
+every other category still shown too.
+
+### Also this round: legend tab removed, Events moved last; mobile mob-fight cap
+
+Two quick follow-up UI asks in the same message:
+
+**"remove the legend tab and move events to the right most."** The
+Legend tab/page and its wiring (`tab-legend`, `#legend`, `renderLegend`,
+the `PanelTab` union's `"legend"` member, and the now-dead `#legend`/
+`.legend-*` CSS) are gone; the tab bar is now Inspector → Battle →
+Chronicle → Events, in both index.html and main.ts's own `TAB_BUTTONS`/
+`TAB_PAGES` order. `legend.ts` itself is left on disk, just unwired, in
+case its content is worth reviving elsewhere later.
+
+**"can you just really limit the ui to two units hp bar at a time and
+just say there's more units in the fight on mobile? It's hard to see
+what's going on."** A mob fight already gave every participant its own
+chip (an earlier session's own direct ask) — genuinely hard to read once
+several chips wrap across multiple rows on a phone-width panel. Rather
+than reverting that desktop behavior, `renderVsHeader` now stamps a
+`data-idx` (participant order) on every chip/VS-label and always appends
+a `.battle-screen-extra` "+N more in this fight" note when there are more
+than two — purely inert markup on desktop. index.html's existing
+`@media (max-width: 900px)` breakpoint (the same one the rest of the app
+already treats as "mobile layout") is what actually hides every chip/
+label past the first two and reveals the note; nothing needs to detect
+the viewport itself or react to resize.
+
+### Verification
+
+No vitest suite exists for `packages/web`; verified live via Playwright.
+Tab bar: `["tab-inspector", "tab-battle-screen", "tab-chronicle",
+"tab-events"]`, with `#tab-legend`/`#legend` both absent. A synthetic
+5-combatant battle at a 390px (phone) viewport: 5 chips built into the
+DOM, but only 2 actually visible (`getComputedStyle(...).display`), with
+`.battle-screen-extra` visible and reading "+3 more in this fight". Full
+monorepo typecheck clean; engine (46 files, 1250 tests) and data (2
+files, 240 tests) suites unaffected and still green.
