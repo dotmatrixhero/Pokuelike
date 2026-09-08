@@ -5241,3 +5241,29 @@ not something this pathfinding pass itself caused or is positioned to fix.
         "Nettleelmaw", so joins now drop a repeated letter at the seam.
       - Still deterministic: no rng draw, so naming cannot perturb a seeded
         run, and re-running a seed reproduces every name exactly.
+- [x] **Chronicle in the renderer.** Direct ask: "make it pretty in the
+      renderer."
+      - Extracted the story logic into the engine (`chronicle.ts`) FIRST,
+        because there are now two consumers: the runner prints text, the web
+        app renders a panel. The valuable half of this feature is the
+        filtering — which moments are worth telling and what gets thrown
+        away — and two copies of that would have drifted within a week. The
+        runner script is now a thin renderer over the shared module.
+      - New Chronicle tab in the web app, between Events and Legend. Each
+        beat carries a coarse `kind` (founding / loss / movement / conflict /
+        notable / growth / split / end) so the panel can colour its left
+        border and pick an icon without parsing prose — a chapter is
+        skimmable without being read.
+      - Cheap by construction: the panel no-ops entirely while its tab is
+        hidden and re-derives at most once every 200 ticks while open. A
+        chronicle is a whole-run summary; deriving it 60x a second would be
+        pure waste.
+      - Verified by actually looking at it in a browser rather than assuming
+        — which caught a stutter no test would have: the founding beat
+        repeated the herd's own name, so the panel read "The Spearows of
+        Stormfen" as a heading and then "the Spearows of Stormfen were here
+        when the world began" directly under it, lowercase mid-sentence.
+        Founding beats no longer name their own herd.
+- [ ] **Chronicle: still to do.** Migration paths drawn on the map; a family
+      tree of splits; clicking a herd to focus the camera on it; weather and
+      drought as named disasters a herd survived.

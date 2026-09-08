@@ -384,6 +384,48 @@
         gap: 4px;
       }
       .panel-tab-btn:hover { background: rgba(255, 255, 255, 0.04); }
+
+      /* ---- Chronicle ---- */
+      #chronicle-page { padding: 10px 12px 24px; overflow-y: auto; }
+      .chron-intro { font-size: 12.5px; color: var(--muted); margin-bottom: 14px; line-height: 1.5; }
+      .chron-empty { font-size: 12.5px; color: var(--muted); line-height: 1.6; padding: 18px 4px; }
+      .chron-herd, .chron-notable {
+        border-left: 2px solid rgba(255, 255, 255, 0.08);
+        padding: 0 0 0 12px;
+        margin: 0 0 20px;
+      }
+      .chron-herd h3, .chron-notable h3 {
+        margin: 0; font-size: 15px; font-weight: 650; letter-spacing: 0.01em; color: var(--text);
+      }
+      .chron-sub { font-size: 11px; color: var(--muted); margin: 3px 0 9px; font-variant-numeric: tabular-nums; }
+      .chron-alive { color: #8fd6a0; }
+      .chron-dead { color: #e8737d; }
+      .chron-beats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+      .chron-beats li {
+        display: grid;
+        grid-template-columns: 18px 42px 1fr;
+        align-items: baseline;
+        gap: 6px;
+        font-size: 12.5px;
+        line-height: 1.5;
+        padding-left: 6px;
+        border-left: 2px solid var(--beat);
+      }
+      .chron-icon { font-size: 11px; line-height: 1.4; }
+      .chron-tick { color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+      .chron-text b { color: var(--beat); font-weight: 650; }
+      .chron-untold { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 7px; padding-left: 8px; }
+      .chron-notables-head {
+        font-size: 13px; text-transform: uppercase; letter-spacing: 0.12em;
+        color: var(--muted); font-weight: 600; margin: 26px 0 14px; padding-top: 14px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .chron-notable { border-left-color: #d9a5f0; }
+      .chron-notable-label {
+        font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: #d9a5f0; font-weight: 700;
+      }
+      .chron-tale { margin: 8px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--text); }
+      .chron-before { margin-top: 7px; font-size: 11px; color: var(--muted); line-height: 1.5; }
       .panel-tab-btn.playing { color: var(--text); border-bottom-color: var(--accent); background: transparent; }
       #panel-toolbar {
         flex: 0 0 auto;
@@ -752,6 +794,10 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h14M5 18h9"/></svg>
               Events
             </button>
+            <button id="tab-chronicle" class="panel-tab-btn" role="tab" aria-selected="false" title="The story of each herd — foundings, migrations, disasters, splits — and the world's notables">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/></svg>
+              Chronicle
+            </button>
             <button id="tab-legend" class="panel-tab-btn" role="tab" aria-selected="false" title="What every glyph/color on the map means">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
               Legend
@@ -783,6 +829,7 @@
               </div>
               <div id="event-log"></div>
             </div>
+            <div id="chronicle-page" data-panel-page hidden></div>
             <div id="legend" data-panel-page hidden></div>
           </div>
         </div>
