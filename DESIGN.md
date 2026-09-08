@@ -13261,3 +13261,52 @@ this particular run (population too busy fleeing/fighting/mating to
 idle-explore much) — expected given how rarely `explore` itself fired, not
 evidence the discovery logic is broken (it's exercised directly by unit
 tests).
+
+## Battle Screen: real turn-by-turn combat lines, not just an intro that vanishes
+
+Direct report: "In the battle log... Just sorta says... Like... Not much.
+And I can't see what happens and it goes away. I want a real battle log."
+
+Root cause, found by tracing `main.ts`'s `step()`/`frame()` split against
+`autoCamera.ts`: `AutoCameraController.ingest()` (called every tick, from
+`step()`) only *detects* a new engagement and pushes it onto an internal
+queue — promoting it to the `active` engagement that `BattleScreenPanel`
+actually reads happens in `AutoCameraController.update()`, called once per
+*animation frame* (`frame()`), fully decoupled from tick cadence.
+`BattleScreenPanel.ingest()` is itself gated on its own `setActive()` having
+already run with that promoted engagement. A fast kill — often the entire
+fight, for a one/two-shot — could start and finish inside a single `step()`
+call, entirely between two animation frames: every real `fought`/`damage`/
+`faint` event for it got silently dropped, leaving only the generic "X vs Y
+fighting!" intro line `setActive()` itself synthesizes. That's exactly what
+a viewer sees as "just sorta says... not much... and it goes away."
+
+Fix (`main.ts`'s `step()`): call `autoCamera.update(world)` (idempotent —
+promoting/expiring engagements is pure state-machine logic, safe to run more
+than once per tick) and re-sync `battleScreenPanel.setActive(...)` right
+there, every tick, instead of relying solely on the once-per-frame call in
+`frame()`.
+
+### Verification
+
+Live-run verification (headless Chromium via Playwright against the real
+dev server) turned out to be a poor tool for reproducing this specific bug
+on demand: it's exactly the *fast* kills that trigger it, and the demo
+scenario's population is too sparse/guarded for one to occur reliably within
+several minutes of real 32x-speed play. Instead, verified deterministically
+by loading the real `AutoCameraController`/`BattleScreenPanel` modules
+(unmodified) into a live browser page via Vite's dev-server module graph,
+constructing a synthetic "fight starts and a one-shot kill lands, all in one
+tick" event sequence, and running it through both orderings:
+
+- **Old ordering** (`ingest` only, `setActive` deferred to "next frame"):
+  panel content right after the killing tick is empty; only once a
+  simulated "next frame" finally runs does anything show, and even then it's
+  just the intro line — `"spearow (Lv13) 33/33 HP VS diglett (down) 0/23 HP
+  spearow (1) vs diglett (1) engaging!"` — never the actual hit.
+- **Fixed ordering** (`update`+`setActive` synced inside the same tick):
+  the exact same event sequence produces the full turn-by-turn log —
+  `"...engaging! spearow (1) used peck! diglett (1) takes 23 damage! (HP
+  left: 0) diglett (1) fainted!"`
+
+Full monorepo typecheck clean.
