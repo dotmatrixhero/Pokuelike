@@ -150,31 +150,218 @@ doesn't need a new mechanic invented; it needs those four wired to a player.
 - **Village, NPCs, quests, rebuilding.** All of Act 2's connective tissue.
   The sim has no concept of a human other than the (unbuilt) player.
 
-## Real tensions worth deciding early, not discovering late
+## Decided
 
-Not resolving these here on purpose — they're the user's calls, and they're
-cheap to decide now and expensive to reverse later.
+The four open questions from the first pass, answered directly. Recorded
+here as settled so they don't get relitigated.
 
-1. **How much of the cave is simulated vs. authored?** The sim's whole value
-   is emergent ecology; a 5-6 layer escape sequence is the most level-like,
-   most authored thing this project has ever proposed. The pitch mostly
-   threads this well (layer 1 is a real ecosystem with herds, water and
-   plants, not a corridor), but "layer 4 always has the stone" and "the
-   ecosystem decides what's here" pull in opposite directions and the ratio
-   should be picked deliberately.
-2. **Tick model vs. turn model** (see above). My instinct: turn-based for
-   the player's own actions with the world stepping per action, because
-   "traditional roguelike" and a fragile-human fantasy both want you to be
-   able to *stop and think* — but that makes the existing continuous-tick
-   observer view a second, different mode rather than the same one.
-3. **Three overlapping spatial concepts now: layer, zone, Z-level.** The
-   pitch's "layers bigger than our zones, 2 or 3 of em together" needs
-   reconciling with `Layer` (the three-value enum) and with the macro grid's
-   zone promotion. These are three different things currently wearing
-   similar names.
-4. **Scale of the ask.** This is three acts of a full game. It is worth
-   saying plainly that Act 1 alone is larger than any feature this project
-   has shipped so far, and Act 2 is larger again.
+1. **Turn based.** The world steps when the player acts. This makes the
+   existing continuous-tick observer view a second, different mode rather
+   than the same one — worth knowing up front, but the underlying
+   `tickWorld` is already deterministic per tick, so "one tick per player
+   action" is a scheduling change at the driver level, not a rewrite of the
+   sim. The fragile-human fantasy needs you to be able to stop and think;
+   a timer fights that.
+2. **"A well designed randomly generated bespoke level."** The middle path,
+   and the right one: the *generator* is authored, the *instance* is
+   random. Not hand-placed rooms, and not "the ecosystem sim decides
+   everything and we hope a level falls out" — a purpose-built generator for
+   this level type, with real design intent baked into its rules (where the
+   water is, where the corridors are, what the layer is *for*), producing a
+   different real cave every run. This is the same thing `worldgen.ts`
+   already does for zones, aimed at a specific authored purpose instead of
+   general terrain.
+3. **Layer, zone and Z-level are one concept: zones on different Z levels,
+   with stairs between them. That's the cave.** This collapses the naming
+   collision instead of reconciling it. A cave is a set of zones stacked
+   across Z levels, connected by stair tiles; "layer" as a separate spatial
+   noun goes away. The pitch's "layers are 2-3 zones together" survives as
+   horizontal extent — a given Z level can span several zones.
+4. **Forced fights come from level design, not combat tuning.** "We can just
+   force fights in tight corridors" — a corridor with no room to slip past
+   is a bespoke-generator concern (decision 2), which means today's
+   pursuit/give-up rules don't need to be retuned to hit a balance target.
+   Much cheaper, and much more legible to a player: you can *see* why you
+   can't run.
+
+**Standing note, not a question**: this is three acts of a full game. Act 1
+alone is larger than any feature this project has shipped so far, and Act 2
+is larger again. Slicing matters more here than anywhere else so far.
+
+### What decision 3 leaves open
+
+Collapsing layer/zone/Z-level is the right call and most of it is
+straightforward, but two things genuinely need answering before it's built,
+and neither is answered here:
+
+- **What happens to `Layer` (`surface`/`underground`/`canopy`)?** Does every
+  Z level still have its own three sub-layers, or does the Z axis replace
+  that enum outright? DESIGN.md's Z-level vision section raised exactly this
+  and left it open ("are those now sub-categories *within* a Z-level... or
+  an orthogonal concept entirely"). Cheapest coherent answer is probably
+  that a cave Z level IS the underground layer at a given depth, and
+  surface/canopy only exist at the topmost level — but that's a guess, not a
+  decision.
+- **How does a zone address itself now?** Today a zone is `(row, col)` and
+  the macro grid is dense 2D. Adding Z means either a third coordinate on
+  the same grid, or caves as a separate, sparse structure hanging off the
+  surface zone that contains their entrance. The second is likely cheaper
+  (caves are rare; a dense 3D grid would be almost entirely empty) and keeps
+  the existing surface macro grid completely untouched.
+
+## The human geo pass
+
+Direct ask, opening a new front: "We also need to do 'human' geo passes to
+add human-ness to it all. Like roads and villages and ports and boats and
+homes and shrines and shit."
+
+This is the phase DESIGN.md deferred on purpose — "I think we do need to
+simulate human society and stuff but we can do a separate pass for that.
+It's after the geological stuff" — now being asked for concretely. The
+sequencing it specified still holds: geology first (built), humans layered
+on top of an already-coherent world (this).
+
+**It's a macro-grid pass, and the macro grid is already shaped for it.** The
+existing generation order in `macroGrid.ts` is elevation → ocean → biome →
+rivers → landmarks → territories. Human geo slots in after landmarks, and
+`placeLandmarks` is the exact pattern to follow: eligibility-gated, capped,
+spaced placement over the zone grid, cheap and deterministic.
+
+What makes this more than another landmark type is that **settlements relate
+to each other** — landmarks are independent rolls, roads are a network.
+
+### Settlement siting
+
+Not a flat random roll — humans settle where it makes sense, and every input
+that decides that already exists as a per-zone macro fact:
+
+- **Fresh water** — `riverEdges` / `isLake`, already carved.
+- **Arable land** — biome (grassland/forest/wetland lean), plus
+  `estimateZoneResourceIndex`, which already estimates abundance per zone
+  from biome density parameters.
+- **Coast access** — `coastEdges`, already computed for every land zone.
+  This is exactly what a **port** needs and it's already there.
+- **Junctions/defensibility** — `minLandNeighbors` is already a
+  `LandmarkDef` concept (Crossroads uses it).
+- **Spacing** — settlements shouldn't clump; the greedy min-spacing loop
+  `selectMacroRiverSources` already uses for river sources is the same
+  shape.
+
+**Tiers fall out of the score rather than being authored**: a well-watered,
+fertile, well-connected site becomes a town; a marginal one a hamlet; a
+coastal one with a good hinterland a port. That gives a settlement hierarchy
+for free instead of hand-tuning three separate placement passes.
+
+### Roads are the genuinely new algorithm
+
+Everything above is a variation on something that exists. Roads aren't:
+they're the first *connective* human feature, where rivers are the only
+existing connective feature and they're carved by steepest descent (which
+is exactly wrong for a road — water goes downhill, roads go where it's
+cheap to walk).
+
+The shape, reusing what's already listed in DESIGN.md's own procgen toolbox
+("Graph/MST-based anchor placement"):
+
+1. Build a **minimum spanning tree** over settlements, so every settlement
+   is reachable and there are no redundant highways — then add a small
+   number of extra edges so the network has loops rather than being a
+   strict tree (a real road network isn't a tree).
+2. Path each edge across the zone grid with a **cost function**, not
+   steepest descent: cheap across grassland/beach, expensive across
+   highland/jungle/snow, very expensive crossing a river except where a
+   bridge/ford is placed (which is itself a nice reason for a landmark),
+   impassable across ocean.
+3. Mark the zones a road crosses with **`roadEdges`** — deliberately the
+   same compass-edge vocabulary `riverEdges` and `coastEdges` already use,
+   so road continuity across a zone boundary gets handled by exactly the
+   same machinery (and hits exactly the same known gap, see below).
+
+**Sea routes** are the same MST idea over water between ports, which is what
+makes ports mechanically distinct from coastal villages rather than just
+flavor.
+
+### Per-zone human influence
+
+DESIGN.md's "generation as ordered passes" section already called for a
+per-zone "extent of human influence" gradient as part of the life pass. It
+falls straight out of this: distance-decay from settlements and roads. One
+0..1 number per zone, which then feeds anything that should care — species
+density and wariness near towns, what generates when the zone is promoted,
+whether a quest even makes sense there.
+
+### Honest flag: roads will hit the river gap
+
+A promoted zone's terrain is biased from macro facts (`biasForZone`), but
+that bias currently consumes **only elevation, ocean and biome** — the
+macro `riverEdges` facts are recorded and not yet read, which is already a
+tracked gap. Roads will hit it identically: the macro grid will say "a road
+crosses this zone's north and east edges" and the zone generator won't yet
+know how to lay actual road tiles entering at those edges.
+
+That's worth saying plainly because it's an argument for fixing it **once**,
+generically: a single "macro edge features → real tiles at the right edge"
+mechanism serves rivers, roads and coastlines together. Doing it per-feature
+would be three versions of the same thing.
+
+### Boats are not a geo pass
+
+Worth separating: ports are terrain, boats are a **vehicle** — an entity
+that carries the player between coastal zones. That's a travel mechanic, not
+a generation pass, and it needs its own design (does it move on the macro
+map? is there a sea zone to sail through?). Not scoped here beyond noting
+it's a different kind of thing than everything else in this section.
+
+## Villages, quests and content
+
+Direct ask, stated as scope rather than spec: "Need to design villages and
+quests and content. Lots work." Agreed on both counts — it is the biggest
+unstarted piece and it genuinely needs its own design pass, which this doc
+deliberately does not attempt.
+
+What's worth recording now, so that pass starts from something:
+
+- **The village is where the campaign's second act lives**, and the human
+  geo pass above is what puts villages on the map in the first place. The
+  design order is: geo pass first (villages exist as places), then village
+  content (what's *in* one), then quests (what you do for them). Doing them
+  out of order means designing quests for places with no defined shape.
+- **The premise gives quests their frame for free**: "In this world Pokémon
+  trainers aren't really a thing as much yet, so no Poké Balls. And you're
+  the first to train one, so people ask for your help with lots of things."
+  That's a genuinely good quest-giver justification — you're not the chosen
+  one, you're the only person with a capability nobody else has.
+- **The example quests given are all sim-shaped, not scripted**: "clear out
+  Krabby nests by the beach," "collect materials." Both are things the
+  existing sim can actually express — a real herd with a real territory in a
+  real coastal zone, and real gatherable crops/materials. Worth holding onto
+  that property deliberately as the quest design grows: a quest that the sim
+  can satisfy emergently is worth more here than a scripted one.
+- **Crafting tables at the village** are the progression spine tying Act 1's
+  survival crafting to Act 2 — the same crafting system, upgraded, rather
+  than a separate village-economy system.
+
+## More moves
+
+Direct ask: "And implement more moves."
+
+Real current numbers, checked rather than remembered: **~35 moves are
+actually implemented** as sim mechanics (`packages/data/src/moves.ts`),
+against **~951 imported into the move dex** as data
+(`packages/data/src/dex/moves.generated.ts`). The dex import deliberately
+stopped at "core numeric/categorical fields plus a lightweight tag list...
+This does NOT reimplement move battle logic."
+
+So "implement more moves" is well-defined work with a known backlog and a
+known ceiling: every move already has canon power/accuracy/type/category
+available; what each one *does* beyond damage is the part that needs
+building. The existing pipelines to hang them on already exist and are
+distinct — hostile hits (`predation.ts`), ally support (`support.ts`), and
+self/tile utility effects (`utilityMoves.ts`) — so the work is mostly
+picking the next batch of moves and deciding which pipeline each belongs to,
+plus adding effect fields the engine doesn't understand yet.
+
+Not scoped further here; see MOVES_DESIGN.md, which owns this thread.
 
 ## A suggested first slice (recommendation, not a decision)
 

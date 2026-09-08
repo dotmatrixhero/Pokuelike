@@ -24,27 +24,119 @@ are already locked in from an earlier design pass too.
 an observer sim with a camera, no controlled entity, no input→action path.
 Everything else in the pitch is content on top of that single change.
 
-Decisions worth making before anything is built (all open, none of them
-mine to make):
+**All four opening decisions are now made** (see CAMPAIGN_DESIGN.md's
+"Decided" section for the reasoning):
 
-- [ ] **Tick model vs. turn model.** `tickWorld` advances everything on a
-      timer; a "traditional roguelike" is world-steps-when-you-act. Both work
-      on a deterministic tick, but the choice shapes the whole UX. My
-      instinct is turn-based for player actions, which makes the existing
-      continuous observer view a second mode rather than the same one.
-- [ ] **How much of the cave is simulated vs. authored?** "Layer 4 always
-      has the stone" and "the ecosystem decides what's here" pull opposite
-      ways. The pitch threads this well (layer 1 is a real ecosystem, not a
-      corridor) but the ratio should be picked deliberately.
-- [ ] **Layer vs. zone vs. Z-level** — three overlapping spatial concepts
-      wearing similar names now. The pitch's "layers are 2-3 zones together"
-      needs reconciling with `Layer` (the fixed 3-value enum) and with the
-      macro grid's zone promotion. A 5-6 layer stacked cave is the
-      Dwarf-Fortress Z-level generalization DESIGN.md already flags as a
-      real structural change, not a number bump.
-- [ ] **Escape-vs-forced-fight balance** — "you can run by them but some
-      predators will catch you... basically force a fight" is a specific
-      tuning goal today's pursuit/give-up rules were never written to hit.
+- [x] **Turn based.** World steps when the player acts. `tickWorld` is
+      already deterministic per tick, so this is a scheduling change at the
+      driver level, not a sim rewrite — but it does make the existing
+      continuous observer view a second, different mode.
+- [x] **"A well designed randomly generated bespoke level."** Authored
+      generator, random instance — not hand-placed rooms, not "hope a level
+      falls out of the ecosystem sim."
+- [x] **Layer, zone and Z-level collapse into one concept**: zones on
+      different Z levels with stairs between them. "Layer" as a separate
+      spatial noun goes away; a Z level can span several zones horizontally.
+- [x] **Forced fights come from level design, not combat tuning** — tight
+      corridors, a bespoke-generator concern. Today's pursuit/give-up rules
+      don't need retuning to hit a balance target.
+
+Still genuinely open, left by the Z-level decision:
+
+- [ ] **What happens to `Layer` (`surface`/`underground`/`canopy`)** once Z
+      levels exist — sub-layers within each Z level, or does Z replace the
+      enum? DESIGN.md's Z-level section raised this and left it open.
+      Cheapest coherent guess: a cave Z level IS underground at a given
+      depth, and surface/canopy only exist at the top level.
+- [ ] **How a zone addresses itself with Z** — third coordinate on the same
+      dense grid, or caves as a sparse structure hanging off the surface
+      zone containing their entrance? The second is likely much cheaper
+      (caves are rare; a dense 3D grid would be almost entirely empty) and
+      leaves the existing surface macro grid untouched.
+
+## Human geo pass: roads, villages, ports, shrines — designed, see CAMPAIGN_DESIGN.md
+
+Direct ask: "We also need to do 'human' geo passes to add human-ness to it
+all. Like roads and villages and ports and boats and homes and shrines and
+shit." This is the phase DESIGN.md deliberately deferred ("it's after the
+geological stuff") — now designed, still unbuilt. Slots into `macroGrid.ts`
+after `placeLandmarks`, following that function's existing eligibility-gated
+/capped/spaced placement pattern.
+
+Most of the inputs already exist as per-zone macro facts: `riverEdges`/
+`isLake` (fresh water), `coastEdges` (ports — already computed for every
+land zone), `estimateZoneResourceIndex` (arable land), `minLandNeighbors`
+(junctions), and the greedy min-spacing loop from `selectMacroRiverSources`.
+Settlement tiers (hamlet/village/town/port) fall out of the site score
+rather than needing three separate placement passes.
+
+- [ ] **Roads are the one genuinely new algorithm** — the first *connective*
+      human feature (rivers are the only existing one, and steepest descent
+      is exactly wrong for a road). Shape: MST over settlements plus a few
+      extra edges for loops, then cost-based pathing per edge (cheap on
+      grassland/beach, expensive on highland/jungle/snow, very expensive
+      crossing rivers except at a bridge/ford, impassable on ocean), marking
+      `roadEdges` in the same compass-edge vocabulary `riverEdges`/
+      `coastEdges` already use.
+- [ ] **Sea routes between ports** — same MST idea over water; what makes a
+      port mechanically distinct from a coastal village rather than flavor.
+- [ ] **Per-zone human influence gradient** (0..1, distance-decay from
+      settlements/roads) — already called for by DESIGN.md's "life pass"
+      as "extent of human influence"; falls straight out of this pass.
+      Feeds species density/wariness near towns and what generates on
+      promotion.
+- [ ] **Roads will hit the known river gap**, identically: `biasForZone`
+      currently consumes only elevation/ocean/biome, so macro edge facts
+      (`riverEdges`, and now `roadEdges`) are recorded but never turned into
+      real tiles entering at the right edge. Argument for fixing it **once**,
+      generically — one "macro edge features → tiles at the correct edge"
+      mechanism serves rivers, roads and coastlines together, instead of
+      three versions of the same thing.
+- [ ] **Boats are not a geo pass** — ports are terrain, a boat is a vehicle
+      that carries the player between coastal zones. Different kind of thing,
+      needs its own design (does it move on the macro map? is there a sea
+      zone to sail through?).
+- [ ] Shrines/homes: `sacredSpring` and `sanctuary` landmarks already exist
+      as the natural-world cousins; shrines are the human-built version and
+      could plausibly be sited near them or on high ground.
+
+## Villages, quests and content — not designed, own pass needed
+
+Direct ask, stated as scope: "Need to design villages and quests and
+content. Lots work." Agreed — biggest unstarted piece, needs its own design
+pass, deliberately not attempted in CAMPAIGN_DESIGN.md.
+
+- [ ] **Design order matters**: human geo pass first (villages exist as
+      places on the map), then village content (what's *in* one), then
+      quests (what you do for them). Out of order means designing quests for
+      places with no defined shape.
+- [ ] The premise already justifies quest-giving for free: "trainers aren't
+      really a thing yet... you're the first to train one, so people ask for
+      your help." Not a chosen one — the only person with a capability
+      nobody else has.
+- [ ] **Keep quests sim-shaped, not scripted.** Both examples given ("clear
+      out Krabby nests by the beach," "collect materials") are things the
+      existing sim can actually express — a real herd with a real territory
+      in a real coastal zone. Worth holding onto that property deliberately
+      as quest design grows.
+- [ ] Village crafting tables are the progression spine linking Act 1
+      survival crafting to Act 2 — same system upgraded, not a separate
+      village-economy system.
+
+## Implement more moves — real backlog, known ceiling
+
+Direct ask: "And implement more moves." Real numbers, checked: **~35 moves
+implemented** as sim mechanics (`packages/data/src/moves.ts`) against
+**~951 imported** into the dex as data (`dex/moves.generated.ts`, which
+explicitly "does NOT reimplement move battle logic").
+
+- [ ] Every dex move already has canon power/accuracy/type/category — the
+      work is what each one *does* beyond damage, plus effect fields the
+      engine doesn't understand yet. Three distinct pipelines already exist
+      to hang them on: hostile hits (`predation.ts`), ally support
+      (`support.ts`), self/tile utility (`utilityMoves.ts`), so most of the
+      work is picking the next batch and deciding which pipeline each
+      belongs to. See MOVES_DESIGN.md, which owns this thread.
 
 Unbuilt systems the pitch implies, each a real project of its own, none
 started: inventory/equipment (armor, stick, backpack, fishing rod, TMs,
