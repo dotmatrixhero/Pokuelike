@@ -320,9 +320,10 @@ thing"):
   10`; other stats: `floor(2*base*level/100) + 5`), no IV/EV modeling, just
   mainline-scale numbers. Verified against a real level-5 Bulbasaur's HP.
 - **`packages/engine/src/moves.ts`**: `MoveSpec` now carries `type`,
-  `category` (physical/special), `power`, `accuracy` (not yet consumed —
-  every move currently hits, see TODO), and `cooldownTicks`, replacing the
-  old untyped `tuning` bag.
+  `category` (physical/special), `power`, `accuracy` (live — `rollAccuracy`
+  consumes it on every real hit; this line used to say "not yet consumed,
+  every move currently hits" and was stale), and `cooldownTicks`, replacing
+  the old untyped `tuning` bag.
 - **`packages/engine/src/combat.ts`**: `calculateDamage` is the real
   mainline formula (`((2*level/5+2) * power * atk/def) / 50 + 2`) with
   STAB (1.5x), type effectiveness, and an injectable random-variance
@@ -10598,6 +10599,14 @@ been discussed or designed yet. The only decided thing so far is the
 sequencing: geological/historical world-shape first, human society layered
 on top of an already-coherent world second, not simultaneously.
 
+**Update — this phase now has a real design**: see CAMPAIGN_DESIGN.md's
+"The human geo pass" section, written after the direct follow-up ask ("we
+also need to do 'human' geo passes to add human-ness to it all. Like roads
+and villages and ports and boats and homes and shrines"). It keeps the
+sequencing this section decided (geology first, humans on top) and slots in
+after `placeLandmarks` in `macroGrid.ts`'s existing pass order. Still
+unbuilt, but no longer just a placeholder.
+
 ### Dwarf-Fortress-style Z-levels within a region
 
 Direct ask, verbatim: "I want Dwarf Fortress style z levels in overworld so
@@ -13993,3 +14002,234 @@ colors) — confirming a real, accurate mix, not a systematically-broken
 render. Full monorepo typecheck clean; engine (46 files, 1250 tests) and
 data (2 files, 240 tests) suites unaffected and still green — this fix
 touches web-only display code.
+
+## The real Move Tree Atlas radial visualization, in-game
+
+Direct ask: "The moves don't really show a tree - we have these super sick
+skill tree visualizations in move atlas. It'd be really cool to have that
+when you click a Pokémon unit, look at their moves... I don't see how
+they're specced either. It'd be nice to see their actual allocations." A
+direct follow-up: "Pull the visualization from our html move atlas thing.
+It should help a lot."
+
+Found, on investigation, that `inspector.ts`'s move list already had a
+click-to-expand tree slot wired to a real `Agent.moveTreeChoices` lookup
+(`leveling.ts`'s `maybeAutoRespec` sets it as a wild agent auto-respecs) —
+so "their actual allocations" were already there to show. It was just
+drawing a plain BFS-layered row grid instead of anything resembling the
+Move Tree Atlas's real three-branch radial layout
+(`packages/data/scripts/move-tree-atlas.template.html`, the standalone
+design-tool artifact this session's move-tree/species work has referenced
+throughout).
+
+New `moveTreeSvg.ts` (packages/web) IS that atlas's layout/render code —
+`computeLayout` (branch angles, per-depth radius, fork spreading,
+crosslink-bridge positioning scaled to how deep its real prerequisites
+sit, crosslink-chain descendants radiating from their own hub) ported
+near-verbatim from the atlas's vanilla JS to real DOM/SVG-element
+construction (this codebase's own idiom, matching `overworldMap.ts`/
+`renderer.ts`, rather than the atlas's `innerHTML`/`el()` helper). The
+atlas's OWN interactive "try a hypothetical build" half — its whole
+purpose as a design tool — is deliberately not ported: an agent's
+`moveTreeChoices` is real, already-decided history (auto-respec'd by the
+engine, never player-chosen), so there's nothing to simulate. What's kept
+from the atlas: chosen nodes get the real green checkmark badge and glow
+ring; not-yet-chosen nodes dim further the less reachable they are
+(`isEligible`, a direct port of the atlas's own `checkEligible` —
+prerequisite AND exclusion aware, so a fork's excluded sibling reads as
+locked even though its own prerequisite is satisfied); hover lights up a
+node and its edges, dimming the rest; crosslink/bridge/anyOf/exclusion
+edges keep their distinct dash styles and gold coloring. Clicking a node
+now shows its plain-English effect (leaning/passives/delta) in a small
+detail line below the tree, replacing the old version's hover-only
+native tooltip.
+
+### Verification
+
+No vitest suite exists for `packages/web`; verified live via Playwright
+against the real dev server, using a synthetic tree exercising every
+layout feature at once (a branch opener, an excludes-pair fork, a
+cost-2 capstone with a passive, a second branch, and a crosslink bridge
+with a chained descendant): all 7 nodes rendered, exactly 3 marked
+`node-chosen` (matching the given `chosenIds`) and exactly 3 marked
+`node-locked` — confirmed by hand that the locked set is right: the
+excluded fork sibling (its own prerequisite met, but excluded by an
+already-chosen node), plus the crosslink bridge and its chained
+descendant (both still missing an unchosen prerequisite), while the
+OTHER branch's unrelated opener correctly read as eligible-but-not-
+locked. A follow-up click on a capstone node produced the correct detail
+text ("Inferno — Leans: aggression, Grants: damageReduction +0.1, power:
++20"). Full monorepo typecheck clean; engine (46 files, 1250 tests) and
+data (2 files, 240 tests) suites unaffected and still green — this fix
+touches web-only display code.
+
+## Move tree follow-up: real node visibility, and a whole-build summary
+
+Direct report on the radial visualization above, from a screenshot of a
+small synthetic test tree: "I think you should be able to see all the
+skills, even if they aren't specced. In your screenshot it looks like
+it's missing a bunch. It'd also be nice to show what all the effects are
+of the entire build."
+
+**Every node was already rendering** — confirmed against ember's real
+35-node tree (`missingIds: []`, all 35 got a `.skilltree-node-hit`). The
+actual bug: `.skilltree-svg { width:100%; height:auto; max-height:340px }`
+was forcing a real tree's true ~1300×1300-unit layout down into a fixed
+~340px box — roughly a quarter of native scale, shrinking an 11px node
+radius and 11px label text to a handful of CSS pixels each. At that scale
+a node reads as a faint speck, easy to mistake for "not there." Fixed by
+giving the SVG explicit native pixel `width`/`height` attributes (1 SVG
+unit = 1 CSS px, matching the atlas's own true-to-source scale) instead
+of stretching to the container, wrapped in a new `.skilltree-canvas` box
+that scrolls (both axes) rather than squishing an oversized tree to fit.
+
+**Whole-build summary**: added `combineDeltas` (merges every chosen
+node's `delta` using the identical additive/OR-merge/overwrite rules the
+atlas's own `applyBuildJS` — itself a faithful port of the real engine's
+`applyMoveTree` — already used) plus a full port of the atlas's
+`describeDelta`/`describePassive` plain-English translators (all ~35
+delta fields, all 13 passive kinds). `summarizeBuildEffects` now runs
+those translators over the whole build's COMBINED net delta, not one
+node's — a `.skilltree-build-summary` block above the tree shows it
+always, not just on click. One wording glitch fixed while porting:
+`conditionLabel`'s `targetBurning`/`targetStatused` entries were full
+clauses ("the target is burning") getting concatenated after the
+template's own "when the target is ", producing "the target is the
+target is burning" — trimmed to adjective phrases like every other entry.
+
+### Verification
+
+Real ember tree, 8 chosen nodes: `summarizeBuildEffects` produced
+`["+10 power.", "-5 accuracy.", "-2 ticks cooldown.", "×2 damage when the
+target is burning.", "Hits everyone caught in the move's shape, not just
+the one target picked.", "+30% status chance.", "Changes its own shape to
+a burst of radius 1.", "Changes its max reach to 2 tiles.", "Sets fire to
+the terrain wherever it lands."]` — real, readable sentences instead of
+raw `JSON.stringify` dumps or floating-point noise (`statusChance`'s
+`0.30000000000000004` from naive summing is gone — `describeDelta` always
+rounds it for display). Full monorepo typecheck clean; engine (46 files,
+1250 tests) and data (2 files, 240 tests) suites unaffected and still
+green.
+
+## Battle Screen QoL: real HP animation, no parentheses, slower reveal pacing
+
+Four direct follow-up asks on the Battle Screen panel in one message:
+"Battle logs need more qol. Hp should be interpolating down, animated
+when unit takes damage. A downed unit should still say their lvl. Lets
+remove the parentheses altogether in the battle log (but keep the herd
+name above hp bar). Need more pause between each log line and a 1000 ms
+pause after the last one."
+
+**HP animation.** `.battle-screen-hp-fill` already had a CSS `transition`
+on `width` — it just never got a chance to play: the header was torn down
+and rebuilt (`headerEl.replaceWith(fresh)`) every single frame regardless
+of whether anything changed, so the fill bar's width always "changed" on
+a brand-new element with no prior width to transition FROM, snapping
+instantly no matter what the CSS said. Fixed with a new `combatantEls`
+map of persistent per-combatant DOM handles, built once by `renderVsHeader`
+and then mutated in place every ordinary frame by `updateVsHeader`/
+`applyCombatantState` — the fill bar is now the SAME element across
+frames, so its `width` change genuinely interpolates. Nudged the
+transition itself a little longer (0.25s → 0.4s) now that it actually
+runs. Still rebuilds fully on a genuinely new engagement, or if `ids`
+widens mid-battle (a pack-hunt assist joining — `idsWidened`), since
+`updateVsHeader` has nothing to update for a combatant it's never seen.
+
+**Downed unit keeps its level; no more parentheses.** The header used to
+squeeze level/status into the name line as `"Name (Lv42)"`/`"Name
+(down)"` — the latter REPLACING the level entirely once dead. Now two
+separate lines: the name, and a `.battle-screen-level` line reading
+`"Lv 42"` normally or `"Down · Lv 42"` once fainted/dead — level always
+shown, no parens anywhere. The herd name keeps its existing separate line
+above the HP bar, unchanged, per the ask's own parenthetical carve-out.
+The scrolling combat lines had a second, easy-to-miss source of
+parentheses too: every line used the shared `idLabel` (notableTitles.ts),
+which appends `"(id, herd)"` — redundant here since the header chips
+already show full identity per combatant. New `battleName` (battle-
+Screen-local, not touching `idLabel` itself, which the plain Event Log
+and Chronicle still want in full) is just leader-icon + notable-full-name-
+or-species, no id/herd suffix — used everywhere this file previously
+called `idLabel`. The `"(HP left: N)"` parenthetical on damage lines is
+gone outright rather than de-parenthesized — redundant now that the HP
+bar animates live right above the log.
+
+**Reveal pacing.** `LINE_REVEAL_INTERVAL_MS` raised from 160ms to 450ms
+("more pause between each log line"). New `POST_CATCHUP_HOLD_MS = 1000`:
+once the reveal has fully caught up (nothing left pending), the FIRST
+line of the next batch waits this longer gap before appearing — "a 1000
+ms pause after the last one" — while every line after that within the
+same batch still just uses the ordinary interval. Tracked via a new
+`caughtUpAtMs` field, stamped the frame `revealedCount` reaches
+`lines.length` and cleared the moment that hold gets spent on the next
+reveal.
+
+Verified via typecheck and the existing engine/data suites only, at the
+user's direction (no live Playwright pass this round) — pure web-display
+changes, engine (46 files, 1250 tests) and data (2 files, 240 tests)
+suites unaffected and still green.
+
+## Fixed: courtship (bonds/eggs/shelters) could be starved out entirely
+
+Direct report, after the deploy above went live: "you got rid of all the
+other autocam stuff like bonds and evos and hatching in the battle logs."
+
+Confirmed empirically before touching anything — a real 8000-tick run,
+threading every real event through a live `AutoCameraController`, counted
+how many times each category actually became the active engagement:
+`clash: 45, immigration: 9, battle: 26, evolution: 6, hatch: 4, death: 4,
+courtship: 0` — zero, despite 51 real bonded/eggLaid/shelterBuilt events
+happening in that same run. Every other category got shown at least a
+handful of times; only courtship was fully erased.
+
+Root cause: `popNextEngagement`'s existing, intentional priority order
+(battle > clash > any other one-shot > courtship, from an earlier
+session's own direct ask) has no floor. In a living world, SOME
+non-courtship one-shot or continuous fight is essentially always
+available, so courtship — always compared last — can lose literally every
+single time forever, not just "usually." Fixed with a starvation guard:
+a new `queuedAtTick` field (stamped when an engagement is first queued,
+distinct from `expiresOrLastActiveTick`'s dwell-deadline meaning once
+active) lets `popNextEngagement` check how long the oldest queued
+courtship entry has been waiting; past `COURTSHIP_STARVATION_TICKS`
+(400), it jumps back to the front of the one-shot tier — still behind
+battle/clash (genuinely time-sensitive, unconditionally first), but ahead
+of a fresher non-courtship one-shot that would otherwise keep bumping it
+forever. Re-ran the same empirical check after the fix: `courtship: 20`,
+every other category still shown too.
+
+### Also this round: legend tab removed, Events moved last; mobile mob-fight cap
+
+Two quick follow-up UI asks in the same message:
+
+**"remove the legend tab and move events to the right most."** The
+Legend tab/page and its wiring (`tab-legend`, `#legend`, `renderLegend`,
+the `PanelTab` union's `"legend"` member, and the now-dead `#legend`/
+`.legend-*` CSS) are gone; the tab bar is now Inspector → Battle →
+Chronicle → Events, in both index.html and main.ts's own `TAB_BUTTONS`/
+`TAB_PAGES` order. `legend.ts` itself is left on disk, just unwired, in
+case its content is worth reviving elsewhere later.
+
+**"can you just really limit the ui to two units hp bar at a time and
+just say there's more units in the fight on mobile? It's hard to see
+what's going on."** A mob fight already gave every participant its own
+chip (an earlier session's own direct ask) — genuinely hard to read once
+several chips wrap across multiple rows on a phone-width panel. Rather
+than reverting that desktop behavior, `renderVsHeader` now stamps a
+`data-idx` (participant order) on every chip/VS-label and always appends
+a `.battle-screen-extra` "+N more in this fight" note when there are more
+than two — purely inert markup on desktop. index.html's existing
+`@media (max-width: 900px)` breakpoint (the same one the rest of the app
+already treats as "mobile layout") is what actually hides every chip/
+label past the first two and reveals the note; nothing needs to detect
+the viewport itself or react to resize.
+
+### Verification
+
+No vitest suite exists for `packages/web`; verified live via Playwright.
+Tab bar: `["tab-inspector", "tab-battle-screen", "tab-chronicle",
+"tab-events"]`, with `#tab-legend`/`#legend` both absent. A synthetic
+5-combatant battle at a 390px (phone) viewport: 5 chips built into the
+DOM, but only 2 actually visible (`getComputedStyle(...).display`), with
+`.battle-screen-extra` visible and reading "+3 more in this fight". Full
+monorepo typecheck clean; engine (46 files, 1250 tests) and data (2
+files, 240 tests) suites unaffected and still green.

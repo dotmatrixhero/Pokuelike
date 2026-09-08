@@ -1,7 +1,7 @@
 import { notableFullName, speciesDisplayName, typeEffectiveness, type Agent, type SimEvent, type World } from "@pokuelike/engine";
 import type { ActiveEngagementInfo, NotableCategory } from "./autoCamera.js";
 import { eventNamesAnyOf, findMoveUsed } from "./eventText.js";
-import { herdNameOf, idLabel, LEADER_ICON } from "./notableTitles.js";
+import { herdNameOf, leaderPrefix } from "./notableTitles.js";
 import { agentAccentColor } from "./palette.js";
 import { getSprite } from "./sprites.js";
 
@@ -49,6 +49,25 @@ function hasRichBattleScreen(category: NotableCategory | undefined): boolean {
 }
 
 /**
+ * Plain display name for a combatant, used everywhere WITHIN the Battle
+ * Screen — leader icon + notable full name or species, deliberately
+ * WITHOUT `notableTitles.ts`'s own `idLabel`'s "(id, herd)" suffix. Direct
+ * ask: "Lets remove the parentheses altogether in the battle log (but
+ * keep the herd name above hp bar)." This panel's header chips already
+ * show id/level/herd on their own separate lines (see
+ * `applyCombatantState`), so repeating "(32, the Kinglers of the Bright
+ * Coast)" after every single name in every scrolling log line was the
+ * actual clutter — `idLabel` itself is untouched for every OTHER consumer
+ * (the plain Event Log, Chronicle) that still wants that full identity in
+ * one line.
+ */
+function battleName(world: World, id: string, rawSpecies: string): string {
+  const agent = world.agents.find((a) => a.id === id) as Agent | undefined;
+  if (!agent) return speciesDisplayName(rawSpecies);
+  return `${leaderPrefix(agent)}${agent.notableTitle ? notableFullName(agent.notableTitle, agent.id, agent.types) : speciesDisplayName(agent.species)}`;
+}
+
+/**
  * How long a freshly-ingested line waits before it's actually revealed in
  * the log, one at a time — direct ask: "It'd be nice to have battle logs
  * and go loss and moves and the moves in a battle pop up in animated form,
@@ -63,13 +82,32 @@ function hasRichBattleScreen(category: NotableCategory | undefined): boolean {
  * a new batch on top of it, rather than the reveal queue perpetually
  * trailing the sim.
  *
- * Raised 160 -> 200ms alongside that cadence. At 160ms against a 650ms tick
- * a four-line hit consumed 640 of the available 650, so lines arrived in an
- * essentially unbroken stream; 800 of 950 leaves a real gap between
- * exchanges, which is what lets the eye find the boundary between one hit
- * and the next.
+ * Direct follow-up ask: "Need more pause between each log line" — raised
+ * from the original 160ms.
+ *
+ * **Unresolved tension, flagged rather than silently retuned.** A parallel
+ * branch independently raised this to 200ms, reasoning against the tick
+ * cadence (now `BATTLE_STEP_INTERVAL_MS` = 950ms in main.ts): at 200ms a
+ * four-line hit consumes 800 of the available 950, leaving a real gap
+ * between exchanges without the reveal queue ever trailing the sim. At
+ * 450ms that same four-line hit needs 1800ms against a 950ms tick, so
+ * during a sustained exchange the reveal *does* fall behind and
+ * `MAX_PENDING_LINES`'s instant-catch-up path is what bounds the lag.
+ *
+ * 450ms is kept because it came from an explicit direct ask and is the more
+ * recent decision; the cadence argument for 200ms is recorded here because
+ * it is a real objection, not because it has been overruled on the merits.
+ * This is a balance number and belongs to the user — see TODO.md.
  */
-const LINE_REVEAL_INTERVAL_MS = 200;
+const LINE_REVEAL_INTERVAL_MS = 450;
+/**
+ * Extra hold once the reveal has fully caught up (nothing pending) before
+ * the FIRST line of the next batch is allowed to appear — direct ask: "and
+ * a 1000 ms pause after the last one." Only the one line right after a
+ * catch-up waits this long; every line after that within the same new
+ * batch still just uses `LINE_REVEAL_INTERVAL_MS`. See `caughtUpAtMs`.
+ */
+const POST_CATCHUP_HOLD_MS = 1000;
 /**
  * If the reveal queue ever falls behind by more than this many lines (a
  * mob fight landing several simultaneous hits in one tick, or the viewer
@@ -91,8 +129,10 @@ export class BattleScreenPanel {
   private lines: BattleLine[] = [];
   /** How many of `lines`, from the front, have actually been revealed to the DOM — see `LINE_REVEAL_INTERVAL_MS`. `render` advances this at most one line per interval (or catches up instantly past `MAX_REVEAL_BACKLOG`), so a freshly-`ingest`-ed batch of lines animates in individually rather than appearing all at once. */
   private revealedCount = 0;
-  /** `performance.now()` the last time `revealedCount` advanced — what `LINE_REVEAL_INTERVAL_MS` counts elapsed real time against. `undefined` means "reveal immediately," used right after a reset/new engagement so the opening line never waits on the timer. */
+  /** `performance.now()` the last time `revealedCount` advanced — what `LINE_REVEAL_INTERVAL_MS`/`POST_CATCHUP_HOLD_MS` count elapsed real time against. `undefined` means "reveal immediately," used right after a reset/new engagement so the opening line never waits on the timer. */
   private lastRevealAtMs: number | undefined;
+  /** `performance.now()` the moment `revealedCount` most recently caught all the way up to `lines.length` (nothing left pending) — `undefined` while there's still a backlog, or once the post-catchup hold has already been consumed by revealing the next batch's first line. See `POST_CATCHUP_HOLD_MS`. */
+  private caughtUpAtMs: number | undefined;
   /** Set once a battle's conclusion (a death/faint/flee) has been rendered — the epilogue hold that follows shouldn't add a fresh "battle begins" framing if somehow re-entered, and gets a distinct "concluded" visual treatment (see render's `.battle-screen-concluded`). */
   private concluded = false;
   private dirty = true;
@@ -104,6 +144,20 @@ export class BattleScreenPanel {
   private logEl: HTMLElement | undefined;
   private headerEl: HTMLElement | undefined;
   private renderedSeq: number | undefined;
+  /**
+   * Per-combatant DOM handles, keyed by agent id — populated by
+   * `renderVsHeader` on a full (re)build, then mutated in place by
+   * `updateVsHeader` every ordinary frame instead of tearing the header
+   * down and rebuilding it. Direct ask: "Hp should be interpolating down,
+   * animated when unit takes damage." A CSS `transition` on
+   * `.battle-screen-hp-fill`'s `width` (index.html) can only ever animate
+   * a change on the SAME element across frames — the old code called
+   * `headerEl.replaceWith(fresh)` every single frame regardless of whether
+   * anything changed, so the fill bar's width always "changed" on a brand
+   * new element with no prior width to transition from, snapping instantly
+   * no matter what CSS said. `undefined` while idle/between engagements.
+   */
+  private combatantEls: Map<string, CombatantEls> | undefined;
 
   constructor(private readonly container: HTMLElement) {}
 
@@ -116,11 +170,13 @@ export class BattleScreenPanel {
     this.lines = [];
     this.revealedCount = 0;
     this.lastRevealAtMs = undefined;
+    this.caughtUpAtMs = undefined;
     this.concluded = false;
     this.dirty = true;
     this.logEl = undefined;
     this.headerEl = undefined;
     this.renderedSeq = undefined;
+    this.combatantEls = undefined;
   }
 
   /**
@@ -223,18 +279,33 @@ export class BattleScreenPanel {
     if (this.revealedCount < this.lines.length) {
       const now = performance.now();
       const backlog = this.lines.length - this.revealedCount;
-      const dueByTimer = this.lastRevealAtMs === undefined || now - this.lastRevealAtMs >= LINE_REVEAL_INTERVAL_MS;
+      // The first line of a fresh batch (right after a real catch-up) waits
+      // the longer `POST_CATCHUP_HOLD_MS`; every line after that within the
+      // same batch uses the ordinary `LINE_REVEAL_INTERVAL_MS` pace.
+      const requiredGap = this.caughtUpAtMs !== undefined ? POST_CATCHUP_HOLD_MS : LINE_REVEAL_INTERVAL_MS;
+      const dueByTimer = this.lastRevealAtMs === undefined || now - this.lastRevealAtMs >= requiredGap;
       const toReveal = backlog > MAX_REVEAL_BACKLOG ? backlog - MAX_REVEAL_BACKLOG : dueByTimer ? 1 : 0;
       if (toReveal > 0) {
         this.revealedCount = Math.min(this.lines.length, this.revealedCount + toReveal);
         this.lastRevealAtMs = now;
+        this.caughtUpAtMs = undefined; // the hold (if any) has now been spent
         this.dirty = true;
       }
+    } else if (this.caughtUpAtMs === undefined) {
+      // Just now fully caught up (this is the frame `revealedCount` reached
+      // `lines.length`) — stamp it so the next `ingest`'s first line gets
+      // the longer `POST_CATCHUP_HOLD_MS` gap instead of the ordinary pace.
+      this.caughtUpAtMs = performance.now();
     }
 
     const linesChanged = this.dirty;
 
-    if (isNewEngagement) {
+    // Widened mid-battle (a pack-hunt assist joining) — same `seq`, so not
+    // `isNewEngagement`, but `updateVsHeader` below has nothing to update
+    // for an id it's never seen, so this still needs a real rebuild.
+    const idsWidened = !isNewEngagement && !!this.ids && !!this.combatantEls && [...this.ids].some((id) => !this.combatantEls!.has(id));
+
+    if (isNewEngagement || idsWidened) {
       this.container.replaceChildren();
       this.headerEl = hasRichBattleScreen(this.activeCategory) && this.ids ? this.renderVsHeader(world) : undefined;
       if (this.headerEl) this.container.appendChild(this.headerEl);
@@ -243,12 +314,14 @@ export class BattleScreenPanel {
       this.container.appendChild(this.logEl);
       this.renderedSeq = this.activeSeq;
     } else if (hasRichBattleScreen(this.activeCategory) && this.ids && this.headerEl) {
-      // HP/names are live state — refresh the header in place every frame
-      // without touching the log element at all (that's what preserves its
-      // scroll position across frames it isn't otherwise dirty).
-      const fresh = this.renderVsHeader(world);
-      this.headerEl.replaceWith(fresh);
-      this.headerEl = fresh;
+      // HP/names are live state — updated in place every frame (text/src
+      // attributes, and the HP fill bar's `width`) without touching the log
+      // element at all (that's what preserves its scroll position across
+      // frames it isn't otherwise dirty) and, just as importantly, without
+      // tearing down and rebuilding the fill bar itself — see
+      // `combatantEls`'s own doc comment for why that used to defeat the
+      // HP bar's CSS transition entirely.
+      this.updateVsHeader(world);
     }
 
     this.container.classList.toggle("battle-screen-concluded", this.concluded);
@@ -275,63 +348,92 @@ export class BattleScreenPanel {
    * separator still sits between consecutive chips for the common 1-vs-1
    * case's familiar reading; a mob fight just reads as a longer wrapped row
    * of chips instead of a lost "+N more" count.
+   *
+   * Direct follow-up ask, on a real narrow-viewport screenshot: "can you
+   * just really limit the ui to two units hp bar at a time and just say
+   * there's more units in the fight on mobile? It's hard to see what's
+   * going on." A mob fight's chips wrapping across several rows genuinely
+   * doesn't fit a phone-width panel the way it does on desktop. Rather than
+   * ripping out the richer desktop behavior above, every chip/VS-label
+   * still gets built (`data-idx`, in participant order) and a
+   * `.battle-screen-extra` "+N more" note is always appended when there
+   * are more than two — index.html's own `@media (max-width: 900px)` rule
+   * (the same breakpoint the rest of this app already treats as "mobile
+   * layout") is what actually hides everything past the first two chips
+   * and shows the note; nothing here needs to know the viewport width
+   * itself, or re-run on resize.
    */
   private renderVsHeader(world: World): HTMLElement {
     const wrap = document.createElement("div");
     wrap.className = "battle-screen-vs";
     const ids = [...this.ids!];
+    const map = new Map<string, CombatantEls>();
     ids.forEach((id, i) => {
-      wrap.appendChild(this.renderCombatant(id, world));
+      const els = buildCombatant(id);
+      els.box.dataset.idx = String(i);
+      this.applyCombatantState(els, id, world);
+      wrap.appendChild(els.box);
+      map.set(id, els);
       if (i < ids.length - 1) {
         const vsLabel = document.createElement("div");
         vsLabel.className = "battle-screen-vs-label";
+        vsLabel.dataset.idx = String(i);
         vsLabel.textContent = "VS";
         wrap.appendChild(vsLabel);
       }
     });
+    if (ids.length > 2) {
+      const extra = document.createElement("div");
+      extra.className = "battle-screen-extra";
+      extra.textContent = `+${ids.length - 2} more in this fight`;
+      wrap.appendChild(extra);
+    }
+    this.combatantEls = map;
     return wrap;
   }
 
-  private renderCombatant(id: string, world: World): HTMLElement {
-    const agent = world.agents.find((a) => a.id === id) as Agent | undefined;
-    const accent = agentAccentColor(id);
-    const box = document.createElement("div");
-    box.className = "battle-screen-combatant";
-    box.style.borderLeftColor = accent;
-    const identRow = document.createElement("div");
-    identRow.className = "battle-screen-combatant-ident";
-    const sprite = agent ? getSprite(agent.species, "down") : null;
-    if (sprite) {
-      const img = document.createElement("img");
-      img.src = sprite.src;
-      img.alt = agent!.species;
-      img.className = "battle-screen-sprite";
-      identRow.appendChild(img);
+  /** Updates every already-built combatant chip in place (text/src/HP-bar width) — see `combatantEls`'s own doc comment for why this, not a rebuild, is what lets the HP bar's CSS transition actually animate. */
+  private updateVsHeader(world: World): void {
+    for (const id of this.ids ?? []) {
+      const els = this.combatantEls?.get(id);
+      if (els) this.applyCombatantState(els, id, world);
     }
-    const name = document.createElement("div");
-    name.className = "battle-screen-name";
-    name.style.color = accent;
+  }
+
+  /** Writes one combatant's current live state into its already-built DOM handles — called both right after `buildCombatant` (initial paint) and every ordinary frame after (an in-place update, not a rebuild). */
+  private applyCombatantState(els: CombatantEls, id: string, world: World): void {
+    const agent = world.agents.find((a) => a.id === id) as Agent | undefined;
+    const sprite = agent ? getSprite(agent.species, "down") : null;
+    if (sprite && els.img.src !== sprite.src) {
+      els.img.src = sprite.src;
+      els.img.alt = agent!.species;
+      els.img.hidden = false;
+    } else if (!sprite) {
+      els.img.hidden = true;
+    }
+
     // A notable fights under its full earned name ("Surgeshade
     // Single-Minded"), not the bare title ("The Warrior") this used to show
     // — direct ask, and it is the same name the chronicle and the event log
-    // now use for the same animal.
-    name.textContent = agent
-      ? `${agent.isHerdLeader ? `${LEADER_ICON} ` : ""}${agent.notableTitle ? notableFullName(agent.notableTitle, agent.id, agent.types) : speciesDisplayName(agent.species)} (${agent.alive === false ? "down" : "Lv" + (agent.level ?? "?")})`
-      : id;
-    identRow.appendChild(name);
-    box.appendChild(identRow);
+    // now use for the same animal. Direct follow-up ask: "Lets remove the
+    // parentheses altogether in the battle log" — name and level/status are
+    // now two separate lines instead of "Name (Lv42)"/"Name (down)"; a
+    // downed unit still shows its level too ("A downed unit should still
+    // say their lvl"), not just "down" in place of it.
+    els.nameEl.textContent = agent ? battleName(world, id, agent.species) : id;
+    els.levelEl.textContent = agent ? `${agent.alive === false ? "Down · " : ""}Lv ${agent.level ?? "?"}` : "";
+    els.levelEl.hidden = !agent;
 
     // Which group this animal is fighting for. Direct ask: "in battle logs
     // and their hp bar, use herd name." It earns its line here more than
     // anywhere else — a mob fight is a wrapped row of same-species chips,
     // and the herd is the only thing that says which side each one is on.
+    // Direct follow-up: "keep the herd name above hp bar" — unchanged
+    // position, own line, no parentheses either.
     const herd = agent ? herdNameOf(world, agent) : undefined;
-    if (herd) {
-      const herdEl = document.createElement("div");
-      herdEl.className = "battle-screen-herd";
-      herdEl.textContent = herd;
-      box.appendChild(herdEl);
-    }
+    els.herdEl.textContent = herd ?? "";
+    els.herdEl.hidden = !herd;
+
     if (agent && agent.maxHp) {
       // Rounded for display only — combat math elsewhere in the engine can
       // leave HP as a non-integer fraction (partial-tick regen, fractional
@@ -341,21 +443,70 @@ export class BattleScreenPanel {
       const hp = Math.max(0, Math.round(agent.hp ?? 0));
       const max = Math.round(agent.maxHp);
       const frac = Math.max(0, Math.min(1, hp / max));
-      const track = document.createElement("div");
-      track.className = "battle-screen-hp-track";
-      const fill = document.createElement("div");
-      fill.className = "battle-screen-hp-fill";
-      fill.style.width = `${Math.round(frac * 100)}%`;
-      fill.style.background = frac > 0.5 ? "#7be08a" : frac > 0.2 ? "#f5d76e" : "#ff6b6b";
-      track.appendChild(fill);
-      box.appendChild(track);
-      const value = document.createElement("div");
-      value.className = "battle-screen-hp-value";
-      value.textContent = `${hp} / ${max} HP`;
-      box.appendChild(value);
+      els.hpTrack.hidden = false;
+      // Only the WIDTH is set here every frame — `.battle-screen-hp-fill`'s
+      // own CSS `transition` (index.html) is what actually animates it from
+      // whatever width it was already at down/up to this one. Direct ask:
+      // "Hp should be interpolating down, animated when unit takes damage."
+      els.hpFill.style.width = `${Math.round(frac * 100)}%`;
+      els.hpFill.style.background = frac > 0.5 ? "#7be08a" : frac > 0.2 ? "#f5d76e" : "#ff6b6b";
+      els.hpValue.textContent = `${hp} / ${max} HP`;
+    } else {
+      els.hpTrack.hidden = true;
     }
-    return box;
   }
+}
+
+/** Persistent per-combatant DOM handles — see `BattleScreenPanel.combatantEls`'s own doc comment for why these survive frame to frame instead of being torn down and rebuilt. */
+interface CombatantEls {
+  box: HTMLElement;
+  img: HTMLImageElement;
+  nameEl: HTMLElement;
+  levelEl: HTMLElement;
+  herdEl: HTMLElement;
+  hpTrack: HTMLElement;
+  hpFill: HTMLElement;
+  hpValue: HTMLElement;
+}
+
+/** Builds one combatant chip's DOM skeleton once — content/visibility is filled in (and later kept live) by `BattleScreenPanel.applyCombatantState`. */
+function buildCombatant(id: string): CombatantEls {
+  const accent = agentAccentColor(id);
+  const box = document.createElement("div");
+  box.className = "battle-screen-combatant";
+  box.style.borderLeftColor = accent;
+
+  const identRow = document.createElement("div");
+  identRow.className = "battle-screen-combatant-ident";
+  const img = document.createElement("img");
+  img.className = "battle-screen-sprite";
+  img.hidden = true;
+  identRow.appendChild(img);
+  const nameEl = document.createElement("div");
+  nameEl.className = "battle-screen-name";
+  nameEl.style.color = accent;
+  identRow.appendChild(nameEl);
+  box.appendChild(identRow);
+
+  const levelEl = document.createElement("div");
+  levelEl.className = "battle-screen-level";
+  box.appendChild(levelEl);
+
+  const herdEl = document.createElement("div");
+  herdEl.className = "battle-screen-herd";
+  box.appendChild(herdEl);
+
+  const hpTrack = document.createElement("div");
+  hpTrack.className = "battle-screen-hp-track";
+  const hpFill = document.createElement("div");
+  hpFill.className = "battle-screen-hp-fill";
+  hpTrack.appendChild(hpFill);
+  box.appendChild(hpTrack);
+  const hpValue = document.createElement("div");
+  hpValue.className = "battle-screen-hp-value";
+  box.appendChild(hpValue);
+
+  return { box, img, nameEl, levelEl, herdEl, hpTrack, hpFill, hpValue };
 }
 
 /** Display-only rounding for a raw engine damage/HP number that can carry float noise (partial-tick regen, fractional damage) — see the doc comment on the HP-bar rendering above for why this is presentation, not a claim about the underlying value's precision. */
@@ -440,8 +591,8 @@ function battleLinesFor(event: SimEvent, world: World): BattleLine[] {
     case "missed":
       return [...moveOpeningLines(event, "used", world), { kind: "miss", text: "But it missed!" }];
     case "herdClash": {
-      const attacker = idLabel(world, event.attackerId, event.attackerSpecies);
-      const defender = idLabel(world, event.defenderId, event.defenderSpecies);
+      const attacker = battleName(world, event.attackerId, event.attackerSpecies);
+      const defender = battleName(world, event.defenderId, event.defenderSpecies);
       if (event.outcome === "missed") {
         return [
           { kind: "move", text: `${attacker} clashes with ${defender}!`, agentId: event.attackerId },
@@ -453,20 +604,20 @@ function battleLinesFor(event: SimEvent, world: World): BattleLine[] {
         ...(event.critical ? [{ kind: "crit" as const, text: "A critical hit!" }] : []),
         {
           kind: "damage",
-          text: `${defender} takes ${roundForDisplay(event.damage)} damage!${event.defenderHpRemaining !== undefined ? ` (HP left: ${roundForDisplay(event.defenderHpRemaining)})` : ""}`,
+          text: `${defender} takes ${roundForDisplay(event.damage)} damage!`,
           agentId: event.defenderId,
         },
         ...(event.outcome === "retreated" ? [{ kind: "retreat" as const, text: `${defender} backs off!` }] : []),
       ];
     }
     case "fainted":
-      return [{ kind: "faint", text: `${idLabel(world, event.agentId, event.species)} fainted!` }];
+      return [{ kind: "faint", text: `${battleName(world, event.agentId, event.species)} fainted!` }];
     case "behaviorChanged":
-      return event.to === "flee" ? [{ kind: "retreat", text: `${idLabel(world, event.agentId, event.species)} flees from the battle!` }] : [];
+      return event.to === "flee" ? [{ kind: "retreat", text: `${battleName(world, event.agentId, event.species)} flees from the battle!` }] : [];
     case "killed":
-      return [{ kind: "conclusion", text: `${idLabel(world, event.preyId, event.preySpecies)} was defeated by ${idLabel(world, event.predatorId, event.predatorSpecies)}!` }];
+      return [{ kind: "conclusion", text: `${battleName(world, event.preyId, event.preySpecies)} was defeated by ${battleName(world, event.predatorId, event.predatorSpecies)}!` }];
     case "defeated":
-      return [{ kind: "conclusion", text: `${idLabel(world, event.winnerId, event.winnerSpecies)} defeated ${idLabel(world, event.loserId, event.loserSpecies)}!` }];
+      return [{ kind: "conclusion", text: `${battleName(world, event.winnerId, event.winnerSpecies)} defeated ${battleName(world, event.loserId, event.loserSpecies)}!` }];
     default:
       return [];
   }
@@ -475,7 +626,7 @@ function battleLinesFor(event: SimEvent, world: World): BattleLine[] {
 /** The "X used Move!" opening line(s) shared by both `fought` and `missed` — a super/not-very-effective callout is only ever meaningful on `fought` (a miss deals no damage to be effective *against*), so this stays deliberately narrower than `moveLines`. */
 function moveOpeningLines(event: { attackerId: string; attackerSpecies: string; moveId: string }, verb: string, world: World): BattleLine[] {
   const move = findMoveUsed(event, world);
-  return [{ kind: "move", text: `${idLabel(world, event.attackerId, event.attackerSpecies)} ${verb} ${move?.name ?? event.moveId}!`, agentId: event.attackerId }];
+  return [{ kind: "move", text: `${battleName(world, event.attackerId, event.attackerSpecies)} ${verb} ${move?.name ?? event.moveId}!`, agentId: event.attackerId }];
 }
 
 function moveLines(event: Extract<SimEvent, { kind: "fought" }>, verb: string, world: World): BattleLine[] {
@@ -493,7 +644,7 @@ function moveLines(event: Extract<SimEvent, { kind: "fought" }>, verb: string, w
 
   lines.push({
     kind: "damage",
-    text: `${idLabel(world, event.defenderId, event.defenderSpecies)} takes ${roundForDisplay(event.damage)} damage! (HP left: ${roundForDisplay(event.defenderHpRemaining)})`,
+    text: `${battleName(world, event.defenderId, event.defenderSpecies)} takes ${roundForDisplay(event.damage)} damage!`,
     agentId: event.defenderId,
   });
   return lines;
