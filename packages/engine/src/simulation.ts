@@ -3,6 +3,7 @@ import type { EventLog } from "./events.js";
 import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import type { RegionDispersalContext } from "./dispersal.js";
 import { growCanopyFood, growFlora, growUndergroundFlora, maybeDropSeed } from "./flora.js";
+import { applyFireDamage, tickFires } from "./fire.js";
 import { decayShelters } from "./shelter.js";
 import { tickEgg } from "./eggs.js";
 import { updateHerdMigrations } from "./herdMigration.js";
@@ -227,6 +228,12 @@ export function tickWorld(
       maybeDropSeed(world, agent.layer, agent.pos, log, rng);
     }
   }
+  // Before growFlora, so a tile that burned out this tick is already
+  // scorched "floor" when the flora pass considers regrowth — fire clears
+  // ground first, then the world decides what grows back into it.
+  // Once per tick, not once per agent, same as growFlora below.
+  tickFires(world, log, rng);
+  applyFireDamage(world, log, rng);
   growFlora(world, log, rng);
   // Once per tick, not once per agent — same "world-level system, one pass"
   // shape as growFlora above, its Underground counterpart: real crops

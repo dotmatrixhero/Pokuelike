@@ -11,6 +11,16 @@ import type { Disposition } from "../src/nature.js";
 import { EGG_INCUBATION_TICKS, tickEgg } from "../src/eggs.js";
 
 /**
+ * Seed for every world in this file, so a test never depends on an
+ * unseeded RNG draw. Chasing an intermittent full-suite failure showed the
+ * cause was not shared state across files (the theory for most of a
+ * session) but plain unseeded randomness inside individual tests — a
+ * different test lost a coin flip on each run, and every one of them passed
+ * in isolation.
+ */
+const DETERMINISTIC_TEST_SEED = 12345;
+
+/**
  * Runs `applyMateSeeking` on `mother` (the turn that actually resolves
  * contact — see that function's own doc comment) up to `maxTicks` times,
  * stopping the moment an egg appears in `world.agents`. Direct instruction:
@@ -130,7 +140,7 @@ function parent(id: string, sex: "male" | "female", pos: { x: number; y: number 
 
 describe("reproduction", () => {
   it("a mature pair closes distance toward each other", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 6, y: 2 }));
 
     tickWorld(world);
@@ -140,7 +150,7 @@ describe("reproduction", () => {
   });
 
   it("an adjacent mature pair bonds (not an instant offspring) and resets mateDrive, when there's no shelter yet", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
     const log = new EventLog();
 
@@ -167,7 +177,7 @@ describe("reproduction", () => {
     // (SHELTER_TILE_EGG_CAP=4) — so this test checks "at least one real
     // egg, not an instant newborn," not an exact count; see the dedicated
     // clutch-size tests below for the exact-count behavior.
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 3, "shelter");
     world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
     const log = new EventLog();
@@ -194,7 +204,7 @@ describe("reproduction", () => {
     // (SHELTER_TILE_EGG_CAP=1 per tile) -> exactly enough for the whole
     // clutch to fit. Force the clutch-size draw to its max via a fixed rng
     // so this test is deterministic rather than "usually more than one egg."
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 3, "shelter");
     setTile(world, "surface", 3, 3, "shelter");
     setTile(world, "surface", 4, 3, "shelter");
@@ -216,7 +226,7 @@ describe("reproduction", () => {
     // free slot — the clutch-size draw forced to its max (4) should still
     // only place 1, not cram the rest in or drop the whole household's egg
     // count to 0.
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 3, "shelter");
     world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
     const log = new EventLog();
@@ -233,7 +243,7 @@ describe("reproduction", () => {
     // (SHELTER_TILE_EGG_CAP - 1 existing eggs), so free room scales 1:1
     // with tile count regardless of the cap's own absolute value.
     function layWithClusterSize(shelterTiles: number): number {
-      const world = createWorld(10, 10);
+      const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
       const existing: Agent[] = [];
       for (let i = 0; i < shelterTiles; i++) {
         setTile(world, "surface", 2 + i, 3, "shelter");
@@ -252,7 +262,7 @@ describe("reproduction", () => {
   });
 
   it("each egg in a clutch is an independent Agent instance — hatching/eating one doesn't affect its siblings", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 3, "shelter");
     setTile(world, "surface", 3, 3, "shelter");
     world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
@@ -282,7 +292,7 @@ describe("reproduction", () => {
     // position is now wherever the actual shelter tile is — a real,
     // different anti-stacking mechanism (occupancy.ts's shelter capacity)
     // layered on top.
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 5, 8, "shelter");
     const mother: Agent = { ...parent("mother", "female", { x: 5, y: 5 }), herdId: undefined };
     const father: Agent = { ...parent("father", "male", { x: 5, y: 6 }), herdId: undefined };
@@ -301,7 +311,7 @@ describe("reproduction", () => {
     // conversion now happens at hatch time (eggs.ts's `tickEgg`), not at lay
     // time — the egg itself carries the mother's own (possibly evolved)
     // species until then.
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 3, "shelter");
     const mother: Agent = { ...parent("mother", "female", { x: 2, y: 2 }), species: "venusaur" };
     const father: Agent = { ...parent("father", "male", { x: 3, y: 2 }), species: "venusaur" };
@@ -317,7 +327,7 @@ describe("reproduction", () => {
   });
 
   it("a Bulbasaur and a Charmander can breed — real cross-species pair sharing the monster egg group", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 3, "shelter");
     const mother: Agent = { ...parent("mother", "female", { x: 2, y: 2 }), species: "charmander", herdId: undefined };
     const father: Agent = { ...parent("father", "male", { x: 3, y: 2 }), species: "bulbasaur", herdId: undefined };
@@ -334,7 +344,7 @@ describe("reproduction", () => {
   });
 
   it("species that share no egg group can't breed at all — Scyther and Bulbasaur", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 3, "shelter");
     const mother: Agent = { ...parent("mother", "female", { x: 2, y: 2 }), species: "scyther", herdId: undefined };
     const father: Agent = { ...parent("father", "male", { x: 3, y: 2 }), species: "bulbasaur", herdId: undefined };
@@ -346,7 +356,7 @@ describe("reproduction", () => {
   });
 
   it("an unclassified species (no eggGroups data) still breeds with its own kind", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 3, "shelter");
     const mother: Agent = { ...parent("mother", "female", { x: 2, y: 2 }), species: "mysteryon", herdId: undefined };
     const father: Agent = { ...parent("father", "male", { x: 3, y: 2 }), species: "mysteryon", herdId: undefined };
@@ -362,7 +372,7 @@ describe("reproduction", () => {
   });
 
   it("an unclassified species can't cross-breed with anything else", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 3, "shelter");
     const mother: Agent = { ...parent("mother", "female", { x: 2, y: 2 }), species: "mysteryon", herdId: undefined };
     const father: Agent = { ...parent("father", "male", { x: 3, y: 2 }), species: "bulbasaur", herdId: undefined };
@@ -378,7 +388,7 @@ describe("reproduction", () => {
     // to fight, and silently missing their guaranteed per-level-up skill
     // point since grantExp reads agent.types?.[0]. The backfill now happens
     // at hatch time (eggs.ts's `tickEgg`), same call (`ensureCombatProfile`).
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 3, "shelter");
     world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
 
@@ -394,7 +404,7 @@ describe("reproduction", () => {
   });
 
   it("an immature agent doesn't seek a mate even with high mateDrive", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     const youngster: Agent = { ...parent("young", "female", { x: 2, y: 2 }), age: 5 };
     world.agents.push(youngster, parent("father", "male", { x: 3, y: 2 }));
 
@@ -404,7 +414,7 @@ describe("reproduction", () => {
   });
 
   it("same-sex agents don't pair", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     world.agents.push(parent("a", "female", { x: 2, y: 2 }), parent("b", "female", { x: 3, y: 2 }));
 
     tickWorld(world);
@@ -417,7 +427,7 @@ describe("reproduction", () => {
       // Real bug this fixes: a founding Venusaur guardian with no
       // predator fathered most of a herd's growth over a real run,
       // including with his own daughters and granddaughters.
-      const world = createWorld(10, 10);
+      const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
       const father: Agent = parent("father", "male", { x: 2, y: 2 });
       const daughter: Agent = { ...parent("daughter", "female", { x: 3, y: 2 }), parentIds: ["some-mother", "father"] };
       world.agents.push(father, daughter);
@@ -428,7 +438,7 @@ describe("reproduction", () => {
     });
 
     it("full siblings (share both parents) don't pair", () => {
-      const world = createWorld(10, 10);
+      const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
       const a: Agent = { ...parent("a", "female", { x: 2, y: 2 }), parentIds: ["m", "f"] };
       const b: Agent = { ...parent("b", "male", { x: 3, y: 2 }), parentIds: ["m", "f"] };
       world.agents.push(a, b);
@@ -439,7 +449,7 @@ describe("reproduction", () => {
     });
 
     it("half-siblings (share one parent) don't pair", () => {
-      const world = createWorld(10, 10);
+      const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
       const a: Agent = { ...parent("a", "female", { x: 2, y: 2 }), parentIds: ["m", "f1"] };
       const b: Agent = { ...parent("b", "male", { x: 3, y: 2 }), parentIds: ["m", "f2"] };
       world.agents.push(a, b);
@@ -450,7 +460,7 @@ describe("reproduction", () => {
     });
 
     it("a grandparent and grandchild don't pair", () => {
-      const world = createWorld(10, 10);
+      const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
       const grandparent: Agent = parent("grandparent", "male", { x: 2, y: 2 });
       const grandchild: Agent = {
         ...parent("grandchild", "female", { x: 3, y: 2 }),
@@ -464,7 +474,7 @@ describe("reproduction", () => {
     });
 
     it("unrelated agents (including two founders with no parentIds) still pair normally", () => {
-      const world = createWorld(10, 10);
+      const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
       setTile(world, "surface", 2, 3, "shelter");
       world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
 
@@ -475,7 +485,7 @@ describe("reproduction", () => {
     });
 
     it("an egg's parentIds/grandparentIds are recorded correctly", () => {
-      const world = createWorld(10, 10);
+      const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
       setTile(world, "surface", 2, 3, "shelter");
       const mother: Agent = { ...parent("mother", "female", { x: 2, y: 2 }), parentIds: ["gm", "gf"] };
       const father: Agent = parent("father", "male", { x: 3, y: 2 }); // a founder, no parentIds
@@ -492,7 +502,7 @@ describe("reproduction", () => {
   });
 
   it("a hatchling gets its own randomly-assigned nature and disposition, not inherited from a parent (assigned at hatch, not at lay)", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 3, "shelter");
     world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
 
@@ -509,7 +519,7 @@ describe("reproduction", () => {
   });
 
   it("hatching logs a real eggHatched event for the narrative log", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 3, "shelter");
     world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 3, y: 2 }));
     const log = new EventLog();
@@ -530,7 +540,7 @@ describe("reproduction", () => {
 describe("sociability-driven mate-seeking radius", () => {
   it("a sociable agent closes distance on a mate a neutral agent wouldn't even detect", () => {
     const sociable: Disposition = { boldness: 0.5, aggression: 0.5, sociability: 1 };
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     // Distance 6 — beyond the neutral 5-tile search radius, within a fully sociable agent's ~7-tile radius.
     world.agents.push(
       parent("mother", "female", { x: 2, y: 2 }, { disposition: sociable }),
@@ -544,7 +554,7 @@ describe("sociability-driven mate-seeking radius", () => {
   });
 
   it("a neutral (no disposition) agent does NOT react to that same distant mate", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     world.agents.push(parent("mother", "female", { x: 2, y: 2 }), parent("father", "male", { x: 8, y: 2 }));
 
     tickWorld(world);
@@ -555,7 +565,7 @@ describe("sociability-driven mate-seeking radius", () => {
 
   it("an unsociable agent doesn't close distance on a mate a neutral agent would", () => {
     const unsociable: Disposition = { boldness: 0.5, aggression: 0.5, sociability: 0 };
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     // Distance 4 — within the neutral 5-tile radius, beyond an unsociable agent's ~3-tile radius.
     world.agents.push(
       parent("mother", "female", { x: 2, y: 2 }, { disposition: unsociable }),
@@ -571,7 +581,7 @@ describe("sociability-driven mate-seeking radius", () => {
 
 describe("matingRadiusBoostTicksRemaining (e.g. Sweet Scent) doubles the real mate-search radius", () => {
   it("a boosted neutral agent closes distance on a mate a plain neutral agent wouldn't even detect", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     // Distance 8 — beyond the neutral 5-tile radius, within a boosted (x2 -> ~10-tile) one.
     world.agents.push(
       parent("mother", "female", { x: 2, y: 2 }, { matingRadiusBoostTicksRemaining: 10 }),
@@ -585,7 +595,7 @@ describe("matingRadiusBoostTicksRemaining (e.g. Sweet Scent) doubles the real ma
   });
 
   it("the same distant mate goes undetected once the boost has expired", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     world.agents.push(
       parent("mother", "female", { x: 2, y: 2 }, { matingRadiusBoostTicksRemaining: 0 }),
       parent("father", "male", { x: 10, y: 2 })
@@ -609,7 +619,7 @@ describe("herd-status-driven mate preference", () => {
   // describe block is actually testing (rank-driven mate preference).
 
   it("prefers a higher-status suitor over a merely-nearer lower-status one at a comparable distance", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     // Distance 3 (moves in x) vs distance 4 (moves in y) — a 1-tile gap, well
     // inside STATUS_DISTANCE_BONUS (2), so status should flip the pick.
     world.agents.push(
@@ -626,7 +636,7 @@ describe("herd-status-driven mate preference", () => {
   });
 
   it("distance still dominates a large gap — a much-farther higher-status suitor does NOT beat a much-nearer lower-status one", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     // Distance 2 (moves in x) vs distance 5 (moves in y, still within the
     // neutral 5-tile search radius so both are real candidates) — a 3-tile
     // gap, exceeding STATUS_DISTANCE_BONUS (2), so the nearer suitor must
@@ -655,7 +665,7 @@ describe("cross-herd mating escape hatch (MATE_ISOLATION_TICKS)", () => {
   // rather than going through a full dispersal walk.
 
   it("a solo-herd agent does NOT mate across herds immediately — herd preference still holds before sustained isolation", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     const solo: Agent = { ...parent("mother", "female", { x: 5, y: 5 }, { herdId: "solo-herd-of-one" }) };
     const other: Agent = { ...parent("father", "male", { x: 6, y: 5 }, { herdId: "other-herd" }) };
     world.agents.push(solo, other);
@@ -671,7 +681,7 @@ describe("cross-herd mating escape hatch (MATE_ISOLATION_TICKS)", () => {
   it("a same-herd mate is still preferred over widening the search, even once isolated", () => {
     // Once the same-herd candidate becomes visible, ticksSinceEligibleMate
     // resets to 0 and normal herd-locked behavior applies again.
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     const mother: Agent = {
       ...parent("mother", "female", { x: 5, y: 5 }, { herdId: "herd-a" }),
       ticksSinceEligibleMate: 500,
@@ -686,7 +696,7 @@ describe("cross-herd mating escape hatch (MATE_ISOLATION_TICKS)", () => {
   });
 
   it("a solo-herd agent eventually mates across herds once its own herd has been sterile long enough", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 5, 6, "shelter");
     const solo: Agent = {
       ...parent("mother", "female", { x: 5, y: 5 }, { herdId: "solo-herd-of-one" }),
@@ -710,7 +720,7 @@ describe("cross-herd mating escape hatch (MATE_ISOLATION_TICKS)", () => {
     // Mating fires on the female's turn (applyMateSeeking), so her own scan
     // has to accept the isolated male even though *she* hasn't been isolated
     // — this is exactly why isEligibleMate checks either party's counter.
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 5, 6, "shelter");
     const father: Agent = {
       ...parent("father", "male", { x: 6, y: 5 }, { herdId: "solo-herd-of-one" }),
@@ -727,7 +737,7 @@ describe("cross-herd mating escape hatch (MATE_ISOLATION_TICKS)", () => {
   });
 
   it("solitary agents (no herdId at all) are unaffected — the escape hatch only concerns herd-locked agents", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 3, "shelter");
     const mother: Agent = { ...parent("mother", "female", { x: 2, y: 2 }), herdId: undefined };
     const father: Agent = { ...parent("father", "male", { x: 3, y: 2 }), herdId: undefined };
@@ -747,7 +757,7 @@ describe("cross-herd mating escape hatch (MATE_ISOLATION_TICKS)", () => {
  */
 describe("mate-seeking approach uses real BFS pathfinding for a MOVING partner (stepTowardMovingTarget)", () => {
   it("routes around an obstacle cluster while closing on a partner that keeps moving, instead of getting stuck", () => {
-    const world = createWorld(12, 12);
+    const world = createWorld(12, 12, DETERMINISTIC_TEST_SEED);
     // A wall spanning the whole width with a single gap, between the two
     // mates — kept within `mateSearchRadius`'s neutral 5-tile radius
     // throughout, since eligibility here is plain Manhattan distance,
@@ -794,7 +804,7 @@ describe("mate-seeking approach uses real BFS pathfinding for a MOVING partner (
   });
 
   it("gives up cleanly (falls back to greedy stepping, never throws) when the partner is genuinely unreachable", () => {
-    const world = createWorld(12, 12);
+    const world = createWorld(12, 12, DETERMINISTIC_TEST_SEED);
     // Box the father in on all four sides — no gap anywhere.
     for (let x = 4; x <= 6; x++) {
       setTile(world, "surface", x, 4, "tree");
@@ -820,7 +830,7 @@ describe("mate-seeking approach uses real BFS pathfinding for a MOVING partner (
   });
 
   it("stops pathfinding toward a partner once it leaves mate-search range mid-approach", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     const mother = parent("mother", "female", { x: 5, y: 0 });
     const father = parent("father", "male", { x: 5, y: 3 }); // within the neutral 5-tile mateSearchRadius
     world.agents.push(mother, father);

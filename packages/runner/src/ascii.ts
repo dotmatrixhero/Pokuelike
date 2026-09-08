@@ -39,6 +39,8 @@ const TERRAIN_GLYPH: Record<TerrainKind, string> = {
   sand: ":",
   mud: "=",
   shelter: "h",
+  // Fire reads as the one thing on the map that is actively happening.
+  fire: "*",
 };
 
 const TERRAIN_BG: Record<TerrainKind, Rgb> = {
@@ -55,6 +57,7 @@ const TERRAIN_BG: Record<TerrainKind, Rgb> = {
   sand: [92, 80, 50],
   mud: [42, 34, 22],
   shelter: [64, 50, 34],
+  fire: [96, 32, 10],
 };
 
 const TERRAIN_FG: Record<TerrainKind, Rgb> = {
@@ -71,6 +74,7 @@ const TERRAIN_FG: Record<TerrainKind, Rgb> = {
   sand: [214, 194, 140],
   mud: [110, 90, 60],
   shelter: [196, 158, 108],
+  fire: [255, 168, 64],
 };
 
 /**

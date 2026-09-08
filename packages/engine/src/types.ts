@@ -60,13 +60,44 @@ export type PassiveKind =
   | "damageReduction"
   | "immovable"
   | "regen"
+  /**
+   * Flat HP restored per tick, as opposed to `"regen"`'s fraction of max
+   * HP. Same out-of-combat gate, different scaling on purpose: a flat 1
+   * HP/tick is a real 3.3% to a 30-HP early unit and a marginal 1.4% to a
+   * 70-HP late one, so flat healing is what keeps early units alive without
+   * compounding into late-game invulnerability. Percent `"regen"` is
+   * reserved for capstones, where being disproportionately strong is the
+   * point. Direct framing: "adding more flat heal rather than percent...
+   * scale it better for early game survivors and less useful late game.
+   * Percent can be more intense capstone stuff."
+   */
+  | "regenFlat"
+  /**
+   * Flat HP taken off each incoming hit, as opposed to `"damageReduction"`'s
+   * fraction. Same early-strong/late-marginal scaling as `"regenFlat"`, and
+   * the same split of roles: the common tree nodes grant this, capstones
+   * grant the percentage. A landed hit always does at least
+   * `MIN_LANDED_DAMAGE`, so this never confers immunity to weak attacks.
+   */
+  | "damageReductionFlat"
   | "thorns"
   | "healAura"
   | "defenseBoost"
   | "aquaticHaste"
   | "nonTerritorial"
   | "calmingPresence"
-  | "unshaken";
+  | "unshaken"
+  /**
+   * Fraction of fire-terrain damage ignored (fire.ts's `applyFireDamage`),
+   * and at 1 the holder's passive healing is no longer suppressed by
+   * standing in fire either. A creature that lives in its own flames.
+   *
+   * Deliberately does NOT touch the `"burn"` status or Fire-type attack
+   * damage — those are the type chart's job. This is specifically about the
+   * hazard tile, which is what makes it a real reason to fight standing in
+   * your own wildfire rather than a generic resistance.
+   */
+  | "fireproof";
 
 /**
  * Why a herd is (or was) migrating — see herdMigration.ts/DESIGN.md's
@@ -186,7 +217,14 @@ export type TerrainKind =
   | "bush"
   | "sand"
   | "mud"
-  | "shelter";
+  | "shelter"
+  /**
+   * A tile that is actively on fire — see fire.ts. Walkable (you can run
+   * through a fire, it just hurts) and not opaque. Burns down over
+   * `Tile.burnTicksRemaining` and reverts to scorched "floor", spreading
+   * into adjacent `FLAMMABLE_TERRAIN` on the way.
+   */
+  | "fire";
 
 /**
  * Three layers share one x,y footprint. A species is native to one layer
@@ -230,6 +268,12 @@ export interface Tile {
   stock?: number;
   /** "seedling" tiles only: ticks since it took root. Becomes "food" or "flora" once mature — see flora.ts. */
   growth?: number;
+  /**
+   * "fire" tiles only: ticks of fuel left before the fire burns out and the
+   * tile reverts to scorched "floor" (fire.ts's `tickFires`). Re-igniting a
+   * burning tile refreshes this rather than stacking.
+   */
+  burnTicksRemaining?: number;
   /**
    * "bush" tiles only: true if standing here makes an agent harder to
    * detect — a real (not cosmetic) reduction to predation.ts's flee/hunt
@@ -767,6 +811,31 @@ export interface Agent {
    * agent, whether or not it holds the passive.
    */
   unshakenCooldownTicks?: number;
+
+  /**
+   * Ticks of PASSIVE-healing suppression left: while this is above 0, the
+   * `"regen"` and `"healAura"` passives do nothing (status.ts). Set by any
+   * damage taken — a hit landed, recoil, thorns, or standing in fire —
+   * and ticked down by `tickStatusEffects` (same bookkeeping shape as
+   * `unshakenCooldownTicks` above).
+   *
+   * This is the line between *passive* and *active* healing, and it exists
+   * because passive healing is the one kind that stacks without limit:
+   * `grantPassive` accumulates permanently across every node of every move
+   * a unit knows, so a long-lived agent trends toward the sum of every
+   * regen node it can reach. Measured on a real 20k-tick run before this
+   * gate existed: 117 of 167 living agents carried some `regen`, p90 6%
+   * per tick, max 11% — a full heal every 9 ticks, mid-fight, forever.
+   *
+   * Deliberately does NOT touch lifesteal, ally heals, or the fed/watered
+   * `applyHealOverTime` — those are either paid for by an action, capped by
+   * a real resource, or already gated on being fed. Direct framing: "make
+   * combat healing like leech seed different than passive healing, which
+   * requires unit to be out of combat."
+   *
+   * Absent/0 = healing normally, which is every agent not recently hurt.
+   */
+  regenSuppressedTicks?: number;
   /**
    * Ticks remaining during which this agent (and, per `MoveSpec.
    * statusImmunityAura`'s `radius`, any living same-herd ally within it)

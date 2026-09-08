@@ -6,6 +6,16 @@ import { EventLog } from "../src/events.js";
 import type { Agent } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 
+/**
+ * Seed for every world in this file, so a test never depends on an
+ * unseeded RNG draw. Chasing an intermittent full-suite failure showed the
+ * cause was not shared state across files (the theory for most of a
+ * session) but plain unseeded randomness inside individual tests — a
+ * different test lost a coin flip on each run, and every one of them passed
+ * in isolation.
+ */
+const DETERMINISTIC_TEST_SEED = 12345;
+
 // A real leak this session already hit once (see vitest.config.ts's "forks"
 // pool comment, added for the cross-FILE version of this bug): a bare
 // `vi.spyOn(Math, "random")` a few tests down (the "no tagged preference"
@@ -36,7 +46,7 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
 
 describe("tickAgent", () => {
   it("moves a thirsty agent toward the nearest water tile on its layer", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 4, 0, "water");
     const agent = makeAgent({ needs: createNeeds({ thirst: 0.1 }) });
 
@@ -47,7 +57,7 @@ describe("tickAgent", () => {
   });
 
   it("stays idle when all needs are satisfied", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ pos: { x: 2, y: 0 } });
 
     tickAgent(world, agent);
@@ -57,7 +67,7 @@ describe("tickAgent", () => {
   });
 
   it("drinks and restores thirst once it reaches the water tile", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "water");
     const agent = makeAgent({ pos: { x: 2, y: 0 }, needs: createNeeds({ thirst: 0.1 }) });
 
@@ -68,7 +78,7 @@ describe("tickAgent", () => {
   });
 
   it("crosses to a neighboring layer when its resource isn't on the home layer", () => {
-    const world = createWorld(3, 1);
+    const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 1, 0, "food");
     const agent = makeAgent({
       species: "diglett",
@@ -84,7 +94,7 @@ describe("tickAgent", () => {
   });
 
   it("returns to its home layer once idle away from home", () => {
-    const world = createWorld(3, 1);
+    const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ layer: "surface", homeLayer: "underground" });
 
     tickAgent(world, agent);
@@ -94,7 +104,7 @@ describe("tickAgent", () => {
   });
 
   it("eating depletes the food patch's stock, and a depleted patch is skipped as a target", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     const agent = makeAgent({ pos: { x: 2, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
 
@@ -109,7 +119,7 @@ describe("tickAgent", () => {
   });
 
   it("eating Herbs grants a real, short status-immunity window — CROPS_DESIGN.md's own 'humble remedy' hook, reusing Safeguard's field", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     tileAt(world, "surface", 2, 0)!.flavor = "herbs";
     const agent = makeAgent({ pos: { x: 2, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
@@ -121,7 +131,7 @@ describe("tickAgent", () => {
   });
 
   it("eating a real nutrition crop (not Herbs) does not grant status immunity", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     // corn, not pumpkin — pumpkin is underground-native and would require
     // digging (see the "layer-gated crop access" describe block below),
@@ -136,7 +146,7 @@ describe("tickAgent", () => {
 
   it("eating a high-quality patch restores noticeably more hunger than eating a low-quality one — direct ask: \"fully fertile plant gives super higher quality berries\"", () => {
     function hungerRestored(quality: number): number {
-      const world = createWorld(5, 1);
+      const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
       setTile(world, "surface", 2, 0, "food");
       tileAt(world, "surface", 2, 0)!.quality = quality;
       const agent = makeAgent({ pos: { x: 2, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
@@ -166,7 +176,7 @@ const DIG_MOVE: MoveSpec = {
 describe("layer-gated crop access + digging (CROPS_DESIGN.md)", () => {
 
   it("a surface agent can't eat an underground-native crop (Potato) instantly — it has to dig first", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     const tile = tileAt(world, "surface", 2, 0)!;
     tile.flavor = "potato";
@@ -180,7 +190,7 @@ describe("layer-gated crop access + digging (CROPS_DESIGN.md)", () => {
   });
 
   it("digging completes after enough real ticks standing there, then the agent actually eats", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     const tile = tileAt(world, "surface", 2, 0)!;
     tile.flavor = "potato";
@@ -201,7 +211,7 @@ describe("layer-gated crop access + digging (CROPS_DESIGN.md)", () => {
   });
 
   it("an agent already on the crop's native layer pays no dig tax at all — eats immediately", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "underground", 2, 0, "food");
     tileAt(world, "underground", 2, 0)!.flavor = "potato";
     const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "underground", homeLayer: "underground", needs: createNeeds({ hunger: 0.1 }) });
@@ -213,7 +223,7 @@ describe("layer-gated crop access + digging (CROPS_DESIGN.md)", () => {
   });
 
   it("an ordinary surface-native crop (Corn) is never gated by digging, on any layer", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     tileAt(world, "surface", 2, 0)!.flavor = "corn";
     const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }) });
@@ -225,7 +235,7 @@ describe("layer-gated crop access + digging (CROPS_DESIGN.md)", () => {
   });
 
   it("an off-cooldown dig move grants a real burst of dig progress, not just +1/tick", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     tileAt(world, "surface", 2, 0)!.flavor = "potato";
     const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }), moves: [DIG_MOVE] });
@@ -240,12 +250,12 @@ describe("layer-gated crop access + digging (CROPS_DESIGN.md)", () => {
     // Direct ask: "dig was supposed to make digging springs and food
     // easier" — Dig's tree can now buy real progress toward that, not
     // just cooldown reduction.
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     tileAt(world, "surface", 2, 0)!.flavor = "potato";
     const plain = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }), moves: [DIG_MOVE] });
 
-    const world2 = createWorld(5, 1);
+    const world2 = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world2, "surface", 2, 0, "food");
     tileAt(world2, "surface", 2, 0)!.flavor = "potato";
     const specced = makeAgent({
@@ -262,12 +272,12 @@ describe("layer-gated crop access + digging (CROPS_DESIGN.md)", () => {
   });
 
   it("gatherBurst also speeds up digging a brand-new spring, not just crops", () => {
-    const world = createWorld(5, 1); // no water anywhere — forces the spring-digging branch
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED); // no water anywhere — forces the spring-digging branch
     setTile(world, "surface", 2, 0, "floor");
     const plain = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ thirst: 0.05 }), moves: [DIG_MOVE] });
     plain.behavior = "seekWater";
 
-    const world2 = createWorld(5, 1);
+    const world2 = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world2, "surface", 2, 0, "floor");
     const specced = makeAgent({
       pos: { x: 2, y: 0 },
@@ -312,7 +322,7 @@ const RANGED_ATTACK_MOVE: MoveSpec = {
 
 describe("canopy harvest by damage (CROPS_DESIGN.md: \"canopy foods can also be processed by damage, with higher range giving advantage\")", () => {
   it("a non-canopy agent can't eat a canopy-native crop (Apple) instantly — it has to process it out first", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     const tile = tileAt(world, "surface", 2, 0)!;
     tile.flavor = "apple";
@@ -326,7 +336,7 @@ describe("canopy harvest by damage (CROPS_DESIGN.md: \"canopy foods can also be 
   });
 
   it("an off-cooldown damage move (not a dig/burrow move) processes an Apple out over real time", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     const tile = tileAt(world, "surface", 2, 0)!;
     tile.flavor = "apple";
@@ -345,7 +355,7 @@ describe("canopy harvest by damage (CROPS_DESIGN.md: \"canopy foods can also be 
 
   it("a higher-range damage move processes an Apple out faster than a melee-only one — \"higher range giving advantage\"", () => {
     function ticksToHarvest(move: MoveSpec): number {
-      const world = createWorld(5, 1);
+      const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
       setTile(world, "surface", 2, 0, "food");
       const tile = tileAt(world, "surface", 2, 0)!;
       tile.flavor = "apple";
@@ -365,12 +375,12 @@ describe("canopy harvest by damage (CROPS_DESIGN.md: \"canopy foods can also be 
   it("gatherBurst on a damage move speeds up canopy harvesting too (Vine Whip's own tree node)", () => {
     // Direct ask: "Vine whip too... Reduce the amount of time to harvest
     // crops." Same field as digging, the other real gather path.
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     tileAt(world, "surface", 2, 0)!.flavor = "apple";
     const plain = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }), moves: [MELEE_ATTACK_MOVE] });
 
-    const world2 = createWorld(5, 1);
+    const world2 = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world2, "surface", 2, 0, "food");
     tileAt(world2, "surface", 2, 0)!.flavor = "apple";
     const specced = makeAgent({
@@ -387,7 +397,7 @@ describe("canopy harvest by damage (CROPS_DESIGN.md: \"canopy foods can also be 
   });
 
   it("a status move (real power 0) never substitutes for a damage move — falls back to +1/tick", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     tileAt(world, "surface", 2, 0)!.flavor = "apple";
     const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "surface", needs: createNeeds({ hunger: 0.1 }), moves: [DIG_MOVE] }); // DIG_MOVE is category "status", power 0
@@ -399,7 +409,7 @@ describe("canopy harvest by damage (CROPS_DESIGN.md: \"canopy foods can also be 
   });
 
   it("a canopy agent already on the crop's native layer pays no processing tax at all — eats immediately", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "canopy", 2, 0, "food");
     tileAt(world, "canopy", 2, 0)!.flavor = "apple";
     const agent = makeAgent({ pos: { x: 2, y: 0 }, layer: "canopy", homeLayer: "canopy", needs: createNeeds({ hunger: 0.1 }) });
@@ -413,7 +423,7 @@ describe("canopy harvest by damage (CROPS_DESIGN.md: \"canopy foods can also be 
 
 describe("dig a spring (CROPS_DESIGN.md water rework: real last resort when water genuinely doesn't exist anywhere)", () => {
   it("an agent with no reachable water anywhere digs a real new spring at its own position, over real time", () => {
-    const world = createWorld(3, 1); // no water anywhere on any layer
+    const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED); // no water anywhere on any layer
     const agent = makeAgent({ pos: { x: 1, y: 0 }, needs: createNeeds({ thirst: 0.3 }) });
 
     let dugTick: number | undefined;
@@ -429,7 +439,7 @@ describe("dig a spring (CROPS_DESIGN.md water rework: real last resort when wate
   });
 
   it("does NOT dig a spring while known water tiles exist but are merely crowded — falls through to the ordinary wait/relocate path instead", () => {
-    const world = createWorld(10, 3);
+    const world = createWorld(10, 3, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 1, "water");
     // Crowd it to capacity.
     world.agents = [
@@ -450,7 +460,7 @@ describe("dig a spring (CROPS_DESIGN.md water rework: real last resort when wate
   });
 
   it("never carves through an obstacle — only real bare 'floor'", () => {
-    const world = createWorld(3, 1); // no water anywhere
+    const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED); // no water anywhere
     setTile(world, "surface", 1, 0, "boulder");
     const agent = makeAgent({ pos: { x: 1, y: 0 }, needs: createNeeds({ thirst: 0.3 }) });
 
@@ -464,7 +474,7 @@ describe("dig a spring (CROPS_DESIGN.md water rework: real last resort when wate
   });
 
   it("an off-cooldown dig move speeds up digging a spring the same way it speeds up crop-digging", () => {
-    const world = createWorld(3, 1);
+    const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ pos: { x: 1, y: 0 }, needs: createNeeds({ thirst: 0.3 }), moves: [DIG_MOVE] });
 
     tickAgent(world, agent);
@@ -485,7 +495,7 @@ describe("herd-status feeding priority", () => {
   // rank decides who eats first regardless of which one's turn came first.
 
   it("a lower-ranked herd-mate yields to a higher-ranked, equally-hungry one on the same dwindling-stock tile, even when its own turn comes first", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     tileAt(world, "surface", 2, 0)!.stock = 0.4; // below the 0.5 dwindling threshold
 
@@ -513,7 +523,7 @@ describe("herd-status feeding priority", () => {
   });
 
   it("does not make an agent yield to a herd-mate that isn't also hungry", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food");
     tileAt(world, "surface", 2, 0)!.stock = 0.4;
 
@@ -526,7 +536,7 @@ describe("herd-status feeding priority", () => {
   });
 
   it("does not make anyone yield while the tile's stock isn't actually dwindling yet", () => {
-    const world = createWorld(5, 1);
+    const world = createWorld(5, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 0, "food"); // default full stock (1), well above the threshold
 
     const low = makeAgent({ id: "low", pos: { x: 2, y: 0 }, herdId: "h", level: 1, needs: createNeeds({ hunger: 0.5 }) });
@@ -540,7 +550,7 @@ describe("herd-status feeding priority", () => {
 
 describe("starvation", () => {
   it("survives a while at 0 hunger, then dies once the grace period runs out", () => {
-    const world = createWorld(3, 1);
+    const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ needs: createNeeds({ hunger: 0 }) });
 
     for (let i = 0; i < 99; i++) tickAgent(world, agent);
@@ -551,7 +561,7 @@ describe("starvation", () => {
   });
 
   it("records a starved event with the right cause", () => {
-    const world = createWorld(3, 1);
+    const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED);
     // Real, undiggable trap: no floor at the agent's own position, so the
     // dig-a-spring last resort (CROPS_DESIGN.md's water rework) can't
     // rescue it — this test is specifically about genuine, unrecoverable
@@ -575,7 +585,7 @@ describe("starvation", () => {
   });
 
   it("gives thirst its own, longer grace period — survives past the old 100-tick hunger threshold", () => {
-    const world = createWorld(3, 1);
+    const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED);
     // Thirst hits 0 immediately; hunger stays comfortably positive the whole
     // time (kept topped up each tick) so this isolates thirst's own
     // THIRST_STARVATION_GRACE_TICKS (150) from hunger's STARVATION_GRACE_TICKS
@@ -598,7 +608,7 @@ describe("starvation", () => {
   });
 
   it("recovering above 0 resets the starvation clock", () => {
-    const world = createWorld(3, 1);
+    const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 1, 0, "food");
     const agent = makeAgent({ pos: { x: 1, y: 0 }, needs: createNeeds({ hunger: 0 }) });
     agent.starvationTicks = 90; // pretend it's already been starving a while
@@ -643,7 +653,7 @@ describe("old-age mortality", () => {
   // itself is left in place, unused, same call as the skill-point removal:
   // easy to re-wire later if wanted, harmless sitting idle in the meantime.
   it("no agent dies of old age regardless of age or roll, even at a fully-saturated hazard", () => {
-    const world = createWorld(3, 1);
+    const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ age: 3000 /* OLD_AGE_HAZARD_CAP_AGE, hazard would be fully saturated */ });
     const log = new EventLog();
     vi.spyOn(Math, "random").mockReturnValue(0); // would have killed anything with a nonzero hazard
@@ -655,7 +665,7 @@ describe("old-age mortality", () => {
   });
 
   it("an agent with no age (spawned directly into a scenario) is unaffected either way", () => {
-    const world = createWorld(3, 1);
+    const world = createWorld(3, 1, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ age: undefined });
     vi.spyOn(Math, "random").mockReturnValue(0);
 
@@ -675,7 +685,7 @@ const EXPLORE_NOT_SHELTER_NEEDS = { hunger: 0.8, thirst: 0.8 };
 
 describe("exp-motivated exploration", () => {
   it("a fully-satisfied idle agent in a large world wanders toward unexplored territory instead of standing still", () => {
-    const world = createWorld(40, 40);
+    const world = createWorld(40, 40, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ pos: { x: 20, y: 20 }, needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
     tickAgent(world, agent);
@@ -685,7 +695,7 @@ describe("exp-motivated exploration", () => {
   });
 
   it("keeps walking toward the same exploreTarget across multiple ticks rather than re-rolling every tick", () => {
-    const world = createWorld(40, 40);
+    const world = createWorld(40, 40, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ pos: { x: 20, y: 20 }, needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
     tickAgent(world, agent);
@@ -698,7 +708,7 @@ describe("exp-motivated exploration", () => {
   });
 
   it("an urgent need interrupts an in-progress exploration walk", () => {
-    const world = createWorld(40, 40);
+    const world = createWorld(40, 40, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 0, 0, "water");
     const agent = makeAgent({ pos: { x: 20, y: 20 }, needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
@@ -713,7 +723,7 @@ describe("exp-motivated exploration", () => {
   });
 
   it("does nothing (stays idle) when the entire reachable world is already one visited sector", () => {
-    const world = createWorld(3, 3); // one sector total (SECTOR_SIZE=5) — markSectorVisited marks it before exploration is even considered
+    const world = createWorld(3, 3, DETERMINISTIC_TEST_SEED); // one sector total (SECTOR_SIZE=5) — markSectorVisited marks it before exploration is even considered
     const agent = makeAgent({ pos: { x: 1, y: 1 } });
 
     tickAgent(world, agent);
@@ -725,7 +735,7 @@ describe("exp-motivated exploration", () => {
 
 describe("tile preference (Agent.preferredTerrain, applyExploration)", () => {
   it("a satisfied agent with a tagged flora preference heads toward the nearest flora tile instead of a random unvisited one", () => {
-    const world = createWorld(40, 40);
+    const world = createWorld(40, 40, DETERMINISTIC_TEST_SEED);
     // Only one flora tile anywhere on the map — deterministic single target,
     // no reliance on rng at all for this path.
     setTile(world, "surface", 35, 20, "flora");
@@ -740,7 +750,7 @@ describe("tile preference (Agent.preferredTerrain, applyExploration)", () => {
   });
 
   it("a satisfied agent with a tagged water preference heads toward water, not wherever ordinary random exploration would otherwise go", () => {
-    const world = createWorld(40, 40);
+    const world = createWorld(40, 40, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 5, 20, "water");
     const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["water"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
@@ -751,7 +761,7 @@ describe("tile preference (Agent.preferredTerrain, applyExploration)", () => {
   });
 
   it("an agent already lingering near its preferred terrain stays idle instead of wandering off to a new spot", () => {
-    const world = createWorld(40, 40);
+    const world = createWorld(40, 40, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 21, 20, "flora"); // 1 tile away, inside the "already satisfied" radius
     const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["flora"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
@@ -763,7 +773,7 @@ describe("tile preference (Agent.preferredTerrain, applyExploration)", () => {
   });
 
   it("falls back to a bounded local scan for a preference kind outside the cheap resource index (e.g. boulder)", () => {
-    const world = createWorld(40, 40);
+    const world = createWorld(40, 40, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 25, 20, "boulder");
     const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["boulder"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
@@ -773,7 +783,7 @@ describe("tile preference (Agent.preferredTerrain, applyExploration)", () => {
   });
 
   it("tries preferred terrain kinds in order, falling through to the next when the first has no reachable tile anywhere", () => {
-    const world = createWorld(40, 40);
+    const world = createWorld(40, 40, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 30, 20, "water"); // no "flora" placed anywhere on this map
     const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["flora", "water"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
 
@@ -783,7 +793,7 @@ describe("tile preference (Agent.preferredTerrain, applyExploration)", () => {
   });
 
   it("an agent with no tagged preference is completely unaffected — same random-wander behavior as before this feature", () => {
-    const world = createWorld(40, 40);
+    const world = createWorld(40, 40, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 35, 20, "flora"); // present on the map, but this agent isn't tagged to care
     const agent = makeAgent({ pos: { x: 20, y: 20 }, needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) }); // no preferredTerrain
 
@@ -799,7 +809,7 @@ describe("tile preference (Agent.preferredTerrain, applyExploration)", () => {
 
   it("rng-determinism: the preference-driven wander consumes no rng and is byte-identical across two independent runs from the same state", () => {
     function run(): { pos: Agent["pos"]; target: Agent["exploreTarget"] } {
-      const world = createWorld(40, 40);
+      const world = createWorld(40, 40, DETERMINISTIC_TEST_SEED);
       setTile(world, "surface", 35, 20, "flora");
       const agent = makeAgent({ pos: { x: 20, y: 20 }, preferredTerrain: ["flora"], needs: createNeeds(EXPLORE_NOT_SHELTER_NEEDS) });
       tickAgent(world, agent);
@@ -813,7 +823,7 @@ describe("tile preference (Agent.preferredTerrain, applyExploration)", () => {
 
 describe("water-graze foraging (Agent.obligateAquatic / preferredTerrain water)", () => {
   it("a hungry water-affiliated agent standing on water can feed without any 'food' tile existing anywhere", () => {
-    const world = createWorld(10, 10); // no "food" terrain placed anywhere
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED); // no "food" terrain placed anywhere
     setTile(world, "surface", 5, 5, "water");
     const agent = makeAgent({ pos: { x: 5, y: 5 }, obligateAquatic: true, needs: createNeeds({ hunger: 0.3 }) });
 
@@ -825,7 +835,7 @@ describe("water-graze foraging (Agent.obligateAquatic / preferredTerrain water)"
   });
 
   it("a merely water-preferring (not obligate-aquatic) agent standing on water also gets the graze", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 5, 5, "water");
     const agent = makeAgent({ pos: { x: 5, y: 5 }, preferredTerrain: ["water"], needs: createNeeds({ hunger: 0.3 }) });
 
@@ -836,7 +846,7 @@ describe("water-graze foraging (Agent.obligateAquatic / preferredTerrain water)"
   });
 
   it("never fires for a water-affiliated agent standing on dry land", () => {
-    const world = createWorld(10, 10); // no water anywhere
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED); // no water anywhere
     const agent = makeAgent({ pos: { x: 5, y: 5 }, obligateAquatic: true, needs: createNeeds({ hunger: 0.3 }) });
 
     vi.spyOn(Math, "random").mockReturnValue(0);
@@ -849,7 +859,7 @@ describe("water-graze foraging (Agent.obligateAquatic / preferredTerrain water)"
   });
 
   it("never fires for an ordinary (non-water-affiliated) agent even when standing on water", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 5, 5, "water");
     const agent = makeAgent({ pos: { x: 5, y: 5 }, needs: createNeeds({ hunger: 0.3 }) }); // no obligateAquatic, no water preference
 
@@ -896,13 +906,13 @@ describe("decayNeeds: thirstMultiplier composes with the flat decay rate (Phase 
 
 describe("tickAgentNeeds: local weather composes with thirst decay through a real World", () => {
   it("an agent standing in an active drought cell loses thirst faster than one on a clear tile", () => {
-    const droughtWorld = createWorld(10, 10);
+    const droughtWorld = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     droughtWorld.weatherCells = [
       { id: "d", type: "drought", center: { x: 5, y: 5 }, radius: 3, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
     ];
     const droughtAgent = makeAgent({ pos: { x: 5, y: 5 } });
 
-    const clearWorld = createWorld(10, 10);
+    const clearWorld = createWorld(10, 10, DETERMINISTIC_TEST_SEED);
     const clearAgent = makeAgent({ pos: { x: 5, y: 5 } });
 
     tickAgentNeeds(droughtAgent, droughtWorld);
@@ -912,7 +922,7 @@ describe("tickAgentNeeds: local weather composes with thirst decay through a rea
   });
 
   it("an agent outside the drought cell's radius decays at the ordinary rate", () => {
-    const world = createWorld(30, 30);
+    const world = createWorld(30, 30, DETERMINISTIC_TEST_SEED);
     world.weatherCells = [
       { id: "d", type: "drought", center: { x: 25, y: 25 }, radius: 2, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
     ];
@@ -929,7 +939,7 @@ describe("tile-capacity: blocked-resource fallback", () => {
   // resource with a way around" scenario this feature targets.
 
   it("waits near a crowded target rather than instantly bailing on it", () => {
-    const world = createWorld(10, 3);
+    const world = createWorld(10, 3, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 1, "water");
     setTile(world, "surface", 8, 1, "water");
     // Crowd the nearer tile (x=2,y=1) to capacity — three 30-weight
@@ -952,7 +962,7 @@ describe("tile-capacity: blocked-resource fallback", () => {
   });
 
   it("gives up on a persistently crowded tile after its grace period and tries a different one", () => {
-    const world = createWorld(10, 3);
+    const world = createWorld(10, 3, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 1, "water");
     setTile(world, "surface", 8, 1, "water");
     world.agents = [
@@ -986,7 +996,7 @@ describe("tile-capacity: blocked-resource fallback", () => {
   });
 
   it("does not infinite-loop between two mutually-crowded tiles — eventually relocates instead of oscillating forever", () => {
-    const world = createWorld(10, 3);
+    const world = createWorld(10, 3, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 2, 1, "water");
     setTile(world, "surface", 8, 1, "water");
     // Crowd BOTH tiles to capacity.
@@ -1020,7 +1030,7 @@ describe("tile-capacity: blocked-resource fallback", () => {
 
 describe("migration on unreachable resources", () => {
   it("an agent that can never find food eventually migrates instead of standing still forever", () => {
-    const world = createWorld(30, 30); // no food anywhere on any layer
+    const world = createWorld(30, 30, DETERMINISTIC_TEST_SEED); // no food anywhere on any layer
     const agent = makeAgent({ pos: { x: 15, y: 15 }, needs: createNeeds({ hunger: 0.5, thirst: 1 }) });
     // Keep hunger from ever reaching the starvation floor so this test isolates migration, not starvation.
     for (let i = 0; i < 149; i++) {
@@ -1071,7 +1081,7 @@ describe("seekWater near a large lake: targets a genuinely reachable tile, not t
   }
 
   it("a land-type agent approaching from the walled side still finds and drinks from the real shore, not the nearer walled-off tile", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     buildWalledLake(world);
     // West side, well outside the wall ring, so the raw-nearest water tile
     // (x=5, same row) sits behind the wall — genuinely unreachable — while
@@ -1093,7 +1103,7 @@ describe("seekWater near a large lake: targets a genuinely reachable tile, not t
   });
 
   it("a Rock-type agent (no special shore restriction) also successfully drinks via the real shore", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, DETERMINISTIC_TEST_SEED);
     buildWalledLake(world);
     const agent = makeAgent({
       id: "thirsty-rock",
@@ -1116,7 +1126,7 @@ describe("seekWater near a large lake: targets a genuinely reachable tile, not t
 
 describe("tickAgentAction: status-effect action-tick guards", () => {
   it("an asleep agent takes no action at all", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ pos: { x: 0, y: 0 }, status: { kind: "sleep", ticksRemaining: 5 }, needs: createNeeds({ thirst: 0.1 }) });
     setTile(world, "surface", 4, 0, "water");
     tickAgentAction(world, agent);
@@ -1124,7 +1134,7 @@ describe("tickAgentAction: status-effect action-tick guards", () => {
   });
 
   it("a frozen agent takes no action at all", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     const agent = makeAgent({ pos: { x: 0, y: 0 }, status: { kind: "freeze" }, needs: createNeeds({ thirst: 0.1 }) });
     setTile(world, "surface", 4, 0, "water");
     tickAgentAction(world, agent);
@@ -1132,7 +1142,7 @@ describe("tickAgentAction: status-effect action-tick guards", () => {
   });
 
   it("a paralyzed agent skips this action tick on a failed roll, acts normally on a passed one", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 4, 0, "water");
     const skipped = makeAgent({ pos: { x: 0, y: 0 }, status: { kind: "paralysis" }, needs: createNeeds({ thirst: 0.1 }) });
     tickAgentAction(world, skipped, undefined, undefined, undefined, () => 0); // 0 < PARALYSIS_SKIP_CHANCE
@@ -1144,7 +1154,7 @@ describe("tickAgentAction: status-effect action-tick guards", () => {
   });
 
   it("a move-locked agent (MoveSpec.lockTicks, set via useMove) takes no action at all", () => {
-    const world = createWorld(5, 5);
+    const world = createWorld(5, 5, DETERMINISTIC_TEST_SEED);
     setTile(world, "surface", 4, 0, "water");
     const agent = makeAgent({ pos: { x: 0, y: 0 }, actionLockTicks: 2, needs: createNeeds({ thirst: 0.1 }) });
     tickAgentAction(world, agent);
@@ -1154,7 +1164,7 @@ describe("tickAgentAction: status-effect action-tick guards", () => {
 
 describe("tickAgentNeeds: soil tending (direct ask: Grass-type Pokémon till/tend the ground they stand on)", () => {
   it("a live Grass-type agent raises the fertility of the tile under it, every tick", () => {
-    const world = createWorld(3, 3);
+    const world = createWorld(3, 3, DETERMINISTIC_TEST_SEED);
     const tile = tileAt(world, "surface", 1, 1)!;
     tile.fertility = 0.35;
     const grassAgent = makeAgent({ pos: { x: 1, y: 1 }, types: ["grass"] });
@@ -1165,7 +1175,7 @@ describe("tickAgentNeeds: soil tending (direct ask: Grass-type Pokémon till/ten
   });
 
   it("a non-Grass-type agent standing on the same tile does nothing to its fertility", () => {
-    const world = createWorld(3, 3);
+    const world = createWorld(3, 3, DETERMINISTIC_TEST_SEED);
     const tile = tileAt(world, "surface", 1, 1)!;
     tile.fertility = 0.35;
     const waterAgent = makeAgent({ pos: { x: 1, y: 1 }, types: ["water"] });
@@ -1176,7 +1186,7 @@ describe("tickAgentNeeds: soil tending (direct ask: Grass-type Pokémon till/ten
   });
 
   it("a fainted (alive === false) Grass-type agent doesn't tend the ground — tickAgentNeeds returns before any of this", () => {
-    const world = createWorld(3, 3);
+    const world = createWorld(3, 3, DETERMINISTIC_TEST_SEED);
     const tile = tileAt(world, "surface", 1, 1)!;
     tile.fertility = 0.35;
     const deadGrassAgent = makeAgent({ pos: { x: 1, y: 1 }, types: ["grass"], alive: false });
@@ -1187,7 +1197,7 @@ describe("tickAgentNeeds: soil tending (direct ask: Grass-type Pokémon till/ten
   });
 
   it("a Grass-type agent underground (not surface) doesn't tend a surface tile at the same x,y", () => {
-    const world = createWorld(3, 3);
+    const world = createWorld(3, 3, DETERMINISTIC_TEST_SEED);
     const surfaceTile = tileAt(world, "surface", 1, 1)!;
     surfaceTile.fertility = 0.35;
     const undergroundGrassAgent = makeAgent({ pos: { x: 1, y: 1 }, layer: "underground", homeLayer: "underground", types: ["grass"] });

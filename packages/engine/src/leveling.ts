@@ -230,6 +230,15 @@ export const SKILLPOINT_ON_HIT_CHANCE = 0.05;
  */
 export const SKILLPOINT_WILDCARD_INTERVAL = 2;
 
+/**
+ * Chance an agent banks a skill point rather than spending it, when a
+ * reachable node it cannot yet afford exists — see `maybeAutoRespec`. At
+ * 0.5 an agent takes roughly two grants to commit to a cost-2 keystone
+ * instead of never reaching one, without becoming a hoarder that ignores
+ * the cheap nodes it likes.
+ */
+export const SKILLPOINT_SAVE_CHANCE = 0.5;
+
 export function sectorId(x: number, y: number): string {
   return `${Math.floor(x / SECTOR_SIZE)},${Math.floor(y / SECTOR_SIZE)}`;
 }
@@ -364,6 +373,7 @@ export function maybeAutoRespec(
     chosen: string[];
   }
   const candidates: Candidate[] = [];
+  let oneGrantAway = false;
 
   for (const moveId of agent.knownMoves ?? []) {
     const base = ctx.resolveMove(moveId);
@@ -383,11 +393,39 @@ export function maybeAutoRespec(
         (chosenId) => (node.excludes ?? []).includes(chosenId) || (base.tree![chosenId]?.excludes ?? []).includes(node.id)
       );
       if (excluded) continue;
-      if (node.cost > typed + wildcard) continue;
+      if (node.cost > typed + wildcard) {
+        // Reachable but not yet affordable. Only "one more grant away"
+        // counts — see the banking rule below.
+        if (node.cost === typed + wildcard + 1) oneGrantAway = true;
+        continue;
+      }
       candidates.push({ moveId, base, node, chosen });
     }
   }
   if (candidates.length === 0) return;
+
+  // Bank the point instead of spending it, sometimes, when the agent is
+  // exactly one grant short of something it has already unlocked.
+  //
+  // Without this an agent spends every point the instant it arrives, and a
+  // cost-1 candidate is nearly always available — so it can never accumulate
+  // the 2 or 3 points a keystone or capstone costs. That is not a theory:
+  // measured across the living population of a 20k-tick run, cost-1 nodes
+  // reached 77 of 456 distinct nodes, cost-2 only 6 of 144, and cost-3
+  // exactly 0 of 4. Every capstone in the game was very nearly dead content,
+  // and the expensive forks (Inferno, Wildfire Burst) were unreachable
+  // outright — which is how a whole shipped fire mechanic managed to produce
+  // zero ignitions across 20k ticks.
+  //
+  // The "exactly one grant away" gate matters more than the probability. The
+  // first attempt at this banked whenever ANY unaffordable node existed,
+  // which is almost always true — agents then saved indefinitely toward
+  // something deeper and picked ~nothing at all. Bounding it to one point of
+  // patience lets a build climb 1 -> 2 -> 3 smoothly and self-limits: once
+  // the node is affordable it stops being "ahead" and the normal weighted
+  // pick resumes. The probability keeps it from becoming a rule, so an agent
+  // still commits to cheap nodes it likes.
+  if (oneGrantAway && SKILLPOINT_SAVE_CHANCE > 0 && rng() < SKILLPOINT_SAVE_CHANCE) return;
 
   const weights = candidates.map((c) => 0.15 + (c.node.leaning ? agent.disposition?.[c.node.leaning] ?? 0.5 : 0.5));
   const total = weights.reduce((sum, w) => sum + w, 0);

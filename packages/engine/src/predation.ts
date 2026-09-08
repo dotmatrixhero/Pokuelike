@@ -16,12 +16,14 @@ import { isPathClear } from "./fov.js";
 import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt, setTile } from "./world.js";
 import { waterSoil } from "./flora.js";
+import { igniteNear } from "./fire.js";
 import { recordPredatorPressure } from "./herdMigration.js";
 import { isNight, isTwilight, lightLevel } from "./daynight.js";
 import { activeWeatherAt, isInColdSnap, stormAccuracyMultiplier } from "./weather.js";
 import {
   applyStatStage,
   BURN_ATTACK_STAGE,
+  damageReductionFlatOf,
   damageReductionOf,
   defenseBoostOf,
   getStatStage,
@@ -29,6 +31,7 @@ import {
   maybeInflictStatus,
   maybeSpreadStatus,
   maybeThawOnFireHit,
+  suppressPassiveHealing,
   thornsOf,
 } from "./status.js";
 
@@ -225,6 +228,14 @@ export function huntHungerThreshold(world: World, agent: Agent, tick: number): n
 /** Fallback HP for an agent with no real combat profile (stats/level/types) — shouldn't happen for fully-statted species. Exported so support.ts's body-weight proxy can match it. */
 export const FALLBACK_MAX_HP = 10;
 const FALLBACK_DAMAGE = 1;
+
+/**
+ * The least damage a landed, damaging hit can be reduced to by flat armor
+ * (`"damageReductionFlat"`). Without a floor, enough stacked flat reduction
+ * makes a unit simply immune to weaker attackers rather than tough against
+ * them — the failure mode flat armor systems classically have.
+ */
+export const MIN_LANDED_DAMAGE = 1;
 /** Ticks the `"unshaken"` passive locks out after fully negating a hit — see `Agent.unshakenCooldownTicks`'s own doc comment (types.ts). */
 const UNSHAKEN_COOLDOWN_TICKS = 20;
 /** A predator at or below this fraction of max HP flees a fight instead of continuing it. See `retreatHpFraction` for the juvenile-aware version actually used. */
@@ -974,7 +985,17 @@ function applySingleDamageInstance(
         ).damage
       : FALLBACK_DAMAGE;
 
-  const damage = Math.max(0, Math.floor(rawDamage * situational * consumedTerrainMultiplier * (1 - damageReductionOf(defender))));
+  // Percentage reduction (with diminishing returns, see status.ts) first,
+  // then flat armor off the result. The `MIN_LANDED_DAMAGE` floor only
+  // applies to a hit that was actually going to hurt: flat armor may blunt a
+  // weak attack to a scratch, but must never make a unit outright immune to
+  // one, which uncapped flat reduction otherwise does. A move that already
+  // deals nothing still deals nothing.
+  const afterPercent = Math.floor(rawDamage * situational * consumedTerrainMultiplier * (1 - damageReductionOf(defender)));
+  const damage =
+    afterPercent <= 0
+      ? Math.max(0, afterPercent)
+      : Math.max(MIN_LANDED_DAMAGE, afterPercent - damageReductionFlatOf(defender));
 
   if (damage > 0) maybeGrantHitSkillPoint(attacker, move.type, world, log, ctx, rng);
 
@@ -988,10 +1009,12 @@ function applySingleDamageInstance(
   }
   if (damage > 0 && move.recoilFraction) {
     attacker.hp = Math.max(1, (attacker.hp ?? attacker.maxHp ?? FALLBACK_MAX_HP) - Math.floor(damage * move.recoilFraction));
+    suppressPassiveHealing(attacker);
   }
   const thorns = thornsOf(defender);
   if (damage > 0 && thorns > 0) {
     attacker.hp = Math.max(1, (attacker.hp ?? attacker.maxHp ?? FALLBACK_MAX_HP) - Math.floor(damage * thorns));
+    suppressPassiveHealing(attacker);
   }
 
   // Every real hit against a herd member counts toward that herd's
@@ -1050,6 +1073,8 @@ function applySingleDamageInstance(
   }
 
   defender.hp = Math.max(0, (defender.hp ?? defender.maxHp ?? FALLBACK_MAX_HP) - damage);
+  // Passive healing only works out of combat — see `Agent.regenSuppressedTicks`.
+  suppressPassiveHealing(defender);
 
   log?.record({
     kind: "fought",
@@ -1174,8 +1199,13 @@ function resolveHitAgainstTarget(
       }
     }
     if (move.terrainBurn) {
-      const tile = tileAt(world, defender.layer, defender.pos.x, defender.pos.y);
-      if (tile?.terrain === "bush") setTile(world, defender.layer, defender.pos.x, defender.pos.y, "floor");
+      // Was: instantly revert a bush to floor. Now it lights a real,
+      // persistent fire that burns down over time, spreads into adjacent
+      // fuel and hurts whatever stands in it (fire.ts) — the direct ask for
+      // "the fire burning down flora mechanic." The end state is the same
+      // scorched floor; what changed is that it now takes ticks, is
+      // visible while it happens, and can get away from you.
+      igniteNear(world, defender.layer, defender.pos.x, defender.pos.y, log);
     }
     if (move.terrainFill) {
       const tile = tileAt(world, defender.layer, defender.pos.x, defender.pos.y);

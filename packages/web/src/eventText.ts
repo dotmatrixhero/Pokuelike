@@ -90,6 +90,8 @@ export function formatEvent(event: SimEvent, world?: World): string {
     }
     case "defeated":
       return `${idLabel(world, event.winnerId, event.winnerSpecies)} defeated ${idLabel(world, event.loserId, event.loserSpecies)}`;
+    case "burned":
+      return `${idLabel(world, event.agentId, event.species)} burned to death at (${event.pos.x},${event.pos.y})`;
     case "starved":
       return `${idLabel(world, event.agentId, event.species)} starved to death (${event.cause})`;
     case "diedOfAge":

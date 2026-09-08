@@ -5,6 +5,21 @@ import { tickWorld } from "../src/simulation.js";
 import { applyPredationInstincts, preferMarked } from "../src/predation.js";
 import { EventLog } from "../src/events.js";
 import { mulberry32 } from "../src/rng.js";
+import { FIRE_BURN_TICKS } from "../src/fire.js";
+import { MIN_LANDED_DAMAGE } from "../src/predation.js";
+
+/**
+ * Shared seed for every world in an A/B damage comparison in this file.
+ *
+ * Damage carries a 0.85-1.0 random roll, so two independently-seeded worlds
+ * can easily produce a bigger hit for the side that is supposed to be
+ * weaker. Several tests here were built that way and flaked intermittently
+ * for exactly that reason — it presented as a mysterious cross-file failure
+ * (a different test failing on each full run, all of them passing in
+ * isolation) and was actually just unseeded comparisons losing a coin flip.
+ * Both sides of a comparison must share a seed.
+ */
+const AB_COMPARISON_SEED = 12345;
 import type { Agent, HuntRules } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 import type { Disposition } from "../src/nature.js";
@@ -117,7 +132,7 @@ function predator(pos: { x: number; y: number }, hunger = 0.3, overrides: Partia
 
 describe("predation", () => {
   it("prey flees a nearby predator instead of pursuing its own needs", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 });
     world.agents.push(target, predator({ x: 6, y: 5 }));
     const log = new EventLog();
@@ -132,7 +147,7 @@ describe("predation", () => {
   });
 
   it("a hungry predator hunts and closes distance on nearby prey", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     world.agents.push(prey({ x: 5, y: 5 }), predator({ x: 8, y: 5 }));
     const log = new EventLog();
 
@@ -144,7 +159,7 @@ describe("predation", () => {
   });
 
   it("a lethal hit faints prey rather than killing it outright, and a follow-up hit finishes it off", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     // Predator ticks first so it strikes before the prey has a chance to flee this tick.
     // Prey hp set to 1 so a single fallback-damage hit (1) would have been fatal under
     // the old instant-death model — now it only faints (see predation.ts/support.ts).
@@ -178,7 +193,7 @@ describe("predation", () => {
   });
 
   it("a satisfied predator ignores nearby prey", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     world.agents.push(prey({ x: 5, y: 5 }), predator({ x: 6, y: 5 }, 0.9));
     const log = new EventLog();
 
@@ -189,7 +204,7 @@ describe("predation", () => {
   });
 
   it("without rules, agents behave exactly as before predation existed", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     world.agents.push(prey({ x: 5, y: 5 }), predator({ x: 6, y: 5 }, 0.1));
 
     tickWorld(world, undefined, undefined, undefined, SAFE_RNG);
@@ -215,7 +230,7 @@ describe("predation", () => {
     // prey just runs to the map's actual corner and stops there, which
     // works too, but wastes most of a short test on the chase instead of
     // the cycling this test actually cares about).
-    const world = createWorld(2, 1);
+    const world = createWorld(2, 1, AB_COMPARISON_SEED);
     // maxHp large enough to comfortably outlast 30 ticks of FALLBACK_DAMAGE
     // (1/hit, see this file's own fixture doc comment) without ever fainting
     // — a faint/finish-off detour is a different mechanic this test isn't
@@ -247,7 +262,7 @@ describe("dynamic (size-based) predation — not a fixed species list", () => {
     // limited to a hardcoded menu; anything sufficiently smaller/weaker
     // nearby is fair game. "charmander" here stands in for any species this
     // predator was never explicitly paired with in HUNT_RULES/data.
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const smallStranger = prey({ x: 5, y: 5 }, { id: "charmander-0", species: "charmander", maxHp: 8 });
     world.agents.push(smallStranger, predator({ x: 8, y: 5 }));
     const log = new EventLog();
@@ -260,7 +275,7 @@ describe("dynamic (size-based) predation — not a fixed species list", () => {
   });
 
   it("a predator does NOT hunt something too close to its own size, even of a species it usually preys on", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     // maxHp 18 is above predator()'s 20 * PREY_POWER_RATIO (0.75) = 15 — too big to be worth it.
     const tooBig = prey({ x: 5, y: 5 }, { maxHp: 18 });
     world.agents.push(tooBig, predator({ x: 8, y: 5 }));
@@ -272,7 +287,7 @@ describe("dynamic (size-based) predation — not a fixed species list", () => {
   });
 
   it("same species is never prey, regardless of a power gap", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     // A second, much weaker scyther — same species as the hungry predator, well within
     // the power ratio that would make anything else fair game.
     const weakerKin = predator({ x: 5, y: 5 }, 1, { id: "scyther-1", maxHp: 5 });
@@ -285,7 +300,7 @@ describe("dynamic (size-based) predation — not a fixed species list", () => {
   });
 
   it("a target grown too big (e.g. leveled up) stops being prey to a predator that used to be able to eat it", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const grownUp = prey({ x: 5, y: 5 }, { maxHp: 10 }); // eligible prey at this size
     const hunter = predator({ x: 8, y: 5 });
     world.agents.push(grownUp, hunter);
@@ -322,7 +337,7 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     // the latter no longer reaches any roll made through a real tick.
     const fixedRng = () => 0.7;
 
-    const clearWorld = createWorld(10, 10);
+    const clearWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     clearWorld.agents.push(
       prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
       prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
@@ -335,7 +350,7 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
       expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
     );
 
-    const stormWorld = createWorld(10, 10);
+    const stormWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     stormWorld.weatherCells = [
       { id: "s", type: "storm", center: { x: 5, y: 5 }, radius: 5, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
     ];
@@ -356,7 +371,7 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
 
 describe("mob-fighting", () => {
   it("a large enough, close enough herd mobs the predator instead of fleeing", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const mobber1 = prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" });
     const mobber2 = prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" });
     const mobber3 = prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" });
@@ -376,7 +391,7 @@ describe("mob-fighting", () => {
   });
 
   it("a mob of 3+ can finish off a fainted predator within the same tick (faint, then a follow-up hit exhausts the pool)", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const mobbers = [
       prey({ x: 4, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
       prey({ x: 6, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
@@ -402,7 +417,7 @@ describe("mob-fighting", () => {
     // This is the exact tick-97 bug from the 1000-tick run: bulbasaur-0 is right on
     // top of the predator, but its herd-mates are still several tiles away (mid-flee),
     // not actually in striking distance. It must flee, not fight alone and die.
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, AB_COMPARISON_SEED);
     const solo = prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" });
     const farAlly1 = prey({ x: 12, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" });
     const farAlly2 = prey({ x: 13, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" });
@@ -430,7 +445,7 @@ describe("mob-fighting", () => {
   });
 
   it("a lone or small group still flees rather than fights", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const mobber1 = prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" });
     const mobber2 = prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" });
     world.agents.push(mobber1, mobber2, predator({ x: 5, y: 6 }));
@@ -442,7 +457,7 @@ describe("mob-fighting", () => {
   });
 
   it("a predator avoids hunting prey protected by a large enough herd", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const hungry = predator({ x: 10, y: 5 }, 0.1);
     const group = [0, 1, 2].map((i) => prey({ x: 5 + i, y: 5 }, { id: `bulbasaur-${i}`, herdId: "herd-a" }));
     world.agents.push(hungry, ...group);
@@ -454,7 +469,7 @@ describe("mob-fighting", () => {
   });
 
   it("a critically hurt predator flees a fight instead of continuing to hunt", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const attacker = prey({ x: 6, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", behavior: "fight", fightTarget: "scyther-0" });
     const hurt = predator({ x: 5, y: 5 });
     hurt.hp = 1;
@@ -470,7 +485,7 @@ describe("mob-fighting", () => {
   });
 
   it("a predator that can't find safe prey for long enough relocates instead of camping", () => {
-    const world = createWorld(30, 30);
+    const world = createWorld(30, 30, AB_COMPARISON_SEED);
     const hungry = predator({ x: 15, y: 15 }, 0.1);
     hungry.ticksSinceMeal = 149;
     world.agents.push(hungry);
@@ -485,7 +500,7 @@ describe("mob-fighting", () => {
 
 describe("ranged attacks", () => {
   it("a move with real reach (e.g. Vine Whip) can hit without closing to melee", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const mobber1 = prey({ x: 5, y: 3 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [RANGED_MOVE] });
     const mobber2 = prey({ x: 4, y: 4 }, { id: "bulbasaur-1", herdId: "herd-a", moves: [RANGED_MOVE] });
     const mobber3 = prey({ x: 6, y: 4 }, { id: "bulbasaur-2", herdId: "herd-a", moves: [RANGED_MOVE] });
@@ -500,7 +515,7 @@ describe("ranged attacks", () => {
   });
 
   it("a melee-only move still requires closing to distance 1", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const mobber1 = prey({ x: 5, y: 3 }, { id: "bulbasaur-0", herdId: "herd-a" }); // TEST_MOVE default: melee only
     const mobber2 = prey({ x: 4, y: 4 }, { id: "bulbasaur-1", herdId: "herd-a" });
     const mobber3 = prey({ x: 6, y: 4 }, { id: "bulbasaur-2", herdId: "herd-a" });
@@ -519,7 +534,7 @@ describe("disposition wiring", () => {
   const BOLD: Disposition = { boldness: 1, aggression: 0.5, sociability: 0.5 };
 
   it("a timid prey flees a predator at a distance a neutral prey would ignore", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, AB_COMPARISON_SEED);
     // Distance 5 — beyond the neutral FLEE_DETECT_RADIUS (4), within a timid agent's expanded radius.
     const target = prey({ x: 5, y: 5 }, { disposition: TIMID });
     world.agents.push(target, predator({ x: 10, y: 5 }));
@@ -530,7 +545,7 @@ describe("disposition wiring", () => {
   });
 
   it("a neutral (no disposition) prey does NOT react to that same distant predator", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 });
     world.agents.push(target, predator({ x: 10, y: 5 }));
 
@@ -563,7 +578,7 @@ describe("disposition wiring", () => {
   });
 
   it("a bold prey tolerates a closer predator that a neutral prey would flee from", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, AB_COMPARISON_SEED);
     // Distance 3 — within the neutral FLEE_DETECT_RADIUS (4), but beyond a bold agent's shrunk radius.
     const target = prey({ x: 5, y: 5 }, { disposition: BOLD });
     world.agents.push(target, predator({ x: 8, y: 5 }));
@@ -574,7 +589,7 @@ describe("disposition wiring", () => {
   });
 
   it("a bold prey still flees a predator that is genuinely close (hard floor holds)", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { disposition: BOLD });
     world.agents.push(target, predator({ x: 6, y: 5 })); // distance 1
     const log = new EventLog();
@@ -586,7 +601,7 @@ describe("disposition wiring", () => {
 
   it("a bold+aggressive pair mobs a threat that a neutral pair of the same size would flee from", () => {
     const boldAndAggressive: Disposition = { boldness: 1, aggression: 1, sociability: 0.5 };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const mobber1 = prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", disposition: boldAndAggressive });
     const mobber2 = prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a", disposition: boldAndAggressive });
     world.agents.push(mobber1, mobber2, predator({ x: 5, y: 6 }));
@@ -601,7 +616,7 @@ describe("disposition wiring", () => {
 
   it("a timid pair flees rather than mobs even where a neutral trio would fight", () => {
     const timid: Disposition = { boldness: 0, aggression: 0, sociability: 0.5 };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const mobber1 = prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", disposition: timid });
     const mobber2 = prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a", disposition: timid });
     const mobber3 = prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a", disposition: timid });
@@ -616,7 +631,7 @@ describe("disposition wiring", () => {
 
   it("an aggressive predator hunts at a hunger level a neutral predator would ignore", () => {
     const aggressive: Disposition = { boldness: 0.5, aggression: 1, sociability: 0.5 };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     // hunger 0.7 is below both the neutral baseline (0.85) and an aggressive
     // predator's raised threshold (0.85 + 0.2 = 1.05), so this alone doesn't
     // isolate the aggression effect the way it did against the old, lower
@@ -634,7 +649,7 @@ describe("disposition wiring", () => {
 
   it("a passive predator waits longer than a neutral predator to hunt", () => {
     const passive: Disposition = { boldness: 0.5, aggression: 0, sociability: 0.5 };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     // hunger 0.75 is below the neutral threshold (0.85 baseline, would
     // normally hunt) but above the passive predator's lowered threshold
     // (0.85 - 0.2 = 0.65).
@@ -649,7 +664,7 @@ describe("disposition wiring", () => {
 
 describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)", () => {
   it("a nocturnal predator hunts at night at a hunger level a cathemeral predator would ignore", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     world.tick = MIDNIGHT;
     // 0.9: below the nocturnal-at-midnight threshold (baseline 0.85 + 0.15
     // activity shift = 1.0) but above the plain baseline (0.85) — recalibrated
@@ -663,7 +678,7 @@ describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)",
     expect(nocturnalHunter.behavior).toBe("hunt");
 
     // Same hunger, same tick, no activityPattern set — the baseline (unshifted) case.
-    const world2 = createWorld(10, 10);
+    const world2 = createWorld(10, 10, AB_COMPARISON_SEED);
     world2.tick = MIDNIGHT;
     const cathemeralHunter = predator({ x: 8, y: 5 }, 0.9);
     world2.agents.push(prey({ x: 5, y: 5 }), cathemeralHunter);
@@ -674,7 +689,7 @@ describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)",
   });
 
   it("that same nocturnal predator is LESS eager by day than a cathemeral predator at the same hunger", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     world.tick = NOON;
     // 0.9 is above the day-nocturnal threshold (0.85 - 0.15 = 0.7), so this
     // hunter should NOT hunt by day despite being quite hungry.
@@ -687,14 +702,14 @@ describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)",
   });
 
   it("a diurnal predator is the exact mirror: eager by day, less eager at night", () => {
-    const dayWorld = createWorld(10, 10);
+    const dayWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     dayWorld.tick = NOON;
     const dayHunter = predator({ x: 8, y: 5 }, 0.7, { activityPattern: "diurnal" });
     dayWorld.agents.push(prey({ x: 5, y: 5 }), dayHunter);
     applyPredationInstincts(dayWorld, dayHunter, RULES);
     expect(dayHunter.behavior).toBe("hunt");
 
-    const nightWorld = createWorld(10, 10);
+    const nightWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     nightWorld.tick = MIDNIGHT;
     const nightHunter = predator({ x: 8, y: 5 }, 0.7, { activityPattern: "diurnal" });
     nightWorld.agents.push(prey({ x: 5, y: 5 }), nightHunter);
@@ -704,7 +719,7 @@ describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)",
 
   it("composes with the existing aggression-based shift rather than replacing it — both stack", () => {
     // Neutral aggression, nocturnal, at night: threshold 0.85 (baseline) + 0.15 (activity) = 1.0.
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     world.tick = MIDNIGHT;
     const neutralNocturnal = predator({ x: 8, y: 5 }, 0.72, { activityPattern: "nocturnal" });
     world.agents.push(prey({ x: 5, y: 5 }), neutralNocturnal);
@@ -717,7 +732,7 @@ describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)",
     // 0.85 (baseline) + 0.04 (aggression) + 0.15 (activity) = 1.04 — hunts at
     // a hunger level neither shift alone would cover.
     const aggressive: Disposition = { boldness: 0.5, aggression: 0.6, sociability: 0.5 };
-    const world2 = createWorld(10, 10);
+    const world2 = createWorld(10, 10, AB_COMPARISON_SEED);
     world2.tick = MIDNIGHT;
     const aggressiveNocturnal = predator({ x: 8, y: 5 }, 0.92, { activityPattern: "nocturnal", disposition: aggressive });
     world2.agents.push(prey({ x: 5, y: 5 }), aggressiveNocturnal);
@@ -726,7 +741,7 @@ describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)",
 
     // Aggression alone (no activityPattern) does NOT reach 0.92 hunger — its
     // own threshold is 0.85 + 0.04 = 0.89.
-    const world3 = createWorld(10, 10);
+    const world3 = createWorld(10, 10, AB_COMPARISON_SEED);
     world3.tick = MIDNIGHT;
     const aggressiveOnly = predator({ x: 8, y: 5 }, 0.92, { disposition: aggressive });
     world3.agents.push(prey({ x: 5, y: 5 }), aggressiveOnly);
@@ -737,7 +752,7 @@ describe("nocturnal/diurnal hunt-eagerness (see DESIGN.md's day/night Phase 2)",
 
 describe("guardians", () => {
   it("a non-prey herd-mate (e.g. Venusaur) intervenes when another member is threatened", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const protector = guardian({ x: 8, y: 5 }, { herdId: "herd-a" });
     const threatened = prey({ x: 5, y: 5 }, { herdId: "herd-a", behavior: "flee" });
     const threat = predator({ x: 6, y: 5 }, 0.9); // satisfied — isolates the guardian's proactive response
@@ -752,7 +767,7 @@ describe("guardians", () => {
   });
 
   it("a guardian with no herd-mate in danger behaves normally", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const protector = guardian({ x: 8, y: 5 }, { herdId: "herd-a" });
     world.agents.push(protector);
 
@@ -792,7 +807,7 @@ describe("bush concealment", () => {
     // the exact distance this test depends on) despite `age: 0`.
     const notShelterComfy = createNeeds({ hunger: 0.8, thirst: 0.8 });
 
-    const openWorld = createWorld(20, 20);
+    const openWorld = createWorld(20, 20, AB_COMPARISON_SEED);
     openWorld.agents.push(
       prey({ x: 5, y: 5 }, { disposition: bold, age: 0, needs: notShelterComfy }),
       predator({ x: 9, y: 5 }, 0.1, { age: ADULT_PREDATOR_AGE })
@@ -801,7 +816,7 @@ describe("bush concealment", () => {
     const openHunter = openWorld.agents.find((a) => a.id === "scyther-0")!;
     expect(openHunter.behavior).toBe("hunt"); // sanity: this distance is normally detectable
 
-    const bushWorld = createWorld(20, 20);
+    const bushWorld = createWorld(20, 20, AB_COMPARISON_SEED);
     setTile(bushWorld, "surface", 5, 5, "bush");
     bushWorld.agents.push(
       prey({ x: 5, y: 5 }, { disposition: bold, age: 0, needs: createNeeds({ hunger: 0.8, thirst: 0.8 }) }),
@@ -814,13 +829,13 @@ describe("bush concealment", () => {
 
   it("prey doesn't notice a predator lurking in a bush at a distance it would otherwise flee from", () => {
     // Distance 3 is within FLEE_DETECT_RADIUS (4) normally.
-    const openWorld = createWorld(20, 20);
+    const openWorld = createWorld(20, 20, AB_COMPARISON_SEED);
     const openTarget = prey({ x: 5, y: 5 });
     openWorld.agents.push(openTarget, predator({ x: 8, y: 5 }));
     tickWorld(openWorld, undefined, RULES, undefined, SAFE_RNG);
     expect(openTarget.behavior).toBe("flee"); // sanity: this distance is normally detectable
 
-    const bushWorld = createWorld(20, 20);
+    const bushWorld = createWorld(20, 20, AB_COMPARISON_SEED);
     setTile(bushWorld, "surface", 8, 5, "bush");
     const concealedTarget = prey({ x: 5, y: 5 });
     bushWorld.agents.push(concealedTarget, predator({ x: 8, y: 5 }));
@@ -831,7 +846,7 @@ describe("bush concealment", () => {
 
 describe("obstacles block combat move lines", () => {
   it("a tree between a mobbing prey and its target blocks the ranged attack — it closes distance instead", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     setTile(world, "surface", 5, 4, "tree"); // directly between mobber1 (5,3) and the predator (5,5)
     const mobber1 = prey({ x: 5, y: 3 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [RANGED_MOVE] });
     const mobber2 = prey({ x: 4, y: 4 }, { id: "bulbasaur-1", herdId: "herd-a", moves: [RANGED_MOVE] });
@@ -852,7 +867,7 @@ describe("obstacles block combat move lines", () => {
   });
 
   it("the same layout with no obstacle DOES let the ranged attack land (control case)", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const mobber1 = prey({ x: 5, y: 3 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [RANGED_MOVE] });
     const mobber2 = prey({ x: 4, y: 4 }, { id: "bulbasaur-1", herdId: "herd-a", moves: [RANGED_MOVE] });
     const mobber3 = prey({ x: 6, y: 4 }, { id: "bulbasaur-2", herdId: "herd-a", moves: [RANGED_MOVE] });
@@ -870,7 +885,7 @@ describe("status effects wired into real combat (resolveHit)", () => {
   const BURNING_MOVE: MoveSpec = { ...TEST_MOVE, id: "burning-move", statusChance: 1, statusKind: "burn" };
 
   it("a landed, non-killing hit inflicts the move's status on the defender", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 }); // survives FALLBACK_DAMAGE (1)
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [BURNING_MOVE] });
     world.agents.push(hunter, target); // predator ticks first, strikes before prey can flee
@@ -885,7 +900,7 @@ describe("status effects wired into real combat (resolveHit)", () => {
   });
 
   it("a fire-typed target can't be burned even on a guaranteed roll", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10, types: ["fire"] });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [BURNING_MOVE] });
     world.agents.push(hunter, target);
@@ -899,7 +914,7 @@ describe("status effects wired into real combat (resolveHit)", () => {
     const attackerStats = { maxHp: 100, attack: 50, defense: 30, spAttack: 30, spDefense: 30, speed: 40 }; // speed >= ACTION_THRESHOLD so it acts on the very first tick
     const defenderStats = { maxHp: 100, attack: 30, defense: 30, spAttack: 30, spDefense: 30, speed: 10 };
 
-    const burnedWorld = createWorld(10, 10);
+    const burnedWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const burnedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [TEST_MOVE] });
     burnedAttacker.status = { kind: "burn" };
     const victim1 = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...defenderStats } });
@@ -908,7 +923,7 @@ describe("status effects wired into real combat (resolveHit)", () => {
     tickWorld(burnedWorld, burnedLog, RULES);
     const burnedDamage = burnedLog.events.find((e) => e.kind === "fought")! as Extract<(typeof burnedLog.events)[number], { kind: "fought" }>;
 
-    const healthyWorld = createWorld(10, 10);
+    const healthyWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const healthyAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [TEST_MOVE] });
     const victim2 = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...defenderStats } });
     healthyWorld.agents.push(healthyAttacker, victim2);
@@ -928,7 +943,7 @@ describe("forced movement wired into real combat (resolveHit)", () => {
       range: { min: 0, max: 2 },
       forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" },
     };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 7, y: 5 }, undefined, { moves: [LUNGE_MOVE] }); // starts distance 2, within LUNGE_MOVE's range
     world.agents.push(hunter, target);
@@ -949,7 +964,7 @@ describe("forced movement wired into real combat (resolveHit)", () => {
       id: "knockback-move",
       forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" },
     };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 }); // survives FALLBACK_DAMAGE (1), so this is a non-killing hit
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [KNOCKBACK_MOVE] });
     world.agents.push(hunter, target);
@@ -967,7 +982,7 @@ describe("forced movement wired into real combat (resolveHit)", () => {
       id: "knockback-move-2",
       forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" },
     };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     // hp:1, no types/stats -> this fixture's FALLBACK_DAMAGE (1) brings it to
     // exactly 0, a fainting hit, not a survived one.
     const target = prey({ x: 5, y: 5 }, { hp: 1, maxHp: 1 });
@@ -992,7 +1007,7 @@ describe("chargeAttack: a genuine mid-commit wind-up (Agent.chargingAttack, Body
   };
 
   it("commits the attacker without landing a hit immediately", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [CHARGE_MOVE] });
     world.agents.push(hunter, target);
@@ -1008,7 +1023,7 @@ describe("chargeAttack: a genuine mid-commit wind-up (Agent.chargingAttack, Body
   });
 
   it("a charging agent takes no damage at all — genuine invulnerability, not a defense buff", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     // The one charging here is the "prey" fixture — attacked by a real
     // predator well within its own power to normally down it in one hit.
     const chargingPrey = prey(
@@ -1030,7 +1045,7 @@ describe("chargeAttack: a genuine mid-commit wind-up (Agent.chargingAttack, Body
   });
 
   it("resolves after its ticks elapse — leaps toward the target's current position, then lands the hit", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 9, y: 5 }, undefined, { moves: [CHARGE_MOVE] }); // out of melee range — only the leap closes it
     world.agents.push(hunter, target);
@@ -1052,7 +1067,7 @@ describe("chargeAttack: a genuine mid-commit wind-up (Agent.chargingAttack, Body
   });
 
   it("fizzles for no damage if the target is gone by the time the charge completes", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [CHARGE_MOVE] });
     world.agents.push(hunter, target);
@@ -1070,7 +1085,7 @@ describe("chargeAttack: a genuine mid-commit wind-up (Agent.chargingAttack, Body
 
 describe("unshaken: fully negates the next hit, once, then recharges (Agent.unshakenCooldownTicks, Body Slam's Unbothered)", () => {
   it("the first hit against a holder off cooldown does nothing at all — no damage, no event", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const unshakenPrey = prey({ x: 5, y: 5 }, { hp: 10, passives: { unshaken: 1 } });
     const hunter = predator({ x: 6, y: 5 });
     world.agents.push(hunter, unshakenPrey);
@@ -1089,7 +1104,7 @@ describe("unshaken: fully negates the next hit, once, then recharges (Agent.unsh
   });
 
   it("a second hit while the shield is still on cooldown lands normally", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const unshakenPrey = prey({ x: 5, y: 5 }, { hp: 10, passives: { unshaken: 1 } });
     const hunter = predator({ x: 6, y: 5 });
     world.agents.push(hunter, unshakenPrey);
@@ -1109,7 +1124,7 @@ describe("unshaken: fully negates the next hit, once, then recharges (Agent.unsh
   });
 
   it("without the passive, a hit lands normally even with unshakenCooldownTicks at 0", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 6, y: 5 });
     world.agents.push(hunter, target);
@@ -1122,7 +1137,7 @@ describe("unshaken: fully negates the next hit, once, then recharges (Agent.unsh
   });
 
   it("the shield recharges after enough ticks pass with no further hits", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const unshakenPrey = prey({ x: 5, y: 5 }, { hp: 10, passives: { unshaken: 1 }, unshakenCooldownTicks: 1 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [{ ...TEST_MOVE, id: "slow-move", cooldownTicks: 30 }] });
     world.agents.push(hunter, unshakenPrey);
@@ -1144,7 +1159,7 @@ describe("unshaken: fully negates the next hit, once, then recharges (Agent.unsh
 describe("multi-hit wired into real combat (resolveHit)", () => {
   it("strikes exactly hits.min===max times, each its own 'fought' event, until the hit count is used up or the target dies", () => {
     const FLURRY_MOVE: MoveSpec = { ...TEST_MOVE, id: "flurry-move", hits: { min: 3, max: 3 } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100 }); // survives all 3 FALLBACK_DAMAGE (1 each) hits
     const hunter = predator({ x: 6, y: 5 }, undefined, { maxHp: 200, moves: [FLURRY_MOVE] }); // maxHp raised so a maxHp:100 target still qualifies as prey (see isPreyOf/PREY_POWER_RATIO)
     world.agents.push(hunter, target);
@@ -1162,7 +1177,7 @@ describe("multi-hit wired into real combat (resolveHit)", () => {
 
   it("stops early once the target truly dies mid-flurry", () => {
     const FLURRY_MOVE: MoveSpec = { ...TEST_MOVE, id: "flurry-move-2", hits: { min: 5, max: 5 } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     // Already fainted with a tiny finishing pool — the first hit of the
     // flurry (FALLBACK_DAMAGE=1) exhausts it, killing it outright; the
     // remaining 4 hits of this same move-use never get a chance to land.
@@ -1181,7 +1196,7 @@ describe("multi-hit wired into real combat (resolveHit)", () => {
 describe("positionSwap wired into real combat (resolveHit)", () => {
   it("attacker and defender trade tiles on a landed, non-killing hit", () => {
     const SWAP_MOVE: MoveSpec = { ...TEST_MOVE, id: "swap-move", positionSwap: true };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [SWAP_MOVE] });
     world.agents.push(hunter, target);
@@ -1194,7 +1209,7 @@ describe("positionSwap wired into real combat (resolveHit)", () => {
 
   it("does not swap on a killing/finishing hit", () => {
     const SWAP_MOVE: MoveSpec = { ...TEST_MOVE, id: "swap-move-2", positionSwap: true };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 1, maxHp: 1 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [SWAP_MOVE] });
     world.agents.push(hunter, target);
@@ -1214,7 +1229,7 @@ describe("statChangeOnHit wired into real combat (resolveHit)", () => {
       accuracy: 0, // never lands
       statChangeOnHit: { target: "self", stat: "attack", stage: 1 },
     };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [SELF_BUFF_MOVE] });
     world.agents.push(hunter, target);
@@ -1230,7 +1245,7 @@ describe("statChangeOnHit wired into real combat (resolveHit)", () => {
       id: "debuff-move",
       statChangeOnHit: { target: "defender", stat: "defense", stage: -1, ticks: 10 },
     };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [DEBUFF_MOVE] });
     world.agents.push(hunter, target);
@@ -1250,7 +1265,7 @@ describe("statChangeOnHit wired into real combat (resolveHit)", () => {
       id: "debuff-move-2",
       statChangeOnHit: { target: "defender", stat: "defense", stage: -1 },
     };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 1, maxHp: 1 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [DEBUFF_MOVE] });
     world.agents.push(hunter, target);
@@ -1266,7 +1281,7 @@ describe("damage-reduction passive wired into real combat (resolveHit)", () => {
     const attackerStats = { maxHp: 100, attack: 50, defense: 30, spAttack: 30, spDefense: 30, speed: 40 };
     const defenderStats = { maxHp: 100, attack: 30, defense: 30, spAttack: 30, spDefense: 30, speed: 10 };
 
-    const reducedWorld = createWorld(10, 10);
+    const reducedWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const reducedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [TEST_MOVE] });
     const reducedVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...defenderStats }, passives: { damageReduction: 0.5 } });
     reducedWorld.agents.push(reducedAttacker, reducedVictim);
@@ -1274,7 +1289,7 @@ describe("damage-reduction passive wired into real combat (resolveHit)", () => {
     tickWorld(reducedWorld, reducedLog, RULES);
     const reducedDamage = (reducedLog.events.find((e) => e.kind === "fought")! as Extract<(typeof reducedLog.events)[number], { kind: "fought" }>).damage;
 
-    const normalWorld = createWorld(10, 10);
+    const normalWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const normalAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [TEST_MOVE] });
     const normalVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...defenderStats } });
     normalWorld.agents.push(normalAttacker, normalVictim);
@@ -1292,7 +1307,7 @@ describe("situational bonus wired into real combat (resolveHit)", () => {
     const attackerStats = { maxHp: 100, attack: 50, defense: 30, spAttack: 30, spDefense: 30, speed: 40 };
     const defenderStats = { maxHp: 100, attack: 30, defense: 30, spAttack: 30, spDefense: 30, speed: 10 };
 
-    const lowHpWorld = createWorld(10, 10);
+    const lowHpWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const lowHpAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [LOW_HP_MOVE] });
     const lowHpVictim = prey({ x: 5, y: 5 }, { hp: 40, maxHp: 100, types: ["normal"], stats: { ...defenderStats } });
     lowHpWorld.agents.push(lowHpAttacker, lowHpVictim);
@@ -1300,7 +1315,7 @@ describe("situational bonus wired into real combat (resolveHit)", () => {
     tickWorld(lowHpWorld, lowHpLog, RULES);
     const lowHpDamage = (lowHpLog.events.find((e) => e.kind === "fought")! as Extract<(typeof lowHpLog.events)[number], { kind: "fought" }>).damage;
 
-    const fullHpWorld = createWorld(10, 10);
+    const fullHpWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const fullHpAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...attackerStats }, maxHp: 200, moves: [LOW_HP_MOVE] });
     const fullHpVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...defenderStats } });
     fullHpWorld.agents.push(fullHpAttacker, fullHpVictim);
@@ -1320,7 +1335,7 @@ describe("multi-target/AoE resolution wired into real combat (resolveHit)", () =
       shape: { kind: "ring", radius: 1 },
       hitsArea: true,
     };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const primaryTarget = prey({ x: 6, y: 5 }, { id: "bulbasaur-primary", hp: 10 });
     // A bystander on the same ring (radius 1 around the attacker at (5,5)) but
     // not the deliberately-picked target — should still take a hit.
@@ -1344,7 +1359,7 @@ describe("multi-target/AoE resolution wired into real combat (resolveHit)", () =
       hitsArea: true,
       forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" },
     };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const primaryTarget = prey({ x: 6, y: 5 }, { id: "bulbasaur-primary", hp: 10 });
     const bystander = prey({ x: 5, y: 6 }, { id: "bulbasaur-bystander", hp: 10 });
     const hunter = predator({ x: 5, y: 5 }, undefined, { moves: [BLAST_MOVE] });
@@ -1363,7 +1378,7 @@ describe("multi-target/AoE resolution wired into real combat (resolveHit)", () =
       shape: { kind: "ring", radius: 1 },
       hitsArea: true,
     };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const primaryTarget = prey({ x: 6, y: 5 }, { id: "bulbasaur-primary", hp: 10 }); // survives
     const bystander = prey({ x: 5, y: 6 }, { id: "bulbasaur-bystander", hp: 1, maxHp: 1 }); // dies to FALLBACK_DAMAGE
     const hunter = predator({ x: 5, y: 5 }, 0.9, { moves: [GROWL_LIKE_MOVE] }); // very hungry — restores hunger only on a true "kill" per applyPredationInstincts
@@ -1386,7 +1401,7 @@ describe("multi-target/AoE resolution wired into real combat (resolveHit)", () =
       hitsArea: true,
       excludesAllies: true,
     };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const primaryTarget = prey({ x: 6, y: 5 }, { id: "bulbasaur-primary", hp: 10 });
     const ally = prey({ x: 5, y: 6 }, { id: "bulbasaur-ally", hp: 10, herdId: "herd-a" });
     const bystander = prey({ x: 4, y: 5 }, { id: "bulbasaur-bystander", hp: 10 });
@@ -1409,7 +1424,7 @@ describe("multi-target/AoE resolution wired into real combat (resolveHit)", () =
       shape: { kind: "burst", radius: 1 },
       hitsArea: true,
     };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const primaryTarget = prey({ x: 6, y: 5 }, { id: "bulbasaur-primary", hp: 10 });
     const ally = prey({ x: 5, y: 6 }, { id: "bulbasaur-ally", hp: 10, herdId: "herd-a" });
     const hunter = predator({ x: 5, y: 5 }, undefined, { herdId: "herd-a", moves: [REGULAR_AOE_MOVE] });
@@ -1440,7 +1455,7 @@ describe("weightScaling wired into real combat", () => {
   it("a heavier attacker (higher maxHp) deals more bonus damage than a lighter one", () => {
     const HEAVY_MOVE: MoveSpec = { ...TEST_MOVE, id: "heavy-move", weightScaling: { factor: 0.5 } };
 
-    const heavyWorld = createWorld(10, 10);
+    const heavyWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const heavyAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 300, moves: [HEAVY_MOVE] });
     const heavyVictim = prey({ x: 5, y: 5 }, { hp: 20, maxHp: 20, types: ["normal"], stats: { ...DEFENDER_STATS } });
     heavyWorld.agents.push(heavyAttacker, heavyVictim);
@@ -1451,7 +1466,7 @@ describe("weightScaling wired into real combat", () => {
     // unlucky seed, cause no "fought" event this single tick at all).
     tickWorld(heavyWorld, heavyLog, RULES, undefined, SAFE_RNG);
 
-    const lightWorld = createWorld(10, 10);
+    const lightWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const lightAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 50, moves: [HEAVY_MOVE] });
     const lightVictim = prey({ x: 5, y: 5 }, { hp: 20, maxHp: 20, types: ["normal"], stats: { ...DEFENDER_STATS } });
     lightWorld.agents.push(lightAttacker, lightVictim);
@@ -1475,14 +1490,14 @@ describe("critRateStage wired into real combat", () => {
     const fixedRng = () => 0.1;
     const CRIT_MOVE: MoveSpec = { ...TEST_MOVE, id: "crit-move", critRateStage: 1 };
 
-    const critWorld = createWorld(10, 10);
+    const critWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const critAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [CRIT_MOVE] });
     const critVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     critWorld.agents.push(critAttacker, critVictim);
     const critLog = new EventLog();
     tickWorld(critWorld, critLog, RULES, undefined, fixedRng);
 
-    const noCritWorld = createWorld(10, 10);
+    const noCritWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const noCritAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [TEST_MOVE] });
     const noCritVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     noCritWorld.agents.push(noCritAttacker, noCritVictim);
@@ -1497,7 +1512,7 @@ describe("critRateStage wired into real combat", () => {
 describe("lifesteal/recoil/thorns wired into real combat", () => {
   it("lifestealFraction heals the attacker by a fraction of the damage it dealt", () => {
     const LIFESTEAL_MOVE: MoveSpec = { ...TEST_MOVE, id: "lifesteal-move", lifestealFraction: 0.5 };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const hunter = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS_FAST }, hp: 100, maxHp: 200, moves: [LIFESTEAL_MOVE] });
     const target = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     world.agents.push(hunter, target);
@@ -1509,7 +1524,7 @@ describe("lifesteal/recoil/thorns wired into real combat", () => {
 
   it("recoilFraction damages the attacker by a fraction of the damage it dealt, floored at 1hp", () => {
     const RECOIL_MOVE: MoveSpec = { ...TEST_MOVE, id: "recoil-move", recoilFraction: 0.5 };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const hunter = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, hp: 200, maxHp: 200, moves: [RECOIL_MOVE] });
     const target = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     world.agents.push(hunter, target);
@@ -1519,7 +1534,7 @@ describe("lifesteal/recoil/thorns wired into real combat", () => {
 
   it("recoilFraction never faints the attacker outright — floors at 1hp", () => {
     const RECOIL_MOVE: MoveSpec = { ...TEST_MOVE, id: "recoil-move-2", recoilFraction: 50 };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const hunter = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS_FAST }, hp: 5, maxHp: 200, moves: [RECOIL_MOVE] });
     const target = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     world.agents.push(hunter, target);
@@ -1528,7 +1543,7 @@ describe("lifesteal/recoil/thorns wired into real combat", () => {
   });
 
   it("a defender's thorns passive reflects a fraction of damage back onto the attacker", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const hunter = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, hp: 200, maxHp: 200, moves: [TEST_MOVE] });
     const target = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS }, passives: { thorns: 0.5 } });
     world.agents.push(hunter, target);
@@ -1540,7 +1555,7 @@ describe("lifesteal/recoil/thorns wired into real combat", () => {
 describe("jamCooldownTicks/terrainBurn/statusSpreads wired into real combat", () => {
   it("bumps every entry in the defender's active moveCooldowns on a landed, non-killing hit", () => {
     const JAM_MOVE: MoveSpec = { ...TEST_MOVE, id: "jam-move", jamCooldownTicks: 3 };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10, moveCooldowns: { "some-move": 2 } });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [JAM_MOVE] });
     world.agents.push(hunter, target);
@@ -1554,14 +1569,31 @@ describe("jamCooldownTicks/terrainBurn/statusSpreads wired into real combat", ()
     expect(target.moveCooldowns?.["some-move"]).toBe(5);
   });
 
-  it("terrainBurn reverts a bush tile the defender stands on to floor", () => {
+  it("terrainBurn lights a real, persistent fire on the bush the defender stands on", () => {
+    // Was "reverts the bush straight to floor". terrainBurn now starts a
+    // fire that burns down over time and can spread (fire.ts) — the end
+    // state is still scorched floor, it just takes ticks to get there and
+    // is a hazard while it does.
     const BURN_TERRAIN_MOVE: MoveSpec = { ...TEST_MOVE, id: "burn-terrain-move", terrainBurn: true };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    world.weatherCells = [];
     setTile(world, "surface", 5, 5, "bush");
     const target = prey({ x: 5, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [BURN_TERRAIN_MOVE] });
     world.agents.push(hunter, target);
     tickWorld(world, undefined, RULES);
+    expect(world.tiles.surface[5 * world.width + 5].terrain).toBe("fire");
+  });
+
+  it("a terrainBurn fire eventually burns itself out to scorched floor", () => {
+    const BURN_TERRAIN_MOVE: MoveSpec = { ...TEST_MOVE, id: "burn-terrain-move", terrainBurn: true };
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    world.weatherCells = [];
+    setTile(world, "surface", 5, 5, "bush");
+    const target = prey({ x: 5, y: 5 }, { hp: 10 });
+    const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [BURN_TERRAIN_MOVE] });
+    world.agents.push(hunter, target);
+    for (let i = 0; i < FIRE_BURN_TICKS + 2; i++) tickWorld(world, undefined, RULES);
     expect(world.tiles.surface[5 * world.width + 5].terrain).toBe("floor");
   });
 
@@ -1576,7 +1608,7 @@ describe("jamCooldownTicks/terrainBurn/statusSpreads wired into real combat", ()
     // a melee move that would put it adjacent and eligible to catch its own
     // spread instead of the intended bystander.
     const SPREADING_BURN: MoveSpec = { ...RANGED_MOVE, id: "spreading-burn", statusChance: 1, statusKind: "burn", statusSpreads: true };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10, types: ["grass"] });
     const neighbor = prey({ x: 5, y: 6 }, { id: "bulbasaur-neighbor", hp: 10, types: ["grass"] });
     const hunter = predator({ x: 5, y: 3 }, undefined, { moves: [SPREADING_BURN] });
@@ -1590,7 +1622,7 @@ describe("jamCooldownTicks/terrainBurn/statusSpreads wired into real combat", ()
 describe("selfCostPerUse wired into real combat", () => {
   it("deducts the configured need by the configured amount once the move is used", () => {
     const COSTLY_MOVE: MoveSpec = { ...TEST_MOVE, id: "costly-move", selfCostPerUse: { need: "energy", amount: 0.2 } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [COSTLY_MOVE] });
     hunter.needs.energy = 0.8;
@@ -1601,7 +1633,7 @@ describe("selfCostPerUse wired into real combat", () => {
 
   it("floors at 0, never goes negative", () => {
     const COSTLY_MOVE: MoveSpec = { ...TEST_MOVE, id: "costly-move-2", selfCostPerUse: { need: "energy", amount: 5 } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [COSTLY_MOVE] });
     world.agents.push(hunter, target);
@@ -1621,7 +1653,7 @@ describe("new situational conditions wired into real combat", () => {
   it("elevation grants the bonus only when the attacker is higher than the defender", () => {
     const ELEVATION_MOVE: MoveSpec = { ...TEST_MOVE, id: "elevation-move", situationalBonus: { condition: "elevation", multiplier: 3 } };
 
-    const highWorld = createWorld(10, 10);
+    const highWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     setElevation(highWorld, "surface", 6, 5, 2);
     const highAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [ELEVATION_MOVE] });
     const highVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
@@ -1629,7 +1661,7 @@ describe("new situational conditions wired into real combat", () => {
     const highLog = new EventLog();
     tickWorld(highWorld, highLog, RULES);
 
-    const flatWorld = createWorld(10, 10);
+    const flatWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const flatAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [ELEVATION_MOVE] });
     const flatVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     flatWorld.agents.push(flatAttacker, flatVictim);
@@ -1642,7 +1674,7 @@ describe("new situational conditions wired into real combat", () => {
   it("concealed grants the bonus only when the attacker is standing in a bush", () => {
     const CONCEALED_MOVE: MoveSpec = { ...TEST_MOVE, id: "concealed-move", situationalBonus: { condition: "concealed", multiplier: 3 } };
 
-    const bushWorld = createWorld(10, 10);
+    const bushWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     setTile(bushWorld, "surface", 6, 5, "bush");
     const bushAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [CONCEALED_MOVE] });
     const bushVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
@@ -1650,7 +1682,7 @@ describe("new situational conditions wired into real combat", () => {
     const bushLog = new EventLog();
     tickWorld(bushWorld, bushLog, RULES);
 
-    const openWorld = createWorld(10, 10);
+    const openWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const openAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [CONCEALED_MOVE] });
     const openVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     openWorld.agents.push(openAttacker, openVictim);
@@ -1663,7 +1695,7 @@ describe("new situational conditions wired into real combat", () => {
   it("storm/drought/rain check the active weather cell at the attacker's position", () => {
     const RAIN_MOVE: MoveSpec = { ...TEST_MOVE, id: "rain-move", situationalBonus: { condition: "rain", multiplier: 3 } };
 
-    const rainWorld = createWorld(10, 10);
+    const rainWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     rainWorld.weatherCells = [{ id: "r", type: "rain", center: { x: 6, y: 5 }, radius: 5, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } }];
     const rainAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [RAIN_MOVE] });
     const rainVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
@@ -1671,7 +1703,7 @@ describe("new situational conditions wired into real combat", () => {
     const rainLog = new EventLog();
     tickWorld(rainWorld, rainLog, RULES);
 
-    const clearWorld = createWorld(10, 10);
+    const clearWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const clearAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [RAIN_MOVE] });
     const clearVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     clearWorld.agents.push(clearAttacker, clearVictim);
@@ -1684,7 +1716,7 @@ describe("new situational conditions wired into real combat", () => {
   it("coldSnap checks isInColdSnap at the attacker's position", () => {
     const COLD_MOVE: MoveSpec = { ...TEST_MOVE, id: "cold-move", situationalBonus: { condition: "coldSnap", multiplier: 3 } };
 
-    const coldWorld = createWorld(10, 10);
+    const coldWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     coldWorld.weatherCells = [{ id: "c", type: "coldSnap", center: { x: 6, y: 5 }, radius: 5, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } }];
     // A cold snap also slows the attacker's own action speed (weather.ts's
     // COLD_SNAP_SPEED_MULTIPLIER, composed into actionSpeedOf) — a plain
@@ -1696,7 +1728,7 @@ describe("new situational conditions wired into real combat", () => {
     const coldLog = new EventLog();
     tickWorld(coldWorld, coldLog, RULES);
 
-    const warmWorld = createWorld(10, 10);
+    const warmWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const warmAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS_FAST }, maxHp: 200, moves: [COLD_MOVE] });
     const warmVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     warmWorld.agents.push(warmAttacker, warmVictim);
@@ -1710,14 +1742,14 @@ describe("new situational conditions wired into real combat", () => {
     const BURNING_BONUS_MOVE: MoveSpec = { ...TEST_MOVE, id: "burning-bonus-move", situationalBonus: { condition: "targetBurning", multiplier: 3 } };
     const STATUSED_BONUS_MOVE: MoveSpec = { ...TEST_MOVE, id: "statused-bonus-move", situationalBonus: { condition: "targetStatused", multiplier: 3 } };
 
-    const burningWorld = createWorld(10, 10);
+    const burningWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const burningAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [BURNING_BONUS_MOVE] });
     const burningVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS }, status: { kind: "burn" } });
     burningWorld.agents.push(burningAttacker, burningVictim);
     const burningLog = new EventLog();
     tickWorld(burningWorld, burningLog, RULES);
 
-    const healthyWorld = createWorld(10, 10);
+    const healthyWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const healthyAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [BURNING_BONUS_MOVE] });
     const healthyVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     healthyWorld.agents.push(healthyAttacker, healthyVictim);
@@ -1727,14 +1759,14 @@ describe("new situational conditions wired into real combat", () => {
     // targetBurning fires on the burning target but not the healthy one.
     expect(foughtDamage(burningLog.events)).toBeGreaterThan(foughtDamage(healthyLog.events));
 
-    const paralyzedWorld = createWorld(10, 10);
+    const paralyzedWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const paralyzedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [STATUSED_BONUS_MOVE] });
     const paralyzedVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS }, status: { kind: "paralysis" } });
     paralyzedWorld.agents.push(paralyzedAttacker, paralyzedVictim);
     const paralyzedLog = new EventLog();
     tickWorld(paralyzedWorld, paralyzedLog, RULES);
 
-    const unstatusedWorld = createWorld(10, 10);
+    const unstatusedWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const unstatusedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [STATUSED_BONUS_MOVE] });
     const unstatusedVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     unstatusedWorld.agents.push(unstatusedAttacker, unstatusedVictim);
@@ -1748,14 +1780,14 @@ describe("new situational conditions wired into real combat", () => {
   it("rallyMarked keys off the defender's own active rallyCall mark, not any other agent's", () => {
     const RALLY_MARKED_MOVE: MoveSpec = { ...TEST_MOVE, id: "rally-marked-move", situationalBonus: { condition: "rallyMarked", multiplier: 3 } };
 
-    const markedWorld = createWorld(10, 10);
+    const markedWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const markedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [RALLY_MARKED_MOVE] });
     const markedVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS }, rallyMarkTicksRemaining: 5 });
     markedWorld.agents.push(markedAttacker, markedVictim);
     const markedLog = new EventLog();
     tickWorld(markedWorld, markedLog, RULES);
 
-    const unmarkedWorld = createWorld(10, 10);
+    const unmarkedWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const unmarkedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [RALLY_MARKED_MOVE] });
     const unmarkedVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     unmarkedWorld.agents.push(unmarkedAttacker, unmarkedVictim);
@@ -1803,7 +1835,7 @@ describe("preferMarked (rally-call focus fire)", () => {
 
 describe("rally-call wired into real predation instincts", () => {
   it("prey flees toward a rally-marked (farther) threat instead of the merely-closer one", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, AB_COMPARISON_SEED);
     const target = prey({ x: 10, y: 10 }, { id: "bulbasaur-0" });
     const closeThreat = predator({ x: 8, y: 10 }, undefined, { id: "scyther-close" }); // distance 2, west
     const farThreat = predator({ x: 13, y: 10 }, undefined, { id: "scyther-far", rallyMarkTicksRemaining: 5 }); // distance 3, east, marked
@@ -1818,7 +1850,7 @@ describe("rally-call wired into real predation instincts", () => {
   });
 
   it("baseline sanity: with nothing marked, the same layout flees the actually-nearest threat", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, AB_COMPARISON_SEED);
     const target = prey({ x: 10, y: 10 }, { id: "bulbasaur-0" });
     const closeThreat = predator({ x: 8, y: 10 }, undefined, { id: "scyther-close" });
     const farThreat = predator({ x: 13, y: 10 }, undefined, { id: "scyther-far" });
@@ -1831,7 +1863,7 @@ describe("rally-call wired into real predation instincts", () => {
   });
 
   it("a hungry predator hunts a rally-marked prey over a merely-closer one", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, AB_COMPARISON_SEED);
     const hungry = predator({ x: 10, y: 10 }, 0.1, { id: "scyther-hungry" });
     const closePrey = prey({ x: 11, y: 10 }, { id: "bulbasaur-close" }); // distance 1
     const farPrey = prey({ x: 14, y: 10 }, { id: "bulbasaur-far", rallyMarkTicksRemaining: 5 }); // distance 4, marked
@@ -1844,7 +1876,7 @@ describe("rally-call wired into real predation instincts", () => {
   });
 
   it("a guardian intervenes against a rally-marked threat over a merely-closer one", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, AB_COMPARISON_SEED);
     const protector = guardian({ x: 5, y: 3 }, { herdId: "herd-a" });
     const threatened = prey({ x: 5, y: 5 }, { herdId: "herd-a", behavior: "flee" });
     const closeThreat = predator({ x: 6, y: 5 }, 0.9, { id: "scyther-close" }); // distance 1
@@ -1859,7 +1891,7 @@ describe("rally-call wired into real predation instincts", () => {
 
   it("a landed, non-killing hit with rallyCall marks the defender for the configured duration", () => {
     const RALLY_MOVE: MoveSpec = { ...TEST_MOVE, id: "rally-move", rallyCall: { ticks: 8 } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 }); // survives FALLBACK_DAMAGE (1)
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [RALLY_MOVE] });
     world.agents.push(hunter, target);
@@ -1874,7 +1906,7 @@ describe("rally-call wired into real predation instincts", () => {
 
   it("no mark on a killing/finishing hit", () => {
     const RALLY_MOVE: MoveSpec = { ...TEST_MOVE, id: "rally-move-2", rallyCall: { ticks: 8 } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 1, maxHp: 1 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [RALLY_MOVE] });
     world.agents.push(hunter, target);
@@ -1889,7 +1921,7 @@ describe("rally-call wired into real predation instincts", () => {
 describe("critCooldownReset (predation.ts's applySingleDamageInstance)", () => {
   it("a landed critical hit resets the attacker's own cooldown for that move to 0", () => {
     const CRIT_RESET_MOVE: MoveSpec = { ...TEST_MOVE, id: "crit-reset-move", cooldownTicks: 5, critRateStage: 3, critCooldownReset: true };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 }); // survives FALLBACK_DAMAGE (1)
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [CRIT_RESET_MOVE] });
     world.agents.push(hunter, target);
@@ -1903,7 +1935,7 @@ describe("critCooldownReset (predation.ts's applySingleDamageInstance)", () => {
 
   it("without critCooldownReset, a crit is still just bonus damage — the normal cooldown stands", () => {
     const CRIT_ONLY_MOVE: MoveSpec = { ...TEST_MOVE, id: "crit-only-move", cooldownTicks: 5, critRateStage: 3 };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [CRIT_ONLY_MOVE] });
     world.agents.push(hunter, target);
@@ -1917,7 +1949,7 @@ describe("critCooldownReset (predation.ts's applySingleDamageInstance)", () => {
 describe("positionSwapPull (predation.ts's resolveHitAgainstTarget)", () => {
   it("pulls the defender further past the swap, continuing away from the attacker's new position", () => {
     const PULL_SWAP_MOVE: MoveSpec = { ...TEST_MOVE, id: "pull-swap-move", positionSwap: true, positionSwapPull: 2 };
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, AB_COMPARISON_SEED);
     const target = prey({ x: 10, y: 5 }, { hp: 10 }); // survives FALLBACK_DAMAGE (1)
     const hunter = predator({ x: 9, y: 5 }, undefined, { moves: [PULL_SWAP_MOVE] }); // adjacent, west of target
 
@@ -1933,7 +1965,7 @@ describe("positionSwapPull (predation.ts's resolveHitAgainstTarget)", () => {
 
   it("a plain positionSwap with no pull just trades tiles, unchanged from before this field existed", () => {
     const PLAIN_SWAP_MOVE: MoveSpec = { ...TEST_MOVE, id: "plain-swap-move", positionSwap: true };
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, AB_COMPARISON_SEED);
     const target = prey({ x: 10, y: 5 }, { hp: 10 });
     const hunter = predator({ x: 9, y: 5 }, undefined, { moves: [PLAIN_SWAP_MOVE] });
 
@@ -1955,7 +1987,7 @@ describe("positionSwapPull (predation.ts's resolveHitAgainstTarget)", () => {
  */
 describe("hunt pursuit of a MOVING target uses real BFS pathfinding (stepTowardMovingTarget)", () => {
   it("routes around an obstacle cluster while chasing prey that keeps moving, instead of chasing a stale position forever", () => {
-    const world = createWorld(12, 12);
+    const world = createWorld(12, 12, AB_COMPARISON_SEED);
     // A wall spanning the whole width with a single gap, between the
     // predator (above) and the prey (below) — the same obstacle shape as
     // the confirmed seekWater/seekFood death this session's earlier BFS
@@ -2008,7 +2040,7 @@ describe("hunt pursuit of a MOVING target uses real BFS pathfinding (stepTowardM
   });
 
   it("gives up cleanly on a genuinely unreachable (walled-off) prey target instead of getting stuck", () => {
-    const world = createWorld(12, 12);
+    const world = createWorld(12, 12, AB_COMPARISON_SEED);
     // Box the prey in on all four sides — no gap anywhere, unreachable by
     // any route.
     for (let x = 4; x <= 6; x++) {
@@ -2037,7 +2069,7 @@ describe("hunt pursuit of a MOVING target uses real BFS pathfinding (stepTowardM
   });
 
   it("stops pathfinding toward a hunt target once it leaves detection range mid-chase", () => {
-    const world = createWorld(20, 20);
+    const world = createWorld(20, 20, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 3 }); // within HUNT_DETECT_RADIUS (5) of the hunter below
     const hunter = predator({ x: 5, y: 0 }, 0.3);
     world.agents.push(target, hunter);
@@ -2064,7 +2096,7 @@ describe("hunt pursuit of a MOVING target uses real BFS pathfinding (stepTowardM
   });
 
   it("never lands the hunter on the same tile as its prey, even chasing a stationary target diagonally across an open map", () => {
-    const world = createWorld(12, 12);
+    const world = createWorld(12, 12, AB_COMPARISON_SEED);
     const target = prey({ x: 7, y: 7 });
     // Within HUNT_DETECT_RADIUS (5) from the start, matching every other
     // hunt test in this file — a predator that never detects its prey in
@@ -2097,7 +2129,7 @@ describe("pack hunting", () => {
   const PACK_ONLY_MAXHP = 18;
 
   it("a lone predator will NOT hunt a target too strong to take on alone", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { maxHp: PACK_ONLY_MAXHP });
     const lone = predator({ x: 6, y: 5 }, 0.1); // no same-species conspecific anywhere nearby
     world.agents.push(target, lone);
@@ -2109,7 +2141,7 @@ describe("pack hunting", () => {
   });
 
   it("the same target becomes huntable once a real, nearby same-species conspecific is there to pack up with", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { maxHp: PACK_ONLY_MAXHP });
     // Predator ticks before the ally so its own hunt-eligibility check sees
     // the ally already in place — position, not shared herdId, is the real
@@ -2127,7 +2159,7 @@ describe("pack hunting", () => {
   });
 
   it("a distant same-species predator (outside PACK_MUSTER_RADIUS) doesn't count toward forming a pack", () => {
-    const world = createWorld(30, 30);
+    const world = createWorld(30, 30, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { maxHp: PACK_ONLY_MAXHP });
     const hunter = predator({ x: 6, y: 5 }, 0.1);
     const farAlly = predator({ x: 20, y: 20 }, 0.1, { id: "scyther-1" }); // way outside PACK_MUSTER_RADIUS (5) of the target
@@ -2139,7 +2171,7 @@ describe("pack hunting", () => {
   });
 
   it("a different-species conspecific doesn't count toward forming a pack (no cross-species pack hunting)", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { maxHp: PACK_ONLY_MAXHP });
     const hunter = predator({ x: 6, y: 5 }, 0.1);
     const otherPredatorSpecies = predator({ x: 8, y: 5 }, 0.1, { id: "onix-0", species: "onix" });
@@ -2161,14 +2193,14 @@ describe("pack hunting", () => {
     // too-strong target" trigger effect covered by the tests above.
     const target = prey({ x: 5, y: 5 });
 
-    const soloWorld = createWorld(10, 10);
+    const soloWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const soloHunter = predator({ x: 6, y: 5 }, 0.1, { moves: [PARTIAL_ACC_MOVE] });
     soloWorld.agents.push(soloHunter, target);
     const soloLog = new EventLog();
     tickWorld(soloWorld, soloLog, RULES, undefined, fixedRng);
     expect(soloLog.events).toContainEqual(expect.objectContaining({ kind: "missed", attackerId: "scyther-0" }));
 
-    const packWorld = createWorld(10, 10);
+    const packWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const packTarget = prey({ x: 5, y: 5 });
     const packHunter = predator({ x: 6, y: 5 }, 0.1, { moves: [PARTIAL_ACC_MOVE] });
     // Already committed to the same target — the real, positioning-driven
@@ -2187,7 +2219,7 @@ describe("pack hunting", () => {
 
   it("rng-determinism: the same seed run twice with pack hunting active produces byte-identical outcomes", () => {
     function run(): unknown {
-      const world = createWorld(10, 10);
+      const world = createWorld(10, 10, AB_COMPARISON_SEED);
       const target = prey({ x: 5, y: 5 }, { maxHp: PACK_ONLY_MAXHP });
       const hunter = predator({ x: 6, y: 5 }, 0.1);
       const ally = predator({ x: 8, y: 5 }, 0.1, { id: "scyther-1" });
@@ -2203,7 +2235,7 @@ describe("pack hunting", () => {
 
 describe("ontogenetic niche shift (juvenile predator behavior)", () => {
   it("a juvenile predator never initiates an independent hunt, even hungry with solo-eligible prey right next to it", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 });
     const juvenile = predator({ x: 6, y: 5 }, 0.1, { age: 10 }); // well below JUVENILE_AGE_THRESHOLD (60)
     world.agents.push(target, juvenile);
@@ -2215,7 +2247,7 @@ describe("ontogenetic niche shift (juvenile predator behavior)", () => {
   });
 
   it("an adult predator (same setup, no age or a mature age) does hunt", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 });
     const adult = predator({ x: 6, y: 5 }, 0.1, { age: 200 });
     world.agents.push(target, adult);
@@ -2228,7 +2260,7 @@ describe("ontogenetic niche shift (juvenile predator behavior)", () => {
   it("a juvenile flees a losing fight at a higher hp fraction than an adult would, at the identical hp fraction", () => {
     const HALFWAY_HP_FRACTION = 0.5; // below JUVENILE_RETREAT_HP_FRACTION (0.6), above the adult's RETREAT_HP_FRACTION (0.4)
 
-    const juvenileWorld = createWorld(10, 10);
+    const juvenileWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const juvenileAttacker = prey({ x: 6, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", behavior: "fight", fightTarget: "scyther-0" });
     const juvenile = predator({ x: 5, y: 5 }, 0.3, { age: 10 });
     juvenile.hp = 5;
@@ -2240,7 +2272,7 @@ describe("ontogenetic niche shift (juvenile predator behavior)", () => {
     expect(handled).toBe(true);
     expect(juvenile.behavior).toBe("flee");
 
-    const adultWorld = createWorld(10, 10);
+    const adultWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const adultAttacker = prey({ x: 6, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", behavior: "fight", fightTarget: "scyther-0" });
     const adult = predator({ x: 5, y: 5 }, 0.3, { age: 200 });
     adult.hp = 5;
@@ -2255,7 +2287,7 @@ describe("ontogenetic niche shift (juvenile predator behavior)", () => {
   it("end-to-end: given a choice between a live kill and a corpse, a juvenile scavenges while an adult hunts", () => {
     const corpsePos = { x: 3, y: 6 };
 
-    const juvenileWorld = createWorld(10, 10);
+    const juvenileWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const juvenileLivePrey = prey({ x: 5, y: 5 });
     const juvenileCorpse = prey({ x: 3, y: 6 }, { id: "corpse-0", alive: false });
     const juvenile = predator({ x: 6, y: 5 }, 0.1, { age: 10 });
@@ -2264,7 +2296,7 @@ describe("ontogenetic niche shift (juvenile predator behavior)", () => {
     expect(juvenile.behavior).toBe("scavenge");
     expect(juvenile.huntTarget).toBeUndefined();
 
-    const adultWorld = createWorld(10, 10);
+    const adultWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const adultLivePrey = prey({ x: 5, y: 5 });
     const adultCorpse = prey(corpsePos, { id: "corpse-0", alive: false });
     const adult = predator({ x: 6, y: 5 }, 0.1, { age: 200 });
@@ -2276,14 +2308,14 @@ describe("ontogenetic niche shift (juvenile predator behavior)", () => {
 
 describe("defenseBoost passive wired into real combat", () => {
   it("reduces damage from a physical move, same direction as more Defense stat would", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const attacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [TEST_MOVE] });
     const victim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS }, passives: { defenseBoost: 1 } });
     world.agents.push(attacker, victim);
     const log = new EventLog();
     tickWorld(world, log, RULES, undefined, mulberry32(999));
 
-    const baselineWorld = createWorld(10, 10);
+    const baselineWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const baselineAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [TEST_MOVE] });
     const baselineVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     baselineWorld.agents.push(baselineAttacker, baselineVictim);
@@ -2295,14 +2327,14 @@ describe("defenseBoost passive wired into real combat", () => {
 
   it("does nothing against a special move — physical-only, since calculateDamage never reads the defense stage for a special attack", () => {
     const SPECIAL_MOVE: MoveSpec = { ...TEST_MOVE, id: "special-move", category: "special" };
-    const boostedWorld = createWorld(10, 10);
+    const boostedWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const boostedAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [SPECIAL_MOVE] });
     const boostedVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS }, passives: { defenseBoost: 1 } });
     boostedWorld.agents.push(boostedAttacker, boostedVictim);
     const boostedLog = new EventLog();
     tickWorld(boostedWorld, boostedLog, RULES, undefined, mulberry32(999));
 
-    const baselineWorld = createWorld(10, 10);
+    const baselineWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const baselineAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 200, moves: [SPECIAL_MOVE] });
     const baselineVictim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...DEFENDER_STATS } });
     baselineWorld.agents.push(baselineAttacker, baselineVictim);
@@ -2317,7 +2349,7 @@ describe("consumesOwnTerrain (Rock Throw's boulder-consume spec)", () => {
   const BOULDER_MOVE: MoveSpec = { ...TEST_MOVE, id: "boulder-move", consumesOwnTerrain: { terrain: "boulder", damageMultiplier: 3 } };
 
   it("triples damage and reverts the attacker's own boulder tile to floor", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     setTile(world, "surface", 6, 5, "boulder");
     const attacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 400, moves: [BOULDER_MOVE] });
     const victim = prey({ x: 5, y: 5 }, { hp: 200, maxHp: 200, types: ["normal"], stats: { ...DEFENDER_STATS } });
@@ -2325,7 +2357,7 @@ describe("consumesOwnTerrain (Rock Throw's boulder-consume spec)", () => {
     const log = new EventLog();
     tickWorld(world, log, RULES, undefined, mulberry32(999));
 
-    const baselineWorld = createWorld(10, 10);
+    const baselineWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const baselineAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 400, moves: [BOULDER_MOVE] });
     const baselineVictim = prey({ x: 5, y: 5 }, { hp: 200, maxHp: 200, types: ["normal"], stats: { ...DEFENDER_STATS } });
     baselineWorld.agents.push(baselineAttacker, baselineVictim);
@@ -2337,14 +2369,14 @@ describe("consumesOwnTerrain (Rock Throw's boulder-consume spec)", () => {
   });
 
   it("does nothing when the attacker isn't standing on the required terrain", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const attacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 400, moves: [BOULDER_MOVE] });
     const victim = prey({ x: 5, y: 5 }, { hp: 200, maxHp: 200, types: ["normal"], stats: { ...DEFENDER_STATS } });
     world.agents.push(attacker, victim);
     const log = new EventLog();
     tickWorld(world, log, RULES, undefined, mulberry32(999));
 
-    const baselineWorld = createWorld(10, 10);
+    const baselineWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const baselineAttacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 400, moves: [BOULDER_MOVE] });
     const baselineVictim = prey({ x: 5, y: 5 }, { hp: 200, maxHp: 200, types: ["normal"], stats: { ...DEFENDER_STATS } });
     baselineWorld.agents.push(baselineAttacker, baselineVictim);
@@ -2356,7 +2388,7 @@ describe("consumesOwnTerrain (Rock Throw's boulder-consume spec)", () => {
 
   it("only fires once in a multi-hit flurry — the tile is already floor for later hits", () => {
     const FLURRY_MOVE: MoveSpec = { ...BOULDER_MOVE, id: "boulder-flurry", hits: { min: 3, max: 3 } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     setTile(world, "surface", 6, 5, "boulder");
     const attacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...ATTACKER_STATS }, maxHp: 1000, moves: [FLURRY_MOVE] });
     const victim = prey({ x: 5, y: 5 }, { hp: 500, maxHp: 500, types: ["normal"], stats: { ...DEFENDER_STATS } });
@@ -2370,7 +2402,7 @@ describe("consumesOwnTerrain (Rock Throw's boulder-consume spec)", () => {
 describe("terrainFill (Water Gun leaving a puddle)", () => {
   it("converts a dry floor tile at the defender's position into water on a landed, non-killing hit", () => {
     const FILL_MOVE: MoveSpec = { ...TEST_MOVE, id: "fill-move", terrainFill: { terrain: "water" } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 100 }); // survives FALLBACK_DAMAGE (1)
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [FILL_MOVE] });
     world.agents.push(hunter, target);
@@ -2382,7 +2414,7 @@ describe("terrainFill (Water Gun leaving a puddle)", () => {
 
   it("a real puddle forming also 'waters' the ground — direct ask: soil fertility helped by Water-type moves", () => {
     const FILL_MOVE: MoveSpec = { ...TEST_MOVE, id: "fill-move-water", terrainFill: { terrain: "water" } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 100 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [FILL_MOVE] });
     world.agents.push(hunter, target);
@@ -2395,7 +2427,7 @@ describe("terrainFill (Water Gun leaving a puddle)", () => {
 
   it("does nothing to a tile kind that isn't fillable (e.g. a wall)", () => {
     const FILL_MOVE: MoveSpec = { ...TEST_MOVE, id: "fill-move-2", terrainFill: { terrain: "water" } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     setTile(world, "surface", 5, 5, "wall");
     const target = prey({ x: 5, y: 5 }, { hp: 100 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [FILL_MOVE] });
@@ -2408,7 +2440,7 @@ describe("terrainFill (Water Gun leaving a puddle)", () => {
 
   it("no fill on a killing/finishing hit — same 'landed non-killing hit' gate as terrainBurn", () => {
     const FILL_MOVE: MoveSpec = { ...TEST_MOVE, id: "fill-move-3", terrainFill: { terrain: "water" } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 1, maxHp: 1 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [FILL_MOVE] });
     world.agents.push(hunter, target);
@@ -2424,7 +2456,7 @@ describe("burrow (MoveSpec.burrow, Dig-to-escape)", () => {
   const BURROW_MOVE: MoveSpec = { ...TEST_MOVE, id: "burrow-move", cooldownTicks: 15, burrow: { ticks: 20 } };
 
   it("a fleeing agent with an off-cooldown burrow move burrows instead of stepping away", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { moves: [BURROW_MOVE] });
     const threat = predator({ x: 6, y: 5 });
     world.agents.push(target, threat);
@@ -2440,7 +2472,7 @@ describe("burrow (MoveSpec.burrow, Dig-to-escape)", () => {
   });
 
   it("without a burrow move, the same layout takes a normal flee step", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 });
     const threat = predator({ x: 6, y: 5 });
     world.agents.push(target, threat);
@@ -2454,7 +2486,7 @@ describe("burrow (MoveSpec.burrow, Dig-to-escape)", () => {
 
   it("resurfaces to the original layer once the burrow duration runs out", () => {
     const agent = prey({ x: 5, y: 5 }, { layer: "underground", burrowedFromLayer: "surface", burrowedTicksRemaining: 1 });
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     world.agents.push(agent);
 
     tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
@@ -2466,7 +2498,7 @@ describe("burrow (MoveSpec.burrow, Dig-to-escape)", () => {
 
   it("counts as concealed while burrowed — a 'flanking'-style situational bonus keyed to concealment fires", () => {
     const CONCEALED_BONUS_MOVE: MoveSpec = { ...TEST_MOVE, id: "concealed-bonus-move", situationalBonus: { condition: "concealed", multiplier: 3 } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const attacker = predator(
       { x: 6, y: 5 },
       undefined,
@@ -2477,7 +2509,7 @@ describe("burrow (MoveSpec.burrow, Dig-to-escape)", () => {
     const log = new EventLog();
     tickWorld(world, log, RULES, undefined, mulberry32(999));
 
-    const baselineWorld = createWorld(10, 10);
+    const baselineWorld = createWorld(10, 10, AB_COMPARISON_SEED);
     const baselineAttacker = predator(
       { x: 6, y: 5 },
       undefined,
@@ -2492,7 +2524,7 @@ describe("burrow (MoveSpec.burrow, Dig-to-escape)", () => {
   });
 
   it("pickBestMove never selects a burrow move offensively", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     // Attacker knows ONLY the burrow move — if pickBestMove excludes it
     // correctly, there's nothing left to attack with and no hit lands.
     const attacker = predator({ x: 6, y: 5 }, undefined, { moves: [BURROW_MOVE] });
@@ -2509,7 +2541,7 @@ describe("burrow (MoveSpec.burrow, Dig-to-escape)", () => {
 describe("targetsAlly moves are additive, not a replacement — real combat use", () => {
   it("a hunting predator attacks with its own targetsAlly move when it's the only one available", () => {
     const ALLY_ATTACK_MOVE: MoveSpec = { ...TEST_MOVE, id: "ally-attack-move", targetsAlly: true, allyEffect: { healFraction: 0.1 } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { moves: [ALLY_ATTACK_MOVE] });
     world.agents.push(hunter, target);
@@ -2530,7 +2562,7 @@ describe("allyEffectOnAttack: the ally-effect ALSO piggybacks on a hostile attac
   const CLEAVE_HEAL_MOVE: MoveSpec = { ...TEST_MOVE, id: "cleave-heal-move", allyEffect: { healFraction: 0.2 }, allyEffectOnAttack: true };
 
   it("heals a nearby, hurt herd-mate the instant the move lands a hostile hit, at no extra cost", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { id: "scyther-0", herdId: "pack-1", moves: [CLEAVE_HEAL_MOVE] });
     const packmate = predator({ x: 7, y: 5 }, undefined, { id: "scyther-1", herdId: "pack-1", hp: 10, maxHp: 100 });
@@ -2547,7 +2579,7 @@ describe("allyEffectOnAttack: the ally-effect ALSO piggybacks on a hostile attac
   });
 
   it("still lands the hostile hit normally when no ally happens to be in range", () => {
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { id: "scyther-0", herdId: "pack-1", moves: [CLEAVE_HEAL_MOVE] });
     world.agents.push(hunter, target);
@@ -2561,7 +2593,7 @@ describe("allyEffectOnAttack: the ally-effect ALSO piggybacks on a hostile attac
 
   it("does nothing extra without allyEffectOnAttack set — a plain targetsAlly move stays exactly as before", () => {
     const PLAIN_ALLY_MOVE: MoveSpec = { ...TEST_MOVE, id: "plain-ally-move", targetsAlly: true, allyEffect: { healFraction: 0.2 } };
-    const world = createWorld(10, 10);
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 });
     const hunter = predator({ x: 6, y: 5 }, undefined, { id: "scyther-0", herdId: "pack-1", moves: [PLAIN_ALLY_MOVE] });
     const packmate = predator({ x: 7, y: 5 }, undefined, { id: "scyther-1", herdId: "pack-1", hp: 10, maxHp: 100 });
@@ -2573,5 +2605,40 @@ describe("allyEffectOnAttack: the ally-effect ALSO piggybacks on a hostile attac
     expect(log.events.some((e) => e.kind === "fought" && (e as any).moveId === "plain-ally-move")).toBe(true);
     expect(packmate.hp).toBe(10); // untouched
     expect(log.events.some((e) => e.kind === "supported")).toBe(false);
+  });
+});
+
+describe("flat damage reduction (damageReductionFlat) in real combat", () => {
+  const STATS = { maxHp: 100, attack: 50, defense: 30, spAttack: 30, spDefense: 30, speed: 40 };
+  const SLOW = { maxHp: 100, attack: 30, defense: 30, spAttack: 30, spDefense: 30, speed: 10 };
+
+  // Fixed seed on purpose: damage carries a 0.85-1.0 random roll, so two
+  // independently-seeded worlds can produce a smaller hit against the
+  // ARMORED defender purely by luck. A comparison test here has to hold the
+  // roll still or it is flaky by construction.
+  function damageWith(passives: Agent["passives"]): number {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const attacker = predator({ x: 6, y: 5 }, undefined, { level: 10, types: ["normal"], stats: { ...STATS }, maxHp: 200, moves: [TEST_MOVE] });
+    const victim = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100, types: ["normal"], stats: { ...SLOW }, passives });
+    world.agents.push(attacker, victim);
+    const log = new EventLog();
+    tickWorld(world, log, RULES);
+    const fought = log.events.find((e) => e.kind === "fought");
+    return fought ? (fought as Extract<(typeof log.events)[number], { kind: "fought" }>).damage : 0;
+  }
+
+  it("takes a flat amount off the hit", () => {
+    expect(damageWith({ damageReductionFlat: 3 })).toBeLessThan(damageWith(undefined));
+  });
+
+  it("never reduces a landed hit below MIN_LANDED_DAMAGE — armor makes you tough, not immune", () => {
+    // Far more flat armor than any real build could stack.
+    expect(damageWith({ damageReductionFlat: 9999 })).toBe(MIN_LANDED_DAMAGE);
+  });
+
+  it("stacks with percentage reduction rather than replacing it", () => {
+    const both = damageWith({ damageReduction: 0.3, damageReductionFlat: 2 });
+    const pctOnly = damageWith({ damageReduction: 0.3 });
+    expect(both).toBeLessThan(pctOnly);
   });
 });

@@ -4854,3 +4854,233 @@ not something this pathfinding pass itself caused or is positioned to fix.
       subsequent full runs were clean (1334/1334). Unrelated to the move
       trees (data-only change), but worth chasing: likely shared state or
       ordering across parallel test files rather than true randomness.
+- [x] **Persistent fire (`TerrainKind: "fire"`), and the passive-healing
+      problem it exposed.** Direct ask: "for fire based move we gotta add
+      the fire burning down flora mechanic... and it deals dot damage to
+      units standing in fire... gotta have a rendering for it too."
+      - New `fire.ts`: `igniteTile`, `tickFires`, `applyFireDamage`. Fire
+        is a real terrain kind, so it renders everywhere for free, persists,
+        and interacts with movement and flora rather than sitting in a
+        parallel hazards collection.
+      - `terrainBurn` now lights a real fire instead of instantly deleting
+        the bush. Same end state, but it takes ticks and can get away from
+        you. Wildfire's Reach (Flamethrower) is the only node using it.
+      - Measured on real worlds: median 3 tiles burned / 21 ticks, p90 19 /
+        49, max 47 / 59. Sharp percolation threshold in fuel density
+        (60% -> ~12 tiles, 80% -> ~188, 100% -> the whole map); real worlds
+        are ~5% fuel but clustered. Rain: 10 tiles/41 ticks -> 1 tile/3.
+      - Two bugs caught by the tests: `setTile` leaked stale
+        `burnTicksRemaining`, and the spread pass needed collect-then-apply
+        or a fire chains across a whole row in one tick.
+      - 15 fire tests + 2 rewritten `terrainBurn` tests; 1357 passing.
+- [x] **Passive healing gated on being out of combat, and mostly converted
+      to flat HP.** Direct worry: "will users just be unkillable?" —
+      measurably yes. `grantPassive` accumulates with no cap across every
+      move's tree and choices are permanent, so on a 20k run 117/167 living
+      agents carried regen, p90 6%/tick, max 11% (full heal every 9 ticks,
+      mid-fight). Theoretical ceiling 12%/tick.
+      - Any damage taken suppresses `regen`/`healAura` for
+        `REGEN_COMBAT_SUPPRESSION_TICKS`. Lifesteal, ally heals and the
+        fed/watered heal are untouched — those are paid for or already
+        gated. `healAura` checks each recipient, not the holder.
+      - New `"regenFlat"` passive; 31 of 38 nodes converted to flat HP, 7
+        terminal capstones keep percent (raised to 0.04 so percent reads as
+        the special version). Flat 1 HP/tick = 3.3% to a 30-HP unit, 1.4%
+        to a 70-HP one.
+      - Two nodes named "+0.01 Regen" renamed "+0.5 HP Regen".
+      - Effect: flat conversion alone takes 20k population 167 -> 28; the
+        gate takes it 28 -> 8. Both oscillate rather than spiral.
+- [ ] **Open question for a human: is the new carrying capacity right?**
+      The healing fix is clearly correct in kind, but it lowered the 20k
+      population band from ~12-34 to ~7-31 on seed 12345. That may be the
+      ecosystem working properly under real predation pressure, or it may
+      now be too harsh. Needs a game-feel call, and more seeds. Levers still
+      unbuilt if it IS too harsh: diminishing returns on passive stacking
+      instead of the hard out-of-combat gate, a shorter
+      `REGEN_COMBAT_SUPPRESSION_TICKS`, or larger flat values.
+- [ ] **Not built, still on the table** (raised in the same conversation):
+      diminishing returns on stacked passives, and a per-move
+      heal-reduction lever (Heal Block-style) the trees could reach for.
+      Both are real design levers, neither is needed to close the
+      unkillable problem now that the gate and flat conversion are in.
+- [ ] **Fire is currently inert in real runs.** A 20k-tick run produced
+      zero ignitions — `terrainBurn` lives only on Wildfire's Reach, deep
+      in Flamethrower's Aggression branch, and no agent in the demo world
+      reached it. The mechanic is real and tested but effectively unseen.
+      Worth either seeding fire more broadly across the fire-type trees or
+      accepting it as a rare, memorable event.
+- [x] **Flat regen bumped 1.5x** (0.5->0.75, 1->1.5, 1.5->2.25, 2->3), per
+      "flat conversion is fine. Maybe bump it a tiny bit." The two nodes
+      displaying their own number renamed to "+0.75 HP Regen" to match.
+- [x] **MAJOR: cost-2 and cost-3 tree nodes were nearly dead content.**
+      Found while chasing why fire never triggered. `maybeAutoRespec` spends
+      each point the instant it arrives and a cost-1 candidate almost always
+      exists, so agents never bank the 2-3 points a keystone or capstone
+      costs. Measured across a living population: cost-1 reached 77/456
+      distinct nodes, cost-2 only 6/144, cost-3 exactly 0/4.
+      - Fixed with `SKILLPOINT_SAVE_CHANCE` (0.5): bank the point when
+        exactly one grant short of an already-unlocked node. Across 6 seeds
+        this takes cost-3 from 0/4 to 2/4 reached.
+      - The first attempt banked whenever ANY unaffordable node existed
+        (almost always true) and agents saved forever, picking ~nothing.
+        "Exactly one grant away" is what makes it self-limiting.
+- [x] **Fire now actually happens: 0 -> 74 ignitions across 6 seeds.**
+      Three separate causes, each found by measuring rather than guessing:
+      terrainBurn sat only on Flamethrower (1 species entry vs Ember's 6);
+      then on cost-3 nodes nothing reaches; then at depth 5, where only
+      9 of 360 agents arrived and 18 of 1217 fights involved one. It now
+      sits on Ember's opener "Wider Burn", whose name already promised it,
+      and spills to an adjacent fuel tile since fuel is only ~5% of a map.
+- [x] **Boldness de-templated.** vine_whip/flamethrower/rock_slide ran the
+      same branch node-for-node with identical passive values. Vine Whip
+      keeps rooted-and-thorny (it is the honest owner); Flamethrower rebuilt
+      around a new `fireproof` passive (stands in its own wildfire, capstone
+      leaves fire behind it); Rock Slide rebuilt around `weightScaling` +
+      the `elevation` bonus, with a positional fork instead of the stock
+      regen-vs-thorns one.
+- [x] **Second seed confirms the ORIGINAL regen diagnosis** (a long
+      background baseline run that only finished later). Seed 777, pre-fix:
+      1368 living agents, 471 carrying regen, max 11.00%/tick, p90 6% —
+      an identical ceiling to seed 12345's 11%/6%. Worth being precise
+      about what this does and does not vindicate: the passive-stacking
+      measurement is robust across seeds, because the ceiling is a property
+      of the tree content and the uncapped `+=` rather than of a run's RNG
+      trajectory. The POPULATION figures quoted alongside it are still
+      unreliable (see below). Seed 777 also shows the runaway shape clearly:
+      1368 agents alive at 20k ticks when nothing can finish a kill.
+- [ ] **`damageReduction` has the same uncapped-stacking problem and was
+      never addressed.** Same pre-fix baseline: median 0.15, p90 0.25, max
+      0.33 across 1234 of 1368 living agents — every third point of damage
+      simply deleted, on a passive that `damageReductionOf` only clamps at
+      1.0 (i.e. total immunity). It accumulates permanently across every
+      move's tree exactly like regen did, and unlike regen it is NOT gated
+      on being out of combat, so it applies to every hit in a fight. The
+      out-of-combat gate is the wrong tool here (flat damage reduction is
+      not healing); the options are a real cap, diminishing returns, or
+      converting the low-tier nodes to flat damage reduction the way regen
+      went flat. Not urgent, but it is the same bug wearing a different
+      passive.
+- [x] **FIXED: the intermittent test flake — and it was never cross-file
+      state.** Chased all session on the theory that parallel workers were
+      sharing something. Wrong. The cause was plain unseeded randomness
+      inside individual tests: damage carries a 0.85-1.0 roll, and dozens of
+      A/B comparison tests built two `createWorld(w, h)` worlds with no seed
+      and asserted one hit harder than the other. A different test lost the
+      coin flip on each run, which is exactly why it looked like shared
+      state and why every one of them passed in isolation.
+      - Seeded every world in predation/needs/reproduction/status tests.
+        Ten consecutive full runs clean, 43/43 files, 1367/1367 tests
+        (previously roughly one failure every two runs).
+      - I wrote one of these flaky tests myself this session, then hit it,
+        which is what finally exposed the pattern.
+      - **Second "verify the verifier" miss in the same session:** I first
+        declared 8 runs clean while grepping only for failed TESTS. A test
+        FILE was failing to collect (my seed constant landed inside a
+        multi-line import block), so its 62 tests silently vanished from
+        the count and the run still looked green. Always check
+        `Test Files` alongside `Tests`.
+- [ ] **REGRESSION I INTRODUCED: flat healing now stacks HIGHER than the
+      percentage it replaced, on exactly the units it was meant to help.**
+      Seed 777 post-fix shows a 51 HP ivysaur at **17.65%/tick** effective
+      passive healing — above the 11%/tick maximum that started this whole
+      investigation. Confirmed analytically rather than trusting the run:
+      a 14-point budget in `dig` alone reaches 4.5 HP/tick flat, which is
+      15%/tick on a 30 HP unit, 9% on a 50 HP one — and agents know several
+      moves, so it sums across every tree they hold.
+      - This is the SAME bug class I had just finished writing into
+        MOVES_DESIGN.md as the lesson ("the sum of every node granting a
+        passive has never been the unit of analysis") — and then repeated,
+        with flat healing, in the same session. Flat values stack additively
+        exactly like percentages do; dividing by a small maxHp then makes
+        them worse, not better, for small units. The 1.5x bump compounded it.
+      - Importantly this is NOT the original "unkillable mid-fight" problem
+        returning: the out-of-combat gate still holds, so none of it applies
+        while a unit is being hit. It is a between-fights recovery problem —
+        roughly a 6-tick full heal for a small unit.
+      - NOT re-tuned unilaterally, because the magnitudes were an explicit
+        call ("maybe bump it a tiny bit") and this needs a decision, not a
+        quiet revert. Options, cheapest first: cap total effective passive
+        healing at some %/tick of maxHp (bounds the early-game case without
+        touching the flat shape at all); apply the same `x / (1 + x)`
+        diminishing returns to accumulated `regenFlat`; or simply undo the
+        1.5x bump, which only gets it back to ~11%/tick and does not fix
+        the stacking.
+      - RESOLVED: the maxHp-relative soft cap was chosen and built
+        (`softCapHealShare`, status.ts). Piecewise rather than plain
+        hyperbolic so a light build is untouched — everything up to
+        `PASSIVE_HEAL_KNEE` (3%/tick) passes through at face value and only
+        the excess is compressed, asymptotically toward
+        `PASSIVE_HEAL_CEILING` (8%/tick). The 17.65%/tick case now lands at
+        6.7%, and no build can reach the six-tick full heal.
+- [x] **FIXED: the percentage tier of both passives was dead content.** Post-fix seed 777: effective `damageReduction` is
+      **median 0%, p90 0%, max 0%** across 568 living agents — nobody has
+      any. Flat armor: median 2, max 5.5. The diminishing-returns curve is
+      correct and tested, and currently has nothing to act on.
+      - Cause is structural, not a bug: 39 of 41 DR nodes (and 31 of 38
+        regen nodes) moved to flat, leaving percentage only on terminal
+        capstones — and capstones are reached ~21 times out of 144 even
+        after the `SKILLPOINT_SAVE_CHANCE` fix. "Reserve percent for
+        capstones" and "capstones are barely reachable" combine into
+        "percent never happens."
+      - So the flat/percent split is doing only half its job: the flat half
+        is live (arguably too live, see the regression above), the percent
+        half is theoretical. Worth deciding whether percent belongs on some
+        reachable mid-branch nodes instead, or whether capstone reachability
+        needs another push, or whether percent-as-a-rare-payoff is actually
+        the intent.
+      - Same lesson as the fire mechanic: content gated behind a cost or a
+        depth nothing reaches is not shipped, however well built.
+      - RESOLVED by making it a three-tier system instead of two: cost-1
+        common nodes grant flat (early-strong, late-marginal), the 27
+        cost-2 mid-branch KEYSTONES grant percentage (reached ~15% of the
+        time, so genuinely live), and terminal capstones grant a larger
+        percentage as the rare payoff. Percent is no longer capstone-only,
+        which is what made it unreachable.
+- [ ] **Starvation is now the dominant cause of death.** Same run: 117
+      starved vs 20 killed across 209 fights, at a population of 568.
+      Unremarked on so far and possibly fine (a crowded world should run
+      out of food) but it means combat balance is no longer what governs
+      the population — food supply is. Worth knowing before reading any
+      further balance measurement.
+- [ ] **METHODOLOGY: stop trusting single-seed population numbers.**
+      Adding one extra `rng()` draw per skill-point grant, with its effect
+      disabled, moved a seed's 20k population from 129 to 3. Across 6 seeds
+      population ranges 11-151. Earlier entries in this file quote
+      single-seed population swings (167 -> 28 -> 8 -> 129) as if they were
+      clean signal; they are not, and should be re-measured with
+      `validateSkillEconomy.ts` before anyone acts on them.
+      Distinct-nodes-reached is the metric that holds up.
+- [ ] **The intermittent test flake is real and recurring.** Now seen in
+      three different files across separate full runs (predation,
+      reproduction "lays a real egg", status "burn halves the burned
+      attacker's physical damage"), each passing in isolation and on re-run.
+      Different test each time points at shared global state rather than one
+      bad test. Narrowed a little: the status test passes 5/5 in isolation
+      and only fails inside the full parallel run, and three test files
+      (flora, needs, predation) spy on `Math.random`. All three do restore
+      it, so the leak is subtler than a missing `restoreAllMocks` — likely
+      worker/module sharing across parallel files. Not caused by the fire or
+      healing work (it predates both). Worth a dedicated look.
+- [ ] **Population may still be low.** Multi-seed median sits around 18 with
+      a long tail to 151. Whether that band is right is still the open
+      game-feel call from the previous round; the healing levers not built
+      (diminishing returns, per-move heal reduction) remain the tuning
+      options if it wants raising.
+- [x] **damageReduction: diminishing returns + a flat tier.** Direct steer:
+      "for damage reduction, we do diminishing returns and flat."
+      - `damageReductionOf` now applies `x / (1 + x)` at read time (the raw
+        passive is only ever stored as a running sum, so there are no
+        individual sources to stack multiplicatively). 0.05 raw -> 0.048
+        effective, 0.33 -> 0.248, 1.0 -> 0.5; immunity is unreachable
+        rather than clamped. Preferred over a hard cap so single nodes
+        still deliver face value and there is no dead zone where further
+        investment silently does nothing.
+      - New `damageReductionFlat` passive; 39 of 41 nodes converted
+        (0.03->0.5, 0.04->0.75, 0.05->1, 0.06->1.25, 0.08->1.5, 0.1->2),
+        the 2 terminal capstones keep percentage and were raised to 0.12.
+      - `MIN_LANDED_DAMAGE` floors a landed damaging hit at 1 so flat armor
+        can never make a unit immune to weak attackers — the classic
+        flat-armor failure. A move already dealing 0 still deals 0.
+      - One node named "+0.03 Damage Reduction" renamed "+0.5 Armor".
+      - 8 new tests (curve shape, monotonicity, unreachable immunity, the
+        floor, percent+flat stacking).

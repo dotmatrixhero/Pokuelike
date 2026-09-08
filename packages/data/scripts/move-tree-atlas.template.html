@@ -887,11 +887,14 @@
 
   var STAT_LABEL = { attack: "Attack", defense: "Defense", spAttack: "Sp. Attack", spDefense: "Sp. Defense", speed: "Speed" };
   var PASSIVE_LABEL = {
-    damageReduction: function (v) { return "Passive — takes " + pct(v) + " less damage from every hit."; },
+    damageReduction: function (v) { var eff = v / (1 + v); return "Passive — takes less damage from every hit. Diminishing returns: " + pct(v) + " raw is " + pct(eff) + " in practice, and stacking can never reach immunity."; },
+    damageReductionFlat: function (v) { return "Passive — takes a flat " + v + " HP off every hit, after the percentage reduction. Worth proportionally more against weak hits than strong ones; a landed hit always does at least 1."; },
     immovable: function () { return "Passive — can't be dragged, knocked back, or lunged at by anything."; },
-    regen: function (v) { return "Passive — heals " + pct(v) + " of max HP every tick, on its own."; },
+    regen: function (v) { return "Passive — heals " + pct(v) + " of max HP every tick, on its own. Only out of combat (any damage taken suppresses it briefly)."; },
+    fireproof: function (v) { return v >= 1 ? "Passive — completely immune to standing in fire: no damage, and passive healing keeps working on a burning tile." : "Passive — ignores " + pct(v) + " of the damage from standing in a fire tile."; },
+    regenFlat: function (v) { return "Passive — heals a flat " + v + " HP every tick, on its own. Worth proportionally more to a small unit than a big one. Only out of combat (any damage taken suppresses it briefly)."; },
     thorns: function (v) { return "Passive — reflects " + pct(v) + " of incoming damage back onto the attacker."; },
-    healAura: function (v) { return "Passive — heals every nearby herd-mate (itself included) " + pct(v) + " of max HP every tick."; },
+    healAura: function (v) { return "Passive — heals every nearby herd-mate (itself included) " + pct(v) + " of max HP every tick. Each recipient must be out of combat."; },
     defenseBoost: function (v) { return "Passive — permanently raises its own Defense stat-stage by " + v + "."; },
     aquaticHaste: function (v) { return "Passive — every nearby herd-mate (itself included) moves " + pct(v) + " faster while standing on water."; },
     nonTerritorial: function () { return "Passive — never initiates a fight over a contested resource tile (can still be targeted by someone else's)."; },

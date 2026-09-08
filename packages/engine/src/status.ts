@@ -181,6 +181,10 @@ export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rn
   tickBurrow(agent, world);
   tickChargingAttack(agent);
   tickUnshaken(agent);
+  // Ticked here rather than in fire.ts so it counts down every tick even
+  // once the agent has stepped off the fire — same always-runs placement as
+  // every other per-tick countdown in this function.
+  if (agent.regenSuppressedTicks) agent.regenSuppressedTicks = Math.max(0, agent.regenSuppressedTicks - 1);
   applyRegenPassive(agent);
   applyHealAuraPassive(agent, world);
 
@@ -311,6 +315,24 @@ function tickUnshaken(agent: Agent): void {
   agent.unshakenCooldownTicks = Math.max(0, agent.unshakenCooldownTicks - 1);
 }
 
+/**
+ * How long any damage taken holds `regen`/`healAura` down. Roughly a couple
+ * of move cooldowns: long enough that passive healing can't out-tick a real
+ * fight, short enough that a unit that disengages is genuinely recovering
+ * rather than permanently locked out. See `Agent.regenSuppressedTicks`.
+ */
+export const REGEN_COMBAT_SUPPRESSION_TICKS = 8;
+
+/** Marks an agent as recently hurt, suppressing its PASSIVE healing for `REGEN_COMBAT_SUPPRESSION_TICKS`. Called from every damage site (predation.ts's hit/recoil/thorns, fire.ts). Refreshes rather than stacking. */
+export function suppressPassiveHealing(agent: Agent, ticks = REGEN_COMBAT_SUPPRESSION_TICKS): void {
+  agent.regenSuppressedTicks = Math.max(agent.regenSuppressedTicks ?? 0, ticks);
+}
+
+/** True while passive healing (`regen`/`healAura`) is gated off by recent damage. */
+export function isPassiveHealingSuppressed(agent: Agent): boolean {
+  return (agent.regenSuppressedTicks ?? 0) > 0;
+}
+
 // --- Agent-modifying passives (Agent.passives) ---
 
 /** Grants (accumulates into) a permanent passive — called from `maybeAutoRespec` (leveling.ts) when a node with `grantsPassive` is chosen. */
@@ -319,9 +341,54 @@ export function grantPassive(agent: Agent, kind: PassiveKind, value: number): vo
   agent.passives[kind] = (agent.passives[kind] ?? 0) + value;
 }
 
-/** The flat fraction of incoming damage the `"damageReduction"` passive takes off — read by `resolveHit` (predation.ts). 0 if the agent has none. */
+/**
+ * The fraction of incoming damage the `"damageReduction"` passive takes
+ * off, **after diminishing returns** — read by `resolveHit` (predation.ts).
+ * 0 if the agent has none.
+ *
+ * The raw passive is an uncapped running sum (`grantPassive` is a `+=` and
+ * tree choices are permanent), so it has the same runaway shape `regen` did:
+ * measured on a pre-fix 20k-tick run, 1234 of 1368 living agents carried
+ * some, median 0.15, p90 0.25, max 0.33 — a third of all incoming damage
+ * simply deleted, on every hit, forever.
+ *
+ * The curve is hyperbolic, `x / (1 + x)`:
+ *
+ * | raw sum | effective |
+ * |---|---|
+ * | 0.05 | 0.048 |
+ * | 0.15 | 0.130 |
+ * | 0.25 | 0.200 |
+ * | 0.33 | 0.248 |
+ * | 1.00 | 0.500 |
+ * | 3.00 | 0.750 |
+ *
+ * Chosen over a hard cap for two reasons: a single node is worth almost
+ * exactly its face value (so early nodes still feel like what they say),
+ * and there is no cliff where further investment silently does nothing —
+ * it just gets progressively worse value, and can never reach immunity.
+ * Percentage reduction is the capstone-tier version of this passive; the
+ * common nodes grant `"damageReductionFlat"` instead, same split as
+ * `regen`/`regenFlat`.
+ */
 export function damageReductionOf(agent: Agent): number {
-  return Math.min(1, agent.passives?.damageReduction ?? 0);
+  const raw = Math.max(0, agent.passives?.damageReduction ?? 0);
+  return raw / (1 + raw);
+}
+
+/**
+ * Flat HP taken off an incoming hit by the `"damageReductionFlat"` passive,
+ * applied AFTER the percentage reduction above — read by `resolveHit`
+ * (predation.ts), which enforces that a landed hit still does at least
+ * `MIN_LANDED_DAMAGE`, so flat armor can blunt a weak hit but never make a
+ * unit outright immune to one. 0 if the agent has none.
+ *
+ * Scales the way flat healing does and for the same reason: 2 points off a
+ * 12-damage early hit matters, 2 points off a 60-damage late one barely
+ * registers.
+ */
+export function damageReductionFlatOf(agent: Agent): number {
+  return Math.max(0, agent.passives?.damageReductionFlat ?? 0);
 }
 
 /** True if the `"immovable"` passive should block this agent from being forced-moved — read by `applyForcedMovement` (movement.ts). */
@@ -341,12 +408,68 @@ export function defenseBoostOf(agent: Agent): number {
   return agent.passives?.defenseBoost ?? 0;
 }
 
-/** Per-tick HP regen from the `"regen"` passive, on top of (independent of) the fed/watered `applyHealOverTime` (support.ts) — a regen agent heals even while starving. No-op on a corpse or one with no regen passive. */
+/** Per-tick HP regen from the `"regen"` (fraction of max HP) and `"regenFlat"` (absolute HP) passives, on top of (independent of) the fed/watered `applyHealOverTime` (support.ts) — a regen agent heals even while starving. No-op on a corpse or one with no regen passive. */
 function applyRegenPassive(agent: Agent): void {
   const fraction = agent.passives?.regen ?? 0;
-  if (agent.alive === false || fraction <= 0) return;
+  const flat = agent.passives?.regenFlat ?? 0;
+  if (agent.alive === false || (fraction <= 0 && flat <= 0)) return;
+  // Any recent damage holds passive regen down — see
+  // `Agent.regenSuppressedTicks` for why passive healing specifically is
+  // the kind that needs an out-of-combat gate.
+  if (isPassiveHealingSuppressed(agent)) return;
   if (agent.hp === undefined || agent.maxHp === undefined) return;
-  agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * fraction);
+  const share = softCapHealShare(fraction + flat / agent.maxHp);
+  agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * share);
+}
+
+/**
+ * Below this share of max HP per tick, passive healing is worth exactly its
+ * face value — a node that says it heals 2 HP heals 2 HP. Above it, the
+ * excess is squeezed toward `PASSIVE_HEAL_CEILING` and never reaches it.
+ */
+export const PASSIVE_HEAL_KNEE = 0.03;
+
+/** Hard asymptote on passive healing per tick, as a share of max HP. Approached, never attained. */
+export const PASSIVE_HEAL_CEILING = 0.08;
+
+/**
+ * Soft-caps total passive healing (percentage `regen` plus `regenFlat`
+ * expressed as a share of max HP) for the same reason `damageReductionOf`
+ * has diminishing returns: passives accumulate permanently across every
+ * move a unit knows, so what matters is the SUM, not any single node.
+ *
+ * This one is a correction of a mistake made in this very system. Converting
+ * the common healing nodes from percentage to flat was supposed to make
+ * healing weaker late and stronger early — and it did — but flat values
+ * stack additively just like percentages, and dividing by a SMALL maxHp
+ * makes a stack worse rather than better. Measured after that change: a 51
+ * HP unit at 17.65%/tick, above the 11%/tick that prompted the original
+ * work. The shape was right; nothing bounded the total.
+ *
+ * Piecewise rather than a plain hyperbolic, deliberately. `x / (1 + x/C)`
+ * would asymptote correctly but shaves ~20% off even a single small node,
+ * which breaks the rule that a node delivers what it says. Instead
+ * everything up to `PASSIVE_HEAL_KNEE` passes through untouched, and only
+ * the excess is compressed:
+ *
+ * | raw share | effective |
+ * |---|---|
+ * | 0.02 | 0.020 (untouched) |
+ * | 0.03 | 0.030 (untouched) |
+ * | 0.05 | 0.044 |
+ * | 0.09 | 0.058 |
+ * | 0.1765 | 0.067 |
+ * | infinity | 0.080 |
+ *
+ * So a couple of healing nodes are exactly as good as they read, a heavily
+ * stacked build still heals faster than a light one, and no build reaches
+ * the six-tick full heal the flat conversion had accidentally created.
+ */
+export function softCapHealShare(raw: number): number {
+  if (raw <= PASSIVE_HEAL_KNEE) return Math.max(0, raw);
+  const excess = raw - PASSIVE_HEAL_KNEE;
+  const headroom = PASSIVE_HEAL_CEILING - PASSIVE_HEAL_KNEE;
+  return PASSIVE_HEAL_KNEE + excess / (1 + excess / headroom);
 }
 
 /** The flat fraction of damage taken the `"thorns"` passive reflects back at the attacker — read by `applySingleDamageInstance` (predation.ts). 0 if the agent has none. */
@@ -370,6 +493,10 @@ const HEAL_AURA_RADIUS = 3;
 function applyHealAuraPassive(agent: Agent, world: World): void {
   const fraction = agent.passives?.healAura ?? 0;
   if (agent.alive === false || fraction <= 0 || !agent.herdId) return;
+  // The aura HOLDER being in combat doesn't stop it; each RECIPIENT is
+  // checked below instead. A support unit hanging back should still be
+  // healing, and a unit being hit should still not be passively healing —
+  // gating on the holder would get both of those backwards.
   // Scoped to this agent's own herd (herdIndex.ts) rather than a scan of
   // every living agent in the world — see herdMembers's doc comment for the
   // real O(agents²) regression this fixes once more than a handful of
@@ -378,6 +505,7 @@ function applyHealAuraPassive(agent: Agent, world: World): void {
     if (other.layer !== agent.layer) continue;
     if (Math.abs(other.pos.x - agent.pos.x) + Math.abs(other.pos.y - agent.pos.y) > HEAL_AURA_RADIUS) continue;
     if (other.hp === undefined || other.maxHp === undefined) continue;
+    if (isPassiveHealingSuppressed(other)) continue;
     other.hp = Math.min(other.maxHp, other.hp + other.maxHp * fraction);
   }
 }

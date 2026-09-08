@@ -119,6 +119,14 @@ export type SimEvent =
       cause: "hunger" | "thirst";
     }
   | {
+      /** Burned to death standing in a fire tile — see fire.ts's `applyFireDamage`. Deliberately NOT a `killed` event: a fire is not a predator, and the hunt/rapport/feeding consumers of `killed` would all be wrong to count it. */
+      kind: "burned";
+      tick: number;
+      agentId: string;
+      species: string;
+      pos: Vec2;
+    }
+  | {
       kind: "diedOfAge";
       tick: number;
       agentId: string;
@@ -375,7 +383,7 @@ export type SimEvent =
        * rework: an agent with no reachable water anywhere digs a real new
        * spring at its own position instead of migrating away).
        */
-      cause: "drought" | "rain" | "dug";
+      cause: "drought" | "rain" | "dug" | "fire";
     }
   | {
       kind: "herdClash";
