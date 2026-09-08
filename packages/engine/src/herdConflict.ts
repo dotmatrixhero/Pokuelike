@@ -3,6 +3,8 @@ import type { EventLog } from "./events.js";
 import { calculateDamage, pickBestMove, rollAccuracy, rollCritical, useMove } from "./combat.js";
 import { stepAway, stepToward } from "./movement.js";
 import { stormAccuracyMultiplier } from "./weather.js";
+import { elevationAccuracyMultiplier } from "./elevation.js";
+import { tileAt } from "./world.js";
 import { FALLBACK_MAX_HP, manhattan } from "./predation.js";
 import { RAPPORT_HERD_CLASH_DELTA, rapportScore, strengthenRapportMutual } from "./rapport.js";
 import { effectiveDisposition } from "./herdLeadership.js";
@@ -339,7 +341,22 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
   attacker.lastHerdConflictTick = world.tick;
   defender.lastHerdConflictTick = world.tick;
 
-  if (!rollAccuracy(move, 0, 0, rng, stormAccuracyMultiplier(world, attacker.layer, attacker.pos))) {
+  // Same elevation-accuracy composition as the predation hit path — see
+  // `resolveHitAgainstTarget` (predation.ts) for why only the accuracy
+  // modifier is applied and never the evasion one.
+  const attackerElevation = tileAt(world, attacker.layer, attacker.pos.x, attacker.pos.y)?.elevation ?? 0;
+  const defenderElevation = tileAt(world, defender.layer, defender.pos.x, defender.pos.y)?.elevation ?? 0;
+
+  if (
+    !rollAccuracy(
+      move,
+      0,
+      0,
+      rng,
+      stormAccuracyMultiplier(world, attacker.layer, attacker.pos) *
+        elevationAccuracyMultiplier(attackerElevation, defenderElevation)
+    )
+  ) {
     log?.record({
       kind: "herdClash",
       tick: world.tick,

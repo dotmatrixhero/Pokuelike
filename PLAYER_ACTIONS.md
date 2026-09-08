@@ -556,12 +556,22 @@ as more finished than it is.
 
 - **No player agent and no input path.** The big one, already recorded in
   `CAMPAIGN_DESIGN.md`. Everything here sits on top of that one change.
-- **`accuracy` is not consumed by combat.** `MoveSpec.accuracy` exists and
-  `combat.ts` ignores it — the doc comment says so outright: *"every move
-  currently hits."* For a tactical game that's a live question, not a bug:
-  guaranteed hits make positioning deterministic and readable, which is
-  arguably *more* Brogue-like than a miss chance. Worth deciding on purpose
-  rather than by default.
+- **Elevation's accuracy and evasion modifiers are written but unwired.**
+  `elevation.ts` exports `elevationAccuracyModifier` and
+  `elevationEvasionModifier` — high ground helps the attacker hit, low
+  ground helps the defender dodge, each capped at ±0.3 so a cliff can't make
+  a move unmissable. They are tested and have **zero callers**; the file's
+  own header says "standalone until a combat resolver exists to consume
+  them." The hookup is small and well-defined: `rollAccuracy` already takes
+  `accuracyStage`/`evasionStage` parameters (always passed 0 today) plus an
+  `accuracyBonusMultiplier`, which is exactly the shape these produce.
+
+  This one is directly load-bearing for the tactical design. High ground
+  already gives a *damage* multiplier via `situationalBonus: "elevation"`;
+  wiring these would make it also help you land the hit, which is what makes
+  "help it get to the right position/elevation" a real, layered decision
+  instead of a single flat bonus. **This is the highest-value small change
+  identified in this doc.**
 - **No facing or awareness model.** `flanking` is explicitly a proxy —
   "caught it off guard" via `fightTarget`, because there's no real facing.
   Good enough, probably better than good enough, but it means true
@@ -583,8 +593,12 @@ as more finished than it is.
 2. Do abstract (unfocused) zones advance while the player takes turns? If
    not, the world freezes while you play and the ecology becomes scenery.
    Recommend yes.
-3. Should `accuracy` be wired in, or should hits stay deterministic? See
-   above — this shapes the entire feel of the tactical layer.
+3. ~~Should `accuracy` be wired in, or should hits stay deterministic?~~
+   **Settled, and it was never open.** Accuracy is already live — see the
+   correction note below. Confirmed as wanted: *"i think accuracy is a core
+   thing in pokemon so we should have it."* The remaining question is
+   narrower: should elevation feed accuracy/evasion (recommend yes, the
+   modifiers are already written).
 4. Can the player use moves themselves, or only direct a partner? "Punch,
    kick, swing, yell" from the pitch implies yes. It also makes the flanking
    dynamic two-way, which is probably good.
@@ -600,6 +614,39 @@ as more finished than it is.
    the coaching layer the *whole* combat game, which is a bolder and
    cleaner design than mixing both — and a real risk if the coaching inputs
    turn out to be too thin to carry it.
+
+## Correction: accuracy was already live, and this doc said otherwise
+
+Recorded because the mistake is instructive, and because the stale comment
+that caused it would have caught the next reader too.
+
+An earlier version of this doc claimed `MoveSpec.accuracy` was unwired and
+"every move currently hits," and raised deterministic-hits as an open design
+question. That was wrong. The user pushed back from actual play — *"idk, ive
+seen moves miss i thought"* — and was right.
+
+What's actually true, verified:
+
+- `combat.ts`'s `rollAccuracy` is called on every real hit, from
+  `resolveHitAgainstTarget` (predation.ts:1192) and the clash path
+  (herdConflict.ts:342).
+- A failed roll emits a real `"missed"` outcome (events.ts), which
+  `autoCamera.ts` and `rapport.ts` both already branch on.
+- `accuracyStageMultiplier` implements the mainline accuracy/evasion stage
+  formula, and `weather.ts`'s storm penalty already composes onto the roll.
+
+The source of the error: a doc comment on `MoveSpec.accuracy` reading *"Not
+yet consumed by combat.ts — every move currently hits; see TODO."* True when
+written, stale since. `DESIGN.md` carried the same stale claim. **Both have
+been corrected**, and the comment now records what actually consumes the
+field.
+
+The lesson is one `CLAUDE.md` already states and this doc failed to apply: a
+doc comment is a claim about the past, not evidence about the present. The
+grep for callers takes ten seconds and would have caught it. Worth noting
+that the same ten-second check *did* catch the genuine cases —
+`computeVisible` and the elevation modifiers really do have zero callers —
+so the method works; it just wasn't applied uniformly.
 
 ## Not decided by this doc
 

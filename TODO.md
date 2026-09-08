@@ -82,6 +82,44 @@ pass rather than a rushed bolt-on:
       are not obviously more resilient than average, so this needs a real
       before/after population check, not just "seems right."
 
+## Your call: is elevation's accuracy effect big enough to feel?
+
+Elevation is now wired into the accuracy roll (attacker's elevation minus
+defender's — the gap only, never absolute height). It works, and it is
+**subtle by default**. The constants look like they were written for integer
+elevation tiers, but `Tile.elevation` is a continuous float and the gaps
+between two agents close enough to fight are small.
+
+Measured over 12 seeds x 6000 ticks (4,929 real hit attempts):
+
+| |delta| between combatants | value |
+|---|---|
+| median | 0.015 |
+| p90 | 0.676 |
+| p99 | 2.068 |
+| max observed | 3.661 |
+
+At `ACCURACY_PER_ELEVATION` = 0.05 that is a ~3% accuracy swing at p90 and
+~18% at the largest gap ever observed. `MODIFIER_CAP` (0.3) needs a gap of 6
+and is never reached in a real fight.
+
+Concretely: 3 of the first 6 seeds came out **bit-identical** before and
+after wiring — the nudge was never large enough to flip a single roll in
+those runs.
+
+Options:
+- **Leave it.** Elevation is a real but minor edge; terrain reads as texture.
+- **Raise `ACCURACY_PER_ELEVATION`** (0.15-0.25 would make p90 a 10-17%
+  swing) so high ground is a decision a player would actually take a detour
+  for.
+- **Rescale elevation itself** so terrain has sharper, more legible steps —
+  bigger change, affects FOV and movement too.
+
+Recommend raising the constant if the tactical layer in `PLAYER_ACTIONS.md`
+goes ahead: "help it get to the right position/elevation" needs the bonus to
+be worth a turn of walking. Not changed unilaterally — it's a balance number.
+Re-measure with `npx tsx packages/runner/src/validateElevationAccuracy.ts`.
+
 ## Your call: battle log reveal pace (LINE_REVEAL_INTERVAL_MS)
 
 Two branches independently tuned the same number and disagreed. Merged in
@@ -6528,3 +6566,33 @@ not something this pathfinding pass itself caused or is positioned to fix.
       - `CLASH_PROMOTION_COOLDOWN_TICKS` 40 -> 100, since each clash now holds
         the camera for seconds and 594 per 6,000 ticks would otherwise
         monopolise Auto Camera and crowd out every other kind of moment.
+
+- [x] **Skill-tree allocations were never visible — a key-space mismatch.**
+      Direct report: "i don't see the actual skill allocations being
+      visible."
+      - `agent.moveTreeChoices` is keyed by the `knownMoves` DEX KEY
+        (`"WATER_GUN"`); `agent.moves` is keyed by the `MoveSpec`'s own id
+        (`"water_gun"`). Both the old flat-row tree and the new radial Move
+        Tree Atlas did `agent.moveTreeChoices?.[move.id]`, which never
+        matched. Measured over a real 4,000-tick run: that lookup lit **0
+        nodes across 70 rendered trees**; resolving properly lights **726
+        across 64**. A level-31 Kingler with 28 bought Water Gun nodes
+        displayed as having bought none.
+      - leveling.ts documents the trap at its write site ("those two are
+        frequently different casings/names for the same move") and handles it
+        for `agent.moves`. Fixed by resolving each stored key through
+        `LEVELING_CONTEXT.resolveMove` — the engine's own mapping — rather
+        than upper-casing, which that comment warns is not enough.
+      - **Note on how this landed.** A parallel session had meanwhile built
+        the radial Move Tree Atlas (`moveTreeSvg.ts`), replacing the flat
+        BFS row grid. My first pass fixed the OLD renderer and also centred
+        its rows; on merging, the row-centring work was discarded as
+        obsolete and only the lookup fix was re-applied on top of the atlas.
+        The atlas had the identical bug, so the visualization was correct and
+        drawing an empty build the whole time.
+
+- [ ] **Side note: duplicate node display names.** The Tackle tree renders two
+      separate nodes both labelled "+10 Accuracy" in the same row (plus a
+      "+5 Power" that repeats a row later). Not a rendering bug — the tree
+      data really does give distinct nodes identical display names, which
+      makes a tree impossible to read. Wants real names.

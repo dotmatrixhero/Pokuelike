@@ -1,5 +1,5 @@
 import type { Agent, MoveSpec, World } from "@pokuelike/engine";
-import { SPECIES } from "@pokuelike/data";
+import { LEVELING_CONTEXT, SPECIES } from "@pokuelike/data";
 import { TYPE_COLOR, rgbToCss } from "./palette.js";
 import { agentDisplayName, herdDisplayName, LEADER_ICON, TITLE_ICON } from "./notableTitles.js";
 import { buildMoveTreeSvg, describeMoveTreeNode, summarizeBuildEffects } from "./moveTreeSvg.js";
@@ -154,6 +154,37 @@ function moveKey(agent: Agent, move: MoveSpec): string {
 }
 
 /**
+ * The skill nodes this agent has actually bought for `move`.
+ *
+ * **`agent.moveTreeChoices` is not keyed the way `agent.moves` is**, and
+ * reading it as though it were is why the atlas rendered every node
+ * un-chosen. Direct report: "i don't see the actual skill allocations being
+ * visible." Choices are keyed by the `knownMoves` DEX KEY (`"WATER_GUN"`),
+ * `agent.moves` by the `MoveSpec`'s own id (`"water_gun"`), so the plain
+ * `agent.moveTreeChoices[move.id]` lookup returned `undefined` every time.
+ * Measured over a real 4,000-tick run: that lookup lit **0 nodes across 70
+ * rendered trees**, while resolving properly lights **726 across 64** — a
+ * level-31 Kingler holding 28 bought Water Gun nodes displayed as having
+ * bought none.
+ *
+ * leveling.ts documents the trap at its write site ("those two are
+ * frequently different casings/names for the same move") and handles it for
+ * `agent.moves`. Resolving each stored key through
+ * `LEVELING_CONTEXT.resolveMove` uses that same engine mapping rather than
+ * upper-casing, which the comment explicitly warns is not enough.
+ */
+function chosenNodesFor(agent: Agent, move: MoveSpec): string[] {
+  const choices = agent.moveTreeChoices;
+  if (!choices) return [];
+  const direct = choices[move.id];
+  if (direct) return direct;
+  for (const [key, nodes] of Object.entries(choices)) {
+    if (LEVELING_CONTEXT.resolveMove(key)?.id === move.id) return nodes;
+  }
+  return [];
+}
+
+/**
  * Renders the inline skill-tree visualization for one move — the real
  * radial layout ported from the "Move Tree Atlas" artifact, see
  * `moveTreeSvg.ts`'s own doc comment. The agent's actual `moveTreeChoices`
@@ -267,7 +298,7 @@ function renderMoveRow(agent: Agent, move: MoveSpec): HTMLElement {
   wrap.appendChild(header);
 
   if (hasTree && expandedKey === moveKey(agent, move)) {
-    const chosen = agent.moveTreeChoices?.[move.id] ?? [];
+    const chosen = chosenNodesFor(agent, move);
     wrap.appendChild(renderMoveTree(move, chosen));
   }
 

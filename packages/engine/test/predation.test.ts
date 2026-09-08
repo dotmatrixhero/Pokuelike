@@ -367,6 +367,62 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
       expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
     );
   });
+
+  /**
+   * The elevation-accuracy wiring, proved through a real tick rather than by
+   * calling the modifier directly — the exact same A/B shape as the storm
+   * test above, for the same reason: `elevation.ts`'s modifiers existed,
+   * were tested, and had zero callers, so a unit test on the math alone
+   * would have passed just as happily before they were wired to anything.
+   *
+   * TEST_MOVE has 100 accuracy. On level ground the chance is 100 and this
+   * rng's 0.92 always hits (92 < 100). With the defender standing 2 above
+   * the attacker the multiplier is 1 + (-2 * 0.05) = 0.9, dropping the
+   * chance to 90, and that same roll (92 >= 90) now misses.
+   *
+   * Absolute heights are deliberately 100/102 rather than 0/2: the rule is
+   * the GAP between the two combatants, so a fight halfway up a mountain
+   * must behave exactly like the same fight at sea level. If someone ever
+   * introduces an absolute-elevation term, this test fails.
+   */
+  it("a roll that would hit on level ground misses when the defender holds higher ground", () => {
+    const fixedRng = () => 0.92;
+
+    const levelWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    for (const [x, y] of [[5, 5], [5, 6]]) setElevation(levelWorld, "surface", x!, y!, 100);
+    levelWorld.agents.push(
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
+      prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
+      predator({ x: 5, y: 6 })
+    );
+    const levelLog = new EventLog();
+    tickWorld(levelWorld, levelLog, RULES, undefined, fixedRng);
+    expect(levelLog.events).toContainEqual(
+      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
+    );
+
+    // Same fight, same seed, same roll — only the gap changes. The attacker
+    // (bulbasaur-0, at 5,5) stays at 100; the defender it swings at (the
+    // predator at 5,6) stands at 102.
+    const upSlopeWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    setElevation(upSlopeWorld, "surface", 5, 5, 100);
+    setElevation(upSlopeWorld, "surface", 5, 6, 102);
+    upSlopeWorld.agents.push(
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
+      prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
+      predator({ x: 5, y: 6 })
+    );
+    const upSlopeLog = new EventLog();
+    tickWorld(upSlopeWorld, upSlopeLog, RULES, undefined, fixedRng);
+    expect(upSlopeLog.events).not.toContainEqual(
+      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" })
+    );
+    expect(upSlopeLog.events).toContainEqual(
+      expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
+    );
+  });
 });
 
 describe("mob-fighting", () => {

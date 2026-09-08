@@ -377,7 +377,11 @@ describe("elevation/terrain movement-speed modifiers", () => {
   });
 
   it("a real tick applies the last step's terrain factor to the NEXT action's pace, via ordinary needs-driven movement", () => {
-    const world = createWorld(10, 1);
+    // Explicit seed, not `createWorld`'s default: an omitted seed mints a
+    // fresh non-reproducible one (see world.ts's doc comment), which made
+    // this test fail roughly 1 run in 8 while passing in isolation. Same
+    // latent flake predation.test.ts documents and fixes with its SAFE_RNG.
+    const world = createWorld(10, 1, 20260908);
     setTile(world, "surface", 5, 0, "mud"); // directly between the agent and the water it's walking toward
     setTile(world, "surface", 6, 0, "water");
     const agent = makeAgent({
