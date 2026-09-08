@@ -5477,3 +5477,82 @@ not something this pathfinding pass itself caused or is positioned to fix.
         hunger's; it still crosses 0.7 sooner) rather than only a magic
         first-tick number, so retuning the constants cannot silently
         reintroduce the flat tail.
+
+- [x] **UI round: herd/notable identity, region name, notable stars, birth
+      beats, click-to-find.** Seven direct asks, all shipped. The engine
+      changes are small (stamping `herdId` onto the three egg events so a
+      chronicle can attribute them); the rest is presentation.
+      - **Herd names in battle logs and HP bars.** `idLabel` now reads
+        `"Kingler (32, the Kinglers of the Bright Coast)"`, and a combatant
+        chip in the Battle Screen carries its herd on a quieter second line.
+        The short id survives on purpose: a herd routinely holds several
+        animals of one species, and dropping the id would make two Kinglers
+        of the same herd literally identical in the log — the exact problem
+        an earlier ask ("shrink the Id and origin... like cubone (32,
+        immigrant)") had already fixed. The herd name takes the ORIGIN
+        word's slot instead, which it strictly dominates (an immigrant herd
+        is called "the Wandering Kin", a splinter "the Severed Flame").
+      - **Notables under their full name.** `"Surgeshade Single-Minded
+        (Kingler)"` rather than `"The Warrior (Kingler)"`, from the engine's
+        own `notableFullName` — so the log, the HP bar, the inspector and
+        the chronicle finally all call the same animal the same thing.
+      - **`herdDisplayName` now returns the real `HerdRecord.name`.** It had
+        been hashing a titled member's id into a 16-word pool and returning
+        "Ember's Pack" — a leftover from when a herd was nothing but an
+        opaque id string with no record behind it. The UI was inventing a
+        second, unrelated name for a group the chronicle had already named.
+      - **Region name above the play bar** (`#region-banner`), read live from
+        `world.territoryName` every frame rather than pushed on load, so
+        promoting a different zone cannot leave it stale.
+      - **A persistent star on notables** on the zone map, upper right.
+      - **Birth beats in the chronicle.** The honest beat is not the laying:
+        a herd lays far more than it raises (eggs get eaten, and a clutch
+        laid into a full cluster is simply lost), so the beat reports both
+        halves when they differ — "6 eggs laid, 3 of them hatched" — plus
+        "2 eggs laid, and not one of them hatched" and a clustered "3 eggs
+        were taken from the nest."
+      - **Click a species or herd to find them.** The selection is stored as
+        the QUERY (a species id or a herd id), never as the ids matching it
+        right now, and re-resolved every frame — a herd loses and gains
+        members constantly, and a frozen list would quietly become a
+        highlight of whoever used to be in it. Frames the whole group rather
+        than centring on one member, and draws a cyan ring per member (a
+        spread-out herd's bounding box says nothing; the rings are what let
+        you actually pick its members out of a crowd).
+
+- [x] **Two bugs only the running app could have shown.** Both found by
+      driving the real UI with a browser, neither reachable by any test in
+      this repo. Worth recording as a pattern: every test and the runner
+      TICK before they assert, and they dispatch events programmatically —
+      so a bug that only exists at tick 0, or only when the DOM is being
+      rebuilt under a real pointer, is invisible to all of them.
+      - **Herd names were raw ids on the first screen.** Herd records are
+        created by `tickHerds`, a once-per-tick pass, so a world that has
+        not been ticked has agents carrying `herdId`s no record exists for.
+        Normally invisible for one tick — except this app boots PAUSED, so
+        the first thing a viewer saw was "spearow-zone-32,32" instead of
+        "the Spearows of the Green Plain", and it stayed that way until they
+        pressed play. Fixed by running the engine's own `tickHerds` once at
+        world-load time (it is idempotent, so this is exactly the state tick
+        1 would produce, one frame earlier).
+      - **The click target was being destroyed mid-click.** The inspector
+        overview is deliberately marked dirty every tick ("a live
+        population/weather overview, not a static placeholder"), so the row
+        list is rebuilt several times a second. A `click` only fires if the
+        same element survives from mousedown to mouseup — a browser test
+        clicking a herd row at ordinary speed retried 25 times over 30
+        seconds and never landed one. Now committed on `pointerdown`.
+      - A third, milder one: the notable star shipped at 0.17 of a tile with
+        a full-width dark outline, leaving **7 fill pixels** on screen at
+        default zoom. A screenshot could not show that it was there or that
+        it was not; a pixel-scan of the live canvas for the star's exact
+        fill colour found 7 before the fix and 33 after. Small was the ask,
+        invisible was not.
+
+- [ ] **Breeding is wildly seed-dependent.** Noticed while checking the new
+      birth beats: over 8,000 ticks seed 24757 laid **3** eggs while seed 11
+      laid **67** (39 hatched, 28 eaten). Both are healthy-looking worlds by
+      population. A 20x spread in reproduction across seeds means the
+      breeding gate (level 16 or evolved, DESIGN.md) is sitting right at a
+      cliff edge for some worlds and not others. Worth a multi-seed look at
+      what fraction of a population ever reaches the gate at all.

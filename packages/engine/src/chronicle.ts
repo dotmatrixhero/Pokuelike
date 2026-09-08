@@ -223,6 +223,50 @@ export function chronicleFor(world: World, events: readonly SimEvent[], options:
       });
     }
 
+    // A generation, told as one line rather than one per egg. Direct ask:
+    // "some of the births — like a few eggs laid or something — should add a
+    // log entry."
+    //
+    // The "or something" is doing real work there, and the honest beat is
+    // not the laying. A herd lays far more eggs than it raises: eggs are
+    // eaten by predators, and a clutch laid into a cluster that is already
+    // full is simply lost (reproduction.ts). Reporting "18 eggs were laid"
+    // would be true and misleading in the same breath. So this reports both
+    // halves when they differ — what was laid AND what actually hatched —
+    // which is the difference between a herd that is growing and one that
+    // is merely trying to.
+    const laid = own.filter((e) => e.kind === "eggLaid");
+    const hatched = own.filter((e) => e.kind === "eggHatched");
+    if (laid.length > 0 || hatched.length > 0) {
+      const midpoint = (hatched.length > 0 ? hatched : laid)[Math.floor((hatched.length > 0 ? hatched : laid).length / 2)]!;
+      const text =
+        hatched.length === 0
+          ? `${plural(laid.length, "egg")} laid, and not one of them hatched.`
+          : laid.length > hatched.length
+            ? `A generation came up — ${plural(laid.length, "egg")} laid, ${hatched.length} of them hatched.`
+            : `A generation came up — ${plural(hatched.length, "hatchling")}.`;
+      // Weighted below a death or a migration but above the ordinary growth
+      // beats: a herd raising young is the quiet middle of its story, not
+      // its headline.
+      beats.push({ tick: midpoint.tick, weight: hatched.length === 0 ? 74 : 56, kind: "growth", text });
+    }
+
+    // A raided nest is its own beat — clustered, because a predator that
+    // finds a nest usually empties it and eight identical lines would bury
+    // everything else in the chapter.
+    const eggsEaten = own.filter((e) => e.kind === "eggEaten");
+    if (eggsEaten.length > 0) {
+      beats.push({
+        tick: eggsEaten[Math.floor(eggsEaten.length / 2)]!.tick,
+        weight: 68,
+        kind: "loss",
+        text:
+          eggsEaten.length === 1
+            ? `An egg was taken from the nest.`
+            : `${plural(eggsEaten.length, "egg")} were taken from the nest.`,
+      });
+    }
+
     // Splits are told from the parent's side too — losing half your herd is
     // the parent's story as much as the child's.
     for (const child of Object.values(herds)) {

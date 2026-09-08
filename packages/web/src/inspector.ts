@@ -5,6 +5,65 @@ import { agentDisplayName, herdDisplayName, LEADER_ICON, TITLE_ICON } from "./no
 
 // --- Small shared DOM helpers ------------------------------------------------
 
+/**
+ * What the viewer clicked to say "show me these" — a whole species, or one
+ * named herd. Direct ask: "clicking on herd name or species should auto zoom
+ * to them and highlight them on the map."
+ *
+ * A selection is stored as the QUERY (a species id, or a herd id), never as
+ * the list of ids matching it right now. A herd is a live thing: members
+ * die, are born, and wander, and a frozen id list would quietly stop
+ * highlighting the herd and start highlighting a snapshot of who used to be
+ * in it. `main.ts` re-resolves this every frame instead.
+ */
+export type GroupSelection = { kind: "species"; key: string } | { kind: "herd"; key: string };
+
+/** Everything the inspector can hand back to its host — kept as one object so adding a second interaction later does not thread another parameter through every render function. */
+export interface InspectorHooks {
+  /** Clicking a species or herd row. Passing the same selection again clears it, so a row acts as a toggle. */
+  onFocusGroup?: (selection: GroupSelection) => void;
+  /** What is currently focused, so the matching row can render as active. */
+  focused?: GroupSelection;
+}
+
+function sameSelection(a: GroupSelection | undefined, b: GroupSelection | undefined): boolean {
+  return a !== undefined && b !== undefined && a.kind === b.kind && a.key === b.key;
+}
+
+/**
+ * Turns any row into a clickable "focus this group" control, marked active
+ * when it is the current selection.
+ *
+ * **`pointerdown`, not `click`, and that is not a style preference.** The
+ * overview these rows live in is a live readout: `main.ts` marks the
+ * inspector dirty every tick on purpose ("the no-selection view is a live
+ * population/weather overview, not a static placeholder"), so the whole row
+ * list is destroyed and rebuilt several times a second while the sim runs. A
+ * `click` only fires if the SAME element survives from mousedown to mouseup,
+ * and here it routinely does not — a real browser test clicking a herd row
+ * at ordinary speed retried 25 times over 30 seconds and never landed one,
+ * every attempt losing the element mid-gesture. Committing on press sidesteps
+ * the rebuild entirely.
+ *
+ * Found by driving the actual app, not by any unit test — the handler is
+ * correctly attached and would pass any test that dispatches a synthetic
+ * click.
+ */
+function makeFocusRow(el: HTMLElement, selection: GroupSelection, hooks: InspectorHooks | undefined): HTMLElement {
+  if (!hooks?.onFocusGroup) return el;
+  const isFocused = sameSelection(hooks.focused, selection);
+  el.classList.add("inspect-focusable");
+  el.classList.toggle("inspect-focused", isFocused);
+  el.title = isFocused ? "Click again to clear the highlight" : "Zoom to them and highlight them on the map";
+  el.addEventListener("pointerdown", (event) => {
+    // Keeps a press from starting a text selection across the row list,
+    // which a press-to-act control should never do.
+    event.preventDefault();
+    hooks.onFocusGroup!(selection);
+  });
+  return el;
+}
+
 function row(label: string, value: string, compact = false): HTMLElement {
   const el = document.createElement("div");
   el.className = compact ? "inspect-row inspect-row-compact" : "inspect-row";
@@ -264,7 +323,7 @@ function renderMovesGroup(agent: Agent, onToggle: () => void): HTMLElement | und
 // --- World overview (no selection) -------------------------------------------
 
 /** With nothing selected, the inspector doubles as a world-overview panel instead of sitting empty. */
-function renderOverview(container: HTMLElement, world: World): void {
+function renderOverview(container: HTMLElement, world: World, hooks: InspectorHooks | undefined): void {
   const title = document.createElement("div");
   title.className = "inspect-title";
   title.textContent = "World overview";
@@ -277,15 +336,39 @@ function renderOverview(container: HTMLElement, world: World): void {
   const corpses = world.agents.length - living.length;
   container.appendChild(row("Population", `${living.length} alive${fainted > 0 ? `, ${fainted} fainted` : ""}${corpses > 0 ? `, ${corpses} corpses` : ""}`));
 
+  // Species, each with the named herds it is currently split across —
+  // direct ask: "inspector should show the names of the chronicle herds,
+  // next to species that belong to them."
+  //
+  // Nested rather than a flat "species, herd" pair per line because the
+  // relationship really is one-to-many: a species routinely holds several
+  // herds at once (the founding one plus every group that has split off or
+  // wandered in), and flattening that would repeat the species name three
+  // or four times and lose the fact that they are the same animal.
   const perSpecies = new Map<string, number>();
-  for (const a of living) perSpecies.set(a.species, (perSpecies.get(a.species) ?? 0) + 1);
+  const herdCounts = new Map<string, Map<string, number>>();
+  for (const a of living) {
+    perSpecies.set(a.species, (perSpecies.get(a.species) ?? 0) + 1);
+    if (!a.herdId) continue;
+    const forSpecies = herdCounts.get(a.species) ?? new Map<string, number>();
+    forSpecies.set(a.herdId, (forSpecies.get(a.herdId) ?? 0) + 1);
+    herdCounts.set(a.species, forSpecies);
+  }
   const bySpecies = [...perSpecies.entries()].sort((a, b) => b[1] - a[1]);
   for (const [species, count] of bySpecies) {
     // Compact: the general #inspector row layout's fixed 130px label column
     // (tuned for longer per-agent field names like "Activity pattern") left
     // a huge gap between a short species name and its count on desktop —
     // direct ask: "the label of pokemon to number is super far apart."
-    container.appendChild(row(SPECIES[species]?.name ?? species, String(count), true));
+    container.appendChild(
+      makeFocusRow(row(SPECIES[species]?.name ?? species, String(count), true), { kind: "species", key: species }, hooks)
+    );
+    const herds = [...(herdCounts.get(species) ?? new Map<string, number>()).entries()].sort((a, b) => b[1] - a[1]);
+    for (const [herdId, herdCount] of herds) {
+      const herdRow = row(herdDisplayName(world, herdId), String(herdCount), true);
+      herdRow.classList.add("inspect-herd-row");
+      container.appendChild(makeFocusRow(herdRow, { kind: "herd", key: herdId }, hooks));
+    }
   }
 
   if (world.weatherCells && world.weatherCells.length > 0) {
@@ -294,24 +377,26 @@ function renderOverview(container: HTMLElement, world: World): void {
 
   const hint = document.createElement("div");
   hint.className = "inspect-empty";
-  hint.textContent = "Click an agent on the grid to inspect it.";
+  hint.textContent = hooks?.onFocusGroup
+    ? "Click an agent on the grid to inspect it, or a species/herd above to find them on the map."
+    : "Click an agent on the grid to inspect it.";
   container.appendChild(hint);
 }
 
 // --- Per-agent panel, grouped ------------------------------------------------
 
 /** Renders the click-to-inspect panel for `agent`, or a world-overview summary if nothing is selected, into `container`. */
-export function renderInspector(container: HTMLElement, agent: Agent | undefined, world: World): void {
+export function renderInspector(container: HTMLElement, agent: Agent | undefined, world: World, hooks?: InspectorHooks): void {
   if (!agent) {
     container.replaceChildren();
-    renderOverview(container, world);
+    renderOverview(container, world, hooks);
     return;
   }
 
   // Re-render in place (not a full DOM replace performed by the caller) so a
   // move-tree toggle click can re-run this whole function without losing
   // scroll position mid-panel.
-  const rerender = () => renderInspector(container, agent, world);
+  const rerender = () => renderInspector(container, agent, world, hooks);
   container.replaceChildren();
 
   const def = SPECIES[agent.species];
@@ -381,7 +466,11 @@ export function renderInspector(container: HTMLElement, agent: Agent | undefined
   social.appendChild(row("Behavior", agent.behavior, true));
   social.appendChild(row("Layer", `${agent.layer} (home: ${agent.homeLayer})`, true));
   social.appendChild(row("Position", `(${agent.pos.x}, ${agent.pos.y})`, true));
-  if (agent.herdId) social.appendChild(row("Herd", herdDisplayName(world, agent.herdId), true));
+  // The selected animal's own herd is clickable too — the natural follow-up
+  // to inspecting one member is "where are the rest of them?"
+  if (agent.herdId) {
+    social.appendChild(makeFocusRow(row("Herd", herdDisplayName(world, agent.herdId), true), { kind: "herd", key: agent.herdId }, hooks));
+  }
   if (agent.isHerdLeader) social.appendChild(row("Leadership", `${LEADER_ICON} leads this herd`, true));
   if (agent.nature) social.appendChild(row("Nature", agent.nature, true));
   if (agent.activityPattern) social.appendChild(row("Activity pattern", agent.activityPattern, true));

@@ -61,6 +61,49 @@ function burned(tick: number): SimEvent {
   return { kind: "burned", tick, agentId: `bulbasaur-${tick}`, species: "bulbasaur", pos: POS, herdId: "h1" };
 }
 
+function eggLaid(tick: number): SimEvent {
+  return { kind: "eggLaid", tick, motherId: "m", fatherId: "f", eggId: `egg-${tick}`, species: "bulbasaur", layer: "surface", pos: POS, herdId: "h1" };
+}
+
+function eggHatched(tick: number): SimEvent {
+  return { kind: "eggHatched", tick, agentId: `a-${tick}`, species: "bulbasaur", layer: "surface", pos: POS, herdId: "h1" };
+}
+
+function eggEaten(tick: number): SimEvent {
+  return { kind: "eggEaten", tick, eaterId: "p", eaterSpecies: "spearow", eggId: `egg-${tick}`, eggSpecies: "bulbasaur", layer: "surface", pos: POS, herdId: "h1" };
+}
+
+function beatTexts(events: SimEvent[], record = herd()): string[] {
+  return chronicleFor(worldWith(record), events)[0]!.beats.map((b) => b.text);
+}
+
+describe("a herd raising young", () => {
+  // Direct ask: "some of the births — like a few eggs laid or something —
+  // should add a log entry."
+  it("reports what hatched, not just what was laid", () => {
+    const text = beatTexts([eggLaid(100), eggLaid(110), eggLaid(120), eggHatched(300), eggHatched(310)]).join(" ");
+    // A herd lays more than it raises — eggs get eaten, and a clutch laid
+    // into a full cluster is lost. Reporting only the laying would be true
+    // and misleading at once.
+    expect(text).toContain("3 eggs laid, 2 of them hatched");
+  });
+
+  it("says so plainly when a whole generation failed", () => {
+    expect(beatTexts([eggLaid(100), eggLaid(110)]).join(" ")).toContain("not one of them hatched");
+  });
+
+  it("does not mention losses that did not happen", () => {
+    expect(beatTexts([eggHatched(300), eggHatched(310)]).join(" ")).toContain("2 hatchlings");
+  });
+
+  it("tells a raided nest as one beat, not one line per egg", () => {
+    const beats = chronicleFor(worldWith(herd()), [eggEaten(400), eggEaten(410), eggEaten(420)])[0]!.beats;
+    const nest = beats.filter((b) => b.text.includes("nest"));
+    expect(nest).toHaveLength(1);
+    expect(nest[0]!.text).toContain("3 eggs were taken");
+  });
+});
+
 describe("what ended a herd", () => {
   it("names the animal that hunted them, not just 'predators'", () => {
     const text = ending([killedBy(900, "spearow"), killedBy(950, "spearow"), killedBy(990, "spearow")]);
