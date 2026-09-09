@@ -89,7 +89,6 @@ the first three.
 | **Firestarter** | 1 | Loose flint + fiber | 4 | Fire anywhere | Consumed |
 | **Lamp** | 2 | Clay vessel + tallow | 8 | Longer-lasting light | Needs a vessel first |
 | **Banked coal** | 2 | Charcoal + clay vessel | 6 | Carry fire without a flame | Slow, fragile |
-| **Smoke bomb** | 1 | Fiber + fungus | 6 | **Smokescreen** — moves creatures without harm | Consumed |
 
 ## Tools
 
@@ -165,12 +164,13 @@ of them costs you the trust the whole of Act 1 is about earning.
 
 | Item | W | Recipe | T | Slices | What it solves | Cost |
 |---|---|---|---|---|---|---|
+| **Smoke bomb** | 1 | Fiber + fungus | 6 | Smokescreen | Blinds and scatters — moves a herd off a tile without a wound | Consumed; drifts with wind |
 | **Soporific spores** | 1 | Fungus + herbs | 6 | Sleep Powder | Puts a creature to sleep — pass it, pass *by* it, or approach it | Short; may not take |
 | **Net / bola** | 2 | Cordage ×2 + stone | 8 | String Shot | Entangles — stops a chase without a wound | Must be close; one use |
 | **Caltrops** | 1 | Knapped flint + fiber | 5 | Spikes | Lays a hazard on a tile behind you — breaks pursuit | Scattered, not recovered |
 | **Decoy** | 2 | Fiber + hide | 8 | Substitute | Draws attention to a tile that isn't you | One use |
 | **Noisemaker** | 1 | Bone + cordage | 6 | Growl / Roar | Scatters a group off a tile — moves a herd out of a field | Everything hears it |
-| **Scent lure** | 1 | Food + herbs | 4 | Sweet Scent | Draws creatures *to* a tile — traps, or pulls a predator off you | Draws what you didn't want too |
+| **Incense** | 1 | Herbs + tallow | 5 | Sweet Scent | Draws creatures *to* a tile — traps, or pulls a predator off you | Draws what you didn't want too |
 | **Repellent salve** | 1 | Herbs + tallow | 6 | *(Repel)* | Lowers your detection radius for a window | Wears off; you reek |
 | **Trail chalk** | 1 | Clay + charcoal | 4 | — | Marks a tile. Finding your way back through a 5-layer cave | Not a move; purely navigational |
 | **Ash compost** | 1 | Charcoal + food | 6 | the fertility utility move | Raises a tile's `fertility` — repairs ground you exhausted | Slow; one tile |
@@ -198,6 +198,30 @@ they started themselves with their own firestarter.
 
 That's the Water Gun slice, and it makes carrying water a real decision
 rather than a thirst convenience.
+
+
+### From the HMs — the traversal gates
+
+`MOVES_DESIGN.md`'s Round Four already worked out what HMs do in this world.
+These are their tool slices, and they're the highest-value category in the
+whole document because **each one opens a gate the engine currently closes
+outright.**
+
+| Item | W | Recipe | T | Slices | The gate it opens |
+|---|---|---|---|---|---|
+| **Canopy hook** | 2 | Deadwood + sinew cord | 8 | Headbutt | **Reach the canopy layer.** Knock down apples and canopy food a human can't climb to — `deriveCanopyFromSurface` puts real food up there and nothing on the ground can touch it |
+| **Reed breather** | 1 | Reeds + pitch | 6 | Dive | **Go under water.** A hollow stem and pitch seal — real ancient tech. Pairs with the winter ice lid: under it, not on it |
+| **Grapple line** | 2 | Cordage ×2 + bone | 8 | Rock Climb · Waterfall | **Climb elevation you can't walk.** The `movementSpeedFactor` elevation term currently just slows you; this passes it |
+| **Dowsing rod** | 1 | Cave vine + bone | 8 | Itemfinder | **Find what's buried.** Widens what `search` turns up — the forked-switch version of a Pokédex tool |
+| **Escape line** | 3 | Cordage ×3 | 10 | *(Escape Rope)* | **Fixed ascent between cave layers.** Set it at a chokepoint and climb back fast — for a 5–6 layer cave that's a real quality-of-life gate |
+
+**Canopy hook and reed breather are the two I'd build first.** They open
+*layers* — canopy and underwater — that exist in the engine and are
+completely inaccessible to a human today. Nothing else on this list adds a
+whole dimension for two materials.
+
+**Not craftable, found:** the pitch's fire/water/electric **evolution
+stones** are relics, like TMs. Nobody knaps one.
 
 ## Consumables — basics
 
