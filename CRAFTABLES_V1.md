@@ -55,13 +55,21 @@ Correct, and worth stating because **weight alone doesn't achieve that.** A
 weight cap stops you carrying everything *at once*; it doesn't stop you
 hoarding. Three layers do the actual job, and two already exist:
 
-### Layer 1 — recipes never want more than 2 (removes the *reason*)
+### Layer 1 — recipes stay cheap (removes the *reason*)
 
-The hoarding instinct comes from games that ask for 64 wood. Recipe
-quantities here are `fiber ×2` at most, everything else 1 + 1. **If nothing
-ever needs twenty of something, nobody stockpiles twenty of it.** This is the
-most effective anti-hoard measure and it costs nothing — it's a rule already
-decided in `CRAFTING_DESIGN.md`.
+The hoarding instinct comes from games that ask for 64 wood.
+
+**Not a hard cap** — *"i dont think we codify more than 2. maybe some
+expensive things cost 6. but yeah, i think for the most part we try to keep
+it cheap."* So:
+
+- **Default 1–2 of anything.** Most recipes are 1 + 1.
+- **Up to ~6 for something deliberately expensive** — a pack, a raft, a
+  station. The cost is the point in those cases.
+- **Never more than that.** 6 is a trip; 64 is a job.
+
+**If nothing ever needs twenty of something, nobody stockpiles twenty of
+it.** This is the most effective anti-hoard measure and it costs nothing.
 
 ### Layer 2 — weight with soft encumbrance (the tried-and-true part)
 
@@ -96,6 +104,102 @@ your shelter a reason to exist beyond sleeping, and makes losing it matter.
 Raw food decays. Dried rations don't. That's the whole justification for
 preservation as a craft, and it stops food specifically from being the thing
 you stockpile infinitely.
+
+### Capacity should grow — it's a real progression axis
+
+Base capacity is `maxHp × 1.5`, which grows a little as you do. On top of
+that, **carried upgrades stack**:
+
+| | Capacity |
+|---|---|
+| Base (frail human) | ~24 |
+| + Forage pouch | +8 |
+| + Pack | +14 |
+| + Act 2 pack / panniers | +20 |
+| + Cache at shelter | unlimited, but stationary |
+
+So "how much can I carry" is something you visibly improve, and each upgrade
+has a weight and a Speed cost of its own — you're trading mobility for
+capacity, not getting it free.
+
+---
+
+## Inventory UX: the best inventory screen is one you rarely open
+
+> "make it not painful to sort through your backpack and shit please. also
+> show encumbrance and stuff easily on ui."
+
+Five rules, in order of how much pain they remove.
+
+### 1 · Encumbrance is always on screen, never behind a menu
+
+A small persistent readout, colour-coded, next to your needs:
+
+```
+  ☰ 17 / 24                    (normal)
+  ☰ 27 / 24   slowed           (amber — you're in the 100–150% band)
+  ☰ 38 / 24   can't move       (red)
+```
+
+You should never have to open anything to find out you're overloaded. The
+moment it starts costing you actions, the number that says so is visible.
+
+### 2 · Keep it small enough that sorting is unnecessary
+
+The real fix isn't a better sort — it's **fewer things.** At ~24 capacity
+with items weighing 1–5, you carry 10–20 stacks. Grouped, that's one screen
+with no scrolling. Every design choice here should protect that: cheap
+recipes, no ammo counting, no durability spares, no crafting components that
+exist only to be intermediate.
+
+### 3 · Auto-grouped, auto-stacked, stable order
+
+```
+  CARRYING                                    17 / 24
+
+  HELD     torch                                   2
+  WORN     camouflage cloak                        2
+
+  TOOLS
+    flint knife                                    2
+  MATERIALS
+    fiber          ×4    → cordage, torch          4
+    lichen         ×3    → fiber                   3
+    flint          ×2    → knapped flint           2
+  CONSUMABLES
+    poultice       ×2                              2
+```
+
+- **Grouped by category** with headers. No manual sorting, ever.
+- **Auto-stacked** by key.
+- **Stable order** — items never jump around between openings. This is the
+  single biggest anti-frustration measure; muscle memory only works if
+  position is predictable.
+
+### 4 · Materials say what they're for, right in the list
+
+The `→ cordage, torch` column is the payoff of examine-teaches-recipes: once
+you know a recipe, every material you carry shows what it feeds. **You never
+have to remember why you picked something up**, and you can tell at a glance
+what's dead weight.
+
+A material with an empty arrow column is either something you haven't learned
+a use for yet, or genuinely junk — and that ambiguity is fine, it's a reason
+to go find out.
+
+### 5 · Overloaded gets help, not just a warning
+
+When you're over capacity the screen marks the obvious candidates — heaviest
+first, and anything with no known use. Not automatic, just pointed at. The
+common case ("I picked up too much timber") should be two keypresses to fix.
+
+### The screen you actually use is the craft list
+
+Worth saying plainly: **the crafting list is the real inventory screen.** It
+already shows what you can make, what you know but can't make, and exactly
+what you're missing. Most of the time the player wants "what can I do with
+this stuff," not "enumerate my possessions" — so the craft list should be the
+one-key screen, and raw inventory the second-key one.
 
 ### What we're *not* doing
 
@@ -159,7 +263,7 @@ fire.
 | **Camouflage cloak** | Fiber + lichen | 2 | 8 | worn | **Lowers threat signature** |
 | **Hide armor** | Hide + cordage | 5 | 12 | worn | Real armor. −Speed. Needs a kill |
 | **Forage pouch** | Cordage + fiber | 1 | 6 | — | **+8 capacity** |
-| **Pack** | Hide + cordage | 2 | 10 | — | **+14 capacity**. −Speed |
+| **Pack** | Hide + cordage ×3 | 2 | 10 | — | **+14 capacity**. −Speed. *(an example of a deliberately expensive recipe)* |
 | **Waterskin** | Hide + cordage | 1 | 8 | — | Travel from water |
 | **Snare** | Cordage + haft | 2 | 6 | — | Passive trapping |
 | **Clay vessel** | Clay + `fire` | 2 | 20 | — | Liquids, storage |
@@ -192,7 +296,8 @@ act turns on.
 ## Open
 
 1. Soft encumbrance thresholds (100/150%) need play-testing, not reasoning.
-2. Stack counts must exist in `InventoryItem` before any of this is real.
+2. Stack counts must exist in `InventoryItem` before any of this is real —
+   they gate stacking, the "×4" display, and the whole grouped list.
 3. Should the cloak and club be mutually exclusive in practice, or is
    carrying both just heavy? Recommend heavy — let the weight decide.
 4. Food spoilage rate — fast enough to matter, slow enough not to nag.
