@@ -3,6 +3,37 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Pending: merge the player/campaign docs into one real spec
+
+Flagged directly: *"were gonna have to merge all the player campaign stuff
+together at some point to start doing a real spec pass."*
+
+Nine docs now cover overlapping ground, written in conversation order rather
+than spec order:
+
+| Doc | Covers |
+|---|---|
+| `CAMPAIGN_DESIGN.md` | The three-act pitch, what exists vs what's new |
+| `PLAYER_MOVEMENT.md` | Turn model, the energy scheduler, movement, bump rules |
+| `PLAYER_ACTIONS.md` | Tactics, the two tiers, coaching, automation |
+| `PLAYER_INVENTORY.md` | Slots, threat signature, held vs stowed |
+| `CRAFTING_DESIGN.md` | Materials, harvesting, the rules |
+| `CRAFTING_LOOP.md` | Where you craft, recipe knowledge, time costs |
+| `CRAFTING_TREE.md` | The dependency graph, gates, bootstrap |
+| `CRAFTABLES_V1.md` | Action list, inventory UX, the item table |
+| `ITEM_CATALOGUE.md` | The wider item list with engine hooks |
+| `MOVES_AND_TOOLS.md` | Items and moves as one effect vocabulary |
+| `PLAYTHROUGH_LAYER1.md` | The opening, played turn by turn |
+
+**Known duplication to resolve in the merge:** the action list appears in
+both `PLAYER_ACTIONS.md` and `CRAFTABLES_V1.md`; the item set appears in both
+`ITEM_CATALOGUE.md` and `CRAFTABLES_V1.md`; `grantsMoves` is described in
+`PLAYER_INVENTORY.md` and specified in `MOVES_AND_TOOLS.md`.
+
+Not urgent — these are working documents and the arguments in them are the
+value. But before implementation starts, one spec with a single source of
+truth per topic, and these kept as the reasoning behind it.
+
 ## DECIDED: items and moves are one system — see MOVES_AND_TOOLS.md
 
 Direction confirmed: *"I'm fairly confident about the items as moves
