@@ -448,8 +448,8 @@ It is dispersing — `dispersalTarget` set, walking away from its herd, and
 that is perceivable before the moment fires (legibility rule: the cause is
 visible first). It stops in front of you.
 
-> *It has been walking away from the water since dawn. It stops in front of
-> you and does not move.*
+> *It has been watching the dark mouth of the passage all morning. It turns,
+> and looks at you, and waits.*
 >
 > `1. Go with it.`  `2. Stay.`
 
@@ -463,6 +463,54 @@ visible first). It stops in front of you.
 - **Refusal must cost.** It disperses, and that individual is gone. A free
   refusal is not a decision.
 
+### Two doors, not one — the second trigger
+
+Proposed alongside the first, and it makes the system stronger than either
+half alone:
+
+> "Maybe if you don't have this incident trigger and just try to leave, if
+> you reached a certain threshold of rapport and didn't experience that
+> moment, maybe the moment is that the Pokémon follows you with a look of
+> concern."
+
+| | Who moves first | Where it fires |
+|---|---|---|
+| **The disperser** | It is leaving. You go with it. | Mid-run, in the herd's territory |
+| **The follower** | You are leaving. It comes after you. | At the exit / a region crossing |
+
+Same underlying condition — the rapport threshold. Which door you get depends
+on what actually happened in your run, so **the difference between two
+players' bonding moments is a story difference rather than a variant roll.**
+That is pillar 2 at no extra cost.
+
+> *You are three steps into the passage when you hear it behind you. It has
+> never come this far from the water. It looks at you like you have made a
+> mistake.*
+
+**Concern is the precise emotion**, and it matters that it is not *"take me
+with you."* It is **"you should not go alone"** — pillar 3 delivered by
+behaviour rather than by a line of dialogue explaining the pillar.
+
+**It also de-risks the whole feature.** The measurement below (does dispersal
+fire often enough in a layer-1-length run?) stops being blocking: if no
+individual disperses, the follower still fires. The measurement becomes
+tuning rather than a gate.
+
+#### The dominant-answer problem, and the fix
+
+If the follower always fires at threshold it is **strictly better than the
+disperser**: going with a disperser costs your cache, your lit chamber and
+travel on its schedule, while waiting for the exit costs nothing because you
+were leaving anyway. A player who notices never takes the expensive door
+again — the failure mode this project keeps refusing (*"equilibrium and
+variety, not a dominant answer"*).
+
+**Fix: the disperser knows where it is going.** It already carries a
+`dispersalTarget`, so going with it means **it leads** — into cave you have
+not seen. The follower gives you company and no direction. Same bond either
+way; different thing gained, and the expensive door buys knowledge of the
+cave, which is the scarce resource down there.
+
 If resources do appear in the moment, the rule that keeps it from being a
 shop:
 
@@ -474,12 +522,35 @@ Deterministic and informed — the same reasoning as no failure rolls in
 `CRAFTING_LOOP.md`. A random outcome after a cost is a slot machine, not a
 decision.
 
-### The constraint on the text itself
+### The constraint on the text itself — corrected
 
-Pillars: *"Let the systems make the argument. Never the dialogue."* The box
-may describe **what is happening** (*"it stops and does not move"*). It may
-never describe **what it means** (*"it seems to have chosen you"*). The
-second is the easy sentence to write and the one that breaks the pillar.
+An earlier draft of this section said the box may describe *what is
+happening* but never *what it means*, and gave *"it seems to have chosen
+you"* as the forbidden case. **That drew the line in the wrong place**, and
+the correction is worth keeping because the reasoning generalises:
+
+> "Except the not telling you it's chosen you. We should be clear ish about
+> it or at least give it context and flavor. It looks out to the unexplored
+> cave with a kind of yearning in its eyes. Then it stops and looks at you,
+> expectantly."
+
+The pillar refuses **dialogue carrying the argument** — a character
+explaining that bonds are necessary for survival. It does not refuse the
+animal having an interior. *"Yearning in its eyes"* is characterisation;
+*"it has chosen you, because no one survives alone"* is thesis. Collapsing
+those two into one rule produces austerity, not restraint.
+
+The stricter version also broke a **different** pillar: decisions must be
+real and informed. *"Looks at you, expectantly"* is not flavour — it is the
+part that tells the player a question is being asked. Withholding it makes
+the moment unreadable, which is the worse failure.
+
+**The actual cut:**
+
+| | |
+|---|---|
+| **In** | What it does, what it wants, how it looks at you. Yearning, concern, expectation. Be clear that a question is being asked |
+| **Out** | What it means about the world. No line explains why this matters |
 
 ### Open calls
 
@@ -491,6 +562,13 @@ second is the easy sentence to write and the one that breaks the pillar.
 3. **Frequency** — recommend once per individual, ever, refusable, not
    repeatable.
 4. **Does refusing lose that individual permanently?** Recommend yes.
+5. **If you refuse a disperser and later reach the exit, can the follower
+   moment fire for that same individual?** Recommend no — refusal was
+   permanent, that was its cost — but a *different* individual still can.
+6. **Do both doors land at Bonded, or does the follower arrive short?**
+   Recommend both reach Bonded. A guaranteed floor is correct while the bond
+   gates progression; the variety lives in which door and which individual,
+   not in whether you got one at all.
 
 ### The measurable risk before this gets built
 

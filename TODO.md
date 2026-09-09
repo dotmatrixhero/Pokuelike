@@ -56,11 +56,16 @@ Proposed explicit text-decision moment at the last trust rung, triggered off
 a real dispersing individual. Four calls open there (who initiates, whether
 resources are involved, frequency, cost of refusal).
 
-**Blocking measurement:** how many dispersal events fire in a layer-1-sized
-region over ~400 turns across several seeds. Trigger 1 is disposition-gated
-(factor 0 for timid+social) and the fallbacks need sustained stretches — if
-this fires near-zero in a real run the whole path is unreachable content.
-Not yet run.
+Now **two doors**: the disperser (it leaves, you follow, it leads you
+somewhere new) and the follower (you leave, it comes after you with concern,
+at the exit). Six calls open there.
+
+**Measurement, no longer blocking:** how many dispersal events fire in a
+layer-1-sized region over ~400 turns across several seeds. Trigger 1 is
+disposition-gated (factor 0 for timid+social) and the fallbacks need
+sustained stretches. The follower door means a zero result is a tuning
+problem, not unreachable content — but it still decides whether the
+expensive door is ever seen. Not yet run.
 
 ## DECIDED: items and moves are one system — see MOVES_AND_TOOLS.md
 
