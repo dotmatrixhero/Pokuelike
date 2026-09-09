@@ -121,7 +121,7 @@ const NEW_BIOME_BATCH_EVOLUTIONS: Record<string, string> = {
   golbat: "zubat",
 };
 
-const ALL_BIOME_NAMES = ["grassland", "forest", "wetland", "badlands", "highland", "snow", "desert", "jungle", "beach"];
+const ALL_BIOME_NAMES = ["grassland", "forest", "wetland", "badlands", "highland", "snow", "desert", "jungle", "beach", "savanna", "mangrove", "tundra"];
 
 describe("desert/jungle/beach species batch", () => {
   for (const id of [...NEW_BIOME_BATCH_BASE_SPECIES, ...Object.keys(NEW_BIOME_BATCH_EVOLUTIONS)]) {
@@ -184,7 +184,10 @@ describe("IMMIGRATION_CONTEXT wiring", () => {
 
   it("new badlands/highland species carry biome tags through to the roster IMMIGRATION_CONTEXT hands to the engine", () => {
     const geodude = IMMIGRATION_CONTEXT.speciesRoster.find((s) => s.id === "geodude");
-    expect(geodude?.biomes).toEqual(["badlands", "highland"]);
+    // "tundra" added later — a living boulder fits Tundra's own real
+    // frost-heaved-boulder signature (worldgen.ts's `carveTundraPermafrost`)
+    // as a genuine third home, not just badlands/highland.
+    expect(geodude?.biomes).toEqual(["badlands", "highland", "tundra"]);
   });
 });
 

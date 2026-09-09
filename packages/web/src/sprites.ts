@@ -197,10 +197,25 @@ const BIOME_FLOOR: Record<string, { base: string; overlays: readonly string[] }>
   // for ground this arid/sandy.
   desert: { base: "floor_desert", overlays: ["sand"] },
   beach: { base: "floor_desert", overlays: ["sand"] },
+  // Same "dry, sandy" real texture as Badlands/Desert/Beach above — Savanna
+  // is dry open plains, the closest real match this pool has, differentiated
+  // from all three by its own warm gold `BIOME_TINT` wash (palette.ts) on
+  // top, plus the very different terrain-weight/obstacle-cluster profile
+  // (worldgen.ts's `carveSavannaClusters`) rather than by base art alone.
+  savanna: { base: "floor_desert", overlays: ["sand"] },
+  // Real cobble/rock texture — Tundra is cold open rocky ground, closer to
+  // Highland's own stone than to the plain cave/dirt default. Its own cool
+  // blue-gray `BIOME_TINT` wash is what actually separates it from
+  // Highland's warm gray at a glance.
+  tundra: { base: "floor_stone", overlays: [] },
   // No dedicated jungle floor crop exists either — falls through to the
   // plain `FLOOR_BASE`/`FLOOR_OVERLAYS` default, same as grassland/forest
   // already do. Flagged in TODO.md rather than silently reusing a
-  // mismatched texture.
+  // mismatched texture. Mangrove (real coastal marsh) also falls through
+  // here on purpose — its own real `mud` TERRAIN (not floor) already reads
+  // distinctly via `carveMangroveLattice`'s dense mud/bush composition,
+  // plus its own `BIOME_TINT` wash; a sandy desert-family base texture
+  // would read as wrong for a brackish marsh.
 };
 
 /** Which base texture name a biome resolves to — exported so renderer.ts's edge-blend code can tell "same art, different biome name" (e.g. grassland vs. forest, both plain) apart from a real texture change (badlands vs. anything else) without duplicating this lookup. */

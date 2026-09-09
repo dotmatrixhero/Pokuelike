@@ -143,6 +143,52 @@ export const GROUND_TYPE_TINT: Partial<Record<GroundType, Rgb>> = {
   peat: [69, 58, 40],
 };
 
+/**
+ * Same "subtle color cast, mechanics visible on the map" idiom as
+ * `GROUND_TYPE_TINT` above, keyed by dominant BIOME instead of ground/soil
+ * type — direct follow-up ask, alongside the new Savanna/Mangrove/Tundra
+ * biomes themselves: "add tile types to help flesh out biome uniqueness...
+ * we can rip more or reuse and recolor existing ones." No dedicated floor
+ * art exists for any of these three (same gap Jungle/Wetland/Grassland/
+ * Forest already accept, per `sprites.ts`'s `BIOME_FLOOR` doc comment) — a
+ * real color wash over the shared default floor texture is the cheap,
+ * real-recoloring answer instead of leaving them visually identical to
+ * whichever biome they were carved out of. Every other biome (including
+ * ones with real dedicated floor art, e.g. Badlands/Highland/Snow) gets no
+ * entry here — this is specifically for the three that would otherwise be
+ * indistinguishable from their parent biome's own floor.
+ */
+export const BIOME_TINT: Partial<Record<string, Rgb>> = {
+  // A dusty, sun-bleached gold — dry open plains, distinct from Grassland's
+  // own plain dirt/cave-pool default and from Desert/Badlands' sandy tint
+  // (GROUND_TYPE_TINT's "sandy" above already claims that warmer tan).
+  savanna: [196, 168, 96],
+  // A deep brackish teal-brown — real coastal marsh mud, distinct from
+  // inland Wetland's plain default and from Beach's dry sand.
+  mangrove: [64, 92, 78],
+  // A cool, frost-touched blue-gray — cold open steppe, distinct from
+  // Highland's warm gray stone and Snow's pure white.
+  tundra: [138, 158, 168],
+};
+
+/**
+ * Same idea as `BIOME_TINT` above, applied to tree/bush obstacle SPRITES
+ * instead of the floor underneath them — direct follow-up ask: "different
+ * colored trees or palettes for the biome. Just use some recoloring
+ * techniques." Drawn as a `source-atop` color wash over the real sprite (see
+ * `drawTintedObstacle` in renderer.ts) so it only tints the sprite's own
+ * opaque pixels — the tree/bush SHAPE stays the real hand-drawn art, only
+ * its hue shifts, the same "one real sprite, several recolors" idiom a
+ * tileset artist would use instead of drawing N palette-swapped copies by
+ * hand. Only the three new biomes get an entry — every other biome's
+ * tree/bush already reads fine as plain green.
+ */
+export const BIOME_FLORA_TINT: Partial<Record<string, Rgb>> = {
+  savanna: [214, 176, 84], // sun-bleached acacia gold
+  mangrove: [58, 138, 122], // deep brackish teal-green
+  tundra: [172, 196, 200], // frost-pale scrub
+};
+
 /** Direct port of ascii.ts's TERRAIN_GLYPH/FLAVOR_GLYPH — the "ASCII classic" render mode's glyph set, Brogue-style. */
 export const TERRAIN_GLYPH: Record<TerrainKind, string> = {
   floor: ".",

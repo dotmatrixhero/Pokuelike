@@ -254,6 +254,21 @@ pass rather than a rushed bolt-on:
       and a max observed `ticksSinceSocialContact` of 2889 on a still-living
       agent, confirming the widened search and the dispersal escape hatch
       both actually engage in a real run, not just in theory.
+      **Second follow-up, direct report after actually watching a run:
+      "are you sure socializing is in? I just watched a psyduck train and
+      never socialize."** Measured before changing anything (real 3000-tick
+      scenario): at the original `SOCIALIZE_RADIUS` (1), only 4.3% of
+      sampled idle-eligible agents had ANY herd-mate that close — herds
+      routinely spread ~25 tiles apart during ordinary wandering/feeding
+      (`herding.ts`'s `COHESION_DISTANCE`, 5, is only where cohesion starts
+      pulling an agent BACK, not the herd's typical spread), and
+      `train`:`socialize` promotions came out 31:1. The feature was real
+      but essentially unreachable for a typical agent — the psyduck report
+      was correct, not a fluke. Raised `SOCIALIZE_RADIUS` 1 → 3 (matching
+      `herding.ts`'s own existing `GUARDIAN_COHESION_DISTANCE`/
+      `LOW_LEVEL_COHESION_DISTANCE`, not a newly-invented number) —
+      re-measured: reachability jumped to 18.1%, ratio to a real, felt
+      4.2:1.
 - [x] **Ground/soil types — built.** Direct ask, then a follow-up
       reframe: "I think I want more types of tiles, you know?" New
       `GroundType` ("loam" | "sandy" | "clay" | "rocky" | "peat"),
@@ -6961,3 +6976,162 @@ not something this pathfinding pass itself caused or is positioned to fix.
         and a Rapport group with a 1.00 bond to a Krabby egg. The multi-row
         and negative-score paths are confirmed present in the data but were
         not visually exercised — the agent the harness landed on had one edge.
+
+## Biome uniqueness pass — built, see DESIGN.md
+
+- [x] **Grassland waterDensity was higher than Forest's own** — direct
+      report: "I feel like there's too much water in like grassy plains type
+      environments. They don't feel distinct from coastal ones." Confirmed
+      real (0.08 vs Forest's 0.07), fixed by shifting some of the cut into
+      `foodDensity` instead of a flat `waterDensity` drop — a pure water cut
+      to 0.03 broke a real survival-margin test (macroGrid.ts's
+      `estimateZoneResourceIndex`/`RESOURCE_ESTIMATE_SCALE` explicitly
+      calibrated so Grassland stays comfortably above `overworld.ts`'s
+      `DEATH_HEALTH_THRESHOLD`). See DESIGN.md for the full numbers.
+- [x] **Three new biomes**: Savanna (dry open plains, carved out of
+      Grassland's own driest moisture sub-band), Mangrove (real coastal
+      marsh, carved out of Wetland's coastal-adjacent footprint), Tundra
+      (cold open steppe, elevation-gated just below Highland). Each gets its
+      own real structural generation pass (not just density-knob variation):
+      `carveSavannaClusters` (acacia-style tree/bush islands),
+      `carveMangroveLattice` (braided water channels), `carveTundraPermafrost`
+      (ice-wedge polygon crack lines) — worldgen.ts.
+- [x] **3 new crops**: Groundnut (Savanna, drought-resistant), Mango
+      (Mangrove/Jungle), Mushroom (Tundra/Highland/Snow, winter-hardy) —
+      crops.ts, same tier-ladder gates every other crop uses.
+- [x] **8 new species, all Gen 1 with real sprite art**: Kangaskhan/Tauros
+      (Savanna), Poliwag/Poliwhirl/Slowpoke/Slowbro (Mangrove), Dewgong
+      (Tundra/Snow) — species.ts. First pass picked 8 Gen 2/3 species by
+      flavor fit alone without checking for sprite art first; direct catch:
+      "Oh... you did Gen 2... I don't think we got sprites for em." Redone
+      Gen-1-only, every pick's `public/sprites/` art confirmed present
+      BEFORE adding it this time. Krabby/Kingler (already Gen 1, already
+      arted) also picked up "mangrove" as a real secondary biome for free.
+- [x] **Real recoloring for biome uniqueness** — direct ask: "just use some
+      recoloring techniques." A `BIOME_TINT` ground wash (palette.ts,
+      renderer.ts's `drawBiomeTint`) and a `BIOME_FLORA_TINT` tree/bush
+      sprite recolor (`tintedSprite`, drawn on an isolated offscreen canvas
+      per sprite variant so `source-atop` only tints the sprite's own
+      silhouette, cached) — no new art files, real recolors of the existing
+      shared tile art. Savanna/Tundra also reuse `floor_desert`/`floor_stone`
+      as their base texture instead of the generic default.
+
+## Biome species round 2 — built, see DESIGN.md
+
+- [x] Direct follow-up: "we need more species that can spawn in them than
+      just those... not anywhere near our full species list." Added 9 more
+      Gen-1 species, all sprite-art-confirmed first: Doduo/Dodrio/Rhyhorn/
+      Rhydon (Savanna), Goldeen/Seaking/Grimer/Muk/Farfetch'd (Mangrove),
+      Graveler (Tundra, Geodude's own reachable evolution — Geodude itself
+      also picked up "tundra" as a real third biome).
+- [ ] **Still open, real gap**: `public/sprites/` has ~85 more real,
+      Gen-1-arted species with zero roster entry at all. This pass only
+      targeted the 3 new biomes specifically asked about — a broader
+      "flesh out the whole roster" pass is a separate, bigger task.
+
+## Fixed: thin biomes always spawned every fitting species, every zone
+
+- [x] Direct report: "make spawn in different zones, so like i don't have
+      to see a million krabby on every single beach zone. maybe some of em
+      have seel or whatever and no krabby's." Confirmed real:
+      `pickZoneSpeciesPool`'s existing `ZONE_SPECIES_POOL_MIN/MAX` (4-7)
+      trimming only ever fires when a biome has MORE fitting species than
+      that — Beach (5 fitting), Tundra (3), Desert/Snow (5) all sit at or
+      under that floor, so every zone got the full fitting list,
+      unconditionally, every time. Measured on a real 60x60 grid: 12/15
+      Beach zones showed the identical 5-species pool, Krabby in all 15.
+      Fixed by scaling the pool's own lower bound down with a thin biome's
+      `fitting.length` (floored at 2) instead of always floating at the
+      fixed MIN — Beach now real-measures at 72% Krabby inclusion (was
+      100%), Tundra 85% (was 100%); a rich biome (Wetland, Forest) is
+      unaffected. See DESIGN.md for the full numbers and the rng-stream
+      regression this caught and fixed along the way.
+
+## Whole-roster species pass — built, see DESIGN.md
+
+- [x] Direct follow-up: "let's add more. Species to em all." Added 38 more
+      Gen-1 species across every biome (not just Savanna/Mangrove/Tundra),
+      taking the roster from 57 to 108 — every pick sprite-art-confirmed
+      and, where an evolution is included, evolution-reachability-confirmed
+      against the real dex before adding. Full evolution lines completed:
+      Rattata/Raticate, Pidgeotto/Pidgeot, Fearow, Nidoran♀/Nidorina,
+      Nidoran♂/Nidorino, Venonat/Venomoth, Paras/Parasect, Bellsprout/
+      Weepinbell, Machop/Machoke, Drowzee/Hypno, Abra/Kadabra, Gastly/
+      Haunter, Dugtrio, Sandslash, Primeape, Kabuto/Kabutops, Omanyte/
+      Omastar. Base-only (no in-sim-reachable evolution, same accepted
+      limitation as Growlithe/Onix): Clefairy, Jigglypuff, Exeggcute,
+      Tangela, Magmar, Aerodactyl, Chansey, Lickitung, Pinsir, Pikachu,
+      Eevee. Tundra (this roster's thinnest biome even after the round-2
+      pass) also picked up Machop/Machoke/Primeape/Aerodactyl as a real
+      cold-mountain secondary.
+- [ ] **Deliberately excluded, real open question**: the 5 Gen-1
+      legendaries (Articuno/Zapdos/Moltres/Mewtwo/Mew) all have real sprite
+      art but were NOT added as ordinary spawnable population — this is a
+      population sim, not a catching game, and whether a legendary should
+      exist as a regular breeding/dying zone resident (vs. a one-off
+      landmark-bound event, vs. not at all) is a real design decision, not
+      a species-roster mechanical add. Flagged here rather than decided
+      unilaterally.
+- [ ] Also skipped for weak natural-biome fit in an ecological sim (not a
+      sprite-art or evolution-reachability issue): Ditto, Porygon,
+      Electabuzz, Hitmonlee/Hitmonchan, Mr. Mime, Magnemite/Magneton line,
+      Voltorb/Electrode, Koffing/Weezing. Real, arted Gen-1 species — could
+      still be added if the "no natural biome" call is wrong; a request to
+      revisit is enough to redo it.
+
+## Fixed: predator population per zone hard-capped — see DESIGN.md
+
+- [x] Direct report: "Kabutops are just utterly slaughtering everything...
+      make high level predators like no more than 2 in a zone." Verified
+      first: Kabutops (evolution floor level 40 + PREDATOR_LEVEL_BOOST) was
+      spawning at level 46-51 against level-5 co-spawned prey in the same
+      zone — the real cause is the level gap, population itself was already
+      only 5-7. Added the requested `PREDATOR_POPULATION_CAP = 2` anyway —
+      real and requested, fewer high-level killers doing the damage — a
+      real zone's Kabutops population measured at exactly 2.00 after (was
+      5.3-7.5 before). Caught a real collision with the existing Sanctuary
+      predator-discount test along the way: a flat cap applied AFTER the
+      Sanctuary's own extra discount clamped both the ordinary and
+      Sanctuary case to the same number, erasing the "Sanctuary is even
+      thinner on predators" signal — fixed by capping first, then applying
+      Sanctuary's discount on top of the already-capped number.
+- [ ] **Still open, the deeper cause**: the level gap itself. Kabutops
+      (level 40 floor) is the roster's most extreme case, but Charizard
+      (36), Tentacruel (30), Haunter (25) aren't far behind, all spawning
+      well above most base-form prey's low end. `PREDATOR_LEVEL_BOOST`
+      (`immigration.ts`) already narrows this somewhat but wasn't designed
+      around an evolution floor this high. Not fixed here — a balance
+      call, not decided unilaterally.
+
+## Fixed: high-level predator occurrence itself, not just population — see DESIGN.md
+
+- [x] Direct follow-up: "I think the level 40 gap can happen, it should
+      just be rare. We should make it a rare occurrence." Root cause: the
+      earlier `PREDATOR_POPULATION_CAP` fix only thinned Kabutops'
+      population once present — it was still GUARANTEED present in every
+      Beach zone, since Kabutops was Beach's only fitting predator and
+      every selection mechanism (pool-size trim, predator-cap split)
+      deterministically includes the sole candidate whenever a predator
+      slot fills. Fixed by having a predator's `rarity` ALSO gate whether
+      it's even a candidate for a zone's pool at all (an independent roll,
+      before any pool-size math runs) — completing `rarity`'s own
+      documented intent ("a multiplier on how often this species shows
+      up"), which zone-seeding had never actually read for inclusion,
+      only for population size. Gave Kabutops `rarity: 0.3`. Real
+      generated-grid measurement: Kabutops now shows up in 28.5% of Beach
+      zones (was 100%). Full engine (1262) and data (240) suites green.
+
+## Fixed: usually a lower-level Kabuto predator, rarely the level-40 Kabutops — see DESIGN.md
+
+- [x] Direct follow-up correction: "can't we have a lower level kabutops?
+      Change the level adding distribution instead. A predator kabuto is
+      OK too." Kabutops literally can't spawn below level 40 (its real
+      evolution requirement) — there's no level roll to lower while
+      keeping it Kabutops. Real fix: tagged Kabuto itself `isPredator: true`
+      (real mainline "preyed on smaller life" flavor) — no evolution floor
+      to clear, so it spawns at a normal ~5-18 like any other base-form
+      predator. A Beach/Wetland zone's predator niche now usually resolves
+      to Kabuto; Kabutops (kept at its earlier `rarity: 0.3`) is the rare
+      escalation on top. Measured on a real generated grid: Kabuto in 100%
+      of Beach zones at level 12-18, Kabutops in 31.6% at its unavoidable
+      ~46+. Full engine (1262) and data (240) suites green.

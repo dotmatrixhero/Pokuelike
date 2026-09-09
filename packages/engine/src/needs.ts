@@ -479,16 +479,28 @@ const TRAINING_STEP_OFFSETS: readonly Vec2[] = [
 /**
  * How close a herd-mate has to be for `applySocializing` to consider them —
  * direct ask: "has to be like pretty close quarters to your rapport
- * target." Deliberately the tightest radius this file uses for anything
- * (contrast `SHELTER_REST_RADIUS`/`FLEE_DETECT_RADIUS`, both several tiles):
- * this is meant to read as "keeping company with whoever's already right
- * here," an opportunistic use of otherwise-idle time, not a destination an
- * agent travels toward — see `applySocializing`'s own doc comment for why
- * it never moves an agent toward a target the way `applyExploration` does.
- * Manhattan distance <= 1 is exactly the 4 orthogonal neighbor tiles, not
- * even a diagonal step away.
+ * target." Originally shipped at 1 (Manhattan — the 4 orthogonal neighbor
+ * tiles, nothing else), read as literally as the ask's own wording. Direct
+ * follow-up report, after actually watching a real run: "are you sure
+ * socializing is in? I just watched a psyduck train and never socialize."
+ * Measured before changing anything (same real scenario, 3000 ticks): at
+ * radius 1, only 4.3% of sampled idle-eligible agents had ANY herd-mate
+ * that close (herds routinely spread ~25 tiles apart during ordinary
+ * wandering/feeding — `herding.ts`'s own `COHESION_DISTANCE`, 5, is only
+ * the point cohesion starts pulling an agent BACK, not the herd's typical
+ * spread), and `train`:`socialize` promotions came out 31:1 — the feature
+ * was real but essentially unreachable for a typical agent, not just rare.
+ * Raised to 3 (same value `herding.ts`'s own `GUARDIAN_COHESION_DISTANCE`/
+ * `LOW_LEVEL_COHESION_DISTANCE` already use for "close to the herd," not a
+ * new number invented here) — re-measured: reachability jumped to 18.1%
+ * and the ratio to a real, felt 4.2:1. Still deliberately tighter than
+ * `SHELTER_REST_RADIUS`/`FLEE_DETECT_RADIUS` (both several tiles wider):
+ * this stays "keeping company with whoever's nearby," an opportunistic use
+ * of otherwise-idle time, not a destination an agent travels toward — see
+ * `applySocializing`'s own doc comment for why it never moves an agent
+ * toward a target the way `applyExploration` does.
  */
-const SOCIALIZE_RADIUS = 1;
+const SOCIALIZE_RADIUS = 3;
 
 /**
  * How many consecutive idle-stack ticks with nobody to socialize with
