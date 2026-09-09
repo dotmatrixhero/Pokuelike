@@ -67,8 +67,11 @@ timestamp, no memory of why).
 look like "an animal walking" from outside. No door works until behaviour is
 readable.
 
-**Correction:** the active roster is **50 species, all Gen 1**, not the 70
-cited earlier in this repo.
+**Corrections logged:** the active roster is **108 species, all Gen 1** after
+master's whole-roster pass (this repo has cited 70 and 50 at different points).
+And `EMERGENT_SITUATIONS.md`'s first draft used Growlithe as the predator —
+**Growlithe has no `isPredator` flag and never hunts anything.** Swapped to
+Charmeleon (`isPredator: true`, diurnal, badlands, knows `ember`).
 
 ## OPEN: the dispersal offer — see CAMPAIGN_DESIGN.md
 

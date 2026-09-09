@@ -80,8 +80,18 @@ None of these need a written scenario. They need a **verb**.
 ## The worked example
 
 Everything below is checked against the real roster and real move data, not
-invented. `species.ts` currently holds **50 species, all Gen 1** (an earlier
-note in this repo said 70 — that was wrong).
+invented. `species.ts` currently holds **108 species, all Gen 1** after
+master's whole-roster pass.
+
+**Two corrections to an earlier draft of this doc, both caught by going back
+to the source:**
+- It said 50 species; that was true before merging master's 57 → 108 pass, and
+  a still-earlier note in this repo said 70. The live number is 108.
+- **It used Growlithe as the predator. Growlithe is not a predator** — it has
+  no `isPredator` flag, so it never hunts anything, ever. Swapped to
+  **Charmeleon**, which is `isPredator: true`, `diurnal`, `biomes:
+  ["badlands"]` and knows `ember` — the scenario needed exactly that and it
+  was luck, not judgement, that a real species fit.
 
 ### First: the same tick as the game plays today
 
@@ -101,13 +111,13 @@ tell you is that a plant is walking. Your options are attack it or don't.
 ```ts
 oddish:    activityPattern: "nocturnal",  preferredTerrain: ["flora"],
            moves: ["tackle", "growth", "grassy_terrain"]
-growlithe: activityPattern: "diurnal",    biomes: ["badlands"],
-           moves: ["ember", "agility"],   isPredator: true
+charmeleon: activityPattern: "diurnal",  biomes: ["badlands"],
+           moves: ["scratch", "ember"],  isPredator: true
 ```
 
 Three things fall out of that with no design work at all:
 
-1. **A deadline nobody wrote.** Oddish move at night; Growlithe hunt by day.
+1. **A deadline nobody wrote.** Oddish move at night; Charmeleon hunt by day.
    A migrating Oddish herd is therefore a series of night marches against a
    dawn deadline — and `nightfall`/`daybreak` are already real `SimEvent`s.
    Two flavour-text fields, set months apart for unrelated reasons, produce
@@ -141,7 +151,7 @@ crossed a shaded draw to the north where the flora held on.
 > `> light torch`
 
 You can keep pace now — and the column is visible from the ridge. The ridge is
-badlands. Badlands is where Growlithe live, and Growlithe are asleep.
+badlands. Badlands is where Charmeleon live, and it is asleep.
 
 **Every door here has a real cost:**
 
@@ -155,8 +165,8 @@ badlands. Badlands is where Growlithe live, and Growlithe are asleep.
 
 **Dawn is the clock.** The stragglers will not make cover.
 
-And when the Growlithe wake, one of them knows `ember`, and the brush has been
-dry for three weeks. Worth noting: a validation run measured **zero fire
+And when the Charmeleon wakes, it knows `ember`, and the brush has been dry
+for three weeks. Worth noting: a validation run measured **zero fire
 events in 24,000 agent-ticks** — `fire.ts` has never once ignited in a real
 run. This is the first situation that would light it.
 
@@ -167,8 +177,8 @@ run. This is the first situation that would light it.
   anything alive. It does not wander toward a random distant tile — it comes
   and finds you. That is `CAMPAIGN_DESIGN.md`'s bonding moment, reached by a
   route nobody scripted.
-- **The grudge.** The Growlithe carry `score: -0.6, reason: "drove us off a
-  kill"`. Two zones east, weeks later, they hunt **you** — not the nearest
+- **The grudge.** The Charmeleon carries `score: -0.6, reason: "drove me off
+  a kill"`. Two zones east, weeks later, it hunts **you** — not the nearest
   prey. A predator with a reason.
 - **The grove.** Where you stopped them is where they rested, and where they
   rested got `fertilityBoost`. Come back a season later and there are plants
@@ -241,7 +251,7 @@ Roll the same world again with the same six doors:
 - **You let the straggler go** → no smoke, no grudge, nothing hunting you in
   the east. A quieter, poorer run — and it was a real choice.
 
-The content is not the scene. It is that **eighteen behaviours × 50 species ×
+The content is not the scene. It is that **eighteen behaviours × 108 species ×
 weather × time of day × who you are to them** is a space nobody has to write,
 and today the player is sealed out of every square of it.
 

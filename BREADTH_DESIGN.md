@@ -28,25 +28,25 @@ value in this codebase sits in the joins.
 
 ## Three measured findings
 
-### 1. You are using 4.6% of your species
+### 1. You are using 10% of your species
 
 | | Count |
 |---|---|
 | Species in the generated dex | **1085** |
-| Species in the active roster (`packages/data/src/species.ts`) | **50**, all Gen 1 |
+| Species in the active roster (`packages/data/src/species.ts`) | **108**, all Gen 1 |
 
-*(Corrected: this section originally said 70. Recounted directly off the
-`SPECIES` record — it is 50, and every one is Gen 1. Design decision recorded
-alongside it: **stay Gen 1 for now.**)*
+*(This section originally said 70, then 50; master's whole-roster pass took it
+57 → 108. Recounted directly off the `SPECIES` record. Design decision
+recorded alongside it: **stay Gen 1 for now** — 108 of Gen 1's 151.)*
 
 And the placement machinery already exists — `estimateZoneSpecies`,
 `speciesFitsZone`, and `SpeciesDef`'s `biomes` / `preferredTerrain` /
 `activityPattern` / `isPredator` gating.
 
-This is the single largest latent content pool in the project. Filling out the
-rest of Gen 1 — 151 species, biome-gated — would transform variety at close to
-zero design cost per species; the work is curation (which ones, what stats,
-does the ecology still balance), not construction.
+This was the single largest latent content pool in the project and master has
+now largely spent it for Gen 1 — 108 of 151. The remaining headroom inside the
+Gen 1 decision is small; the next real breadth lever is behaviour doors, not
+roster size.
 
 **Note added from `EMERGENT_SITUATIONS.md`:** breadth here multiplies against
 behaviour doors rather than adding to them. Each new species is not one new
