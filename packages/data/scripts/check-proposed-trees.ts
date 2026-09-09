@@ -20,6 +20,63 @@ import { MOVES } from "../src/moves.js";
 // decision — the Path of Exile shape, per "multi paths to same notable".
 const SHIPPED = { anyOf: 9, forks: 6, bridges: 3 };
 
+/**
+ * The largest total of `valueOf` any single build can actually reach, given
+ * that `excludes` pairs can never both be taken.
+ *
+ * Summing every node blindly is wrong and it produced a real false positive:
+ * dig's Instant Vanish and False Surface exclude each other, so their two
+ * cooldown cuts can never both be in one build, yet a flat sum reported dig
+ * as -11 against a -10 cap and would have had a node rewritten to fix a
+ * budget nothing was actually over. Every cap in this file is a claim about
+ * what a BUILD can have, so every cap has to be measured the same way.
+ *
+ * Exclusion components are tiny (almost always a single pair), so this brute-
+ * forces the maximum-weight independent set within each component and falls
+ * back to the plain sum on anything implausibly large.
+ */
+function maxReachableTotal(nodes: ProposedNode[], valueOf: (n: ProposedNode) => number): number {
+  const contributing = nodes.filter((n) => valueOf(n) !== 0);
+  const byId = new Map(contributing.map((n) => [n.id, n]));
+  const conflicts = (a: ProposedNode, b: ProposedNode) =>
+    (a.excludes ?? []).includes(b.id) || (b.excludes ?? []).includes(a.id);
+
+  // Connected components over the exclusion relation.
+  const seen = new Set<string>();
+  let total = 0;
+  for (const start of contributing) {
+    if (seen.has(start.id)) continue;
+    const component: ProposedNode[] = [];
+    const queue = [start];
+    seen.add(start.id);
+    while (queue.length) {
+      const cur = queue.pop()!;
+      component.push(cur);
+      for (const other of contributing) {
+        if (seen.has(other.id) || !conflicts(cur, other)) continue;
+        seen.add(other.id);
+        queue.push(other);
+      }
+    }
+    if (component.length === 1) { total += valueOf(component[0]); continue; }
+    if (component.length > 16) { total += component.reduce((sum, n) => sum + valueOf(n), 0); continue; }
+    let best = 0;
+    for (let mask = 0; mask < 1 << component.length; mask++) {
+      let sum = 0;
+      let ok = true;
+      const picked: ProposedNode[] = [];
+      for (let i = 0; i < component.length; i++) if (mask & (1 << i)) picked.push(component[i]);
+      for (let i = 0; i < picked.length && ok; i++)
+        for (let j = i + 1; j < picked.length && ok; j++) if (conflicts(picked[i], picked[j])) ok = false;
+      if (!ok) continue;
+      for (const n of picked) sum += valueOf(n);
+      if (sum > best) best = sum;
+    }
+    total += best;
+  }
+  return total;
+}
+
 function problems(move: ProposedMove): string[] {
   // With every node at 1 point, a notable is no longer marked by cost. What
   // actually MADE a node a notable is that routes converge on it — so that is
@@ -386,7 +443,11 @@ function problems(move: ProposedMove): string[] {
   // Capped at 3x by flooring the cooldown, per "2 +1 together. Cap it at 3x".
   const cdFloor = Math.ceil((move.cooldownTicks + 1) / 3) - 1;
   const maxCut = move.cooldownTicks - cdFloor;
-  const cut = -nodes.reduce((sum, n) => sum + Math.min(0, ((n.delta as any)?.cooldownTicks ?? 0)), 0);
+  // Magnitudes, not signed values: `maxReachableTotal` maximises, so feeding
+  // it negative cooldown deltas made the empty set (0) the best answer and the
+  // rule silently stopped firing. Caught by the selftest below, which is the
+  // only reason this is not shipped broken.
+  const cut = maxReachableTotal(nodes, (n) => Math.max(0, -((n.delta as any)?.cooldownTicks ?? 0)));
   if (cut > maxCut) {
     const tempo = (move.cooldownTicks + 1) / (Math.max(0, move.cooldownTicks - cut) + 1);
     out.push(`cooldown reduction totals -${cut} against a base of ${move.cooldownTicks}, a ${tempo.toFixed(1)}x tempo gain — the cap is 3.0x, so at most -${maxCut} (floor ${cdFloor}). Trim or repurpose.`);
@@ -401,16 +462,17 @@ function problems(move: ProposedMove): string[] {
   // status.ts:342, uncapped), so four capped moves still stack. That is what
   // passive-exposure.ts measures; this rule only stops any single tree from
   // being the whole problem by itself.
-  const passiveTotals = new Map<string, number>();
-  for (const n of nodes)
-    for (const g of [...(n.grantsPassive ? [n.grantsPassive] : []), ...(n.grantsPassives ?? [])])
-      passiveTotals.set(g.kind, (passiveTotals.get(g.kind) ?? 0) + g.value);
+  const passiveOn = (n: ProposedNode, kind: string) =>
+    [...(n.grantsPassive ? [n.grantsPassive] : []), ...(n.grantsPassives ?? [])]
+      .filter((g) => g.kind === kind)
+      .reduce((sum, g) => sum + g.value, 0);
+  const passiveTotal = (kind: string) => maxReachableTotal(nodes, (n) => passiveOn(n, kind));
   const PASSIVE_CAP: [string, number, string][] = [
     ["damageReduction", 0.2, "damage reduction"],
     ["thorns", 0.5, "thorns"],
   ];
   for (const [kind, cap, label] of PASSIVE_CAP) {
-    const total = passiveTotals.get(kind) ?? 0;
+    const total = passiveTotal(kind);
     if (total > cap + 1e-9) out.push(`${label} totals ${(total * 100).toFixed(0)}% across this tree — the per-move cap is ${(cap * 100).toFixed(0)}%`);
   }
   // Healing is one budget across its three kinds, because that is how the
@@ -424,7 +486,10 @@ function problems(move: ProposedMove): string[] {
   // deeply-invested agent is usually high level, where the same flat regen is
   // worth about half as much share.
   const HEAL_REF_MAX_HP = 43;
-  const heal = (passiveTotals.get("regen") ?? 0) + (passiveTotals.get("healAura") ?? 0) + (passiveTotals.get("regenFlat") ?? 0) / HEAL_REF_MAX_HP;
+  const heal = maxReachableTotal(
+    nodes,
+    (n) => passiveOn(n, "regen") + passiveOn(n, "healAura") + passiveOn(n, "regenFlat") / HEAL_REF_MAX_HP
+  );
   if (heal > 0.1 + 1e-9) out.push(`healing totals ${(heal * 100).toFixed(1)}%/tick across this tree (regen + healAura + regenFlat/${HEAL_REF_MAX_HP}) — the per-move cap is 10%`);
 
   // A node that is pure downside is a bug, not a design choice (principle 4).
@@ -467,6 +532,31 @@ if (selftest) {
   if (missed.length) { console.error(`SELFTEST FAILED — checker missed: ${missed.join("; ")}`); process.exit(1); }
   console.log("selftest passed: the checker can actually fail.\n");
 }
+// The exclusion-reachability logic changed no shipped number when it landed,
+// which makes it exactly the kind of rule that silently rots. This proves it
+// both ways on a tree built for it: two mutually-exclusive -3 cooldowns must
+// read as -3, not -6, and two co-takeable ones must still read as -6.
+{
+  const mk = (cd: number, id: string, excludes?: string[]): ProposedNode => ({
+    id, name: id, cost: 1, leaning: "aggression", excludes, delta: { cooldownTicks: cd },
+  });
+  const cutOf = (nodes: ProposedNode[]) => {
+    const move: ProposedMove = {
+      id: "x", name: "X", type: "normal", category: "physical", power: 10, accuracy: 100,
+      cooldownTicks: 2, shape: {}, fantasy: "", learners: [], tree: tree_(nodes),
+    };
+    const line = problems(move).find((m) => m.startsWith("cooldown reduction totals"));
+    return line ? Number(/totals -(\d+)/.exec(line)![1]) : 0;
+  };
+  const exclusive = cutOf([mk(-3, "a", ["b"]), mk(-3, "b", ["a"])]);
+  const together = cutOf([mk(-3, "a"), mk(-3, "b")]);
+  if (exclusive !== 3 || together !== 6) {
+    console.error(`SELFTEST FAILED — exclusion reachability: exclusive pair read as -${exclusive} (want -3), co-takeable pair as -${together} (want -6)`);
+    process.exit(1);
+  }
+  if (process.argv.includes("--selftest")) console.log("selftest passed: exclusive cooldowns count once, co-takeable ones sum.\n");
+}
+
 function tree_(ns: ProposedNode[]) { const o: Record<string, ProposedNode> = {}; for (const n of ns) o[n.id] = n; return o; }
 
 // `--shipped` runs the same rules over the real MOVES roster. Same checker,

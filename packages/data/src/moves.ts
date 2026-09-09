@@ -4101,10 +4101,14 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Ancient Grove",
         cost: 2,
         leaning: "boldness",
-        // An immovable, ancient guardian that punishes and endures.
+        // An immovable, ancient guardian that punishes and endures. The
+        // node's own comment said "immovable" and then granted regen; it now
+        // grants what it describes. (`immovable` is `> 0`-gated in status.ts
+        // rather than summed, so this is the tree's only grant of it — a
+        // second one anywhere in Solar Beam would be a dead node.)
         grantsPassives: [
           { kind: "thorns", value: 0.1 },
-          { kind: "regen", value: 0.04 },
+          { kind: "immovable", value: 1 },
         ],
         delta: {},
       },
@@ -4189,7 +4193,9 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // DEEP NOTABLE. Both lanes end here: the beam stops being one
         // guardian's and becomes the grove's answer to being encroached on.
-        grantsPassive: { kind: "healAura", value: 0.01 },
+        // 0.01 -> 0.006: group healing is held to a stricter standard than
+        // self-healing, since one node pays out to the whole herd every tick.
+        grantsPassive: { kind: "healAura", value: 0.006 },
         delta: { allyEffectOnAttack: true },
       },
       sunward_stance: {
@@ -4217,8 +4223,11 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Deeper Shade",
         cost: 1,
         leaning: "boldness",
-        // Bridge filler — deepens Shared Shade's own recovery lever.
-        grantsPassive: { kind: "regenFlat", value: 1 },
+        // Bridge filler. Was "+1 HP Regen", deepening Shared Shade's healing;
+        // it now deepens the shade itself. Shade is cover, and cover is a
+        // Boldness flavour — the branch keeps its lever without adding a
+        // fourth healing node to a tree that had seven.
+        grantsPassive: { kind: "defenseBoost", value: 0.04 },
         delta: {},
       },
       the_canopy: {
@@ -4228,10 +4237,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         leaning: "sociability",
         // BRIDGE NOTABLE. Shade thick enough that standing under it is
-        // itself the recovery.
+        // itself the recovery. Trimmed against the per-move healing budget,
+        // aura harder than self: 1.5 -> 1.0 flat, 0.008 -> 0.005 aura.
         grantsPassives: [
-          { kind: "regenFlat", value: 1.5 },
-          { kind: "healAura", value: 0.008 },
+          { kind: "regenFlat", value: 1 },
+          { kind: "healAura", value: 0.005 },
         ],
         delta: {},
       },
@@ -4260,7 +4270,9 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Eternal Grove",
         cost: 2,
         leaning: "sociability",
-        grantsPassive: { kind: "regen", value: 0.04 },
+        // 0.04 -> 0.025. The `allyEffect` heal in this node's delta is the
+        // real payload; the passive was doubling up on it.
+        grantsPassive: { kind: "regen", value: 0.025 },
         delta: { targetsAlly: true, allyEffect: { healFraction: 0.25, buff: { stat: "spAttack", stage: 1, ticks: 20 } } },
       },
       // Crosslink: Aggression <-> Boldness — the guardian's own steady
@@ -4315,12 +4327,15 @@ export const MOVES: Record<string, MoveSpec> = {
       canopy_footing: {
         id: "canopy_footing",
         prerequisites: ["bulwark_footing"],
-        name: "+0.75 HP Regen",
+        name: "Rooted Footing",
         cost: 1,
         leaning: "boldness",
-        // Deepens Shared Shade's own shared-vitality lever directly,
-        // instead of a generic power bolt-on.
-        grantsPassive: { kind: "regenFlat", value: 0.75 },
+        // Was literally named "+0.75 HP Regen" — a placeholder name is a tell
+        // that the node had no idea, and it was the seventh healing node in
+        // one tree. Its prerequisite is Bulwark Footing; planting your feet
+        // is what it should have been doing all along, and flat mitigation is
+        // early-strong/late-marginal exactly like the flat regen it replaces.
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
         delta: {},
       },
       grove_bulwark: {
@@ -6508,9 +6523,15 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["never_still"],
         excludes: ["false_surface"],
         leaning: "aggression",
-        // Recovers fast between dives instead of biting on the way past.
-        grantsPassive: { kind: "regenFlat", value: 2.25 },
-        delta: {},
+        // Was "+2.25 HP Regen". Healing was never this node's fantasy — it is
+        // the FAST dive, the one that is gone before anything lands. Now it
+        // buys the tempo it describes.
+        //
+        // Deliberately NOT `unshaken`, which reads like a perfect fit: dig
+        // already grants it (Unflinching Burrow's own read of its name), and
+        // predation.ts gates on `passives.unshaken > 0` rather than summing,
+        // so a second grant would be a node that does literally nothing.
+        delta: { cooldownTicks: -1 },
       },
       false_surface: {
         id: "false_surface",
@@ -6533,7 +6554,13 @@ export const MOVES: Record<string, MoveSpec> = {
         // dodge/timing effect this tree's real lever set (cooldownTicks +
         // passives only, since Dig is never resolved as a hit) can't
         // actually deliver.
-        grantsPassive: { kind: "damageReduction", value: 0.12 },
+        //
+        // 0.12 -> 0.05 to bring the tree under the 20% per-move damage-
+        // reduction cap (it totalled 29%). The cut lands on Aggression
+        // rather than Boldness deliberately: mitigation is a Boldness
+        // flavour in the colour pie, and this node keeps its real lever,
+        // the cooldown.
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
         delta: { cooldownTicks: -1 },
       },
       // Crosslink: Aggression <-> Boldness — braces for real before every
@@ -6563,9 +6590,10 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["hardened_dive"],
         leaning: "aggression",
-        // Takes the hit mid-dive and keeps going.
+        // Takes the hit mid-dive and keeps going. 0.05 -> 0.03 for the
+        // same per-move cap; the defenseBoost is what carries this node.
         grantsPassives: [
-          { kind: "damageReduction", value: 0.05 },
+          { kind: "damageReduction", value: 0.03 },
           { kind: "defenseBoost", value: 0.04 },
         ],
         delta: {},
@@ -6616,7 +6644,12 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["bedrock_grip"],
         excludes: ["stone_hide"],
         leaning: "boldness",
-        grantsPassive: { kind: "regenFlat", value: 3 },
+        // Was "+3 HP Regen", the single biggest healing node in the tree and
+        // flatly off-fantasy: weathered scales are armour. Flat mitigation
+        // scales the same way flat regen did (real early, marginal late —
+        // see `damageReductionFlat`'s own doc comment), so this keeps the
+        // node's role in the build while changing what it means.
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
         delta: {},
       },
       stone_hide: {
@@ -6738,7 +6771,9 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["settling_earth"],
         excludes: ["deeper_calm"],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 2.25 },
+        // Kept as healing — this one IS rest — but 2.25 -> 1.5 against the
+        // per-move budget.
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: {},
       },
       denning_together: {
@@ -6749,9 +6784,14 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // A shared den means real rest for everyone in it, not just a
         // trickle of healing.
+        //
+        // Group healing is held to a stricter standard than self-healing:
+        // `healAura` pays out to every herd-mate in radius every tick, so one
+        // node is worth its value times the herd. Direct: "be more stringent
+        // on group regen." 0.01 -> 0.006 aura, 0.04 -> 0.02 self.
         grantsPassives: [
-          { kind: "healAura", value: 0.01 },
-          { kind: "regen", value: 0.04 },
+          { kind: "healAura", value: 0.006 },
+          { kind: "regen", value: 0.02 },
         ],
         delta: {},
       },
@@ -6763,8 +6803,19 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["peaceful_tunnels", "quick_reflexes"],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
-        delta: { cooldownTicks: -1 },
+        // Was "+1.5 HP Regen". A warning shouted early is what stops a fight
+        // starting, not what patches one up — `calmingPresence` is the lever
+        // that actually models that (herdConflict.ts multiplies down the
+        // escalation chance of BOTH sides near the holder, not just its own
+        // herd).
+        //
+        // Its -1 cooldown moved to Instant Vanish, whose entire identity is
+        // speed, rather than being shaved off some third node: dig sits
+        // exactly at the 3x tempo cap, so the tick had to come from
+        // somewhere, and a de-escalation node is the one place in this branch
+        // where tempo was never the point.
+        grantsPassive: { kind: "calmingPresence", value: 0.08 },
+        delta: {},
       },
       sharper_warning: {
         id: "sharper_warning",
@@ -6772,8 +6823,13 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["quick_warning"],
         leaning: "sociability",
-        // Deepens Quick Warning's own tempo lever.
-        delta: { cooldownTicks: -1 },
+        // Deepens Quick Warning's own de-escalation lever, which is what that
+        // node now grants — the whole bridge is about the warning working,
+        // not about digging faster. This gave back the tick Instant Vanish
+        // needed: dig sat exactly at the 3x tempo cap, so the two cooldowns
+        // on this bridge were the ones with the least claim to it.
+        grantsPassive: { kind: "calmingPresence", value: 0.05 },
+        delta: {},
       },
       first_to_ground: {
         id: "first_to_ground",
@@ -6782,8 +6838,9 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["sharper_warning"],
         leaning: "aggression",
         // Underground before anything else has reacted, and recovering while
-        // it waits.
-        grantsPassive: { kind: "regen", value: 0.025 },
+        // it waits. 0.025 -> 0.015: the waiting-and-recovering half is real
+        // and stays, but the cooldown is what this node is actually for.
+        grantsPassive: { kind: "regen", value: 0.015 },
         delta: { cooldownTicks: -2 },
       },
     },
@@ -7101,7 +7158,11 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Steady Roots",
         cost: 1,
         leaning: "boldness",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        // Was "+1.5 HP Regen". "Steady" is a stance, not a heal — and this
+        // branch's own flavour is defence. Physical-only by construction
+        // (calculateDamage only reads the defense stage for a physical move),
+        // which is the honest version of what a root system does.
+        grantsPassive: { kind: "defenseBoost", value: 0.04 },
         delta: {},
       },
       thick_bark: {
@@ -7158,9 +7219,10 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         // Distinct from Sturdy Return/Steady Roots below it, not the same
         // two values re-granted a second time — a genuinely deeper root
-        // system, not a bigger number on the same two levers.
+        // system, not a bigger number on the same two levers. 0.04 -> 0.025
+        // against the per-move healing budget.
         grantsPassives: [
-          { kind: "regen", value: 0.04 },
+          { kind: "regen", value: 0.025 },
           { kind: "defenseBoost", value: 0.04 },
         ],
         delta: {},
@@ -7265,7 +7327,8 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["settled_growth"],
         excludes: ["deepening_calm"],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 2.25 },
+        // Kept as healing, 2.25 -> 1.5 against the per-move budget.
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: {},
       },
       roots_that_feed_the_grove: {
@@ -7276,8 +7339,11 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // What the roots take, the grove gets back — a slow herd-wide heal
         // paired with the branch's own calm, not a bare aura on its own.
+        //
+        // 0.012 -> 0.008. Group healing pays out to every herd-mate in radius
+        // every tick, so it is held to a stricter standard than self-healing.
         grantsPassives: [
-          { kind: "healAura", value: 0.012 },
+          { kind: "healAura", value: 0.008 },
           { kind: "calmingPresence", value: 0.1 },
         ],
         delta: {},
@@ -7290,8 +7356,12 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["gentle_roots", "ravenous_bite"],
         leaning: "aggression",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
-        delta: { cooldownTicks: -1 },
+        // Was "+1.5 HP Regen". This crosslink sits behind Ravenous Bite on a
+        // move literally named for draining, and the tree used no
+        // `lifestealFraction` anywhere — a real gap, not a rebalance. The
+        // recovery is now taken FROM something rather than accruing on its
+        // own, which is the whole fantasy of the move.
+        delta: { cooldownTicks: -1, lifestealFraction: 0.08 },
       },
       richer_ground: {
         id: "richer_ground",
@@ -7299,9 +7369,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["feeding_ground"],
         leaning: "aggression",
-        // Deepens Feeding Ground's own recovery lever.
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
-        delta: {},
+        // Bridge filler — deepens Feeding Ground's own lever, which is now
+        // the drain rather than a second identical "+1.5 HP Regen". The old
+        // pair was the clearest case in the roster of a filler that just
+        // repeated the node above it.
+        delta: { lifestealFraction: 0.06 },
       },
       endless_bounty: {
         id: "endless_bounty",
@@ -7309,8 +7381,9 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["richer_ground"],
         leaning: "sociability",
-        // Never quite empty, and never waiting long.
-        grantsPassive: { kind: "regen", value: 0.03 },
+        // Never quite empty, and never waiting long. 0.03 -> 0.02 against the
+        // per-move healing budget.
+        grantsPassive: { kind: "regen", value: 0.02 },
         delta: { cooldownTicks: -1 },
       },
     },

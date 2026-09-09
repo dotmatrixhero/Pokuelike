@@ -32,7 +32,7 @@ for (const sp of Object.values(SPECIES) as any[]) {
   }
   if (!totals.size) continue;
   const healFrac = (totals.get("regen") ?? 0) + (totals.get("healAura") ?? 0);
-  rows.push({ id: sp.id, totals, healFrac, dr: totals.get("damageReduction") ?? 0, thorns: totals.get("thorns") ?? 0 });
+  rows.push({ id: sp.id, totals, healFrac, dr: totals.get("damageReduction") ?? 0, thorns: totals.get("thorns") ?? 0, calm: totals.get("calmingPresence") ?? 0 });
 }
 
 console.log("Worst-case passive totals if a species takes EVERY passive node across its whole movepool.\n");
@@ -51,3 +51,21 @@ console.log(`\nworst case across ${rows.length} species:`);
 console.log(`  damageReduction ${(worstDR * 100).toFixed(0)}%  ${worstDR >= 1 ? "<-- IMMUNE. UNCAPPED." : worstDR > 0.5 ? "<-- over half of all damage, uncapped" : ""}`);
 console.log(`  thorns          ${(worstThorns * 100).toFixed(0)}%  ${worstThorns > 0.5 ? "<-- reflects more than half the hit, uncapped" : ""}`);
 console.log(`  regen + aura    ${(worstHeal * 100).toFixed(1)}%/tick raw — softCapHealShare bends this one; nothing bends the others.`);
+
+// `calmingPresence` has a HARD CLIFF the other passives don't, and it is easy
+// to miss: herdConflict.ts's `calmingMultiplier` does `Math.max(0, 1 -
+// strongest)`, where `strongest` is one agent's SUMMED total. It does not
+// stack across agents, but it absolutely stacks within one — so a species
+// whose movepool totals 1.0 reduces every nearby rivalry-escalation chance to
+// exactly zero, for both sides, permanently. That is not a strong passive, it
+// is a switch that turns off a whole mechanic in a radius.
+const calmRows = rows.filter((r: any) => r.calm > 0).sort((a: any, b: any) => b.calm - a.calm);
+if (calmRows.length) {
+  console.log("\ncalmingPresence (herd-conflict escalation multiplier is 1 - total; at 1.0 conflict near this agent is OFF)");
+  for (const r of calmRows.slice(0, 8)) {
+    const flag = r.calm >= 1 ? "  <-- CONFLICT DISABLED" : r.calm >= 0.5 ? "  <-- halves escalation" : "";
+    console.log(`  ${String(r.id).padEnd(14)} ${r.calm.toFixed(2)}${flag}`);
+  }
+  const worst = calmRows[0].calm;
+  console.log(`  worst ${worst.toFixed(2)} of the 1.00 cliff (${((100 * worst) / 1).toFixed(0)}% of the way there)`);
+}
