@@ -343,6 +343,27 @@ export function grantPassive(agent: Agent, kind: PassiveKind, value: number): vo
 }
 
 /**
+ * Takes a passive back — the exact inverse of `grantPassive`, used by
+ * `forgetMove` (leveling.ts) when a whole move tree is unlearned.
+ *
+ * Without this, forgetting would be pure upside: an agent could max a tree,
+ * bank every passive it granted permanently, forget the move, take the full
+ * skill-point refund and spend it again elsewhere. Passives are the game's
+ * scarcest currency precisely because they stack across every move an agent
+ * knows, so "knows" has to mean something.
+ *
+ * Clamps at zero and clears the key entirely when it lands there, so a
+ * passive nothing grants any more reads as absent rather than as a 0 that
+ * every `?? 0` would treat identically but every dump would still show.
+ */
+export function revokePassive(agent: Agent, kind: PassiveKind, value: number): void {
+  if (!agent.passives) return;
+  const next = (agent.passives[kind] ?? 0) - value;
+  if (next > 1e-9) agent.passives[kind] = next;
+  else delete agent.passives[kind];
+}
+
+/**
  * The fraction of incoming damage the `"damageReduction"` passive takes
  * off, **after diminishing returns** — read by `resolveHit` (predation.ts).
  * 0 if the agent has none.

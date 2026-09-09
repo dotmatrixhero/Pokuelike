@@ -7632,3 +7632,53 @@ feature rather than a detail.
   80% damage reduction. `passive-exposure.ts` is the tool for that; nothing
   fails a build on it yet. Worst live case today: thorns 65% (venusaur,
   ivysaur), damageReduction 42% (diglett, sandshrew).
+
+
+## Four-move cap, forgetting and the refund — BUILT
+
+Direct: *"we technically don't cap moves to 4 moves per unit. I think we should
+add a cap. Force forgetting. Also forgetting gives you skill points back to
+reinvest. I think Ai on deciding to forget a move or not should be sharpened a
+bit."* Then: *"the 4 moved cap applies to all"* (knownMoves, status moves
+included) and, on who decides, **B** — the sim decides for wild Pokemon, the
+player for theirs.
+
+Refund shape, direct call **A + C**: the full amount ever spent, nothing
+withheld, returned as WILDCARD rather than typed points. Full value so
+forgetting is never a punishment for having specialised; wildcard so it does
+not simply re-buy the branch it came from.
+
+### Measured, 3 seeds x 6000 ticks, 71 living agents
+
+| | before | after |
+|---|---|---|
+| knownMoves mean | 11.8 | 3.97 |
+| knownMoves max | 21 | 4 |
+| agents over 4 | 94.9% | 0% |
+| agents keeping a usable status move | — | 42.3% |
+| agents keeping a damage move (control) | — | 100% |
+
+### Two flaws only the live run found — the unit tests passed through both
+
+1. **The cap did not hold at all.** `spawnAgent` writes `knownMoves` directly
+   and never went through `enforceMoveCap`, so 57 of 105 living agents sat
+   over the cap (mean 7.56, max 21) while every unit test passed.
+2. **The forget AI deleted the entire specialisation system.** A level-42
+   Charizard spawn came out knowing Dragon Claw, Metal Claw, Fire Fang and
+   Flame Burst — four generic dex-derived specs with no tree — having dropped
+   Slash, the curated move with a full 45-node tree, because Slash scored
+   marginally lower on raw damage per action. Fixed with a tree-POTENTIAL
+   term scaled by node count. Three existing spawn tests caught this: the
+   tests were right and the code was wrong.
+
+### Open, worth a decision
+
+- **The refund never fires in practice.** 0 points refunded across 6744
+  forgets in the run above, because the AI now correctly never drops an
+  invested move. The mechanic is real and unit-tested; in a live sim it is
+  currently theoretical. Either that is the system working as intended, or
+  the investment weight is too protective.
+- **76% of cap events are the new move being DECLINED** (5136 of 6744), so an
+  agent largely settles on its first four moves and rarely changes shape
+  after early life. Whether a movepool should be that static is a design
+  call.

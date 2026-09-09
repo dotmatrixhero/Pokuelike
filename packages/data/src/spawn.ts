@@ -4,6 +4,9 @@ import {
   randomNature,
   dispositionFromNature,
   MATURITY_AGE,
+  MAX_KNOWN_MOVES,
+  pickMoveToForget,
+  forgetMove,
   type Agent,
   type MoveSpec,
   type Vec2,
@@ -128,7 +131,7 @@ export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5, 
   }
   const moves = [...movesById.values()];
 
-  return {
+  const agent: Agent = {
     id,
     species: speciesId,
     pos,
@@ -166,4 +169,25 @@ export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5, 
     isPredator: species.isPredator,
     obligateAquatic: species.obligateAquatic,
   };
+
+  // The learnset union above can hand a high-level spawn or immigrant its
+  // whole movepool at once — measured at up to 21 moves — so the cap has to
+  // be applied HERE too, not only where moves are learned in-sim.
+  //
+  // This was a real hole, and one only a live run found: every unit test of
+  // the cap passed while 57 of 105 living agents in a 4-seed run sat over
+  // it, because nothing spawned had ever gone through `enforceMoveCap`.
+  //
+  // A fresh spawn has no tree investment, so `pickMoveToForget` is deciding
+  // purely on damage per action, STAB and type coverage here — which is the
+  // right basis when there is no build to protect. No log: nothing has
+  // happened in the world yet, and a chronicle full of "forgot" beats at
+  // tick 0 for agents that never knew the move would be noise.
+  while ((agent.knownMoves?.length ?? 0) > MAX_KNOWN_MOVES) {
+    const drop = pickMoveToForget(agent, agent.knownMoves!, LEVELING_CONTEXT);
+    if (!drop) break;
+    forgetMove(agent, drop, undefined, LEVELING_CONTEXT);
+  }
+
+  return agent;
 }

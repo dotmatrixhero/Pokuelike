@@ -5,7 +5,7 @@ import { applyMoveTree, trySpendSkillPoints } from "./moves.js";
 import type { BaseStats } from "./stats.js";
 import { calculateStats } from "./stats.js";
 import type { EventLog } from "./events.js";
-import { grantPassive } from "./status.js";
+import { grantPassive, revokePassive } from "./status.js";
 
 /** PokeRogue's `GrowthRate` enum keys, e.g. as imported onto `SpeciesDexEntry.growthRate`. */
 export type GrowthRateKey = "ERRATIC" | "FAST" | "MEDIUM_FAST" | "MEDIUM_SLOW" | "SLOW" | "FLUCTUATING";
@@ -548,6 +548,18 @@ export function ensureCombatProfile(agent: Agent, ctx?: LevelingContext): void {
     const spec = ctx.resolveMove(moveKey);
     if (spec && !agent.moves.some((m) => m.id === spec.id)) agent.moves.push(spec);
   }
+  // A backfilled profile can hand a high-level agent its whole level-move
+  // list at once, so this path needs the cap too — otherwise an immigrant or
+  // a newborn constructed at level 30 would enter the world holding ten
+  // moves while everything that levelled there naturally holds four.
+  // No investment exists yet on a fresh profile, so `pickMoveToForget` here
+  // is deciding purely on combat value and type coverage, which is what it
+  // should be doing when there is no build to protect.
+  while ((agent.knownMoves?.length ?? 0) > MAX_KNOWN_MOVES) {
+    const drop = pickMoveToForget(agent, agent.knownMoves!, ctx);
+    if (!drop) break;
+    forgetMove(agent, drop, undefined, ctx);
+  }
 }
 
 /**
@@ -644,6 +656,12 @@ export function grantExp(
         if (!agent.moves.some((m) => m.id === spec.id)) agent.moves.push(spec);
       }
       log?.record({ kind: "learnedMove", tick: world.tick, agentId: agent.id, species: agent.species, moveId: moveKey, level: agent.level });
+      // One move at a time, inside the loop: a level-up can cross several
+      // thresholds at once and teach two or three moves in one go, and
+      // deferring the cap to the end would let the agent briefly hold six
+      // and then decide between them with the tree investment of the ones it
+      // never really had. Each new move faces the cap as it arrives.
+      enforceMoveCap(agent, moveKey, world, ctx, log);
     }
 
     const primaryType = agent.types?.[0];
@@ -696,4 +714,245 @@ export function grantKillExp(
   if (!profile) return;
   const amount = killExpYield(profile.baseExp, defender.level ?? 1) * KILL_EXP_MULTIPLIER;
   grantExp(world, attacker, amount, ctx, log, rng);
+}
+
+// --- The four-move cap, forgetting, and the refund (see DESIGN.md) ---
+
+/**
+ * How many moves an agent may know at once.
+ *
+ * Applies to `knownMoves` — everything, status moves included. Direct: "we
+ * technically don't cap moves to 4 moves per unit. I think we should add a
+ * cap. Force forgetting," and then "the 4 moved cap applies to all." Capping
+ * only the combat-usable subset was the other option and was rejected: a
+ * species with three status moves would effectively get seven slots and the
+ * cap would stop being legible.
+ *
+ * This is a large change, not a trim. Measured before it existed
+ * (`measureMovepool.ts`, 8 seeds x 10k ticks, 158 living agents): agents knew
+ * a MEDIAN of 13 moves, mean 11.8, max 21, and 94.9% knew more than four. So
+ * a typical adult now makes roughly nine forget decisions over its life,
+ * which is what makes `pickMoveToForget` below load-bearing rather than a
+ * detail.
+ */
+export const MAX_KNOWN_MOVES = 4;
+
+/**
+ * Every skill point an agent has sunk into `moveId`'s tree.
+ *
+ * Reads the node costs out of the tree itself rather than assuming 1 apiece:
+ * template v4 made every node cost 1, but older trees still carry cost-2
+ * notables, and a refund that silently short-changed those would be a quiet
+ * tax on exactly the builds that invested most.
+ */
+function pointsSpentOn(agent: Agent, moveId: string, ctx: LevelingContext): number {
+  const base = ctx.resolveMove(moveId);
+  const chosen = agent.moveTreeChoices?.[moveId] ?? [];
+  if (!base?.tree) return chosen.length; // no tree to price it from — one point each is the honest fallback
+  return chosen.reduce((sum, nodeId) => sum + (base.tree![nodeId]?.cost ?? 1), 0);
+}
+
+/**
+ * Unlearns `moveId`: drops it from `knownMoves`/`moves`, takes back every
+ * passive its chosen nodes granted, and refunds the points as WILDCARD.
+ *
+ * Refund shape is a direct call — "A + C": the full amount ever spent, with
+ * nothing withheld, but returned as wildcard rather than typed points. Full
+ * value means forgetting is never a punishment for having specialised;
+ * wildcard means it does not simply re-buy the same tree, since a typed
+ * refund would fund the branch it just came from and forgetting would be a
+ * free respec button.
+ *
+ * Returns the number of points refunded, or undefined if the agent did not
+ * know the move.
+ */
+export function forgetMove(
+  agent: Agent,
+  moveId: string,
+  /** Only ever read for the log tick — `ensureCombatProfile` backfills a profile with no world in scope and still has to be able to trim. */
+  world: World | undefined,
+  ctx: LevelingContext,
+  log?: EventLog,
+  reason: "capacity" | "declined" = "capacity"
+): number | undefined {
+  const known = agent.knownMoves ?? [];
+  const idx = known.indexOf(moveId);
+  if (idx < 0) return undefined;
+
+  const refund = pointsSpentOn(agent, moveId, ctx);
+  const base = ctx.resolveMove(moveId);
+
+  // Passives come back off BEFORE the choices are dropped — the tree is the
+  // only record of what was granted.
+  for (const nodeId of agent.moveTreeChoices?.[moveId] ?? []) {
+    const node = base?.tree?.[nodeId];
+    if (!node) continue;
+    if (node.grantsPassive) revokePassive(agent, node.grantsPassive.kind, node.grantsPassive.value);
+    for (const passive of node.grantsPassives ?? []) revokePassive(agent, passive.kind, passive.value);
+  }
+
+  known.splice(idx, 1);
+  agent.knownMoves = known;
+  if (agent.moveTreeChoices) {
+    delete agent.moveTreeChoices[moveId];
+    if (Object.keys(agent.moveTreeChoices).length === 0) agent.moveTreeChoices = undefined;
+  }
+  if (base && agent.moves) {
+    agent.moves = agent.moves.filter((m) => m.id !== base.id);
+    if (agent.moveCooldowns) delete agent.moveCooldowns[base.id];
+    if (agent.moveLastUsedTick) delete agent.moveLastUsedTick[base.id];
+  }
+  agent.wildcardSkillPoints = (agent.wildcardSkillPoints ?? 0) + refund;
+
+  log?.record({
+    kind: "forgotMove",
+    tick: world?.tick ?? 0,
+    agentId: agent.id,
+    species: agent.species,
+    moveId,
+    refundedPoints: refund,
+    reason,
+  });
+  return refund;
+}
+
+/**
+ * How much a chosen tree node counts toward "don't throw this build away."
+ *
+ * Weighted well above raw combat value on purpose. Failure mode (a) — an
+ * agent forgetting the move it had poured its whole build into — is the one
+ * that reads worst: the points come back as wildcard, so nothing is lost on
+ * paper, but a Venusaur that spent thirty points becoming a Solar Beam
+ * specialist and then drops Solar Beam for a freshly-learned Tackle has
+ * thrown away its own story.
+ */
+const FORGET_INVESTMENT_WEIGHT = 8;
+
+/** Bonus for a move whose type the agent doesn't otherwise have, so a movepool doesn't collapse to four of the same type. */
+const FORGET_COVERAGE_BONUS = 25;
+
+/** How much of a utility move's worth its effects are assumed to carry, given it has no `power` to score. */
+const FORGET_UTILITY_BASE_VALUE = 30;
+
+/**
+ * What a move is worth for having a designed skill tree at all — its
+ * POTENTIAL, as against the current value of every other term.
+ *
+ * Not a nicety: without this term the cap deletes the game's whole
+ * specialisation system, and only a live run showed it. A level-42 Charizard
+ * spawn came out knowing Dragon Claw, Metal Claw, Fire Fang and Flame Burst
+ * — four generic dex-derived specs with no tree — having dropped Slash, the
+ * curated move with a full 45-node tree, because Slash scored marginally
+ * lower on raw damage per action. Every curated move in the roster was being
+ * displaced by undesigned filler with slightly better numbers.
+ *
+ * Scaled by the tree's size so a 45-node tree outweighs a stub: a move that
+ * can grow into thirty more nodes is worth more than one that is already
+ * everything it will ever be.
+ */
+const FORGET_TREE_POTENTIAL_PER_NODE = 3;
+
+/**
+ * What this move is worth to this agent, right now. Higher = keep.
+ *
+ * Deliberately not just "damage": failure mode (b) is an agent keeping a bad
+ * move and refusing a better one, and a pure-damage score causes exactly
+ * that, since it rates every status move at zero and would forget Synthesis
+ * for a marginally stronger Tackle every time.
+ *
+ * The terms, and the failure each answers:
+ *   investment  — (a), don't discard a built tree
+ *   potential   — don't discard a tree it has not built YET; without this,
+ *                 every curated move loses its slot to undesigned dex filler
+ *                 with slightly better raw numbers
+ *   power/tempo — (b), a genuinely stronger move should win a slot
+ *   coverage    — four moves of one type is a worse movepool than three
+ *                 types plus a filler, however the raw numbers read
+ *   STAB        — the sim's own damage math already rewards it
+ */
+function moveKeepScore(agent: Agent, moveId: string, ctx: LevelingContext, ownTypes: PokemonType[]): number {
+  const spec = ctx.resolveMove(moveId);
+  if (!spec) {
+    // Learned but not representable in combat. Its tree investment is still
+    // real, so it is not free to drop, but it has no combat value to add.
+    return FORGET_INVESTMENT_WEIGHT * pointsSpentOn(agent, moveId, ctx);
+  }
+
+  const invested = FORGET_INVESTMENT_WEIGHT * pointsSpentOn(agent, moveId, ctx);
+
+  // Damage per action, not damage per use — a move usable every action is
+  // worth more than a stronger one usable every fourth. Same denominator the
+  // tempo cap uses (cooldowns tick on the agent's own action clock), so this
+  // does not repeat the units mistake called out in CLAUDE.md.
+  const avgHits = spec.hits ? (spec.hits.min + spec.hits.max) / 2 : 1;
+  const perAction = spec.utilityMove
+    ? FORGET_UTILITY_BASE_VALUE
+    : (spec.power * avgHits) / (spec.cooldownTicks + 1);
+
+  const stab = ownTypes.includes(spec.type) ? 1.5 : 1;
+
+  const otherTypes = new Set(
+    (agent.knownMoves ?? [])
+      .filter((id) => id !== moveId)
+      .map((id) => ctx.resolveMove(id)?.type)
+      .filter((t): t is PokemonType => t !== undefined)
+  );
+  const coverage = otherTypes.has(spec.type) ? 0 : FORGET_COVERAGE_BONUS;
+  const potential = FORGET_TREE_POTENTIAL_PER_NODE * Object.keys(spec.tree ?? {}).length;
+
+  return invested + perAction * stab + coverage + potential;
+}
+
+/**
+ * Which of `candidates` to give up — the lowest-scoring one.
+ *
+ * `candidates` deliberately INCLUDES the move being learned. An agent that
+ * would be worse off learning something should decline it, which is both
+ * mainline-accurate and the other half of failure mode (b): a cap that can
+ * only ever displace an existing move forces every new move in regardless of
+ * whether it is an upgrade.
+ */
+export function pickMoveToForget(agent: Agent, candidates: string[], ctx: LevelingContext): string | undefined {
+  const ownTypes = agent.types ?? [];
+  let worst: string | undefined;
+  let worstScore = Infinity;
+  for (const moveId of candidates) {
+    const score = moveKeepScore(agent, moveId, ctx, ownTypes);
+    if (score < worstScore) {
+      worstScore = score;
+      worst = moveId;
+    }
+  }
+  return worst;
+}
+
+/**
+ * Enforces `MAX_KNOWN_MOVES` after `newMoveId` has just been learned.
+ *
+ * Player-owned agents are NOT auto-resolved. Direct call on who decides:
+ * the sim decides for wild Pokemon, the player decides for theirs. There is
+ * no player-owned agent in the sim yet, so this is the seam rather than the
+ * feature — a player-owned agent over the cap parks the decision on
+ * `pendingMoveChoice` and is left alone until something resolves it, and
+ * every wild agent goes through `pickMoveToForget` as before. Building the
+ * seam now keeps the cap from having to be retrofitted around a UI later.
+ */
+export function enforceMoveCap(
+  agent: Agent,
+  newMoveId: string,
+  world: World,
+  ctx: LevelingContext,
+  log?: EventLog
+): void {
+  const known = agent.knownMoves ?? [];
+  if (known.length <= MAX_KNOWN_MOVES) return;
+
+  if (agent.playerOwned) {
+    agent.pendingMoveChoice = { newMoveId, atTick: world.tick };
+    return;
+  }
+
+  const drop = pickMoveToForget(agent, known, ctx);
+  if (!drop) return;
+  forgetMove(agent, drop, world, ctx, log, drop === newMoveId ? "declined" : "capacity");
 }
