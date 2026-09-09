@@ -6929,13 +6929,22 @@ not something this pathfinding pass itself caused or is positioned to fix.
       `localAvgLevel` re-centering in `rollImmigrantLevel` — wired into
       both live immigration AND a never-visited zone's initial invented
       population (`estimateInitialAggregates`), so the effect isn't just on
-      later immigrants. Measured on a real generated grid (50x50, 6 seeds):
-      clean, smooth, monotonic climb from ~11 avg level 1 zone-step from a
-      Sanctuary to ~46 (capped) 7+ steps out — see DESIGN.md's full table.
-      Full engine suite (1267, 5 new) green. NOT yet spot-checked live in
-      the running app (Sanctuaries are sparse — a handful per grid — so
-      landing near one in a short session is luck of the seed); worth a
-      live check next time.
+      later immigrants. Full engine suite (1267, 5 new) green. NOT yet
+      spot-checked live in the running app (Sanctuaries are sparse — a
+      handful per grid — so landing near one in a short session is luck of
+      the seed); worth a live check next time.
+- [x] Follow-up retune: "Maybe 5 should be 30, 8 like 35 and 12+ like 46.
+      Since levels get exponentially harder to gain as you get [higher].
+      More xp." Reshaped `zoneLevelCenter` from a flat per-step ramp into a
+      concave power curve (`floor + (cap-floor) * (dist/maxDist)^0.6`, ramp
+      cap raised 7 -> 12 steps, cap level set to 46) — fast climb near a
+      Sanctuary, flattening out further away, mirroring the sim's own
+      "later levels cost more XP" curve spatially. Real measured checkpoints
+      on a 60x60 grid, 6 seeds: dist 5 -> 29 avg (asked ~30), dist 8 -> 37
+      avg (asked ~35, the one anchor this curve can't hit exactly — the
+      three named anchors aren't fully consistent with any single smooth
+      curve), dist 12+ -> 46 avg (asked 46, exact). See DESIGN.md's full
+      table. Full engine suite (1267) green.
 - [ ] Follow-up not yet built (explicitly scoped OUT of this slice, per "spawn
       time only"): a low-level zone's peace can still be broken by a
       high-level predator WANDERING in from herdMigration.ts after

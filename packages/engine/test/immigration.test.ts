@@ -361,11 +361,18 @@ describe("rollImmigrantLevel (direct ask: \"why does everything spawn at lv5... 
   });
 
   describe("zone-level banding (direct ask: \"bands of acceptable level ranges per zone... median increasing... as you get further away from a particular zone\")", () => {
-    it("zoneLevelCenter climbs with distance from the nearest Sanctuary and caps out, rather than climbing forever", () => {
+    it("zoneLevelCenter climbs fast close to a Sanctuary and flattens out further away — a concave curve, not a flat per-step ramp", () => {
+      // Direct follow-up ask, correcting the original linear version's numbers:
+      // "Maybe 5 should be 30, 8 like 35 and 12+ like 46... levels get
+      // exponentially harder to gain." Real curve values at those checkpoints:
       expect(zoneLevelCenter(0)).toBe(5);
-      expect(zoneLevelCenter(1)).toBe(11);
-      expect(zoneLevelCenter(7)).toBe(47);
-      expect(zoneLevelCenter(100)).toBe(47); // capped at ZONE_LEVEL_RAMP_MAX_DISTANCE, not unbounded
+      expect(zoneLevelCenter(1)).toBe(14); // steep early climb — most of the range covers in the first few steps
+      expect(zoneLevelCenter(5)).toBe(29); // asked ~30
+      expect(zoneLevelCenter(8)).toBe(37); // asked ~35 — closest clean single-curve compromise, not an exact fit (see ZONE_LEVEL_RAMP_EXPONENT's own doc comment)
+      expect(zoneLevelCenter(12)).toBe(46); // asked 46 — exact, it's the cap by construction
+      expect(zoneLevelCenter(100)).toBe(46); // capped at ZONE_LEVEL_RAMP_MAX_DISTANCE, not unbounded
+      // Genuinely concave: the early step gains more ground than a later one.
+      expect(zoneLevelCenter(1)! - zoneLevelCenter(0)!).toBeGreaterThan(zoneLevelCenter(12)! - zoneLevelCenter(11)!);
     });
 
     it("undefined distance (no overworld above this world, or a grid with no Sanctuary at all) falls back to no zone term", () => {
@@ -373,14 +380,14 @@ describe("rollImmigrantLevel (direct ask: \"why does everything spawn at lv5... 
     });
 
     it("a zone center re-centers the roll exactly like a local average does — same mechanism, different source", () => {
-      // PREY_LEVEL_JITTER(16) centered on zoneCenter(47): floor(47 - 16/2) = 39 .. +15 = 54.
-      expect(rollImmigrantLevel(BASE_FORM, () => 0, undefined, 47)).toBe(39);
-      expect(rollImmigrantLevel(BASE_FORM, () => 0.99, undefined, 47)).toBe(39 + 15);
+      // PREY_LEVEL_JITTER(16) centered on zoneCenter(12)=46: floor(46 - 16/2) = 38 .. +15 = 53.
+      expect(rollImmigrantLevel(BASE_FORM, () => 0, undefined, 46)).toBe(38);
+      expect(rollImmigrantLevel(BASE_FORM, () => 0.99, undefined, 46)).toBe(38 + 15);
     });
 
     it("a zone center and a local species average blend evenly rather than either one winning outright", () => {
-      const blended = rollImmigrantLevel(BASE_FORM, () => 0, 5, 47);
-      const zoneOnly = rollImmigrantLevel(BASE_FORM, () => 0, undefined, 47);
+      const blended = rollImmigrantLevel(BASE_FORM, () => 0, 5, 46);
+      const zoneOnly = rollImmigrantLevel(BASE_FORM, () => 0, undefined, 46);
       const localOnly = rollImmigrantLevel(BASE_FORM, () => 0, 5, undefined);
       expect(blended).toBeGreaterThan(localOnly);
       expect(blended).toBeLessThan(zoneOnly);

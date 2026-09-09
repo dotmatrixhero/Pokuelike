@@ -15292,3 +15292,43 @@ above exercises the actual shipped functions against a real generated
 grid, not a re-derivation of the formula, so it's a real result, just not
 an in-browser one. Worth a live spot-check next time a session lands near a
 Sanctuary zone.
+
+### Follow-up: reshaped the ramp into a concave curve, not a flat per-step climb
+
+Direct correction to the linear ramp above: "Maybe 5 should be 30, 8 like
+35 and 12+ like 46. Since levels get exponentially harder to gain as you
+get [higher]. More xp." The in-fiction logic (each further level costs
+disproportionately more XP, same as this sim's own leveling curve) maps
+onto space as: the first few zone-steps out from a Sanctuary cover most of
+the level range fast; the last several barely move the needle further.
+
+**Fix.** `zoneLevelCenter` is now a concave power curve —
+`floor + (cap - floor) * (distance / maxDistance) ^ 0.6` — instead of a
+flat `+6 levels/step`. `ZONE_LEVEL_RAMP_MAX_DISTANCE` raised 7 -> 12,
+`ZONE_LEVEL_RAMP_CAP` set explicitly to 46 (was an emergent ~47 before).
+0.6 is a sim-original guess, not an exact fit — the three named anchors
+(5->30, 8->35, 12->46) aren't even fully consistent with any single smooth
+curve (the implied per-step climb goes 5/step, then 1.7/step, then back up
+to 2.75/step near the end), so this is the closest clean compromise, called
+out plainly in the code rather than silently rounding the request.
+
+**Verified** on a real generated 60x60 grid, 6 seeds, real rolled levels
+(not just the bare curve function):
+
+| distance | zoneCenter | predator avg | prey avg |
+|---|---|---|---|
+| 0 | 5 | 16.0 | 5.0 |
+| 1 | 14 | 12.5 | 8.0 |
+| 5 | 29 | 28.6 | 24.9 |
+| 8 | 37 | 37.1 | 30.6 |
+| 12 | 46 | 46.0 | 40.8 |
+| 13+ (capped) | 46 | 45.5 | 40.9 |
+
+Checkpoints land close to what was asked (5->29 vs. asked ~30, 8->37 vs.
+asked ~35, 12+->46 vs. asked 46 exact) with a genuinely front-loaded climb
+(distance 0->1 gains 9 levels; distance 11->12 gains only 2). d=0's n=1
+predator sample (16.0) is a single noisy roll, not the curve itself (which
+is exactly 5 there) — not enough samples at that exact distance across 6
+seeds to average out; not corrected for, flagging honestly rather than
+hiding it. Full engine suite (1267 tests, existing zone-banding tests
+updated to the new curve's real values) green.

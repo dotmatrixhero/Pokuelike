@@ -299,40 +299,57 @@ function rollLevelJitter(species: Pick<ImmigrationSpeciesInfo, "isPredator" | "s
  * to the original species-only floor+jitter roll unchanged.
  */
 /**
- * Levels-per-zone-step ramp `zoneLevelCenter` applies on top of the base
- * floor as a zone gets further from the nearest Sanctuary — direct ask:
- * "bands of acceptable level ranges per zone and adjacent zones with
- * changing normalized probability curves, median increasing... as you get
- * further away." Sim-original guess, same footing as every other tuning
- * constant here (`PREDATOR_LEVEL_BOOST`, etc.) — verify against a real
- * generated grid and expect this to get retuned once real distance-vs-level
- * numbers are in hand.
- */
-const ZONE_LEVEL_RAMP_PER_DISTANCE = 6;
-/**
  * Distance (in zone steps) beyond which the ramp stops climbing — past this,
  * a zone is just "the wilderness," not an escalating threat scale forever.
- * At the chosen ramp, this caps the zone-driven center around the mid-40s,
- * comfortably past most evolution thresholds without making every far-flung
- * zone read as a raid boss arena.
+ * `ZONE_LEVEL_RAMP_CAP` is the level the ramp reaches exactly at this
+ * distance (and holds at, beyond it).
  */
-const ZONE_LEVEL_RAMP_MAX_DISTANCE = 7;
+const ZONE_LEVEL_RAMP_MAX_DISTANCE = 12;
+/** The level `zoneLevelCenter` reaches at `ZONE_LEVEL_RAMP_MAX_DISTANCE` and holds beyond it — comfortably past most evolution thresholds without making every far-flung zone read as a raid boss arena. */
+const ZONE_LEVEL_RAMP_CAP = 46;
+/**
+ * Shapes the climb from floor to `ZONE_LEVEL_RAMP_CAP` as distance goes from
+ * 0 to `ZONE_LEVEL_RAMP_MAX_DISTANCE` — `< 1` bows the curve so it climbs
+ * FAST close to a Sanctuary and flattens out further away, rather than a
+ * flat per-step ramp. Direct follow-up ask, correcting the original linear
+ * version's numbers: "Maybe 5 should be 30, 8 like 35 and 12+ like 46.
+ * Since levels get exponentially harder to gain as you get [higher]. More
+ * xp" — the in-fiction logic (each further level costs disproportionately
+ * more XP/experience to reach, same as this sim's own leveling curve) maps
+ * onto space as "the first few zone-steps out from safety cover most of the
+ * level range; the last several barely move the needle further." 0.6 is a
+ * sim-original guess landing close to all three named anchors (see
+ * `zoneLevelCenter`'s own doc comment for the real numbers) — not an exact
+ * fit (the three anchors given aren't quite consistent with a single smooth
+ * curve: the implied per-step climb goes 5/step, then 1.7/step, then back
+ * up to 2.75/step, which no monotonically-decelerating curve can match
+ * everywhere), so this is the closest clean single-curve compromise, not a
+ * precise solve.
+ */
+const ZONE_LEVEL_RAMP_EXPONENT = 0.6;
 
 /**
  * Turns a zone's `sanctuaryDistance` (World's own field, set once at
  * `overworld.ts`'s `promoteZone`) into a level to re-center immigrant rolls
  * on — the "median increasing... as you get further away from a particular
- * [safe] zone" half of the direct ask above; `distanceToNearestLandmark`
+ * [safe] zone" half of the original direct ask; `distanceToNearestLandmark`
  * (macroGrid.ts) is the "how far away" half. `undefined` when the zone
  * carries no distance at all (a standalone scenario world with no overworld
  * above it, or a real macro grid that happens to have no Sanctuary anywhere)
  * — `rollImmigrantLevel` below falls all the way back to its original
  * species-only behavior in that case, not a mid-band guess.
+ *
+ * A concave power curve, not the original flat per-step ramp — see
+ * `ZONE_LEVEL_RAMP_EXPONENT`'s own doc comment for the direct ask that
+ * reshaped it. Real values at this curve's own three named checkpoints:
+ * distance 5 -> 29 (asked ~30), distance 8 -> 37 (asked ~35), distance 12+
+ * -> 46 (asked 46, exact — it's the cap by construction).
  */
 export function zoneLevelCenter(sanctuaryDistance: number | undefined): number | undefined {
   if (sanctuaryDistance === undefined) return undefined;
   const clamped = Math.min(sanctuaryDistance, ZONE_LEVEL_RAMP_MAX_DISTANCE);
-  return IMMIGRANT_BASE_LEVEL_FLOOR + clamped * ZONE_LEVEL_RAMP_PER_DISTANCE;
+  const fraction = Math.pow(clamped / ZONE_LEVEL_RAMP_MAX_DISTANCE, ZONE_LEVEL_RAMP_EXPONENT);
+  return Math.round(IMMIGRANT_BASE_LEVEL_FLOOR + (ZONE_LEVEL_RAMP_CAP - IMMIGRANT_BASE_LEVEL_FLOOR) * fraction);
 }
 
 /**
