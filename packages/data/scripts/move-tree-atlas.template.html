@@ -777,7 +777,14 @@
 
     var positions = {};
     var angleFor = { aggression: -90, boldness: 30, sociability: 150 };
-    var R0 = 64, RSTEP = 56, FORK_OFFSET = 34;
+    var R0 = 64, RSTEP = 56;
+    // Siblings at the same depth are parallel ROUTES to the next node (the
+    // Path-of-Exile shape), so they must read as two visibly separate paths.
+    // 34 was tuned for node circles alone and let their LABELS sit on top of
+    // each other ("Thin Point"/"Venom Sacs" rendered as one unreadable
+    // smear); labels run 60-90px wide, so the spread has to clear that, and
+    // it grows with how many siblings share the ring.
+    var FORK_OFFSET = 96;
 
     Object.keys(branches).forEach(function (branchName) {
       var angle = angleFor[branchName] * Math.PI / 180;
@@ -804,6 +811,8 @@
               y: cy + Math.sin(perp) * offset,
               branch: branchName,
               depth: d,
+              siblingIndex: i,
+              siblingCount: n,
             };
           });
         }
@@ -1466,8 +1475,12 @@
       // place label text via separate non-transformed element for readability
       nodesLayer.appendChild(g);
 
+      var sibs = p.siblingCount || 1;
+      var labelFlip = sibs > 1 && (p.siblingIndex % 2 === 1) ? -1 : 1;
+      var lblY = p.y < 0 ? p.y - r - 8 : p.y + r + 15;
+      if (sibs > 1 && labelFlip < 0) lblY = p.y < 0 ? p.y + r + 15 : p.y - r - 8;
       var lbl = el("text", {
-        x: p.x, y: p.y < 0 ? p.y - r - 8 : p.y + r + 15,
+        x: p.x, y: lblY,
         "text-anchor": "middle", class: "node-label", fill: "var(--text)", "font-size": 11,
       });
       lbl.textContent = node.name;

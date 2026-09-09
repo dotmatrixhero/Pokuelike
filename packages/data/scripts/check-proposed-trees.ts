@@ -10,6 +10,13 @@
  */
 import { PROPOSED_TREES, type ProposedMove, type ProposedNode } from "./proposed-trees.js";
 
+// Identity-tier forks (3 per tree) plus one filler-tier fork per branch (3
+// more) = 12 fork nodes. The filler forks are this roster's addition to the
+// shipped standard, not a deviation from it: shipped trees have 6.
+// Fork nodes = the 3 permanent identity-tier choices per tree (6 nodes),
+// matching shipped. Filler-tier alternatives are PARALLEL ROUTES, not forks:
+// nothing locks out, and scarcity of skill points is what makes picking one a
+// decision — the Path of Exile shape, per "multi paths to same notable".
 const SHIPPED = { anyOf: 9, forks: 6, bridges: 3 };
 
 function problems(move: ProposedMove): string[] {
@@ -29,11 +36,37 @@ function problems(move: ProposedMove): string[] {
     if (!n.leaning) out.push(`${n.id}: missing leaning (would render invisibly in the atlas)`);
   }
 
+  const bridgeIds = new Set<string>();
+  for (const cross of nodes.filter(isCrosslink)) {
+    const mid = nodes.find((n) => (n.prerequisites ?? []).length === 1 && n.prerequisites![0] === cross.id);
+    const not = mid && nodes.find((n) => (n.prerequisites ?? []).length === 1 && n.prerequisites![0] === mid.id);
+    for (const x of [cross, mid, not]) if (x) bridgeIds.add(x.id);
+  }
   const anyOf = nodes.filter((n) => n.prerequisitesAnyOf).length;
   const forks = nodes.filter((n) => n.excludes?.length).length;
   const crosslinks = nodes.filter(isCrosslink);
   if (anyOf !== SHIPPED.anyOf) out.push(`${anyOf} prerequisitesAnyOf, shipped standard is ${SHIPPED.anyOf}`);
-  if (forks !== SHIPPED.forks) out.push(`${forks} fork nodes, shipped standard is ${SHIPPED.forks}`);
+  // A branch offers a real decision one of two ways: the shipped pattern (a
+  // permanent `excludes` fork) or the two-lane pattern ("x x Y x x / a a B a a"
+  // — two parallel filler lanes each with their own notable, nothing locked
+  // out, the cost of walking both being what makes picking one a decision).
+  // A branch with neither is a corridor.
+  const laned = (branch: string) => {
+    const notables = nodes.filter((n) => n.leaning === branch && n.cost >= 2 && !bridgeIds.has(n.id));
+    // Two notables neither of which is an ancestor of the other = parallel lanes.
+    const ancestors = (id: string, seen = new Set<string>()): Set<string> => {
+      if (seen.has(id)) return seen;
+      seen.add(id);
+      for (const p of [...(t[id]?.prerequisites ?? []), ...(t[id]?.prerequisitesAnyOf ?? []).flat()]) ancestors(p, seen);
+      return seen;
+    };
+    return notables.some((a) => notables.some((b) => a.id !== b.id && !ancestors(a.id).has(b.id) && !ancestors(b.id).has(a.id)));
+  };
+  for (const branch of ["aggression", "boldness", "sociability"] as const) {
+    if (!nodes.some((n) => n.leaning === branch)) continue;
+    const hasFork = nodes.some((n) => n.leaning === branch && n.excludes?.length);
+    if (!hasFork && !laned(branch)) out.push(`${branch} branch: no permanent fork and no parallel lanes — a corridor, not a decision`);
+  }
   if (crosslinks.length !== SHIPPED.bridges) out.push(`${crosslinks.length} crosslinks, shipped standard is ${SHIPPED.bridges}`);
 
   // Every crosslink must head a real three-node bridge whose notable is an
@@ -73,14 +106,26 @@ function problems(move: ProposedMove): string[] {
   // REQUIRED to be single-lever by principle 13, which is the trap this rule
   // exists to stop being applied one level up.
   const BACKGROUND = new Set(["power", "accuracy", "cooldownTicks", "range", "critRateStage", "defensePenetration", "lifestealFraction", "recoilFraction"]);
-  const bridgeIds = new Set<string>();
-  for (const cross of crosslinks) {
-    const mid = nodes.find((n) => (n.prerequisites ?? []).length === 1 && n.prerequisites![0] === cross.id);
-    const not = mid && nodes.find((n) => (n.prerequisites ?? []).length === 1 && n.prerequisites![0] === mid.id);
-    for (const x of [cross, mid, not]) if (x) bridgeIds.add(x.id);
-  }
+  // Several delta fields are CONTAINERS, not levers: `allyEffect` covers both
+  // a heal and a stat buff, `situationalBonus` covers night/flanking/elevation,
+  // `forcedMovement` covers a shove and a lunge. Keying repetition on the
+  // container name reports two genuinely different nodes as identical — a flaw
+  // in the metric, not the design. Key on the discriminating sub-field instead.
+  const expand = (key: string, value: any): string[] => {
+    if (key === "allyEffect" && value && typeof value === "object") {
+      const parts: string[] = [];
+      if (value.healFraction != null) parts.push("allyEffect:heal");
+      if (value.buff) parts.push(`allyEffect:buff-${value.buff.stat}`);
+      if (value.statChange) parts.push(`allyEffect:buff-${value.statChange.stat}`);
+      return parts.length ? parts : ["allyEffect"];
+    }
+    if (key === "situationalBonus" && value?.condition) return [`situationalBonus:${value.condition}`];
+    if (key === "statChangeOnHit" && value?.stat) return [`statChangeOnHit:${value.target ?? "self"}-${value.stat}`];
+    if (key === "forcedMovement" && value?.mover) return [`forcedMovement:${value.mover}`];
+    return [key];
+  };
   const signature = (n: ProposedNode) => [...new Set([
-    ...Object.keys(n.delta ?? {}),
+    ...Object.entries(n.delta ?? {}).flatMap(([k, v]) => expand(k, v)),
     ...(n.grantsPassive ? [`p:${n.grantsPassive.kind}`] : []),
     ...(n.grantsPassives ?? []).map((g) => `p:${g.kind}`),
   ])].filter((k) => !BACKGROUND.has(k));
@@ -113,6 +158,9 @@ function problems(move: ProposedMove): string[] {
     "rallying": ["rallyCall"],
     "ally buffing": ["targetsAlly", "allyEffect", "allyEffectOnAttack", "p:herdHaste", "p:aquaticHaste"],
     "calming": ["p:calmingPresence", "p:nonTerritorial", "statusImmunityAura"],
+    // Cross-axis: PP and needs as a real spend, per "more pp tradeoffs are
+    // the play. Notables that require pp. It becomes a gate."
+    "resource economy": ["ppCost", "maxPPBonus", "selfCostPerUse", "drainNeeds"],
   };
   const flavourOf = new Map<string, string>();
   for (const [f, ks] of Object.entries(FLAVOUR)) for (const k of ks) flavourOf.set(k, f);
@@ -130,6 +178,65 @@ function problems(move: ProposedMove): string[] {
     ])];
     for (const n of bn) for (const k of allLevers(n)) { const f = flavourOf.get(k); if (f) fl.add(f); }
     if (fl.size < 3) out.push(`${branch} branch: draws on only ${fl.size} flavour(s) [${[...fl].join(", ")}] — the colour pie says pick two or three and build from those (shipped roster averages 3.8)`);
+  }
+
+  // PP as tree currency: a per-use cost belongs on an identity node (it is a
+  // real build decision, not filler), and any tree that spends PP must also
+  // offer a way to buy headroom back — otherwise it is a flat tax.
+  const spenders = nodes.filter((n) => (n.delta as any)?.ppCost);
+  const sellers = nodes.filter((n) => (n.delta as any)?.maxPPBonus);
+  for (const n of spenders) {
+    if (n.cost < 2) out.push(`${n.id}: ppCost on a filler node — a PP cost is a build decision, put it on an identity node`);
+  }
+  if (spenders.length && !sellers.length) {
+    out.push(`spends PP (${spenders.map((n) => n.id).join(", ")}) but no node grants maxPPBonus — that is a tax, not an economy`);
+  }
+  // A low pool must not mean a punishing tree. PP-cost density scales with
+  // the move's own canon pool: "Make the low pp moves not as punishing then.
+  // We don't have to have all notable cost pp. Just some of em."
+  if (!Number.isFinite(move.pp)) out.push(`no canon pp declared — the PP density and headroom checks cannot run`);
+  const maxSpenders = Math.ceil(move.pp / 12);
+  if (spenders.length > maxSpenders) {
+    out.push(`${spenders.length} PP-costing nodes on a ${move.pp}-PP move — cap is ${maxSpenders} (ceil(pool/12)); a small pool should carry fewer, not be punished for being small`);
+  }
+  // On a small pool a headroom node is transformative and on a big one it is
+  // a rounding error, so the floor is relative: headroom worth at least a
+  // third of the pool wherever the tree spends PP at all.
+  const headroom = sellers.reduce((sum, n) => sum + Number((n.delta as any).maxPPBonus ?? 0), 0);
+  if (spenders.length && headroom < move.pp / 3) {
+    out.push(`headroom +${headroom} against a ${move.pp} pool — a tree that spends PP should sell back at least a third of its pool (+${Math.ceil(move.pp / 3)})`);
+  }
+
+  // "it can fork paths, that converge at notables" — both sides of any fork
+  // must reach the same downstream node, or the losing side is a dead end.
+  const reaches = (id: string) =>
+    nodes.filter((n) => (n.prerequisites ?? []).includes(id) || (n.prerequisitesAnyOf ?? []).some((set) => set.includes(id))).map((n) => n.id);
+  for (const n of nodes) {
+    for (const other of n.excludes ?? []) {
+      if (n.id > other) continue; // check each pair once
+      const a = new Set(reaches(n.id)), b = reaches(other);
+      const isTerminal = a.size === 0 && b.length === 0;
+      if (isTerminal) continue; // a fork between two capstones is allowed to end
+      if (!b.some((x) => a.has(x))) {
+        out.push(`fork ${n.id}/${other}: the two sides never reconverge — one of them is a dead end (${n.id} -> [${[...a].join(", ") || "nothing"}], ${other} -> [${b.join(", ") || "nothing"}])`);
+      }
+    }
+  }
+
+  // Multi-path: every branch should offer at least one node reachable by two
+  // or more independent routes, or the "tree" is a corridor.
+  const multiEntry = nodes.filter((n) => (n.prerequisitesAnyOf ?? []).length >= 2);
+  const branchesWithChoice = new Set(multiEntry.map((n) => n.leaning));
+  for (const branch of ["aggression", "boldness", "sociability"] as const) {
+    if (nodes.some((n) => n.leaning === branch) && !branchesWithChoice.has(branch)) {
+      out.push(`${branch} branch: no node reachable by two independent routes — that is a corridor, not a tree`);
+    }
+  }
+
+  // A "+max PP" node is only a real pick opposite a tree that spends PP —
+  // otherwise it is a dead option wearing a fork's clothes.
+  if (sellers.length && !spenders.length) {
+    out.push(`grants maxPPBonus (${sellers.map((n) => n.id).join(", ")}) but nothing in the tree costs PP — a dead pick, not a choice`);
   }
 
   // A node that is pure downside is a bug, not a design choice (principle 4).

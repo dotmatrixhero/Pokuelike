@@ -3060,6 +3060,12 @@ Two details did more work than expected:
   holder who still sits on the title turns that into "7154 ticks alive,
   having outlasted everything they were born beside."
 
+> **Executable rules live in [`DESIGN_VALIDATION.md`](DESIGN_VALIDATION.md)**
+> — the checker that enforces the structural and content rules in this
+> document, plus the self-test discipline that keeps it honest. Prose does
+> not fail a build; several rules here were re-broken after being written
+> down, which is why that layer exists.
+
 ## Roster census: where the tree content actually is (measured)
 
 Design session opener, after "OK I want us to get to designing more. Moves
@@ -3659,3 +3665,184 @@ own rule is to surface the finding and the options.
 Stopped short of building the mechanic deliberately (principle 10, and
 "never unilaterally retune balance numbers"): the data layer needed no
 decision and is done; the behaviour is gated on 1–3.
+
+### PP is tree currency, not a rate limiter — the reframe
+
+Direct correction after the measurement above: *"I think regen is fine. I
+just think more pp tradeoffs are the play. Notables that require pp. It
+becomes a gate."*
+
+**This inverts the finding.** The measurement said PP binds on only three of
+thirty-five moves, so a global PP budget would be invisible to most of the
+sim — and that is a real argument against PP as a rate limiter. It is not an
+argument against PP at all, because **a node that costs PP creates the
+binding itself.** The pool does not need to be naturally tight; the tree
+makes it tight, on the builds that opted in.
+
+Taking regen as settled per the same message: slow always-on trickle plus
+the sleep multiplier (option 1a), which is what DESIGN.md's sleep section
+already promised and substituted cooldowns for.
+
+**Why this is the best thing PP could be here.** Three reasons, and the
+third is the one that makes it worth building:
+
+1. **It is the roster's first real cost axis.** Nearly every node shipped is
+   strictly upside. A node reading "much bigger effect, 4 PP a use" puts the
+   benefit and the cost *in the same node*, which is exactly what principle
+   4 demands and what `recoilFraction`-only fillers failed.
+2. **It constrains a build.** You cannot take every heavy node, because the
+   pool will not sustain them. That is a genuine decision where trees
+   currently only offer forks.
+3. **The gate comes free from canon, and it is already correctly shaped.**
+   Canon PP tracks move power inversely, so the strongest moves have the
+   tightest budgets with no tuning at all:
+
+| Pool | Moves | What a heavy notable does to it |
+|---|---|---|
+| **5** | hydro_pump, synthesis, moonlight, roost, rain_dance | at 3 PP a use: **1 use.** The gate is absolute |
+| **10** | solar_beam, earthquake, rock_slide, ice_beam, dig, leech_seed, grassy_terrain | at 3 PP: 3 uses |
+| **15–20** | flamethrower, rock_throw, surf, body_slam, slash, twineedle, growth… | affords one heavy node, or two mid |
+| **25–40** | tackle, peck, scratch, poison_sting, agility, harden, withdraw… | affords a real heavy build |
+
+12 moves sit in the hard-gate band, 10 mid, 13 loose. A Hydro Pump build
+genuinely cannot look like a Tackle build, and nobody has to hand-tune that.
+
+**Not every notable — density scales with the pool.** Direct correction:
+*"Make the low pp moves not as punishing then. We don't have to have all
+notable cost pp. Just some of em."* Right: a 5-PP move should not be
+punished for having a small pool. The cap is **ceil(pool / 12)**:
+
+| Pool | PP-costing nodes allowed |
+|---|---|
+| 5–10 | 1 |
+| 15–20 | 2 |
+| 25–35 | 3 |
+| 40 | 4 |
+
+Six PP costs came back off the drafts to meet it.
+
+**And the headroom filler is worth wildly different amounts by pool — which
+is the point.** *"We can also have max pp increase filler, and for hydropump
+that actually means something, you know?"* Exactly; one +5 max-PP node:
+
+| move | pool | +5 is | uses of a 3-PP notable: base → +5 → +10 |
+|---|---|---|---|
+| **hydro_pump**, synthesis, roost | 5 | **+100%** | **1 → 3 → 5** |
+| solar_beam, earthquake, dig | 10 | +50% | 3 → 5 → 6 |
+| flamethrower, body_slam | 15 | +33% | 5 → 6 → 8 |
+| twineedle, growth | 20 | +25% | 6 → 8 → 10 |
+| tackle, poison_sting | 35 | +14% | 11 → 13 → 15 |
+| defense_curl | 40 | +13% | 13 → 15 → 16 |
+
+The *same node* triples Hydro Pump's uses of a heavy notable and is a
+rounding error on Defense Curl. A filler that is genuinely build-defining on
+one move and skippable on another is the best kind of filler this roster
+has, and it needs no per-move tuning at all — the canon pool does it.
+
+So the checker also enforces a **relative** headroom floor: a tree that
+spends PP must sell back at least a third of its own pool.
+
+**Every branch keystone requires PP, within that cap.** Direct clarification:
+*"I meant make notables require pp basically."* So a per-use PP cost sits on
+each branch's keystone plus the heavy fork, scaled to the move's own canon
+pool — 19 PP-costing identity nodes across the five drafts:
+
+| Draft | pool (+headroom) | PP-costing nodes → uses base / with headroom |
+|---|---|---|
+| Harden | 30 (+10) | 3/3 · Chrysalis 4 → 7/10 · Brittle Edge 3 · Let It Pass 2 |
+| Twineedle | 20 (+8) | 2/2 · Pincushion 3 → 6/9 · Nothing Forgets 3 |
+| Poison Sting | 35 (+12) | 3/3 · Nothing Recovers 3 → 11/15 · Venom Glut 2 · The Nest Decides 2 |
+| Growth | 20 (+10) | 2/2 · It Takes 4 → **5/7** · The Orchard 4 → **5/7** |
+| Agility | 30 (+10) | 3/3 · Faster Than Thought 3 → 10/13 · The Migration 3 · Nothing Stops It 2 |
+
+Growth is the sharpest read: a Bulbasaur that specced *The Orchard* plants
+**five trees in its life**, seven if it bought the headroom. That is the
+mechanic doing what a paragraph of flavour text cannot.
+
+**A tax is not an economy.** Every tree that spends PP must also sell
+headroom back, or the node is just a nerf with extra steps. Both halves are
+in the drafts:
+
+| Draft | pool | spends | sells |
+|---|---|---|---|
+| Harden | 30 | *Chrysalis* 4/use → 7 uses | *Slow to Shift* +8 |
+| Twineedle | 20 | *Pincushion* 3/use → 6 flurries | *Quicker Draw* +6 |
+| Poison Sting | 35 | *Venom Glut* 2/use | *Quick Fangs* +10 |
+| Growth | 20 | *It Takes* 4/use → 5 bushes | *Patient Soil* +10 |
+| Agility | 30 | *Faster Than Thought* 3/use | *Short Rest* +8 |
+
+*Venom Glut* is the first node in either roster to cost **both** a need and
+PP — venom as a consumable twice over.
+
+`check-proposed-trees.ts` now enforces both halves: a `ppCost` may only sit
+on an identity node (a build decision, never filler), and any tree that
+spends PP must grant `maxPPBonus` somewhere.
+
+**Honest caveat on the drafts.** All five sit at pools of 20–35, so they
+demonstrate the tradeoff but not the *hard* gate. The moves where PP would
+bite hardest — Hydro Pump at 5, Earthquake and Solar Beam at 10 — are
+already-shipped trees, and retrofitting PP costs into them is the real test
+of this idea, not these five.
+
+**Engine work this needs** (none of it built): `MoveSpec.ppCost`, a live
+`Agent.movePP` counter spent in `useMove` (combat.ts — already the single
+choke point that sets cooldowns and increments `moveUseCounts`),
+`MoveTreeNode.delta.maxPPBonus`, regen in `tickStatusEffects` with the
+sleep multiplier alongside `SLEEP_COOLDOWN_TICKS_PER_ACTION`, and
+`pickBestMove` skipping a dry move.
+
+### Filler forks: diverging paths that reconverge at the notable
+
+Direct: *"Maybe we can split aggression filler paths even with power vs pp??
+That's really cool. Boldness filler with cooldown vs aoe or duration."* Then,
+sharpening it: *"Well it can fork paths, that converge at notables."*
+
+That second sentence is the whole design. A filler fork is **not** a
+permanent commitment to a sub-branch — both sides feed the same next node, so
+the choice is which route you walk, not which half of the tree you give up.
+
+**One filler fork per branch, at the post-notable slot** — the point where a
+build has already committed to the branch and knows what it needs. Structure
+against the shipped roster:
+
+| | shipped | drafts |
+|---|---|---|
+| nodes | 36.1 | 42.0 |
+| fork nodes | 6.1 (3 real choices) | 12.0 (**6 real choices**) |
+
+Pushback that shaped it, recorded because the answer overrode it: my first
+instinct was that forking every filler would make nothing feel like a choice
+— shipped trees get exactly three per tree. Doubling to six is the right
+size; forking all nine filler slots would not be. The reconvergence is what
+makes six affordable: a route choice costs less than a commitment.
+
+**The power-versus-PP split, which is the best pair of the set:**
+
+| tree | fork | the PP side is worth |
+|---|---|---|
+| Twineedle | Thin Point vs **Venom Sacs** | +8 on a 20 pool = **+40%** |
+| Growth | Choking Out vs **Spore Reserve** | +10 on a 20 = **+50%** |
+| Poison Sting | Finisher vs **Glut Sacs** | +12 on a 35 = +34% |
+| Agility | No Wind-Down vs **Second Wind** | +10 on a 30 = +33% |
+| Harden | Slow to Shift vs **Deep Reserve** | +10 on a 30 = +33% |
+
+**It is self-balancing, which is the part that makes it good design rather
+than just another node.** `+max PP` is only worth taking if you took the
+PP-heavy notables. On a build that went wide it is a dead pick; on a build
+that went deep it is the strongest node in the branch. Nobody has to tune
+that — the build decides it retroactively. The other pairs are drawn from
+each move's own palette per the colour pie, never a fixed template: thorns
+vs tempo, range vs crit, duration vs terrain, heal vs denial.
+
+**A real bug this caught.** My first pass gave each fork's B-side the same
+parent but left the downstream node requiring the A-side specifically —
+so every B-side was a **dead end** and any build taking one was stranded.
+"Converge at notables" named the defect before it shipped.
+`check-proposed-trees.ts` now enforces it: both sides of any fork must reach
+a common downstream node, with a terminal-capstone fork exempted. Verified by
+deliberately stranding one and confirming the report:
+
+```
+fork deep_reserve/slow_to_shift: the two sides never reconverge — one of them
+is a dead end (deep_reserve -> [nothing], slow_to_shift -> [set_bone])
+```
