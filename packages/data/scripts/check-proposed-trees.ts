@@ -113,6 +113,9 @@ function problems(move: ProposedMove): string[] {
     "rallying": ["rallyCall"],
     "ally buffing": ["targetsAlly", "allyEffect", "allyEffectOnAttack", "p:herdHaste", "p:aquaticHaste"],
     "calming": ["p:calmingPresence", "p:nonTerritorial", "statusImmunityAura"],
+    // Cross-axis: PP and needs as a real spend, per "more pp tradeoffs are
+    // the play. Notables that require pp. It becomes a gate."
+    "resource economy": ["ppCost", "maxPPBonus", "selfCostPerUse", "drainNeeds"],
   };
   const flavourOf = new Map<string, string>();
   for (const [f, ks] of Object.entries(FLAVOUR)) for (const k of ks) flavourOf.set(k, f);
@@ -130,6 +133,18 @@ function problems(move: ProposedMove): string[] {
     ])];
     for (const n of bn) for (const k of allLevers(n)) { const f = flavourOf.get(k); if (f) fl.add(f); }
     if (fl.size < 3) out.push(`${branch} branch: draws on only ${fl.size} flavour(s) [${[...fl].join(", ")}] — the colour pie says pick two or three and build from those (shipped roster averages 3.8)`);
+  }
+
+  // PP as tree currency: a per-use cost belongs on an identity node (it is a
+  // real build decision, not filler), and any tree that spends PP must also
+  // offer a way to buy headroom back — otherwise it is a flat tax.
+  const spenders = nodes.filter((n) => (n.delta as any)?.ppCost);
+  const sellers = nodes.filter((n) => (n.delta as any)?.maxPPBonus);
+  for (const n of spenders) {
+    if (n.cost < 2) out.push(`${n.id}: ppCost on a filler node — a PP cost is a build decision, put it on an identity node`);
+  }
+  if (spenders.length && !sellers.length) {
+    out.push(`spends PP (${spenders.map((n) => n.id).join(", ")}) but no node grants maxPPBonus — that is a tax, not an economy`);
   }
 
   // A node that is pure downside is a bug, not a design choice (principle 4).

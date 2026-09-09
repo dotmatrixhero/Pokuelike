@@ -3659,3 +3659,93 @@ own rule is to surface the finding and the options.
 Stopped short of building the mechanic deliberately (principle 10, and
 "never unilaterally retune balance numbers"): the data layer needed no
 decision and is done; the behaviour is gated on 1–3.
+
+### PP is tree currency, not a rate limiter — the reframe
+
+Direct correction after the measurement above: *"I think regen is fine. I
+just think more pp tradeoffs are the play. Notables that require pp. It
+becomes a gate."*
+
+**This inverts the finding.** The measurement said PP binds on only three of
+thirty-five moves, so a global PP budget would be invisible to most of the
+sim — and that is a real argument against PP as a rate limiter. It is not an
+argument against PP at all, because **a node that costs PP creates the
+binding itself.** The pool does not need to be naturally tight; the tree
+makes it tight, on the builds that opted in.
+
+Taking regen as settled per the same message: slow always-on trickle plus
+the sleep multiplier (option 1a), which is what DESIGN.md's sleep section
+already promised and substituted cooldowns for.
+
+**Why this is the best thing PP could be here.** Three reasons, and the
+third is the one that makes it worth building:
+
+1. **It is the roster's first real cost axis.** Nearly every node shipped is
+   strictly upside. A node reading "much bigger effect, 4 PP a use" puts the
+   benefit and the cost *in the same node*, which is exactly what principle
+   4 demands and what `recoilFraction`-only fillers failed.
+2. **It constrains a build.** You cannot take every heavy node, because the
+   pool will not sustain them. That is a genuine decision where trees
+   currently only offer forks.
+3. **The gate comes free from canon, and it is already correctly shaped.**
+   Canon PP tracks move power inversely, so the strongest moves have the
+   tightest budgets with no tuning at all:
+
+| Pool | Moves | What a heavy notable does to it |
+|---|---|---|
+| **5** | hydro_pump, synthesis, moonlight, roost, rain_dance | at 3 PP a use: **1 use.** The gate is absolute |
+| **10** | solar_beam, earthquake, rock_slide, ice_beam, dig, leech_seed, grassy_terrain | at 3 PP: 3 uses |
+| **15–20** | flamethrower, rock_throw, surf, body_slam, slash, twineedle, growth… | affords one heavy node, or two mid |
+| **25–40** | tackle, peck, scratch, poison_sting, agility, harden, withdraw… | affords a real heavy build |
+
+12 moves sit in the hard-gate band, 10 mid, 13 loose. A Hydro Pump build
+genuinely cannot look like a Tackle build, and nobody has to hand-tune that.
+
+**Every keystone requires PP, not one node per tree.** Direct clarification:
+*"I meant make notables require pp basically."* So a per-use PP cost sits on
+each branch's keystone plus the heavy fork, scaled to the move's own canon
+pool — 19 PP-costing identity nodes across the five drafts:
+
+| Draft | pool (+headroom) | PP-costing nodes → uses base / with headroom |
+|---|---|---|
+| Harden | 30 (+8) | Chrysalis 4 → 7/9 · Unbudgeable 3 → 10/12 · Brittle Edge 3 → 10/12 · Let It Pass 2 → 15/19 |
+| Twineedle | 20 (+6) | Pincushion 3 → 6/8 · Nothing Forgets 3 → 6/8 · Hollow Points 2 → 10/13 · Gone Before It Turns 2 → 10/13 |
+| Poison Sting | 35 (+10) | Nothing Recovers 3 → 11/15 · Venom Glut 2 → 17/22 · Nothing Walks Away 2 · The Nest Decides 2 |
+| Growth | 20 (+10) | It Takes 4 → **5/7** · The Orchard 4 → **5/7** · It Was All Grass 3 → 6/10 · Nobody Leaves 3 → 6/10 |
+| Agility | 30 (+8) | Faster Than Thought 3 → 10/12 · The Migration 3 → 10/12 · Nothing Stops It 2 → 15/19 |
+
+Growth is the sharpest read: a Bulbasaur that specced *The Orchard* plants
+**five trees in its life**, seven if it bought the headroom. That is the
+mechanic doing what a paragraph of flavour text cannot.
+
+**A tax is not an economy.** Every tree that spends PP must also sell
+headroom back, or the node is just a nerf with extra steps. Both halves are
+in the drafts:
+
+| Draft | pool | spends | sells |
+|---|---|---|---|
+| Harden | 30 | *Chrysalis* 4/use → 7 uses | *Slow to Shift* +8 |
+| Twineedle | 20 | *Pincushion* 3/use → 6 flurries | *Quicker Draw* +6 |
+| Poison Sting | 35 | *Venom Glut* 2/use | *Quick Fangs* +10 |
+| Growth | 20 | *It Takes* 4/use → 5 bushes | *Patient Soil* +10 |
+| Agility | 30 | *Faster Than Thought* 3/use | *Short Rest* +8 |
+
+*Venom Glut* is the first node in either roster to cost **both** a need and
+PP — venom as a consumable twice over.
+
+`check-proposed-trees.ts` now enforces both halves: a `ppCost` may only sit
+on an identity node (a build decision, never filler), and any tree that
+spends PP must grant `maxPPBonus` somewhere.
+
+**Honest caveat on the drafts.** All five sit at pools of 20–35, so they
+demonstrate the tradeoff but not the *hard* gate. The moves where PP would
+bite hardest — Hydro Pump at 5, Earthquake and Solar Beam at 10 — are
+already-shipped trees, and retrofitting PP costs into them is the real test
+of this idea, not these five.
+
+**Engine work this needs** (none of it built): `MoveSpec.ppCost`, a live
+`Agent.movePP` counter spent in `useMove` (combat.ts — already the single
+choke point that sets cooldowns and increments `moveUseCounts`),
+`MoveTreeNode.delta.maxPPBonus`, regen in `tickStatusEffects` with the
+sleep multiplier alongside `SLEEP_COOLDOWN_TICKS_PER_ACTION`, and
+`pickBestMove` skipping a dry move.
