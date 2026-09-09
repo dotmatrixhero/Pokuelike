@@ -3976,23 +3976,96 @@ cost-2 notable), each landing on **one lane notable per branch** it connects,
 complementing that lane rather than matching it. Nine `prerequisitesAnyOf`:
 six lane notables plus three deep notables.
 
-### The one place this standard must NOT be rigid: node count
+### Node count: "thin lever set" was a rationalisation, and the data says so
 
-**Structure is the standard. 45 nodes is not.** This document already learned
-this once, in the crosslink rollout:
+I argued the standard should be structure-only, because a move with a "thin
+honest lever set" should get shorter lanes rather than invented filler —
+citing this document's own note that dig (29) and leech_seed (31) were
+"deliberately left short." Direct pushback:
 
-> "dig (29) and leech_seed (31) were deliberately left short. Their honest
-> lever sets are smaller, and inflating them to hit a number is exactly the
-> template failure the rest of this document exists to prevent. Matching the
-> flagships' *structure* was the finding; matching their *node count* was
-> not."
+> "Problem is, we do have 45 nodes of real ideas on everything. It's the cool
+> part of the game."
 
-A move with a thin honest lever set gets the same shape with **shorter
-lanes** — two rungs instead of three, 10 nodes per branch instead of 12 —
-not three invented fillers to hit a number. Diglett's Dig does not have 45
-nodes' worth of real ideas in it, and pretending otherwise produces exactly
-the copy-pasted feel the v3 redesign existed to kill.
+**Correct, and it is measurable.** Counting the shared lever palette the
+roster actually uses — 71 distinct levers — against what each tree touches:
+
+| tree | nodes | levers used | **levers untouched** |
+|---|---|---|---|
+| **dig** | 29 | **12** | **59** |
+| **leech_seed** | 31 | **13** | **58** |
+| water_gun | 33 | 18 | 53 |
+| peck / scratch | 33 | 19 | 52 |
+| earthquake | 39 | 27 | 44 |
+| twineedle (v4) | 45 | 27 | 44 |
+
+Dig — the tree named as honestly thin — uses **12 of 71 levers and leaves 59
+untouched.** That is not a small lever set; it is an unexplored one. And this
+document contains a whole section, *"Confirmed for later: Diglett tunnel
+networks"*, recording a decision ("tunnel networks are cool as fuck we're
+gonna do it") that was written down and never built. The ideas were not
+missing. The work was.
+
+**So: 45 nodes is the standard too.** Not as a quota to pad toward — as an
+expectation that if a move cannot fill it, the fantasy has not been
+interrogated hard enough yet. That is a very different instruction from
+"inflate to hit a number," and it inverts what the earlier note assumed.
+
+The real risk was never running out of ideas; it is **filler produced under
+volume pressure** — which is exactly what the earlier measurement caught in
+these very drafts (power/accuracy/cooldown accounting for 280 of ~700 lever
+uses). That risk is already guarded by the rules in
+[`DESIGN_VALIDATION.md`](DESIGN_VALIDATION.md): a branch must draw on three
+or more flavours, no signature lever may answer more than 60% of a branch's
+identity nodes, and no node may be pure downside. Volume is safe when the
+quality gate runs on every tree. It was not safe when the only gate was
+whether I felt like writing more nodes.
 
 `check-proposed-trees.ts` therefore enforces the **shape** — two lanes, a
 notable in each, a deep convergence notable, a filler, a capstone, three
 bridges, nine anyOf — and says nothing about how many nodes fill it.
+
+### v4 addendum: every node costs 1, and the snake concern measured
+
+> "We can make every node cost 1, just make it always require 1 skill point
+> as long as you're connecting it to an existing node 'one layer' below it.
+> I think we probably don't want you to be able to capture all outer nodes
+> and capstone with just a single connected line, but none of the early
+> nodes for that branch? Idk. thoughts?"
+
+**Uniform cost — done.** 87 cost-2 nodes flattened. Depth is now the only
+price, which is the Path-of-Exile reading and is more legible than a second
+number: a notable is expensive *because it is far away*, not because it says
+2 on it.
+
+It forced a real definition change in the checker, and a better one. Notables
+were previously identified by `cost >= 2` — a label. Under uniform cost the
+question becomes structural: **a notable is a node that routes converge on**
+(two or more `prerequisitesAnyOf` entries), and a capstone is terminal. That
+is what "notable" always MEANT; cost was standing in for it.
+
+**The snake concern: measured, and it is already a non-problem.** Cheapest
+legal route to each capstone, across all five drafts:
+
+| tree | capstone | points | in its own branch | borrowed |
+|---|---|---|---|---|
+| twineedle | Empty the Sacs | 8 | 8 | **0** |
+| twineedle | Never There | 8 | 8 | **0** |
+| twineedle | The Swarm Decides | 8 | 8 | **0** |
+| harden | all three | 9 | 9 | **0** |
+| poison_sting / growth / agility | all three | 9 | 9 | **0** |
+
+**Zero points borrowed from another branch, on any capstone in any tree.**
+The reason is arithmetic rather than luck: a bridge costs two openers plus
+three bridge nodes (5 points) to save three points of lane filler, so
+snaking is *more* expensive than walking. Bridges are shortcuts to a lane
+notable for a build already invested in two branches — never a back door to
+a capstone.
+
+Encoded as a regression guard anyway, since trees will keep changing: a
+capstone's cheapest route must be ≥75% inside its own branch.
+
+**And the point economy lands somewhere satisfying by accident.** A full v4
+tree is 45 nodes = 45 points. Observed agent levels: p50 25, p90 34, **max
+46**. So a maximum-level agent can just about complete exactly one tree, a
+median agent affords three capstones (24 points) *or* one branch walked
+completely with both lanes — a real build decision, not a formality.
