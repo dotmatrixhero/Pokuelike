@@ -4169,3 +4169,89 @@ up? Replaced in the drafts with a target-relative vocabulary:
 | `"dragged"` | the target is hauled N tiles toward you |
 
 Each says who moves and where they end up relative to whom.
+
+## Cooldown overshoot, and what the action economy says about cooldowns at all
+
+> "We should be careful about cooldown nodes lowering the cd beyond 0." …
+> "I mean it's okay to get to cooldown 0, just a bunch of filler beyond that
+> is not useful."
+
+The engine already clamps (`Math.max(0, …)`), so nothing goes negative. The
+waste is real anyway: **every tick of reduction past a move's base cooldown
+is a node that provably does nothing** — this project's own definition of a
+bug, applied to overshoot.
+
+Measured across the roster:
+
+| move | base cd | total reduction | dead ticks |
+|---|---|---|---|
+| **agility** (draft) | 50 | −65 | **15** |
+| **ember** (shipped) | 2 | −6 | **4** |
+| **twineedle** (draft) | 3 | −7 | 4 |
+| **harden** (draft) | 40 | −44 | 4 |
+| slash, wing_attack (shipped) | 2 | −4 | 2 each |
+| tackle, vine_whip (shipped) | 2 | −3 | 1 each |
+
+Eight of twenty-two trees hand out more reduction than the move has cooldown.
+And **12 of 22 can reach cooldown 0 at all** — Ember in **3 skill points**.
+
+### CORRECTION: my "cooldown is barely a constraint" analysis was wrong
+
+I wrote here that a 2-tick cooldown is "inert for 31% of agents" and that the
+2-to-4-tick band is a weak axis, having measured `ACTION_THRESHOLD` against
+the gap in **world ticks** between an agent's actions. Direct challenge:
+
+> "I thought we made it scale off speed. So your cooldown ticks down on your
+> turn, based on your speed, not individual ticks?"
+
+**Correct.** `tickCooldowns` is called from `tickAgentAction` (needs.ts:1279),
+and `tickAgentAction` "only run[s] on an agent's own action tick"
+(simulation.ts:273). Cooldowns are counted in the agent's **own turns**, not
+world ticks. The code comment even names the exact bug I re-created:
+
+> "not once per world tick regardless of Speed, which is what this lived as
+> before: a move with `cooldownTicks: 1` was effectively always off-cooldown
+> for anything slower than the action threshold itself"
+
+That was fixed deliberately, and I measured the system as though the fix had
+never landed — a unit error, comparing turn-denominated cooldowns against
+world-tick action gaps. **Retracted in full:**
+
+- ~~"a 2-tick cooldown is inert for 31% of agents"~~ — false. A cooldown is
+  never inert. `cooldownTicks: N` means the move is usable every (N+1)th
+  action, for everyone, at any Speed.
+- ~~"the 2-4 tick band is a weak axis to spend nodes on"~~ — false. It is a
+  strong one.
+- ~~"raising base cooldowns is supported by the data"~~ — withdrawn. Nothing
+  supports it; the suggestion came entirely from the bad measurement.
+
+**And the correction makes the original concern bigger, not smaller.** On a
+base-2 move, going to 0 is not a rounding difference — it is the move firing
+**every** action instead of every third: a real 3x tempo gain. So Ember
+reaching cooldown 0 in three skill points matters more than I credited, and
+"be very careful not to add too much cooldown" was right for a reason I
+argued against.
+
+What survives untouched, because it never depended on the action economy:
+every tick of reduction past base is still a node that does nothing, and 12
+of 22 trees still overshoot or bottom out.
+
+### What was done
+
+### What was done
+
+`check-proposed-trees.ts` now fails any tree whose total cooldown reduction
+exceeds its base. The three offending drafts were **repurposed rather than
+just shrunk**, which is the better outcome — a node reaching for tempo out of
+habit became a node that does something the lane actually cares about:
+
+- Twineedle's *Gliding* buys **reach** instead (Lane H is the strafing lane).
+- *Hive Tempo* buys a **longer mark** (Lane M is the marking lane).
+- *Quicker Draw* steadies the **flurry** (Lane P's identity).
+- Agility's *The Short Way* now also cuts **straight past** whatever is in
+  the way — the literal short way — instead of −15 ticks a 50-tick move only
+  partly had to give.
+
+All five drafts are now within budget. **The four shipped offenders — ember
+(4 dead ticks), slash (2), wing_attack (2), tackle and vine_whip (1 each) —
+are untouched live data.**

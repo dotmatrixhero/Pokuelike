@@ -156,6 +156,13 @@ argument, and starting to implement mid-discussion reads as not listening.
 - **Absence of a call site tells you a feature is off, not why.** `diedOfAge` had zero record
   sites and was reported as an oversight; it had actually been deliberately removed on the
   user's own instruction, with a test saying so. Look for the decision before calling it a gap.
+- **Check the UNITS before drawing a conclusion from a measurement.** A
+  cooldown analysis here compared turn-denominated cooldowns against
+  world-tick action gaps and concluded, confidently and with a table, that
+  cooldowns were "barely a constraint." They tick on the agent's own action
+  clock. The engine even carried a comment describing that exact bug as
+  something already fixed. A number with the wrong denominator looks just
+  like a finding.
 - **A test that passes for the wrong reason is worse than no test.** Two happened here: an
   always-zero rng that fired a different trigger than the test named, and an `if (walkable)`
   precondition that made a test silently vacuous. When a test fails after a change, work out
