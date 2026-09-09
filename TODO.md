@@ -6862,3 +6862,21 @@ not something this pathfinding pass itself caused or is positioned to fix.
       (`immigration.ts`) already narrows this somewhat but wasn't designed
       around an evolution floor this high. Not fixed here — a balance
       call, not decided unilaterally.
+
+## Fixed: high-level predator occurrence itself, not just population — see DESIGN.md
+
+- [x] Direct follow-up: "I think the level 40 gap can happen, it should
+      just be rare. We should make it a rare occurrence." Root cause: the
+      earlier `PREDATOR_POPULATION_CAP` fix only thinned Kabutops'
+      population once present — it was still GUARANTEED present in every
+      Beach zone, since Kabutops was Beach's only fitting predator and
+      every selection mechanism (pool-size trim, predator-cap split)
+      deterministically includes the sole candidate whenever a predator
+      slot fills. Fixed by having a predator's `rarity` ALSO gate whether
+      it's even a candidate for a zone's pool at all (an independent roll,
+      before any pool-size math runs) — completing `rarity`'s own
+      documented intent ("a multiplier on how often this species shows
+      up"), which zone-seeding had never actually read for inclusion,
+      only for population size. Gave Kabutops `rarity: 0.3`. Real
+      generated-grid measurement: Kabutops now shows up in 28.5% of Beach
+      zones (was 100%). Full engine (1262) and data (240) suites green.

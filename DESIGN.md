@@ -15083,3 +15083,36 @@ a floor this high. Whether to lower specific species' boost, widen prey's
 own upper range further, or leave it as "yes, an ambush-tier predator
 should occasionally roll in strong" is a real balance call, not decided
 here. Full engine suite (1262 tests) green after the fix.
+
+## Fixed: Kabutops' occurrence, not just its population, made rare
+
+Direct follow-up to the predator-population-cap fix: "I think the level 40
+gap can happen, it should just be rare. We should make it a rare
+occurrence."
+
+**Why the population cap alone wasn't enough.** `PREDATOR_POPULATION_CAP`
+(the previous fix) thinned Kabutops' population once a zone had it — but
+Beach's fitting predator list was Kabutops and ONLY Kabutops. Every
+selection step in `pickZoneSpeciesPool` (the thin-biome pool-size trim, the
+predator/prey cap split) deterministically includes the sole candidate
+whenever a predator slot gets filled at all — "pick up to N from a list of
+exactly 1" has no randomness to it. So Kabutops was still present in
+literally every eligible Beach zone; it just carried fewer individuals.
+
+**Fix.** A predator's own `rarity` (already a real field, already
+documented as "a multiplier on how often this species shows up... as an
+immigrant and in population size" — `ImmigrationSpeciesInfo.rarity`'s own
+doc comment) now ALSO gates a zone-seeding inclusion roll for predators
+specifically, run BEFORE any of `pickZoneSpeciesPool`'s pool-size math —
+completing that documented intent, which zone-seeding had never actually
+read for inclusion before, only `estimateZoneSpecies`'s population math
+did. Non-predator selection is completely untouched (the roll short-
+circuits on `!s.isPredator`). Gave Kabutops `rarity: 0.3` — a sim-original
+guess ("roughly 1 in 3 eligible zones"), explicitly less rare than Arbok's
+own 0.12 (Kabutops is meant to read as a real, intended apex predator when
+it IS present, not an unwanted nuisance species like Arbok was).
+
+**Verified on a real generated grid**, 8 seeds, 60x60 each: Kabutops now
+shows up in 580 of 2,033 real Beach zones — 28.5% (was 100%, every single
+zone, before this fix). Full engine suite (1262 tests) and data suite (240
+tests) green, no regressions from the new per-predator roll.

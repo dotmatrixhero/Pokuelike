@@ -829,13 +829,36 @@ function pickZoneSpeciesPool(fitting: readonly ImmigrationSpeciesInfo[], poolBon
   // the same seeded stream, a real regression a `promoteZone` test caught
   // (an evolved species' seeded level jitter came out different for a
   // reason that had nothing to do with levels at all).
-  const lowerBound = fitting.length <= 2 ? fitting.length : Math.max(2, Math.min(ZONE_SPECIES_POOL_MIN + poolBonus, Math.floor(fitting.length / 2)));
-  const upperBound = Math.min(ZONE_SPECIES_POOL_MAX + poolBonus, fitting.length);
-  const poolSize = lowerBound + Math.floor(rng() * Math.max(0, upperBound - lowerBound + 1));
-  if (fitting.length <= poolSize) return [...fitting];
+  // A predator's own `rarity` now ALSO gates whether it's even a candidate
+  // for THIS zone at all, independent per-species roll, before any of the
+  // pool-size/trimming math below — direct report: "kabutops are just
+  // utterly slaughtering everything... I think the level 40 gap can
+  // happen, it should just be rare." Beach's fitting predator list is a
+  // single species (Kabutops) — every earlier mechanism here (the
+  // pool-size trim, the predator-cap split) still guaranteed its inclusion
+  // whenever a predator slot got filled at all, since "pick up to N from a
+  // list of exactly 1" is deterministic regardless of N. Rolled BEFORE
+  // `fitting.length` gets used for anything (including the thin-biome
+  // trimming above, and the `fitting.length <= poolSize` early return
+  // right below) so an excluded predator is genuinely ABSENT from this
+  // zone's pool, not just population-thinned once present — the actual
+  // "occurrence should be rare" the report asked for, not another
+  // reduction on top of `PREDATOR_POPULATION_CAP`'s existing one. `rarity`
+  // was already documented as "a multiplier on how often this species
+  // shows up" (`ImmigrationSpeciesInfo.rarity`'s own doc comment) — this
+  // is that stated intent actually reaching zone-seeding, which it never
+  // did before (only `estimateZoneSpecies`'s population math read it).
+  // Non-predators are untouched (`!s.isPredator` short-circuits before the
+  // roll) — this doesn't change ordinary prey/neutral selection at all.
+  const candidates = fitting.filter((s) => !s.isPredator || rng() < (s.rarity ?? 1));
 
-  const predators = fitting.filter((s) => s.isPredator);
-  const prey = fitting.filter((s) => !s.isPredator);
+  const lowerBound = candidates.length <= 2 ? candidates.length : Math.max(2, Math.min(ZONE_SPECIES_POOL_MIN + poolBonus, Math.floor(candidates.length / 2)));
+  const upperBound = Math.min(ZONE_SPECIES_POOL_MAX + poolBonus, candidates.length);
+  const poolSize = lowerBound + Math.floor(rng() * Math.max(0, upperBound - lowerBound + 1));
+  if (candidates.length <= poolSize) return [...candidates];
+
+  const predators = candidates.filter((s) => s.isPredator);
+  const prey = candidates.filter((s) => !s.isPredator);
   const predatorCap = predatorCapOverride ?? ZONE_PREDATOR_POOL_CAP + (isCongregationLandmark ? LANDMARK_PREDATOR_POOL_BONUS : 0);
   const pickedPredators = pickRandomSubset(predators, Math.min(predatorCap, poolSize), rng);
   const pickedPrey = pickRandomSubset(prey, poolSize - pickedPredators.length, rng);

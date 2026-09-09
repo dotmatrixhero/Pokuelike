@@ -1560,7 +1560,22 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // text — a real predator.
     isPredator: true,
     // Kabuto's own real, in-sim-reachable evolution (level 40, no item/
-    // condition).
+    // condition) — this roster's highest predator evolution floor, and
+    // with `immigration.ts`'s own `PREDATOR_LEVEL_BOOST` on top, a real
+    // invented Kabutops lands around level 46-51. Direct report: "kabutops
+    // are just utterly slaughtering everything... the level 40 gap can
+    // happen, it should just be rare." `rarity` here now ALSO gates
+    // whether Kabutops is even a candidate for a given zone's species pool
+    // at all (`macroGrid.ts`'s `pickZoneSpeciesPool`), not just how large
+    // its population is once present — Beach's fitting predator list was
+    // just this one species, so every earlier mechanism guaranteed its
+    // inclusion whenever a predator slot got filled. 0.3 is a sim-original
+    // guess (roughly "shows up in about 1 of 3 eligible zones"), same
+    // "judge against a real run" standard as Arbok's own 0.12 — not
+    // Arbok-tier rare (Kabutops is a real, intended apex predator when it
+    // does show up, not an unwanted nuisance species), just no longer
+    // guaranteed.
+    rarity: 0.3,
     biomes: ["wetland", "beach"],
     preferredTerrain: ["water"],
   }),
