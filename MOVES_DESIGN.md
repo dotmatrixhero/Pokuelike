@@ -2545,6 +2545,21 @@ future update builds on the existing tool instead of re-deriving it.
    it's not already in context) so it **updates the same artifact in
    place** rather than creating a duplicate.
 
+**Proposed mode** — drafts live in `packages/data/scripts/proposed-trees.ts`
+and are merged into the export by `export-move-trees.ts`, each flagged
+`proposed: true`. They are NOT part of `MOVES`; the game never reads them.
+Direct ask: "Add a proposed mode. I just want to see your trees before you
+build em all." In the atlas they get their own picker group, an All /
+Shipped / Proposed filter, dashed node rings, a PROPOSED badge, and the
+move's `fantasy` text rendered above the graph. Any node whose effect has
+no engine primitive yet carries `needsPrimitive` and gets a dashed **red**
+outer ring plus a "NEEDS NEW ENGINE WORK" box in the detail pane — so a
+reviewer can see at a glance which half of a draft is free and which half
+costs engine work. Adding a new draft needs no template edit: the picker
+group is derived from the data. When a tree is approved, its nodes move
+into `moves.ts`, get the real `MoveTree` type, and come out of
+`proposed-trees.ts`.
+
 **When the template itself needs a real change** (a new layout idea, a
 new field to visualize, a UI fix) — edit
 `packages/data/scripts/move-tree-atlas.template.html` directly, keep its
