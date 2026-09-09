@@ -18,6 +18,8 @@ import {
 import type { ActivePopup } from "./eventPopups.js";
 import type { ActiveMoveFlash } from "./moveEffects.js";
 import {
+  BIOME_FLORA_TINT,
+  BIOME_TINT,
   CROP_EMOJI,
   FLAVOR_FG,
   FLAVOR_GLYPH,
@@ -33,6 +35,7 @@ import {
   shade,
   shelterOwnerTint,
   terrainBgColor,
+  type Rgb,
   tileLight,
   waterDepthFactor,
   waterDepthShade,
@@ -190,6 +193,44 @@ function drawGroundTypeTint(ctx: CanvasRenderingContext2D, tile: Tile, x: number
   if (!tint) return;
   ctx.fillStyle = rgbaToCss(tint, 0.16);
   ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+}
+
+/** Same idea as `drawGroundTypeTint` above, keyed by dominant biome instead of soil type — see `BIOME_TINT`'s own doc comment (palette.ts) for which biomes get one and why. */
+function drawBiomeTint(ctx: CanvasRenderingContext2D, biome: string | undefined, x: number, y: number): void {
+  const tint = biome ? BIOME_TINT[biome] : undefined;
+  if (!tint) return;
+  ctx.fillStyle = rgbaToCss(tint, 0.14);
+  ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+}
+
+/**
+ * A pre-tinted copy of one obstacle sprite, built once on its own isolated
+ * offscreen canvas and cached — see `BIOME_FLORA_TINT`'s own doc comment
+ * (palette.ts) for the "one real sprite, several recolors" reasoning.
+ * `source-atop`, run on a canvas that holds ONLY this one sprite (not the
+ * whole scene), composites the tint exclusively over pixels the sprite
+ * itself already painted — a tree's transparent corners stay transparent —
+ * without needing to know or touch whatever's already on the real map
+ * canvas underneath it. Same "build once, cache, `drawImage` from it every
+ * frame" idiom `vignetteStamp`/`contiguousPatchStamp` above already use for
+ * their own generated decals.
+ */
+const tintedSpriteCache = new Map<string, HTMLCanvasElement>();
+function tintedSprite(sprite: HTMLImageElement, key: string, tint: Rgb): HTMLCanvasElement {
+  const cacheKey = `${key}:${tint.join(",")}`;
+  let cached = tintedSpriteCache.get(cacheKey);
+  if (cached) return cached;
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE_SIZE;
+  canvas.height = TILE_SIZE;
+  const tctx = canvas.getContext("2d")!;
+  tctx.drawImage(sprite, 0, 0, TILE_SIZE, TILE_SIZE);
+  tctx.globalCompositeOperation = "source-atop";
+  tctx.fillStyle = rgbaToCss(tint, 0.4);
+  tctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+  tintedSpriteCache.set(cacheKey, canvas);
+  cached = canvas;
+  return cached;
 }
 
 /**
@@ -658,6 +699,7 @@ function drawWorldTiles(
         // a single solid color would.
         drawGroundBacking(ctx, world, x, y, tile.elevation);
         drawGroundTypeTint(ctx, tile, x, y);
+        drawBiomeTint(ctx, dominantBiomeAt(world, x, y), x, y);
         ctx.fillStyle = rgbaToCss(shade([120, 128, 140], tile.elevation), 0.35);
         ctx.fillText(".", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
         drawTileVignette(ctx, x, y);
@@ -720,7 +762,21 @@ function drawWorldTiles(
           // its own full-tile opaque surface, not an object standing on
           // ground, so it's excluded.
           if (tile.terrain !== "water") drawGroundBacking(ctx, world, x, y, tile.elevation);
-          ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          // Biome-flavored recolor for tree/bush only (see BIOME_FLORA_TINT's
+          // own doc comment, palette.ts) — boulder/wall/sand/mud already read
+          // fine as plain, and a recolored rock/wall would just look wrong.
+          const floraTint = (tile.terrain === "tree" || tile.terrain === "bush") && BIOME_FLORA_TINT[dominantBiomeAt(world, x, y) ?? ""];
+          if (floraTint) {
+            // Keyed by the sprite's own image URL (e.g. "/tiles/tree_3.png"),
+            // NOT by (x, y) — the underlying art only has a handful of real
+            // variants (`TILE_VARIANT_COUNTS`, sprites.ts), so this caches at
+            // most a few tinted copies total, reused across every tile that
+            // happens to roll the same variant, instead of one cache entry
+            // per map tile ever drawn.
+            ctx.drawImage(tintedSprite(sprite, sprite.src, floraTint), x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          } else {
+            ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          }
           drawTileVignette(ctx, x, y);
           continue;
         }
@@ -742,6 +798,7 @@ function drawWorldTiles(
         // corners around the plant itself.
         drawGroundBacking(ctx, world, x, y, tile.elevation);
         drawGroundTypeTint(ctx, tile, x, y);
+        drawBiomeTint(ctx, dominantBiomeAt(world, x, y), x, y);
 
         // A green "fertile ground" patch under the plant itself — direct
         // ask: "can we decal a little green patch under the plants...

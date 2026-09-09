@@ -14743,3 +14743,145 @@ exactly where/why agents are drawn after it. Re-verified live: the same
 vivid 🌿 at the same midnight tick, no code path double-drawing or flickering
 across frames. Engine test suite (46 files, 1262 tests) still green — this
 was a web-only rendering-order fix, no engine logic touched.
+
+## Biome uniqueness pass: grassland water, three new biomes, structural generation, recoloring
+
+Direct ask, following the "too much water in grassy plains" report and its
+fix (see this doc's own prior entry on that report): "Yes to this and add
+tile types to help flesh out biome uniqueness... I want more unique zone
+generation that results in high quality looking zones... do em while
+preserving the fuzzy zones and zone terrain matching." Mid-turn follow-ups
+folded in: "Add more crops types too for these places too. And different
+colored trees or palettes for the biome. Just use some recoloring
+techniques" and "finally spawn more unique Pokémon species in these places
+to give em flavor."
+
+### Grassland's actual water-density fix, corrected
+
+The originally-proposed fix (a prior DESIGN.md entry) dropped Grassland's
+`waterDensity` from 0.08 straight to 0.03 (Highland/Snow's own low end).
+Implementing it surfaced a real regression: `overworld.test.ts`'s "recovers
+back toward the biome's real potential" test — a background population
+starting at a drought-suppressed `baseResourceIndex` of 0.23 — went extinct
+instead of recovering. Root cause, found by tracing the actual tick-by-tick
+population trajectory: macroGrid.ts's `estimateZoneResourceIndex` reads
+`(foodDensity + waterDensity) * RESOURCE_ESTIMATE_SCALE`, and that scale
+constant's own doc comment records it was explicitly calibrated so Grassland
+lands "comfortably above" `overworld.ts`'s `DEATH_HEALTH_THRESHOLD` (0.3) —
+at 0.03 the estimate was (0.05+0.03)*4=0.32, barely above that threshold
+instead of comfortably so, and `BASELINE_RECOVERY_RATE`'s slow climb wasn't
+fast enough to save a population sitting that close to the edge.
+
+Fix: keep the *combined* estimate at its original ~0.5 (matching 0.08's own
+0.52) by moving some of the cut into `foodDensity` instead — `foodDensity:
+0.075, waterDensity: 0.05` gives `(0.075+0.05)*4=0.5`, preserving the
+survival margin, while `waterDensity` alone (the number that actually drives
+real per-tile pond placement) still reads as meaningfully drier than before
+and than Forest's own 0.07. Verified: the same overworld.test.ts scenario
+now survives and recovers; the full engine suite (1262 tests) and data suite
+(240 tests) both green. A genuine side benefit, not just a math patch:
+Grassland reading as the real food-rich "grain basket" biome (more crops,
+modest water) is a more distinct identity than "same water as Forest, just
+a bit less."
+
+Also caught and fixed in the same pass: two more real regressions from
+reshuffling the biome-classification bands (see below) — a
+macroGrid.test.ts desert-region-size check that briefly went to zero
+because Tundra's elevation gate was checked *before* Desert/Badlands'
+moisture bands and started stealing zones that should've stayed desert
+(fixed by checking Desert/Badlands first); and a Sanctuary-resource-estimate
+test whose seed happened to land the landmark on a Wetland zone whose
+estimate was already at the formula's own ceiling regardless of any bonus
+(fixed by picking a seed where the landmark lands somewhere with real
+headroom — Wetland's own `(0.04+0.28)*4=1.28>1` clamping to 1 with zero
+bonus at all is a pre-existing formula property, not something this pass
+introduced).
+
+### Three new biomes, each with a real structural generation signature
+
+Not just three more density-tuned entries — the explicit ask was "more
+unique zone generation that results in high quality looking zones," so each
+gets its own post-process structural pass, following the exact
+`isXDominant`-gated idiom `carveBadlandsChambers`/`carveMountainMassifs`
+already established (biome-blend-dominant gate, own derived rng sub-stream,
+runs after rivers, skips existing water, tapers at the real fuzzy
+cross-biome boundary instead of a hard edge):
+
+- **Savanna** — carved out of Grassland's own driest moisture sub-band
+  (`macroGrid.ts`'s new `SAVANNA_MOISTURE_THRESHOLD`, splitting the old
+  0.35-0.5 pure-Grassland band roughly in half). `carveSavannaClusters`
+  scatters real acacia-style tree/bush islands (a filled circular cluster,
+  high fill chance) over an otherwise bare `obstacleDensity: 0.02` ground —
+  the real savanna signature is scattered tree islands, not just "thinner
+  Grassland."
+- **Mangrove** — a coastal Wetland zone reclassifies to Mangrove
+  (`applyMangroveReclassification`, run right after
+  `applyBeachReclassification`, same "coastal strip isn't a moisture/
+  elevation threshold" reasoning that function already established for
+  Beach). `carveMangroveLattice` carves real braided water channels through
+  the mud/bush land using a domain-stretched noise field (elongated along a
+  randomly-rotated axis, so channels read as channels, not round ponds).
+- **Tundra** — elevation-gated just below Highland
+  (`TUNDRA_ELEVATION_THRESHOLD = 0.58`, checked AFTER Desert/Badlands'
+  moisture bands so it doesn't cannibalize them — see the regression above).
+  `carveTundraPermafrost` approximates real ice-wedge polygon cracks with a
+  Worley-style "distance to nearest of a few scattered points" field: tiles
+  where two cells' distances are nearly equal (the cell boundary) get a
+  sparse, broken boulder line.
+
+Verified live against the real dev server (a temporary `window.__debug`
+hook, removed before committing, generating a real `generateWorld` call with
+each biome forced dominant and drawing it through the actual `drawWorld`):
+Savanna showed real separated tree/bush clusters over open ground, Mangrove
+showed a real checkered/braided channel pattern plus dense mud terrain
+(`mud` already has its own real tile art), Tundra showed real sparse
+diagonal boulder-line chains over stone-textured ground. Also confirmed by
+direct `generateWorld` calls with each biome forced dominant: no crash
+across 5+ seeds each, sane non-degenerate terrain-kind distributions.
+
+### Real per-tile measurement caveat
+
+A whole-map water-fraction re-measurement after this pass (same methodology
+as the original grassland-water report) came back close to unchanged
+(~12% inland either way) — NOT because the fix didn't work (the per-tile
+`waterDensity` constant is directly and verifiably lower, confirmed via
+direct constant inspection and a real generated tile's own `fertility`/
+`groundType` readout), but because adding 3 more ambient-scattered biomes to
+the same `dominantBiome`-plus-8-extra-seeds mechanism dilutes any single
+biome's real-world share of a "dominant" test zone more than before —
+a measurement-dilution artifact of testing methodology, not a sign the
+change is ineffective. Flagged rather than presented as false precision.
+
+### Crops, species, and recoloring
+
+- **3 new crops** (`crops.ts`): Groundnut (Savanna, `droughtResistant`),
+  Mango (Mangrove/Jungle, same wet-tropical moisture band Rice already
+  calibrated), Mushroom (Tundra/Highland/Snow — Highland previously only had
+  Wheat/Potato, Snow had zero crops at all, `winterHardy`). Caught and fixed
+  a real test regression here too: crops.test.ts's "only Potato is
+  winterHardy/droughtResistant" encoded a narrow, now-stale invariant —
+  rewritten to assert the real, still-small set (`["mushroom","potato"]`/
+  `["groundnut","potato"]`) instead of "only Potato, forever."
+- **9 new species** (`species.ts`): Girafarig/Tauros (Savanna — Tauros
+  already has real drawn sprite art, `public/sprites/tauros_*.png`),
+  Corphish/Crawdaunt (Mangrove, tagged `isPredator` — real "attacks
+  anything" mainline flavor text), Wingull/Pelipper (Mangrove/Beach coastal
+  birds), Swinub/Piloswine (Tundra/Snow, real in-sim-reachable evolution at
+  level 33), Sneasel (Tundra/Snow, `isPredator` — real "vicious... steals
+  eggs" flavor text). Most have no dedicated sprite art yet — same accepted
+  letter-glyph fallback every other undrawn roster species already uses.
+- **Recoloring, not new art files** (direct ask: "rip more or reuse and
+  recolor existing ones... just use some recoloring techniques"):
+  `BIOME_TINT` (palette.ts) — a low-alpha ground-color wash over the shared
+  default floor texture, same idiom `GROUND_TYPE_TINT` already established
+  for soil types, drawn via `drawBiomeTint` (renderer.ts) wherever
+  `drawGroundTypeTint` already runs. `BIOME_FLORA_TINT` — a real recolor of
+  the actual tree/bush sprite art via `source-atop` compositing, but done on
+  a small per-variant OFFSCREEN canvas (`tintedSprite`, cached by the
+  sprite's own image URL) rather than directly on the live scene canvas —
+  `source-atop` composites against whatever's already painted underneath,
+  and the scene canvas already has opaque ground painted before the sprite,
+  which would have washed the whole tile square instead of just the
+  tree/bush silhouette. Savanna/Tundra also reuse real existing base
+  textures (`floor_desert`/`floor_stone`) instead of the generic
+  cave/dirt default, on top of their own tint.

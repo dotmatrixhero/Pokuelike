@@ -21,7 +21,23 @@ import type { Layer } from "./types.js";
  * replaces that need.
  */
 
-export const CROP_IDS = ["herbs", "oran", "pecha", "sitrus", "cheri", "wheat", "tomato", "corn", "rice", "apple", "potato", "pumpkin"] as const;
+export const CROP_IDS = [
+  "herbs",
+  "oran",
+  "pecha",
+  "sitrus",
+  "cheri",
+  "wheat",
+  "tomato",
+  "corn",
+  "rice",
+  "apple",
+  "potato",
+  "pumpkin",
+  "groundnut",
+  "mango",
+  "mushroom",
+] as const;
 export type CropId = (typeof CROP_IDS)[number];
 
 export type SeasonName = "spring" | "summer" | "autumn" | "winter";
@@ -225,6 +241,38 @@ export const FOOD_CROPS: Record<CropId, FoodCropDef> = {
     seasonWindow: AUTUMN_SECOND_HALF,
     nutritionMultiplier: 1.65,
     nativeLayer: "underground",
+  },
+  // Direct follow-up ask, alongside the new Savanna/Mangrove/Tundra biomes:
+  // "Add more crops types too for these places too." Same tier-ladder
+  // idiom as every crop above — real biome/moisture/season gates, no new
+  // mechanism.
+  groundnut: {
+    name: "Groundnut",
+    // A real dryland staple — Savanna's own low water density means most
+    // crops here would be unreachable; groundnut is the one that actually
+    // wants that, same "droughtResistant" idiom Potato already established.
+    eligibleBiomes: ["savanna"],
+    droughtResistant: true,
+    nutritionMultiplier: 1.3,
+  },
+  mango: {
+    name: "Mango",
+    // Mangrove/Jungle share the same wet-tropical moisture band Rice
+    // already calibrated against real sampled `effectiveWaterDensityAt`
+    // output (see Rice's own doc comment) — reused rather than re-derived.
+    eligibleBiomes: ["mangrove", "jungle"],
+    moistureRange: [0.1, 1],
+    sunLoving: true,
+    nutritionMultiplier: 1.35,
+  },
+  mushroom: {
+    name: "Mushroom",
+    // Real cold-climate forage — Tundra's own scrub/rock ground, plus
+    // Highland/Snow where nothing else currently grows at all (Highland
+    // only had Wheat/Potato before this; Snow had zero crops).
+    eligibleBiomes: ["tundra", "highland", "snow"],
+    winterHardy: true,
+    nutritionMultiplier: 1.25,
   },
 };
 

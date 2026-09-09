@@ -6736,3 +6736,38 @@ not something this pathfinding pass itself caused or is positioned to fix.
       itself, or auto-expanding the panel when a tree is opened. Not chosen
       unilaterally — the native scale was a deliberate call and reversing it
       is a design decision, not a bug fix.
+
+## Biome uniqueness pass — built, see DESIGN.md
+
+- [x] **Grassland waterDensity was higher than Forest's own** — direct
+      report: "I feel like there's too much water in like grassy plains type
+      environments. They don't feel distinct from coastal ones." Confirmed
+      real (0.08 vs Forest's 0.07), fixed by shifting some of the cut into
+      `foodDensity` instead of a flat `waterDensity` drop — a pure water cut
+      to 0.03 broke a real survival-margin test (macroGrid.ts's
+      `estimateZoneResourceIndex`/`RESOURCE_ESTIMATE_SCALE` explicitly
+      calibrated so Grassland stays comfortably above `overworld.ts`'s
+      `DEATH_HEALTH_THRESHOLD`). See DESIGN.md for the full numbers.
+- [x] **Three new biomes**: Savanna (dry open plains, carved out of
+      Grassland's own driest moisture sub-band), Mangrove (real coastal
+      marsh, carved out of Wetland's coastal-adjacent footprint), Tundra
+      (cold open steppe, elevation-gated just below Highland). Each gets its
+      own real structural generation pass (not just density-knob variation):
+      `carveSavannaClusters` (acacia-style tree/bush islands),
+      `carveMangroveLattice` (braided water channels), `carveTundraPermafrost`
+      (ice-wedge polygon crack lines) — worldgen.ts.
+- [x] **3 new crops**: Groundnut (Savanna, drought-resistant), Mango
+      (Mangrove/Jungle), Mushroom (Tundra/Highland/Snow, winter-hardy) —
+      crops.ts, same tier-ladder gates every other crop uses.
+- [x] **9 new species**: Girafarig/Tauros (Savanna), Corphish/Crawdaunt/
+      Wingull/Pelipper (Mangrove), Swinub/Piloswine/Sneasel (Tundra) —
+      species.ts, same "each in-sim-reachable evolution gets its own entry"
+      standard the desert/jungle/beach batch already set.
+- [x] **Real recoloring for biome uniqueness** — direct ask: "just use some
+      recoloring techniques." A `BIOME_TINT` ground wash (palette.ts,
+      renderer.ts's `drawBiomeTint`) and a `BIOME_FLORA_TINT` tree/bush
+      sprite recolor (`tintedSprite`, drawn on an isolated offscreen canvas
+      per sprite variant so `source-atop` only tints the sprite's own
+      silhouette, cached) — no new art files, real recolors of the existing
+      shared tile art. Savanna/Tundra also reuse `floor_desert`/`floor_stone`
+      as their base texture instead of the generic default.

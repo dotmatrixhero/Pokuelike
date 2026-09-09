@@ -949,4 +949,112 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Vulpix/Cubone above, just a different condition kind.
     biomes: ["highland", "badlands"],
   }),
+
+  // --- New species below: direct follow-up ask, alongside the new
+  // Savanna/Mangrove/Tundra biomes: "spawn more unique Pokemon species in
+  // these places to give em flavor." Real residents for all three, same
+  // "each evolution reachable purely by in-sim leveling gets its own
+  // curated entry" standard the desert/jungle/beach batch above set
+  // (checked against each dex entry's own `evolutions`, `conditions: {}`
+  // only). Most have no dedicated sprite art yet (public/sprites/) — same
+  // accepted letter-glyph fallback (`getSprite` -> null -> letter) every
+  // other undrawn roster species already uses, not a blocker.
+  girafarig: speciesFromDex("GIRAFARIG", {
+    spriteKey: "girafarig",
+    placeholderColor: "#f8c860",
+    homeLayer: "surface",
+    moves: ["tackle", "psybeam"],
+    activityPattern: "diurnal",
+    // A real open-plains grazer per mainline flavor text — no mainline
+    // evolution exists at all, so no "never evolves in-sim" caveat needed.
+    biomes: ["savanna", "grassland"],
+  }),
+  tauros: speciesFromDex("TAUROS", {
+    spriteKey: "tauros",
+    placeholderColor: "#c88840",
+    homeLayer: "surface",
+    moves: ["tackle", "body_slam"],
+    activityPattern: "diurnal",
+    // A real wild-plains bull — already has drawn sprite art
+    // (public/sprites/tauros_*.png), unlike most of this batch.
+    biomes: ["savanna", "grassland"],
+  }),
+  corphish: speciesFromDex("CORPHISH", {
+    spriteKey: "corphish",
+    placeholderColor: "#e05838",
+    homeLayer: "surface",
+    // Real Corphish level-1 moves are Harden/Bubble; Bubble isn't in this
+    // roster's curated move set, so Water Gun stands in for it — same
+    // off-type-reuse acceptance this file's own Onix/Dratini entries use.
+    moves: ["harden", "water_gun"],
+    // "An extremely aggressive Pokemon... will attack anything" per
+    // mainline flavor text — a real opportunistic predator, same standard
+    // Ekans/Arbok/Zubat/Golbat above were tagged under.
+    isPredator: true,
+    biomes: ["mangrove", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  crawdaunt: speciesFromDex("CRAWDAUNT", {
+    spriteKey: "crawdaunt",
+    placeholderColor: "#983020",
+    homeLayer: "surface",
+    moves: ["harden", "water_gun", "slash"],
+    // See corphish's own comment immediately above — same direct ask, same reasoning.
+    isPredator: true,
+    biomes: ["mangrove", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  wingull: speciesFromDex("WINGULL", {
+    spriteKey: "wingull",
+    placeholderColor: "#88c0e0",
+    homeLayer: "surface",
+    moves: ["tackle", "peck"],
+    activityPattern: "diurnal",
+    // A real coastal seabird — Mangrove/Beach both real coastline habitats.
+    biomes: ["mangrove", "beach"],
+  }),
+  pelipper: speciesFromDex("PELIPPER", {
+    spriteKey: "pelipper",
+    placeholderColor: "#6098c8",
+    homeLayer: "surface",
+    moves: ["tackle", "peck", "wing_attack"],
+    activityPattern: "diurnal",
+    biomes: ["mangrove", "beach"],
+  }),
+  swinub: speciesFromDex("SWINUB", {
+    spriteKey: "swinub",
+    placeholderColor: "#c8a888",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    // A real cold-scrub forager per mainline flavor text.
+    biomes: ["tundra", "snow"],
+  }),
+  piloswine: speciesFromDex("PILOSWINE", {
+    spriteKey: "piloswine",
+    placeholderColor: "#a88868",
+    homeLayer: "surface",
+    // Avalanche is Piloswine's real signature move, but this roster's
+    // curated move set has no top-level "avalanche" (only nested variants
+    // under other moves' own footing trees) — Ice Beam stands in instead,
+    // same off-type-reuse acceptance as Corphish/Sneasel above.
+    moves: ["tackle", "ice_beam"],
+    biomes: ["tundra", "snow"],
+    // Real further evolution (Mamoswine) needs an item (Icicle Spinner or
+    // move-known condition, not a plain level) — same "never evolves
+    // in-sim" limitation as Growlithe/Vulpix/Cubone/Golbat above.
+  }),
+  sneasel: speciesFromDex("SNEASEL", {
+    spriteKey: "sneasel",
+    placeholderColor: "#785088",
+    homeLayer: "surface",
+    // Scratch is Sneasel's real level-1 move; Ice Beam stands in for its
+    // real ice-type coverage (this roster has no curated Icy Wind/Faint
+    // Attack), same off-type-reuse acceptance as Corphish above.
+    moves: ["scratch", "ice_beam"],
+    // "Ruthlessly steals eggs... vicious temperament" per mainline flavor
+    // text — a real predator, same standard as Corphish/Crawdaunt above.
+    isPredator: true,
+    activityPattern: "nocturnal",
+    biomes: ["tundra", "snow"],
+  }),
 };

@@ -131,14 +131,20 @@ describe("FOOD_CROPS registry", () => {
     expect(FOOD_CROPS.potato.nutritionMultiplier).toBeLessThan(FOOD_CROPS.pumpkin.nutritionMultiplier);
   });
 
-  it("only Potato is winterHardy/droughtResistant", () => {
-    for (const id of CROP_IDS) {
-      if (id === "potato") continue;
-      expect(FOOD_CROPS[id].winterHardy).toBeFalsy();
-      expect(FOOD_CROPS[id].droughtResistant).toBeFalsy();
-    }
-    expect(FOOD_CROPS.potato.winterHardy).toBe(true);
-    expect(FOOD_CROPS.potato.droughtResistant).toBe(true);
+  it("winterHardy/droughtResistant stays a deliberately rare tier, not a default", () => {
+    // Direct follow-up ask alongside Savanna/Mangrove/Tundra: "add more
+    // crops types too for these places" — Groundnut (Savanna, drought) and
+    // Mushroom (Tundra, winter) are real, judged additions to this
+    // originally-Potato-only set, same tier-ladder standard every other
+    // crop gate follows. This test's job is making sure the flag stays a
+    // deliberate minority (most crops still have neither), not that
+    // Potato is the only one that will ever qualify.
+    const winterHardy = CROP_IDS.filter((id) => FOOD_CROPS[id].winterHardy);
+    const droughtResistant = CROP_IDS.filter((id) => FOOD_CROPS[id].droughtResistant);
+    expect(winterHardy.sort()).toEqual(["mushroom", "potato"]);
+    expect(droughtResistant.sort()).toEqual(["groundnut", "potato"]);
+    expect(winterHardy.length).toBeLessThan(CROP_IDS.length / 2);
+    expect(droughtResistant.length).toBeLessThan(CROP_IDS.length / 2);
   });
 
   it("WINTER_NON_HARDY_FOOD_CHANCE_MULTIPLIER is a real reduction, not a token one", () => {

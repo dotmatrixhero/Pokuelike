@@ -159,17 +159,48 @@ const WETLAND_MOISTURE_THRESHOLD = 0.65;
  * habitat from a temperate Forest, not just a green recolor of it.
  */
 const JUNGLE_MOISTURE_THRESHOLD = 0.58;
-/** Moisture at/above this (but below Jungle) reads as Forest; below it, Grassland. */
+/** Moisture at/above this (but below Jungle) reads as Forest; below it, Grassland (or, below `SAVANNA_MOISTURE_THRESHOLD`, Savanna). */
 const FOREST_MOISTURE_THRESHOLD = 0.5;
+/**
+ * Moisture below this (but at/above Badlands) reads as Savanna instead of
+ * Grassland — the driest slice of what used to be one flat Grassland band,
+ * carved out the same way Desert/Jungle already were. Direct follow-up ask,
+ * after fixing Grassland's own water density: "what other biomes could be
+ * better?" A real dry-open-plains habitat, distinct from both moister
+ * Grassland above this threshold and Badlands/Desert below it (which stay
+ * rocky/dune-structured, not open plains — see `isBadlandsDominant`).
+ * Splits the old 0.35-0.5 Grassland-only band roughly in half.
+ */
+const SAVANNA_MOISTURE_THRESHOLD = 0.42;
+/**
+ * Elevation at/above this (but below Highland) reads as Tundra — a cold,
+ * open, rocky plateau/steppe sitting just below Highland's own much taller
+ * mountain profile, the same "one biome caps another" relationship
+ * Highland/Snow already have. Checked before the moisture bands below (like
+ * Highland/Snow above it) so Tundra is a real elevation tier, not competing
+ * with Grassland/Forest/etc. for the same territory. Sim-original guess —
+ * comfortably below `HIGHLAND_ELEVATION_THRESHOLD` (0.72) so it reads as a
+ * genuine foothill/plateau band, not a sliver.
+ */
+const TUNDRA_ELEVATION_THRESHOLD = 0.58;
 
 function macroBiomeFor(elevation: number, moisture: number): string {
   if (elevation >= SNOW_ELEVATION_THRESHOLD) return "snow";
   if (elevation >= HIGHLAND_ELEVATION_THRESHOLD) return "highland";
+  // Desert/Badlands checked BEFORE Tundra's own elevation gate — a zone
+  // that's both cold (elevated) and arid reads as a cold desert/badlands
+  // (real rocky/dune structure already models that), not stolen into
+  // Tundra's open-plateau niche. Confirmed via a real regression: an
+  // earlier ordering with Tundra checked first measurably shrank Desert's
+  // own real macro-scale regions in several seeds (this file's own
+  // macroGrid.test.ts caught it).
   if (moisture < DESERT_MOISTURE_THRESHOLD) return "desert";
   if (moisture < BADLANDS_MOISTURE_THRESHOLD) return "badlands";
+  if (elevation >= TUNDRA_ELEVATION_THRESHOLD && moisture < FOREST_MOISTURE_THRESHOLD) return "tundra";
   if (moisture >= WETLAND_MOISTURE_THRESHOLD) return "wetland";
   if (moisture >= JUNGLE_MOISTURE_THRESHOLD) return "jungle";
   if (moisture >= FOREST_MOISTURE_THRESHOLD) return "forest";
+  if (moisture < SAVANNA_MOISTURE_THRESHOLD) return "savanna";
   return "grassland";
 }
 
@@ -207,6 +238,23 @@ function applyBeachReclassification(zones: readonly MacroZone[]): void {
   for (const zone of zones) {
     if (zone.isOcean || zone.coastEdges.length === 0) continue;
     if (zone.elevation <= beachCeiling) zone.biome = "beach";
+  }
+}
+
+/**
+ * A coastal Wetland zone reads as Mangrove instead — the same "coastal strip
+ * isn't expressible as a moisture/elevation threshold alone" reasoning
+ * `applyBeachReclassification` above already established, just for
+ * Wetland's own coastal-adjacent extreme rather than every biome's. Run
+ * AFTER beach reclassification so a coastal zone low enough to already read
+ * as Beach (dry sand, no standing water of its own) stays Beach rather than
+ * being re-claimed here — Mangrove is specifically "a real coastal marsh",
+ * not "any wet zone that happens to touch the ocean".
+ */
+function applyMangroveReclassification(zones: readonly MacroZone[]): void {
+  for (const zone of zones) {
+    if (zone.isOcean || zone.coastEdges.length === 0) continue;
+    if (zone.biome === "wetland") zone.biome = "mangrove";
   }
 }
 
@@ -407,6 +455,7 @@ export function generateMacroGrid(seed: number, rows: number, cols: number): Mac
     }
   }
   applyBeachReclassification(zones);
+  applyMangroveReclassification(zones);
 
   carveMacroRivers(grid, mulberry32(seed ^ 0x27220a95));
   // After rivers/lakes — Great Lake specifically wants to know `isLake`,
