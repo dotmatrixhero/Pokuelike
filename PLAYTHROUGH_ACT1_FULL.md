@@ -169,17 +169,63 @@ still nearby and settling — *"They haven't gone far. They're drinking
 again."* That's true, it's derived from real agent state, and it suggests
 patience without instructing.
 
-### 3. Nothing motivates leaving layer 1
+### 3. ~~Nothing motivates leaving layer 1~~ — I misread the pitch
 
-Layer 1 is safe, has water, food, fiber, wood and a herd. The pitch says the
-goal is to escape upward, but **nothing in the layer creates pressure to
-go.** Needs decay too slowly to push you, and there are no predators here by
-design.
+**Retracted.** Re-reading Act 1 as written, the motivation is stated twice
+and I'd flattened both:
 
-That's a structural gap, not a tuning one. Options worth considering: the
-partner wanting something only found higher; a seasonal change making the
-chamber worse; or simply that the way *down* closes behind you and up is the
-only direction left. Unresolved — flagging it.
+> "You start at the bottom of a 5 or 6 layer cave. Alone. **Your first goal
+> is to escape.**"
+
+> "**Your first goal is to befriend a Pokémon to help you.**"
+
+Two "first goals" is not sloppiness, it's the structure: **escape is the
+frame, and the partner is the means.** You befriend something *to help you*
+get out. Layer 1 being safe is therefore correct — it's the preparation
+ground, not a place you need pressure to leave.
+
+So the real answer to "why leave" is: leaving is the whole point, and you
+stayed only long enough to find someone to leave *with*.
+
+What remains open is narrower and worth keeping: **the player needs to know
+early that up is the only way out.** That's one line of environmental
+framing — the way down is flooded, collapsed, or simply behind you — not a
+motivation system.
+
+### 3b. The thing I actually missed: this is a five-layer structure
+
+I prototyped the bottom layer as if it were the whole act. The pitch:
+
+> "These layers are bigger than our zones, **probably 2 or 3 of em
+> together**."
+
+So Act 1 is **5–6 layers × 2–3 zones each = roughly 10–18 zones**, and layer
+1 is deliberately the only safe one. The difficulty curve *is* the stack:
+
+| | |
+|---|---|
+| **Layer 1** (bottom, start) | Peaceful, prey only, herds, water, sunlight, plants. Earn trust here |
+| **Layers 2–5** | "More prey to recruit, **predators who will attack you directly**" |
+| **Exit** | "Ultimately you can get a fire, water or electric stone. Then you emerge" |
+
+Three consequences for everything designed so far:
+
+- **The partner is a survival tool, not a collectible.** Layers 2+ are
+  balanced around having one. That justifies spending 200 turns on the
+  bonding arc in layer 1 — it isn't a slow opening, it's the equipment
+  phase.
+- **The club stops being a trap.** In layer 1 it's counterproductive (no
+  predators, high threat, herds you want). From layer 2 it's the thing you
+  wish you'd made. **The same item flips value across the boundary**, which
+  is a much better arc than "weapons are bad."
+- **Predators are befriendable too** — *"harder to befriend them, though
+  still possible if you can figure out a way to do that."* That's a puzzle
+  the trust design hasn't touched, and "figure out a way" implies the
+  species-specific bonding paths `DESIGN.md` already specifies.
+
+Also missed: **the evolution stone is the exit condition**, and there are
+three of them. Which stone you leave with plausibly shapes what your partner
+becomes — that's a real branch sitting in one line of the pitch.
 
 ### 4. The club is a trap, and that's correct
 
