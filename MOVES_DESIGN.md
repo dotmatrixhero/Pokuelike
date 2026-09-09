@@ -3128,3 +3128,151 @@ Note the shape of the poison/freeze rows: three of the four poison sources
 and the only freeze source are **bare moves with no tree**. The status
 variety is already in the roster — it's sitting on exactly the moves that
 have nothing to spec into.
+
+## Round six: trees for the bare 18, starting with Bug and the status moves
+
+Direct steer: "we want every move to have a tree eventually... Don't reduce
+number of nodes. We add to every move. We really wanted to explore
+utility/different ways it affects the environment." Priority: "Bug I think.
+And more status ones that are interesting in other ways not just pure
+combat." And the seed idea this whole round is built around:
+
+> "Ex what if harden also increased weight so it strengthens weighted
+> version of tackle?"
+
+### The structural idea: a utility move's tree that buffs a *different* move
+
+That Harden question is not a node idea, it's a new **shape** for a tree,
+and the roster has nothing like it yet. Every node in every shipped tree
+changes the move it hangs off. Harden making its holder *heavier* changes
+Tackle's `weighted_charge`, because `weightScaling` reads the attacker's
+own weight, not the move's.
+
+This is the answer to "different ways it affects the environment" applied
+inward: a utility move's payoff doesn't have to be a buff you read on a
+meter, it can be a **precondition that some other move in the same
+species' kit was already waiting for**. It also fixes the floor-group
+problem structurally rather than by volume — a Metapod with Tackle and
+Harden currently has two unrelated trees; under this shape it has one
+build.
+
+Mechanically it is nearly free: `predation.ts` already computes
+`move.weightScaling.factor * attacker.maxHp`. A new `PassiveKind`
+(`"bulk"`) added into that one expression is the entire engine change.
+
+Three more pairs the roster already supports, same shape:
+
+| Utility move node grants… | …which some other move was already reading |
+|---|---|
+| Harden → `bulk` | Tackle's *Weighted Charge*, Body Slam's whole weight fantasy |
+| Growth/Grassy Terrain → real fertility | Leech Seed's drain, Solar Beam's charge (both Grass moves on the same species) |
+| Agility → terrain-speed immunity | every cooldown-gated move, by acting more often |
+
+### Harden — full fantasy-first treatment (the flagship)
+
+**Fantasy.** Harden is not a shield being raised. It is a body clenching
+until it is a different material. A Caterpie going rigid on a twig until
+it reads as bark; a Kakuna that is, functionally, furniture. It is the
+move of things that cannot run and cannot fight, and that survive by not
+being worth the effort. Nothing about it is dangerous. What it changes is
+whether anything bothers.
+
+Five species: metapod, kakuna, krabby, kingler, shellder — the two most
+famous of which are pupae whose entire canonical characterization is
+"does nothing, very well."
+
+- **Boldness — Density.** Hardening makes you heavier and more inert.
+  Grants `bulk` (feeding every `weightScaling` move) and, deeper,
+  `immovable` (already shipped, currently used by 7 nodes). Keystone
+  **Chrysalis**: an enormous `damageReduction` window that costs real
+  `lockTicks` — you genuinely cannot act while it holds. A voluntary
+  helplessness window is a mechanic the roster does not have; the closest
+  thing, `chargeAttack`, spends its lock buying an attack, not survival.
+- **Sociability — Not Worth Eating.** A hardened thing stops reading as
+  prey. This is the branch that finally consumes **the detection-radius
+  gap** this doc flagged and never used. Keystone **Bark-Still**: several
+  hardened herd-mates near each other read as scenery together, and a
+  predator's hunt-target pick skips the cluster for a different herd
+  entirely. Note the shape — like `rallyCall`, the payoff is that *other
+  agents independently decide something different*, which this doc's own
+  principles call the richest kind of payoff available.
+- **Aggression — the shell as the weapon.** `thorns` (shipped, 14 nodes,
+  never on a status move). Keystone **Brittle Edge**: the casing cracks
+  when struck — reflects damage *and* leaves real debris terrain on the
+  attacker's tile. A defensive move that terraforms by being hit.
+
+The move's own flaw — it does nothing to anyone — is the branch material,
+exactly as this doc's own "a move's flaw is a branch's best payoff" rule
+predicts.
+
+### Twineedle — Beedrill's only signature (1 learner, 0 nodes today)
+
+**Fantasy.** Two strikes, one behind the other, from a thing that is
+mostly needles. A Beedrill does not grapple; it commutes. It arrives,
+stabs twice, and is gone before you have turned around. It is a poison
+delivery system with wings.
+
+- **Aggression** — the flurry: `hits` from 2 up, each stab rolling poison
+  independently, so the branch's real payoff is status *reliability*, not
+  raw damage.
+- **Boldness** — the drive-by: `forcedMovement` retreating the *user*
+  after the hit, `situationalBonus: "flanking"`. The branch is about never
+  being where the counterattack lands.
+- **Sociability** — the hive: `rallyCall` on the poisoned target plus
+  `statusSpreads`. Beedrill are never one Beedrill.
+
+### Poison Sting — status-first, and the one that leaves combat entirely
+
+**Fantasy.** A wound too small to matter, and then it matters. The sting
+is not the point; the sting is delivery. Five learners (ekans, arbok,
+weedle, zubat, golbat) currently share nothing but Tackle.
+
+Answering the "status-first or damage tree with a status node" question
+per this move specifically: **status-first**, because for Poison Sting the
+venom *is* the fantasy — where Ice Beam's is the beam.
+
+The branch worth pitching hardest is the non-combat one: **venom
+interferes with needs**. A poisoned agent recovers hunger and thirst more
+slowly — so the payoff of poisoning something is not that it takes damage,
+it is that it *starves*. That is a real, legible, sim-level consequence a
+watcher can follow in the chronicle, and it makes a predator with Poison
+Sting a genuinely different kind of predator: one that wounds and waits.
+Needs an engine hook in `needs.ts`, not a `MoveSpec` delta field.
+
+### Growth / Grassy Terrain — a pure environment tree, no combat branch
+
+Both already do real work today (`fertilityBoost`, feeding flora.ts).
+Neither has a node. This is the most literally environmental tree
+available and it should not have a damage branch at all — a first for
+this roster.
+
+Directions: wider radius, richer soil, faster flora regrowth, permanently
+fertile ground, and a keystone that **creates a bush where there was
+none** — an Oddish that gardens its own zone into a food supply. Every one
+of those is visible on the map at a glance, which is the standing
+preference for diegetic mechanics over hidden multipliers.
+
+### Agility — speed as a migration mechanic (8 learners, 0 nodes)
+
+The interesting branch is not combat: a passive that shrugs off
+`terrainSpeedMultiplier` penalties. A herd that specced Agility crosses
+mud, water and rubble at full speed — which means it **emigrates faster
+and reaches a new zone sooner**. That is a tree node with a visible effect
+on the world map at the herd level, not the fight level.
+
+### New primitives this round would need
+
+Honest list, same discipline as the checklist above — none of these exist:
+
+| Primitive | Unblocks | Est. |
+|---|---|---|
+| `PassiveKind: "bulk"` folded into `weightScaling`'s expression | The whole Harden→Tackle idea | One line + a type |
+| Detection-radius passive | Harden's Sociability branch; the gap this doc already flagged | Small; the machinery exists |
+| Needs-recovery interference from a status | Poison Sting's Sociability/utility branch | `needs.ts` hook, medium |
+| Terrain-speed-immunity passive | Agility's migration branch | Small; `terrainSpeedMultiplier` exists |
+| Move-created flora/bush | Growth's keystone | Medium; flora.ts has germination already |
+| Debris/rubble terrain kind | Harden's *Brittle Edge*; also Earthquake's long-pending Boldness branch | Medium; a new `TerrainKind` |
+
+The rubble one is worth noting: Earthquake's Boldness redesign has been
+blocked on exactly this terrain kind since round three. Building it for
+Harden unblocks both.
