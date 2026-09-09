@@ -194,8 +194,84 @@ The concrete asks, so the two workstreams meet:
 3. **Keep effects declarative on `MoveSpec`.** If an item can point at a
    move id and get its effect, tools cost nearly nothing to add. If effects
    are hardcoded per move in `predation.ts`, every tool is bespoke work.
-4. **Tag which moves are tool-reachable.** Not everything should be —
-   Flamethrower shouldn't have a hand-held equivalent.
+4. **Tag which moves are tool-reachable**, using the rule in "Which moves
+   are tool-reachable" below: can a human reproduce the effect with
+   materials and technique, or does it require being the creature? Fire and
+   thrown stone yes; Ice Beam and Dragon Rage no. The unreachable set is
+   load-bearing — it's what the partner is for.
+
+---
+
+## Which moves are tool-reachable
+
+Corrected from an earlier line in this doc that said Flamethrower shouldn't
+have a hand-held equivalent:
+
+> "Flamethrower could be. Dragon rage or ice beam, probably not."
+
+Right — and the difference between those three is a rule, not a judgement
+call. The question isn't how *strong* a move is. It's:
+
+> **Can a human reproduce the effect with materials and technique, or does
+> it require being the creature?**
+
+- **Flamethrower** — directed fire. People have built fire-projecting things
+  for millennia: burning pitch, a bellows, resin through a tube. Squarely
+  inside `HUMANS_DESIGN.md`'s pre-industrial ladder.
+- **Ice Beam** — projecting cold. There is no arrangement of wood, stone,
+  fibre and hide that fires cold at something. Cold isn't a substance you
+  can throw.
+- **Dragon Rage** — not a material phenomenon at all. It's an expression of
+  what the creature *is*.
+
+### The gradient
+
+Not binary — most of the interesting cases are the middle row.
+
+| | Examples | Why |
+|---|---|---|
+| **Reachable** | Cut, Scratch, Tackle, Ember, Rock Throw, Dig, Smokescreen, String Shot, Flash, Poison Sting | Blade, club, fire, thrown stone, spade, smoke, net, torch, harvested venom |
+| **Reachable as a weak slice** | **Flamethrower**, Water Gun, Vine Whip, Bulldoze | Real devices exist, but crude: short range, consumable fuel, slow, and dangerous to the user |
+| **Not reachable** | Ice Beam, Dragon Rage, Thunderbolt, Psychic, Shadow Ball, Moonblast | Requires an organ, a nature, or a force outside the tech ladder |
+
+**A human Flamethrower should be genuinely dangerous to hold.** Short range,
+limited fuel, and it ignites terrain — including the tile you're standing on,
+via the `fire.ts` spread that already exists. That's the pillar-1 cost the
+slice rule asks for, and it's the difference between a fire-lance and a
+Charmeleon: the Charmeleon is never in danger from its own breath.
+
+### Roughly by type
+
+Types are a decent proxy, though the line doesn't follow them exactly:
+
+- **Mostly reachable** — Normal, Rock, Ground, Fighting, Poison, Bug
+  (technique, stone, earth, venom, cordage and nets)
+- **Partially** — Fire, Water, Grass, Dark (fire yes; moving an ocean no;
+  a whip yes, growing a vine no; a dirty trick or a shout yes)
+- **Not reachable** — Electric, Ice, Psychic, Ghost, Dragon, Fairy
+
+### The payoff, and it's the best part
+
+**The moves a human can't reach are exactly why you need a partner.**
+
+You can make fire, throw stones, cut, dig, snare, poison and hide. You will
+never call lightning, freeze a lake, or do whatever a Dragon does. Those
+aren't gated behind a level or a quest — they're gated behind *not being that
+thing*, permanently.
+
+That is pillar 3 — the rugged individual is a myth — expressed through the
+move list itself, with no dialogue and no scripting. The partner's
+irreplaceable contribution is defined by the shape of what tools can't do.
+And it means the unreachable list should stay genuinely unreachable: every
+move that gets a hand-held equivalent is one less reason to need somebody.
+
+### Act 2 raises the ceiling, slightly
+
+The tech ladder moves: a smithing settlement means metal, and metal means a
+bow, better edges, maybe a real fire-lance. So a few moves cross from
+"weak slice" to "solid slice" — but **nothing crosses out of the unreachable
+column**, because that column is defined by physics and nature rather than by
+craftsmanship. The pre-industrial ceiling is deliberate.
 
 ## Open questions
 
