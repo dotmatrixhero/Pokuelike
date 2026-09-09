@@ -20,6 +20,13 @@ import { PROPOSED_TREES, type ProposedMove, type ProposedNode } from "./proposed
 const SHIPPED = { anyOf: 9, forks: 6, bridges: 3 };
 
 function problems(move: ProposedMove): string[] {
+  // With every node at 1 point, a notable is no longer marked by cost. What
+  // actually MADE a node a notable is that routes converge on it — so that is
+  // the definition now. A capstone is terminal. Direct: "We can make every
+  // node cost 1, just make it always require 1 skill point."
+  const identityOf = (all: ProposedNode[]) => (n: ProposedNode) =>
+    (n.prerequisitesAnyOf ?? []).length >= 2 ||
+    !all.some((o) => (o.prerequisites ?? []).includes(n.id) || (o.prerequisitesAnyOf ?? []).some((x) => x.includes(n.id)));
   const t = move.tree;
   const nodes = Object.values(t);
   const out: string[] = [];
@@ -52,7 +59,8 @@ function problems(move: ProposedMove): string[] {
   // out, the cost of walking both being what makes picking one a decision).
   // A branch with neither is a corridor.
   const laned = (branch: string) => {
-    const notables = nodes.filter((n) => n.leaning === branch && n.cost >= 2 && !bridgeIds.has(n.id));
+    const inBranch = nodes.filter((n) => n.leaning === branch && !bridgeIds.has(n.id));
+    const notables = inBranch.filter(identityOf(inBranch));
     // Two notables neither of which is an ancestor of the other = parallel lanes.
     const ancestors = (id: string, seen = new Set<string>()): Set<string> => {
       if (seen.has(id)) return seen;
@@ -77,7 +85,7 @@ function problems(move: ProposedMove): string[] {
     if (!mid) { out.push(`${cross.id}: crosslink has no bridge filler — spur, not bridge`); continue; }
     const notable = nodes.find((n) => (n.prerequisites ?? []).length === 1 && n.prerequisites![0] === mid.id);
     if (!notable) { out.push(`${cross.id}: bridge stops at ${mid.id} with no notable`); continue; }
-    if (notable.cost < 2) out.push(`${notable.id}: bridge notable should be cost 2, is ${notable.cost}`);
+
 
     const shortcuts = nodes.filter((n) => (n.prerequisitesAnyOf ?? []).some((set) => set.includes(notable.id)));
     const leanings = new Set(shortcuts.map((n) => n.leaning));
@@ -130,7 +138,10 @@ function problems(move: ProposedMove): string[] {
     ...(n.grantsPassives ?? []).map((g) => `p:${g.kind}`),
   ])].filter((k) => !BACKGROUND.has(k));
   for (const branch of ["aggression", "boldness", "sociability"] as const) {
-    const identity = nodes.filter((n) => n.leaning === branch && !bridgeIds.has(n.id) && n.cost >= 2);
+    const inBranch = nodes.filter((n) => n.leaning === branch && !bridgeIds.has(n.id));
+    const identity = inBranch.filter((n) =>
+      (n.prerequisitesAnyOf ?? []).length >= 2 ||
+      !inBranch.some((o) => (o.prerequisites ?? []).includes(n.id) || (o.prerequisitesAnyOf ?? []).some((x) => x.includes(n.id))));
     if (identity.length < 3) continue;
     const counts = new Map<string, number>();
     for (const n of identity) for (const l of signature(n)) counts.set(l, (counts.get(l) ?? 0) + 1);
@@ -186,7 +197,7 @@ function problems(move: ProposedMove): string[] {
   const spenders = nodes.filter((n) => (n.delta as any)?.ppCost);
   const sellers = nodes.filter((n) => (n.delta as any)?.maxPPBonus);
   for (const n of spenders) {
-    if (n.cost < 2) out.push(`${n.id}: ppCost on a filler node — a PP cost is a build decision, put it on an identity node`);
+    if (!identityOf(nodes)(n)) out.push(`${n.id}: ppCost on a plain filler node — a PP cost is a build decision, put it on a notable or capstone`);
   }
   if (spenders.length && !sellers.length) {
     out.push(`spends PP (${spenders.map((n) => n.id).join(", ")}) but no node grants maxPPBonus — that is a tax, not an economy`);
@@ -252,7 +263,11 @@ function problems(move: ProposedMove): string[] {
   for (const branch of ["aggression", "boldness", "sociability"] as const) {
     const bn = nodes.filter((n) => n.leaning === branch && !bridgeIds.has(n.id));
     if (!bn.length) continue;
-    const identity = bn.filter((n) => n.cost >= 2);
+    // Every node costs 1 point now ("just make it always require 1 skill
+    // point"), so identity can no longer be read off `cost`. A node is an
+    // identity node if it is a routing target (something reaches it by an
+    // alternate route) or terminal — which is what notable/capstone MEANT.
+    const identity = bn.filter(identityOf(bn));
     if (bn.length < 12) out.push(`${branch} branch: ${bn.length} nodes — v4 wants 12 (opener, two 4-node lanes, deep notable, filler, capstone). Short of that is an unexplored fantasy, not a small move.`);
     if (identity.length < 4) {
       out.push(`${branch} branch: ${identity.length} identity nodes — v4 wants 4 (two lane notables, a deep notable, a capstone)`);
@@ -272,6 +287,38 @@ function problems(move: ProposedMove): string[] {
         const direct = (cap.prerequisites ?? []).includes(deep.id) || (cap.prerequisitesAnyOf ?? []).some((s) => s.includes(deep.id));
         if (direct) out.push(`${branch} branch: capstone ${cap.id} hangs straight off the deep notable — v4 wants one filler between them`);
       }
+    }
+  }
+
+  // "I think we probably don't want you to be able to capture all outer nodes
+  // and capstone with just a single connected line, but none of the early
+  // nodes for that branch" — a regression guard. The cheapest legal route to
+  // a capstone must be spent overwhelmingly inside its own branch, so no
+  // build can snake in through bridges and skip a branch's own early nodes.
+  const cheapest = (id: string, memo = new Map<string, Set<string>>()): Set<string> => {
+    if (memo.has(id)) return memo.get(id)!;
+    memo.set(id, new Set([id]));
+    const node = t[id];
+    const need = new Set([id]);
+    for (const pre of node?.prerequisites ?? []) for (const x of cheapest(pre, memo)) need.add(x);
+    const sets = node?.prerequisitesAnyOf ?? [];
+    if (sets.length) {
+      let best: Set<string> | null = null;
+      for (const set of sets) {
+        const acc = new Set<string>();
+        for (const pre of set) for (const x of cheapest(pre, memo)) acc.add(x);
+        if (!best || acc.size < best.size) best = acc;
+      }
+      for (const x of best!) need.add(x);
+    }
+    memo.set(id, need);
+    return need;
+  };
+  for (const cap of nodes.filter((n) => !nodes.some((o) => (o.prerequisites ?? []).includes(n.id) || (o.prerequisitesAnyOf ?? []).some((x) => x.includes(n.id))))) {
+    const path = cheapest(cap.id);
+    const own = [...path].filter((x) => t[x]?.leaning === cap.leaning).length;
+    if (own / path.size < 0.75) {
+      out.push(`capstone ${cap.id}: cheapest route is ${path.size} points but only ${own} are in its own branch — a build could snake in and skip the branch's early nodes`);
     }
   }
 

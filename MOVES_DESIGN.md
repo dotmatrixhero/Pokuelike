@@ -4023,3 +4023,49 @@ whether I felt like writing more nodes.
 `check-proposed-trees.ts` therefore enforces the **shape** — two lanes, a
 notable in each, a deep convergence notable, a filler, a capstone, three
 bridges, nine anyOf — and says nothing about how many nodes fill it.
+
+### v4 addendum: every node costs 1, and the snake concern measured
+
+> "We can make every node cost 1, just make it always require 1 skill point
+> as long as you're connecting it to an existing node 'one layer' below it.
+> I think we probably don't want you to be able to capture all outer nodes
+> and capstone with just a single connected line, but none of the early
+> nodes for that branch? Idk. thoughts?"
+
+**Uniform cost — done.** 87 cost-2 nodes flattened. Depth is now the only
+price, which is the Path-of-Exile reading and is more legible than a second
+number: a notable is expensive *because it is far away*, not because it says
+2 on it.
+
+It forced a real definition change in the checker, and a better one. Notables
+were previously identified by `cost >= 2` — a label. Under uniform cost the
+question becomes structural: **a notable is a node that routes converge on**
+(two or more `prerequisitesAnyOf` entries), and a capstone is terminal. That
+is what "notable" always MEANT; cost was standing in for it.
+
+**The snake concern: measured, and it is already a non-problem.** Cheapest
+legal route to each capstone, across all five drafts:
+
+| tree | capstone | points | in its own branch | borrowed |
+|---|---|---|---|---|
+| twineedle | Empty the Sacs | 8 | 8 | **0** |
+| twineedle | Never There | 8 | 8 | **0** |
+| twineedle | The Swarm Decides | 8 | 8 | **0** |
+| harden | all three | 9 | 9 | **0** |
+| poison_sting / growth / agility | all three | 9 | 9 | **0** |
+
+**Zero points borrowed from another branch, on any capstone in any tree.**
+The reason is arithmetic rather than luck: a bridge costs two openers plus
+three bridge nodes (5 points) to save three points of lane filler, so
+snaking is *more* expensive than walking. Bridges are shortcuts to a lane
+notable for a build already invested in two branches — never a back door to
+a capstone.
+
+Encoded as a regression guard anyway, since trees will keep changing: a
+capstone's cheapest route must be ≥75% inside its own branch.
+
+**And the point economy lands somewhere satisfying by accident.** A full v4
+tree is 45 nodes = 45 points. Observed agent levels: p50 25, p90 34, **max
+46**. So a maximum-level agent can just about complete exactly one tree, a
+median agent affords three capstones (24 points) *or* one branch walked
+completely with both lanes — a real build decision, not a formality.
