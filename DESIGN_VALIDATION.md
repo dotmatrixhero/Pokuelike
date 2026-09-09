@@ -142,6 +142,42 @@ untouched** — its 29 nodes were an unexplored fantasy, not a small move.
 The guard against padding to 45 is not a lower count; it is the flavour,
 repetition and pure-downside rules above.
 
+## Passive ceilings (per move)
+
+Direct ask: *"we should maybe try to aim to cap at 20% dmg reduction max,
+10% regen per move. Tbh up to 50% thorns is fine, it can be a case where it
+hits back quite hard."*
+
+| Passive | Per-move cap | Why this one is different |
+|---|---|---|
+| `damageReduction` | 20% | Flat multiplicative mitigation, no engine cap at all |
+| healing (`regen` + `healAura` + `regenFlat`/43) | 10%/tick | One budget across three kinds, because `status.ts:422` folds them into one share before `softCapHealShare` bends it |
+| `thorns` | 50% | Deliberately loose — hitting back hard is a legitimate build |
+
+The healing budget converts `regenFlat` at a reference **maxHp of 43**: the
+measured median over all species x levels 5/15/30 (level-5 median 21,
+level-15 43, level-30 76). The overall median rather than the level-30 one
+is the conservative choice, since a deeply-invested agent is usually high
+level, where the same flat regen is worth about half as much share.
+
+**A per-move cap does not bound a species.** `grantPassive` does
+`agent.passives[kind] += value` (`status.ts:342`) with no cap, and an agent
+spends points across the trees of *every* move it knows. Four capped moves
+still stack to 80% damage reduction. `passive-exposure.ts` is the tool that
+measures that; this rule only stops any single tree from being the whole
+problem by itself.
+
+Findings on first run over the shipped roster:
+
+| Move | Reading | Cap |
+|---|---|---|
+| dig | 29% damage reduction, 28.4%/tick healing | 20% / 10% |
+| leech_seed | 23.9%/tick healing | 10% |
+| solar_beam | 20.8%/tick healing | 10% |
+
+All three healing overshoots are driven by `regenFlat`, which the earlier
+per-move table missed because it summed only the fractional kinds.
+
 ## What is NOT checked, deliberately
 
 - **Whether a fantasy is any good.** No script can tell you a branch is
@@ -150,7 +186,6 @@ repetition and pure-downside rules above.
   to build.
 - **Balance.** Numbers are a human decision here; see
   `CLAUDE.md`'s standing rule about never unilaterally retuning them.
-- **Shipped trees.** The checker only reads `proposed-trees.ts` today.
-  Pointing it at `MOVES` is the obvious next step and would immediately
-  report real findings — several shipped trees sit at 6 `anyOf` against the
-  standard of 9.
+- **Cross-move passive stacking.** Every rule here is per-tree. Species-level
+  totals are `passive-exposure.ts`'s job, and nothing fails a build on them
+  yet.
