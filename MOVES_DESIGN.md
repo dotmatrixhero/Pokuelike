@@ -4970,3 +4970,104 @@ with no tree applied gives the same zeros, so this is pre-existing scenario
 population state, not something this pass caused. It is the same finding Rock
 Slide's conversion recorded for its lone Onix, and it is a population problem,
 not a tree problem.
+
+### Scratch converted to v4 (Shipped) — "the wound outlives the swipe"
+
+Fourth structural conversion, and the first one that had to be designed
+*against* another tree rather than in isolation: Scratch and Tackle are both
+Normal-typed melee openers on overlapping species, so the brief was that
+Scratch has to stand on its own claws.
+
+**The fantasy, written before a node was touched:**
+
+> Scratch is four claws and no technique. There is no wind-up and nothing to
+> see coming — the paw is already moving. What separates a rake from a blow
+> is that a blow is finished the moment it lands and a rake is not: it opens
+> the skin and leaves the wound to do the rest of the work, hours later,
+> somewhere else. Claws are filthy by design, and whatever was under them
+> yesterday goes in today. And claws were tools long before they were
+> weapons — the same four hooks that open a belly hook into bark, into a
+> fleeing leg, into the dirt of a den, and score a line across a tree that
+> every animal in the valley can read without a single fight happening.
+
+The Tackle separation is stated in the source as a rule, not a vibe: Tackle
+is **mass arriving and it is over when it stops**; Scratch is **an edge
+opening something, and it leaves things behind** — a septic wound, a
+shredded bush, a churned furrow, a claw mark on a tree. `weightScaling` and
+`chargeAttack` are therefore deliberately absent from this tree. A claw has
+no wind-up and does not care what it weighs.
+
+**Lanes differ in kind, not degree:**
+
+| branch | lane A | lane B | different how |
+|---|---|---|---|
+| Aggression — *Nothing Stays Closed* | **Filth** (statusChance → statusSpreads → jam) | **The Seam** (defensePenetration + resistanceBreaker) | attrition vs. precision |
+| Boldness — *The Hook* | **Dug In** (damageReduction, `lockTicks` commitment, thorns) | **Where the Fight Happens** (the lunge, and the fork to disengage or dig in) | holding a tile vs. choosing one |
+| Sociability — *The Mark* | **The Call** (`rallyCall` — a raked flank is a name shouted) | **The Boundary** (`nonTerritorial` — a scored tree is a fight that never starts) | directing attention vs. removing the reason to fight |
+
+**The three payoffs worth naming.** *Churned Ground* fills the defender's
+tile with real `"mud"` (0.5x `terrainSpeedMultiplier`) and *Purchase*, the
+Boldness capstone, then **consumes mud its own tree created** for a 2x hit —
+the only node in the roster that eats terrain it made itself, and the cost
+is legible because standing in mud halves your own speed. *No Cover Left*
+uses `terrainBurn` to shred the bush a target ducked into, permanently
+stripping the concealment the branch next door is built on. *Never Your Own*
+is the tree's single `shape` setter: a point move that learns a three-tile
+arc (verified against `resolveShape`: 3 tiles, control = 1) and still never
+cuts a herd-mate — the roster's other three `excludesAllies` users were all
+AoE moves already.
+
+**Rejected, with reasons — unreachable content is a bug.** `drainNeeds`
+would have been a perfect "a raked animal cannot feed" capstone and is
+**dead on this move**: `utilityMoves.ts`'s `maybeUseUtilityMove` is the only
+reader and it needs `utilityMove`, which an attack move cannot carry. A
+fourth `situationalBonus` condition (*Sandstorm Claws*' `night`) was dropped
+because four co-takeable setters of one OVERWRITE field is exactly the
+"if you got both, would it just do nothing?" bug, and `night` was
+Sandshrew-specific on a move eleven species share. `situationalBonus:
+{ condition: "rallyMarked" }` was the first choice for the Sociability
+capstone and was cut for the same overwrite reason — it would have been
+co-takeable with *Frenzied Burrow*'s `flanking` with no ancestor relation
+between them.
+
+**Passives went DOWN, measured.** `passive-exposure.ts`, before → after:
+
+| | before | after |
+|---|---|---|
+| roster worst-case healing (sandshrew, sandslash) | 16.6%/tick | **13.6%/tick** |
+| charmeleon healing | 12.5%/tick | **9.5%/tick** |
+| charmeleon `damageReductionFlat` | 2.00 | **1.00** |
+| thorns / damageReduction | unchanged | unchanged |
+
+Two changes did that. *Communal Foraging* traded a flat `regen` passive for
+`gatherBurst` — the node's own name finally meaning what it says, a visible
+burst of food on the map instead of a hidden meter, and it resolved the
+`2/3 identity nodes are "p:regen"` principle-17 failure at the same time.
+And *Guarded Den* stopped being a second `damageReductionFlat` duplicating
+*Colony Guard*'s and became a `positionSwap` — a claw hooked into an
+intruder to swing it out of the den mouth, which is what the node was
+always describing.
+
+**Numbers, roster as control:**
+
+| | before | after | roster median |
+|---|---|---|---|
+| checker problems | **12** | **0** | — |
+| nodes | 33 | 45 | 39 |
+| distinct levers | 19 | **34** | 23 |
+| colour-pie flavours | 7 | **13** | 9 |
+| tempo | 1.00x (cap 2.00) | **2.00x** | 2.00x |
+| power | 2.25x | 2.42x | 1.96x |
+| cheapest capstone | 11 pts | 10 pts | 11 pts |
+
+**Reach, live, with a control — and an honest limit.** 6 seeds x 8,000
+ticks: 14 agents knew Scratch, 10 invested, and **17 of 45 nodes were
+actually bought** (before: 21 of 33). No lane notable, deep notable or
+capstone was reached in that run. That is a v4-wide property rather than a
+Scratch defect — in the same run `rock_slide` reached 9/45, `body_slam`
+9/45, `earthquake` and `hydro_pump` 0/45, so Scratch is the best-reached
+45-node tree on the board — but it is worth writing down plainly: the
+deeper trees are still outrunning what an 8,000-tick population levels into.
+Every capstone and every bridge shortcut *is* legal and reachable, proved by
+walking all six routes through the real `applyMoveTree` (which throws on an
+illegal walk) and by proving that harness rejects an illegal walk first.

@@ -294,19 +294,35 @@ describe("Scratch tree: tree-earned status", () => {
     expect(respec.statusKind).toBe("poison");
   });
 
-  it("Toxic Spread keystone is reachable and sets statusSpreads", () => {
+  // v4: Toxic Spread is now Aggression's lane-A notable (the "filth" lane)
+  // rather than the branch's terminal keystone, so the route is shorter. The
+  // assertion is unchanged — it still proves the node is reachable by a legal
+  // walk and still turns `statusSpreads` on.
+  it("Toxic Spread is reachable and sets statusSpreads", () => {
     const respec = applyMoveTree(scratch, [
       "envenomed",
       "venom_glands",
-      "envenomed_footing",
       "deepening_venom",
-      "claw_conditioning",
-      "toxin_overload",
-      "sandstorm_claws",
-      "claw_precision",
       "toxic_spread",
     ]);
     expect(respec.statusSpreads).toBe(true);
+  });
+
+  it("Everything Festers, the Aggression capstone, is reachable by a legal walk", () => {
+    const respec = applyMoveTree(scratch, [
+      "envenomed",
+      "venom_glands",
+      "deepening_venom",
+      "toxic_spread",
+      "torn_tendon",
+      "no_cover_left",
+      "claw_conditioning",
+      "everything_festers",
+    ]);
+    // 0.15 (Envenomed) + 0.1 (Deepening Venom) + 0.35 (Everything Festers).
+    expect(respec.statusChance).toBeCloseTo(0.6, 5);
+    expect(respec.statusSeverity).toBe(3);
+    expect(respec.terrainBurn).toBe(true);
   });
 
   it("Colony Warmth is the only two-passive keystone (grantsPassives, plural)", () => {

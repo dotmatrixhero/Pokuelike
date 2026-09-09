@@ -2770,10 +2770,51 @@ export const MOVES: Record<string, MoveSpec> = {
     // delta has no statusKind slot of its own), but the base move never rolls
     // for it on its own.
     statusKind: "poison",
-    // v2 full triangle (MOVES_DESIGN.md's "Scratch" writeup): the roster's
-    // first non-Ember status inflicter, its only two-passive keystone, and
-    // the roster's first rallyCall.
+    // --- The fantasy (v4 rewrite, MOVES_DESIGN.md's "start from the
+    // fantasy") ---
+    //
+    // Scratch is four claws and no technique. There is no wind-up and
+    // nothing to see coming — the paw is already moving. What separates a
+    // rake from a blow is that a blow is finished the moment it lands and a
+    // rake is not: it opens the skin and leaves the wound to do the rest of
+    // the work, hours later, somewhere else. Claws are filthy by design, and
+    // whatever was under them yesterday goes in today. And claws were tools
+    // long before they were weapons — the same four hooks that open a belly
+    // hook into bark, into a fleeing leg, into the dirt of a den, and score
+    // a line across a tree that every animal in the valley can read without
+    // a single fight happening.
+    //
+    // Deliberately NOT Tackle. Tackle is mass arriving and it is over when
+    // it stops; Scratch is an edge opening something and it LEAVES THINGS
+    // BEHIND — a septic wound, a shredded bush, a churned furrow, a claw
+    // mark on a tree. `weightScaling` and `chargeAttack` are Tackle's and
+    // Body Slam's answers and are deliberately absent here: a claw has no
+    // wind-up and does not care what it weighs.
+    //
+    // Aggression — "Nothing Stays Closed": the predator's use of a claw.
+    //   Lane A is FILTH (the wound outlives the fight); lane B is THE SEAM
+    //   (one opening, through whatever is in the way). Different in kind:
+    //   attrition versus precision. Flavours: raw damage, piercing,
+    //   stealth/ambush, environment.
+    // Boldness — "The Hook": commitment, not armour. Lane A is DUG IN
+    //   (hooked into the ground, refusing to be moved); lane B is WHERE THE
+    //   FIGHT HAPPENS (a lunge that decides the tile). Different in kind:
+    //   holding a position versus choosing one. Flavours: stealth/ambush,
+    //   defence, aggressive movement, environment.
+    // Sociability — "The Mark": claws are how a colony talks. Lane A is THE
+    //   CALL (a raked flank is a name shouted); lane B is THE BOUNDARY (a
+    //   scored tree is a fight that never happens). Different in kind:
+    //   directing attention versus removing the reason to fight. Flavours:
+    //   rallying, ally buffing, calming, healing, wider AoE, no friendly
+    //   fire.
+    //
+    // Template v4: 45 nodes — three 12-node branches (opener, two parallel
+    // lanes each with their own notable, a deep notable both lanes converge
+    // on, a filler, a capstone) plus three 3-node crosslink bridges. Nine
+    // `prerequisitesAnyOf` (six lane notables, three deep notables), six
+    // fork nodes — every v2 fork preserved.
     tree: {
+      // --- Aggression: "Nothing Stays Closed" ---
       envenomed: {
         id: "envenomed",
         name: "Envenomed",
@@ -2781,6 +2822,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { statusChance: 0.15 },
       },
+      // Lane A — filth: what goes in with the claw, and where it goes next.
       venom_glands: {
         id: "venom_glands",
         name: "+5 Power",
@@ -2789,35 +2831,65 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { power: 5 },
       },
-      envenomed_footing: {
-        id: "envenomed_footing",
-        name: "+5 Accuracy",
-        cost: 1,
-        prerequisitesAnyOf: [["venom_glands"], ["frenzied_burrow"], ["colony_fury"]],
-        leaning: "aggression",
-        delta: { accuracy: 5 },
-      },
       deepening_venom: {
         id: "deepening_venom",
         name: "Deepening Venom",
         cost: 1,
-        prerequisites: ["envenomed_footing"],
+        prerequisites: ["venom_glands"],
         leaning: "aggression",
         delta: { statusChance: 0.1 },
       },
-      claw_conditioning: {
-        id: "claw_conditioning",
-        name: "+5 Power",
-        cost: 1,
-        prerequisites: ["deepening_venom"],
+      toxic_spread: {
+        id: "toxic_spread",
+        name: "Toxic Spread",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Sociability <->
+        // Aggression bridge's own notable (Feed the Den).
+        prerequisitesAnyOf: [["deepening_venom"], ["feed_the_den"]],
         leaning: "aggression",
-        delta: { power: 5 },
+        // The lane's whole point: the wound is the weapon, not the claw. It
+        // goes bad, and it goes around — whoever crowds in around the
+        // wounded one gets it too (status.ts's `maybeSpreadStatus`, generic
+        // over `StatusKind`, so this really is the poison spreading).
+        delta: { statusSpreads: true },
+      },
+      torn_tendon: {
+        id: "torn_tendon",
+        name: "Torn Tendon",
+        cost: 1,
+        prerequisites: ["toxic_spread"],
+        leaning: "aggression",
+        // A raked leg cannot wind up again. Adds ticks to whatever the
+        // defender already has recovering, rather than a fresh lockout.
+        delta: { jamCooldownTicks: 1, accuracy: 5 },
+      },
+      // Lane B — the seam: one opening, through whatever is in the way.
+      envenomed_footing: {
+        id: "envenomed_footing",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["envenomed"],
+        leaning: "aggression",
+        delta: { accuracy: 5 },
+      },
+      find_the_gap: {
+        id: "find_the_gap",
+        name: "Find the Gap",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Aggression <->
+        // Boldness bridge's own notable (Opened From Behind).
+        prerequisitesAnyOf: [["envenomed_footing"], ["opened_from_behind"]],
+        leaning: "aggression",
+        // What a claw answers that a fist does not: it goes BETWEEN things.
+        // A scaled or shelled body is still full of seams, so a matchup the
+        // type chart resists comes back toward neutral.
+        delta: { defensePenetration: 0.15, resistanceBreaker: { multiplier: 1.5 } },
       },
       toxin_overload: {
         id: "toxin_overload",
         name: "Toxin Overload",
         cost: 1,
-        prerequisites: ["claw_conditioning"],
+        prerequisites: ["find_the_gap"],
         excludes: ["widening_fangs"],
         leaning: "aggression",
         // Hits harder finishing off something already statused.
@@ -2827,40 +2899,49 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "widening_fangs",
         name: "Widening Fangs",
         cost: 1,
-        prerequisites: ["claw_conditioning"],
+        prerequisites: ["find_the_gap"],
         excludes: ["toxin_overload"],
         leaning: "aggression",
         // Trades away some of the earned chance to poison for whatever
         // poison does land hitting twice as hard.
         delta: { power: 10, statusChance: -0.1, statusSeverity: 2 },
       },
-      sandstorm_claws: {
-        id: "sandstorm_claws",
-        name: "Sandstorm Claws",
+      no_cover_left: {
+        id: "no_cover_left",
+        name: "No Cover Left",
         cost: 2,
-        prerequisitesAnyOf: [["toxin_overload"], ["widening_fangs"]],
+        // DEEP NOTABLE. Both lanes end here: filth and the seam add up to a
+        // target that can neither close the wound nor get out of sight.
+        prerequisitesAnyOf: [["torn_tendon"], ["toxin_overload"], ["widening_fangs"]],
         leaning: "aggression",
-        // Matches Sandshrew's own nocturnal activity pattern.
-        delta: { situationalBonus: { condition: "night", multiplier: 1.3 } },
+        // The rake goes through the bush the target ducked into and takes it
+        // with it — `terrainBurn` reverts that "bush" tile to plain floor
+        // for good (predation.ts's landed-hit hook), stripping the
+        // concealment the `"concealed"` bonus one branch over is built on.
+        // Something an observer can SEE happen, unlike another +5 power.
+        delta: { terrainBurn: true },
       },
-      claw_precision: {
-        id: "claw_precision",
-        name: "+5 Accuracy",
+      claw_conditioning: {
+        id: "claw_conditioning",
+        name: "+5 Power",
         cost: 1,
-        prerequisites: ["sandstorm_claws"],
+        prerequisites: ["no_cover_left"],
         leaning: "aggression",
-        delta: { accuracy: 5 },
+        delta: { power: 5 },
       },
-      toxic_spread: {
-        id: "toxic_spread",
-        name: "Toxic Spread",
+      everything_festers: {
+        id: "everything_festers",
+        name: "Everything Festers",
         cost: 2,
-        prerequisites: ["claw_precision"],
+        prerequisites: ["claw_conditioning"],
         leaning: "aggression",
-        // The branch's payoff for actually committing to the venom line —
-        // the poison jumps to whoever's standing next to the target too.
-        delta: { statusSpreads: true },
+        // CAPSTONE. The branch's thesis at full volume: the claw stops being
+        // the weapon entirely. Nearly every rake takes, and what it leaves
+        // burns three times as fast — and with Toxic Spread already taken,
+        // one hit is an outbreak rather than a wound.
+        delta: { statusChance: 0.35, statusSeverity: 3 },
       },
+      // --- Boldness: "The Hook" ---
       ambush_claws: {
         id: "ambush_claws",
         name: "Ambush Claws",
@@ -2868,6 +2949,49 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { situationalBonus: { condition: "concealed", multiplier: 1.3 } },
       },
+      // Lane A — dug in: hooked into the ground, and not letting go.
+      braced_paws: {
+        id: "braced_paws",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["ambush_claws"],
+        leaning: "boldness",
+        // No wind-up is the whole point of a claw: the paw is already back.
+        delta: { cooldownTicks: -1 },
+      },
+      burrow_guard: {
+        id: "burrow_guard",
+        name: "Burrow Guard",
+        cost: 1,
+        prerequisites: ["braced_paws"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.08 },
+        delta: {},
+      },
+      wont_let_go: {
+        id: "wont_let_go",
+        name: "Won't Let Go",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Aggression <->
+        // Boldness bridge's own notable (Opened From Behind).
+        prerequisitesAnyOf: [["burrow_guard"], ["opened_from_behind"]],
+        leaning: "boldness",
+        // Claws sink in and stay in. A real beat of committed downtime
+        // (`lockTicks` locks the USER, not the target — predation.ts) bought
+        // by a much heavier hit, benefit and cost in the same node.
+        delta: { lockTicks: 1, power: 12 },
+      },
+      spiked_curl: {
+        id: "spiked_curl",
+        name: "Spiked Curl",
+        cost: 1,
+        prerequisites: ["wont_let_go"],
+        leaning: "boldness",
+        // Sandshrew's own real spiked hide, curled up defensively.
+        grantsPassive: { kind: "thorns", value: 0.15 },
+        delta: {},
+      },
+      // Lane B — where the fight happens: the claw decides the tile.
       burrow_conditioning: {
         id: "burrow_conditioning",
         name: "+5 Power",
@@ -2876,35 +3000,21 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { power: 5 },
       },
-      burrow_strike_footing: {
-        id: "burrow_strike_footing",
-        name: "+5 Accuracy",
-        cost: 1,
-        prerequisitesAnyOf: [["burrow_conditioning"], ["frenzied_burrow"], ["guarded_den"]],
-        leaning: "boldness",
-        delta: { accuracy: 5 },
-      },
       dig_and_strike: {
         id: "dig_and_strike",
         name: "Dig-and-Strike",
-        cost: 1,
-        prerequisites: ["burrow_strike_footing"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Boldness <->
+        // Sociability bridge's own notable (Shouldered Aside).
+        prerequisitesAnyOf: [["burrow_conditioning"], ["shouldered_aside"]],
         leaning: "boldness",
         delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 2, timing: "beforeHit" } },
-      },
-      claw_momentum: {
-        id: "claw_momentum",
-        name: "+5 Power",
-        cost: 1,
-        prerequisites: ["dig_and_strike"],
-        leaning: "boldness",
-        delta: { power: 5 },
       },
       retreating_slash: {
         id: "retreating_slash",
         name: "Retreating Slash",
         cost: 1,
-        prerequisites: ["claw_momentum"],
+        prerequisites: ["dig_and_strike"],
         excludes: ["cornered_fury"],
         leaning: "boldness",
         delta: { forcedMovement: { mover: "attacker", direction: "away", tiles: 2, timing: "onHit" } },
@@ -2913,38 +3023,53 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "cornered_fury",
         name: "Cornered Fury",
         cost: 1,
-        prerequisites: ["claw_momentum"],
+        prerequisites: ["dig_and_strike"],
         excludes: ["retreating_slash"],
         leaning: "boldness",
         delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.3 } },
       },
-      burrow_guard: {
-        id: "burrow_guard",
-        name: "Burrow Guard",
+      churned_ground: {
+        id: "churned_ground",
+        name: "Churned Ground",
         cost: 2,
-        prerequisitesAnyOf: [["retreating_slash"], ["cornered_fury"]],
+        // DEEP NOTABLE. Both lanes end here: holding a tile and choosing a
+        // tile are the same skill once the ground itself is the weapon.
+        prerequisitesAnyOf: [["spiked_curl"], ["retreating_slash"], ["cornered_fury"]],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReduction", value: 0.08 },
-        delta: {},
+        // The claws tear the floor out from under whatever they hit — a
+        // landed hit converts the defender's floor/sand tile to real "mud"
+        // (predation.ts's `TERRAIN_FILLABLE`), and mud is a 0.5x speed
+        // multiplier for anything that steps on it afterwards
+        // (support.ts's `terrainSpeedMultiplier`). A permanent, visible
+        // furrow, not a hidden slow counter.
+        delta: { terrainFill: { terrain: "mud" } },
       },
-      burrow_resolve: {
-        id: "burrow_resolve",
-        name: "+5 Power",
+      raked_furrows: {
+        id: "raked_furrows",
+        name: "+8 Accuracy",
         cost: 1,
-        prerequisites: ["burrow_guard"],
+        prerequisites: ["churned_ground"],
         leaning: "boldness",
-        delta: { power: 5 },
+        delta: { accuracy: 8 },
       },
-      spiked_curl: {
-        id: "spiked_curl",
-        name: "Spiked Curl",
+      purchase: {
+        id: "purchase",
+        name: "Purchase",
         cost: 2,
-        prerequisites: ["burrow_resolve"],
+        prerequisites: ["raked_furrows"],
         leaning: "boldness",
-        // Sandshrew's own real spiked hide, curled up defensively.
-        grantsPassive: { kind: "thorns", value: 0.15 },
-        delta: {},
+        // CAPSTONE, and the pay-off for the branch's own deep notable rather
+        // than a bigger number: standing in the bog it churned up itself,
+        // the claws finally get something to brace against. Doubles the hit
+        // and spends the tile (predation.ts's `consumesOwnTerrain`, checked
+        // on the ATTACKER's tile before the damage formula). Rock Throw
+        // consumes a boulder the world happened to put there; this is the
+        // only node in the roster that eats terrain its own tree created —
+        // and the cost is real and legible, because standing in mud halves
+        // your own movement speed for as long as you stay there.
+        delta: { consumesOwnTerrain: { terrain: "mud", damageMultiplier: 2 } },
       },
+      // --- Sociability: "The Mark" ---
       colony_call: {
         id: "colony_call",
         name: "Colony Call",
@@ -2954,6 +3079,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // buffs a nearby colony-mate's attack for free.
         delta: { targetsAlly: true, allyEffectOnAttack: true, allyEffect: { buff: { stat: "attack", stage: 1, ticks: 20 } } },
       },
+      // Lane A — the call: a raked flank is a name shouted.
       den_footing: {
         id: "den_footing",
         name: "+5 Accuracy",
@@ -2966,18 +3092,21 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "colony_bond_footing",
         name: "+5 Power",
         cost: 1,
-        prerequisitesAnyOf: [["den_footing"], ["guarded_den"], ["colony_fury"]],
+        prerequisites: ["den_footing"],
         leaning: "sociability",
         delta: { power: 5 },
       },
       rally_the_colony: {
         id: "rally_the_colony",
         name: "Rally the Colony",
-        cost: 1,
-        prerequisites: ["colony_bond_footing"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Boldness <->
+        // Sociability bridge's own notable (Shouldered Aside).
+        prerequisitesAnyOf: [["colony_bond_footing"], ["shouldered_aside"]],
         leaning: "sociability",
         // A landed, non-killing hit marks the predator for the whole colony
-        // to converge on — genuinely stronger than buffing one ally.
+        // to converge on — genuinely stronger than buffing one ally, because
+        // it changes what other agents independently decide to do.
         delta: { rallyCall: { ticks: 20 } },
       },
       den_precision: {
@@ -2988,11 +3117,38 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { accuracy: 5 },
       },
+      // Lane B — the boundary: a scored tree is a fight that never happens.
+      worn_grooves: {
+        id: "worn_grooves",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["colony_call"],
+        leaning: "sociability",
+        // The same four grooves, cut over and over into the same bark until
+        // the motion costs nothing.
+        delta: { cooldownTicks: -1 },
+      },
+      line_in_the_bark: {
+        id: "line_in_the_bark",
+        name: "Line in the Bark",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Sociability <->
+        // Aggression bridge's own notable (Feed the Den).
+        prerequisitesAnyOf: [["worn_grooves"], ["feed_the_den"]],
+        leaning: "sociability",
+        // The lane's thesis, and the one Sociability payoff that is measured
+        // in fights that DON'T happen: a boundary everyone can read means
+        // this one never starts a rivalry over a contested tile
+        // (herdConflict.ts's `applyHerdRivalryConflict`, a flat opt-out —
+        // a truthy flag, so it cannot stack into anything).
+        grantsPassive: { kind: "nonTerritorial", value: 1 },
+        delta: { accuracy: 5 },
+      },
       colony_guard: {
         id: "colony_guard",
         name: "Colony Guard",
         cost: 1,
-        prerequisites: ["den_precision"],
+        prerequisites: ["line_in_the_bark"],
         excludes: ["tunnel_runner"],
         leaning: "sociability",
         grantsPassive: { kind: "damageReductionFlat", value: 1 },
@@ -3002,7 +3158,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "tunnel_runner",
         name: "Tunnel Runner",
         cost: 1,
-        prerequisites: ["den_precision"],
+        prerequisites: ["line_in_the_bark"],
         excludes: ["colony_guard"],
         leaning: "sociability",
         delta: { power: 10, jamCooldownTicks: 1 },
@@ -3011,35 +3167,54 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "communal_foraging",
         name: "Communal Foraging",
         cost: 2,
-        prerequisitesAnyOf: [["colony_guard"], ["tunnel_runner"]],
+        // DEEP NOTABLE. Both lanes end here: a colony that answers a call
+        // and doesn't fight over ground is a colony that eats.
+        prerequisitesAnyOf: [["den_precision"], ["colony_guard"], ["tunnel_runner"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regen", value: 0.03 },
-        delta: {},
-      },
-      den_instinct: {
-        id: "den_instinct",
-        name: "+5 Accuracy",
-        cost: 1,
-        prerequisites: ["communal_foraging"],
-        leaning: "sociability",
-        delta: { accuracy: 5 },
+        // Claws are a foraging tool before they are a weapon — this is the
+        // node's own name finally meaning what it says. Extra
+        // `digTicksAccrued` on the canopy-harvest path (needs.ts, which
+        // picks the agent's first ready damage move to knock fruit down),
+        // instead of the flat `regen` passive it used to hide behind. A
+        // visible burst of food on the map beats a hidden meter, and it
+        // takes this tree's stacked healing down with it.
+        delta: { gatherBurst: 3 },
       },
       colony_warmth: {
         id: "colony_warmth",
         name: "Colony Warmth",
         cost: 2,
-        prerequisites: ["den_instinct"],
+        prerequisites: ["communal_foraging"],
         leaning: "sociability",
-        // The only two-passive keystone among these four trees — earned
-        // because this is the one branch guaranteed to actually fire for
-        // real herd-mates today, Diglett included.
+        // The roster's only two-passive node — earned because this is the
+        // one branch guaranteed to actually fire for real herd-mates today,
+        // Diglett included.
         grantsPassives: [
           { kind: "healAura", value: 0.01 },
           { kind: "regen", value: 0.04 },
         ],
         delta: {},
       },
-      // Crosslink: Aggression <-> Boldness — bonus vs. a flanking target.
+      never_your_own: {
+        id: "never_your_own",
+        name: "Never Your Own",
+        cost: 2,
+        prerequisites: ["colony_warmth"],
+        leaning: "sociability",
+        // CAPSTONE, and the only shape change in the tree (principle 14 —
+        // a footprint change is notable-tier currency, spent once). The
+        // whole point of a claw among kin is that it is a wild, unaimed
+        // swipe; a colony animal that has spent its whole life scoring
+        // boundaries with the same four claws can widen it into a three-tile
+        // arc and STILL not touch a herd-mate standing in it
+        // (`excludesAllies`, resolveAreaHit). Not "an AoE, but bigger" —
+        // the roster's three `excludesAllies` moves were all AoE already;
+        // this is a point move that learns to sweep without cutting kin.
+        delta: { shape: { kind: "cone", length: 1, width: 1 }, hitsArea: true, excludesAllies: true },
+      },
+      // --- Bridges ---
+      // Crosslink: Aggression <-> Boldness — the flank of something that has
+      // not turned around yet is where the seams already are.
       frenzied_burrow: {
         id: "frenzied_burrow",
         name: "Frenzied Burrow",
@@ -3048,15 +3223,64 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { situationalBonus: { condition: "flanking", multiplier: 1.3 } },
       },
-      // Crosslink: Boldness <-> Sociability — shared damageReduction.
+      wrong_side: {
+        id: "wrong_side",
+        name: "Wrong Side",
+        cost: 1,
+        prerequisites: ["frenzied_burrow"],
+        leaning: "aggression",
+        // Deepens Frenzied Burrow's own flanking bonus (overwrite — restates
+        // the full multiplier, not an increment).
+        delta: { situationalBonus: { condition: "flanking", multiplier: 1.5 }, accuracy: 5 },
+      },
+      opened_from_behind: {
+        id: "opened_from_behind",
+        name: "Opened From Behind",
+        cost: 2,
+        prerequisites: ["wrong_side"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE. Escalates its own crosslink's lever one more step
+        // and adds the crit stage that a back turned actually deserves.
+        // Lands one lane notable deep in each branch it connects — Find the
+        // Gap (Aggression's seam lane) and Won't Let Go (Boldness's dug-in
+        // lane) — complementing both rather than repeating either.
+        delta: { situationalBonus: { condition: "flanking", multiplier: 1.9 }, critRateStage: 1 },
+      },
+      // Crosslink: Boldness <-> Sociability — standing in the den's mouth.
+      // Was a second flat `damageReductionFlat` node duplicating Colony
+      // Guard's; MOVES_DESIGN.md's "Stop overusing damageReduction" and the
+      // per-species passive totals both argue against it, and a claw hooked
+      // into an intruder to swing it out of the doorway is the thing the
+      // node was always describing.
       guarded_den: {
         id: "guarded_den",
         name: "Guarded Den",
         cost: 1,
         prerequisites: ["ambush_claws", "colony_call"],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReductionFlat", value: 1 },
-        delta: {},
+        delta: { positionSwap: true, power: 5 },
+      },
+      through_the_doorway: {
+        id: "through_the_doorway",
+        name: "Through the Doorway",
+        cost: 1,
+        prerequisites: ["guarded_den"],
+        leaning: "boldness",
+        // Deepens Guarded Den's own swap: it does not just trade places, it
+        // keeps hauling.
+        delta: { positionSwap: true, positionSwapPull: 1 },
+      },
+      shouldered_aside: {
+        id: "shouldered_aside",
+        name: "Shouldered Aside",
+        cost: 2,
+        prerequisites: ["through_the_doorway"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE. One more tile of haul on the same swap. Lands on
+        // Dig-and-Strike (Boldness's lunge lane) and Rally the Colony
+        // (Sociability's call lane) — dragging a target out of the den mouth
+        // and into the middle of the colony is both branches' business.
+        delta: { positionSwap: true, positionSwapPull: 1, accuracy: 8 },
       },
       // Crosslink: Sociability <-> Aggression — a colony-backed strike that
       // recoups a little of what it deals, not another self-buff.
@@ -3066,6 +3290,28 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["colony_call", "envenomed"],
         leaning: "sociability",
+        delta: { lifestealFraction: 0.08 },
+      },
+      red_teeth: {
+        id: "red_teeth",
+        name: "Red Teeth",
+        cost: 1,
+        prerequisites: ["colony_fury"],
+        leaning: "sociability",
+        // Deepens Colony Fury's own lifesteal (additive).
+        delta: { lifestealFraction: 0.04, accuracy: 5 },
+      },
+      feed_the_den: {
+        id: "feed_the_den",
+        name: "Feed the Den",
+        cost: 2,
+        prerequisites: ["red_teeth"],
+        leaning: "aggression",
+        // BRIDGE NOTABLE. The same lever again, at the size that makes a
+        // hunting party self-sufficient. Lands on Toxic Spread (Aggression's
+        // filth lane) and Line in the Bark (Sociability's boundary lane).
+        // 8/4/8 across the bridge tops out at 20% for a full 5-point walk —
+        // above the roster's ~10% median, below vine_whip's 38% ceiling.
         delta: { lifestealFraction: 0.08 },
       },
     },
