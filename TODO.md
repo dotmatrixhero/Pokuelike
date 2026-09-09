@@ -136,6 +136,96 @@ And the narration works:
 > *(-0.44) struck them 14 times, was struck by them 6 times, shared their
 > company*
 
+## BUILT: shared experience — relationships made of what you went through
+
+Direct steer: *"I wish they were more than just #s of things... I want more
+meaningful interaction even if it means building new systems. Ex. Training
+together. Or leveling up together or drinking from the same water without
+clashing."* Plus: *"Survived together, slept in each other's presence (not
+necessarily simultaneous) are good too."*
+
+The eight original reasons were all **transactions** — what I did *to* you.
+These six are **shared experience** — what we went through. That is the
+category that makes a relationship read as a relationship rather than a
+ledger.
+
+| Reason | Trigger | Hook |
+|---|---|---|
+| `sharedWater` | Eligible to fight over a contested tile, and didn't | `herdConflict.ts`'s declined-escalation branch |
+| `trainedTogether` | Both drilling within `SOCIALIZE_RADIUS` | `needs.ts`'s `applyTraining` |
+| `keptWatch` / `sleptSafely` | One goes to sleep where another awake agent can reach it | `needs.ts`'s `fellAsleep` site |
+| `survivedTogether` | Something died near both of you and neither was it | new `witness.ts`, one pass in `tickWorld` |
+| `mourned` | Same, where both held real rapport with the one who died | as above |
+
+**Restraint is an interaction.** `herdConflict.ts` already decided, tile by
+tile, whether two power-matched rivals escalate over water — and the "no"
+branch was a bare `return false`. Its own comment noted the asymmetry: *"a
+grudge biases escalation, a positive relationship never suppresses it."*
+Escalation compounded; backing down earned nothing. Now it does.
+
+**Sleep is asymmetric and deliberately not simultaneous** — two animals asleep
+at once are only co-located; one asleep and one awake is a watch. That is
+`DESIGN.md`'s **Presence** bonding verb, appearing as something the sim's own
+agents already do to each other.
+
+### Two examples changed on contact with the code
+
+- **"Leveling up together"** — dropped as stated. Two agents crossing an XP
+  threshold near each other is arithmetic coincidence, and XP is a hidden
+  number, which the legibility rule says to avoid. The instinct was right; the
+  trigger was wrong.
+- **"Survived a storm together"** — *storms cannot hurt anything.*
+  `weather.ts` only exposes `stormAccuracyMultiplier` and `stormFovPenalty`,
+  and exposure is tracked per-**herd** for migration, never per-agent. A "we
+  survived that" memory would have invented a danger the sim does not have.
+  Rebuilt on the dangers that are real — predation and starvation — as *"something
+  died near both of you."* That covers drought by the route drought actually
+  kills through.
+
+### Measured, 4 seeds x 6000 ticks
+
+**38.6% of all edges now carry at least one shared-experience reason.**
+`survivedTogether` 72, `trainedTogether` 90 (from 6,208 raw — the throttle
+works), `mourned` 4, `keptWatch` 8 / `sleptSafely` 11.
+
+Real output:
+
+> *(+0.41) lost the same friend, came through 6 deaths beside them, fought
+> for them 6 times, was defended by them 5 times, spent 2 long stretches in
+> their company*
+>
+> *(+0.74) lost the same friend, came through 3 deaths beside them, took them
+> as a mate, kept watch over their sleep 1 time*
+>
+> *(+0.07) watched something die beside them, took them as a mate, drilled
+> beside them through 4 long sessions, struck them 1 time*
+
+That last one is a mate it once came to blows with. Nothing in the design
+authored that.
+
+### FINDING 3 — `sharedWater` barely fires: 15 raw events in 24,000 agent-ticks
+
+The best idea of the batch is close to unreachable. The declined-escalation
+branch needs every gate to hold first — blocked from a resource for
+`HERD_CONFLICT_MIN_BLOCKED_TICKS`, an adjacent rival, both non-predator,
+power-matched within `HERD_CONFLICT_MIN_POWER_RATIO`, off cooldown — and only
+*then* fail the disposition roll. All of that happened 15 times across four
+6,000-tick runs, producing **one** memory.
+
+**Not tuned here** — the gates belong to herd conflict, and loosening them
+changes fight frequency, which is a balance call. Options if it should read
+more often: record restraint at a wider bar than the one that gates an actual
+fight (e.g. two power-matched rivals adjacent at a contested tile, whether or
+not the blocked-ticks threshold was met), or lower `RAPPORT_REASON_MEMORY_INTERVAL.sharedWater`
+from 50.
+
+### Note on the numbers
+
+The new rapport writes consume `rng`, so worlds diverge from the pre-change
+runs — these figures are not directly comparable to the earlier
+`socialized` table. The 95.2% → 9.6% throttle result stands, since that was
+measured before and after that change alone.
+
 ## IMPLEMENTATION ORDER — the move from design into code
 
 Asked directly: *"Do you think you're potentially ready to really start

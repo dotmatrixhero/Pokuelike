@@ -3,7 +3,13 @@ import { otherLayers, setTile, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
 import { agentsWithin, applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan, resolveChargedAttack } from "./predation.js";
-import { RAPPORT_SOCIALIZE_DELTA, rapportScore, strengthenRapportMutual } from "./rapport.js";
+import {
+  RAPPORT_SLEPT_NEAR_DELTA,
+  RAPPORT_SOCIALIZE_DELTA,
+  RAPPORT_TRAINED_TOGETHER_DELTA,
+  rapportScore,
+  strengthenRapportMutual,
+} from "./rapport.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, groundTypeParams, recordGrazing, tendSoil } from "./flora.js";
 import { tickCooldowns, useMove } from "./combat.js";
@@ -616,6 +622,17 @@ function applyTraining(world: World, agent: Agent, log: EventLog | undefined, ct
 
   logBehaviorChange(log, world, agent, "train");
   agent.behavior = "train";
+
+  // Shared experience: drilling moves next to someone else doing the same.
+  // Reuses `applySocializing`'s own radius and scan — this is the same "who
+  // is near me right now" question, asked of a different activity, and
+  // training is the idle-stack step immediately after socializing so the
+  // agents reaching here are exactly the ones that found nobody to sit with
+  // but may still have company at the practice ground.
+  for (const other of agentsWithin(world, agent, SOCIALIZE_RADIUS)) {
+    if (other.behavior !== "train") continue;
+    strengthenRapportMutual(world, agent, other, RAPPORT_TRAINED_TOGETHER_DELTA, "trainedTogether", "trainedTogether", rng);
+  }
 
   grantExp(world, agent, EXP_ON_TRAINING_TICK, ctx, log, rng);
   if (rng() < TRAINING_SKILLPOINT_CHANCE) {
@@ -1492,6 +1509,25 @@ export function tickAgentAction(
     logBehaviorChange(log, world, agent, "sleep");
     agent.behavior = "sleep";
     log?.record({ kind: "fellAsleep", tick: world.tick, agentId: agent.id, species: agent.species, pos: agent.pos });
+
+    // Shared experience: choosing to go under where somebody else could
+    // reach you. Deliberately asymmetric and deliberately NOT simultaneous
+    // sleep — direct steer, "slept in each other's presence (not necessarily
+    // simultaneous)": two animals asleep at once are only co-located, while
+    // one asleep and one awake is a watch. That is `DESIGN.md`'s `Presence`
+    // bonding verb ("watching over a vulnerable moment like sleep") showing
+    // up as something the sim's own agents already do to each other.
+    //
+    // Fires once per sleep *episode*, here at the moment of going under,
+    // rather than every tick spent asleep — one decision, one memory, and no
+    // need for the per-tick throttle the ambient reasons need. The sleeper
+    // is a genuine sitting duck from the next line onward (see the early
+    // `return` above: no movement, attack or flee while asleep), which is
+    // exactly what makes the choice cost something.
+    for (const other of agentsWithin(world, agent, SOCIALIZE_RADIUS)) {
+      if (other.asleep) continue;
+      strengthenRapportMutual(world, agent, other, RAPPORT_SLEPT_NEAR_DELTA, "sleptSafely", "keptWatch", rng);
+    }
     return;
   }
 

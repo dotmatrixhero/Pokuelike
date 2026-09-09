@@ -1578,7 +1578,51 @@ export type RapportReason =
   /** Spent real time together — `needs.ts`'s `applySocializing`. Symmetric. */
   | "socialized"
   /** Became mates — `reproduction.ts`'s `applyMateSeeking`. Symmetric, and fires once per pair. */
-  | "bonded";
+  | "bonded"
+  // --- Shared experience, as distinct from the transactions above ---
+  // Everything before this point answers "what did I do TO you." These
+  // answer "what did we go through together," which is the half that makes a
+  // relationship read as a relationship instead of a ledger. Direct steer:
+  // "I wish they were more than just #s of things... I want more meaningful
+  // interaction even if it means building new systems. Ex. Training
+  // together. Or leveling up together or drinking from the same water
+  // without clashing."
+  /**
+   * Stood over the same contested resource, eligible to fight for it, and
+   * didn't — `herdConflict.ts`'s declined-escalation branch. Symmetric.
+   *
+   * **Restraint is an interaction.** This is the counterweight to
+   * `"struck"`: the sim already decides, tile by tile, whether two
+   * power-matched rivals escalate over water or food, and until now the
+   * "no" branch recorded nothing while the "yes" branch built a grudge. A
+   * relationship made of a thing *not* happening.
+   */
+  | "sharedWater"
+  /** Drilled moves within sight of each other — `needs.ts`'s `applyTraining`. Symmetric. */
+  | "trainedTogether"
+  /**
+   * Stayed awake beside them while they slept — the watcher's side. This is
+   * the `Presence` bonding verb (`DESIGN.md`: "watching over a vulnerable
+   * moment like sleep") as a thing the sim's own agents do to each other.
+   */
+  | "keptWatch"
+  /**
+   * Chose to sleep where they could reach you — the sleeper's side of the
+   * same night, and the half that actually costs something. Deliberately
+   * **not** simultaneous sleep, per direct steer ("slept in each other's
+   * presence (not necessarily simultaneous)"): two animals asleep at once
+   * are merely co-located, whereas one asleep and one awake is trust.
+   */
+  | "sleptSafely"
+  /** Both stood near a death and neither was the one that died. Symmetric. */
+  | "survivedTogether"
+  /**
+   * Both lost the same friend — `survivedTogether`'s trigger, narrowed to
+   * the case where the dead agent was someone *both* witnesses held real
+   * positive rapport with. Symmetric, rare, and the only thing in this
+   * vocabulary that is about a third party.
+   */
+  | "mourned";
 
 /**
  * One aggregated reason on a `RapportEdge` — "this happened between us, this

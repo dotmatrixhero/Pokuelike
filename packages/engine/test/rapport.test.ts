@@ -25,6 +25,7 @@ import { applyHerdSupport, DELIVERED_FOOD_HUNGER_RESTORE } from "../src/support.
 import { applyMateSeeking } from "../src/reproduction.js";
 import { applyPredationInstincts } from "../src/predation.js";
 import { applyHerdRivalryConflict, HERD_CONFLICT_MIN_BLOCKED_TICKS } from "../src/herdConflict.js";
+import { MOURNING_MIN_RAPPORT, recordDeathWitnesses, WITNESS_RADIUS } from "../src/witness.js";
 
 function agent(id: string, overrides: Partial<Agent> = {}): Agent {
   return {
@@ -551,6 +552,136 @@ describe("rapport memories: the real triggers tag themselves correctly", () => {
     }
 
     expect(rapportMemories(carrier, "receiver")).toEqual([{ reason: "gaveFood", count: 5, lastTick: world.tick }]);
+  });
+});
+
+describe("rapport: shared experience, not just transactions", () => {
+  const MOVE2: MoveSpec = {
+    id: "tackle",
+    name: "Tackle",
+    shape: { kind: "point" },
+    type: "normal",
+    category: "physical",
+    power: 40,
+    accuracy: 100,
+    cooldownTicks: 0,
+  };
+  const RULES2: HuntRules = { scyther: true };
+
+  it("declining a fight over a contested tile is itself remembered — restraint is an interaction", () => {
+    const world = createWorld(10, 10);
+    const a = agent("a", {
+      species: "bulbasaur",
+      herdId: "herd-a",
+      pos: { x: 4, y: 5 },
+      moves: [MOVE2],
+      maxHp: 40,
+      hp: 40,
+      level: 10,
+      types: ["normal"],
+      stats: { hp: 40, attack: 30, defense: 30, spAttack: 30, spDefense: 30, speed: 30 },
+      // Timid and unaggressive: every other gate holds, but the disposition
+      // roll will refuse — which is exactly the branch under test.
+      disposition: { boldness: 0, aggression: 0, sociability: 0.5 },
+      ticksBlockedFromResource: HERD_CONFLICT_MIN_BLOCKED_TICKS,
+    });
+    const rival = agent("rival", { species: "pidgey", herdId: "herd-b", pos: { x: 5, y: 5 }, maxHp: 40, hp: 40 });
+    world.agents.push(a, rival);
+
+    // rng ~1 => the escalation roll always fails, so this is the declined branch.
+    const engaged = applyHerdRivalryConflict(world, a, RULES2, rival.pos, undefined, () => 0.999);
+
+    expect(engaged).toBe(false);
+    expect(rapportMemories(a, "rival").map((m) => m.reason)).toEqual(["sharedWater"]);
+    expect(rapportMemories(rival, "a").map((m) => m.reason)).toEqual(["sharedWater"]);
+    // ...and it moved the relationship the OTHER way from a clash.
+    expect(rapportScore(a, "rival", world.tick)).toBeGreaterThan(0);
+  });
+
+  it("a death nearby bonds the two who watched it and were not it", () => {
+    const world = createWorld(20, 20);
+    const w1 = agent("w1", { pos: { x: 5, y: 5 } });
+    const w2 = agent("w2", { pos: { x: 6, y: 5 } });
+    const doomed = agent("doomed", { pos: { x: 5, y: 6 } });
+    world.agents.push(w1, w2, doomed);
+
+    doomed.alive = false;
+    doomed.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+
+    expect(rapportMemories(w1, "w2").map((m) => m.reason)).toEqual(["survivedTogether"]);
+    expect(rapportMemories(w2, "w1").map((m) => m.reason)).toEqual(["survivedTogether"]);
+  });
+
+  it("...but grief instead, when both of them actually cared about the one who died", () => {
+    const world = createWorld(20, 20);
+    const w1 = agent("w1", { pos: { x: 5, y: 5 } });
+    const w2 = agent("w2", { pos: { x: 6, y: 5 } });
+    const friend = agent("friend", { pos: { x: 5, y: 6 } });
+    world.agents.push(w1, w2, friend);
+
+    adjustRapport(world, w1, "friend", MOURNING_MIN_RAPPORT + 0.1, "socialized");
+    adjustRapport(world, w2, "friend", MOURNING_MIN_RAPPORT + 0.1, "socialized");
+
+    friend.alive = false;
+    friend.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+
+    expect(rapportMemories(w1, "w2").map((m) => m.reason)).toEqual(["mourned"]);
+    // Grief replaces the plain survival memory rather than stacking with it.
+    expect(rapportMemories(w1, "w2")).toHaveLength(1);
+  });
+
+  it("one mourner and one stranger is survival, not grief — BOTH have to have cared", () => {
+    const world = createWorld(20, 20);
+    const w1 = agent("w1", { pos: { x: 5, y: 5 } });
+    const w2 = agent("w2", { pos: { x: 6, y: 5 } });
+    const friend = agent("friend", { pos: { x: 5, y: 6 } });
+    world.agents.push(w1, w2, friend);
+
+    adjustRapport(world, w1, "friend", MOURNING_MIN_RAPPORT + 0.1, "socialized");
+
+    friend.alive = false;
+    friend.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+
+    expect(rapportMemories(w1, "w2").map((m) => m.reason)).toEqual(["survivedTogether"]);
+  });
+
+  it("a death out of range bonds nobody, and a death last tick is not re-counted", () => {
+    const world = createWorld(40, 40);
+    const w1 = agent("w1", { pos: { x: 1, y: 1 } });
+    const w2 = agent("w2", { pos: { x: 2, y: 1 } });
+    const farAway = agent("far", { pos: { x: 1 + WITNESS_RADIUS + 5, y: 1 } });
+    world.agents.push(w1, w2, farAway);
+
+    farAway.alive = false;
+    farAway.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+    expect(rapportMemories(w1, "w2")).toEqual([]);
+
+    // Now in range, but it died on a previous tick — already accounted for.
+    const stale = agent("stale", { pos: { x: 1, y: 2 } });
+    stale.alive = false;
+    stale.diedAtTick = world.tick - 1;
+    world.agents.push(stale);
+    recordDeathWitnesses(world, () => 0.5);
+    expect(rapportMemories(w1, "w2")).toEqual([]);
+  });
+
+  it("the hunter that caused a death does not come away bonded to its victim's neighbours", () => {
+    const world = createWorld(20, 20);
+    const hunter = agent("hunter", { species: "scyther", pos: { x: 5, y: 5 }, behavior: "hunt" });
+    const bystander = agent("bystander", { pos: { x: 6, y: 5 } });
+    const prey = agent("prey", { pos: { x: 5, y: 6 } });
+    world.agents.push(hunter, bystander, prey);
+
+    prey.alive = false;
+    prey.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+
+    expect(rapportMemories(hunter, "bystander")).toEqual([]);
+    expect(rapportMemories(bystander, "hunter")).toEqual([]);
   });
 });
 

@@ -141,6 +141,45 @@ export const RAPPORT_BONDING_DELTA = 0.6;
  */
 export const RAPPORT_HERD_CLASH_DELTA = -0.06;
 
+// --- Shared experience (see RapportReason's own doc comment for why these are a
+// different category from everything above). All five magnitudes are
+// sim-original guesses in the same spirit as every constant above it: judge
+// them against a real run, not against canon.
+
+/**
+ * Two power-matched rivals stood over the same contested resource, were
+ * eligible to fight for it, and didn't — `herdConflict.ts`'s declined
+ * escalation. Deliberately magnitude-matched to `RAPPORT_HERD_CLASH_DELTA`'s
+ * 0.06, slightly under it: **restraint is worth about what a clash costs**,
+ * which is the whole point of adding it. The existing code notes that "a
+ * grudge biases escalation, a positive relationship never suppresses it" —
+ * so escalation compounded and restraint earned nothing, and this is the
+ * missing half of that loop.
+ */
+export const RAPPORT_SHARED_RESOURCE_DELTA = 0.05;
+
+/** Drilling moves within sight of each other. Sized like socializing — shared time, with a bit more purpose in it. */
+export const RAPPORT_TRAINED_TOGETHER_DELTA = 0.04;
+
+/**
+ * One asleep, one awake beside it. Bigger than socializing because it is not
+ * merely co-presence: the sleeper is a genuine sitting duck (`needs.ts`
+ * refuses it any movement, attack or flee while asleep) and chose that spot
+ * anyway. Real trust, not company.
+ */
+export const RAPPORT_SLEPT_NEAR_DELTA = 0.05;
+
+/** Something died within sight of both of them, and neither was it. A real shared moment, so bigger than any ordinary errand. */
+export const RAPPORT_SURVIVED_TOGETHER_DELTA = 0.08;
+
+/**
+ * The same death, where the dead agent was someone *both* of them held real
+ * positive rapport with. The largest non-bonding delta here, because it is
+ * the rarest thing in the vocabulary and the only one about a third party —
+ * grief is not an errand.
+ */
+export const RAPPORT_MOURNED_DELTA = 0.12;
+
 function clampScore(score: number): number {
   return Math.max(-1, Math.min(1, score));
 }
@@ -186,11 +225,21 @@ export function rapportMemories(agent: Agent, otherId: string): RapportMemory[] 
  * different questions, and conflating them would hide the judgement.
  */
 export const RAPPORT_REASON_SIGNIFICANCE: Record<RapportReason, number> = {
+  // Rarest and heaviest: a third party both of them cared about is dead.
+  mourned: 6,
   bonded: 5,
+  survivedTogether: 5,
   wasDefended: 4,
   defended: 4,
+  // Sleeping beside someone who could reach you is a real, costly choice —
+  // ranked with the risk-bearing acts rather than with shared time.
+  sleptSafely: 4,
+  keptWatch: 4,
   struck: 3,
   wasStruck: 3,
+  // Choosing not to fight over water reads as strongly as choosing to.
+  sharedWater: 3,
+  trainedTogether: 3,
   // A socialized *milestone* is 500 ticks of chosen company (see
   // RAPPORT_REASON_MEMORY_INTERVAL), which distinguishes a relationship about
   // as much as a single clash does — not the near-worthless per-tick event
@@ -224,6 +273,21 @@ export const RAPPORT_REASON_SIGNIFICANCE: Record<RapportReason, number> = {
  */
 export const RAPPORT_REASON_MEMORY_INTERVAL: Partial<Record<RapportReason, number>> = {
   socialized: 500,
+  // Training is an idle-stack fallback, so a pair with nothing better to do
+  // can drill side by side for hundreds of consecutive ticks — the same
+  // per-tick-habit shape socializing had, at a shorter interval because it
+  // is a deliberate activity rather than ambient company.
+  trainedTogether: 200,
+  // A watch is recorded once per *sleep episode* (see needs.ts — it fires as
+  // an agent falls asleep, not every tick it stays asleep), so these are
+  // already nights rather than ticks. A handful of nights is a real habit;
+  // this keeps a long-lived pair from turning that into a four-digit count.
+  keptWatch: 20,
+  sleptSafely: 20,
+  // Restraint is checked whenever a standoff is live, which can be many
+  // consecutive ticks over one contested tile. Throttled so a single long
+  // standoff reads as one act of restraint rather than fifty.
+  sharedWater: 50,
 };
 
 /**

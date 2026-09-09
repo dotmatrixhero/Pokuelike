@@ -28,6 +28,12 @@ const ALL_REASONS: RapportReason[] = [
   "wasStruck",
   "socialized",
   "bonded",
+  "sharedWater",
+  "trainedTogether",
+  "keptWatch",
+  "sleptSafely",
+  "survivedTogether",
+  "mourned",
 ];
 
 /** How an edge's reasons read in prose — the "does this narrate?" check, not a shipping renderer. */
@@ -40,6 +46,12 @@ const PHRASING: Record<RapportReason, (n: number) => string> = {
   wasStruck: (n) => `was struck by them ${n} time${n === 1 ? "" : "s"}`,
   socialized: (n) => (n <= 1 ? `shared their company` : `spent ${n} long stretches in their company`),
   bonded: () => `took them as a mate`,
+  sharedWater: (n) => (n <= 1 ? `stood off over water without a fight` : `backed down from them over water ${n} times`),
+  trainedTogether: (n) => (n <= 1 ? `drilled beside them` : `drilled beside them through ${n} long sessions`),
+  keptWatch: (n) => `kept watch over their sleep ${n} time${n === 1 ? "" : "s"}`,
+  sleptSafely: (n) => `slept where they could reach ${n} time${n === 1 ? "" : "s"}`,
+  survivedTogether: (n) => (n === 1 ? `watched something die beside them` : `came through ${n} deaths beside them`),
+  mourned: (n) => (n === 1 ? `lost the same friend` : `buried ${n} of the same friends`),
 };
 
 const totals: Record<string, number> = Object.fromEntries(ALL_REASONS.map((r) => [r, 0]));
@@ -50,6 +62,9 @@ let edgesWithMemory = 0;
 let edgesMultiReason = 0;
 let mixedValence = 0;
 let curationChangedLead = 0;
+let edgesWithSharedExperience = 0;
+/** The shared-experience group — "what we went through", as opposed to "what I did to you". */
+const SHARED = new Set<RapportReason>(["sharedWater", "trainedTogether", "keptWatch", "sleptSafely", "survivedTogether", "mourned"]);
 const sampleLines: string[] = [];
 
 for (const seed of seeds) {
@@ -73,6 +88,7 @@ for (const seed of seeds) {
 
       const positive = memories.some((m) => m.reason !== "struck" && m.reason !== "wasStruck");
       const negative = memories.some((m) => m.reason === "struck" || m.reason === "wasStruck");
+      if (memories.some((m) => SHARED.has(m.reason))) edgesWithSharedExperience++;
       if (positive && negative) mixedValence++;
 
       for (const m of memories) {
@@ -121,6 +137,10 @@ console.log(
   `\nedges: ${edgeTotal} total, ${edgesWithMemory} carry a reason ` +
     `(${edgeTotal ? ((edgesWithMemory / edgeTotal) * 100).toFixed(1) : "0"}%), ` +
     `${edgesMultiReason} have more than one, ${mixedValence} mix a positive reason with a grudge`
+);
+console.log(
+  `shared experience: ${edgesWithSharedExperience}/${edgeTotal} edges carry at least one ` +
+    `(${edgeTotal ? ((edgesWithSharedExperience / edgeTotal) * 100).toFixed(1) : "0"}%)`
 );
 console.log(
   `curation: on ${curationChangedLead}/${edgesMultiReason} multi-reason edges ` +
