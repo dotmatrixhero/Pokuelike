@@ -145,6 +145,31 @@ describe("applyHerdCohesion", () => {
     expect(straggler.pos).toEqual({ x: 0, y: 0 });
   });
 
+  it("a juvenile (by age) uses the tighter leash even when its level is close to the herd's top — direct follow-up ask: 'stay closer' (about young specifically)", () => {
+    // A slow-growing herd: the "young" member is only 2 levels behind (below
+    // LOW_LEVEL_COHESION_GAP(5)), so the level-gap proxy alone wouldn't
+    // catch it — age is what actually makes it young here.
+    const world = createWorld(20, 20);
+    const youngster = member("a", { x: 0, y: 0 }, { level: 18, age: 10 }); // well under JUVENILE_AGE_THRESHOLD
+    world.agents.push(youngster, member("b", { x: 8, y: 0 }, { level: 20 }));
+
+    const moved = applyHerdCohesion(world, youngster);
+
+    expect(moved).toBe(true);
+    expect(youngster.pos.x).toBeGreaterThan(0);
+  });
+
+  it("an adult close in level to its herd's top keeps the ordinary wider leash even with age set", () => {
+    const world = createWorld(20, 20);
+    const adult = member("a", { x: 0, y: 0 }, { level: 18, age: 500 }); // well past JUVENILE_AGE_THRESHOLD
+    world.agents.push(adult, member("b", { x: 8, y: 0 }, { level: 20 }));
+
+    const moved = applyHerdCohesion(world, adult);
+
+    expect(moved).toBe(false);
+    expect(adult.pos).toEqual({ x: 0, y: 0 });
+  });
+
   it("an ordinary (non-guardian) herd member keeps the wider leash and whole-herd centroid even when rules are provided", () => {
     const world = createWorld(20, 20);
     const nearby = member("a", { x: 5, y: 5 }, { species: "bulbasaur" });

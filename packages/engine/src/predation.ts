@@ -887,7 +887,21 @@ export function isPreyOfAnything(rules: HuntRules, world: World, agent: Agent): 
   );
 }
 
-/** A herd-mate (any species) that's currently fleeing or fighting something, for a guardian to notice. */
+/**
+ * A herd-mate (any species) that's currently fleeing, fighting, or being
+ * actively stalked by a hunting predator, for a guardian to notice.
+ *
+ * The "being stalked" half (`isBeingHunted` below) is new — direct ask:
+ * "needs more instinct to protect while alive." Before this, a guardian only
+ * ever noticed a herd-mate already IN `"flee"` or `"fight"` — purely
+ * reactive. A threat that resolves in a single hit (predation.ts's own
+ * one-shot case against a juvenile, confirmed via
+ * `validateYoungProtection.ts`: no flee tick, no fight tick, just a kill)
+ * never gave that reactive check a window to fire at all. `"hunt"` behavior
+ * with a matching `huntTarget` is the earliest real signal this file has: a
+ * predator commits to a specific victim (`huntTarget` gets set) before it's
+ * even necessarily adjacent yet, well before the first hit lands.
+ */
 function findHerdmateInDanger(world: World, agent: Agent): Agent | undefined {
   if (!agent.herdId) return undefined;
   const inDanger = world.agents.filter(
@@ -896,10 +910,17 @@ function findHerdmateInDanger(world: World, agent: Agent): Agent | undefined {
       other.alive !== false &&
       other.herdId === agent.herdId &&
       other.layer === agent.layer &&
-      (other.behavior === "flee" || other.behavior === "fight") &&
+      (other.behavior === "flee" || other.behavior === "fight" || isBeingHunted(world, other)) &&
       manhattan(other.pos, agent.pos) <= GUARDIAN_DETECT_RADIUS
   );
   return nearest(agent, inDanger);
+}
+
+/** Is `agent` the active `huntTarget` of some nearby predator still mid-hunt (not yet fighting)? See `findHerdmateInDanger`'s own doc comment for why this is the proactive half of guardian detection. */
+function isBeingHunted(world: World, agent: Agent): boolean {
+  return world.agents.some(
+    (other) => other.id !== agent.id && other.alive !== false && other.behavior === "hunt" && other.huntTarget === agent.id
+  );
 }
 
 /**

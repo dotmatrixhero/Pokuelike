@@ -6951,3 +6951,29 @@ not something this pathfinding pass itself caused or is positioned to fix.
       spawning elsewhere — same "40+ slaughtering low levels" symptom, a
       different cause. Whether/how to also discourage that drift is a
       separate design question for later.
+
+## Built: herd young-protection, pieces 1+2 (proactive guardian + age-based cohesion) — see DESIGN.md
+
+- [x] Direct question + decision: "do herds protect their young at all? I
+      don't seem to see it... needs more instinct to protect while alive,
+      stay closer, and avenge when dead" -> menu of 3 pieces -> "Sure."
+      Built 1 (proactive guardian trigger: `findHerdmateInDanger` now
+      notices a herd-mate a nearby predator has already committed to
+      hunting, `behavior === "hunt"` + matching `huntTarget`, not just one
+      already fleeing/fighting) and 2 (age-based tight cohesion:
+      `applyHerdCohesion`'s tighter leash now also fires on
+      `isJuvenile(agent)` directly, not only the level-gap proxy). Full
+      engine suite (1270, 5 new) green. Real before/after (8 seeds x 10,000
+      ticks each, same seeds, code swapped via `git stash` — not just two
+      unrelated runs): guardian-intervention rate on a juvenile death
+      roughly tripled, 17% -> 50%; juvenile deaths 6 -> 4, total deaths
+      250 -> 271 across the same 8 seeds (noted honestly as suggestive, not
+      a clean causal read — any behavior-timing change cascades the whole
+      shared-rng timeline from that point on, so per-seed numbers aren't
+      "the same encounters resolving differently"). See DESIGN.md's full
+      table and honesty note.
+- [ ] Piece 3 (avenge) intentionally NOT built yet — genuinely new
+      mechanic (temporary pursuit/aggression toward a still-nearby killer
+      after a herd death), no existing code to extend, needs its own
+      design/tuning pass rather than being bolted on blind. Still on the
+      menu, not decided against.

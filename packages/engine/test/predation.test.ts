@@ -822,6 +822,28 @@ describe("guardians", () => {
     expect(protector.pos.x).toBeLessThan(8); // closing in — TEST_MOVE is melee-only, can't hit from 2 away yet
   });
 
+  it("a guardian intervenes proactively — before the herd-mate has ever fled or fought — once a predator commits to hunting it", () => {
+    // Direct follow-up ask: "needs more instinct to protect... while alive."
+    // Before this, a guardian only noticed a herd-mate already IN "flee" or
+    // "fight" — purely reactive. Here the herd-mate is still "idle": no
+    // flee tick, no fight tick, just a predator that has already committed
+    // to hunting it (`behavior: "hunt"`, `huntTarget` set) — the earliest
+    // real signal predation.ts has, and the one a single-hit kill would
+    // otherwise never give the reactive check a chance to see.
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const protector = guardian({ x: 8, y: 5 }, { herdId: "herd-a" });
+    const stalked = prey({ x: 5, y: 5 }, { herdId: "herd-a", behavior: "idle" });
+    const threat = predator({ x: 6, y: 5 }, 0.9, { behavior: "hunt", huntTarget: "bulbasaur-0" });
+    world.agents.push(protector, stalked, threat);
+    const log = new EventLog();
+
+    tickWorld(world, log, RULES, undefined, SAFE_RNG);
+
+    expect(protector.behavior).toBe("fight");
+    expect(protector.fightTarget).toBe("scyther-0");
+    expect(protector.pos.x).toBeLessThan(8); // closing in — TEST_MOVE is melee-only, can't hit from 2 away yet
+  });
+
   it("a guardian with no herd-mate in danger behaves normally", () => {
     const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const protector = guardian({ x: 8, y: 5 }, { herdId: "herd-a" });

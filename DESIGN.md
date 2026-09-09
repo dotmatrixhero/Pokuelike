@@ -15424,3 +15424,56 @@ nearly free once 1 is in), measure with the same tool, then treat 3 as its
 own slice — it's a genuinely new mechanic (temporary aggression/pursuit
 state) rather than an extension of something that already exists, and
 deserves its own tuning pass rather than being bolted on blind.
+
+### Built: pieces 1 + 2 (proactive guardian, age-based tight cohesion)
+
+Direct decision on the menu above: "Sure."
+
+**1. Proactive guardian trigger.** `findHerdmateInDanger` (predation.ts)
+now also treats a herd-mate as "in danger" if a nearby predator has already
+committed to hunting it (`behavior === "hunt"` with a matching
+`huntTarget`) — not just once that herd-mate is already `"flee"`/`"fight"`.
+`huntTarget` gets set the moment a predator locks onto a specific victim,
+before it's necessarily even adjacent yet, so this gives a guardian a real
+window to close in and threaten the predator before the first hit lands,
+not just pile on after. New helper `isBeingHunted`.
+
+**2. Age-based tight cohesion.** `applyHerdCohesion`'s (herding.ts)
+tighter-leash check now also fires on `isJuvenile(agent)` directly, not
+only the existing level-gap proxy (5+ levels below the herd's own top).
+Closes the gap where a genuinely young agent in a slow-growing herd (or one
+that's lost its veterans) wouldn't be far enough behind in level to trigger
+the old check even though it's still, by age, a juvenile.
+
+**Verified.** Full engine suite green (1270 tests, 5 new — a guardian
+intervening against a merely-hunting threat with no prior flee/fight tick,
+and a by-age juvenile getting the tight leash despite a small level gap).
+
+**Real before/after measurement**, same methodology both sides (new
+`packages/runner/src/validateYoungProtectionMulti.ts`, 8 seeds x 10,000
+ticks, code under test swapped via `git stash` — NOT a re-run of the same
+seeds with unrelated variance, the actual before/after comparison this
+project's own rules call for):
+
+| | before | after |
+|---|---|---|
+| total deaths (all ages, 8 seeds) | 250 | 271 |
+| juvenile flee events (near-misses) | 45 | 18 |
+| juvenile deaths to predation | 6 | 4 |
+| juvenile deaths WITH a guardian intervention | 1 (17%) | 2 (50%) |
+
+**Honest read.** The guardian-intervention RATE roughly tripled (17% ->
+50% of juvenile deaths now show a herd-mate actually engaging the killer)
+— that's the piece this measurement can attribute cleanly to the fix,
+since it's a direct behavioral signature of the new proactive path.
+Juvenile deaths dropped 6 -> 4 and total deaths rose 250 -> 271 across the
+same 8 seeds, but per-seed results aren't a clean causal comparison beyond
+that: a guardian intervening even slightly earlier changes which `rng()`
+calls happen when, which cascades into a fully different tick-by-tick
+timeline from that point on (same "one shared generator, one behavior
+change diverges everything after it" fact this project's own determinism
+tests already document) — so individual seed numbers (e.g. seed 1008's
+31 flee events before vs. 2 after) reflect a genuinely different run, not
+"the same encounters resolving differently." The intervention-rate jump is
+real; the exact death-count delta is suggestive, not proven, on 8 seeds.
+Piece 3 (avenge) remains its own, not-yet-built slice.
