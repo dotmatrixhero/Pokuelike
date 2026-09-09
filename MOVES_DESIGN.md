@@ -3060,6 +3060,12 @@ Two details did more work than expected:
   holder who still sits on the title turns that into "7154 ticks alive,
   having outlasted everything they were born beside."
 
+> **Executable rules live in [`DESIGN_VALIDATION.md`](DESIGN_VALIDATION.md)**
+> — the checker that enforces the structural and content rules in this
+> document, plus the self-test discipline that keeps it honest. Prose does
+> not fail a build; several rules here were re-broken after being written
+> down, which is why that layer exists.
+
 ## Roster census: where the tree content actually is (measured)
 
 Design session opener, after "OK I want us to get to designing more. Moves
