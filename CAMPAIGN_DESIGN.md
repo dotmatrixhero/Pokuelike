@@ -511,6 +511,51 @@ not seen. The follower gives you company and no direction. Same bond either
 way; different thing gained, and the expensive door buys knowledge of the
 cave, which is the scarce resource down there.
 
+#### One armful — what leaving actually costs
+
+> "I think if it asks you to leave you get a chance to grab your stuff from
+> your cache maybe."
+
+Right, and it needs a bound or the dominance simply flips: a disperser you
+can fully pack for is strictly better than the follower, since you would be
+led somewhere *and* keep everything.
+
+The bound is already in the data — **it is walking**, toward its
+`dispersalTarget`.
+
+> *It waits at the mouth of the passage. It does not wait long.*
+
+- **One armful.** Enough turns for a single trip to the cache, not enough to
+  shuttle back and forth.
+- **Carry capacity does the rest.** You choose what the cache was *for*.
+- **Its distance is visible**, so the pressure is informed rather than a
+  hidden timer (legibility rule).
+
+This is strictly better than "you lose everything," which is a penalty rather
+than a decision. *Six units of twenty, right now, while an animal waits* is a
+decision. It is also the single most dramatic moment the pouch and pack
+upgrades from `CRAFTING_LOOP.md` could possibly pay off in.
+
+The two doors stay balanced:
+
+| | You get | You give up |
+|---|---|---|
+| **Disperser** | A guide into cave you have not seen | Everything past one armful |
+| **Follower** | All your gear, your own schedule | Any idea where you are going |
+
+**Scope flag — the player cache does not exist.** `Tile.cache` is real but it
+is a *number*: a food stockpile on "shelter" tiles for `buildsShelter`
+agents. There is no items-on-the-ground concept anywhere, so nothing can be
+dropped, stashed or found. A cache you can run back to means **adding items
+to tiles**, which is genuinely new work — and which also unlocks dropped
+loot, another creature raiding your stash, and finding somebody else's.
+
+**Call:** is the cache a real place you chose, or an abstraction?
+**Recommend real** — pillar 4 wants you living beside what you did, and a
+specific rock you piled your things behind beats a menu. It also makes the
+moment play differently depending on where you cached, which is free
+variety.
+
 If resources do appear in the moment, the rule that keeps it from being a
 shop:
 
@@ -562,13 +607,14 @@ the moment unreadable, which is the worse failure.
 3. **Frequency** — recommend once per individual, ever, refusable, not
    repeatable.
 4. **Does refusing lose that individual permanently?** Recommend yes.
-5. **If you refuse a disperser and later reach the exit, can the follower
-   moment fire for that same individual?** Recommend no — refusal was
-   permanent, that was its cost — but a *different* individual still can.
-6. **Do both doors land at Bonded, or does the follower arrive short?**
-   Recommend both reach Bonded. A guaranteed floor is correct while the bond
-   gates progression; the variety lives in which door and which individual,
-   not in whether you got one at all.
+5. ~~If you refuse a disperser, can the follower moment fire for that same
+   individual?~~ **DECIDED: no.** Refusal is permanent for that individual —
+   that was its cost. A *different* individual still can.
+6. ~~Do both doors land at Bonded?~~ **DECIDED: both bonded.** The guaranteed
+   floor is correct while the bond gates progression; the variety lives in
+   which door and which individual, not in whether you got one.
+7. **Is the cache a real place or an abstraction?** Recommend real — see
+   "One armful" above. Open.
 
 ### The measurable risk before this gets built
 

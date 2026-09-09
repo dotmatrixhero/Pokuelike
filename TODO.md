@@ -58,7 +58,16 @@ resources are involved, frequency, cost of refusal).
 
 Now **two doors**: the disperser (it leaves, you follow, it leads you
 somewhere new) and the follower (you leave, it comes after you with concern,
-at the exit). Six calls open there.
+at the exit). Both land at Bonded; refusing a disperser burns that individual
+permanently. Leaving with a disperser gets you **one armful** from your cache
+— a single trip, bounded by how far it has already walked.
+
+**Blocked on a system that doesn't exist: the player cache.** `Tile.cache` is
+a number (shelter food stockpile for `buildsShelter` agents). There is no
+items-on-the-ground concept at all, so nothing can be dropped, stashed or
+found. Adding items to tiles is a prerequisite for the one-armful moment, and
+separately unlocks dropped loot, stash raiding, and finding another
+settlement's leavings.
 
 **Measurement, no longer blocking:** how many dispersal events fire in a
 layer-1-sized region over ~400 turns across several seeds. Trigger 1 is
