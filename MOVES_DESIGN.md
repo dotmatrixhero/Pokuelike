@@ -3923,3 +3923,76 @@ but never its decision — principle 12, restated for lanes.
 
 Four drafts still use the previous shape. Rolling this out to them is a
 decision, not an oversight — one tree was piloted first on purpose.
+
+## Skill-tree template v4 — the two-lane standard (proposed for all moves)
+
+> "Perhaps we should standardize that for ALL moves. This exact shape of
+> tree?" / "Well they should get a skill point every level right."
+
+### First, the reach check — because depth is only real if agents get there
+
+A capstone 26 points deep needs a level-27 agent to exist. Measured, 3 seeds
+x 4,000 ticks, 67 living agents, plus the existing `validateCapstoneReach`
+over 4 seeds x 8,000 ticks:
+
+| | |
+|---|---|
+| level | min 6 · **p50 25** · p90 34 · p99 46 · max 46 |
+| an 8-point node | reachable by 94% of agents |
+| a 16-point node | 82% |
+| a 21-point node | 72% |
+| **a 26-point node** | **45%** |
+| currently reach a terminal capstone | 33% |
+| **unspent points banked per agent** | **9.81** |
+
+So the two-lane tree's 26-point capstones land at 45% reach — *better* than
+the 33% the current roster manages. And the decisive number is the last one:
+agents are sitting on ~10 unspent points each. **There is real headroom for
+deeper trees**; the roster is currently too shallow for its own progression
+curve, not too deep. Depth is affordable.
+
+(That 9.81 figure is worth its own investigation — points banked and never
+spent is either an AI picking constraint or genuinely nothing worth buying.
+Logged, not chased here.)
+
+### The standard
+
+Per branch, 12 nodes:
+
+```
+                opener
+        ┌──────────┴──────────┐
+   x → x → [LANE NOTABLE] → x   a → a → [LANE NOTABLE] → a
+        └──────────┬──────────┘
+              [DEEP NOTABLE]
+                    │
+                 filler
+                    │
+               [CAPSTONE]
+```
+
+Plus three crosslink bridges (crosslink → filler deepening its own lever →
+cost-2 notable), each landing on **one lane notable per branch** it connects,
+complementing that lane rather than matching it. Nine `prerequisitesAnyOf`:
+six lane notables plus three deep notables.
+
+### The one place this standard must NOT be rigid: node count
+
+**Structure is the standard. 45 nodes is not.** This document already learned
+this once, in the crosslink rollout:
+
+> "dig (29) and leech_seed (31) were deliberately left short. Their honest
+> lever sets are smaller, and inflating them to hit a number is exactly the
+> template failure the rest of this document exists to prevent. Matching the
+> flagships' *structure* was the finding; matching their *node count* was
+> not."
+
+A move with a thin honest lever set gets the same shape with **shorter
+lanes** — two rungs instead of three, 10 nodes per branch instead of 12 —
+not three invented fillers to hit a number. Diglett's Dig does not have 45
+nodes' worth of real ideas in it, and pretending otherwise produces exactly
+the copy-pasted feel the v3 redesign existed to kill.
+
+`check-proposed-trees.ts` therefore enforces the **shape** — two lanes, a
+notable in each, a deep convergence notable, a filler, a capstone, three
+bridges, nine anyOf — and says nothing about how many nodes fill it.
