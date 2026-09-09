@@ -62,7 +62,7 @@ console.log(`level         mean ${mean(levels).toFixed(1)}  p50 ${pct(levels, 0.
 console.log(`nodes chosen  mean ${mean(invested).toFixed(1)}  p90 ${pct(invested, 0.9)}  max ${Math.max(...invested)}`);
 console.log(`deepest single branch  mean ${mean(branchMax).toFixed(1)}  p90 ${pct(branchMax, 0.9)}  max ${Math.max(...branchMax)}`);
 console.log(`  savant at >=6 (today)  ${savantAgents} agents (${((100 * savantAgents) / agents).toFixed(1)}%)`);
-for (const bar of [8, 10, 12]) {
+for (const bar of [8, 10, 11, 12, 13, 14, 15]) {
   const n = branchMax.filter((b) => b >= bar).length;
   console.log(`  savant at >=${bar}          ${n} agents (${((100 * n) / agents).toFixed(1)}%)`);
 }
