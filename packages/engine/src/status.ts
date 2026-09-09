@@ -4,6 +4,7 @@ import type { StatKey } from "./nature.js";
 import type { EventLog } from "./events.js";
 import { FINISHING_POOL_FRACTION } from "./support.js";
 import { herdMembers } from "./herdIndex.js";
+import { RAPPORT_HEALED_DELTA, strengthenRapportMutual } from "./rapport.js";
 import { findWalkableNear } from "./worldgen.js";
 
 /** Chance a burn spreads to another nearby agent when `MoveSpec.statusSpreads` is set — rolled once per successful `maybeInflictStatus` call, not once per tick. Sim-original magnitude, not canon. */
@@ -506,6 +507,16 @@ function applyHealAuraPassive(agent: Agent, world: World): void {
     if (Math.abs(other.pos.x - agent.pos.x) + Math.abs(other.pos.y - agent.pos.y) > HEAL_AURA_RADIUS) continue;
     if (other.hp === undefined || other.maxHp === undefined) continue;
     if (isPassiveHealingSuppressed(other)) continue;
+    const before = other.hp;
     other.hp = Math.min(other.maxHp, other.hp + other.maxHp * fraction);
+    // Rapport: real agent-to-agent healing, which until now built nothing.
+    // Gated on HP having actually moved — topping up a herd-mate already at
+    // full health is arithmetically a no-op, and letting a no-op read as
+    // care would make every aura holder "close" to everyone standing near
+    // it. Throttled per `RAPPORT_REASON_MEMORY_INTERVAL`, since this runs
+    // every tick a hurt ally is in range.
+    if (other.hp > before) {
+      strengthenRapportMutual(world, agent, other, RAPPORT_HEALED_DELTA, "healed", "wasHealed");
+    }
   }
 }

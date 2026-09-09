@@ -1,4 +1,4 @@
-import type { Agent, RapportEdge, RapportMemory, RapportReason, World } from "./types.js";
+import type { Agent, RapportEdge, RapportMemory, RapportReason, RapportSubject, World } from "./types.js";
 
 /**
  * Rapport: a real, sparse agent-to-agent relationship graph — the general,
@@ -180,6 +180,46 @@ export const RAPPORT_SURVIVED_TOGETHER_DELTA = 0.08;
  */
 export const RAPPORT_MOURNED_DELTA = 0.12;
 
+/**
+ * Both were fighting when something died beside them. Sized just above
+ * `RAPPORT_SURVIVED_TOGETHER_DELTA` — standing in a fight together is more
+ * than standing near one — and it carries a named subject, which is the part
+ * that actually does the work.
+ */
+export const RAPPORT_DEFEATED_TOGETHER_DELTA = 0.1;
+
+/**
+ * The herd migrated together because the weather (or the scarcity it caused)
+ * left it no choice. Modest per migration: a real shared upheaval, but every
+ * member of the herd gets it with every other member, so this multiplies
+ * across a herd in a way the one-to-one reasons do not.
+ */
+export const RAPPORT_WEATHERED_TOGETHER_DELTA = 0.04;
+
+/**
+ * Carrying a fainted ally to safety — `support.ts`'s completed carry, and
+ * `DESIGN.md`'s **Rescue**, the strongest of the four bonding verbs ("the
+ * Pokémon chooses you as much as you chose it"). Until this constant existed
+ * the entire carry mechanic built **zero** rapport, which was an oversight
+ * rather than a decision: nothing in DESIGN.md or TODO.md records a choice
+ * to leave it out. The largest delta in this file after bonding itself,
+ * because a rescue should not need repeating to mean something.
+ */
+export const RAPPORT_RESCUE_DELTA = 0.35;
+
+/**
+ * A tick of the `healAura` passive that actually closed a wound — counted
+ * only when the recipient was genuinely hurt, since healing somebody at full
+ * HP is arithmetically a no-op and should not read as care. Small and
+ * throttled (see `RAPPORT_REASON_MEMORY_INTERVAL`) because an aura holder
+ * mends the same herd-mates every tick they stand near it; the *milestone*
+ * is what means something, not the tick.
+ *
+ * Like the carry mechanic, this had no rapport hook at all before — real
+ * agent-to-agent healing, running every tick, building nothing.
+ */
+export const RAPPORT_HEALED_DELTA = 0.03;
+
 function clampScore(score: number): number {
   return Math.max(-1, Math.min(1, score));
 }
@@ -225,10 +265,20 @@ export function rapportMemories(agent: Agent, otherId: string): RapportMemory[] 
  * different questions, and conflating them would hide the judgement.
  */
 export const RAPPORT_REASON_SIGNIFICANCE: Record<RapportReason, number> = {
+  // Being carried out when you could not walk is the strongest thing one
+  // agent can do for another short of dying for it.
+  wasRescued: 7,
+  rescued: 7,
   // Rarest and heaviest: a third party both of them cared about is dead.
   mourned: 6,
+  wasHealed: 5,
+  healed: 5,
+  // Carries a named subject, which makes it the most specific thing an edge
+  // can say about itself.
+  defeatedTogether: 6,
   bonded: 5,
   survivedTogether: 5,
+  weatheredTogether: 4,
   wasDefended: 4,
   defended: 4,
   // Sleeping beside someone who could reach you is a real, costly choice —
@@ -288,6 +338,11 @@ export const RAPPORT_REASON_MEMORY_INTERVAL: Partial<Record<RapportReason, numbe
   // consecutive ticks over one contested tile. Throttled so a single long
   // standoff reads as one act of restraint rather than fifty.
   sharedWater: 50,
+  // The aura fires every tick a hurt herd-mate stands in it, so these are
+  // per-tick habits in exactly the way socializing was. A milestone is
+  // roughly "you have patched me up through a whole bad stretch."
+  healed: 100,
+  wasHealed: 100,
 };
 
 /**
@@ -316,7 +371,25 @@ export function notableRapportMemories(agent: Agent, otherId: string): RapportMe
  * Takes and returns the array rather than mutating an edge, so
  * `adjustRapport` can carry memories across the edge object it rebuilds.
  */
-function withMemory(memories: RapportMemory[] | undefined, reason: RapportReason, tick: number): RapportMemory[] {
+/**
+ * Which of two subjects is worth keeping — the more notable one, judged by
+ * `level`, ties going to the newer. An edge keeps exactly one subject per
+ * reason (see `RapportMemory.subject`), so this is the whole of that
+ * curation: bringing down a Scyther outranks the four Rattata before it, and
+ * `count` still records that there were five.
+ */
+function moreNotableSubject(prior: RapportSubject | undefined, next: RapportSubject | undefined): RapportSubject | undefined {
+  if (!next) return prior;
+  if (!prior) return next;
+  return (next.level ?? 0) >= (prior.level ?? 0) ? next : prior;
+}
+
+function withMemory(
+  memories: RapportMemory[] | undefined,
+  reason: RapportReason,
+  tick: number,
+  subject?: RapportSubject,
+): RapportMemory[] {
   const next = memories ? [...memories] : [];
   const interval = RAPPORT_REASON_MEMORY_INTERVAL[reason] ?? 1;
   const at = next.findIndex((m) => m.reason === reason);
@@ -325,13 +398,19 @@ function withMemory(memories: RapportMemory[] | undefined, reason: RapportReason
     // The first occurrence always records, throttled or not — "these two have
     // met" is real information, and it means a throttled reason never sits
     // invisible at count 0 waiting for a milestone that may never come.
-    next.push(interval > 1 ? { reason, count: 1, lastTick: tick, occurrences: 1 } : { reason, count: 1, lastTick: tick });
+    const fresh: RapportMemory = { reason, count: 1, lastTick: tick };
+    if (interval > 1) fresh.occurrences = 1;
+    if (subject) fresh.subject = subject;
+    next.push(fresh);
     return next;
   }
 
   const prior = next[at]!;
+  const keptSubject = moreNotableSubject(prior.subject, subject);
   if (interval <= 1) {
-    next[at] = { reason, count: prior.count + 1, lastTick: tick };
+    const updated: RapportMemory = { reason, count: prior.count + 1, lastTick: tick };
+    if (keptSubject) updated.subject = keptSubject;
+    next[at] = updated;
     return next;
   }
 
@@ -341,12 +420,14 @@ function withMemory(memories: RapportMemory[] | undefined, reason: RapportReason
   // remembering", which is what a reader wants from it.
   const occurrences = (prior.occurrences ?? prior.count) + 1;
   const crossed = (occurrences - 1) % interval === 0;
-  next[at] = {
+  const throttled: RapportMemory = {
     reason,
     count: crossed ? prior.count + 1 : prior.count,
     lastTick: crossed ? tick : prior.lastTick,
     occurrences,
   };
+  if (keptSubject) throttled.subject = keptSubject;
+  next[at] = throttled;
   return next;
 }
 
@@ -459,6 +540,7 @@ export function adjustRapport(
   delta: number,
   reason?: RapportReason,
   rng: () => number = world.rng,
+  subject?: RapportSubject,
 ): void {
   if (agent.id === otherId) return;
   const rapport = agent.rapport ?? (agent.rapport = {});
@@ -472,7 +554,7 @@ export function adjustRapport(
   }
 
   if (!existing) evictWeakestEdge(agent, world.tick, rng);
-  const memories = reason ? withMemory(existing?.memories, reason, world.tick) : existing?.memories;
+  const memories = reason ? withMemory(existing?.memories, reason, world.tick, subject) : existing?.memories;
   const edge: RapportEdge = { score: next, lastInteractionTick: world.tick };
   if (memories?.length) edge.memories = memories;
   rapport[otherId] = edge;
@@ -508,8 +590,9 @@ export function strengthenRapportMutual(
   reasonForA?: RapportReason,
   reasonForB: RapportReason | undefined = reasonForA,
   rng: () => number = world.rng,
+  subject?: RapportSubject,
 ): void {
   if (a.id === b.id) return;
-  adjustRapport(world, a, b.id, delta, reasonForA, rng);
-  adjustRapport(world, b, a.id, delta, reasonForB, rng);
+  adjustRapport(world, a, b.id, delta, reasonForA, rng, subject);
+  adjustRapport(world, b, a.id, delta, reasonForB, rng, subject);
 }

@@ -226,6 +226,78 @@ runs — these figures are not directly comparable to the earlier
 `socialized` table. The 95.2% → 9.6% throttle result stands, since that was
 measured before and after that change alone.
 
+## BUILT: named subjects, rescue, healing, displacement
+
+Follow-up round on shared experience. Direct steers: *"Maybe surviving a storm
+and drought and other weather together would still be worth it if it
+meaningfully changed their behavior."* / *"I think defeating an enemy together
+- and naming specifically what it was would be great."* / *"Lost the same
+friend might be better as 'mourned a friend together' — phrasing is
+important."* / *"And like defending each other? Is that a thing? Healing?"*
+
+### The structural change: memories can name a subject
+
+`RapportMemory.subject` — a `{ label, id?, level? }`. One per reason, kept as
+the most **notable** (highest level, ties to the newest), so the structure
+stays bounded exactly as `count` does. Three kills together keeps the Scyther
+and drops the Rattata; `count` still says three.
+
+That is the answer to *"more than just #s of things"*: a count says two
+creatures fought a lot, a subject says **they brought down a Scyther.**
+
+### Conceded: weather counts, and my test for it was wrong
+
+I rejected "survived a storm together" because storms do no damage. True, and
+the wrong test — **the shared experience is the displacement, not the
+damage.** `weatheredTogether` now fires on a herd migration whose
+`MigrationReason` is `weather` or `scarcity`: the world moved them, it moved
+them together, and the memory names what drove them out. `wanderlust` and
+`territorial` are excluded — those are choices, not weather.
+
+### Two real gaps found by the questions
+
+- **Carrying a fainted ally home built ZERO rapport.** `support.ts` only ever
+  touched rapport at the food-delivery site. That is `DESIGN.md`'s **Rescue** —
+  the strongest of the four bonding verbs, *"the Pokémon chooses you as much
+  as you chose it"* — completely unhooked. Nothing in DESIGN.md or TODO.md
+  records a decision to leave it out, so: oversight, not choice. Now
+  `rescued`/`wasRescued`, and only on `"arrived"` — a carrier that dropped its
+  ally because a predator turned up did not rescue anybody.
+- **The `healAura` passive built zero rapport too.** Real agent-to-agent
+  healing, running every tick, building nothing. Now `healed`/`wasHealed`,
+  gated on HP having actually moved (topping up someone at full health is a
+  no-op and must not read as care) and throttled at 100.
+
+**Defending each other already existed** — `defended`/`wasDefended`, wired in
+the first round.
+
+### Measured, 4 seeds x 6000 ticks
+
+**48.6% of edges carry a shared-experience reason** (was 38.6%).
+`rescued` 18 / `wasRescued` 21, `weatheredTogether` 36, `defeatedTogether` 14.
+
+> *(+1.00) brought down 2 together, the largest a scyther, came through 3
+> deaths beside them, worst a scyther, was defended by them 20 times, fought
+> for them 3 times, was driven out by hunger beside them*
+>
+> *(+0.43) brought down a fearow together, watched a onix die beside them,
+> was defended by them 7 times, fought for them 6 times*
+
+### FINDING 4 — `healAura` never occurs in a real run
+
+`healed`/`wasHealed` recorded **0** across 24,000 agent-ticks. The hook is
+proven working by a direct unit test; the *passive* is what never happens.
+`healAura` is granted only by skill-tree nodes (`grantsPassive` in
+`moves.ts`), and no agent in four 6,000-tick runs ever allocated one. Same
+unreachable-content pattern as fire never igniting — and it predates this
+change.
+
+### Phrasing
+
+`mourned` now reads *"mourned a friend together"*. `trainedTogether` was
+*"drilled beside them"*, which — fair — meant nothing; now *"trained
+alongside them"*.
+
 ## IMPLEMENTATION ORDER — the move from design into code
 
 Asked directly: *"Do you think you're potentially ready to really start

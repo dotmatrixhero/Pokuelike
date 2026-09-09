@@ -1622,7 +1622,55 @@ export type RapportReason =
    * positive rapport with. Symmetric, rare, and the only thing in this
    * vocabulary that is about a third party.
    */
-  | "mourned";
+  | "mourned"
+  /**
+   * Both were fighting when something died beside them — and the memory
+   * **names what it was**. Direct steer: "I think defeating an enemy
+   * together - and naming specifically what it was would be great." A count
+   * says two creatures fought a lot; a subject says they brought down a
+   * Scyther.
+   */
+  | "defeatedTogether"
+  /**
+   * The world moved them, and it moved them together — a herd migration
+   * whose `MigrationReason` was the weather or the scarcity it caused.
+   *
+   * This exists because of a correction worth keeping: "surviving a storm"
+   * was first rejected on the grounds that storms do no damage, which is
+   * true and was the wrong test. Direct steer: "Maybe surviving a storm and
+   * drought and other weather together would still be worth it if it
+   * meaningfully changed their behavior." **The shared experience is the
+   * displacement, not the damage** — and a migration is displacement the sim
+   * already records, with a cause attached.
+   */
+  | "weatheredTogether"
+  /** Carried them out when they could not walk — `support.ts`'s completed carry. The carrier's side. */
+  | "rescued"
+  /** Was carried out by them — the rescued side, and the heavier half of the pair. */
+  | "wasRescued"
+  /** Closed their wounds — the `healAura` passive, holder's side, counted only when it actually restored HP. */
+  | "healed"
+  /** Was mended by them — the recipient's side of the same aura. */
+  | "wasHealed";
+
+/**
+ * What a `RapportMemory` was *about*, when it was about something — the
+ * predator two agents brought down, the friend they both lost, the drought
+ * that drove them out. Direct steer: naming the thing specifically is what
+ * turns a count into a story.
+ *
+ * Deliberately a display `label` rather than a species id, so one field
+ * covers both an agent (`"Scyther"`) and a cause (`"drought"`) without a
+ * discriminated union that every consumer would have to branch on.
+ */
+export interface RapportSubject {
+  /** The noun prose should use — a species name, or a cause like "drought". */
+  label: string;
+  /** The specific agent this was about, when it was an agent at all. */
+  id?: string;
+  /** Level where known — `rapport.ts` keeps the most notable subject, and this is how "notable" is judged. */
+  level?: number;
+}
 
 /**
  * One aggregated reason on a `RapportEdge` — "this happened between us, this
@@ -1649,6 +1697,14 @@ export interface RapportMemory {
    * where `count` already *is* the raw count.
    */
   occurrences?: number;
+  /**
+   * What this memory was about, where there was a subject to name — kept as
+   * the single most *notable* one (highest `level`, ties going to the most
+   * recent) rather than a list, so the structure stays bounded exactly as
+   * `count` does. "Brought down a Scyther together" survives; the four
+   * Rattata before it do not, and `count` still says there were five.
+   */
+  subject?: RapportSubject;
 }
 
 /** One directed edge of `Agent.rapport` — see that field's doc comment. */

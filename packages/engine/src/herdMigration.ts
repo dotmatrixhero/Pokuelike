@@ -6,6 +6,7 @@ import { foodStockNear, countTerrainNear } from "./resourceIndex.js";
 import { findWalkableNear, biomeWeightsAt } from "./worldgen.js";
 import { activeWeatherAt, hasCoverNearby } from "./weather.js";
 import { LEADERSHIP_DISPOSITION_BLEND_WEIGHT } from "./herdLeadership.js";
+import { RAPPORT_WEATHERED_TOGETHER_DELTA, strengthenRapportMutual } from "./rapport.js";
 
 /**
  * Herd-level migration — see DESIGN.md's "Herd-level migration: moving as a
@@ -563,10 +564,45 @@ export function updateHerdMigrations(world: World, log?: EventLog, rng: () => nu
   }
 }
 
+/**
+ * Migration reasons that count as the world having moved this herd, rather
+ * than the herd having chosen to move — the two where nobody decided
+ * anything and everyone lived through it together. `"wanderlust"` and
+ * `"territorial"` are deliberately excluded: those are choices, not weather.
+ * `"crowding"` and `"predator_pressure"` are left out for now as arguable
+ * middle cases rather than assumed in.
+ */
+const DISPLACEMENT_REASONS: readonly MigrationReason[] = ["weather", "scarcity"];
+
 function startMigration(world: World, log: EventLog | undefined, herdId: string, from: Vec2, to: Vec2, reason: MigrationReason): void {
   world.herdMigrations ??= {};
   world.herdMigrations[herdId] = { target: to, reason, startedTick: world.tick };
   log?.record({ kind: "herdMigrating", tick: world.tick, herdId, from, to, reason });
+
+  // Shared experience: the world moved them, and it moved them together.
+  // Direct steer, correcting an earlier over-strict reading that rejected
+  // weather because storms do no damage: "Maybe surviving a storm and drought
+  // and other weather together would still be worth it if it meaningfully
+  // changed their behavior." A migration IS the meaningful behavior change,
+  // it is already recorded, and it already carries its own cause — so the
+  // memory can name what drove them out.
+  if (!DISPLACEMENT_REASONS.includes(reason)) return;
+  const displaced = world.agents.filter((a) => a.herdId === herdId && a.alive !== false && !a.isEgg);
+  const subject = { label: reason === "weather" ? "the weather" : "hunger" };
+  for (let i = 0; i < displaced.length; i++) {
+    for (let j = i + 1; j < displaced.length; j++) {
+      strengthenRapportMutual(
+        world,
+        displaced[i]!,
+        displaced[j]!,
+        RAPPORT_WEATHERED_TOGETHER_DELTA,
+        "weatheredTogether",
+        "weatheredTogether",
+        world.rng,
+        subject,
+      );
+    }
+  }
 }
 
 /** Whether any living member of this herd is already mid-crossing out of the zone. */

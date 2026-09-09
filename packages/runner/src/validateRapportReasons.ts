@@ -34,10 +34,16 @@ const ALL_REASONS: RapportReason[] = [
   "sleptSafely",
   "survivedTogether",
   "mourned",
+  "defeatedTogether",
+  "weatheredTogether",
+  "rescued",
+  "wasRescued",
+  "healed",
+  "wasHealed",
 ];
 
 /** How an edge's reasons read in prose — the "does this narrate?" check, not a shipping renderer. */
-const PHRASING: Record<RapportReason, (n: number) => string> = {
+const PHRASING: Record<RapportReason, (n: number, subject?: string) => string> = {
   gaveFood: (n) => `fed them ${n} time${n === 1 ? "" : "s"}`,
   receivedFood: (n) => `was fed by them ${n} time${n === 1 ? "" : "s"}`,
   defended: (n) => `fought for them ${n} time${n === 1 ? "" : "s"}`,
@@ -47,11 +53,21 @@ const PHRASING: Record<RapportReason, (n: number) => string> = {
   socialized: (n) => (n <= 1 ? `shared their company` : `spent ${n} long stretches in their company`),
   bonded: () => `took them as a mate`,
   sharedWater: (n) => (n <= 1 ? `stood off over water without a fight` : `backed down from them over water ${n} times`),
-  trainedTogether: (n) => (n <= 1 ? `drilled beside them` : `drilled beside them through ${n} long sessions`),
+  trainedTogether: (n) => (n <= 1 ? `trained alongside them` : `trained alongside them through ${n} long stretches`),
   keptWatch: (n) => `kept watch over their sleep ${n} time${n === 1 ? "" : "s"}`,
   sleptSafely: (n) => `slept where they could reach ${n} time${n === 1 ? "" : "s"}`,
-  survivedTogether: (n) => (n === 1 ? `watched something die beside them` : `came through ${n} deaths beside them`),
-  mourned: (n) => (n === 1 ? `lost the same friend` : `buried ${n} of the same friends`),
+  survivedTogether: (n, subj) =>
+    n === 1 ? `watched a ${subj ?? "creature"} die beside them` : `came through ${n} deaths beside them, worst a ${subj ?? "creature"}`,
+  mourned: (n, subj) =>
+    n === 1 ? `mourned a friend together — a ${subj ?? "herd-mate"}` : `mourned ${n} friends together`,
+  defeatedTogether: (n, subj) =>
+    n === 1 ? `brought down a ${subj ?? "creature"} together` : `brought down ${n} together, the largest a ${subj ?? "creature"}`,
+  weatheredTogether: (n, subj) =>
+    n === 1 ? `was driven out by ${subj ?? "the weather"} beside them` : `was driven out beside them ${n} times`,
+  rescued: (n) => (n === 1 ? `carried them home when they could not walk` : `carried them home ${n} times`),
+  wasRescued: (n) => (n === 1 ? `was carried home by them` : `was carried home by them ${n} times`),
+  healed: (n) => (n === 1 ? `closed their wounds` : `mended them through ${n} bad stretches`),
+  wasHealed: (n) => (n === 1 ? `was mended by them` : `was mended by them through ${n} bad stretches`),
 };
 
 const totals: Record<string, number> = Object.fromEntries(ALL_REASONS.map((r) => [r, 0]));
@@ -64,7 +80,10 @@ let mixedValence = 0;
 let curationChangedLead = 0;
 let edgesWithSharedExperience = 0;
 /** The shared-experience group — "what we went through", as opposed to "what I did to you". */
-const SHARED = new Set<RapportReason>(["sharedWater", "trainedTogether", "keptWatch", "sleptSafely", "survivedTogether", "mourned"]);
+const SHARED = new Set<RapportReason>([
+  "sharedWater", "trainedTogether", "keptWatch", "sleptSafely", "survivedTogether", "mourned",
+  "defeatedTogether", "weatheredTogether",
+]);
 const sampleLines: string[] = [];
 
 for (const seed of seeds) {
@@ -108,7 +127,7 @@ for (const seed of seeds) {
             String(memories.length).padStart(2),
             String(events).padStart(4),
             `seed ${seed} · ${agent.species} ${agent.id.slice(0, 8)} → ${other?.species ?? "?"} ${otherId.slice(0, 8)}`,
-            `(${score >= 0 ? "+" : ""}${score.toFixed(2)}) ` + notable.map((m) => PHRASING[m.reason](m.count)).join(", "),
+            `(${score >= 0 ? "+" : ""}${score.toFixed(2)}) ` + notable.map((m) => PHRASING[m.reason](m.count, m.subject?.label)).join(", "),
           ].join("\t")
         );
       }

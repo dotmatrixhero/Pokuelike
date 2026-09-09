@@ -1,5 +1,6 @@
 import type { Agent, World } from "./types.js";
 import {
+  RAPPORT_DEFEATED_TOGETHER_DELTA,
   RAPPORT_MOURNED_DELTA,
   RAPPORT_SURVIVED_TOGETHER_DELTA,
   rapportScore,
@@ -7,24 +8,26 @@ import {
 } from "./rapport.js";
 
 /**
- * Shared experience of a death — the `"survivedTogether"` and `"mourned"`
- * halves of `RapportReason`'s shared-experience group (see that type's doc
- * comment for why that group exists at all).
+ * Shared experience of a death — the `"survivedTogether"`, `"defeatedTogether"`
+ * and `"mourned"` members of `RapportReason`'s shared-experience group (see
+ * that type's doc comment for why that group exists at all).
  *
- * **Why a death and not a storm.** The obvious version of "we came through
- * that together" is weather, and it does not work: `weather.ts` never harms
- * an agent. A storm only shifts accuracy (`stormAccuracyMultiplier`) and
- * sight (`stormFovPenalty`), and exposure is tracked per-*herd*
- * (`World.herdStormExposureTicks`) for migration purposes, never per-agent.
- * Nothing is ever at risk in a storm, so a "we survived it" memory would be
- * inventing a danger the simulation does not have.
+ * **Why a death and not a storm — and the correction to that.** The first
+ * version of this reasoned that "we survived that storm" cannot work because
+ * `weather.ts` never harms an agent: a storm only shifts accuracy
+ * (`stormAccuracyMultiplier`) and sight (`stormFovPenalty`), and exposure is
+ * tracked per-*herd* (`World.herdStormExposureTicks`) for migration purposes,
+ * never per-agent. That is all true, and it was the wrong test — direct
+ * steer: *"Maybe surviving a storm and drought and other weather together
+ * would still be worth it if it meaningfully changed their behavior."*
  *
- * The dangers that are real here are **predation and starvation** — `killed`,
- * `defeated` and `starved` are all real, positioned events with real
- * corpses — so this keys on the only unambiguous evidence that something was
- * genuinely at stake: *somebody nearby just died, and neither of you was it.*
- * That covers drought too, by the route drought actually kills through
- * (thirst and famine), rather than by pretending weather does damage.
+ * Right: the shared experience is the **displacement**, not the damage. That
+ * half now lives in `herdMigration.ts` as `"weatheredTogether"`, keyed on a
+ * migration the weather actually caused. This module keeps the other half —
+ * the case where something was genuinely at stake because *somebody nearby
+ * just died, and neither of you was it* — which covers drought by the route
+ * drought actually kills through (thirst and famine) rather than by
+ * pretending weather does damage.
  *
  * **One pass, not five call sites.** There is no central "an agent dies"
  * helper in this engine — `alive = false` is set in five places across
@@ -97,6 +100,11 @@ export function recordDeathWitnesses(world: World, rng: () => number = world.rng
     }
     if (witnesses.length < 2) continue;
 
+    // Name the thing. Direct steer: "defeating an enemy together — and naming
+    // specifically what it was would be great." A count says two creatures
+    // fought a lot; a subject says they brought down a Scyther.
+    const subject = { label: dead.species, id: dead.id, level: dead.level };
+
     for (let i = 0; i < witnesses.length; i++) {
       for (let j = i + 1; j < witnesses.length; j++) {
         const a = witnesses[i]!;
@@ -105,9 +113,16 @@ export function recordDeathWitnesses(world: World, rng: () => number = world.rng
           rapportScore(a, dead.id, world.tick) >= MOURNING_MIN_RAPPORT &&
           rapportScore(b, dead.id, world.tick) >= MOURNING_MIN_RAPPORT;
         if (bothLoved) {
-          strengthenRapportMutual(world, a, b, RAPPORT_MOURNED_DELTA, "mourned", "mourned", rng);
+          strengthenRapportMutual(world, a, b, RAPPORT_MOURNED_DELTA, "mourned", "mourned", rng, subject);
+        } else if (a.behavior === "fight" && b.behavior === "fight") {
+          // Both still swinging as it went down. This is a heuristic, not
+          // damage attribution — the engine keeps no per-agent record of who
+          // hit whom, so "was fighting at the moment it died, next to it" is
+          // the closest honest evidence available. It is deliberately
+          // stricter than survival: BOTH have to have been in the fight.
+          strengthenRapportMutual(world, a, b, RAPPORT_DEFEATED_TOGETHER_DELTA, "defeatedTogether", "defeatedTogether", rng, subject);
         } else {
-          strengthenRapportMutual(world, a, b, RAPPORT_SURVIVED_TOGETHER_DELTA, "survivedTogether", "survivedTogether", rng);
+          strengthenRapportMutual(world, a, b, RAPPORT_SURVIVED_TOGETHER_DELTA, "survivedTogether", "survivedTogether", rng, subject);
         }
       }
     }

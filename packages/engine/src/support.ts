@@ -11,7 +11,7 @@ import { findNearestIndexed } from "./resourceIndex.js";
 import { herdMembers } from "./herdIndex.js";
 import { COLD_SNAP_SPEED_MULTIPLIER, isInColdSnap } from "./weather.js";
 import { useMove, withinMoveRange } from "./combat.js";
-import { RAPPORT_FOOD_DELIVERY_DELTA, strengthenRapportMutual } from "./rapport.js";
+import { RAPPORT_FOOD_DELIVERY_DELTA, RAPPORT_RESCUE_DELTA, strengthenRapportMutual } from "./rapport.js";
 
 /**
  * Faint/finish-off, heal-over-time, and herd support (inventory, food
@@ -797,6 +797,11 @@ export function maybeStartCarrying(world: World, agent: Agent, log?: EventLog): 
   return true;
 }
 
+/** Test seam for `dropCarriedAlly` — the carry/rescue path is otherwise only reachable through a full multi-tick carry. */
+export function dropCarriedAllyForTest(world: World, agent: Agent, reason: "arrived" | "threat", log?: EventLog): void {
+  dropCarriedAlly(world, agent, reason, log);
+}
+
 function dropCarriedAlly(world: World, agent: Agent, reason: "arrived" | "threat", log?: EventLog): void {
   const carried = world.agents.find((a) => a.id === agent.carryingId);
   if (carried) {
@@ -812,6 +817,21 @@ function dropCarriedAlly(world: World, agent: Agent, reason: "arrived" | "threat
       carriedSpecies: carried.species,
       reason,
     });
+    // Rapport: a completed rescue. This is DESIGN.md's **Rescue**, the
+    // strongest of the four bonding verbs — "the Pokémon chooses you as much
+    // as you chose it" — and until this line the entire carry mechanic built
+    // no rapport whatsoever. That was an oversight rather than a decision:
+    // nothing in DESIGN.md or TODO.md records a choice to leave it out.
+    //
+    // Only on `"arrived"`. A carrier that dropped its ally because a predator
+    // turned up (`"threat"`) did not rescue anybody — the carried agent is
+    // lying in the open exactly where it was going to be anyway, and
+    // `applyCarry`'s own doc comment is explicit that the carrier's survival
+    // instinct is not overridden by rescuing. Rewarding that would make an
+    // abandonment read as a bond.
+    if (reason === "arrived") {
+      strengthenRapportMutual(world, agent, carried, RAPPORT_RESCUE_DELTA, "rescued", "wasRescued");
+    }
   }
   agent.carryingId = undefined;
 }
