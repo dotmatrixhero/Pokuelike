@@ -14901,3 +14901,42 @@ change is ineffective. Flagged rather than presented as false precision.
   tree/bush silhouette. Savanna/Tundra also reuse real existing base
   textures (`floor_desert`/`floor_stone`) instead of the generic
   cave/dirt default, on top of their own tint.
+
+## Biome species round 2: more residents for Savanna/Mangrove/Tundra
+
+Direct follow-up, right after the Gen-1-only species correction above:
+"yeah, we need more species that can spawn in them than just those. i think
+we're not anywhere near our full species list right." Confirmed: 57 of the
+151 real Gen-1-arted species in `public/sprites/` were in the roster before
+this pass — a real, large gap.
+
+Scoped to the three new biomes specifically (the "them" in the ask), not a
+full-roster sweep — that's flagged in TODO.md as a separate, bigger open
+item rather than attempted here. Same standard as the Gen-1 correction:
+every pick's `public/sprites/` art and dex evolution reachability (`level`,
+`conditions: {}`) checked BEFORE adding, not after.
+
+- **Savanna**: Doduo → Dodrio (level 31, real "roams the savanna" mainline
+  flavor text — about as literal a match as this roster has), Rhyhorn →
+  Rhydon (level 42, real "wild Rhyhorn charge through savannas" flavor
+  text).
+- **Mangrove**: Goldeen → Seaking (level 33, river/lake fish), Grimer → Muk
+  (level 38, real "born from sludge" flavor text — a genuinely apt brackish-
+  marsh fit, not a stretch), Farfetch'd (no evolution, real wild-leek
+  marsh-dwelling bird).
+- **Tundra**: Graveler — not a new base species but Geodude's own real,
+  in-sim-reachable evolution (level 25, no item/condition); Geodude's own
+  existing entry picked up "tundra" as a genuine third biome alongside
+  Badlands/Highland, since Tundra's own real generation signature
+  (`carveTundraPermafrost`'s frost-heaved boulder cracks) is a natural fit
+  for a living rock. Golem (Graveler's own next evolution) stays excluded —
+  real trade-item evolution, same "never evolves further in-sim" limitation
+  as Poliwhirl/Rhydon.
+
+Caught one more real test regression: `species.test.ts` had a test asserting
+Geodude's exact `biomes` array (`["badlands", "highland"]`) — updated to the
+new three-biome reality rather than reverting the design choice to keep an
+old assertion passing. Full data suite (240 tests) and engine suite (1262
+tests) green; every one of the 10 new/touched species' sprite art confirmed
+present (`ls public/sprites/<key>_*.png`, 4 directional frames each) before
+committing.

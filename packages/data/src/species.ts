@@ -371,8 +371,11 @@ export const SPECIES: Record<string, SpeciesDef> = {
     moves: ["rock_throw", "tackle", "defense_curl", "rock_slide", "earthquake"],
     // A living boulder that mainline flavor text has rolling down
     // mountainsides — badlands/highland, both rock-and-boulder-heavy biomes
-    // (see worldgen.ts's BIOMES boulder terrainWeights).
-    biomes: ["badlands", "highland"],
+    // (see worldgen.ts's BIOMES boulder terrainWeights). "tundra" added
+    // later, same reasoning — Tundra's own real signature (worldgen.ts's
+    // `carveTundraPermafrost`) IS frost-heaved boulder, a genuinely apt
+    // third home for a living rock.
+    biomes: ["badlands", "highland", "tundra"],
     // Literally a living boulder (mainline flavor text) — the roster's most
     // direct terrain-preference fit of all: it settles among the same rocks
     // it's made of, not just the biome that happens to contain them.
@@ -1047,5 +1050,123 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // alongside Seel's own Snow/Wetland pairing.
     biomes: ["snow", "tundra"],
     preferredTerrain: ["water"],
+  }),
+
+  // --- Second round, same three biomes: direct follow-up ask, "we need
+  // more species that can spawn in them than just those. I don't think
+  // we're anywhere near our full species list." All Gen 1, all confirmed
+  // to have real public/sprites/ art BEFORE being added, same standard the
+  // Gen-2/3 correction above established. Not exhaustive — packages/web/
+  // public/sprites/ still has ~85 more real, arted Gen-1 species with no
+  // roster entry at all, a real broader gap this batch doesn't attempt to
+  // close on its own.
+  doduo: speciesFromDex("DODUO", {
+    spriteKey: "doduo",
+    placeholderColor: "#c8a860",
+    homeLayer: "surface",
+    // Peck is Doduo's real level-1 move.
+    moves: ["peck"],
+    activityPattern: "diurnal",
+    // "Roams the savanna" per mainline flavor text — about as literal a
+    // biome match as this roster has.
+    biomes: ["savanna", "grassland"],
+  }),
+  dodrio: speciesFromDex("DODRIO", {
+    spriteKey: "dodrio",
+    placeholderColor: "#a88848",
+    homeLayer: "surface",
+    // Agility is a real, early Dodrio move (a fast, skittish runner).
+    moves: ["peck", "agility"],
+    activityPattern: "diurnal",
+    biomes: ["savanna", "grassland"],
+    // Real further evolution doesn't exist (Dodrio is the top of its own
+    // line) — no "never evolves in-sim" caveat needed.
+  }),
+  rhyhorn: speciesFromDex("RHYHORN", {
+    spriteKey: "rhyhorn",
+    placeholderColor: "#b0a090",
+    homeLayer: "surface",
+    // Real Rhyhorn level-1 moves (Horn Attack/Tail Whip/Sand Attack) aren't
+    // in this roster's curated move set — Rock Throw stands in, matching
+    // its own real Rock-type half.
+    moves: ["tackle", "rock_throw"],
+    // "Wild Rhyhorn charge through savannas" per mainline flavor text.
+    biomes: ["savanna", "badlands"],
+  }),
+  rhydon: speciesFromDex("RHYDON", {
+    spriteKey: "rhydon",
+    placeholderColor: "#8c7c6c",
+    homeLayer: "surface",
+    moves: ["tackle", "rock_throw", "earthquake"],
+    biomes: ["savanna", "badlands"],
+    // Real further evolution (Rhyperior) needs a held item during a trade —
+    // same "never evolves further in-sim" limitation as Graveler below.
+  }),
+  goldeen: speciesFromDex("GOLDEEN", {
+    spriteKey: "goldeen",
+    placeholderColor: "#f08090",
+    homeLayer: "surface",
+    // Peck is a real early Goldeen move; Water Gun stands in for its Water
+    // typing, same pattern Poliwag/Slowbro above already use.
+    moves: ["peck", "water_gun"],
+    biomes: ["mangrove", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  seaking: speciesFromDex("SEAKING", {
+    spriteKey: "seaking",
+    placeholderColor: "#e86868",
+    homeLayer: "surface",
+    moves: ["peck", "water_gun", "surf"],
+    biomes: ["mangrove", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  grimer: speciesFromDex("GRIMER", {
+    spriteKey: "grimer",
+    placeholderColor: "#706090",
+    homeLayer: "surface",
+    // Harden is a real early Grimer move; Sludge stands in for its real
+    // Poison Gas (not in this roster's curated move set), same signature
+    // Ekans/Arbok/Zubat already use.
+    moves: ["harden", "sludge"],
+    // A real brackish-muck dweller per mainline flavor text ("born from
+    // sludge") — a genuinely apt fit for a coastal marsh, not a stretch.
+    biomes: ["mangrove", "wetland"],
+  }),
+  muk: speciesFromDex("MUK", {
+    spriteKey: "muk",
+    placeholderColor: "#584870",
+    homeLayer: "surface",
+    moves: ["harden", "sludge"],
+    biomes: ["mangrove", "wetland"],
+  }),
+  farfetchd: speciesFromDex("FARFETCHD", {
+    spriteKey: "farfetchd",
+    placeholderColor: "#c8b878",
+    homeLayer: "surface",
+    // Peck is a real early Farfetch'd move; Slash stands in for its later
+    // real Leaf Blade/cutting-signature moveset (not curated here).
+    moves: ["peck", "slash"],
+    activityPattern: "diurnal",
+    // A real wild-leek marsh-dwelling bird per mainline flavor text — no
+    // mainline evolution exists at all.
+    biomes: ["mangrove", "wetland"],
+  }),
+  graveler: speciesFromDex("GRAVELER", {
+    spriteKey: "graveler",
+    placeholderColor: "#9c8c6c",
+    homeLayer: "surface",
+    // Real Graveler level-1 moves (Tackle/Defense Curl) match this
+    // roster's curated set directly — Rock Throw added to match Geodude's
+    // own moveset style.
+    moves: ["tackle", "defense_curl", "rock_throw"],
+    // Geodude's own real, in-sim-reachable evolution (level 25, no item/
+    // condition) — Geodude itself stays tagged
+    // ["badlands", "highland", "tundra"] above unchanged; this is its own
+    // curated entry for the evolved form, same "don't let an evolved agent
+    // quietly lose its personality" standard the rest of this file follows.
+    biomes: ["badlands", "highland", "tundra"],
+    preferredTerrain: ["boulder"],
+    // Real further evolution (Golem) needs a held item during a trade —
+    // same "never evolves further in-sim" limitation as Poliwhirl/Rhydon.
   }),
 };

@@ -6775,3 +6775,16 @@ not something this pathfinding pass itself caused or is positioned to fix.
       silhouette, cached) — no new art files, real recolors of the existing
       shared tile art. Savanna/Tundra also reuse `floor_desert`/`floor_stone`
       as their base texture instead of the generic default.
+
+## Biome species round 2 — built, see DESIGN.md
+
+- [x] Direct follow-up: "we need more species that can spawn in them than
+      just those... not anywhere near our full species list." Added 9 more
+      Gen-1 species, all sprite-art-confirmed first: Doduo/Dodrio/Rhyhorn/
+      Rhydon (Savanna), Goldeen/Seaking/Grimer/Muk/Farfetch'd (Mangrove),
+      Graveler (Tundra, Geodude's own reachable evolution — Geodude itself
+      also picked up "tundra" as a real third biome).
+- [ ] **Still open, real gap**: `public/sprites/` has ~85 more real,
+      Gen-1-arted species with zero roster entry at all. This pass only
+      targeted the 3 new biomes specifically asked about — a broader
+      "flesh out the whole roster" pass is a separate, bigger task.
