@@ -4169,3 +4169,71 @@ up? Replaced in the drafts with a target-relative vocabulary:
 | `"dragged"` | the target is hauled N tiles toward you |
 
 Each says who moves and where they end up relative to whom.
+
+## Cooldown overshoot, and what the action economy says about cooldowns at all
+
+> "We should be careful about cooldown nodes lowering the cd beyond 0." …
+> "I mean it's okay to get to cooldown 0, just a bunch of filler beyond that
+> is not useful."
+
+The engine already clamps (`Math.max(0, …)`), so nothing goes negative. The
+waste is real anyway: **every tick of reduction past a move's base cooldown
+is a node that provably does nothing** — this project's own definition of a
+bug, applied to overshoot.
+
+Measured across the roster:
+
+| move | base cd | total reduction | dead ticks |
+|---|---|---|---|
+| **agility** (draft) | 50 | −65 | **15** |
+| **ember** (shipped) | 2 | −6 | **4** |
+| **twineedle** (draft) | 3 | −7 | 4 |
+| **harden** (draft) | 40 | −44 | 4 |
+| slash, wing_attack (shipped) | 2 | −4 | 2 each |
+| tackle, vine_whip (shipped) | 2 | −3 | 1 each |
+
+Eight of twenty-two trees hand out more reduction than the move has cooldown.
+And **12 of 22 can reach cooldown 0 at all** — Ember in **3 skill points**.
+
+### The finding underneath it: cooldown is barely a constraint
+
+`ACTION_THRESHOLD` is 40, and measured over 3 seeds x 3,000 ticks the gap
+between an agent's actions is **p50 1.5 ticks, p90 3.1, max 5.4**. So:
+
+| cooldown | inert for |
+|---|---|
+| 1 tick | **68% of agents** |
+| 2 ticks | 31% |
+| 3 ticks | 11% |
+| 4 ticks | 6% |
+| 15+ | 0% |
+
+Most of the roster's base cooldowns are 2. **A 2-tick cooldown is already
+doing nothing for a third of the population**, and a build only has to shave
+one tick before it does nothing for two thirds. That reframes the original
+worry: the problem is not just overshooting past 0, it is that the whole
+2-to-4-tick band is a weak axis to spend nodes on. The long cooldowns (Dig
+15, Growth 30, Harden 40, Agility 50) are the ones where tempo nodes are
+genuinely worth something.
+
+**Not acted on unilaterally** — raising base cooldowns across the board is a
+balance decision, and this document's standing rule is that those are the
+user's. Flagged with the numbers.
+
+### What was done
+
+`check-proposed-trees.ts` now fails any tree whose total cooldown reduction
+exceeds its base. The three offending drafts were **repurposed rather than
+just shrunk**, which is the better outcome — a node reaching for tempo out of
+habit became a node that does something the lane actually cares about:
+
+- Twineedle's *Gliding* buys **reach** instead (Lane H is the strafing lane).
+- *Hive Tempo* buys a **longer mark** (Lane M is the marking lane).
+- *Quicker Draw* steadies the **flurry** (Lane P's identity).
+- Agility's *The Short Way* now also cuts **straight past** whatever is in
+  the way — the literal short way — instead of −15 ticks a 50-tick move only
+  partly had to give.
+
+All five drafts are now within budget. **The four shipped offenders — ember
+(4 dead ticks), slash (2), wing_attack (2), tackle and vine_whip (1 each) —
+are untouched live data.**

@@ -372,6 +372,18 @@ function problems(move: ProposedMove): string[] {
     }
   }
 
+  // Cooldown overshoot. Reaching 0 is fine — "it's okay to get to cooldown 0,
+  // just a bunch of filler beyond that is not useful" — but every tick of
+  // reduction past the move's base cooldown is a node that provably does
+  // nothing, which is this project's own definition of a bug. The action
+  // economy tightens it further: agents act every 1.5 ticks at the median,
+  // so a cooldown already at 1 is inert for two thirds of them.
+  const cut = -nodes.reduce((sum, n) => sum + Math.min(0, ((n.delta as any)?.cooldownTicks ?? 0)), 0);
+  if (cut > move.cooldownTicks) {
+    const cutters = nodes.filter((n) => ((n.delta as any)?.cooldownTicks ?? 0) < 0);
+    out.push(`cooldown reduction totals -${cut} against a base of ${move.cooldownTicks} — ${cut - move.cooldownTicks} ticks of it can never do anything. ${cutters.length} nodes cut cooldown; trim or repurpose.`);
+  }
+
   // A node that is pure downside is a bug, not a design choice (principle 4).
   const DOWNSIDE = new Set(["recoilFraction", "selfCostPerUse", "lockTicks"]);
   for (const n of nodes) {
