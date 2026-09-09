@@ -4971,17 +4971,35 @@ export const MOVES: Record<string, MoveSpec> = {
     cooldownTicks: 5,
     range: { min: 0, max: 1 },
     hitsArea: true,
-    // v2 (MOVES_DESIGN.md's own template). Onix's third real move —
-    // already has Rock Throw's defense-penetrating single-target tree and
-    // Earthquake's ground-shockwave AoE tree, so this one earns a genuinely
-    // different fantasy: boulders literally falling FROM ABOVE, not thrown
-    // or shaken up from the ground. Leans on `situationalBonus`'s
-    // `"elevation"` condition (attacker on a strictly higher tile) as its
-    // own real hook, distinct from either sibling tree. Same three-branch-
-    // plus-crosslink-triangle shape (10 nodes/branch + 3 crosslinks = 33).
+    // --- The fantasy (v4 rewrite, MOVES_DESIGN.md's "start from the
+    // fantasy") ---
+    //
+    // Onix rears against a slope and the slope lets go. This is not a rock
+    // thrown (Rock Throw) and it is not the ground shaking (Earthquake) —
+    // it is tons of stone arriving from ABOVE, into a one-tile bowl, onto
+    // things whose guard is pointed at the wrong angle. What makes it
+    // dangerous is where the user is standing: from the high ground it is
+    // gravity doing the work; on the flat it is a slow, heavy move that
+    // mostly buries its own feet. It does not pick targets — the herd-mate
+    // beside it is under the same rocks — and everything nearby hears it
+    // coming a beat before it lands. That beat is the whole Sociability
+    // branch; the height is the whole Aggression branch; standing in the
+    // middle of your own rockfall and not moving is Boldness.
+    //
+    // Template v4: 45 nodes — three 12-node branches (opener, two parallel
+    // lanes each with their own notable, a deep notable both lanes converge
+    // on, a filler, a capstone) plus three 3-node crosslink bridges. Nine
+    // `prerequisitesAnyOf` (six lane notables, three deep notables), six
+    // fork nodes, every v3 fork preserved.
     tree: {
-      // --- Aggression: "Landslide Fury" — more stone, falling harder,
-      // from higher up.
+      // --- Aggression: "the whole face lets go" ---
+      // Flavours (the colour pie): stealth/ambush (the elevation the drop
+      // comes from), piercing (through a guard, through a resist), raw
+      // damage (mass and crit), wider AoE (the fork), aggressive movement
+      // (the wall sweeping everything outward at the deep notable).
+      // The two lanes differ in KIND: lane A is the DROP (height, and
+      // getting through whatever is in the way), lane B is the SLOPE
+      // (volume, and whether it comes down wide or concentrated).
       raining_stones: {
         id: "raining_stones",
         name: "Raining Stones",
@@ -4989,19 +5007,12 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { situationalBonus: { condition: "elevation", multiplier: 1.3 } },
       },
-      heavier_boulders: {
-        id: "heavier_boulders",
-        name: "+5 Power",
-        cost: 1,
-        prerequisites: ["raining_stones"],
-        leaning: "aggression",
-        delta: { power: 5 },
-      },
+      // Lane A — the drop.
       steadier_aim: {
         id: "steadier_aim",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["heavier_boulders"], ["quarried_weight"], ["second_wave"]],
+        prerequisites: ["raining_stones"],
         leaning: "aggression",
         delta: { accuracy: 10 },
       },
@@ -5013,19 +5024,58 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { defensePenetration: 0.1 },
       },
+      straight_down: {
+        id: "straight_down",
+        name: "Straight Down",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Aggression <->
+        // Boldness bridge's own notable (Mountainfall).
+        prerequisitesAnyOf: [["crushing_debris"], ["mountainfall"]],
+        leaning: "aggression",
+        // The one thing a fall this heavy answers that a thrown rock does
+        // not: being built to shrug rock off. A Ground/Steel/Fighting type
+        // still has a hillside on top of it. First `resistanceBreaker` in
+        // this tree, and the lane's whole point — the drop goes through.
+        delta: { resistanceBreaker: { multiplier: 1.5 } },
+      },
+      heavier_boulders: {
+        id: "heavier_boulders",
+        name: "Edge-On",
+        cost: 1,
+        prerequisites: ["straight_down"],
+        leaning: "aggression",
+        // Was a second "+5 Power" filler in a branch that already had one
+        // (Settling Dust) — the duplicate-filler smell this document has
+        // retired elsewhere. Same +5, plus the first crit stage in the
+        // tree: a slab that lands on its edge rather than its face.
+        delta: { power: 5, critRateStage: 1 },
+      },
+      // Lane B — the slope itself.
       faster_collapse: {
         id: "faster_collapse",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["crushing_debris"], ["mountainfall"], ["no_respite"]],
+        prerequisites: ["raining_stones"],
         leaning: "aggression",
         delta: { cooldownTicks: -1 },
+      },
+      ground_shaking_impact: {
+        id: "ground_shaking_impact",
+        name: "Ground-Shaking Impact",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Sociability
+        // <-> Aggression bridge's own notable (No Respite).
+        prerequisitesAnyOf: [["faster_collapse"], ["no_respite"]],
+        leaning: "aggression",
+        // Whatever's still standing after the rockfall gets no time to
+        // recover before the next one.
+        delta: { power: 10, jamCooldownTicks: 1 },
       },
       wider_slide: {
         id: "wider_slide",
         name: "Wider Slide",
         cost: 1,
-        prerequisites: ["faster_collapse"],
+        prerequisites: ["ground_shaking_impact"],
         excludes: ["heavier_stones"],
         leaning: "aggression",
         // A broader wall of falling stone, spread thinner.
@@ -5035,27 +5085,33 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "heavier_stones",
         name: "Heavier Stones",
         cost: 1,
-        prerequisites: ["faster_collapse"],
+        prerequisites: ["ground_shaking_impact"],
         excludes: ["wider_slide"],
         leaning: "aggression",
         // Fewer, bigger boulders, harder to line up.
         delta: { power: 15, accuracy: -10 },
       },
-      ground_shaking_impact: {
-        id: "ground_shaking_impact",
-        name: "Ground-Shaking Impact",
+      swept_off: {
+        id: "swept_off",
+        name: "Swept Off",
         cost: 2,
-        prerequisitesAnyOf: [["wider_slide"], ["heavier_stones"]],
+        // DEEP NOTABLE. Both lanes end here — the drop and the volume add
+        // up to a moving wall rather than a rain of separate rocks.
+        prerequisitesAnyOf: [["heavier_boulders"], ["wider_slide"], ["heavier_stones"]],
         leaning: "aggression",
-        // Whatever's still standing after the rockfall gets no time to
-        // recover before the next one.
-        delta: { power: 10, jamCooldownTicks: 1 },
+        // The debris does not stop where it lands. On an AoE move this
+        // resolves per target (resolveAreaHit -> resolveHitAgainstTarget),
+        // so the whole bowl gets carried a tile outward — something an
+        // observer can SEE happen, which "+10% power" never is. It respects
+        // `"immovable"` like any other forced movement, which is exactly
+        // what the Boldness branch one over is buying.
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" }, power: 5 },
       },
       settling_dust: {
         id: "settling_dust",
         name: "+5 Power",
         cost: 1,
-        prerequisites: ["ground_shaking_impact"],
+        prerequisites: ["swept_off"],
         leaning: "aggression",
         delta: { power: 5 },
       },
@@ -5065,8 +5121,8 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["settling_dust"],
         leaning: "aggression",
-        // The whole slope comes down at once, Onix's own real mass adding
-        // to the weight of what's already falling.
+        // CAPSTONE. The whole slope comes down at once, Onix's own real
+        // mass adding to the weight of what's already falling.
         delta: { shape: { kind: "burst", radius: 2 }, weightScaling: { factor: 0.1 } },
       },
       // Crosslink: Aggression <-> Boldness — a braced stance means it can
@@ -5095,26 +5151,25 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["heaved_mass"],
         leaning: "boldness",
-        // Heaving that much rock is genuinely exhausting — a real per-use cost
-        // in the same node as its payoff.
+        // BRIDGE NOTABLE. Heaving that much rock is genuinely exhausting —
+        // a real per-use cost in the same node as its payoff. Lands on one
+        // lane notable per branch it connects: Straight Down (Aggression's
+        // drop lane, which is about angle rather than mass, so the bridge
+        // complements it) and Unbroken (Boldness's footing lane).
         delta: { power: 12, selfCostPerUse: { need: "energy", amount: 0.05 } },
       },
-      // --- Boldness: "Bedrock Stance" — standing unmoved in the middle of
-      // its own rockfall.
-      // --- Boldness: mass, and the high ground it fights from ---
+      // --- Boldness: standing in the middle of your own rockfall ---
+      // Flavours: defence (bulk, and the rubble that punishes climbers),
+      // raw damage (weight — this branch's thesis), stealth/ambush (the
+      // ledge it drops from), planted/duration (setting its feet as the
+      // stone lands), aggressive movement (the deep notable's commitment).
+      // Lane A is BULK (what it is made of), lane B is FOOTING (where it
+      // stands, and refusing to leave) — different in kind, not degree.
       //
-      // Reworked off the same generic armor ladder vine_whip and
-      // flamethrower were running node-for-node (damageReduction ->
-      // defenseBoost -> regen/thorns fork -> defenseBoost+thorns capstone,
-      // identical passive values). Vine Whip is the honest owner of
-      // rooted-and-thorny; this branch was borrowing it.
-      //
-      // What is only true of a rockslide: it is a WEIGHT problem, and it is
-      // an ELEVATION problem. Nothing else in the roster gets to build
-      // around `weightScaling` and the `elevation` situational bonus, and
-      // both are levers the trees have barely touched. This branch is about
-      // being the heavy thing standing above you, not about having thicker
-      // skin than the next tank.
+      // Reworked in v3 off the generic armor ladder vine_whip and
+      // flamethrower were running node-for-node; vine_whip is the honest
+      // owner of rooted-and-thorny. What is only true of a rockslide is
+      // that it is a WEIGHT problem and an ELEVATION problem.
       stone_shield: {
         id: "stone_shield",
         name: "Set Stance",
@@ -5124,6 +5179,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // thesis stated in its first node.
         delta: { weightScaling: { factor: 0.2 } },
       },
+      // Lane A — bulk.
       firmer_footing: {
         id: "firmer_footing",
         name: "+10 Accuracy",
@@ -5136,7 +5192,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "craggy_hide",
         name: "Craggy Hide",
         cost: 1,
-        prerequisitesAnyOf: [["firmer_footing"], ["quarried_weight"], ["steadfast_warning"]],
+        prerequisites: ["firmer_footing"],
         leaning: "boldness",
         grantsPassive: { kind: "defenseBoost", value: 0.05 },
         delta: {},
@@ -5144,19 +5200,50 @@ export const MOVES: Record<string, MoveSpec> = {
       denser_stone: {
         id: "denser_stone",
         name: "Denser Stone",
-        cost: 1,
-        prerequisites: ["craggy_hide"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Boldness <->
+        // Sociability bridge's own notable (Unmoved Sentinel).
+        prerequisitesAnyOf: [["craggy_hide"], ["unmoved_sentinel"]],
         leaning: "boldness",
         // Deepens the opener's own lever instead of being another +5 Power.
         delta: { weightScaling: { factor: 0.15 } },
       },
+      digs_in: {
+        id: "digs_in",
+        name: "Digs In",
+        cost: 1,
+        prerequisites: ["denser_stone"],
+        leaning: "boldness",
+        // A `delta`, deliberately, and not another defensive passive:
+        // passives stack uncapped across every tree a species knows, and
+        // Onix already carries damageReductionFlat 12.5 / immovable 4
+        // across its movepool. This one only changes what THIS move does —
+        // as the stone lands it sets its feet and its guard comes up, for
+        // a real but bounded window.
+        delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 20 } },
+      },
+      // Lane B — footing.
       settled_stance: {
         id: "settled_stance",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["denser_stone"], ["mountainfall"], ["unmoved_sentinel"]],
+        prerequisites: ["stone_shield"],
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
+      },
+      unbroken: {
+        id: "unbroken",
+        name: "Unbroken",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Aggression <->
+        // Boldness bridge's own notable (Mountainfall).
+        prerequisitesAnyOf: [["settled_stance"], ["mountainfall"]],
+        leaning: "boldness",
+        // Anchored under its own rockfall — no drag/knockback/lunge so
+        // much as budges it, a real delivery on "Unbroken" instead of
+        // another flat damage-reduction stand-in.
+        grantsPassive: { kind: "immovable", value: 1 },
+        delta: {},
       },
       // The fork: take the high ground and rain rock down from it, or
       // refuse to give ground at all. Both are "mass"; they want opposite
@@ -5165,7 +5252,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "weathering",
         name: "High Perch",
         cost: 1,
-        prerequisites: ["settled_stance"],
+        prerequisites: ["unbroken"],
         excludes: ["jagged_edges"],
         leaning: "boldness",
         delta: { situationalBonus: { condition: "elevation", multiplier: 1.45 } },
@@ -5174,29 +5261,31 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "jagged_edges",
         name: "Jagged Edges",
         cost: 1,
-        prerequisites: ["settled_stance"],
+        prerequisites: ["unbroken"],
         excludes: ["weathering"],
         leaning: "boldness",
         grantsPassive: { kind: "thorns", value: 0.12 },
         delta: {},
       },
-      unbroken: {
-        id: "unbroken",
-        name: "Unbroken",
+      bring_it_down: {
+        id: "bring_it_down",
+        name: "Bring It Down",
         cost: 2,
-        prerequisitesAnyOf: [["weathering"], ["jagged_edges"]],
+        // DEEP NOTABLE. Both lanes end here. A badly hurt Onix stops trying
+        // to trade and reaches for the slope instead: `selfStateBonus`
+        // biases `pickBestMove`'s own scoring toward this move once the
+        // user is at or below half HP, and the extra `lockTicks` beat is
+        // the real price of committing to a collapse it is standing inside.
+        // Cost and payoff in the same node (principle 4).
+        prerequisitesAnyOf: [["digs_in"], ["weathering"], ["jagged_edges"]],
         leaning: "boldness",
-        // Anchored under its own rockfall — no drag/knockback/lunge so
-        // much as budges it, a real delivery on "Unbroken" instead of
-        // another flat damage-reduction stand-in.
-        grantsPassive: { kind: "immovable", value: 1 },
-        delta: {},
+        delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.4 }, lockTicks: 1, power: 10 },
       },
       time_worn: {
         id: "time_worn",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisites: ["unbroken"],
+        prerequisites: ["bring_it_down"],
         leaning: "boldness",
         delta: { accuracy: 10 },
       },
@@ -5206,10 +5295,10 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["time_worn"],
         leaning: "boldness",
-        // Escalates the branch's OWN lever — the heaviest version of the
-        // thing every node here has been building — rather than reaching
-        // for the roster's stock defenseBoost+thorns tank capstone, which
-        // is exactly what it used to be.
+        // CAPSTONE. Escalates the branch's OWN lever — the heaviest version
+        // of the thing every node here has been building — rather than
+        // reaching for the roster's stock defenseBoost+thorns tank
+        // capstone, which is exactly what it used to be.
         grantsPassive: { kind: "defenseBoost", value: 0.06 },
         delta: { weightScaling: { factor: 0.25 }, defensePenetration: 0.15 },
       },
@@ -5241,24 +5330,36 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["braced_footing"],
         leaning: "sociability",
-        // Holds the line while everything else is still getting clear.
+        // BRIDGE NOTABLE. Holds the line while everything else is still
+        // getting clear. Lands on Denser Stone (Boldness's bulk lane, a
+        // lane about mass rather than protection, so the bridge
+        // complements it) and Settling Rumble (Sociability's warning lane).
         grantsPassives: [
           { kind: "defenseBoost", value: 0.04 },
           { kind: "damageReduction", value: 0.05 },
         ],
         delta: {},
       },
-      // --- Sociability: "Warning Rumble" — the tremor before the rockfall
-      // gives everyone nearby, herd or rival, a real chance to get clear.
+      // --- Sociability: the sound before the stone ---
+      // Flavours: no friendly fire (the herd is standing in the bowl too),
+      // calming (nobody has to fight over a slope that is coming down),
+      // ally buffing (a warning is only worth anything if they act on it),
+      // rallying (whatever is left standing gets called out).
+      // Lane A is what the herd DOES about the warning; lane B is the
+      // warning itself, and how far its authority reaches — different in
+      // kind: one buffs herd-mates, the other de-escalates rivals.
       herd_warning: {
         id: "herd_warning",
         name: "Herd Warning",
         cost: 1,
         leaning: "sociability",
         // Same real ally-exemption Earthquake's own Herdsafe Trigger uses —
-        // a same-herd agent caught in the burst takes nothing.
+        // a same-herd agent caught in the burst takes nothing. Deliberate
+        // reuse for a different reason: an advance-warning tremor, not
+        // drilled herd discipline.
         delta: { excludesAllies: true },
       },
+      // Lane A — what the herd does about it.
       clearer_warning: {
         id: "clearer_warning",
         name: "+10 Accuracy",
@@ -5267,36 +5368,66 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { accuracy: 10 },
       },
+      deeper_rumble: {
+        id: "deeper_rumble",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["clearer_warning"],
+        leaning: "sociability",
+        delta: { power: 5 },
+      },
+      set_yourselves: {
+        id: "set_yourselves",
+        name: "Set Yourselves",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Sociability
+        // <-> Aggression bridge's own notable (No Respite).
+        prerequisitesAnyOf: [["deeper_rumble"], ["no_respite"]],
+        leaning: "sociability",
+        // The warning finally does something on the herd's side of it:
+        // every time the slide goes off, the nearest herd-mate braces
+        // against it (`allyEffectOnAttack`, resolved through support.ts's
+        // `nearestAllyEffectTarget`) instead of merely not being hit. A
+        // bounded, per-use buff rather than another permanent aura — this
+        // species already carries plenty of permanent aura.
+        delta: { allyEffectOnAttack: true, allyEffect: { buff: { stat: "defense", stage: 1, ticks: 20 } } },
+      },
+      take_cover: {
+        id: "take_cover",
+        name: "Take Cover",
+        cost: 1,
+        prerequisites: ["set_yourselves"],
+        leaning: "sociability",
+        // Deepens the same ally-effect one rung. A later node on the SAME
+        // chain overwriting an earlier one is intended escalation, not the
+        // overwrite bug — see MOVES_DESIGN.md's own note on that.
+        delta: { allyEffect: { buff: { stat: "defense", stage: 2, ticks: 24 } } },
+      },
+      // Lane B — the warning itself.
       faster_warning: {
         id: "faster_warning",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["clearer_warning"], ["steadfast_warning"], ["second_wave"]],
+        prerequisites: ["herd_warning"],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
       settling_rumble: {
         id: "settling_rumble",
         name: "Settling Rumble",
-        cost: 1,
-        prerequisites: ["faster_warning"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Boldness <->
+        // Sociability bridge's own notable (Unmoved Sentinel).
+        prerequisitesAnyOf: [["faster_warning"], ["unmoved_sentinel"]],
         leaning: "sociability",
         grantsPassive: { kind: "calmingPresence", value: 0.2 },
         delta: {},
-      },
-      deeper_rumble: {
-        id: "deeper_rumble",
-        name: "+5 Power",
-        cost: 1,
-        prerequisitesAnyOf: [["settling_rumble"], ["unmoved_sentinel"], ["no_respite"]],
-        leaning: "sociability",
-        delta: { power: 5 },
       },
       wider_warning: {
         id: "wider_warning",
         name: "Wider Warning",
         cost: 1,
-        prerequisites: ["deeper_rumble"],
+        prerequisites: ["settling_rumble"],
         excludes: ["sharpened_call"],
         leaning: "sociability",
         // Deepens the calm further — an even bigger radius of rivals that
@@ -5308,7 +5439,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "sharpened_call",
         name: "Sharpened Call",
         cost: 1,
-        prerequisites: ["deeper_rumble"],
+        prerequisites: ["settling_rumble"],
         excludes: ["wider_warning"],
         leaning: "sociability",
         // An Onix this reliably loud about warning everyone off doesn't
@@ -5320,7 +5451,9 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "toppling_call",
         name: "Toppling Call",
         cost: 2,
-        prerequisitesAnyOf: [["wider_warning"], ["sharpened_call"]],
+        // DEEP NOTABLE. Both lanes end here: the herd that got clear and
+        // the rivals that backed off all now know exactly where to look.
+        prerequisitesAnyOf: [["take_cover"], ["wider_warning"], ["sharpened_call"]],
         leaning: "sociability",
         // Whatever's still standing after the warning gets marked for
         // anything else nearby to finish.
@@ -5340,9 +5473,9 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["lasting_rumble"],
         leaning: "sociability",
-        // Escalates the branch's own real lever instead of switching to a
-        // generic heal — after enough warnings, the ground around it
-        // finally settles for good, a decisively bigger calm than
+        // CAPSTONE. Escalates the branch's own real lever instead of
+        // switching to a generic heal — after enough warnings, the ground
+        // around it finally settles for good, a decisively bigger calm than
         // anything earlier on this branch (0.2/0.15 at most before this).
         grantsPassive: { kind: "calmingPresence", value: 0.3 },
         delta: {},
@@ -5373,8 +5506,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["rolling_aftershock"],
         leaning: "sociability",
-        // Whatever's still pinned under the aftershocks gets marked for
-        // everything else nearby — denial turning into focus fire.
+        // BRIDGE NOTABLE. Whatever's still pinned under the aftershocks
+        // gets marked for everything else nearby — denial turning into
+        // focus fire. Lands on Set Yourselves (Sociability's herd lane —
+        // teeth dropped into the lane that otherwise never threatens
+        // anyone) and Ground-Shaking Impact (Aggression's slope lane).
         delta: { rallyCall: { ticks: 15 } },
       },
     },

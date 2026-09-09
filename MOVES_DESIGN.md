@@ -4489,6 +4489,85 @@ a cooldown into the wrong node, producing `delta: {, cooldownTicks: -1 }`.
 Reverted and rebuilt with brace-counting from an exact anchor. On a
 6,000-line file of live game data, `.*?` is not a search, it is a guess.
 
+### Rock Slide to v4 (Shipped) — the second converted tree, and what the numbers said
+
+Solar Beam was the pattern; Rock Slide was the tree that *looked* easy. It
+reported only 3 structural problems (three 10-node branches) against the
+checker, which made it read as nearly-v4 already. `tree-balance.ts` said
+otherwise:
+
+| | before | after | roster median |
+|---|---|---|---|
+| nodes | 39 | **45** | 38 |
+| distinct levers | **17** (3rd lowest in the roster) | **25** | 21 |
+| colour-pie flavours | 9 | **12** | 9 |
+| tempo | 2.00x (cap 3.00x) | 2.00x | 1.80x |
+| power | 1.76x | 1.96x | 1.96x |
+| cheapest capstone | 11 pts | 10 pts | 11 pts |
+| checker problems | 3 | **0** | — |
+
+**The structural gap was small and the content gap was not.** 17 levers on a
+tree whose own writeup already claimed a distinct fantasy is the same finding
+this document made about dig: an unexplored lever set, not a small move.
+
+**The fantasy, written first** (per template v3's rule 1): Onix rears against
+a slope and the slope lets go. Not a rock thrown (Rock Throw), not the ground
+shaking (Earthquake) — tons of stone arriving from ABOVE into a one-tile
+bowl, onto things whose guard is pointed the wrong way. Its danger is
+positional: from the high ground gravity does the work, on the flat it mostly
+buries its own feet. It does not pick targets, and everything nearby hears it
+a beat before it lands.
+
+Each branch answers that, and the lanes differ in *kind*:
+
+- **Aggression — the whole face lets go.** Lane A is the DROP (accuracy,
+  penetration, then *Straight Down*: `resistanceBreaker`, the one thing a
+  hillside answers that a thrown rock does not — being built to shrug rock
+  off). Lane B is the SLOPE (volume, then the preserved wide-vs-heavy fork).
+  New deep notable *Swept Off* gives the move its first physical lever:
+  `forcedMovement` on an AoE, so the whole bowl is carried a tile outward.
+- **Boldness — standing inside your own rockfall.** Lane A is BULK (mass,
+  hide, *Denser Stone*), lane B is FOOTING (*Unbroken*'s `immovable`, then
+  the preserved high-ground-vs-jagged-edges fork). New deep notable *Bring It
+  Down*: `selfStateBonus` — a badly hurt Onix stops trading and reaches for
+  the slope, paying a real `lockTicks` beat for it in the same node.
+- **Sociability — the sound before the stone.** Lane A is what the herd DOES
+  about the warning (new *Set Yourselves*: `allyEffectOnAttack` braces the
+  nearest herd-mate every time the slide goes off), lane B is the warning
+  itself and how far its authority reaches (calm, then the preserved
+  wider-warning-vs-nonterritorial fork). *Toppling Call*'s `rallyCall` is now
+  the convergence both lanes earn.
+
+**Three levers deliberately NOT used, and why** — all three would have been
+sibling re-skins or dead content:
+
+- `terrainFill: "mud"` (the rubble field). Earthquake — *the same species'
+  other AoE* — already owns it.
+- `bonusVsType: flying` and `consumesOwnTerrain: boulder`. Rock Throw, again
+  the same species, already owns both.
+- `gatherBurst`. Read the call site rather than assuming: the canopy-harvest
+  path is the only one a non-`burrow` damage move can feed, and the only
+  canopy crop is Apple, `eligibleBiomes: ["forest"]`. Onix/Geodude/Aerodactyl
+  live in badlands/highland/tundra/underground. It would have been a node
+  that can never fire — unreachable content, which this project treats as a
+  bug, not a curiosity.
+
+**Passive discipline.** Zero new passives. Onix already carries
+`damageReductionFlat 12.5` / `immovable 4` / thorns 27% summed across its
+movepool (`passive-exposure.ts`), and passives stack uncapped across every
+tree a species knows. Where the branch wanted armour, the node got a `delta`
+instead: *Digs In* is `statChangeOnHit` on the user, bounded to this move.
+`passive-exposure.ts` output is byte-identical before and after.
+
+**Verified by running it, not by reading it.** Driving the engine's own
+`maybeAutoRespec` on a real Onix with points to spend, once per disposition:
+**42 of 45 nodes bought in each case** (the missing three are the excluded
+fork sides), **all three capstones reached**, from every disposition. In a
+plain 3-seed × 6,000-tick demo run the tree is still inert — but for a
+reason that predates this work and is logged already: 3 seeds produced one
+living Onix and one Geodude between them. That is a population problem, not
+a tree problem, and it is not this pass's to retune.
+
 ### Hydro Pump converted to v4 (option 2: forks kept, inside the lanes)
 
 40 → 45 nodes, 12 per branch, 9 `anyOf`, 6 fork nodes, 3 real bridges. Every
