@@ -719,6 +719,13 @@ export function grantKillExp(
 // --- The four-move cap, forgetting, and the refund (see DESIGN.md) ---
 
 /**
+ * Why a move was unlearned. "declined" is the new move being turned down as
+ * not worth a slot; the rest describe what was given up and why — see
+ * `forgetReasonFor`.
+ */
+export type ForgetReason = "capacity" | "declined" | "outclassed" | "redundant" | "unbuilt";
+
+/**
  * How many moves an agent may know at once.
  *
  * Applies to `knownMoves` — everything, status moves included. Direct: "we
@@ -773,7 +780,7 @@ export function forgetMove(
   world: World | undefined,
   ctx: LevelingContext,
   log?: EventLog,
-  reason: "capacity" | "declined" = "capacity"
+  reason: ForgetReason = "capacity"
 ): number | undefined {
   const known = agent.knownMoves ?? [];
   const idx = known.indexOf(moveId);
@@ -819,14 +826,24 @@ export function forgetMove(
 /**
  * How much a chosen tree node counts toward "don't throw this build away."
  *
- * Weighted well above raw combat value on purpose. Failure mode (a) — an
- * agent forgetting the move it had poured its whole build into — is the one
- * that reads worst: the points come back as wildcard, so nothing is lost on
- * paper, but a Venusaur that spent thirty points becoming a Solar Beam
- * specialist and then drops Solar Beam for a freshly-learned Tackle has
- * thrown away its own story.
+ * Was 8, which made investment an effective VETO — nothing invested was ever
+ * dropped, and the refund became dead content: 0 points returned across 6744
+ * forgets in a live run. Direct correction: "It's okay to drop an invested
+ * move but there should be reasoning behind it."
+ *
+ * 2 is the honest weight once you follow the refund through. Forgetting
+ * returns EVERY point spent, as wildcard, and `maybeAutoRespec` immediately
+ * starts spending them again — so dropping a built move does not destroy the
+ * points, it converts them. What is actually lost is narrower than it looks:
+ * the specific shape of the build, the passives that tree granted (revoked
+ * by `forgetMove`), and the time to climb a new tree. Real costs, but not
+ * the whole thirty points, which is what a weight of 8 was implicitly
+ * charging.
+ *
+ * So this is a friction term, not a lock: a clearly better move wins the
+ * slot and the agent respecs into it, and a marginally better one does not.
  */
-const FORGET_INVESTMENT_WEIGHT = 8;
+const FORGET_INVESTMENT_WEIGHT = 2;
 
 /** Bonus for a move whose type the agent doesn't otherwise have, so a movepool doesn't collapse to four of the same type. */
 const FORGET_COVERAGE_BONUS = 25;
@@ -862,6 +879,39 @@ const FORGET_UTILITY_BASE_VALUE = 30;
  * anyway.
  */
 const FORGET_HAS_TREE_BONUS = 120;
+
+/**
+ * Why a move was given up, worked out from the same scores that chose it —
+ * so the chronicle can say what happened rather than just that it happened.
+ *
+ * "Just dying out is sad and vague" applies to builds too: an agent that
+ * dropped a thirty-point Solar Beam because a Fire Blast outclassed it is a
+ * different story from one that dropped an untouched Growl for space, and
+ * the log should be able to tell them apart.
+ */
+function forgetReasonFor(
+  agent: Agent,
+  dropped: string,
+  kept: string[],
+  ctx: LevelingContext,
+  ownTypes: PokemonType[]
+): "outclassed" | "redundant" | "unbuilt" | "capacity" {
+  const spec = ctx.resolveMove(dropped);
+  const investedPoints = pointsSpentOn(agent, dropped, ctx);
+
+  // Same type as something it kept, and it lost — the movepool was doubling
+  // up, which is the cheapest kind of slot to free.
+  if (spec && kept.some((id) => ctx.resolveMove(id)?.type === spec.type)) return "redundant";
+
+  // A real build was given up. That is the case worth naming: it only
+  // happens when something genuinely outscored it, and the points come back
+  // to be spent on whatever did.
+  if (investedPoints > 0) return "outclassed";
+
+  // Known but never invested in at all.
+  if (spec) return "unbuilt";
+  return "capacity";
+}
 
 /**
  * What this move is worth to this agent, right now. Higher = keep.
@@ -965,5 +1015,9 @@ export function enforceMoveCap(
 
   const drop = pickMoveToForget(agent, known, ctx);
   if (!drop) return;
-  forgetMove(agent, drop, world, ctx, log, drop === newMoveId ? "declined" : "capacity");
+  const reason =
+    drop === newMoveId
+      ? "declined"
+      : forgetReasonFor(agent, drop, known.filter((id) => id !== drop), ctx, agent.types ?? []);
+  forgetMove(agent, drop, world, ctx, log, reason);
 }

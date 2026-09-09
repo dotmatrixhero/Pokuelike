@@ -206,8 +206,15 @@ export type SimEvent =
       moveId: string;
       /** Skill points returned, as wildcard — every point ever spent in that move's tree. */
       refundedPoints: number;
-      /** "capacity" = displaced by a newly learned move; "declined" = the newly learned move was itself the worst option and was dropped instead. */
-      reason: "capacity" | "declined";
+      /**
+       * Why it went, so the chronicle can say more than "a move was
+       * forgotten": "outclassed" = a real build was given up because
+       * something scored higher, and the points went with it; "redundant" =
+       * the movepool was doubling up on a type; "unbuilt" = known but never
+       * invested in; "declined" = the NEW move was itself the worst option
+       * and was turned down; "capacity" = no better account than space.
+       */
+      reason: "capacity" | "declined" | "outclassed" | "redundant" | "unbuilt";
     }
   | {
       kind: "utilityMoveUsed";

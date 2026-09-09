@@ -27,6 +27,7 @@ const known: number[] = [];
 const wildcardHeld: number[] = [];
 const forgottenWithInvestment: number[] = [];
 const dropped = new Map<string, number>();
+const reasons = new Map<string, number>();
 
 for (let i = 0; i < nSeeds; i++) {
   const world: any = createDemoWorld(3000 + i * 7919);
@@ -39,6 +40,7 @@ for (let i = 0; i < nSeeds; i++) {
     forgets++;
     refunded += e.refundedPoints;
     if (e.reason === "declined") declines++;
+    reasons.set(e.reason, (reasons.get(e.reason) ?? 0) + 1);
     if (e.refundedPoints > 0) forgottenWithInvestment.push(e.refundedPoints);
     dropped.set(e.moveId, (dropped.get(e.moveId) ?? 0) + 1);
   }
@@ -75,6 +77,9 @@ console.log(`wildcard points held   mean ${mean(wildcardHeld).toFixed(1)}  max $
 // combat-usable, and a cap that quietly deletes all of them from every
 // movepool would undo that without failing a single assertion. Measured, with
 // damage moves as the control.
+console.log(`\nwhy moves were given up:`);
+for (const [r, n] of [...reasons].sort((a, b) => b[1] - a[1])) console.log(`  ${r.padEnd(12)} ${n}`);
+
 console.log(`\nstatus moves surviving the cap:`);
 console.log(`  living agents knowing >=1 usable status move  ${withStatus} of ${agents} (${agents ? ((100 * withStatus) / agents).toFixed(1) : 0}%)`);
 console.log(`  living agents knowing >=1 damage move         ${withDamage} of ${agents} (${agents ? ((100 * withDamage) / agents).toFixed(1) : 0}%)   <-- control`);

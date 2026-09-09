@@ -200,6 +200,61 @@ describe("the four-move cap", () => {
     expect(pickMoveToForget(agent, agent.knownMoves!, ctx)).not.toBe("W");
   });
 
+  it("drops a BUILT move for a clearly better one, refunds the points, and says why", () => {
+    // Direct: "It's okay to drop an invested move but there should be
+    // reasoning behind it." The reasoning is that the refund makes
+    // investment transferable rather than destroyed — every point comes back
+    // as wildcard and maybeAutoRespec starts spending it again on whatever
+    // won the slot. So investment is friction, not a veto.
+    const treeOf = (p: string) =>
+      Object.fromEntries(
+        Array.from({ length: 45 }, (_, i) => [`${p}${i}`, { id: `${p}${i}`, name: `${p}${i}`, cost: 1, leaning: "aggression" as const }])
+      );
+    const ctx = ctxOf({
+      OLD: spec("old", { type: "normal", power: 40, cooldownTicks: 3, tree: treeOf("o") } as Partial<MoveSpec>),
+      FILLER1: spec("filler1", { type: "water", power: 60, tree: treeOf("a") } as Partial<MoveSpec>),
+      FILLER2: spec("filler2", { type: "fire", power: 60, tree: treeOf("b") } as Partial<MoveSpec>),
+      FILLER3: spec("filler3", { type: "rock", power: 60, tree: treeOf("c") } as Partial<MoveSpec>),
+      // Same type as OLD, and far stronger per action.
+      NEW: spec("new", { type: "normal", power: 110, cooldownTicks: 1, tree: treeOf("n") } as Partial<MoveSpec>),
+    });
+    // Every slot carries investment, so there is no cheap one to free —
+    // which is exactly the situation the live sim does not currently reach
+    // (measured: no agent has all four slots invested, so the AI always has
+    // an uninvested slot and never NEEDS to spend a built one).
+    const agent = agentOf({
+      types: ["normal"],
+      knownMoves: ["OLD", "FILLER1", "FILLER2", "FILLER3", "NEW"],
+      moveTreeChoices: { OLD: Object.keys(treeOf("o")).slice(0, 12), FILLER1: ["a0"], FILLER2: ["b0"], FILLER3: ["c0"], NEW: [] },
+      wildcardSkillPoints: 0,
+    });
+    const log = new EventLog();
+
+    enforceMoveCap(agent, "NEW", world, ctx, log);
+
+    expect(agent.knownMoves).not.toContain("OLD");
+    expect(agent.knownMoves).toContain("NEW");
+    // The twelve points are not lost — they come back to fund the new build.
+    expect(agent.wildcardSkillPoints).toBe(12);
+    const forgot = (log.events as any[]).find((e) => e.kind === "forgotMove");
+    expect(forgot.refundedPoints).toBe(12);
+    expect(forgot.reason).toBe("redundant"); // same type as one it kept — the cheapest slot to free, and named as such
+
+    // Control: make the new move only marginally better and the built move
+    // survives, so this is a real threshold and not "the newest move always
+    // wins".
+    const marginal = ctxOf({
+      OLD: spec("old", { type: "normal", power: 40, cooldownTicks: 3, tree: treeOf("o") } as Partial<MoveSpec>),
+      NEW: spec("new", { type: "normal", power: 45, cooldownTicks: 3, tree: treeOf("n") } as Partial<MoveSpec>),
+    });
+    const settled = agentOf({
+      types: ["normal"],
+      knownMoves: ["OLD", "NEW"],
+      moveTreeChoices: { OLD: Object.keys(treeOf("o")).slice(0, 12) },
+    });
+    expect(pickMoveToForget(settled, settled.knownMoves!, marginal)).toBe("NEW");
+  });
+
   it("a player-owned agent parks the decision instead of having it made for them", () => {
     const ctx = ctxOf({ A: spec("a"), B: spec("b"), C: spec("c"), D: spec("d"), E: spec("e") });
     const agent = agentOf({ playerOwned: true, knownMoves: ["A", "B", "C", "D", "E"] });
