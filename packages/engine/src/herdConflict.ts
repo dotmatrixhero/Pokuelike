@@ -253,6 +253,28 @@ function herdConflictChance(
 const CALMING_PRESENCE_RADIUS = 3;
 
 /**
+ * Floor on the calming multiplier — the most a calming presence can ever do
+ * is halve a nearby rivalry's escalation chance.
+ *
+ * It does not stack across agents, but it absolutely sums WITHIN one: an
+ * agent's total is the sum of every `calmingPresence` node across every move
+ * it knows, so `1 - strongest` could reach 0 and switch herd conflict off
+ * entirely in a radius, for both sides. That is not a strong passive, it is a
+ * mechanic being disabled.
+ *
+ * Measured before this floor existed (`passive-exposure.ts`): six species —
+ * snorlax, tauros, kangaskhan, machop, machoke, lickitung — could total 1.50,
+ * half again past the point where conflict stopped happening at all, with
+ * aerodactyl at 1.05. Direct call on the cap: "50%."
+ *
+ * Deliberately a floor on the EFFECT rather than a clamp on the stored value:
+ * the totals stay honest and legible in the exposure report, and a build that
+ * over-invests in calm is merely wasting points rather than silently having
+ * them zeroed.
+ */
+const MIN_CALMING_MULTIPLIER = 0.5;
+
+/**
  * How much a nearby `"calmingPresence"` holder dampens `agent`'s own
  * rivalry-escalation chance — deliberately scans every living, same-layer
  * agent regardless of `herdId` (unlike `healAura`/`aquaticHaste`, which stay
@@ -271,7 +293,7 @@ function calmingMultiplier(world: World, agent: Agent): number {
     if (manhattan(other.pos, agent.pos) > CALMING_PRESENCE_RADIUS) continue;
     strongest = calm;
   }
-  return Math.max(0, 1 - strongest);
+  return Math.max(MIN_CALMING_MULTIPLIER, 1 - strongest);
 }
 
 /**

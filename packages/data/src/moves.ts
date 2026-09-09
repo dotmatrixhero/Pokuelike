@@ -4101,10 +4101,14 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Ancient Grove",
         cost: 2,
         leaning: "boldness",
-        // An immovable, ancient guardian that punishes and endures.
+        // An immovable, ancient guardian that punishes and endures. The
+        // node's own comment said "immovable" and then granted regen; it now
+        // grants what it describes. (`immovable` is `> 0`-gated in status.ts
+        // rather than summed, so this is the tree's only grant of it — a
+        // second one anywhere in Solar Beam would be a dead node.)
         grantsPassives: [
           { kind: "thorns", value: 0.1 },
-          { kind: "regen", value: 0.04 },
+          { kind: "immovable", value: 1 },
         ],
         delta: {},
       },
@@ -4189,7 +4193,9 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // DEEP NOTABLE. Both lanes end here: the beam stops being one
         // guardian's and becomes the grove's answer to being encroached on.
-        grantsPassive: { kind: "healAura", value: 0.01 },
+        // 0.01 -> 0.006: group healing is held to a stricter standard than
+        // self-healing, since one node pays out to the whole herd every tick.
+        grantsPassive: { kind: "healAura", value: 0.006 },
         delta: { allyEffectOnAttack: true },
       },
       sunward_stance: {
@@ -4217,8 +4223,11 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Deeper Shade",
         cost: 1,
         leaning: "boldness",
-        // Bridge filler — deepens Shared Shade's own recovery lever.
-        grantsPassive: { kind: "regenFlat", value: 1 },
+        // Bridge filler. Was "+1 HP Regen", deepening Shared Shade's healing;
+        // it now deepens the shade itself. Shade is cover, and cover is a
+        // Boldness flavour — the branch keeps its lever without adding a
+        // fourth healing node to a tree that had seven.
+        grantsPassive: { kind: "defenseBoost", value: 0.04 },
         delta: {},
       },
       the_canopy: {
@@ -4228,10 +4237,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         leaning: "sociability",
         // BRIDGE NOTABLE. Shade thick enough that standing under it is
-        // itself the recovery.
+        // itself the recovery. Trimmed against the per-move healing budget,
+        // aura harder than self: 1.5 -> 1.0 flat, 0.008 -> 0.005 aura.
         grantsPassives: [
-          { kind: "regenFlat", value: 1.5 },
-          { kind: "healAura", value: 0.008 },
+          { kind: "regenFlat", value: 1 },
+          { kind: "healAura", value: 0.005 },
         ],
         delta: {},
       },
@@ -4260,7 +4270,9 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Eternal Grove",
         cost: 2,
         leaning: "sociability",
-        grantsPassive: { kind: "regen", value: 0.04 },
+        // 0.04 -> 0.025. The `allyEffect` heal in this node's delta is the
+        // real payload; the passive was doubling up on it.
+        grantsPassive: { kind: "regen", value: 0.025 },
         delta: { targetsAlly: true, allyEffect: { healFraction: 0.25, buff: { stat: "spAttack", stage: 1, ticks: 20 } } },
       },
       // Crosslink: Aggression <-> Boldness — the guardian's own steady
@@ -4315,12 +4327,15 @@ export const MOVES: Record<string, MoveSpec> = {
       canopy_footing: {
         id: "canopy_footing",
         prerequisites: ["bulwark_footing"],
-        name: "+0.75 HP Regen",
+        name: "Rooted Footing",
         cost: 1,
         leaning: "boldness",
-        // Deepens Shared Shade's own shared-vitality lever directly,
-        // instead of a generic power bolt-on.
-        grantsPassive: { kind: "regenFlat", value: 0.75 },
+        // Was literally named "+0.75 HP Regen" — a placeholder name is a tell
+        // that the node had no idea, and it was the seventh healing node in
+        // one tree. Its prerequisite is Bulwark Footing; planting your feet
+        // is what it should have been doing all along, and flat mitigation is
+        // early-strong/late-marginal exactly like the flat regen it replaces.
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
         delta: {},
       },
       grove_bulwark: {
@@ -4956,17 +4971,35 @@ export const MOVES: Record<string, MoveSpec> = {
     cooldownTicks: 5,
     range: { min: 0, max: 1 },
     hitsArea: true,
-    // v2 (MOVES_DESIGN.md's own template). Onix's third real move —
-    // already has Rock Throw's defense-penetrating single-target tree and
-    // Earthquake's ground-shockwave AoE tree, so this one earns a genuinely
-    // different fantasy: boulders literally falling FROM ABOVE, not thrown
-    // or shaken up from the ground. Leans on `situationalBonus`'s
-    // `"elevation"` condition (attacker on a strictly higher tile) as its
-    // own real hook, distinct from either sibling tree. Same three-branch-
-    // plus-crosslink-triangle shape (10 nodes/branch + 3 crosslinks = 33).
+    // --- The fantasy (v4 rewrite, MOVES_DESIGN.md's "start from the
+    // fantasy") ---
+    //
+    // Onix rears against a slope and the slope lets go. This is not a rock
+    // thrown (Rock Throw) and it is not the ground shaking (Earthquake) —
+    // it is tons of stone arriving from ABOVE, into a one-tile bowl, onto
+    // things whose guard is pointed at the wrong angle. What makes it
+    // dangerous is where the user is standing: from the high ground it is
+    // gravity doing the work; on the flat it is a slow, heavy move that
+    // mostly buries its own feet. It does not pick targets — the herd-mate
+    // beside it is under the same rocks — and everything nearby hears it
+    // coming a beat before it lands. That beat is the whole Sociability
+    // branch; the height is the whole Aggression branch; standing in the
+    // middle of your own rockfall and not moving is Boldness.
+    //
+    // Template v4: 45 nodes — three 12-node branches (opener, two parallel
+    // lanes each with their own notable, a deep notable both lanes converge
+    // on, a filler, a capstone) plus three 3-node crosslink bridges. Nine
+    // `prerequisitesAnyOf` (six lane notables, three deep notables), six
+    // fork nodes, every v3 fork preserved.
     tree: {
-      // --- Aggression: "Landslide Fury" — more stone, falling harder,
-      // from higher up.
+      // --- Aggression: "the whole face lets go" ---
+      // Flavours (the colour pie): stealth/ambush (the elevation the drop
+      // comes from), piercing (through a guard, through a resist), raw
+      // damage (mass and crit), wider AoE (the fork), aggressive movement
+      // (the wall sweeping everything outward at the deep notable).
+      // The two lanes differ in KIND: lane A is the DROP (height, and
+      // getting through whatever is in the way), lane B is the SLOPE
+      // (volume, and whether it comes down wide or concentrated).
       raining_stones: {
         id: "raining_stones",
         name: "Raining Stones",
@@ -4974,19 +5007,12 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { situationalBonus: { condition: "elevation", multiplier: 1.3 } },
       },
-      heavier_boulders: {
-        id: "heavier_boulders",
-        name: "+5 Power",
-        cost: 1,
-        prerequisites: ["raining_stones"],
-        leaning: "aggression",
-        delta: { power: 5 },
-      },
+      // Lane A — the drop.
       steadier_aim: {
         id: "steadier_aim",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["heavier_boulders"], ["quarried_weight"], ["second_wave"]],
+        prerequisites: ["raining_stones"],
         leaning: "aggression",
         delta: { accuracy: 10 },
       },
@@ -4998,19 +5024,58 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { defensePenetration: 0.1 },
       },
+      straight_down: {
+        id: "straight_down",
+        name: "Straight Down",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Aggression <->
+        // Boldness bridge's own notable (Mountainfall).
+        prerequisitesAnyOf: [["crushing_debris"], ["mountainfall"]],
+        leaning: "aggression",
+        // The one thing a fall this heavy answers that a thrown rock does
+        // not: being built to shrug rock off. A Ground/Steel/Fighting type
+        // still has a hillside on top of it. First `resistanceBreaker` in
+        // this tree, and the lane's whole point — the drop goes through.
+        delta: { resistanceBreaker: { multiplier: 1.5 } },
+      },
+      heavier_boulders: {
+        id: "heavier_boulders",
+        name: "Edge-On",
+        cost: 1,
+        prerequisites: ["straight_down"],
+        leaning: "aggression",
+        // Was a second "+5 Power" filler in a branch that already had one
+        // (Settling Dust) — the duplicate-filler smell this document has
+        // retired elsewhere. Same +5, plus the first crit stage in the
+        // tree: a slab that lands on its edge rather than its face.
+        delta: { power: 5, critRateStage: 1 },
+      },
+      // Lane B — the slope itself.
       faster_collapse: {
         id: "faster_collapse",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["crushing_debris"], ["mountainfall"], ["no_respite"]],
+        prerequisites: ["raining_stones"],
         leaning: "aggression",
         delta: { cooldownTicks: -1 },
+      },
+      ground_shaking_impact: {
+        id: "ground_shaking_impact",
+        name: "Ground-Shaking Impact",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Sociability
+        // <-> Aggression bridge's own notable (No Respite).
+        prerequisitesAnyOf: [["faster_collapse"], ["no_respite"]],
+        leaning: "aggression",
+        // Whatever's still standing after the rockfall gets no time to
+        // recover before the next one.
+        delta: { power: 10, jamCooldownTicks: 1 },
       },
       wider_slide: {
         id: "wider_slide",
         name: "Wider Slide",
         cost: 1,
-        prerequisites: ["faster_collapse"],
+        prerequisites: ["ground_shaking_impact"],
         excludes: ["heavier_stones"],
         leaning: "aggression",
         // A broader wall of falling stone, spread thinner.
@@ -5020,27 +5085,33 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "heavier_stones",
         name: "Heavier Stones",
         cost: 1,
-        prerequisites: ["faster_collapse"],
+        prerequisites: ["ground_shaking_impact"],
         excludes: ["wider_slide"],
         leaning: "aggression",
         // Fewer, bigger boulders, harder to line up.
         delta: { power: 15, accuracy: -10 },
       },
-      ground_shaking_impact: {
-        id: "ground_shaking_impact",
-        name: "Ground-Shaking Impact",
+      swept_off: {
+        id: "swept_off",
+        name: "Swept Off",
         cost: 2,
-        prerequisitesAnyOf: [["wider_slide"], ["heavier_stones"]],
+        // DEEP NOTABLE. Both lanes end here — the drop and the volume add
+        // up to a moving wall rather than a rain of separate rocks.
+        prerequisitesAnyOf: [["heavier_boulders"], ["wider_slide"], ["heavier_stones"]],
         leaning: "aggression",
-        // Whatever's still standing after the rockfall gets no time to
-        // recover before the next one.
-        delta: { power: 10, jamCooldownTicks: 1 },
+        // The debris does not stop where it lands. On an AoE move this
+        // resolves per target (resolveAreaHit -> resolveHitAgainstTarget),
+        // so the whole bowl gets carried a tile outward — something an
+        // observer can SEE happen, which "+10% power" never is. It respects
+        // `"immovable"` like any other forced movement, which is exactly
+        // what the Boldness branch one over is buying.
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" }, power: 5 },
       },
       settling_dust: {
         id: "settling_dust",
         name: "+5 Power",
         cost: 1,
-        prerequisites: ["ground_shaking_impact"],
+        prerequisites: ["swept_off"],
         leaning: "aggression",
         delta: { power: 5 },
       },
@@ -5050,8 +5121,8 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["settling_dust"],
         leaning: "aggression",
-        // The whole slope comes down at once, Onix's own real mass adding
-        // to the weight of what's already falling.
+        // CAPSTONE. The whole slope comes down at once, Onix's own real
+        // mass adding to the weight of what's already falling.
         delta: { shape: { kind: "burst", radius: 2 }, weightScaling: { factor: 0.1 } },
       },
       // Crosslink: Aggression <-> Boldness — a braced stance means it can
@@ -5080,26 +5151,25 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["heaved_mass"],
         leaning: "boldness",
-        // Heaving that much rock is genuinely exhausting — a real per-use cost
-        // in the same node as its payoff.
+        // BRIDGE NOTABLE. Heaving that much rock is genuinely exhausting —
+        // a real per-use cost in the same node as its payoff. Lands on one
+        // lane notable per branch it connects: Straight Down (Aggression's
+        // drop lane, which is about angle rather than mass, so the bridge
+        // complements it) and Unbroken (Boldness's footing lane).
         delta: { power: 12, selfCostPerUse: { need: "energy", amount: 0.05 } },
       },
-      // --- Boldness: "Bedrock Stance" — standing unmoved in the middle of
-      // its own rockfall.
-      // --- Boldness: mass, and the high ground it fights from ---
+      // --- Boldness: standing in the middle of your own rockfall ---
+      // Flavours: defence (bulk, and the rubble that punishes climbers),
+      // raw damage (weight — this branch's thesis), stealth/ambush (the
+      // ledge it drops from), planted/duration (setting its feet as the
+      // stone lands), aggressive movement (the deep notable's commitment).
+      // Lane A is BULK (what it is made of), lane B is FOOTING (where it
+      // stands, and refusing to leave) — different in kind, not degree.
       //
-      // Reworked off the same generic armor ladder vine_whip and
-      // flamethrower were running node-for-node (damageReduction ->
-      // defenseBoost -> regen/thorns fork -> defenseBoost+thorns capstone,
-      // identical passive values). Vine Whip is the honest owner of
-      // rooted-and-thorny; this branch was borrowing it.
-      //
-      // What is only true of a rockslide: it is a WEIGHT problem, and it is
-      // an ELEVATION problem. Nothing else in the roster gets to build
-      // around `weightScaling` and the `elevation` situational bonus, and
-      // both are levers the trees have barely touched. This branch is about
-      // being the heavy thing standing above you, not about having thicker
-      // skin than the next tank.
+      // Reworked in v3 off the generic armor ladder vine_whip and
+      // flamethrower were running node-for-node; vine_whip is the honest
+      // owner of rooted-and-thorny. What is only true of a rockslide is
+      // that it is a WEIGHT problem and an ELEVATION problem.
       stone_shield: {
         id: "stone_shield",
         name: "Set Stance",
@@ -5109,6 +5179,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // thesis stated in its first node.
         delta: { weightScaling: { factor: 0.2 } },
       },
+      // Lane A — bulk.
       firmer_footing: {
         id: "firmer_footing",
         name: "+10 Accuracy",
@@ -5121,7 +5192,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "craggy_hide",
         name: "Craggy Hide",
         cost: 1,
-        prerequisitesAnyOf: [["firmer_footing"], ["quarried_weight"], ["steadfast_warning"]],
+        prerequisites: ["firmer_footing"],
         leaning: "boldness",
         grantsPassive: { kind: "defenseBoost", value: 0.05 },
         delta: {},
@@ -5129,19 +5200,50 @@ export const MOVES: Record<string, MoveSpec> = {
       denser_stone: {
         id: "denser_stone",
         name: "Denser Stone",
-        cost: 1,
-        prerequisites: ["craggy_hide"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Boldness <->
+        // Sociability bridge's own notable (Unmoved Sentinel).
+        prerequisitesAnyOf: [["craggy_hide"], ["unmoved_sentinel"]],
         leaning: "boldness",
         // Deepens the opener's own lever instead of being another +5 Power.
         delta: { weightScaling: { factor: 0.15 } },
       },
+      digs_in: {
+        id: "digs_in",
+        name: "Digs In",
+        cost: 1,
+        prerequisites: ["denser_stone"],
+        leaning: "boldness",
+        // A `delta`, deliberately, and not another defensive passive:
+        // passives stack uncapped across every tree a species knows, and
+        // Onix already carries damageReductionFlat 12.5 / immovable 4
+        // across its movepool. This one only changes what THIS move does —
+        // as the stone lands it sets its feet and its guard comes up, for
+        // a real but bounded window.
+        delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 20 } },
+      },
+      // Lane B — footing.
       settled_stance: {
         id: "settled_stance",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["denser_stone"], ["mountainfall"], ["unmoved_sentinel"]],
+        prerequisites: ["stone_shield"],
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
+      },
+      unbroken: {
+        id: "unbroken",
+        name: "Unbroken",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Aggression <->
+        // Boldness bridge's own notable (Mountainfall).
+        prerequisitesAnyOf: [["settled_stance"], ["mountainfall"]],
+        leaning: "boldness",
+        // Anchored under its own rockfall — no drag/knockback/lunge so
+        // much as budges it, a real delivery on "Unbroken" instead of
+        // another flat damage-reduction stand-in.
+        grantsPassive: { kind: "immovable", value: 1 },
+        delta: {},
       },
       // The fork: take the high ground and rain rock down from it, or
       // refuse to give ground at all. Both are "mass"; they want opposite
@@ -5150,7 +5252,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "weathering",
         name: "High Perch",
         cost: 1,
-        prerequisites: ["settled_stance"],
+        prerequisites: ["unbroken"],
         excludes: ["jagged_edges"],
         leaning: "boldness",
         delta: { situationalBonus: { condition: "elevation", multiplier: 1.45 } },
@@ -5159,29 +5261,31 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "jagged_edges",
         name: "Jagged Edges",
         cost: 1,
-        prerequisites: ["settled_stance"],
+        prerequisites: ["unbroken"],
         excludes: ["weathering"],
         leaning: "boldness",
         grantsPassive: { kind: "thorns", value: 0.12 },
         delta: {},
       },
-      unbroken: {
-        id: "unbroken",
-        name: "Unbroken",
+      bring_it_down: {
+        id: "bring_it_down",
+        name: "Bring It Down",
         cost: 2,
-        prerequisitesAnyOf: [["weathering"], ["jagged_edges"]],
+        // DEEP NOTABLE. Both lanes end here. A badly hurt Onix stops trying
+        // to trade and reaches for the slope instead: `selfStateBonus`
+        // biases `pickBestMove`'s own scoring toward this move once the
+        // user is at or below half HP, and the extra `lockTicks` beat is
+        // the real price of committing to a collapse it is standing inside.
+        // Cost and payoff in the same node (principle 4).
+        prerequisitesAnyOf: [["digs_in"], ["weathering"], ["jagged_edges"]],
         leaning: "boldness",
-        // Anchored under its own rockfall — no drag/knockback/lunge so
-        // much as budges it, a real delivery on "Unbroken" instead of
-        // another flat damage-reduction stand-in.
-        grantsPassive: { kind: "immovable", value: 1 },
-        delta: {},
+        delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.4 }, lockTicks: 1, power: 10 },
       },
       time_worn: {
         id: "time_worn",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisites: ["unbroken"],
+        prerequisites: ["bring_it_down"],
         leaning: "boldness",
         delta: { accuracy: 10 },
       },
@@ -5191,10 +5295,10 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["time_worn"],
         leaning: "boldness",
-        // Escalates the branch's OWN lever — the heaviest version of the
-        // thing every node here has been building — rather than reaching
-        // for the roster's stock defenseBoost+thorns tank capstone, which
-        // is exactly what it used to be.
+        // CAPSTONE. Escalates the branch's OWN lever — the heaviest version
+        // of the thing every node here has been building — rather than
+        // reaching for the roster's stock defenseBoost+thorns tank
+        // capstone, which is exactly what it used to be.
         grantsPassive: { kind: "defenseBoost", value: 0.06 },
         delta: { weightScaling: { factor: 0.25 }, defensePenetration: 0.15 },
       },
@@ -5226,24 +5330,36 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["braced_footing"],
         leaning: "sociability",
-        // Holds the line while everything else is still getting clear.
+        // BRIDGE NOTABLE. Holds the line while everything else is still
+        // getting clear. Lands on Denser Stone (Boldness's bulk lane, a
+        // lane about mass rather than protection, so the bridge
+        // complements it) and Settling Rumble (Sociability's warning lane).
         grantsPassives: [
           { kind: "defenseBoost", value: 0.04 },
           { kind: "damageReduction", value: 0.05 },
         ],
         delta: {},
       },
-      // --- Sociability: "Warning Rumble" — the tremor before the rockfall
-      // gives everyone nearby, herd or rival, a real chance to get clear.
+      // --- Sociability: the sound before the stone ---
+      // Flavours: no friendly fire (the herd is standing in the bowl too),
+      // calming (nobody has to fight over a slope that is coming down),
+      // ally buffing (a warning is only worth anything if they act on it),
+      // rallying (whatever is left standing gets called out).
+      // Lane A is what the herd DOES about the warning; lane B is the
+      // warning itself, and how far its authority reaches — different in
+      // kind: one buffs herd-mates, the other de-escalates rivals.
       herd_warning: {
         id: "herd_warning",
         name: "Herd Warning",
         cost: 1,
         leaning: "sociability",
         // Same real ally-exemption Earthquake's own Herdsafe Trigger uses —
-        // a same-herd agent caught in the burst takes nothing.
+        // a same-herd agent caught in the burst takes nothing. Deliberate
+        // reuse for a different reason: an advance-warning tremor, not
+        // drilled herd discipline.
         delta: { excludesAllies: true },
       },
+      // Lane A — what the herd does about it.
       clearer_warning: {
         id: "clearer_warning",
         name: "+10 Accuracy",
@@ -5252,36 +5368,66 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { accuracy: 10 },
       },
+      deeper_rumble: {
+        id: "deeper_rumble",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["clearer_warning"],
+        leaning: "sociability",
+        delta: { power: 5 },
+      },
+      set_yourselves: {
+        id: "set_yourselves",
+        name: "Set Yourselves",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Sociability
+        // <-> Aggression bridge's own notable (No Respite).
+        prerequisitesAnyOf: [["deeper_rumble"], ["no_respite"]],
+        leaning: "sociability",
+        // The warning finally does something on the herd's side of it:
+        // every time the slide goes off, the nearest herd-mate braces
+        // against it (`allyEffectOnAttack`, resolved through support.ts's
+        // `nearestAllyEffectTarget`) instead of merely not being hit. A
+        // bounded, per-use buff rather than another permanent aura — this
+        // species already carries plenty of permanent aura.
+        delta: { allyEffectOnAttack: true, allyEffect: { buff: { stat: "defense", stage: 1, ticks: 20 } } },
+      },
+      take_cover: {
+        id: "take_cover",
+        name: "Take Cover",
+        cost: 1,
+        prerequisites: ["set_yourselves"],
+        leaning: "sociability",
+        // Deepens the same ally-effect one rung. A later node on the SAME
+        // chain overwriting an earlier one is intended escalation, not the
+        // overwrite bug — see MOVES_DESIGN.md's own note on that.
+        delta: { allyEffect: { buff: { stat: "defense", stage: 2, ticks: 24 } } },
+      },
+      // Lane B — the warning itself.
       faster_warning: {
         id: "faster_warning",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["clearer_warning"], ["steadfast_warning"], ["second_wave"]],
+        prerequisites: ["herd_warning"],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
       settling_rumble: {
         id: "settling_rumble",
         name: "Settling Rumble",
-        cost: 1,
-        prerequisites: ["faster_warning"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Boldness <->
+        // Sociability bridge's own notable (Unmoved Sentinel).
+        prerequisitesAnyOf: [["faster_warning"], ["unmoved_sentinel"]],
         leaning: "sociability",
         grantsPassive: { kind: "calmingPresence", value: 0.2 },
         delta: {},
-      },
-      deeper_rumble: {
-        id: "deeper_rumble",
-        name: "+5 Power",
-        cost: 1,
-        prerequisitesAnyOf: [["settling_rumble"], ["unmoved_sentinel"], ["no_respite"]],
-        leaning: "sociability",
-        delta: { power: 5 },
       },
       wider_warning: {
         id: "wider_warning",
         name: "Wider Warning",
         cost: 1,
-        prerequisites: ["deeper_rumble"],
+        prerequisites: ["settling_rumble"],
         excludes: ["sharpened_call"],
         leaning: "sociability",
         // Deepens the calm further — an even bigger radius of rivals that
@@ -5293,7 +5439,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "sharpened_call",
         name: "Sharpened Call",
         cost: 1,
-        prerequisites: ["deeper_rumble"],
+        prerequisites: ["settling_rumble"],
         excludes: ["wider_warning"],
         leaning: "sociability",
         // An Onix this reliably loud about warning everyone off doesn't
@@ -5305,7 +5451,9 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "toppling_call",
         name: "Toppling Call",
         cost: 2,
-        prerequisitesAnyOf: [["wider_warning"], ["sharpened_call"]],
+        // DEEP NOTABLE. Both lanes end here: the herd that got clear and
+        // the rivals that backed off all now know exactly where to look.
+        prerequisitesAnyOf: [["take_cover"], ["wider_warning"], ["sharpened_call"]],
         leaning: "sociability",
         // Whatever's still standing after the warning gets marked for
         // anything else nearby to finish.
@@ -5325,9 +5473,9 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["lasting_rumble"],
         leaning: "sociability",
-        // Escalates the branch's own real lever instead of switching to a
-        // generic heal — after enough warnings, the ground around it
-        // finally settles for good, a decisively bigger calm than
+        // CAPSTONE. Escalates the branch's own real lever instead of
+        // switching to a generic heal — after enough warnings, the ground
+        // around it finally settles for good, a decisively bigger calm than
         // anything earlier on this branch (0.2/0.15 at most before this).
         grantsPassive: { kind: "calmingPresence", value: 0.3 },
         delta: {},
@@ -5358,8 +5506,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["rolling_aftershock"],
         leaning: "sociability",
-        // Whatever's still pinned under the aftershocks gets marked for
-        // everything else nearby — denial turning into focus fire.
+        // BRIDGE NOTABLE. Whatever's still pinned under the aftershocks
+        // gets marked for everything else nearby — denial turning into
+        // focus fire. Lands on Set Yourselves (Sociability's herd lane —
+        // teeth dropped into the lane that otherwise never threatens
+        // anyone) and Ground-Shaking Impact (Aggression's slope lane).
         delta: { rallyCall: { ticks: 15 } },
       },
     },
@@ -6508,9 +6659,15 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["never_still"],
         excludes: ["false_surface"],
         leaning: "aggression",
-        // Recovers fast between dives instead of biting on the way past.
-        grantsPassive: { kind: "regenFlat", value: 2.25 },
-        delta: {},
+        // Was "+2.25 HP Regen". Healing was never this node's fantasy — it is
+        // the FAST dive, the one that is gone before anything lands. Now it
+        // buys the tempo it describes.
+        //
+        // Deliberately NOT `unshaken`, which reads like a perfect fit: dig
+        // already grants it (Unflinching Burrow's own read of its name), and
+        // predation.ts gates on `passives.unshaken > 0` rather than summing,
+        // so a second grant would be a node that does literally nothing.
+        delta: { cooldownTicks: -1 },
       },
       false_surface: {
         id: "false_surface",
@@ -6533,7 +6690,13 @@ export const MOVES: Record<string, MoveSpec> = {
         // dodge/timing effect this tree's real lever set (cooldownTicks +
         // passives only, since Dig is never resolved as a hit) can't
         // actually deliver.
-        grantsPassive: { kind: "damageReduction", value: 0.12 },
+        //
+        // 0.12 -> 0.05 to bring the tree under the 20% per-move damage-
+        // reduction cap (it totalled 29%). The cut lands on Aggression
+        // rather than Boldness deliberately: mitigation is a Boldness
+        // flavour in the colour pie, and this node keeps its real lever,
+        // the cooldown.
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
         delta: { cooldownTicks: -1 },
       },
       // Crosslink: Aggression <-> Boldness — braces for real before every
@@ -6563,9 +6726,10 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["hardened_dive"],
         leaning: "aggression",
-        // Takes the hit mid-dive and keeps going.
+        // Takes the hit mid-dive and keeps going. 0.05 -> 0.03 for the
+        // same per-move cap; the defenseBoost is what carries this node.
         grantsPassives: [
-          { kind: "damageReduction", value: 0.05 },
+          { kind: "damageReduction", value: 0.03 },
           { kind: "defenseBoost", value: 0.04 },
         ],
         delta: {},
@@ -6616,7 +6780,12 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["bedrock_grip"],
         excludes: ["stone_hide"],
         leaning: "boldness",
-        grantsPassive: { kind: "regenFlat", value: 3 },
+        // Was "+3 HP Regen", the single biggest healing node in the tree and
+        // flatly off-fantasy: weathered scales are armour. Flat mitigation
+        // scales the same way flat regen did (real early, marginal late —
+        // see `damageReductionFlat`'s own doc comment), so this keeps the
+        // node's role in the build while changing what it means.
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
         delta: {},
       },
       stone_hide: {
@@ -6738,7 +6907,9 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["settling_earth"],
         excludes: ["deeper_calm"],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 2.25 },
+        // Kept as healing — this one IS rest — but 2.25 -> 1.5 against the
+        // per-move budget.
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: {},
       },
       denning_together: {
@@ -6749,9 +6920,14 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // A shared den means real rest for everyone in it, not just a
         // trickle of healing.
+        //
+        // Group healing is held to a stricter standard than self-healing:
+        // `healAura` pays out to every herd-mate in radius every tick, so one
+        // node is worth its value times the herd. Direct: "be more stringent
+        // on group regen." 0.01 -> 0.006 aura, 0.04 -> 0.02 self.
         grantsPassives: [
-          { kind: "healAura", value: 0.01 },
-          { kind: "regen", value: 0.04 },
+          { kind: "healAura", value: 0.006 },
+          { kind: "regen", value: 0.02 },
         ],
         delta: {},
       },
@@ -6763,8 +6939,19 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["peaceful_tunnels", "quick_reflexes"],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
-        delta: { cooldownTicks: -1 },
+        // Was "+1.5 HP Regen". A warning shouted early is what stops a fight
+        // starting, not what patches one up — `calmingPresence` is the lever
+        // that actually models that (herdConflict.ts multiplies down the
+        // escalation chance of BOTH sides near the holder, not just its own
+        // herd).
+        //
+        // Its -1 cooldown moved to Instant Vanish, whose entire identity is
+        // speed, rather than being shaved off some third node: dig sits
+        // exactly at the 3x tempo cap, so the tick had to come from
+        // somewhere, and a de-escalation node is the one place in this branch
+        // where tempo was never the point.
+        grantsPassive: { kind: "calmingPresence", value: 0.08 },
+        delta: {},
       },
       sharper_warning: {
         id: "sharper_warning",
@@ -6772,8 +6959,13 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["quick_warning"],
         leaning: "sociability",
-        // Deepens Quick Warning's own tempo lever.
-        delta: { cooldownTicks: -1 },
+        // Deepens Quick Warning's own de-escalation lever, which is what that
+        // node now grants — the whole bridge is about the warning working,
+        // not about digging faster. This gave back the tick Instant Vanish
+        // needed: dig sat exactly at the 3x tempo cap, so the two cooldowns
+        // on this bridge were the ones with the least claim to it.
+        grantsPassive: { kind: "calmingPresence", value: 0.05 },
+        delta: {},
       },
       first_to_ground: {
         id: "first_to_ground",
@@ -6782,8 +6974,9 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["sharper_warning"],
         leaning: "aggression",
         // Underground before anything else has reacted, and recovering while
-        // it waits.
-        grantsPassive: { kind: "regen", value: 0.025 },
+        // it waits. 0.025 -> 0.015: the waiting-and-recovering half is real
+        // and stays, but the cooldown is what this node is actually for.
+        grantsPassive: { kind: "regen", value: 0.015 },
         delta: { cooldownTicks: -2 },
       },
     },
@@ -7101,7 +7294,11 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Steady Roots",
         cost: 1,
         leaning: "boldness",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        // Was "+1.5 HP Regen". "Steady" is a stance, not a heal — and this
+        // branch's own flavour is defence. Physical-only by construction
+        // (calculateDamage only reads the defense stage for a physical move),
+        // which is the honest version of what a root system does.
+        grantsPassive: { kind: "defenseBoost", value: 0.04 },
         delta: {},
       },
       thick_bark: {
@@ -7158,9 +7355,10 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         // Distinct from Sturdy Return/Steady Roots below it, not the same
         // two values re-granted a second time — a genuinely deeper root
-        // system, not a bigger number on the same two levers.
+        // system, not a bigger number on the same two levers. 0.04 -> 0.025
+        // against the per-move healing budget.
         grantsPassives: [
-          { kind: "regen", value: 0.04 },
+          { kind: "regen", value: 0.025 },
           { kind: "defenseBoost", value: 0.04 },
         ],
         delta: {},
@@ -7265,7 +7463,8 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["settled_growth"],
         excludes: ["deepening_calm"],
         leaning: "sociability",
-        grantsPassive: { kind: "regenFlat", value: 2.25 },
+        // Kept as healing, 2.25 -> 1.5 against the per-move budget.
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: {},
       },
       roots_that_feed_the_grove: {
@@ -7276,8 +7475,11 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // What the roots take, the grove gets back — a slow herd-wide heal
         // paired with the branch's own calm, not a bare aura on its own.
+        //
+        // 0.012 -> 0.008. Group healing pays out to every herd-mate in radius
+        // every tick, so it is held to a stricter standard than self-healing.
         grantsPassives: [
-          { kind: "healAura", value: 0.012 },
+          { kind: "healAura", value: 0.008 },
           { kind: "calmingPresence", value: 0.1 },
         ],
         delta: {},
@@ -7290,8 +7492,12 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["gentle_roots", "ravenous_bite"],
         leaning: "aggression",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
-        delta: { cooldownTicks: -1 },
+        // Was "+1.5 HP Regen". This crosslink sits behind Ravenous Bite on a
+        // move literally named for draining, and the tree used no
+        // `lifestealFraction` anywhere — a real gap, not a rebalance. The
+        // recovery is now taken FROM something rather than accruing on its
+        // own, which is the whole fantasy of the move.
+        delta: { cooldownTicks: -1, lifestealFraction: 0.08 },
       },
       richer_ground: {
         id: "richer_ground",
@@ -7299,9 +7505,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["feeding_ground"],
         leaning: "aggression",
-        // Deepens Feeding Ground's own recovery lever.
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
-        delta: {},
+        // Bridge filler — deepens Feeding Ground's own lever, which is now
+        // the drain rather than a second identical "+1.5 HP Regen". The old
+        // pair was the clearest case in the roster of a filler that just
+        // repeated the node above it.
+        delta: { lifestealFraction: 0.06 },
       },
       endless_bounty: {
         id: "endless_bounty",
@@ -7309,8 +7517,9 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["richer_ground"],
         leaning: "sociability",
-        // Never quite empty, and never waiting long.
-        grantsPassive: { kind: "regen", value: 0.03 },
+        // Never quite empty, and never waiting long. 0.03 -> 0.02 against the
+        // per-move healing budget.
+        grantsPassive: { kind: "regen", value: 0.02 },
         delta: { cooldownTicks: -1 },
       },
     },

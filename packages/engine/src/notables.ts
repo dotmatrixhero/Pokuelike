@@ -198,8 +198,29 @@ export const GIANT_SLAYER_LEVEL_GAP = 5;
  * case to count it as maxed — see that function's own doc comment for why
  * this can't mean literally every node in the group (a real fork's mutually
  * `excludes`-ing pair can never both be chosen at once).
+ *
+ * Raised 6 -> 11 when template v4 made every branch 12 nodes. Direct ask:
+ * "requirements for savant notable need to be higher, maybe all nodes in an
+ * entire branch with our new 45 node trees to get it," then "yeah not all"
+ * — so 11 of 12, which is a genuinely maxed branch minus the one side of the
+ * fork a build can never take.
+ *
+ * Measured, 8 seeds x 10k ticks, 158 living agents:
+ *
+ *   bar   agents qualifying
+ *   >=6   57.6%   (the old bar)
+ *   >=10  44.3%
+ *   >=11  38.0%   <- this one
+ *   >=12  22.2%
+ *   >=13  17.7%
+ *   >=14   1.3%
+ *
+ * Reachable, not theoretical: the deepest single branch observed was 14.
+ * Honest limit — 11 is only a 1.5x rarity gain, and savant still lands on
+ * more than a third of living agents. If the goal is genuinely rare, 12
+ * (22.2%) or 13 (17.7%) is the bar; 11 was the explicit choice.
  */
-const SAVANT_MIN_BRANCH_NODES = 6;
+const SAVANT_MIN_BRANCH_NODES = 11;
 
 /**
  * This agent's own current live stat value for `title`, or `undefined` if

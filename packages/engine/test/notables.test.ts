@@ -200,18 +200,26 @@ describe("notables: record-holder transfer mechanism", () => {
 
   it("The Savant: a real, deeply-chosen move-tree branch (by leaning) qualifies; a shallow one doesn't", () => {
     const world = createWorld(10, 10);
-    const tree = {
-      n1: { id: "n1", name: "n1", cost: 1, leaning: "aggression" as const },
-      n2: { id: "n2", name: "n2", cost: 1, leaning: "aggression" as const },
-      n3: { id: "n3", name: "n3", cost: 1, leaning: "aggression" as const },
-      n4: { id: "n4", name: "n4", cost: 1, leaning: "aggression" as const },
-      n5: { id: "n5", name: "n5", cost: 1, leaning: "aggression" as const },
-      n6: { id: "n6", name: "n6", cost: 1, leaning: "aggression" as const },
-    };
+    // A full template-v4 branch: 12 nodes sharing one leaning. The bar is
+    // SAVANT_MIN_BRANCH_NODES = 11 of them ("maybe all nodes in an entire
+    // branch with our new 45 node trees... yeah not all"), so a build that
+    // took every node but one side of a fork qualifies and nothing shallower
+    // does. Only the threshold moved when v4 landed — what this test asserts,
+    // that a genuinely maxed branch is the bar and a partial one isn't, is
+    // unchanged.
+    const tree = Object.fromEntries(
+      Array.from({ length: 12 }, (_, i) => [
+        `n${i + 1}`,
+        { id: `n${i + 1}`, name: `n${i + 1}`, cost: 1, leaning: "aggression" as const },
+      ])
+    );
+    const nodeIds = (n: number) => Array.from({ length: n }, (_, i) => `n${i + 1}`);
     const ctx = { getProfile: () => undefined, resolveMove: () => ({ id: "m", name: "m", shape: { kind: "point" as const }, type: "normal" as const, category: "physical" as const, power: 10, accuracy: 100, cooldownTicks: 1, tree }) };
 
-    const shallow = agent("shallow", { moveTreeChoices: { M: ["n1", "n2", "n3"] } });
-    const deep = agent("deep", { moveTreeChoices: { M: ["n1", "n2", "n3", "n4", "n5", "n6"] } });
+    // 10 of 12 is deep — deeper than the old bar of 6 — and still not a maxed
+    // branch. That is the case that has to fail, or the raise did nothing.
+    const shallow = agent("shallow", { moveTreeChoices: { M: nodeIds(10) } });
+    const deep = agent("deep", { moveTreeChoices: { M: nodeIds(11) } });
     world.agents.push(shallow, deep);
 
     updateNotables(world, undefined, ctx, () => 0);

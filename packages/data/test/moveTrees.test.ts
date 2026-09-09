@@ -523,13 +523,26 @@ describe("Solar Beam tree: v4 two-lane — a guardian's dominance display", () =
     expect(viaGlare.bonusVsType).toEqual({ type: "grass", multiplier: 1.5 });
   });
 
-  it("Ancient Grove is a real two-passive keystone (thorns + regen), distinct from the resistanceBreaker every other move's Boldness branch reaches for", () => {
+  // The regen half became `immovable` when the per-move healing budget landed:
+  // the node's own comment described "an immovable, ancient guardian" and then
+  // granted regen. What this test exists to prove — that Ancient Grove is a
+  // real TWO-passive keystone rather than another resistanceBreaker — is
+  // unchanged; only which second passive it is moved. `immovable` is
+  // `> 0`-gated in status.ts rather than summed, so the assertion that it is
+  // the tree's only grant of it is load-bearing: a second one would be a node
+  // that does nothing at all.
+  it("Ancient Grove is a real two-passive keystone (thorns + immovable), distinct from the resistanceBreaker every other move's Boldness branch reaches for", () => {
     const node = solarBeam.tree!.ancient_grove;
     expect(node.grantsPassives).toEqual([
       { kind: "thorns", value: 0.1 },
-      { kind: "regen", value: 0.04 },
+      { kind: "immovable", value: 1 },
     ]);
     expect(node.delta.resistanceBreaker).toBeUndefined();
+
+    const immovableGrants = Object.values(solarBeam.tree!).flatMap((n) =>
+      [...(n.grantsPassive ? [n.grantsPassive] : []), ...(n.grantsPassives ?? [])].filter((g) => g.kind === "immovable")
+    );
+    expect(immovableGrants).toHaveLength(1);
   });
 
   it("Sociability's fork makes the ally-effect overwrite an explicit, deliberate choice (heal the grove vs. steel it), not an emergent quirk", () => {
@@ -570,6 +583,92 @@ describe("Solar Beam tree: v4 two-lane — a guardian's dominance display", () =
     const bridge = ["grove_ward", "gathering_light", "territorial_flare", "flare_wider", "sunspot"];
     expect(applyMoveTree(solarBeam, [...bridge, "grove_muster"]).rallyCall).toBeDefined();
     expect(applyMoveTree(solarBeam, [...bridge, "widening_beam"]).range!.max).toBeGreaterThan(solarBeam.range!.max);
+  });
+});
+
+describe("Rock Slide tree: v4 two-lane — stone arriving from above", () => {
+  const rockSlide = MOVES.rock_slide;
+
+  it("Straight Down is the drop lane's payoff: the one thing a hillside answers that a thrown rock doesn't — being built to shrug rock off", () => {
+    const built = applyMoveTree(rockSlide, ["raining_stones", "steadier_aim", "crushing_debris", "straight_down"]);
+    expect(built.resistanceBreaker).toEqual({ multiplier: 1.5 });
+    // Distinct from its sibling tree: Rock Throw answers fliers (bonusVsType),
+    // this one answers resists.
+    expect(built.bonusVsType).toBeUndefined();
+  });
+
+  it("Swept Off is a real positional payoff on an AoE — the whole bowl gets carried a tile outward, reachable from either lane", () => {
+    const viaDrop = applyMoveTree(rockSlide, [
+      "raining_stones",
+      "steadier_aim",
+      "crushing_debris",
+      "straight_down",
+      "heavier_boulders",
+      "swept_off",
+    ]);
+    expect(viaDrop.hitsArea).toBe(true);
+    expect(viaDrop.forcedMovement).toEqual({ mover: "defender", direction: "away", tiles: 1, timing: "onHit" });
+
+    const viaSlope = applyMoveTree(rockSlide, [
+      "raining_stones",
+      "faster_collapse",
+      "ground_shaking_impact",
+      "heavier_stones",
+      "swept_off",
+    ]);
+    expect(viaSlope.forcedMovement).toEqual({ mover: "defender", direction: "away", tiles: 1, timing: "onHit" });
+  });
+
+  it("Bring It Down is a cornered-user lever with its cost in the same node — not a free power bump", () => {
+    const node = rockSlide.tree!.bring_it_down;
+    expect(node.delta.selfStateBonus).toEqual({ condition: "selfLowHp", multiplier: 1.4 });
+    expect(node.delta.lockTicks).toBe(1);
+    expect(node.delta.power).toBeGreaterThan(0);
+  });
+
+  it("Set Yourselves is the herd's own half of the warning — a per-use ally brace, not another permanent aura", () => {
+    const built = applyMoveTree(rockSlide, ["herd_warning", "clearer_warning", "deeper_rumble", "set_yourselves"]);
+    expect(built.excludesAllies).toBe(true);
+    expect(built.allyEffectOnAttack).toBe(true);
+    expect(built.allyEffect).toEqual({ buff: { stat: "defense", stage: 1, ticks: 20 } });
+    expect(rockSlide.tree!.set_yourselves.grantsPassive).toBeUndefined();
+    expect(rockSlide.tree!.set_yourselves.grantsPassives).toBeUndefined();
+  });
+
+  it("Take Cover escalates the same ally-effect on the same chain (intended ladder), not an independent second setter", () => {
+    const built = applyMoveTree(rockSlide, [
+      "herd_warning",
+      "clearer_warning",
+      "deeper_rumble",
+      "set_yourselves",
+      "take_cover",
+    ]);
+    expect(built.allyEffect).toEqual({ buff: { stat: "defense", stage: 2, ticks: 24 } });
+    expect(rockSlide.tree!.take_cover.prerequisites).toEqual(["set_yourselves"]);
+  });
+
+  it("Quarried Weight's bridge lands on a lane notable in each branch it connects — Straight Down and Unbroken", () => {
+    // v4: a bridge skips a lane's filler grind, never its notable.
+    const bridge = ["raining_stones", "stone_shield", "quarried_weight", "heaved_mass", "mountainfall"];
+    expect(applyMoveTree(rockSlide, [...bridge, "straight_down"]).resistanceBreaker).toBeDefined();
+    expect(rockSlide.tree!.unbroken.prerequisitesAnyOf).toContainEqual(["mountainfall"]);
+  });
+
+  it("Second Wave's bridge lands on a lane notable in each branch it connects — Set Yourselves and Ground-Shaking Impact", () => {
+    const bridge = ["herd_warning", "raining_stones", "second_wave", "rolling_aftershock", "no_respite"];
+    expect(applyMoveTree(rockSlide, [...bridge, "set_yourselves"]).allyEffectOnAttack).toBe(true);
+    expect(applyMoveTree(rockSlide, [...bridge, "ground_shaking_impact"]).jamCooldownTicks).toBe(3);
+  });
+
+  it("the high-ground fork stays a real, permanent choice: the perch or the rubble, never both", () => {
+    const path = ["stone_shield", "settled_stance", "unbroken"];
+    expect(applyMoveTree(rockSlide, [...path, "weathering"]).situationalBonus).toEqual({
+      condition: "elevation",
+      multiplier: 1.45,
+    });
+    expect(() => applyMoveTree(rockSlide, [...path, "weathering", "jagged_edges"])).toThrow(
+      /conflicts with already-chosen/
+    );
   });
 });
 
