@@ -12,13 +12,13 @@ import { MOVE_DEX_BY_KEY } from "./dex/index.js";
  */
 export function moveCanon(
   dexKey: string
-): Pick<MoveSpec, "type" | "category" | "power" | "accuracy"> {
+): Pick<MoveSpec, "type" | "category" | "power" | "accuracy" | "pp"> {
   const entry = MOVE_DEX_BY_KEY[dexKey];
   if (!entry) throw new Error(`moveCanon: no dex entry for key "${dexKey}" (packages/data/src/dex/moves.generated.ts)`);
   if (entry.category === "status") {
     throw new Error(`moveCanon: "${dexKey}" is a status move; MoveSpec only models physical/special attacks (see TODO.md)`);
   }
-  return { type: entry.type, category: entry.category, power: entry.power, accuracy: entry.accuracy };
+  return { type: entry.type, category: entry.category, power: entry.power, accuracy: entry.accuracy, pp: entry.pp };
 }
 
 /**
@@ -34,10 +34,10 @@ export function moveCanon(
  * accuracy`'s own doc comment), so this is purely for a faithful display
  * value, not a gameplay effect.
  */
-function statusMoveCanon(dexKey: string): Pick<MoveSpec, "type" | "category" | "power" | "accuracy"> {
+function statusMoveCanon(dexKey: string): Pick<MoveSpec, "type" | "category" | "power" | "accuracy" | "pp"> {
   const entry = MOVE_DEX_BY_KEY[dexKey];
   if (!entry) throw new Error(`statusMoveCanon: no dex entry for key "${dexKey}" (packages/data/src/dex/moves.generated.ts)`);
-  return { type: entry.type, category: "status", power: 0, accuracy: entry.accuracy < 0 ? 100 : entry.accuracy };
+  return { type: entry.type, category: "status", power: 0, accuracy: entry.accuracy < 0 ? 100 : entry.accuracy, pp: entry.pp };
 }
 
 /**

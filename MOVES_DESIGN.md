@@ -3575,3 +3575,87 @@ flavours, with the colour pie encoded as the lever→flavour map. Its
 **Still true after the pass, and worth keeping visible:** no proposed
 branch uses `excludesAllies` (preventing friendly fire), and nothing in the
 entire roster can grab attention, because that primitive was never built.
+
+## PP: the measurement that changes what it should be
+
+"we do need to do the pp thing." Before designing it, two things got
+checked rather than assumed.
+
+### 1. The canonical PP data has been sitting in the repo unused
+
+`dex/moves.generated.ts` carries a real mainline `pp` for **every one of
+the 35 roster moves** (range 5–40), imported with the rest of the dex and
+never surfaced: `moveCanon` returned only type/category/power/accuracy and
+dropped `pp` on the floor. Nothing had to be invented, and the values
+correlate with power exactly as you'd want:
+
+| PP | moves |
+|---|---|
+| 5 | hydro_pump, synthesis, moonlight, roost, rain_dance |
+| 10 | solar_beam, earthquake, rock_slide, ice_beam, dig, leech_seed, grassy_terrain |
+| 15 | flamethrower, rock_throw, surf, body_slam |
+| 20–25 | slash, twineedle, psybeam, vine_whip, ember, water_gun, growth, safeguard |
+| 30–40 | agility, harden, tackle, peck, scratch, poison_sting, wing_attack, withdraw, defense_curl |
+
+**Done and pushed:** `MoveSpec.pp` now exists and both `moveCanon` and
+`statusMoveCanon` source it from the dex — 35/35 moves carry it. It is
+deliberately **inert**: nothing reads it, nothing spends it. This is the
+one part of PP that needed no design decision, so it is not waiting on one.
+
+### 2. What a PP budget would actually do, measured over 3 seeds × 4,000 ticks
+
+`packages/runner/src/measurePP.ts` counts real per-agent usage (from the
+`moveUseCounts` that `useMove` already records) against each move's canon
+pool. 67 living agents, 50 of which used a move at all.
+
+| move | canon PP | total uses | agents | **max on one agent** | pools burned |
+|---|---|---|---|---|---|
+| vine_whip | 25 | 1,420 | 16 | **425** | **17.0x** |
+| tackle | 35 | 994 | 15 | **392** | **11.2x** |
+| water_gun | 25 | 80 | 5 | 60 | 2.4x |
+| take_down | 20 | 146 | 17 | 21 | 1.1x |
+| razor_leaf | 25 | 48 | 11 | 12 | 0.5x |
+| everything else (23 moves) | — | ≤44 | ≤9 | ≤10 | **≤0.5x** |
+
+**The distribution is the finding.** The median agent's heaviest move burns
+**0.31x** of its pool in 4,000 ticks — most of the roster would never once
+notice PP existed. Meanwhile two moves run 11x and 17x over.
+
+That reframes the mechanic. Modelled as mainline PP — a budget everyone
+tracks — it would be invisible to ~90% of the sim and would simply switch
+off the three heaviest units, which are the guardians and territory-holders
+doing the most narratively interesting work. **Its real function here is a
+rate limiter on outliers**, and the outliers are already a standing balance
+problem independent of PP: 1,420 Vine Whips against 48 Razor Leafs is one
+move eating a whole species' combat identity.
+
+### The decisions that actually need making
+
+None of these are mine to pick — they change game feel, and this document's
+own rule is to surface the finding and the options.
+
+1. **Regen shape.** (a) Slow always-on trickle plus a big multiplier while
+   asleep — reuses the shipped sleep machinery, and DESIGN.md's sleep
+   section already records the verbatim ask *"make it so it replenishes hp
+   and pp more"* with the admission that it substituted cooldowns because
+   "there's no PP resource to restore." (b) Sleep-only regen: harsher,
+   makes sleep genuinely mandatory, very legible in the chronicle.
+   (c) Needs-gated regen (recovers only while fed and watered).
+   **Recommend (a).**
+2. **Behaviour at zero.** (a) The move drops out of `pickBestMove` and the
+   agent uses something else — a predator that has run dry disengages,
+   which is a real chronicle beat. (b) A Struggle-style fallback with
+   recoil. (c) Usable at reduced power. **Recommend (a).**
+3. **Rate.** To cut the 17x outlier to roughly 2x sustained, a 25-PP pool
+   needs about 1 PP per 20 ticks. That number is a balance decision, and it
+   should be measured before/after across seeds like every other one.
+4. **The Nx-PP lever**, already asked for: *"a node that spends 2x (or Nx)
+   PP in one use for a proportionally bigger effect... I feel like we're
+   underutilizing PP too."* Genuinely good, and note it only becomes a real
+   tradeoff for the moves PP actually binds — which, per the table above,
+   is currently three of thirty-five. Widening that set is the same
+   decision as (3).
+
+Stopped short of building the mechanic deliberately (principle 10, and
+"never unilaterally retune balance numbers"): the data layer needed no
+decision and is done; the behaviour is gated on 1–3.

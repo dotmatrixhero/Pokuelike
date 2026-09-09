@@ -79,6 +79,19 @@ export interface MoveSpec {
   /** Mainline-scale base power (Tackle 40, Flamethrower 90, etc.). */
   power: number;
   /**
+   * Mainline max PP (Tackle 35, Hydro Pump 5) — the real dex value, sourced
+   * by `moveCanon`/`statusMoveCanon` from `dex/moves.generated.ts`, which has
+   * carried a `pp` for every move since the import and never surfaced it.
+   *
+   * **Inert.** Nothing spends it: `useMove` (combat.ts) sets cooldowns and
+   * increments `moveUseCounts`, and no code path reads this field. It is
+   * present so the number exists, is displayable, and is sourced from canon
+   * rather than invented later — see MOVES_DESIGN.md's PP section for the
+   * measurement of what a real PP budget would actually do to this sim, and
+   * the open decisions (regen shape, behaviour at zero) that gate building it.
+   */
+  pp?: number;
+  /**
    * 0-100. **Live** — `combat.ts`'s `rollAccuracy` consumes this on every
    * real hit, via `resolveHitAgainstTarget` (predation.ts) and
    * `resolveClashHit` (herdConflict.ts); a failed roll emits a `"missed"`
