@@ -149,7 +149,55 @@ the first three.
 | **Shell bowl** | 1 | Shell + pitch | 6 | Cheap vessel, no fire needed |
 | **Travois** | 3 | Haft + cordage ×2 | 10 | **Drag a fainted creature** — makes Rescue practical |
 
-## Consumables
+## Consumables — the practical toolkit
+
+The category that matters most for a weak human, because these solve *world*
+problems rather than winning fights. Each one is a **slice of a real move**
+(see `MOVES_AND_TOOLS.md`) — a Pokémon does it with its body, you throw it
+once and it's gone.
+
+Read together, they're a coherent thesis: **almost every problem in this game
+has a non-violent solution, and it's craftable.** Sleep it, net it, scare it,
+lure it, mislead it, or smoke it out — all cheaper than killing it, and none
+of them costs you the trust the whole of Act 1 is about earning.
+
+| Item | W | Recipe | T | Slices | What it solves | Cost |
+|---|---|---|---|---|---|---|
+| **Soporific spores** | 1 | Fungus + herbs | 6 | Sleep Powder | Puts a creature to sleep — pass it, pass *by* it, or approach it | Short; may not take |
+| **Net / bola** | 2 | Cordage ×2 + stone | 8 | String Shot | Entangles — stops a chase without a wound | Must be close; one use |
+| **Caltrops** | 1 | Knapped flint + fiber | 5 | Spikes | Lays a hazard on a tile behind you — breaks pursuit | Scattered, not recovered |
+| **Decoy** | 2 | Fiber + hide | 8 | Substitute | Draws attention to a tile that isn't you | One use |
+| **Noisemaker** | 1 | Bone + cordage | 6 | Growl / Roar | Scatters a group off a tile — moves a herd out of a field | Everything hears it |
+| **Scent lure** | 1 | Food + herbs | 4 | Sweet Scent | Draws creatures *to* a tile — traps, or pulls a predator off you | Draws what you didn't want too |
+| **Repellent salve** | 1 | Herbs + tallow | 6 | *(Repel)* | Lowers your detection radius for a window | Wears off; you reek |
+| **Trail chalk** | 1 | Clay + charcoal | 4 | — | Marks a tile. Finding your way back through a 5-layer cave | Not a move; purely navigational |
+| **Ash compost** | 1 | Charcoal + food | 6 | the fertility utility move | Raises a tile's `fertility` — repairs ground you exhausted | Slow; one tile |
+
+**Two of these are load-bearing beyond their own use.**
+
+**Ash compost** is the first item that *undoes* damage rather than causing
+it. Harvesting depletes `fertility` and peat scars permanently
+(`maybeDegradePeat`); compost is the only way to give any of it back. That
+makes it the mechanical counterpart to the sickle — pillar 1 as a craftable,
+on the repair side.
+
+**Trail chalk** isn't a move slice at all, and it's here because the cave is
+5–6 layers of procedurally generated dark and there is currently no way to
+mark anything. Every roguelike either gives you a map or gives you a reason
+not to need one; this is the cheap version of the first.
+
+### And the waterskin gains a second verb
+
+Not a new item — an existing one doing more. **A full waterskin can be
+emptied onto a fire tile to put it out.** Fire is the one world system that
+destroys things faster than they regrow, `fire.ts` already spreads it, and
+until now nothing the player could make could stop it — including a fire
+they started themselves with their own firestarter.
+
+That's the Water Gun slice, and it makes carrying water a real decision
+rather than a thirst convenience.
+
+## Consumables — basics
 
 | Item | W | Recipe | T | Effect |
 |---|---|---|---|---|
