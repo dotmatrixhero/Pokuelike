@@ -4366,3 +4366,71 @@ Slightly less combat churn, exactly the same lethality, and a third more
 survivors. Nothing broke. The population rise is a real consequence worth
 watching — slower moves mean fewer resolved fights per unit time — and is
 flagged rather than tuned away. 1,274 engine + 240 data tests pass.
+
+## Shipped-roster audit, and the v4 conversion question
+
+> "Can we rework the old trees to have the split filler paths too? I want more
+> cooldown reduction for the heavier things like solar beam."
+
+**Done: the cooldown half.** Solar Beam is the heaviest cooldown in the
+damaging roster (9) and was spending only −2 of the −6 the 3x cap allows.
+Now at −6: **tempo 1.67x → 2.50x**. No structural change, no test churn.
+Remaining headroom elsewhere, for the same treatment: leech_seed (11 ticks
+unspent), earthquake (4), rock_throw (3), hydro_pump (2), body_slam (2),
+peck/scratch/water_gun (2 each).
+
+**`check-proposed-trees.ts --shipped` now runs every rule over the real
+`MOVES` roster.** That was flagged as the obvious next step several rounds
+ago; it is done, and it reports **136 findings across all 17 shipped trees**:
+
+| finding | count |
+|---|---|
+| branch under 12 nodes | 47 |
+| under 4 identity nodes | 27 |
+| crosslink is a spur, not a bridge | 22 |
+| overwrite collision | 15 |
+| `anyOf` below 9 | 7 |
+| under 3 flavours | 5 |
+| rival shape nodes | 4 |
+| bridge filler shares no lever with its crosslink | 4 |
+| one lever answers a whole branch | 3 |
+| capstone reachable by snaking in | 1 |
+| pure-downside node | 1 |
+
+### Why the structural conversion stopped after one tree
+
+Solar Beam's branches were converted to the two-lane shape and it worked —
+39 nodes, 9 `anyOf`, both lanes reconverging. Then **five tests failed, and
+they were right to.** They encode v3 decisions deliberately, and one is a
+real design choice that v4 dissolves:
+
+> *"Sociability's fork makes the ally-effect overwrite an explicit,
+> deliberate choice (heal the grove vs. steel it), not an emergent quirk"*
+
+That fork exists **because** `allyEffect` is an overwrite field — v3 solved
+the collision by forcing the player to pick. Under v4, `vital_bloom` becomes
+a lane notable and `steadfast_bloom_ally` the deep notable downstream of it,
+so a build takes both and the later one wins. That is legitimate escalation
+under v4's own rules, and it is also **the deliberate choice being quietly
+removed**. Rewriting the test to match would have laundered a design decision
+into a green checkmark.
+
+So the structural rewire was reverted and the question goes back:
+
+1. **Convert anyway**, accepting that some v3 forks dissolve into lane
+   progressions. Fastest; loses a few explicit either/ors.
+2. **Convert but keep the forks**, placing each preserved fork *inside* a
+   lane rather than at the branch's end. Slower per tree, keeps every
+   deliberate choice.
+3. **Convert only the trees whose forks are ordinary power/accuracy picks**,
+   and leave the ones where the fork guards a real overwrite decision.
+
+**Recommendation: 2.** Nothing in v4 forbids a fork — the corridor rule
+accepts a fork *or* lanes — so the two are compatible, and the forks that
+exist were mostly put there on purpose.
+
+**Process note.** The first rewire attempt corrupted `moves.ts`: a regex
+using `.*?` to find a node's `delta` matched across node boundaries and wrote
+a cooldown into the wrong node, producing `delta: {, cooldownTicks: -1 }`.
+Reverted and rebuilt with brace-counting from an exact anchor. On a
+6,000-line file of live game data, `.*?` is not a search, it is a guess.
