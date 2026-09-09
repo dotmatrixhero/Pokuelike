@@ -1436,9 +1436,97 @@ shipped data, both called out in each tree's own code comment:
   the user originally asked for ("maybe needs to give damage reduction
   too") independent of the taunt idea.
 
-### Tackle (Normal, point/melee) — Utility archetype, full treatment
+### Tackle (Normal, point/melee) — v4 two-lane (Shipped)
 
-**Shipped as v2** — three branches plus a crosslink triangle:
+**Shipped as v4**, 45 nodes, 0 checker problems (was 33 nodes / 11
+problems). The v2 writeup it replaces is kept below for the record.
+
+**The fantasy, written before a single node moved.** Tackle is the first
+thing anything learns and the last thing it forgets. There is no element in
+it, no trick, no reach — it is a body at speed, head down, feet planted,
+putting its whole weight through whatever is in front of it. Everything that
+makes it dangerous is borrowed: the mass the animal grew, the ground it
+braces against, the herd running at its shoulder. And its flaw is that it has
+to **arrive** — no range, no projectile, you cross the distance yourself, and
+when you land you are standing exactly where you hit with your momentum
+spent. Every branch is an answer to that flaw.
+
+| branch | lane A | lane B | how they differ in KIND |
+|---|---|---|---|
+| **Aggression — the approach is the weapon** | *Broke Cover* — waiting in the scrub, and the scrub is spent on the hit (`situationalBonus: concealed` + `consumesOwnTerrain: bush`) | *Full Tilt* — a real `chargeAttack` wind-up that crosses six tiles of open ground | never seen at all vs. seen coming and unstoppable |
+| **Boldness — two bodies meet, one of them moves** | *Immovable* — hide, recovery, nothing budges it | *Shoulder Through* — `positionSwap` + `positionSwapPull`: it goes through and comes out standing where they were | absorb vs. displace |
+| **Sociability — the herd is the body** | *Rally Cry* — a real `rallyCall` mark; every nearby agent's own targeting converges | *Bulwark* — bulk spent for the herd: `gatherBurst` browsing the tree line, then standing in the way | change what others decide vs. change what the herd has |
+
+Flavours drawn on: Aggression 6 (stealth/ambush, aggressive movement, raw
+damage, piercing, environment, wider AoE) · Boldness 5 (defence,
+reposition-others, planted/duration, healing, raw damage) · Sociability 5
+(rallying, ally buffing, healing, defence, raw damage).
+
+Deep notables are where the two lanes have to meet, not a third idea bolted
+on: *Unstoppable Momentum* (both approach lanes converge on never having to
+approach again), *Sets Its Feet* (whoever is better set wins the collision —
+and the brace is real damage here, since `effectiveWeight` adds
+`BRACED_WEIGHT_PER_STAGE` per positive Defense stage and the opener scales
+power off weight), *The Herd Arrives* (`allyEffectOnAttack` — the support
+effect stops needing its own turn).
+
+**Rejected, each against a real call site rather than a field name
+(principle 3):**
+
+- `ppCost`/`maxPPBonus` — PP is still an unbuilt primitive; there is no such
+  field on `MoveTreeNode.delta`. The power-vs-PP fork the design doc likes
+  would have been dead content.
+- `excludesAllies` — read only inside `resolveAreaHit`, so on a point-shaped
+  move it does nothing unless the build also took Aggression's ring capstone.
+  A Sociability branch that needs another branch's capstone to function is a
+  bug, not a synergy.
+- `statusChance`/`statusSeverity`/`statusSpreads` — `maybeInflictStatus`
+  returns early without a `statusKind`, and `statusKind` is not a delta
+  field. Tackle has none, so all three are inert on this tree.
+- a new `unshaken` passive on the Boldness deep notable. It fit the fantasy
+  perfectly and is non-stacking by construction — but Tackle is the
+  most-shared move in the roster, so a passive here spreads further than a
+  passive anywhere else. Replaced with a `delta` per PART 4's rule. **This
+  pass adds zero new passive grants and `passive-exposure.ts` is
+  byte-identical before and after.**
+
+**Two nodes reworked, with reasons rather than taste:**
+
+- *Counter Slam* was `situationalBonus: flanking`, which collided with
+  *Vanguard Charge*'s own flanking bonus on the same OVERWRITE field (two
+  co-takeable nodes; whichever the engine reached last quietly won) and
+  duplicated that crosslink's identity outright. It now does what its name
+  always said — the more it has already taken, the harder it comes back
+  (`selfStateBonus`, three users in the whole roster). This is the 11th
+  checker problem that had nowhere else to go.
+- *Rally Cry* was called Rally Cry and did not rally: it only buffed one
+  herd-mate's Attack. It now sets a real `rallyCall` mark as well.
+- *Guardian's Stand* gained `jamCooldownTicks: 1`. It had an empty `delta`
+  and only a passive, which left its bridge nothing to deepen (principle 13
+  requires the bridge's filler to escalate the crosslink's own lever, and
+  PART 4's rule is not to grant a second passive just to have one).
+
+**Balance, against the roster median as control** (`tree-balance.ts`):
+
+| | before | after | roster median |
+|---|---|---|---|
+| nodes | 33 | 45 | 39 |
+| distinct levers | 23 | **31** | 22 |
+| colour-pie flavours | 9 | **12** | 9 |
+| tempo | 2.00x (cap 2.00) | 2.00x (cap 2.00) | 2.00x |
+| power multiplier | 3.38x | **3.38x** | 1.96x |
+| cheapest capstone | 11 pts | 10 pts | 11 pts |
+
+Power was held at exactly its pre-existing 3.38x rather than "fixed":
+Tackle's base power of 40 is the lowest in the roster, so every absolute
+`+power` grant reads as a large multiplier, and retuning it is a balance
+decision, not a conversion one. Five new nodes were drafted with a `+5`/`+10`
+power rider and had it swapped for a real lever (`critRateStage`,
+`weightScaling`, a stronger `allyEffect`, `defensePenetration`) specifically
+to keep the total unmoved. **Flagged for a decision: 3.38x is the highest in
+the roster and 72% above the median — worth a look, but not unilaterally.**
+
+**v2, for the record** — three branches plus a crosslink triangle:
 
 - **Aggression — "Full Charge"**: opener *Weighted Charge* (bonus power
   scales with the user's own `maxHp` — `weightScaling`, a Venusaur and a
@@ -1591,7 +1679,10 @@ here, not done.
 
 - **Peck** (Flying, point) — Spearow's only move, a solitary crepuscular
   ambush hunter (mismatched with its diurnal Pidgey prey — see
-  `species.ts`'s own comment on that).
+  `species.ts`'s own comment on that). **Superseded** — converted to template
+  v4 (33 -> 45 nodes); see "Peck converted to v4 (Shipped)" at the end of this
+  document for the current tree. Several node mechanics below (Talon Strike,
+  Ambush Dive, Harrier's Charge) no longer match `moves.ts`.
   - **Aggression — "Sharp Strike"**: opener *Needle Point* (+power) →
     filler → filler → notable *Frenzied Pecking* (`hits` 2) → filler →
     **fork**: *Piercing Beak* (`defensePenetration`) vs. *Rapid Volley*
@@ -4628,3 +4719,355 @@ that headroom is a balance decision, not a conversion one. The capstone
 depth drop to 9 is structural to v4 (Solar Beam sits at 9 for the same
 reason: lane B reaches the deep notable in four steps) and is not a
 regression specific to this tree.
+
+### Water Gun converted to v4 — "the one that irrigates"
+
+33 → 45 nodes, 12 per branch, 9 `anyOf`, 6 fork nodes, 3 real bridges. Both
+v3 forks survive, relocated to the tail of a lane. Checker findings for this
+tree: **10 → 0**, including the two overwrite collisions that Solar Beam and
+Hydro Pump are still carrying — Water Gun ends up with exactly one `shape`
+setter, one `range` setter and one `rallyCall` setter in the whole tree.
+
+**Hydro Pump had just been converted, which made the real risk obvious:**
+shipping a weaker fire hose. So the fantasy was written first, and written
+against its sibling rather than in isolation.
+
+> A hairline jet fired through a pinched mouth — pressure, not volume. Forty
+> power, a twenty-five-shot pool, two tiles of reach. It does not knock
+> anything over; it stings, it blinds, and it **wets**. The danger is not the
+> hit, it is the repetition: every landed shot leaves standing water where it
+> struck and puts a real fertility boost into that ground (`terrainFill` →
+> `waterSoil`, predation.ts), so a creature that keeps firing is quietly
+> rebuilding the ground the fight is happening on. Hydro Pump is one release
+> you can barely aim; Water Gun is the same animal doing one small exact
+> thing forty times, and the map remembers every one of them.
+
+Each branch answers that, and each branch's two lanes differ in **kind**:
+
+| branch | lane A | lane B | the new idea |
+|---|---|---|---|
+| **The Fine Point** (agg) | the CUT — penetration, then *Piercing Jet* pinching the two-tile line into a three-tile one | the RATE — cooldown, then *Stuttering Jet*'s 1–2 hits, ending at the preserved heavy-vs-double fork | *Stuttering Jet* |
+| **Standing Water** (bold) | SPACE — the knockback/recoil chain, nothing gets to arm's length | PLANTED — *Drink the Puddle*, then the preserved unsteady-them-vs-steel-yourself fork | *Drink the Puddle*, *Sheeting Spray* |
+| **The Waterhole** (soc) | CARE — heal the pod, steel it, share more of it | COMMAND — *Rally the Shoal* marks the threat, then cover the pod or press the mark | *Rally the Shoal*, *Fuller Share* |
+
+**The best node in the tree is *Drink the Puddle*, and it is the one Hydro
+Pump could not have.** Hydro Pump drafted `consumesOwnTerrain: { terrain:
+"water" }` and cut it, for a good reason recorded above: `predation.ts`
+reverts the consumed tile to `"floor"` permanently, and a Water species
+fights standing on water constantly, so it is a plausible ecology regression
+on a resource the sim actually meters. Water Gun is the one move in the
+roster that answers that objection, because its **base** `terrainFill` puts a
+fresh water tile under every landed, non-killing hit. The tree that spends
+puddles is the same tree that makes them — net-neutral on the map, and the
+only node anywhere where a move's own side effect is its own ammunition.
+
+***Sheeting Spray*** is the Boldness capstone, and it is the roster's only
+node that turns a single-target line into an area sweep. It also came with a
+correction worth recording, because the first version of its source comment
+was **wrong**: it claimed a build with Piercing Jet would leave a puddle
+under each of three tiles. Driven for real against `tickWorld`, it does not —
+`terrainFill` sits behind `isPrimaryTarget` in `resolveHitAgainstTarget`, so
+an area sweep still leaves exactly **one** water tile per cast. Measured:
+1 puddle for the base move and 1 for Sheeting Spray, while the secondary
+target went from **0 damage to 33**. The comment now says what the engine
+does, not what the design wanted.
+
+**Four levers checked at the call site and rejected, all of them as
+unreachable content rather than as taste:**
+
+- `spawnsRain`, `drainNeeds`, `fertilityBoost`, `statusImmunityAura`. Every
+  one of these is only ever read inside `maybeUseUtilityMove`
+  (utilityMoves.ts), whose candidate list is `agent.moves.filter(m =>
+  m.utilityMove)`. Water Gun is a damage move and `utilityMove` is not a
+  `delta` field, so all four would have been dead the moment they shipped —
+  and `spawnsRain` in particular reads as a *perfect* capstone for a tree
+  with two weather situational-bonus nodes, which is exactly why it needed
+  the grep instead of the vibe.
+- `gatherBurst`. Live for a damage move, but Hydro Pump — the same type
+  family, converted one tree ago — already owns it, and the only canopy crop
+  is Apple (`eligibleBiomes: ["forest"]`, autumn only). A sibling re-skin on
+  a narrow path.
+- `excludesAllies`. Only consulted inside `resolveAreaHit`, so it does
+  nothing on a move without `hitsArea`. Putting it in Sociability while
+  `hitsArea` lives in Boldness would have made it cross-branch dead content
+  for every build that did not take both.
+- A fourth `critRateStage` node. `rollCritical` (combat.ts) clamps the stage
+  to 3, and the Sociability↔Aggression bridge already grants exactly 3. A
+  fourth would provably do nothing. The whole tree's crit budget therefore
+  lives on that one bridge, which also gives the bridge a character.
+
+**Passive discipline: zero new passives, and one passive-shaped node
+answered with a `delta` instead.** *Fuller Share* deepens the opener's own
+`allyEffect` rather than granting a fourth healing kind, and the old
+`+5 Accuracy` filler in the Boldness capstone approach became *Braced Spray*
+(`weightScaling`), which is systemic rather than granted: `predation.ts`'s
+weight term already reads positive Defense stages, so a build that came
+through *Bubble Shield* gets more out of it than one that came through
+*Undertow*, with nothing pairing the two nodes explicitly.
+`passive-exposure.ts` output is **byte-identical** before and after.
+
+**Six `+5 Accuracy` fillers on a 100-accuracy move.** That was a third of
+this tree's filler, and `rollAccuracy` (combat.ts) only ever spends the
+surplus through `stormAccuracyMultiplier`. Four were repurposed into real
+levers; **two were kept on purpose**, in the branch whose own opener wants a
+storm and in the lane that stands in the open holding a spot — those two are
+buying back exactly what the weather takes off them.
+
+### Peck converted to v4 (Shipped) — "the point, not the wing"
+
+33 → 45 nodes, 12 per branch, 9 `anyOf`, 6 fork nodes, 3 real bridges. Every
+v3 fork survives, relocated to a lane tail. Checker findings for this tree:
+**11 → 0**, including both overwrite collisions (see below — those were
+fixable here without engine work, unlike Solar Beam's and Hydro Pump's).
+
+**The fantasy, written before any node**, because the brief for this move was
+specifically "peck must not just be a smaller Wing Attack":
+
+> Peck is one hard point — a beak, a horn, a leek — driven into a single spot
+> with the whole body behind it. Wing Attack is surface area; Peck is
+> pressure. There is no wind-up and nothing to see coming: it happens inside
+> your guard, at arm's length, and it happens again a half-second later in
+> exactly the same place. What kills is not the size of the hole, it is the
+> repetition — the same puncture reopened until something under it gives.
+> What is dangerous *to the pecker* is where it has to stand to do it: range
+> 1, inside the reach of everything, nowhere to be but there.
+
+**The learners settle the "is it a bird move" question, and they say no.**
+Peck is on spearow/fearow (crepuscular canopy predators), doduo/dodrio
+(flightless savanna runners), goldeen/seaking (horned fish), farfetchd (a
+leek), and nidoranm/nidorino (a horn). Only three of the nine can fly.
+`wing_attack` — gusts, scatter, mobbing, `forcedMovement: away` — is the wing.
+Peck is the point. That is the whole separation, and it is what the Boldness
+deep notable inverts on purpose (below).
+
+**Lanes differ in kind, per branch:**
+
+| branch | lane A | lane B | deep notable |
+|---|---|---|---|
+| **The Same Hole** (agg) | *Through the Guard* — severity: armour, then the type chart (`defensePenetration`, `bonusVsType`, new *Stone-Seeker*'s `resistanceBreaker` answering Peck's own printed Rock/Steel resist) | *Again, Same Spot* — rate: `hits` 2, then the preserved deeper-jab-vs-third-jab fork | *Talon Strike*, rebuilt: the talons plant, the body's mass goes in behind the point (`weightScaling`) and the beak takes a piece back out (`lifestealFraction`) |
+| **Where You Have To Stand** (bold) | *Longer Reach* — rewrite the geometry so point-blank stops being point-blank (`shape` line-2 + `range`) | *Nowhere To Go* — accept point-blank and make standing there survivable (new *Braced Stance*'s `lockTicks` commitment, crit-fishing, the preserved fork) | new *Nowhere to Run* |
+| **Ten Beaks, One Hole** (soc) | *Everyone On That One* — the mark: new *Mark the Soft Spot*'s `rallyCall` turns every flock-mate's separately-run threat pick onto the same target | *Keep the Flock Standing* — provisioning and cover, incl. the preserved screen-vs-charge fork | *Preening Recovery*, which stops being a bare passive with an empty delta |
+
+**The best node in the pass is *Nowhere to Run*.** `wing_attack`'s entire
+positional identity is scattering things AWAY on a landed hit. A point weapon
+wants the exact opposite: the beak hooks and the target comes one tile IN,
+back onto the spot the next jab is already aimed at. It is one field
+(`forcedMovement`, mover `defender`, direction `closer`) and it is the
+clearest statement in the roster of what separates these two Flying moves.
+
+***Set the Point*** is the Aggression capstone and answers the move's own
+flaw, per the pattern about a weakness being a branch waiting to happen: Peck
+is range 1, so everything in that branch has to be bought standing on top of
+the target. `chargeAttack` is the only primitive that addresses that directly
+— one tick fixed on a spot (invulnerable, unable to act), then three tiles
+crossed in the leap and the stored commitment driven home, fizzling for
+nothing if the target has moved. Second user of `chargeAttack` in the roster,
+after Body Slam's *Mountainous Impact*.
+
+**Both overwrite collisions were real dead content, not just checker noise.**
+v3 had THREE co-takeable `situationalBonus` setters (`talon_strike`
+targetLowHp, `swooping_approach` elevation, `ambush_dive` flanking).
+`applyMoveTree` overwrites that field, so a build taking two of them was
+paying a skill point for a node that provably did nothing. The tree now
+carries exactly one (`swooping_approach`'s elevation — the fantasy-obvious
+condition for something that drops on things), and the two freed nodes became
+the levers the branches were actually missing.
+
+**A unit check that changed the design, caught by running it.** I assumed
+`jamCooldownTicks` was an overwrite field, since it is not in
+`applyMoveTree`'s documented additive list, and built the Ambush Strike bridge
+as an escalating 1 → 2 → 3 chain on that basis — plus rewrote *Harrier's
+Charge* off the lever to avoid a collision that would not have existed. Then I
+ran a fully-specced respec and read `jamCooldownTicks: 6` off the result. It
+is additive (`moves.ts:773`). The bridge is now +1/+1/+2 for four ticks total,
+*Harrier's Charge* is reverted to its shipped mechanic, and the file carries a
+comment saying the field was verified by running it rather than by reading the
+list. This is the same class of mistake as the cooldown-denominator one.
+
+**Levers deliberately NOT used, with the call site read first:**
+
+- **`drainNeeds`** — a beak that takes a bite off a rival is almost too apt.
+  It requires `utilityMove`, and `pickBestMove` (combat.ts) *excludes* any
+  `utilityMove` from hostile selection. Putting it on a Peck node would have
+  removed Peck from combat entirely. Not a balance judgement — it would have
+  deleted the move.
+- **`positionSwap` as a Sociability node** ("take your flock-mate's place").
+  `positionSwap` swaps attacker and defender; there is no ally-side form. It
+  would have read as cover and done something else.
+- **A second healing passive.** The branch is about focus, not medicine, and
+  the roster's healing budget is already the thing `softCapHealShare` exists
+  to bend.
+
+**Passive discipline: zero net change.** `passive-exposure.ts` output is
+byte-identical before and after. The tree grants exactly the passive budget it
+already granted (`regen 0.03`, `damageReductionFlat` 1.0 per fork side) — the
+Bridge-2 filler *Spread Wing* needed to share its crosslink's lever (principle
+13), and rather than adding a second point of flat mitigation, *Cover Call*'s
+own 1.0 was split 0.5/0.5 across the two nodes. Everywhere else the branch
+wanted armour, the node got a delta instead.
+
+**Balance, with the roster as control:**
+
+| | before | after | roster median |
+|---|---|---|---|
+| nodes | 33 | **45** | 39 |
+| distinct levers | 18 | **24** | 23 |
+| colour-pie flavours | 8 | **11** | 9 |
+| tempo | 1.00x (cap 2.00) | **2.00x** | 1.80–2.00x |
+| power | 1.88x | 2.58x | 2.20x |
+| cheapest capstone | 11 pts | 9 pts | 11 pts |
+| checker problems | 10 | **0** | — |
+
+**One balance number was moved and it should be looked at.** The tree spent
+**zero** of the −2 cooldown the 3x cap allows on a base-3 move; it now spends
+both (`-1 Cooldown` in the rate lane, and `Stuttering Jet`). Tempo goes
+1.00x → 2.00x. That is a real buff, chosen because repeatability is literally
+the fantasy — but it is a balance call, not a conversion one, and −1 (1.33x)
+or −0 are both available if 2.00x is too much for a move this cheap to fire.
+
+**Verified by running it, not by reading it.** Driving `maybeAutoRespec` on a
+real Squirtle with points to spend, once per disposition: **42 of 45 nodes
+bought in each case** (the missing three are the excluded fork sides), **all
+three capstones reached, from every disposition**. And driving `tickWorld`
+itself, with controls:
+
+| | measured | control |
+|---|---|---|
+| *Drink the Puddle*, standing on water | 15 damage, attacker's tile `water` → `floor` | 10 damage off water — exactly the 1.5x |
+| base move, standing on water | 9 damage, tile stays `water` | the consume is tree-earned, not baked in |
+| *Sheeting Spray*, two bodies in the line | 34 and **33** damage | base move: 7 and **0** |
+| puddles left per cast | **1** | base move: also 1 — `isPrimaryTarget` |
+
+| distinct levers | 19 | **31** (2nd in the roster) | 23 |
+| colour-pie flavours | 9 | **12** | 9 |
+| tempo | 1.00x (cap 2.00x) | **2.00x** | 2.00x |
+| power | 2.43x | 2.57x | 1.96x |
+| cheapest capstone | 11 pts | 10 pts | 11 pts |
+| checker problems | **11** | **0** | — |
+
+**The one balance number moved, flagged for a decision rather than settled.**
+Peck was the only damaging tree in the roster spending *nothing* on cooldown —
+tempo 1.00x against a 2.00x cap, the lowest reading on the board. Two fillers
+(*+5 Accuracy, -1 Cooldown* in Boldness, *+5 Power, -1 Cooldown* in
+Sociability) now spend the full −2 the cap allows, landing tempo on exactly
+the roster median. That is a control-anchored number, not a taste call, but it
+IS a tuning decision and reverting either node to a plain stat filler is a
+one-line change.
+
+**Verified by running it, not by reading it.** Driving the engine's own
+`maybeAutoRespec` on a real Spearow with points to spend, once per
+disposition: **42 of 45 nodes bought in each case** (the missing three are the
+excluded fork sides), **all three capstones reached from every disposition**,
+and every new lever present on the resulting spec (`chargeAttack`,
+`rallyCall`, `forcedMovement`, `gatherBurst`, `terrainBurn`,
+`resistanceBreaker`, `weightScaling`, `allyEffectOnAttack`).
+
+**And a live-run limit stated plainly, with its control.** In a real
+`createDemoWorld` run — 5 seeds × 8,000 ticks — the tree never fires, because
+the scenario's single Spearow never enters a fight at all: **0 ticks with a
+fight or hunt target, 0 moves used of any kind**. Running the identical world
+with no tree applied gives the same zeros, so this is pre-existing scenario
+population state, not something this pass caused. It is the same finding Rock
+Slide's conversion recorded for its lone Onix, and it is a population problem,
+not a tree problem.
+
+### Scratch converted to v4 (Shipped) — "the wound outlives the swipe"
+
+Fourth structural conversion, and the first one that had to be designed
+*against* another tree rather than in isolation: Scratch and Tackle are both
+Normal-typed melee openers on overlapping species, so the brief was that
+Scratch has to stand on its own claws.
+
+**The fantasy, written before a node was touched:**
+
+> Scratch is four claws and no technique. There is no wind-up and nothing to
+> see coming — the paw is already moving. What separates a rake from a blow
+> is that a blow is finished the moment it lands and a rake is not: it opens
+> the skin and leaves the wound to do the rest of the work, hours later,
+> somewhere else. Claws are filthy by design, and whatever was under them
+> yesterday goes in today. And claws were tools long before they were
+> weapons — the same four hooks that open a belly hook into bark, into a
+> fleeing leg, into the dirt of a den, and score a line across a tree that
+> every animal in the valley can read without a single fight happening.
+
+The Tackle separation is stated in the source as a rule, not a vibe: Tackle
+is **mass arriving and it is over when it stops**; Scratch is **an edge
+opening something, and it leaves things behind** — a septic wound, a
+shredded bush, a churned furrow, a claw mark on a tree. `weightScaling` and
+`chargeAttack` are therefore deliberately absent from this tree. A claw has
+no wind-up and does not care what it weighs.
+
+**Lanes differ in kind, not degree:**
+
+| branch | lane A | lane B | different how |
+|---|---|---|---|
+| Aggression — *Nothing Stays Closed* | **Filth** (statusChance → statusSpreads → jam) | **The Seam** (defensePenetration + resistanceBreaker) | attrition vs. precision |
+| Boldness — *The Hook* | **Dug In** (damageReduction, `lockTicks` commitment, thorns) | **Where the Fight Happens** (the lunge, and the fork to disengage or dig in) | holding a tile vs. choosing one |
+| Sociability — *The Mark* | **The Call** (`rallyCall` — a raked flank is a name shouted) | **The Boundary** (`nonTerritorial` — a scored tree is a fight that never starts) | directing attention vs. removing the reason to fight |
+
+**The three payoffs worth naming.** *Churned Ground* fills the defender's
+tile with real `"mud"` (0.5x `terrainSpeedMultiplier`) and *Purchase*, the
+Boldness capstone, then **consumes mud its own tree created** for a 2x hit —
+the only node in the roster that eats terrain it made itself, and the cost
+is legible because standing in mud halves your own speed. *No Cover Left*
+uses `terrainBurn` to shred the bush a target ducked into, permanently
+stripping the concealment the branch next door is built on. *Never Your Own*
+is the tree's single `shape` setter: a point move that learns a three-tile
+arc (verified against `resolveShape`: 3 tiles, control = 1) and still never
+cuts a herd-mate — the roster's other three `excludesAllies` users were all
+AoE moves already.
+
+**Rejected, with reasons — unreachable content is a bug.** `drainNeeds`
+would have been a perfect "a raked animal cannot feed" capstone and is
+**dead on this move**: `utilityMoves.ts`'s `maybeUseUtilityMove` is the only
+reader and it needs `utilityMove`, which an attack move cannot carry. A
+fourth `situationalBonus` condition (*Sandstorm Claws*' `night`) was dropped
+because four co-takeable setters of one OVERWRITE field is exactly the
+"if you got both, would it just do nothing?" bug, and `night` was
+Sandshrew-specific on a move eleven species share. `situationalBonus:
+{ condition: "rallyMarked" }` was the first choice for the Sociability
+capstone and was cut for the same overwrite reason — it would have been
+co-takeable with *Frenzied Burrow*'s `flanking` with no ancestor relation
+between them.
+
+**Passives went DOWN, measured.** `passive-exposure.ts`, before → after:
+
+| | before | after |
+|---|---|---|
+| roster worst-case healing (sandshrew, sandslash) | 16.6%/tick | **13.6%/tick** |
+| charmeleon healing | 12.5%/tick | **9.5%/tick** |
+| charmeleon `damageReductionFlat` | 2.00 | **1.00** |
+| thorns / damageReduction | unchanged | unchanged |
+
+Two changes did that. *Communal Foraging* traded a flat `regen` passive for
+`gatherBurst` — the node's own name finally meaning what it says, a visible
+burst of food on the map instead of a hidden meter, and it resolved the
+`2/3 identity nodes are "p:regen"` principle-17 failure at the same time.
+And *Guarded Den* stopped being a second `damageReductionFlat` duplicating
+*Colony Guard*'s and became a `positionSwap` — a claw hooked into an
+intruder to swing it out of the den mouth, which is what the node was
+always describing.
+
+**Numbers, roster as control:**
+
+| | before | after | roster median |
+|---|---|---|---|
+| checker problems | **12** | **0** | — |
+| nodes | 33 | 45 | 39 |
+| distinct levers | 19 | **34** | 23 |
+| colour-pie flavours | 7 | **13** | 9 |
+| tempo | 1.00x (cap 2.00) | **2.00x** | 2.00x |
+| power | 2.25x | 2.42x | 1.96x |
+| cheapest capstone | 11 pts | 10 pts | 11 pts |
+
+**Reach, live, with a control — and an honest limit.** 6 seeds x 8,000
+ticks: 14 agents knew Scratch, 10 invested, and **17 of 45 nodes were
+actually bought** (before: 21 of 33). No lane notable, deep notable or
+capstone was reached in that run. That is a v4-wide property rather than a
+Scratch defect — in the same run `rock_slide` reached 9/45, `body_slam`
+9/45, `earthquake` and `hydro_pump` 0/45, so Scratch is the best-reached
+45-node tree on the board — but it is worth writing down plainly: the
+deeper trees are still outrunning what an 8,000-tick population levels into.
+Every capstone and every bridge shortcut *is* legal and reachable, proved by
+walking all six routes through the real `applyMoveTree` (which throws on an
+illegal walk) and by proving that harness rejects an illegal walk first.

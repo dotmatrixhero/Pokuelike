@@ -54,22 +54,65 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("TACKLE"),
     cooldownTicks: 3,
     range: { min: 0, max: 1 },
-    // v2 — Vine Whip's full treatment (MOVES_DESIGN.md's "Tackle" writeup):
-    // three branches (Aggression/Boldness/Sociability — Tackle is the most-
-    // shared move in the spawned roster, so a Sociability branch earns its
-    // keep) plus a crosslink triangle between every pair. Every lever this
-    // tree uses (weightScaling, forced movement, agent-modifying passives —
-    // damageReduction/regen/immovable/thorns/healAura, statChangeOnHit,
-    // situationalBonus, targetsAlly/allyEffect, lifestealFraction,
-    // recoilFraction, critRateStage, jamCooldownTicks, hitsArea) is real,
-    // shipped engine plumbing — see MOVES_DESIGN.md's primitives checklist.
-    // Two things from the paper draft are deliberately NOT here: Max PP
-    // (`maxPPBonus`/`ppCost`) is a whole new resource axis, its own
-    // follow-up project — every "+1 Max PP" filler became a real, already-
-    // used filler type instead; and `aggroRedirect` (a taunt-style passive)
-    // was never actually built, so Bulwark grants extra `damageReduction`
-    // instead of a targeting effect that doesn't exist.
+    // v4 (two-lane standard) — the fantasy first, per MOVES_DESIGN.md's
+    // "Skill-tree template v4" and its own guide's principle 1.
+    //
+    // THE FANTASY. Tackle is the first thing anything learns and the last
+    // thing it forgets. There is no element in it, no trick, no reach — it
+    // is a body at speed, head down, feet planted, putting its whole weight
+    // through whatever is in front of it. Everything that makes it
+    // dangerous is borrowed: the mass the animal grew, the ground it braces
+    // against, the herd running at its shoulder. And its flaw is that it
+    // has to ARRIVE. No range, no projectile: you cross the distance
+    // yourself, and when you land you are standing exactly where you hit
+    // with your momentum spent. Every branch below is an answer to that
+    // flaw.
+    //
+    // AGGRESSION — the approach is the weapon. Two lanes that differ in
+    // KIND, not degree: "never saw it coming" (waiting in the scrub, the
+    // bush itself spent on the hit — `situationalBonus: concealed` +
+    // `consumesOwnTerrain`) against "saw it coming, could not stop it" (a
+    // real `chargeAttack` wind-up that crosses six tiles of open ground).
+    // Flavours: stealth/ambush, aggressive movement, raw damage, piercing.
+    //
+    // BOLDNESS — two bodies meet and one of them moves. Lane A is "nothing
+    // moves you" (hide, recovery, `immovable`); lane B is "you move them"
+    // (`positionSwap`/`positionSwapPull` — it does not go around, it goes
+    // through and comes out standing where they were). Absorb versus
+    // displace: the same collision from either end. Flavours: defence,
+    // reposition-others, planted/duration, healing.
+    //
+    // SOCIABILITY — one Tackle is nothing; forty arriving at once is a
+    // stampede. Lane A is the CALL (`rallyCall` — the herd's own targeting
+    // logic converges on what got named, per "rally/mark mechanics are
+    // richer than a same-sized buff"); lane B is what a body is FOR — bulk
+    // spent on the herd's behalf, shouldering trees until the canopy gives
+    // up its food (`gatherBurst`, the real canopy-harvest path in needs.ts)
+    // and standing in the way of what is coming. Flavours: rallying, ally
+    // buffing, healing, defence.
+    //
+    // Deliberately NOT here, each rejected against a real call site rather
+    // than a field name (principle 3):
+    //   - `ppCost`/`maxPPBonus` — PP is still an unbuilt primitive; there is
+    //     no `ppCost` field on `MoveTreeNode.delta` at all, so the
+    //     power-vs-PP fork the design doc likes would be dead content.
+    //   - `excludesAllies` — read only inside `resolveAreaHit`
+    //     (predation.ts), so on a point-shaped move it does nothing unless
+    //     the build also took the Aggression capstone's ring. A Sociability
+    //     branch that needs another branch's capstone to function is a bug.
+    //   - `statusChance`/`statusSeverity`/`statusSpreads` —
+    //     `maybeInflictStatus` returns early without a `statusKind`, and
+    //     `statusKind` is not a delta field. Tackle has none, so all three
+    //     are inert here.
+    //   - a fourth healing passive, and any new `thorns`/`damageReduction`.
+    //     Passives sum across every move an agent knows and nothing caps
+    //     them; this pass adds ZERO new passive grants and moves no
+    //     species' exposure totals.
+    //   - `aggroRedirect` still does not exist (see the colour pie's "the
+    //     one flavour with no mechanics at all"), which is why *Bulwark*
+    //     still settles for `damageReduction`.
     tree: {
+      // --- Aggression: "Full Charge" -------------------------------------
       weighted_charge: {
         id: "weighted_charge",
         name: "Weighted Charge",
@@ -80,6 +123,55 @@ export const MOVES: Record<string, MoveSpec> = {
         // same (see MoveSpec.weightScaling's own doc comment).
         delta: { weightScaling: { factor: 0.15 }, accuracy: -5 },
       },
+
+      // Lane A — "never saw it coming": it was in the scrub the whole time.
+      hardened_knuckles: {
+        id: "hardened_knuckles",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["weighted_charge"],
+        leaning: "aggression",
+        delta: { accuracy: 10 },
+      },
+      aftershock: {
+        id: "aftershock",
+        name: "Aftershock",
+        cost: 1,
+        prerequisites: ["hardened_knuckles"],
+        leaning: "aggression",
+        delta: { defensePenetration: 0.12 },
+      },
+      broke_cover: {
+        id: "broke_cover",
+        name: "Broke Cover",
+        cost: 2,
+        prerequisitesAnyOf: [["aftershock"], ["vanguard_press"]],
+        leaning: "aggression",
+        // LANE NOTABLE. The whole lane's thesis in one node, and it is
+        // visible on the map rather than hidden in a meter: it hits far
+        // harder out of concealment (`isConcealed` reads the ATTACKER's own
+        // tile — predation.ts's `situationalMultiplier`), and the bush it
+        // came out of is SPENT doing it (`consumesOwnTerrain` reverts the
+        // attacker's own tile to floor). So the ambush bonus and the cover
+        // that granted it are the same resource: you get it once, then
+        // you're standing in the open like everything else.
+        delta: {
+          situationalBonus: { condition: "concealed", multiplier: 1.5 },
+          consumesOwnTerrain: { terrain: "bush", damageMultiplier: 1.3 },
+        },
+      },
+      bracing_impact: {
+        id: "bracing_impact",
+        name: "Bracing Impact",
+        cost: 1,
+        prerequisites: ["broke_cover"],
+        leaning: "aggression",
+        // A landed, non-killing hit shoves the target back two whole tiles —
+        // denying easy follow-up range harder than v1's one-tile shove.
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 2, timing: "onHit" } },
+      },
+
+      // Lane B — "saw it coming, could not stop it": the run-up itself.
       momentum_grip: {
         id: "momentum_grip",
         name: "+5 Power",
@@ -88,37 +180,27 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { power: 5 },
       },
-      hardened_knuckles: {
-        id: "hardened_knuckles",
-        name: "+10 Accuracy",
-        cost: 1,
-        prerequisitesAnyOf: [["momentum_grip"], ["grounded_fury"], ["vanguard_charge"]],
+      full_tilt: {
+        id: "full_tilt",
+        name: "Full Tilt",
+        cost: 2,
+        prerequisitesAnyOf: [["momentum_grip"], ["blood_up"]],
         leaning: "aggression",
-        delta: { accuracy: 10 },
-      },
-      bracing_impact: {
-        id: "bracing_impact",
-        name: "Bracing Impact",
-        cost: 1,
-        prerequisites: ["hardened_knuckles"],
-        leaning: "aggression",
-        // A landed, non-killing hit shoves the target back two whole tiles —
-        // denying easy follow-up range harder than v1's one-tile shove.
-        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 2, timing: "onHit" } },
-      },
-      aftershock: {
-        id: "aftershock",
-        name: "Aftershock",
-        cost: 1,
-        prerequisites: ["bracing_impact"],
-        leaning: "aggression",
-        delta: { defensePenetration: 0.12 },
+        // LANE NOTABLE, and the answer to the move's own flaw: Tackle has
+        // to arrive. It backs off, sets, and crosses six tiles of open
+        // ground in one committed run (`chargeAttack` — attacker is locked
+        // for the wind-up, then leaps and lands the blow; predation.ts's
+        // `resolveChargedAttack`). Deliberately NOT Body Slam's Reckoning
+        // profile, which is a long invulnerable rear-up for enormous
+        // damage: this one is a short wind-up and a very long approach,
+        // because closing the gap is what Tackle is short of, not power.
+        delta: { chargeAttack: { ticks: 1, bonusPower: 15, leapTiles: 6 } },
       },
       full_force_slam: {
         id: "full_force_slam",
         name: "Full-Force Slam",
         cost: 1,
-        prerequisites: ["aftershock"],
+        prerequisites: ["full_tilt"],
         excludes: ["relentless_charge"],
         leaning: "aggression",
         // Commits fully — a heavier, slower slam that costs the user
@@ -129,7 +211,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "relentless_charge",
         name: "Relentless Charge",
         cost: 1,
-        prerequisites: ["aftershock"],
+        prerequisites: ["full_tilt"],
         excludes: ["full_force_slam"],
         leaning: "aggression",
         // Two quicker, lighter blows instead of one big one — more chances
@@ -140,10 +222,13 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "unstoppable_momentum",
         name: "Unstoppable Momentum",
         cost: 2,
-        prerequisitesAnyOf: [["full_force_slam"], ["relentless_charge"]],
+        prerequisitesAnyOf: [["bracing_impact"], ["full_force_slam"], ["relentless_charge"]],
         leaning: "aggression",
-        // After a landed hit, immediately closes in on whatever's next — a
-        // heavy hitter that never really stops moving.
+        // DEEP NOTABLE — where both lanes land, and the only place they
+        // could: the ambush lane and the charge lane are both about getting
+        // there, so what they converge on is never having to get there
+        // again. After a landed hit it immediately closes on whatever's
+        // next.
         delta: { power: 10, forcedMovement: { mover: "attacker", direction: "closer", tiles: 3, timing: "onHit" } },
       },
       aggression_capstone_filler: {
@@ -160,8 +245,8 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["aggression_capstone_filler"],
         leaning: "aggression",
-        // The impact doesn't stop at one target — it ripples outward,
-        // shoving back everyone standing nearby.
+        // CAPSTONE. The impact doesn't stop at one target — it ripples
+        // outward, shoving back everyone standing nearby.
         delta: {
           shape: { kind: "ring", radius: 1 },
           hitsArea: true,
@@ -169,9 +254,12 @@ export const MOVES: Record<string, MoveSpec> = {
           forcedMovement: { mover: "defender", direction: "away", tiles: 2, timing: "onHit" },
         },
       },
-      // Crosslink: Aggression <-> Boldness — a jolt of confidence off an
-      // already-braced, powerful hit, Boldness's sturdiness feeding
-      // Aggression's swing.
+
+      // --- Bridge 1: Aggression <-> Boldness ------------------------------
+      // A jolt of confidence off an already-braced, powerful hit — Boldness's
+      // sturdiness feeding Aggression's swing. The bridge deepens that one
+      // lever the whole way up (principle 13): the same self-buff, first
+      // held longer, then held harder.
       grounded_fury: {
         id: "grounded_fury",
         name: "Grounded Fury",
@@ -180,6 +268,30 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 12 } },
       },
+      still_rising: {
+        id: "still_rising",
+        name: "Still Rising",
+        cost: 1,
+        prerequisites: ["grounded_fury"],
+        leaning: "aggression",
+        // Same jolt, twice as long on it — the anger doesn't come off
+        // between exchanges any more.
+        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 24 }, accuracy: 5 },
+      },
+      blood_up: {
+        id: "blood_up",
+        name: "Blood Up",
+        cost: 2,
+        prerequisites: ["still_rising"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE — an alternate route into Full Tilt (Aggression's
+        // charge lane) and Immovable (Boldness's planted lane), which is
+        // the pair this crosslink actually connects: a build that braced
+        // AND swung can skip either lane's filler grind, never its choice.
+        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 2, ticks: 24 }, critRateStage: 1 },
+      },
+
+      // --- Boldness: "Brace for Impact" -----------------------------------
       iron_hide: {
         id: "iron_hide",
         name: "Iron Hide",
@@ -188,6 +300,8 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "damageReductionFlat", value: 2 },
         delta: {},
       },
+
+      // Lane A — "nothing moves you".
       sturdy_stance: {
         id: "sturdy_stance",
         name: "+10 Accuracy",
@@ -196,62 +310,25 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { accuracy: 10 },
       },
-      grounded_hit: {
-        id: "grounded_hit",
-        name: "+5 Power",
-        cost: 1,
-        prerequisitesAnyOf: [["sturdy_stance"], ["grounded_fury"], ["guardians_stand"]],
-        leaning: "boldness",
-        delta: { power: 5 },
-      },
       second_wind: {
         id: "second_wind",
         name: "Second Wind",
         cost: 1,
-        prerequisites: ["grounded_hit"],
+        prerequisites: ["sturdy_stance"],
         leaning: "boldness",
         // A real, felt recovery rhythm — bought by trading away some
         // precision to fight sustainably instead of going all-out.
         grantsPassive: { kind: "regenFlat", value: 2.25 },
         delta: { accuracy: -5 },
       },
-      weathered_grip: {
-        id: "weathered_grip",
-        name: "+5 Power",
-        cost: 1,
-        prerequisites: ["second_wind"],
-        leaning: "boldness",
-        delta: { power: 5 },
-      },
-      counter_slam: {
-        id: "counter_slam",
-        name: "Counter Slam",
-        cost: 1,
-        prerequisites: ["weathered_grip"],
-        excludes: ["steady_guard"],
-        leaning: "boldness",
-        // Swings hardest at a target that hasn't turned to face the threat yet.
-        delta: { power: 10, situationalBonus: { condition: "flanking", multiplier: 1.4 } },
-      },
-      steady_guard: {
-        id: "steady_guard",
-        name: "Steady Guard",
-        cost: 1,
-        prerequisites: ["weathered_grip"],
-        excludes: ["counter_slam"],
-        leaning: "boldness",
-        // A patient, precise style that never overextends — recoups a real
-        // fraction of what it deals.
-        delta: { accuracy: 5, lifestealFraction: 0.12 },
-      },
       immovable: {
         id: "immovable",
         name: "Immovable",
         cost: 2,
-        prerequisitesAnyOf: [["counter_slam"], ["steady_guard"]],
+        prerequisitesAnyOf: [["second_wind"], ["blood_up"]],
         leaning: "boldness",
-        // Plants and refuses to be moved — no drag, knockback, or lunge so
-        // much as budges it.
+        // LANE NOTABLE. Plants and refuses to be moved — no drag,
+        // knockback, or lunge so much as budges it.
         grantsPassive: { kind: "immovable", value: 1 },
         delta: { power: 10 },
       },
@@ -263,18 +340,111 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { accuracy: 10 },
       },
+
+      // Lane B — "you move them".
+      grounded_hit: {
+        id: "grounded_hit",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["iron_hide"],
+        leaning: "boldness",
+        delta: { power: 5 },
+      },
+      shoulder_through: {
+        id: "shoulder_through",
+        name: "Shoulder Through",
+        cost: 2,
+        prerequisitesAnyOf: [["grounded_hit"], ["no_clean_run"]],
+        leaning: "boldness",
+        // LANE NOTABLE, and the exact opposite end of the same collision
+        // from Immovable's: it does not go around and it does not stop —
+        // it goes through, ends the exchange standing where they were
+        // (`positionSwap`), and leaves them a further tile off balance
+        // (`positionSwapPull`). Physical and visible, per "a drag, a lunge,
+        // a swap... an observer can see these happen mid-fight".
+        delta: { positionSwap: true, positionSwapPull: 1 },
+      },
+      counter_slam: {
+        id: "counter_slam",
+        name: "Counter Slam",
+        cost: 1,
+        prerequisites: ["shoulder_through"],
+        excludes: ["steady_guard"],
+        leaning: "boldness",
+        // REWORKED, for a stated reason rather than taste: this was
+        // `situationalBonus: flanking`, which (a) collided with Vanguard
+        // Charge's own flanking bonus on the same OVERWRITE field — two
+        // co-takeable nodes, whichever the engine reached last quietly won
+        // — and (b) duplicated that crosslink's identity outright. It now
+        // does what its NAME always said: the more it has already taken,
+        // the harder it comes back (`selfStateBonus`, a lever with three
+        // users in the whole roster).
+        delta: { power: 10, selfStateBonus: { condition: "selfLowHp", multiplier: 1.4 } },
+      },
+      steady_guard: {
+        id: "steady_guard",
+        name: "Steady Guard",
+        cost: 1,
+        prerequisites: ["shoulder_through"],
+        excludes: ["counter_slam"],
+        leaning: "boldness",
+        // A patient, precise style that never overextends — recoups a real
+        // fraction of what it deals.
+        delta: { accuracy: 5, lifestealFraction: 0.12 },
+      },
+      sets_its_feet: {
+        id: "sets_its_feet",
+        name: "Sets Its Feet",
+        cost: 2,
+        prerequisitesAnyOf: [["boldness_capstone_filler"], ["counter_slam"], ["steady_guard"]],
+        leaning: "boldness",
+        // DEEP NOTABLE — the one thing both lanes are really about: whoever
+        // is better set wins the collision. Every landed hit leaves it a
+        // stage further braced, and that is not just defence here:
+        // `effectiveWeight` (predation.ts) adds BRACED_WEIGHT_PER_STAGE per
+        // positive Defense stage, and Tackle's own opener scales power off
+        // weight. Bracing literally makes the next collision heavier.
+        //
+        // Note the deliberate overwrite ladder: on a build that came in
+        // over Blood Up's bridge this replaces that node's self-ATTACK
+        // buff with a self-DEFENSE one. That is the intended reading (the
+        // Boldness answer supersedes the Aggression one), and the two are
+        // ancestor-related so the checker's overwrite rule treats it as a
+        // ladder rather than a silent collision. The `weightScaling` half is
+        // the same idea stated outright, raising the opener's 0.15 to 0.25:
+        // the loser of a collision is the lighter one.
+        delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 24 }, weightScaling: { factor: 0.25 } },
+      },
+      weathered_grip: {
+        id: "weathered_grip",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["sets_its_feet"],
+        leaning: "boldness",
+        delta: { power: 5 },
+      },
       thornguard: {
         id: "thornguard",
         name: "Thornguard",
         cost: 2,
-        prerequisites: ["boldness_capstone_filler"],
+        prerequisites: ["weathered_grip"],
         leaning: "boldness",
-        // Standing this firm has its own cost for whoever's still hitting it.
+        // CAPSTONE. Standing this firm has its own cost for whoever's still
+        // hitting it.
         grantsPassive: { kind: "thorns", value: 0.15 },
         delta: {},
       },
-      // Crosslink: Boldness <-> Sociability — extends a bit of that thick
-      // hide to whoever's fighting alongside.
+
+      // --- Bridge 2: Boldness <-> Sociability -----------------------------
+      // Extends a bit of that thick hide to whoever's fighting alongside —
+      // and gets in the way while doing it. The `jamCooldownTicks` half is
+      // new: the crosslink previously had an empty `delta` and only a
+      // passive, which left its bridge nothing to deepen (principle 13
+      // requires the bridge's filler to escalate the crosslink's OWN lever,
+      // and PART 4's rule is to spend a passive like a capstone, not to
+      // grant a second one just to have a lever). Stepping into the path of
+      // something mid-swing and costing it the beat is what a guardian
+      // actually does; the bridge escalates exactly that, twice.
       guardians_stand: {
         id: "guardians_stand",
         name: "Guardian's Stand",
@@ -282,8 +452,33 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["iron_hide", "steadfast_guard"],
         leaning: "sociability",
         grantsPassive: { kind: "damageReductionFlat", value: 1 },
-        delta: {},
+        delta: { jamCooldownTicks: 1 },
       },
+      in_the_way: {
+        id: "in_the_way",
+        name: "In the Way",
+        cost: 1,
+        prerequisites: ["guardians_stand"],
+        leaning: "boldness",
+        // Doesn't dodge, doesn't duck — puts a shoulder where the swing was
+        // going, and it costs the attacker another beat.
+        delta: { jamCooldownTicks: 1, accuracy: 5 },
+      },
+      no_clean_run: {
+        id: "no_clean_run",
+        name: "No Clean Run",
+        cost: 2,
+        prerequisites: ["in_the_way"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE — an alternate route into Shoulder Through
+        // (Boldness's displacement lane) and Bulwark (Sociability's
+        // standing-in-the-way lane), the two lanes this crosslink connects.
+        // Nothing gets a clean run at the herd: a third beat off the
+        // attacker's rhythm, and its guard no longer buys it much either.
+        delta: { jamCooldownTicks: 1, defensePenetration: 0.1 },
+      },
+
+      // --- Sociability: "Shared Ground" ------------------------------------
       steadfast_guard: {
         id: "steadfast_guard",
         name: "Steadfast Guard",
@@ -292,6 +487,8 @@ export const MOVES: Record<string, MoveSpec> = {
         // Shares a braced stance with the nearest threatened herd-mate.
         delta: { targetsAlly: true, allyEffect: { buff: { stat: "defense", stage: 1, ticks: 20 } } },
       },
+
+      // Lane A — the CALL: change what everyone else decides to do.
       watchful_stance: {
         id: "watchful_stance",
         name: "+10 Accuracy",
@@ -304,18 +501,27 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "herd_instinct",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["watchful_stance"], ["guardians_stand"], ["vanguard_charge"]],
+        prerequisites: ["watchful_stance"],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
       rally_cry: {
         id: "rally_cry",
         name: "Rally Cry",
-        cost: 1,
-        prerequisites: ["herd_instinct"],
+        cost: 2,
+        prerequisitesAnyOf: [["herd_instinct"], ["vanguard_press"]],
         leaning: "sociability",
-        // A shared burst of resolve, sharpening a herd-mate's next few strikes.
-        delta: { targetsAlly: true, allyEffect: { buff: { stat: "attack", stage: 1, ticks: 20 } } },
+        // LANE NOTABLE. It was called Rally Cry and it did not rally: the
+        // node only buffed one herd-mate's Attack. It now sets a real
+        // `rallyCall` mark, which is a categorically different payoff from
+        // a same-sized buff — every nearby agent's OWN, independently-run
+        // target selection (`preferMarked`, predation.ts) converges on
+        // whatever got named. The herd deciding together is the reward.
+        delta: {
+          targetsAlly: true,
+          allyEffect: { buff: { stat: "attack", stage: 1, ticks: 20 } },
+          rallyCall: { ticks: 15 },
+        },
       },
       close_ranks: {
         id: "close_ranks",
@@ -325,11 +531,40 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { power: 5 },
       },
+
+      // Lane B — what a body is FOR: bulk spent on the herd's behalf.
+      browse_line: {
+        id: "browse_line",
+        name: "Browse Line",
+        cost: 1,
+        prerequisites: ["steadfast_guard"],
+        leaning: "sociability",
+        // The herd walks the tree line shouldering trunks until the canopy
+        // gives up its food. Real, not flavour text: needs.ts's canopy
+        // harvest lets any damage move stand in for a dig move, and adds
+        // `gatherBurst` on top of the base burst — so a Tackle specced this
+        // way genuinely feeds the herd faster. One of four users of the
+        // lever in the entire roster.
+        delta: { gatherBurst: 2 },
+      },
+      bulwark: {
+        id: "bulwark",
+        name: "Bulwark",
+        cost: 2,
+        prerequisitesAnyOf: [["browse_line"], ["no_clean_run"]],
+        leaning: "sociability",
+        // LANE NOTABLE. A last line that doesn't move and doesn't quit —
+        // soaks up real damage doing it. (Still `damageReduction` because
+        // `aggroRedirect`, the attention-grabbing primitive this node
+        // actually wants, has never been built — see the colour pie.)
+        grantsPassive: { kind: "damageReduction", value: 0.08 },
+        delta: { power: 10 },
+      },
       bulwark_stance: {
         id: "bulwark_stance",
         name: "Bulwark Stance",
         cost: 1,
-        prerequisites: ["close_ranks"],
+        prerequisites: ["bulwark"],
         excludes: ["front_line"],
         leaning: "sociability",
         // Turtles up to keep standing between the herd and harm.
@@ -340,29 +575,35 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "front_line",
         name: "Front Line",
         cost: 1,
-        prerequisites: ["close_ranks"],
+        prerequisites: ["bulwark"],
         excludes: ["bulwark_stance"],
         leaning: "sociability",
         // Charges in ahead of the herd, hitting hard enough to throw off the
         // target's own rhythm.
         delta: { power: 15, jamCooldownTicks: 1 },
       },
-      bulwark: {
-        id: "bulwark",
-        name: "Bulwark",
+      the_herd_arrives: {
+        id: "the_herd_arrives",
+        name: "The Herd Arrives",
         cost: 2,
-        prerequisitesAnyOf: [["bulwark_stance"], ["front_line"]],
+        prerequisitesAnyOf: [["close_ranks"], ["bulwark_stance"], ["front_line"]],
         leaning: "sociability",
-        // A last line that doesn't move and doesn't quit — soaks up real
-        // damage doing it.
-        grantsPassive: { kind: "damageReduction", value: 0.08 },
-        delta: { power: 10 },
+        // DEEP NOTABLE — where the call and the wall become the same thing.
+        // The support effect stops needing its own turn: it piggybacks on
+        // every hostile hit this thing lands (`allyEffectOnAttack`,
+        // predation.ts), so a herd-mate is braced or emboldened every time
+        // the biggest body in the herd connects with something. No longer a
+        // choice between fighting and helping — and the effect it passes on
+        // is a full ladder over Rally Cry's own (+2 Attack stages, 24 ticks,
+        // up from +1/20), so lane A's call and lane B's wall both get
+        // strictly better here rather than one overwriting the other.
+        delta: { allyEffectOnAttack: true, allyEffect: { buff: { stat: "attack", stage: 2, ticks: 24 } } },
       },
       sociability_capstone_filler: {
         id: "sociability_capstone_filler",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisites: ["bulwark"],
+        prerequisites: ["the_herd_arrives"],
         leaning: "sociability",
         delta: { accuracy: 10 },
       },
@@ -372,13 +613,15 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["sociability_capstone_filler"],
         leaning: "sociability",
-        // Just standing near this Tackle-user mends the herd, slowly, all on
-        // its own — no move needed, no cooldown to manage.
+        // CAPSTONE. Just standing near this Tackle-user mends the herd,
+        // slowly, all on its own — no move needed, no cooldown to manage.
         grantsPassive: { kind: "healAura", value: 0.01 },
         delta: {},
       },
-      // Crosslink: Sociability <-> Aggression — charges in specifically at
-      // whatever's caught off guard menacing the herd.
+
+      // --- Bridge 3: Sociability <-> Aggression ---------------------------
+      // Charges in specifically at whatever's caught off guard menacing the
+      // herd. The bridge deepens that same flanking read the whole way up.
       vanguard_charge: {
         id: "vanguard_charge",
         name: "Vanguard Charge",
@@ -386,6 +629,31 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["steadfast_guard", "weighted_charge"],
         leaning: "aggression",
         delta: { situationalBonus: { condition: "flanking", multiplier: 1.25 } },
+      },
+      into_the_gap: {
+        id: "into_the_gap",
+        name: "Into the Gap",
+        cost: 1,
+        prerequisites: ["vanguard_charge"],
+        leaning: "sociability",
+        // Reads the hole in the line rather than the target — anything
+        // whose attention is elsewhere pays more for it.
+        delta: { situationalBonus: { condition: "flanking", multiplier: 1.45 }, accuracy: 5 },
+      },
+      vanguard_press: {
+        id: "vanguard_press",
+        name: "Vanguard Press",
+        cost: 2,
+        prerequisites: ["into_the_gap"],
+        leaning: "aggression",
+        // BRIDGE NOTABLE — an alternate route into Broke Cover
+        // (Aggression's ambush lane) and Rally Cry (Sociability's call
+        // lane), the pair this crosslink connects, and it complements both
+        // rather than matching them: a herd that names its threat creates
+        // the distracted flank this node punishes. The penetration is the
+        // same read applied to the body rather than the field: it goes in
+        // where the guard is not.
+        delta: { situationalBonus: { condition: "flanking", multiplier: 1.7 }, defensePenetration: 0.08 },
       },
     },
   },
@@ -1949,12 +2217,35 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("PECK"),
     cooldownTicks: 3,
     range: { min: 0, max: 1 },
-    // v2 full triangle (MOVES_DESIGN.md's "Peck" writeup): the roster's first
-    // positionSwap+positionSwapPull and first critCooldownReset live here,
-    // plus the only tree that changes Peck's own point shape into real reach
-    // mid-build, and a support keystone that slows a target down instead of
-    // healing.
+    // --- Template v4 (45 nodes). THE FANTASY, written before any node:
+    //
+    // Peck is one hard point — a beak, a horn, a leek — driven into a single
+    // spot with the whole body behind it. Wing Attack is surface area; Peck
+    // is pressure. There is no wind-up and nothing to see coming: it happens
+    // inside your guard, at arm's length, and it happens again a half-second
+    // later in exactly the same place. What kills is not the size of the hole,
+    // it is the repetition — the same puncture reopened until something under
+    // it gives. What is dangerous *to the pecker* is where it has to stand to
+    // do it: range 1, inside the reach of everything, nowhere to be but there.
+    //
+    // Its learners are not all birds, and that is the point: Goldeen and
+    // Nidorino peck with a horn, Farfetch'd with a leek, Doduo with two heads
+    // that never leave the ground. Peck is the POINT, not the wing — which is
+    // exactly what keeps it out of `wing_attack`'s lane (gusts, scatter,
+    // mobbing) even though the two share Spearow's sky.
+    //
+    // Aggression answers "where does the point land and what does the hole
+    // become"; Boldness answers "range 1 is the flaw — rewrite the geometry,
+    // or refuse to be moved off the spot"; Sociability answers "ten small
+    // points in the same hole beat one big one, if they all pick the same
+    // target". Keeps every v3 fork, relocated into a lane tail.
     tree: {
+      // ============================================================
+      // AGGRESSION — "The Same Hole"
+      // Flavours: piercing (defensePenetration/resistanceBreaker/bonusVsType),
+      // raw damage (hits/lifesteal/weightScaling), aggressive movement
+      // (chargeAttack), environment (terrainBurn).
+      // ============================================================
       needle_point: {
         id: "needle_point",
         name: "Needle Point",
@@ -1962,6 +2253,8 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { power: 10 },
       },
+      // --- Lane A: "Through the Guard" — severity. One point, past whatever
+      // is in the way: armour first, then the type chart.
       beak_sharpening: {
         id: "beak_sharpening",
         name: "+5 Power",
@@ -1970,35 +2263,64 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { power: 5 },
       },
+      rapid_pecking: {
+        id: "rapid_pecking",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["beak_sharpening"],
+        leaning: "aggression",
+        delta: { accuracy: 5 },
+      },
+      skybreaker: {
+        id: "skybreaker",
+        name: "Skybreaker",
+        cost: 2,
+        // Lane A's notable, reachable either by walking the lane or off the
+        // Ambush Strike bridge (principle 12 — the bridge saves the grind,
+        // never the fork).
+        prerequisitesAnyOf: [["rapid_pecking"], ["never_recovers"]],
+        leaning: "aggression",
+        // Flying beats Grass — a real answer to the roster's own
+        // Bulbasaur/Venusaur line.
+        delta: { bonusVsType: { type: "grass", multiplier: 1.5 } },
+      },
+      stone_seeker: {
+        id: "stone_seeker",
+        name: "Stone-Seeker",
+        cost: 1,
+        prerequisites: ["skybreaker"],
+        leaning: "aggression",
+        // The lane's own logic, finished: Peck is Flying, so Rock and Steel
+        // and Electric all shrug it off. A point does not answer that with
+        // mass — it answers it by going for the seam instead of the plate,
+        // which costs real force (`power: -5`) for the angle.
+        delta: { resistanceBreaker: { multiplier: 1.5 }, power: -5 },
+      },
+      // --- Lane B: "Again, Same Spot" — rate. The point returns before the
+      // wound closes. Differs from Lane A in KIND: volume, not severity.
       sharp_strike_footing: {
         id: "sharp_strike_footing",
         name: "+5 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["beak_sharpening"], ["ambush_strike"], ["war_cry"]],
+        prerequisites: ["needle_point"],
         leaning: "aggression",
         delta: { accuracy: 5 },
       },
       frenzied_pecking: {
         id: "frenzied_pecking",
         name: "Frenzied Pecking",
-        cost: 1,
-        prerequisites: ["sharp_strike_footing"],
+        cost: 2,
+        prerequisitesAnyOf: [["sharp_strike_footing"], ["cornered_beak"]],
         leaning: "aggression",
         delta: { hits: { min: 2, max: 2 } },
       },
-      rapid_pecking: {
-        id: "rapid_pecking",
-        name: "+5 Accuracy",
-        cost: 1,
-        prerequisites: ["frenzied_pecking"],
-        leaning: "aggression",
-        delta: { accuracy: 5 },
-      },
+      // The v3 fork, preserved verbatim and relocated to this lane's tail:
+      // one jab that goes deeper, or a third jab that does not.
       piercing_beak: {
         id: "piercing_beak",
         name: "Piercing Beak",
         cost: 1,
-        prerequisites: ["rapid_pecking"],
+        prerequisites: ["frenzied_pecking"],
         excludes: ["rapid_volley"],
         leaning: "aggression",
         delta: { defensePenetration: 0.3 },
@@ -2007,7 +2329,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "rapid_volley",
         name: "Rapid Volley",
         cost: 1,
-        prerequisites: ["rapid_pecking"],
+        prerequisites: ["frenzied_pecking"],
         excludes: ["piercing_beak"],
         leaning: "aggression",
         delta: { hits: { min: 3, max: 3 }, power: -10 },
@@ -2016,9 +2338,20 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "talon_strike",
         name: "Talon Strike",
         cost: 2,
-        prerequisitesAnyOf: [["piercing_beak"], ["rapid_volley"]],
+        // Deep notable: both lanes end here — Lane A's tail and both tips of
+        // Lane B's fork.
+        prerequisitesAnyOf: [["stone_seeker"], ["piercing_beak"], ["rapid_volley"]],
         leaning: "aggression",
-        delta: { situationalBonus: { condition: "targetLowHp", multiplier: 1.4 } },
+        // v3 had this as `situationalBonus: targetLowHp`, which was one of
+        // THREE co-takeable `situationalBonus` setters in the tree — an
+        // overwrite field, so two of the three were silently dead on any build
+        // that took them together. The tree now carries exactly one
+        // (`swooping_approach`), and this node became the thing the branch was
+        // missing instead: the convergence where opening a hole finally means
+        // FEEDING through it. The talons plant, the whole body's mass goes in
+        // behind the point (`weightScaling`, the fantasy's own sentence), and
+        // the beak takes a piece back out.
+        delta: { weightScaling: { factor: 0.1 }, lifestealFraction: 0.12 },
       },
       keen_eye: {
         id: "keen_eye",
@@ -2026,25 +2359,47 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["talon_strike"],
         leaning: "aggression",
-        delta: { accuracy: 5 },
+        // Same +5 Accuracy it always was, plus the lever its own name was
+        // already promising: what a hunting bird's eye is FOR is finding the
+        // thing in the undergrowth, and `terrainBurn` strips that bush tile's
+        // concealment for good on a landed hit.
+        delta: { accuracy: 5, terrainBurn: true },
       },
-      skybreaker: {
-        id: "skybreaker",
-        name: "Skybreaker",
+      set_the_point: {
+        id: "set_the_point",
+        name: "Set the Point",
         cost: 2,
         prerequisites: ["keen_eye"],
         leaning: "aggression",
-        // Flying beats Grass — a real answer to the roster's own
-        // Bulbasaur/Venusaur line.
-        delta: { bonusVsType: { type: "grass", multiplier: 1.5 } },
+        // Capstone, and the one moment a Peck ever holds still. Peck's real
+        // weakness is its range — everything in this branch has to be bought
+        // standing on top of the target. `chargeAttack` is the only primitive
+        // in the engine that answers that directly: one tick fixed on a spot
+        // (invulnerable, unable to act), then three tiles crossed in the leap
+        // and the whole stored commitment driven home. A genuine risk, not a
+        // guaranteed payoff — if the target is gone when it releases, the
+        // whole thing fizzles. Second user of `chargeAttack` in the roster.
+        delta: { chargeAttack: { ticks: 1, bonusPower: 30, leapTiles: 3 } },
       },
+
+      // ============================================================
+      // BOLDNESS — "Where You Have To Stand"
+      // Peck's flaw IS its range. This branch answers it two ways that are
+      // not degrees of each other: Lane A changes the geometry so point-blank
+      // stops being point-blank; Lane B accepts point-blank and makes staying
+      // there survivable.
+      // Flavours: stealth/ambush, wider aoe (shape), aggressive movement
+      // (lockTicks/forcedMovement), raw damage, reposition others.
+      // ============================================================
       swooping_approach: {
         id: "swooping_approach",
         name: "Swooping Approach",
         cost: 1,
         leaning: "boldness",
+        // The tree's ONLY `situationalBonus` — see `talon_strike`'s comment.
         delta: { situationalBonus: { condition: "elevation", multiplier: 1.3 } },
       },
+      // --- Lane A: "Longer Reach" — stop having to stand there at all.
       wing_conditioning: {
         id: "wing_conditioning",
         name: "+5 Power",
@@ -2055,20 +2410,20 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       dive_strike_footing: {
         id: "dive_strike_footing",
-        name: "+5 Accuracy",
+        name: "+5 Accuracy, -1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["wing_conditioning"], ["ambush_strike"], ["cover_call"]],
+        prerequisites: ["wing_conditioning"],
         leaning: "boldness",
-        delta: { accuracy: 5 },
+        delta: { accuracy: 5, cooldownTicks: -1 },
       },
       extended_wingspan: {
         id: "extended_wingspan",
         name: "Extended Wingspan",
-        cost: 1,
-        prerequisites: ["dive_strike_footing"],
+        cost: 2,
+        prerequisitesAnyOf: [["dive_strike_footing"], ["never_recovers"]],
         leaning: "boldness",
         // Peck actually gains reach for the first time — a 2-tile line
-        // instead of a point-blank stab.
+        // instead of a point-blank stab. The tree's only shape setter.
         delta: { shape: { kind: "line", length: 2 }, range: { max: 2 } },
       },
       wing_precision: {
@@ -2079,39 +2434,74 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { accuracy: 5 },
       },
-      ambush_dive: {
-        id: "ambush_dive",
-        name: "Ambush Dive",
+      // --- Lane B: "Nowhere To Go" — do not fix the range. Fix what happens
+      // when something is already on top of you.
+      braced_stance: {
+        id: "braced_stance",
+        name: "Braced Stance",
         cost: 1,
-        prerequisites: ["wing_precision"],
-        excludes: ["harrying_wings"],
+        prerequisites: ["swooping_approach"],
         leaning: "boldness",
-        delta: { situationalBonus: { condition: "flanking", multiplier: 1.4 } },
-      },
-      harrying_wings: {
-        id: "harrying_wings",
-        name: "Harrying Wings",
-        cost: 1,
-        prerequisites: ["wing_precision"],
-        excludes: ["ambush_dive"],
-        leaning: "boldness",
-        delta: { power: -5, accuracy: 10 },
+        // The whole body behind the point means the body is committed too:
+        // planted feet drive the point straighter past whatever it lands on,
+        // and you are a beat late recovering from it (`lockTicks` locks the
+        // USER, not the target — moves.ts's own doc comment). Benefit and
+        // cost in the same node, per principle 4.
+        delta: { defensePenetration: 0.12, lockTicks: 1 },
       },
       relentless_harrier: {
         id: "relentless_harrier",
         name: "Relentless Harrier",
         cost: 2,
-        prerequisitesAnyOf: [["ambush_dive"], ["harrying_wings"]],
+        prerequisitesAnyOf: [["braced_stance"], ["they_come_with_you"]],
         leaning: "boldness",
-        // A real crit-fisher spec — when the dive lands one, it's ready to
-        // go again immediately instead of just hitting harder.
+        // A real crit-fisher spec — when the point lands one, it is ready to
+        // go again immediately instead of just hitting harder, which is what
+        // "nowhere to go" needs: you never get to step back and reset.
         delta: { power: 10, critRateStage: 1, critCooldownReset: true },
+      },
+      // The v3 fork, preserved, relocated to this lane's tail. Rebuilt off
+      // `situationalBonus` (see `talon_strike`) into the choice this lane was
+      // actually asking: commit everything and wear it, or stay light and
+      // just never miss.
+      ambush_dive: {
+        id: "ambush_dive",
+        name: "All-In Dive",
+        cost: 1,
+        prerequisites: ["relentless_harrier"],
+        excludes: ["harrying_wings"],
+        leaning: "boldness",
+        delta: { power: 5, critRateStage: 1, recoilFraction: 0.08 },
+      },
+      harrying_wings: {
+        id: "harrying_wings",
+        name: "Harrying Wings",
+        cost: 1,
+        prerequisites: ["relentless_harrier"],
+        excludes: ["ambush_dive"],
+        leaning: "boldness",
+        delta: { power: -5, accuracy: 10 },
+      },
+      nowhere_to_run: {
+        id: "nowhere_to_run",
+        name: "Nowhere to Run",
+        cost: 2,
+        prerequisitesAnyOf: [["wing_precision"], ["ambush_dive"], ["harrying_wings"]],
+        leaning: "boldness",
+        // Deep notable, and the deliberate inversion of `wing_attack`: that
+        // move's whole positional identity is scattering things AWAY on a
+        // landed hit. A point weapon wants the opposite — the beak hooks and
+        // the target comes one tile IN, back onto the spot the next jab is
+        // already aimed at. Whichever lane got here, it stops the target
+        // leaving: the reach lane can no longer be walked out of, and the
+        // braced lane no longer has to chase.
+        delta: { forcedMovement: { mover: "defender", direction: "closer", tiles: 1, timing: "onHit" } },
       },
       diving_precision: {
         id: "diving_precision",
         name: "+5 Accuracy",
         cost: 1,
-        prerequisites: ["relentless_harrier"],
+        prerequisites: ["nowhere_to_run"],
         leaning: "boldness",
         delta: { accuracy: 5 },
       },
@@ -2126,6 +2516,15 @@ export const MOVES: Record<string, MoveSpec> = {
         // out of position instead of a same-spot trade.
         delta: { positionSwap: true, positionSwapPull: 2 },
       },
+
+      // ============================================================
+      // SOCIABILITY — "Ten Beaks, One Hole"
+      // A flock of small point-weapons is not a bigger weapon; it is the same
+      // weapon used ten times in the same second on the same target. This
+      // branch is about FOCUS, not healing.
+      // Flavours: ally buffing, rallying, healing, defence, piercing,
+      // planted/duration.
+      // ============================================================
       flock_call: {
         id: "flock_call",
         name: "Flock Call",
@@ -2133,6 +2532,9 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { targetsAlly: true, allyEffect: { buff: { stat: "attack", stage: 1, ticks: 20 } } },
       },
+      // --- Lane A: "Everyone On That One" — the mark. This lane changes what
+      // OTHER agents independently decide to attack, which is a different
+      // kind of thing from Lane B's provisioning, not a bigger version of it.
       flock_footing: {
         id: "flock_footing",
         name: "+5 Accuracy",
@@ -2145,31 +2547,53 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "flock_call_footing",
         name: "+5 Power",
         cost: 1,
-        prerequisitesAnyOf: [["flock_footing"], ["war_cry"], ["cover_call"]],
+        prerequisites: ["flock_footing"],
         leaning: "sociability",
         delta: { power: 5 },
+      },
+      mark_the_soft_spot: {
+        id: "mark_the_soft_spot",
+        name: "Mark the Soft Spot",
+        cost: 2,
+        prerequisitesAnyOf: [["flock_call_footing"], ["they_come_with_you"]],
+        leaning: "sociability",
+        // The branch's actual thesis, which v3 never built: a flock's edge is
+        // that all of it picks the SAME target. `rallyCall` marks the thing
+        // this beak just found the soft spot on, and every nearby flock-mate's
+        // own separately-run threat pick lands on it too.
+        delta: { rallyCall: { ticks: 15 } },
+      },
+      flock_instinct: {
+        id: "flock_instinct",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["mark_the_soft_spot"],
+        leaning: "sociability",
+        delta: { accuracy: 5 },
+      },
+      // --- Lane B: "Keep the Flock Standing" — provisioning and cover.
+      flock_synergy: {
+        id: "flock_synergy",
+        name: "+5 Power, -1 Cooldown",
+        cost: 1,
+        prerequisites: ["flock_call"],
+        leaning: "sociability",
+        delta: { power: 5, cooldownTicks: -1 },
       },
       wingmate_cover: {
         id: "wingmate_cover",
         name: "Wingmate Cover",
-        cost: 1,
-        prerequisites: ["flock_call_footing"],
+        cost: 2,
+        prerequisitesAnyOf: [["flock_synergy"], ["cornered_beak"]],
         leaning: "sociability",
         delta: { targetsAlly: true, allyEffect: { buff: { stat: "defense", stage: 1, ticks: 20 } } },
       },
-      flock_synergy: {
-        id: "flock_synergy",
-        name: "+5 Power",
-        cost: 1,
-        prerequisites: ["wingmate_cover"],
-        leaning: "sociability",
-        delta: { power: 5 },
-      },
+      // The v3 fork, preserved verbatim on this lane's tail.
       screening_wings: {
         id: "screening_wings",
         name: "Screening Wings",
         cost: 1,
-        prerequisites: ["flock_synergy"],
+        prerequisites: ["wingmate_cover"],
         excludes: ["harriers_charge"],
         leaning: "sociability",
         grantsPassive: { kind: "damageReductionFlat", value: 1 },
@@ -2179,7 +2603,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "harriers_charge",
         name: "Harrier's Charge",
         cost: 1,
-        prerequisites: ["flock_synergy"],
+        prerequisites: ["wingmate_cover"],
         excludes: ["screening_wings"],
         leaning: "sociability",
         delta: { power: 10, jamCooldownTicks: 1 },
@@ -2188,30 +2612,54 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "preening_recovery",
         name: "Preening Recovery",
         cost: 2,
-        prerequisitesAnyOf: [["screening_wings"], ["harriers_charge"]],
+        prerequisitesAnyOf: [["flock_instinct"], ["screening_wings"], ["harriers_charge"]],
         leaning: "sociability",
         grantsPassive: { kind: "regen", value: 0.03 },
-        delta: {},
+        // Deep notable. v3 left this a bare passive with an empty delta; it
+        // now also deepens the ally-effect the branch has been building
+        // (restating Wingmate Cover's defense buff so the overwrite loses
+        // nothing, and adding the heal), which is what "preening" is: the
+        // flock putting each other back in order between fights.
+        delta: { allyEffect: { healFraction: 0.08, buff: { stat: "defense", stage: 1, ticks: 20 } } },
       },
-      flock_instinct: {
-        id: "flock_instinct",
-        name: "+5 Accuracy",
+      shake_the_branch: {
+        id: "shake_the_branch",
+        name: "Shake the Branch",
         cost: 1,
         prerequisites: ["preening_recovery"],
         leaning: "sociability",
-        delta: { accuracy: 5 },
+        // The one node in the tree that feeds instead of fights, and the
+        // reason it is reachable rather than decorative: needs.ts's
+        // canopy-harvest path processes a canopy-native crop with an
+        // off-cooldown damage move (`CANOPY_HARVEST_MOVE_BASE_BURST` +
+        // `gatherBurst`), Apple is canopy-native and forest-eligible
+        // (crops.ts), and Spearow/Fearow live in `homeLayer: "canopy"` over
+        // forest. A flock working an apple branch with its beaks.
+        delta: { gatherBurst: 3, accuracy: 5 },
       },
       harrying_flock: {
         id: "harrying_flock",
         name: "Harrying Flock",
         cost: 2,
-        prerequisites: ["flock_instinct"],
+        prerequisites: ["shake_the_branch"],
         leaning: "sociability",
-        // A crowd-control capstone — slows prey down, instead of a heal.
+        // A crowd-control capstone — slows prey down, instead of a heal. The
+        // tree's only `statChangeOnHit`.
         delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -1, ticks: 20 } },
       },
-      // Crosslink: Aggression <-> Boldness — a coordinated snatch that
-      // throws off the target's own rhythm.
+
+      // ============================================================
+      // BRIDGES — three, each crosslink -> filler deepening its own lever ->
+      // notable that is an alternate route into ONE lane per branch it
+      // connects (principles 7, 11, 12, 13).
+      // ============================================================
+      // Bridge 1: Aggression <-> Boldness. A coordinated snatch that throws
+      // off the target's own rhythm. `jamCooldownTicks` is ADDITIVE in
+      // `applyMoveTree` (verified by running it, not by reading the field
+      // list), so this bridge stacks +1/+1/+2 to four ticks of jam — the
+      // roster's deepest, and the reason the bridge exists. It lands in the
+      // two SEVERITY-and-REACH lanes, the two with no tempo of their own: a
+      // bridge complements its landing lane rather than deepening a rut.
       ambush_strike: {
         id: "ambush_strike",
         name: "Ambush Strike",
@@ -2220,19 +2668,65 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { jamCooldownTicks: 1 },
       },
-      // Crosslink: Boldness <-> Sociability — a braced dive shares its own
-      // cover with the flock.
+      broken_rhythm: {
+        id: "broken_rhythm",
+        name: "Broken Rhythm",
+        cost: 1,
+        prerequisites: ["ambush_strike"],
+        leaning: "aggression",
+        delta: { jamCooldownTicks: 1, accuracy: 5 },
+      },
+      never_recovers: {
+        id: "never_recovers",
+        name: "Never Recovers",
+        cost: 2,
+        prerequisites: ["broken_rhythm"],
+        leaning: "aggression",
+        // The bridge's own payoff, deepening its own lever rather than
+        // grabbing a generic stat: four ticks in total added to everything the
+        // target already has winding down. It stops being a jab that
+        // interrupts and starts being a jab it never gets out from under.
+        delta: { jamCooldownTicks: 2 },
+      },
+      // Bridge 2: Boldness <-> Sociability. A braced dive shares its own
+      // cover with the flock. The crosslink's lever IS the flat mitigation,
+      // so the bridge filler deepens exactly that (principle 13) — and the
+      // 1.0 the crosslink used to grant alone is now split across the two,
+      // so the tree's passive budget is unchanged (see passive-exposure.ts).
       cover_call: {
         id: "cover_call",
         name: "Cover Call",
         cost: 1,
         prerequisites: ["swooping_approach", "flock_call"],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        grantsPassive: { kind: "damageReductionFlat", value: 0.5 },
         delta: {},
       },
-      // Crosslink: Sociability <-> Aggression — a cornered flock-mate
-      // fights harder.
+      spread_wing: {
+        id: "spread_wing",
+        name: "Spread Wing",
+        cost: 1,
+        prerequisites: ["cover_call"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 0.5 },
+        delta: {},
+      },
+      they_come_with_you: {
+        id: "they_come_with_you",
+        name: "They Come With You",
+        cost: 2,
+        prerequisites: ["spread_wing"],
+        leaning: "sociability",
+        // Cover stops being something you hand out on an idle tick and starts
+        // being automatic: every hostile Peck now also fires the flock-buff on
+        // the nearest hurt flock-mate (`allyEffectOnAttack`, support.ts's
+        // `nearestAllyEffectTarget`). Guaranteed to have something to fire —
+        // Flock Call is this bridge's own prerequisite.
+        delta: { allyEffectOnAttack: true },
+      },
+      // Bridge 3: Sociability <-> Aggression. A cornered flock-mate fights
+      // harder — `selfStateBonus` escalating 1.3 -> 1.5 -> 1.8, the same
+      // overwrite discipline as Bridge 1. Lands on the two VOLUME lanes.
       war_cry: {
         id: "war_cry",
         name: "War Cry",
@@ -2240,6 +2734,26 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["flock_call", "needle_point"],
         leaning: "sociability",
         delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.3 } },
+      },
+      last_of_the_flock: {
+        id: "last_of_the_flock",
+        name: "Last of the Flock",
+        cost: 1,
+        prerequisites: ["war_cry"],
+        leaning: "sociability",
+        delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.5 }, accuracy: 5 },
+      },
+      cornered_beak: {
+        id: "cornered_beak",
+        name: "Cornered Beak",
+        cost: 2,
+        prerequisites: ["last_of_the_flock"],
+        leaning: "sociability",
+        // `selfStateBonus` biases `pickBestMove`'s SCORING, not damage
+        // (moves.ts's own doc comment) — so what this actually buys is a
+        // half-dead bird that reaches for the beak instead of fleeing, and a
+        // point sharp enough past armour to make that the right call.
+        delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.8 }, defensePenetration: 0.15 },
       },
     },
   },
@@ -2256,10 +2770,51 @@ export const MOVES: Record<string, MoveSpec> = {
     // delta has no statusKind slot of its own), but the base move never rolls
     // for it on its own.
     statusKind: "poison",
-    // v2 full triangle (MOVES_DESIGN.md's "Scratch" writeup): the roster's
-    // first non-Ember status inflicter, its only two-passive keystone, and
-    // the roster's first rallyCall.
+    // --- The fantasy (v4 rewrite, MOVES_DESIGN.md's "start from the
+    // fantasy") ---
+    //
+    // Scratch is four claws and no technique. There is no wind-up and
+    // nothing to see coming — the paw is already moving. What separates a
+    // rake from a blow is that a blow is finished the moment it lands and a
+    // rake is not: it opens the skin and leaves the wound to do the rest of
+    // the work, hours later, somewhere else. Claws are filthy by design, and
+    // whatever was under them yesterday goes in today. And claws were tools
+    // long before they were weapons — the same four hooks that open a belly
+    // hook into bark, into a fleeing leg, into the dirt of a den, and score
+    // a line across a tree that every animal in the valley can read without
+    // a single fight happening.
+    //
+    // Deliberately NOT Tackle. Tackle is mass arriving and it is over when
+    // it stops; Scratch is an edge opening something and it LEAVES THINGS
+    // BEHIND — a septic wound, a shredded bush, a churned furrow, a claw
+    // mark on a tree. `weightScaling` and `chargeAttack` are Tackle's and
+    // Body Slam's answers and are deliberately absent here: a claw has no
+    // wind-up and does not care what it weighs.
+    //
+    // Aggression — "Nothing Stays Closed": the predator's use of a claw.
+    //   Lane A is FILTH (the wound outlives the fight); lane B is THE SEAM
+    //   (one opening, through whatever is in the way). Different in kind:
+    //   attrition versus precision. Flavours: raw damage, piercing,
+    //   stealth/ambush, environment.
+    // Boldness — "The Hook": commitment, not armour. Lane A is DUG IN
+    //   (hooked into the ground, refusing to be moved); lane B is WHERE THE
+    //   FIGHT HAPPENS (a lunge that decides the tile). Different in kind:
+    //   holding a position versus choosing one. Flavours: stealth/ambush,
+    //   defence, aggressive movement, environment.
+    // Sociability — "The Mark": claws are how a colony talks. Lane A is THE
+    //   CALL (a raked flank is a name shouted); lane B is THE BOUNDARY (a
+    //   scored tree is a fight that never happens). Different in kind:
+    //   directing attention versus removing the reason to fight. Flavours:
+    //   rallying, ally buffing, calming, healing, wider AoE, no friendly
+    //   fire.
+    //
+    // Template v4: 45 nodes — three 12-node branches (opener, two parallel
+    // lanes each with their own notable, a deep notable both lanes converge
+    // on, a filler, a capstone) plus three 3-node crosslink bridges. Nine
+    // `prerequisitesAnyOf` (six lane notables, three deep notables), six
+    // fork nodes — every v2 fork preserved.
     tree: {
+      // --- Aggression: "Nothing Stays Closed" ---
       envenomed: {
         id: "envenomed",
         name: "Envenomed",
@@ -2267,6 +2822,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { statusChance: 0.15 },
       },
+      // Lane A — filth: what goes in with the claw, and where it goes next.
       venom_glands: {
         id: "venom_glands",
         name: "+5 Power",
@@ -2275,35 +2831,65 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { power: 5 },
       },
-      envenomed_footing: {
-        id: "envenomed_footing",
-        name: "+5 Accuracy",
-        cost: 1,
-        prerequisitesAnyOf: [["venom_glands"], ["frenzied_burrow"], ["colony_fury"]],
-        leaning: "aggression",
-        delta: { accuracy: 5 },
-      },
       deepening_venom: {
         id: "deepening_venom",
         name: "Deepening Venom",
         cost: 1,
-        prerequisites: ["envenomed_footing"],
+        prerequisites: ["venom_glands"],
         leaning: "aggression",
         delta: { statusChance: 0.1 },
       },
-      claw_conditioning: {
-        id: "claw_conditioning",
-        name: "+5 Power",
-        cost: 1,
-        prerequisites: ["deepening_venom"],
+      toxic_spread: {
+        id: "toxic_spread",
+        name: "Toxic Spread",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Sociability <->
+        // Aggression bridge's own notable (Feed the Den).
+        prerequisitesAnyOf: [["deepening_venom"], ["feed_the_den"]],
         leaning: "aggression",
-        delta: { power: 5 },
+        // The lane's whole point: the wound is the weapon, not the claw. It
+        // goes bad, and it goes around — whoever crowds in around the
+        // wounded one gets it too (status.ts's `maybeSpreadStatus`, generic
+        // over `StatusKind`, so this really is the poison spreading).
+        delta: { statusSpreads: true },
+      },
+      torn_tendon: {
+        id: "torn_tendon",
+        name: "Torn Tendon",
+        cost: 1,
+        prerequisites: ["toxic_spread"],
+        leaning: "aggression",
+        // A raked leg cannot wind up again. Adds ticks to whatever the
+        // defender already has recovering, rather than a fresh lockout.
+        delta: { jamCooldownTicks: 1, accuracy: 5 },
+      },
+      // Lane B — the seam: one opening, through whatever is in the way.
+      envenomed_footing: {
+        id: "envenomed_footing",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["envenomed"],
+        leaning: "aggression",
+        delta: { accuracy: 5 },
+      },
+      find_the_gap: {
+        id: "find_the_gap",
+        name: "Find the Gap",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Aggression <->
+        // Boldness bridge's own notable (Opened From Behind).
+        prerequisitesAnyOf: [["envenomed_footing"], ["opened_from_behind"]],
+        leaning: "aggression",
+        // What a claw answers that a fist does not: it goes BETWEEN things.
+        // A scaled or shelled body is still full of seams, so a matchup the
+        // type chart resists comes back toward neutral.
+        delta: { defensePenetration: 0.15, resistanceBreaker: { multiplier: 1.5 } },
       },
       toxin_overload: {
         id: "toxin_overload",
         name: "Toxin Overload",
         cost: 1,
-        prerequisites: ["claw_conditioning"],
+        prerequisites: ["find_the_gap"],
         excludes: ["widening_fangs"],
         leaning: "aggression",
         // Hits harder finishing off something already statused.
@@ -2313,40 +2899,49 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "widening_fangs",
         name: "Widening Fangs",
         cost: 1,
-        prerequisites: ["claw_conditioning"],
+        prerequisites: ["find_the_gap"],
         excludes: ["toxin_overload"],
         leaning: "aggression",
         // Trades away some of the earned chance to poison for whatever
         // poison does land hitting twice as hard.
         delta: { power: 10, statusChance: -0.1, statusSeverity: 2 },
       },
-      sandstorm_claws: {
-        id: "sandstorm_claws",
-        name: "Sandstorm Claws",
+      no_cover_left: {
+        id: "no_cover_left",
+        name: "No Cover Left",
         cost: 2,
-        prerequisitesAnyOf: [["toxin_overload"], ["widening_fangs"]],
+        // DEEP NOTABLE. Both lanes end here: filth and the seam add up to a
+        // target that can neither close the wound nor get out of sight.
+        prerequisitesAnyOf: [["torn_tendon"], ["toxin_overload"], ["widening_fangs"]],
         leaning: "aggression",
-        // Matches Sandshrew's own nocturnal activity pattern.
-        delta: { situationalBonus: { condition: "night", multiplier: 1.3 } },
+        // The rake goes through the bush the target ducked into and takes it
+        // with it — `terrainBurn` reverts that "bush" tile to plain floor
+        // for good (predation.ts's landed-hit hook), stripping the
+        // concealment the `"concealed"` bonus one branch over is built on.
+        // Something an observer can SEE happen, unlike another +5 power.
+        delta: { terrainBurn: true },
       },
-      claw_precision: {
-        id: "claw_precision",
-        name: "+5 Accuracy",
+      claw_conditioning: {
+        id: "claw_conditioning",
+        name: "+5 Power",
         cost: 1,
-        prerequisites: ["sandstorm_claws"],
+        prerequisites: ["no_cover_left"],
         leaning: "aggression",
-        delta: { accuracy: 5 },
+        delta: { power: 5 },
       },
-      toxic_spread: {
-        id: "toxic_spread",
-        name: "Toxic Spread",
+      everything_festers: {
+        id: "everything_festers",
+        name: "Everything Festers",
         cost: 2,
-        prerequisites: ["claw_precision"],
+        prerequisites: ["claw_conditioning"],
         leaning: "aggression",
-        // The branch's payoff for actually committing to the venom line —
-        // the poison jumps to whoever's standing next to the target too.
-        delta: { statusSpreads: true },
+        // CAPSTONE. The branch's thesis at full volume: the claw stops being
+        // the weapon entirely. Nearly every rake takes, and what it leaves
+        // burns three times as fast — and with Toxic Spread already taken,
+        // one hit is an outbreak rather than a wound.
+        delta: { statusChance: 0.35, statusSeverity: 3 },
       },
+      // --- Boldness: "The Hook" ---
       ambush_claws: {
         id: "ambush_claws",
         name: "Ambush Claws",
@@ -2354,6 +2949,49 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { situationalBonus: { condition: "concealed", multiplier: 1.3 } },
       },
+      // Lane A — dug in: hooked into the ground, and not letting go.
+      braced_paws: {
+        id: "braced_paws",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["ambush_claws"],
+        leaning: "boldness",
+        // No wind-up is the whole point of a claw: the paw is already back.
+        delta: { cooldownTicks: -1 },
+      },
+      burrow_guard: {
+        id: "burrow_guard",
+        name: "Burrow Guard",
+        cost: 1,
+        prerequisites: ["braced_paws"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.08 },
+        delta: {},
+      },
+      wont_let_go: {
+        id: "wont_let_go",
+        name: "Won't Let Go",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Aggression <->
+        // Boldness bridge's own notable (Opened From Behind).
+        prerequisitesAnyOf: [["burrow_guard"], ["opened_from_behind"]],
+        leaning: "boldness",
+        // Claws sink in and stay in. A real beat of committed downtime
+        // (`lockTicks` locks the USER, not the target — predation.ts) bought
+        // by a much heavier hit, benefit and cost in the same node.
+        delta: { lockTicks: 1, power: 12 },
+      },
+      spiked_curl: {
+        id: "spiked_curl",
+        name: "Spiked Curl",
+        cost: 1,
+        prerequisites: ["wont_let_go"],
+        leaning: "boldness",
+        // Sandshrew's own real spiked hide, curled up defensively.
+        grantsPassive: { kind: "thorns", value: 0.15 },
+        delta: {},
+      },
+      // Lane B — where the fight happens: the claw decides the tile.
       burrow_conditioning: {
         id: "burrow_conditioning",
         name: "+5 Power",
@@ -2362,35 +3000,21 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { power: 5 },
       },
-      burrow_strike_footing: {
-        id: "burrow_strike_footing",
-        name: "+5 Accuracy",
-        cost: 1,
-        prerequisitesAnyOf: [["burrow_conditioning"], ["frenzied_burrow"], ["guarded_den"]],
-        leaning: "boldness",
-        delta: { accuracy: 5 },
-      },
       dig_and_strike: {
         id: "dig_and_strike",
         name: "Dig-and-Strike",
-        cost: 1,
-        prerequisites: ["burrow_strike_footing"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Boldness <->
+        // Sociability bridge's own notable (Shouldered Aside).
+        prerequisitesAnyOf: [["burrow_conditioning"], ["shouldered_aside"]],
         leaning: "boldness",
         delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 2, timing: "beforeHit" } },
-      },
-      claw_momentum: {
-        id: "claw_momentum",
-        name: "+5 Power",
-        cost: 1,
-        prerequisites: ["dig_and_strike"],
-        leaning: "boldness",
-        delta: { power: 5 },
       },
       retreating_slash: {
         id: "retreating_slash",
         name: "Retreating Slash",
         cost: 1,
-        prerequisites: ["claw_momentum"],
+        prerequisites: ["dig_and_strike"],
         excludes: ["cornered_fury"],
         leaning: "boldness",
         delta: { forcedMovement: { mover: "attacker", direction: "away", tiles: 2, timing: "onHit" } },
@@ -2399,38 +3023,53 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "cornered_fury",
         name: "Cornered Fury",
         cost: 1,
-        prerequisites: ["claw_momentum"],
+        prerequisites: ["dig_and_strike"],
         excludes: ["retreating_slash"],
         leaning: "boldness",
         delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.3 } },
       },
-      burrow_guard: {
-        id: "burrow_guard",
-        name: "Burrow Guard",
+      churned_ground: {
+        id: "churned_ground",
+        name: "Churned Ground",
         cost: 2,
-        prerequisitesAnyOf: [["retreating_slash"], ["cornered_fury"]],
+        // DEEP NOTABLE. Both lanes end here: holding a tile and choosing a
+        // tile are the same skill once the ground itself is the weapon.
+        prerequisitesAnyOf: [["spiked_curl"], ["retreating_slash"], ["cornered_fury"]],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReduction", value: 0.08 },
-        delta: {},
+        // The claws tear the floor out from under whatever they hit — a
+        // landed hit converts the defender's floor/sand tile to real "mud"
+        // (predation.ts's `TERRAIN_FILLABLE`), and mud is a 0.5x speed
+        // multiplier for anything that steps on it afterwards
+        // (support.ts's `terrainSpeedMultiplier`). A permanent, visible
+        // furrow, not a hidden slow counter.
+        delta: { terrainFill: { terrain: "mud" } },
       },
-      burrow_resolve: {
-        id: "burrow_resolve",
-        name: "+5 Power",
+      raked_furrows: {
+        id: "raked_furrows",
+        name: "+8 Accuracy",
         cost: 1,
-        prerequisites: ["burrow_guard"],
+        prerequisites: ["churned_ground"],
         leaning: "boldness",
-        delta: { power: 5 },
+        delta: { accuracy: 8 },
       },
-      spiked_curl: {
-        id: "spiked_curl",
-        name: "Spiked Curl",
+      purchase: {
+        id: "purchase",
+        name: "Purchase",
         cost: 2,
-        prerequisites: ["burrow_resolve"],
+        prerequisites: ["raked_furrows"],
         leaning: "boldness",
-        // Sandshrew's own real spiked hide, curled up defensively.
-        grantsPassive: { kind: "thorns", value: 0.15 },
-        delta: {},
+        // CAPSTONE, and the pay-off for the branch's own deep notable rather
+        // than a bigger number: standing in the bog it churned up itself,
+        // the claws finally get something to brace against. Doubles the hit
+        // and spends the tile (predation.ts's `consumesOwnTerrain`, checked
+        // on the ATTACKER's tile before the damage formula). Rock Throw
+        // consumes a boulder the world happened to put there; this is the
+        // only node in the roster that eats terrain its own tree created —
+        // and the cost is real and legible, because standing in mud halves
+        // your own movement speed for as long as you stay there.
+        delta: { consumesOwnTerrain: { terrain: "mud", damageMultiplier: 2 } },
       },
+      // --- Sociability: "The Mark" ---
       colony_call: {
         id: "colony_call",
         name: "Colony Call",
@@ -2440,6 +3079,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // buffs a nearby colony-mate's attack for free.
         delta: { targetsAlly: true, allyEffectOnAttack: true, allyEffect: { buff: { stat: "attack", stage: 1, ticks: 20 } } },
       },
+      // Lane A — the call: a raked flank is a name shouted.
       den_footing: {
         id: "den_footing",
         name: "+5 Accuracy",
@@ -2452,18 +3092,21 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "colony_bond_footing",
         name: "+5 Power",
         cost: 1,
-        prerequisitesAnyOf: [["den_footing"], ["guarded_den"], ["colony_fury"]],
+        prerequisites: ["den_footing"],
         leaning: "sociability",
         delta: { power: 5 },
       },
       rally_the_colony: {
         id: "rally_the_colony",
         name: "Rally the Colony",
-        cost: 1,
-        prerequisites: ["colony_bond_footing"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Boldness <->
+        // Sociability bridge's own notable (Shouldered Aside).
+        prerequisitesAnyOf: [["colony_bond_footing"], ["shouldered_aside"]],
         leaning: "sociability",
         // A landed, non-killing hit marks the predator for the whole colony
-        // to converge on — genuinely stronger than buffing one ally.
+        // to converge on — genuinely stronger than buffing one ally, because
+        // it changes what other agents independently decide to do.
         delta: { rallyCall: { ticks: 20 } },
       },
       den_precision: {
@@ -2474,11 +3117,38 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { accuracy: 5 },
       },
+      // Lane B — the boundary: a scored tree is a fight that never happens.
+      worn_grooves: {
+        id: "worn_grooves",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["colony_call"],
+        leaning: "sociability",
+        // The same four grooves, cut over and over into the same bark until
+        // the motion costs nothing.
+        delta: { cooldownTicks: -1 },
+      },
+      line_in_the_bark: {
+        id: "line_in_the_bark",
+        name: "Line in the Bark",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or via the Sociability <->
+        // Aggression bridge's own notable (Feed the Den).
+        prerequisitesAnyOf: [["worn_grooves"], ["feed_the_den"]],
+        leaning: "sociability",
+        // The lane's thesis, and the one Sociability payoff that is measured
+        // in fights that DON'T happen: a boundary everyone can read means
+        // this one never starts a rivalry over a contested tile
+        // (herdConflict.ts's `applyHerdRivalryConflict`, a flat opt-out —
+        // a truthy flag, so it cannot stack into anything).
+        grantsPassive: { kind: "nonTerritorial", value: 1 },
+        delta: { accuracy: 5 },
+      },
       colony_guard: {
         id: "colony_guard",
         name: "Colony Guard",
         cost: 1,
-        prerequisites: ["den_precision"],
+        prerequisites: ["line_in_the_bark"],
         excludes: ["tunnel_runner"],
         leaning: "sociability",
         grantsPassive: { kind: "damageReductionFlat", value: 1 },
@@ -2488,7 +3158,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "tunnel_runner",
         name: "Tunnel Runner",
         cost: 1,
-        prerequisites: ["den_precision"],
+        prerequisites: ["line_in_the_bark"],
         excludes: ["colony_guard"],
         leaning: "sociability",
         delta: { power: 10, jamCooldownTicks: 1 },
@@ -2497,35 +3167,54 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "communal_foraging",
         name: "Communal Foraging",
         cost: 2,
-        prerequisitesAnyOf: [["colony_guard"], ["tunnel_runner"]],
+        // DEEP NOTABLE. Both lanes end here: a colony that answers a call
+        // and doesn't fight over ground is a colony that eats.
+        prerequisitesAnyOf: [["den_precision"], ["colony_guard"], ["tunnel_runner"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regen", value: 0.03 },
-        delta: {},
-      },
-      den_instinct: {
-        id: "den_instinct",
-        name: "+5 Accuracy",
-        cost: 1,
-        prerequisites: ["communal_foraging"],
-        leaning: "sociability",
-        delta: { accuracy: 5 },
+        // Claws are a foraging tool before they are a weapon — this is the
+        // node's own name finally meaning what it says. Extra
+        // `digTicksAccrued` on the canopy-harvest path (needs.ts, which
+        // picks the agent's first ready damage move to knock fruit down),
+        // instead of the flat `regen` passive it used to hide behind. A
+        // visible burst of food on the map beats a hidden meter, and it
+        // takes this tree's stacked healing down with it.
+        delta: { gatherBurst: 3 },
       },
       colony_warmth: {
         id: "colony_warmth",
         name: "Colony Warmth",
         cost: 2,
-        prerequisites: ["den_instinct"],
+        prerequisites: ["communal_foraging"],
         leaning: "sociability",
-        // The only two-passive keystone among these four trees — earned
-        // because this is the one branch guaranteed to actually fire for
-        // real herd-mates today, Diglett included.
+        // The roster's only two-passive node — earned because this is the
+        // one branch guaranteed to actually fire for real herd-mates today,
+        // Diglett included.
         grantsPassives: [
           { kind: "healAura", value: 0.01 },
           { kind: "regen", value: 0.04 },
         ],
         delta: {},
       },
-      // Crosslink: Aggression <-> Boldness — bonus vs. a flanking target.
+      never_your_own: {
+        id: "never_your_own",
+        name: "Never Your Own",
+        cost: 2,
+        prerequisites: ["colony_warmth"],
+        leaning: "sociability",
+        // CAPSTONE, and the only shape change in the tree (principle 14 —
+        // a footprint change is notable-tier currency, spent once). The
+        // whole point of a claw among kin is that it is a wild, unaimed
+        // swipe; a colony animal that has spent its whole life scoring
+        // boundaries with the same four claws can widen it into a three-tile
+        // arc and STILL not touch a herd-mate standing in it
+        // (`excludesAllies`, resolveAreaHit). Not "an AoE, but bigger" —
+        // the roster's three `excludesAllies` moves were all AoE already;
+        // this is a point move that learns to sweep without cutting kin.
+        delta: { shape: { kind: "cone", length: 1, width: 1 }, hitsArea: true, excludesAllies: true },
+      },
+      // --- Bridges ---
+      // Crosslink: Aggression <-> Boldness — the flank of something that has
+      // not turned around yet is where the seams already are.
       frenzied_burrow: {
         id: "frenzied_burrow",
         name: "Frenzied Burrow",
@@ -2534,15 +3223,64 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { situationalBonus: { condition: "flanking", multiplier: 1.3 } },
       },
-      // Crosslink: Boldness <-> Sociability — shared damageReduction.
+      wrong_side: {
+        id: "wrong_side",
+        name: "Wrong Side",
+        cost: 1,
+        prerequisites: ["frenzied_burrow"],
+        leaning: "aggression",
+        // Deepens Frenzied Burrow's own flanking bonus (overwrite — restates
+        // the full multiplier, not an increment).
+        delta: { situationalBonus: { condition: "flanking", multiplier: 1.5 }, accuracy: 5 },
+      },
+      opened_from_behind: {
+        id: "opened_from_behind",
+        name: "Opened From Behind",
+        cost: 2,
+        prerequisites: ["wrong_side"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE. Escalates its own crosslink's lever one more step
+        // and adds the crit stage that a back turned actually deserves.
+        // Lands one lane notable deep in each branch it connects — Find the
+        // Gap (Aggression's seam lane) and Won't Let Go (Boldness's dug-in
+        // lane) — complementing both rather than repeating either.
+        delta: { situationalBonus: { condition: "flanking", multiplier: 1.9 }, critRateStage: 1 },
+      },
+      // Crosslink: Boldness <-> Sociability — standing in the den's mouth.
+      // Was a second flat `damageReductionFlat` node duplicating Colony
+      // Guard's; MOVES_DESIGN.md's "Stop overusing damageReduction" and the
+      // per-species passive totals both argue against it, and a claw hooked
+      // into an intruder to swing it out of the doorway is the thing the
+      // node was always describing.
       guarded_den: {
         id: "guarded_den",
         name: "Guarded Den",
         cost: 1,
         prerequisites: ["ambush_claws", "colony_call"],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReductionFlat", value: 1 },
-        delta: {},
+        delta: { positionSwap: true, power: 5 },
+      },
+      through_the_doorway: {
+        id: "through_the_doorway",
+        name: "Through the Doorway",
+        cost: 1,
+        prerequisites: ["guarded_den"],
+        leaning: "boldness",
+        // Deepens Guarded Den's own swap: it does not just trade places, it
+        // keeps hauling.
+        delta: { positionSwap: true, positionSwapPull: 1 },
+      },
+      shouldered_aside: {
+        id: "shouldered_aside",
+        name: "Shouldered Aside",
+        cost: 2,
+        prerequisites: ["through_the_doorway"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE. One more tile of haul on the same swap. Lands on
+        // Dig-and-Strike (Boldness's lunge lane) and Rally the Colony
+        // (Sociability's call lane) — dragging a target out of the den mouth
+        // and into the middle of the colony is both branches' business.
+        delta: { positionSwap: true, positionSwapPull: 1, accuracy: 8 },
       },
       // Crosslink: Sociability <-> Aggression — a colony-backed strike that
       // recoups a little of what it deals, not another self-buff.
@@ -2552,6 +3290,28 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["colony_call", "envenomed"],
         leaning: "sociability",
+        delta: { lifestealFraction: 0.08 },
+      },
+      red_teeth: {
+        id: "red_teeth",
+        name: "Red Teeth",
+        cost: 1,
+        prerequisites: ["colony_fury"],
+        leaning: "sociability",
+        // Deepens Colony Fury's own lifesteal (additive).
+        delta: { lifestealFraction: 0.04, accuracy: 5 },
+      },
+      feed_the_den: {
+        id: "feed_the_den",
+        name: "Feed the Den",
+        cost: 2,
+        prerequisites: ["red_teeth"],
+        leaning: "aggression",
+        // BRIDGE NOTABLE. The same lever again, at the size that makes a
+        // hunting party self-sufficient. Lands on Toxic Spread (Aggression's
+        // filth lane) and Line in the Bark (Sociability's boundary lane).
+        // 8/4/8 across the bridge tops out at 20% for a full 5-point walk —
+        // above the roster's ~10% median, below vine_whip's 38% ceiling.
         delta: { lifestealFraction: 0.08 },
       },
     },
@@ -3018,14 +3778,53 @@ export const MOVES: Record<string, MoveSpec> = {
     // already-favorable Fire matchup, plus a storm-specific opener and a
     // Boldness branch built around un-buffing the target instead of buffing
     // the user.
+    //
+    // v4 conversion (MOVES_DESIGN.md's "Skill-tree template v4 — the
+    // two-lane standard"): 33 -> 45 nodes, 12 per branch, 9 anyOf, 3 real
+    // three-node bridges. Every v3 fork kept, relocated to the tail of a
+    // lane.
+    //
+    // THE FANTASY, written before a single node moved: a hairline jet fired
+    // through a pinched mouth — pressure, not volume. Forty power, a
+    // twenty-five-shot pool, two tiles of reach. It does not knock anything
+    // over; it stings, it blinds, and it WETS. The danger is not the hit, it
+    // is the repetition: every landed shot leaves standing water where it
+    // struck and puts a real fertility boost into that ground (`terrainFill`
+    // -> `waterSoil`, predation.ts), so a creature that keeps firing is
+    // quietly rebuilding the ground the fight is happening on. Hydro Pump is
+    // one release you can barely aim; Water Gun is the same animal doing one
+    // small exact thing forty times, and the map remembers every one of them.
+    //
+    // - Aggression ("The Fine Point"): aggression for a squirt gun is
+    //   NARROWING the aperture, not opening it. Lane A is the CUT — one shot,
+    //   thinner, further, through the guard (penetration, then Piercing Jet
+    //   turning the two-tile line into a three-tile one, this tree's only
+    //   `shape` setter). Lane B is the RATE — how often it arrives and how
+    //   many arrive at once, ending at the preserved heavy-vs-double fork.
+    //   Volume against severity, not two flavours of "more".
+    // - Boldness ("Standing Water"): the most fragile spawned agent in the
+    //   sim is bold by CHOOSING WHERE the fight happens and turning that
+    //   ground into its own pond. Lane A is SPACE (the knockback/recoil
+    //   chain — nothing gets to arm's length). Lane B is PLANTED: Drink the
+    //   Puddle spends a water tile the user is standing on for real bonus
+    //   damage — the base move's own `terrainFill` is what put it there, so
+    //   this tree, uniquely, closes the loop instead of draining the map.
+    // - Sociability ("The Waterhole"): a small repeatable water move is
+    //   INFRASTRUCTURE. Lane A is the pod (heal, steel, share). Lane B is
+    //   command — Rally the Shoal marks the threat so the whole herd's own
+    //   targeting turns onto it, then either shield the pod or press the
+    //   mark. Care against command, not two sizes of buff.
     tree: {
+      // ---------------------------------------------------------------
+      // AGGRESSION — "The Fine Point". 12 nodes.
+      // ---------------------------------------------------------------
       high_pressure_jet: {
         id: "high_pressure_jet",
         name: "High-Pressure Jet",
         cost: 1,
         leaning: "aggression",
-        // A genuine barometric-pressure hook — hits hardest specifically
-        // during a storm, not just any rain.
+        // OPENER. A genuine barometric-pressure hook — hits hardest
+        // specifically during a storm, not just any rain.
         delta: { situationalBonus: { condition: "storm", multiplier: 1.4 } },
       },
       jet_conditioning: {
@@ -3034,55 +3833,100 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["high_pressure_jet"],
         leaning: "aggression",
+        // LANE A filler.
         delta: { power: 5 },
       },
-      pressurized_footing: {
-        id: "pressurized_footing",
-        name: "+5 Accuracy",
+      narrowed_aperture: {
+        id: "narrowed_aperture",
+        name: "Narrowed Aperture",
         cost: 1,
-        prerequisitesAnyOf: [["jet_conditioning"], ["surging_retreat"], ["rising_tide"]],
+        prerequisites: ["jet_conditioning"],
         leaning: "aggression",
-        delta: { accuracy: 5 },
+        // LANE A filler. The whole branch in one lever: the same water
+        // through a smaller hole finds the gaps in a guard.
+        delta: { defensePenetration: 0.2 },
       },
       piercing_jet: {
         id: "piercing_jet",
         name: "Piercing Jet",
         cost: 1,
-        prerequisites: ["pressurized_footing"],
+        // LANE NOTABLE A, and the landing point for the
+        // Aggression<->Boldness bridge.
+        prerequisitesAnyOf: [["narrowed_aperture"], ["full_bore"]],
         leaning: "aggression",
-        delta: { range: { max: 3 } },
+        // The tree's ONLY `shape` setter (overwrite field, notable-tier
+        // currency per principle 14): the base two-tile line becomes three,
+        // with the `range.max` to actually decide to fire from there. Still
+        // single-file — this lane makes the jet longer and thinner, never
+        // wider. Measured against the base shape, not guessed: line 2 -> 3.
+        delta: { shape: { kind: "line", length: 3 }, range: { max: 3 } },
       },
       jet_precision: {
         id: "jet_precision",
-        name: "+5 Accuracy",
+        name: "Deeper Bite",
         cost: 1,
         prerequisites: ["piercing_jet"],
         leaning: "aggression",
-        delta: { accuracy: 5 },
+        // Repurposed from "+5 Accuracy": Water Gun's canon accuracy is
+        // already 100, and `rollAccuracy` (combat.ts) only ever spends the
+        // surplus through `stormAccuracyMultiplier`. Six of this tree's 33
+        // nodes were +5 Accuracy; four of them have been given real levers
+        // and two kept where the storm hook makes them deliberate.
+        delta: { power: 5, defensePenetration: 0.15 },
+      },
+      pressurized_footing: {
+        id: "pressurized_footing",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["high_pressure_jet"],
+        leaning: "aggression",
+        // LANE B filler. Lane B is the repetition the whole fantasy runs on,
+        // so it opens by shortening the gap between shots. (Also repurposed
+        // from a +5 Accuracy node — see Deeper Bite above.)
+        delta: { cooldownTicks: -1 },
+      },
+      stuttering_jet: {
+        id: "stuttering_jet",
+        name: "Stuttering Jet",
+        cost: 1,
+        // LANE NOTABLE B, and the landing point for the
+        // Sociability<->Aggression bridge.
+        prerequisitesAnyOf: [["pressurized_footing"], ["rip_current"]],
+        leaning: "aggression",
+        // The pressure is no longer smooth: the jet breaks into a stutter
+        // that sometimes lands twice, and the mouth refills faster. Volume,
+        // where lane A bought severity.
+        delta: { hits: { min: 1, max: 2 }, cooldownTicks: -1 },
       },
       torrent: {
         id: "torrent",
         name: "Torrent",
         cost: 1,
-        prerequisites: ["jet_precision"],
+        prerequisites: ["stuttering_jet"],
         excludes: ["rapid_jets"],
         leaning: "aggression",
+        // Preserved v3 fork, relocated to the tail of the rate lane: give up
+        // the stutter's tempo for one heavy shot.
         delta: { power: 10, cooldownTicks: 1 },
       },
       rapid_jets: {
         id: "rapid_jets",
         name: "Rapid Jets",
         cost: 1,
-        prerequisites: ["jet_precision"],
+        prerequisites: ["stuttering_jet"],
         excludes: ["torrent"],
         leaning: "aggression",
+        // The other half of the same fork: commit to the stutter instead —
+        // always two, never one.
         delta: { hits: { min: 2, max: 2 }, power: -10 },
       },
       deluge: {
         id: "deluge",
         name: "Deluge",
         cost: 2,
-        prerequisitesAnyOf: [["torrent"], ["rapid_jets"]],
+        // DEEP NOTABLE: the cut lane and both sides of the rate fork end
+        // here.
+        prerequisitesAnyOf: [["jet_precision"], ["torrent"], ["rapid_jets"]],
         leaning: "aggression",
         delta: { situationalBonus: { condition: "rain", multiplier: 1.3 } },
       },
@@ -3092,6 +3936,11 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["deluge"],
         leaning: "aggression",
+        // One of the two accuracy fillers deliberately KEPT: this is the
+        // branch whose opener wants a storm, and `stormAccuracyMultiplier`
+        // (weather.ts) is the one real caller of `rollAccuracy`'s extra
+        // multiplier — so a storm build is buying back exactly what the
+        // storm takes off it.
         delta: { accuracy: 5 },
       },
       overwhelming_current: {
@@ -3100,16 +3949,21 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["jet_focus"],
         leaning: "aggression",
-        // Water Gun is resisted by Grass, Water, and Dragon — this fixes a
-        // real, printed weakness instead of padding an already-favorable
-        // matchup vs. Fire.
+        // CAPSTONE. Water Gun is resisted by Grass, Water, and Dragon — this
+        // fixes a real, printed weakness instead of padding an
+        // already-favorable matchup vs. Fire.
         delta: { resistanceBreaker: { multiplier: 2 } },
       },
+
+      // ---------------------------------------------------------------
+      // BOLDNESS — "Standing Water". 12 nodes.
+      // ---------------------------------------------------------------
       knockback_spray: {
         id: "knockback_spray",
         name: "Knockback Spray",
         cost: 1,
         leaning: "boldness",
+        // OPENER.
         delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" } },
       },
       spray_conditioning: {
@@ -3118,39 +3972,84 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["knockback_spray"],
         leaning: "boldness",
+        // LANE A filler.
         delta: { power: 5 },
       },
       evasive_spray_footing: {
         id: "evasive_spray_footing",
         name: "+5 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["spray_conditioning"], ["surging_retreat"], ["sheltering_current"]],
+        prerequisites: ["spray_conditioning"],
         leaning: "boldness",
+        // LANE A filler. The second accuracy node kept on purpose: this is
+        // the lane that stands in the open holding a spot, which is where a
+        // storm's accuracy penalty actually bites.
         delta: { accuracy: 5 },
       },
       retreating_current: {
         id: "retreating_current",
         name: "Retreating Current",
         cost: 1,
-        prerequisites: ["evasive_spray_footing"],
+        // LANE NOTABLE A, and the landing point for the
+        // Boldness<->Sociability bridge.
+        prerequisitesAnyOf: [["evasive_spray_footing"], ["breakwater"]],
         leaning: "boldness",
+        // Lane A is SPACE: the jet's own recoil is the retreat. Nothing gets
+        // to arm's length of the most fragile agent in the sim.
         delta: { forcedMovement: { mover: "attacker", direction: "away", tiles: 2, timing: "onHit" } },
       },
-      current_precision: {
-        id: "current_precision",
-        name: "+5 Accuracy",
+      tidal_retreat: {
+        id: "tidal_retreat",
+        name: "Tidal Retreat",
         cost: 1,
         prerequisites: ["retreating_current"],
         leaning: "boldness",
-        delta: { accuracy: 5 },
+        // A real, always-usable panic-button retreat for the sim's most
+        // fragile spawned agent. `forcedMovement` is an overwrite field, so
+        // this deliberately sits downstream of Retreating Current as
+        // escalation (2 tiles -> 3) rather than as a rival setting.
+        delta: { forcedMovement: { mover: "attacker", direction: "away", tiles: 3, timing: "onHit" } },
+      },
+      current_precision: {
+        id: "current_precision",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["knockback_spray"],
+        leaning: "boldness",
+        // LANE B filler, repurposed from "+5 Accuracy" (see Deeper Bite).
+        // The planted lane wants weight behind the shot, not a hit chance it
+        // already has.
+        delta: { power: 5 },
+      },
+      drink_the_puddle: {
+        id: "drink_the_puddle",
+        name: "Drink the Puddle",
+        cost: 1,
+        // LANE NOTABLE B, and the landing point for the
+        // Aggression<->Boldness bridge.
+        prerequisitesAnyOf: [["current_precision"], ["full_bore"]],
+        leaning: "boldness",
+        // The loop this move and no other can close. `consumesOwnTerrain`
+        // (predation.ts) checks the ATTACKER's own tile: standing in water,
+        // the shot draws from the tile itself for 1.5x and the tile reverts
+        // to floor. Hydro Pump drafted this exact node and cut it, because a
+        // Water species fights standing on water constantly and deleting
+        // those tiles is a real ecology regression on a metered resource.
+        // Water Gun is the one move that answers that objection: its base
+        // `terrainFill` puts a fresh water tile under every landed,
+        // non-killing hit, so the tree that spends puddles is the same tree
+        // that makes them. Net-neutral on the map, and the only node in the
+        // roster where the move's own side effect is its own ammunition.
+        delta: { consumesOwnTerrain: { terrain: "water", damageMultiplier: 1.5 } },
       },
       undertow: {
         id: "undertow",
         name: "Undertow",
         cost: 1,
-        prerequisites: ["current_precision"],
+        prerequisites: ["drink_the_puddle"],
         excludes: ["bubble_shield"],
         leaning: "boldness",
+        // Preserved v3 fork, relocated to the tail of the planted lane.
         // Washes the target's own footing out from under it.
         delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -1, ticks: 20 } },
       },
@@ -3158,45 +4057,74 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "bubble_shield",
         name: "Bubble Shield",
         cost: 1,
-        prerequisites: ["current_precision"],
+        prerequisites: ["drink_the_puddle"],
         excludes: ["undertow"],
         leaning: "boldness",
+        // The other half: steel yourself instead of unsteadying them. Note
+        // this side feeds Braced Spray below, since a positive Defense stage
+        // is part of the engine's own weight term (predation.ts) — nothing
+        // pairs the two nodes explicitly, they just both talk to stat stages.
         delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 20 } },
       },
       tidal_guard: {
         id: "tidal_guard",
         name: "Tidal Guard",
         cost: 2,
-        prerequisitesAnyOf: [["undertow"], ["bubble_shield"]],
+        // DEEP NOTABLE: the space lane and both sides of the planted lane's
+        // fork end here.
+        prerequisitesAnyOf: [["tidal_retreat"], ["undertow"], ["bubble_shield"]],
         leaning: "boldness",
         grantsPassive: { kind: "damageReduction", value: 0.08 },
         delta: {},
       },
-      tidal_precision: {
-        id: "tidal_precision",
-        name: "+5 Accuracy",
+      braced_spray: {
+        id: "braced_spray",
+        name: "Braced Spray",
         cost: 1,
         prerequisites: ["tidal_guard"],
         leaning: "boldness",
-        delta: { accuracy: 5 },
+        // Replaces the old "+5 Accuracy" filler in this slot with a real
+        // lever, and a systemic one: `weightScaling` (predation.ts) reads
+        // the attacker's own maxHp AND its positive Defense stages, so a
+        // build that came through Bubble Shield gets more out of this than
+        // one that came through Undertow. The setup is not wired up — both
+        // halves just talk to the stat-stage system already.
+        delta: { weightScaling: { factor: 0.2 } },
       },
-      tidal_retreat: {
-        id: "tidal_retreat",
-        name: "Tidal Retreat",
+      sheeting_spray: {
+        id: "sheeting_spray",
+        name: "Sheeting Spray",
         cost: 2,
-        prerequisites: ["tidal_precision"],
+        prerequisites: ["braced_spray"],
         leaning: "boldness",
-        // A real, always-usable panic-button retreat for the sim's most
-        // fragile spawned agent.
-        delta: { forcedMovement: { mover: "attacker", direction: "away", tiles: 3, timing: "onHit" } },
+        // CAPSTONE, and the payoff the whole branch has been standing still
+        // for: the jet stops being a jet. `hitsArea` (resolveAreaHit,
+        // predation.ts) makes every living agent standing in the resolved
+        // line take the hit instead of only the first body — with Piercing
+        // Jet that is three tiles of front, on a move whose whole identity
+        // was one tiny target at a time. The only node in the roster that
+        // turns a single-target line into an area sweep.
+        //
+        // Measured, not assumed: this does NOT multiply the move's own
+        // puddle. `terrainFill` sits behind `isPrimaryTarget` in
+        // `resolveHitAgainstTarget`, so an area sweep still leaves exactly
+        // one water tile per cast (verified live: 1 tile, base move and
+        // Sheeting Spray alike, while the secondary target went from 0
+        // damage to 33). Flooding the map is still a matter of firing a
+        // lot, which is the branch's point.
+        delta: { hitsArea: true },
       },
+
+      // ---------------------------------------------------------------
+      // SOCIABILITY — "The Waterhole". 12 nodes.
+      // ---------------------------------------------------------------
       shared_current: {
         id: "shared_current",
         name: "Shared Current",
         cost: 1,
         leaning: "sociability",
-        // The splash from a landed hit also heals a nearby hurt herd-mate
-        // for free, on top of the dedicated idle-tick support use.
+        // OPENER. The splash from a landed hit also heals a nearby hurt
+        // herd-mate for free, on top of the dedicated idle-tick support use.
         delta: { targetsAlly: true, allyEffectOnAttack: true, allyEffect: { healFraction: 0.15 } },
       },
       pond_footing: {
@@ -3205,39 +4133,71 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["shared_current"],
         leaning: "sociability",
+        // LANE A filler.
         delta: { accuracy: 5 },
       },
       pond_kinship_footing: {
         id: "pond_kinship_footing",
         name: "+5 Power",
         cost: 1,
-        prerequisitesAnyOf: [["pond_footing"], ["sheltering_current"], ["rising_tide"]],
+        prerequisites: ["pond_footing"],
         leaning: "sociability",
+        // LANE A filler.
         delta: { power: 5 },
       },
       calming_wave: {
         id: "calming_wave",
         name: "Calming Wave",
         cost: 1,
-        prerequisites: ["pond_kinship_footing"],
+        // LANE NOTABLE A, and the landing point for the
+        // Boldness<->Sociability bridge.
+        prerequisitesAnyOf: [["pond_kinship_footing"], ["breakwater"]],
         leaning: "sociability",
+        // Lane A is CARE: what the waterhole does for the bodies around it.
         delta: { targetsAlly: true, allyEffect: { buff: { stat: "defense", stage: 1, ticks: 20 } } },
       },
       wave_precision: {
         id: "wave_precision",
-        name: "+5 Accuracy",
+        name: "+5 Power",
         cost: 1,
         prerequisites: ["calming_wave"],
         leaning: "sociability",
+        // Repurposed from "+5 Accuracy" (see Deeper Bite).
+        delta: { power: 5 },
+      },
+      tide_instinct: {
+        id: "tide_instinct",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["shared_current"],
+        leaning: "sociability",
+        // LANE B filler.
         delta: { accuracy: 5 },
+      },
+      rally_the_shoal: {
+        id: "rally_the_shoal",
+        name: "Rally the Shoal",
+        cost: 1,
+        // LANE NOTABLE B, and the landing point for the
+        // Sociability<->Aggression bridge.
+        prerequisitesAnyOf: [["tide_instinct"], ["rip_current"]],
+        leaning: "sociability",
+        // Lane B is COMMAND, and it differs from lane A in kind rather than
+        // size: a mark changes what other agents independently decide to do
+        // (`rallyMarkTicksRemaining` -> `preferMarked` targeting) instead of
+        // adding a number to one of them. The small one at the waterhole is
+        // the one that sees the threat first and says so.
+        delta: { rallyCall: { ticks: 20 } },
       },
       undertow_guard: {
         id: "undertow_guard",
         name: "Undertow Guard",
         cost: 1,
-        prerequisites: ["wave_precision"],
+        prerequisites: ["rally_the_shoal"],
         excludes: ["riptide_rush"],
         leaning: "sociability",
+        // Preserved v3 fork, relocated to the tail of the command lane:
+        // having marked the threat, cover the pod...
         grantsPassive: { kind: "damageReductionFlat", value: 1 },
         delta: { power: -5 },
       },
@@ -3245,39 +4205,56 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "riptide_rush",
         name: "Riptide Rush",
         cost: 1,
-        prerequisites: ["wave_precision"],
+        prerequisites: ["rally_the_shoal"],
         excludes: ["undertow_guard"],
         leaning: "sociability",
+        // ...or go at the thing you just marked yourself.
         delta: { power: 10, jamCooldownTicks: 1 },
       },
       steady_tides: {
         id: "steady_tides",
         name: "Steady Tides",
         cost: 2,
-        prerequisitesAnyOf: [["undertow_guard"], ["riptide_rush"]],
+        // DEEP NOTABLE: the care lane and both sides of the command lane's
+        // fork end here.
+        prerequisitesAnyOf: [["wave_precision"], ["undertow_guard"], ["riptide_rush"]],
         leaning: "sociability",
         grantsPassive: { kind: "regen", value: 0.03 },
         delta: {},
       },
-      tide_instinct: {
-        id: "tide_instinct",
-        name: "+5 Accuracy",
+      fuller_share: {
+        id: "fuller_share",
+        name: "Fuller Share",
         cost: 1,
         prerequisites: ["steady_tides"],
         leaning: "sociability",
-        delta: { accuracy: 5 },
+        // A `delta` rather than another passive, deliberately: passives sum
+        // uncapped across every tree a species knows, and this tree already
+        // grants three. Deepens the opener's own ally effect instead — the
+        // splash now both heals and steels, and holds longer.
+        delta: { allyEffect: { healFraction: 0.25, buff: { stat: "defense", stage: 1, ticks: 30 } } },
       },
       tidal_bond: {
         id: "tidal_bond",
         name: "Tidal Bond",
         cost: 2,
-        prerequisites: ["tide_instinct"],
+        prerequisites: ["fuller_share"],
         leaning: "sociability",
+        // CAPSTONE.
         grantsPassive: { kind: "healAura", value: 0.01 },
         delta: {},
       },
+
+      // ---------------------------------------------------------------
+      // BRIDGES — crosslink -> filler deepening its own lever -> cost-2
+      // notable, each landing on ONE lane notable per branch it connects,
+      // and on the lane it COMPLEMENTS rather than the one it matches.
+      // ---------------------------------------------------------------
+
       // Crosslink: Aggression <-> Boldness — a shared burst of confidence
-      // off a forceful hit.
+      // off a forceful hit. Lands on Piercing Jet (the cut lane) and Drink
+      // the Puddle (the planted lane): an attack buff that only pays off if
+      // you keep firing from the same spot.
       surging_retreat: {
         id: "surging_retreat",
         name: "Surging Retreat",
@@ -3286,7 +4263,32 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 12 } },
       },
-      // Crosslink: Boldness <-> Sociability — shared damageReduction.
+      held_pressure: {
+        id: "held_pressure",
+        name: "Held Pressure",
+        cost: 1,
+        prerequisites: ["surging_retreat"],
+        leaning: "boldness",
+        // Bridge filler, deepening its own crosslink's lever (principle 13):
+        // the same +1 Attack, held twice as long.
+        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 24 }, power: 4 },
+      },
+      full_bore: {
+        id: "full_bore",
+        name: "Full Bore",
+        cost: 2,
+        prerequisites: ["held_pressure"],
+        leaning: "aggression",
+        // Bridge notable: the same lever escalated, not a new stat grabbed —
+        // +2 Attack on hit, and the valve is open far enough that the stream
+        // starts going through guards on its own.
+        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 2, ticks: 24 }, defensePenetration: 0.2 },
+      },
+
+      // Crosslink: Boldness <-> Sociability — interposing. Standing between
+      // the pod and the thing, and denying it its tempo rather than out-
+      // tanking it. Lands on Retreating Current (the space lane) and Calming
+      // Wave (the care lane).
       sheltering_current: {
         id: "sheltering_current",
         name: "Sheltering Current",
@@ -3294,10 +4296,35 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["knockback_spray", "shared_current"],
         leaning: "boldness",
         grantsPassive: { kind: "damageReductionFlat", value: 1 },
-        delta: {},
+        // `delta` added in the v4 pass so this bridge has a lever of its own
+        // for its filler to deepen (principle 13) without granting a second
+        // passive. A jet in the eyes does not wound — it costs the thing its
+        // next move, which is what "sheltering" actually buys the pod.
+        delta: { jamCooldownTicks: 1 },
       },
+      blinding_mist: {
+        id: "blinding_mist",
+        name: "Blinding Mist",
+        cost: 1,
+        prerequisites: ["sheltering_current"],
+        leaning: "sociability",
+        delta: { jamCooldownTicks: 1 },
+      },
+      breakwater: {
+        id: "breakwater",
+        name: "Breakwater",
+        cost: 2,
+        prerequisites: ["blinding_mist"],
+        leaning: "boldness",
+        // Bridge notable, escalating the crosslink's own lever: two more
+        // ticks off whatever the thing was about to do.
+        delta: { jamCooldownTicks: 2, power: 4 },
+      },
+
       // Crosslink: Sociability <-> Aggression — a shared burst of
-      // coordinated ferocity, not another flanking check.
+      // coordinated ferocity, not another flanking check. Lands on Rally the
+      // Shoal (the command lane) and Stuttering Jet (the rate lane): more
+      // shots, each likelier to find a seam.
       rising_tide: {
         id: "rising_tide",
         name: "Rising Tide",
@@ -3305,6 +4332,26 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["shared_current", "high_pressure_jet"],
         leaning: "sociability",
         delta: { critRateStage: 1 },
+      },
+      sharpened_shoal: {
+        id: "sharpened_shoal",
+        name: "+1 Crit Rate Stage",
+        cost: 1,
+        prerequisites: ["rising_tide"],
+        leaning: "aggression",
+        delta: { critRateStage: 1 },
+      },
+      rip_current: {
+        id: "rip_current",
+        name: "Rip Current",
+        cost: 2,
+        prerequisites: ["sharpened_shoal"],
+        leaning: "sociability",
+        // Bridge notable. The third and LAST crit stage this tree grants,
+        // and that is not a coincidence: `rollCritical` (combat.ts) clamps
+        // the stage to 3, so a fourth would be a node that provably does
+        // nothing. The whole tree's crit budget lives on this one bridge.
+        delta: { critRateStage: 1, power: 5 },
       },
     },
   },

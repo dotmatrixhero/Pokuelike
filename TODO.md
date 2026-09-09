@@ -7762,3 +7762,78 @@ feature rather than a detail.
       after a herd death), no existing code to extend, needs its own
       design/tuning pass rather than being bolted on blind. Still on the
       menu, not decided against.
+
+
+## Four-move cap, forgetting and the refund — BUILT
+
+Direct: *"we technically don't cap moves to 4 moves per unit. I think we should
+add a cap. Force forgetting. Also forgetting gives you skill points back to
+reinvest. I think Ai on deciding to forget a move or not should be sharpened a
+bit."* Then: *"the 4 moved cap applies to all"* (knownMoves, status moves
+included) and, on who decides, **B** — the sim decides for wild Pokemon, the
+player for theirs.
+
+Refund shape, direct call **A + C**: the full amount ever spent, nothing
+withheld, returned as WILDCARD rather than typed points. Full value so
+forgetting is never a punishment for having specialised; wildcard so it does
+not simply re-buy the branch it came from.
+
+### Measured, 3 seeds x 6000 ticks, 71 living agents
+
+| | before | after |
+|---|---|---|
+| knownMoves mean | 11.8 | 3.97 |
+| knownMoves max | 21 | 4 |
+| agents over 4 | 94.9% | 0% |
+| agents keeping a usable status move | — | 42.3% |
+| agents keeping a damage move (control) | — | 100% |
+
+### Two flaws only the live run found — the unit tests passed through both
+
+1. **The cap did not hold at all.** `spawnAgent` writes `knownMoves` directly
+   and never went through `enforceMoveCap`, so 57 of 105 living agents sat
+   over the cap (mean 7.56, max 21) while every unit test passed.
+2. **The forget AI deleted the entire specialisation system.** A level-42
+   Charizard spawn came out knowing Dragon Claw, Metal Claw, Fire Fang and
+   Flame Burst — four generic dex-derived specs with no tree — having dropped
+   Slash, the curated move with a full 45-node tree, because Slash scored
+   marginally lower on raw damage per action. Fixed with a tree-POTENTIAL
+   term scaled by node count. Three existing spawn tests caught this: the
+   tests were right and the code was wrong.
+
+### Open, worth a decision
+
+- **The refund does not fire in the live sim yet, and the reason is
+  structural, not a tuning error.** Direct correction: *"It's okay to drop an
+  invested move but there should be reasoning behind it."*
+
+  First guess was that the investment weight (8) was an effective veto. It
+  was too high and is now 2 — the honest weight once the refund is followed
+  through: forgetting returns EVERY point as wildcard and `maybeAutoRespec`
+  starts spending them again, so a built move is converted, not destroyed.
+  What is really lost is the build's shape, its passives (revoked), and the
+  time to climb again. Friction, not a lock.
+
+  But lowering it changed nothing live, so it got measured instead of
+  guessed. Of 27 living agents: **7 have no investment at all, 9 have one
+  invested slot, 5 have two, 6 have three — and none has all four.**
+  `maybeAutoRespec`'s focus bonus concentrates points in one move, so there
+  is always a cheaper slot to free and the AI never NEEDS to spend a built
+  one. Dropping an invested move while an untouched one sits there would be
+  the wrong call, so this is the AI reasoning correctly, not refusing to.
+
+  The path is proved reachable by a test rather than left on faith: an agent
+  with all four slots invested and a clearly better new move drops a built
+  one, refunds all 12 points, and logs why — with a control showing a
+  MARGINALLY better move does not win the slot. It will start firing live
+  once agents routinely fill all four slots with investment, which is a
+  consequence of every move reaching 45 nodes.
+
+- **`forgotMove` now carries a real reason** — "outclassed" (a build given up
+  because something outscored it), "redundant" (the movepool was doubling up
+  on a type), "unbuilt", "declined", "capacity". Live distribution over 3
+  seeds: declined 5470, capacity 902, redundant 785, unbuilt 556.
+- **76% of cap events are the new move being DECLINED** (5136 of 6744), so an
+  agent largely settles on its first four moves and rarely changes shape
+  after early life. Whether a movepool should be that static is a design
+  call.

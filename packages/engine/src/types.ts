@@ -746,15 +746,39 @@ export interface Agent {
    */
   exp?: number;
   /**
-   * Move ids/keys this agent has ever learned, unbounded (no forgetting, no
-   * 4-move cap — a deliberate departure from mainline, see DESIGN.md). Not
-   * every entry necessarily has a corresponding `MoveSpec` in `moves` — a
-   * learned move that's a status move (no MoveSpec representation in this
-   * sim yet) is still recorded here for bookkeeping/event purposes even
-   * though it can't be selected in combat. `moves` stays the actual
-   * combat-usable subset that `pickBestMove` reads.
+   * Move ids/keys this agent knows, capped at `MAX_KNOWN_MOVES`
+   * (leveling.ts) with forced forgetting.
+   *
+   * This was unbounded for most of the project's life — an explicit
+   * departure from mainline — and the cap reverses that. Measured before it
+   * landed (`measureMovepool.ts`, 8 seeds x 10k ticks): agents knew a median
+   * of 13 moves and 94.9% knew more than four, so this is a 3x cut on the
+   * typical adult, not a trim.
+   *
+   * The cap counts EVERY entry here, status moves included. Not every entry
+   * necessarily has a corresponding `MoveSpec` in `moves`: a status move
+   * outside the curated roster has no spec to resolve (see the data
+   * package's own `resolveMove`) but still occupies a slot. `moves` stays
+   * the subset that has one.
    */
   knownMoves?: string[];
+  /**
+   * This agent belongs to the player rather than to the sim. Nothing creates
+   * one yet — it exists so `enforceMoveCap` (leveling.ts) has a real seam to
+   * check instead of the move cap having to be retrofitted around a UI
+   * later. Direct call on who decides which move gets forgotten: the sim
+   * decides for wild Pokemon, the player decides for theirs.
+   */
+  playerOwned?: boolean;
+  /**
+   * A learn-vs-forget decision waiting on the player, set by
+   * `enforceMoveCap` when a `playerOwned` agent goes over
+   * `MAX_KNOWN_MOVES`. The agent is left over the cap until something
+   * resolves this — deliberately, since silently choosing for the player is
+   * the whole thing `playerOwned` exists to avoid. Always absent on a wild
+   * agent, which resolves the decision the same tick it arises.
+   */
+  pendingMoveChoice?: { newMoveId: string; atTick: number };
   /** Typed skill-point currency for `applyMoveTreeWithSpend` (moves.ts) — see DESIGN.md. */
   skillPoints?: Partial<Record<PokemonType, number>>;
   /** Untyped skill points that can fund any move's respec tree, regardless of type. */

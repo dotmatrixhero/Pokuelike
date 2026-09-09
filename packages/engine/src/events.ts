@@ -192,6 +192,31 @@ export type SimEvent =
        * an agent that braced and survived is a story, and an agent that
        * healed and lost is a different one.
        */
+      /**
+       * A move unlearned to stay under `MAX_KNOWN_MOVES` (leveling.ts).
+       * Narratable on purpose: "it forgot Vine Whip to make room for Solar
+       * Beam, and got 31 points back" is a story about a build changing
+       * shape, and a `reason` of "declined" is a different story again —
+       * the agent judged the new move not worth a slot and turned it down.
+       */
+      kind: "forgotMove";
+      tick: number;
+      agentId: string;
+      species: string;
+      moveId: string;
+      /** Skill points returned, as wildcard — every point ever spent in that move's tree. */
+      refundedPoints: number;
+      /**
+       * Why it went, so the chronicle can say more than "a move was
+       * forgotten": "outclassed" = a real build was given up because
+       * something scored higher, and the points went with it; "redundant" =
+       * the movepool was doubling up on a type; "unbuilt" = known but never
+       * invested in; "declined" = the NEW move was itself the worst option
+       * and was turned down; "capacity" = no better account than space.
+       */
+      reason: "capacity" | "declined" | "outclassed" | "redundant" | "unbuilt";
+    }
+  | {
       kind: "utilityMoveUsed";
       tick: number;
       agentId: string;
