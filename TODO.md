@@ -6913,3 +6913,32 @@ not something this pathfinding pass itself caused or is positioned to fix.
       battles) with zero regressions, but never actually caught the
       original failure in the act — worth re-checking if it recurs, ideally
       with a repro that's easier to force (e.g. throttling the tab).
+
+## Built: zone-level banding (safer near a Sanctuary, rising with distance) — see DESIGN.md
+
+- [x] Direct report + proposal: "Still got a lot of lvl 40+ slaughtering
+      low levels. Maybe certain zones (friendlier ones) don't have high
+      levels... spawn. We can have bands of acceptable level ranges per
+      zone and adjacent zones with changing normalized probability curves
+      with the median increasing or decreasing as you get further away
+      from a particular zone." Decision: distance from nearest Sanctuary,
+      soft re-center (not a hard clamp), spawn-time only. New
+      `distanceToNearestLandmark` (macroGrid.ts), `World.sanctuaryDistance`
+      (carried down at promotion, same as `territoryName`), and
+      `zoneLevelCenter` (immigration.ts) blend with the existing
+      `localAvgLevel` re-centering in `rollImmigrantLevel` — wired into
+      both live immigration AND a never-visited zone's initial invented
+      population (`estimateInitialAggregates`), so the effect isn't just on
+      later immigrants. Measured on a real generated grid (50x50, 6 seeds):
+      clean, smooth, monotonic climb from ~11 avg level 1 zone-step from a
+      Sanctuary to ~46 (capped) 7+ steps out — see DESIGN.md's full table.
+      Full engine suite (1267, 5 new) green. NOT yet spot-checked live in
+      the running app (Sanctuaries are sparse — a handful per grid — so
+      landing near one in a short session is luck of the seed); worth a
+      live check next time.
+- [ ] Follow-up not yet built (explicitly scoped OUT of this slice, per "spawn
+      time only"): a low-level zone's peace can still be broken by a
+      high-level predator WANDERING in from herdMigration.ts after
+      spawning elsewhere — same "40+ slaughtering low levels" symptom, a
+      different cause. Whether/how to also discourage that drift is a
+      separate design question for later.

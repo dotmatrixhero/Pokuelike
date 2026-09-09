@@ -6,6 +6,7 @@ import { tickWorld } from "../src/simulation.js";
 import {
   maybeImmigrate,
   rollImmigrantLevel,
+  zoneLevelCenter,
   localAverageLevel,
   IMMIGRATION_BASE_CHANCE,
   FOUNDER_REINFORCE_BOOST,
@@ -357,6 +358,40 @@ describe("rollImmigrantLevel (direct ask: \"why does everything spawn at lv5... 
 
   it("a local average below the species' own floor still never rolls under that floor", () => {
     expect(rollImmigrantLevel(BASE_FORM, () => 0, 2)).toBe(5); // floor(2 - 4) = -2, clamped to floor(5)
+  });
+
+  describe("zone-level banding (direct ask: \"bands of acceptable level ranges per zone... median increasing... as you get further away from a particular zone\")", () => {
+    it("zoneLevelCenter climbs with distance from the nearest Sanctuary and caps out, rather than climbing forever", () => {
+      expect(zoneLevelCenter(0)).toBe(5);
+      expect(zoneLevelCenter(1)).toBe(11);
+      expect(zoneLevelCenter(7)).toBe(47);
+      expect(zoneLevelCenter(100)).toBe(47); // capped at ZONE_LEVEL_RAMP_MAX_DISTANCE, not unbounded
+    });
+
+    it("undefined distance (no overworld above this world, or a grid with no Sanctuary at all) falls back to no zone term", () => {
+      expect(zoneLevelCenter(undefined)).toBeUndefined();
+    });
+
+    it("a zone center re-centers the roll exactly like a local average does — same mechanism, different source", () => {
+      // PREY_LEVEL_JITTER(16) centered on zoneCenter(47): floor(47 - 16/2) = 39 .. +15 = 54.
+      expect(rollImmigrantLevel(BASE_FORM, () => 0, undefined, 47)).toBe(39);
+      expect(rollImmigrantLevel(BASE_FORM, () => 0.99, undefined, 47)).toBe(39 + 15);
+    });
+
+    it("a zone center and a local species average blend evenly rather than either one winning outright", () => {
+      const blended = rollImmigrantLevel(BASE_FORM, () => 0, 5, 47);
+      const zoneOnly = rollImmigrantLevel(BASE_FORM, () => 0, undefined, 47);
+      const localOnly = rollImmigrantLevel(BASE_FORM, () => 0, 5, undefined);
+      expect(blended).toBeGreaterThan(localOnly);
+      expect(blended).toBeLessThan(zoneOnly);
+    });
+
+    it("a Sanctuary-adjacent zone still rarely rolls a real high-level wanderer via the jitter's own tail — soft, not a hard clamp", () => {
+      // zoneCenter(0) = 5, predator jitter width 8, uniform (not skewed) -> a near-max roll still clears the "safe zone" reading.
+      const PREDATOR: ImmigrationSpeciesInfo = { id: "scyther", homeLayer: "surface", isPredator: true };
+      const nearMax = rollImmigrantLevel(PREDATOR, () => 0.999, undefined, zoneLevelCenter(0));
+      expect(nearMax).toBeGreaterThan(15);
+    });
   });
 });
 

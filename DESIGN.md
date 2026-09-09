@@ -15208,3 +15208,87 @@ strictly an improvement even if the specific trigger turns out to be
 something other than my best-guess corpse-pruning/throttled-tab theory
 above). Flagging as a TODO to watch for a recurrence with an easier repro,
 since this session couldn't force the exact race.
+
+## Zone-level banding: safer levels near a Sanctuary, rising with distance
+
+Direct report + proposal: "Still got a lot of lvl 40+ slaughtering low
+levels. Maybe certain zones (friendlier ones) don't have high levels (and
+thus no high evolutions) spawn. We can have bands of acceptable level
+ranges per zone and adjacent zones with changing normalized probability
+curves with the median increasing or decreasing as you get further away
+from a particular zone." Options laid out (anchor: distance from nearest
+Sanctuary / distance from map center / a per-territory rolled ferocity
+value; hard band vs. soft re-center; spawn-only vs. also constraining
+post-spawn wandering) — decision: **"A,. And soft. And spawn time only."**
+(distance-from-Sanctuary anchor, soft re-center, spawn-time only).
+
+**Why this problem had no spatial fix available before.** Level was never
+zone-aware at all — `rollImmigrantLevel` only ever re-centered on
+`localAverageLevel`, the average level of a SPECIES across the WHOLE WORLD,
+not the zone it's arriving into. There was no "friendlier zone" concept for
+level to read at all, only per-species floor+jitter, identical everywhere.
+
+**Mechanism.**
+- `macroGrid.ts`'s new `distanceToNearestLandmark(grid, row, col, type)` —
+  Chebyshev (grid-step) distance from a zone to the nearest zone carrying a
+  given landmark type; a plain full-grid scan, deliberately not a
+  BFS/cache, since it only ever runs once per zone PROMOTION (a rare "the
+  observer moved to/booted into a new zone" event), not per-tick.
+- `World` gets a new optional `sanctuaryDistance` field, carried down at
+  `overworld.ts`'s `promoteZone` exactly the same way `territoryName`
+  already is — set once when a zone's real `World` gets generated.
+- `immigration.ts`'s new `zoneLevelCenter(sanctuaryDistance)` turns that
+  distance into a level: `IMMIGRANT_BASE_LEVEL_FLOOR + min(distance,
+  ZONE_LEVEL_RAMP_MAX_DISTANCE) * ZONE_LEVEL_RAMP_PER_DISTANCE` — sim-
+  original guesses (6 levels/zone-step, capped at 7 steps out, so a zone at
+  or past the cap centers around the high-40s, not unbounded), same footing
+  as every other tuning constant here, expect a retune once real numbers
+  are in.
+- `rollImmigrantLevel` gained an optional `zoneCenter` parameter. Soft, not
+  a hard clamp: it re-centers the SAME jitter band `localAvgLevel` already
+  re-centers (the jitter's own tail still reaches a rare high roll even
+  right next to a Sanctuary — "equilibrium and variety, not a dominant
+  answer"). When both a zone center and a local species average are
+  available, they blend evenly (average of the two) rather than either
+  fully overriding the other. `Math.max(floor, ...)` (unchanged) still
+  protects a structurally-gated species like Kabutops (its real level-40
+  evolution floor) from rolling below what it can actually exist at, even
+  deep in a safe zone — it just mostly won't be a CANDIDATE there at all,
+  via the separate rarity gate from the Kabutops/Kabuto fix above.
+- Wired into BOTH real spawn paths, not just live immigration: the ordinary
+  `maybeImmigrate` roll, AND `overworld.ts`'s `estimateInitialAggregates`
+  (a never-visited zone's invented starting population) — that function's
+  own doc comment already called out matching `rollImmigrantLevel`'s
+  formula exactly so it wouldn't drift, and a zone's initial population is
+  exactly as real a "spawn" as a later immigrant group. Skipping it would
+  have left the vast majority of a zone's population (most zones are never
+  individually visited/promoted) on the old ungated distribution.
+
+**Verified.** Full engine suite (1267 tests, 5 new — `zoneLevelCenter`'s
+climb-then-cap behavior, the blend-evenly behavior, the "still soft, not a
+hard clamp" tail check) green, no regressions. Measured on a real generated
+50x50 grid, 6 seeds, sampling every other zone (predator = a `spearow`-like
+base predator, prey = `pidgey`-like base prey, both rolled through the real
+`rollImmigrantLevel`/`zoneLevelCenter` functions):
+
+| distance (zone-steps) | n | predator avg level | prey avg level |
+|---|---|---|---|
+| 1 | 4 | 11.5 | 8.0 |
+| 2 | 8 | 16.4 | 10.5 |
+| 3 | 10 | 22.1 | 15.8 |
+| 4 | 12 | 28.5 | 23.7 |
+| 5 | 11 | 34.3 | 28.3 |
+| 6 | 18 | 41.2 | 37.9 |
+| 7 | 11 | 46.2 | 43.3 |
+| 8+ (capped) | 612 | 46.5 | 41.6 |
+
+A clean, smooth, monotonic climb from Sanctuary-adjacent zones (levels near
+the ordinary floor) out to the wilderness (mid-40s, where evolved-form
+predators actually belong), with no seam or cliff — exactly the gradient
+asked for. Not yet live-verified in the running app (a Sanctuary's own real
+placement is sparse — a handful per whole grid per `landmarks.ts` — so
+hitting one live in a short session is luck-of-the-seed); the measurement
+above exercises the actual shipped functions against a real generated
+grid, not a re-derivation of the formula, so it's a real result, just not
+an in-browser one. Worth a live spot-check next time a session lands near a
+Sanctuary zone.

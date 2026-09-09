@@ -298,13 +298,66 @@ function rollLevelJitter(species: Pick<ImmigrationSpeciesInfo, "isPredator" | "s
  * this species yet to match against — a genuinely first arrival) falls back
  * to the original species-only floor+jitter roll unchanged.
  */
-export function rollImmigrantLevel(species: ImmigrationSpeciesInfo, rng: () => number, localAvgLevel?: number): number {
+/**
+ * Levels-per-zone-step ramp `zoneLevelCenter` applies on top of the base
+ * floor as a zone gets further from the nearest Sanctuary — direct ask:
+ * "bands of acceptable level ranges per zone and adjacent zones with
+ * changing normalized probability curves, median increasing... as you get
+ * further away." Sim-original guess, same footing as every other tuning
+ * constant here (`PREDATOR_LEVEL_BOOST`, etc.) — verify against a real
+ * generated grid and expect this to get retuned once real distance-vs-level
+ * numbers are in hand.
+ */
+const ZONE_LEVEL_RAMP_PER_DISTANCE = 6;
+/**
+ * Distance (in zone steps) beyond which the ramp stops climbing — past this,
+ * a zone is just "the wilderness," not an escalating threat scale forever.
+ * At the chosen ramp, this caps the zone-driven center around the mid-40s,
+ * comfortably past most evolution thresholds without making every far-flung
+ * zone read as a raid boss arena.
+ */
+const ZONE_LEVEL_RAMP_MAX_DISTANCE = 7;
+
+/**
+ * Turns a zone's `sanctuaryDistance` (World's own field, set once at
+ * `overworld.ts`'s `promoteZone`) into a level to re-center immigrant rolls
+ * on — the "median increasing... as you get further away from a particular
+ * [safe] zone" half of the direct ask above; `distanceToNearestLandmark`
+ * (macroGrid.ts) is the "how far away" half. `undefined` when the zone
+ * carries no distance at all (a standalone scenario world with no overworld
+ * above it, or a real macro grid that happens to have no Sanctuary anywhere)
+ * — `rollImmigrantLevel` below falls all the way back to its original
+ * species-only behavior in that case, not a mid-band guess.
+ */
+export function zoneLevelCenter(sanctuaryDistance: number | undefined): number | undefined {
+  if (sanctuaryDistance === undefined) return undefined;
+  const clamped = Math.min(sanctuaryDistance, ZONE_LEVEL_RAMP_MAX_DISTANCE);
+  return IMMIGRANT_BASE_LEVEL_FLOOR + clamped * ZONE_LEVEL_RAMP_PER_DISTANCE;
+}
+
+/**
+ * `zoneCenter` (see `zoneLevelCenter` above) softly re-centers the SAME
+ * jitter band `localAvgLevel` already re-centers — deliberately not a clamp:
+ * a Sanctuary-adjacent zone can still, rarely, roll a genuinely high-level
+ * wanderer via the jitter's own tail, same "equilibrium and variety, not a
+ * dominant answer" spirit as everything else here. When both a zone center
+ * and a local species average are available, blend them evenly rather than
+ * letting either fully override the other — a zone pulls the population
+ * toward it over time, but doesn't erase what's already living there in one
+ * roll. `Math.max(floor, ...)` (unchanged) still protects a structurally-
+ * gated species (Kabutops' level-40 evolution floor, say) from getting
+ * pulled below what it can actually exist at, even deep in a safe zone —
+ * see `pickZoneSpeciesPool`'s separate rarity gate (macroGrid.ts) for why
+ * that species mostly won't even be a *candidate* there in the first place.
+ */
+export function rollImmigrantLevel(species: ImmigrationSpeciesInfo, rng: () => number, localAvgLevel?: number, zoneCenter?: number): number {
   const floor = Math.max(IMMIGRANT_BASE_LEVEL_FLOOR, species.minLevel ?? 1) + (species.isPredator ? PREDATOR_LEVEL_BOOST : 0);
-  if (localAvgLevel === undefined) {
+  const target = zoneCenter === undefined ? localAvgLevel : localAvgLevel === undefined ? zoneCenter : (zoneCenter + localAvgLevel) / 2;
+  if (target === undefined) {
     return floor + rollLevelJitter(species, rng);
   }
   const width = levelJitterWidth(species);
-  const center = Math.max(floor, Math.round(localAvgLevel - width / 2));
+  const center = Math.max(floor, Math.round(target - width / 2));
   return center + rollLevelJitter(species, rng);
 }
 
@@ -560,10 +613,11 @@ export function maybeImmigrate(world: World, ctx: ImmigrationContext | undefined
   }
 
   const localAvgLevel = localAverageLevel(world, species.id);
+  const zoneCenter = zoneLevelCenter(world.sanctuaryDistance);
   const newAgents: Agent[] = [];
   for (let i = 0; i < groupSize; i++) {
     const pos = nextArrivalPos(i);
-    const agent = ctx.spawnAgent(species.id, `${species.id}-immigrant-${world.tick}-${i}`, pos, rollImmigrantLevel(species, rng, localAvgLevel), rng);
+    const agent = ctx.spawnAgent(species.id, `${species.id}-immigrant-${world.tick}-${i}`, pos, rollImmigrantLevel(species, rng, localAvgLevel, zoneCenter), rng);
     agent.sex = rng() < 0.5 ? "male" : "female";
     newAgents.push(agent);
   }
