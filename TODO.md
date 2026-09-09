@@ -368,6 +368,47 @@ clause only ever sees one side's count, so **both** halves of a mutual rivalry
 claimed to have started it. Liberty in the connective tissue, never in the
 facts.
 
+### Fourth pass: say whose it was, and stop using euphemisms
+
+> "But three have died still confusing. Were they foes that died? Allies?"
+>
+> "Put themselves in front sounds like a euphemism. Same with come at me.
+> More specificity please"
+
+Both right, and the first one was a **data** problem hiding as a prose
+problem. The sim always knew whether the dead agent shared a herd with the
+two remembering it; the memory just threw that away. `RapportSubject.kin`
+now records `"ours"` or `"other"`, computed **per pair** rather than per
+death — "one of ours" is a question about the two agents doing the
+remembering, not about the corpse.
+
+The euphemisms were laziness. Each is now what the mechanic literally does:
+
+| Was | Is |
+|---|---|
+| *put themselves in front of me* | **Something had hold of me, and they hit it until it let go.** |
+| *come at me* | **They have hit me thirteen times over water and feeding-ground we both wanted.** |
+| *three have died beside them* | **Three of our own have died in front of us, the last of them a Pidgey.** |
+
+Three more small ones from the same pass: *"no one of ours"* is not English
+(now *"Not one of ours"*); *"they came and hit it off"* collides with the
+idiom for getting along (now *"drove it off"*); and *"the last a Scyther"* was
+telegram-ese appositive again (now *"the last of them a Scyther"*).
+
+Final, from a real run:
+
+> **We brought down a Scyther together. Three have died in front of us, the
+> last of them a Scyther. None were ours.**
+>
+> **I watched an Onix die in front of us. Not one of ours. Eight times
+> something has had hold of me, and every time they drove it off.**
+>
+> **We have sat together. We both wanted the same water, and I hit them for
+> it.**
+>
+> **We are mates. Five times something has had hold of them, and every time I
+> hit it until it let go.**
+
 Also fixed across these passes: `mourned` reads *"we lost the same friend"*,
 and `trainedTogether` was *"drilled beside them"* — which meant nothing.
 

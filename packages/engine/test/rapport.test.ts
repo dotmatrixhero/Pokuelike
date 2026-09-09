@@ -718,6 +718,48 @@ describe("rapport: named subjects, rescue, healing and displacement", () => {
     expect(memory).toMatchObject({ reason: "defeatedTogether", subject: { label: "scyther", level: 22 } });
   });
 
+  it("a death records WHOSE it was — a herd-mate of both witnesses is 'ours'", () => {
+    const world = createWorld(20, 20);
+    const w1 = agent("w1", { herdId: "h", pos: { x: 5, y: 5 } });
+    const w2 = agent("w2", { herdId: "h", pos: { x: 6, y: 5 } });
+    const ourDead = agent("ourDead", { herdId: "h", species: "pidgey", pos: { x: 5, y: 6 } });
+    world.agents.push(w1, w2, ourDead);
+
+    ourDead.alive = false;
+    ourDead.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+
+    expect(rapportMemories(w1, "w2")[0]!.subject).toMatchObject({ label: "pidgey", kin: "ours" });
+  });
+
+  it("...and a stranger's death is 'other', even standing in the same spot", () => {
+    const world = createWorld(20, 20);
+    const w1 = agent("w1", { herdId: "h", pos: { x: 5, y: 5 } });
+    const w2 = agent("w2", { herdId: "h", pos: { x: 6, y: 5 } });
+    const outsider = agent("outsider", { herdId: "other-herd", species: "onix", pos: { x: 5, y: 6 } });
+    world.agents.push(w1, w2, outsider);
+
+    outsider.alive = false;
+    outsider.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+
+    expect(rapportMemories(w1, "w2")[0]!.subject).toMatchObject({ label: "onix", kin: "other" });
+  });
+
+  it("a herd-mate of only ONE witness is not 'ours' — it is a question about the pair", () => {
+    const world = createWorld(20, 20);
+    const w1 = agent("w1", { herdId: "h", pos: { x: 5, y: 5 } });
+    const stranger = agent("stranger", { herdId: "other-herd", pos: { x: 6, y: 5 } });
+    const dead = agent("dead", { herdId: "h", species: "pidgey", pos: { x: 5, y: 6 } });
+    world.agents.push(w1, stranger, dead);
+
+    dead.alive = false;
+    dead.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+
+    expect(rapportMemories(w1, "stranger")[0]!.subject).toMatchObject({ kin: "other" });
+  });
+
   it("...but only when BOTH were in the fight — one bystander makes it survival again", () => {
     const world = createWorld(20, 20);
     const fighter = agent("fighter", { pos: { x: 5, y: 5 }, behavior: "fight" });
