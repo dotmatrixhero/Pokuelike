@@ -1644,7 +1644,16 @@ export function applyPredationInstincts(
           // guardians defending the same herdmate over multiple ticks/events
           // is what makes this genuinely "joint" over a run. See
           // rapport.ts's doc comment.
-          strengthenRapportMutual(world, agent, herdmate, RAPPORT_MOB_DEFENSE_DELTA, "defended", "wasDefended", rng);
+          // Name the threat. Without this the memory could only say
+          // "something had hold of me", which is the same vagueness the
+          // euphemism it replaced had — direct note: "more specificity
+          // please." The predator is right here in `threat`; there was never
+          // a reason not to record it.
+          strengthenRapportMutual(world, agent, herdmate, RAPPORT_MOB_DEFENSE_DELTA, "defended", "wasDefended", rng, {
+            label: threat.species,
+            id: threat.id,
+            level: threat.level,
+          });
         } else {
           // stopAdjacent=true — see stepToward's doc comment.
           agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos, agent, undefined, true);

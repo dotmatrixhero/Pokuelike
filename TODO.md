@@ -395,19 +395,49 @@ Three more small ones from the same pass: *"no one of ours"* is not English
 idiom for getting along (now *"drove it off"*); and *"the last a Scyther"* was
 telegram-ese appositive again (now *"the last of them a Scyther"*).
 
+### Fifth pass: I did it again
+
+> "Your output still is confusingly bad? Didn't seem to pick up your was/is
+> changes?"
+
+The changes had landed. The output was still bad, for the same reason each
+previous pass was bad — **writing around missing data instead of going and
+getting it.** I replaced *"put themselves in front of me"* with *"something
+had hold of me"*, which is exactly as vague as the euphemism it replaced. The
+`kin` fix was that lesson and I did not generalise it.
+
+The predator is sitting in a local named `threat` at the defence site in
+`predation.ts`. There was never a reason not to record it.
+
+| Was | Is |
+|---|---|
+| *Eight times something has had hold of me* | **They have pulled a Scyther off me, and seven other things besides.** |
+| *a Scyther … a Scyther* in one line | **We brought down a Scyther together. Three have died in front of us, and none of them were ours.** |
+| *Not one of ours.* (clipped fragment) | **…and it was none of our herd.** |
+
+**And one wrong turn worth recording.** The first fix for the repeated-name
+stutter *dropped* the duplicate clause — which was worse than the stutter: it
+threw away the best line on the edge and fell back to filler like *"We have
+sat together."* Keep the clause, refer back instead. The refer-back word then
+produced *"the last another"*, so a naming slot now drops the name rather than
+mangling it.
+
 Final, from a real run:
 
-> **We brought down a Scyther together. Three have died in front of us, the
-> last of them a Scyther. None were ours.**
+> **We brought down a Scyther together. Three have died in front of us, and
+> none of them were ours.**
 >
-> **I watched an Onix die in front of us. Not one of ours. Eight times
-> something has had hold of me, and every time they drove it off.**
+> **I watched an Onix die in front of us, and it was none of our herd. They
+> have pulled another off me, and seven other things besides.**
+>
+> **We are mates. I have pulled a Fearow off them, and four other things
+> besides.**
 >
 > **We have sat together. We both wanted the same water, and I hit them for
 > it.**
 >
-> **We are mates. Five times something has had hold of them, and every time I
-> hit it until it let go.**
+> **I watched a Kakuna die in front of us, and it was none of our herd. They
+> have hit me thirteen times over water and feeding-ground we both wanted.**
 
 Also fixed across these passes: `mourned` reads *"we lost the same friend"*,
 and `trainedTogether` was *"drilled beside them"* — which meant nothing.
