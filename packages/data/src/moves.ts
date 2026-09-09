@@ -3857,7 +3857,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         // Catches a challenger off guard, before it's even noticed the
         // light gathering.
-        delta: { situationalBonus: { condition: "flanking", multiplier: 1.4 } },
+        delta: { cooldownTicks: -1, situationalBonus: { condition: "flanking", multiplier: 1.4 } },
       },
       overwhelming_beam: {
         id: "overwhelming_beam",
@@ -3946,7 +3946,7 @@ export const MOVES: Record<string, MoveSpec> = {
         excludes: ["verdant_wall"],
         leaning: "boldness",
         // Holds the high, defensible ground rather than turtling in place.
-        delta: { situationalBonus: { condition: "elevation", multiplier: 1.3 } },
+        delta: { cooldownTicks: -1, situationalBonus: { condition: "elevation", multiplier: 1.3 } },
       },
       verdant_wall: {
         id: "verdant_wall",
@@ -4061,7 +4061,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisitesAnyOf: [["vital_bloom"], ["steadfast_bloom_ally"]],
         leaning: "sociability",
-        delta: { accuracy: 5 },
+        delta: { cooldownTicks: -2, accuracy: 5 },
       },
       eternal_grove: {
         id: "eternal_grove",

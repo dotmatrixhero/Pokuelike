@@ -9,6 +9,7 @@
  * (--selftest) before it is trusted on the real ones.
  */
 import { PROPOSED_TREES, type ProposedMove, type ProposedNode } from "./proposed-trees.js";
+import { MOVES } from "../src/moves.js";
 
 // Identity-tier forks (3 per tree) plus one filler-tier fork per branch (3
 // more) = 12 fork nodes. The filler forks are this roster's addition to the
@@ -430,8 +431,17 @@ if (selftest) {
 }
 function tree_(ns: ProposedNode[]) { const o: Record<string, ProposedNode> = {}; for (const n of ns) o[n.id] = n; return o; }
 
+// `--shipped` runs the same rules over the real MOVES roster. Same checker,
+// same thresholds — the drafts were never the only trees that needed them.
+const shipped = process.argv.includes("--shipped");
+const targets: ProposedMove[] = shipped
+  ? (Object.values(MOVES) as any[])
+      .filter((m) => m.tree && Object.keys(m.tree).length)
+      .map((m) => ({ ...m, pp: m.pp, learners: [], fantasy: "", tree: m.tree }) as ProposedMove)
+  : Object.values(PROPOSED_TREES);
+
 let bad = 0;
-for (const move of Object.values(PROPOSED_TREES)) {
+for (const move of targets) {
   const p = problems(move);
   const n = Object.keys(move.tree).length;
   console.log(`${move.id.padEnd(14)} ${String(n).padStart(2)} nodes  ${p.length ? `${p.length} PROBLEM(S)` : "ok"}`);
