@@ -77,6 +77,23 @@ rather than the design:
 | `maxPPBonus` with no `ppCost` anywhere | fails | A dead pick wearing a choice's clothes |
 | Canon pool must be declared | fails loudly | The `NaN` silent-pass bug above |
 
+## Template v4 shape
+
+| Rule | Catches |
+|---|---|
+| 12 nodes per branch | A branch short of the standard — "we do have 45 nodes of real ideas on everything" |
+| 4 identity nodes per branch | Two lane notables, a deep convergence notable, a capstone |
+| Exactly one terminal identity node | Two competing capstones, or none |
+| A deep notable both lanes converge on | Lanes that never rejoin |
+| One filler between deep notable and capstone | A capstone hanging straight off the convergence |
+
+The node-count rule reverses an earlier position in `MOVES_DESIGN.md`, and
+the reversal is the interesting part: "thin lever set" turned out to be a
+rationalisation. Dig uses **12 of the roster's 71 levers and leaves 59
+untouched** — its 29 nodes were an unexplored fantasy, not a small move.
+The guard against padding to 45 is not a lower count; it is the flavour,
+repetition and pure-downside rules above.
+
 ## What is NOT checked, deliberately
 
 - **Whether a fantasy is any good.** No script can tell you a branch is

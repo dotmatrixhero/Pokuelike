@@ -3976,22 +3976,49 @@ cost-2 notable), each landing on **one lane notable per branch** it connects,
 complementing that lane rather than matching it. Nine `prerequisitesAnyOf`:
 six lane notables plus three deep notables.
 
-### The one place this standard must NOT be rigid: node count
+### Node count: "thin lever set" was a rationalisation, and the data says so
 
-**Structure is the standard. 45 nodes is not.** This document already learned
-this once, in the crosslink rollout:
+I argued the standard should be structure-only, because a move with a "thin
+honest lever set" should get shorter lanes rather than invented filler —
+citing this document's own note that dig (29) and leech_seed (31) were
+"deliberately left short." Direct pushback:
 
-> "dig (29) and leech_seed (31) were deliberately left short. Their honest
-> lever sets are smaller, and inflating them to hit a number is exactly the
-> template failure the rest of this document exists to prevent. Matching the
-> flagships' *structure* was the finding; matching their *node count* was
-> not."
+> "Problem is, we do have 45 nodes of real ideas on everything. It's the cool
+> part of the game."
 
-A move with a thin honest lever set gets the same shape with **shorter
-lanes** — two rungs instead of three, 10 nodes per branch instead of 12 —
-not three invented fillers to hit a number. Diglett's Dig does not have 45
-nodes' worth of real ideas in it, and pretending otherwise produces exactly
-the copy-pasted feel the v3 redesign existed to kill.
+**Correct, and it is measurable.** Counting the shared lever palette the
+roster actually uses — 71 distinct levers — against what each tree touches:
+
+| tree | nodes | levers used | **levers untouched** |
+|---|---|---|---|
+| **dig** | 29 | **12** | **59** |
+| **leech_seed** | 31 | **13** | **58** |
+| water_gun | 33 | 18 | 53 |
+| peck / scratch | 33 | 19 | 52 |
+| earthquake | 39 | 27 | 44 |
+| twineedle (v4) | 45 | 27 | 44 |
+
+Dig — the tree named as honestly thin — uses **12 of 71 levers and leaves 59
+untouched.** That is not a small lever set; it is an unexplored one. And this
+document contains a whole section, *"Confirmed for later: Diglett tunnel
+networks"*, recording a decision ("tunnel networks are cool as fuck we're
+gonna do it") that was written down and never built. The ideas were not
+missing. The work was.
+
+**So: 45 nodes is the standard too.** Not as a quota to pad toward — as an
+expectation that if a move cannot fill it, the fantasy has not been
+interrogated hard enough yet. That is a very different instruction from
+"inflate to hit a number," and it inverts what the earlier note assumed.
+
+The real risk was never running out of ideas; it is **filler produced under
+volume pressure** — which is exactly what the earlier measurement caught in
+these very drafts (power/accuracy/cooldown accounting for 280 of ~700 lever
+uses). That risk is already guarded by the rules in
+[`DESIGN_VALIDATION.md`](DESIGN_VALIDATION.md): a branch must draw on three
+or more flavours, no signature lever may answer more than 60% of a branch's
+identity nodes, and no node may be pure downside. Volume is safe when the
+quality gate runs on every tree. It was not safe when the only gate was
+whether I felt like writing more nodes.
 
 `check-proposed-trees.ts` therefore enforces the **shape** — two lanes, a
 notable in each, a deep convergence notable, a filler, a capstone, three

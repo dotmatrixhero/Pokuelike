@@ -240,13 +240,20 @@ function problems(move: ProposedMove): string[] {
   }
 
   // Template v4 shape check: per branch, two lanes each with a notable,
-  // converging on a DEEPER notable, then a filler, then a capstone. Node
-  // COUNT is deliberately not checked — a thin lever set gets shorter lanes,
-  // not invented filler (the dig/leech_seed lesson).
+  // converging on a DEEPER notable, then a filler, then a capstone.
+  //
+  // Node count IS part of the standard, contrary to an earlier note here.
+  // "We do have 45 nodes of real ideas on everything. It's the cool part of
+  // the game" — and the measurement agrees: dig uses 12 of the roster's 71
+  // levers and leaves 59 untouched, so its 29 nodes were an unexplored lever
+  // set, not a small one. A tree short of 45 is a tree whose fantasy has not
+  // been interrogated yet. The guard against padding is not a lower count,
+  // it is the flavour/repetition/pure-downside rules below.
   for (const branch of ["aggression", "boldness", "sociability"] as const) {
     const bn = nodes.filter((n) => n.leaning === branch && !bridgeIds.has(n.id));
     if (!bn.length) continue;
     const identity = bn.filter((n) => n.cost >= 2);
+    if (bn.length < 12) out.push(`${branch} branch: ${bn.length} nodes — v4 wants 12 (opener, two 4-node lanes, deep notable, filler, capstone). Short of that is an unexplored fantasy, not a small move.`);
     if (identity.length < 4) {
       out.push(`${branch} branch: ${identity.length} identity nodes — v4 wants 4 (two lane notables, a deep notable, a capstone)`);
       continue;
