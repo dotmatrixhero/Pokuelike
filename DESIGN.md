@@ -15150,3 +15150,61 @@ zones): Kabuto now present in 100% of zones (levels sampled 12-18 across
 several real zones), Kabutops in 31.6% (levels sampled ~46, its real,
 unavoidable floor). Full engine suite (1262 tests) and data suite (240
 tests) green.
+
+## Fixed: Battle Screen chip degrading to a bare id, no HP bar/level/herd/sprite
+
+Direct report, with a mobile screenshot: a Battle-tab engagement
+("Horsea... vs Spearow... engaging!") showing the two combatants only as
+raw colored id text (`horsea-immigrant-302-3`, `spearow-immigrant-2573-1`)
+— no sprite, no level, no herd line, no HP bar at all. "Why did we lose hp
+bars and stuff sometimes? On the battle renderer."
+
+**Root cause (code-confirmed, not live-reproduced — see honesty note
+below).** `battleScreenPanel.ts`'s `applyCombatantState` looks the
+combatant up fresh every frame via `world.agents.find((a) => a.id === id)`.
+When that lookup fails, every field it fills in degrades to its "no agent"
+branch in the same pass: `nameEl.textContent` falls back to the bare `id`
+(exactly the pink/blue raw-id text in the screenshot), `levelEl`/`herdEl`
+get `hidden = true`, `hpTrack` gets `hidden = true`, and the sprite
+(`img`) stays hidden. The lookup can fail for an id this chip was already
+built for and had previously shown real data for — the agent's corpse can
+finish its `CORPSE_PERSIST_TICKS` window and get pruned
+(`simulation.ts`'s `pruneStaleCorpses`) while the engagement referencing it
+is still on screen or still queued behind other engagements; a
+backgrounded/throttled mobile tab (rAF paused/slowed while ticks keep
+advancing via `setInterval`) makes that gap much more likely to matter in
+practice than it would on a desktop tab kept in focus — the likely story
+for why this showed up on a phone screenshot specifically.
+
+**Fix.** `combatantEls` already persist frame-to-frame by design (see that
+field's own doc comment — it's what lets the HP bar's CSS transition
+animate instead of snapping). `applyCombatantState` now leans on that same
+persistence for this case: if the agent can't be found AND this chip has
+already painted real content before (`els.nameEl.textContent` non-empty),
+it just returns without touching anything — freezes on the last real state
+instead of stomping a name/HP/level down to a bare id. Only a chip's very
+first-ever paint (nothing shown yet) still falls through to the old raw-id
+fallback, since freezing there would show literally nothing instead.
+
+**Honesty note on verification.** I stress-tested this live — Playwright
+against the real dev server, autocam + 32x speed, several runs totaling
+several thousand real ticks and dozens of real battles/clashes/pack hunts
+— specifically instrumented to warn on every `applyCombatantState` lookup
+failure. It never fired once in that live testing, so I could not
+reproduce the exact bug live before fixing it. What I DID verify live: (1)
+every real battle/clash/pack-hunt chip render I sampled was correct
+(names, levels, herds, HP all resolved) both before and after the fix; (2)
+one apparent "totally empty chip row" case I initially flagged turned out
+to be an artifact of my own test script's async query timing racing a
+real (and correct) `isNewEngagement` header rebuild, not a product bug —
+confirmed by re-reading the DOM a moment later and finding it fully
+populated; (3) typecheck, `vite build`, and the full engine (1262) + data
+(240) test suites are all green after the fix. The fix itself is the
+minimal, low-risk change matching the exact mechanism the screenshot shows
+(bare id, no HP/level/herd/sprite is precisely `applyCombatantState`'s
+`!agent` branch), and it can't make anything worse (a chip that already
+degrades to blank now just quietly keeps its last real content instead —
+strictly an improvement even if the specific trigger turns out to be
+something other than my best-guess corpse-pruning/throttled-tab theory
+above). Flagging as a TODO to watch for a recurrence with an easier repro,
+since this session couldn't force the exact race.

@@ -435,6 +435,25 @@ export class BattleScreenPanel {
   /** Writes one combatant's current live state into its already-built DOM handles — called both right after `buildCombatant` (initial paint) and every ordinary frame after (an in-place update, not a rebuild). */
   private applyCombatantState(els: CombatantEls, id: string, world: World): void {
     const agent = world.agents.find((a) => a.id === id) as Agent | undefined;
+    // Direct report: "Why did we lose hp bars and stuff sometimes? On the
+    // battle renderer" (mobile screenshot: a chip showing only the bare
+    // "spearow-immigrant-2573-1"-style id, no sprite/level/herd/HP bar at
+    // all). Root cause: `world.agents.find` can fail for an id this chip was
+    // already built for — the agent's corpse can finish its
+    // `CORPSE_PERSIST_TICKS` window and get pruned (simulation.ts's
+    // `pruneStaleCorpses`) while this engagement is still the active one (or
+    // still sitting in the queue, e.g. behind other engagements, or behind a
+    // backgrounded/throttled tab's rAF falling behind real tick time — the
+    // more likely story on mobile). Before this fix, that produced exactly
+    // the bare-id/no-HP look: every field below degrades to its "no agent"
+    // branch. Since `combatantEls` already persist frame-to-frame by design
+    // (see that field's own doc comment), the fix already exists here: on an
+    // already-painted chip, just don't touch it — freeze on whatever it last
+    // showed rather than stomping a real name/HP down to a raw id. Only a
+    // chip's very first paint (nothing shown yet) still falls through to the
+    // raw-id fallback below, which is the best available answer at that
+    // point.
+    if (!agent && els.nameEl.textContent) return;
     const sprite = agent ? getSprite(agent.species, "down") : null;
     if (sprite && els.img.src !== sprite.src) {
       els.img.src = sprite.src;

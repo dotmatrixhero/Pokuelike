@@ -6895,3 +6895,21 @@ not something this pathfinding pass itself caused or is positioned to fix.
       escalation on top. Measured on a real generated grid: Kabuto in 100%
       of Beach zones at level 12-18, Kabutops in 31.6% at its unavoidable
       ~46+. Full engine (1262) and data (240) suites green.
+
+## Fixed: Battle Screen chip losing HP bar/level/herd/sprite, showing bare id — see DESIGN.md
+
+- [x] Direct report with screenshot: "Why did we lose hp bars and stuff
+      sometimes? On the battle renderer." Root cause (code-confirmed,
+      NOT live-reproduced despite heavy stress testing — see DESIGN.md's
+      honesty note): `applyCombatantState`'s `world.agents.find` lookup can
+      fail for an id a chip already painted (corpse pruned after
+      `CORPSE_PERSIST_TICKS`, or a mobile tab's rAF falling behind real
+      ticks), and every field degraded to its "no agent" branch at once —
+      bare id text, no sprite/level/herd/HP. Fixed by freezing an
+      already-painted chip on its last real state instead of stomping it,
+      using the same frame-to-frame persistence `combatantEls` already
+      relies on for the HP bar's CSS transition. Typecheck/build/full test
+      suites green; live stress-tested (thousands of ticks, dozens of real
+      battles) with zero regressions, but never actually caught the
+      original failure in the act — worth re-checking if it recurs, ideally
+      with a repro that's easier to force (e.g. throttling the tab).
