@@ -3344,6 +3344,22 @@ export const MOVES: Record<string, MoveSpec> = {
     //   real positional choices (push the threat back vs. interpose
     //   yourself) instead of the tired damageReduction/jam fork reused
     //   everywhere else.
+    //
+    // v4 conversion (MOVES_DESIGN.md's "Skill-tree template v4 — the
+    // two-lane standard"): 40 -> 45 nodes, 12 per branch, every v3 fork
+    // kept and moved to the tail of a lane. The fantasy is unchanged; what
+    // changed is that each branch now answers it TWICE, in two lanes that
+    // differ in kind rather than in degree:
+    // - Overwhelm: sustained pressure (bore through, flood the ground you
+    //   crossed) vs. commitment (wind up, unload, and on a real connection
+    //   never re-pressurise at all). Both end at Undertow Pull.
+    // - Bastion: plant your feet (immovable, valve wide open at a real
+    //   per-use price) vs. control the stream — Narrow the Stream turns
+    //   the base cone into a line, which is this branch's whole thesis
+    //   about the dex's own 80 accuracy made visible on the map.
+    // - Pod Tide: coordination (mark, converge, reach) vs. keeping the pod
+    //   (a fuller wash over a herd-mate, and a pump used to strip a canopy
+    //   crop for the herd instead of to fight).
     tree: {
       building_pressure: {
         id: "building_pressure",
@@ -3366,15 +3382,17 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "overwhelm_footing",
         name: "+5 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["pump_conditioning"], ["surge_and_brace"], ["wake_of_violence"]],
+        prerequisites: ["building_pressure"],
         leaning: "aggression",
+        // LANE B, filler. Steadying the nozzle before the release — the
+        // commitment lane, opposite lane A's sustained pressure.
         delta: { accuracy: 5 },
       },
       bursting_main: {
         id: "bursting_main",
         name: "Bursting Main",
         cost: 1,
-        prerequisites: ["overwhelm_footing"],
+        prerequisites: ["pump_conditioning"],
         leaning: "aggression",
         delta: { defensePenetration: 0.3 },
       },
@@ -3382,7 +3400,11 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "flooding_wake",
         name: "Flooding Wake",
         cost: 1,
-        prerequisites: ["bursting_main"],
+        // LANE NOTABLE A (v4): lane A is sustained pressure — it bores
+        // through (Bursting Main) and leaves the ground it crossed
+        // underwater. Also the landing point for the Aggression<->Boldness
+        // bridge, which skips the lane's grind but not its decisions.
+        prerequisitesAnyOf: [["bursting_main"], ["unified_current"]],
         leaning: "aggression",
         // A real, already-shipped primitive (see Water Gun's own use of it):
         // a landed, non-killing hit leaves standing water where it struck.
@@ -3396,13 +3418,11 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "widening_main",
         name: "+1 Range",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Aggression (Surge and Brace's and Wake of
-        // Violence's own chains).
-        prerequisitesAnyOf: [["flooding_wake"], ["unified_current"], ["violent_confluence"]],
+        prerequisites: ["flooding_wake"],
         leaning: "aggression",
-        // Honest caveat, not hidden: this move's own cone footprint is
-        // fixed at `shape.length` (4) regardless of `range.max` — range
+        // Honest caveat, not hidden: this move's own footprint is fixed at
+        // `shape.length` (4 by default, or 5 if the Boldness branch's
+        // Narrow the Stream has been taken) regardless of `range.max` — range
         // only governs how far away a target can be for the attacker to
         // *decide* to fire (`moveRange`/`withinMoveRange`, combat.ts), not
         // how far the resolved blast itself reaches. A target at the new,
@@ -3410,11 +3430,27 @@ export const MOVES: Record<string, MoveSpec> = {
         // See MOVES_DESIGN.md's "range vs. shape are decoupled" note.
         delta: { range: { max: 5 } },
       },
+      pressure_holds: {
+        id: "pressure_holds",
+        name: "Pressure Holds",
+        cost: 1,
+        // LANE NOTABLE B (v4), and the landing point for the
+        // Sociability<->Aggression bridge.
+        prerequisitesAnyOf: [["overwhelm_footing"], ["violent_confluence"]],
+        leaning: "aggression",
+        // Lane B is commitment: wind up, unload, and — once a blast really
+        // connects — the main is still full, so it fires again immediately
+        // instead of re-pressurising (`critCooldownReset`, combat.ts's own
+        // crit path). Deliberately not another cooldown delta: this one is
+        // earned per crit, and it is what makes the nuke-vs-volley fork
+        // below a real choice rather than a coin flip.
+        delta: { critCooldownReset: true },
+      },
       overwhelm_surge: {
         id: "overwhelm_surge",
         name: "Overwhelm",
         cost: 1,
-        prerequisites: ["widening_main"],
+        prerequisites: ["pressure_holds"],
         excludes: ["relentless_surge"],
         leaning: "aggression",
         // Goes all-in on one unstoppable blast — the wind-up costs even
@@ -3425,7 +3461,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "relentless_surge",
         name: "Relentless Surge",
         cost: 1,
-        prerequisites: ["widening_main"],
+        prerequisites: ["pressure_holds"],
         excludes: ["overwhelm_surge"],
         leaning: "aggression",
         delta: { hits: { min: 2, max: 2 }, power: -20 },
@@ -3434,7 +3470,9 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "undertow_pull",
         name: "Undertow Pull",
         cost: 2,
-        prerequisitesAnyOf: [["overwhelm_surge"], ["relentless_surge"]],
+        // DEEP NOTABLE (v4): both lanes end here — the sustained-pressure
+        // lane's widened main and either side of the commitment fork.
+        prerequisitesAnyOf: [["widening_main"], ["overwhelm_surge"], ["relentless_surge"]],
         leaning: "aggression",
         // The backwash literally drags the target with it.
         delta: { positionSwap: true, positionSwapPull: 1 },
@@ -3472,19 +3510,38 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
       },
+      open_the_valve: {
+        id: "open_the_valve",
+        name: "Open the Valve",
+        cost: 1,
+        prerequisites: ["bastion_footing"],
+        leaning: "boldness",
+        // LANE A, filler. You can only hold the valve wide open if you are
+        // planted — so the lane that plants its feet is the one allowed to.
+        // A real per-use price in the same node as the payoff (principle 4):
+        // `selfCostPerUse` drains the user's own energy every cast
+        // (predation.ts's `resolveHit`), the roster's second use of a lever
+        // it has barely touched.
+        delta: { power: 15, selfCostPerUse: { need: "energy", amount: 0.05 } },
+      },
       channel_footing: {
         id: "channel_footing",
         name: "+5 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["bastion_footing"], ["surge_and_brace"], ["steadfast_tide"]],
+        prerequisites: ["wading_advance"],
         leaning: "boldness",
+        // LANE B, filler — the control lane. Hydro Pump's canonically bad
+        // accuracy is this branch's whole subject, so lane B starts by
+        // tightening the stream rather than by bracing against it.
         delta: { accuracy: 5 },
       },
       undertow_anchor: {
         id: "undertow_anchor",
         name: "Undertow Anchor",
         cost: 1,
-        prerequisites: ["channel_footing"],
+        // LANE NOTABLE A (v4), and the Aggression<->Boldness bridge's
+        // landing point on this branch.
+        prerequisitesAnyOf: [["open_the_valve"], ["unified_current"]],
         leaning: "boldness",
         // Ironic and earned: the water-mover that can't be swept away by
         // its own current.
@@ -3495,18 +3552,32 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "channel_grip",
         name: "+1 Range",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Boldness (Surge and Brace's and Steadfast Tide's
-        // own chains).
-        prerequisitesAnyOf: [["undertow_anchor"], ["unified_current"], ["communal_current"]],
+        prerequisites: ["undertow_anchor"],
         leaning: "boldness",
         delta: { range: { max: 5 } },
+      },
+      narrow_the_stream: {
+        id: "narrow_the_stream",
+        name: "Narrow the Stream",
+        cost: 1,
+        // LANE NOTABLE B (v4), and the Boldness<->Sociability bridge's
+        // landing point on this branch.
+        prerequisitesAnyOf: [["channel_footing"], ["communal_current"]],
+        leaning: "boldness",
+        // The branch's thesis, made literal and visible on the map: stop
+        // spraying. The base move's wide `cone` (length 4, width 2) becomes
+        // a `line` five tiles long — fewer tiles hit, but every one of them
+        // in front of you, at the exact reach Channel Grip buys. A real
+        // trade, not an upgrade, and the only `shape` setter in this tree
+        // (shape is an overwrite field — see MOVES_DESIGN.md principle 14:
+        // notable-tier currency, never filler).
+        delta: { shape: { kind: "line", length: 5 } },
       },
       bracing_wave: {
         id: "bracing_wave",
         name: "Bracing Wave",
         cost: 1,
-        prerequisites: ["channel_grip"],
+        prerequisites: ["narrow_the_stream"],
         excludes: ["riptide_counter"],
         leaning: "boldness",
         grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
@@ -3516,7 +3587,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "riptide_counter",
         name: "Riptide Counter",
         cost: 1,
-        prerequisites: ["channel_grip"],
+        prerequisites: ["narrow_the_stream"],
         excludes: ["bracing_wave"],
         leaning: "boldness",
         // Punishes whoever tries to catch it off guard mid-channel.
@@ -3526,7 +3597,9 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "fouling_backwash",
         name: "Fouling Backwash",
         cost: 2,
-        prerequisitesAnyOf: [["bracing_wave"], ["riptide_counter"]],
+        // DEEP NOTABLE (v4): the planted lane's own reach, or either side
+        // of the control lane's fork, all end here.
+        prerequisitesAnyOf: [["channel_grip"], ["bracing_wave"], ["riptide_counter"]],
         leaning: "boldness",
         // The backwash fouls the target's own footing, throwing off its
         // rhythm rather than just crushing its guard down.
@@ -3581,7 +3654,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "wake_footing",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["pod_footing"], ["steadfast_tide"], ["wake_of_violence"]],
+        prerequisites: ["pod_footing"],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
@@ -3589,7 +3662,10 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "wake_rally",
         name: "Wake Rally",
         cost: 1,
-        prerequisites: ["wake_footing"],
+        // LANE NOTABLE A (v4), and the Sociability<->Aggression bridge's
+        // landing point on this branch. Lane A is coordination: the pod
+        // converges, and reaches further to do it.
+        prerequisitesAnyOf: [["wake_footing"], ["violent_confluence"]],
         leaning: "sociability",
         // The surge marks a target for the whole pod to converge on.
         delta: { rallyCall: { ticks: 20 } },
@@ -3598,18 +3674,46 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "pod_reach",
         name: "+1 Range",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Sociability (Steadfast Tide's and Wake of
-        // Violence's own chains).
-        prerequisitesAnyOf: [["wake_rally"], ["communal_current"], ["violent_confluence"]],
+        prerequisites: ["wake_rally"],
         leaning: "sociability",
         delta: { range: { max: 5 } },
+      },
+      fuller_wash: {
+        id: "fuller_wash",
+        name: "Fuller Wash",
+        cost: 1,
+        prerequisites: ["pod_current"],
+        leaning: "sociability",
+        // LANE B, filler. Lane B is the other half of "the pod cares for
+        // itself" — not converging on a threat, but keeping the pod: the
+        // opener's own wash over a herd-mate goes from 15% to 22% of their
+        // max HP. Deliberately a `delta`, not another healing passive —
+        // `agent.passives` totals stack across every move a species knows
+        // and are the scarcest currency in the system.
+        delta: { allyEffect: { healFraction: 0.22 } },
+      },
+      strip_the_canopy: {
+        id: "strip_the_canopy",
+        name: "Strip the Canopy",
+        cost: 1,
+        // LANE NOTABLE B (v4), and the Boldness<->Sociability bridge's
+        // landing point on this branch.
+        prerequisitesAnyOf: [["fuller_wash"], ["communal_current"]],
+        leaning: "sociability",
+        // The pod turns the pump on a fruiting tree instead of on an
+        // animal: a jet strong enough to move bodies knocks a canopy crop
+        // down in a fraction of the time. Real and already wired —
+        // needs.ts's canopy-harvest path substitutes any off-cooldown
+        // damage move for the dig, scaling with its `range.max` and adding
+        // its `gatherBurst` on top. The one node in this tree that feeds
+        // the herd rather than fighting for it.
+        delta: { gatherBurst: 3 },
       },
       undertow_guard: {
         id: "undertow_guard",
         name: "Undertow Guard",
         cost: 1,
-        prerequisites: ["pod_reach"],
+        prerequisites: ["strip_the_canopy"],
         excludes: ["riptide_charge"],
         leaning: "sociability",
         // Protectively shoves the threat back from the herd.
@@ -3619,7 +3723,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "riptide_charge",
         name: "Riptide Charge",
         cost: 1,
-        prerequisites: ["pod_reach"],
+        prerequisites: ["strip_the_canopy"],
         excludes: ["undertow_guard"],
         leaning: "sociability",
         // Surges forward to meet the threat before it reaches the herd.
@@ -3629,7 +3733,9 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "pod_instinct",
         name: "+8% Lifesteal",
         cost: 2,
-        prerequisitesAnyOf: [["undertow_guard"], ["riptide_charge"]],
+        // DEEP NOTABLE (v4): the coordination lane's own reach, or either
+        // side of the guardianship lane's fork, all end here.
+        prerequisitesAnyOf: [["pod_reach"], ["undertow_guard"], ["riptide_charge"]],
         leaning: "sociability",
         delta: { lifestealFraction: 0.08 },
       },
@@ -3667,20 +3773,32 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["building_pressure", "wading_advance"],
         leaning: "boldness",
-        delta: { lockTicks: -1 },
+        // Planting your feet alongside someone else both shortens the
+        // wind-up Building Pressure introduces and steadies the aim — the
+        // benefit lives in the same node as the commitment it pays off
+        // (principle 4), and the accuracy half is on-fantasy rather than a
+        // bolt-on: a braced stance is exactly what this move's canonically
+        // bad aim is missing.
+        delta: { lockTicks: -1, accuracy: 5 },
       },
       // Bridge tail (see MOVES_DESIGN.md's "Crosslinks as bridges"):
       // extends Surge and Brace into Aggression's and Boldness's own
       // pre-fork nodes (Widening Main / Channel Grip).
       brace_conditioning: {
         id: "brace_conditioning",
-        name: "-1 Cooldown",
+        name: "Deeper Brace",
         cost: 1,
         prerequisites: ["surge_and_brace"],
         leaning: "aggression",
         // Deepens the same wind-up-softening lever Surge and Brace already
-        // introduced, instead of a generic accuracy bolt-on.
-        delta: { cooldownTicks: -1 },
+        // introduced (principle 13) rather than the generic cooldown
+        // bolt-on this was: a second -1 `lockTicks` is what pays off the
+        // all-in Aggression build, whose Building Pressure (+1) and
+        // Overwhelm (+1) put it at +2 — this bridge is the only thing in
+        // the tree that fully cancels the wind-up it commits to. Keeps its
+        // -1 cooldown so the tree's total tempo is unchanged at -4 of the
+        // -6 the 3x cap allows.
+        delta: { lockTicks: -1, cooldownTicks: -1 },
       },
       unified_current: {
         id: "unified_current",
