@@ -1,5 +1,45 @@
 # Moves and tools are one system
 
+**Status: direction decided, specifics open.** Confirmed directly — *"Yes.
+I'm fairly confident about the items as moves direction."* The architecture
+below is the one to build against; the field shapes, the exact per-move
+slices, and the balance numbers are still to be worked out, and the terrain
+measurement under "the biggest risk" is still outstanding.
+
+## Decided
+
+1. **Items and moves share one effect vocabulary.** A move is an effect; a
+   Pokémon reaches it through its body, a human through a tool. Not two
+   systems that resemble each other — one system with three delivery
+   mechanisms (innate, tool-granted, consumable).
+2. **A tool is a slice of a move, never the whole move.** Cut damages, fells
+   and clears; an axe only fells, a machete only clears, a knife only does
+   the damage slice. This is what makes pillar 3 structural instead of a
+   tuning problem.
+3. **Consumables are borrowed moves.** A smoke bomb fires Smokescreen
+   without knowing it.
+4. **The player's loadout is their moveset.** No separate ability screen.
+5. **Tool-reachability rule:** can a human reproduce the effect with
+   materials and technique, or does it require being the creature?
+   Flamethrower yes, as a weak and self-endangering slice. Ice Beam and
+   Dragon Rage no.
+6. **The unreachable set is load-bearing and stays closed.** It is the
+   mechanical reason a partner is necessary. Act 2's smithing tier upgrades
+   slices; it never opens that column.
+7. **Raft is Act 2.**
+
+## Still open
+
+- The generalised terrain-effect field shape — the moves agent's call; the
+  ask is in "What the moves agent needs from this" below.
+- Whether a tool-granted move can ever become permanently known.
+- Throw range for consumables.
+- Whether a partner can use tools (recommendation: no).
+- **Unmeasured:** terrain change per 1000 ticks by cause, before the
+  vocabulary is widened.
+
+---
+
 The idea, as given:
 
 > "consumable items that sorta mimic moves that Pokémon use would be really

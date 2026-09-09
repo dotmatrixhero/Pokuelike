@@ -65,6 +65,9 @@ Held deliberately tight, because crafting is where sim games bloat.
    Nothing may ever require a third tier.
 3. **Every item grants a verb or removes a constraint.** No flat stat
    sticks. If it doesn't change what you can *do*, it doesn't ship.
+   **Decided (see `MOVES_AND_TOOLS.md`):** that verb is a real `MoveSpec` —
+   items and moves share one effect vocabulary, and a tool is always a
+   *slice* of a move, never the whole move.
 4. **Every item names its cost.** Weight, noise, threat signature, or
    something it stops you doing.
 5. **Nothing craftable is sufficient.** Pillar 3: if a loadout lets a player
