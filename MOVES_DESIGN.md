@@ -1436,9 +1436,97 @@ shipped data, both called out in each tree's own code comment:
   the user originally asked for ("maybe needs to give damage reduction
   too") independent of the taunt idea.
 
-### Tackle (Normal, point/melee) — Utility archetype, full treatment
+### Tackle (Normal, point/melee) — v4 two-lane (Shipped)
 
-**Shipped as v2** — three branches plus a crosslink triangle:
+**Shipped as v4**, 45 nodes, 0 checker problems (was 33 nodes / 11
+problems). The v2 writeup it replaces is kept below for the record.
+
+**The fantasy, written before a single node moved.** Tackle is the first
+thing anything learns and the last thing it forgets. There is no element in
+it, no trick, no reach — it is a body at speed, head down, feet planted,
+putting its whole weight through whatever is in front of it. Everything that
+makes it dangerous is borrowed: the mass the animal grew, the ground it
+braces against, the herd running at its shoulder. And its flaw is that it has
+to **arrive** — no range, no projectile, you cross the distance yourself, and
+when you land you are standing exactly where you hit with your momentum
+spent. Every branch is an answer to that flaw.
+
+| branch | lane A | lane B | how they differ in KIND |
+|---|---|---|---|
+| **Aggression — the approach is the weapon** | *Broke Cover* — waiting in the scrub, and the scrub is spent on the hit (`situationalBonus: concealed` + `consumesOwnTerrain: bush`) | *Full Tilt* — a real `chargeAttack` wind-up that crosses six tiles of open ground | never seen at all vs. seen coming and unstoppable |
+| **Boldness — two bodies meet, one of them moves** | *Immovable* — hide, recovery, nothing budges it | *Shoulder Through* — `positionSwap` + `positionSwapPull`: it goes through and comes out standing where they were | absorb vs. displace |
+| **Sociability — the herd is the body** | *Rally Cry* — a real `rallyCall` mark; every nearby agent's own targeting converges | *Bulwark* — bulk spent for the herd: `gatherBurst` browsing the tree line, then standing in the way | change what others decide vs. change what the herd has |
+
+Flavours drawn on: Aggression 6 (stealth/ambush, aggressive movement, raw
+damage, piercing, environment, wider AoE) · Boldness 5 (defence,
+reposition-others, planted/duration, healing, raw damage) · Sociability 5
+(rallying, ally buffing, healing, defence, raw damage).
+
+Deep notables are where the two lanes have to meet, not a third idea bolted
+on: *Unstoppable Momentum* (both approach lanes converge on never having to
+approach again), *Sets Its Feet* (whoever is better set wins the collision —
+and the brace is real damage here, since `effectiveWeight` adds
+`BRACED_WEIGHT_PER_STAGE` per positive Defense stage and the opener scales
+power off weight), *The Herd Arrives* (`allyEffectOnAttack` — the support
+effect stops needing its own turn).
+
+**Rejected, each against a real call site rather than a field name
+(principle 3):**
+
+- `ppCost`/`maxPPBonus` — PP is still an unbuilt primitive; there is no such
+  field on `MoveTreeNode.delta`. The power-vs-PP fork the design doc likes
+  would have been dead content.
+- `excludesAllies` — read only inside `resolveAreaHit`, so on a point-shaped
+  move it does nothing unless the build also took Aggression's ring capstone.
+  A Sociability branch that needs another branch's capstone to function is a
+  bug, not a synergy.
+- `statusChance`/`statusSeverity`/`statusSpreads` — `maybeInflictStatus`
+  returns early without a `statusKind`, and `statusKind` is not a delta
+  field. Tackle has none, so all three are inert on this tree.
+- a new `unshaken` passive on the Boldness deep notable. It fit the fantasy
+  perfectly and is non-stacking by construction — but Tackle is the
+  most-shared move in the roster, so a passive here spreads further than a
+  passive anywhere else. Replaced with a `delta` per PART 4's rule. **This
+  pass adds zero new passive grants and `passive-exposure.ts` is
+  byte-identical before and after.**
+
+**Two nodes reworked, with reasons rather than taste:**
+
+- *Counter Slam* was `situationalBonus: flanking`, which collided with
+  *Vanguard Charge*'s own flanking bonus on the same OVERWRITE field (two
+  co-takeable nodes; whichever the engine reached last quietly won) and
+  duplicated that crosslink's identity outright. It now does what its name
+  always said — the more it has already taken, the harder it comes back
+  (`selfStateBonus`, three users in the whole roster). This is the 11th
+  checker problem that had nowhere else to go.
+- *Rally Cry* was called Rally Cry and did not rally: it only buffed one
+  herd-mate's Attack. It now sets a real `rallyCall` mark as well.
+- *Guardian's Stand* gained `jamCooldownTicks: 1`. It had an empty `delta`
+  and only a passive, which left its bridge nothing to deepen (principle 13
+  requires the bridge's filler to escalate the crosslink's own lever, and
+  PART 4's rule is not to grant a second passive just to have one).
+
+**Balance, against the roster median as control** (`tree-balance.ts`):
+
+| | before | after | roster median |
+|---|---|---|---|
+| nodes | 33 | 45 | 39 |
+| distinct levers | 23 | **31** | 22 |
+| colour-pie flavours | 9 | **12** | 9 |
+| tempo | 2.00x (cap 2.00) | 2.00x (cap 2.00) | 2.00x |
+| power multiplier | 3.38x | **3.38x** | 1.96x |
+| cheapest capstone | 11 pts | 10 pts | 11 pts |
+
+Power was held at exactly its pre-existing 3.38x rather than "fixed":
+Tackle's base power of 40 is the lowest in the roster, so every absolute
+`+power` grant reads as a large multiplier, and retuning it is a balance
+decision, not a conversion one. Five new nodes were drafted with a `+5`/`+10`
+power rider and had it swapped for a real lever (`critRateStage`,
+`weightScaling`, a stronger `allyEffect`, `defensePenetration`) specifically
+to keep the total unmoved. **Flagged for a decision: 3.38x is the highest in
+the roster and 72% above the median — worth a look, but not unilaterally.**
+
+**v2, for the record** — three branches plus a crosslink triangle:
 
 - **Aggression — "Full Charge"**: opener *Weighted Charge* (bonus power
   scales with the user's own `maxHp` — `weightScaling`, a Venusaur and a
