@@ -3846,3 +3846,65 @@ deliberately stranding one and confirming the report:
 fork deep_reserve/slow_to_shift: the two sides never reconverge — one of them
 is a dead end (deep_reserve -> [nothing], slow_to_shift -> [set_bone])
 ```
+
+### The two-lane branch, finished shape
+
+Three corrections landed on the pilot in sequence, each fixing something real:
+
+1. *"I mean little like path of exile. Like multi paths to same notable."* —
+   filler alternatives stopped being mutually exclusive. 30 `excludes`
+   removed; scarcity of points is what makes a route a decision, not a
+   lockout.
+2. *"x x Y x x / a a B a a ... you can technically go both Y and B
+   'excludes' you just have to invest a Lotta skill in it."* — two parallel
+   lanes, each with its own notable.
+3. *"did you get rid of a deeper notable on each branch? You could have the
+   paths converge to a linear notable, then have another linear single filler
+   and single end capstone to really make it feel complete?"* — **yes, I
+   had.** Collapsing to lanes cut identity nodes per branch from 5 to 3; the
+   deep convergence notable was simply gone.
+
+The finished branch, 12 nodes:
+
+```
+                opener
+        ┌──────────┴──────────┐
+   x → x → [LANE NOTABLE] → x   a → a → [LANE NOTABLE] → a
+        └──────────┬──────────┘
+              [DEEP NOTABLE]        <- both lanes end here
+                    │
+                 filler
+                    │
+               [CAPSTONE]
+```
+
+Four identity nodes per branch, 45 nodes per tree, and every capstone sits
+26 points deep by the cheapest route. Walking one lane costs 16; walking both
+costs 21 — you *can*, it just costs five more points.
+
+**Bridges land deep now, and on one lane each.** They used to drop you at a
+lane's *entry*, which is the shallowest possible landing. Each bridge notable
+is now an alternate route into a **lane notable** — skipping that lane's
+filler grind but never the lane choice itself (principle 12, restated for
+lanes). And per *"I'm okay if the cross links only let you move to one of the
+two soft exclusive branches"*, each bridge reaches **one lane per branch**,
+which gives every bridge a character instead of making it a skeleton key:
+
+| Bridge | joins | character |
+|---|---|---|
+| Blur of Needles | Fourth Needle (agg) + Never Landed (bold) | the two fast, close lanes |
+| Ambush Hive | High Pass (bold) + Converge (soc) | the two patient, high lanes |
+| Venom Mark | Pincushion (agg) + Drone Relay (soc) | the two reserve lanes |
+
+**Two things the new capstone tier finally bought:**
+
+- *Empty the Sacs* is the **deferred Nx-PP lever**, at last at the tier it
+  belongs: 5 PP in one use for everything the Beedrill has. That idea has sat
+  in this document unbuilt since the PP brainstorm.
+- *The Swarm Decides* uses `excludesAllies` — the one Sociability flavour
+  **no proposed branch touched**, flagged by this document's own colour-pie
+  audit. A hive-wide AoE that no longer stings its own is exactly where it
+  belongs.
+
+Four drafts still use the previous shape. Rolling this out to them is a
+decision, not an oversight — one tree was piloted first on purpose.
