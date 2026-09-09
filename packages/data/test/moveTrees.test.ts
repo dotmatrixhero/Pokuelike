@@ -476,7 +476,7 @@ describe("Hydro Pump tree: v3 redesign — overwhelming, genuinely hard to aim",
   });
 });
 
-describe("Solar Beam tree: v3 redesign — a guardian's dominance display", () => {
+describe("Solar Beam tree: v4 two-lane — a guardian's dominance display", () => {
   const solarBeam = MOVES.solar_beam;
 
   it("has no hitsArea by default — Solar Beam stays a single-target beam, just with real range", () => {
@@ -484,14 +484,13 @@ describe("Solar Beam tree: v3 redesign — a guardian's dominance display", () =
     expect(solarBeam.shape).toEqual({ kind: "line", length: 5 });
   });
 
-  it("Claim the Grove is a real clashing-flavored bonus vs. a rival Grass-type, reachable through either Aggression fork", () => {
+  it("Claim the Grove is a real clashing-flavored bonus vs. a rival Grass-type, reachable through either Aggression lane", () => {
     const viaGlare = applyMoveTree(solarBeam, [
       "gathering_light",
-      "focusing_lens",
       "dominance_footing",
-      "piercing_ray",
       "widening_beam",
       "withering_glare",
+      "dominant_bloom",
       "claim_the_grove",
     ]);
     expect(viaGlare.bonusVsType).toEqual({ type: "grass", multiplier: 1.5 });
@@ -507,15 +506,13 @@ describe("Solar Beam tree: v3 redesign — a guardian's dominance display", () =
   });
 
   it("Sociability's fork makes the ally-effect overwrite an explicit, deliberate choice (heal the grove vs. steel it), not an emergent quirk", () => {
-    const healed = applyMoveTree(solarBeam, ["grove_ward", "grove_footing", "grove_reach", "grove_muster", "grove_precision", "vital_bloom"]);
+    const healed = applyMoveTree(solarBeam, ["grove_ward", "territorial_footing", "grove_bulwark", "vital_bloom"]);
     expect(healed.allyEffect).toEqual({ healFraction: 0.25 });
 
     const steeled = applyMoveTree(solarBeam, [
       "grove_ward",
-      "grove_footing",
-      "grove_reach",
-      "grove_muster",
-      "grove_precision",
+      "territorial_footing",
+      "grove_bulwark",
       "steadfast_bloom_ally",
     ]);
     expect(steeled.allyEffect).toEqual({ buff: { stat: "defense", stage: 2, ticks: 20 } });
@@ -525,49 +522,27 @@ describe("Solar Beam tree: v3 redesign — a guardian's dominance display", () =
     expect(() =>
       applyMoveTree(solarBeam, [
         "grove_ward",
-        "grove_footing",
-        "grove_reach",
-        "grove_muster",
-        "grove_precision",
+        "territorial_footing",
+        "grove_bulwark",
         "vital_bloom",
         "steadfast_bloom_ally",
       ])
     ).toThrow(/conflicts with already-chosen/);
   });
 
-  it("Rooted Assault's bridge (Aggression<->Boldness) reaches both Widening Beam and Deepening Roots", () => {
-    const viaAggr = applyMoveTree(solarBeam, ["gathering_light", "sunlit_roots", "rooted_assault", "sunlit_focus", "bedrock_beam", "widening_beam"]);
-    expect(viaAggr.range).toEqual({ min: 0, max: 7 });
-
-    const viaBold = applyMoveTree(solarBeam, ["gathering_light", "sunlit_roots", "rooted_assault", "sunlit_focus", "bedrock_beam", "deepening_roots"]);
-    expect(viaBold.range).toEqual({ min: 0, max: 7 });
+  it("Rooted Assault's bridge lands on a lane notable in each branch it connects — Piercing Ray and Bedrock Beam", () => {
+    // v4: a bridge skips a lane's filler grind, never its notable.
+    const bridge = ["gathering_light", "sunlit_roots", "rooted_assault", "sunward_stance", "heliostand"];
+    expect(applyMoveTree(solarBeam, [...bridge, "piercing_ray"]).defensePenetration).toBeGreaterThan(0);
+    expect(applyMoveTree(solarBeam, [...bridge, "bedrock_beam"]).defensePenetration).toBeGreaterThan(0);
   });
 
-  it("Territorial Flare's bridge (Sociability<->Aggression) reaches both Grove Precision and Widening Beam", () => {
-    const viaSoc = applyMoveTree(solarBeam, [
-      "grove_ward",
-      "gathering_light",
-      "territorial_flare",
-      "territorial_footing",
-      "dominant_bloom",
-      "grove_precision",
-    ]);
-    expect(viaSoc.critRateStage).toBe(2); // Gathering Light's own +1, plus Territorial Footing's own +1
-    expect(viaSoc.accuracy).toBe(solarBeam.accuracy + 5); // Grove Precision's own +5
-
-    const viaAggr = applyMoveTree(solarBeam, [
-      "grove_ward",
-      "gathering_light",
-      "territorial_flare",
-      "territorial_footing",
-      "dominant_bloom",
-      "widening_beam",
-    ]);
-    expect(viaAggr.range).toEqual({ min: 0, max: 7 });
-    // Triple Bloom is a real, flashy capstone-tier payoff — a genuine
-    // shape/AoE change (earned at notable tier), not another stat bump.
-    expect(viaAggr.shape).toEqual({ kind: "cone", length: 5, width: 3 });
-    expect(viaAggr.hitsArea).toBe(true);
+  it("Territorial Flare's bridge lands on a lane notable in each branch it connects — Grove Muster and Widening Beam", () => {
+    // v4: bridges reach ONE lane per branch, which is what gives each bridge a
+    // character instead of making it a skeleton key.
+    const bridge = ["grove_ward", "gathering_light", "territorial_flare", "flare_wider", "sunspot"];
+    expect(applyMoveTree(solarBeam, [...bridge, "grove_muster"]).rallyCall).toBeDefined();
+    expect(applyMoveTree(solarBeam, [...bridge, "widening_beam"]).range!.max).toBeGreaterThan(solarBeam.range!.max);
   });
 });
 
