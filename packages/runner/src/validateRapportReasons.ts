@@ -38,11 +38,13 @@ const PHRASING: Record<RapportReason, (n: number) => string> = {
   wasDefended: (n) => `was defended by them ${n} time${n === 1 ? "" : "s"}`,
   struck: (n) => `struck them ${n} time${n === 1 ? "" : "s"}`,
   wasStruck: (n) => `was struck by them ${n} time${n === 1 ? "" : "s"}`,
-  socialized: (n) => `kept their company ${n} time${n === 1 ? "" : "s"}`,
+  socialized: (n) => (n <= 1 ? `shared their company` : `spent ${n} long stretches in their company`),
   bonded: () => `took them as a mate`,
 };
 
 const totals: Record<string, number> = Object.fromEntries(ALL_REASONS.map((r) => [r, 0]));
+/** Raw occurrences behind the milestones — how the table WOULD read untrottled. */
+const rawTotals: Record<string, number> = Object.fromEntries(ALL_REASONS.map((r) => [r, 0]));
 let edgeTotal = 0;
 let edgesWithMemory = 0;
 let edgesMultiReason = 0;
@@ -73,7 +75,10 @@ for (const seed of seeds) {
       const negative = memories.some((m) => m.reason === "struck" || m.reason === "wasStruck");
       if (positive && negative) mixedValence++;
 
-      for (const m of memories) totals[m.reason] = (totals[m.reason] ?? 0) + m.count;
+      for (const m of memories) {
+        totals[m.reason] = (totals[m.reason] ?? 0) + m.count;
+        rawTotals[m.reason] = (rawTotals[m.reason] ?? 0) + (m.occurrences ?? m.count);
+      }
       if (memories.length > 1 && memories[0]!.reason !== notable[0]!.reason) curationChangedLead++;
 
       // Keep a handful of the richest edges (most distinct reasons, then most
@@ -97,13 +102,19 @@ for (const seed of seeds) {
 
 console.log(`=== rapport reasons over ${seeds.length} seeds x ${ticks} ticks ===\n`);
 
-console.log("reason vocabulary exercised:");
+console.log("reason vocabulary exercised (memories, i.e. after throttling):");
 const grand = Object.values(totals).reduce((a, b) => a + b, 0);
+const rawGrand = Object.values(rawTotals).reduce((a, b) => a + b, 0);
+console.log("  reason           memories   share      raw   raw share");
 for (const reason of ALL_REASONS) {
   const n = totals[reason] ?? 0;
+  const raw = rawTotals[reason] ?? 0;
   const share = grand > 0 ? ((n / grand) * 100).toFixed(1) : "0.0";
+  const rawShare = rawGrand > 0 ? ((raw / rawGrand) * 100).toFixed(1) : "0.0";
   const flag = n === 0 ? "   <-- NEVER FIRED (unreachable content)" : "";
-  console.log(`  ${reason.padEnd(14)} ${String(n).padStart(7)}  ${share.padStart(5)}%${flag}`);
+  console.log(
+    `  ${reason.padEnd(14)} ${String(n).padStart(8)}  ${share.padStart(5)}%  ${String(raw).padStart(7)}  ${rawShare.padStart(6)}%${flag}`
+  );
 }
 
 console.log(

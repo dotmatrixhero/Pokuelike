@@ -191,9 +191,39 @@ export const RAPPORT_REASON_SIGNIFICANCE: Record<RapportReason, number> = {
   defended: 4,
   struck: 3,
   wasStruck: 3,
+  // A socialized *milestone* is 500 ticks of chosen company (see
+  // RAPPORT_REASON_MEMORY_INTERVAL), which distinguishes a relationship about
+  // as much as a single clash does — not the near-worthless per-tick event
+  // this entry used to represent.
+  socialized: 3,
   gaveFood: 2,
   receivedFood: 2,
-  socialized: 1,
+};
+
+/**
+ * How many raw occurrences of a reason it takes to add one to a memory's
+ * `count` — absent means 1, i.e. every occurrence is its own memory, which is
+ * right for everything rare and deliberate.
+ *
+ * **`socialized` is throttled because a real run proved it had to be.**
+ * Measured over 4 seeds x 6000 ticks, socializing was **95.2%** of all
+ * recorded reason-events (16,168 of 16,975), and one pair alone logged 2,907
+ * of them — they sat together every other tick. At that density the count
+ * carries no information: *"kept their company 2907 times"* says nothing a
+ * reader can use, and it swamps *"fought for them 19 times"* on the same
+ * edge.
+ *
+ * The fix is a milestone, not a deletion — direct steer: *"I would rather
+ * have more depth to the social then drop it. But yeah the raw 3k events on
+ * its own isn't really that useful i guess. Maybe every 500 social it creates
+ * a useful memory."* 500 is that number. So the first shared moment records
+ * immediately (these two have met, and that is real), and every 500
+ * thereafter adds another — a count of long stretches together rather than of
+ * ticks. `RapportMemory.occurrences` keeps the raw total so the depth is
+ * still there for anything that wants it.
+ */
+export const RAPPORT_REASON_MEMORY_INTERVAL: Partial<Record<RapportReason, number>> = {
+  socialized: 500,
 };
 
 /**
@@ -224,13 +254,35 @@ export function notableRapportMemories(agent: Agent, otherId: string): RapportMe
  */
 function withMemory(memories: RapportMemory[] | undefined, reason: RapportReason, tick: number): RapportMemory[] {
   const next = memories ? [...memories] : [];
-  const existing = next.findIndex((m) => m.reason === reason);
-  if (existing >= 0) {
-    const prior = next[existing]!;
-    next[existing] = { reason, count: prior.count + 1, lastTick: tick };
-  } else {
-    next.push({ reason, count: 1, lastTick: tick });
+  const interval = RAPPORT_REASON_MEMORY_INTERVAL[reason] ?? 1;
+  const at = next.findIndex((m) => m.reason === reason);
+
+  if (at < 0) {
+    // The first occurrence always records, throttled or not — "these two have
+    // met" is real information, and it means a throttled reason never sits
+    // invisible at count 0 waiting for a milestone that may never come.
+    next.push(interval > 1 ? { reason, count: 1, lastTick: tick, occurrences: 1 } : { reason, count: 1, lastTick: tick });
+    return next;
   }
+
+  const prior = next[at]!;
+  if (interval <= 1) {
+    next[at] = { reason, count: prior.count + 1, lastTick: tick };
+    return next;
+  }
+
+  // Throttled: always advance the raw total, but only cross into a new
+  // milestone (and refresh lastTick) every `interval` occurrences since the
+  // first. `lastTick` therefore means "when this last became worth
+  // remembering", which is what a reader wants from it.
+  const occurrences = (prior.occurrences ?? prior.count) + 1;
+  const crossed = (occurrences - 1) % interval === 0;
+  next[at] = {
+    reason,
+    count: crossed ? prior.count + 1 : prior.count,
+    lastTick: crossed ? tick : prior.lastTick,
+    occurrences,
+  };
   return next;
 }
 

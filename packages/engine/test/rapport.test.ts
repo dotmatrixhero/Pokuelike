@@ -12,6 +12,7 @@ import {
   RAPPORT_MAX_EDGES_PER_AGENT,
   RAPPORT_MOB_DEFENSE_DELTA,
   RAPPORT_PRUNE_THRESHOLD,
+  RAPPORT_REASON_MEMORY_INTERVAL,
   RAPPORT_SOCIALIZE_DELTA,
   adjustRapport,
   decayedRapportScore,
@@ -426,20 +427,67 @@ describe("rapport memories: an edge remembers WHY, not just how much", () => {
     expect(rapportMemories(b, "a").map((m) => m.reason)).toEqual(["wasDefended"]);
   });
 
-  it("notableRapportMemories leads with the RARE reason, not the frequent one", () => {
+  it("notableRapportMemories leads with the rarer reason on a count tie", () => {
     const world = createWorld(5, 5);
     const a = agent("a");
     world.agents.push(a);
 
-    // The shape a real run actually produces: socializing swamps everything
-    // (measured at 95.2% of all reason-events over 4 seeds x 6000 ticks).
-    for (let i = 0; i < 500; i++) adjustRapport(world, a, "b", RAPPORT_SOCIALIZE_DELTA, "socialized");
+    // 500 socialize occurrences throttle down to 2 milestones (one at the
+    // first, one on crossing 501)... so make it a clean tie against a single
+    // defense and let significance decide.
+    for (let i = 0; i < 2; i++) adjustRapport(world, a, "b", RAPPORT_SOCIALIZE_DELTA, "socialized");
     adjustRapport(world, a, "b", RAPPORT_MOB_DEFENSE_DELTA, "wasDefended");
 
-    // The honest mechanical order buries the interesting fact...
-    expect(rapportMemories(a, "b").map((m) => m.reason)).toEqual(["socialized", "wasDefended"]);
-    // ...and the curated one leads with it.
     expect(notableRapportMemories(a, "b").map((m) => m.reason)).toEqual(["wasDefended", "socialized"]);
+  });
+
+  it("throttles socialized into milestones so a per-tick habit cannot swamp the edge", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    world.agents.push(a);
+
+    // The real shape: one measured pair logged 2,907 socialize events in a
+    // 6,000-tick run — they sat together every other tick.
+    for (let i = 0; i < 2907; i++) adjustRapport(world, a, "b", RAPPORT_SOCIALIZE_DELTA, "socialized");
+
+    const [memory] = rapportMemories(a, "b");
+    // 1 for the first shared moment, then one per RAPPORT_REASON_MEMORY_INTERVAL.
+    expect(memory).toMatchObject({
+      reason: "socialized",
+      count: 1 + Math.floor(2906 / RAPPORT_REASON_MEMORY_INTERVAL.socialized!),
+      occurrences: 2907,
+    });
+    // The depth is kept, not discarded — the raw total is still there.
+    expect(memory!.occurrences).toBe(2907);
+    // And a real, risk-bearing act now outranks the habit on raw count alone.
+    adjustRapport(world, a, "b", RAPPORT_MOB_DEFENSE_DELTA, "defended");
+    for (let i = 0; i < 18; i++) adjustRapport(world, a, "b", RAPPORT_MOB_DEFENSE_DELTA, "defended");
+    expect(rapportMemories(a, "b")[0]!.reason).toBe("defended");
+  });
+
+  it("the first shared moment records immediately — a throttled reason never sits invisible", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    world.agents.push(a);
+
+    adjustRapport(world, a, "b", RAPPORT_SOCIALIZE_DELTA, "socialized");
+
+    expect(rapportMemories(a, "b")).toEqual([
+      { reason: "socialized", count: 1, lastTick: world.tick, occurrences: 1 },
+    ]);
+  });
+
+  it("a throttled reason's lastTick marks the last MILESTONE, not the last occurrence", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    world.agents.push(a);
+
+    adjustRapport(world, a, "b", RAPPORT_SOCIALIZE_DELTA, "socialized"); // milestone 1, tick 0
+    world.tick = 50;
+    adjustRapport(world, a, "b", RAPPORT_SOCIALIZE_DELTA, "socialized"); // occurrence only
+
+    const [memory] = rapportMemories(a, "b");
+    expect(memory).toMatchObject({ count: 1, lastTick: 0, occurrences: 2 });
   });
 
   it("notableRapportMemories does not disturb the stored order or the mechanical view", () => {

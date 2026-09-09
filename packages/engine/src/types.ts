@@ -1588,11 +1588,23 @@ export type RapportReason =
  * memory without any pruning of its own: a long run cannot grow it.
  */
 export interface RapportMemory {
-  reason: RapportReason;
-  /** How many times this has happened between the pair. Never decays — decay belongs to `score`. */
+  /**
+   * How many times this became worth *remembering* — which for most reasons
+   * is simply how many times it happened, but for a throttled reason (see
+   * `rapport.ts`'s `RAPPORT_REASON_MEMORY_INTERVAL`) counts milestones
+   * instead. Never decays; decay belongs to `score`.
+   */
   count: number;
-  /** `World.tick` of the most recent occurrence. */
+  reason: RapportReason;
+  /** `World.tick` of the most recent occurrence that produced a milestone. */
   lastTick: number;
+  /**
+   * Raw occurrences behind `count`, present only for a throttled reason —
+   * so nothing is thrown away and a consumer that wants the real depth ("how
+   * long have these two actually spent together") can still have it. Absent
+   * where `count` already *is* the raw count.
+   */
+  occurrences?: number;
 }
 
 /** One directed edge of `Agent.rapport` — see that field's doc comment. */
