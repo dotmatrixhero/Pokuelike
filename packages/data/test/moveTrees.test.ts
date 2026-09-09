@@ -523,13 +523,26 @@ describe("Solar Beam tree: v4 two-lane — a guardian's dominance display", () =
     expect(viaGlare.bonusVsType).toEqual({ type: "grass", multiplier: 1.5 });
   });
 
-  it("Ancient Grove is a real two-passive keystone (thorns + regen), distinct from the resistanceBreaker every other move's Boldness branch reaches for", () => {
+  // The regen half became `immovable` when the per-move healing budget landed:
+  // the node's own comment described "an immovable, ancient guardian" and then
+  // granted regen. What this test exists to prove — that Ancient Grove is a
+  // real TWO-passive keystone rather than another resistanceBreaker — is
+  // unchanged; only which second passive it is moved. `immovable` is
+  // `> 0`-gated in status.ts rather than summed, so the assertion that it is
+  // the tree's only grant of it is load-bearing: a second one would be a node
+  // that does nothing at all.
+  it("Ancient Grove is a real two-passive keystone (thorns + immovable), distinct from the resistanceBreaker every other move's Boldness branch reaches for", () => {
     const node = solarBeam.tree!.ancient_grove;
     expect(node.grantsPassives).toEqual([
       { kind: "thorns", value: 0.1 },
-      { kind: "regen", value: 0.04 },
+      { kind: "immovable", value: 1 },
     ]);
     expect(node.delta.resistanceBreaker).toBeUndefined();
+
+    const immovableGrants = Object.values(solarBeam.tree!).flatMap((n) =>
+      [...(n.grantsPassive ? [n.grantsPassive] : []), ...(n.grantsPassives ?? [])].filter((g) => g.kind === "immovable")
+    );
+    expect(immovableGrants).toHaveLength(1);
   });
 
   it("Sociability's fork makes the ally-effect overwrite an explicit, deliberate choice (heal the grove vs. steel it), not an emergent quirk", () => {
