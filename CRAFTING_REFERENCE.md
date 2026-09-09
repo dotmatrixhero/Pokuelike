@@ -200,6 +200,42 @@ That's the Water Gun slice, and it makes carrying water a real decision
 rather than a thirst convenience.
 
 
+
+### Smoke is a real cloud, not a one-tile effect
+
+> "smokescreen should create gas on the map that reduces accuracy a ton while
+> in aoe and makes it hard for predators to track you. Maybe it even
+> confuses."
+
+**And the engine already has the right shape for it.** `WeatherCell` is
+`{ id, type, center, radius, startedTick, lifespanTicks, drift }` — a
+continuous centre (so drift accumulates smoothly rather than snapping tile to
+tile), a radius, a lifespan, and a **per-tick drift vector**. Its own doc
+comment notes that *"every consumer (flora/needs/fov/combat/support) reads
+`center`/`radius` directly"*.
+
+A smoke cloud is a weather cell. Adding `"smoke"` to `WeatherType` gets
+drift, dissipation, radius and the existing consumer wiring for free.
+
+What a cloud does while it lasts:
+
+| Effect | Hooks |
+|---|---|
+| **Heavy accuracy penalty inside** — much steeper than a storm's | `stormAccuracyMultiplier` is the existing pattern; smoke is a second, harsher multiplier |
+| **Blocks sight through it** | `computeVisible` already takes a `stormPenalty` term — same hook |
+| **Breaks tracking** — a predator loses `huntTarget` on something inside | The practical use: it's how you shake a pursuit without a fight |
+| **Chance of confusion** | `status.ts`'s real `StatusKind`s |
+| **Drifts and thins** | `drift` and `lifespanTicks`, already in the shape |
+| **Harms nothing** | Deliberate — it's the non-violent answer |
+
+**The one real change:** weather cells are documented as surface-only —
+*"every effect function gates on `layer === 'surface'`"* — and smoke in a
+cave is underground. That gate needs relaxing for this cell type.
+
+Everything else is a new `WeatherType` and two multipliers. Notably this
+also means a **Pokémon's** Smokescreen makes the same cloud, since it's one
+vocabulary — so a wild Koffing fight leaves real weather behind it.
+
 ### From the HMs — the traversal gates
 
 `MOVES_DESIGN.md`'s Round Four already worked out what HMs do in this world.

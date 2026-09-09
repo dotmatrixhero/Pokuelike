@@ -119,6 +119,50 @@ The other three routes stay: **a few known innately** (you are a human,
 tying a stick to a stone is not a discovery), **taught by people** in Act 2,
 and **written recipes** as loot.
 
+
+### Learning by watching — and by getting hit
+
+The second route in, and it closes the loop on the moves-are-items
+architecture:
+
+> "I like to think observing or getting hit by moves in the wild can also
+> inspire the recipes."
+
+If a move and an item are the same effect reached two ways, then **seeing
+the effect should teach you the item.** You watch a Koffing put up a
+Smokescreen; now you have an idea about smoke. You get hit by it; now you
+really do.
+
+Two tiers, mapping onto the same knowledge states species use:
+
+| How | Result |
+|---|---|
+| **Seen used** | *Glimpsed* — the recipe appears with its inputs unknown: *"a smoke that blinds — made of something that smoulders"* |
+| **Seen several times, or hit by it** | *Learned* — full recipe |
+
+**Getting hit is the fast path**, which is both funny and true: pain is
+memorable, and a lungful of smoke teaches you more about smoke than watching
+does.
+
+Why this is worth building:
+
+- **It makes observation pay.** Watching creatures is already the core Act 1
+  skill — the trust arc is entirely about reading tells. This gives watching
+  a second, concrete reward that isn't bonding.
+- **It ties the crafting tree to the ecology.** What you can make depends on
+  what lives near you. That's `HUMANS_DESIGN.md`'s regional material culture
+  — *"two villages a hundred zones apart genuinely make different things"* —
+  applied to the player.
+- **Your recipe book becomes a record of what you've met.** Not a tech tree
+  you unlock in order; a diary of encounters. Two players in different caves
+  end up able to make different things, and neither was handed a list.
+- **It's the same system twice.** Examining an *object* teaches its recipe;
+  witnessing an *effect* teaches its recipe. One knowledge mask, two ways in.
+
+**It must never be the only route.** If you never meet a smoke-user you can
+still learn smoke bombs by examining one, being taught, or finding it
+written. Luck can accelerate discovery; it can't gate it.
+
 ## Quantities and inventory pressure — the real numbers
 
 `carryCapacityOf` is `maxHp × 1.5`. Computed against real species stats: a
