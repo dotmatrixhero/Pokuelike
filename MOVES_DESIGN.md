@@ -3291,3 +3291,287 @@ Honest list, same discipline as the checklist above — none of these exist:
 The rubble one is worth noting: Earthquake's Boldness redesign has been
 blocked on exactly this terrain kind since round three. Building it for
 Harden unblocks both.
+
+## Round six, self-critique: the drafts against this document's own principles
+
+Direct ask: "your cross links are asymmetrical and a little weird... the
+deep ones do need to be linked as shortcuts to deeper up the trees as well.
+To be safe just match the standard cross link design." And: "we've shared
+some design principles around rigor... use it to critique your own work."
+
+Measured first, argued second. Structure of the v1 drafts against the
+shipped roster, straight off the exported JSON:
+
+| | shipped (mature trees) | v1 drafts |
+|---|---|---|
+| nodes | 33–40 | 21–28 |
+| `prerequisitesAnyOf` | 9 | **0–1** |
+| fork nodes (`excludes`) | 6 | **0–2** |
+| crosslinks | 3 | 3 |
+
+### What I got wrong, by principle
+
+**Principle 7/11/12/13 — crosslinks were spurs.** This is what the ask
+caught. All three "crosslinks" per tree were two-node dead ends: a
+crosslink plus one leaf. No `prerequisitesAnyOf` anywhere in four of five
+trees, so nothing they led to was ever an alternate route into anything.
+That is precisely the mistake principle 7 was written about, already made
+once before on the shipped trees and corrected there. I read the
+"Crosslinks are bridges" section for the pitch and then did not apply it.
+Two of the bridge fillers also reached for an unrelated lever
+(`unnoticed` → `nonTerritorial`, `bulk` → `thorns`), which is principle 13
+verbatim.
+
+**Nobody asked about this one, and it is worse: four of five drafts had no
+fork at all.** Harden had a single pair; Twineedle, Poison Sting, Growth
+and Agility were pure linear chains. A tree with no `excludes` has no
+decision in it — the whole "meaningful, permanent choice" premise of the
+template is simply absent, and I shipped four of them for review without
+noticing. Node counts and crosslinks got compared to the shipped roster in
+the pitch; forks did not, which is exactly how it survived.
+
+**Principle 3 — three "needs new engine work" claims were wrong, because I
+read this document instead of the function.** Every one of them was
+asserted from a doc line or a field name:
+
+| Claim in v1 | What the code actually says |
+|---|---|
+| "terrain-speed immunity — small, `terrainSpeedMultiplier` exists" | It exists, but it is a pure function whose result is stashed on `agent.terrainSpeedFactor` at step time (simulation.ts:357). `actionSpeedOf` only reads the already-computed factor, so the passive has to hook the *stash*, not the read. Still small, different place. |
+| "move-created flora/bush — medium, new primitive" | **`terrainFill` is shipped and writes any `TerrainKind`, and `"bush"` is a real `TerrainKind`.** The gap is only that it fires at the *defender's* tile on a landed hit (predation.ts:1265); Growth needs the caster's tile from the utility path. An extension, not a new primitive — I overstated the cost. |
+| "fertility that doesn't decay back" | Fertility already regenerates toward a per-ground-type `fertilityCeiling` (flora.ts's `GROUND_TYPE_PARAMS`). "Permanent" is not a coherent shape here; raising the ceiling is. The v1 node was designed against a system I had not read. |
+
+One went the other way, and is worth recording because it strengthens a
+node rather than weakening it: the detection-radius idea has a real named
+function, `isDetectable` (predation.ts:867), with `baseRadius` already
+reduced by exactly the sort of term an `unnoticed` passive would add — and
+four call sites (two flee-radius, two hunt-detect). Harden's *Let It Pass*
+and *Still as Bark* are both cheaper and better-grounded than I claimed.
+
+**Principle 2 — the flagship idea was not mine.** "What if harden also
+increased weight so it strengthens weighted version of tackle" is the
+user's sentence. I costed it into a primitive and called it "the best thing
+here," which is translation, not design. Principle 2 names this exactly:
+"costing out a suggestion into real primitives is useful but it's
+translation, not design." The nodes here I did originate from a fantasy
+nobody asked about — the honest list, so the ratio stays visible — are
+*Sickened* (poison as a needs-interference effect, so the payoff of
+poisoning is starvation rather than damage), the whole reading of Agility
+as a migration move, Growth's *Homestead*, and *Chrysalis* as voluntary
+helplessness.
+
+**Node-count inflation, against this doc's own warning.** All five drafts
+now sit at exactly 39 nodes. The crosslink rollout section says plainly:
+"dig (29) and leech_seed (31) were deliberately left short. Their honest
+lever sets are smaller, and inflating them to hit a number is exactly the
+template failure the rest of this document exists to prevent. Matching the
+flagships' *structure* was the finding; matching their *node count* was
+not." Twineedle is a single-species move with one honest lever set, and I
+gave it 39 nodes to match a table. That is the same failure in the other
+direction, and it is not fixed — it is flagged for a decision.
+
+### What I think holds up
+
+- Growth having no combat branch at all, and the cross-move shape
+  generally (a utility tree whose payoff lands in a different tree) —
+  that is a structure the roster genuinely does not have.
+- Poison Sting's *Sickened* line. It is the only node in either roster
+  whose consequence is legible in the chronicle rather than in a fight.
+- Naming *Nobody Leaves* as possibly bad for the sim in its own node note
+  rather than shipping it quietly: a herd that has solved food is a zone
+  that never turns over, which collides with the standing "equilibrium and
+  variety, not a dominant answer" pillar. Flagged, not resolved.
+
+### What changed
+
+All five rebuilt to the shipped standard: **39 nodes, 9
+`prerequisitesAnyOf`, 6 fork nodes, 3 three-node bridges** each. Every
+bridge is crosslink → filler-that-deepens-the-crosslink's-own-lever →
+cost-2 notable, with that notable wired as an alternate route into the
+pre-fork node of *both* branches it connects, landing one step short of the
+fork rather than on it. The crosslink itself stays a shallower alternate
+route on an early filler in each flanking branch.
+
+`packages/data/scripts/check-proposed-trees.ts` enforces all of that, plus
+dangling prerequisites, one-sided forks, missing `leaning` (the defect that
+would render a node invisibly, found once before in the atlas rollout), and
+principle 4's pure-downside check. **It runs a `--selftest` against a
+deliberately broken tree first**, because a verification step that has
+never printed a failure has not been verified — the lesson from the atlas
+layout check that reported all 17 trees clean without reading one.
+
+**17. A branch must not answer every identity node with the same signature
+lever — and this is NOT the same rule as #13, it is its opposite one level
+up.** Direct, blunt: "twin needle just fuckin does the same shit the entire
+branch for sociable. Surprised you didn't catch that. Is that not called
+out in design docs? Uninspired."
+
+Measured, with the shipped roster as the control. Counting only *identity*
+nodes (cost-2: the notable, both fork tips, the convergence, the keystone),
+excluding bridges (which principle 13 *requires* to be single-lever), and
+excluding background stats — power/accuracy/cooldown/range/crit/defense-pen
+repeat harmlessly everywhere and always have. What's left is the share of a
+branch's identity nodes answered by one *signature* lever:
+
+| | worst branch | branches at or over 80% |
+|---|---|---|
+| shipped roster | 50% | 0 of 8 |
+| round-six drafts, v2 | **100%** | **6 of 15** |
+
+Twineedle's Sociability was 4 of 5 on `rallyCall` — Converge, The Hive
+Decides, Drone Relay and Nothing Forgets were all "the mark, but a bigger
+number," and even the *fork* was 240 ticks versus 90. A fork between two
+values of one field is not a decision. Agility's Sociability was worse at
+5 of 5 on `herdHaste`, and nobody had to point that one out because the
+first example was enough.
+
+**Answering the question directly: no, this was not called out.** The
+nearest existing rules both miss it:
+
+- Template v3's rule 2 ("use the whole lever list, not just power/accuracy/
+  cooldown") is scoped to *filler* tier and to the *three cheap stats*.
+  `rallyCall` five times is neither, so it passes the letter of that rule
+  while breaking its entire spirit.
+- "A capstone's mechanic should be something the roster doesn't already
+  have" is scoped to the capstone, and to *other moves* — not to
+  repetition inside one branch.
+
+Worse, there was an active trap: **principle 13 mandates exactly this
+behaviour for bridges** — "a bridge's own new content must deepen the
+specific lever its own crosslink already introduced." I applied bridge
+logic to whole branches. The two rules are now explicitly scoped against
+each other: single-lever escalation is the *requirement* across a
+three-node bridge and a *defect* across a ten-node branch.
+
+Fixed in the drafts by giving each offending branch real, distinct answers
+at each identity node rather than a rising number — Twineedle's hive now
+forks between a mark and a no-mark sustain build, converges on
+`positionSwap` (drones trading places mid-flurry, a shipped primitive with
+one user in the entire roster), and keystones on a real shape change to a
+burst, which is principle 14's currency and this branch had spent none of
+it. Worst branch is now 60%, against a shipped ceiling of 50%; the
+remaining 60% cases are branches whose whole fantasy genuinely *is* that
+lever (Poison Sting's needs-interference, Growth's fertility), which is a
+different thing from a number going up five times.
+
+`check-proposed-trees.ts` now fails any branch over 60%, and its
+`--selftest` includes a five-node all-`rallyCall` branch so the rule is
+proven to fire.
+
+## The Disposition colour pie — the flavour palette for every branch
+
+**This is the reference that should have existed before round six was
+designed, and its absence is why those drafts came out narrow.** Direct:
+
+> "Branches need to have multiple Flavors to it, not a linear path. I've
+> talked about the different aspects of like aggression can be stealth, it
+> can be aggressive movement. It can be raw damage. It can be piercing
+> projectiles. [...] Think of it like the colors in magic. Red can be life
+> burn or removal, blue can be hand manipulation or counter spells, etc.
+> Our levers, our mechanics can map in loose ways to fit the fantasy of
+> these branches. All of these types of flavors need to be considered when
+> designing a branch under the fantasy."
+
+What the doc had before this: principle 6 says "widen a branch's *allowed*
+flavor before widening its mechanics," and template v3's rule 1 names three
+flavours **for Aggression only** (raw power / hunting-stealth / clashing),
+with a single worked Boldness example (Earthquake terraforming) and
+**nothing at all for Sociability**. That is a third of a colour pie
+described in prose. Here it is as a real table, with every flavour mapped
+to the levers that actually exist.
+
+An axis is a *colour*, not a mechanic. A branch picks two or three flavours
+from its axis that fit the move's fantasy and builds from those — it does
+not walk one of them in a straight line. Flavours may also be borrowed
+across axes when the fantasy demands it (a shelled pupa's Aggression drawn
+from defensive levers is legitimate); what is not legitimate is a branch
+that never chose.
+
+### Aggression
+
+| Flavour | Levers that serve it |
+|---|---|
+| Raw damage | `power`, `hits`, `critRateStage`, `critCooldownReset`, `statusSeverity`, `weightScaling`, `recoilFraction`, `lifestealFraction` |
+| Stealth / ambush | `situationalBonus` (`concealed`, `night`, `flanking`, `elevation`), `burrow`, proposed `unnoticed` |
+| Aggressive movement | `chargeAttack`, `forcedMovement` (mover: attacker), `lockTicks` as commitment |
+| Piercing projectiles | `defensePenetration`, `resistanceBreaker`, `bonusVsType`, `range`, line/`shape` |
+| Clashing (resource contest) | `herdConflict.ts`-scoped bonuses — **still has no `situationalBonus` condition**, a real flagged gap |
+
+### Boldness
+
+| Flavour | Levers that serve it |
+|---|---|
+| Defence | `damageReduction`, `defenseBoost`, `thorns`, `unshaken`, `immovable`, `fireproof` |
+| Manipulating the environment | `terrainBurn`, `terrainFill`, `consumesOwnTerrain`, `spawnsRain`, `fertilityBoost`, proposed rubble |
+| Wider AoE | `shape` (ring/burst/cone), `hitsArea` — notable/keystone currency only, per principle 14 |
+| Attention-grabbing | **`aggroRedirect` — DOES NOT EXIST.** See below. |
+| Repositioning other units | `forcedMovement` (mover: defender), `positionSwap`, `positionSwapPull` |
+| Planting one's feet / duration | `lockTicks`, `immovable`, `statChangeOnHit`'s `ticks`, `statusSeverity`'s duration, `chargeAttack` |
+
+### Sociability
+
+| Flavour | Levers that serve it |
+|---|---|
+| Healing | `allyEffect.healFraction`, `healAura`, `regen`, `regenFlat`, `selfHeal` |
+| Preventing friendly fire | `excludesAllies` |
+| Rallying | `rallyCall` + `preferMarked`, `allyEffectOnAttack` |
+| Stat boosting | `allyEffect.buff`, `targetsAlly`, `aquaticHaste`, proposed `herdHaste` |
+| Calming auras (reducing others' aggression and clashing) | `calmingPresence`, `nonTerritorial`, `statusImmunityAura` |
+
+### The one flavour with no mechanics at all
+
+**Attention-grabbing has zero engine support.** `aggroRedirect` is named in
+this doc's own lever brainstorm as unbuilt, and **three shipped trees carry
+a source comment saying they wanted it and settled for `damageReduction`
+instead** (moves.ts lines 69, 407, 1182 — Tackle's *Bulwark* among them).
+A whole flavour of Boldness has been quietly unavailable this entire time,
+and the workaround has been shipped three times. With the palette written
+down it is now obviously the highest-value missing primitive on the board:
+it is the difference between a defensive branch that survives and one that
+*protects*, which is the thing "boldness" is supposed to mean.
+
+### Audit: the round-six drafts against this palette
+
+Distinct flavours drawn on per branch, bridges excluded:
+
+| | shipped | round-six drafts |
+|---|---|---|
+| mean flavours per branch | **3.8** | **2.9** |
+| mean distinct levers per branch | **8.3** | **6.9** |
+
+Three of the drafts' fifteen branches draw on exactly one flavour:
+`growth/aggression` (11 nodes, all environment), `growth/boldness` (10
+nodes, all environment), `agility/boldness` (10 nodes, all
+planted-duration). And three flavours are touched by no proposed branch at
+all: aggressive movement, attention-grabbing, and preventing friendly fire.
+
+Direct follow-up while this was being written: "USE MORE LEVERS. Your
+levers are so monotonous." The numbers agree — 6.9 against 8.3 — and the
+unmapped tail is the specific evidence: `jamCooldownTicks`, `statusSpreads`,
+`selfStateBonus`, `drainNeeds`, `gatherBurst`, `selfCostPerUse`,
+`statusChance` and `range` are all real, shipped, and barely appear.
+
+### The widening pass, measured
+
+| | shipped | drafts before | drafts after |
+|---|---|---|---|
+| distinct flavours per branch | 3.8 | 2.9 | **3.7** |
+| distinct levers per branch | 8.3 | 6.9 | **9.4** |
+| top signature lever's share of a branch | 34% | 51% | **42%** |
+| branches drawing on one flavour | 0 | 3 | **0** |
+
+The levers that went in are specifically the ones the audit named as
+sitting unused: `gatherBurst` (4 users in the whole roster) on Growth's
+*Quicker Season*, `drainNeeds` (6 users, never once as a weapon) on *It Was
+All Grass*, `jamCooldownTicks` (16 users, none on a status move) on Harden's
+*Sharp Seams*, `selfStateBonus` (3 users) on Agility's *No Bad Ground*,
+`consumesOwnTerrain` (1 user) on *The Short Way*, plus `range`, `lockTicks`,
+`statusSpreads` and real `shape` changes where a branch had spent none of
+its notable-tier currency.
+
+`check-proposed-trees.ts` now fails any branch drawing on fewer than three
+flavours, with the colour pie encoded as the lever→flavour map. Its
+`--selftest` covers this rule too.
+
+**Still true after the pass, and worth keeping visible:** no proposed
+branch uses `excludesAllies` (preventing friendly fire), and nothing in the
+entire roster can grab attention, because that primitive was never built.
