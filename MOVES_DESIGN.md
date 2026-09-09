@@ -3291,3 +3291,110 @@ Honest list, same discipline as the checklist above — none of these exist:
 The rubble one is worth noting: Earthquake's Boldness redesign has been
 blocked on exactly this terrain kind since round three. Building it for
 Harden unblocks both.
+
+## Round six, self-critique: the drafts against this document's own principles
+
+Direct ask: "your cross links are asymmetrical and a little weird... the
+deep ones do need to be linked as shortcuts to deeper up the trees as well.
+To be safe just match the standard cross link design." And: "we've shared
+some design principles around rigor... use it to critique your own work."
+
+Measured first, argued second. Structure of the v1 drafts against the
+shipped roster, straight off the exported JSON:
+
+| | shipped (mature trees) | v1 drafts |
+|---|---|---|
+| nodes | 33–40 | 21–28 |
+| `prerequisitesAnyOf` | 9 | **0–1** |
+| fork nodes (`excludes`) | 6 | **0–2** |
+| crosslinks | 3 | 3 |
+
+### What I got wrong, by principle
+
+**Principle 7/11/12/13 — crosslinks were spurs.** This is what the ask
+caught. All three "crosslinks" per tree were two-node dead ends: a
+crosslink plus one leaf. No `prerequisitesAnyOf` anywhere in four of five
+trees, so nothing they led to was ever an alternate route into anything.
+That is precisely the mistake principle 7 was written about, already made
+once before on the shipped trees and corrected there. I read the
+"Crosslinks are bridges" section for the pitch and then did not apply it.
+Two of the bridge fillers also reached for an unrelated lever
+(`unnoticed` → `nonTerritorial`, `bulk` → `thorns`), which is principle 13
+verbatim.
+
+**Nobody asked about this one, and it is worse: four of five drafts had no
+fork at all.** Harden had a single pair; Twineedle, Poison Sting, Growth
+and Agility were pure linear chains. A tree with no `excludes` has no
+decision in it — the whole "meaningful, permanent choice" premise of the
+template is simply absent, and I shipped four of them for review without
+noticing. Node counts and crosslinks got compared to the shipped roster in
+the pitch; forks did not, which is exactly how it survived.
+
+**Principle 3 — three "needs new engine work" claims were wrong, because I
+read this document instead of the function.** Every one of them was
+asserted from a doc line or a field name:
+
+| Claim in v1 | What the code actually says |
+|---|---|
+| "terrain-speed immunity — small, `terrainSpeedMultiplier` exists" | It exists, but it is a pure function whose result is stashed on `agent.terrainSpeedFactor` at step time (simulation.ts:357). `actionSpeedOf` only reads the already-computed factor, so the passive has to hook the *stash*, not the read. Still small, different place. |
+| "move-created flora/bush — medium, new primitive" | **`terrainFill` is shipped and writes any `TerrainKind`, and `"bush"` is a real `TerrainKind`.** The gap is only that it fires at the *defender's* tile on a landed hit (predation.ts:1265); Growth needs the caster's tile from the utility path. An extension, not a new primitive — I overstated the cost. |
+| "fertility that doesn't decay back" | Fertility already regenerates toward a per-ground-type `fertilityCeiling` (flora.ts's `GROUND_TYPE_PARAMS`). "Permanent" is not a coherent shape here; raising the ceiling is. The v1 node was designed against a system I had not read. |
+
+One went the other way, and is worth recording because it strengthens a
+node rather than weakening it: the detection-radius idea has a real named
+function, `isDetectable` (predation.ts:867), with `baseRadius` already
+reduced by exactly the sort of term an `unnoticed` passive would add — and
+four call sites (two flee-radius, two hunt-detect). Harden's *Let It Pass*
+and *Still as Bark* are both cheaper and better-grounded than I claimed.
+
+**Principle 2 — the flagship idea was not mine.** "What if harden also
+increased weight so it strengthens weighted version of tackle" is the
+user's sentence. I costed it into a primitive and called it "the best thing
+here," which is translation, not design. Principle 2 names this exactly:
+"costing out a suggestion into real primitives is useful but it's
+translation, not design." The nodes here I did originate from a fantasy
+nobody asked about — the honest list, so the ratio stays visible — are
+*Sickened* (poison as a needs-interference effect, so the payoff of
+poisoning is starvation rather than damage), the whole reading of Agility
+as a migration move, Growth's *Homestead*, and *Chrysalis* as voluntary
+helplessness.
+
+**Node-count inflation, against this doc's own warning.** All five drafts
+now sit at exactly 39 nodes. The crosslink rollout section says plainly:
+"dig (29) and leech_seed (31) were deliberately left short. Their honest
+lever sets are smaller, and inflating them to hit a number is exactly the
+template failure the rest of this document exists to prevent. Matching the
+flagships' *structure* was the finding; matching their *node count* was
+not." Twineedle is a single-species move with one honest lever set, and I
+gave it 39 nodes to match a table. That is the same failure in the other
+direction, and it is not fixed — it is flagged for a decision.
+
+### What I think holds up
+
+- Growth having no combat branch at all, and the cross-move shape
+  generally (a utility tree whose payoff lands in a different tree) —
+  that is a structure the roster genuinely does not have.
+- Poison Sting's *Sickened* line. It is the only node in either roster
+  whose consequence is legible in the chronicle rather than in a fight.
+- Naming *Nobody Leaves* as possibly bad for the sim in its own node note
+  rather than shipping it quietly: a herd that has solved food is a zone
+  that never turns over, which collides with the standing "equilibrium and
+  variety, not a dominant answer" pillar. Flagged, not resolved.
+
+### What changed
+
+All five rebuilt to the shipped standard: **39 nodes, 9
+`prerequisitesAnyOf`, 6 fork nodes, 3 three-node bridges** each. Every
+bridge is crosslink → filler-that-deepens-the-crosslink's-own-lever →
+cost-2 notable, with that notable wired as an alternate route into the
+pre-fork node of *both* branches it connects, landing one step short of the
+fork rather than on it. The crosslink itself stays a shallower alternate
+route on an early filler in each flanking branch.
+
+`packages/data/scripts/check-proposed-trees.ts` enforces all of that, plus
+dangling prerequisites, one-sided forks, missing `leaning` (the defect that
+would render a node invisibly, found once before in the atlas rollout), and
+principle 4's pure-downside check. **It runs a `--selftest` against a
+deliberately broken tree first**, because a verification step that has
+never printed a failure has not been verified — the lesson from the atlas
+layout check that reported all 17 trees clean without reading one.
