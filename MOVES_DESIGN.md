@@ -3784,3 +3784,59 @@ choke point that sets cooldowns and increments `moveUseCounts`),
 `MoveTreeNode.delta.maxPPBonus`, regen in `tickStatusEffects` with the
 sleep multiplier alongside `SLEEP_COOLDOWN_TICKS_PER_ACTION`, and
 `pickBestMove` skipping a dry move.
+
+### Filler forks: diverging paths that reconverge at the notable
+
+Direct: *"Maybe we can split aggression filler paths even with power vs pp??
+That's really cool. Boldness filler with cooldown vs aoe or duration."* Then,
+sharpening it: *"Well it can fork paths, that converge at notables."*
+
+That second sentence is the whole design. A filler fork is **not** a
+permanent commitment to a sub-branch — both sides feed the same next node, so
+the choice is which route you walk, not which half of the tree you give up.
+
+**One filler fork per branch, at the post-notable slot** — the point where a
+build has already committed to the branch and knows what it needs. Structure
+against the shipped roster:
+
+| | shipped | drafts |
+|---|---|---|
+| nodes | 36.1 | 42.0 |
+| fork nodes | 6.1 (3 real choices) | 12.0 (**6 real choices**) |
+
+Pushback that shaped it, recorded because the answer overrode it: my first
+instinct was that forking every filler would make nothing feel like a choice
+— shipped trees get exactly three per tree. Doubling to six is the right
+size; forking all nine filler slots would not be. The reconvergence is what
+makes six affordable: a route choice costs less than a commitment.
+
+**The power-versus-PP split, which is the best pair of the set:**
+
+| tree | fork | the PP side is worth |
+|---|---|---|
+| Twineedle | Thin Point vs **Venom Sacs** | +8 on a 20 pool = **+40%** |
+| Growth | Choking Out vs **Spore Reserve** | +10 on a 20 = **+50%** |
+| Poison Sting | Finisher vs **Glut Sacs** | +12 on a 35 = +34% |
+| Agility | No Wind-Down vs **Second Wind** | +10 on a 30 = +33% |
+| Harden | Slow to Shift vs **Deep Reserve** | +10 on a 30 = +33% |
+
+**It is self-balancing, which is the part that makes it good design rather
+than just another node.** `+max PP` is only worth taking if you took the
+PP-heavy notables. On a build that went wide it is a dead pick; on a build
+that went deep it is the strongest node in the branch. Nobody has to tune
+that — the build decides it retroactively. The other pairs are drawn from
+each move's own palette per the colour pie, never a fixed template: thorns
+vs tempo, range vs crit, duration vs terrain, heal vs denial.
+
+**A real bug this caught.** My first pass gave each fork's B-side the same
+parent but left the downstream node requiring the A-side specifically —
+so every B-side was a **dead end** and any build taking one was stranded.
+"Converge at notables" named the defect before it shipped.
+`check-proposed-trees.ts` now enforces it: both sides of any fork must reach
+a common downstream node, with a terminal-capstone fork exempted. Verified by
+deliberately stranding one and confirming the report:
+
+```
+fork deep_reserve/slow_to_shift: the two sides never reconverge — one of them
+is a dead end (deep_reserve -> [nothing], slow_to_shift -> [set_bone])
+```

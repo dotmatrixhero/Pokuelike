@@ -10,7 +10,10 @@
  */
 import { PROPOSED_TREES, type ProposedMove, type ProposedNode } from "./proposed-trees.js";
 
-const SHIPPED = { anyOf: 9, forks: 6, bridges: 3 };
+// Identity-tier forks (3 per tree) plus one filler-tier fork per branch (3
+// more) = 12 fork nodes. The filler forks are this roster's addition to the
+// shipped standard, not a deviation from it: shipped trees have 6.
+const SHIPPED = { anyOf: 9, forks: 12, bridges: 3 };
 
 function problems(move: ProposedMove): string[] {
   const t = move.tree;
@@ -160,6 +163,28 @@ function problems(move: ProposedMove): string[] {
   const headroom = sellers.reduce((sum, n) => sum + Number((n.delta as any).maxPPBonus ?? 0), 0);
   if (spenders.length && headroom < move.pp / 3) {
     out.push(`headroom +${headroom} against a ${move.pp} pool — a tree that spends PP should sell back at least a third of its pool (+${Math.ceil(move.pp / 3)})`);
+  }
+
+  // "it can fork paths, that converge at notables" — both sides of any fork
+  // must reach the same downstream node, or the losing side is a dead end.
+  const reaches = (id: string) =>
+    nodes.filter((n) => (n.prerequisites ?? []).includes(id) || (n.prerequisitesAnyOf ?? []).some((set) => set.includes(id))).map((n) => n.id);
+  for (const n of nodes) {
+    for (const other of n.excludes ?? []) {
+      if (n.id > other) continue; // check each pair once
+      const a = new Set(reaches(n.id)), b = reaches(other);
+      const isTerminal = a.size === 0 && b.length === 0;
+      if (isTerminal) continue; // a fork between two capstones is allowed to end
+      if (!b.some((x) => a.has(x))) {
+        out.push(`fork ${n.id}/${other}: the two sides never reconverge — one of them is a dead end (${n.id} -> [${[...a].join(", ") || "nothing"}], ${other} -> [${b.join(", ") || "nothing"}])`);
+      }
+    }
+  }
+
+  // A "+max PP" node is only a real pick opposite a tree that spends PP —
+  // otherwise it is a dead option wearing a fork's clothes.
+  if (sellers.length && !spenders.length) {
+    out.push(`grants maxPPBonus (${sellers.map((n) => n.id).join(", ")}) but nothing in the tree costs PP — a dead pick, not a choice`);
   }
 
   // A node that is pure downside is a bug, not a design choice (principle 4).
