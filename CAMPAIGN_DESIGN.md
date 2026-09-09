@@ -381,6 +381,132 @@ plus adding effect fields the engine doesn't understand yet.
 
 Not scoped further here; see MOVES_DESIGN.md, which owns this thread.
 
+## The dispersal offer — a proposal for the last trust rung (OPEN)
+
+Proposed directly:
+
+> "What if spending enough time around a Pokémon gave you the opportunity to
+> have like.. explicit text decisions? That can help solidify bond... it
+> essentially comes up to you and triggers a dialog box that sorta lets you
+> make some kind of trade (time, resource, food, effort, etc) to get it to
+> leave its herd and join you? Probably increased chance if it already wants
+> to be herd dispersal or smth."
+
+**Status: not decided.** Recorded here because it fills a placeholder that
+has been open since the trust stages were written, and because the sim
+turns out to already support most of it.
+
+### Why it isn't actually a new stage
+
+`DESIGN.md`'s trust ladder specifies the last transition as *"a
+species-specific bonding moment"* — qualitatively different from the
+repeatable verbs, and **undefined** since it was written. This is a shape for
+that placeholder, not a fifth thing bolted on.
+
+It also closes the hole found in `PLAYTHROUGH_ACT1_FULL.md` finding 3c:
+**Fight alongside** and **Rescue** both require danger layer 1 deliberately
+does not contain, so as designed the bond could not complete where it is
+meant to be played. A dispersal moment is a **fourth route to Bonded that
+needs no predator**, which makes climbing with a partner a choice rather than
+the only path.
+
+### The sim already correlates the two — this is a real finding, not a wish
+
+`dispersal.ts` computes, today:
+
+```
+dispersalChance = DISPERSAL_BASE_CHANCE (0.3) × (boldness + (1 − sociability))
+```
+
+Those are **the same two `effectiveDisposition` axes** that decide which
+individual tolerates the player's approach when the rest of the herd bolts.
+So the bold, unsociable individual that lets you close to 2 tiles is
+*mechanically the same individual* most likely to leave its herd. Nobody
+designed that as a bonding hook. It already is one.
+
+`DispersalReason` carries three values — `matured`, `no_eligible_mates`, and
+**`isolation`**, documented in `types.ts` as a sustained stretch with nobody
+at all to socialise with. A creature that has been alone too long meeting a
+human who is alone is pillar 3 without a line of text having to state it.
+
+Also already real: `Agent.dispersalTarget` (where it is walking), and the
+`dispersed` `SimEvent`.
+
+### The objection: "trade" is a capture mechanic wearing a coat
+
+Pillar 1 refuses *"any capture mechanic, ever."* Pillar 3 refuses *"a
+partner who reads as equipment rather than a relationship."* A dialog that
+exchanges time/food/resources for a creature joining you is a purchase, and
+a purchase makes the 200 turns spent reading that animal count for less than
+whether you happened to be carrying three berries.
+
+The moment is right. **The price list is the part that collides.**
+
+### The proposed shape instead: it is leaving, and you go with it
+
+It is dispersing — `dispersalTarget` set, walking away from its herd, and
+that is perceivable before the moment fires (legibility rule: the cause is
+visible first). It stops in front of you.
+
+> *It has been walking away from the water since dawn. It stops in front of
+> you and does not move.*
+>
+> `1. Go with it.`  `2. Stay.`
+
+- **Every listed cost survives.** Going means abandoning your cache, your lit
+  chamber, your known ground, and travelling on its schedule. Time, effort
+  and resources are all really spent — but **none of it is a price**, because
+  nothing is being bought. It leaves either way.
+- **You do not recruit it; you follow it.** That is Rescue's mutuality —
+  *"the Pokémon chooses you as much as you chose it"* — reached without
+  something having to nearly die.
+- **Refusal must cost.** It disperses, and that individual is gone. A free
+  refusal is not a decision.
+
+If resources do appear in the moment, the rule that keeps it from being a
+shop:
+
+> **The outcome is never bought and never rolled.** It is determined by state
+> the player built and could read. Handing over food is the *gesture that
+> closes* it, not the payment that causes it.
+
+Deterministic and informed — the same reasoning as no failure rolls in
+`CRAFTING_LOOP.md`. A random outcome after a cost is a slot machine, not a
+decision.
+
+### The constraint on the text itself
+
+Pillars: *"Let the systems make the argument. Never the dialogue."* The box
+may describe **what is happening** (*"it stops and does not move"*). It may
+never describe **what it means** (*"it seems to have chosen you"*). The
+second is the easy sentence to write and the one that breaks the pillar.
+
+### Open calls
+
+1. **Who initiates** — it comes to you (recommended; that is the mutuality),
+   or the player may offer once conditions are met (more agency, more
+   shop-like).
+2. **Are resources part of it at all**, under the gesture-not-price rule, or
+   is it purely commitment and time?
+3. **Frequency** — recommend once per individual, ever, refusable, not
+   repeatable.
+4. **Does refusing lose that individual permanently?** Recommend yes.
+
+### The measurable risk before this gets built
+
+Trigger 1 is disposition-gated: a fully timid + social agent scores factor 0
+and **never** disperses through it. The `no_eligible_mates` and `isolation`
+fallbacks are guaranteed but require *sustained* stretches. So the open
+empirical question is:
+
+> **How many dispersal events actually fire in a layer-1-sized region over a
+> layer-1-length run (~400 turns), across several seeds?**
+
+If the answer is near zero, this path never fires in a real run — the
+"unreachable content is a bug" pattern this project has hit repeatedly
+(fire that never ignited, moves nothing reached, a landmark that could never
+place). **Measure before building.**
+
 ## A suggested first slice (recommendation, not a decision)
 
 The project's own established habit is "pick 2-3 pieces, prove the pipeline,
