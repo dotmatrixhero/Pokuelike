@@ -380,10 +380,15 @@ function problems(move: ProposedMove): string[] {
   // tickAgentAction, which only fires on an action tick), so `cooldownTicks:
   // N` means "usable every (N+1)th action" at any Speed — going from 2 to 0
   // on a base-2 move is a real 3x tempo gain, not a rounding difference.
+  // Damage per action is power/(cooldown+1), so tempo compounds: dropping a
+  // base-8 move to 0 was a 9x gain, against ~2x for power or multi-hit nodes.
+  // Capped at 3x by flooring the cooldown, per "2 +1 together. Cap it at 3x".
+  const cdFloor = Math.ceil((move.cooldownTicks + 1) / 3) - 1;
+  const maxCut = move.cooldownTicks - cdFloor;
   const cut = -nodes.reduce((sum, n) => sum + Math.min(0, ((n.delta as any)?.cooldownTicks ?? 0)), 0);
-  if (cut > move.cooldownTicks) {
-    const cutters = nodes.filter((n) => ((n.delta as any)?.cooldownTicks ?? 0) < 0);
-    out.push(`cooldown reduction totals -${cut} against a base of ${move.cooldownTicks} — ${cut - move.cooldownTicks} ticks of it can never do anything. ${cutters.length} nodes cut cooldown; trim or repurpose.`);
+  if (cut > maxCut) {
+    const tempo = (move.cooldownTicks + 1) / (Math.max(0, move.cooldownTicks - cut) + 1);
+    out.push(`cooldown reduction totals -${cut} against a base of ${move.cooldownTicks}, a ${tempo.toFixed(1)}x tempo gain — the cap is 3.0x, so at most -${maxCut} (floor ${cdFloor}). Trim or repurpose.`);
   }
 
   // A node that is pure downside is a bug, not a design choice (principle 4).
