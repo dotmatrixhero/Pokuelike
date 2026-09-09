@@ -292,11 +292,51 @@ proven working by a direct unit test; the *passive* is what never happens.
 unreachable-content pattern as fire never igniting — and it predates this
 change.
 
-### Phrasing
+### Phrasing — rewritten after a blunt and correct note
 
-`mourned` now reads *"mourned a friend together"*. `trainedTogether` was
-*"drilled beside them"*, which — fair — meant nothing; now *"trained
-alongside them"*.
+> "Your phrasing is so stilted and weird."
+
+It was. The first renderer produced:
+
+> *brought down 2 together, the largest a scyther, came through 3 deaths
+> beside them, worst a scyther, was defended by them 20 times, fought for
+> them 3 times, was driven out by hunger beside them*
+
+Everything wrong with it, named, because each fault is a rule:
+
+- **No grammatical subject** — eight verb phrases in a row read as a dump.
+- **Telegram-ese appositives** — *"the largest a scyther"*, *"worst a scyther"*.
+- **Lowercase species and a broken article** — *"a onix"*. They are names.
+- **Voice flipping** inside one line: active *brought down*, passive *was
+  defended by*.
+- **Digits** where speech wants words — *"20 times"* reads as a field.
+- **It printed every reason.** That is the real fault: eight clauses of equal
+  length is a table with commas, not prose. Curation was the whole point of
+  `notableRapportMemories` and the renderer ignored it.
+
+The rules now: **two clauses, three at the outside**; verb-first fragments, so
+no pronoun tangle and the strong word lands first; species as proper nouns;
+numbers only where the number is the point, spelled out; heaviest clause
+first, short one after.
+
+| | |
+|---|---|
+| **Before** | *brought down 2 together, the largest a scyther, came through 3 deaths beside them, worst a scyther, was defended by them 20 times, fought for them 3 times* |
+| **After** | **Killed a Scyther together. Watched three die beside them.** |
+
+More real output:
+
+> **Killed a Fearow together. Watched an Onix die.**
+>
+> **Watched an Onix die. Pulled out of eight fights by them.**
+>
+> **Killed an Onix together. Mates.**
+>
+> **Mates. Trained alongside them for seasons.**
+
+Also fixed from the same note: `mourned` reads *"mourned a friend together"*,
+and `trainedTogether` was *"drilled beside them"* — which meant nothing — now
+*"trained alongside them"*.
 
 ## IMPLEMENTATION ORDER — the move from design into code
 
