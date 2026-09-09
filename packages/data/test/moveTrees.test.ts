@@ -368,7 +368,7 @@ describe("Water Gun tree: resistanceBreaker fixes the real weakness", () => {
   });
 });
 
-describe("Hydro Pump tree: v3 redesign — overwhelming, genuinely hard to aim", () => {
+describe("Hydro Pump tree: v4 two-lane — overwhelming, genuinely hard to aim", () => {
   const hydroPump = MOVES.hydro_pump;
 
   it("Building Pressure is a real wind-up cost (lockTicks), not a free power bump", () => {
@@ -380,16 +380,54 @@ describe("Hydro Pump tree: v3 redesign — overwhelming, genuinely hard to aim",
   it("Undertow Pull is reachable through either Aggression fork and drags the target on a swap", () => {
     const viaNuke = applyMoveTree(hydroPump, [
       "building_pressure",
-      "pump_conditioning",
       "overwhelm_footing",
-      "bursting_main",
-      "flooding_wake",
-      "widening_main",
+      "pressure_holds",
       "overwhelm_surge",
       "undertow_pull",
     ]);
     expect(viaNuke.positionSwap).toBe(true);
     expect(viaNuke.positionSwapPull).toBe(1);
+
+    const viaVolley = applyMoveTree(hydroPump, [
+      "building_pressure",
+      "overwhelm_footing",
+      "pressure_holds",
+      "relentless_surge",
+      "undertow_pull",
+    ]);
+    expect(viaVolley.positionSwap).toBe(true);
+    expect(viaVolley.positionSwapPull).toBe(1);
+  });
+
+  it("Undertow Pull is also reachable from lane A alone — v4's deep notable is where both lanes converge, not just the fork", () => {
+    const viaLaneA = applyMoveTree(hydroPump, [
+      "building_pressure",
+      "pump_conditioning",
+      "bursting_main",
+      "flooding_wake",
+      "widening_main",
+      "undertow_pull",
+    ]);
+    expect(viaLaneA.positionSwap).toBe(true);
+    // Reached without ever taking either fork tip.
+    expect(viaLaneA.hits).toBeUndefined();
+  });
+
+  it("Narrow the Stream is the Boldness branch's thesis as a real shape change, not a stat bump", () => {
+    const respec = applyMoveTree(hydroPump, ["wading_advance", "channel_footing", "narrow_the_stream"]);
+    expect(hydroPump.shape).toEqual({ kind: "cone", length: 4, width: 2 });
+    expect(respec.shape).toEqual({ kind: "line", length: 5 });
+    // The only shape setter in the tree — shape is an overwrite field.
+    expect(Object.values(hydroPump.tree!).filter((n) => n.delta.shape !== undefined)).toHaveLength(1);
+  });
+
+  it("Strip the Canopy makes the pump a harvesting tool, using the real canopy-harvest path's gatherBurst", () => {
+    const respec = applyMoveTree(hydroPump, ["pod_current", "fuller_wash", "strip_the_canopy"]);
+    expect(respec.gatherBurst).toBe(3);
+    // ...and Fuller Wash deepens the opener's own ally heal rather than
+    // granting another stacking healing passive.
+    expect(respec.allyEffect).toEqual({ healFraction: 0.22 });
+    expect(hydroPump.tree!.fuller_wash.grantsPassive).toBeUndefined();
   });
 
   it("Flooding Wake leaves real standing water via the already-shipped terrainFill primitive", () => {
@@ -431,48 +469,37 @@ describe("Hydro Pump tree: v3 redesign — overwhelming, genuinely hard to aim",
     expect(respec.lockTicks).toBe(0); // +1 from Building Pressure, -1 from the crosslink
   });
 
-  it("Surge and Brace's bridge (Aggression<->Boldness) reaches both Widening Main and Channel Grip", () => {
-    const viaAggr = applyMoveTree(hydroPump, [
-      "building_pressure",
-      "wading_advance",
-      "surge_and_brace",
-      "brace_conditioning",
-      "unified_current",
-      "widening_main",
-    ]);
+  it("Surge and Brace's bridge (Aggression<->Boldness) lands on one LANE NOTABLE in each branch it connects", () => {
+    // v4 moved where a bridge lands: it shortcuts into a lane's NOTABLE
+    // (Flooding Wake / Undertow Anchor), skipping that lane's filler grind
+    // but never a decision. Same rule as before — reach both branches the
+    // crosslink connects — checked at the nodes v4 puts it on.
+    const bridge = ["building_pressure", "wading_advance", "surge_and_brace", "brace_conditioning", "unified_current"];
+
+    // Into Aggression: Flooding Wake without Pump Conditioning or Bursting Main.
+    const viaAggr = applyMoveTree(hydroPump, [...bridge, "flooding_wake", "widening_main"]);
+    expect(viaAggr.terrainFill).toEqual({ terrain: "water" });
     expect(viaAggr.range).toEqual({ min: 0, max: 5 });
 
-    const viaBold = applyMoveTree(hydroPump, [
-      "building_pressure",
-      "wading_advance",
-      "surge_and_brace",
-      "brace_conditioning",
-      "unified_current",
-      "channel_grip",
-    ]);
+    // Into Boldness: Undertow Anchor without Bastion Footing or Open the Valve.
+    const viaBold = applyMoveTree(hydroPump, [...bridge, "undertow_anchor", "channel_grip"]);
     expect(viaBold.range).toEqual({ min: 0, max: 5 });
+    expect(hydroPump.tree!.undertow_anchor.grantsPassive).toEqual({ kind: "immovable", value: 1 });
   });
 
-  it("Wake of Violence's bridge (Sociability<->Aggression) reaches both Pod Reach and Widening Main", () => {
-    const viaSoc = applyMoveTree(hydroPump, [
-      "pod_current",
-      "building_pressure",
-      "wake_of_violence",
-      "surging_wake",
-      "violent_confluence",
-      "pod_reach",
-    ]);
+  it("Wake of Violence's bridge (Sociability<->Aggression) lands on one LANE NOTABLE in each branch it connects", () => {
+    // Same v4 relocation as Surge and Brace above: Wake Rally in
+    // Sociability, Pressure Holds in Aggression.
+    const bridge = ["pod_current", "building_pressure", "wake_of_violence", "surging_wake", "violent_confluence"];
+
+    // Into Sociability: Wake Rally without Pod Footing or Wake Footing.
+    const viaSoc = applyMoveTree(hydroPump, [...bridge, "wake_rally", "pod_reach"]);
+    expect(viaSoc.rallyCall).toEqual({ ticks: 20 });
     expect(viaSoc.range).toEqual({ min: 0, max: 5 });
 
-    const viaAggr = applyMoveTree(hydroPump, [
-      "pod_current",
-      "building_pressure",
-      "wake_of_violence",
-      "surging_wake",
-      "violent_confluence",
-      "widening_main",
-    ]);
-    expect(viaAggr.range).toEqual({ min: 0, max: 5 });
+    // Into Aggression: Pressure Holds without Overwhelm Footing.
+    const viaAggr = applyMoveTree(hydroPump, [...bridge, "pressure_holds"]);
+    expect(viaAggr.critCooldownReset).toBe(true);
   });
 });
 

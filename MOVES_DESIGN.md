@@ -4434,3 +4434,64 @@ using `.*?` to find a node's `delta` matched across node boundaries and wrote
 a cooldown into the wrong node, producing `delta: {, cooldownTicks: -1 }`.
 Reverted and rebuilt with brace-counting from an exact anchor. On a
 6,000-line file of live game data, `.*?` is not a search, it is a guess.
+
+### Hydro Pump converted to v4 (option 2: forks kept, inside the lanes)
+
+40 → 45 nodes, 12 per branch, 9 `anyOf`, 6 fork nodes, 3 real bridges. Every
+v3 fork survives, relocated to the tail of a lane. Checker findings for this
+tree: **7 → 2**, both leftover overwrite collisions (`range` across the three
+branches' own "+1 Range" fillers, and `situationalBonus` between *Riptide
+Counter* and *Violent Confluence*) — the same two Solar Beam is left with,
+and they need the additive fields, not tree surgery.
+
+The fantasy is unchanged, per the standing rule about not reinventing a
+documented identity. What v4 forced was answering it **twice per branch**,
+in lanes that differ in kind:
+
+| branch | lane A | lane B | new node |
+|---|---|---|---|
+| Overwhelm | sustained pressure — bore through, flood the ground you crossed | commitment — wind up, unload, and on a real connection never re-pressurise (`critCooldownReset`) | *Pressure Holds* |
+| Bastion | plant your feet (`immovable`, and *Open the Valve* trading `selfCostPerUse` energy for power) | control the stream | *Open the Valve*, *Narrow the Stream* |
+| Pod Tide | coordination — mark, converge, reach | keeping the pod — a fuller wash, and the pump as a harvesting tool | *Fuller Wash*, *Strip the Canopy* |
+
+**The best of the five is *Narrow the Stream*.** The branch's whole thesis
+has been prose since v3 — "a patient controlled deluge instead of a wild
+spray" — and it had no mechanic. It does now: the base `cone` (length 4,
+width 2, 12 tiles) becomes a `line` of 5, which is fewer tiles hit at longer
+reach, at the exact range *Channel Grip* buys. Measured directly, not
+reasoned about: 12 tiles → 5. The tree's only `shape` setter, so the
+overwrite field stays safe, and notable-tier per principle 14.
+
+***Strip the Canopy*** is the other one worth naming: `gatherBurst` on
+needs.ts's canopy-harvest path, where an off-cooldown damage move
+substitutes for the dig and scales with its own `range.max`. A pod using
+Hydro Pump to knock fruit down for the herd is the only node in the tree
+that feeds rather than fights — and it is the fourth user of a lever the
+colour-pie audit named as barely appearing.
+
+**Two things deliberately NOT done.** `consumesOwnTerrain: { terrain:
+"water" }` was drafted for the Bastion lane and cut: it permanently deletes
+the water tile it consumes (predation.ts `setTile(..., "floor")`), and a
+Water species fights standing on water constantly, so it is a plausible
+ecology regression on a resource the sim actually meters. And **no new
+passives at all** — `agent.passives[kind] += value` is uncapped and stacks
+across a species' whole movepool, so *Fuller Wash* deepens the opener's
+`allyEffect` delta instead of granting another heal. `passive-exposure.ts`
+totals are byte-identical before and after.
+
+**Balance, with the roster as control:**
+
+| | before | after | roster median |
+|---|---|---|---|
+| nodes | 40 | 45 | 38 |
+| distinct levers | 26 | **30** | 21 |
+| colour-pie flavours | 11 | **13** | 9 |
+| tempo | 1.80x (cap 3.00) | 1.80x | 1.80x |
+| power | 1.45x | 1.59x | 1.89x |
+| cheapest capstone | 11 pts | 9 pts | 11 |
+
+Tempo is untouched — the tree still spends −4 of the −6 the cap allows, and
+that headroom is a balance decision, not a conversion one. The capstone
+depth drop to 9 is structural to v4 (Solar Beam sits at 9 for the same
+reason: lane B reaches the deep notable in four steps) and is not a
+regression specific to this tree.
