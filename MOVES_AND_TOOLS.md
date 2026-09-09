@@ -342,6 +342,71 @@ bow, better edges, maybe a real fire-lance. So a few moves cross from
 column**, because that column is defined by physics and nature rather than by
 craftsmanship. The pre-industrial ceiling is deliberate.
 
+
+---
+
+## What every equippable actually grants
+
+The `grantsMoves` table, concrete. Direct framing: *"how knife gives you
+scratch and maybe machete gives you cut and slash. Like shield can give you
+defense curl type thing."*
+
+**Your loadout is your moveset.** Nothing else decides what a human can do.
+
+| Held | Grants | Slices | How the tool version is worse |
+|---|---|---|---|
+| *(bare hands)* | **Punch · Kick · Yell** | Pound · Low Kick · Growl | The baseline. All weak, all range 1 |
+| **Flint knife** | **Scratch** | Scratch | Fast and light, but it's a short blade — no reach |
+| **Obsidian knife** | **Scratch** *(high crit)* | Scratch | Sharper edge, same reach |
+| **Machete** | **Cut · Slash** | Cut · Slash | Cut **clears foliage only** — it can't fell a tree. Slash is slower than a claw |
+| **Axe** | **Cut · Chop** | Cut · Karate Chop | Cut **fells only** — it's the wrong tool for brush. Slow to swing |
+| **Pick** | **Rock Smash · Dig** | Rock Smash · Dig | Dig **tunnels only** — none of Dig's dodge-underground trick |
+| **Club** | **Swing** | Slam | Heavy, slow, no secondary effect |
+| **Spear** | **Thrust** *(reach 2)* | Horn Attack | The only reach you get. Heavy; high threat signature |
+| **Sling** | **Sling Stone** *(ranged)* | Rock Throw | Weaker than a thrown rock from something strong. Noisy |
+| **Shield** | **Brace** | Defense Curl | Raises defence for a turn — and **costs you the held slot**, so you can't brace and swing |
+| **Torch** | **Flash** *(passive)* · **Brandish** | Flash · Scary Face | Brandish pushes something back a tile; no stat drop |
+| **Digging stick** | **Dig** *(slow)* | Dig | Slower than a pick, softer ground only |
+| **Sickle** | **Scratch** *(weak)* | Scratch | It's a harvesting tool that happens to have an edge |
+| **Bow** *(Act 2)* | **Arrow Shot** | Pin Missile | Real range, but it needs arrows |
+| **Fire-lance** *(Act 2)* | **Scorch** | Flamethrower | Short range, limited fuel, **ignites your own tile** |
+
+| Worn | Grants | Slices | Note |
+|---|---|---|---|
+| **Camouflage cloak** | **Conceal** | Camouflage | Only works while you're **stationary** — move and you're visible again |
+| **Hide armor · chitin scale · woven wrap** | *(passive)* | — | Defence and a Speed cost. No move |
+| **Fur cloak · rain hood · snowshoes** | *(passive)* | — | Weather and terrain mitigation. No move |
+
+### The knife/machete/axe split is the slice rule at its clearest
+
+**Cut**, as a real move, does three things: damages, fells trees, clears
+foliage. Three tools split it and **no tool gets all three**:
+
+- **Knife** takes the damage slice, as Scratch.
+- **Machete** takes the clearing slice, plus Slash.
+- **Axe** takes the felling slice, plus Chop.
+
+So a player carrying all three still hasn't got Cut — they've got three
+partial answers, each occupying the held slot, each with its own weight. The
+complete move stays something only a creature brings, which is pillar 3
+holding structurally rather than by tuning.
+
+### The numeric rule
+
+A tool-granted move should sit at roughly **60–70% of the creature version's
+power** with **1.5–2× the cooldown**. If a tool ever matches the innate
+version, the slice rule has failed and the partner has lost a reason to
+exist.
+
+### Shield is the interesting one
+
+`Brace` costs the **held slot**. You cannot brace and swing — putting up a
+shield means putting down your weapon, every turn, as a live decision.
+
+That's a much better shield than a passive defence bonus, and it's another
+instance of the pattern that keeps recurring in this design: **the
+interesting version of an item is the one that takes something away.**
+
 ## Open questions
 
 1. **Does a tool-granted move count as the player "knowing" it** for
