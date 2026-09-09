@@ -4124,10 +4124,32 @@ collision — Hit and Gone (2 tiles) → Never Landed (3) → Never There (4) is
 deliberate ladder. Only *independent* setters are the bug. The checker now
 tests ancestry before reporting.
 
-**Two fields cannot be made additive**, and those got a design rule instead:
-`shape` and `hitsArea`. A cone is not a ring plus a line. Rule: **only one
-branch per move may own the footprint.** Twineedle's Aggression was quietly
-fighting Sociability over it, so Hollow Points stopped being a cone.
+**Area size is additive too, on a second pass.** *"Hits area should be
+additive. Make it scalar with range of area. Agreed on shape though. Maybe
+that excludes you from taking other shape modes."* Right — `hitsArea` was a
+boolean bolted to a `shape` carrying a `radius`, so widening an area meant
+redeclaring the whole footprint. Split in two:
+
+- **`shape`** — what FORM the area takes (burst, ring, cone). Still an
+  overwrite, because a cone genuinely is not a ring plus a line.
+- **`areaBonus: +N`** — how BIG it is. Additive, stacks across nodes.
+
+Twineedle's Sociability shows why that is better than the rule alone: Nothing
+Forgets sets `shape: burst, areaBonus: +1`, and The Swarm Decides adds
+`areaBonus: +1`. Taking both gives a radius-2 burst — **the same cloud,
+widened**, rather than a second declaration racing the first. The capstone no
+longer restates the notable's footprint; it grows it.
+
+**And `shape` now locks out rival forms.** Independent shape nodes must
+declare `excludes` against each other: a move has one footprint, so choosing
+a form is a real fork rather than a silent race. Verified the rule fires by
+adding a rival cone to Twineedle's Aggression and confirming the report,
+then reverting.
+
+The design rule that came out of the first pass still holds and is now
+enforced by that exclusion: Twineedle's Aggression was quietly fighting
+Sociability over the footprint, so Hollow Points stopped being a cone. Every
+draft now has at most one shape setter (Agility has none).
 
 ### Repositioning, phrased from the target
 

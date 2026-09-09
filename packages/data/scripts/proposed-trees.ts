@@ -50,6 +50,7 @@ export interface ProposedMove {
   pp: number;
   shape: unknown;
   range?: unknown;
+  /** Deprecated in drafts: area SIZE is the additive `delta.areaBonus` now, and `shape` says what form it takes. Kept only to describe a move's base footprint. */
   hitsArea?: boolean;
   fantasy: string;
   learners: string[];
@@ -183,7 +184,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
       { id: "sharded_break", name: "Sharded Break", cost: 1, leaning: "aggression",
         prerequisitesAnyOf: [["barbed_plates"], ["spines_out"]],
         grantsPassive: { kind: "thorns", value: 0.15 },
-        delta: { shape: { kind: "ring", radius: 1 }, hitsArea: true },
+        delta: { shape: { kind: "ring" }, areaBonus: 1 },
         note: "LANE C NOTABLE. The casing shatters outward — everything adjacent takes the fragments, not just whatever bit." },
       { id: "keen_edges", name: "Keen Edges", cost: 1, prerequisites: ["sharded_break"], leaning: "aggression",
         grantsPassive: { kind: "thorns", value: 0.08 }, delta: {} },
@@ -331,12 +332,12 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
       // --- Convergence, filler, capstone.
       { id: "nothing_forgets", name: "Nothing Forgets", cost: 1, leaning: "sociability",
         prerequisitesAnyOf: [["no_stragglers"], ["one_mind"]],
-        delta: { shape: { kind: "burst", radius: 1 }, hitsArea: true, statusSpreads: true, power: -8 },
+        delta: { shape: { kind: "burst" }, areaBonus: 1, statusSpreads: true, power: -8 },
         note: "DEEP NOTABLE. Both lanes end here. The swarm stops being individuals and arrives as a cloud." },
       { id: "hive_memory", name: "Hive Memory", cost: 1, prerequisites: ["nothing_forgets"], leaning: "sociability",
         delta: { rallyCallTicks: 200 } },
       { id: "the_swarm_decides", name: "The Swarm Decides", cost: 1, prerequisites: ["hive_memory"], leaning: "sociability",
-        delta: { excludesAllies: true, shape: { kind: "burst", radius: 2 }, hitsArea: true },
+        delta: { excludesAllies: true, areaBonus: 1 },
         note: "CAPSTONE. A cloud twice as wide that no longer stings its own. `excludesAllies` is the one Sociability flavour NO proposed branch used — this tree's own audit flagged it, and a hive-wide AoE is exactly where it belongs." },
 
       // ================= Bridges — landing deep, at the lane notables =================
@@ -471,7 +472,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
         grantsPassive: { kind: "calmingPresence", value: 0.2 }, delta: {} },
       { id: "the_nest_decides", name: "The Nest Decides", cost: 1, prerequisites: ["old_ground_ps"], leaning: "sociability",
         grantsPassive: { kind: "healAura", value: 0.015 },
-        delta: { shape: { kind: "burst", radius: 1 }, hitsArea: true, excludesAllies: true },
+        delta: { shape: { kind: "burst" }, areaBonus: 1, excludesAllies: true },
         note: "CAPSTONE. A cloud of venom the nest is immune to. `excludesAllies` was the one Sociability flavour no draft used." },
 
       // ===== Bridges =====
@@ -554,7 +555,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
         delta: { fertilityBoost: { amount: 0.3, radius: 2 } } },
       { id: "thicket", name: "Thicket", cost: 1, leaning: "aggression",
         prerequisitesAnyOf: [["spreading"], ["feast"]],
-        delta: { fertilityBoost: { amount: 0.35, radius: 3 }, shape: { kind: "burst", radius: 3 }, hitsArea: true },
+        delta: { fertilityBoost: { amount: 0.35, radius: 3 }, shape: { kind: "burst" }, areaBonus: 3 },
         note: "LANE W NOTABLE. A real patch, not a tile — and the growth itself is now an area event." },
       { id: "root_war", name: "Root War", cost: 1, prerequisites: ["thicket"], leaning: "aggression",
         delta: { reposition: { mover: "defender", to: "shoved", tiles: 1, timing: "onHit" } },

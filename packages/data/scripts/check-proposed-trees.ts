@@ -165,7 +165,7 @@ function problems(move: ProposedMove): string[] {
     "piercing": ["defensePenetration", "resistanceBreaker", "bonusVsType", "rangeBonus"],
     "defence": ["p:damageReduction", "p:damageReductionFlat", "p:defenseBoost", "p:thorns", "p:thornsRubble", "p:unshaken", "p:immovable", "p:fireproof"],
     "environment": ["terrainBurn", "terrainFill", "consumesOwnTerrain", "createsTerrain", "spawnsRain", "fertilityBoost", "fertilityCeilingBoost", "floraRegrowthMultiplier", "floraCompetition"],
-    "wider aoe": ["shape", "hitsArea"],
+    "wider aoe": ["shape", "hitsArea", "areaBonus"],
     "reposition others": ["positionSwap", "positionSwapPull", "reposition"],
     "planted/duration": ["statChangeOnHit", "statChangesOnHit", "p:terrainUnhindered", "p:dispersalSpeed", "herdMigrationResistance"],
     "healing": ["p:healAura", "p:regen", "p:regenFlat", "selfHeal", "herdForageBonus", "gatherBurst"],
@@ -339,7 +339,7 @@ function problems(move: ProposedMove): string[] {
     for (const pre of [...(t[id]?.prerequisites ?? []), ...(t[id]?.prerequisitesAnyOf ?? []).flat()]) ancestorsOf(pre, seen);
     return seen;
   };
-  const OVERWRITE = ["shape", "range", "hits", "forcedMovement", "situationalBonus", "statChangeOnHit", "rallyCall", "allyEffect", "reposition", "hitsArea"];
+  const OVERWRITE = ["shape", "range", "hits", "forcedMovement", "situationalBonus", "statChangeOnHit", "rallyCall", "allyEffect", "reposition"];
   const excl = new Map(nodes.map((n) => [n.id, new Set(n.excludes ?? [])]));
   for (const field of OVERWRITE) {
     const setters = nodes.filter((n) => (n.delta as any)?.[field] !== undefined);
@@ -353,6 +353,22 @@ function problems(move: ProposedMove): string[] {
     }
     if (pairs.length) {
       out.push(`"${field}" is an OVERWRITE field but ${setters.length} co-takeable nodes set it (${pairs.slice(0, 3).join(", ")}${pairs.length > 3 ? ` +${pairs.length - 3} more` : ""}) — a build taking both gets whichever the engine reaches last. Use the additive form, or make them mutually exclusive.`);
+    }
+  }
+
+  // `shape` is the one field that genuinely cannot be additive — a cone is
+  // not a ring plus a line — so taking one form locks out the others:
+  // "Maybe that excludes you from taking other shape modes." Independent
+  // shape nodes must declare `excludes` against each other. (Area SIZE is
+  // additive via `areaBonus` and is not affected by this.)
+  const shapers = nodes.filter((n) => (n.delta as any)?.shape !== undefined);
+  for (let i = 0; i < shapers.length; i++) {
+    for (let j = i + 1; j < shapers.length; j++) {
+      const a = shapers[i], b = shapers[j];
+      if (ancestorsOf(a.id).has(b.id) || ancestorsOf(b.id).has(a.id)) continue;
+      if (!(a.excludes ?? []).includes(b.id) && !(b.excludes ?? []).includes(a.id)) {
+        out.push(`shape nodes ${a.id} and ${b.id} are independently takeable — a move has one footprint, so alternative forms must exclude each other`);
+      }
     }
   }
 
