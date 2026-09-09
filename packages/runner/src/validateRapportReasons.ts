@@ -69,16 +69,25 @@ const ALL_REASONS: RapportReason[] = [
  * 5. **Vary the length.** Heaviest clause leads, a short one follows.
  */
 
-const NUMBERS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+const NUMBERS = [
+  "no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+  "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+];
 /** A plain spelled cardinal — "three", not "3". */
 function count(n: number): string {
   return NUMBERS[n] ?? String(n);
 }
 
-const ONES = ["zero", "once", "twice", "three times", "four times", "five times", "six times", "seven times", "eight times", "nine times", "ten times"];
-/** "twenty times", not "20 times" — a spelled number reads as speech, a digit reads as a field. */
+/**
+ * "twenty times", not "20 times" — a spelled number reads as speech, a digit
+ * reads as a database field. Past twenty, "again and again" beats either:
+ * nobody counting their own fights lands on "twenty-seven".
+ */
 function times(n: number): string {
-  return ONES[n] ?? `${n} times`;
+  if (n === 1) return "once";
+  if (n === 2) return "twice";
+  if (n <= 20) return `${NUMBERS[n]} times`;
+  return "again and again";
 }
 
 /** Species come out of the dex lowercased; they are names. */
@@ -93,30 +102,78 @@ function a(label: string | undefined, fallback: string): string {
   return `${/^[AEIOU]/.test(name) ? "an" : "a"} ${name}`;
 }
 
-/** One clause per reason. Verb-first, no subject, no hedging. */
+/**
+ * One sentence per reason, **spoken by the agent whose edge this is, about
+ * the other one.** Second rewrite: the first was a comma-dump, the second
+ * over-corrected into clipped fragments — *"OK you over indexed in like
+ * hyper succinct. That's not what I want either. Like watched three die
+ * beside them sounds confusing and ominous?"* Both notes were right.
+ *
+ * The brief for this version: *"be a little more poetic and emotion driven?
+ * Try to put yourself in the shoes of the Pokémon that lived through that
+ * explaining what you've been through together. Take a little creative
+ * liberty but not too much."*
+ *
+ * So:
+ * - **First person, full sentences.** "We brought down a Scyther together",
+ *   not "Killed a Scyther together". A relationship is spoken, not tabulated.
+ * - **Say who or what**, always. "Three died within sight of us both" fixes
+ *   the exact confusion in that note — the old line never said what died.
+ * - **One feeling per sentence, carried by the facts.** "and I started most
+ *   of it" is a real read of `struck` outweighing `wasStruck`, not a mood
+ *   pasted on top.
+ * - **Liberty only in the connective tissue.** Every noun, number and event
+ *   is real. Nothing invents an event that did not happen — no "never left my
+ *   side" on an edge that only knows a count.
+ */
 const CLAUSE: Record<RapportReason, (n: number, subject?: string) => string> = {
-  rescued: (n) => (n <= 1 ? `Carried them home` : `Carried them home ${times(n)}`),
-  wasRescued: (n) => (n <= 1 ? `Was carried home by them` : `Carried home by them ${times(n)}`),
-  mourned: (n) => (n <= 1 ? `Mourned the same friend` : `Mourned the same dead ${times(n)} over`),
-  // A count of two is not worth a clause of its own — the kill is the story.
-  // Three or more, and the number starts meaning something.
-  defeatedTogether: (n, s) => (n <= 2 ? `Killed ${a(s, "creature")} together` : `Killed ${a(s, "creature")} together, and others`),
-  bonded: () => `Mates`,
-  survivedTogether: (n, s) => (n <= 1 ? `Watched ${a(s, "creature")} die` : `Watched ${count(n)} die beside them`),
-  weatheredTogether: (n, s) => (n <= 1 ? `Driven out by ${s ?? "the weather"}, side by side` : `Driven out together ${times(n)}`),
-  healed: (n) => (n <= 1 ? `Closed their wounds` : `Mended them ${times(n)} over`),
-  wasHealed: (n) => (n <= 1 ? `Mended by them` : `Mended by them ${times(n)} over`),
-  defended: (n) => (n <= 1 ? `Fought for them` : `Fought for them ${times(n)}`),
-  wasDefended: (n) => (n <= 1 ? `Saved by them once` : `Pulled out of ${times(n).replace(" times", " fights")} by them`),
-  sleptSafely: (n) => (n <= 1 ? `Slept where they could reach` : `Slept beside them ${times(n)}`),
-  keptWatch: (n) => (n <= 1 ? `Watched over their sleep` : `Watched over their sleep ${times(n)}`),
-  struck: (n) => (n <= 1 ? `Struck them` : `Struck them ${times(n)}`),
-  wasStruck: (n) => (n <= 1 ? `Took a hit from them` : `Took ${times(n).replace(" times", " hits")} from them`),
-  sharedWater: (n) => (n <= 1 ? `Backed down at the water` : `Backed down at the water ${times(n)}`),
-  trainedTogether: (n) => (n <= 1 ? `Trained alongside them` : `Trained alongside them for seasons`),
-  gaveFood: (n) => (n <= 1 ? `Fed them` : `Fed them ${times(n)}`),
-  receivedFood: (n) => (n <= 1 ? `Fed by them` : `Fed by them ${times(n)}`),
-  socialized: (n) => (n <= 1 ? `Kept their company` : `Years of their company`),
+  rescued: (n) =>
+    n <= 1 ? `I carried them home when they could not walk.` : `I have carried them home ${times(n)}.`,
+  wasRescued: (n) =>
+    n <= 1 ? `They carried me home when I could not walk.` : `They have carried me home ${times(n)}.`,
+  mourned: (n) =>
+    n <= 1 ? `We lost the same friend, and we were both there for it.` : `We have buried the same friends ${times(n)} now.`,
+  defeatedTogether: (n, s) =>
+    n <= 2
+      ? `We brought down ${a(s, "creature")} together.`
+      : `We have brought down ${count(n)} between us, one of them ${a(s, "creature")}.`,
+  bonded: () => `We are mates.`,
+  survivedTogether: (n, s) =>
+    n <= 1
+      ? `I watched ${a(s, "creature")} die, and they were beside me.`
+      : `${count(n).charAt(0).toUpperCase() + count(n).slice(1)} have died within sight of us both, one of them ${a(s, "creature")}.`,
+  weatheredTogether: (n, s) =>
+    n <= 1
+      ? `${nameOf(s, "The weather")} drove us off our own ground, and we left together.`
+      : `The world has driven us out together ${times(n)}.`,
+  healed: (n) => (n <= 1 ? `I closed their wounds.` : `I have mended them through ${count(n)} bad stretches.`),
+  wasHealed: (n) => (n <= 1 ? `They closed my wounds.` : `They have mended me through ${count(n)} bad stretches.`),
+  defended: (n) =>
+    n <= 1 ? `I stood between them and what was coming.` : `I have stood between them and what was coming ${times(n)}.`,
+  wasDefended: (n) =>
+    n <= 1 ? `They stood between me and what was coming.` : `They have put themselves in front of me ${times(n)}.`,
+  sleptSafely: (n) =>
+    n <= 1 ? `I have slept where they could reach me.` : `I have slept beside them ${times(n)}.`,
+  keptWatch: (n) =>
+    n <= 1 ? `I stayed awake while they slept.` : `I have stayed awake through their sleep ${times(n)}.`,
+  // No "and I started most of it" here, however well it read: this clause only
+  // ever sees ONE side's count, so both halves of a mutual rivalry claimed to
+  // have started it — a sentence the data cannot support. Liberty in the
+  // connective tissue, never in the facts.
+  struck: (n) =>
+    n <= 1 ? `I struck them once, over ground we both wanted.` : `I have struck them ${times(n)} over ground we both wanted.`,
+  wasStruck: (n) =>
+    n <= 1 ? `They struck me once, over ground we both wanted.` : `They have come at me ${times(n)}.`,
+  sharedWater: (n) =>
+    n <= 1
+      ? `We stood over the same water and neither of us started anything.`
+      : `We have stood over the same water ${times(n)} without it coming to blows.`,
+  trainedTogether: (n) =>
+    n <= 1 ? `We practised side by side.` : `We spent whole seasons practising side by side.`,
+  gaveFood: (n) => (n <= 1 ? `I brought them food.` : `I have brought them food ${times(n)}.`),
+  receivedFood: (n) => (n <= 1 ? `They brought me food.` : `They have brought me food ${times(n)}.`),
+  socialized: (n) =>
+    n <= 1 ? `We have sat together.` : `We have spent seasons in each other's company.`,
 };
 
 /** At most `limit` clauses, most significant first, as one line. */
@@ -124,7 +181,7 @@ function describe(memories: { reason: RapportReason; count: number; subject?: { 
   return memories
     .slice(0, limit)
     .map((m) => CLAUSE[m.reason](m.count, m.subject?.label))
-    .join(". ") + ".";
+    .join(" ");
 }
 
 const totals: Record<string, number> = Object.fromEntries(ALL_REASONS.map((r) => [r, 0]));

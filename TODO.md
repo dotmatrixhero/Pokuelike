@@ -314,29 +314,62 @@ Everything wrong with it, named, because each fault is a rule:
   length is a table with commas, not prose. Curation was the whole point of
   `notableRapportMemories` and the renderer ignored it.
 
-The rules now: **two clauses, three at the outside**; verb-first fragments, so
-no pronoun tangle and the strong word lands first; species as proper nouns;
-numbers only where the number is the point, spelled out; heaviest clause
-first, short one after.
+### ...and then over-corrected, so: a third pass
+
+The fragment version was too far the other way:
+
+> "OK you over indexed in like hyper succinct. That's not what I want either.
+> Like watched three die beside them sounds confusing and ominous?"
+
+Both notes were right. *"Killed a Scyther together. Watched three die beside
+them."* is clipped, and it never says **what** died, which is precisely what
+made it ominous instead of sad.
+
+The brief for the version that stuck:
+
+> "Be a little more poetic and emotion driven? Try to put yourself in the
+> shoes of the Pokémon that lived through that explaining what you've been
+> through together. Take a little creative liberty but not too much."
+
+**The rules, third time:**
+
+1. **First person, full sentences**, spoken by the agent whose edge it is
+   about the other. A relationship is spoken, not tabulated.
+2. **Always say who or what.** "Three have died within sight of us both, one
+   of them a Scyther" — the old line never named anything.
+3. **One feeling per sentence, carried by the facts**, never pasted on top.
+4. **Liberty in the connective tissue only.** Every noun, number and event is
+   real. Nothing invents an event the edge does not know about.
+5. **Still at most two clauses.** Curation survived all three passes.
+6. Species are proper nouns; numbers spelled out to twenty, then "again and
+   again", because nobody counting their own fights lands on "twenty-seven".
 
 | | |
 |---|---|
-| **Before** | *brought down 2 together, the largest a scyther, came through 3 deaths beside them, worst a scyther, was defended by them 20 times, fought for them 3 times* |
-| **After** | **Killed a Scyther together. Watched three die beside them.** |
+| **First** | *brought down 2 together, the largest a scyther, came through 3 deaths beside them, worst a scyther, was defended by them 20 times* |
+| **Second** | *Killed a Scyther together. Watched three die beside them.* |
+| **Third** | **We brought down a Scyther together. Three have died within sight of us both, one of them a Scyther.** |
 
-More real output:
+More, straight from the run:
 
-> **Killed a Fearow together. Watched an Onix die.**
+> **We are mates. We spent whole seasons practising side by side.**
 >
-> **Watched an Onix die. Pulled out of eight fights by them.**
+> **I watched an Onix die, and they were beside me. They have put themselves
+> in front of me eight times.**
 >
-> **Killed an Onix together. Mates.**
+> **We have sat together. I struck them once, over ground we both wanted.**
 >
-> **Mates. Trained alongside them for seasons.**
+> **I watched a Kakuna die, and they were beside me. They have come at me
+> thirteen times.**
 
-Also fixed from the same note: `mourned` reads *"mourned a friend together"*,
-and `trainedTogether` was *"drilled beside them"* — which meant nothing — now
-*"trained alongside them"*.
+**One flaw the wider sample caught.** The `struck` line read *"and I started
+most of it"*, which was the best sentence in the batch and had to go: the
+clause only ever sees one side's count, so **both** halves of a mutual rivalry
+claimed to have started it. Liberty in the connective tissue, never in the
+facts.
+
+Also fixed across these passes: `mourned` reads *"we lost the same friend"*,
+and `trainedTogether` was *"drilled beside them"* — which meant nothing.
 
 ## IMPLEMENTATION ORDER — the move from design into code
 
