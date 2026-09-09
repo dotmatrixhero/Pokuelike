@@ -1578,7 +1578,99 @@ export type RapportReason =
   /** Spent real time together — `needs.ts`'s `applySocializing`. Symmetric. */
   | "socialized"
   /** Became mates — `reproduction.ts`'s `applyMateSeeking`. Symmetric, and fires once per pair. */
-  | "bonded";
+  | "bonded"
+  // --- Shared experience, as distinct from the transactions above ---
+  // Everything before this point answers "what did I do TO you." These
+  // answer "what did we go through together," which is the half that makes a
+  // relationship read as a relationship instead of a ledger. Direct steer:
+  // "I wish they were more than just #s of things... I want more meaningful
+  // interaction even if it means building new systems. Ex. Training
+  // together. Or leveling up together or drinking from the same water
+  // without clashing."
+  /**
+   * Stood over the same contested resource, eligible to fight for it, and
+   * didn't — `herdConflict.ts`'s declined-escalation branch. Symmetric.
+   *
+   * **Restraint is an interaction.** This is the counterweight to
+   * `"struck"`: the sim already decides, tile by tile, whether two
+   * power-matched rivals escalate over water or food, and until now the
+   * "no" branch recorded nothing while the "yes" branch built a grudge. A
+   * relationship made of a thing *not* happening.
+   */
+  | "sharedWater"
+  /** Drilled moves within sight of each other — `needs.ts`'s `applyTraining`. Symmetric. */
+  | "trainedTogether"
+  /**
+   * Stayed awake beside them while they slept — the watcher's side. This is
+   * the `Presence` bonding verb (`DESIGN.md`: "watching over a vulnerable
+   * moment like sleep") as a thing the sim's own agents do to each other.
+   */
+  | "keptWatch"
+  /**
+   * Chose to sleep where they could reach you — the sleeper's side of the
+   * same night, and the half that actually costs something. Deliberately
+   * **not** simultaneous sleep, per direct steer ("slept in each other's
+   * presence (not necessarily simultaneous)"): two animals asleep at once
+   * are merely co-located, whereas one asleep and one awake is trust.
+   */
+  | "sleptSafely"
+  /** Both stood near a death and neither was the one that died. Symmetric. */
+  | "survivedTogether"
+  /**
+   * Both lost the same friend — `survivedTogether`'s trigger, narrowed to
+   * the case where the dead agent was someone *both* witnesses held real
+   * positive rapport with. Symmetric, rare, and the only thing in this
+   * vocabulary that is about a third party.
+   */
+  | "mourned"
+  /**
+   * Both were fighting when something died beside them — and the memory
+   * **names what it was**. Direct steer: "I think defeating an enemy
+   * together - and naming specifically what it was would be great." A count
+   * says two creatures fought a lot; a subject says they brought down a
+   * Scyther.
+   */
+  | "defeatedTogether"
+  /**
+   * The world moved them, and it moved them together — a herd migration
+   * whose `MigrationReason` was the weather or the scarcity it caused.
+   *
+   * This exists because of a correction worth keeping: "surviving a storm"
+   * was first rejected on the grounds that storms do no damage, which is
+   * true and was the wrong test. Direct steer: "Maybe surviving a storm and
+   * drought and other weather together would still be worth it if it
+   * meaningfully changed their behavior." **The shared experience is the
+   * displacement, not the damage** — and a migration is displacement the sim
+   * already records, with a cause attached.
+   */
+  | "weatheredTogether"
+  /** Carried them out when they could not walk — `support.ts`'s completed carry. The carrier's side. */
+  | "rescued"
+  /** Was carried out by them — the rescued side, and the heavier half of the pair. */
+  | "wasRescued"
+  /** Closed their wounds — the `healAura` passive, holder's side, counted only when it actually restored HP. */
+  | "healed"
+  /** Was mended by them — the recipient's side of the same aura. */
+  | "wasHealed";
+
+/**
+ * What a `RapportMemory` was *about*, when it was about something — the
+ * predator two agents brought down, the friend they both lost, the drought
+ * that drove them out. Direct steer: naming the thing specifically is what
+ * turns a count into a story.
+ *
+ * Deliberately a display `label` rather than a species id, so one field
+ * covers both an agent (`"Scyther"`) and a cause (`"drought"`) without a
+ * discriminated union that every consumer would have to branch on.
+ */
+export interface RapportSubject {
+  /** The noun prose should use — a species name, or a cause like "drought". */
+  label: string;
+  /** The specific agent this was about, when it was an agent at all. */
+  id?: string;
+  /** Level where known — `rapport.ts` keeps the most notable subject, and this is how "notable" is judged. */
+  level?: number;
+}
 
 /**
  * One aggregated reason on a `RapportEdge` — "this happened between us, this
@@ -1605,6 +1697,14 @@ export interface RapportMemory {
    * where `count` already *is* the raw count.
    */
   occurrences?: number;
+  /**
+   * What this memory was about, where there was a subject to name — kept as
+   * the single most *notable* one (highest `level`, ties going to the most
+   * recent) rather than a list, so the structure stays bounded exactly as
+   * `count` does. "Brought down a Scyther together" survives; the four
+   * Rattata before it do not, and `count` still says there were five.
+   */
+  subject?: RapportSubject;
 }
 
 /** One directed edge of `Agent.rapport` — see that field's doc comment. */

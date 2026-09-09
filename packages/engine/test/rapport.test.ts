@@ -13,6 +13,7 @@ import {
   RAPPORT_MOB_DEFENSE_DELTA,
   RAPPORT_PRUNE_THRESHOLD,
   RAPPORT_REASON_MEMORY_INTERVAL,
+  RAPPORT_RESCUE_DELTA,
   RAPPORT_SOCIALIZE_DELTA,
   adjustRapport,
   decayedRapportScore,
@@ -25,6 +26,9 @@ import { applyHerdSupport, DELIVERED_FOOD_HUNGER_RESTORE } from "../src/support.
 import { applyMateSeeking } from "../src/reproduction.js";
 import { applyPredationInstincts } from "../src/predation.js";
 import { applyHerdRivalryConflict, HERD_CONFLICT_MIN_BLOCKED_TICKS } from "../src/herdConflict.js";
+import { MOURNING_MIN_RAPPORT, recordDeathWitnesses, WITNESS_RADIUS } from "../src/witness.js";
+import { dropCarriedAllyForTest } from "../src/support.js";
+import { tickStatusEffects } from "../src/status.js";
 
 function agent(id: string, overrides: Partial<Agent> = {}): Agent {
   return {
@@ -551,6 +555,238 @@ describe("rapport memories: the real triggers tag themselves correctly", () => {
     }
 
     expect(rapportMemories(carrier, "receiver")).toEqual([{ reason: "gaveFood", count: 5, lastTick: world.tick }]);
+  });
+});
+
+describe("rapport: shared experience, not just transactions", () => {
+  const MOVE2: MoveSpec = {
+    id: "tackle",
+    name: "Tackle",
+    shape: { kind: "point" },
+    type: "normal",
+    category: "physical",
+    power: 40,
+    accuracy: 100,
+    cooldownTicks: 0,
+  };
+  const RULES2: HuntRules = { scyther: true };
+
+  it("declining a fight over a contested tile is itself remembered — restraint is an interaction", () => {
+    const world = createWorld(10, 10);
+    const a = agent("a", {
+      species: "bulbasaur",
+      herdId: "herd-a",
+      pos: { x: 4, y: 5 },
+      moves: [MOVE2],
+      maxHp: 40,
+      hp: 40,
+      level: 10,
+      types: ["normal"],
+      stats: { hp: 40, attack: 30, defense: 30, spAttack: 30, spDefense: 30, speed: 30 },
+      // Timid and unaggressive: every other gate holds, but the disposition
+      // roll will refuse — which is exactly the branch under test.
+      disposition: { boldness: 0, aggression: 0, sociability: 0.5 },
+      ticksBlockedFromResource: HERD_CONFLICT_MIN_BLOCKED_TICKS,
+    });
+    const rival = agent("rival", { species: "pidgey", herdId: "herd-b", pos: { x: 5, y: 5 }, maxHp: 40, hp: 40 });
+    world.agents.push(a, rival);
+
+    // rng ~1 => the escalation roll always fails, so this is the declined branch.
+    const engaged = applyHerdRivalryConflict(world, a, RULES2, rival.pos, undefined, () => 0.999);
+
+    expect(engaged).toBe(false);
+    expect(rapportMemories(a, "rival").map((m) => m.reason)).toEqual(["sharedWater"]);
+    expect(rapportMemories(rival, "a").map((m) => m.reason)).toEqual(["sharedWater"]);
+    // ...and it moved the relationship the OTHER way from a clash.
+    expect(rapportScore(a, "rival", world.tick)).toBeGreaterThan(0);
+  });
+
+  it("a death nearby bonds the two who watched it and were not it", () => {
+    const world = createWorld(20, 20);
+    const w1 = agent("w1", { pos: { x: 5, y: 5 } });
+    const w2 = agent("w2", { pos: { x: 6, y: 5 } });
+    const doomed = agent("doomed", { pos: { x: 5, y: 6 } });
+    world.agents.push(w1, w2, doomed);
+
+    doomed.alive = false;
+    doomed.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+
+    expect(rapportMemories(w1, "w2").map((m) => m.reason)).toEqual(["survivedTogether"]);
+    expect(rapportMemories(w2, "w1").map((m) => m.reason)).toEqual(["survivedTogether"]);
+  });
+
+  it("...but grief instead, when both of them actually cared about the one who died", () => {
+    const world = createWorld(20, 20);
+    const w1 = agent("w1", { pos: { x: 5, y: 5 } });
+    const w2 = agent("w2", { pos: { x: 6, y: 5 } });
+    const friend = agent("friend", { pos: { x: 5, y: 6 } });
+    world.agents.push(w1, w2, friend);
+
+    adjustRapport(world, w1, "friend", MOURNING_MIN_RAPPORT + 0.1, "socialized");
+    adjustRapport(world, w2, "friend", MOURNING_MIN_RAPPORT + 0.1, "socialized");
+
+    friend.alive = false;
+    friend.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+
+    expect(rapportMemories(w1, "w2").map((m) => m.reason)).toEqual(["mourned"]);
+    // Grief replaces the plain survival memory rather than stacking with it.
+    expect(rapportMemories(w1, "w2")).toHaveLength(1);
+  });
+
+  it("one mourner and one stranger is survival, not grief — BOTH have to have cared", () => {
+    const world = createWorld(20, 20);
+    const w1 = agent("w1", { pos: { x: 5, y: 5 } });
+    const w2 = agent("w2", { pos: { x: 6, y: 5 } });
+    const friend = agent("friend", { pos: { x: 5, y: 6 } });
+    world.agents.push(w1, w2, friend);
+
+    adjustRapport(world, w1, "friend", MOURNING_MIN_RAPPORT + 0.1, "socialized");
+
+    friend.alive = false;
+    friend.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+
+    expect(rapportMemories(w1, "w2").map((m) => m.reason)).toEqual(["survivedTogether"]);
+  });
+
+  it("a death out of range bonds nobody, and a death last tick is not re-counted", () => {
+    const world = createWorld(40, 40);
+    const w1 = agent("w1", { pos: { x: 1, y: 1 } });
+    const w2 = agent("w2", { pos: { x: 2, y: 1 } });
+    const farAway = agent("far", { pos: { x: 1 + WITNESS_RADIUS + 5, y: 1 } });
+    world.agents.push(w1, w2, farAway);
+
+    farAway.alive = false;
+    farAway.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+    expect(rapportMemories(w1, "w2")).toEqual([]);
+
+    // Now in range, but it died on a previous tick — already accounted for.
+    const stale = agent("stale", { pos: { x: 1, y: 2 } });
+    stale.alive = false;
+    stale.diedAtTick = world.tick - 1;
+    world.agents.push(stale);
+    recordDeathWitnesses(world, () => 0.5);
+    expect(rapportMemories(w1, "w2")).toEqual([]);
+  });
+
+  it("the hunter that caused a death does not come away bonded to its victim's neighbours", () => {
+    const world = createWorld(20, 20);
+    const hunter = agent("hunter", { species: "scyther", pos: { x: 5, y: 5 }, behavior: "hunt" });
+    const bystander = agent("bystander", { pos: { x: 6, y: 5 } });
+    const prey = agent("prey", { pos: { x: 5, y: 6 } });
+    world.agents.push(hunter, bystander, prey);
+
+    prey.alive = false;
+    prey.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+
+    expect(rapportMemories(hunter, "bystander")).toEqual([]);
+    expect(rapportMemories(bystander, "hunter")).toEqual([]);
+  });
+});
+
+describe("rapport: named subjects, rescue, healing and displacement", () => {
+  it("a memory names what it was about, and keeps the most NOTABLE subject", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    world.agents.push(a);
+
+    adjustRapport(world, a, "b", 0.1, "defeatedTogether", world.rng, { label: "Rattata", id: "r1", level: 4 });
+    adjustRapport(world, a, "b", 0.1, "defeatedTogether", world.rng, { label: "Scyther", id: "s1", level: 30 });
+    adjustRapport(world, a, "b", 0.1, "defeatedTogether", world.rng, { label: "Rattata", id: "r2", level: 5 });
+
+    const [memory] = rapportMemories(a, "b");
+    // Three kills, and the one worth telling somebody about is kept.
+    expect(memory).toMatchObject({ count: 3, subject: { label: "Scyther", level: 30 } });
+  });
+
+  it("two agents fighting when something dies beside them get a NAMED defeat, not a generic survival", () => {
+    const world = createWorld(20, 20);
+    const f1 = agent("f1", { pos: { x: 5, y: 5 }, behavior: "fight" });
+    const f2 = agent("f2", { pos: { x: 6, y: 5 }, behavior: "fight" });
+    const enemy = agent("enemy", { species: "scyther", pos: { x: 5, y: 6 }, level: 22 });
+    world.agents.push(f1, f2, enemy);
+
+    enemy.alive = false;
+    enemy.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+
+    const [memory] = rapportMemories(f1, "f2");
+    expect(memory).toMatchObject({ reason: "defeatedTogether", subject: { label: "scyther", level: 22 } });
+  });
+
+  it("...but only when BOTH were in the fight — one bystander makes it survival again", () => {
+    const world = createWorld(20, 20);
+    const fighter = agent("fighter", { pos: { x: 5, y: 5 }, behavior: "fight" });
+    const bystander = agent("bystander", { pos: { x: 6, y: 5 }, behavior: "idle" });
+    const enemy = agent("enemy", { species: "scyther", pos: { x: 5, y: 6 }, level: 22 });
+    world.agents.push(fighter, bystander, enemy);
+
+    enemy.alive = false;
+    enemy.diedAtTick = world.tick;
+    recordDeathWitnesses(world, () => 0.5);
+
+    // Still named — you remember what died even if you only watched.
+    expect(rapportMemories(fighter, "bystander")[0]).toMatchObject({
+      reason: "survivedTogether",
+      subject: { label: "scyther" },
+    });
+  });
+
+  it("carrying a fainted ally home builds rapport — the Rescue verb, which built none before", () => {
+    const world = createWorld(10, 10);
+    const carrier = agent("carrier", { herdId: "h", pos: { x: 3, y: 3 }, homePos: { x: 3, y: 3 } });
+    const downed = agent("downed", { herdId: "h", pos: { x: 3, y: 3 }, hp: 0, maxHp: 20, fainted: true });
+    carrier.carryingId = "downed";
+    downed.beingCarriedBy = "carrier";
+    world.agents.push(carrier, downed);
+
+    dropCarriedAllyForTest(world, carrier, "arrived");
+
+    expect(rapportMemories(carrier, "downed").map((m) => m.reason)).toEqual(["rescued"]);
+    expect(rapportMemories(downed, "carrier").map((m) => m.reason)).toEqual(["wasRescued"]);
+    expect(rapportScore(carrier, "downed", world.tick)).toBeCloseTo(RAPPORT_RESCUE_DELTA, 5);
+  });
+
+  it("the healAura passive builds rapport — but only when it actually closed a wound", () => {
+    const world = createWorld(10, 10);
+    const healer = agent("healer", {
+      herdId: "h",
+      pos: { x: 3, y: 3 },
+      hp: 20,
+      maxHp: 20,
+      passives: { healAura: 0.1 },
+    });
+    const hurt = agent("hurt", { herdId: "h", pos: { x: 4, y: 3 }, hp: 5, maxHp: 20 });
+    const unhurt = agent("unhurt", { herdId: "h", pos: { x: 2, y: 3 }, hp: 20, maxHp: 20 });
+    world.agents.push(healer, hurt, unhurt);
+
+    tickStatusEffects(healer, world);
+
+    expect(hurt.hp).toBeGreaterThan(5);
+    expect(rapportMemories(healer, "hurt").map((m) => m.reason)).toEqual(["healed"]);
+    expect(rapportMemories(hurt, "healer").map((m) => m.reason)).toEqual(["wasHealed"]);
+    // Topping up somebody already at full HP is arithmetically a no-op, and a
+    // no-op must not read as care — otherwise every aura holder ends up
+    // "close" to everyone who ever stood near it.
+    expect(rapportMemories(healer, "unhurt")).toEqual([]);
+  });
+
+  it("dropping an ally because a predator turned up is NOT a rescue", () => {
+    const world = createWorld(10, 10);
+    const carrier = agent("carrier", { herdId: "h", pos: { x: 3, y: 3 } });
+    const downed = agent("downed", { herdId: "h", pos: { x: 3, y: 3 }, hp: 0, maxHp: 20, fainted: true });
+    carrier.carryingId = "downed";
+    downed.beingCarriedBy = "carrier";
+    world.agents.push(carrier, downed);
+
+    dropCarriedAllyForTest(world, carrier, "threat");
+
+    expect(rapportMemories(carrier, "downed")).toEqual([]);
+    expect(rapportMemories(downed, "carrier")).toEqual([]);
   });
 });
 

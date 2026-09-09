@@ -6,7 +6,7 @@ import { stormAccuracyMultiplier } from "./weather.js";
 import { elevationAccuracyMultiplier } from "./elevation.js";
 import { tileAt } from "./world.js";
 import { FALLBACK_MAX_HP, manhattan } from "./predation.js";
-import { RAPPORT_HERD_CLASH_DELTA, rapportScore, strengthenRapportMutual } from "./rapport.js";
+import { RAPPORT_HERD_CLASH_DELTA, RAPPORT_SHARED_RESOURCE_DELTA, rapportScore, strengthenRapportMutual } from "./rapport.js";
 import { effectiveDisposition } from "./herdLeadership.js";
 import { SCARCITY_SCORE_THRESHOLD } from "./herdMigration.js";
 import { foodStockNear, countTerrainNear } from "./resourceIndex.js";
@@ -517,7 +517,18 @@ export function applyHerdRivalryConflict(world: World, agent: Agent, rules: Hunt
   if (ratio < HERD_CONFLICT_MIN_POWER_RATIO || ratio > 1 / HERD_CONFLICT_MIN_POWER_RATIO) return false;
 
   const grudge = rapportScore(agent, rival.id, world.tick);
-  if (rng() >= herdConflictChance(world, agent, grudge)) return false;
+  if (rng() >= herdConflictChance(world, agent, grudge)) {
+    // Restraint is an interaction. Every gate above has held — these two are
+    // power-matched, both want the same tile, and this one has been blocked
+    // off it long enough to be eligible to fight over it — and the
+    // disposition roll said no. Until this line existed that "no" recorded
+    // nothing, so escalation compounded (the grudge term above feeds back
+    // into `herdConflictChance`) while backing down earned nothing at all.
+    // Now the tile they both wanted and neither took a swing over is a real,
+    // remembered thing between them.
+    strengthenRapportMutual(world, agent, rival, RAPPORT_SHARED_RESOURCE_DELTA, "sharedWater", "sharedWater", rng);
+    return false;
+  }
 
   if (tooManyLocalFights(world, agent.layer, target)) return false;
 
