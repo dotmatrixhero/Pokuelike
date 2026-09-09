@@ -607,7 +607,7 @@ export function applyHerdSupport(world: World, agent: Agent, log?: EventLog, nee
           // Rapport: a small, real nudge between exactly these two —
           // repetition (many deliveries over a run) is what's meant to add
           // up to something meaningful. See rapport.ts's doc comment.
-          strengthenRapportMutual(world, agent, target!, RAPPORT_FOOD_DELIVERY_DELTA);
+          strengthenRapportMutual(world, agent, target!, RAPPORT_FOOD_DELIVERY_DELTA, "gaveFood", "receivedFood");
           // Notables: The Gatherer's real stat — the carrier's side of the
           // same real, rare foodDelivered trigger rapport already hooks (see
           // Agent.lifetimeFoodDeliveries's doc comment).

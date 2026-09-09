@@ -131,7 +131,7 @@ describe("notables: record-holder transfer mechanism", () => {
     const a = agent("a");
     const b = agent("b");
     world.agents.push(a, b);
-    adjustRapport(world, a, "b", -(NOTABLE_TITLE_MIN_THRESHOLDS.rival + 0.1), () => 0.5);
+    adjustRapport(world, a, "b", -(NOTABLE_TITLE_MIN_THRESHOLDS.rival + 0.1), undefined, () => 0.5);
 
     updateNotables(world, undefined, undefined, () => 0);
 

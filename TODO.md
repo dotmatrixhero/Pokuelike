@@ -50,6 +50,65 @@ ascent. Two things need a ruling before anything is built:
    Presence + Feed only reaches *Tolerant*, layer 1 delivers less than the
    prototype assumed.
 
+## BUILT: rapport reasons (Track A #1) — plus two findings it turned up
+
+`RapportEdge` now carries `memories: RapportMemory[]` — one aggregated entry
+per `RapportReason` (`{reason, count, lastTick}`), so a relationship can say
+*what happened* and not only how strong it is.
+
+- **Directional, because the edge is.** One interaction writes different
+  reasons on each side: `gaveFood`/`receivedFood`, `defended`/`wasDefended`,
+  `struck`/`wasStruck`; `socialized` and `bonded` are symmetric. "It fed me
+  four times" and "I fed it four times" are different sentences about the
+  same four events.
+- **Bounded by construction** — 8 reason kinds x 16 max edges, so a long run
+  cannot grow it. That answers the save-size open question in
+  `EMERGENT_SITUATIONS.md` outright.
+- Memories die with the edge on prune/eviction. A relationship faded to
+  stranger-neutral should not keep its grievances.
+- All five real triggers tagged. Verified falsifiable: stripping the reasons
+  off `support.ts`'s call makes exactly the two integration tests fail.
+- 12 new tests, whole suite green (1274 engine / 240 data).
+
+### FINDING 1 — `foodDelivered` effectively never fires. Pre-existing, real.
+
+Measured over 4 seeds x 6000 ticks: **`gaveFood`/`receivedFood` recorded 0
+events**, and counting the event directly gives **1 `foodDelivered` in the
+whole 24,000-agent-tick sample** (seeds 11/202/3003/40404 → 0, 0, 1, 0),
+against 1,051 `herdClash` and 91 `bonded`. Live agents holding an inventory
+item at run's end: 0–2. Not a pruning artifact — the trigger itself does not
+run.
+
+This contradicts `rapport.ts`'s own doc comment, which calls food delivery
+*"an ordinary, fairly frequent errand"* and tunes
+`RAPPORT_FOOD_DELIVERY_DELTA` deliberately small on the assumption that
+repetition does the work. There is no repetition. It also means
+`Agent.lifetimeFoodDeliveries` — the Gatherer notable's stat — is
+approximately always zero.
+
+**Not fixed here.** Why `deliverFood` almost never runs is a behaviour/balance
+question, and this project does not retune unilaterally. Surfacing it.
+
+### FINDING 2 — `socialized` is 95.2% of all recorded reasons
+
+16,168 of 16,975 reason-events. So ordering an edge's reasons by raw count
+puts the least interesting fact first on essentially every relationship in
+the world: *"kept their company 2907 times, fought for them 19 times."*
+
+Contribution-ordering does not fix it — socializing genuinely did drive most
+of those scores. The rare reason is the interesting one, so
+`notableRapportMemories` orders by `RAPPORT_REASON_SIGNIFICANCE` (scarcity of
+meaning) while `rapportMemories` keeps the honest mechanical order. **The
+curated view changes which reason leads on 18.6% of multi-reason edges.**
+Kept as two functions rather than one so the editorial judgement is visible
+rather than baked in.
+
+**Open question for a ruling:** should `socialize` record a memory *every
+tick*? One pair logged 2,907 socialize events in 6,000 ticks — they sat
+together every other tick. That makes `count` nearly meaningless for this
+reason. Options: leave it, record at most once per N ticks, or drop
+`socialized` from memories entirely and let it live only in the score.
+
 ## IMPLEMENTATION ORDER — the move from design into code
 
 Asked directly: *"Do you think you're potentially ready to really start

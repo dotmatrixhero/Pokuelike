@@ -1543,12 +1543,73 @@ export interface Agent {
   isHerdLeader?: boolean;
 }
 
+/**
+ * Why one agent feels how it does about another — the memory half of a
+ * `RapportEdge`, so a relationship can say *what happened* and not only how
+ * strong it is. Direct design finding (EMERGENT_SITUATIONS.md): a
+ * `{score, lastInteractionTick}` edge can report outcomes but never causes,
+ * and "stories emerge" games are made almost entirely of reasons.
+ *
+ * **Directional, because the edge is.** `Agent.rapport[otherId]` is what
+ * *this* agent feels about the other, so the same interaction records
+ * different reasons on each side — the carrier remembers `"gaveFood"` and the
+ * receiver `"receivedFood"`. That asymmetry is the whole narrative value: "it
+ * fed me four times" and "I fed it four times" are different sentences about
+ * the same four events. `strengthenRapportMutual` takes both.
+ *
+ * Deliberately one entry per `RapportReason` kind rather than a log of
+ * individual events (see `RapportMemory`) — that bounds the structure by
+ * construction, and "fed me four times" is what narration actually wants
+ * anyway.
+ */
+export type RapportReason =
+  /** Carried food to them — `support.ts`'s `applyHerdSupport`, carrier's side. */
+  | "gaveFood"
+  /** Was brought food by them — the receiver's side of the same delivery. */
+  | "receivedFood"
+  /** Landed a hit on something threatening them — `predation.ts`'s guardian mechanic, defender's side. */
+  | "defended"
+  /** Was defended by them — the rescued herd-mate's side of the same act. */
+  | "wasDefended"
+  /** Struck them in a herd conflict — `herdConflict.ts`, attacker's side. */
+  | "struck"
+  /** Was struck by them — the defender's side of the same clash. */
+  | "wasStruck"
+  /** Spent real time together — `needs.ts`'s `applySocializing`. Symmetric. */
+  | "socialized"
+  /** Became mates — `reproduction.ts`'s `applyMateSeeking`. Symmetric, and fires once per pair. */
+  | "bonded";
+
+/**
+ * One aggregated reason on a `RapportEdge` — "this happened between us, this
+ * many times, most recently then." Aggregated rather than appended per event
+ * so an edge holds at most one entry per `RapportReason` (8 kinds), which
+ * with `RAPPORT_MAX_EDGES_PER_AGENT` = 16 bounds an agent's whole social
+ * memory without any pruning of its own: a long run cannot grow it.
+ */
+export interface RapportMemory {
+  reason: RapportReason;
+  /** How many times this has happened between the pair. Never decays — decay belongs to `score`. */
+  count: number;
+  /** `World.tick` of the most recent occurrence. */
+  lastTick: number;
+}
+
 /** One directed edge of `Agent.rapport` — see that field's doc comment. */
 export interface RapportEdge {
   /** -1 (grudge) .. 1 (bond). */
   score: number;
   /** `World.tick` this edge was last created or touched — anchors `rapport.ts`'s lazy decay. */
   lastInteractionTick: number;
+  /**
+   * What actually happened between this pair, one entry per `RapportReason`.
+   * Absent on an edge written before this field existed, or by a caller that
+   * genuinely has no reason to give — read it through `rapport.ts`'s
+   * `rapportMemories`, which normalizes that away. Dies with the edge when
+   * decay or eviction prunes it, which is correct: a forgotten relationship
+   * does not keep its grievances.
+   */
+  memories?: RapportMemory[];
 }
 
 /**
