@@ -10,6 +10,7 @@ import { resolveShape } from "./moves.js";
 import type { MoveSpec } from "./moves.js";
 import { canBreed, grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
 import { GIANT_SLAYER_LEVEL_GAP } from "./notables.js";
+import { maybeUseUtilityMoveInCombat } from "./utilityMoves.js";
 import { FINISHING_POOL_FRACTION, applyAllyEffect, nearestAllyEffectTarget } from "./support.js";
 import { RAPPORT_MOB_DEFENSE_DELTA, strengthenRapportMutual } from "./rapport.js";
 import { effectiveDisposition } from "./herdLeadership.js";
@@ -228,6 +229,15 @@ export function huntHungerThreshold(world: World, agent: Agent, tick: number): n
 }
 /** Fallback HP for an agent with no real combat profile (stats/level/types) — shouldn't happen for fully-statted species. Exported so support.ts's body-weight proxy can match it. */
 export const FALLBACK_MAX_HP = 10;
+
+/**
+ * How much one positive Defense stage adds to the effective weight a
+ * `weightScaling` move reads. Deliberately small: at +2 stages (the most
+ * `maybeUseUtilityMoveInCombat` will stack) a weight-scaling move gains 30%
+ * of its weight TERM, not of its whole power — a real reason to brace first,
+ * nowhere near a reason to do nothing else.
+ */
+const BRACED_WEIGHT_PER_STAGE = 0.15;
 const FALLBACK_DAMAGE = 1;
 
 /**
@@ -996,8 +1006,28 @@ function applySingleDamageInstance(
   // maxHp (this sim's proxy for size/weight — see `powerOf`'s own doc
   // comment) — computed into an effective move rather than mutating `move`
   // itself, since `move` is the live, shared `MoveSpec` on the attacker.
+  //
+  // Effective weight also counts how braced the attacker is: a positive
+  // Defense stage adds `BRACED_WEIGHT_PER_STAGE` to the weight term. This is
+  // the abstraction behind the original pitch — "what if harden also
+  // increased weight so it strengthens weighted version of tackle?" —
+  // written as a system rather than a pairing. NOTHING here knows what
+  // Harden is. Any move that raises Defense makes any weight-scaling move
+  // land harder, including a species that gets there some other way, and a
+  // status move written tomorrow inherits it for free. Direct: "Don't make
+  // the setups explicit. Use systems to abstract em."
+  //
+  // Only positive stages count: being battered into a lower Defense stage
+  // should not make an agent lighter.
   const effectiveMove = move.weightScaling
-    ? { ...move, power: move.power + move.weightScaling.factor * (attacker.maxHp ?? attacker.stats?.maxHp ?? FALLBACK_MAX_HP) }
+    ? {
+        ...move,
+        power:
+          move.power +
+          move.weightScaling.factor *
+            (attacker.maxHp ?? attacker.stats?.maxHp ?? FALLBACK_MAX_HP) *
+            (1 + BRACED_WEIGHT_PER_STAGE * Math.max(0, getStatStage(attacker, "defense"))),
+      }
     : move;
 
   const rawDamage =
@@ -1173,6 +1203,13 @@ function resolveHitAgainstTarget(
   accuracyBonusMultiplier = 1
 ): boolean {
   if (defender.alive === false) return false; // already a corpse — nothing left to finish off here (looting/scavenging is a separate path, see support.ts)
+
+  // A fight action can be spent bracing, healing or warding instead of
+  // hitting. Hooked here rather than at each of the five call sites so every
+  // fight path — predation, mob-fighting, the guardian branch — gets it from
+  // one place. Returns false (nobody fainted) because the action WAS spent:
+  // the attacker's move went on cooldown, it just wasn't a hit.
+  if (maybeUseUtilityMoveInCombat(world, attacker, defender, log, rng)) return false;
   // A charging defender is genuinely invulnerable — see `Agent.chargingAttack`'s
   // own doc comment (types.ts): no accuracy roll, no partial effects, this
   // attack simply doesn't land at all while the wind-up is in progress.

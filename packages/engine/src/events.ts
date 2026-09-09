@@ -183,6 +183,24 @@ export type SimEvent =
       nodeId: string;
     }
   | {
+      /**
+       * A status/utility move actually firing — Harden bracing, Synthesis
+       * healing, Safeguard warding the herd. These were invisible before:
+       * `maybeUseUtilityMove` (utilityMoves.ts) recorded nothing at all, so
+       * a whole category of move could resolve without leaving a trace in
+       * the chronicle. "Just dying out is sad and vague" applies here too —
+       * an agent that braced and survived is a story, and an agent that
+       * healed and lost is a different one.
+       */
+      kind: "utilityMoveUsed";
+      tick: number;
+      agentId: string;
+      species: string;
+      moveId: string;
+      /** True when this was spent as a FIGHT action rather than on an idle tick — the same move reads very differently in the two contexts. */
+      inCombat: boolean;
+    }
+  | {
       kind: "fainted";
       tick: number;
       agentId: string;
