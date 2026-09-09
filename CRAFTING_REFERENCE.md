@@ -296,6 +296,17 @@ You are a human; these need no discovery:
 
 > **Fiber · Cordage · Bound haft · Torch · Club · Poultice · Campfire**
 
+**Gap found by paper-prototyping** (`PLAYTHROUGH_ACT1_FULL.md`): the
+**camouflage cloak** is in the first-playable ten and is the peaceful path's
+whole identity, but it is not on this list and there is nothing in a cave to
+examine an example of — so as specified it was **unobtainable in Act 1**.
+
+Fix, and it turns a dead spot into the best beat in the opening: **you learn
+it by watching a creature conceal itself** — something entering a `bush`
+tile and dropping out of your FOV. Both `Tile.concealment` and
+`computeVisible` are real. The cave teaches you to hide by showing you
+something hiding.
+
 Everything else is learned by **examining an example**, being taught, or
 finding a written recipe.
 
