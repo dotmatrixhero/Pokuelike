@@ -159,17 +159,48 @@ const WETLAND_MOISTURE_THRESHOLD = 0.65;
  * habitat from a temperate Forest, not just a green recolor of it.
  */
 const JUNGLE_MOISTURE_THRESHOLD = 0.58;
-/** Moisture at/above this (but below Jungle) reads as Forest; below it, Grassland. */
+/** Moisture at/above this (but below Jungle) reads as Forest; below it, Grassland (or, below `SAVANNA_MOISTURE_THRESHOLD`, Savanna). */
 const FOREST_MOISTURE_THRESHOLD = 0.5;
+/**
+ * Moisture below this (but at/above Badlands) reads as Savanna instead of
+ * Grassland — the driest slice of what used to be one flat Grassland band,
+ * carved out the same way Desert/Jungle already were. Direct follow-up ask,
+ * after fixing Grassland's own water density: "what other biomes could be
+ * better?" A real dry-open-plains habitat, distinct from both moister
+ * Grassland above this threshold and Badlands/Desert below it (which stay
+ * rocky/dune-structured, not open plains — see `isBadlandsDominant`).
+ * Splits the old 0.35-0.5 Grassland-only band roughly in half.
+ */
+const SAVANNA_MOISTURE_THRESHOLD = 0.42;
+/**
+ * Elevation at/above this (but below Highland) reads as Tundra — a cold,
+ * open, rocky plateau/steppe sitting just below Highland's own much taller
+ * mountain profile, the same "one biome caps another" relationship
+ * Highland/Snow already have. Checked before the moisture bands below (like
+ * Highland/Snow above it) so Tundra is a real elevation tier, not competing
+ * with Grassland/Forest/etc. for the same territory. Sim-original guess —
+ * comfortably below `HIGHLAND_ELEVATION_THRESHOLD` (0.72) so it reads as a
+ * genuine foothill/plateau band, not a sliver.
+ */
+const TUNDRA_ELEVATION_THRESHOLD = 0.58;
 
 function macroBiomeFor(elevation: number, moisture: number): string {
   if (elevation >= SNOW_ELEVATION_THRESHOLD) return "snow";
   if (elevation >= HIGHLAND_ELEVATION_THRESHOLD) return "highland";
+  // Desert/Badlands checked BEFORE Tundra's own elevation gate — a zone
+  // that's both cold (elevated) and arid reads as a cold desert/badlands
+  // (real rocky/dune structure already models that), not stolen into
+  // Tundra's open-plateau niche. Confirmed via a real regression: an
+  // earlier ordering with Tundra checked first measurably shrank Desert's
+  // own real macro-scale regions in several seeds (this file's own
+  // macroGrid.test.ts caught it).
   if (moisture < DESERT_MOISTURE_THRESHOLD) return "desert";
   if (moisture < BADLANDS_MOISTURE_THRESHOLD) return "badlands";
+  if (elevation >= TUNDRA_ELEVATION_THRESHOLD && moisture < FOREST_MOISTURE_THRESHOLD) return "tundra";
   if (moisture >= WETLAND_MOISTURE_THRESHOLD) return "wetland";
   if (moisture >= JUNGLE_MOISTURE_THRESHOLD) return "jungle";
   if (moisture >= FOREST_MOISTURE_THRESHOLD) return "forest";
+  if (moisture < SAVANNA_MOISTURE_THRESHOLD) return "savanna";
   return "grassland";
 }
 
@@ -207,6 +238,23 @@ function applyBeachReclassification(zones: readonly MacroZone[]): void {
   for (const zone of zones) {
     if (zone.isOcean || zone.coastEdges.length === 0) continue;
     if (zone.elevation <= beachCeiling) zone.biome = "beach";
+  }
+}
+
+/**
+ * A coastal Wetland zone reads as Mangrove instead — the same "coastal strip
+ * isn't expressible as a moisture/elevation threshold alone" reasoning
+ * `applyBeachReclassification` above already established, just for
+ * Wetland's own coastal-adjacent extreme rather than every biome's. Run
+ * AFTER beach reclassification so a coastal zone low enough to already read
+ * as Beach (dry sand, no standing water of its own) stays Beach rather than
+ * being re-claimed here — Mangrove is specifically "a real coastal marsh",
+ * not "any wet zone that happens to touch the ocean".
+ */
+function applyMangroveReclassification(zones: readonly MacroZone[]): void {
+  for (const zone of zones) {
+    if (zone.isOcean || zone.coastEdges.length === 0) continue;
+    if (zone.biome === "wetland") zone.biome = "mangrove";
   }
 }
 
@@ -407,6 +455,7 @@ export function generateMacroGrid(seed: number, rows: number, cols: number): Mac
     }
   }
   applyBeachReclassification(zones);
+  applyMangroveReclassification(zones);
 
   carveMacroRivers(grid, mulberry32(seed ^ 0x27220a95));
   // After rivers/lakes — Great Lake specifically wants to know `isLake`,
@@ -652,6 +701,23 @@ const LANDMARK_PREDATOR_POOL_BONUS = 2;
  * presence read as negligible.
  */
 const PREDATOR_POPULATION_DISCOUNT = 0.55;
+/**
+ * A hard ceiling on one predator species' own invented population, on top
+ * of `PREDATOR_POPULATION_DISCOUNT`'s proportional thinning — direct
+ * report: "Kabutops are just utterly slaughtering everything... make high
+ * level predators like no more than 2 in a zone." A real generated zone
+ * measured before this cap: Kabutops (its own real evolution floor, level
+ * 40, plus `immigration.ts`'s `PREDATOR_LEVEL_BOOST`) was spawning at
+ * level 46-51 against co-spawned prey — Shellder/Psyduck/Krabby — rolling
+ * as low as level 5 in the SAME zone, a 40+ level gap; population itself
+ * was already only 5-7 (the existing discount above was already working
+ * as designed). The level gap is the deeper cause and this cap alone
+ * doesn't fix it (even 2 individuals at level 50 among level-5 prey is
+ * still a massacre) — flagged separately, not solved here. This constant
+ * is the real, requested piece: fewer high-level killers doing the
+ * damage, whatever the level gap turns out to be.
+ */
+const PREDATOR_POPULATION_CAP = 2;
 
 /**
  * Direct ask: "make certain zones more hospitable and prey friendly." A
@@ -725,11 +791,74 @@ function pickRandomSubset<T>(list: readonly T[], n: number, rng: () => number): 
  * why the two "special zone" mechanisms don't need to compose.
  */
 function pickZoneSpeciesPool(fitting: readonly ImmigrationSpeciesInfo[], poolBonus: number, isCongregationLandmark: boolean, predatorCapOverride: number | undefined, rng: () => number): ImmigrationSpeciesInfo[] {
-  const poolSize = ZONE_SPECIES_POOL_MIN + poolBonus + Math.floor(rng() * (ZONE_SPECIES_POOL_MAX - ZONE_SPECIES_POOL_MIN + 1));
-  if (fitting.length <= poolSize) return [...fitting];
+  // `ZONE_SPECIES_POOL_MIN`/`_MAX` (4-7) only ever trims a biome with MORE
+  // fitting species than that — a thin biome (this roster's Beach: 5,
+  // Tundra: 3, Desert/Snow: 5) always had `fitting.length <= poolSize`,
+  // so `pickZoneSpeciesPool` returned every fitting species, EVERY zone,
+  // unconditionally. Direct report, confirmed by a real generated 60x60
+  // grid before this fix: 12 of 15 real Beach zones showed the identical
+  // full 5-species pool, and Krabby (fitting every one) appeared in all
+  // 15 — "I don't have to see a million krabby on every single beach
+  // zone... maybe some of em have seel or whatever and no krabby's."
+  // `lowerBound` now scales DOWN with a thin biome's own `fitting.length`
+  // (floored at 2 — omitting down to a single species reads as "empty",
+  // not "a real distinct pocket") instead of always floating at the fixed
+  // `ZONE_SPECIES_POOL_MIN`, so `poolSize` can land below `fitting.length`
+  // even for a thin biome and real omission actually has a chance to fire.
+  // A rich biome (Wetland: 26, Forest: 15, ...) is completely unaffected —
+  // `Math.min(ZONE_SPECIES_POOL_MIN, fitting.length - 1)` still resolves to
+  // the same fixed `ZONE_SPECIES_POOL_MIN` whenever `fitting.length` is
+  // comfortably above it, so this is purely additive for thin biomes.
+  // Scales with HALF of `fitting.length`, not a flat `fitting.length - 1` —
+  // a first attempt at that flat version only ever dropped exactly one
+  // species, which barely moved the needle for a thin biome: re-measured,
+  // Krabby (fitting all 5 real Beach species) still showed up in 91.5% of
+  // 1,218 real generated Beach zones (5 seeds, 60x60 grids) — one dropped
+  // slot out of five just isn't a big enough perturbation to feel like real
+  // variety. Halving instead gives Beach a real 3-5 range (drop 0-2 of 5),
+  // Tundra (3 fitting) a real 2-3 range — a real chance some zones settle
+  // on a genuinely different, smaller pocket, matching the direct ask:
+  // "I don't have to see a million krabby on every single beach zone...
+  // maybe some of em have seel or whatever and no krabby's."
+  // `fitting.length <= 2` forces `lowerBound` up to `fitting.length` itself
+  // (no real trimming possible/desirable at that point — see this
+  // function's own doc comment) while still drawing exactly one `rng()`
+  // call below either way, matching the original unconditional single draw
+  // this function always made — a version that skipped the draw entirely
+  // for this case shifted every OTHER `rng()`-consuming call downstream in
+  // the same seeded stream, a real regression a `promoteZone` test caught
+  // (an evolved species' seeded level jitter came out different for a
+  // reason that had nothing to do with levels at all).
+  // A predator's own `rarity` now ALSO gates whether it's even a candidate
+  // for THIS zone at all, independent per-species roll, before any of the
+  // pool-size/trimming math below — direct report: "kabutops are just
+  // utterly slaughtering everything... I think the level 40 gap can
+  // happen, it should just be rare." Beach's fitting predator list is a
+  // single species (Kabutops) — every earlier mechanism here (the
+  // pool-size trim, the predator-cap split) still guaranteed its inclusion
+  // whenever a predator slot got filled at all, since "pick up to N from a
+  // list of exactly 1" is deterministic regardless of N. Rolled BEFORE
+  // `fitting.length` gets used for anything (including the thin-biome
+  // trimming above, and the `fitting.length <= poolSize` early return
+  // right below) so an excluded predator is genuinely ABSENT from this
+  // zone's pool, not just population-thinned once present — the actual
+  // "occurrence should be rare" the report asked for, not another
+  // reduction on top of `PREDATOR_POPULATION_CAP`'s existing one. `rarity`
+  // was already documented as "a multiplier on how often this species
+  // shows up" (`ImmigrationSpeciesInfo.rarity`'s own doc comment) — this
+  // is that stated intent actually reaching zone-seeding, which it never
+  // did before (only `estimateZoneSpecies`'s population math read it).
+  // Non-predators are untouched (`!s.isPredator` short-circuits before the
+  // roll) — this doesn't change ordinary prey/neutral selection at all.
+  const candidates = fitting.filter((s) => !s.isPredator || rng() < (s.rarity ?? 1));
 
-  const predators = fitting.filter((s) => s.isPredator);
-  const prey = fitting.filter((s) => !s.isPredator);
+  const lowerBound = candidates.length <= 2 ? candidates.length : Math.max(2, Math.min(ZONE_SPECIES_POOL_MIN + poolBonus, Math.floor(candidates.length / 2)));
+  const upperBound = Math.min(ZONE_SPECIES_POOL_MAX + poolBonus, candidates.length);
+  const poolSize = lowerBound + Math.floor(rng() * Math.max(0, upperBound - lowerBound + 1));
+  if (candidates.length <= poolSize) return [...candidates];
+
+  const predators = candidates.filter((s) => s.isPredator);
+  const prey = candidates.filter((s) => !s.isPredator);
   const predatorCap = predatorCapOverride ?? ZONE_PREDATOR_POOL_CAP + (isCongregationLandmark ? LANDMARK_PREDATOR_POOL_BONUS : 0);
   const pickedPredators = pickRandomSubset(predators, Math.min(predatorCap, poolSize), rng);
   const pickedPrey = pickRandomSubset(prey, poolSize - pickedPredators.length, rng);
@@ -755,18 +884,29 @@ export function estimateZoneSpecies(zone: MacroZone, roster: readonly Immigratio
   );
   for (const species of pool) {
     const populationMultiplier =
-      (species.isPredator
-        ? PREDATOR_POPULATION_DISCOUNT * (isSanctuary ? SANCTUARY_PREDATOR_POPULATION_DISCOUNT : 1)
-        : isSanctuary
-          ? SANCTUARY_PREY_POPULATION_MULTIPLIER
-          : 1) *
+      (species.isPredator ? PREDATOR_POPULATION_DISCOUNT : isSanctuary ? SANCTUARY_PREY_POPULATION_MULTIPLIER : 1) *
       // See `ImmigrationSpeciesInfo.rarity`'s own doc comment — direct ask:
       // "make arboks less common."
       (species.rarity ?? 1);
+    let population = (SEED_POPULATION_BASE + rng() * SEED_POPULATION_VARIANCE) * multiplier * populationMultiplier;
+    if (species.isPredator) {
+      // `PREDATOR_POPULATION_CAP` applied BEFORE the Sanctuary-specific
+      // extra discount, not composed into one combined multiplier — a flat
+      // ceiling would otherwise clamp an ordinary zone's already-modest
+      // predator population (typically 2.2-7.7 pre-cap) down to the SAME
+      // number a Sanctuary's own further-discounted population lands on,
+      // erasing the real "Sanctuary is even thinner on predators" signal
+      // this function's own Sanctuary test checks for. Capping first, then
+      // discounting the Sanctuary case on top of that already-capped
+      // number, keeps Sanctuary's population strictly lower than an
+      // ordinary zone's, same as every other Sanctuary mechanic here.
+      population = Math.min(PREDATOR_POPULATION_CAP, population);
+      if (isSanctuary) population *= SANCTUARY_PREDATOR_POPULATION_DISCOUNT;
+    }
     estimates.push({
       speciesId: species.id,
       homeLayer: species.homeLayer,
-      population: (SEED_POPULATION_BASE + rng() * SEED_POPULATION_VARIANCE) * multiplier * populationMultiplier,
+      population,
       minLevel: species.minLevel,
       singleStage: species.singleStage,
       isPredator: species.isPredator,

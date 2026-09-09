@@ -860,22 +860,31 @@ interface BiomeDef {
 }
 
 /**
- * Nine biomes: the original five per DESIGN.md's list, plus "snow" (direct
+ * Twelve biomes: the original five per DESIGN.md's list, plus "snow" (direct
  * ask: "snowy mountain tops where ice Pokemon and dragon live"), plus
  * "jungle"/"beach"/"desert" (direct follow-up ask: "more other types of
  * terrain generation... stretches of desert... islands... variance that
- * really helps flesh the world out"). "Snow" is elevation-gated ABOVE
- * Highland (see macroGrid.ts's `SNOW_ELEVATION_THRESHOLD`) — a snowy peak
- * literally caps the tallest mountains, it doesn't compete with the others
- * for territory the way ordinary seed-scatter does. `floor_snow.png`
- * (public/tiles/) already existed unused before this — sprites.ts's own doc
- * comment flagged it as "no biome maps to snow yet." "Jungle" and "desert"
- * are carved out of Forest's/Badlands' own moisture extremes respectively
- * (see macroGrid.ts's `JUNGLE_MOISTURE_THRESHOLD`/`DESERT_MOISTURE_
- * THRESHOLD`) rather than competing head-on for the same moisture range;
- * "beach" is different again — a coastline post-process
- * (`applyBeachReclassification`), not a moisture/elevation band at all,
- * since "coastal strip" isn't expressible as a threshold on either field.
+ * really helps flesh the world out"), plus "savanna"/"mangrove"/"tundra"
+ * (direct follow-up: "too much water in like grassy plains type
+ * environments... what other biomes could be better?"). "Snow" is
+ * elevation-gated ABOVE Highland (see macroGrid.ts's
+ * `SNOW_ELEVATION_THRESHOLD`) — a snowy peak literally caps the tallest
+ * mountains, it doesn't compete with the others for territory the way
+ * ordinary seed-scatter does. `floor_snow.png` (public/tiles/) already
+ * existed unused before this — sprites.ts's own doc comment flagged it as
+ * "no biome maps to snow yet." "Jungle" and "desert" are carved out of
+ * Forest's/Badlands' own moisture extremes respectively (see macroGrid.ts's
+ * `JUNGLE_MOISTURE_THRESHOLD`/`DESERT_MOISTURE_THRESHOLD`) rather than
+ * competing head-on for the same moisture range; "savanna" is the same move
+ * applied to Grassland's own driest sub-band (`SAVANNA_MOISTURE_THRESHOLD`);
+ * "tundra" is elevation-gated just below Highland
+ * (`TUNDRA_ELEVATION_THRESHOLD`), the same "one biome caps another"
+ * relationship Highland/Snow already have; "beach"/"mangrove" are both
+ * coastline post-processes (`applyBeachReclassification`/
+ * `applyMangroveReclassification`), not a moisture/elevation band at all,
+ * since "coastal strip" isn't expressible as a threshold on either field —
+ * mangrove is specifically what a coastal Wetland zone becomes, beach what
+ * a coastal zone at any other real-low elevation becomes.
  *
  * Every numeric value here is a sim-original guess to be judged against a
  * real run, exactly like every other tuning constant in this codebase —
@@ -885,10 +894,40 @@ interface BiomeDef {
  */
 const BIOMES: readonly BiomeDef[] = [
   {
+    // waterDensity dropped from 0.08 (higher than Forest's own 0.07) to 0.05
+    // — direct report: "there's too much water in like grassy plains type
+    // environments. They don't feel distinct from coastal ones." Measured
+    // directly (real `generateWorld` calls, real zone biases): at 0.08 an
+    // inland grassland zone and a coastal one both read as generically
+    // "quite wet" (12.7%/29.2% water tiles), because plains-level incidental
+    // pond speckle was already dense enough that a coastal zone's forced
+    // ocean fraction on top didn't feel like a real qualitative jump.
+    //
+    // foodDensity raised from 0.05 to 0.075 alongside the water cut, NOT an
+    // independent tune — a real regression (overworld.test.ts) caught
+    // `waterDensity` alone dropping too far: macroGrid.ts's
+    // `estimateZoneResourceIndex`/`RESOURCE_ESTIMATE_SCALE` reads
+    // `foodDensity + waterDensity` as one combined "how rich is this biome"
+    // estimate, explicitly calibrated (that constant's own doc comment) so
+    // Grassland lands "comfortably above" `overworld.ts`'s
+    // `DEATH_HEALTH_THRESHOLD` (0.3) for a real abstracted population to
+    // survive on. A `waterDensity`-only cut to 0.03 held the old combined
+    // total's water HALF but dropped the ESTIMATE to (0.05+0.03)*4=0.32 —
+    // barely above that threshold instead of comfortably so, and a real
+    // low-population test scenario starved out instead of recovering.
+    // Shifting some of the cut into `foodDensity` instead keeps the
+    // combined estimate at (0.075+0.05)*4=0.5 (matching the original
+    // 0.52 the un-cut 0.08 gave), preserving that survival margin, while
+    // `waterDensity` alone — the number that actually drives real per-tile
+    // pond placement — still reads as meaningfully drier than before and
+    // than Forest's own 0.07. A thematic bonus, not just a math patch:
+    // Grassland reading as the real grain-basket (food-rich, water-modest)
+    // biome, complementary to Wetland's water-richness, is a genuinely
+    // better distinct identity than "same water as Forest, just less".
     name: "grassland",
     seedCount: 3,
-    foodDensity: 0.05,
-    waterDensity: 0.08,
+    foodDensity: 0.075,
+    waterDensity: 0.05,
     obstacleDensity: 0.05,
     elevationBase: 0.4,
     elevationVariance: 0.5,
@@ -1008,6 +1047,67 @@ const BIOMES: readonly BiomeDef[] = [
     // Overwhelmingly boulder (icy rock/snowdrift) — barely any of the
     // others; a snowcap isn't wooded or sandy.
     terrainWeights: { tree: 0.05, boulder: 6, bush: 0.05, sand: 0.1, mud: 0.05 },
+  },
+  {
+    // Carved out of Grassland's own driest sub-band (see macroGrid.ts's
+    // `SAVANNA_MOISTURE_THRESHOLD`) — direct follow-up to the grassland
+    // water-density fix above: "what other biomes could be better?" A real
+    // dry-open-plains habitat distinct from both Grassland (moister, denser
+    // bush) and Badlands/Desert (rocky/dune, BSP-canyon or dune-carved
+    // structure — see `isBadlandsDominant`). Its own real structural
+    // signature is `carveSavannaClusters` below: scattered acacia-style
+    // tree/bush islands over otherwise bare ground, not just a uniformly
+    // sparser version of Grassland's per-tile obstacle roll.
+    name: "savanna",
+    seedCount: 2,
+    foodDensity: 0.03,
+    waterDensity: 0.02,
+    // Lower than Grassland's 0.05 — most of Savanna's tree/bush presence
+    // comes from the discrete cluster pass below, not the ambient per-tile
+    // roll, so between clusters this should read as genuinely open ground.
+    obstacleDensity: 0.02,
+    elevationBase: 0.4,
+    elevationVariance: 0.4,
+    terrainWeights: { tree: 1.2, boulder: 0.2, bush: 1, sand: 1, mud: 0.05 },
+  },
+  {
+    // Carved out of Wetland's own coastal-adjacent footprint (see
+    // macroGrid.ts's `applyMangroveReclassification`) — a real brackish
+    // coastal marsh, distinct from open Beach (dry sand, minimal obstacle/
+    // food of its own) and from inland Wetland (denser mud, no coastline).
+    // Its own structural signature is `carveMangroveLattice` below: braided
+    // fingers of water and mud rather than Wetland's uniform per-tile mud
+    // density — real "walk the land fingers between the channels" habitat.
+    name: "mangrove",
+    seedCount: 2,
+    foodDensity: 0.035,
+    waterDensity: 0.18,
+    obstacleDensity: 0.14,
+    elevationBase: 0.09,
+    elevationVariance: 0.12,
+    // Mostly mud and bush (mangrove root-tangle undergrowth) with a little
+    // tree — real art already exists for "mud" (mud.png) as its own
+    // terrain, so this reads distinctly without needing new tile art.
+    terrainWeights: { tree: 0.6, boulder: 0.1, bush: 2.5, sand: 0.3, mud: 5 },
+  },
+  {
+    // Carved out of the elevation band just below Highland (see
+    // macroGrid.ts's `TUNDRA_ELEVATION_THRESHOLD`) — a cold, open, rocky
+    // plateau/steppe, distinct from Highland's own much taller, denser-
+    // boulder mountain profile and from Snow's peak-cap. Its own structural
+    // signature is `carveTundraPermafrost` below: sparse polygon-crack
+    // boulder lines (real permafrost ice-wedge polygons), not just a
+    // thinned-out Highland.
+    name: "tundra",
+    seedCount: 2,
+    foodDensity: 0.012,
+    waterDensity: 0.025,
+    obstacleDensity: 0.09,
+    elevationBase: 0.65,
+    elevationVariance: 0.3,
+    // Scrubby and rocky, almost no real tree cover — low-growing bush
+    // (tundra scrub) and boulder (frost-heaved rock) dominate.
+    terrainWeights: { tree: 0.1, boulder: 2, bush: 1.2, sand: 0.1, mud: 0.3 },
   },
 ];
 
@@ -1412,11 +1512,14 @@ function groundTypeForBiome(biome: string | undefined, rng: () => number): Groun
     case "highland":
     case "snow":
     case "badlands":
+    case "tundra":
       return "rocky";
     case "desert":
     case "beach":
+    case "savanna":
       return "sandy";
     case "wetland":
+    case "mangrove":
       return rng() < 0.25 ? "peat" : "clay";
     default:
       return "loam";
@@ -1915,6 +2018,198 @@ function carveMountainMassifs(world: World, width: number, height: number, rng: 
       // already uses) before applying the massif's own, taller boost.
       const ambientElevation = tile.terrain === "boulder" ? tile.elevation - BOULDER_ELEVATION_BOOST : tile.elevation;
       setTile(world, "surface", x, y, "wall", ambientElevation + MASSIF_ELEVATION_BOOST);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Savanna acacia clusters — direct follow-up ask, after fixing Grassland's
+// water density: "add tile types to help flesh out biome uniqueness... I
+// want more unique zone generation that results in high quality looking
+// zones." A uniformly-sparse per-tile obstacle roll (Savanna's own low
+// `obstacleDensity`) reads as "thin Grassland", not "savanna" — the real,
+// recognizable savanna signature is scattered tree/bush ISLANDS over
+// otherwise open ground, not uniform sparseness. Same `isXDominant`-gated
+// post-process idiom as `carveBadlandsChambers`/`carveMountainMassifs`
+// above, so clusters stay inside Savanna's own real footprint and taper at
+// its fuzzy cross-biome boundary instead of bleeding into Grassland.
+// ---------------------------------------------------------------------------
+
+/** How many cluster centers to scatter per zone-sized area — a light function of map area, same "scale with the map, not a fixed count" idea `riverCountFor` already uses. */
+function savannaClusterCount(width: number, height: number): number {
+  return Math.max(2, Math.round((width * height) / 900));
+}
+/** Cluster radius, in tiles — small enough to read as a distinct "island", not a competing sub-region. */
+const SAVANNA_CLUSTER_RADIUS = 3.5;
+/** Chance a tile inside a cluster's radius actually gets an obstacle — high enough that a cluster reads as a real dense knot, not just a slightly-denser haze. */
+const SAVANNA_CLUSTER_FILL_CHANCE = 0.55;
+/** Of a cluster tile that does fill, the fraction that becomes a tree (vs. bush) — mostly tree, real acacia-island silhouette. */
+const SAVANNA_CLUSTER_TREE_FRACTION = 0.7;
+
+function isSavannaDominant(seeds: readonly BiomeSeedInfo[], x: number, y: number): boolean {
+  const weights = biomeWeightsAt(seeds, x, y);
+  const savannaWeight = weights["savanna"] ?? 0;
+  if (savannaWeight <= 0) return false;
+  for (const [name, weight] of Object.entries(weights)) {
+    if (name !== "savanna" && weight >= savannaWeight) return false;
+  }
+  return true;
+}
+
+function carveSavannaClusters(world: World, width: number, height: number, rng: () => number): void {
+  const seeds = world.biomeSeeds;
+  if (!seeds || seeds.length === 0) return;
+
+  // Candidate centers: real Savanna-dominant land tiles only, so a cluster
+  // never seeds itself in the ocean or a neighboring biome — sampled by
+  // scanning rather than rejection-sampling random points, since a real
+  // Savanna footprint can be a small fraction of the whole map.
+  const candidates: Vec2[] = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const tile = tileAt(world, "surface", x, y);
+      if (!tile || tile.terrain === "water") continue;
+      if (isSavannaDominant(seeds, x, y)) candidates.push({ x, y });
+    }
+  }
+  if (candidates.length === 0) return;
+
+  const count = Math.min(savannaClusterCount(width, height), Math.ceil(candidates.length / 40));
+  for (let c = 0; c < count; c++) {
+    const center = candidates[Math.floor(rng() * candidates.length)]!;
+    const r = SAVANNA_CLUSTER_RADIUS;
+    for (let dy = -Math.ceil(r); dy <= Math.ceil(r); dy++) {
+      for (let dx = -Math.ceil(r); dx <= Math.ceil(r); dx++) {
+        if (dx * dx + dy * dy > r * r) continue;
+        const x = center.x + dx;
+        const y = center.y + dy;
+        if (x < 0 || y < 0 || x >= width || y >= height) continue;
+        const tile = tileAt(world, "surface", x, y);
+        if (!tile || tile.terrain === "water") continue;
+        if (!isSavannaDominant(seeds, x, y)) continue;
+        if (rng() >= SAVANNA_CLUSTER_FILL_CHANCE) continue;
+        const kind = rng() < SAVANNA_CLUSTER_TREE_FRACTION ? "tree" : "bush";
+        setTile(world, "surface", x, y, kind, tile.elevation);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mangrove channel lattice — same follow-up ask as Savanna's clusters above.
+// A mangrove's real signature is braided water channels threading through
+// land, not Wetland's uniform per-tile mud/water density — this carves real
+// elongated channels (domain-stretched noise, not round ponds) through
+// Mangrove's own footprint, gated the same `isXDominant` way.
+// ---------------------------------------------------------------------------
+
+const MANGROVE_CHANNEL_NOISE_SCALE = 5;
+/** How much the channel-noise domain is stretched along the (randomly rotated) channel axis — bigger = longer, straighter channels instead of round ponds. */
+const MANGROVE_CHANNEL_STRETCH = 3.2;
+/** Fraction of Mangrove-dominant land that becomes a real channel — real but not overwhelming, most of the footprint stays the walkable mud/bush land-fingers between channels. */
+const MANGROVE_CHANNEL_THRESHOLD = 0.32;
+
+function isMangroveDominant(seeds: readonly BiomeSeedInfo[], x: number, y: number): boolean {
+  const weights = biomeWeightsAt(seeds, x, y);
+  const mangroveWeight = weights["mangrove"] ?? 0;
+  if (mangroveWeight <= 0) return false;
+  for (const [name, weight] of Object.entries(weights)) {
+    if (name !== "mangrove" && weight >= mangroveWeight) return false;
+  }
+  return true;
+}
+
+function carveMangroveLattice(world: World, width: number, height: number, rng: () => number): void {
+  const seeds = world.biomeSeeds;
+  if (!seeds || seeds.length === 0) return;
+
+  // A random channel orientation per generation, same "genuinely local
+  // flourish" reasoning `carveBadlandsChambers`'s own wobble noise doc
+  // comment gives — every Mangrove zone should not carve identically
+  // oriented channels.
+  const angle = rng() * Math.PI;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const channelNoise = makeNoise2D(Math.floor(rng() * 0xffffffff), MANGROVE_CHANNEL_NOISE_SCALE);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const tile = tileAt(world, "surface", x, y);
+      if (!tile || tile.terrain === "water") continue;
+      if (!isMangroveDominant(seeds, x, y)) continue;
+      // Stretch the sampled domain along the rotated axis so the noise
+      // field reads as elongated channels, not round ponds — the same
+      // domain-warp trick a river's own steepest-descent carving achieves
+      // structurally; here it's cheaper to fake with an anisotropic sample.
+      const u = x * cos + y * sin;
+      const v = (-x * sin + y * cos) / MANGROVE_CHANNEL_STRETCH;
+      if (channelNoise(u, v) < MANGROVE_CHANNEL_THRESHOLD) {
+        setTile(world, "surface", x, y, "water", 0);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tundra permafrost polygons — same follow-up ask again. Real permafrost
+// ground forms ice-wedge polygons: a sparse network of cracked ground along
+// roughly-hexagonal cell boundaries. Approximated here with a Worley-ish
+// "distance to nearest of a few scattered points" field thresholded near its
+// own local minimum — cell boundaries (where two points' distances are
+// close to equal) read as thin crack lines; cell interiors stay open ground.
+// Same `isXDominant`-gated post-process idiom as the two structural passes
+// above.
+// ---------------------------------------------------------------------------
+
+/** How many polygon-crack cell points to scatter per zone-sized area. */
+function tundraCellCount(width: number, height: number): number {
+  return Math.max(6, Math.round((width * height) / 220));
+}
+/** How close two cells' distances must be (as a fraction of the smaller) for a tile to read as sitting on the crack between them. */
+const TUNDRA_CRACK_BAND = 0.06;
+/** Not every crack tile becomes real boulder — a sparse, broken line reads as natural frost-heaving, not a solid drawn grid. */
+const TUNDRA_CRACK_FILL_CHANCE = 0.6;
+
+function isTundraDominant(seeds: readonly BiomeSeedInfo[], x: number, y: number): boolean {
+  const weights = biomeWeightsAt(seeds, x, y);
+  const tundraWeight = weights["tundra"] ?? 0;
+  if (tundraWeight <= 0) return false;
+  for (const [name, weight] of Object.entries(weights)) {
+    if (name !== "tundra" && weight >= tundraWeight) return false;
+  }
+  return true;
+}
+
+function carveTundraPermafrost(world: World, width: number, height: number, rng: () => number): void {
+  const seeds = world.biomeSeeds;
+  if (!seeds || seeds.length === 0) return;
+
+  const cellCount = tundraCellCount(width, height);
+  const cells: Vec2[] = [];
+  for (let i = 0; i < cellCount; i++) cells.push({ x: rng() * width, y: rng() * height });
+  if (cells.length < 2) return;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const tile = tileAt(world, "surface", x, y);
+      if (!tile || tile.terrain === "water") continue;
+      if (!isTundraDominant(seeds, x, y)) continue;
+
+      let nearest = Infinity;
+      let secondNearest = Infinity;
+      for (const cell of cells) {
+        const d = Math.hypot(cell.x - x, cell.y - y);
+        if (d < nearest) {
+          secondNearest = nearest;
+          nearest = d;
+        } else if (d < secondNearest) {
+          secondNearest = d;
+        }
+      }
+      if (nearest <= 0) continue;
+      const onCrack = (secondNearest - nearest) / nearest < TUNDRA_CRACK_BAND;
+      if (!onCrack || rng() >= TUNDRA_CRACK_FILL_CHANCE) continue;
+      setTile(world, "surface", x, y, "boulder", tile.elevation + BOULDER_ELEVATION_BOOST);
     }
   }
 }
@@ -2539,6 +2834,14 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   // "distinct xor'd seed per generation concern" pattern as every other
   // noise field in this function.
   carveMountainMassifs(world, width, height, mulberry32(seed ^ 0xbb67ae85), bias?.elevation.highEdges);
+
+  // Savanna/Mangrove/Tundra structural passes — same "after rivers, skip
+  // existing water" ordering and "own derived rng sub-stream" pattern as
+  // Badlands/Massifs just above. See each function's own section doc
+  // comment for what it carves.
+  carveSavannaClusters(world, width, height, mulberry32(seed ^ 0x6b43a9d5));
+  carveMangroveLattice(world, width, height, mulberry32(seed ^ 0x1c69b3f7));
+  carveTundraPermafrost(world, width, height, mulberry32(seed ^ 0x94d049bb));
 
   // Canopy is derived from Surface (trees, massif ridges) now that Surface's
   // own generation — including massifs just above — is fully settled; see

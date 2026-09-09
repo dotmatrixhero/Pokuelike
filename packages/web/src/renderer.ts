@@ -18,6 +18,8 @@ import {
 import type { ActivePopup } from "./eventPopups.js";
 import type { ActiveMoveFlash } from "./moveEffects.js";
 import {
+  BIOME_FLORA_TINT,
+  BIOME_TINT,
   CROP_EMOJI,
   FLAVOR_FG,
   FLAVOR_GLYPH,
@@ -33,6 +35,7 @@ import {
   shade,
   shelterOwnerTint,
   terrainBgColor,
+  type Rgb,
   tileLight,
   waterDepthFactor,
   waterDepthShade,
@@ -190,6 +193,122 @@ function drawGroundTypeTint(ctx: CanvasRenderingContext2D, tile: Tile, x: number
   if (!tint) return;
   ctx.fillStyle = rgbaToCss(tint, 0.16);
   ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+}
+
+/** Same idea as `drawGroundTypeTint` above, keyed by dominant biome instead of soil type — see `BIOME_TINT`'s own doc comment (palette.ts) for which biomes get one and why. */
+function drawBiomeTint(ctx: CanvasRenderingContext2D, biome: string | undefined, x: number, y: number): void {
+  const tint = biome ? BIOME_TINT[biome] : undefined;
+  if (!tint) return;
+  ctx.fillStyle = rgbaToCss(tint, 0.14);
+  ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+}
+
+/**
+ * A pre-tinted copy of one obstacle sprite, built once on its own isolated
+ * offscreen canvas and cached — see `BIOME_FLORA_TINT`'s own doc comment
+ * (palette.ts) for the "one real sprite, several recolors" reasoning.
+ * `source-atop`, run on a canvas that holds ONLY this one sprite (not the
+ * whole scene), composites the tint exclusively over pixels the sprite
+ * itself already painted — a tree's transparent corners stay transparent —
+ * without needing to know or touch whatever's already on the real map
+ * canvas underneath it. Same "build once, cache, `drawImage` from it every
+ * frame" idiom `vignetteStamp`/`contiguousPatchStamp` above already use for
+ * their own generated decals.
+ */
+const tintedSpriteCache = new Map<string, HTMLCanvasElement>();
+function tintedSprite(sprite: HTMLImageElement, key: string, tint: Rgb): HTMLCanvasElement {
+  const cacheKey = `${key}:${tint.join(",")}`;
+  let cached = tintedSpriteCache.get(cacheKey);
+  if (cached) return cached;
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE_SIZE;
+  canvas.height = TILE_SIZE;
+  const tctx = canvas.getContext("2d")!;
+  tctx.drawImage(sprite, 0, 0, TILE_SIZE, TILE_SIZE);
+  tctx.globalCompositeOperation = "source-atop";
+  tctx.fillStyle = rgbaToCss(tint, 0.4);
+  tctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+  tintedSpriteCache.set(cacheKey, canvas);
+  cached = canvas;
+  return cached;
+}
+
+/**
+ * A food/flora/seedling tile's own identity mark — real fruit emoji, real
+ * berry-plant art, a growing sprout, or the muted fallback glyph. Called
+ * once per crop tile, after `drawDayNightTint`, instead of inline in
+ * `drawWorldTiles`'s own tile loop — see that loop's `cropIdentityTiles`
+ * doc comment for the direct report and the root cause this fixes. Sets its
+ * own `textAlign`/`textBaseline` since it now runs after the tile loop's
+ * `ctx.restore()` un-sets the ones set at that loop's own top.
+ */
+function drawCropIdentity(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number): void {
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const plantSprite =
+    tile.terrain === "food" && tile.flavor
+      ? getFoodSprite(tile.flavor)
+      : tile.terrain === "flora" && tile.flavor
+        ? getFloraSprite(tile.flavor)
+        : tile.terrain === "seedling"
+          ? getSeedlingSprite(x, y)
+          : null;
+  const cropEmoji = tile.terrain === "food" && tile.flavor ? CROP_EMOJI[tile.flavor] : undefined;
+  // Real growth-stage rendering (CROPS_DESIGN.md: a canopy Apple tree
+  // "reading as 'growing' before 'ready to pick'") — a food tile placed
+  // unripe (`worldgen.ts`'s canopy Apple placement, `stock: 0` with a real
+  // `Tile.growth` counting up — see flora.ts's `growCanopyFood`) isn't
+  // actually harvestable yet, so it shouldn't read as the same ready-to-eat
+  // fruit emoji, just faded. A small sprout stands in for "still growing"
+  // until `growCanopyFood` flips it over to real stock and clears `growth`,
+  // at which point this tile falls straight through to the ordinary
+  // `cropEmoji` branch.
+  const unripe = tile.terrain === "food" && (tile.stock ?? 0) <= 0 && tile.growth !== undefined;
+  if (cropEmoji && !unripe) {
+    // Real emoji art for the 8 new crops (direct ask: "do them for tile
+    // mode at least", then a direct follow-up: "I don't see eggs and crops
+    // on the map. Can we make them very apparent emoji even in tile
+    // mode?"). Checked BEFORE `plantSprite` (not just as its fallback) so a
+    // crop's own real look is never a barely-there colored letter and never
+    // quietly displaced if pixel art for one of these 8 flavors ever gets
+    // added later — bigger than before, a higher opacity floor so a
+    // low-stock patch still reads clearly instead of fading toward
+    // invisible, and a soft dark backing disc so the emoji stays legible
+    // against a bright grass tile the same way the egg emoji below does.
+    ctx.save();
+    const cropAlpha = tile.stock !== undefined ? 0.65 + 0.35 * tile.stock : 0.95;
+    ctx.globalAlpha = cropAlpha;
+    ctx.beginPath();
+    ctx.ellipse(x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2, TILE_SIZE * 0.44, TILE_SIZE * 0.44, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
+    ctx.fill();
+    ctx.font = `${TILE_SIZE * 0.85}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.fillText(cropEmoji, x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
+    ctx.restore();
+  } else if (plantSprite) {
+    ctx.save();
+    ctx.globalAlpha = tile.terrain === "seedling" ? 0.7 : 0.4 + (tile.stock ?? 1) * 0.6;
+    ctx.drawImage(plantSprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    ctx.restore();
+  } else if (unripe) {
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.font = `${TILE_SIZE * 0.55}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.fillText("🌱", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
+    ctx.restore();
+  } else {
+    const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_FG[tile.terrain];
+    const glyph = (tile.flavor && FLAVOR_GLYPH[tile.flavor]) || TERRAIN_GLYPH[tile.terrain];
+    // Same "fades back toward nothing as stock runs out" idea the real art
+    // gets above, just applied to the glyph's own alpha instead of a
+    // whole-tile color mix.
+    const glyphAlpha = tile.stock !== undefined ? 0.3 + 0.5 * tile.stock : 0.55;
+    ctx.save();
+    ctx.font = `${TILE_SIZE * 0.55}px monospace, "Segoe UI Emoji", "Noto Color Emoji"`;
+    ctx.fillStyle = rgbaToCss(accent, glyphAlpha);
+    ctx.fillText(glyph, x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
+    ctx.restore();
+  }
 }
 
 /**
@@ -544,6 +663,9 @@ function drawWorldTiles(
   focusGroupIds?: ReadonlySet<string>
 ): void {
   const surface = world.tiles.surface;
+  // Collected while walking the tile grid below, drawn in a second pass
+  // after `drawDayNightTint` — see `drawCropIdentity`'s own doc comment.
+  const cropIdentityTiles: { x: number; y: number; tile: Tile }[] = [];
 
   ctx.fillStyle = rgbToCss(TERRAIN_BG.floor);
   ctx.fillRect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
@@ -577,6 +699,7 @@ function drawWorldTiles(
         // a single solid color would.
         drawGroundBacking(ctx, world, x, y, tile.elevation);
         drawGroundTypeTint(ctx, tile, x, y);
+        drawBiomeTint(ctx, dominantBiomeAt(world, x, y), x, y);
         ctx.fillStyle = rgbaToCss(shade([120, 128, 140], tile.elevation), 0.35);
         ctx.fillText(".", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
         drawTileVignette(ctx, x, y);
@@ -639,7 +762,21 @@ function drawWorldTiles(
           // its own full-tile opaque surface, not an object standing on
           // ground, so it's excluded.
           if (tile.terrain !== "water") drawGroundBacking(ctx, world, x, y, tile.elevation);
-          ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          // Biome-flavored recolor for tree/bush only (see BIOME_FLORA_TINT's
+          // own doc comment, palette.ts) — boulder/wall/sand/mud already read
+          // fine as plain, and a recolored rock/wall would just look wrong.
+          const floraTint = (tile.terrain === "tree" || tile.terrain === "bush") && BIOME_FLORA_TINT[dominantBiomeAt(world, x, y) ?? ""];
+          if (floraTint) {
+            // Keyed by the sprite's own image URL (e.g. "/tiles/tree_3.png"),
+            // NOT by (x, y) — the underlying art only has a handful of real
+            // variants (`TILE_VARIANT_COUNTS`, sprites.ts), so this caches at
+            // most a few tinted copies total, reused across every tile that
+            // happens to roll the same variant, instead of one cache entry
+            // per map tile ever drawn.
+            ctx.drawImage(tintedSprite(sprite, sprite.src, floraTint), x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          } else {
+            ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          }
           drawTileVignette(ctx, x, y);
           continue;
         }
@@ -661,6 +798,7 @@ function drawWorldTiles(
         // corners around the plant itself.
         drawGroundBacking(ctx, world, x, y, tile.elevation);
         drawGroundTypeTint(ctx, tile, x, y);
+        drawBiomeTint(ctx, dominantBiomeAt(world, x, y), x, y);
 
         // A green "fertile ground" patch under the plant itself — direct
         // ask: "can we decal a little green patch under the plants...
@@ -696,68 +834,21 @@ function drawWorldTiles(
         // for this flavor (or none assigned yet) — same "match the ascii,
         // don't fill the whole tile with a loud color" reasoning as before,
         // just as a fallback now instead of the only option.
-        const plantSprite =
-          tile.terrain === "food" && tile.flavor
-            ? getFoodSprite(tile.flavor)
-            : tile.terrain === "flora" && tile.flavor
-              ? getFloraSprite(tile.flavor)
-              : tile.terrain === "seedling"
-                ? getSeedlingSprite(x, y)
-                : null;
-        const cropEmoji = tile.terrain === "food" && tile.flavor ? CROP_EMOJI[tile.flavor] : undefined;
-        // Real growth-stage rendering (CROPS_DESIGN.md: a canopy Apple tree
-        // "reading as 'growing' before 'ready to pick'") — a food tile
-        // placed unripe (`worldgen.ts`'s canopy Apple placement, `stock: 0`
-        // with a real `Tile.growth` counting up — see flora.ts's
-        // `growCanopyFood`) isn't actually harvestable yet, so it shouldn't
-        // read as the same ready-to-eat fruit emoji, just faded. A small
-        // sprout stands in for "still growing" until `growCanopyFood` flips
-        // it over to real stock and clears `growth`, at which point this
-        // tile falls straight through to the ordinary `cropEmoji` branch.
-        const unripe = tile.terrain === "food" && (tile.stock ?? 0) <= 0 && tile.growth !== undefined;
-        if (cropEmoji && !unripe) {
-          // Real emoji art for the 8 new crops (direct ask: "do them for
-          // tile mode at least", then a direct follow-up: "I don't see eggs
-          // and crops on the map. Can we make them very apparent emoji even
-          // in tile mode?"). Checked BEFORE `plantSprite` (not just as its
-          // fallback) so a crop's own real look is never a barely-there
-          // colored letter and never quietly displaced if pixel art for one
-          // of these 8 flavors ever gets added later — bigger than before,
-          // a higher opacity floor so a low-stock patch still reads clearly
-          // instead of fading toward invisible, and a soft dark backing
-          // disc so the emoji stays legible against a bright grass tile the
-          // same way the egg emoji below does.
-          ctx.save();
-          const cropAlpha = tile.stock !== undefined ? 0.65 + 0.35 * tile.stock : 0.95;
-          ctx.globalAlpha = cropAlpha;
-          ctx.beginPath();
-          ctx.ellipse(x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2, TILE_SIZE * 0.44, TILE_SIZE * 0.44, 0, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
-          ctx.fill();
-          ctx.font = `${TILE_SIZE * 0.85}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
-          ctx.fillText(cropEmoji, x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
-          ctx.restore();
-        } else if (plantSprite) {
-          ctx.save();
-          ctx.globalAlpha = tile.terrain === "seedling" ? 0.7 : 0.4 + (tile.stock ?? 1) * 0.6;
-          ctx.drawImage(plantSprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-          ctx.restore();
-        } else if (unripe) {
-          ctx.save();
-          ctx.globalAlpha = 0.55;
-          ctx.font = `${TILE_SIZE * 0.55}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
-          ctx.fillText("🌱", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
-          ctx.restore();
-        } else {
-          const accent = (tile.flavor && FLAVOR_FG[tile.flavor]) || TERRAIN_FG[tile.terrain];
-          const glyph = (tile.flavor && FLAVOR_GLYPH[tile.flavor]) || TERRAIN_GLYPH[tile.terrain];
-          // Same "fades back toward nothing as stock runs out" idea the real
-          // art gets above, just applied to the glyph's own alpha instead of
-          // a whole-tile color mix.
-          const glyphAlpha = tile.stock !== undefined ? 0.3 + 0.5 * tile.stock : 0.55;
-          ctx.fillStyle = rgbaToCss(accent, glyphAlpha);
-          ctx.fillText(glyph, x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
-        }
+        // The crop's own identity mark (real fruit emoji, plant sprite, growth
+        // sprout, or fallback glyph) is drawn in a later pass, after
+        // `drawDayNightTint` — see `drawCropIdentity` below for why: direct
+        // report: "Crops and eggs are still hard to see... behind the tiles?"
+        // Root cause, found by instrumenting real fillText calls against a
+        // live dev server: the mark rendered here, inline in this loop, was
+        // real (confirmed 243/256 green pixels sampled right after the
+        // `fillText` call) but then silently got dimmed toward invisible by
+        // `drawDayNightTint`'s whole-canvas night wash, which runs *after*
+        // this loop — exactly the treatment Pokémon are already deliberately
+        // exempted from ("Pokémon should always read at full brightness
+        // regardless of time of day", `drawAgent`'s own call site below).
+        // Crops never got that same exemption. Since this demo world's tick 0
+        // is midnight, that dimming was in effect from the very first frame.
+        cropIdentityTiles.push({ x, y, tile });
         drawTileVignette(ctx, x, y);
         continue;
       }
@@ -774,6 +865,12 @@ function drawWorldTiles(
   // on top of it — Pokémon should always read at full brightness regardless
   // of time of day, not get dimmed along with the terrain underneath them.
   drawDayNightTint(ctx, world);
+
+  // Crops get that same "always legible" treatment as agents (see
+  // `cropIdentityTiles`'s own doc comment above for the root cause this
+  // fixes) — drawn now, on top of the night tint, instead of back in the
+  // tile loop where the tint would wash over them.
+  for (const { x, y, tile } of cropIdentityTiles) drawCropIdentity(ctx, tile, x, y);
 
   pruneStaleFacings(world);
   for (const agent of world.agents) {

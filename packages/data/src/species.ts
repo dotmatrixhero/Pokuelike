@@ -371,8 +371,11 @@ export const SPECIES: Record<string, SpeciesDef> = {
     moves: ["rock_throw", "tackle", "defense_curl", "rock_slide", "earthquake"],
     // A living boulder that mainline flavor text has rolling down
     // mountainsides — badlands/highland, both rock-and-boulder-heavy biomes
-    // (see worldgen.ts's BIOMES boulder terrainWeights).
-    biomes: ["badlands", "highland"],
+    // (see worldgen.ts's BIOMES boulder terrainWeights). "tundra" added
+    // later, same reasoning — Tundra's own real signature (worldgen.ts's
+    // `carveTundraPermafrost`) IS frost-heaved boulder, a genuinely apt
+    // third home for a living rock.
+    biomes: ["badlands", "highland", "tundra"],
     // Literally a living boulder (mainline flavor text) — the roster's most
     // direct terrain-preference fit of all: it settles among the same rocks
     // it's made of, not just the biome that happens to contain them.
@@ -820,7 +823,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // "Digs holes in beaches to live in" per mainline flavor text — a real,
     // literal burrower, same standard Diglett/Sandshrew's own callouts use.
     buildsShelter: true,
-    biomes: ["beach", "wetland"],
+    // "mangrove" added alongside the new biome itself — a real coastal crab
+    // that already digs beach/wetland burrows fits a brackish marsh just as
+    // naturally, no new species needed to give Mangrove a crab resident.
+    biomes: ["beach", "wetland", "mangrove"],
     preferredTerrain: ["water"],
   }),
   kingler: speciesFromDex("KINGLER", {
@@ -829,7 +835,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     homeLayer: "surface",
     moves: ["tackle", "water_gun", "harden"],
     buildsShelter: true,
-    biomes: ["beach", "wetland"],
+    // See krabby's own comment immediately above — same reasoning.
+    biomes: ["beach", "wetland", "mangrove"],
     preferredTerrain: ["water"],
   }),
   shellder: speciesFromDex("SHELLDER", {
@@ -948,5 +955,732 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // plain level — same "never evolves in-sim" limitation as Growlithe/
     // Vulpix/Cubone above, just a different condition kind.
     biomes: ["highland", "badlands"],
+  }),
+
+  // --- New species below: direct follow-up ask, alongside the new
+  // Savanna/Mangrove/Tundra biomes: "spawn more unique Pokemon species in
+  // these places to give em flavor." First pass picked Gen 2/3 species by
+  // flavor fit alone and only checked afterward that public/sprites/ had no
+  // art for 8 of the 9 — direct catch: "Oh... you did Gen 2... I don't
+  // think we got sprites for em." Replaced with Gen-1-only picks, every one
+  // confirmed to have real drawn sprite art in public/sprites/ BEFORE being
+  // added this time (checked directly, not assumed), same "each evolution
+  // reachable purely by in-sim leveling gets its own curated entry"
+  // standard as before (checked against each dex entry's own `evolutions`,
+  // `conditions: {}` only).
+  tauros: speciesFromDex("TAUROS", {
+    spriteKey: "tauros",
+    placeholderColor: "#c88840",
+    homeLayer: "surface",
+    moves: ["tackle", "body_slam"],
+    activityPattern: "diurnal",
+    // A real wild-plains bull.
+    biomes: ["savanna", "grassland"],
+  }),
+  kangaskhan: speciesFromDex("KANGASKHAN", {
+    spriteKey: "kangaskhan",
+    placeholderColor: "#c8845c",
+    homeLayer: "surface",
+    // Real Kangaskhan level-1 move is Comet Punch, not in this roster's
+    // curated move set — Tackle/Body Slam stand in, same off-type-reuse
+    // acceptance this file's own Onix/Dratini entries use.
+    moves: ["tackle", "body_slam"],
+    activityPattern: "diurnal",
+    // A real open-plains/outback marsupial per mainline flavor text — no
+    // mainline evolution exists at all, so no "never evolves in-sim"
+    // caveat needed.
+    biomes: ["savanna", "grassland"],
+  }),
+  poliwag: speciesFromDex("POLIWAG", {
+    spriteKey: "poliwag",
+    placeholderColor: "#68a0c0",
+    homeLayer: "surface",
+    // Water Gun is Poliwag's real level-1 move.
+    moves: ["tackle", "water_gun"],
+    // "Prefers to live near water... in swamps" per mainline flavor text —
+    // a real, literal match for a coastal marsh.
+    biomes: ["mangrove", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  poliwhirl: speciesFromDex("POLIWHIRL", {
+    spriteKey: "poliwhirl",
+    placeholderColor: "#5088b0",
+    homeLayer: "surface",
+    moves: ["tackle", "water_gun"],
+    biomes: ["mangrove", "wetland"],
+    preferredTerrain: ["water"],
+    // Real further evolution (Poliwrath) needs a Water Stone — same
+    // "never evolves in-sim" limitation as Growlithe/Vulpix/Cubone above.
+  }),
+  slowpoke: speciesFromDex("SLOWPOKE", {
+    spriteKey: "slowpoke",
+    placeholderColor: "#f0a8b8",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    // "Lazily suns itself on the shore" per mainline flavor text — a real
+    // shoreline/marsh dweller.
+    biomes: ["mangrove", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  slowbro: speciesFromDex("SLOWBRO", {
+    spriteKey: "slowbro",
+    placeholderColor: "#e888a0",
+    homeLayer: "surface",
+    moves: ["tackle", "water_gun"],
+    biomes: ["mangrove", "wetland"],
+    preferredTerrain: ["water"],
+    // Real further evolution (Mega Slowbro) is a battle-only Mega, not a
+    // real in-sim leveling path — same "never evolves further in-sim"
+    // limitation as Piloswine/Golbat above.
+  }),
+  dewgong: speciesFromDex("DEWGONG", {
+    spriteKey: "dewgong",
+    placeholderColor: "#c8f0f8",
+    homeLayer: "surface",
+    // Real Dewgong level-1 move is Headbutt, not in this roster's curated
+    // move set — Water Gun/Ice Beam stand in instead, matching its own
+    // real Water/Ice typing.
+    moves: ["tackle", "water_gun", "ice_beam"],
+    // Seel's own real, in-sim-reachable evolution (level 34, no item/
+    // condition) — Seel itself stays tagged ["snow", "wetland"] above
+    // unchanged; this is its own curated entry for the evolved form, same
+    // "don't let an evolved agent quietly lose its personality" standard
+    // this file's other evolution-completion entries follow. A real
+    // arctic pinniped — Tundra as a real cold-open-ground secondary
+    // alongside Seel's own Snow/Wetland pairing.
+    biomes: ["snow", "tundra"],
+    preferredTerrain: ["water"],
+  }),
+
+  // --- Second round, same three biomes: direct follow-up ask, "we need
+  // more species that can spawn in them than just those. I don't think
+  // we're anywhere near our full species list." All Gen 1, all confirmed
+  // to have real public/sprites/ art BEFORE being added, same standard the
+  // Gen-2/3 correction above established. Not exhaustive — packages/web/
+  // public/sprites/ still has ~85 more real, arted Gen-1 species with no
+  // roster entry at all, a real broader gap this batch doesn't attempt to
+  // close on its own.
+  doduo: speciesFromDex("DODUO", {
+    spriteKey: "doduo",
+    placeholderColor: "#c8a860",
+    homeLayer: "surface",
+    // Peck is Doduo's real level-1 move.
+    moves: ["peck"],
+    activityPattern: "diurnal",
+    // "Roams the savanna" per mainline flavor text — about as literal a
+    // biome match as this roster has.
+    biomes: ["savanna", "grassland"],
+  }),
+  dodrio: speciesFromDex("DODRIO", {
+    spriteKey: "dodrio",
+    placeholderColor: "#a88848",
+    homeLayer: "surface",
+    // Agility is a real, early Dodrio move (a fast, skittish runner).
+    moves: ["peck", "agility"],
+    activityPattern: "diurnal",
+    biomes: ["savanna", "grassland"],
+    // Real further evolution doesn't exist (Dodrio is the top of its own
+    // line) — no "never evolves in-sim" caveat needed.
+  }),
+  rhyhorn: speciesFromDex("RHYHORN", {
+    spriteKey: "rhyhorn",
+    placeholderColor: "#b0a090",
+    homeLayer: "surface",
+    // Real Rhyhorn level-1 moves (Horn Attack/Tail Whip/Sand Attack) aren't
+    // in this roster's curated move set — Rock Throw stands in, matching
+    // its own real Rock-type half.
+    moves: ["tackle", "rock_throw"],
+    // "Wild Rhyhorn charge through savannas" per mainline flavor text.
+    biomes: ["savanna", "badlands"],
+  }),
+  rhydon: speciesFromDex("RHYDON", {
+    spriteKey: "rhydon",
+    placeholderColor: "#8c7c6c",
+    homeLayer: "surface",
+    moves: ["tackle", "rock_throw", "earthquake"],
+    biomes: ["savanna", "badlands"],
+    // Real further evolution (Rhyperior) needs a held item during a trade —
+    // same "never evolves further in-sim" limitation as Graveler below.
+  }),
+  goldeen: speciesFromDex("GOLDEEN", {
+    spriteKey: "goldeen",
+    placeholderColor: "#f08090",
+    homeLayer: "surface",
+    // Peck is a real early Goldeen move; Water Gun stands in for its Water
+    // typing, same pattern Poliwag/Slowbro above already use.
+    moves: ["peck", "water_gun"],
+    biomes: ["mangrove", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  seaking: speciesFromDex("SEAKING", {
+    spriteKey: "seaking",
+    placeholderColor: "#e86868",
+    homeLayer: "surface",
+    moves: ["peck", "water_gun", "surf"],
+    biomes: ["mangrove", "wetland"],
+    preferredTerrain: ["water"],
+  }),
+  grimer: speciesFromDex("GRIMER", {
+    spriteKey: "grimer",
+    placeholderColor: "#706090",
+    homeLayer: "surface",
+    // Harden is a real early Grimer move; Sludge stands in for its real
+    // Poison Gas (not in this roster's curated move set), same signature
+    // Ekans/Arbok/Zubat already use.
+    moves: ["harden", "sludge"],
+    // A real brackish-muck dweller per mainline flavor text ("born from
+    // sludge") — a genuinely apt fit for a coastal marsh, not a stretch.
+    biomes: ["mangrove", "wetland"],
+  }),
+  muk: speciesFromDex("MUK", {
+    spriteKey: "muk",
+    placeholderColor: "#584870",
+    homeLayer: "surface",
+    moves: ["harden", "sludge"],
+    biomes: ["mangrove", "wetland"],
+  }),
+  farfetchd: speciesFromDex("FARFETCHD", {
+    spriteKey: "farfetchd",
+    placeholderColor: "#c8b878",
+    homeLayer: "surface",
+    // Peck is a real early Farfetch'd move; Slash stands in for its later
+    // real Leaf Blade/cutting-signature moveset (not curated here).
+    moves: ["peck", "slash"],
+    activityPattern: "diurnal",
+    // A real wild-leek marsh-dwelling bird per mainline flavor text — no
+    // mainline evolution exists at all.
+    biomes: ["mangrove", "wetland"],
+  }),
+  graveler: speciesFromDex("GRAVELER", {
+    spriteKey: "graveler",
+    placeholderColor: "#9c8c6c",
+    homeLayer: "surface",
+    // Real Graveler level-1 moves (Tackle/Defense Curl) match this
+    // roster's curated set directly — Rock Throw added to match Geodude's
+    // own moveset style.
+    moves: ["tackle", "defense_curl", "rock_throw"],
+    // Geodude's own real, in-sim-reachable evolution (level 25, no item/
+    // condition) — Geodude itself stays tagged
+    // ["badlands", "highland", "tundra"] above unchanged; this is its own
+    // curated entry for the evolved form, same "don't let an evolved agent
+    // quietly lose its personality" standard the rest of this file follows.
+    biomes: ["badlands", "highland", "tundra"],
+    preferredTerrain: ["boulder"],
+    // Real further evolution (Golem) needs a held item during a trade —
+    // same "never evolves further in-sim" limitation as Poliwhirl/Rhydon.
+  }),
+
+  // --- Third round, whole-roster pass: direct follow-up ask, after the
+  // Savanna/Mangrove/Tundra-specific rounds above: "let's add more.
+  // Species to em all." Only 57 of 151 real Gen-1-arted species
+  // (public/sprites/) were in the roster before this batch — every pick
+  // below confirmed to have real sprite art AND (where an evolution is
+  // included) a real in-sim-reachable evolution (`level`, `conditions: {}`
+  // — checked directly against the dex, not assumed) before being added,
+  // same standard every prior round in this file set. Deliberately
+  // excludes the 5 Gen-1 legendaries (Articuno/Zapdos/Moltres/Mewtwo/Mew) —
+  // adding them as ordinary spawnable population members is a real design
+  // decision (this is a population sim, not a catching game) this batch
+  // doesn't make unilaterally; flagged in TODO.md instead. Also skips a
+  // handful of real Gen-1 species with genuinely no natural-biome fit for
+  // an ecological sim (Ditto, Porygon, Electabuzz, Hitmonlee/Hitmonchan,
+  // Mr. Mime) rather than forcing a thin justification just to pad count.
+  rattata: speciesFromDex("RATTATA", {
+    spriteKey: "rattata",
+    placeholderColor: "#a89078",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    activityPattern: "nocturnal",
+    // "Found anywhere" per mainline flavor text — the roster's other true
+    // generalist alongside Herbs' own any-biome crop gate.
+    biomes: ["grassland", "forest", "badlands"],
+  }),
+  raticate: speciesFromDex("RATICATE", {
+    spriteKey: "raticate",
+    placeholderColor: "#8c7860",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    activityPattern: "nocturnal",
+    // Rattata's own real, in-sim-reachable evolution (level 20, no item/
+    // condition).
+    biomes: ["grassland", "forest", "badlands"],
+  }),
+  pidgeotto: speciesFromDex("PIDGEOTTO", {
+    spriteKey: "pidgeotto",
+    placeholderColor: "#c8a868",
+    homeLayer: "canopy",
+    moves: ["tackle", "wing_attack"],
+    activityPattern: "diurnal",
+    // Pidgey's own real, in-sim-reachable evolution (level 36, no item/
+    // condition) — Pidgey itself stays tagged ["grassland", "forest"]
+    // above unchanged; canopy has no biome of its own, same "tagged by the
+    // surface below" reasoning Pidgey's own entry already documents.
+    biomes: ["grassland", "forest"],
+  }),
+  pidgeot: speciesFromDex("PIDGEOT", {
+    spriteKey: "pidgeot",
+    placeholderColor: "#b89058",
+    homeLayer: "canopy",
+    moves: ["tackle", "wing_attack"],
+    activityPattern: "diurnal",
+    // Pidgeotto's own real, in-sim-reachable evolution (level 36 total
+    // from Pidgey, no item/condition).
+    biomes: ["grassland", "forest"],
+  }),
+  fearow: speciesFromDex("FEAROW", {
+    spriteKey: "fearow",
+    placeholderColor: "#8c6848",
+    homeLayer: "canopy",
+    moves: ["peck", "roost"],
+    // See spearow's own comment above — same direct ask, same reasoning: a
+    // real predator, most dangerous at dawn/dusk.
+    isPredator: true,
+    // Spearow's own real, in-sim-reachable evolution (level 20, no item/
+    // condition) — Spearow itself stays tagged unchanged.
+    biomes: ["grassland", "forest"],
+  }),
+  nidoranf: speciesFromDex("NIDORAN_F", {
+    // Explicit id override — speciesFromDex defaults to the dex key
+    // lowercased ("nidoran_f"), which wouldn't match this entry's own
+    // object property name ("nidoranf"); every other lookup in this
+    // codebase (IMMIGRATION_CONTEXT, spawnAgent) keys by the object
+    // property, so the two need to agree explicitly here.
+    id: "nidoranf",
+    spriteKey: "nidoranf",
+    placeholderColor: "#c890a8",
+    homeLayer: "surface",
+    // Real Nidoran♀ level-1 moves.
+    moves: ["scratch", "poison_sting"],
+    // "Found in fields and forests in large numbers" per mainline flavor
+    // text — Savanna as a genuinely apt open-ground third habitat.
+    biomes: ["grassland", "savanna"],
+  }),
+  nidorina: speciesFromDex("NIDORINA", {
+    spriteKey: "nidorina",
+    placeholderColor: "#b8789c",
+    homeLayer: "surface",
+    moves: ["scratch", "poison_sting"],
+    // Nidoran♀'s own real, in-sim-reachable evolution (level 16, no item/
+    // condition). Real further evolution (Nidoqueen) needs a Moon Stone —
+    // same "never evolves further in-sim" limitation as Poliwhirl above.
+    biomes: ["grassland", "savanna"],
+  }),
+  nidoranm: speciesFromDex("NIDORAN_M", {
+    // See nidoranf's own comment above — same id-override reasoning.
+    id: "nidoranm",
+    spriteKey: "nidoranm",
+    placeholderColor: "#5878a8",
+    homeLayer: "surface",
+    // Real Nidoran♂ level-1 moves.
+    moves: ["poison_sting", "peck"],
+    biomes: ["grassland", "savanna"],
+  }),
+  nidorino: speciesFromDex("NIDORINO", {
+    spriteKey: "nidorino",
+    placeholderColor: "#486890",
+    homeLayer: "surface",
+    moves: ["poison_sting", "peck"],
+    // Nidoran♂'s own real, in-sim-reachable evolution (level 16, no item/
+    // condition). Real further evolution (Nidoking) needs a Moon Stone —
+    // same "never evolves further in-sim" limitation as Nidorina above.
+    biomes: ["grassland", "savanna"],
+  }),
+  clefairy: speciesFromDex("CLEFAIRY", {
+    spriteKey: "clefairy",
+    placeholderColor: "#f8b8d0",
+    homeLayer: "surface",
+    // Real Clefairy level-1 moves (Pound/Growl/Spotlight) aren't in this
+    // roster's curated move set — Safeguard stands in, matching its real
+    // signature protective move.
+    moves: ["tackle", "safeguard"],
+    // "Said to have descended from the moon... found on mountains" per
+    // mainline flavor text — a real Highland fit. Real evolution
+    // (Clefable) needs a Moon Stone — never evolves in-sim, same
+    // limitation as Growlithe/Vulpix above.
+    biomes: ["highland"],
+  }),
+  jigglypuff: speciesFromDex("JIGGLYPUFF", {
+    spriteKey: "jigglypuff",
+    placeholderColor: "#f8c8d8",
+    homeLayer: "surface",
+    // Real Jigglypuff level-1 moves (Sing/Disarming Voice) aren't curated —
+    // Safeguard stands in, same reasoning as Clefairy above.
+    moves: ["tackle", "safeguard"],
+    // "Found in grassy areas" per mainline flavor text. Real evolution
+    // (Wigglytuff) needs a Moon Stone — never evolves in-sim.
+    biomes: ["grassland", "forest"],
+  }),
+  venonat: speciesFromDex("VENONAT", {
+    spriteKey: "venonat",
+    placeholderColor: "#a878c8",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    activityPattern: "nocturnal",
+    // "Attracted to light... lives in the shadows of trees" per mainline
+    // flavor text.
+    biomes: ["forest", "jungle"],
+  }),
+  venomoth: speciesFromDex("VENOMOTH", {
+    spriteKey: "venomoth",
+    placeholderColor: "#8858a8",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    activityPattern: "nocturnal",
+    // Venonat's own real, in-sim-reachable evolution (level 31, no item/
+    // condition).
+    biomes: ["forest", "jungle"],
+  }),
+  paras: speciesFromDex("PARAS", {
+    spriteKey: "paras",
+    placeholderColor: "#d04848",
+    homeLayer: "surface",
+    moves: ["scratch"],
+    // "Mushrooms grow on its back... prefers damp, dark places" per
+    // mainline flavor text.
+    biomes: ["forest", "jungle"],
+  }),
+  parasect: speciesFromDex("PARASECT", {
+    spriteKey: "parasect",
+    placeholderColor: "#b83838",
+    homeLayer: "surface",
+    moves: ["scratch"],
+    // Paras's own real, in-sim-reachable evolution (level 24, no item/
+    // condition).
+    biomes: ["forest", "jungle"],
+  }),
+  bellsprout: speciesFromDex("BELLSPROUT", {
+    spriteKey: "bellsprout",
+    placeholderColor: "#a8c848",
+    homeLayer: "surface",
+    // Vine Whip is Bellsprout's real level-1 move.
+    moves: ["vine_whip"],
+    // A real "prefers hot, humid places" carnivorous-plant flavor.
+    biomes: ["jungle", "grassland"],
+  }),
+  weepinbell: speciesFromDex("WEEPINBELL", {
+    spriteKey: "weepinbell",
+    placeholderColor: "#88b838",
+    homeLayer: "surface",
+    moves: ["vine_whip", "sludge"],
+    isPredator: true,
+    // Bellsprout's own real, in-sim-reachable evolution (level 21, no
+    // item/condition). Real further evolution (Victreebel) needs a Leaf
+    // Stone — never evolves further in-sim.
+    biomes: ["jungle", "grassland"],
+  }),
+  exeggcute: speciesFromDex("EXEGGCUTE", {
+    spriteKey: "exeggcute",
+    placeholderColor: "#f0d078",
+    homeLayer: "surface",
+    // Real Exeggcute level-1 moves (Absorb/Hypnosis/Barrage) aren't
+    // curated — Psybeam/Leech Seed stand in, matching its real
+    // Grass/Psychic typing.
+    moves: ["psybeam", "leech_seed"],
+    // A real jungle-canopy egg cluster per mainline flavor text. Real
+    // evolution (Exeggutor) needs a Leaf Stone — never evolves in-sim.
+    biomes: ["jungle", "forest"],
+  }),
+  tangela: speciesFromDex("TANGELA", {
+    spriteKey: "tangela",
+    placeholderColor: "#4890a8",
+    homeLayer: "surface",
+    // Real Tangela level-1 moves (Bind/Absorb/Constrict) aren't curated —
+    // Vine Whip/Leech Seed stand in, matching its real Grass typing.
+    moves: ["vine_whip", "leech_seed"],
+    // Real further evolution (Tangrowth) needs a specific known move —
+    // never evolves in-sim.
+    biomes: ["jungle", "forest"],
+  }),
+  machop: speciesFromDex("MACHOP", {
+    spriteKey: "machop",
+    placeholderColor: "#c0a8a0",
+    homeLayer: "surface",
+    // Real Machop level-1 moves (Leer/Low Kick) aren't curated — Tackle/
+    // Body Slam stand in, matching its real raw-strength flavor.
+    moves: ["tackle", "body_slam"],
+    // "Trains in the mountains" per mainline flavor text — Highland as
+    // primary, Badlands/Tundra the roster's other cold-and-rocky
+    // secondaries (added later — Tundra was still this roster's thinnest
+    // biome, 3 fitting species, after the whole-roster pass; a mountain
+    // fighter trains just as well on a frost-cracked plateau).
+    biomes: ["highland", "badlands", "tundra"],
+  }),
+  machoke: speciesFromDex("MACHOKE", {
+    spriteKey: "machoke",
+    placeholderColor: "#a88880",
+    homeLayer: "surface",
+    moves: ["tackle", "body_slam"],
+    // Machop's own real, in-sim-reachable evolution (level 28, no item/
+    // condition). Real further evolution (Machamp) needs a trade — never
+    // evolves further in-sim.
+    biomes: ["highland", "badlands", "tundra"],
+  }),
+  drowzee: speciesFromDex("DROWZEE", {
+    spriteKey: "drowzee",
+    placeholderColor: "#f0c860",
+    homeLayer: "surface",
+    // Real Drowzee level-1 moves (Pound/Hypnosis/Meditate) aren't curated —
+    // Psybeam stands in, matching its real Psychic typing.
+    moves: ["tackle", "psybeam"],
+    activityPattern: "nocturnal",
+    // "Puts people to sleep and eats their dreams" per mainline flavor
+    // text — a real nocturnal predator of a kind, though its "prey" is
+    // dreams, not other Pokémon, so left untagged `isPredator` (that flag
+    // means real inter-species predation, per predation.ts).
+    biomes: ["highland", "grassland"],
+  }),
+  hypno: speciesFromDex("HYPNO", {
+    spriteKey: "hypno",
+    placeholderColor: "#d8a848",
+    homeLayer: "surface",
+    moves: ["tackle", "psybeam"],
+    activityPattern: "nocturnal",
+    // Drowzee's own real, in-sim-reachable evolution (level 26, no item/
+    // condition).
+    biomes: ["highland", "grassland"],
+  }),
+  abra: speciesFromDex("ABRA", {
+    spriteKey: "abra",
+    placeholderColor: "#f0b878",
+    homeLayer: "surface",
+    // Real Abra level-1 moves (Teleport/Psywave) aren't curated — Psybeam
+    // stands in, matching its real Psychic typing.
+    moves: ["psybeam"],
+    activityPattern: "nocturnal",
+    // "Sleeps 18 hours a day" per mainline flavor text.
+    biomes: ["grassland", "highland"],
+  }),
+  kadabra: speciesFromDex("KADABRA", {
+    spriteKey: "kadabra",
+    placeholderColor: "#d89860",
+    homeLayer: "surface",
+    moves: ["psybeam"],
+    activityPattern: "nocturnal",
+    // Abra's own real, in-sim-reachable evolution (level 16, no item/
+    // condition). Real further evolution (Alakazam) needs a trade — never
+    // evolves further in-sim.
+    biomes: ["grassland", "highland"],
+  }),
+  gastly: speciesFromDex("GASTLY", {
+    spriteKey: "gastly",
+    placeholderColor: "#705898",
+    // "Almost invisible... anyone would faint if enveloped by it" per
+    // mainline flavor text — a real ambush predator. No biome of its own
+    // (underground, same as Zubat) — tagged by the surface above the same
+    // "dark places" reasoning Zubat's own entry already documents.
+    homeLayer: "underground",
+    // Real Gastly level-1 moves (Confuse Ray/Lick/Smog) aren't curated —
+    // Sludge/Psybeam stand in, matching its real Ghost/Poison typing.
+    moves: ["sludge", "psybeam"],
+    isPredator: true,
+    activityPattern: "nocturnal",
+    biomes: ["highland", "badlands"],
+  }),
+  haunter: speciesFromDex("HAUNTER", {
+    spriteKey: "haunter",
+    placeholderColor: "#503878",
+    homeLayer: "underground",
+    moves: ["sludge", "psybeam"],
+    isPredator: true,
+    activityPattern: "nocturnal",
+    // Gastly's own real, in-sim-reachable evolution (level 25, no item/
+    // condition). Real further evolution (Gengar) needs a trade — never
+    // evolves further in-sim.
+    biomes: ["highland", "badlands"],
+  }),
+  dugtrio: speciesFromDex("DUGTRIO", {
+    spriteKey: "dugtrio",
+    placeholderColor: "#b8905c",
+    homeLayer: "underground",
+    // Dig/Earthquake are real Dugtrio signature moves.
+    moves: ["tackle", "dig", "earthquake"],
+    activityPattern: "nocturnal",
+    buildsShelter: true,
+    // Diglett's own real, in-sim-reachable evolution (level 26, no item/
+    // condition) — Diglett itself stays tagged unchanged.
+    biomes: ["grassland", "badlands", "desert"],
+  }),
+  sandslash: speciesFromDex("SANDSLASH", {
+    spriteKey: "sandslash",
+    placeholderColor: "#c8a850",
+    homeLayer: "underground",
+    // Real Sandslash level-1 moves (Scratch/Defense Curl) match this
+    // roster's curated set directly.
+    moves: ["scratch", "dig", "defense_curl", "earthquake"],
+    activityPattern: "nocturnal",
+    buildsShelter: true,
+    // Sandshrew's own real, in-sim-reachable evolution (no listed level
+    // gate beyond the base game's default — checked reachable via
+    // `LEVELING_CONTEXT`, same bar every entry in this file uses).
+    biomes: ["badlands", "grassland", "desert"],
+  }),
+  primeape: speciesFromDex("PRIMEAPE", {
+    spriteKey: "primeape",
+    placeholderColor: "#a86848",
+    homeLayer: "surface",
+    moves: ["scratch"],
+    // Mankey's own real, in-sim-reachable evolution (level 28, no item/
+    // condition) — Mankey itself stays tagged unchanged. Real further
+    // evolution (Annihilape) needs a specific known move — never evolves
+    // further in-sim.
+    biomes: ["highland", "badlands", "tundra"],
+    preferredTerrain: ["boulder"],
+  }),
+  magmar: speciesFromDex("MAGMAR", {
+    spriteKey: "magmar",
+    placeholderColor: "#e87838",
+    homeLayer: "surface",
+    // Ember is a real early Magmar move.
+    moves: ["ember"],
+    // "Lives in the fiery depths of volcanoes" per mainline flavor text —
+    // Badlands as this roster's closest real volcanic-adjacent biome. Real
+    // evolution (Magmortar) needs a held item during a trade — never
+    // evolves in-sim.
+    biomes: ["badlands"],
+    preferredTerrain: ["sunbeam"],
+  }),
+  kabuto: speciesFromDex("KABUTO", {
+    spriteKey: "kabuto",
+    placeholderColor: "#a89858",
+    homeLayer: "surface",
+    // Real Kabuto level-1 moves (Scratch/Absorb/Harden) match this
+    // roster's curated set directly.
+    moves: ["scratch", "harden"],
+    // A real ancient sea-floor fossil per mainline flavor text — Wetland/
+    // Beach, the roster's real water-adjacent biomes.
+    biomes: ["wetland", "beach"],
+    preferredTerrain: ["water"],
+    // Direct follow-up, after Kabutops' own level-40-evolution-floor
+    // report ("the level 40 gap can happen, it should just be rare...
+    // change the level adding distribution instead. A predator kabuto is
+    // OK too"): Kabuto itself is real predatory shellfish per mainline
+    // flavor ("swam through primordial seas, preying on smaller life") —
+    // tagging it a predator too means a Beach/Wetland zone's "predator"
+    // niche usually resolves to Kabuto (no evolution floor to clear, so
+    // its real spawn level is a normal ~5-17 like any other base-form
+    // predator) instead of ALWAYS needing to be its own much harsher
+    // evolved Kabutops (real floor 40, ~46-51 with `PREDATOR_LEVEL_BOOST`
+    // — see Kabutops' own comment/`rarity` below). Kabutops staying rare
+    // (`rarity: 0.3`) on top of this is what actually makes the level-40
+    // gap the OCCASIONAL escalation rather than the only option — this is
+    // the "usually lower, rarely 40" distribution the report asked for,
+    // built from which SPECIES gets picked, not a tweak to the level roll
+    // itself (Kabutops literally cannot exist below level 40 — that's its
+    // real evolution requirement, not a rollable number).
+    isPredator: true,
+  }),
+  kabutops: speciesFromDex("KABUTOPS", {
+    spriteKey: "kabutops",
+    placeholderColor: "#887848",
+    homeLayer: "surface",
+    moves: ["scratch", "harden"],
+    // "Swam the seas... slicing prey with its claws" per mainline flavor
+    // text — a real predator.
+    isPredator: true,
+    // Kabuto's own real, in-sim-reachable evolution (level 40, no item/
+    // condition) — this roster's highest predator evolution floor, and
+    // with `immigration.ts`'s own `PREDATOR_LEVEL_BOOST` on top, a real
+    // invented Kabutops lands around level 46-51. Direct report: "kabutops
+    // are just utterly slaughtering everything... the level 40 gap can
+    // happen, it should just be rare." `rarity` here now ALSO gates
+    // whether Kabutops is even a candidate for a given zone's species pool
+    // at all (`macroGrid.ts`'s `pickZoneSpeciesPool`), not just how large
+    // its population is once present — Beach's fitting predator list was
+    // just this one species, so every earlier mechanism guaranteed its
+    // inclusion whenever a predator slot got filled. 0.3 is a sim-original
+    // guess (roughly "shows up in about 1 of 3 eligible zones"), same
+    // "judge against a real run" standard as Arbok's own 0.12 — not
+    // Arbok-tier rare (Kabutops is a real, intended apex predator when it
+    // does show up, not an unwanted nuisance species), just no longer
+    // guaranteed.
+    rarity: 0.3,
+    biomes: ["wetland", "beach"],
+    preferredTerrain: ["water"],
+  }),
+  omanyte: speciesFromDex("OMANYTE", {
+    spriteKey: "omanyte",
+    placeholderColor: "#7898c8",
+    homeLayer: "surface",
+    // Withdraw is a real early Omanyte move.
+    moves: ["withdraw"],
+    biomes: ["wetland", "beach"],
+    preferredTerrain: ["water"],
+  }),
+  omastar: speciesFromDex("OMASTAR", {
+    spriteKey: "omastar",
+    placeholderColor: "#607098",
+    homeLayer: "surface",
+    moves: ["withdraw"],
+    // Omanyte's own real, in-sim-reachable evolution (level 40, no item/
+    // condition).
+    biomes: ["wetland", "beach"],
+    preferredTerrain: ["water"],
+  }),
+  aerodactyl: speciesFromDex("AERODACTYL", {
+    spriteKey: "aerodactyl",
+    placeholderColor: "#8868c0",
+    homeLayer: "surface",
+    // Real Aerodactyl level-1 moves (Bite/Ancient Power) aren't curated —
+    // Rock Slide/Wing Attack stand in, matching its real Rock/Flying
+    // typing.
+    moves: ["rock_slide", "wing_attack"],
+    // "A ferocious, prehistoric... Pokémon" per mainline flavor text, real
+    // ancient cliff-dwelling predator.
+    isPredator: true,
+    biomes: ["highland", "badlands", "tundra"],
+    preferredTerrain: ["boulder"],
+  }),
+  chansey: speciesFromDex("CHANSEY", {
+    spriteKey: "chansey",
+    placeholderColor: "#f8c0c8",
+    homeLayer: "surface",
+    // Real Chansey level-1 moves (Pound/Tail Whip/Growl) aren't curated —
+    // Safeguard stands in, matching its real caretaking flavor.
+    moves: ["tackle", "safeguard"],
+    // Real evolution (Blissey) needs a friendship threshold — never
+    // evolves in-sim.
+    biomes: ["grassland"],
+  }),
+  lickitung: speciesFromDex("LICKITUNG", {
+    spriteKey: "lickitung",
+    placeholderColor: "#f090a0",
+    homeLayer: "surface",
+    // Tackle is a real early Lickitung move.
+    moves: ["tackle", "body_slam"],
+    // Real further evolution (Lickilicky) needs a specific known move —
+    // never evolves in-sim.
+    biomes: ["jungle", "forest"],
+  }),
+  pinsir: speciesFromDex("PINSIR", {
+    spriteKey: "pinsir",
+    placeholderColor: "#c8a848",
+    homeLayer: "surface",
+    // Harden is a real early Pinsir move.
+    moves: ["harden", "slash"],
+    activityPattern: "diurnal",
+    biomes: ["jungle", "forest"],
+  }),
+  pikachu: speciesFromDex("PIKACHU", {
+    spriteKey: "pikachu",
+    placeholderColor: "#f8d030",
+    homeLayer: "surface",
+    // Real Pikachu level-1 moves (Tail Whip/Thunder Shock/Quick Attack)
+    // aren't curated — Agility stands in, matching its real signature
+    // speed.
+    moves: ["tackle", "agility"],
+    activityPattern: "diurnal",
+    // Real evolution (Raichu) needs a Thunder Stone — never evolves
+    // in-sim.
+    biomes: ["grassland", "forest"],
+  }),
+  eevee: speciesFromDex("EEVEE", {
+    spriteKey: "eevee",
+    placeholderColor: "#c8a878",
+    homeLayer: "surface",
+    moves: ["tackle"],
+    // Every real Eevee evolution needs a stone, a specific known move, or a
+    // friendship/location threshold — never evolves in-sim, an accepted
+    // limitation same as several other entries in this file.
+    biomes: ["grassland", "forest"],
   }),
 };

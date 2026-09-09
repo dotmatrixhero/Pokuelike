@@ -302,7 +302,18 @@ describe("estimateZoneResourceIndex / estimateZoneSpecies", () => {
   });
 
   it("gives a Sanctuary a higher resource estimate than a plain zone of the same biome — direct ask: 'make certain zones more hospitable'", () => {
-    const grid = generateMacroGrid(2024, 200, 200);
+    // Seed 7, not 2024 — Wetland's own base density ((foodDensity +
+    // waterDensity) * RESOURCE_ESTIMATE_SCALE = (0.04+0.28)*4 = 1.28)
+    // already clamps to `estimateZoneResourceIndex`'s max of 1 on its own,
+    // with or without a landmark bonus on top — a pre-existing property of
+    // that formula, not something this test should be sensitive to. Seed
+    // 2024 happened to land the Sanctuary on a Wetland zone (after
+    // Savanna/Mangrove/Tundra reshuffled which biome band this seed's
+    // zones fall into — see worldgen.ts/macroGrid.ts's own new-biome
+    // additions), which collided with that ceiling and made this
+    // assertion vacuous (1 is not greater than 1). Seed 7 reliably lands
+    // Sanctuary on Jungle instead, well under the ceiling either way.
+    const grid = generateMacroGrid(7, 200, 200);
     const sanctuary = grid.zones.find((z) => z.landmark === "sanctuary")!;
     const plain = grid.zones.find((z) => !z.landmark && !z.isOcean && z.biome === sanctuary.biome)!;
     expect(estimateZoneResourceIndex(sanctuary)).toBeGreaterThan(estimateZoneResourceIndex(plain));
