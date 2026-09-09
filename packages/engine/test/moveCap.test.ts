@@ -150,16 +150,32 @@ describe("the four-move cap", () => {
     // tree, on raw damage per action. Every curated move in the roster was
     // being displaced by filler with marginally better numbers, which would
     // have quietly deleted the whole specialisation system.
-    const tree = Object.fromEntries(
-      Array.from({ length: 45 }, (_, i) => [`n${i}`, { id: `n${i}`, name: `n${i}`, cost: 1, leaning: "aggression" as const }])
-    );
+    const treeOf = (n: number) =>
+      Object.fromEntries(
+        Array.from({ length: n }, (_, i) => [`n${i}`, { id: `n${i}`, name: `n${i}`, cost: 1, leaning: "aggression" as const }])
+      );
     const ctx = ctxOf({
-      SLASH: spec("slash", { power: 70, tree } as Partial<MoveSpec>),
+      SLASH: spec("slash", { power: 70, tree: treeOf(45) } as Partial<MoveSpec>),
       DRAGON_CLAW: spec("dragon_claw", { power: 80 }),
     });
     const agent = agentOf({ knownMoves: ["SLASH", "DRAGON_CLAW"] });
 
     expect(pickMoveToForget(agent, agent.knownMoves!, ctx)).toBe("DRAGON_CLAW");
+
+    // Tree SIZE must not decide between two designed moves. The first version
+    // of this term scaled by node count, and a level-50 Charizard promptly
+    // started dropping Slash (36 nodes) for Scratch (45) the moment Scratch
+    // was converted — purely on the count, though Slash wins on damage per
+    // action and both are Normal. Converting the remaining trees would have
+    // reshuffled every movepool in the game for no design reason.
+    const bothDesigned = ctxOf({
+      BIG_TREE: spec("big_tree", { power: 40, cooldownTicks: 3, tree: treeOf(45) } as Partial<MoveSpec>),
+      SMALL_TREE: spec("small_tree", { power: 70, cooldownTicks: 5, tree: treeOf(36) } as Partial<MoveSpec>),
+    });
+    const both = agentOf({ knownMoves: ["BIG_TREE", "SMALL_TREE"] });
+    // 70/6 beats 40/4, so the stronger move survives on its numbers, not on
+    // having twelve more nodes than the other one.
+    expect(pickMoveToForget(both, both.knownMoves!, bothDesigned)).toBe("BIG_TREE");
 
     // Control: strip the tree and the stronger move wins on its numbers, as
     // it should. Without this the assertion above would also pass on a

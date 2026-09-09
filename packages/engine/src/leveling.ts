@@ -846,11 +846,22 @@ const FORGET_UTILITY_BASE_VALUE = 30;
  * lower on raw damage per action. Every curated move in the roster was being
  * displaced by undesigned filler with slightly better numbers.
  *
- * Scaled by the tree's size so a 45-node tree outweighs a stub: a move that
- * can grow into thirty more nodes is worth more than one that is already
- * everything it will ever be.
+ * Deliberately BINARY — "does this move have a designed tree at all" — and
+ * not scaled by node count. Scaling was the first attempt and it was wrong:
+ * it made tree SIZE decide which moves survive, and size is currently an
+ * artifact of how far the v4 conversion has got rather than anything about
+ * the move. A level-50 Charizard started dropping Slash (36 nodes) for
+ * Scratch (45) the moment Scratch was converted, purely on the node count,
+ * even though Slash wins on damage per action and the two are the same type.
+ * Converting the remaining trees would have kept reshuffling every movepool
+ * in the game for no design reason.
+ *
+ * The bug this term exists for was never 36-vs-45; it was curated-move
+ * versus undesigned dex filler. Binary answers that and nothing else, and
+ * once every tree is 45 nodes a scaled version would collapse to this
+ * anyway.
  */
-const FORGET_TREE_POTENTIAL_PER_NODE = 3;
+const FORGET_HAS_TREE_BONUS = 120;
 
 /**
  * What this move is worth to this agent, right now. Higher = keep.
@@ -898,7 +909,7 @@ function moveKeepScore(agent: Agent, moveId: string, ctx: LevelingContext, ownTy
       .filter((t): t is PokemonType => t !== undefined)
   );
   const coverage = otherTypes.has(spec.type) ? 0 : FORGET_COVERAGE_BONUS;
-  const potential = FORGET_TREE_POTENTIAL_PER_NODE * Object.keys(spec.tree ?? {}).length;
+  const potential = Object.keys(spec.tree ?? {}).length > 0 ? FORGET_HAS_TREE_BONUS : 0;
 
   return invested + perAction * stab + coverage + potential;
 }
