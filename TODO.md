@@ -6759,10 +6759,14 @@ not something this pathfinding pass itself caused or is positioned to fix.
 - [x] **3 new crops**: Groundnut (Savanna, drought-resistant), Mango
       (Mangrove/Jungle), Mushroom (Tundra/Highland/Snow, winter-hardy) —
       crops.ts, same tier-ladder gates every other crop uses.
-- [x] **9 new species**: Girafarig/Tauros (Savanna), Corphish/Crawdaunt/
-      Wingull/Pelipper (Mangrove), Swinub/Piloswine/Sneasel (Tundra) —
-      species.ts, same "each in-sim-reachable evolution gets its own entry"
-      standard the desert/jungle/beach batch already set.
+- [x] **8 new species, all Gen 1 with real sprite art**: Kangaskhan/Tauros
+      (Savanna), Poliwag/Poliwhirl/Slowpoke/Slowbro (Mangrove), Dewgong
+      (Tundra/Snow) — species.ts. First pass picked 8 Gen 2/3 species by
+      flavor fit alone without checking for sprite art first; direct catch:
+      "Oh... you did Gen 2... I don't think we got sprites for em." Redone
+      Gen-1-only, every pick's `public/sprites/` art confirmed present
+      BEFORE adding it this time. Krabby/Kingler (already Gen 1, already
+      arted) also picked up "mangrove" as a real secondary biome for free.
 - [x] **Real recoloring for biome uniqueness** — direct ask: "just use some
       recoloring techniques." A `BIOME_TINT` ground wash (palette.ts,
       renderer.ts's `drawBiomeTint`) and a `BIOME_FLORA_TINT` tree/bush

@@ -14862,14 +14862,30 @@ change is ineffective. Flagged rather than presented as false precision.
   winterHardy/droughtResistant" encoded a narrow, now-stale invariant —
   rewritten to assert the real, still-small set (`["mushroom","potato"]`/
   `["groundnut","potato"]`) instead of "only Potato, forever."
-- **9 new species** (`species.ts`): Girafarig/Tauros (Savanna — Tauros
-  already has real drawn sprite art, `public/sprites/tauros_*.png`),
-  Corphish/Crawdaunt (Mangrove, tagged `isPredator` — real "attacks
-  anything" mainline flavor text), Wingull/Pelipper (Mangrove/Beach coastal
-  birds), Swinub/Piloswine (Tundra/Snow, real in-sim-reachable evolution at
-  level 33), Sneasel (Tundra/Snow, `isPredator` — real "vicious... steals
-  eggs" flavor text). Most have no dedicated sprite art yet — same accepted
-  letter-glyph fallback every other undrawn roster species already uses.
+- **Species, redone Gen-1-only after a real catch.** First pass added 9
+  species (Girafarig, Tauros, Corphish, Crawdaunt, Wingull, Pelipper,
+  Swinub, Piloswine, Sneasel) picked by flavor fit alone — direct catch,
+  next message: "Oh... you did Gen 2... Uh... I don't think we got sprites
+  for em. Right? 😬" Checked directly: right — only Tauros (Gen 1) had real
+  drawn sprite art in `public/sprites/`; the other 8 (Gen 2/3) had none and
+  were silently riding the letter-glyph fallback. Replaced all 8 with
+  Gen-1-only picks, this time confirming each one's `public/sprites/`
+  art existed BEFORE adding it, not after:
+  - **Savanna**: Tauros (kept) + Kangaskhan (real open-plains/outback
+    marsupial, no mainline evolution).
+  - **Mangrove**: Poliwag/Poliwhirl (real "prefers to live near water... in
+    swamps" flavor text) + Slowpoke/Slowbro (real "lazily suns itself on the
+    shore" flavor text).
+  - **Tundra**: Dewgong — not a new base species but Seel's own real,
+    in-sim-reachable evolution (level 34, no item/condition), Seel's own
+    entry left untouched; a real arctic pinniped fits Tundra as a natural
+    secondary alongside Seel's existing Snow/Wetland.
+  - **Krabby/Kingler** (already Gen 1, already arted, already in the
+    roster) picked up "mangrove" as a real secondary biome for free — no
+    new species needed to give Mangrove a resident crab.
+  Caught one more real test regression from this: `species.test.ts`'s own
+  `ALL_BIOME_NAMES` was a hardcoded list that predated Savanna/Mangrove/
+  Tundra and had never been updated — fixed by adding the three real names.
 - **Recoloring, not new art files** (direct ask: "rip more or reuse and
   recolor existing ones... just use some recoloring techniques"):
   `BIOME_TINT` (palette.ts) — a low-alpha ground-color wash over the shared

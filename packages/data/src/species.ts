@@ -820,7 +820,10 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // "Digs holes in beaches to live in" per mainline flavor text — a real,
     // literal burrower, same standard Diglett/Sandshrew's own callouts use.
     buildsShelter: true,
-    biomes: ["beach", "wetland"],
+    // "mangrove" added alongside the new biome itself — a real coastal crab
+    // that already digs beach/wetland burrows fits a brackish marsh just as
+    // naturally, no new species needed to give Mangrove a crab resident.
+    biomes: ["beach", "wetland", "mangrove"],
     preferredTerrain: ["water"],
   }),
   kingler: speciesFromDex("KINGLER", {
@@ -829,7 +832,8 @@ export const SPECIES: Record<string, SpeciesDef> = {
     homeLayer: "surface",
     moves: ["tackle", "water_gun", "harden"],
     buildsShelter: true,
-    biomes: ["beach", "wetland"],
+    // See krabby's own comment immediately above — same reasoning.
+    biomes: ["beach", "wetland", "mangrove"],
     preferredTerrain: ["water"],
   }),
   shellder: speciesFromDex("SHELLDER", {
@@ -952,109 +956,96 @@ export const SPECIES: Record<string, SpeciesDef> = {
 
   // --- New species below: direct follow-up ask, alongside the new
   // Savanna/Mangrove/Tundra biomes: "spawn more unique Pokemon species in
-  // these places to give em flavor." Real residents for all three, same
-  // "each evolution reachable purely by in-sim leveling gets its own
-  // curated entry" standard the desert/jungle/beach batch above set
-  // (checked against each dex entry's own `evolutions`, `conditions: {}`
-  // only). Most have no dedicated sprite art yet (public/sprites/) — same
-  // accepted letter-glyph fallback (`getSprite` -> null -> letter) every
-  // other undrawn roster species already uses, not a blocker.
-  girafarig: speciesFromDex("GIRAFARIG", {
-    spriteKey: "girafarig",
-    placeholderColor: "#f8c860",
-    homeLayer: "surface",
-    moves: ["tackle", "psybeam"],
-    activityPattern: "diurnal",
-    // A real open-plains grazer per mainline flavor text — no mainline
-    // evolution exists at all, so no "never evolves in-sim" caveat needed.
-    biomes: ["savanna", "grassland"],
-  }),
+  // these places to give em flavor." First pass picked Gen 2/3 species by
+  // flavor fit alone and only checked afterward that public/sprites/ had no
+  // art for 8 of the 9 — direct catch: "Oh... you did Gen 2... I don't
+  // think we got sprites for em." Replaced with Gen-1-only picks, every one
+  // confirmed to have real drawn sprite art in public/sprites/ BEFORE being
+  // added this time (checked directly, not assumed), same "each evolution
+  // reachable purely by in-sim leveling gets its own curated entry"
+  // standard as before (checked against each dex entry's own `evolutions`,
+  // `conditions: {}` only).
   tauros: speciesFromDex("TAUROS", {
     spriteKey: "tauros",
     placeholderColor: "#c88840",
     homeLayer: "surface",
     moves: ["tackle", "body_slam"],
     activityPattern: "diurnal",
-    // A real wild-plains bull — already has drawn sprite art
-    // (public/sprites/tauros_*.png), unlike most of this batch.
+    // A real wild-plains bull.
     biomes: ["savanna", "grassland"],
   }),
-  corphish: speciesFromDex("CORPHISH", {
-    spriteKey: "corphish",
-    placeholderColor: "#e05838",
+  kangaskhan: speciesFromDex("KANGASKHAN", {
+    spriteKey: "kangaskhan",
+    placeholderColor: "#c8845c",
     homeLayer: "surface",
-    // Real Corphish level-1 moves are Harden/Bubble; Bubble isn't in this
-    // roster's curated move set, so Water Gun stands in for it — same
-    // off-type-reuse acceptance this file's own Onix/Dratini entries use.
-    moves: ["harden", "water_gun"],
-    // "An extremely aggressive Pokemon... will attack anything" per
-    // mainline flavor text — a real opportunistic predator, same standard
-    // Ekans/Arbok/Zubat/Golbat above were tagged under.
-    isPredator: true,
+    // Real Kangaskhan level-1 move is Comet Punch, not in this roster's
+    // curated move set — Tackle/Body Slam stand in, same off-type-reuse
+    // acceptance this file's own Onix/Dratini entries use.
+    moves: ["tackle", "body_slam"],
+    activityPattern: "diurnal",
+    // A real open-plains/outback marsupial per mainline flavor text — no
+    // mainline evolution exists at all, so no "never evolves in-sim"
+    // caveat needed.
+    biomes: ["savanna", "grassland"],
+  }),
+  poliwag: speciesFromDex("POLIWAG", {
+    spriteKey: "poliwag",
+    placeholderColor: "#68a0c0",
+    homeLayer: "surface",
+    // Water Gun is Poliwag's real level-1 move.
+    moves: ["tackle", "water_gun"],
+    // "Prefers to live near water... in swamps" per mainline flavor text —
+    // a real, literal match for a coastal marsh.
     biomes: ["mangrove", "wetland"],
     preferredTerrain: ["water"],
   }),
-  crawdaunt: speciesFromDex("CRAWDAUNT", {
-    spriteKey: "crawdaunt",
-    placeholderColor: "#983020",
+  poliwhirl: speciesFromDex("POLIWHIRL", {
+    spriteKey: "poliwhirl",
+    placeholderColor: "#5088b0",
     homeLayer: "surface",
-    moves: ["harden", "water_gun", "slash"],
-    // See corphish's own comment immediately above — same direct ask, same reasoning.
-    isPredator: true,
+    moves: ["tackle", "water_gun"],
     biomes: ["mangrove", "wetland"],
     preferredTerrain: ["water"],
+    // Real further evolution (Poliwrath) needs a Water Stone — same
+    // "never evolves in-sim" limitation as Growlithe/Vulpix/Cubone above.
   }),
-  wingull: speciesFromDex("WINGULL", {
-    spriteKey: "wingull",
-    placeholderColor: "#88c0e0",
-    homeLayer: "surface",
-    moves: ["tackle", "peck"],
-    activityPattern: "diurnal",
-    // A real coastal seabird — Mangrove/Beach both real coastline habitats.
-    biomes: ["mangrove", "beach"],
-  }),
-  pelipper: speciesFromDex("PELIPPER", {
-    spriteKey: "pelipper",
-    placeholderColor: "#6098c8",
-    homeLayer: "surface",
-    moves: ["tackle", "peck", "wing_attack"],
-    activityPattern: "diurnal",
-    biomes: ["mangrove", "beach"],
-  }),
-  swinub: speciesFromDex("SWINUB", {
-    spriteKey: "swinub",
-    placeholderColor: "#c8a888",
+  slowpoke: speciesFromDex("SLOWPOKE", {
+    spriteKey: "slowpoke",
+    placeholderColor: "#f0a8b8",
     homeLayer: "surface",
     moves: ["tackle"],
-    // A real cold-scrub forager per mainline flavor text.
-    biomes: ["tundra", "snow"],
+    // "Lazily suns itself on the shore" per mainline flavor text — a real
+    // shoreline/marsh dweller.
+    biomes: ["mangrove", "wetland"],
+    preferredTerrain: ["water"],
   }),
-  piloswine: speciesFromDex("PILOSWINE", {
-    spriteKey: "piloswine",
-    placeholderColor: "#a88868",
+  slowbro: speciesFromDex("SLOWBRO", {
+    spriteKey: "slowbro",
+    placeholderColor: "#e888a0",
     homeLayer: "surface",
-    // Avalanche is Piloswine's real signature move, but this roster's
-    // curated move set has no top-level "avalanche" (only nested variants
-    // under other moves' own footing trees) — Ice Beam stands in instead,
-    // same off-type-reuse acceptance as Corphish/Sneasel above.
-    moves: ["tackle", "ice_beam"],
-    biomes: ["tundra", "snow"],
-    // Real further evolution (Mamoswine) needs an item (Icicle Spinner or
-    // move-known condition, not a plain level) — same "never evolves
-    // in-sim" limitation as Growlithe/Vulpix/Cubone/Golbat above.
+    moves: ["tackle", "water_gun"],
+    biomes: ["mangrove", "wetland"],
+    preferredTerrain: ["water"],
+    // Real further evolution (Mega Slowbro) is a battle-only Mega, not a
+    // real in-sim leveling path — same "never evolves further in-sim"
+    // limitation as Piloswine/Golbat above.
   }),
-  sneasel: speciesFromDex("SNEASEL", {
-    spriteKey: "sneasel",
-    placeholderColor: "#785088",
+  dewgong: speciesFromDex("DEWGONG", {
+    spriteKey: "dewgong",
+    placeholderColor: "#c8f0f8",
     homeLayer: "surface",
-    // Scratch is Sneasel's real level-1 move; Ice Beam stands in for its
-    // real ice-type coverage (this roster has no curated Icy Wind/Faint
-    // Attack), same off-type-reuse acceptance as Corphish above.
-    moves: ["scratch", "ice_beam"],
-    // "Ruthlessly steals eggs... vicious temperament" per mainline flavor
-    // text — a real predator, same standard as Corphish/Crawdaunt above.
-    isPredator: true,
-    activityPattern: "nocturnal",
-    biomes: ["tundra", "snow"],
+    // Real Dewgong level-1 move is Headbutt, not in this roster's curated
+    // move set — Water Gun/Ice Beam stand in instead, matching its own
+    // real Water/Ice typing.
+    moves: ["tackle", "water_gun", "ice_beam"],
+    // Seel's own real, in-sim-reachable evolution (level 34, no item/
+    // condition) — Seel itself stays tagged ["snow", "wetland"] above
+    // unchanged; this is its own curated entry for the evolved form, same
+    // "don't let an evolved agent quietly lose its personality" standard
+    // this file's other evolution-completion entries follow. A real
+    // arctic pinniped — Tundra as a real cold-open-ground secondary
+    // alongside Seel's own Snow/Wetland pairing.
+    biomes: ["snow", "tundra"],
+    preferredTerrain: ["water"],
   }),
 };
