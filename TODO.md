@@ -442,6 +442,54 @@ Final, from a real run:
 Also fixed across these passes: `mourned` reads *"we lost the same friend"*,
 and `trainedTogether` was *"drilled beside them"* — which meant nothing.
 
+## BUILT: rapport prose in the inspector — visible in game
+
+`renderRapportGroup` already existed (bars and scores, top 6 by absolute
+score). It now carries the sentence under each bar, so the panel says *why* a
+score is what it is rather than only how big it is.
+
+**Live-verified**, not reasoned about: dev server, Playwright, sim run to tick
+2364, clicked until an agent with rapport came up. A Scyther of Tiderun:
+
+```
+RAPPORT
+  Krabby 0-1        |||||||| 0.14
+    We trained together.
+  someone (lost)    ||       0.02
+    We have sat together.
+```
+
+**One renderer now.** `packages/engine/src/rapportProse.ts` holds the only
+copy — the web inspector and both runner scripts import it, so what prints in
+a validator is literally what shows in game. It had been copy-pasted into two
+runner scripts already; a third copy in the web package was the point at which
+that stopped being acceptable.
+
+### Decay already exists — do not build it twice
+
+Flagged as a possible gap off a loose phrase of mine ("decay hasn't caught up
+yet"). It has not caught up because it is *running*:
+
+- `RAPPORT_DECAY_PER_TICK = 0.9977` — a ~300-tick half-life, applied lazily at
+  read time by `decayedRapportScore`.
+- `RAPPORT_PRUNE_THRESHOLD = 0.02` — an edge under it is deleted outright, on
+  read or on write.
+
+The -0.07 grudge against a dead agent in the earlier sample was decay
+mid-flight, not its absence.
+
+**Two real open calls it does raise**, both design rather than defect:
+
+1. **Should an edge to a *dead* agent decay faster, or prune on death?**
+   Today it fades at the ordinary rate, so a creature can carry a live
+   rivalry with something that has been dead for hundreds of ticks. That is
+   either a bug or the best thing in the system, and it is a taste call.
+2. **Memories never decay — only `score` does.** "We have fought five times"
+   stays five forever while the score fades to nothing, and the whole memory
+   list dies at once when the edge prunes. So a relationship's *feeling* fades
+   gradually and its *history* vanishes in one step. Deliberate so far, but
+   worth ruling on.
+
 ## IMPLEMENTATION ORDER — the move from design into code
 
 Asked directly: *"Do you think you're potentially ready to really start

@@ -668,6 +668,10 @@
       }
       .inspect-meter-fill { height: 100%; border-radius: 4px; }
       .inspect-meter-value { flex: 0 0 auto; min-width: 34px; text-align: right; font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+      /* Why a rapport score is what it is — sits under its own meter row,
+         indented to the meter track so the sentence reads as belonging to the
+         bar above it rather than as a new entry. */
+      .inspect-rapport-why { margin: 0 0 6px 84px; font-size: 11px; line-height: 1.45; color: var(--text-dim); opacity: 0.85; }
 
       .move-list { display: flex; flex-direction: column; gap: 3px; }
       .move-row { border-bottom: 1px dashed #232a34; padding-bottom: 3px; }
