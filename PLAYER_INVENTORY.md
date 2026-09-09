@@ -90,6 +90,11 @@ sticks, and two slots enforces that by construction.
 
 ### Equipment grants moves
 
+**Decided, and it's now an architecture rather than a convenience — see
+`MOVES_AND_TOOLS.md`.** A move is an effect; a Pokémon reaches it through its
+body and a human through a tool. `grantsMoves` points at real `MoveSpec`s,
+and a tool always delivers a *slice* of a move rather than the whole thing.
+
 The pitch lists the player's moves as *"punch or kick, or swing or yell"* —
 and **swing is what a stick gives you.** That's the model:
 

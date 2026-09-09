@@ -1,5 +1,46 @@
 # Moves and tools are one system
 
+**Status: direction decided, specifics open.** Confirmed directly — *"Yes.
+I'm fairly confident about the items as moves direction."* The architecture
+below is the one to build against; the field shapes, the exact per-move
+slices, and the balance numbers are still to be worked out, and the terrain
+measurement under "the biggest risk" is still outstanding.
+
+## Decided
+
+1. **Items and moves share one effect vocabulary.** A move is an effect; a
+   Pokémon reaches it through its body, a human through a tool. Not two
+   systems that resemble each other — one system with three delivery
+   mechanisms (innate, tool-granted, consumable).
+2. **A tool is a slice of a move, never the whole move.** Cut damages, fells
+   and clears; an axe only fells, a machete only clears, a knife only does
+   the damage slice. This is what makes pillar 3 structural instead of a
+   tuning problem.
+3. **Consumables are borrowed moves.** A smoke bomb fires Smokescreen
+   without knowing it.
+4. **The player's loadout is their moveset.** No separate ability screen.
+5. **Tool-reachability rule:** can a human reproduce the effect with
+   materials and technique, or does it require being the creature?
+   Flamethrower yes, as a weak and self-endangering slice. Ice Beam and
+   Dragon Rage no.
+6. **The unreachable set is load-bearing and stays closed.** It is the
+   mechanical reason a partner is necessary. Act 2's smithing tier upgrades
+   slices; it never opens that column.
+7. **Raft is Act 2.**
+
+## Still open
+
+- The generalised terrain-effect field shape — the moves agent's call; the
+  ask is in "What the moves agent needs from this" below.
+- Whether a tool-granted move can ever become permanently known.
+- Throw range for consumables.
+- Whether a partner can use tools (recommendation: no).
+- ~~Unmeasured: terrain change before the vocabulary is widened.~~
+  **Measured — there is headroom.** Vegetation grew 11.8% over 4 seeds x
+  6000 ticks; fire produced zero events. See "The risk, now measured".
+
+---
+
 The idea, as given:
 
 > "consumable items that sorta mimic moves that Pokémon use would be really
@@ -156,19 +197,47 @@ Over a long run, **the map records what lived there** — which is pillar 4
 ("the land remembers") arriving without being designed for, and it's the kind
 of emergent history the chronicle exists to narrate.
 
-### Which is also the biggest risk in this document
+### The risk, now measured — and there is headroom
 
-`igniteNear` is **already on the live hit path**. Fire already spreads and
-consumes fuel. Generalising terrain effects across a wide move roster and a
-widened species roster could strip or burn the world, and the failure mode is
-the one this project keeps hitting: a feedback loop nobody predicted, only
-visible in a multi-thousand-tick run.
+The worry was: if moves fell trees and start fires, thousands of agents doing
+that forever could strip the world bare. `igniteNear` is already on the live
+hit path and fire already spreads, so this could in principle be happening
+today.
 
-**This is unmeasured.** Before the vocabulary is generalised, count terrain
-changes per 1000 ticks by cause, across seeds — the same shape as every other
-validation script here. If a mature roster is stripping bushes and burning
-forest faster than `flora.ts` regrows it, that's a balance problem to find
-now rather than after twenty moves are written against it.
+**Measured** (`validateTerrainChurn.ts`, 4 seeds x 6000 ticks). The answer is
+the opposite of the worry:
+
+| Vegetation tiles (tree/bush/flora/food/seedling) | |
+|---|---|
+| Start | 1300 |
+| End | **1453** |
+| Change | **+11.8%** |
+
+The world is **mildly overgrowing**, not stripping. Regrowth currently
+outpaces everything consuming it. Net stock: `flora` +512, `seedling` +70,
+against `food` −429 — plants cycling between states with vegetation up
+overall.
+
+Two further findings from the same run:
+
+- **Fire never happens.** Zero `cause: "fire"` terrain changes in 24,000
+  agent-ticks. The whole fire system — spread, fuel, burn-out, DoT — produced
+  nothing. So the "fire is already live on the hit path" risk is currently
+  **inert**, and by this project's own standard ("unreachable content is a
+  bug") that is worth a look on its own.
+- **Churn is dominated by seasons.** Freeze 72/1k ticks and thaw 63/1k are
+  the top two causes by a wide margin — that's just the ice cycle working.
+  Drought and rain are single digits.
+
+**What this means for the direction:** there is real headroom. Adding
+tree-felling, brush-clearing and fire-starting moves will not strip a world
+that is currently regrowing faster than it is consumed. Re-run this script
+after the move roster widens and watch the vegetation percentage — if it goes
+negative, that's the signal to tune.
+
+**Caveat on the instrument:** `terrainBurn` and `terrainFill` don't log
+`terrainChanged`, so they're invisible in the flow table and only show up in
+the stock comparison. Worth fixing before using flow numbers to tune.
 
 ### And it has to be legible
 
@@ -194,8 +263,84 @@ The concrete asks, so the two workstreams meet:
 3. **Keep effects declarative on `MoveSpec`.** If an item can point at a
    move id and get its effect, tools cost nearly nothing to add. If effects
    are hardcoded per move in `predation.ts`, every tool is bespoke work.
-4. **Tag which moves are tool-reachable.** Not everything should be —
-   Flamethrower shouldn't have a hand-held equivalent.
+4. **Tag which moves are tool-reachable**, using the rule in "Which moves
+   are tool-reachable" below: can a human reproduce the effect with
+   materials and technique, or does it require being the creature? Fire and
+   thrown stone yes; Ice Beam and Dragon Rage no. The unreachable set is
+   load-bearing — it's what the partner is for.
+
+---
+
+## Which moves are tool-reachable
+
+Corrected from an earlier line in this doc that said Flamethrower shouldn't
+have a hand-held equivalent:
+
+> "Flamethrower could be. Dragon rage or ice beam, probably not."
+
+Right — and the difference between those three is a rule, not a judgement
+call. The question isn't how *strong* a move is. It's:
+
+> **Can a human reproduce the effect with materials and technique, or does
+> it require being the creature?**
+
+- **Flamethrower** — directed fire. People have built fire-projecting things
+  for millennia: burning pitch, a bellows, resin through a tube. Squarely
+  inside `HUMANS_DESIGN.md`'s pre-industrial ladder.
+- **Ice Beam** — projecting cold. There is no arrangement of wood, stone,
+  fibre and hide that fires cold at something. Cold isn't a substance you
+  can throw.
+- **Dragon Rage** — not a material phenomenon at all. It's an expression of
+  what the creature *is*.
+
+### The gradient
+
+Not binary — most of the interesting cases are the middle row.
+
+| | Examples | Why |
+|---|---|---|
+| **Reachable** | Cut, Scratch, Tackle, Ember, Rock Throw, Dig, Smokescreen, String Shot, Flash, Poison Sting | Blade, club, fire, thrown stone, spade, smoke, net, torch, harvested venom |
+| **Reachable as a weak slice** | **Flamethrower**, Water Gun, Vine Whip, Bulldoze | Real devices exist, but crude: short range, consumable fuel, slow, and dangerous to the user |
+| **Not reachable** | Ice Beam, Dragon Rage, Thunderbolt, Psychic, Shadow Ball, Moonblast | Requires an organ, a nature, or a force outside the tech ladder |
+
+**A human Flamethrower should be genuinely dangerous to hold.** Short range,
+limited fuel, and it ignites terrain — including the tile you're standing on,
+via the `fire.ts` spread that already exists. That's the pillar-1 cost the
+slice rule asks for, and it's the difference between a fire-lance and a
+Charmeleon: the Charmeleon is never in danger from its own breath.
+
+### Roughly by type
+
+Types are a decent proxy, though the line doesn't follow them exactly:
+
+- **Mostly reachable** — Normal, Rock, Ground, Fighting, Poison, Bug
+  (technique, stone, earth, venom, cordage and nets)
+- **Partially** — Fire, Water, Grass, Dark (fire yes; moving an ocean no;
+  a whip yes, growing a vine no; a dirty trick or a shout yes)
+- **Not reachable** — Electric, Ice, Psychic, Ghost, Dragon, Fairy
+
+### The payoff, and it's the best part
+
+**The moves a human can't reach are exactly why you need a partner.**
+
+You can make fire, throw stones, cut, dig, snare, poison and hide. You will
+never call lightning, freeze a lake, or do whatever a Dragon does. Those
+aren't gated behind a level or a quest — they're gated behind *not being that
+thing*, permanently.
+
+That is pillar 3 — the rugged individual is a myth — expressed through the
+move list itself, with no dialogue and no scripting. The partner's
+irreplaceable contribution is defined by the shape of what tools can't do.
+And it means the unreachable list should stay genuinely unreachable: every
+move that gets a hand-held equivalent is one less reason to need somebody.
+
+### Act 2 raises the ceiling, slightly
+
+The tech ladder moves: a smithing settlement means metal, and metal means a
+bow, better edges, maybe a real fire-lance. So a few moves cross from
+"weak slice" to "solid slice" — but **nothing crosses out of the unreachable
+column**, because that column is defined by physics and nature rather than by
+craftsmanship. The pre-industrial ceiling is deliberate.
 
 ## Open questions
 

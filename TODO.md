@@ -3,6 +3,79 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## DECIDED: items and moves are one system — see MOVES_AND_TOOLS.md
+
+Direction confirmed: *"I'm fairly confident about the items as moves
+direction."* Unbuilt, but this is what to build against.
+
+**A move is an effect. A Pokémon reaches it through its body; a human
+reaches it through a tool.** One vocabulary, three deliveries — innate,
+tool-granted (`ItemDef.grantsMoves`), consumable (`consumableMove`).
+
+- **A tool is a slice of a move, never the whole move.** Cut damages, fells
+  trees and clears foliage; an axe only fells, a machete only clears, a
+  knife only does the damage slice as Scratch. Pillar 3's "nothing craftable
+  is sufficient" then holds structurally rather than by tuning.
+- **Consumables are borrowed moves** — a smoke bomb fires Smokescreen
+  without knowing it.
+- **The player's loadout is their moveset.** No ability screen.
+- **Tool-reachability:** can a human reproduce the effect with materials and
+  technique, or does it require *being* the creature? Fire, stone, blades,
+  smoke, nets, venom, digging → yes. **Flamethrower yes**, as a crude slice
+  that ignites the tile you stand on. **Ice Beam / Dragon Rage / Thunderbolt
+  / Psychic → no.**
+- **The unreachable set is load-bearing.** It's the mechanical reason a
+  partner is necessary — every move that gets a hand-held equivalent is one
+  less reason to need somebody. Act 2's smithing tier improves slices but
+  never opens that column.
+- This generalizes an existing pattern: moves already change the world five
+  ways (`terrainBurn`, `terrainFill`, `consumesOwnTerrain`, `igniteNear` on
+  the live hit path, and a fertility bump).
+- It's also the inversion of `MOVES_DESIGN.md`'s Round Four HM finding —
+  HMs are Pokémon-as-key; this is tool-as-key.
+
+**Interface asks for the moves work** (separate agent): generalize
+`terrainBurn`/`terrainFill` into one `{ from?, to, yields? }` field; make
+`yields` the crafting hook (a Pokémon felling a tree currently drops
+nothing); keep effects declarative on `MoveSpec` so an item can point at a
+move id; tag which moves are tool-reachable.
+
+**Risk: measured, and there is headroom.** `validateTerrainChurn.ts`, 4
+seeds x 6000 ticks: vegetation went **1300 -> 1453 (+11.8%)**, i.e. the world
+mildly overgrows rather than stripping. Churn is dominated by the seasonal
+ice cycle (freeze 72/1k, thaw 63/1k). **Fire produced zero events** across
+24,000 agent-ticks, so the "igniteNear is already live" worry is currently
+inert — and by the "unreachable content is a bug" standard, fire never
+firing is worth a look on its own. Re-run after the move roster widens and
+watch the vegetation percentage.
+
+## Fire safety belongs to biome placement, not a global constant
+
+Design position, given directly: *"fire does not spread a ton because they
+shouldn't be around a ton of flammable stuff all the time. The environment
+they normally exist in might have a couple fires, but they are designed to
+burn themselves out. Now, if they take over a place they shouldn't, like a
+forest, and it gets hit by a drought, maybe that ends up causing a huge
+disaster."*
+
+So fire safety is **emergent from where a species lives**: a Fire-type in
+fuel-poor volcanic ground has fires that die on their own; the same species
+in a forest is a catastrophe waiting for a dry season. Nobody tunes a spread
+constant down — the biome does it.
+
+Three links, all of which already half-exist:
+1. **Fuel load as a biome property** — Fire-type home biomes generated
+   genuinely fuel-poor.
+2. **Species-biome fit enforceable *and* violable** — a mismatch via
+   migration/dispersal is *the story*, not a bug to prevent. If placement is
+   airtight the disaster never happens.
+3. **Drought as trigger** — already real in `weather.ts` at 11.4 changes/1k.
+
+Handed to the biome-zone-logic agent as `PROMPT_biome_fire_context.md`, with
+the measured baseline and the concern that a wider roster (70 active vs 1085
+in the dex) is the risk multiplier: loose gating burns every forest, airtight
+gating kills the mechanic. Target is "rare but real."
+
 ## Winter ice: a lid, not a solid freeze — see BREADTH_DESIGN.md
 
 Decided in discussion, unbuilt. Today `weather.ts` freezes only bodies below
