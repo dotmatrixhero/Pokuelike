@@ -101,8 +101,15 @@ function nameOf(label: string | undefined, fallback: string): string {
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
-/** "an Onix", "a Scyther" — the broken article was half of why the old lines read wrong. */
-function a(label: string | undefined, fallback: string): string {
+/**
+ * "an Onix", "a Scyther" — the broken article was half of why the old lines
+ * read wrong. `repeated` is for the second clause in a line that would name
+ * the same creature again: "We brought down a Scyther together. They have
+ * pulled a Scyther off me" reads as a stutter or a bug, while "pulled another
+ * off me" refers back the way speech does.
+ */
+function a(label: string | undefined, fallback: string, repeated = false): string {
+  if (repeated) return "another";
   const name = nameOf(label, fallback);
   return `${/^[AEIOU]/.test(name) ? "an" : "a"} ${name}`;
 }
@@ -131,28 +138,38 @@ function a(label: string | undefined, fallback: string): string {
  *   is real. Nothing invents an event that did not happen — no "never left my
  *   side" on an edge that only knows a count.
  */
-const CLAUSE: Record<RapportReason, (n: number, subject?: string, kin?: "ours" | "other") => string> = {
+const CLAUSE: Record<RapportReason, (n: number, subject?: string, kin?: "ours" | "other", again?: boolean) => string> = {
   rescued: (n) =>
     n <= 1 ? `I carried them home when they could not walk.` : `I have carried them home ${times(n)}.`,
   wasRescued: (n) =>
     n <= 1 ? `They carried me home when I could not walk.` : `They have carried me home ${times(n)}.`,
   mourned: (n) =>
     n <= 1 ? `We lost the same friend, and we were both there for it.` : `We have buried the same friends ${times(n)} now.`,
-  defeatedTogether: (n, s) =>
+  defeatedTogether: (n, s, _k, again) =>
     n <= 2
-      ? `We brought down ${a(s, "creature")} together.`
-      : `We have brought down ${count(n)} between us, one of them ${a(s, "creature")}.`,
+      ? `We brought down ${a(s, "creature", again)} together.`
+      : `We have brought down ${count(n)} between us, one of them ${a(s, "creature", again)}.`,
   bonded: () => `We are mates.`,
   // "Three have died" was ambiguous in the way that mattered: foes or allies?
   // The subject now carries `kin`, so the sentence can just say.
-  survivedTogether: (n, s, kin) =>
+  survivedTogether: (n, s, kin, again) =>
     kin === "ours"
       ? n <= 1
-        ? `I watched one of our own die in front of us — ${a(s, "herd-mate")}.`
-        : `${cap(count(n))} of our own have died in front of us, the last of them ${a(s, "herd-mate")}.`
+        ? again
+          ? `I watched one of our own die in front of us.`
+          : `I watched one of our own die in front of us — ${a(s, "herd-mate")}.`
+        : again
+          ? `${cap(count(n))} of our own have died in front of us.`
+          : `${cap(count(n))} of our own have died in front of us, the last of them ${a(s, "herd-mate")}.`
       : n <= 1
-        ? `I watched ${a(s, "creature")} die in front of us. Not one of ours.`
-        : `${cap(count(n))} have died in front of us, the last of them ${a(s, "creature")}. None were ours.`,
+        ? again
+          ? `I watched another die in front of us, and it was none of our herd.`
+          : `I watched ${a(s, "creature")} die in front of us, and it was none of our herd.`
+        // "the last another" is nonsense — a naming slot cannot take the
+        // refer-back word, so this drops the name instead of mangling it.
+        : again
+          ? `${cap(count(n))} have died in front of us, and none of them were ours.`
+          : `${cap(count(n))} have died in front of us — none of them ours, the last ${a(s, "creature")}.`,
   weatheredTogether: (n, s) =>
     n <= 1
       ? `${nameOf(s, "The weather")} drove us off our own ground, and we left together.`
@@ -163,14 +180,17 @@ const CLAUSE: Record<RapportReason, (n: number, subject?: string, kin?: "ours" |
   // me", which is euphemism — direct note: "put themselves in front sounds
   // like a euphemism... more specificity please." What the mechanic actually
   // is: a predator had locked onto a herd-mate, and this agent hit it.
-  defended: (n) =>
+  // "Something had hold of me" was the euphemism problem all over again —
+  // vague where the note asked for specificity. The predator is now recorded
+  // at the defence site, so the sentence can name it.
+  defended: (n, s, _k, again) =>
     n <= 1
-      ? `Something had hold of them, and I hit it until it let go.`
-      : `${cap(times(n))} something has had hold of them, and ${times(n) === "twice" ? "both times" : "every time"} I hit it until it let go.`,
-  wasDefended: (n) =>
+      ? `${cap(a(s, "predator", again))} had hold of them, and I hit it until it let go.`
+      : `I have pulled ${a(s, "predator", again)} off them, and ${count(n - 1)} other ${n === 2 ? "thing" : "things"} besides.`,
+  wasDefended: (n, s, _k, again) =>
     n <= 1
-      ? `Something had hold of me, and they hit it until it let go.`
-      : `${cap(times(n))} something has had hold of me, and ${times(n) === "twice" ? "both times" : "every time"} they drove it off.`,
+      ? `${cap(a(s, "predator", again))} had hold of me, and they hit it until it let go.`
+      : `They have pulled ${a(s, "predator", again)} off me, and ${count(n - 1)} other ${n === 2 ? "thing" : "things"} besides.`,
   sleptSafely: (n) =>
     n <= 1 ? `I have slept where they could reach me.` : `I have slept beside them ${times(n)}.`,
   keptWatch: (n) =>
@@ -203,9 +223,20 @@ function describe(
   memories: { reason: RapportReason; count: number; subject?: { label: string; kin?: "ours" | "other" } }[],
   limit = 2,
 ): string {
+  // Never name the same creature twice in one breath — "We brought down a
+  // Scyther together. They have pulled a Scyther off me" reads as a stutter,
+  // or as a bug. An earlier attempt at this DROPPED the duplicate clause,
+  // which was worse: it threw away the best line on the edge and fell back to
+  // filler like "We have sat together." Keep the clause, refer back instead.
+  const spoken = new Set<string>();
   return memories
     .slice(0, limit)
-    .map((m) => CLAUSE[m.reason](m.count, m.subject?.label, m.subject?.kin))
+    .map((m) => {
+      const label = m.subject?.label;
+      const again = label !== undefined && spoken.has(label);
+      if (label) spoken.add(label);
+      return CLAUSE[m.reason](m.count, label, m.subject?.kin, again);
+    })
     .join(" ");
 }
 
