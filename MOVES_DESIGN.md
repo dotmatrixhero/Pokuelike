@@ -4069,3 +4069,103 @@ tree is 45 nodes = 45 points. Observed agent levels: p50 25, p90 34, **max
 46**. So a maximum-level agent can just about complete exactly one tree, a
 median agent affords three capstones (24 points) *or* one branch walked
 completely with both lanes — a real build decision, not a formality.
+
+## The overwrite bug: "if you got both, would it just do nothing?"
+
+> "On twineedle high pass makes it a multi strike. Blur of needles also does
+> that. How does that work? If you got both, would it just do nothing? [...]
+> I like the idea of ADDING modifiers so you can stack your build, not
+> setting them. Because with the latter you don't know how they will interact
+> with each other."
+
+**Worse than nothing.** Read from `applyMoveTree` (engine/moves.ts), not
+guessed:
+
+| behaviour | fields |
+|---|---|
+| **additive** | `power`, `accuracy`, `cooldownTicks`, `statusChance`, `defensePenetration`, `lockTicks` |
+| **overwrite — last one applied wins** | `shape`, `range`, `hits`, `forcedMovement`, `situationalBonus`, `statChangeOnHit`, `rallyCall`, `allyEffect`, `positionSwap`, `hitsArea`, `terrainBurn`, … |
+
+The engine's own doc comment already admitted it: *"order given to
+`applyMoveTree` matters for overwriting fields like `shape`."* So two
+co-takeable nodes setting `hits` do not cancel and do not stack — whichever
+the chosen-id iteration reaches last silently wins. The result depends on
+allocation order, is invisible in the UI, and cannot be reasoned about from
+the tree.
+
+**Measured across the whole roster** — pairs of co-takeable nodes (neither
+mutually exclusive nor on the same chain) writing the same overwrite field:
+
+| | colliding pairs | trees affected |
+|---|---|---|
+| proposed drafts, before | 106 | 4 of 5 |
+| **shipped trees** | **39** | **11 of 17** |
+| proposed drafts, after | **0** | 0 |
+
+Worst shipped offenders: `rock_throw` and `wing_attack` at 8 pairs each,
+`slash` 6, `solar_beam` 5, `hydro_pump` 4.
+
+### The fix: additive forms
+
+Drafts converted — these are proposed engine fields, not shipped ones:
+
+| was (overwrite) | now (additive) |
+|---|---|
+| `hits: {min, max}` | `hitsBonus: +N` |
+| `range: {max}` | `rangeBonus: +N` |
+| `situationalBonus: {…}` | `situationalBonuses: [{…}]` — multipliers stack |
+| `statChangeOnHit: {…}` | `statChangesOnHit: [{…}]` |
+| `rallyCall: {ticks}` | `rallyCallTicks: +N` |
+| `allyEffect: {…}` | `allyEffects: [{…}]` |
+
+**One refinement the first version of the rule got wrong:** a later node on
+the *same chain* overwriting an earlier one is intended escalation, not a
+collision — Hit and Gone (2 tiles) → Never Landed (3) → Never There (4) is a
+deliberate ladder. Only *independent* setters are the bug. The checker now
+tests ancestry before reporting.
+
+**Area size is additive too, on a second pass.** *"Hits area should be
+additive. Make it scalar with range of area. Agreed on shape though. Maybe
+that excludes you from taking other shape modes."* Right — `hitsArea` was a
+boolean bolted to a `shape` carrying a `radius`, so widening an area meant
+redeclaring the whole footprint. Split in two:
+
+- **`shape`** — what FORM the area takes (burst, ring, cone). Still an
+  overwrite, because a cone genuinely is not a ring plus a line.
+- **`areaBonus: +N`** — how BIG it is. Additive, stacks across nodes.
+
+Twineedle's Sociability shows why that is better than the rule alone: Nothing
+Forgets sets `shape: burst, areaBonus: +1`, and The Swarm Decides adds
+`areaBonus: +1`. Taking both gives a radius-2 burst — **the same cloud,
+widened**, rather than a second declaration racing the first. The capstone no
+longer restates the notable's footprint; it grows it.
+
+**And `shape` now locks out rival forms.** Independent shape nodes must
+declare `excludes` against each other: a move has one footprint, so choosing
+a form is a real fork rather than a silent race. Verified the rule fires by
+adding a rival cone to Twineedle's Aggression and confirming the report,
+then reverting.
+
+The design rule that came out of the first pass still holds and is now
+enforced by that exclusion: Twineedle's Aggression was quietly fighting
+Sociability over the footprint, so Hollow Points stopped being a cone. Every
+draft now has at most one shape setter (Agility has none).
+
+### Repositioning, phrased from the target
+
+> "the reposition moves phrasing is quite confusing. It should be phrased
+> around repositioning based on a specific target. Ex. Move to the other side
+> of the target by 2 tiles."
+
+`forcedMovement: { mover, direction: "closer" | "away", tiles }` describes
+motion relative to *nothing legible* — "closer" to what, and where do you end
+up? Replaced in the drafts with a target-relative vocabulary:
+
+| `reposition.to` | means |
+|---|---|
+| `"past"` | end up on the far side of the target, N tiles beyond it |
+| `"back"` | disengage N tiles from the target |
+| `"shoved"` | the target is driven N tiles away from you |
+| `"dragged"` | the target is hauled N tiles toward you |
+
+Each says who moves and where they end up relative to whom.
