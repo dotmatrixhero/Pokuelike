@@ -4195,30 +4195,48 @@ Measured across the roster:
 Eight of twenty-two trees hand out more reduction than the move has cooldown.
 And **12 of 22 can reach cooldown 0 at all** — Ember in **3 skill points**.
 
-### The finding underneath it: cooldown is barely a constraint
+### CORRECTION: my "cooldown is barely a constraint" analysis was wrong
 
-`ACTION_THRESHOLD` is 40, and measured over 3 seeds x 3,000 ticks the gap
-between an agent's actions is **p50 1.5 ticks, p90 3.1, max 5.4**. So:
+I wrote here that a 2-tick cooldown is "inert for 31% of agents" and that the
+2-to-4-tick band is a weak axis, having measured `ACTION_THRESHOLD` against
+the gap in **world ticks** between an agent's actions. Direct challenge:
 
-| cooldown | inert for |
-|---|---|
-| 1 tick | **68% of agents** |
-| 2 ticks | 31% |
-| 3 ticks | 11% |
-| 4 ticks | 6% |
-| 15+ | 0% |
+> "I thought we made it scale off speed. So your cooldown ticks down on your
+> turn, based on your speed, not individual ticks?"
 
-Most of the roster's base cooldowns are 2. **A 2-tick cooldown is already
-doing nothing for a third of the population**, and a build only has to shave
-one tick before it does nothing for two thirds. That reframes the original
-worry: the problem is not just overshooting past 0, it is that the whole
-2-to-4-tick band is a weak axis to spend nodes on. The long cooldowns (Dig
-15, Growth 30, Harden 40, Agility 50) are the ones where tempo nodes are
-genuinely worth something.
+**Correct.** `tickCooldowns` is called from `tickAgentAction` (needs.ts:1279),
+and `tickAgentAction` "only run[s] on an agent's own action tick"
+(simulation.ts:273). Cooldowns are counted in the agent's **own turns**, not
+world ticks. The code comment even names the exact bug I re-created:
 
-**Not acted on unilaterally** — raising base cooldowns across the board is a
-balance decision, and this document's standing rule is that those are the
-user's. Flagged with the numbers.
+> "not once per world tick regardless of Speed, which is what this lived as
+> before: a move with `cooldownTicks: 1` was effectively always off-cooldown
+> for anything slower than the action threshold itself"
+
+That was fixed deliberately, and I measured the system as though the fix had
+never landed — a unit error, comparing turn-denominated cooldowns against
+world-tick action gaps. **Retracted in full:**
+
+- ~~"a 2-tick cooldown is inert for 31% of agents"~~ — false. A cooldown is
+  never inert. `cooldownTicks: N` means the move is usable every (N+1)th
+  action, for everyone, at any Speed.
+- ~~"the 2-4 tick band is a weak axis to spend nodes on"~~ — false. It is a
+  strong one.
+- ~~"raising base cooldowns is supported by the data"~~ — withdrawn. Nothing
+  supports it; the suggestion came entirely from the bad measurement.
+
+**And the correction makes the original concern bigger, not smaller.** On a
+base-2 move, going to 0 is not a rounding difference — it is the move firing
+**every** action instead of every third: a real 3x tempo gain. So Ember
+reaching cooldown 0 in three skill points matters more than I credited, and
+"be very careful not to add too much cooldown" was right for a reason I
+argued against.
+
+What survives untouched, because it never depended on the action economy:
+every tick of reduction past base is still a node that does nothing, and 12
+of 22 trees still overshoot or bottom out.
+
+### What was done
 
 ### What was done
 
