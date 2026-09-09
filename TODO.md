@@ -6806,3 +6806,35 @@ not something this pathfinding pass itself caused or is positioned to fix.
       100%), Tundra 85% (was 100%); a rich biome (Wetland, Forest) is
       unaffected. See DESIGN.md for the full numbers and the rng-stream
       regression this caught and fixed along the way.
+
+## Whole-roster species pass — built, see DESIGN.md
+
+- [x] Direct follow-up: "let's add more. Species to em all." Added 38 more
+      Gen-1 species across every biome (not just Savanna/Mangrove/Tundra),
+      taking the roster from 57 to 108 — every pick sprite-art-confirmed
+      and, where an evolution is included, evolution-reachability-confirmed
+      against the real dex before adding. Full evolution lines completed:
+      Rattata/Raticate, Pidgeotto/Pidgeot, Fearow, Nidoran♀/Nidorina,
+      Nidoran♂/Nidorino, Venonat/Venomoth, Paras/Parasect, Bellsprout/
+      Weepinbell, Machop/Machoke, Drowzee/Hypno, Abra/Kadabra, Gastly/
+      Haunter, Dugtrio, Sandslash, Primeape, Kabuto/Kabutops, Omanyte/
+      Omastar. Base-only (no in-sim-reachable evolution, same accepted
+      limitation as Growlithe/Onix): Clefairy, Jigglypuff, Exeggcute,
+      Tangela, Magmar, Aerodactyl, Chansey, Lickitung, Pinsir, Pikachu,
+      Eevee. Tundra (this roster's thinnest biome even after the round-2
+      pass) also picked up Machop/Machoke/Primeape/Aerodactyl as a real
+      cold-mountain secondary.
+- [ ] **Deliberately excluded, real open question**: the 5 Gen-1
+      legendaries (Articuno/Zapdos/Moltres/Mewtwo/Mew) all have real sprite
+      art but were NOT added as ordinary spawnable population — this is a
+      population sim, not a catching game, and whether a legendary should
+      exist as a regular breeding/dying zone resident (vs. a one-off
+      landmark-bound event, vs. not at all) is a real design decision, not
+      a species-roster mechanical add. Flagged here rather than decided
+      unilaterally.
+- [ ] Also skipped for weak natural-biome fit in an ecological sim (not a
+      sprite-art or evolution-reachability issue): Ditto, Porygon,
+      Electabuzz, Hitmonlee/Hitmonchan, Mr. Mime, Magnemite/Magneton line,
+      Voltorb/Electrode, Koffing/Weezing. Real, arted Gen-1 species — could
+      still be added if the "no natural biome" call is wrong; a request to
+      revisit is enough to redo it.

@@ -14991,3 +14991,52 @@ way (matching the function's original unconditional single draw), just with
 `lowerBound` forced up to `fitting.length` itself when `fitting.length <= 2`
 so the draw's outcome is unaffected. Full engine suite (1262 tests) and data
 suite (240 tests) green after the fix.
+
+## Whole-roster species pass: 57 → 108, every biome
+
+Direct follow-up, right after the thin-biome pool-variety fix: "Then let's
+add more. Species to em all." Confirmed before starting: only 57 of 151
+real Gen-1-arted species (`public/sprites/`) were in the roster.
+
+Same verification standard as every prior species round in this file:
+`public/sprites/<key>_*.png` (4 directional frames) confirmed present for
+every pick BEFORE adding it, and any included evolution checked directly
+against `SPECIES_DEX_BY_KEY` for a real `level`/`conditions: {}` gate (not
+assumed) before being added as its own curated entry. 38 new species landed,
+taking the roster to 108. Full detail lives in TODO.md's own "Whole-roster
+species pass" entry (the complete list, grouped by evolution-line-completed
+vs. base-only). Two things worth calling out here specifically:
+
+**Two real dex-key mismatches caught by the test suite, not by inspection.**
+`speciesFromDex` defaults a species' `id` to its dex key lowercased — fine
+for every single-word key so far, but Nidoran♀/♂'s real dex keys
+(`NIDORAN_F`/`NIDORAN_M`) lowercase to `"nidoran_f"`/`"nidoran_m"`, which
+doesn't match this file's own object property names (`nidoranf`/
+`nidoranm`). `IMMIGRATION_CONTEXT wiring`'s existing "can spawn each roster
+species" test caught it immediately (`Unknown species: nidoran_f`) — fixed
+by explicitly passing `id: "nidoranf"`/`id: "nidoranm"` to keep the two in
+sync, rather than renaming the object properties to the underscored dex
+form (which would have been a more invasive, less readable change for no
+real benefit).
+
+**Tundra topped up from the roster, not with new species.** Even after this
+batch, Tundra stayed this roster's thinnest biome (3 fitting species) — none
+of the 38 new picks were cold-specific. Rather than inventing more new
+species just to pad that one biome, four already-added mountain/rock-themed
+entries (Machop, Machoke, Primeape, Aerodactyl — all real "trains/lives in
+the mountains" mainline flavor already) picked up "tundra" as a genuine
+third biome, the same "frost-heaved boulder fits a living rock" reasoning
+Geodude/Graveler's own tundra tag used in the prior round.
+
+**Deliberately excluded — flagged, not decided unilaterally**: the 5 Gen-1
+legendaries (Articuno/Zapdos/Moltres/Mewtwo/Mew) have real sprite art but
+weren't added as ordinary spawnable population. Whether a legendary should
+exist in this sim at all — as a regular zone resident, a landmark-bound
+one-off event, or not at all — is a real design decision this pass
+deliberately didn't make on its own. Also skipped for weak natural-biome
+fit in an ecological sim (not an art/evolution gap): Ditto, Porygon,
+Electabuzz, Hitmonlee/Hitmonchan, Mr. Mime, the Magnemite/Voltorb/Koffing
+"industrial" trio.
+
+Full engine suite (1262 tests) and data suite (240 tests) green; typechecks
+clean across engine/data/web/runner.
