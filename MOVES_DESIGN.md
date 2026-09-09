@@ -4255,3 +4255,65 @@ habit became a node that does something the lane actually cares about:
 All five drafts are now within budget. **The four shipped offenders — ember
 (4 dead ticks), slash (2), wing_attack (2), tackle and vine_whip (1 each) —
 are untouched live data.**
+
+## Cooldown as a balance axis — the numbers, and the decision
+
+> "So yeah maybe the idea is we gotta make more cooldown standard? Idk."
+
+With the units right (cooldown counts the agent's own turns), the picture is
+clear and it is not what my retracted analysis said.
+
+**Damage per action is `power / (cooldownTicks + 1)`.** That denominator is
+tiny, so each −1 is worth an enormous amount, and worth more the closer to
+zero it gets. Fully-invested multipliers, by lever:
+
+| lever | mean multiplier | notes |
+|---|---|---|
+| power nodes | **2.00x** | |
+| multi-hit | **2.00x** | |
+| **tempo (cooldown)** | **2.61x** | and it is bought with the cheapest filler in the tree |
+
+Worst cases are much worse than the mean: **Hydro Pump 22 → 110 damage per
+action, a 5.0x gain from cooldown nodes alone**, no power nodes involved.
+Flamethrower and Rock Slide 4.0x. Twineedle 4.0x.
+
+**So tempo is the strongest lever in the system and the cheapest to buy.**
+That is the real defect, and it is a better reason for the original worry
+than the one I gave.
+
+### Why raising base cooldowns does not fix it on its own
+
+Raising the base makes each individual −1 proportionally smaller, but the
+*total* gets worse, not better: 4 → 0 is 5x, and 8 → 0 would be 9x. Raising
+the base only helps if the tree is also stopped from spending it all.
+
+There is a second, separate reason to raise it though. Across damaging moves,
+**power spans 8.0x (15–120) while cooldown spans 2–4** for everything except
+Dig. Cooldown is currently doing almost no work distinguishing a Tackle from
+a Hydro Pump — a 110-power nuke is available every 5th action against
+Tackle's every 3rd. Widening that band would make cooldown a real identity
+axis (big slow move vs. quick jab) *and* create room for tempo nodes to
+matter without bottoming out.
+
+### The options
+
+1. **Floor total reduction at half the base.** A tree may never take a move
+   below 50% of its base cooldown. Caps tempo at ~2.0x, exactly in line with
+   power and multi-hit. Smallest possible change; the checker already
+   computes the totals, so it is one threshold.
+2. **Widen base cooldowns** so they track power the way canon PP already
+   does — quick jabs at 2, heavy hitters at 8–10. Makes cooldown a real
+   differentiator and gives tempo nodes somewhere to go.
+3. **Multiplicative reduction** (each node −15%, stacking multiplicatively).
+   Never reaches zero, naturally diminishing. Elegant, but rounds badly on
+   a 2-tick cooldown where −15% is a third of a tick.
+4. **2 and 1 together.** Widen the band, then floor at 50%. Hydro Pump at
+   base 8 floors at 4 — still every 5th action fully invested, a 1.8x tempo
+   gain, and it *feels* like a big slow move throughout.
+
+**Recommendation: 4.** It fixes the overpowered lever and the flat
+differentiation in one pass, and it is the version where cooldown finally
+carries some of the identity work that only power is doing today.
+
+**Not applied.** These are balance numbers across 22 moves and this
+document's standing rule is that those are the user's call, not mine.
