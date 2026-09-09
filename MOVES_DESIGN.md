@@ -4317,3 +4317,52 @@ carries some of the identity work that only power is doing today.
 
 **Not applied.** These are balance numbers across 22 moves and this
 document's standing rule is that those are the user's call, not mine.
+
+### Applied: widened cooldowns + a 3x tempo cap
+
+> "2 +1 together. Cap it at 3x"
+
+**Base cooldowns now track power**, the way canon PP already does. Utility
+moves keep theirs; Dig keeps 15 (that number is about burrowing, not damage
+pacing):
+
+| power | cooldown | moves |
+|---|---|---|
+| ≤25 | 2 | poison_sting, twineedle |
+| 26–45 | 3 | tackle, peck, scratch, water_gun, ember, vine_whip |
+| 46–65 | 4 | rock_throw, wing_attack, sludge, psybeam |
+| 66–80 | 5 | slash, rock_slide |
+| 81–95 | 6 | body_slam, flamethrower, surf, ice_beam |
+| 96–110 | 8 | earthquake, hydro_pump |
+| 111+ | 9 | solar_beam |
+
+**And the cap.** A tree may not reduce a cooldown below
+`ceil((base+1)/3) − 1`, which holds the tempo multiplier at or under **3.0x**
+— in line with power (2.00x) and multi-hit (2.00x) rather than the 5.0x
+Hydro Pump had. Nine trees were over and were trimmed; the worst were Agility
+(−50 → −34) and Harden (−40 → −27).
+
+**A regression the trim caused, and how it was caught.** Shaving cooldown
+deltas left **six nodes with nothing left to do** — `tackle/aftershock`,
+`vine_whip/deeper_hold`, `ember/steady_flame`, `ember/slow_burn`,
+`wing_attack/quicker_wings` and Twineedle's `quick_and_many` — five of them
+literally named "-1 Cooldown" while no longer reducing cooldown, which breaks
+principle 4 (a node must do something) and principle 5 (a name that states a
+magnitude must match it). All six repurposed with real levers and renamed.
+Twineedle's tempo bridge had the tightest squeeze: on a base of 3 there are
+only 2 ticks to spend, so the crosslink and its filler take those and the
+bridge *notable* escalates tempo into volume (`hitsBonus`) instead.
+
+**Verified with a real before/after**, 4 seeds x 4,000 ticks, because this
+moved balance numbers on 21 moves:
+
+| | before | after |
+|---|---|---|
+| fought events | 388 | **350** (−10%) |
+| deaths | 58 | **58** (identical) |
+| living at end | 80 | **106** (+33%) |
+
+Slightly less combat churn, exactly the same lethality, and a third more
+survivors. Nothing broke. The population rise is a real consequence worth
+watching — slower moves mean fewer resolved fights per unit time — and is
+flagged rather than tuned away. 1,274 engine + 240 data tests pass.

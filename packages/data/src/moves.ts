@@ -52,7 +52,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Tackle",
     shape: { kind: "point" },
     ...moveCanon("TACKLE"),
-    cooldownTicks: 2,
+    cooldownTicks: 3,
     range: { min: 0, max: 1 },
     // v2 — Vine Whip's full treatment (MOVES_DESIGN.md's "Tackle" writeup):
     // three branches (Aggression/Boldness/Sociability — Tackle is the most-
@@ -108,11 +108,11 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       aftershock: {
         id: "aftershock",
-        name: "-1 Cooldown",
+        name: "Aftershock",
         cost: 1,
         prerequisites: ["bracing_impact"],
         leaning: "aggression",
-        delta: { cooldownTicks: -1 },
+        delta: { defensePenetration: 0.12 },
       },
       full_force_slam: {
         id: "full_force_slam",
@@ -394,7 +394,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Slash",
     shape: { kind: "line", length: 1 },
     ...moveCanon("SLASH"),
-    cooldownTicks: 2,
+    cooldownTicks: 5,
     range: { min: 0, max: 1 },
     // v2 — scaled up to the same triangle as Tackle: Ferocity (Aggression),
     // Precision (Boldness), and a slimmer Pack Instinct (Sociability) — even
@@ -752,7 +752,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Vine Whip",
     shape: { kind: "line", length: 2 },
     ...moveCanon("VINE_WHIP"),
-    cooldownTicks: 2,
+    cooldownTicks: 3,
     range: { min: 0, max: 2 },
     // v2 (MOVES_DESIGN.md's own template). Direct follow-up: "we don't
     // have vine whip? i thought we designed it..." — a fair catch. Vine
@@ -802,11 +802,11 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       deeper_hold: {
         id: "deeper_hold",
-        name: "-1 Cooldown",
+        name: "Deeper Hold",
         cost: 1,
         prerequisitesAnyOf: [["crushing_coil"], ["hauled_in"], ["bloom_of_thorns"]],
         leaning: "aggression",
-        delta: { cooldownTicks: -1 },
+        delta: { lifestealFraction: 0.08 },
       },
       throttling_grip: {
         id: "throttling_grip",
@@ -1166,7 +1166,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Ember",
     shape: { kind: "point" },
     ...moveCanon("EMBER"),
-    cooldownTicks: 2,
+    cooldownTicks: 3,
     statusChance: 0.1,
     statusKind: "burn",
     range: { min: 0, max: 1 },
@@ -1199,7 +1199,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // Burn" is a name that already promises the flame catching what is
         // around it. Fuel is only ~5% of a real map, so even at full uptake
         // this stays occasional rather than constant.
-        delta: { statusChance: 0.15, cooldownTicks: -1, terrainBurn: true },
+        delta: { statusChance: 0.15, cooldownTicks: 0, terrainBurn: true },
       },
       kindling: {
         id: "kindling",
@@ -1211,11 +1211,11 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       steady_flame: {
         id: "steady_flame",
-        name: "-1 Cooldown",
+        name: "Steady Flame",
         cost: 1,
         prerequisitesAnyOf: [["kindling"], ["smoldering_ring"], ["kindled_fury"]],
         leaning: "aggression",
-        delta: { cooldownTicks: -1 },
+        delta: { statusChance: 0.05 },
       },
       roaring_blaze: {
         id: "roaring_blaze",
@@ -1345,11 +1345,11 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       slow_burn: {
         id: "slow_burn",
-        name: "-1 Cooldown",
+        name: "Slow Burn",
         cost: 1,
         prerequisites: ["wide_ring"],
         leaning: "boldness",
-        delta: { cooldownTicks: -1 },
+        delta: { statusSeverity: 1.5 },
       },
       lingering_ring: {
         id: "lingering_ring",
@@ -1358,7 +1358,7 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["slow_burn"],
         excludes: ["searing_wall"],
         leaning: "boldness",
-        delta: { cooldownTicks: -1, statusChance: 0.1 },
+        delta: { cooldownTicks: 0, statusChance: 0.1 },
       },
       searing_wall: {
         id: "searing_wall",
@@ -1531,7 +1531,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Flamethrower",
     shape: { kind: "cone", length: 4, width: 2 },
     ...moveCanon("FLAMETHROWER"),
-    cooldownTicks: 3,
+    cooldownTicks: 6,
     statusChance: 0.1,
     statusKind: "burn",
     range: { min: 0, max: 4 },
@@ -1947,7 +1947,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Peck",
     shape: { kind: "point" },
     ...moveCanon("PECK"),
-    cooldownTicks: 2,
+    cooldownTicks: 3,
     range: { min: 0, max: 1 },
     // v2 full triangle (MOVES_DESIGN.md's "Peck" writeup): the roster's first
     // positionSwap+positionSwapPull and first critCooldownReset live here,
@@ -2248,7 +2248,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Scratch",
     shape: { kind: "point" },
     ...moveCanon("SCRATCH"),
-    cooldownTicks: 2,
+    cooldownTicks: 3,
     range: { min: 0, max: 1 },
     // A real Sandshrew doesn't canonically have venom glands, so unlike
     // Ember's baked-in burn this poison is entirely tree-earned — `statusKind`
@@ -2561,7 +2561,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Rock Throw",
     shape: { kind: "line", length: 3 },
     ...moveCanon("ROCK_THROW"),
-    cooldownTicks: 2,
+    cooldownTicks: 4,
     range: { min: 0, max: 3 },
     // Standing on a real "boulder" tile (worldgen.ts's Highland-leaning
     // obstacle kind) lets this throw consume it for real, ~3x damage —
@@ -3003,7 +3003,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Water Gun",
     shape: { kind: "line", length: 2 },
     ...moveCanon("WATER_GUN"),
-    cooldownTicks: 2,
+    cooldownTicks: 3,
     range: { min: 0, max: 2 },
     // A landed, non-killing hit leaves a real puddle where it struck —
     // converts a dry floor/sand/mud tile at the defender's position into
@@ -3325,7 +3325,7 @@ export const MOVES: Record<string, MoveSpec> = {
     // A real blast, not a stab — Blastoise/Gyarados/Lapras's signature.
     shape: { kind: "cone", length: 4, width: 2 },
     ...moveCanon("HYDRO_PUMP"),
-    cooldownTicks: 4,
+    cooldownTicks: 8,
     range: { min: 0, max: 4 },
     hitsArea: true,
     // v3 redesign (MOVES_DESIGN.md's "start from the fantasy" pass). THE
@@ -3770,7 +3770,7 @@ export const MOVES: Record<string, MoveSpec> = {
     // classic "hits every adjacent foe" spread move.
     shape: { kind: "ring", radius: 2 },
     ...moveCanon("SURF"),
-    cooldownTicks: 3,
+    cooldownTicks: 6,
     range: { min: 0, max: 2 },
     hitsArea: true,
   },
@@ -3783,7 +3783,7 @@ export const MOVES: Record<string, MoveSpec> = {
     // cooldown instead.
     shape: { kind: "line", length: 5 },
     ...moveCanon("SOLAR_BEAM"),
-    cooldownTicks: 4,
+    cooldownTicks: 9,
     range: { min: 0, max: 5 },
     // v3 redesign (MOVES_DESIGN.md's "start from the fantasy" pass). THE
     // FANTASY: concentrated sunlight drawn down into a devastating beam —
@@ -4190,7 +4190,7 @@ export const MOVES: Record<string, MoveSpec> = {
     // everyone nearby regardless of which one was targeted.
     shape: { kind: "burst", radius: 2 },
     ...moveCanon("EARTHQUAKE"),
-    cooldownTicks: 4,
+    cooldownTicks: 8,
     range: { min: 0, max: 2 },
     hitsArea: true,
     // v3 redesign (MOVES_DESIGN.md's "start from the fantasy" pass —
@@ -4624,7 +4624,7 @@ export const MOVES: Record<string, MoveSpec> = {
     // around the user rather than the whole ground shaking.
     shape: { kind: "burst", radius: 1 },
     ...moveCanon("ROCK_SLIDE"),
-    cooldownTicks: 3,
+    cooldownTicks: 5,
     range: { min: 0, max: 1 },
     hitsArea: true,
     // v2 (MOVES_DESIGN.md's own template). Onix's third real move —
@@ -5040,7 +5040,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Sludge",
     shape: { kind: "cone", length: 2, width: 2 },
     ...moveCanon("SLUDGE"),
-    cooldownTicks: 2,
+    cooldownTicks: 4,
     range: { min: 0, max: 2 },
     hitsArea: true,
     statusChance: 0.3,
@@ -5072,7 +5072,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Ice Beam",
     shape: { kind: "line", length: 3 },
     ...moveCanon("ICE_BEAM"),
-    cooldownTicks: 3,
+    cooldownTicks: 6,
     range: { min: 0, max: 3 },
     statusChance: 0.1,
     statusKind: "freeze",
@@ -5085,7 +5085,7 @@ export const MOVES: Record<string, MoveSpec> = {
     // clean, real-reach special hit with no status roll.
     shape: { kind: "line", length: 2 },
     ...moveCanon("PSYBEAM"),
-    cooldownTicks: 2,
+    cooldownTicks: 4,
     range: { min: 0, max: 2 },
   },
   wing_attack: {
@@ -5093,7 +5093,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Wing Attack",
     shape: { kind: "cone", length: 2, width: 2 },
     ...moveCanon("WING_ATTACK"),
-    cooldownTicks: 2,
+    cooldownTicks: 4,
     range: { min: 0, max: 2 },
     hitsArea: true,
     // v2 (MOVES_DESIGN.md's own template). Pidgey's real signature move,
@@ -5138,11 +5138,11 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       quicker_wings: {
         id: "quicker_wings",
-        name: "-1 Cooldown",
+        name: "Quicker Wings",
         cost: 1,
         prerequisitesAnyOf: [["talon_rake"], ["stooping_dive"], ["broken_formation"]],
         leaning: "aggression",
-        delta: { cooldownTicks: -1 },
+        delta: { accuracy: 10 },
       },
       rapid_wingbeats: {
         id: "rapid_wingbeats",
@@ -5484,7 +5484,7 @@ export const MOVES: Record<string, MoveSpec> = {
     name: "Body Slam",
     shape: { kind: "point" },
     ...moveCanon("BODY_SLAM"),
-    cooldownTicks: 2,
+    cooldownTicks: 6,
     range: { min: 0, max: 1 },
     statusChance: 0.3,
     statusKind: "paralysis",
@@ -6040,7 +6040,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // passives are real for a move that's never resolved as a hit)
         // doesn't need the padding of splitting the same lever twice just
         // to hit a node count.
-        delta: { cooldownTicks: -2 },
+        delta: { cooldownTicks: -1 },
       },
       never_still: {
         id: "never_still",
