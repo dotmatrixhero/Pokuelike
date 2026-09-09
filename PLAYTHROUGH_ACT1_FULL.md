@@ -227,6 +227,53 @@ Also missed: **the evolution stone is the exit condition**, and there are
 three of them. Which stone you leave with plausibly shapes what your partner
 becomes — that's a real branch sitting in one line of the pitch.
 
+### 3c. The run did not produce a bond — and the reason is structural
+
+Asked directly: *"Did you befriend one on your run? What happened?"*
+
+**No.** The run reached **two of the four bonding verbs**:
+
+| Verb | Turn | Status |
+|---|---|---|
+| **Presence** | ~150 | Earned — cloaked, 2 tiles, one bold individual tolerated it |
+| **Feed** | ~200 | Earned — berry set down, backed off, it came and ate |
+| **Fight alongside** | — | Needs a fight |
+| **Rescue** | — | Needs something hurt |
+
+Against the **Wary → Tolerant → Curious → Bonded** ladder, the run ends around
+*Curious*. No partner. Nothing followed anywhere.
+
+The two unreached verbs both require **danger that layer 1 deliberately does
+not contain.** That is not a pacing failure — the arc is gated on a thing the
+design removed on purpose.
+
+Two readings, and the second is better:
+
+- **A hole.** The bonding system can't complete where it's meant to be played.
+- **The real shape of Act 1.** The bond *starts* in layer 1 and *completes
+  during the ascent.* You leave the safe layer with something Curious, and
+  **layer 2's first predator is what finishes the bond.**
+
+The second fits everything else: it makes the climb do double duty (it's the
+difficulty curve *and* the back half of the trust arc), and it fits
+`DESIGN.md` calling **Rescue** the special one — *"the Pokémon chooses you as
+much as you chose it."* That beat cannot land in a safe room. It needs the
+thing that nearly killed you both.
+
+The cost is real: **you climb the first ladder with a half-bonded animal that
+may not follow.** That's either the best tension in the act or where players
+quit.
+
+**Two open calls this exposes:**
+
+1. **Does a Curious partner cross a layer boundary at all?** If no, the
+   ascent framing collapses. If yes, *"follows, unreliably"* is the
+   interesting version and matches the established "it might not follow your
+   command" principle.
+2. **Is the verb→rung mapping 1:1?** Four rungs, four verbs — assumed here,
+   never specified. If Presence + Feed only reaches *Tolerant*, layer 1 gives
+   even less than this run suggests.
+
 ### 4. The club is a trap, and that's correct
 
 At every point in this run, crafting the club would have made things worse:
