@@ -1550,6 +1550,24 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // Beach, the roster's real water-adjacent biomes.
     biomes: ["wetland", "beach"],
     preferredTerrain: ["water"],
+    // Direct follow-up, after Kabutops' own level-40-evolution-floor
+    // report ("the level 40 gap can happen, it should just be rare...
+    // change the level adding distribution instead. A predator kabuto is
+    // OK too"): Kabuto itself is real predatory shellfish per mainline
+    // flavor ("swam through primordial seas, preying on smaller life") —
+    // tagging it a predator too means a Beach/Wetland zone's "predator"
+    // niche usually resolves to Kabuto (no evolution floor to clear, so
+    // its real spawn level is a normal ~5-17 like any other base-form
+    // predator) instead of ALWAYS needing to be its own much harsher
+    // evolved Kabutops (real floor 40, ~46-51 with `PREDATOR_LEVEL_BOOST`
+    // — see Kabutops' own comment/`rarity` below). Kabutops staying rare
+    // (`rarity: 0.3`) on top of this is what actually makes the level-40
+    // gap the OCCASIONAL escalation rather than the only option — this is
+    // the "usually lower, rarely 40" distribution the report asked for,
+    // built from which SPECIES gets picked, not a tweak to the level roll
+    // itself (Kabutops literally cannot exist below level 40 — that's its
+    // real evolution requirement, not a rollable number).
+    isPredator: true,
   }),
   kabutops: speciesFromDex("KABUTOPS", {
     spriteKey: "kabutops",

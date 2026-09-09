@@ -15116,3 +15116,37 @@ it IS present, not an unwanted nuisance species like Arbok was).
 shows up in 580 of 2,033 real Beach zones — 28.5% (was 100%, every single
 zone, before this fix). Full engine suite (1262 tests) and data suite (240
 tests) green, no regressions from the new per-predator roll.
+
+## Fixed (corrected approach): a lower-level Kabuto predator most of the time, Kabutops rarely
+
+Direct correction to the previous "make Kabutops rare" fix: "Er I mean
+can't we have a lower level kabutops? Change the level adding distribution
+instead. A predator kabuto is OK too."
+
+The rarity-gate fix (previous entry) made Kabutops absent from most Beach
+zones, but didn't address what the user actually wanted: a LOWER-LEVEL
+predator filling that niche most of the time, not just less predator
+overall. The reason a straight "lower Kabutops' level" isn't possible:
+Kabutops' level-40 evolution floor is a real structural requirement, not a
+tunable roll — an agent below level 40 literally isn't a Kabutops, it's
+still a Kabuto. There's no distribution to reshape while keeping the
+species fixed at Kabutops.
+
+**Fix**: tagged Kabuto itself `isPredator: true` — real mainline flavor
+("swam through primordial seas, preying on smaller life") supports it, and
+crucially Kabuto has no evolution floor to clear, so its real spawn level
+sits at a normal ~5-18 like any other base-form predator
+(`IMMIGRANT_BASE_LEVEL_FLOOR` + jitter + `PREDATOR_LEVEL_BOOST`, no level-40
+floor in the mix at all). With both Kabuto and Kabutops now real predator
+candidates for Beach/Wetland, and Kabutops still kept at its `rarity: 0.3`
+occurrence roll from the previous fix, a zone's "predator" niche now
+usually resolves to the lower-level Kabuto, with Kabutops as the
+occasional escalation — the actual "usually low, rarely 40" distribution
+asked for, built by which SPECIES fills the role rather than by reshaping
+an unrollable level floor.
+
+**Verified on a real generated grid** (8 seeds, 60x60 each, 2,033 Beach
+zones): Kabuto now present in 100% of zones (levels sampled 12-18 across
+several real zones), Kabutops in 31.6% (levels sampled ~46, its real,
+unavoidable floor). Full engine suite (1262 tests) and data suite (240
+tests) green.

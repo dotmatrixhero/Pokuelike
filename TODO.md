@@ -6880,3 +6880,18 @@ not something this pathfinding pass itself caused or is positioned to fix.
       only for population size. Gave Kabutops `rarity: 0.3`. Real
       generated-grid measurement: Kabutops now shows up in 28.5% of Beach
       zones (was 100%). Full engine (1262) and data (240) suites green.
+
+## Fixed: usually a lower-level Kabuto predator, rarely the level-40 Kabutops — see DESIGN.md
+
+- [x] Direct follow-up correction: "can't we have a lower level kabutops?
+      Change the level adding distribution instead. A predator kabuto is
+      OK too." Kabutops literally can't spawn below level 40 (its real
+      evolution requirement) — there's no level roll to lower while
+      keeping it Kabutops. Real fix: tagged Kabuto itself `isPredator: true`
+      (real mainline "preyed on smaller life" flavor) — no evolution floor
+      to clear, so it spawns at a normal ~5-18 like any other base-form
+      predator. A Beach/Wetland zone's predator niche now usually resolves
+      to Kabuto; Kabutops (kept at its earlier `rarity: 0.3`) is the rare
+      escalation on top. Measured on a real generated grid: Kabuto in 100%
+      of Beach zones at level 12-18, Kabutops in 31.6% at its unavoidable
+      ~46+. Full engine (1262) and data (240) suites green.
