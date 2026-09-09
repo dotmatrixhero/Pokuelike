@@ -392,6 +392,41 @@ function problems(move: ProposedMove): string[] {
     out.push(`cooldown reduction totals -${cut} against a base of ${move.cooldownTicks}, a ${tempo.toFixed(1)}x tempo gain — the cap is 3.0x, so at most -${maxCut} (floor ${cdFloor}). Trim or repurpose.`);
   }
 
+  // Per-move passive ceilings. Direct: "we should maybe try to aim to cap at
+  // 20% dmg reduction max, 10% regen per move. Tbh up to 50% thorns is fine,
+  // it can be a case where it hits back quite hard."
+  //
+  // These are PER-MOVE, and a per-move cap does not bound a species: passives
+  // sum across every move a species knows (`agent.passives[kind] += value`,
+  // status.ts:342, uncapped), so four capped moves still stack. That is what
+  // passive-exposure.ts measures; this rule only stops any single tree from
+  // being the whole problem by itself.
+  const passiveTotals = new Map<string, number>();
+  for (const n of nodes)
+    for (const g of [...(n.grantsPassive ? [n.grantsPassive] : []), ...(n.grantsPassives ?? [])])
+      passiveTotals.set(g.kind, (passiveTotals.get(g.kind) ?? 0) + g.value);
+  const PASSIVE_CAP: [string, number, string][] = [
+    ["damageReduction", 0.2, "damage reduction"],
+    ["thorns", 0.5, "thorns"],
+  ];
+  for (const [kind, cap, label] of PASSIVE_CAP) {
+    const total = passiveTotals.get(kind) ?? 0;
+    if (total > cap + 1e-9) out.push(`${label} totals ${(total * 100).toFixed(0)}% across this tree — the per-move cap is ${(cap * 100).toFixed(0)}%`);
+  }
+  // Healing is one budget across its three kinds, because that is how the
+  // engine spends it: status.ts:422 folds regen + healAura + regenFlat/maxHp
+  // into a single share before softCapHealShare bends it. Checking `regen`
+  // alone would pass a tree that hides the same total in `healAura`.
+  // Reference maxHp so regenFlat lands in the same unit as the fractions.
+  // Measured, not guessed: median maxHp over all 108 species x levels 5/15/30
+  // is 43 (level-5 median 21, level-15 43, level-30 76). Using the overall
+  // median rather than the level-30 one is deliberately conservative — a
+  // deeply-invested agent is usually high level, where the same flat regen is
+  // worth about half as much share.
+  const HEAL_REF_MAX_HP = 43;
+  const heal = (passiveTotals.get("regen") ?? 0) + (passiveTotals.get("healAura") ?? 0) + (passiveTotals.get("regenFlat") ?? 0) / HEAL_REF_MAX_HP;
+  if (heal > 0.1 + 1e-9) out.push(`healing totals ${(heal * 100).toFixed(1)}%/tick across this tree (regen + healAura + regenFlat/${HEAL_REF_MAX_HP}) — the per-move cap is 10%`);
+
   // A node that is pure downside is a bug, not a design choice (principle 4).
   const DOWNSIDE = new Set(["recoilFraction", "selfCostPerUse", "lockTicks"]);
   for (const n of nodes) {
@@ -419,10 +454,13 @@ if (selftest) {
       { id: "s3", name: "S3", cost: 2, leaning: "sociability", delta: { rallyCall: { ticks: 3 } } },
       { id: "s4", name: "S4", cost: 2, leaning: "sociability", delta: { rallyCall: { ticks: 4 } } },
       { id: "s5", name: "S5", cost: 2, leaning: "sociability", delta: { rallyCall: { ticks: 5 } } },
+      // Passive ceilings: 35% DR (cap 20) and 14%/tick healing (cap 10).
+      { id: "p1", name: "P1", cost: 1, leaning: "boldness", delta: {}, grantsPassive: { kind: "damageReduction", value: 0.35 } },
+      { id: "p2", name: "P2", cost: 1, leaning: "boldness", delta: {}, grantsPassives: [{ kind: "regen", value: 0.08 }, { kind: "healAura", value: 0.06 }] },
     ]),
   };
   const found = problems(broken);
-  const expect = ["spur, not bridge", "prerequisite \"nope\" does not exist", "missing leaning", "pure downside", "one lever answering the whole branch"];
+  const expect = ["spur, not bridge", "prerequisite \"nope\" does not exist", "missing leaning", "pure downside", "one lever answering the whole branch", "damage reduction totals", "healing totals"];
   const missed = expect.filter((e) => !found.some((f) => f.includes(e)));
   console.log(`selftest: ${found.length} problems found on a deliberately broken tree`);
   found.forEach((f) => console.log(`  - ${f}`));

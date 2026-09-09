@@ -2397,6 +2397,60 @@ Slam's tree had been in the data all along but never appeared in the move
 picker because it was never added there; added a new "Single-species"
 group for it.
 
+
+#### v4 conversion (39 -> 45 nodes) — Shipped
+
+Converted to template v4's two-lane standard. **The v3 fantasy above is
+unchanged and every v3 node kept its own mechanics**: this pass added the
+second lane each branch was missing, moved each branch's existing fork to the
+tail of that second lane, and rewired the three bridges to land on one lane
+notable per branch instead of a pre-fork filler. `check-proposed-trees.ts
+--shipped` reports body_slam **7 problems -> 0**.
+
+Six new nodes, all `delta` levers rather than passives (passives stack
+uncapped across every tree a species knows, so they are the scarcest currency
+in the system — this tree grants exactly the same passives it did before):
+
+| branch | lane | new node | lever | why this lever for THIS move |
+|---|---|---|---|---|
+| Aggression | B *Deadfall* | **Deadfall** | `situationalBonus: elevation 1.4` + `critRateStage` | It doesn't chase, it comes DOWN. `resolveHit` pays this out only when the attacker's own tile is genuinely higher than the target's — the condition IS the fantasy. |
+| Aggression | A *Momentum* | −1 Cooldown | `cooldownTicks: -1` | Tempo was 1.40x against this move's own 2.33x cap and a roster median of 1.80x; total reduction is now −3 (1.75x). Still −1 of headroom left, deliberately unspent. |
+| Boldness | B *Where It's Been Lying* | **Heaving Up** | `power` + `selfCostPerUse: energy` | Getting four hundred pounds off the ground costs the animal something real, in the same node as the payoff (principle 4). |
+| Boldness | B | **Crushed Thicket** | `consumesOwnTerrain: bush 1.5x` | The most physical lever in the palette on the branch that earned it: it comes up out of the brush it was sleeping in and the brush is gone. Reachable, not decorative — Snorlax's curated biomes are forest and jungle, the two with the heaviest bush weighting, and bush is walkable. |
+| Sociability | B *How It Ends One Anyway* | **Pinned** | `jamCooldownTicks: 2` | De-escalation with its whole body: whatever is under it doesn't get its own move off. |
+| Sociability | B | **Finally Roused** | `selfStateBonus: selfLowHp 1.5` | Read from `pickBestMove` (combat.ts), not the damage formula, and said plainly: a hurt Snorlax isn't stronger, it just finally bothers to reach for the slam. |
+
+Lanes differ in KIND, not degree — Aggression is a body already moving versus
+a drop from height; Boldness is refusing to be moved versus what lying
+somewhere for a living costs and leaves behind; Sociability is nobody starting
+anything versus how it ends one it didn't want. Bridges now complement the
+lane they land on rather than matching it: Braced Commitment (footing) lands
+on the Momentum lane and on Crushed Thicket, Nothing to Prove (calm) lands on
+Unbudging and Finally Roused, Provoked Charge (all-in violence) lands on the
+two lanes with no violence of their own, No Quarrel and Deadfall.
+
+Measured, roster median as the control: 39 -> **45 nodes**, 25 -> **30
+distinct levers** (median 21), 8 -> **11 colour-pie flavours** (median 9),
+tempo 1.40x -> **1.75x** (median 1.80x, cap 2.33x), power 2.08x -> 2.20x
+(median 1.89x), cheapest capstone 12 -> **11 points** (median 11).
+`passive-exposure.ts` output is byte-identical before and after — no species'
+cross-tree passive totals moved.
+
+Verified by running the real engine, not by reading it: a one-tick `tickWorld`
+harness with the resolved v4 spec dealt 30 damage on flat ground, **42 from
+elevation** (exactly 1.4x) and **45 standing on a bush** (exactly 1.5x, with
+the attacker's own tile left as `floor` afterward); the defender's own move
+cooldown went 1 -> 3; the attacker's energy dropped 0.045 against a 0.005 idle
+baseline; and `pickBestMove` chose a stronger rival move at full HP but Body
+Slam at 10% HP.
+
+Two data tests changed meaning, deliberately, and are commented as such: both
+bridge tests asserted the *old* landing rule (one filler short of a notable).
+v4 lands a bridge ON a lane notable — skipping that lane's grind, never its
+fork — so those assertions were rewritten to the new rule rather than
+weakened; the thing they exist to prove (a bridge never hands over a fork) is
+still asserted, now against Deadfall instead of Rolling Advance.
+
 ### Pending brainstorm — Earthquake / Hydro Pump / Solar Beam (not yet built)
 
 Consolidated here so none of this is lost to context compaction — these
@@ -4434,3 +4488,64 @@ using `.*?` to find a node's `delta` matched across node boundaries and wrote
 a cooldown into the wrong node, producing `delta: {, cooldownTicks: -1 }`.
 Reverted and rebuilt with brace-counting from an exact anchor. On a
 6,000-line file of live game data, `.*?` is not a search, it is a guess.
+
+### Hydro Pump converted to v4 (option 2: forks kept, inside the lanes)
+
+40 → 45 nodes, 12 per branch, 9 `anyOf`, 6 fork nodes, 3 real bridges. Every
+v3 fork survives, relocated to the tail of a lane. Checker findings for this
+tree: **7 → 2**, both leftover overwrite collisions (`range` across the three
+branches' own "+1 Range" fillers, and `situationalBonus` between *Riptide
+Counter* and *Violent Confluence*) — the same two Solar Beam is left with,
+and they need the additive fields, not tree surgery.
+
+The fantasy is unchanged, per the standing rule about not reinventing a
+documented identity. What v4 forced was answering it **twice per branch**,
+in lanes that differ in kind:
+
+| branch | lane A | lane B | new node |
+|---|---|---|---|
+| Overwhelm | sustained pressure — bore through, flood the ground you crossed | commitment — wind up, unload, and on a real connection never re-pressurise (`critCooldownReset`) | *Pressure Holds* |
+| Bastion | plant your feet (`immovable`, and *Open the Valve* trading `selfCostPerUse` energy for power) | control the stream | *Open the Valve*, *Narrow the Stream* |
+| Pod Tide | coordination — mark, converge, reach | keeping the pod — a fuller wash, and the pump as a harvesting tool | *Fuller Wash*, *Strip the Canopy* |
+
+**The best of the five is *Narrow the Stream*.** The branch's whole thesis
+has been prose since v3 — "a patient controlled deluge instead of a wild
+spray" — and it had no mechanic. It does now: the base `cone` (length 4,
+width 2, 12 tiles) becomes a `line` of 5, which is fewer tiles hit at longer
+reach, at the exact range *Channel Grip* buys. Measured directly, not
+reasoned about: 12 tiles → 5. The tree's only `shape` setter, so the
+overwrite field stays safe, and notable-tier per principle 14.
+
+***Strip the Canopy*** is the other one worth naming: `gatherBurst` on
+needs.ts's canopy-harvest path, where an off-cooldown damage move
+substitutes for the dig and scales with its own `range.max`. A pod using
+Hydro Pump to knock fruit down for the herd is the only node in the tree
+that feeds rather than fights — and it is the fourth user of a lever the
+colour-pie audit named as barely appearing.
+
+**Two things deliberately NOT done.** `consumesOwnTerrain: { terrain:
+"water" }` was drafted for the Bastion lane and cut: it permanently deletes
+the water tile it consumes (predation.ts `setTile(..., "floor")`), and a
+Water species fights standing on water constantly, so it is a plausible
+ecology regression on a resource the sim actually meters. And **no new
+passives at all** — `agent.passives[kind] += value` is uncapped and stacks
+across a species' whole movepool, so *Fuller Wash* deepens the opener's
+`allyEffect` delta instead of granting another heal. `passive-exposure.ts`
+totals are byte-identical before and after.
+
+**Balance, with the roster as control:**
+
+| | before | after | roster median |
+|---|---|---|---|
+| nodes | 40 | 45 | 38 |
+| distinct levers | 26 | **30** | 21 |
+| colour-pie flavours | 11 | **13** | 9 |
+| tempo | 1.80x (cap 3.00) | 1.80x | 1.80x |
+| power | 1.45x | 1.59x | 1.89x |
+| cheapest capstone | 11 pts | 9 pts | 11 |
+
+Tempo is untouched — the tree still spends −4 of the −6 the cap allows, and
+that headroom is a balance decision, not a conversion one. The capstone
+depth drop to 9 is structural to v4 (Solar Beam sits at 9 for the same
+reason: lane B reaches the deep notable in four steps) and is not a
+regression specific to this tree.

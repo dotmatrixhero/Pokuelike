@@ -3344,6 +3344,22 @@ export const MOVES: Record<string, MoveSpec> = {
     //   real positional choices (push the threat back vs. interpose
     //   yourself) instead of the tired damageReduction/jam fork reused
     //   everywhere else.
+    //
+    // v4 conversion (MOVES_DESIGN.md's "Skill-tree template v4 — the
+    // two-lane standard"): 40 -> 45 nodes, 12 per branch, every v3 fork
+    // kept and moved to the tail of a lane. The fantasy is unchanged; what
+    // changed is that each branch now answers it TWICE, in two lanes that
+    // differ in kind rather than in degree:
+    // - Overwhelm: sustained pressure (bore through, flood the ground you
+    //   crossed) vs. commitment (wind up, unload, and on a real connection
+    //   never re-pressurise at all). Both end at Undertow Pull.
+    // - Bastion: plant your feet (immovable, valve wide open at a real
+    //   per-use price) vs. control the stream — Narrow the Stream turns
+    //   the base cone into a line, which is this branch's whole thesis
+    //   about the dex's own 80 accuracy made visible on the map.
+    // - Pod Tide: coordination (mark, converge, reach) vs. keeping the pod
+    //   (a fuller wash over a herd-mate, and a pump used to strip a canopy
+    //   crop for the herd instead of to fight).
     tree: {
       building_pressure: {
         id: "building_pressure",
@@ -3366,15 +3382,17 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "overwhelm_footing",
         name: "+5 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["pump_conditioning"], ["surge_and_brace"], ["wake_of_violence"]],
+        prerequisites: ["building_pressure"],
         leaning: "aggression",
+        // LANE B, filler. Steadying the nozzle before the release — the
+        // commitment lane, opposite lane A's sustained pressure.
         delta: { accuracy: 5 },
       },
       bursting_main: {
         id: "bursting_main",
         name: "Bursting Main",
         cost: 1,
-        prerequisites: ["overwhelm_footing"],
+        prerequisites: ["pump_conditioning"],
         leaning: "aggression",
         delta: { defensePenetration: 0.3 },
       },
@@ -3382,7 +3400,11 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "flooding_wake",
         name: "Flooding Wake",
         cost: 1,
-        prerequisites: ["bursting_main"],
+        // LANE NOTABLE A (v4): lane A is sustained pressure — it bores
+        // through (Bursting Main) and leaves the ground it crossed
+        // underwater. Also the landing point for the Aggression<->Boldness
+        // bridge, which skips the lane's grind but not its decisions.
+        prerequisitesAnyOf: [["bursting_main"], ["unified_current"]],
         leaning: "aggression",
         // A real, already-shipped primitive (see Water Gun's own use of it):
         // a landed, non-killing hit leaves standing water where it struck.
@@ -3396,13 +3418,11 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "widening_main",
         name: "+1 Range",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Aggression (Surge and Brace's and Wake of
-        // Violence's own chains).
-        prerequisitesAnyOf: [["flooding_wake"], ["unified_current"], ["violent_confluence"]],
+        prerequisites: ["flooding_wake"],
         leaning: "aggression",
-        // Honest caveat, not hidden: this move's own cone footprint is
-        // fixed at `shape.length` (4) regardless of `range.max` — range
+        // Honest caveat, not hidden: this move's own footprint is fixed at
+        // `shape.length` (4 by default, or 5 if the Boldness branch's
+        // Narrow the Stream has been taken) regardless of `range.max` — range
         // only governs how far away a target can be for the attacker to
         // *decide* to fire (`moveRange`/`withinMoveRange`, combat.ts), not
         // how far the resolved blast itself reaches. A target at the new,
@@ -3410,11 +3430,27 @@ export const MOVES: Record<string, MoveSpec> = {
         // See MOVES_DESIGN.md's "range vs. shape are decoupled" note.
         delta: { range: { max: 5 } },
       },
+      pressure_holds: {
+        id: "pressure_holds",
+        name: "Pressure Holds",
+        cost: 1,
+        // LANE NOTABLE B (v4), and the landing point for the
+        // Sociability<->Aggression bridge.
+        prerequisitesAnyOf: [["overwhelm_footing"], ["violent_confluence"]],
+        leaning: "aggression",
+        // Lane B is commitment: wind up, unload, and — once a blast really
+        // connects — the main is still full, so it fires again immediately
+        // instead of re-pressurising (`critCooldownReset`, combat.ts's own
+        // crit path). Deliberately not another cooldown delta: this one is
+        // earned per crit, and it is what makes the nuke-vs-volley fork
+        // below a real choice rather than a coin flip.
+        delta: { critCooldownReset: true },
+      },
       overwhelm_surge: {
         id: "overwhelm_surge",
         name: "Overwhelm",
         cost: 1,
-        prerequisites: ["widening_main"],
+        prerequisites: ["pressure_holds"],
         excludes: ["relentless_surge"],
         leaning: "aggression",
         // Goes all-in on one unstoppable blast — the wind-up costs even
@@ -3425,7 +3461,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "relentless_surge",
         name: "Relentless Surge",
         cost: 1,
-        prerequisites: ["widening_main"],
+        prerequisites: ["pressure_holds"],
         excludes: ["overwhelm_surge"],
         leaning: "aggression",
         delta: { hits: { min: 2, max: 2 }, power: -20 },
@@ -3434,7 +3470,9 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "undertow_pull",
         name: "Undertow Pull",
         cost: 2,
-        prerequisitesAnyOf: [["overwhelm_surge"], ["relentless_surge"]],
+        // DEEP NOTABLE (v4): both lanes end here — the sustained-pressure
+        // lane's widened main and either side of the commitment fork.
+        prerequisitesAnyOf: [["widening_main"], ["overwhelm_surge"], ["relentless_surge"]],
         leaning: "aggression",
         // The backwash literally drags the target with it.
         delta: { positionSwap: true, positionSwapPull: 1 },
@@ -3472,19 +3510,38 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
       },
+      open_the_valve: {
+        id: "open_the_valve",
+        name: "Open the Valve",
+        cost: 1,
+        prerequisites: ["bastion_footing"],
+        leaning: "boldness",
+        // LANE A, filler. You can only hold the valve wide open if you are
+        // planted — so the lane that plants its feet is the one allowed to.
+        // A real per-use price in the same node as the payoff (principle 4):
+        // `selfCostPerUse` drains the user's own energy every cast
+        // (predation.ts's `resolveHit`), the roster's second use of a lever
+        // it has barely touched.
+        delta: { power: 15, selfCostPerUse: { need: "energy", amount: 0.05 } },
+      },
       channel_footing: {
         id: "channel_footing",
         name: "+5 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["bastion_footing"], ["surge_and_brace"], ["steadfast_tide"]],
+        prerequisites: ["wading_advance"],
         leaning: "boldness",
+        // LANE B, filler — the control lane. Hydro Pump's canonically bad
+        // accuracy is this branch's whole subject, so lane B starts by
+        // tightening the stream rather than by bracing against it.
         delta: { accuracy: 5 },
       },
       undertow_anchor: {
         id: "undertow_anchor",
         name: "Undertow Anchor",
         cost: 1,
-        prerequisites: ["channel_footing"],
+        // LANE NOTABLE A (v4), and the Aggression<->Boldness bridge's
+        // landing point on this branch.
+        prerequisitesAnyOf: [["open_the_valve"], ["unified_current"]],
         leaning: "boldness",
         // Ironic and earned: the water-mover that can't be swept away by
         // its own current.
@@ -3495,18 +3552,32 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "channel_grip",
         name: "+1 Range",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Boldness (Surge and Brace's and Steadfast Tide's
-        // own chains).
-        prerequisitesAnyOf: [["undertow_anchor"], ["unified_current"], ["communal_current"]],
+        prerequisites: ["undertow_anchor"],
         leaning: "boldness",
         delta: { range: { max: 5 } },
+      },
+      narrow_the_stream: {
+        id: "narrow_the_stream",
+        name: "Narrow the Stream",
+        cost: 1,
+        // LANE NOTABLE B (v4), and the Boldness<->Sociability bridge's
+        // landing point on this branch.
+        prerequisitesAnyOf: [["channel_footing"], ["communal_current"]],
+        leaning: "boldness",
+        // The branch's thesis, made literal and visible on the map: stop
+        // spraying. The base move's wide `cone` (length 4, width 2) becomes
+        // a `line` five tiles long — fewer tiles hit, but every one of them
+        // in front of you, at the exact reach Channel Grip buys. A real
+        // trade, not an upgrade, and the only `shape` setter in this tree
+        // (shape is an overwrite field — see MOVES_DESIGN.md principle 14:
+        // notable-tier currency, never filler).
+        delta: { shape: { kind: "line", length: 5 } },
       },
       bracing_wave: {
         id: "bracing_wave",
         name: "Bracing Wave",
         cost: 1,
-        prerequisites: ["channel_grip"],
+        prerequisites: ["narrow_the_stream"],
         excludes: ["riptide_counter"],
         leaning: "boldness",
         grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
@@ -3516,7 +3587,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "riptide_counter",
         name: "Riptide Counter",
         cost: 1,
-        prerequisites: ["channel_grip"],
+        prerequisites: ["narrow_the_stream"],
         excludes: ["bracing_wave"],
         leaning: "boldness",
         // Punishes whoever tries to catch it off guard mid-channel.
@@ -3526,7 +3597,9 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "fouling_backwash",
         name: "Fouling Backwash",
         cost: 2,
-        prerequisitesAnyOf: [["bracing_wave"], ["riptide_counter"]],
+        // DEEP NOTABLE (v4): the planted lane's own reach, or either side
+        // of the control lane's fork, all end here.
+        prerequisitesAnyOf: [["channel_grip"], ["bracing_wave"], ["riptide_counter"]],
         leaning: "boldness",
         // The backwash fouls the target's own footing, throwing off its
         // rhythm rather than just crushing its guard down.
@@ -3581,7 +3654,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "wake_footing",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["pod_footing"], ["steadfast_tide"], ["wake_of_violence"]],
+        prerequisites: ["pod_footing"],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
@@ -3589,7 +3662,10 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "wake_rally",
         name: "Wake Rally",
         cost: 1,
-        prerequisites: ["wake_footing"],
+        // LANE NOTABLE A (v4), and the Sociability<->Aggression bridge's
+        // landing point on this branch. Lane A is coordination: the pod
+        // converges, and reaches further to do it.
+        prerequisitesAnyOf: [["wake_footing"], ["violent_confluence"]],
         leaning: "sociability",
         // The surge marks a target for the whole pod to converge on.
         delta: { rallyCall: { ticks: 20 } },
@@ -3598,18 +3674,46 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "pod_reach",
         name: "+1 Range",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Sociability (Steadfast Tide's and Wake of
-        // Violence's own chains).
-        prerequisitesAnyOf: [["wake_rally"], ["communal_current"], ["violent_confluence"]],
+        prerequisites: ["wake_rally"],
         leaning: "sociability",
         delta: { range: { max: 5 } },
+      },
+      fuller_wash: {
+        id: "fuller_wash",
+        name: "Fuller Wash",
+        cost: 1,
+        prerequisites: ["pod_current"],
+        leaning: "sociability",
+        // LANE B, filler. Lane B is the other half of "the pod cares for
+        // itself" — not converging on a threat, but keeping the pod: the
+        // opener's own wash over a herd-mate goes from 15% to 22% of their
+        // max HP. Deliberately a `delta`, not another healing passive —
+        // `agent.passives` totals stack across every move a species knows
+        // and are the scarcest currency in the system.
+        delta: { allyEffect: { healFraction: 0.22 } },
+      },
+      strip_the_canopy: {
+        id: "strip_the_canopy",
+        name: "Strip the Canopy",
+        cost: 1,
+        // LANE NOTABLE B (v4), and the Boldness<->Sociability bridge's
+        // landing point on this branch.
+        prerequisitesAnyOf: [["fuller_wash"], ["communal_current"]],
+        leaning: "sociability",
+        // The pod turns the pump on a fruiting tree instead of on an
+        // animal: a jet strong enough to move bodies knocks a canopy crop
+        // down in a fraction of the time. Real and already wired —
+        // needs.ts's canopy-harvest path substitutes any off-cooldown
+        // damage move for the dig, scaling with its `range.max` and adding
+        // its `gatherBurst` on top. The one node in this tree that feeds
+        // the herd rather than fighting for it.
+        delta: { gatherBurst: 3 },
       },
       undertow_guard: {
         id: "undertow_guard",
         name: "Undertow Guard",
         cost: 1,
-        prerequisites: ["pod_reach"],
+        prerequisites: ["strip_the_canopy"],
         excludes: ["riptide_charge"],
         leaning: "sociability",
         // Protectively shoves the threat back from the herd.
@@ -3619,7 +3723,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "riptide_charge",
         name: "Riptide Charge",
         cost: 1,
-        prerequisites: ["pod_reach"],
+        prerequisites: ["strip_the_canopy"],
         excludes: ["undertow_guard"],
         leaning: "sociability",
         // Surges forward to meet the threat before it reaches the herd.
@@ -3629,7 +3733,9 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "pod_instinct",
         name: "+8% Lifesteal",
         cost: 2,
-        prerequisitesAnyOf: [["undertow_guard"], ["riptide_charge"]],
+        // DEEP NOTABLE (v4): the coordination lane's own reach, or either
+        // side of the guardianship lane's fork, all end here.
+        prerequisitesAnyOf: [["pod_reach"], ["undertow_guard"], ["riptide_charge"]],
         leaning: "sociability",
         delta: { lifestealFraction: 0.08 },
       },
@@ -3667,20 +3773,32 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["building_pressure", "wading_advance"],
         leaning: "boldness",
-        delta: { lockTicks: -1 },
+        // Planting your feet alongside someone else both shortens the
+        // wind-up Building Pressure introduces and steadies the aim — the
+        // benefit lives in the same node as the commitment it pays off
+        // (principle 4), and the accuracy half is on-fantasy rather than a
+        // bolt-on: a braced stance is exactly what this move's canonically
+        // bad aim is missing.
+        delta: { lockTicks: -1, accuracy: 5 },
       },
       // Bridge tail (see MOVES_DESIGN.md's "Crosslinks as bridges"):
       // extends Surge and Brace into Aggression's and Boldness's own
       // pre-fork nodes (Widening Main / Channel Grip).
       brace_conditioning: {
         id: "brace_conditioning",
-        name: "-1 Cooldown",
+        name: "Deeper Brace",
         cost: 1,
         prerequisites: ["surge_and_brace"],
         leaning: "aggression",
         // Deepens the same wind-up-softening lever Surge and Brace already
-        // introduced, instead of a generic accuracy bolt-on.
-        delta: { cooldownTicks: -1 },
+        // introduced (principle 13) rather than the generic cooldown
+        // bolt-on this was: a second -1 `lockTicks` is what pays off the
+        // all-in Aggression build, whose Building Pressure (+1) and
+        // Overwhelm (+1) put it at +2 — this bridge is the only thing in
+        // the tree that fully cancels the wind-up it commits to. Keeps its
+        // -1 cooldown so the tree's total tempo is unchanged at -4 of the
+        // -6 the 3x cap allows.
+        delta: { lockTicks: -1, cooldownTicks: -1 },
       },
       unified_current: {
         id: "unified_current",
@@ -4266,27 +4384,50 @@ export const MOVES: Record<string, MoveSpec> = {
     cooldownTicks: 8,
     range: { min: 0, max: 2 },
     hitsArea: true,
-    // v3 redesign (MOVES_DESIGN.md's "start from the fantasy" pass —
-    // Earthquake's own worked example there). THE FANTASY: a self-centered
-    // shockwave that radiates out in every direction — reckless area
-    // denial that doesn't distinguish friend from foe. That's real,
-    // current engine behavior (`resolveAreaHit` has no herd filter by
-    // default), not just flavor text, which is exactly the design space
-    // each branch answers differently:
-    // - Aggression ("Overload"): leans further into scale and
-    //   indiscriminate destruction — loud and obvious, not a stealth/
-    //   ambush fantasy, so it stays power-archetype on purpose (widening
-    //   Aggression's design space doesn't mean every move has to use
-    //   every flavor).
-    // - Boldness ("Fracture"): stops defaulting to flat tankiness and
-    //   reshapes the battlefield instead — the ground itself becomes
-    //   difficult, hazardous terrain (`terrainFill: "mud"`, a real,
-    //   already-shipped slow-terrain kind) wherever the quake lands.
-    // - Sociability ("Herdsafe Ground"): turns the move's own flaw into
-    //   its payoff — the herd learns to read the tremor and doesn't get
-    //   caught in it (`excludesAllies`, the new primitive this redesign
-    //   needed), then turns the aftershock into real support.
+    // THE FANTASY (v3's "start from the fantasy" pass, unchanged by the v4
+    // conversion — see MOVES_DESIGN.md's Earthquake worked example):
+    // Earthquake is not aimed. The user drops its whole weight through its
+    // feet and the fault answers — the ground heaves outward in every
+    // direction at once and everything standing on it goes down together:
+    // the thing it was angry at, the thing beside that, its own herd-mates,
+    // itself. There is no behind. And what is left afterwards is not the
+    // ground that was there before — split, churned, unwalkable. Its danger
+    // and its cost are the same fact: it cannot tell whose feet it is under.
+    // That is real, current engine behavior (`resolveAreaHit` has no herd
+    // filter by default), not flavor text, and it is the design space each
+    // branch answers differently:
+    // - Aggression ("Overload"): answer the blindness by leaning into it —
+    //   heavier, faster, more often, until the quaker is taking damage off
+    //   its own fault line. The one real choice is the footprint: spread the
+    //   collapse or drive it straight down. Ends on a spiral (Cataclysm) in
+    //   which the recoil creates the very condition its own bonus reads.
+    // - Boldness ("Fracture"): the ground is both the weapon and the
+    //   property. Break it (`terrainFill: "mud"` from the opener), refuse to
+    //   be moved on it, shove everyone else off it — then EAT it: Eat the
+    //   Ruin's `consumesOwnTerrain` spends the exact mud this move's own
+    //   opener lays down. Nothing else in the roster makes its own
+    //   consumable terrain and then consumes it; Rock Throw eats boulders it
+    //   did not create.
+    // - Sociability ("Herdsafe Ground"): the flaw, drilled out. A herd that
+    //   has learned to read the fault is not caught in it (`excludesAllies`,
+    //   the primitive this redesign needed), and then the shock becomes a
+    //   provision — bracing, spurring, and literally shaking the canopy down
+    //   onto them (`gatherBurst`; needs.ts's canopy-harvest path takes any
+    //   non-status damage move off cooldown as the harvest move, so this
+    //   fires for real on Earthquake).
+    //
+    // Template v4 (45 nodes): each branch is opener + two parallel lanes
+    // (each with its own lane notable) + a deep notable both lanes converge
+    // on + a filler + a capstone, plus three three-node crosslink bridges.
+    // The lanes are deliberately different in KIND, not degree:
+    //   Aggression  lane A = it doesn't stop (tempo, volume, sustain)
+    //               lane B = one enormous drop (mass, and the footprint fork)
+    //   Boldness    lane A = the quaker's own footing (planted, immovable)
+    //               lane B = everyone else's ground (shoved, broken, eaten)
+    //   Sociability lane A = what the quake GIVES the herd (food, healing)
+    //               lane B = what the herd DOES in it (brace, or surge)
     tree: {
+      // --- Aggression: Overload ------------------------------------------
       fault_trigger: {
         id: "fault_trigger",
         name: "Fault Trigger",
@@ -4295,6 +4436,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // The bigger the mover, the bigger the quake it can trigger.
         delta: { weightScaling: { factor: 0.12 } },
       },
+      // Lane A — "it doesn't stop": tempo, volume, and feeding off the ruin.
       shaking_ground: {
         id: "shaking_ground",
         name: "-1 Cooldown",
@@ -4303,11 +4445,44 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { cooldownTicks: -1 },
       },
+      aftershock_barrage: {
+        id: "aftershock_barrage",
+        name: "Aftershock Barrage",
+        cost: 1,
+        prerequisites: ["shaking_ground"],
+        leaning: "aggression",
+        delta: { hits: { min: 2, max: 2 }, power: -10 },
+      },
+      seismic_feed: {
+        id: "seismic_feed",
+        name: "Seismic Feed",
+        cost: 1,
+        // LANE NOTABLE (lane A). Reachable the normal way, or via Cracking
+        // Momentum's bridge — a lunge dropped into the lane that is already
+        // about not stopping.
+        prerequisitesAnyOf: [["aftershock_barrage"], ["fault_convergence"]],
+        leaning: "aggression",
+        // The lane's whole point in one node: it feeds on what it shakes
+        // loose, and a clean hit rolls it straight back into the next shock
+        // instead of waiting out the cooldown. `critCooldownReset` is the
+        // only lever in the roster that turns a crit into tempo rather than
+        // damage, which is exactly this lane's kind.
+        delta: { lifestealFraction: 0.08, critCooldownReset: true },
+      },
+      overload_precision: {
+        id: "overload_precision",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["seismic_feed"],
+        leaning: "aggression",
+        delta: { accuracy: 5 },
+      },
+      // Lane B — "one enormous drop": mass, and the footprint decision.
       overload_footing: {
         id: "overload_footing",
         name: "Reckless Overload",
         cost: 1,
-        prerequisitesAnyOf: [["shaking_ground"], ["cracking_momentum"], ["coordinated_tremor"]],
+        prerequisites: ["fault_trigger"],
         leaning: "aggression",
         // Fixed a real bug here: this node used to be `recoilFraction: 0.1`
         // alone — a full skill point spent on nothing but self-damage, no
@@ -4317,31 +4492,27 @@ export const MOVES: Record<string, MoveSpec> = {
         // Paired here to match.
         delta: { power: 10, recoilFraction: 0.1 },
       },
-      aftershock_barrage: {
-        id: "aftershock_barrage",
-        name: "Aftershock Barrage",
+      crushing_mass: {
+        id: "crushing_mass",
+        name: "Crushing Mass",
         cost: 1,
-        prerequisites: ["overload_footing"],
+        // LANE NOTABLE (lane B). Reachable the normal way, or via
+        // Coordinated Tremor's bridge — the herd clears, and what is left
+        // gets the whole body dropped on it.
+        prerequisitesAnyOf: [["overload_footing"], ["converged_ruin"]],
         leaning: "aggression",
-        delta: { hits: { min: 2, max: 2 }, power: -10 },
-      },
-      seismic_feed: {
-        id: "seismic_feed",
-        name: "+8% Lifesteal",
-        cost: 1,
-        // Reachable the normal way, or via either of the two crosslink
-        // bridges that reach into Aggression (Coordinated Tremor's and
-        // Cracking Momentum's own chains) — each lands here, one step
-        // before the fork below, same as the normal path.
-        prerequisitesAnyOf: [["aftershock_barrage"], ["converged_ruin"], ["fault_convergence"]],
-        leaning: "aggression",
-        delta: { lifestealFraction: 0.08 },
+        // Doubles down on the opener's own weight scaling (overwrite, and
+        // Fault Trigger is an ancestor on every route) and charges a real
+        // stamina cost for it in the same node — dropping this much mass is
+        // not free. `selfCostPerUse` has exactly one other user in the whole
+        // roster.
+        delta: { weightScaling: { factor: 0.24 }, selfCostPerUse: { need: "energy", amount: 0.05 } },
       },
       total_collapse: {
         id: "total_collapse",
         name: "Total Collapse",
         cost: 1,
-        prerequisites: ["seismic_feed"],
+        prerequisites: ["crushing_mass"],
         excludes: ["focused_rupture"],
         leaning: "aggression",
         // Widens the blast itself — a real AoE-size decision point, not
@@ -4352,7 +4523,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "focused_rupture",
         name: "Focused Rupture",
         cost: 1,
-        prerequisites: ["seismic_feed"],
+        prerequisites: ["crushing_mass"],
         excludes: ["total_collapse"],
         leaning: "aggression",
         // Pulls the blast back in tight and puts everything into what it
@@ -4363,26 +4534,38 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "chain_reaction",
         name: "Chain Reaction",
         cost: 2,
-        prerequisitesAnyOf: [["total_collapse"], ["focused_rupture"]],
+        // DEEP NOTABLE — both lanes end here: lane A's tail and both tips of
+        // lane B's fork.
+        prerequisitesAnyOf: [["overload_precision"], ["total_collapse"], ["focused_rupture"]],
         leaning: "aggression",
-        delta: { critRateStage: 1 },
+        // One fault sets off the next, and anything caught between two
+        // shocks never gets its feet back under it. The tree's only
+        // `statChangeOnHit`, so no build can collide with it.
+        delta: { critRateStage: 1, statChangeOnHit: { target: "defender", stat: "speed", stage: -1, ticks: 20 } },
       },
-      overload_precision: {
-        id: "overload_precision",
-        name: "+5 Accuracy",
+      overload_cadence: {
+        id: "overload_cadence",
+        name: "-1 Cooldown",
         cost: 1,
         prerequisites: ["chain_reaction"],
         leaning: "aggression",
-        delta: { accuracy: 5 },
+        delta: { cooldownTicks: -1 },
       },
       cataclysm: {
         id: "cataclysm",
         name: "Cataclysm",
         cost: 2,
-        prerequisites: ["overload_precision"],
+        prerequisites: ["overload_cadence"],
         leaning: "aggression",
-        delta: { power: 20, recoilFraction: 0.05 },
+        // CAPSTONE. A spiral, not a bigger number: the branch's own recoil
+        // is what CREATES the low-HP state this bonus reads, so an Overload
+        // build gets stronger as it destroys itself. Three shipped moves use
+        // `selfStateBonus` as a standalone "hurt hits harder" bonus; none of
+        // them pairs it with the move's own self-damage, which is the part
+        // that is new here.
+        delta: { power: 20, recoilFraction: 0.05, selfStateBonus: { condition: "selfLowHp", multiplier: 1.5 } },
       },
+      // --- Boldness: Fracture ---------------------------------------------
       fissure_grip: {
         id: "fissure_grip",
         name: "Fissure Grip",
@@ -4390,9 +4573,11 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         // Wherever this lands, the ground cracks into real, treacherous
         // rubble — the terraforming half of the fantasy, live from the
-        // opener, not saved for a keystone.
+        // opener, not saved for a keystone. Also the resource the branch's
+        // capstone later spends.
         delta: { terrainFill: { terrain: "mud" } },
       },
+      // Lane A — "my own footing": the one thing the quake does not move.
       bedrock_footing_2: {
         id: "bedrock_footing_2",
         name: "-1 Cooldown",
@@ -4403,46 +4588,83 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       cracking_footing: {
         id: "cracking_footing",
-        name: "+1 Range",
+        name: "+0.15 Defense Penetration",
         cost: 1,
-        prerequisitesAnyOf: [["bedrock_footing_2"], ["cracking_momentum"], ["fractured_warning"]],
+        prerequisites: ["bedrock_footing_2"],
         leaning: "boldness",
-        delta: { range: { max: 3 } },
+        // Was "+1 Range" (`range: { max: 3 }`), byte-for-byte the same node
+        // as Sociability's Tremor Reach in this same tree — the in-tree
+        // version of the copy-paste failure template v3 exists to stop, and
+        // a real OVERWRITE collision between two co-takeable branches.
+        // Repointed at the lever this lane is actually about: driving the
+        // shock down THROUGH whatever is standing on it.
+        delta: { defensePenetration: 0.15 },
       },
       bedrock_anchor: {
         id: "bedrock_anchor",
         name: "Bedrock Anchor",
         cost: 1,
-        prerequisites: ["cracking_footing"],
+        // LANE NOTABLE (lane A). Reachable the normal way, or via Fractured
+        // Warning's bridge — the warning that throws everyone else's footing
+        // off, landing in the lane that is about never losing your own.
+        prerequisitesAnyOf: [["cracking_footing"], ["warded_convergence"]],
         leaning: "boldness",
+        // Drives itself into the ground: the quake goes deeper because none
+        // of it is spent staying upright, and it is not going anywhere for a
+        // beat afterwards. The lock is the price, in the same node.
         grantsPassive: { kind: "immovable", value: 1 },
-        delta: {},
+        delta: { power: 12, lockTicks: 1 },
       },
+      fracture_precision: {
+        id: "fracture_precision",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["bedrock_anchor"],
+        leaning: "boldness",
+        delta: { accuracy: 5 },
+      },
+      // Lane B — "everyone else's ground": shoved off it, or pinned on it.
       deepening_fissure: {
         id: "deepening_fissure",
         name: "+0.3 Defense Penetration",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Boldness (Cracking Momentum's and Fractured
-        // Warning's own chains).
-        prerequisitesAnyOf: [["bedrock_anchor"], ["fault_convergence"], ["warded_convergence"]],
+        prerequisites: ["fissure_grip"],
         leaning: "boldness",
         delta: { defensePenetration: 0.3 },
+      },
+      rubble_wall: {
+        id: "rubble_wall",
+        name: "Rubble Wall",
+        cost: 1,
+        // LANE NOTABLE (lane B). Reachable the normal way, or via Cracking
+        // Momentum's bridge, whose whole lever is forced movement.
+        prerequisitesAnyOf: [["deepening_fissure"], ["fault_convergence"]],
+        leaning: "boldness",
+        // The rubble itself shoves anyone standing on it away from the
+        // epicenter.
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" } },
       },
       widening_rift: {
         id: "widening_rift",
         name: "Widening Rift",
         cost: 1,
-        prerequisites: ["deepening_fissure"],
+        prerequisites: ["rubble_wall"],
         excludes: ["grounding_brace"],
         leaning: "boldness",
-        delta: { shape: { kind: "burst", radius: 3 } },
+        // Was `shape: { kind: "burst", radius: 3 }` — identical to
+        // Aggression's own Total Collapse in this same tree, and the source
+        // of two real checker failures (a `shape` OVERWRITE collision across
+        // co-takeable branches, and two independently-takeable shape nodes;
+        // a move has one footprint). Repointed to the fork's actual
+        // question: the rift keeps opening, so everything on it slides
+        // further out — against Grounding Brace, which plants on it instead.
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 2, timing: "onHit" } },
       },
       grounding_brace: {
         id: "grounding_brace",
         name: "Grounding Brace",
         cost: 1,
-        prerequisites: ["deepening_fissure"],
+        prerequisites: ["rubble_wall"],
         excludes: ["widening_rift"],
         leaning: "boldness",
         // Braces so hard against its own tremor that it can't immediately
@@ -4450,33 +4672,41 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "damageReductionFlat", value: 2 },
         delta: { lockTicks: 1 },
       },
-      rubble_wall: {
-        id: "rubble_wall",
-        name: "Rubble Wall",
-        cost: 2,
-        prerequisitesAnyOf: [["widening_rift"], ["grounding_brace"]],
-        leaning: "boldness",
-        // The rubble itself shoves anyone standing on it away from the
-        // epicenter.
-        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" } },
-      },
-      fracture_precision: {
-        id: "fracture_precision",
-        name: "+5 Accuracy",
-        cost: 1,
-        prerequisites: ["rubble_wall"],
-        leaning: "boldness",
-        delta: { accuracy: 5 },
-      },
       ruinous_ground: {
         id: "ruinous_ground",
         name: "Ruinous Ground",
         cost: 2,
-        prerequisites: ["fracture_precision"],
+        // DEEP NOTABLE — lane A's tail and both tips of lane B's fork.
+        prerequisitesAnyOf: [["fracture_precision"], ["widening_rift"], ["grounding_brace"]],
         leaning: "boldness",
-        // Fixes Ground's real Grass/Bug resists.
+        // Fixes Ground's real Grass/Bug resists — nothing resists the ground
+        // itself.
         delta: { resistanceBreaker: { multiplier: 2 } },
       },
+      settling_ground: {
+        id: "settling_ground",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["ruinous_ground"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      eat_the_ruin: {
+        id: "eat_the_ruin",
+        name: "Eat the Ruin",
+        cost: 2,
+        prerequisites: ["settling_ground"],
+        leaning: "boldness",
+        // CAPSTONE, and a closed loop the roster does not otherwise have:
+        // Fissure Grip turns the ground this move lands on into mud, and
+        // this spends it. `consumesOwnTerrain` reads the ATTACKER's own tile
+        // (predation.ts) and reverts it to plain floor on use, so the payoff
+        // is self-limiting — a Fracture build has to keep breaking new
+        // ground to keep eating it. Rock Throw consumes boulders, but it
+        // never made them; Leech Seed eats flora it did not plant.
+        delta: { consumesOwnTerrain: { terrain: "mud", damageMultiplier: 2.5 }, defensePenetration: 0.2 },
+      },
+      // --- Sociability: Herdsafe Ground ------------------------------------
       herdsafe_trigger: {
         id: "herdsafe_trigger",
         name: "Herdsafe Trigger",
@@ -4486,6 +4716,50 @@ export const MOVES: Record<string, MoveSpec> = {
         // on this move stops getting caught in its own quake.
         delta: { excludesAllies: true },
       },
+      // Lane A — "what the quake gives the herd": food, then healing.
+      shaken_loose: {
+        id: "shaken_loose",
+        name: "Shaken Loose",
+        cost: 1,
+        prerequisites: ["herdsafe_trigger"],
+        leaning: "sociability",
+        // Was `warning_footing`, "+8% Lifesteal" — byte-for-byte Aggression's
+        // own Seismic Feed in this same tree, and lifesteal has nothing to do
+        // with a herd drill. Replaced with the thing a quake actually does
+        // for a herd: it shakes the canopy down. Real, not flavour —
+        // needs.ts's canopy-harvest path picks any non-status damage move
+        // that is off cooldown as the harvest move and adds its `gatherBurst`
+        // straight to `digTicksAccrued`.
+        delta: { gatherBurst: 2 },
+      },
+      herd_precision: {
+        id: "herd_precision",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["shaken_loose"],
+        leaning: "sociability",
+        delta: { accuracy: 5 },
+      },
+      communal_steadying: {
+        id: "communal_steadying",
+        name: "Communal Steadying",
+        cost: 1,
+        // LANE NOTABLE (lane A). Reachable the normal way, or via Fractured
+        // Warning's bridge.
+        prerequisitesAnyOf: [["herd_precision"], ["warded_convergence"]],
+        leaning: "sociability",
+        grantsPassive: { kind: "regen", value: 0.03 },
+        delta: {},
+      },
+      tremor_reach: {
+        id: "tremor_reach",
+        name: "+1 Range",
+        cost: 1,
+        prerequisites: ["communal_steadying"],
+        leaning: "sociability",
+        delta: { range: { max: 3 } },
+      },
+      // Lane B — "what the herd does in it": brace behind it, or surge on it.
       herdsafe_footing: {
         id: "herdsafe_footing",
         name: "+5 Accuracy",
@@ -4494,39 +4768,22 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { accuracy: 5 },
       },
-      warning_footing: {
-        id: "warning_footing",
-        name: "+8% Lifesteal",
-        cost: 1,
-        prerequisitesAnyOf: [["herdsafe_footing"], ["fractured_warning"], ["coordinated_tremor"]],
-        leaning: "sociability",
-        delta: { lifestealFraction: 0.08 },
-      },
       bracing_call: {
         id: "bracing_call",
         name: "Bracing Call",
         cost: 1,
-        prerequisites: ["warning_footing"],
+        // LANE NOTABLE (lane B). Reachable the normal way, or via
+        // Coordinated Tremor's bridge — the mark that tells the herd where
+        // the shock is going, landing in the lane about what they do next.
+        prerequisitesAnyOf: [["herdsafe_footing"], ["converged_ruin"]],
         leaning: "sociability",
         delta: { targetsAlly: true, allyEffect: { buff: { stat: "defense", stage: 1, ticks: 20 } } },
-      },
-      tremor_reach: {
-        id: "tremor_reach",
-        name: "+1 Range",
-        cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Sociability (Coordinated Tremor's and Fractured
-        // Warning's own chains) — each lands here, one step before the
-        // fork below, same as the normal path.
-        prerequisitesAnyOf: [["bracing_call"], ["converged_ruin"], ["warded_convergence"]],
-        leaning: "sociability",
-        delta: { range: { max: 3 } },
       },
       guardians_ground: {
         id: "guardians_ground",
         name: "Guardian's Ground",
         cost: 1,
-        prerequisites: ["tremor_reach"],
+        prerequisites: ["bracing_call"],
         excludes: ["rally_quake"],
         leaning: "sociability",
         grantsPassive: { kind: "damageReductionFlat", value: 1 },
@@ -4536,42 +4793,48 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "rally_quake",
         name: "Rally Quake",
         cost: 1,
-        prerequisites: ["tremor_reach"],
+        prerequisites: ["bracing_call"],
         excludes: ["guardians_ground"],
         leaning: "sociability",
         // The aftershock keeps helping even mid-fight — no dedicated
         // support use needed to trigger it.
         delta: { allyEffectOnAttack: true, allyEffect: { buff: { stat: "attack", stage: 1, ticks: 20 } } },
       },
-      communal_steadying: {
-        id: "communal_steadying",
-        name: "Communal Steadying",
+      the_herd_reads_it: {
+        id: "the_herd_reads_it",
+        name: "The Herd Reads It",
         cost: 2,
-        prerequisitesAnyOf: [["guardians_ground"], ["rally_quake"]],
+        // DEEP NOTABLE — lane A's tail and both tips of lane B's fork.
+        prerequisitesAnyOf: [["tremor_reach"], ["guardians_ground"], ["rally_quake"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regen", value: 0.03 },
-        delta: {},
+        // Where the two lanes actually meet: the herd has stopped treating
+        // the shaking ground as something to contest. Nobody squares up over
+        // where to stand when the fault goes off, and they close on what it
+        // knocked out of the canopy instead of on each other.
+        grantsPassive: { kind: "nonTerritorial", value: 1 },
+        delta: { gatherBurst: 2 },
       },
-      herd_precision: {
-        id: "herd_precision",
-        name: "+5 Accuracy",
+      herd_cadence: {
+        id: "herd_cadence",
+        name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["communal_steadying"],
+        prerequisites: ["the_herd_reads_it"],
         leaning: "sociability",
-        delta: { accuracy: 5 },
+        delta: { cooldownTicks: -1 },
       },
       sanctuary_quake: {
         id: "sanctuary_quake",
         name: "Sanctuary Quake",
         cost: 2,
-        prerequisites: ["herd_precision"],
+        prerequisites: ["herd_cadence"],
         leaning: "sociability",
-        // The aftershock settles into a real, ongoing comfort for whoever
-        // stayed close — the ultimate payoff of a quake that heals its own
-        // people instead of scattering them.
+        // CAPSTONE. The aftershock settles into a real, ongoing comfort for
+        // whoever stayed close — the ultimate payoff of a quake that heals
+        // its own people instead of scattering them.
         grantsPassive: { kind: "healAura", value: 0.015 },
         delta: {},
       },
+      // --- Crosslink bridges (3 x crosslink -> filler -> cost-2 notable) ---
       // Crosslink: Aggression <-> Boldness — the user lurches forward into
       // the rubble it just cracked open, real momentum off real terrain.
       cracking_momentum: {
@@ -4582,9 +4845,6 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "onHit" } },
       },
-      // Bridge tail (see MOVES_DESIGN.md's "Crosslinks as bridges"): extends
-      // Cracking Momentum into Aggression's and Boldness's own pre-fork
-      // nodes (Seismic Feed / Deepening Fissure).
       momentum_footing: {
         id: "momentum_footing",
         name: "Deeper Lunge",
@@ -4602,6 +4862,9 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["momentum_footing"],
         leaning: "boldness",
+        // BRIDGE NOTABLE. Alternate route into Aggression's Seismic Feed and
+        // Boldness's Rubble Wall — one lane notable in each branch the
+        // crosslink connects, one step short of either fork.
         // Crashing through that much rubble that fast costs something real
         // — a genuine tradeoff, not a flat power bolt-on with nothing to
         // balance it (see MOVES_DESIGN.md's guide on pure-downside bugs).
@@ -4618,8 +4881,6 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { jamCooldownTicks: 1 },
       },
-      // Bridge tail: extends Fractured Warning into Boldness's and
-      // Sociability's own pre-fork nodes (Deepening Fissure / Tremor Reach).
       tremor_lockstep: {
         id: "tremor_lockstep",
         name: "+1 Jam",
@@ -4636,6 +4897,8 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["tremor_lockstep"],
         leaning: "sociability",
+        // BRIDGE NOTABLE. Alternate route into Boldness's Bedrock Anchor and
+        // Sociability's Communal Steadying — the two patient, planted lanes.
         // The warning becomes real protection — ties into the herd's own
         // bracing instead of a generic jam-again bolt-on.
         grantsPassive: { kind: "damageReduction", value: 0.05 },
@@ -4651,37 +4914,30 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { rallyCall: { ticks: 20 } },
       },
-      // Deeper crosslink, building on Coordinated Tremor's own mark: a real
-      // payoff for following up on it, via the new `"rallyMarked"`
-      // `SituationalCondition` (see moves.ts's own doc comment) — the herd
-      // converging on something is worth more once the quake actually
-      // lands on it too.
       marked_rupture: {
         id: "marked_rupture",
         name: "Marked Rupture",
         cost: 1,
         prerequisites: ["coordinated_tremor"],
         leaning: "aggression",
-        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.3 } },
+        // Bridge filler, and it must deepen its own crosslink's lever rather
+        // than reach for a new one (principle 13) — it used to carry ONLY
+        // the `rallyMarked` bonus, which shared nothing with Coordinated
+        // Tremor's mark and was a real reported failure. It now holds the
+        // mark half again as long AND pays off on it, via the shared
+        // `"rallyMarked"` `SituationalCondition`.
+        delta: { rallyCall: { ticks: 32 }, situationalBonus: { condition: "rallyMarked", multiplier: 1.3 } },
       },
-      // Pilot: a crosslink that's a real bridge, not a dead-end leaf.
-      // Coordinated Tremor -> Marked Rupture -> Converged Ruin is its own
-      // short filler+notable tail. Converged Ruin is wired as a real
-      // alternate route into BOTH branches Coordinated Tremor bridges —
-      // Aggression's `seismic_feed` and Sociability's `tremor_reach` (see
-      // each node's own `prerequisitesAnyOf`) — not just the one branch it
-      // happens to lean toward. Revised after direct feedback on the first
-      // version: landing the shortcut straight on a branch's own fork
-      // ("the choice of 2 nodes") was too much; it now lands one step
-      // *before* each fork instead, same distance-to-decision as the
-      // normal path, and reaches into either side of the crosslink rather
-      // than only Aggression.
       converged_ruin: {
         id: "converged_ruin",
         name: "Converged Ruin",
         cost: 2,
         prerequisites: ["marked_rupture"],
         leaning: "aggression",
+        // BRIDGE NOTABLE. Alternate route into Aggression's Crushing Mass
+        // and Sociability's Bracing Call — reaching into BOTH branches the
+        // crosslink bridges (principle 11), and landing one step short of
+        // each fork rather than on it (principle 12).
         // Deepens Marked Rupture's own rallyMarked payoff further
         // (overwrite, like every other situationalBonus) instead of a flat
         // defensePenetration bolt-on — the ground doesn't just care about
@@ -5561,23 +5817,30 @@ export const MOVES: Record<string, MoveSpec> = {
     range: { min: 0, max: 1 },
     statusChance: 0.3,
     statusKind: "paralysis",
-    // v3 tree (MOVES_DESIGN.md's "start from the fantasy" pass).
-    // THE FANTASY: this isn't a strike, it's four hundred pounds of
-    // sleeping mass finally deciding to move — no technique, no
-    // follow-through, just gravity, timed. What's dangerous about it isn't
-    // power, it's inevitability: you don't dodge a landslide, you get out
-    // from under it before it starts, and this animal rarely bothers to
-    // warn anyone it's about to fall. Snorlax's only real signature move
-    // (species.ts) — same single-species freedom Slash's tree used for
-    // Scyther, built specifically for this one body, not a generic "heavy
-    // hit" template.
+    // v4 tree (MOVES_DESIGN.md's "Skill-tree template v4 — the two-lane
+    // standard"): 45 nodes, 9 prerequisitesAnyOf, 6 fork nodes, 3 three-node
+    // bridges. The v3 fantasy and every v3 node's mechanics are unchanged —
+    // this pass only added the second lane each branch was missing and
+    // rewired the bridges to land on lane notables.
+    // THE FANTASY (unchanged, written before a single node): this isn't a
+    // strike, it's four hundred pounds of sleeping mass finally deciding to
+    // move — no technique, no follow-through, just gravity, timed. What's
+    // dangerous about it isn't power, it's inevitability: you don't dodge a
+    // landslide, you get out from under it before it starts, and this animal
+    // rarely bothers to warn anyone it's about to fall. Snorlax's only real
+    // signature move (species.ts) — same single-species freedom Slash's tree
+    // used for Scyther, built specifically for this one body, not a generic
+    // "heavy hit" template.
     // - Aggression ("Landslide"): stays power-archetype on purpose — more
     //   mass, less restraint, escalating to a real localized collapse. The
     //   full-body weight payoff (`weightScaling`) is earned at the keystone
     //   now, not handed out on the opener — direct feedback that starting
     //   this strong was backwards, moved from Full Weight (now a modest
     //   opening lunge) to Avalanche, where "the giant finally throws its
-    //   whole self into it" actually belongs.
+    //   whole self into it" actually belongs. Its two lanes differ in kind,
+    //   not degree: MOMENTUM (a body already moving, driving whatever it hit
+    //   backward) versus DEADFALL (the drop from above — no travel at all,
+    //   just height, and a numbness that comes from being landed on).
     // - Boldness ("Unbudging"): earned tankiness, not a default reach —
     //   nothing on this whole roster fits "doesn't move" better than a
     //   sleeping giant (Snorlax's own curated moveset already primes this
@@ -5585,6 +5848,9 @@ export const MOVES: Record<string, MoveSpec> = {
     //   read as bland: the keystone is now a genuine wind-up — a deliberate,
     //   telegraphed commitment (real "intention," not just more armor),
     //   invulnerable while charging, then a huge leap and a devastating hit.
+    //   Lane A is that refusal to be moved at all; lane B is the other half
+    //   of lying somewhere for a living — what it costs to heave that mass
+    //   back up, and what the ground it was lying on looks like afterward.
     // - Sociability ("Undisturbed"): direct correction on the first draft —
     //   Snorlax is canonically a solitary animal, not a herd one, so a
     //   branch built entirely on ally-buffing herd support was the wrong
@@ -5592,6 +5858,10 @@ export const MOVES: Record<string, MoveSpec> = {
     //   despite its size) is now a genuine non-territorial, de-escalating
     //   presence: it never starts a fight over a resource, and anything
     //   nearby — herd or not, rival or not — calms down just being near it.
+    //   Lane A is that outward calm (nobody starts anything); lane B is how
+    //   a fight it didn't want ENDS — whatever it lands on is simply held
+    //   down rather than escalated with, and it only really reaches for this
+    //   move once it has actually been hurt.
     tree: {
       // --- Aggression: Landslide (more mass, less restraint) ---
       heavy_step: {
@@ -5605,27 +5875,35 @@ export const MOVES: Record<string, MoveSpec> = {
         // move's own top comment.
         delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" } },
       },
-      numbing_follow_through: {
-        id: "numbing_follow_through",
-        name: "+10% Paralysis Chance",
-        cost: 1,
-        prerequisites: ["heavy_step"],
-        leaning: "aggression",
-        delta: { statusChance: 0.1 },
-      },
+      // Lane A — MOMENTUM: a body already in motion, and what being in the
+      // way of one costs.
       mounting_momentum: {
         id: "mounting_momentum",
         name: "+8 Power",
         cost: 1,
-        prerequisites: ["numbing_follow_through"],
+        prerequisites: ["heavy_step"],
         leaning: "aggression",
         delta: { power: 8 },
+      },
+      bearing_down: {
+        id: "bearing_down",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["mounting_momentum"],
+        leaning: "aggression",
+        // Once it's actually moving, stopping is the hard part — it comes
+        // around again sooner. (Total tree reduction is now -3 against a
+        // base of 6: a 1.75x tempo gain, against this move's own 2.33x cap.)
+        delta: { cooldownTicks: -1 },
       },
       ground_shaking_landing: {
         id: "ground_shaking_landing",
         name: "Ground-Shaking Landing",
-        cost: 1,
-        prerequisites: ["mounting_momentum"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or through Braced
+        // Commitment's bridge — bracing first is exactly what keeps the
+        // force in the target instead of in its own wobble.
+        prerequisitesAnyOf: [["bearing_down"], ["settled_impact"]],
         leaning: "aggression",
         // Not a technique — a body just landing somewhere it wasn't,
         // driving whatever it hit backward with it.
@@ -5635,18 +5913,42 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "rolling_advance",
         name: "+8 Power",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Aggression (Braced Commitment's and Provoked
-        // Charge's own chains).
-        prerequisitesAnyOf: [["ground_shaking_landing"], ["settled_impact"], ["undivided"]],
+        prerequisites: ["ground_shaking_landing"],
         leaning: "aggression",
         delta: { power: 8 },
+      },
+      // Lane B — DEADFALL: no travel at all, just height and mass. Numbness
+      // is what being under it does to you.
+      numbing_follow_through: {
+        id: "numbing_follow_through",
+        name: "+10% Paralysis Chance",
+        cost: 1,
+        prerequisites: ["heavy_step"],
+        leaning: "aggression",
+        delta: { statusChance: 0.1 },
+      },
+      deadfall: {
+        id: "deadfall",
+        name: "Deadfall",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or through Provoked
+        // Charge's bridge — the patient lane is exactly the one with no
+        // violence of its own until something rouses it.
+        prerequisitesAnyOf: [["numbing_follow_through"], ["undivided"]],
+        leaning: "aggression",
+        // The one condition this move's own fantasy obviously cares about:
+        // it doesn't chase, it comes DOWN. `situationalBonus`'s "elevation"
+        // is real and literal — resolveHit (predation.ts) compares the
+        // attacker's own tile elevation against the defender's and only
+        // pays out when the attacker is genuinely higher. A fall that finds
+        // the soft spot on the way through, hence the crit stage.
+        delta: { situationalBonus: { condition: "elevation", multiplier: 1.4 }, critRateStage: 1 },
       },
       second_slam: {
         id: "second_slam",
         name: "Second Slam",
         cost: 2,
-        prerequisites: ["rolling_advance"],
+        prerequisites: ["deadfall"],
         excludes: ["rolling_crush"],
         leaning: "aggression",
         // Commits fully — the fall itself costs something now too.
@@ -5656,7 +5958,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "rolling_crush",
         name: "Rolling Crush",
         cost: 2,
-        prerequisites: ["rolling_advance"],
+        prerequisites: ["deadfall"],
         excludes: ["second_slam"],
         leaning: "aggression",
         // The weight keeps going after the first impact — a lighter
@@ -5667,7 +5969,9 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "inevitable",
         name: "Inevitable",
         cost: 2,
-        prerequisitesAnyOf: [["second_slam"], ["rolling_crush"]],
+        // DEEP NOTABLE — both lanes end here: the momentum lane's tail and
+        // either tip of the deadfall lane's fork.
+        prerequisitesAnyOf: [["rolling_advance"], ["second_slam"], ["rolling_crush"]],
         leaning: "aggression",
         // Mass doesn't need precision — it just needs enough attempts to
         // eventually find the gap in any guard.
@@ -5707,6 +6011,7 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
         delta: {},
       },
+      // Lane A — WON'T BE MOVED: the refusal itself, as armor.
       settled_footing: {
         id: "settled_footing",
         name: "+8 Accuracy",
@@ -5726,8 +6031,11 @@ export const MOVES: Record<string, MoveSpec> = {
       unbudging: {
         id: "unbudging",
         name: "Unbudging",
-        cost: 1,
-        prerequisites: ["patient_reset"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or through Nothing to
+        // Prove's bridge — an immovable thing that also isn't looking for a
+        // fight is the ultimate "just go around it."
+        prerequisitesAnyOf: [["patient_reset"], ["undivided_stand"]],
         leaning: "boldness",
         // Nothing on this whole roster embodies "can't be dragged, knocked
         // back, or lunged at" better than a sleeping giant that simply
@@ -5739,18 +6047,48 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "bracing_follow_through",
         name: "+5 Power",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Boldness (Braced Commitment's and Called to Stand's
-        // own chains).
-        prerequisitesAnyOf: [["unbudging"], ["settled_impact"], ["undivided_stand"]],
+        prerequisites: ["unbudging"],
         leaning: "boldness",
         delta: { power: 5 },
+      },
+      // Lane B — WHERE IT'S BEEN LYING: the other half of a life spent
+      // horizontal — what heaving that much mass upright costs, and what
+      // the ground it was lying on looks like afterward.
+      heaving_up: {
+        id: "heaving_up",
+        name: "Heaving Up",
+        cost: 1,
+        prerequisites: ["dead_weight"],
+        leaning: "boldness",
+        // A real tradeoff in one node (principle 4): getting all of that off
+        // the ground hits harder and genuinely costs the animal energy —
+        // `selfCostPerUse` is subtracted from the attacker's own needs on
+        // every use (predation.ts), not a flavour string.
+        delta: { power: 10, selfCostPerUse: { need: "energy", amount: 0.04 } },
+      },
+      crushed_thicket: {
+        id: "crushed_thicket",
+        name: "Crushed Thicket",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or through Braced
+        // Commitment's bridge.
+        prerequisitesAnyOf: [["heaving_up"], ["settled_impact"]],
+        leaning: "boldness",
+        // The most physical lever in the roster's palette, on the branch
+        // that earned it: it comes up out of the brush it has been sleeping
+        // in and the brush is simply gone — `consumesOwnTerrain` reverts the
+        // attacker's own tile to floor and multiplies that one hit
+        // (predation.ts). Reachable in practice, not decorative: Snorlax's
+        // curated biomes are forest and jungle (species.ts), the two with
+        // the heaviest bush weighting in worldgen, and bush is walkable
+        // (only wall/tree are not).
+        delta: { consumesOwnTerrain: { terrain: "bush", damageMultiplier: 1.5 } },
       },
       sink_in: {
         id: "sink_in",
         name: "Sink In",
         cost: 2,
-        prerequisites: ["bracing_follow_through"],
+        prerequisites: ["crushed_thicket"],
         excludes: ["full_bulk"],
         leaning: "boldness",
         // The longer it just sits there, the more it recovers — laziness
@@ -5762,7 +6100,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "full_bulk",
         name: "Full Bulk",
         cost: 2,
-        prerequisites: ["bracing_follow_through"],
+        prerequisites: ["crushed_thicket"],
         excludes: ["sink_in"],
         leaning: "boldness",
         // An even heavier stance — harder to line up, nearly impossible to
@@ -5774,7 +6112,8 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "weathered_giant",
         name: "Weathered Giant",
         cost: 2,
-        prerequisitesAnyOf: [["sink_in"], ["full_bulk"]],
+        // DEEP NOTABLE — both lanes end here.
+        prerequisitesAnyOf: [["bracing_follow_through"], ["sink_in"], ["full_bulk"]],
         leaning: "boldness",
         // A second, distinct armor lever, earned by a branch whose entire
         // identity is refusing to budge — no need to apologize for it the
@@ -5833,6 +6172,8 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "unshaken", value: 1 },
         delta: {},
       },
+      // Lane A — NOBODY STARTS ANYTHING: the outward calm, aimed at the
+      // world around it.
       settled_ease: {
         id: "settled_ease",
         name: "Not Worth It",
@@ -5857,8 +6198,12 @@ export const MOVES: Record<string, MoveSpec> = {
       no_quarrel: {
         id: "no_quarrel",
         name: "No Quarrel",
-        cost: 1,
-        prerequisites: ["unhurried_reset"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or through Provoked
+        // Charge's bridge — the calm lane is the one with no violence of
+        // its own, so that is the bridge that complements it rather than
+        // deepening a rut.
+        prerequisitesAnyOf: [["unhurried_reset"], ["undivided"]],
         leaning: "sociability",
         // Real, immediate de-escalation — not herd-scoped like this sim's
         // other aura passives: whoever's nearby, herd-mate or rival alike,
@@ -5873,22 +6218,50 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "quiet_ground",
         name: "+5 Power",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Sociability (Nothing to Prove's and Provoked
-        // Charge's own chains).
-        prerequisitesAnyOf: [["no_quarrel"], ["undivided_stand"], ["undivided"]],
+        prerequisites: ["no_quarrel"],
         leaning: "sociability",
         delta: { power: 5 },
+      },
+      // Lane B — HOW IT ENDS ONE ANYWAY: it doesn't escalate, it settles on
+      // you; and it doesn't reach for this move at all until it has actually
+      // been hurt.
+      pinned_under: {
+        id: "pinned_under",
+        name: "Pinned",
+        cost: 1,
+        prerequisites: ["unbothered"],
+        leaning: "sociability",
+        // De-escalation with its whole body: whatever it lands on doesn't
+        // get its own move off. `jamCooldownTicks` adds real ticks to the
+        // defender's own move cooldowns on a landed hit (predation.ts) —
+        // 16 users in the roster, none of them a body this heavy.
+        delta: { jamCooldownTicks: 2 },
+      },
+      finally_roused: {
+        id: "finally_roused",
+        name: "Finally Roused",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or through Nothing to
+        // Prove's bridge.
+        prerequisitesAnyOf: [["pinned_under"], ["undivided_stand"]],
+        leaning: "sociability",
+        // Says exactly what it does, per principle 5: `selfStateBonus` is
+        // read by `pickBestMove` (combat.ts), not by the damage formula —
+        // at or below half HP this move's own selection score is multiplied,
+        // so a hurt Snorlax stops picking at things and starts reaching for
+        // the slam. A behavioural lever, and the honest one for a placid
+        // animal: it isn't stronger when cornered, it just finally bothers.
+        delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.5 } },
       },
       wide_berth: {
         id: "wide_berth",
         name: "Wide Berth",
         cost: 2,
-        prerequisites: ["quiet_ground"],
+        prerequisites: ["finally_roused"],
         excludes: ["steady_nerve"],
         leaning: "sociability",
-        // Deepens No Quarrel's own lever directly — the peace it keeps
-        // reaches further out.
+        // Deepens the branch's own calm directly — the peace it keeps
+        // reaches further out — rather than staying roused.
         grantsPassive: { kind: "calmingPresence", value: 0.2 },
         delta: {},
       },
@@ -5896,7 +6269,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "steady_nerve",
         name: "Steady Nerve",
         cost: 2,
-        prerequisites: ["quiet_ground"],
+        prerequisites: ["finally_roused"],
         excludes: ["wide_berth"],
         leaning: "sociability",
         // Content and undisturbed, it simply isn't worn down the way
@@ -5908,7 +6281,8 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "left_in_peace",
         name: "Undisturbed",
         cost: 2,
-        prerequisitesAnyOf: [["wide_berth"], ["steady_nerve"]],
+        // DEEP NOTABLE — both lanes end here.
+        prerequisitesAnyOf: [["quiet_ground"], ["wide_berth"], ["steady_nerve"]],
         leaning: "sociability",
         // It doesn't go looking for trouble, but whatever finds it anyway
         // doesn't enjoy the experience — real self-defense without ever
@@ -5958,9 +6332,11 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 10 } },
       },
-      // Bridge tail (see MOVES_DESIGN.md's "Crosslinks as bridges"): extends
-      // Braced Commitment into Aggression's and Boldness's own pre-fork
-      // nodes (Rolling Advance / Bracing Follow-Through).
+      // Bridge tail (see MOVES_DESIGN.md's "Crosslinks are bridges, not
+      // spurs"): extends Braced Commitment into ONE lane notable per branch
+      // it connects — Aggression's Ground-Shaking Landing and Boldness's
+      // Crushed Thicket. It skips those lanes' filler grind, never their own
+      // decision (principle 12, restated for lanes).
       deepening_brace: {
         id: "deepening_brace",
         name: "Deepening Brace",
@@ -5996,9 +6372,8 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "calmingPresence", value: 0.15 },
         delta: {},
       },
-      // Bridge tail: extends Nothing to Prove into Boldness's and
-      // Sociability's own pre-fork nodes (Bracing Follow-Through / Quiet
-      // Ground).
+      // Bridge tail: extends Nothing to Prove into Boldness's Unbudging and
+      // Sociability's Finally Roused — one lane notable per branch.
       steadfast_focus: {
         id: "steadfast_focus",
         name: "Widening Calm",
@@ -6033,8 +6408,9 @@ export const MOVES: Record<string, MoveSpec> = {
         // hesitation before something this placid actually commits.
         delta: { lockTicks: 1, power: 10 },
       },
-      // Bridge tail: extends Provoked Charge into Sociability's and
-      // Aggression's own pre-fork nodes (Quiet Ground / Rolling Advance).
+      // Bridge tail: extends Provoked Charge into Sociability's No Quarrel
+      // and Aggression's Deadfall — the two lanes with no violence of their
+      // own, which is what makes this the bridge that complements them.
       full_commitment: {
         id: "full_commitment",
         name: "Full Commitment",

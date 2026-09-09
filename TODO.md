@@ -7577,3 +7577,58 @@ not something this pathfinding pass itself caused or is positioned to fix.
       escalation on top. Measured on a real generated grid: Kabuto in 100%
       of Beach zones at level 12-18, Kabutops in 31.6% at its unavoidable
       ~46+. Full engine (1262) and data (240) suites green.
+
+## Movepool cap, forgetting, savant bar — open (awaiting decisions)
+
+Raised in one message: *"we technically don't cap moves to 4 moves per unit. I
+think we should add a cap. Force forgetting. Also forgetting gives you skill
+points back to reinvest. I think Ai on deciding to forget a move or not should
+be sharpened a bit. In addition requirements for savant notable need to be
+higher, maybe all nodes in an entire branch with our new 45 node trees to get
+it."* Plus: *"aim to cap at 20% dmg reduction max, 10% regen per move... up to
+50% thorns is fine."*
+
+### Done
+- Per-move passive ceilings are now enforced by `check-proposed-trees.ts`
+  (20% `damageReduction`, 10%/tick healing as one budget, 50% `thorns`), with
+  the selftest extended to prove each can fail. See `DESIGN_VALIDATION.md`.
+
+### Measured (`measureMovepool.ts`, 4 seeds x 10k ticks, 69 living agents)
+| | |
+|---|---|
+| knownMoves | mean 12.1, median 13, p90 16, max 17 |
+| combat-usable moves | mean 8.5, p90 12, max 14 |
+| agents over 4 moves | 95.7% |
+| level (control) | mean 32.7, median 36, max 56 |
+| nodes chosen | mean 31.7, p90 81, max 94 |
+| savant today (>=6) | 60.9% of living agents |
+| savant at >=12 | 24.6% |
+| deepest single branch | max 13 |
+
+A 4-move cap is a 3x cut on the typical agent and forces roughly nine forget
+decisions per lifetime, which makes the forget-AI the load-bearing part of the
+feature rather than a detail.
+
+### Open decisions
+1. Which nodes eat the healing cut on dig (28.4%), leech_seed (23.9%),
+   solar_beam (20.8%) — all driven by `regenFlat`.
+2. dig's 29% damage reduction -> 20%: proposed `deepening_instincts` 0.12->0.05,
+   `unflinching_burrow` 0.05->0.03, `unshakable_ground` stays 0.12 (damage
+   reduction concentrates in Boldness, per the colour pie).
+3. Refund scope on forgetting: all points spent in that tree, minus a tax, or
+   refunded as wildcard rather than typed points.
+4. Savant bar: 11 (a genuinely maxed 12-node branch, minus one side of a fork),
+   12, or including bridges.
+5. What "sharpen the forget AI" is pointing at — no cap exists today, so this
+   may just be "make it good from the start."
+6. Does the cap apply to `knownMoves` (status moves compete for slots) or only
+   to the combat-usable `moves` subset.
+
+### Known limits of the above
+- n=69 living agents on 4 seeds; an 8-seed rerun is the control for the savant
+  percentages.
+- A per-move passive cap does NOT bound a species. `grantPassive` is uncapped
+  and totals sum across every move known, so four capped moves still stack to
+  80% damage reduction. `passive-exposure.ts` is the tool for that; nothing
+  fails a build on it yet. Worst live case today: thorns 65% (venusaur,
+  ivysaur), damageReduction 42% (diglett, sandshrew).

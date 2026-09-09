@@ -368,7 +368,7 @@ describe("Water Gun tree: resistanceBreaker fixes the real weakness", () => {
   });
 });
 
-describe("Hydro Pump tree: v3 redesign — overwhelming, genuinely hard to aim", () => {
+describe("Hydro Pump tree: v4 two-lane — overwhelming, genuinely hard to aim", () => {
   const hydroPump = MOVES.hydro_pump;
 
   it("Building Pressure is a real wind-up cost (lockTicks), not a free power bump", () => {
@@ -380,16 +380,54 @@ describe("Hydro Pump tree: v3 redesign — overwhelming, genuinely hard to aim",
   it("Undertow Pull is reachable through either Aggression fork and drags the target on a swap", () => {
     const viaNuke = applyMoveTree(hydroPump, [
       "building_pressure",
-      "pump_conditioning",
       "overwhelm_footing",
-      "bursting_main",
-      "flooding_wake",
-      "widening_main",
+      "pressure_holds",
       "overwhelm_surge",
       "undertow_pull",
     ]);
     expect(viaNuke.positionSwap).toBe(true);
     expect(viaNuke.positionSwapPull).toBe(1);
+
+    const viaVolley = applyMoveTree(hydroPump, [
+      "building_pressure",
+      "overwhelm_footing",
+      "pressure_holds",
+      "relentless_surge",
+      "undertow_pull",
+    ]);
+    expect(viaVolley.positionSwap).toBe(true);
+    expect(viaVolley.positionSwapPull).toBe(1);
+  });
+
+  it("Undertow Pull is also reachable from lane A alone — v4's deep notable is where both lanes converge, not just the fork", () => {
+    const viaLaneA = applyMoveTree(hydroPump, [
+      "building_pressure",
+      "pump_conditioning",
+      "bursting_main",
+      "flooding_wake",
+      "widening_main",
+      "undertow_pull",
+    ]);
+    expect(viaLaneA.positionSwap).toBe(true);
+    // Reached without ever taking either fork tip.
+    expect(viaLaneA.hits).toBeUndefined();
+  });
+
+  it("Narrow the Stream is the Boldness branch's thesis as a real shape change, not a stat bump", () => {
+    const respec = applyMoveTree(hydroPump, ["wading_advance", "channel_footing", "narrow_the_stream"]);
+    expect(hydroPump.shape).toEqual({ kind: "cone", length: 4, width: 2 });
+    expect(respec.shape).toEqual({ kind: "line", length: 5 });
+    // The only shape setter in the tree — shape is an overwrite field.
+    expect(Object.values(hydroPump.tree!).filter((n) => n.delta.shape !== undefined)).toHaveLength(1);
+  });
+
+  it("Strip the Canopy makes the pump a harvesting tool, using the real canopy-harvest path's gatherBurst", () => {
+    const respec = applyMoveTree(hydroPump, ["pod_current", "fuller_wash", "strip_the_canopy"]);
+    expect(respec.gatherBurst).toBe(3);
+    // ...and Fuller Wash deepens the opener's own ally heal rather than
+    // granting another stacking healing passive.
+    expect(respec.allyEffect).toEqual({ healFraction: 0.22 });
+    expect(hydroPump.tree!.fuller_wash.grantsPassive).toBeUndefined();
   });
 
   it("Flooding Wake leaves real standing water via the already-shipped terrainFill primitive", () => {
@@ -431,48 +469,37 @@ describe("Hydro Pump tree: v3 redesign — overwhelming, genuinely hard to aim",
     expect(respec.lockTicks).toBe(0); // +1 from Building Pressure, -1 from the crosslink
   });
 
-  it("Surge and Brace's bridge (Aggression<->Boldness) reaches both Widening Main and Channel Grip", () => {
-    const viaAggr = applyMoveTree(hydroPump, [
-      "building_pressure",
-      "wading_advance",
-      "surge_and_brace",
-      "brace_conditioning",
-      "unified_current",
-      "widening_main",
-    ]);
+  it("Surge and Brace's bridge (Aggression<->Boldness) lands on one LANE NOTABLE in each branch it connects", () => {
+    // v4 moved where a bridge lands: it shortcuts into a lane's NOTABLE
+    // (Flooding Wake / Undertow Anchor), skipping that lane's filler grind
+    // but never a decision. Same rule as before — reach both branches the
+    // crosslink connects — checked at the nodes v4 puts it on.
+    const bridge = ["building_pressure", "wading_advance", "surge_and_brace", "brace_conditioning", "unified_current"];
+
+    // Into Aggression: Flooding Wake without Pump Conditioning or Bursting Main.
+    const viaAggr = applyMoveTree(hydroPump, [...bridge, "flooding_wake", "widening_main"]);
+    expect(viaAggr.terrainFill).toEqual({ terrain: "water" });
     expect(viaAggr.range).toEqual({ min: 0, max: 5 });
 
-    const viaBold = applyMoveTree(hydroPump, [
-      "building_pressure",
-      "wading_advance",
-      "surge_and_brace",
-      "brace_conditioning",
-      "unified_current",
-      "channel_grip",
-    ]);
+    // Into Boldness: Undertow Anchor without Bastion Footing or Open the Valve.
+    const viaBold = applyMoveTree(hydroPump, [...bridge, "undertow_anchor", "channel_grip"]);
     expect(viaBold.range).toEqual({ min: 0, max: 5 });
+    expect(hydroPump.tree!.undertow_anchor.grantsPassive).toEqual({ kind: "immovable", value: 1 });
   });
 
-  it("Wake of Violence's bridge (Sociability<->Aggression) reaches both Pod Reach and Widening Main", () => {
-    const viaSoc = applyMoveTree(hydroPump, [
-      "pod_current",
-      "building_pressure",
-      "wake_of_violence",
-      "surging_wake",
-      "violent_confluence",
-      "pod_reach",
-    ]);
+  it("Wake of Violence's bridge (Sociability<->Aggression) lands on one LANE NOTABLE in each branch it connects", () => {
+    // Same v4 relocation as Surge and Brace above: Wake Rally in
+    // Sociability, Pressure Holds in Aggression.
+    const bridge = ["pod_current", "building_pressure", "wake_of_violence", "surging_wake", "violent_confluence"];
+
+    // Into Sociability: Wake Rally without Pod Footing or Wake Footing.
+    const viaSoc = applyMoveTree(hydroPump, [...bridge, "wake_rally", "pod_reach"]);
+    expect(viaSoc.rallyCall).toEqual({ ticks: 20 });
     expect(viaSoc.range).toEqual({ min: 0, max: 5 });
 
-    const viaAggr = applyMoveTree(hydroPump, [
-      "pod_current",
-      "building_pressure",
-      "wake_of_violence",
-      "surging_wake",
-      "violent_confluence",
-      "widening_main",
-    ]);
-    expect(viaAggr.range).toEqual({ min: 0, max: 5 });
+    // Into Aggression: Pressure Holds without Overwhelm Footing.
+    const viaAggr = applyMoveTree(hydroPump, [...bridge, "pressure_holds"]);
+    expect(viaAggr.critCooldownReset).toBe(true);
   });
 });
 
@@ -546,7 +573,7 @@ describe("Solar Beam tree: v4 two-lane — a guardian's dominance display", () =
   });
 });
 
-describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to read", () => {
+describe("Earthquake tree: v4 — a reckless AoE the herd learns to read", () => {
   const earthquake = MOVES.earthquake;
 
   it("is a real self-centered AoE by default, not just a single-target hit", () => {
@@ -567,25 +594,24 @@ describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to rea
   });
 
   it("the Aggression fork is a real AoE-size decision: Total Collapse widens the blast, Focused Rupture narrows it", () => {
-    const widen = applyMoveTree(earthquake, [
-      "fault_trigger",
-      "shaking_ground",
-      "overload_footing",
-      "aftershock_barrage",
-      "seismic_feed",
-      "total_collapse",
-    ]);
+    // v4: the fork sits at the tail of Aggression's lane B (Reckless
+    // Overload -> Crushing Mass -> fork), not at the end of one linear chain.
+    const widen = applyMoveTree(earthquake, ["fault_trigger", "overload_footing", "crushing_mass", "total_collapse"]);
     expect(widen.shape).toEqual({ kind: "burst", radius: 3 });
 
-    const narrow = applyMoveTree(earthquake, [
-      "fault_trigger",
-      "shaking_ground",
-      "overload_footing",
-      "aftershock_barrage",
-      "seismic_feed",
-      "focused_rupture",
-    ]);
+    const narrow = applyMoveTree(earthquake, ["fault_trigger", "overload_footing", "crushing_mass", "focused_rupture"]);
     expect(narrow.shape).toEqual({ kind: "burst", radius: 1 });
+
+    // Still mutually exclusive, and still the tree's ONLY two shape setters —
+    // Boldness's Widening Rift used to set one too, which made a build taking
+    // both silently order-dependent.
+    expect(() => applyMoveTree(earthquake, ["fault_trigger", "overload_footing", "crushing_mass", "total_collapse", "focused_rupture"])).toThrow(
+      /conflicts with already-chosen/
+    );
+    expect(Object.values(earthquake.tree!).filter((n) => (n.delta as { shape?: unknown }).shape !== undefined).map((n) => n.id).sort()).toEqual([
+      "focused_rupture",
+      "total_collapse",
+    ]);
   });
 
   it("Overload Footing's Reckless Overload pairs its recoil with real power, not recoil alone", () => {
@@ -595,13 +621,15 @@ describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to rea
   });
 
   it("the crosslink bridge (Coordinated Tremor -> Marked Rupture -> Converged Ruin) reaches Aggression's fork one step early, not directly", () => {
-    // Converged Ruin alone does NOT satisfy the fork nodes anymore — it only
-    // shortcuts into Seismic Feed, one step before the fork, same as the
-    // normal path (direct feedback: landing straight on "the choice of 2
-    // nodes" was too much).
+    // Converged Ruin alone does NOT satisfy the fork nodes — it shortcuts
+    // into Crushing Mass, the LANE NOTABLE one step before the fork, same as
+    // the normal path (direct feedback: landing straight on "the choice of 2
+    // nodes" was too much). v4 changed WHICH node that is — a bridge now
+    // lands on a lane notable, so it skips the lane's filler grind but never
+    // the lane's own notable and never the fork.
     expect(() =>
       applyMoveTree(earthquake, ["herdsafe_trigger", "fault_trigger", "coordinated_tremor", "marked_rupture", "converged_ruin", "total_collapse"])
-    ).toThrow(/requires \[seismic_feed\]/);
+    ).toThrow(/requires \[crushing_mass\]/);
 
     const viaBridge = applyMoveTree(earthquake, [
       "herdsafe_trigger",
@@ -609,12 +637,12 @@ describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to rea
       "coordinated_tremor",
       "marked_rupture",
       "converged_ruin",
-      "seismic_feed",
+      "crushing_mass",
       "total_collapse",
     ]);
     expect(viaBridge.shape).toEqual({ kind: "burst", radius: 3 });
-    // None of the branch's own linear filler chain (Shaking Ground through
-    // Aftershock Barrage) was ever chosen.
+    // Reckless Overload — lane B's own filler, the only recoil node on this
+    // route — was never chosen, so the bridge really did skip the grind.
     expect(viaBridge.recoilFraction).toBeUndefined();
 
     // The fork itself is still a real, mutually-exclusive choice either way.
@@ -625,7 +653,7 @@ describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to rea
         "coordinated_tremor",
         "marked_rupture",
         "converged_ruin",
-        "seismic_feed",
+        "crushing_mass",
         "total_collapse",
         "focused_rupture",
       ])
@@ -633,34 +661,51 @@ describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to rea
   });
 
   it("the same bridge also reaches into Sociability's own fork, not just Aggression", () => {
-    // Reachable without Tremor Reach's own normal prerequisite (Bracing
-    // Call) or anything earlier in Sociability's filler chain.
+    // Reachable without Bracing Call's own normal prerequisite (Herdsafe
+    // Footing) or anything else in Sociability's lane B filler chain.
     const viaBridge = applyMoveTree(earthquake, [
       "herdsafe_trigger",
       "fault_trigger",
       "coordinated_tremor",
       "marked_rupture",
       "converged_ruin",
-      "tremor_reach",
+      "bracing_call",
       "guardians_ground",
     ]);
     expect(viaBridge.power).toBe(earthquake.power - 5); // Guardian's Ground's own delta
     expect(viaBridge.excludesAllies).toBe(true); // from Herdsafe Trigger, still present
   });
 
-  it("Ruinous Ground keystone fixes Ground's real Grass/Bug resists", () => {
+  // v4 moved this node from Boldness's terminal capstone to its DEEP NOTABLE
+  // (the convergence both Fracture lanes end on) — the assertion below is the
+  // same mechanic, unchanged in strength; only where it sits in the branch and
+  // the walk to it moved. Eat the Ruin is the capstone now.
+  it("Ruinous Ground (Boldness's deep notable) fixes Ground's real Grass/Bug resists", () => {
     const respec = applyMoveTree(earthquake, [
       "fissure_grip",
-      "bedrock_footing_2",
-      "cracking_footing",
-      "bedrock_anchor",
       "deepening_fissure",
-      "grounding_brace",
       "rubble_wall",
-      "fracture_precision",
+      "grounding_brace",
       "ruinous_ground",
     ]);
     expect(respec.resistanceBreaker).toEqual({ multiplier: 2 });
+  });
+
+  it("Eat the Ruin (Boldness capstone) spends the mud this move's own opener lays down", () => {
+    const respec = applyMoveTree(earthquake, [
+      "fissure_grip",
+      "deepening_fissure",
+      "rubble_wall",
+      "grounding_brace",
+      "ruinous_ground",
+      "settling_ground",
+      "eat_the_ruin",
+    ]);
+    // Fissure Grip fills the ground it lands on with mud; the capstone
+    // consumes that same terrain kind from under the user for a real damage
+    // multiplier. The loop is closed on purpose — same terrain both ends.
+    expect(respec.terrainFill).toEqual({ terrain: "mud" });
+    expect(respec.consumesOwnTerrain).toEqual({ terrain: "mud", damageMultiplier: 2.5 });
   });
 
   it("Sanctuary Quake keystone is a real, ongoing herd payoff", () => {
@@ -669,12 +714,26 @@ describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to rea
   });
 
   it("Marked Rupture deepens Coordinated Tremor's own mark via the shared rallyMarked primitive", () => {
+    const crosslinkOnly = applyMoveTree(earthquake, ["herdsafe_trigger", "fault_trigger", "coordinated_tremor"]);
+    expect(crosslinkOnly.rallyCall).toEqual({ ticks: 20 });
+
     const respec = applyMoveTree(earthquake, ["herdsafe_trigger", "fault_trigger", "coordinated_tremor", "marked_rupture"]);
-    expect(respec.rallyCall).toEqual({ ticks: 20 });
+    // Principle 13: a bridge's filler must DEEPEN its own crosslink's lever,
+    // not reach for a new one. This node used to carry only the rallyMarked
+    // bonus and share nothing with Coordinated Tremor's mark. It now holds
+    // the mark strictly longer as well as paying off on it.
+    expect(respec.rallyCall).toEqual({ ticks: 32 });
+    expect(respec.rallyCall!.ticks).toBeGreaterThan(crosslinkOnly.rallyCall!.ticks);
     expect(respec.situationalBonus).toEqual({ condition: "rallyMarked", multiplier: 1.3 });
   });
 
-  it("Cracking Momentum's bridge (Aggression<->Boldness) reaches both Seismic Feed and Deepening Fissure", () => {
+  // v4 changed WHERE a bridge lands: it now drops you on ONE lane notable per
+  // branch it connects, not on a mid-lane filler. So the assertions below name
+  // different landing nodes than the v3 versions did — that is the rule change,
+  // not a weakened test. Each still proves the same two things the v3 test did:
+  // the shortcut works, and it works into BOTH branches the crosslink joins
+  // (principle 11), reaching a node the walker could not otherwise have.
+  it("Cracking Momentum's bridge (Aggression<->Boldness) lands on Seismic Feed and Rubble Wall", () => {
     const viaAggr = applyMoveTree(earthquake, [
       "fault_trigger",
       "fissure_grip",
@@ -684,6 +743,9 @@ describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to rea
       "seismic_feed",
     ]);
     expect(viaAggr.lifestealFraction).toBeCloseTo(0.08);
+    // Aggression's own lane A filler chain (Shaking Ground, Aftershock
+    // Barrage) was never taken — this really is a shortcut.
+    expect(viaAggr.hits).toBeUndefined();
 
     const viaBold = applyMoveTree(earthquake, [
       "fault_trigger",
@@ -691,31 +753,49 @@ describe("Earthquake tree: v3 redesign — a reckless AoE the herd learns to rea
       "cracking_momentum",
       "momentum_footing",
       "fault_convergence",
-      "deepening_fissure",
+      "rubble_wall",
     ]);
-    expect(viaBold.defensePenetration).toBeCloseTo(0.3);
+    expect(viaBold.forcedMovement).toEqual({ mover: "defender", direction: "away", tiles: 1, timing: "onHit" });
+    // Boldness's own lane B filler (Deepening Fissure) was skipped: the only
+    // defensePenetration on this route is the bridge's own, i.e. none.
+    expect(viaBold.defensePenetration).toBeUndefined();
   });
 
-  it("Fractured Warning's bridge (Boldness<->Sociability) reaches both Deepening Fissure and Tremor Reach", () => {
+  it("Fractured Warning's bridge (Boldness<->Sociability) lands on Bedrock Anchor and Communal Steadying", () => {
     const viaBold = applyMoveTree(earthquake, [
       "fissure_grip",
       "herdsafe_trigger",
       "fractured_warning",
       "tremor_lockstep",
       "warded_convergence",
-      "deepening_fissure",
+      "bedrock_anchor",
     ]);
-    expect(viaBold.defensePenetration).toBeCloseTo(0.3);
+    expect(viaBold.lockTicks).toBe(1); // Bedrock Anchor's own delta
+    expect(viaBold.power).toBe(earthquake.power + 12);
+    expect(earthquake.tree!.bedrock_anchor.grantsPassive).toEqual({ kind: "immovable", value: 1 });
+    // Boldness's own lane A filler chain (Bedrock Footing, Cracking Footing)
+    // was never taken.
+    expect(viaBold.defensePenetration).toBeUndefined();
 
-    const viaSoc = applyMoveTree(earthquake, [
-      "fissure_grip",
-      "herdsafe_trigger",
-      "fractured_warning",
-      "tremor_lockstep",
-      "warded_convergence",
-      "tremor_reach",
-    ]);
-    expect(viaSoc.range).toEqual({ min: 0, max: 3 });
+    const socRoute = ["fissure_grip", "herdsafe_trigger", "fractured_warning", "tremor_lockstep", "warded_convergence", "communal_steadying"];
+    expect(() => applyMoveTree(earthquake, socRoute)).not.toThrow();
+    expect(earthquake.tree!.communal_steadying.grantsPassive).toEqual({ kind: "regen", value: 0.03 });
+    // Control: without the bridge notable the same walk is illegal, so the
+    // assertion above is really testing the shortcut and not a node that was
+    // reachable anyway.
+    expect(() => applyMoveTree(earthquake, socRoute.filter((id) => id !== "warded_convergence"))).toThrow(/communal_steadying/);
+  });
+
+  it("Shaken Loose makes the quake a real food source for the herd, not another lifesteal node", () => {
+    // needs.ts's canopy-harvest path takes any non-status damage move that is
+    // off cooldown as the harvest move and adds its `gatherBurst` straight to
+    // digTicksAccrued, so this fires for real on Earthquake.
+    const respec = applyMoveTree(earthquake, ["herdsafe_trigger", "shaken_loose"]);
+    expect(respec.gatherBurst).toBe(2);
+    expect(respec.category).not.toBe("status");
+    expect(respec.power).toBeGreaterThan(0);
+    // And it is no longer a copy of Aggression's Seismic Feed.
+    expect(respec.lifestealFraction).toBeUndefined();
   });
 });
 
@@ -728,12 +808,13 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
   });
 
   it("Avalanche (Aggression keystone) turns the single slam into a real localized collapse, and is where the real weight payoff now lands", () => {
+    // v4 walk: the opener, the Deadfall lane (numbing filler -> lane
+    // notable -> either fork tip), then the branch's deep notable, its
+    // filler and the capstone.
     const respec = applyMoveTree(bodySlam, [
       "heavy_step",
       "numbing_follow_through",
-      "mounting_momentum",
-      "ground_shaking_landing",
-      "rolling_advance",
+      "deadfall",
       "second_slam",
       "inevitable",
       "crushing_follow_up",
@@ -770,7 +851,6 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
       "patient_reset",
       "unbudging",
       "bracing_follow_through",
-      "sink_in",
       "weathered_giant",
       "settled_power",
       "the_reckoning",
@@ -814,70 +894,91 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
   });
 
   it("the fork choices are genuine tradeoffs, not strictly-better stat sticks", () => {
-    const secondSlam = applyMoveTree(bodySlam, ["heavy_step", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "second_slam"]);
+    // Both v4 lanes walked, so the power arithmetic is the same as before
+    // the conversion: +8 (Mounting Momentum) +8 (Rolling Advance) +15.
+    const secondSlam = applyMoveTree(bodySlam, ["heavy_step", "mounting_momentum", "bearing_down", "ground_shaking_landing", "rolling_advance", "numbing_follow_through", "deadfall", "second_slam"]);
     expect(secondSlam.power).toBe(bodySlam.power + 8 + 8 + 15);
     expect(secondSlam.recoilFraction).toBeCloseTo(0.08);
 
-    const rollingCrush = applyMoveTree(bodySlam, ["heavy_step", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "rolling_crush"]);
+    const rollingCrush = applyMoveTree(bodySlam, ["heavy_step", "mounting_momentum", "bearing_down", "ground_shaking_landing", "rolling_advance", "numbing_follow_through", "deadfall", "rolling_crush"]);
     expect(rollingCrush.hits).toEqual({ min: 2, max: 2 });
     expect(rollingCrush.power).toBe(bodySlam.power + 8 + 8 - 12);
 
-    const sinkIn = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "sink_in"]);
-    expect(sinkIn.power).toBe(bodySlam.power + 5 - 5);
+    // The Boldness fork moved to the tail of lane B (Where It's Been
+    // Lying), so the walk to it now passes Heaving Up's +10 as well as lane
+    // A's +5 — the tradeoff asserted is unchanged: Sink In pays 5 power for
+    // real regen.
+    const sinkIn = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "heaving_up", "crushed_thicket", "sink_in"]);
+    expect(sinkIn.power).toBe(bodySlam.power + 5 + 10 - 5);
     expect(bodySlam.tree!.sink_in.grantsPassive).toEqual({ kind: "regen", value: 0.025 });
 
-    const fullBulk = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "full_bulk"]);
+    const fullBulk = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "heaving_up", "crushed_thicket", "full_bulk"]);
     expect(fullBulk.accuracy).toBe(bodySlam.accuracy - 8 + 8);
     expect(bodySlam.tree!.full_bulk.grantsPassive).toEqual({ kind: "damageReduction", value: 0.06 });
 
-    const wideBerth = applyMoveTree(bodySlam, ["unbothered", "settled_ease", "unhurried_reset", "no_quarrel", "quiet_ground", "wide_berth"]);
+    const wideBerth = applyMoveTree(bodySlam, ["unbothered", "settled_ease", "unhurried_reset", "no_quarrel", "quiet_ground", "pinned_under", "finally_roused", "wide_berth"]);
     expect(bodySlam.tree!.wide_berth.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.2 });
     expect(wideBerth.power).toBe(bodySlam.power + 5);
 
-    const steadyNerve = applyMoveTree(bodySlam, ["unbothered", "settled_ease", "unhurried_reset", "no_quarrel", "quiet_ground", "steady_nerve"]);
+    const steadyNerve = applyMoveTree(bodySlam, ["unbothered", "settled_ease", "unhurried_reset", "no_quarrel", "quiet_ground", "pinned_under", "finally_roused", "steady_nerve"]);
     expect(bodySlam.tree!.steady_nerve.grantsPassive).toEqual({ kind: "regen", value: 0.025 });
     expect(steadyNerve.power).toBe(bodySlam.power + 5);
   });
 
   it("second_slam and rolling_crush are a real mutually exclusive fork", () => {
-    expect(() => applyMoveTree(bodySlam, ["heavy_step", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "second_slam", "rolling_crush"])).toThrow(
+    expect(() => applyMoveTree(bodySlam, ["heavy_step", "numbing_follow_through", "deadfall", "second_slam", "rolling_crush"])).toThrow(
       /conflicts with already-chosen/
     );
   });
 
-  it("Braced Commitment's bridge (Aggression<->Boldness) reaches both Rolling Advance and Bracing Follow-Through, one step before each fork", () => {
-    // The bridge notable alone does NOT satisfy the fork — same "one step
-    // early, not onto the fork itself" rule every other bridge in this
-    // roster follows.
+  it("Braced Commitment's bridge (Aggression<->Boldness) reaches one lane notable per branch — Ground-Shaking Landing and Crushed Thicket", () => {
+    // ASSERTION MEANING CHANGED WITH v4, deliberately: a bridge used to land
+    // one filler short of a branch's next notable; the two-lane standard
+    // lands it ON a lane notable instead, skipping that lane's filler grind
+    // but never the lane's own fork. What is still asserted, unchanged, is
+    // that the bridge does NOT hand over a fork: Second Slam still requires
+    // its own lane notable (Deadfall) first.
     expect(() =>
       applyMoveTree(bodySlam, ["heavy_step", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "second_slam"])
-    ).toThrow(/requires \[rolling_advance\]/);
+    ).toThrow(/requires \[deadfall\]/);
 
-    const viaAgg = applyMoveTree(bodySlam, ["heavy_step", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "rolling_advance"]);
+    const viaAgg = applyMoveTree(bodySlam, ["heavy_step", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "ground_shaking_landing"]);
     expect(viaAgg.statChangeOnHit).toEqual({ target: "self", stat: "defense", stage: 3, ticks: 18 });
     expect(viaAgg.defensePenetration).toBeCloseTo(0.15);
-    // None of Aggression's own linear filler chain was ever chosen.
-    expect(viaAgg.statusChance).toBe(bodySlam.statusChance);
+    expect(viaAgg.forcedMovement).toEqual({ mover: "defender", direction: "away", tiles: 2, timing: "onHit" });
+    // None of the Momentum lane's own filler chain was ever chosen.
+    expect(viaAgg.power).toBe(bodySlam.power);
+    expect(viaAgg.cooldownTicks).toBe(bodySlam.cooldownTicks);
 
-    const viaBold = applyMoveTree(bodySlam, ["heavy_step", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "bracing_follow_through"]);
-    expect(viaBold.power).toBe(bodySlam.power + 5);
+    const viaBold = applyMoveTree(bodySlam, ["heavy_step", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "crushed_thicket"]);
+    expect(viaBold.consumesOwnTerrain).toEqual({ terrain: "bush", damageMultiplier: 1.5 });
+    // Lane B's own filler (Heaving Up, +10 power) was skipped by the bridge.
+    expect(viaBold.power).toBe(bodySlam.power);
   });
 
-  it("Nothing to Prove's bridge (Boldness<->Sociability) deepens its own calmingPresence lever, not a generic bolt-on", () => {
+  it("Nothing to Prove's bridge (Boldness<->Sociability) deepens its own calmingPresence lever, and lands on one lane notable per branch", () => {
+    // v4 landing change: Unbudging (Boldness lane A) and Finally Roused
+    // (Sociability lane B), rather than the old pre-fork filler Quiet
+    // Ground. Same rule as every other bridge here — it skips a lane's
+    // grind, never its decision.
     const respec = applyMoveTree(bodySlam, [
       "dead_weight",
       "unbothered",
       "called_to_stand",
       "steadfast_focus",
       "undivided_stand",
-      "quiet_ground",
+      "unbudging",
+      "finally_roused",
     ]);
     // grantsPassive isn't part of the resolved MoveSpec — the real payoff is
     // asserted on the tree nodes' own accumulated values.
     expect(bodySlam.tree!.called_to_stand.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.15 });
     expect(bodySlam.tree!.steadfast_focus.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.15 });
     expect(bodySlam.tree!.undivided_stand.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.2 });
-    expect(respec.power).toBe(bodySlam.power + 5);
+    // Both landings are real, and neither lane's filler was walked.
+    expect(bodySlam.tree!.unbudging.grantsPassive).toEqual({ kind: "immovable", value: 1 });
+    expect(respec.selfStateBonus).toEqual({ condition: "selfLowHp", multiplier: 1.5 });
+    expect(respec.power).toBe(bodySlam.power);
   });
 
   it("Provoked Charge's bridge (Sociability<->Aggression) pairs its lockTicks cost with a real, growing benefit", () => {
