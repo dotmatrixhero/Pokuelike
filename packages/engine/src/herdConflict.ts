@@ -405,7 +405,7 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
   // grudge a deep-enough history can eventually turn lethal. Still applied
   // even on a lethal hit — harmless (the target won't be around to read it
   // back), kept unconditional for simplicity.
-  strengthenRapportMutual(world, attacker, defender, RAPPORT_HERD_CLASH_DELTA, rng);
+  strengthenRapportMutual(world, attacker, defender, RAPPORT_HERD_CLASH_DELTA, "struck", "wasStruck", rng);
 
   log?.record({
     kind: "herdClash",

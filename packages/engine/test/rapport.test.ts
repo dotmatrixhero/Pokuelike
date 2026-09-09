@@ -12,8 +12,11 @@ import {
   RAPPORT_MAX_EDGES_PER_AGENT,
   RAPPORT_MOB_DEFENSE_DELTA,
   RAPPORT_PRUNE_THRESHOLD,
+  RAPPORT_SOCIALIZE_DELTA,
   adjustRapport,
   decayedRapportScore,
+  notableRapportMemories,
+  rapportMemories,
   rapportScore,
   strengthenRapportMutual,
 } from "../src/rapport.js";
@@ -161,7 +164,7 @@ describe("rapport: core data structure, decay, prune, cap", () => {
         a.rapport = a.rapport ?? {};
         a.rapport[`p${i}`] = { score: 0.5, lastInteractionTick: 0 };
       }
-      adjustRapport(world, a, "extra", 0.5, world.rng);
+      adjustRapport(world, a, "extra", 0.5, undefined, world.rng);
       return Object.keys(a.rapport ?? {}).sort();
     }
 
@@ -243,6 +246,7 @@ describe("rapport: real triggers create/strengthen edges", () => {
 
     expect(log.events.some((e) => e.kind === "bonded")).toBe(true);
     expect(rapportScore(mother, "father", world.tick)).toBeCloseTo(RAPPORT_BONDING_DELTA, 5);
+    expect(rapportMemories(mother, "father").map((m) => m.reason)).toEqual(["bonded"]);
     expect(rapportScore(father, "mother", world.tick)).toBeCloseTo(RAPPORT_BONDING_DELTA, 5);
     // Meaningfully bigger than a single ordinary interaction nudge.
     expect(rapportScore(mother, "father", world.tick)).toBeGreaterThan(RAPPORT_FOOD_DELIVERY_DELTA * 5);
@@ -298,6 +302,9 @@ describe("rapport: real triggers create/strengthen edges", () => {
     expect(guardian.behavior).toBe("fight");
     expect(rapportScore(guardian, "herdmate", world.tick)).toBeCloseTo(RAPPORT_MOB_DEFENSE_DELTA, 5);
     expect(rapportScore(herdmate, "guardian", world.tick)).toBeCloseTo(RAPPORT_MOB_DEFENSE_DELTA, 5);
+    // ...and each side remembers its own role in it, not a shared neutral fact.
+    expect(rapportMemories(guardian, "herdmate").map((m) => m.reason)).toEqual(["defended"]);
+    expect(rapportMemories(herdmate, "guardian").map((m) => m.reason)).toEqual(["wasDefended"]);
   });
 
   it("herd-clash fights weaken/negative-shift rapport between exactly the two individuals involved, not species/herd-wide", () => {
@@ -324,9 +331,178 @@ describe("rapport: real triggers create/strengthen edges", () => {
     expect(engaged).toBe(true);
     expect(rapportScore(a, "rival", world.tick)).toBeCloseTo(RAPPORT_HERD_CLASH_DELTA, 5);
     expect(rapportScore(rival, "a", world.tick)).toBeCloseTo(RAPPORT_HERD_CLASH_DELTA, 5);
+    // The aggressor and the one who got hit remember different things.
+    expect(rapportMemories(a, "rival").map((m) => m.reason)).toEqual(["struck"]);
+    expect(rapportMemories(rival, "a").map((m) => m.reason)).toEqual(["wasStruck"]);
     // Not a herd/species-wide effect — an uninvolved same-herd bystander is untouched.
     expect(rapportScore(a, "bystander", world.tick)).toBe(0);
     expect(rapportScore(bystander, "a", world.tick)).toBe(0);
+  });
+});
+
+describe("rapport memories: an edge remembers WHY, not just how much", () => {
+  it("records a reason as an aggregated entry, not one entry per event", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    world.agents.push(a);
+
+    adjustRapport(world, a, "b", 0.1, "gaveFood");
+    adjustRapport(world, a, "b", 0.1, "gaveFood");
+    adjustRapport(world, a, "b", 0.1, "gaveFood");
+
+    expect(rapportMemories(a, "b")).toEqual([{ reason: "gaveFood", count: 3, lastTick: world.tick }]);
+  });
+
+  it("keeps distinct reasons side by side, strongest-evidence first", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    world.agents.push(a);
+
+    adjustRapport(world, a, "b", 0.1, "socialized");
+    adjustRapport(world, a, "b", 0.1, "gaveFood");
+    adjustRapport(world, a, "b", 0.1, "gaveFood");
+
+    expect(rapportMemories(a, "b").map((m) => [m.reason, m.count])).toEqual([
+      ["gaveFood", 2],
+      ["socialized", 1],
+    ]);
+  });
+
+  it("lastTick tracks the most recent occurrence, while count keeps the whole history", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    world.agents.push(a);
+
+    adjustRapport(world, a, "b", 0.1, "struck");
+    world.tick = 40;
+    adjustRapport(world, a, "b", 0.1, "struck");
+
+    expect(rapportMemories(a, "b")).toEqual([{ reason: "struck", count: 2, lastTick: 40 }]);
+  });
+
+  it("a reason-less adjustment leaves existing memories intact rather than clearing them", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    world.agents.push(a);
+
+    adjustRapport(world, a, "b", 0.1, "gaveFood");
+    adjustRapport(world, a, "b", 0.1);
+
+    expect(rapportMemories(a, "b")).toEqual([{ reason: "gaveFood", count: 1, lastTick: world.tick }]);
+  });
+
+  it("reading memories for a pair that never interacted is empty, not a throw", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    world.agents.push(a);
+    expect(rapportMemories(a, "stranger")).toEqual([]);
+  });
+
+  it("memories die with the edge when it prunes — a forgotten relationship keeps no grievances", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    world.agents.push(a);
+
+    adjustRapport(world, a, "b", 0.05, "struck");
+    expect(rapportMemories(a, "b")).toHaveLength(1);
+
+    // Nudge the score back under the prune threshold — the edge goes, and the
+    // memory with it, rather than a scoreless grudge surviving forever.
+    adjustRapport(world, a, "b", -0.045, "socialized");
+
+    expect(a.rapport?.b).toBeUndefined();
+    expect(rapportMemories(a, "b")).toEqual([]);
+  });
+
+  it("the two sides of one interaction record DIFFERENT reasons — the edge is directional", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    const b = agent("b");
+    world.agents.push(a, b);
+
+    strengthenRapportMutual(world, a, b, 0.2, "defended", "wasDefended");
+
+    expect(rapportMemories(a, "b").map((m) => m.reason)).toEqual(["defended"]);
+    expect(rapportMemories(b, "a").map((m) => m.reason)).toEqual(["wasDefended"]);
+  });
+
+  it("notableRapportMemories leads with the RARE reason, not the frequent one", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    world.agents.push(a);
+
+    // The shape a real run actually produces: socializing swamps everything
+    // (measured at 95.2% of all reason-events over 4 seeds x 6000 ticks).
+    for (let i = 0; i < 500; i++) adjustRapport(world, a, "b", RAPPORT_SOCIALIZE_DELTA, "socialized");
+    adjustRapport(world, a, "b", RAPPORT_MOB_DEFENSE_DELTA, "wasDefended");
+
+    // The honest mechanical order buries the interesting fact...
+    expect(rapportMemories(a, "b").map((m) => m.reason)).toEqual(["socialized", "wasDefended"]);
+    // ...and the curated one leads with it.
+    expect(notableRapportMemories(a, "b").map((m) => m.reason)).toEqual(["wasDefended", "socialized"]);
+  });
+
+  it("notableRapportMemories does not disturb the stored order or the mechanical view", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    world.agents.push(a);
+
+    adjustRapport(world, a, "b", 0.05, "socialized");
+    adjustRapport(world, a, "b", 0.05, "socialized");
+    adjustRapport(world, a, "b", 0.05, "bonded");
+
+    notableRapportMemories(a, "b");
+
+    expect(rapportMemories(a, "b").map((m) => m.reason)).toEqual(["socialized", "bonded"]);
+  });
+
+  it("a symmetric interaction records the same reason on both sides (reasonForB defaults to reasonForA)", () => {
+    const world = createWorld(5, 5);
+    const a = agent("a");
+    const b = agent("b");
+    world.agents.push(a, b);
+
+    strengthenRapportMutual(world, a, b, 0.2, "socialized");
+
+    expect(rapportMemories(a, "b").map((m) => m.reason)).toEqual(["socialized"]);
+    expect(rapportMemories(b, "a").map((m) => m.reason)).toEqual(["socialized"]);
+  });
+});
+
+describe("rapport memories: the real triggers tag themselves correctly", () => {
+  it("a real food delivery records gaveFood on the carrier and receivedFood on the receiver", () => {
+    const world = createWorld(6, 6);
+    const carrier = agent("carrier", {
+      herdId: "herd-a",
+      pos: { x: 1, y: 0 },
+      deliverTargetId: "receiver",
+      inventory: [{ itemKey: "food", weight: 1 }],
+    });
+    const receiver = agent("receiver", { herdId: "herd-a", pos: { x: 0, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
+    world.agents.push(carrier, receiver);
+    const log = new EventLog();
+
+    expect(applyHerdSupport(world, carrier, log)).toBe(true);
+    expect(log.events.some((e) => e.kind === "foodDelivered")).toBe(true);
+
+    expect(rapportMemories(carrier, "receiver")).toEqual([{ reason: "gaveFood", count: 1, lastTick: world.tick }]);
+    expect(rapportMemories(receiver, "carrier")).toEqual([{ reason: "receivedFood", count: 1, lastTick: world.tick }]);
+  });
+
+  it("five real deliveries between the same pair aggregate to one memory with count 5", () => {
+    const world = createWorld(6, 6);
+    const carrier = agent("carrier", { herdId: "herd-a", pos: { x: 0, y: 0 } });
+    const receiver = agent("receiver", { herdId: "herd-a", pos: { x: 0, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
+    world.agents.push(carrier, receiver);
+
+    for (let i = 0; i < 5; i++) {
+      carrier.deliverTargetId = "receiver";
+      carrier.inventory = [{ itemKey: "food", weight: 1 }];
+      receiver.needs.hunger = 0.1;
+      applyHerdSupport(world, carrier);
+    }
+
+    expect(rapportMemories(carrier, "receiver")).toEqual([{ reason: "gaveFood", count: 5, lastTick: world.tick }]);
   });
 });
 
@@ -353,7 +529,7 @@ describe("rapport consumer: mate preference favors an existing positive-rapport 
     const fartherFriend = suitor("zebra", { x: 13, y: 10 }); // distance 3, full positive rapport
     world.agents.push(female, nearerStranger, fartherFriend);
 
-    adjustRapport(world, female, "zebra", 1, world.rng);
+    adjustRapport(world, female, "zebra", 1, undefined, world.rng);
 
     for (let i = 0; i < 10 && female.bondedPartnerId === undefined; i++) {
       applyMateSeeking(world, female);
@@ -418,7 +594,7 @@ describe("rapport consumer: herd-conflict re-targets and re-escalates against a 
     expect(applyHerdRivalryConflict(world, a, HUNT_RULES, rival.pos, undefined, roll)).toBe(false);
 
     // Give "a" a strong existing grudge against "rival" (as if from a past herdClash).
-    adjustRapport(world, a, "rival", -1, world.rng);
+    adjustRapport(world, a, "rival", -1, undefined, world.rng);
     a.herdConflictCooldownTicks = 0;
 
     // The exact same roll now succeeds, purely because of the grudge bonus.
@@ -432,7 +608,7 @@ describe("rapport consumer: herd-conflict re-targets and re-escalates against a 
     const stranger = contestant("stranger", { x: 4, y: 5 }, "herd-c"); // same distance (1) from the contested tile
     world.agents.push(a, grudgeRival, stranger);
 
-    adjustRapport(world, a, "grudge-rival", -1, world.rng);
+    adjustRapport(world, a, "grudge-rival", -1, undefined, world.rng);
 
     // ALWAYS_FIGHT-style rng: succeeds every probability gate deterministically.
     const target = { x: 5, y: 6 }; // stranger and grudgeRival are both within RIVAL_DETECT_RADIUS of one of the two tested targets below

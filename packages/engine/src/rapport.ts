@@ -1,4 +1,4 @@
-import type { Agent, RapportEdge, World } from "./types.js";
+import type { Agent, RapportEdge, RapportMemory, RapportReason, World } from "./types.js";
 
 /**
  * Rapport: a real, sparse agent-to-agent relationship graph — the general,
@@ -146,6 +146,95 @@ function clampScore(score: number): number {
 }
 
 /**
+ * The reasons on `agent`'s edge toward `otherId`, strongest-evidence first
+ * (highest `count`, ties broken by most recent) — empty if there's no edge or
+ * the edge predates/omits the field. Every consumer should read through this
+ * rather than touching `RapportEdge.memories` directly, so "no edge",
+ * "edge with no memories" and "edge written before this field existed" all
+ * collapse to the same harmless empty list.
+ *
+ * Returns a fresh sorted array rather than the stored one — this is a
+ * read-only view, and callers ordering or slicing it must not disturb the
+ * edge's own storage order.
+ */
+export function rapportMemories(agent: Agent, otherId: string): RapportMemory[] {
+  const memories = agent.rapport?.[otherId]?.memories;
+  if (!memories?.length) return [];
+  return [...memories].sort((a, b) => b.count - a.count || b.lastTick - a.lastTick);
+}
+
+/**
+ * How much a reason *distinguishes* a relationship, highest first — which is
+ * emphatically NOT how much it contributed to the score. Added because of a
+ * real-run measurement, not a guess: over 4 seeds x 6000 ticks,
+ * `"socialized"` was **95.2%** of all recorded reason-events (16,168 of
+ * 16,975), so a count-ordered read puts the least interesting fact first on
+ * essentially every edge in the world — *"kept their company 2907 times,
+ * fought for them 19 times"* leads with the wrong clause.
+ *
+ * Contribution ordering does not fix that, because socializing genuinely did
+ * drive most of those scores; it is simply the boring reason a relationship
+ * is strong. What a reader wants is the **rare** reason, so this ranks by
+ * scarcity-of-meaning instead: taking a mate happens once ever, being
+ * defended is a risk somebody took, a grudge is a grudge, and sitting
+ * together is what everyone does all day.
+ *
+ * This is `NARRATIVE_PILLARS.md`'s curation mandate in miniature — the game
+ * is responsible for noticing on the player's behalf — which is exactly why
+ * it lives behind `notableRapportMemories` rather than being baked into
+ * `rapportMemories`: the honest mechanical order and the editorial order are
+ * different questions, and conflating them would hide the judgement.
+ */
+export const RAPPORT_REASON_SIGNIFICANCE: Record<RapportReason, number> = {
+  bonded: 5,
+  wasDefended: 4,
+  defended: 4,
+  struck: 3,
+  wasStruck: 3,
+  gaveFood: 2,
+  receivedFood: 2,
+  socialized: 1,
+};
+
+/**
+ * `rapportMemories` reordered for a reader — most *distinguishing* reason
+ * first (see `RAPPORT_REASON_SIGNIFICANCE`), ties broken by count and then
+ * recency. This is the view a narration or inspector surface wants;
+ * `rapportMemories` stays the honest mechanical order for anything counting
+ * events.
+ */
+export function notableRapportMemories(agent: Agent, otherId: string): RapportMemory[] {
+  return rapportMemories(agent, otherId).sort(
+    (a, b) =>
+      RAPPORT_REASON_SIGNIFICANCE[b.reason] - RAPPORT_REASON_SIGNIFICANCE[a.reason] ||
+      b.count - a.count ||
+      b.lastTick - a.lastTick,
+  );
+}
+
+/**
+ * Folds one fresh occurrence of `reason` into `memories`, incrementing the
+ * existing entry for that reason or appending a new one. Bounded by
+ * construction: there are only as many entries as there are `RapportReason`
+ * values, so this never needs a cap or a prune of its own the way `score`
+ * does.
+ *
+ * Takes and returns the array rather than mutating an edge, so
+ * `adjustRapport` can carry memories across the edge object it rebuilds.
+ */
+function withMemory(memories: RapportMemory[] | undefined, reason: RapportReason, tick: number): RapportMemory[] {
+  const next = memories ? [...memories] : [];
+  const existing = next.findIndex((m) => m.reason === reason);
+  if (existing >= 0) {
+    const prior = next[existing]!;
+    next[existing] = { reason, count: prior.count + 1, lastTick: tick };
+  } else {
+    next.push({ reason, count: 1, lastTick: tick });
+  }
+  return next;
+}
+
+/**
  * `edge`'s score decayed forward to `tick`, without mutating `edge` itself —
  * every consumer reads through this (directly via `rapportScore`, or via
  * `adjustRapport` before applying a fresh delta) so a stale-but-still-stored
@@ -233,8 +322,28 @@ function evictWeakestEdge(agent: Agent, tick: number, rng: () => number): void {
  * kept separate so a future asymmetric interaction (one side remembers a
  * slight more than the other) has a place to plug in without inventing a new
  * function.
+ *
+ * `reason` records *what happened*, folded into the edge's `memories` (see
+ * `RapportReason`) — it is directional, describing this agent's side of the
+ * interaction, so a food delivery writes `"gaveFood"` here on the carrier and
+ * `"receivedFood"` on the receiver. Optional only so a test or a future
+ * caller with genuinely nothing to say can omit it; every real trigger in
+ * this codebase passes one, and an untagged edge is exactly the
+ * cause-less relationship this field exists to eliminate.
+ *
+ * **A pruned edge loses its memories with it**, which is deliberate: an edge
+ * only prunes once its score has decayed to indistinguishable-from-stranger,
+ * and a relationship that faded that far should not keep its grievances on
+ * file. Same for eviction under `RAPPORT_MAX_EDGES_PER_AGENT`.
  */
-export function adjustRapport(world: World, agent: Agent, otherId: string, delta: number, rng: () => number = world.rng): void {
+export function adjustRapport(
+  world: World,
+  agent: Agent,
+  otherId: string,
+  delta: number,
+  reason?: RapportReason,
+  rng: () => number = world.rng,
+): void {
   if (agent.id === otherId) return;
   const rapport = agent.rapport ?? (agent.rapport = {});
   const existing = rapport[otherId];
@@ -247,7 +356,10 @@ export function adjustRapport(world: World, agent: Agent, otherId: string, delta
   }
 
   if (!existing) evictWeakestEdge(agent, world.tick, rng);
-  rapport[otherId] = { score: next, lastInteractionTick: world.tick };
+  const memories = reason ? withMemory(existing?.memories, reason, world.tick) : existing?.memories;
+  const edge: RapportEdge = { score: next, lastInteractionTick: world.tick };
+  if (memories?.length) edge.memories = memories;
+  rapport[otherId] = edge;
 }
 
 /**
@@ -261,9 +373,27 @@ export function adjustRapport(world: World, agent: Agent, otherId: string, delta
  * calls, kept as its own function so every call site reads as "these two
  * just had a real interaction" rather than repeating the pair of calls
  * inline at every trigger.
+ *
+ * **The two reasons are separate because the edges are.** Each agent's edge
+ * records that agent's own side of what happened, so an asymmetric
+ * interaction writes different reasons on each: `"gaveFood"`/`"receivedFood"`,
+ * `"defended"`/`"wasDefended"`, `"struck"`/`"wasStruck"`. `reasonForB`
+ * defaults to `reasonForA` for the genuinely symmetric cases (`"socialized"`,
+ * `"bonded"`), where both sides did the same thing and there is no role to
+ * distinguish. The *score* delta stays shared — only the memory differs,
+ * since "how much this moved us" is mutual here even where "what I did" is
+ * not.
  */
-export function strengthenRapportMutual(world: World, a: Agent, b: Agent, delta: number, rng: () => number = world.rng): void {
+export function strengthenRapportMutual(
+  world: World,
+  a: Agent,
+  b: Agent,
+  delta: number,
+  reasonForA?: RapportReason,
+  reasonForB: RapportReason | undefined = reasonForA,
+  rng: () => number = world.rng,
+): void {
   if (a.id === b.id) return;
-  adjustRapport(world, a, b.id, delta, rng);
-  adjustRapport(world, b, a.id, delta, rng);
+  adjustRapport(world, a, b.id, delta, reasonForA, rng);
+  adjustRapport(world, b, a.id, delta, reasonForB, rng);
 }

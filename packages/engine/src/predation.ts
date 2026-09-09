@@ -1644,7 +1644,7 @@ export function applyPredationInstincts(
           // guardians defending the same herdmate over multiple ticks/events
           // is what makes this genuinely "joint" over a run. See
           // rapport.ts's doc comment.
-          strengthenRapportMutual(world, agent, herdmate, RAPPORT_MOB_DEFENSE_DELTA, rng);
+          strengthenRapportMutual(world, agent, herdmate, RAPPORT_MOB_DEFENSE_DELTA, "defended", "wasDefended", rng);
         } else {
           // stopAdjacent=true — see stepToward's doc comment.
           agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos, agent, undefined, true);

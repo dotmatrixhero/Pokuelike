@@ -585,7 +585,7 @@ function applySocializing(world: World, agent: Agent, log: EventLog | undefined,
   // isolated) builds rapport slower than a same-herd interaction — a
   // stranger's company is real, but it isn't the same as a herd-mate's.
   const delta = target.herdId === agent.herdId ? RAPPORT_SOCIALIZE_DELTA : RAPPORT_SOCIALIZE_DELTA * SOCIALIZE_STRANGER_DELTA_FRACTION;
-  strengthenRapportMutual(world, agent, target, delta, rng);
+  strengthenRapportMutual(world, agent, target, delta, "socialized", "socialized", rng);
   agent.ticksSinceSocialContact = 0;
   return true;
 }

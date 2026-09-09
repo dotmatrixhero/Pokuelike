@@ -377,7 +377,7 @@ export function applyMateSeeking(
         // rare, significant event (fires once per pair, never incrementally
         // repeated), so it carries a much bigger single jump than an
         // ordinary interaction's small nudge. See rapport.ts's doc comment.
-        strengthenRapportMutual(world, agent, partner, RAPPORT_BONDING_DELTA, rng);
+        strengthenRapportMutual(world, agent, partner, RAPPORT_BONDING_DELTA, "bonded", "bonded", rng);
         log?.record({
           kind: "bonded",
           tick: world.tick,
