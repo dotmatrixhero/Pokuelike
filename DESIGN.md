@@ -15332,3 +15332,95 @@ is exactly 5 there) — not enough samples at that exact distance across 6
 seeds to average out; not corrected for, flagging honestly rather than
 hiding it. Full engine suite (1267 tests, existing zone-banding tests
 updated to the new curve's real values) green.
+
+## Investigated: does a herd protect its young?
+
+Direct question: "do herds protect their young at all? I don't seem to see
+it. Maybe the young die in one shot so quickly. Maybe needs more instinct
+to protect while alive, stay closer, and avenge when dead." Design-mode
+question, not yet a build — investigated first per the standing "verify
+empirically" rule before proposing anything.
+
+**What already exists (read from the real code, `predation.ts`/`herding.ts`):**
+- **Stay closer**: partially real already, but LEVEL-based, not age-based.
+  `applyHerdCohesion`'s `LOW_LEVEL_COHESION_GAP` gives any herd member 5+
+  levels below the herd's own top a tighter leash (3 tiles vs. the ordinary
+  5) — a juvenile is nearly always low-level relative to its herd, so this
+  covers most of the "stay closer" ask in practice, just indirectly (via
+  level, not `isJuvenile`/`age` directly).
+- **Protect while alive**: real, but REACTIVE only. `findHerdmateInDanger`
+  lets a non-prey herd-mate notice and intervene against a threat — but
+  only once the herd-mate in danger is ALREADY in `"flee"` or `"fight"`
+  behavior. Nothing watches for "a predator is hunting toward my juvenile
+  herd-mate" before that first reaction — a threat that resolves in one hit
+  (no flee tick, no fight tick) never gives this a window to fire at all.
+- **Avenge when dead**: does not exist. Grepped the whole engine for
+  avenge/retaliat/vendetta-shaped mechanics — nothing. A herd's response to
+  losing a member is exactly zero different from before that member died.
+  The user's instinct here is correct: this feature genuinely isn't there.
+- Juveniles DO get one other real protection already:
+  `retreatHpFraction`/`JUVENILE_RETREAT_HP_FRACTION` — a juvenile flees at
+  60% HP instead of the ordinary (lower) threshold, i.e. more skittish,
+  bails out of a fight earlier.
+
+**Empirical measurement** — new tool, `packages/runner/src/
+validateYoungProtection.ts` (kept, matches the existing `validateX.ts`
+diagnostic convention), run against a real `createDemoWorld()` for 10,000
+ticks:
+
+| metric | value |
+|---|---|
+| eggs hatched | 77 |
+| max concurrent juveniles | 3 |
+| juvenile flee events (near-misses) | 29 |
+| juvenile deaths to predation | 1 |
+| juvenile deaths to starvation/old age | 0 |
+| that 1 death: guardian ever fought the killer | **no** |
+| that 1 death: predator | a real Aerodactyl (apex predator) |
+| that 1 death: victim | level 2, age 7 — freshly hatched |
+| total deaths (all ages) this run | 62 |
+
+**Honest read of this measurement.** In THIS run, juveniles mostly survive
+fine on their own — 29 successful flees against 1 death is a good ratio,
+so "juveniles constantly getting slaughtered" isn't what a typical demo-
+seed run shows. But the ONE juvenile death that did happen is exactly the
+shape of the report: an apex predator against a level-2 hatchling, no
+herd-mate ever engaged the killer, and the tool couldn't find any earlier
+tick where the killer's `"fight"` behavior toward this specific victim
+preceded the kill — consistent with (not proven, one sample) a fight that
+started and ended within the same tick, i.e. a real one-shot. A single
+sample can't establish a rate; this demo world is also a smaller, calmer
+population than an extended live session, and now that zone-level banding
+(above) puts genuinely high-level predators in far zones, a juvenile
+hatching or wandering near one is a real, harder-hitting scenario than
+this measurement's population ever produced. So: the MECHANISM gap
+(reactive-only guardian, no avenge at all) is confirmed real by code; the
+FREQUENCY of it mattering is plausible but not nailed down by this one run.
+
+**Build menu, not yet built — three separable pieces, matching the three
+named asks:**
+1. **Proactive guardian trigger.** Extend the guardian check to also treat
+   "a juvenile herd-mate is within a hunting predator's own detection/
+   engagement range" as danger — not just "already fleeing/fighting."
+   Lets a guardian close in and threaten a predator BEFORE the first hit,
+   not just pile on after. Directly answers "protect while alive."
+2. **Age-based (not just level-based) tight cohesion.** Make the existing
+   tighter-leash check also fire on `isJuvenile(agent)` directly, not only
+   the level-gap proxy — closes the gap where a juvenile that happens to be
+   close in level to its herd (a slow-growing herd, say) still wouldn't get
+   the tighter leash today. Directly answers "stay closer."
+3. **Avenge.** New mechanic: when a herd member dies to a predator that's
+   still nearby, give nearby herd-mates a real, temporary response — some
+   combination of a bonus to notice/pursue that specific killer, an
+   aggression/engagement-radius boost, or a scent/marked-target effect that
+   decays over some window. Directly answers "avenge when dead," and is the
+   piece with zero existing code to build on — needs its own design pass on
+   HOW aggressive/how long before it starts overriding other survival
+   instincts.
+
+Recommendation: build 1 and 2 together first (both are extensions of
+`findHerdmateInDanger`/`applyHerdCohesion`, small and low-risk, and 2 is
+nearly free once 1 is in), measure with the same tool, then treat 3 as its
+own slice — it's a genuinely new mechanic (temporary aggression/pursuit
+state) rather than an extension of something that already exists, and
+deserves its own tuning pass rather than being bolted on blind.
