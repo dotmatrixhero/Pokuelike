@@ -2397,6 +2397,60 @@ Slam's tree had been in the data all along but never appeared in the move
 picker because it was never added there; added a new "Single-species"
 group for it.
 
+
+#### v4 conversion (39 -> 45 nodes) — Shipped
+
+Converted to template v4's two-lane standard. **The v3 fantasy above is
+unchanged and every v3 node kept its own mechanics**: this pass added the
+second lane each branch was missing, moved each branch's existing fork to the
+tail of that second lane, and rewired the three bridges to land on one lane
+notable per branch instead of a pre-fork filler. `check-proposed-trees.ts
+--shipped` reports body_slam **7 problems -> 0**.
+
+Six new nodes, all `delta` levers rather than passives (passives stack
+uncapped across every tree a species knows, so they are the scarcest currency
+in the system — this tree grants exactly the same passives it did before):
+
+| branch | lane | new node | lever | why this lever for THIS move |
+|---|---|---|---|---|
+| Aggression | B *Deadfall* | **Deadfall** | `situationalBonus: elevation 1.4` + `critRateStage` | It doesn't chase, it comes DOWN. `resolveHit` pays this out only when the attacker's own tile is genuinely higher than the target's — the condition IS the fantasy. |
+| Aggression | A *Momentum* | −1 Cooldown | `cooldownTicks: -1` | Tempo was 1.40x against this move's own 2.33x cap and a roster median of 1.80x; total reduction is now −3 (1.75x). Still −1 of headroom left, deliberately unspent. |
+| Boldness | B *Where It's Been Lying* | **Heaving Up** | `power` + `selfCostPerUse: energy` | Getting four hundred pounds off the ground costs the animal something real, in the same node as the payoff (principle 4). |
+| Boldness | B | **Crushed Thicket** | `consumesOwnTerrain: bush 1.5x` | The most physical lever in the palette on the branch that earned it: it comes up out of the brush it was sleeping in and the brush is gone. Reachable, not decorative — Snorlax's curated biomes are forest and jungle, the two with the heaviest bush weighting, and bush is walkable. |
+| Sociability | B *How It Ends One Anyway* | **Pinned** | `jamCooldownTicks: 2` | De-escalation with its whole body: whatever is under it doesn't get its own move off. |
+| Sociability | B | **Finally Roused** | `selfStateBonus: selfLowHp 1.5` | Read from `pickBestMove` (combat.ts), not the damage formula, and said plainly: a hurt Snorlax isn't stronger, it just finally bothers to reach for the slam. |
+
+Lanes differ in KIND, not degree — Aggression is a body already moving versus
+a drop from height; Boldness is refusing to be moved versus what lying
+somewhere for a living costs and leaves behind; Sociability is nobody starting
+anything versus how it ends one it didn't want. Bridges now complement the
+lane they land on rather than matching it: Braced Commitment (footing) lands
+on the Momentum lane and on Crushed Thicket, Nothing to Prove (calm) lands on
+Unbudging and Finally Roused, Provoked Charge (all-in violence) lands on the
+two lanes with no violence of their own, No Quarrel and Deadfall.
+
+Measured, roster median as the control: 39 -> **45 nodes**, 25 -> **30
+distinct levers** (median 21), 8 -> **11 colour-pie flavours** (median 9),
+tempo 1.40x -> **1.75x** (median 1.80x, cap 2.33x), power 2.08x -> 2.20x
+(median 1.89x), cheapest capstone 12 -> **11 points** (median 11).
+`passive-exposure.ts` output is byte-identical before and after — no species'
+cross-tree passive totals moved.
+
+Verified by running the real engine, not by reading it: a one-tick `tickWorld`
+harness with the resolved v4 spec dealt 30 damage on flat ground, **42 from
+elevation** (exactly 1.4x) and **45 standing on a bush** (exactly 1.5x, with
+the attacker's own tile left as `floor` afterward); the defender's own move
+cooldown went 1 -> 3; the attacker's energy dropped 0.045 against a 0.005 idle
+baseline; and `pickBestMove` chose a stronger rival move at full HP but Body
+Slam at 10% HP.
+
+Two data tests changed meaning, deliberately, and are commented as such: both
+bridge tests asserted the *old* landing rule (one filler short of a notable).
+v4 lands a bridge ON a lane notable — skipping that lane's grind, never its
+fork — so those assertions were rewritten to the new rule rather than
+weakened; the thing they exist to prove (a bridge never hands over a fork) is
+still asserted, now against Deadfall instead of Rolling Advance.
+
 ### Pending brainstorm — Earthquake / Hydro Pump / Solar Beam (not yet built)
 
 Consolidated here so none of this is lost to context compaction — these

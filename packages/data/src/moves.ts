@@ -5817,23 +5817,30 @@ export const MOVES: Record<string, MoveSpec> = {
     range: { min: 0, max: 1 },
     statusChance: 0.3,
     statusKind: "paralysis",
-    // v3 tree (MOVES_DESIGN.md's "start from the fantasy" pass).
-    // THE FANTASY: this isn't a strike, it's four hundred pounds of
-    // sleeping mass finally deciding to move — no technique, no
-    // follow-through, just gravity, timed. What's dangerous about it isn't
-    // power, it's inevitability: you don't dodge a landslide, you get out
-    // from under it before it starts, and this animal rarely bothers to
-    // warn anyone it's about to fall. Snorlax's only real signature move
-    // (species.ts) — same single-species freedom Slash's tree used for
-    // Scyther, built specifically for this one body, not a generic "heavy
-    // hit" template.
+    // v4 tree (MOVES_DESIGN.md's "Skill-tree template v4 — the two-lane
+    // standard"): 45 nodes, 9 prerequisitesAnyOf, 6 fork nodes, 3 three-node
+    // bridges. The v3 fantasy and every v3 node's mechanics are unchanged —
+    // this pass only added the second lane each branch was missing and
+    // rewired the bridges to land on lane notables.
+    // THE FANTASY (unchanged, written before a single node): this isn't a
+    // strike, it's four hundred pounds of sleeping mass finally deciding to
+    // move — no technique, no follow-through, just gravity, timed. What's
+    // dangerous about it isn't power, it's inevitability: you don't dodge a
+    // landslide, you get out from under it before it starts, and this animal
+    // rarely bothers to warn anyone it's about to fall. Snorlax's only real
+    // signature move (species.ts) — same single-species freedom Slash's tree
+    // used for Scyther, built specifically for this one body, not a generic
+    // "heavy hit" template.
     // - Aggression ("Landslide"): stays power-archetype on purpose — more
     //   mass, less restraint, escalating to a real localized collapse. The
     //   full-body weight payoff (`weightScaling`) is earned at the keystone
     //   now, not handed out on the opener — direct feedback that starting
     //   this strong was backwards, moved from Full Weight (now a modest
     //   opening lunge) to Avalanche, where "the giant finally throws its
-    //   whole self into it" actually belongs.
+    //   whole self into it" actually belongs. Its two lanes differ in kind,
+    //   not degree: MOMENTUM (a body already moving, driving whatever it hit
+    //   backward) versus DEADFALL (the drop from above — no travel at all,
+    //   just height, and a numbness that comes from being landed on).
     // - Boldness ("Unbudging"): earned tankiness, not a default reach —
     //   nothing on this whole roster fits "doesn't move" better than a
     //   sleeping giant (Snorlax's own curated moveset already primes this
@@ -5841,6 +5848,9 @@ export const MOVES: Record<string, MoveSpec> = {
     //   read as bland: the keystone is now a genuine wind-up — a deliberate,
     //   telegraphed commitment (real "intention," not just more armor),
     //   invulnerable while charging, then a huge leap and a devastating hit.
+    //   Lane A is that refusal to be moved at all; lane B is the other half
+    //   of lying somewhere for a living — what it costs to heave that mass
+    //   back up, and what the ground it was lying on looks like afterward.
     // - Sociability ("Undisturbed"): direct correction on the first draft —
     //   Snorlax is canonically a solitary animal, not a herd one, so a
     //   branch built entirely on ally-buffing herd support was the wrong
@@ -5848,6 +5858,10 @@ export const MOVES: Record<string, MoveSpec> = {
     //   despite its size) is now a genuine non-territorial, de-escalating
     //   presence: it never starts a fight over a resource, and anything
     //   nearby — herd or not, rival or not — calms down just being near it.
+    //   Lane A is that outward calm (nobody starts anything); lane B is how
+    //   a fight it didn't want ENDS — whatever it lands on is simply held
+    //   down rather than escalated with, and it only really reaches for this
+    //   move once it has actually been hurt.
     tree: {
       // --- Aggression: Landslide (more mass, less restraint) ---
       heavy_step: {
@@ -5861,27 +5875,35 @@ export const MOVES: Record<string, MoveSpec> = {
         // move's own top comment.
         delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" } },
       },
-      numbing_follow_through: {
-        id: "numbing_follow_through",
-        name: "+10% Paralysis Chance",
-        cost: 1,
-        prerequisites: ["heavy_step"],
-        leaning: "aggression",
-        delta: { statusChance: 0.1 },
-      },
+      // Lane A — MOMENTUM: a body already in motion, and what being in the
+      // way of one costs.
       mounting_momentum: {
         id: "mounting_momentum",
         name: "+8 Power",
         cost: 1,
-        prerequisites: ["numbing_follow_through"],
+        prerequisites: ["heavy_step"],
         leaning: "aggression",
         delta: { power: 8 },
+      },
+      bearing_down: {
+        id: "bearing_down",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["mounting_momentum"],
+        leaning: "aggression",
+        // Once it's actually moving, stopping is the hard part — it comes
+        // around again sooner. (Total tree reduction is now -3 against a
+        // base of 6: a 1.75x tempo gain, against this move's own 2.33x cap.)
+        delta: { cooldownTicks: -1 },
       },
       ground_shaking_landing: {
         id: "ground_shaking_landing",
         name: "Ground-Shaking Landing",
-        cost: 1,
-        prerequisites: ["mounting_momentum"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or through Braced
+        // Commitment's bridge — bracing first is exactly what keeps the
+        // force in the target instead of in its own wobble.
+        prerequisitesAnyOf: [["bearing_down"], ["settled_impact"]],
         leaning: "aggression",
         // Not a technique — a body just landing somewhere it wasn't,
         // driving whatever it hit backward with it.
@@ -5891,18 +5913,42 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "rolling_advance",
         name: "+8 Power",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Aggression (Braced Commitment's and Provoked
-        // Charge's own chains).
-        prerequisitesAnyOf: [["ground_shaking_landing"], ["settled_impact"], ["undivided"]],
+        prerequisites: ["ground_shaking_landing"],
         leaning: "aggression",
         delta: { power: 8 },
+      },
+      // Lane B — DEADFALL: no travel at all, just height and mass. Numbness
+      // is what being under it does to you.
+      numbing_follow_through: {
+        id: "numbing_follow_through",
+        name: "+10% Paralysis Chance",
+        cost: 1,
+        prerequisites: ["heavy_step"],
+        leaning: "aggression",
+        delta: { statusChance: 0.1 },
+      },
+      deadfall: {
+        id: "deadfall",
+        name: "Deadfall",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or through Provoked
+        // Charge's bridge — the patient lane is exactly the one with no
+        // violence of its own until something rouses it.
+        prerequisitesAnyOf: [["numbing_follow_through"], ["undivided"]],
+        leaning: "aggression",
+        // The one condition this move's own fantasy obviously cares about:
+        // it doesn't chase, it comes DOWN. `situationalBonus`'s "elevation"
+        // is real and literal — resolveHit (predation.ts) compares the
+        // attacker's own tile elevation against the defender's and only
+        // pays out when the attacker is genuinely higher. A fall that finds
+        // the soft spot on the way through, hence the crit stage.
+        delta: { situationalBonus: { condition: "elevation", multiplier: 1.4 }, critRateStage: 1 },
       },
       second_slam: {
         id: "second_slam",
         name: "Second Slam",
         cost: 2,
-        prerequisites: ["rolling_advance"],
+        prerequisites: ["deadfall"],
         excludes: ["rolling_crush"],
         leaning: "aggression",
         // Commits fully — the fall itself costs something now too.
@@ -5912,7 +5958,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "rolling_crush",
         name: "Rolling Crush",
         cost: 2,
-        prerequisites: ["rolling_advance"],
+        prerequisites: ["deadfall"],
         excludes: ["second_slam"],
         leaning: "aggression",
         // The weight keeps going after the first impact — a lighter
@@ -5923,7 +5969,9 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "inevitable",
         name: "Inevitable",
         cost: 2,
-        prerequisitesAnyOf: [["second_slam"], ["rolling_crush"]],
+        // DEEP NOTABLE — both lanes end here: the momentum lane's tail and
+        // either tip of the deadfall lane's fork.
+        prerequisitesAnyOf: [["rolling_advance"], ["second_slam"], ["rolling_crush"]],
         leaning: "aggression",
         // Mass doesn't need precision — it just needs enough attempts to
         // eventually find the gap in any guard.
@@ -5963,6 +6011,7 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
         delta: {},
       },
+      // Lane A — WON'T BE MOVED: the refusal itself, as armor.
       settled_footing: {
         id: "settled_footing",
         name: "+8 Accuracy",
@@ -5982,8 +6031,11 @@ export const MOVES: Record<string, MoveSpec> = {
       unbudging: {
         id: "unbudging",
         name: "Unbudging",
-        cost: 1,
-        prerequisites: ["patient_reset"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or through Nothing to
+        // Prove's bridge — an immovable thing that also isn't looking for a
+        // fight is the ultimate "just go around it."
+        prerequisitesAnyOf: [["patient_reset"], ["undivided_stand"]],
         leaning: "boldness",
         // Nothing on this whole roster embodies "can't be dragged, knocked
         // back, or lunged at" better than a sleeping giant that simply
@@ -5995,18 +6047,48 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "bracing_follow_through",
         name: "+5 Power",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Boldness (Braced Commitment's and Called to Stand's
-        // own chains).
-        prerequisitesAnyOf: [["unbudging"], ["settled_impact"], ["undivided_stand"]],
+        prerequisites: ["unbudging"],
         leaning: "boldness",
         delta: { power: 5 },
+      },
+      // Lane B — WHERE IT'S BEEN LYING: the other half of a life spent
+      // horizontal — what heaving that much mass upright costs, and what
+      // the ground it was lying on looks like afterward.
+      heaving_up: {
+        id: "heaving_up",
+        name: "Heaving Up",
+        cost: 1,
+        prerequisites: ["dead_weight"],
+        leaning: "boldness",
+        // A real tradeoff in one node (principle 4): getting all of that off
+        // the ground hits harder and genuinely costs the animal energy —
+        // `selfCostPerUse` is subtracted from the attacker's own needs on
+        // every use (predation.ts), not a flavour string.
+        delta: { power: 10, selfCostPerUse: { need: "energy", amount: 0.04 } },
+      },
+      crushed_thicket: {
+        id: "crushed_thicket",
+        name: "Crushed Thicket",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or through Braced
+        // Commitment's bridge.
+        prerequisitesAnyOf: [["heaving_up"], ["settled_impact"]],
+        leaning: "boldness",
+        // The most physical lever in the roster's palette, on the branch
+        // that earned it: it comes up out of the brush it has been sleeping
+        // in and the brush is simply gone — `consumesOwnTerrain` reverts the
+        // attacker's own tile to floor and multiplies that one hit
+        // (predation.ts). Reachable in practice, not decorative: Snorlax's
+        // curated biomes are forest and jungle (species.ts), the two with
+        // the heaviest bush weighting in worldgen, and bush is walkable
+        // (only wall/tree are not).
+        delta: { consumesOwnTerrain: { terrain: "bush", damageMultiplier: 1.5 } },
       },
       sink_in: {
         id: "sink_in",
         name: "Sink In",
         cost: 2,
-        prerequisites: ["bracing_follow_through"],
+        prerequisites: ["crushed_thicket"],
         excludes: ["full_bulk"],
         leaning: "boldness",
         // The longer it just sits there, the more it recovers — laziness
@@ -6018,7 +6100,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "full_bulk",
         name: "Full Bulk",
         cost: 2,
-        prerequisites: ["bracing_follow_through"],
+        prerequisites: ["crushed_thicket"],
         excludes: ["sink_in"],
         leaning: "boldness",
         // An even heavier stance — harder to line up, nearly impossible to
@@ -6030,7 +6112,8 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "weathered_giant",
         name: "Weathered Giant",
         cost: 2,
-        prerequisitesAnyOf: [["sink_in"], ["full_bulk"]],
+        // DEEP NOTABLE — both lanes end here.
+        prerequisitesAnyOf: [["bracing_follow_through"], ["sink_in"], ["full_bulk"]],
         leaning: "boldness",
         // A second, distinct armor lever, earned by a branch whose entire
         // identity is refusing to budge — no need to apologize for it the
@@ -6089,6 +6172,8 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "unshaken", value: 1 },
         delta: {},
       },
+      // Lane A — NOBODY STARTS ANYTHING: the outward calm, aimed at the
+      // world around it.
       settled_ease: {
         id: "settled_ease",
         name: "Not Worth It",
@@ -6113,8 +6198,12 @@ export const MOVES: Record<string, MoveSpec> = {
       no_quarrel: {
         id: "no_quarrel",
         name: "No Quarrel",
-        cost: 1,
-        prerequisites: ["unhurried_reset"],
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or through Provoked
+        // Charge's bridge — the calm lane is the one with no violence of
+        // its own, so that is the bridge that complements it rather than
+        // deepening a rut.
+        prerequisitesAnyOf: [["unhurried_reset"], ["undivided"]],
         leaning: "sociability",
         // Real, immediate de-escalation — not herd-scoped like this sim's
         // other aura passives: whoever's nearby, herd-mate or rival alike,
@@ -6129,22 +6218,50 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "quiet_ground",
         name: "+5 Power",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Sociability (Nothing to Prove's and Provoked
-        // Charge's own chains).
-        prerequisitesAnyOf: [["no_quarrel"], ["undivided_stand"], ["undivided"]],
+        prerequisites: ["no_quarrel"],
         leaning: "sociability",
         delta: { power: 5 },
+      },
+      // Lane B — HOW IT ENDS ONE ANYWAY: it doesn't escalate, it settles on
+      // you; and it doesn't reach for this move at all until it has actually
+      // been hurt.
+      pinned_under: {
+        id: "pinned_under",
+        name: "Pinned",
+        cost: 1,
+        prerequisites: ["unbothered"],
+        leaning: "sociability",
+        // De-escalation with its whole body: whatever it lands on doesn't
+        // get its own move off. `jamCooldownTicks` adds real ticks to the
+        // defender's own move cooldowns on a landed hit (predation.ts) —
+        // 16 users in the roster, none of them a body this heavy.
+        delta: { jamCooldownTicks: 2 },
+      },
+      finally_roused: {
+        id: "finally_roused",
+        name: "Finally Roused",
+        cost: 2,
+        // LANE NOTABLE. Reachable the normal way, or through Nothing to
+        // Prove's bridge.
+        prerequisitesAnyOf: [["pinned_under"], ["undivided_stand"]],
+        leaning: "sociability",
+        // Says exactly what it does, per principle 5: `selfStateBonus` is
+        // read by `pickBestMove` (combat.ts), not by the damage formula —
+        // at or below half HP this move's own selection score is multiplied,
+        // so a hurt Snorlax stops picking at things and starts reaching for
+        // the slam. A behavioural lever, and the honest one for a placid
+        // animal: it isn't stronger when cornered, it just finally bothers.
+        delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.5 } },
       },
       wide_berth: {
         id: "wide_berth",
         name: "Wide Berth",
         cost: 2,
-        prerequisites: ["quiet_ground"],
+        prerequisites: ["finally_roused"],
         excludes: ["steady_nerve"],
         leaning: "sociability",
-        // Deepens No Quarrel's own lever directly — the peace it keeps
-        // reaches further out.
+        // Deepens the branch's own calm directly — the peace it keeps
+        // reaches further out — rather than staying roused.
         grantsPassive: { kind: "calmingPresence", value: 0.2 },
         delta: {},
       },
@@ -6152,7 +6269,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "steady_nerve",
         name: "Steady Nerve",
         cost: 2,
-        prerequisites: ["quiet_ground"],
+        prerequisites: ["finally_roused"],
         excludes: ["wide_berth"],
         leaning: "sociability",
         // Content and undisturbed, it simply isn't worn down the way
@@ -6164,7 +6281,8 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "left_in_peace",
         name: "Undisturbed",
         cost: 2,
-        prerequisitesAnyOf: [["wide_berth"], ["steady_nerve"]],
+        // DEEP NOTABLE — both lanes end here.
+        prerequisitesAnyOf: [["quiet_ground"], ["wide_berth"], ["steady_nerve"]],
         leaning: "sociability",
         // It doesn't go looking for trouble, but whatever finds it anyway
         // doesn't enjoy the experience — real self-defense without ever
@@ -6214,9 +6332,11 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 10 } },
       },
-      // Bridge tail (see MOVES_DESIGN.md's "Crosslinks as bridges"): extends
-      // Braced Commitment into Aggression's and Boldness's own pre-fork
-      // nodes (Rolling Advance / Bracing Follow-Through).
+      // Bridge tail (see MOVES_DESIGN.md's "Crosslinks are bridges, not
+      // spurs"): extends Braced Commitment into ONE lane notable per branch
+      // it connects — Aggression's Ground-Shaking Landing and Boldness's
+      // Crushed Thicket. It skips those lanes' filler grind, never their own
+      // decision (principle 12, restated for lanes).
       deepening_brace: {
         id: "deepening_brace",
         name: "Deepening Brace",
@@ -6252,9 +6372,8 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "calmingPresence", value: 0.15 },
         delta: {},
       },
-      // Bridge tail: extends Nothing to Prove into Boldness's and
-      // Sociability's own pre-fork nodes (Bracing Follow-Through / Quiet
-      // Ground).
+      // Bridge tail: extends Nothing to Prove into Boldness's Unbudging and
+      // Sociability's Finally Roused — one lane notable per branch.
       steadfast_focus: {
         id: "steadfast_focus",
         name: "Widening Calm",
@@ -6289,8 +6408,9 @@ export const MOVES: Record<string, MoveSpec> = {
         // hesitation before something this placid actually commits.
         delta: { lockTicks: 1, power: 10 },
       },
-      // Bridge tail: extends Provoked Charge into Sociability's and
-      // Aggression's own pre-fork nodes (Quiet Ground / Rolling Advance).
+      // Bridge tail: extends Provoked Charge into Sociability's No Quarrel
+      // and Aggression's Deadfall — the two lanes with no violence of their
+      // own, which is what makes this the bridge that complements them.
       full_commitment: {
         id: "full_commitment",
         name: "Full Commitment",

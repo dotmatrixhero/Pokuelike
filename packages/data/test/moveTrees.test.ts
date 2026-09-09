@@ -808,12 +808,13 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
   });
 
   it("Avalanche (Aggression keystone) turns the single slam into a real localized collapse, and is where the real weight payoff now lands", () => {
+    // v4 walk: the opener, the Deadfall lane (numbing filler -> lane
+    // notable -> either fork tip), then the branch's deep notable, its
+    // filler and the capstone.
     const respec = applyMoveTree(bodySlam, [
       "heavy_step",
       "numbing_follow_through",
-      "mounting_momentum",
-      "ground_shaking_landing",
-      "rolling_advance",
+      "deadfall",
       "second_slam",
       "inevitable",
       "crushing_follow_up",
@@ -850,7 +851,6 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
       "patient_reset",
       "unbudging",
       "bracing_follow_through",
-      "sink_in",
       "weathered_giant",
       "settled_power",
       "the_reckoning",
@@ -894,70 +894,91 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
   });
 
   it("the fork choices are genuine tradeoffs, not strictly-better stat sticks", () => {
-    const secondSlam = applyMoveTree(bodySlam, ["heavy_step", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "second_slam"]);
+    // Both v4 lanes walked, so the power arithmetic is the same as before
+    // the conversion: +8 (Mounting Momentum) +8 (Rolling Advance) +15.
+    const secondSlam = applyMoveTree(bodySlam, ["heavy_step", "mounting_momentum", "bearing_down", "ground_shaking_landing", "rolling_advance", "numbing_follow_through", "deadfall", "second_slam"]);
     expect(secondSlam.power).toBe(bodySlam.power + 8 + 8 + 15);
     expect(secondSlam.recoilFraction).toBeCloseTo(0.08);
 
-    const rollingCrush = applyMoveTree(bodySlam, ["heavy_step", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "rolling_crush"]);
+    const rollingCrush = applyMoveTree(bodySlam, ["heavy_step", "mounting_momentum", "bearing_down", "ground_shaking_landing", "rolling_advance", "numbing_follow_through", "deadfall", "rolling_crush"]);
     expect(rollingCrush.hits).toEqual({ min: 2, max: 2 });
     expect(rollingCrush.power).toBe(bodySlam.power + 8 + 8 - 12);
 
-    const sinkIn = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "sink_in"]);
-    expect(sinkIn.power).toBe(bodySlam.power + 5 - 5);
+    // The Boldness fork moved to the tail of lane B (Where It's Been
+    // Lying), so the walk to it now passes Heaving Up's +10 as well as lane
+    // A's +5 — the tradeoff asserted is unchanged: Sink In pays 5 power for
+    // real regen.
+    const sinkIn = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "heaving_up", "crushed_thicket", "sink_in"]);
+    expect(sinkIn.power).toBe(bodySlam.power + 5 + 10 - 5);
     expect(bodySlam.tree!.sink_in.grantsPassive).toEqual({ kind: "regen", value: 0.025 });
 
-    const fullBulk = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "full_bulk"]);
+    const fullBulk = applyMoveTree(bodySlam, ["dead_weight", "settled_footing", "patient_reset", "unbudging", "bracing_follow_through", "heaving_up", "crushed_thicket", "full_bulk"]);
     expect(fullBulk.accuracy).toBe(bodySlam.accuracy - 8 + 8);
     expect(bodySlam.tree!.full_bulk.grantsPassive).toEqual({ kind: "damageReduction", value: 0.06 });
 
-    const wideBerth = applyMoveTree(bodySlam, ["unbothered", "settled_ease", "unhurried_reset", "no_quarrel", "quiet_ground", "wide_berth"]);
+    const wideBerth = applyMoveTree(bodySlam, ["unbothered", "settled_ease", "unhurried_reset", "no_quarrel", "quiet_ground", "pinned_under", "finally_roused", "wide_berth"]);
     expect(bodySlam.tree!.wide_berth.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.2 });
     expect(wideBerth.power).toBe(bodySlam.power + 5);
 
-    const steadyNerve = applyMoveTree(bodySlam, ["unbothered", "settled_ease", "unhurried_reset", "no_quarrel", "quiet_ground", "steady_nerve"]);
+    const steadyNerve = applyMoveTree(bodySlam, ["unbothered", "settled_ease", "unhurried_reset", "no_quarrel", "quiet_ground", "pinned_under", "finally_roused", "steady_nerve"]);
     expect(bodySlam.tree!.steady_nerve.grantsPassive).toEqual({ kind: "regen", value: 0.025 });
     expect(steadyNerve.power).toBe(bodySlam.power + 5);
   });
 
   it("second_slam and rolling_crush are a real mutually exclusive fork", () => {
-    expect(() => applyMoveTree(bodySlam, ["heavy_step", "numbing_follow_through", "mounting_momentum", "ground_shaking_landing", "rolling_advance", "second_slam", "rolling_crush"])).toThrow(
+    expect(() => applyMoveTree(bodySlam, ["heavy_step", "numbing_follow_through", "deadfall", "second_slam", "rolling_crush"])).toThrow(
       /conflicts with already-chosen/
     );
   });
 
-  it("Braced Commitment's bridge (Aggression<->Boldness) reaches both Rolling Advance and Bracing Follow-Through, one step before each fork", () => {
-    // The bridge notable alone does NOT satisfy the fork — same "one step
-    // early, not onto the fork itself" rule every other bridge in this
-    // roster follows.
+  it("Braced Commitment's bridge (Aggression<->Boldness) reaches one lane notable per branch — Ground-Shaking Landing and Crushed Thicket", () => {
+    // ASSERTION MEANING CHANGED WITH v4, deliberately: a bridge used to land
+    // one filler short of a branch's next notable; the two-lane standard
+    // lands it ON a lane notable instead, skipping that lane's filler grind
+    // but never the lane's own fork. What is still asserted, unchanged, is
+    // that the bridge does NOT hand over a fork: Second Slam still requires
+    // its own lane notable (Deadfall) first.
     expect(() =>
       applyMoveTree(bodySlam, ["heavy_step", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "second_slam"])
-    ).toThrow(/requires \[rolling_advance\]/);
+    ).toThrow(/requires \[deadfall\]/);
 
-    const viaAgg = applyMoveTree(bodySlam, ["heavy_step", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "rolling_advance"]);
+    const viaAgg = applyMoveTree(bodySlam, ["heavy_step", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "ground_shaking_landing"]);
     expect(viaAgg.statChangeOnHit).toEqual({ target: "self", stat: "defense", stage: 3, ticks: 18 });
     expect(viaAgg.defensePenetration).toBeCloseTo(0.15);
-    // None of Aggression's own linear filler chain was ever chosen.
-    expect(viaAgg.statusChance).toBe(bodySlam.statusChance);
+    expect(viaAgg.forcedMovement).toEqual({ mover: "defender", direction: "away", tiles: 2, timing: "onHit" });
+    // None of the Momentum lane's own filler chain was ever chosen.
+    expect(viaAgg.power).toBe(bodySlam.power);
+    expect(viaAgg.cooldownTicks).toBe(bodySlam.cooldownTicks);
 
-    const viaBold = applyMoveTree(bodySlam, ["heavy_step", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "bracing_follow_through"]);
-    expect(viaBold.power).toBe(bodySlam.power + 5);
+    const viaBold = applyMoveTree(bodySlam, ["heavy_step", "dead_weight", "braced_commitment", "deepening_brace", "settled_impact", "crushed_thicket"]);
+    expect(viaBold.consumesOwnTerrain).toEqual({ terrain: "bush", damageMultiplier: 1.5 });
+    // Lane B's own filler (Heaving Up, +10 power) was skipped by the bridge.
+    expect(viaBold.power).toBe(bodySlam.power);
   });
 
-  it("Nothing to Prove's bridge (Boldness<->Sociability) deepens its own calmingPresence lever, not a generic bolt-on", () => {
+  it("Nothing to Prove's bridge (Boldness<->Sociability) deepens its own calmingPresence lever, and lands on one lane notable per branch", () => {
+    // v4 landing change: Unbudging (Boldness lane A) and Finally Roused
+    // (Sociability lane B), rather than the old pre-fork filler Quiet
+    // Ground. Same rule as every other bridge here — it skips a lane's
+    // grind, never its decision.
     const respec = applyMoveTree(bodySlam, [
       "dead_weight",
       "unbothered",
       "called_to_stand",
       "steadfast_focus",
       "undivided_stand",
-      "quiet_ground",
+      "unbudging",
+      "finally_roused",
     ]);
     // grantsPassive isn't part of the resolved MoveSpec — the real payoff is
     // asserted on the tree nodes' own accumulated values.
     expect(bodySlam.tree!.called_to_stand.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.15 });
     expect(bodySlam.tree!.steadfast_focus.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.15 });
     expect(bodySlam.tree!.undivided_stand.grantsPassive).toEqual({ kind: "calmingPresence", value: 0.2 });
-    expect(respec.power).toBe(bodySlam.power + 5);
+    // Both landings are real, and neither lane's filler was walked.
+    expect(bodySlam.tree!.unbudging.grantsPassive).toEqual({ kind: "immovable", value: 1 });
+    expect(respec.selfStateBonus).toEqual({ condition: "selfLowHp", multiplier: 1.5 });
+    expect(respec.power).toBe(bodySlam.power);
   });
 
   it("Provoked Charge's bridge (Sociability<->Aggression) pairs its lockTicks cost with a real, growing benefit", () => {
