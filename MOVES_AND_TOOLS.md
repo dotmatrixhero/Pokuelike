@@ -35,8 +35,9 @@ measurement under "the biggest risk" is still outstanding.
 - Whether a tool-granted move can ever become permanently known.
 - Throw range for consumables.
 - Whether a partner can use tools (recommendation: no).
-- **Unmeasured:** terrain change per 1000 ticks by cause, before the
-  vocabulary is widened.
+- ~~Unmeasured: terrain change before the vocabulary is widened.~~
+  **Measured — there is headroom.** Vegetation grew 11.8% over 4 seeds x
+  6000 ticks; fire produced zero events. See "The risk, now measured".
 
 ---
 
@@ -196,19 +197,47 @@ Over a long run, **the map records what lived there** — which is pillar 4
 ("the land remembers") arriving without being designed for, and it's the kind
 of emergent history the chronicle exists to narrate.
 
-### Which is also the biggest risk in this document
+### The risk, now measured — and there is headroom
 
-`igniteNear` is **already on the live hit path**. Fire already spreads and
-consumes fuel. Generalising terrain effects across a wide move roster and a
-widened species roster could strip or burn the world, and the failure mode is
-the one this project keeps hitting: a feedback loop nobody predicted, only
-visible in a multi-thousand-tick run.
+The worry was: if moves fell trees and start fires, thousands of agents doing
+that forever could strip the world bare. `igniteNear` is already on the live
+hit path and fire already spreads, so this could in principle be happening
+today.
 
-**This is unmeasured.** Before the vocabulary is generalised, count terrain
-changes per 1000 ticks by cause, across seeds — the same shape as every other
-validation script here. If a mature roster is stripping bushes and burning
-forest faster than `flora.ts` regrows it, that's a balance problem to find
-now rather than after twenty moves are written against it.
+**Measured** (`validateTerrainChurn.ts`, 4 seeds x 6000 ticks). The answer is
+the opposite of the worry:
+
+| Vegetation tiles (tree/bush/flora/food/seedling) | |
+|---|---|
+| Start | 1300 |
+| End | **1453** |
+| Change | **+11.8%** |
+
+The world is **mildly overgrowing**, not stripping. Regrowth currently
+outpaces everything consuming it. Net stock: `flora` +512, `seedling` +70,
+against `food` −429 — plants cycling between states with vegetation up
+overall.
+
+Two further findings from the same run:
+
+- **Fire never happens.** Zero `cause: "fire"` terrain changes in 24,000
+  agent-ticks. The whole fire system — spread, fuel, burn-out, DoT — produced
+  nothing. So the "fire is already live on the hit path" risk is currently
+  **inert**, and by this project's own standard ("unreachable content is a
+  bug") that is worth a look on its own.
+- **Churn is dominated by seasons.** Freeze 72/1k ticks and thaw 63/1k are
+  the top two causes by a wide margin — that's just the ice cycle working.
+  Drought and rain are single digits.
+
+**What this means for the direction:** there is real headroom. Adding
+tree-felling, brush-clearing and fire-starting moves will not strip a world
+that is currently regrowing faster than it is consumed. Re-run this script
+after the move roster widens and watch the vegetation percentage — if it goes
+negative, that's the signal to tune.
+
+**Caveat on the instrument:** `terrainBurn` and `terrainFill` don't log
+`terrainChanged`, so they're invisible in the flow table and only show up in
+the stock comparison. Worth fixing before using flow numbers to tune.
 
 ### And it has to be legible
 

@@ -40,9 +40,41 @@ tool-granted (`ItemDef.grantsMoves`), consumable (`consumableMove`).
 nothing); keep effects declarative on `MoveSpec` so an item can point at a
 move id; tag which moves are tool-reachable.
 
-**Blocking risk, unmeasured:** `igniteNear` is already live on the hit path
-and fire spreads. Count terrain changes per 1000 ticks by cause across seeds
-before widening the vocabulary.
+**Risk: measured, and there is headroom.** `validateTerrainChurn.ts`, 4
+seeds x 6000 ticks: vegetation went **1300 -> 1453 (+11.8%)**, i.e. the world
+mildly overgrows rather than stripping. Churn is dominated by the seasonal
+ice cycle (freeze 72/1k, thaw 63/1k). **Fire produced zero events** across
+24,000 agent-ticks, so the "igniteNear is already live" worry is currently
+inert — and by the "unreachable content is a bug" standard, fire never
+firing is worth a look on its own. Re-run after the move roster widens and
+watch the vegetation percentage.
+
+## Fire safety belongs to biome placement, not a global constant
+
+Design position, given directly: *"fire does not spread a ton because they
+shouldn't be around a ton of flammable stuff all the time. The environment
+they normally exist in might have a couple fires, but they are designed to
+burn themselves out. Now, if they take over a place they shouldn't, like a
+forest, and it gets hit by a drought, maybe that ends up causing a huge
+disaster."*
+
+So fire safety is **emergent from where a species lives**: a Fire-type in
+fuel-poor volcanic ground has fires that die on their own; the same species
+in a forest is a catastrophe waiting for a dry season. Nobody tunes a spread
+constant down — the biome does it.
+
+Three links, all of which already half-exist:
+1. **Fuel load as a biome property** — Fire-type home biomes generated
+   genuinely fuel-poor.
+2. **Species-biome fit enforceable *and* violable** — a mismatch via
+   migration/dispersal is *the story*, not a bug to prevent. If placement is
+   airtight the disaster never happens.
+3. **Drought as trigger** — already real in `weather.ts` at 11.4 changes/1k.
+
+Handed to the biome-zone-logic agent as `PROMPT_biome_fire_context.md`, with
+the measured baseline and the concern that a wider roster (70 active vs 1085
+in the dex) is the risk multiplier: loose gating burns every forest, airtight
+gating kills the mechanic. Target is "rare but real."
 
 ## Winter ice: a lid, not a solid freeze — see BREADTH_DESIGN.md
 
