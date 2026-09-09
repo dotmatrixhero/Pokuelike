@@ -103,11 +103,38 @@ curated view changes which reason leads on 18.6% of multi-reason edges.**
 Kept as two functions rather than one so the editorial judgement is visible
 rather than baked in.
 
-**Open question for a ruling:** should `socialize` record a memory *every
-tick*? One pair logged 2,907 socialize events in 6,000 ticks — they sat
-together every other tick. That makes `count` nearly meaningless for this
-reason. Options: leave it, record at most once per N ticks, or drop
-`socialized` from memories entirely and let it live only in the score.
+**RULED AND BUILT: throttle it, don't drop it.** Direct steer: *"I would
+rather have more depth to the social then drop it. But yeah the raw 3k events
+on its own isn't really that useful i guess. Maybe every 500 social it creates
+a useful memory."*
+
+`RAPPORT_REASON_MEMORY_INTERVAL` throttles `socialized` to one memory per
+**500** occurrences — the first shared moment records immediately, then one
+milestone per 500 after. `RapportMemory.occurrences` keeps the raw total, so
+the depth is preserved rather than discarded.
+
+Measured on the same 4 seeds x 6000 ticks, before and after:
+
+| | before | after |
+|---|---|---|
+| `socialized` share of memories | **95.2%** | **9.6%** |
+| curation override needed (notable vs raw order) | 18.6% | **4.4%** |
+
+The second row is the interesting one: **fixing the data at the source left
+the editorial layer with a quarter as much to do.** `notableRapportMemories`
+is still right to exist, it just isn't papering over a measurement problem
+any more.
+
+And the narration works:
+
+> *(+1.00) fought for them 19 times, was defended by them 8 times, spent 6
+> long stretches in their company*
+>
+> *(+0.69) took them as a mate, fought for them 7 times, was defended by them
+> 7 times*
+>
+> *(-0.44) struck them 14 times, was struck by them 6 times, shared their
+> company*
 
 ## IMPLEMENTATION ORDER — the move from design into code
 
