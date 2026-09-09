@@ -34,6 +34,22 @@ Not urgent — these are working documents and the arguments in them are the
 value. But before implementation starts, one spec with a single source of
 truth per topic, and these kept as the reasoning behind it.
 
+## OPEN CALL: the bond can't complete in layer 1
+
+Surfaced by the ~200-turn paper prototype (`PLAYTHROUGH_ACT1_FULL.md`, finding
+3c). The run earned **Presence** and **Feed** and stopped — **Fight alongside**
+and **Rescue** both need danger, and layer 1 is deliberately prey-only.
+
+Working theory: that's correct, and the bond is *meant* to finish during the
+ascent. Two things need a ruling before anything is built:
+
+1. **Does a Curious (half-bonded) partner follow you across a layer
+   boundary?** If not, the ascent framing doesn't hold. Recommend yes, but
+   unreliably.
+2. **Is the four-verb → four-rung mapping 1:1?** Assumed, never specified. If
+   Presence + Feed only reaches *Tolerant*, layer 1 delivers less than the
+   prototype assumed.
+
 ## DECIDED: items and moves are one system — see MOVES_AND_TOOLS.md
 
 Direction confirmed: *"I'm fairly confident about the items as moves
