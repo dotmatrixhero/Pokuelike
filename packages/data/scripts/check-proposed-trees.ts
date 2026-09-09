@@ -65,6 +65,36 @@ function problems(move: ProposedMove): string[] {
     }
   }
 
+  // Principle 17: a branch must not answer every identity node with the same
+  // signature lever. Background stats (power/accuracy/cooldown/range) repeat
+  // harmlessly and always have — the defect is a *signature* lever (a
+  // passive, a mark, a status behaviour) being the answer at notable, both
+  // fork tips, the convergence AND the keystone. Bridges are exempt: they are
+  // REQUIRED to be single-lever by principle 13, which is the trap this rule
+  // exists to stop being applied one level up.
+  const BACKGROUND = new Set(["power", "accuracy", "cooldownTicks", "range", "critRateStage", "defensePenetration", "lifestealFraction", "recoilFraction"]);
+  const bridgeIds = new Set<string>();
+  for (const cross of crosslinks) {
+    const mid = nodes.find((n) => (n.prerequisites ?? []).length === 1 && n.prerequisites![0] === cross.id);
+    const not = mid && nodes.find((n) => (n.prerequisites ?? []).length === 1 && n.prerequisites![0] === mid.id);
+    for (const x of [cross, mid, not]) if (x) bridgeIds.add(x.id);
+  }
+  const signature = (n: ProposedNode) => [...new Set([
+    ...Object.keys(n.delta ?? {}),
+    ...(n.grantsPassive ? [`p:${n.grantsPassive.kind}`] : []),
+    ...(n.grantsPassives ?? []).map((g) => `p:${g.kind}`),
+  ])].filter((k) => !BACKGROUND.has(k));
+  for (const branch of ["aggression", "boldness", "sociability"] as const) {
+    const identity = nodes.filter((n) => n.leaning === branch && !bridgeIds.has(n.id) && n.cost >= 2);
+    if (identity.length < 3) continue;
+    const counts = new Map<string, number>();
+    for (const n of identity) for (const l of signature(n)) counts.set(l, (counts.get(l) ?? 0) + 1);
+    const [lever, hits] = [...counts].sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+    if (hits / identity.length > 0.6) {
+      out.push(`${branch} branch: ${hits}/${identity.length} identity nodes are "${lever}" — one lever answering the whole branch (principle 17; shipped roster tops out at 50%)`);
+    }
+  }
+
   // A node that is pure downside is a bug, not a design choice (principle 4).
   const DOWNSIDE = new Set(["recoilFraction", "selfCostPerUse", "lockTicks"]);
   for (const n of nodes) {
@@ -86,10 +116,16 @@ if (selftest) {
       { id: "x", name: "X", cost: 1, prerequisites: ["a", "b"], leaning: "aggression", delta: { power: 1 } },
       { id: "y", name: "Y", cost: 1, prerequisites: ["a"], leaning: "aggression", delta: { recoilFraction: 0.1 } },
       { id: "z", name: "Z", cost: 1, prerequisites: ["nope"], delta: {} },
+      // Five sociability identity nodes, every one of them rallyCall.
+      { id: "s1", name: "S1", cost: 2, leaning: "sociability", delta: { rallyCall: { ticks: 1 } } },
+      { id: "s2", name: "S2", cost: 2, leaning: "sociability", delta: { rallyCall: { ticks: 2 } } },
+      { id: "s3", name: "S3", cost: 2, leaning: "sociability", delta: { rallyCall: { ticks: 3 } } },
+      { id: "s4", name: "S4", cost: 2, leaning: "sociability", delta: { rallyCall: { ticks: 4 } } },
+      { id: "s5", name: "S5", cost: 2, leaning: "sociability", delta: { rallyCall: { ticks: 5 } } },
     ]),
   };
   const found = problems(broken);
-  const expect = ["spur, not bridge", "prerequisite \"nope\" does not exist", "missing leaning", "pure downside"];
+  const expect = ["spur, not bridge", "prerequisite \"nope\" does not exist", "missing leaning", "pure downside", "one lever answering the whole branch"];
   const missed = expect.filter((e) => !found.some((f) => f.includes(e)));
   console.log(`selftest: ${found.length} problems found on a deliberately broken tree`);
   found.forEach((f) => console.log(`  - ${f}`));

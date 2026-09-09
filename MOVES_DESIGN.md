@@ -3398,3 +3398,61 @@ principle 4's pure-downside check. **It runs a `--selftest` against a
 deliberately broken tree first**, because a verification step that has
 never printed a failure has not been verified — the lesson from the atlas
 layout check that reported all 17 trees clean without reading one.
+
+**17. A branch must not answer every identity node with the same signature
+lever — and this is NOT the same rule as #13, it is its opposite one level
+up.** Direct, blunt: "twin needle just fuckin does the same shit the entire
+branch for sociable. Surprised you didn't catch that. Is that not called
+out in design docs? Uninspired."
+
+Measured, with the shipped roster as the control. Counting only *identity*
+nodes (cost-2: the notable, both fork tips, the convergence, the keystone),
+excluding bridges (which principle 13 *requires* to be single-lever), and
+excluding background stats — power/accuracy/cooldown/range/crit/defense-pen
+repeat harmlessly everywhere and always have. What's left is the share of a
+branch's identity nodes answered by one *signature* lever:
+
+| | worst branch | branches at or over 80% |
+|---|---|---|
+| shipped roster | 50% | 0 of 8 |
+| round-six drafts, v2 | **100%** | **6 of 15** |
+
+Twineedle's Sociability was 4 of 5 on `rallyCall` — Converge, The Hive
+Decides, Drone Relay and Nothing Forgets were all "the mark, but a bigger
+number," and even the *fork* was 240 ticks versus 90. A fork between two
+values of one field is not a decision. Agility's Sociability was worse at
+5 of 5 on `herdHaste`, and nobody had to point that one out because the
+first example was enough.
+
+**Answering the question directly: no, this was not called out.** The
+nearest existing rules both miss it:
+
+- Template v3's rule 2 ("use the whole lever list, not just power/accuracy/
+  cooldown") is scoped to *filler* tier and to the *three cheap stats*.
+  `rallyCall` five times is neither, so it passes the letter of that rule
+  while breaking its entire spirit.
+- "A capstone's mechanic should be something the roster doesn't already
+  have" is scoped to the capstone, and to *other moves* — not to
+  repetition inside one branch.
+
+Worse, there was an active trap: **principle 13 mandates exactly this
+behaviour for bridges** — "a bridge's own new content must deepen the
+specific lever its own crosslink already introduced." I applied bridge
+logic to whole branches. The two rules are now explicitly scoped against
+each other: single-lever escalation is the *requirement* across a
+three-node bridge and a *defect* across a ten-node branch.
+
+Fixed in the drafts by giving each offending branch real, distinct answers
+at each identity node rather than a rising number — Twineedle's hive now
+forks between a mark and a no-mark sustain build, converges on
+`positionSwap` (drones trading places mid-flurry, a shipped primitive with
+one user in the entire roster), and keystones on a real shape change to a
+burst, which is principle 14's currency and this branch had spent none of
+it. Worst branch is now 60%, against a shipped ceiling of 50%; the
+remaining 60% cases are branches whose whole fantasy genuinely *is* that
+lever (Poison Sting's needs-interference, Growth's fertility), which is a
+different thing from a number going up five times.
+
+`check-proposed-trees.ts` now fails any branch over 60%, and its
+`--selftest` includes a five-node all-`rallyCall` branch so the rule is
+proven to fire.
