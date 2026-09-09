@@ -113,13 +113,14 @@ function problems(move: ProposedMove): string[] {
   // fork tips, the convergence AND the keystone. Bridges are exempt: they are
   // REQUIRED to be single-lever by principle 13, which is the trap this rule
   // exists to stop being applied one level up.
-  const BACKGROUND = new Set(["power", "accuracy", "cooldownTicks", "range", "critRateStage", "defensePenetration", "lifestealFraction", "recoilFraction"]);
+  const BACKGROUND = new Set(["power", "accuracy", "cooldownTicks", "range", "rangeBonus", "critRateStage", "defensePenetration", "lifestealFraction", "recoilFraction"]);
   // Several delta fields are CONTAINERS, not levers: `allyEffect` covers both
   // a heal and a stat buff, `situationalBonus` covers night/flanking/elevation,
   // `forcedMovement` covers a shove and a lunge. Keying repetition on the
   // container name reports two genuinely different nodes as identical — a flaw
   // in the metric, not the design. Key on the discriminating sub-field instead.
   const expand = (key: string, value: any): string[] => {
+    if (key === "allyEffects" && Array.isArray(value)) return value.flatMap((v: any) => expand("allyEffect", v));
     if (key === "allyEffect" && value && typeof value === "object") {
       const parts: string[] = [];
       if (value.healFraction != null) parts.push("allyEffect:heal");
@@ -127,6 +128,9 @@ function problems(move: ProposedMove): string[] {
       if (value.statChange) parts.push(`allyEffect:buff-${value.statChange.stat}`);
       return parts.length ? parts : ["allyEffect"];
     }
+    if (key === "situationalBonuses" && Array.isArray(value)) return value.map((v: any) => `situationalBonus:${v.condition}`);
+    if (key === "statChangesOnHit" && Array.isArray(value)) return value.map((v: any) => `statChangeOnHit:${v.target ?? "self"}-${v.stat}`);
+    if (key === "reposition" && value?.to) return [`reposition:${value.to}`];
     if (key === "situationalBonus" && value?.condition) return [`situationalBonus:${value.condition}`];
     if (key === "statChangeOnHit" && value?.stat) return [`statChangeOnHit:${value.target ?? "self"}-${value.stat}`];
     if (key === "forcedMovement" && value?.mover) return [`forcedMovement:${value.mover}`];
@@ -155,19 +159,19 @@ function problems(move: ProposedMove): string[] {
   // flavours from the palette and builds from those. A branch drawing on one
   // or two is walking a straight line. Shipped roster averages 3.8.
   const FLAVOUR: Record<string, string[]> = {
-    "raw damage": ["power", "hits", "critRateStage", "critCooldownReset", "statusSeverity", "weightScaling", "recoilFraction", "lifestealFraction", "p:bulk"],
-    "stealth/ambush": ["situationalBonus", "burrow", "p:unnoticed", "p:unnoticedAura", "p:huntTargetSkip"],
-    "aggressive movement": ["chargeAttack", "forcedMovement", "lockTicks"],
-    "piercing": ["defensePenetration", "resistanceBreaker", "bonusVsType"],
+    "raw damage": ["power", "hits", "hitsBonus", "critRateStage", "critCooldownReset", "statusSeverity", "weightScaling", "recoilFraction", "lifestealFraction", "p:bulk"],
+    "stealth/ambush": ["situationalBonus", "situationalBonuses", "burrow", "p:unnoticed", "p:unnoticedAura", "p:huntTargetSkip"],
+    "aggressive movement": ["chargeAttack", "forcedMovement", "reposition", "lockTicks"],
+    "piercing": ["defensePenetration", "resistanceBreaker", "bonusVsType", "rangeBonus"],
     "defence": ["p:damageReduction", "p:damageReductionFlat", "p:defenseBoost", "p:thorns", "p:thornsRubble", "p:unshaken", "p:immovable", "p:fireproof"],
     "environment": ["terrainBurn", "terrainFill", "consumesOwnTerrain", "createsTerrain", "spawnsRain", "fertilityBoost", "fertilityCeilingBoost", "floraRegrowthMultiplier", "floraCompetition"],
     "wider aoe": ["shape", "hitsArea"],
-    "reposition others": ["positionSwap", "positionSwapPull"],
-    "planted/duration": ["statChangeOnHit", "p:terrainUnhindered", "p:dispersalSpeed", "herdMigrationResistance"],
+    "reposition others": ["positionSwap", "positionSwapPull", "reposition"],
+    "planted/duration": ["statChangeOnHit", "statChangesOnHit", "p:terrainUnhindered", "p:dispersalSpeed", "herdMigrationResistance"],
     "healing": ["p:healAura", "p:regen", "p:regenFlat", "selfHeal", "herdForageBonus", "gatherBurst"],
     "no friendly fire": ["excludesAllies"],
-    "rallying": ["rallyCall"],
-    "ally buffing": ["targetsAlly", "allyEffect", "allyEffectOnAttack", "p:herdHaste", "p:aquaticHaste"],
+    "rallying": ["rallyCall", "rallyCallTicks"],
+    "ally buffing": ["targetsAlly", "allyEffect", "allyEffects", "allyEffectOnAttack", "p:herdHaste", "p:aquaticHaste"],
     "calming": ["p:calmingPresence", "p:nonTerritorial", "statusImmunityAura"],
     // Cross-axis: PP and needs as a real spend, per "more pp tradeoffs are
     // the play. Notables that require pp. It becomes a gate."
@@ -319,6 +323,36 @@ function problems(move: ProposedMove): string[] {
     const own = [...path].filter((x) => t[x]?.leaning === cap.leaning).length;
     if (own / path.size < 0.75) {
       out.push(`capstone ${cap.id}: cheapest route is ${path.size} points but only ${own} are in its own branch — a build could snake in and skip the branch's early nodes`);
+    }
+  }
+
+  // Overwrite collision. `applyMoveTree` (engine/moves.ts) ADDS power,
+  // accuracy, cooldownTicks, statusChance, defensePenetration and lockTicks,
+  // but OVERWRITES everything else — its own doc comment admits "order given
+  // to applyMoveTree matters for overwriting fields like shape". So two
+  // co-takeable nodes setting the same overwrite field produce a silent,
+  // order-dependent result: "If you got both, would it just do nothing?"
+  // Worse than nothing — whichever the iteration reaches last quietly wins.
+  const ancestorsOf = (id: string, seen = new Set<string>()): Set<string> => {
+    if (seen.has(id)) return seen;
+    seen.add(id);
+    for (const pre of [...(t[id]?.prerequisites ?? []), ...(t[id]?.prerequisitesAnyOf ?? []).flat()]) ancestorsOf(pre, seen);
+    return seen;
+  };
+  const OVERWRITE = ["shape", "range", "hits", "forcedMovement", "situationalBonus", "statChangeOnHit", "rallyCall", "allyEffect", "reposition", "hitsArea"];
+  const excl = new Map(nodes.map((n) => [n.id, new Set(n.excludes ?? [])]));
+  for (const field of OVERWRITE) {
+    const setters = nodes.filter((n) => (n.delta as any)?.[field] !== undefined);
+    const pairs: string[] = [];
+    for (let i = 0; i < setters.length; i++) {
+      for (let j = i + 1; j < setters.length; j++) {
+        const a = setters[i], b = setters[j];
+        const related = ancestorsOf(a.id).has(b.id) || ancestorsOf(b.id).has(a.id);
+        if (!related && !excl.get(a.id)?.has(b.id) && !excl.get(b.id)?.has(a.id)) pairs.push(`${a.id}+${b.id}`);
+      }
+    }
+    if (pairs.length) {
+      out.push(`"${field}" is an OVERWRITE field but ${setters.length} co-takeable nodes set it (${pairs.slice(0, 3).join(", ")}${pairs.length > 3 ? ` +${pairs.length - 3} more` : ""}) — a build taking both gets whichever the engine reaches last. Use the additive form, or make them mutually exclusive.`);
     }
   }
 
