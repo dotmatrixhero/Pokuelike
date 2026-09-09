@@ -50,6 +50,26 @@ ascent. Two things need a ruling before anything is built:
    Presence + Feed only reaches *Tolerant*, layer 1 delivers less than the
    prototype assumed.
 
+## OPEN: emergent situations — see EMERGENT_SITUATIONS.md
+
+The scaling answer for player–Pokémon interaction out in the world: the sim's
+18 `BehaviorKind`s and the player's ~7 actions are disjoint sets, and every
+behaviour becomes a situation family the moment the player can participate in
+it. The four bonding verbs and the dispersal offer are already five instances
+of that rule; thirteen behaviours are unused.
+
+**Recommended first slice** (falsifiable): one player verb each for
+`carryAlly`, `hunt`, and `seekWater`-under-drought, plus **reasons on
+`RapportEdge`** (it is `{score, lastInteractionTick}` today — a number and a
+timestamp, no memory of why).
+
+**Blocking prerequisite: tells.** `deliverFood`, `relocate` and `explore` all
+look like "an animal walking" from outside. No door works until behaviour is
+readable.
+
+**Correction:** the active roster is **50 species, all Gen 1**, not the 70
+cited earlier in this repo.
+
 ## OPEN: the dispersal offer — see CAMPAIGN_DESIGN.md
 
 Proposed explicit text-decision moment at the last trust rung, triggered off
