@@ -299,17 +299,48 @@ describe("applyHerdRivalryConflict", () => {
     expect(applyHerdRivalryConflict(world, b, RULES, TARGET, log, ALWAYS_FIGHT)).toBe(true);
   });
 
-  it("`calmingPresence` dampens a nearby THIRD agent's own escalation chance, regardless of herd", () => {
+  /** One standoff with a bystander holding `calmingPresence: calm`, resolved against a fixed roll. */
+  const standoffWithCalmer = (calm: number, roll: number): boolean => {
     const world = createWorld(20, 20);
     // Snorlax isn't a party to this standoff at all — just standing nearby.
-    const snorlax = agent("snorlax-0", "snorlax", "herd-c", { x: 5, y: 6 }, { passives: { calmingPresence: 1 } });
+    const snorlax = agent("snorlax-0", "snorlax", "herd-c", { x: 5, y: 6 }, { passives: { calmingPresence: calm } });
     const a = bumpedUp(agent("a", "bulbasaur", "herd-a", { x: 4, y: 5 }, { disposition: BOLD }));
     const rival = agent("b", "pidgey", "herd-b", TARGET);
     world.agents.push(snorlax, a, rival);
+    return applyHerdRivalryConflict(world, a, RULES, TARGET, undefined, () => roll);
+  };
 
-    // `calmingPresence: 1` dampens the chance to exactly 0 — even a roll of
-    // 0 (which clears every *unmodified* chance in this suite) now fails.
-    expect(applyHerdRivalryConflict(world, a, RULES, TARGET, undefined, ALWAYS_FIGHT)).toBe(false);
+  it("`calmingPresence` dampens a nearby THIRD agent's own escalation chance, regardless of herd", () => {
+    // A calmer makes the standoff strictly less likely to escalate: there is
+    // a roll that fights without one and backs down with one. Asserted by
+    // sweep rather than against a hardcoded chance, so retuning the base
+    // constants can't quietly make this vacuous.
+    const rolls = Array.from({ length: 200 }, (_, i) => i / 200);
+    const uncalmed = rolls.filter((r) => standoffWithCalmer(0, r)).length;
+    const calmed = rolls.filter((r) => standoffWithCalmer(1, r)).length;
+    expect(calmed).toBeLessThan(uncalmed);
+  });
+
+  it("`calmingPresence` can never switch herd conflict off — MIN_CALMING_MULTIPLIER floors it at half", () => {
+    // The regression this exists for: the multiplier used to be
+    // `max(0, 1 - total)`, and a total summed across a whole movepool. Six
+    // species could reach 1.50, so a bystander standing there meant no herd
+    // fight ever happened in a radius, to either side. A roll of 0 clears
+    // every unmodified chance in this suite, and must still clear a halved
+    // one.
+    expect(standoffWithCalmer(5, 0)).toBe(true);
+
+    // And the floor really is a floor: past 0.5 of calm, more calm buys
+    // nothing at all. Identical outcomes across the whole sweep.
+    const rolls = Array.from({ length: 200 }, (_, i) => i / 200);
+    const atFloor = rolls.map((r) => standoffWithCalmer(0.5, r));
+    const wayPastFloor = rolls.map((r) => standoffWithCalmer(5, r));
+    expect(wayPastFloor).toEqual(atFloor);
+
+    // Control: BELOW the floor, calm still does something — otherwise the
+    // two assertions above would also pass on a passive that was simply inert.
+    const belowFloor = rolls.filter((r) => standoffWithCalmer(0.25, r)).length;
+    expect(belowFloor).toBeGreaterThan(atFloor.filter(Boolean).length);
   });
 
   it("`calmingPresence` has no effect beyond its radius", () => {

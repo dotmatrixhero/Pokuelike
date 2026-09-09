@@ -52,20 +52,24 @@ console.log(`  damageReduction ${(worstDR * 100).toFixed(0)}%  ${worstDR >= 1 ? 
 console.log(`  thorns          ${(worstThorns * 100).toFixed(0)}%  ${worstThorns > 0.5 ? "<-- reflects more than half the hit, uncapped" : ""}`);
 console.log(`  regen + aura    ${(worstHeal * 100).toFixed(1)}%/tick raw — softCapHealShare bends this one; nothing bends the others.`);
 
-// `calmingPresence` has a HARD CLIFF the other passives don't, and it is easy
-// to miss: herdConflict.ts's `calmingMultiplier` does `Math.max(0, 1 -
-// strongest)`, where `strongest` is one agent's SUMMED total. It does not
-// stack across agents, but it absolutely stacks within one — so a species
-// whose movepool totals 1.0 reduces every nearby rivalry-escalation chance to
-// exactly zero, for both sides, permanently. That is not a strong passive, it
-// is a switch that turns off a whole mechanic in a radius.
+// `calmingPresence` summed across a movepool used to be a HARD CLIFF:
+// herdConflict.ts's `calmingMultiplier` was `Math.max(0, 1 - strongest)` over
+// one agent's SUMMED total, so a species totalling 1.0 reduced every nearby
+// rivalry-escalation chance to exactly zero, for both sides, permanently —
+// a switch that turned off a whole mechanic in a radius, not a strong
+// passive. Six species reached 1.50.
+//
+// `MIN_CALMING_MULTIPLIER` now floors the effect at 0.5, so the worst case is
+// "halves escalation nearby." This section stays because the floor caps the
+// EFFECT, not the stored value: anything past 0.5 here is a build spending
+// points on nothing, which is still worth seeing.
 const calmRows = rows.filter((r: any) => r.calm > 0).sort((a: any, b: any) => b.calm - a.calm);
 if (calmRows.length) {
-  console.log("\ncalmingPresence (herd-conflict escalation multiplier is 1 - total; at 1.0 conflict near this agent is OFF)");
+  console.log("\ncalmingPresence (escalation multiplier is 1 - total, floored at 0.5 by MIN_CALMING_MULTIPLIER)");
   for (const r of calmRows.slice(0, 8)) {
-    const flag = r.calm >= 1 ? "  <-- CONFLICT DISABLED" : r.calm >= 0.5 ? "  <-- halves escalation" : "";
+    const flag = r.calm >= 0.5 ? "  <-- at the floor; more calm buys nothing" : "";
     console.log(`  ${String(r.id).padEnd(14)} ${r.calm.toFixed(2)}${flag}`);
   }
   const worst = calmRows[0].calm;
-  console.log(`  worst ${worst.toFixed(2)} of the 1.00 cliff (${((100 * worst) / 1).toFixed(0)}% of the way there)`);
+  console.log(`  worst ${worst.toFixed(2)}; everything past 0.50 is wasted investment, not extra calm`);
 }
