@@ -50,6 +50,53 @@ ascent. Two things need a ruling before anything is built:
    Presence + Feed only reaches *Tolerant*, layer 1 delivers less than the
    prototype assumed.
 
+## IMPLEMENTATION ORDER — the move from design into code
+
+Asked directly: *"Do you think you're potentially ready to really start
+implementing? I think the scenarios you made are kinda act 2 stuff. But we
+want the systems for that built out."* Plus: *"Need crafting too don't
+forget."*
+
+**Three prerequisites exist in no design doc, found by grepping the code:**
+
+| | State |
+|---|---|
+| **A player agent** | Does not exist. `rapport.ts`/`types.ts` mention "a future player" in comments; zero code |
+| **Input / turn loop** | Does not exist. `main.ts` free-runs the sim on `setInterval`; no keydown handler anywhere in `packages/web` |
+| **`InventoryItem`** | `{itemKey, weight}` — no stack count. Only `support.ts` touches inventory, only for `FOOD_ITEM_KEY` |
+| **Recipe / item data** | Does not exist in code at all. Entirely in markdown |
+
+The Act 2 scenarios are Act 2, but their *systems* are not: Presence needs to
+see `sleep`, Rescue needs to see `carryAlly`, and the dispersal offer fires off
+rapport. Tells and rapport-reasons are Act 1 blockers too.
+
+### Track A — buildable now, no player agent, each with its own evidence
+
+1. **Reasons on `RapportEdge`.** It is `{score, lastInteractionTick}` today —
+   a number and a timestamp, no memory of why. Agents already form edges from
+   `foodDelivered`, so this is testable immediately against a live run.
+   *Evidence: dump a real run's edges and see whether they read as a story.*
+2. **Tells — `describeBehavior(agent)`.** `deliverFood`, `relocate` and
+   `explore` all look like "an animal walking" from outside. This blocks every
+   verb in `EMERGENT_SITUATIONS.md` and both unbuilt bonding verbs.
+   *Evidence: run the sim, dump what each agent looks like doing, check
+   `relocate` is distinguishable from `explore`.*
+3. **Crafting data + reachability tests.** The tree from `CRAFTING_TREE.md` /
+   `CRAFTABLES_V1.md` / `ITEM_CATALOGUE.md`, typed. Crafting splits cleanly:
+   the *data* needs no player, the *loop* does.
+   *Evidence — and this is the best test in the plan: every recipe's inputs
+   resolve, no cycles, every material has at least one harvest source, and the
+   first-playable set is reachable from an empty inventory.* That is the
+   machine version of "unreachable content is a bug" — **it would have caught
+   the camouflage cloak hole automatically** instead of it taking a hand-played
+   paper prototype to find.
+
+### Track B — gated on the player agent
+
+4. Player agent + turn gate + `InventoryItem` stack counts.
+5. Crafting loop — search, the interruptible time-spend, equip.
+6. The three behaviour verbs: `carryAlly`, `hunt`, `seekWater`-under-drought.
+
 ## OPEN: emergent situations — see EMERGENT_SITUATIONS.md
 
 The scaling answer for player–Pokémon interaction out in the world: the sim's
