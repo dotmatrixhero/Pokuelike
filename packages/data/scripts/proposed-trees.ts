@@ -46,6 +46,8 @@ export interface ProposedMove {
   power: number;
   accuracy: number;
   cooldownTicks: number;
+  /** The move's real canon max PP (dex/moves.generated.ts). PP-cost density scales off this. */
+  pp: number;
   shape: unknown;
   range?: unknown;
   hitsArea?: boolean;
@@ -80,6 +82,7 @@ const HERD_HASTE = "Herd-scoped speed aura — aquaticHasteMultiplier (support.t
 
 export const PROPOSED_TREES: Record<string, ProposedMove> = {
   harden: {
+    pp: 30,
     id: "harden",
     name: "Harden",
     type: "normal",
@@ -105,7 +108,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
         grantsPassive: { kind: "immovable", value: 1 }, delta: {},
         note: "NOTABLE. Cannot be dragged, knocked back or lunged at." },
       { id: "slow_to_shift", name: "Slow to Shift", cost: 1, prerequisites: ["rooted_stance"], leaning: "boldness",
-        delta: { cooldownTicks: -6, maxPPBonus: 8 }, needsPrimitive: PPC,
+        delta: { cooldownTicks: -6, maxPPBonus: 10 }, needsPrimitive: PPC,
         note: "Buys the headroom back. A tree that only ever spends PP is a tax; a tree that also sells it is an economy." },
       { id: "set_bone", name: "Set Bone", cost: 1, leaning: "boldness",
         prerequisitesAnyOf: [["slow_to_shift"], ["spines_out"], ["armored_indifference"]],
@@ -120,7 +123,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
         prerequisitesAnyOf: [["chrysalis"], ["quick_set"]],
         grantsPassive: { kind: "bulk", value: 0.25 }, delta: {}, needsPrimitive: BULK },
       { id: "unbudgeable", name: "Unbudgeable", cost: 2, prerequisites: ["dense_core"], leaning: "boldness",
-        grantsPassives: [{ kind: "bulk", value: 0.35 }, { kind: "damageReduction", value: 0.1 }], delta: { ppCost: 3}, needsPrimitive: BULK,
+        grantsPassives: [{ kind: "bulk", value: 0.35 }, { kind: "damageReduction", value: 0.1 }], delta: {}, needsPrimitive: BULK,
         note: "KEYSTONE. At full stack a Metapod is meaningfully heavy — its Tackle becomes a real threat, which is the whole cross-move thesis paying off." },
 
       // ===== Sociability: Not Worth Eating. Stop reading as prey.
@@ -221,6 +224,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
   },
 
   twineedle: {
+    pp: 20,
     id: "twineedle", name: "Twineedle", type: "bug", category: "physical",
     power: 25, accuracy: 100, cooldownTicks: 3, shape: { kind: "point" },
     learners: ["beedrill"],
@@ -231,7 +235,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
       { id: "third_needle", name: "Third Needle", cost: 1, leaning: "aggression", delta: { hits: { min: 2, max: 3 } },
         note: "Each stab rolls poison independently, so a third stab is a third chance, not just more damage." },
       { id: "quicker_draw", name: "Quicker Draw", cost: 1, prerequisites: ["third_needle"], leaning: "aggression",
-        delta: { cooldownTicks: -1, maxPPBonus: 6 }, needsPrimitive: PPC,
+        delta: { cooldownTicks: -1, maxPPBonus: 8 }, needsPrimitive: PPC,
         note: "Deeper venom sacs — the headroom that makes Pincushion affordable at all." },
       { id: "barbed", name: "Barbed", cost: 1, leaning: "aggression",
         prerequisitesAnyOf: [["quicker_draw"], ["quick_and_many"], ["marked_and_barbed"]], delta: { statusChance: 0.1 } },
@@ -251,7 +255,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
       { id: "drilled", name: "Drilled", cost: 2, leaning: "aggression",
         prerequisitesAnyOf: [["pincushion"], ["venom_lance"]], delta: { accuracy: 10, critRateStage: 1 } },
       { id: "hollow_points", name: "Hollow Points", cost: 2, prerequisites: ["drilled"], leaning: "aggression",
-        delta: { ppCost: 2, statusChance: 0.2, statusSpreads: true }, needsPrimitive: PPC,
+        delta: { statusChance: 0.2, statusSpreads: true },
         note: "KEYSTONE. Enough venom in one flurry that it comes off on whatever is standing nearby." },
 
       // ===== Boldness: the drive-by. Never be where the counterattack lands.
@@ -278,7 +282,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
         prerequisitesAnyOf: [["high_pass"], ["low_pass"]],
         delta: { forcedMovement: { mover: "attacker", direction: "away", tiles: 3, timing: "onHit" }, accuracy: 10 } },
       { id: "gone_before_it_turns", name: "Gone Before It Turns", cost: 2, prerequisites: ["untouchable_arc"], leaning: "boldness",
-        delta: { ppCost: 2, jamCooldownTicks: 10, situationalBonus: { condition: "targetStatused", multiplier: 1.35 }, needsPrimitive: PPC },
+        delta: { jamCooldownTicks: 10, situationalBonus: { condition: "targetStatused", multiplier: 1.35 } },
         note: "KEYSTONE. It is still turning around when the next pass lands, and its own moves are still on cooldown." },
 
       // ===== Sociability: the hive. A Beedrill is never one Beedrill.
@@ -338,6 +342,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
   },
 
   poison_sting: {
+    pp: 35,
     id: "poison_sting", name: "Poison Sting", type: "poison", category: "physical",
     power: 15, accuracy: 100, cooldownTicks: 2, shape: { kind: "point" },
     learners: ["ekans", "arbok", "weedle", "zubat", "golbat"],
@@ -373,7 +378,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
       // ===== Aggression: deeper venom, faster.
       { id: "double_dose", name: "Double Dose", cost: 1, leaning: "aggression", delta: { hits: { min: 1, max: 2 } } },
       { id: "quick_fangs", name: "Quick Fangs", cost: 1, prerequisites: ["double_dose"], leaning: "aggression",
-        delta: { cooldownTicks: -1, maxPPBonus: 10 }, needsPrimitive: PPC,
+        delta: { cooldownTicks: -1, maxPPBonus: 12 }, needsPrimitive: PPC,
         note: "More venom held at once." },
       { id: "deep_stick", name: "Deep Stick", cost: 1, leaning: "aggression",
         prerequisitesAnyOf: [["quick_fangs"], ["thick_and_deep"], ["pack_dosage"]], delta: { defensePenetration: 0.2 } },
@@ -393,7 +398,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
       { id: "bled_out", name: "Bled Out", cost: 2, leaning: "aggression",
         prerequisitesAnyOf: [["run_it_down"], ["dry_bite"]], delta: { critRateStage: 1, critCooldownReset: true } },
       { id: "nothing_walks_away", name: "Nothing Walks Away", cost: 2, prerequisites: ["bled_out"], leaning: "aggression",
-        delta: { ppCost: 2, situationalBonus: { condition: "targetLowHp", multiplier: 2 }, needsPrimitive: PPC, jamCooldownTicks: 10 },
+        delta: { situationalBonus: { condition: "targetLowHp", multiplier: 2 }, jamCooldownTicks: 10 },
         note: "KEYSTONE." },
 
       // ===== Sociability: the shared kill. Nothing here hunts alone.
@@ -454,6 +459,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
   },
 
   growth: {
+    pp: 20,
     id: "growth", name: "Growth", type: "normal", category: "status",
     power: 0, accuracy: 100, cooldownTicks: 30, shape: { kind: "point" },
     learners: ["bulbasaur", "ivysaur", "venusaur", "oddish", "gloom"],
@@ -517,7 +523,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
       { id: "the_verge", name: "The Verge", cost: 2, leaning: "aggression",
         prerequisitesAnyOf: [["overrun"], ["monoculture"]], delta: { fertilityBoost: { amount: 0.3, radius: 4 } } },
       { id: "it_was_all_grass", name: "It Was All Grass", cost: 2, prerequisites: ["the_verge"], leaning: "aggression",
-        delta: { ppCost: 3, createsTerrain: { terrain: "bush", chance: 0.3, at: "self", radius: 3 }, drainNeeds: { need: "energy", amount: 0.03 } },
+        delta: { createsTerrain: { terrain: "bush", chance: 0.3, at: "self", radius: 3 }, drainNeeds: { need: "energy", amount: 0.03 } },
         needsPrimitive: TERRAIN_SELF,
         note: "KEYSTONE. Aggression on a farming move is conquest by vegetation — and the advancing bramble actually saps whatever is caught in it. drainNeeds is shipped with six users and no move has ever used it as a weapon." },
 
@@ -548,7 +554,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
         delta: { createsTerrain: { terrain: "bush", chance: 0.4, at: "self" } }, needsPrimitive: TERRAIN_SELF,
         note: "A store, not a bonus: real bush tiles the herd can come back to." },
       { id: "nobody_leaves", name: "Nobody Leaves", cost: 2, prerequisites: ["granary"], leaning: "sociability",
-        delta: { ppCost: 3, herdMigrationResistance: 0.8, floraRegrowthMultiplier: 1.6 }, needsPrimitive: MIGRATE,
+        delta: { herdMigrationResistance: 0.8, floraRegrowthMultiplier: 1.6 }, needsPrimitive: MIGRATE,
         note: "KEYSTONE. A herd that has solved food. Whether that is good for the sim is a real open question — a zone that never empties is also a zone that never turns over." },
 
       // ===== Bridge B<->A: black earth. Lever: fertilityBoost.
@@ -584,6 +590,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
   },
 
   agility: {
+    pp: 30,
     id: "agility", name: "Agility", type: "psychic", category: "status",
     power: 0, accuracy: 100, cooldownTicks: 50, shape: { kind: "point" },
     learners: ["scyther", "sandshrew", "growlithe", "horsea", "seadra", "beedrill", "ponyta", "rapidash"],
@@ -630,7 +637,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
       { id: "first_move", name: "First Move", cost: 1, leaning: "aggression",
         delta: { statChangeOnHit: { target: "self", stat: "speed", stage: 3, ticks: 40 } } },
       { id: "short_rest", name: "Short Rest", cost: 1, prerequisites: ["first_move"], leaning: "aggression",
-        delta: { cooldownTicks: -12, maxPPBonus: 8 }, needsPrimitive: PPC,
+        delta: { cooldownTicks: -12, maxPPBonus: 10 }, needsPrimitive: PPC,
         note: "The rest is the reserve. Headroom to pay for the keystone." },
       { id: "wound_up", name: "Wound Up", cost: 1, leaning: "aggression",
         prerequisitesAnyOf: [["short_rest"], ["fast_over_rough"], ["set_the_pace"]],

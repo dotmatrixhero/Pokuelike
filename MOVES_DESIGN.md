@@ -3701,18 +3701,53 @@ third is the one that makes it worth building:
 12 moves sit in the hard-gate band, 10 mid, 13 loose. A Hydro Pump build
 genuinely cannot look like a Tackle build, and nobody has to hand-tune that.
 
-**Every keystone requires PP, not one node per tree.** Direct clarification:
+**Not every notable — density scales with the pool.** Direct correction:
+*"Make the low pp moves not as punishing then. We don't have to have all
+notable cost pp. Just some of em."* Right: a 5-PP move should not be
+punished for having a small pool. The cap is **ceil(pool / 12)**:
+
+| Pool | PP-costing nodes allowed |
+|---|---|
+| 5–10 | 1 |
+| 15–20 | 2 |
+| 25–35 | 3 |
+| 40 | 4 |
+
+Six PP costs came back off the drafts to meet it.
+
+**And the headroom filler is worth wildly different amounts by pool — which
+is the point.** *"We can also have max pp increase filler, and for hydropump
+that actually means something, you know?"* Exactly; one +5 max-PP node:
+
+| move | pool | +5 is | uses of a 3-PP notable: base → +5 → +10 |
+|---|---|---|---|
+| **hydro_pump**, synthesis, roost | 5 | **+100%** | **1 → 3 → 5** |
+| solar_beam, earthquake, dig | 10 | +50% | 3 → 5 → 6 |
+| flamethrower, body_slam | 15 | +33% | 5 → 6 → 8 |
+| twineedle, growth | 20 | +25% | 6 → 8 → 10 |
+| tackle, poison_sting | 35 | +14% | 11 → 13 → 15 |
+| defense_curl | 40 | +13% | 13 → 15 → 16 |
+
+The *same node* triples Hydro Pump's uses of a heavy notable and is a
+rounding error on Defense Curl. A filler that is genuinely build-defining on
+one move and skippable on another is the best kind of filler this roster
+has, and it needs no per-move tuning at all — the canon pool does it.
+
+So the checker also enforces a **relative** headroom floor: a tree that
+spends PP must sell back at least a third of its own pool.
+
+**Every branch keystone requires PP, within that cap.** Direct clarification:
 *"I meant make notables require pp basically."* So a per-use PP cost sits on
 each branch's keystone plus the heavy fork, scaled to the move's own canon
 pool — 19 PP-costing identity nodes across the five drafts:
 
 | Draft | pool (+headroom) | PP-costing nodes → uses base / with headroom |
 |---|---|---|
-| Harden | 30 (+8) | Chrysalis 4 → 7/9 · Unbudgeable 3 → 10/12 · Brittle Edge 3 → 10/12 · Let It Pass 2 → 15/19 |
-| Twineedle | 20 (+6) | Pincushion 3 → 6/8 · Nothing Forgets 3 → 6/8 · Hollow Points 2 → 10/13 · Gone Before It Turns 2 → 10/13 |
-| Poison Sting | 35 (+10) | Nothing Recovers 3 → 11/15 · Venom Glut 2 → 17/22 · Nothing Walks Away 2 · The Nest Decides 2 |
-| Growth | 20 (+10) | It Takes 4 → **5/7** · The Orchard 4 → **5/7** · It Was All Grass 3 → 6/10 · Nobody Leaves 3 → 6/10 |
-| Agility | 30 (+8) | Faster Than Thought 3 → 10/12 · The Migration 3 → 10/12 · Nothing Stops It 2 → 15/19 |
+| Harden | 30 (+10) | 3/3 · Chrysalis 4 → 7/10 · Brittle Edge 3 · Let It Pass 2 |
+| Twineedle | 20 (+8) | 2/2 · Pincushion 3 → 6/9 · Nothing Forgets 3 |
+| Poison Sting | 35 (+12) | 3/3 · Nothing Recovers 3 → 11/15 · Venom Glut 2 · The Nest Decides 2 |
+| Growth | 20 (+10) | 2/2 · It Takes 4 → **5/7** · The Orchard 4 → **5/7** |
+| Agility | 30 (+10) | 3/3 · Faster Than Thought 3 → 10/13 · The Migration 3 · Nothing Stops It 2 |
 
 Growth is the sharpest read: a Bulbasaur that specced *The Orchard* plants
 **five trees in its life**, seven if it bought the headroom. That is the

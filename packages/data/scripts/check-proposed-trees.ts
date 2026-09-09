@@ -146,6 +146,21 @@ function problems(move: ProposedMove): string[] {
   if (spenders.length && !sellers.length) {
     out.push(`spends PP (${spenders.map((n) => n.id).join(", ")}) but no node grants maxPPBonus — that is a tax, not an economy`);
   }
+  // A low pool must not mean a punishing tree. PP-cost density scales with
+  // the move's own canon pool: "Make the low pp moves not as punishing then.
+  // We don't have to have all notable cost pp. Just some of em."
+  if (!Number.isFinite(move.pp)) out.push(`no canon pp declared — the PP density and headroom checks cannot run`);
+  const maxSpenders = Math.ceil(move.pp / 12);
+  if (spenders.length > maxSpenders) {
+    out.push(`${spenders.length} PP-costing nodes on a ${move.pp}-PP move — cap is ${maxSpenders} (ceil(pool/12)); a small pool should carry fewer, not be punished for being small`);
+  }
+  // On a small pool a headroom node is transformative and on a big one it is
+  // a rounding error, so the floor is relative: headroom worth at least a
+  // third of the pool wherever the tree spends PP at all.
+  const headroom = sellers.reduce((sum, n) => sum + Number((n.delta as any).maxPPBonus ?? 0), 0);
+  if (spenders.length && headroom < move.pp / 3) {
+    out.push(`headroom +${headroom} against a ${move.pp} pool — a tree that spends PP should sell back at least a third of its pool (+${Math.ceil(move.pp / 3)})`);
+  }
 
   // A node that is pure downside is a bug, not a design choice (principle 4).
   const DOWNSIDE = new Set(["recoilFraction", "selfCostPerUse", "lockTicks"]);
