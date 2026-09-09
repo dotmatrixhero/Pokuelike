@@ -99,6 +99,7 @@ the first three.
 | **Obsidian knife** | 2 | Haft + obsidian edge | 10 | As above, sharper |
 | **Axe** | 3 | Haft + knapped flint | 12 | **Fell trees → timber.** Costs canopy |
 | **Pick** | 4 | Haft + ground stone | 12 | **Break boulders; mine walls** |
+| **Machete** | 3 | Haft + knapped flint ×2 | 12 | **Cut · Slash** — clears foliage (can't fell) |
 | **Sickle** | 2 | Haft + knapped flint | 10 | Harvest without killing the plant |
 | **Digging stick** | 2 | Haft + bone | 8 | Roots; faster soft digging |
 | **Ice awl** | 1 | Haft + bone | 8 | Break a frozen surface |
@@ -112,7 +113,8 @@ the first three.
 |---|---|---|---|---|---|
 | **Club** | 3 | Bound haft | 6 | `swing` | Threat signature up |
 | **Spear** | 3 | Haft + knapped flint | 12 | **Reach 2** | Heavy; high threat |
-| **Sling** | 1 | Cordage + hide | 8 | **Ranged attack** | Noise |
+| **Sling** | 1 | Cordage + hide | 8 | **Sling Stone** — ranged | Noise |
+| **Shield** | 4 | Deadwood + hide | 10 | **Brace** — raise defence a turn | **Occupies the held slot** — no bracing and swinging |
 | **Bow** *(Act 2)* | 3 | Timber + sinew cord | 20 | Real range | Needs arrows |
 | **Arrows ×5** | 1 | Deadwood + feathers | 8 | Ammunition | Recoverable |
 | **Fire-lance** *(Act 2)* | 3 | Timber + pitch 🔥 | 20 | **Flamethrower, crudely** | **Ignites your own tile**; fuel |
