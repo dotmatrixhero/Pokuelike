@@ -3,6 +3,11 @@
 Companion to `CRAFTING_DESIGN.md` (which covers materials, harvesting and
 the rules). This is the example list.
 
+**See also `MOVES_AND_TOOLS.md`** — the architecture underneath this list:
+a move is an effect, a Pokemon reaches it through its body and a human
+reaches it through a tool, and *a tool is always a slice of a move, never
+the whole thing*. Several entries below are that rule applied.
+
 **The organizing principle:** every item opens a gate that *already exists in
 the engine*. Not "+2 defense" — a specific `if` in the codebase that
 currently says no. That's what keeps this from being a generic survival-game
@@ -68,7 +73,7 @@ gates that currently just say no.
 
 | Item | Recipe | Unlocks | The gate it opens |
 |---|---|---|---|
-| **Raft** | Timber + cordage | **Cross large water** | `canEnterWater` returns `false` for non-Water types on large bodies — a hard block today |
+| **Raft** *(Act 2 — decided)* | Timber + cordage | **Cross large water** | `canEnterWater` returns `false` for non-Water types on large bodies — a hard block today. The tool slice of Surf/Whirlpool |
 | **Climbing rope** | Cordage ×2 | Traverse elevation you can't walk | `movementSpeedFactor`'s elevation term; steep ground |
 | **Snowshoes** | Fiber + hide | Cross deep snow / soft ground without the speed penalty | `terrainSpeedMultiplier` |
 | **Ice awl** | Bone + haft | Break a frozen surface | The dual-state ice lid (TODO.md) |
@@ -213,8 +218,9 @@ Four things, each tied to something already running:
 
 ## Open questions
 
-1. **Is the raft too big an unlock for Act 1?** It trivialises water as an
-   obstacle. Maybe it's Act 2, or maybe large water isn't in the cave anyway.
+1. ~~Is the raft too big an unlock for Act 1?~~ **Decided: Act 2.** It
+   trivialises water as an obstacle, and large water in a cave is unlikely
+   anyway.
 2. **Ammo for the sling** — a consumable to manage, or infinite stones?
    Recommend infinite; ammo counting is tedium.
 3. **Does the cloak stack with a real `bush` tile,** or does it just grant the
