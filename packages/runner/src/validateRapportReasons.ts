@@ -42,33 +42,90 @@ const ALL_REASONS: RapportReason[] = [
   "wasHealed",
 ];
 
-/** How an edge's reasons read in prose — the "does this narrate?" check, not a shipping renderer. */
-const PHRASING: Record<RapportReason, (n: number, subject?: string) => string> = {
-  gaveFood: (n) => `fed them ${n} time${n === 1 ? "" : "s"}`,
-  receivedFood: (n) => `was fed by them ${n} time${n === 1 ? "" : "s"}`,
-  defended: (n) => `fought for them ${n} time${n === 1 ? "" : "s"}`,
-  wasDefended: (n) => `was defended by them ${n} time${n === 1 ? "" : "s"}`,
-  struck: (n) => `struck them ${n} time${n === 1 ? "" : "s"}`,
-  wasStruck: (n) => `was struck by them ${n} time${n === 1 ? "" : "s"}`,
-  socialized: (n) => (n <= 1 ? `shared their company` : `spent ${n} long stretches in their company`),
-  bonded: () => `took them as a mate`,
-  sharedWater: (n) => (n <= 1 ? `stood off over water without a fight` : `backed down from them over water ${n} times`),
-  trainedTogether: (n) => (n <= 1 ? `trained alongside them` : `trained alongside them through ${n} long stretches`),
-  keptWatch: (n) => `kept watch over their sleep ${n} time${n === 1 ? "" : "s"}`,
-  sleptSafely: (n) => `slept where they could reach ${n} time${n === 1 ? "" : "s"}`,
-  survivedTogether: (n, subj) =>
-    n === 1 ? `watched a ${subj ?? "creature"} die beside them` : `came through ${n} deaths beside them, worst a ${subj ?? "creature"}`,
-  mourned: (n, subj) =>
-    n === 1 ? `mourned a friend together — a ${subj ?? "herd-mate"}` : `mourned ${n} friends together`,
-  defeatedTogether: (n, subj) =>
-    n === 1 ? `brought down a ${subj ?? "creature"} together` : `brought down ${n} together, the largest a ${subj ?? "creature"}`,
-  weatheredTogether: (n, subj) =>
-    n === 1 ? `was driven out by ${subj ?? "the weather"} beside them` : `was driven out beside them ${n} times`,
-  rescued: (n) => (n === 1 ? `carried them home when they could not walk` : `carried them home ${n} times`),
-  wasRescued: (n) => (n === 1 ? `was carried home by them` : `was carried home by them ${n} times`),
-  healed: (n) => (n === 1 ? `closed their wounds` : `mended them through ${n} bad stretches`),
-  wasHealed: (n) => (n === 1 ? `was mended by them` : `was mended by them through ${n} bad stretches`),
+/**
+ * How a relationship reads out loud.
+ *
+ * Rewritten after a blunt and correct note on the first version — *"your
+ * phrasing is so stilted and weird"* — which produced lines like:
+ *
+ *   brought down 2 together, the largest a scyther, came through 3 deaths
+ *   beside them, worst a scyther, was defended by them 20 times, fought for
+ *   them 3 times, was driven out by hunger beside them
+ *
+ * Everything wrong with that is worth naming, because the fix is a rule each
+ * time: no grammatical subject, so it reads as a dump; telegram-ese
+ * appositives ("the largest a scyther"); lowercase species and a broken
+ * article ("a onix"); voice flipping between active and passive inside one
+ * line; and — the real problem — **it prints every reason.** Eight clauses of
+ * equal length is not prose, it is a table with commas.
+ *
+ * The rules here:
+ * 1. **Two clauses. Three at the very most.** Curation is the point.
+ * 2. **Verb-first fragments**, so there is no pronoun tangle about who did
+ *    what to whom, and the strong word lands first.
+ * 3. **Species are proper nouns** — "an Onix", not "a onix".
+ * 4. **Numbers only when the number is the point**, spelled as words at
+ *    small values. Once or twice does not need a count.
+ * 5. **Vary the length.** Heaviest clause leads, a short one follows.
+ */
+
+const NUMBERS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+/** A plain spelled cardinal — "three", not "3". */
+function count(n: number): string {
+  return NUMBERS[n] ?? String(n);
+}
+
+const ONES = ["zero", "once", "twice", "three times", "four times", "five times", "six times", "seven times", "eight times", "nine times", "ten times"];
+/** "twenty times", not "20 times" — a spelled number reads as speech, a digit reads as a field. */
+function times(n: number): string {
+  return ONES[n] ?? `${n} times`;
+}
+
+/** Species come out of the dex lowercased; they are names. */
+function nameOf(label: string | undefined, fallback: string): string {
+  const raw = label ?? fallback;
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+/** "an Onix", "a Scyther" — the broken article was half of why the old lines read wrong. */
+function a(label: string | undefined, fallback: string): string {
+  const name = nameOf(label, fallback);
+  return `${/^[AEIOU]/.test(name) ? "an" : "a"} ${name}`;
+}
+
+/** One clause per reason. Verb-first, no subject, no hedging. */
+const CLAUSE: Record<RapportReason, (n: number, subject?: string) => string> = {
+  rescued: (n) => (n <= 1 ? `Carried them home` : `Carried them home ${times(n)}`),
+  wasRescued: (n) => (n <= 1 ? `Was carried home by them` : `Carried home by them ${times(n)}`),
+  mourned: (n) => (n <= 1 ? `Mourned the same friend` : `Mourned the same dead ${times(n)} over`),
+  // A count of two is not worth a clause of its own — the kill is the story.
+  // Three or more, and the number starts meaning something.
+  defeatedTogether: (n, s) => (n <= 2 ? `Killed ${a(s, "creature")} together` : `Killed ${a(s, "creature")} together, and others`),
+  bonded: () => `Mates`,
+  survivedTogether: (n, s) => (n <= 1 ? `Watched ${a(s, "creature")} die` : `Watched ${count(n)} die beside them`),
+  weatheredTogether: (n, s) => (n <= 1 ? `Driven out by ${s ?? "the weather"}, side by side` : `Driven out together ${times(n)}`),
+  healed: (n) => (n <= 1 ? `Closed their wounds` : `Mended them ${times(n)} over`),
+  wasHealed: (n) => (n <= 1 ? `Mended by them` : `Mended by them ${times(n)} over`),
+  defended: (n) => (n <= 1 ? `Fought for them` : `Fought for them ${times(n)}`),
+  wasDefended: (n) => (n <= 1 ? `Saved by them once` : `Pulled out of ${times(n).replace(" times", " fights")} by them`),
+  sleptSafely: (n) => (n <= 1 ? `Slept where they could reach` : `Slept beside them ${times(n)}`),
+  keptWatch: (n) => (n <= 1 ? `Watched over their sleep` : `Watched over their sleep ${times(n)}`),
+  struck: (n) => (n <= 1 ? `Struck them` : `Struck them ${times(n)}`),
+  wasStruck: (n) => (n <= 1 ? `Took a hit from them` : `Took ${times(n).replace(" times", " hits")} from them`),
+  sharedWater: (n) => (n <= 1 ? `Backed down at the water` : `Backed down at the water ${times(n)}`),
+  trainedTogether: (n) => (n <= 1 ? `Trained alongside them` : `Trained alongside them for seasons`),
+  gaveFood: (n) => (n <= 1 ? `Fed them` : `Fed them ${times(n)}`),
+  receivedFood: (n) => (n <= 1 ? `Fed by them` : `Fed by them ${times(n)}`),
+  socialized: (n) => (n <= 1 ? `Kept their company` : `Years of their company`),
 };
+
+/** At most `limit` clauses, most significant first, as one line. */
+function describe(memories: { reason: RapportReason; count: number; subject?: { label: string } }[], limit = 2): string {
+  return memories
+    .slice(0, limit)
+    .map((m) => CLAUSE[m.reason](m.count, m.subject?.label))
+    .join(". ") + ".";
+}
 
 const totals: Record<string, number> = Object.fromEntries(ALL_REASONS.map((r) => [r, 0]));
 /** Raw occurrences behind the milestones — how the table WOULD read untrottled. */
@@ -127,7 +184,7 @@ for (const seed of seeds) {
             String(memories.length).padStart(2),
             String(events).padStart(4),
             `seed ${seed} · ${agent.species} ${agent.id.slice(0, 8)} → ${other?.species ?? "?"} ${otherId.slice(0, 8)}`,
-            `(${score >= 0 ? "+" : ""}${score.toFixed(2)}) ` + notable.map((m) => PHRASING[m.reason](m.count, m.subject?.label)).join(", "),
+            `(${score >= 0 ? "+" : ""}${score.toFixed(2)}) ` + describe(notable as any),
           ].join("\t")
         );
       }
