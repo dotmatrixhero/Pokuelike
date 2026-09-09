@@ -249,6 +249,39 @@ where the actual design decisions live.
   re-pick, cuts against the "roll a fresh character and optimise differently"
   loop. That's probably correct for this game, but it is a cost.
 
+## The legibility rule — a sharpening of pillars 2 and 4
+
+Arrived at while designing the degradation → migration crossing, and it
+generalises to every system in the project, so it belongs here rather than
+in that one design doc.
+
+> **A cause must be visible *before* its consequence, or the consequence
+> reads as randomness.**
+
+Not merely visible — visible **first**. The distinction is the whole rule.
+
+The case that produced it: the player harvests a valley, `fertility` falls,
+the herd migrates on scarcity, the predators following it leave too, and the
+place goes quiet. Every link is a system that already exists. But if
+exhausted ground *looks identical to healthy ground*, the player experiences
+four invisible steps and one visible outcome — which reads as the world
+being arbitrary, the exact opposite of the intended effect.
+
+This is pillar 2's "constellations of broad reasons" with teeth on it: a
+layered cause chain is only worth simulating if the early links are
+perceivable. It's also what makes pillar 4 land — "all that you change,
+changes you" requires that you can *see* what you changed, ideally while
+you're still changing it.
+
+**The design question to ask of any crossing:** what does the player see at
+each link? If the answer is "nothing" for the early ones, **build the tell
+before you build the mechanic.**
+
+**What this refuses:**
+- A consequence whose cause was never perceivable.
+- A system whose only output is a chronicle entry after the fact.
+- Simulating a chain the player can only ever see the end of.
+
 ## How to use this document
 
 When a design decision comes up, it should be answerable by pointing at a
