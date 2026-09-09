@@ -3,6 +3,52 @@
 Running list of ideas and decisions to revisit — not a sprint plan, just a
 place to park trains of thought so they don't get lost.
 
+## Winter ice: a lid, not a solid freeze — see BREADTH_DESIGN.md
+
+Decided in discussion, unbuilt. Today `weather.ts` freezes only bodies below
+`LARGE_WATER_BODY_MIN_SIZE`, and `canEnterWater` already lets anyone wade a
+small body — so freezing currently changes nothing about traversal.
+
+The ruling that makes it real: *"fish should be considered underground. If
+they're in it the ice should not affect them unless it's shallow smaller
+puddles."*
+
+- **Large bodies (`waterKind` lake/river/ocean) get a surface lid.** Ice is
+  **dual-state** — walkable terrain for anything above, still water for
+  anything below. Aquatic agents underneath are unaffected. *This* is the
+  seasonal topology change, and it needs large bodies to freeze at the
+  surface, which they currently don't.
+- **Small shallow water (`waterKind: pond`) freezes through.** No water
+  column to be under, so fish there are genuinely affected — the rare
+  Rescue moment, scoped small on purpose so it can't become routine.
+- `waterKind` already carries the shallow/deep signal. No new data needed.
+- Flags a prior call: the existing "no large-body freezing" decision was
+  against freezing *solid*. A lid is a different thing — refinement, not
+  reversal, but worth knowing it touches that decision.
+- **Possible bug to check:** an obligate aquatic on an `ice` tile is no
+  longer on `"water"`, so `canEnterLand`'s gate doesn't see what it expects.
+
+## Make the land's scars visible — see NARRATIVE_PILLARS.md's legibility rule
+
+Raised directly: *"herds emigrating might show in chronicle but not the land
+itself. Maybe that needs to show up if you get close to scarred ground?"*
+
+Right, and as designed the whole degradation → migration crossing would have
+been invisible. The general rule this produced now lives in
+`NARRATIVE_PILLARS.md`: **a cause must be visible before its consequence, or
+the consequence reads as randomness.**
+
+Three channels, different jobs:
+
+- **Rendering (primary).** `groundDegraded`/`fertility` are floats the
+  palette can carry continuously — spent ground should just *look* tired.
+  No prose budget, no repetition problem. Wrinkle: `PEAT_DEGRADE_MAX` caps
+  permanent damage well short of 1, so the tell must read inside a narrow
+  band.
+- **Prose, only when actionable.** *"The ground here is spent"* on approach
+  to badly degraded ground.
+- **Chronicle**, for the after-the-fact why.
+
 ## Simulation-mechanics ideas, raised mid-session, not yet built
 
 Three direct asks raised together, each substantial enough to want its own

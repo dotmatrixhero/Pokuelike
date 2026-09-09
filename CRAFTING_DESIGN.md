@@ -329,6 +329,35 @@ In dependency order. The first two are the real prerequisites.
 5. **Crafting at a station**, reusing shelter-style investment.
 6. **The item set above**, smallest first: cordage → torch → club → spear.
 
+## Harvesting has to be legible, or the ecological cost is invisible
+
+The fertility economy gives crafting its pillar-1 cost for free — but a cost
+the player cannot perceive isn't a cost, it's a hidden number. Per the
+legibility rule in `NARRATIVE_PILLARS.md`: **the tell has to come before the
+consequence.**
+
+The chain crafting creates:
+
+> you harvest a slope → `fertility` falls → `groundDegraded` accrues on peat
+> → the herd that fed there migrates on scarcity → the predators following
+> it leave → the valley is quiet
+
+Every link is built. But if spent ground looks identical to healthy ground,
+the player sees five invisible steps and one silent outcome.
+
+So harvesting needs, in order of importance:
+
+1. **Degraded ground renders differently** — `groundDegraded` and `fertility`
+   are both floats the palette can carry continuously. This is the warning,
+   and it must be visible *while you are still harvesting*, not after the
+   herd has gone.
+2. **A yield tell.** Diminishing returns from the same patch should be
+   obvious from the yields themselves, not inferred.
+3. **Prose only when actionable** — *"the ground here is spent"* on approach
+   to badly degraded ground, per `SENSORY_LAYER.md`'s affordance rule.
+
+Without (1) this whole design is a well-simulated cost nobody experiences.
+
 ## Open questions
 
 1. **Does material quality carry into the item?** Fertile-ground fiber makes

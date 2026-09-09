@@ -49,9 +49,69 @@ curation is noise. Triple the species and you triple the event log, and
 "stories everywhere" becomes stories nowhere. Roster width and the curation
 layer have to grow together.
 
-### 2. Seasonal freezing already changes the map's topology — and nobody noticed
+### 2. Seasonal freezing — corrected, and then made real
 
-This is the best find in this document.
+**I overstated this and it needs fixing before the design built on it.**
+
+The claim was that frozen water becomes a walkable route. Verified against
+`weather.ts`, it doesn't, for a reason its own doc comment states plainly:
+
+> "deliberately NOT applied to large bodies (an ocean/big lake freezing
+> solid isn't the ask; a pond/puddle/small pool is)"
+
+Only bodies **below** `LARGE_WATER_BODY_MIN_SIZE` freeze. And
+`canEnterWater` already returns `true` for any small body — anyone can wade
+a puddle. So the water that freezes was **already crossable**, and freezing
+changes nothing about traversal. No winter island, no shortcut. The
+mechanism is real; the gameplay consequence I claimed is not.
+
+(Second time this session I asserted from a plausible reading instead of
+checking. The correction discipline holds: grep the callers first.)
+
+#### The version that does work — from the ruling on fish
+
+> "for freeze, fish should be considered underground. If they're in it the
+> ice should not affect them unless it's shallow smaller puddles."
+
+That ruling is what makes the feature real, because it separates two things
+the current implementation conflates: **an ice lid is not the same as
+freezing solid.**
+
+- **Large bodies get a surface lid.** The water underneath is unchanged.
+  Land species walk on top; aquatic species keep swimming below, unaffected —
+  they are, as the ruling puts it, *underground* relative to the ice.
+  This is the seasonal topology change, and it needs large bodies to freeze
+  at the surface, which today they explicitly don't.
+- **Small, shallow water freezes through.** A pond or puddle has no water
+  column to be under. Fish there are genuinely affected.
+
+The prior "no large-body freezing" decision was against a lake freezing
+*solid*, and a lid isn't that — so this reads as a refinement rather than a
+reversal. Worth flagging as one anyway.
+
+**`waterKind` already carries the shallow/deep signal.** `pond` is the
+shallow case; `lake`/`river`/`ocean` are the ones that get a lid. No new
+data needed — the field landed on master days ago.
+
+The ice tile becomes **dual-state**: walkable terrain for anything above it,
+still water for anything below. That's the whole mechanic, and it's what
+makes a frozen lake interesting rather than just a recoloured tile.
+
+#### The trapped fish, correctly scoped
+
+Under this ruling the Rescue scenario only happens in **small shallow
+water** — which is better design than my version. It's rare, it's specific,
+and it can't become a routine occurrence that cheapens the strongest bonding
+verb. A fish stranded in a frozen puddle is a moment; a lake full of them
+every winter is a chore.
+
+Still worth checking as a possible bug either way: an obligate aquatic on an
+`ice` tile is no longer on `"water"`, so `canEnterLand`'s gate doesn't see
+what it expects.
+
+---
+
+### 2b. What the original finding was actually pointing at
 
 `weather.ts`'s `advanceWaterCycle` already freezes surface water to `ice` in
 winter and thaws it in spring, logging `terrainChanged` with cause
@@ -177,12 +237,74 @@ it's a feature, not breadth.
 5. **Ground types underground.** Still blocking crafting, still a small change
    to an existing pass.
 
+---
+
+## Legibility: the rule for whether a crossing is worth building
+
+Raised directly, and it's the more important of the two threads:
+
+> "I think herds emigrating might show in chronicle but not the land itself.
+> Maybe that needs to show up if you get close to scarred ground?"
+
+Correct — and as designed, the crossing would have been invisible. The
+chronicle would record *"the herd left, food was scarce"* while the ground
+that caused it looked identical to every other tile. A true simulation the
+player cannot perceive is worth nothing.
+
+So the general rule, which applies to every crossing in the catalogue above:
+
+> **A cause must be visible before its consequence, or the consequence reads
+> as randomness.**
+
+Not merely *visible at all* — visible **first**. If you can only tell the
+ground was exhausted after the herd has gone, you've learned nothing you can
+act on. If you can watch it degrade while the herd is still there, the
+departure becomes a thing you saw coming and could have prevented. That is
+the difference between a simulation that teaches and one that just happens.
+
+### Three channels, doing different jobs
+
+- **Rendering — always on, no prose.** `groundDegraded` is a 0–1 float, so
+  the renderer can desaturate or dull a tile continuously with it. Exhausted
+  ground should simply *look* tired next to healthy ground. This is the
+  primary channel and it costs one palette change: no text, no budget, no
+  repetition problem, and it satisfies the "mechanics visible on the map,
+  not hidden in a meter" principle directly.
+- **Prose — only when actionable.** Per `SENSORY_LAYER.md`'s affordance
+  rule, a line earns its place by telling you something you can act on.
+  *"The ground here is spent"* qualifies: it says don't bother harvesting.
+  It should fire on approach to badly degraded ground and nowhere else.
+- **Chronicle — the why, after the fact.** *"The herd left; the valley had
+  been picked over."* This is the record, not the warning.
+
+Rendering warns, prose explains the affordance, the chronicle closes the
+loop. Same fact, three timescales.
+
+### Why this one matters more than the mechanic
+
+`NARRATIVE_PILLARS.md` asks for "constellations of broad reasons" and calls
+single-cause events the failure mode. The full chain here is already
+available: *you harvested → fertility fell → the herd migrated → the
+predators that followed it went too → the valley is quiet.* Every link is a
+built system.
+
+But a player only experiences that as a story if they can see the first link.
+Otherwise it's four invisible steps and one visible outcome, which reads as
+the world being arbitrary — the exact opposite of the intended effect.
+
+**Generalised: for any crossing, ask what the player sees at each link. If
+the answer is "nothing" for the early ones, build the tell before the
+mechanic.**
+
 ## Open questions
 
 1. How wide should the roster actually get? 70 → 150? → 400? The ecology
    balance work scales with it, and so does log noise.
 2. Does the curation layer need to exist *before* breadth, or can it lag?
    Pillar 2 implies before; practicality implies alongside.
-3. Is there a rule for which crossings are legible to a player? Herds
-   leaving degraded land is only meaningful if the player can *tell* that's
-   why — otherwise it's invisible simulation.
+3. Should large water bodies get an ice lid in winter (the ruling above
+   implies yes), and does that reverse the earlier "no large-body freezing"
+   call or refine it?
+4. How degraded is *visibly* degraded? `PEAT_DEGRADE_MAX` caps the permanent
+   damage well short of 1, so the visual range is narrow and the tell has to
+   work inside it.

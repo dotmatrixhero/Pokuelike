@@ -351,6 +351,43 @@ It also means **auto-travel doesn't have to be silent.** A `travel` command
 that prints these as it runs is a better solution to the dead stretch than
 either walking manually or skipping instantly.
 
+---
+
+## Part C — Rendering is a channel, and it's the primary one
+
+The measurement above pushed this doc toward "say less." The corollary,
+arrived at while working out how exhausted ground becomes perceivable, is
+that **the best answer to a lot of prose problems is not prose.**
+
+Three channels carry the same fact on different timescales:
+
+| Channel | Job | Cost |
+|---|---|---|
+| **Rendering** | The always-on tell. Warns *before* the consequence. | A palette change |
+| **Prose** | Only when actionable — what you can do about it | Budgeted, repetition-prone |
+| **Chronicle** | The after-the-fact why | Already built |
+
+Worked example — degraded ground:
+
+- **Rendering**: `groundDegraded` is a 0–1 float, so a tile can desaturate
+  continuously with it. Exhausted ground simply *looks* tired next to
+  healthy ground. No text, no budget, no repetition problem, and it directly
+  satisfies "mechanics visible on the map, not hidden in a meter."
+- **Prose**: *"The ground here is spent"* fires on approach to badly
+  degraded ground and nowhere else — it earns the line by saying *don't
+  bother harvesting*, which is the affordance rule from Part B.
+- **Chronicle**: *"The herd left; the valley had been picked over."*
+
+**The general lesson for this document:** before writing a describer for
+something, ask whether the renderer could carry it instead. A continuous
+visual signal has no vocabulary ceiling, never repeats, and never needs an
+anti-spam budget — which are exactly the three problems that nearly killed
+Part B.
+
+Practical wrinkle: `PEAT_DEGRADE_MAX` caps permanent damage well short of 1,
+so the visible range is narrow. The palette work has to be legible inside a
+small band, or the tell won't read.
+
 ## Honest gaps
 
 - **Part B is blocked on content, not on writing.** Ordinary underground
