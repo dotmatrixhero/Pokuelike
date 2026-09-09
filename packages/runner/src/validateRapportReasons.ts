@@ -73,6 +73,11 @@ const NUMBERS = [
   "no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
   "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
 ];
+/** Sentence-initial capital, for a clause that opens on a number or a count. */
+function cap(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /** A plain spelled cardinal — "three", not "3". */
 function count(n: number): string {
   return NUMBERS[n] ?? String(n);
@@ -126,7 +131,7 @@ function a(label: string | undefined, fallback: string): string {
  *   is real. Nothing invents an event that did not happen — no "never left my
  *   side" on an edge that only knows a count.
  */
-const CLAUSE: Record<RapportReason, (n: number, subject?: string) => string> = {
+const CLAUSE: Record<RapportReason, (n: number, subject?: string, kin?: "ours" | "other") => string> = {
   rescued: (n) =>
     n <= 1 ? `I carried them home when they could not walk.` : `I have carried them home ${times(n)}.`,
   wasRescued: (n) =>
@@ -138,20 +143,34 @@ const CLAUSE: Record<RapportReason, (n: number, subject?: string) => string> = {
       ? `We brought down ${a(s, "creature")} together.`
       : `We have brought down ${count(n)} between us, one of them ${a(s, "creature")}.`,
   bonded: () => `We are mates.`,
-  survivedTogether: (n, s) =>
-    n <= 1
-      ? `I watched ${a(s, "creature")} die, and they were beside me.`
-      : `${count(n).charAt(0).toUpperCase() + count(n).slice(1)} have died within sight of us both, one of them ${a(s, "creature")}.`,
+  // "Three have died" was ambiguous in the way that mattered: foes or allies?
+  // The subject now carries `kin`, so the sentence can just say.
+  survivedTogether: (n, s, kin) =>
+    kin === "ours"
+      ? n <= 1
+        ? `I watched one of our own die in front of us — ${a(s, "herd-mate")}.`
+        : `${cap(count(n))} of our own have died in front of us, the last of them ${a(s, "herd-mate")}.`
+      : n <= 1
+        ? `I watched ${a(s, "creature")} die in front of us. Not one of ours.`
+        : `${cap(count(n))} have died in front of us, the last of them ${a(s, "creature")}. None were ours.`,
   weatheredTogether: (n, s) =>
     n <= 1
       ? `${nameOf(s, "The weather")} drove us off our own ground, and we left together.`
       : `The world has driven us out together ${times(n)}.`,
   healed: (n) => (n <= 1 ? `I closed their wounds.` : `I have mended them through ${count(n)} bad stretches.`),
   wasHealed: (n) => (n <= 1 ? `They closed my wounds.` : `They have mended me through ${count(n)} bad stretches.`),
+  // Was "stood between them and what was coming" / "put themselves in front of
+  // me", which is euphemism — direct note: "put themselves in front sounds
+  // like a euphemism... more specificity please." What the mechanic actually
+  // is: a predator had locked onto a herd-mate, and this agent hit it.
   defended: (n) =>
-    n <= 1 ? `I stood between them and what was coming.` : `I have stood between them and what was coming ${times(n)}.`,
+    n <= 1
+      ? `Something had hold of them, and I hit it until it let go.`
+      : `${cap(times(n))} something has had hold of them, and ${times(n) === "twice" ? "both times" : "every time"} I hit it until it let go.`,
   wasDefended: (n) =>
-    n <= 1 ? `They stood between me and what was coming.` : `They have put themselves in front of me ${times(n)}.`,
+    n <= 1
+      ? `Something had hold of me, and they hit it until it let go.`
+      : `${cap(times(n))} something has had hold of me, and ${times(n) === "twice" ? "both times" : "every time"} they drove it off.`,
   sleptSafely: (n) =>
     n <= 1 ? `I have slept where they could reach me.` : `I have slept beside them ${times(n)}.`,
   keptWatch: (n) =>
@@ -161,9 +180,12 @@ const CLAUSE: Record<RapportReason, (n: number, subject?: string) => string> = {
   // have started it — a sentence the data cannot support. Liberty in the
   // connective tissue, never in the facts.
   struck: (n) =>
-    n <= 1 ? `I struck them once, over ground we both wanted.` : `I have struck them ${times(n)} over ground we both wanted.`,
+    n <= 1
+      ? `We both wanted the same water, and I hit them for it.`
+      : `We have wanted the same water ${times(n)}, and ${times(n) === "twice" ? "both times" : "every time"} I hit them for it.`,
+  // Was "come at me", which said nothing about what the fight was over.
   wasStruck: (n) =>
-    n <= 1 ? `They struck me once, over ground we both wanted.` : `They have come at me ${times(n)}.`,
+    n <= 1 ? `We both wanted the same water, and they hit me for it.` : `They have hit me ${times(n)} over water and feeding-ground we both wanted.`,
   sharedWater: (n) =>
     n <= 1
       ? `We stood over the same water and neither of us started anything.`
@@ -177,10 +199,13 @@ const CLAUSE: Record<RapportReason, (n: number, subject?: string) => string> = {
 };
 
 /** At most `limit` clauses, most significant first, as one line. */
-function describe(memories: { reason: RapportReason; count: number; subject?: { label: string } }[], limit = 2): string {
+function describe(
+  memories: { reason: RapportReason; count: number; subject?: { label: string; kin?: "ours" | "other" } }[],
+  limit = 2,
+): string {
   return memories
     .slice(0, limit)
-    .map((m) => CLAUSE[m.reason](m.count, m.subject?.label))
+    .map((m) => CLAUSE[m.reason](m.count, m.subject?.label, m.subject?.kin))
     .join(" ");
 }
 

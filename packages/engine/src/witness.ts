@@ -100,15 +100,20 @@ export function recordDeathWitnesses(world: World, rng: () => number = world.rng
     }
     if (witnesses.length < 2) continue;
 
-    // Name the thing. Direct steer: "defeating an enemy together — and naming
-    // specifically what it was would be great." A count says two creatures
-    // fought a lot; a subject says they brought down a Scyther.
-    const subject = { label: dead.species, id: dead.id, level: dead.level };
-
     for (let i = 0; i < witnesses.length; i++) {
       for (let j = i + 1; j < witnesses.length; j++) {
         const a = witnesses[i]!;
         const b = witnesses[j]!;
+        // Name the thing, and say whose it was. "Defeating an enemy together
+        // — and naming specifically what it was would be great", then:
+        // "'three have died' still confusing. Were they foes that died?
+        // Allies?" They were one or the other and the sim knew all along.
+        // Computed per pair rather than per death, because "one of ours" is
+        // a question about the two agents remembering it, not about the
+        // corpse: it is only `"ours"` when the dead shared a herd with BOTH.
+        const kin: "ours" | "other" =
+          dead.herdId !== undefined && dead.herdId === a.herdId && dead.herdId === b.herdId ? "ours" : "other";
+        const subject = { label: dead.species, id: dead.id, level: dead.level, kin };
         const bothLoved =
           rapportScore(a, dead.id, world.tick) >= MOURNING_MIN_RAPPORT &&
           rapportScore(b, dead.id, world.tick) >= MOURNING_MIN_RAPPORT;
