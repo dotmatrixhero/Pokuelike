@@ -4716,3 +4716,128 @@ that headroom is a balance decision, not a conversion one. The capstone
 depth drop to 9 is structural to v4 (Solar Beam sits at 9 for the same
 reason: lane B reaches the deep notable in four steps) and is not a
 regression specific to this tree.
+
+### Water Gun converted to v4 — "the one that irrigates"
+
+33 → 45 nodes, 12 per branch, 9 `anyOf`, 6 fork nodes, 3 real bridges. Both
+v3 forks survive, relocated to the tail of a lane. Checker findings for this
+tree: **10 → 0**, including the two overwrite collisions that Solar Beam and
+Hydro Pump are still carrying — Water Gun ends up with exactly one `shape`
+setter, one `range` setter and one `rallyCall` setter in the whole tree.
+
+**Hydro Pump had just been converted, which made the real risk obvious:**
+shipping a weaker fire hose. So the fantasy was written first, and written
+against its sibling rather than in isolation.
+
+> A hairline jet fired through a pinched mouth — pressure, not volume. Forty
+> power, a twenty-five-shot pool, two tiles of reach. It does not knock
+> anything over; it stings, it blinds, and it **wets**. The danger is not the
+> hit, it is the repetition: every landed shot leaves standing water where it
+> struck and puts a real fertility boost into that ground (`terrainFill` →
+> `waterSoil`, predation.ts), so a creature that keeps firing is quietly
+> rebuilding the ground the fight is happening on. Hydro Pump is one release
+> you can barely aim; Water Gun is the same animal doing one small exact
+> thing forty times, and the map remembers every one of them.
+
+Each branch answers that, and each branch's two lanes differ in **kind**:
+
+| branch | lane A | lane B | the new idea |
+|---|---|---|---|
+| **The Fine Point** (agg) | the CUT — penetration, then *Piercing Jet* pinching the two-tile line into a three-tile one | the RATE — cooldown, then *Stuttering Jet*'s 1–2 hits, ending at the preserved heavy-vs-double fork | *Stuttering Jet* |
+| **Standing Water** (bold) | SPACE — the knockback/recoil chain, nothing gets to arm's length | PLANTED — *Drink the Puddle*, then the preserved unsteady-them-vs-steel-yourself fork | *Drink the Puddle*, *Sheeting Spray* |
+| **The Waterhole** (soc) | CARE — heal the pod, steel it, share more of it | COMMAND — *Rally the Shoal* marks the threat, then cover the pod or press the mark | *Rally the Shoal*, *Fuller Share* |
+
+**The best node in the tree is *Drink the Puddle*, and it is the one Hydro
+Pump could not have.** Hydro Pump drafted `consumesOwnTerrain: { terrain:
+"water" }` and cut it, for a good reason recorded above: `predation.ts`
+reverts the consumed tile to `"floor"` permanently, and a Water species
+fights standing on water constantly, so it is a plausible ecology regression
+on a resource the sim actually meters. Water Gun is the one move in the
+roster that answers that objection, because its **base** `terrainFill` puts a
+fresh water tile under every landed, non-killing hit. The tree that spends
+puddles is the same tree that makes them — net-neutral on the map, and the
+only node anywhere where a move's own side effect is its own ammunition.
+
+***Sheeting Spray*** is the Boldness capstone, and it is the roster's only
+node that turns a single-target line into an area sweep. It also came with a
+correction worth recording, because the first version of its source comment
+was **wrong**: it claimed a build with Piercing Jet would leave a puddle
+under each of three tiles. Driven for real against `tickWorld`, it does not —
+`terrainFill` sits behind `isPrimaryTarget` in `resolveHitAgainstTarget`, so
+an area sweep still leaves exactly **one** water tile per cast. Measured:
+1 puddle for the base move and 1 for Sheeting Spray, while the secondary
+target went from **0 damage to 33**. The comment now says what the engine
+does, not what the design wanted.
+
+**Four levers checked at the call site and rejected, all of them as
+unreachable content rather than as taste:**
+
+- `spawnsRain`, `drainNeeds`, `fertilityBoost`, `statusImmunityAura`. Every
+  one of these is only ever read inside `maybeUseUtilityMove`
+  (utilityMoves.ts), whose candidate list is `agent.moves.filter(m =>
+  m.utilityMove)`. Water Gun is a damage move and `utilityMove` is not a
+  `delta` field, so all four would have been dead the moment they shipped —
+  and `spawnsRain` in particular reads as a *perfect* capstone for a tree
+  with two weather situational-bonus nodes, which is exactly why it needed
+  the grep instead of the vibe.
+- `gatherBurst`. Live for a damage move, but Hydro Pump — the same type
+  family, converted one tree ago — already owns it, and the only canopy crop
+  is Apple (`eligibleBiomes: ["forest"]`, autumn only). A sibling re-skin on
+  a narrow path.
+- `excludesAllies`. Only consulted inside `resolveAreaHit`, so it does
+  nothing on a move without `hitsArea`. Putting it in Sociability while
+  `hitsArea` lives in Boldness would have made it cross-branch dead content
+  for every build that did not take both.
+- A fourth `critRateStage` node. `rollCritical` (combat.ts) clamps the stage
+  to 3, and the Sociability↔Aggression bridge already grants exactly 3. A
+  fourth would provably do nothing. The whole tree's crit budget therefore
+  lives on that one bridge, which also gives the bridge a character.
+
+**Passive discipline: zero new passives, and one passive-shaped node
+answered with a `delta` instead.** *Fuller Share* deepens the opener's own
+`allyEffect` rather than granting a fourth healing kind, and the old
+`+5 Accuracy` filler in the Boldness capstone approach became *Braced Spray*
+(`weightScaling`), which is systemic rather than granted: `predation.ts`'s
+weight term already reads positive Defense stages, so a build that came
+through *Bubble Shield* gets more out of it than one that came through
+*Undertow*, with nothing pairing the two nodes explicitly.
+`passive-exposure.ts` output is **byte-identical** before and after.
+
+**Six `+5 Accuracy` fillers on a 100-accuracy move.** That was a third of
+this tree's filler, and `rollAccuracy` (combat.ts) only ever spends the
+surplus through `stormAccuracyMultiplier`. Four were repurposed into real
+levers; **two were kept on purpose**, in the branch whose own opener wants a
+storm and in the lane that stands in the open holding a spot — those two are
+buying back exactly what the weather takes off them.
+
+**Balance, with the roster as control:**
+
+| | before | after | roster median |
+|---|---|---|---|
+| nodes | 33 | **45** | 39 |
+| distinct levers | 18 | **24** | 23 |
+| colour-pie flavours | 8 | **11** | 9 |
+| tempo | 1.00x (cap 2.00) | **2.00x** | 1.80–2.00x |
+| power | 1.88x | 2.58x | 2.20x |
+| cheapest capstone | 11 pts | 9 pts | 11 pts |
+| checker problems | 10 | **0** | — |
+
+**One balance number was moved and it should be looked at.** The tree spent
+**zero** of the −2 cooldown the 3x cap allows on a base-3 move; it now spends
+both (`-1 Cooldown` in the rate lane, and `Stuttering Jet`). Tempo goes
+1.00x → 2.00x. That is a real buff, chosen because repeatability is literally
+the fantasy — but it is a balance call, not a conversion one, and −1 (1.33x)
+or −0 are both available if 2.00x is too much for a move this cheap to fire.
+
+**Verified by running it, not by reading it.** Driving `maybeAutoRespec` on a
+real Squirtle with points to spend, once per disposition: **42 of 45 nodes
+bought in each case** (the missing three are the excluded fork sides), **all
+three capstones reached, from every disposition**. And driving `tickWorld`
+itself, with controls:
+
+| | measured | control |
+|---|---|---|
+| *Drink the Puddle*, standing on water | 15 damage, attacker's tile `water` → `floor` | 10 damage off water — exactly the 1.5x |
+| base move, standing on water | 9 damage, tile stays `water` | the consume is tree-earned, not baked in |
+| *Sheeting Spray*, two bodies in the line | 34 and **33** damage | base move: 7 and **0** |
+| puddles left per cast | **1** | base move: also 1 — `isPrimaryTarget` |

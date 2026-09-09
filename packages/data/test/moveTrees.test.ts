@@ -332,10 +332,8 @@ describe("Water Gun tree: resistanceBreaker fixes the real weakness", () => {
   it("Overwhelming Current keystone grants resistanceBreaker, not a redundant Fire bonus", () => {
     const respec = applyMoveTree(waterGun, [
       "high_pressure_jet",
-      "jet_conditioning",
       "pressurized_footing",
-      "piercing_jet",
-      "jet_precision",
+      "stuttering_jet",
       "torrent",
       "deluge",
       "jet_focus",
@@ -348,23 +346,42 @@ describe("Water Gun tree: resistanceBreaker fixes the real weakness", () => {
   it("Boldness branch's fork un-buffs the target (Undertow) as an alternative to buffing self (Bubble Shield)", () => {
     const undertow = applyMoveTree(waterGun, [
       "knockback_spray",
-      "spray_conditioning",
-      "evasive_spray_footing",
-      "retreating_current",
       "current_precision",
+      "drink_the_puddle",
       "undertow",
     ]);
     expect(undertow.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -1, ticks: 20 });
 
     const bubbleShield = applyMoveTree(waterGun, [
       "knockback_spray",
-      "spray_conditioning",
-      "evasive_spray_footing",
-      "retreating_current",
       "current_precision",
+      "drink_the_puddle",
       "bubble_shield",
     ]);
     expect(bubbleShield.statChangeOnHit).toEqual({ target: "self", stat: "defense", stage: 1, ticks: 20 });
+  });
+
+  it("Drink the Puddle spends a water tile the user is standing on — the loop the base move's own terrainFill feeds", () => {
+    const respec = applyMoveTree(waterGun, ["knockback_spray", "current_precision", "drink_the_puddle"]);
+    expect(respec.consumesOwnTerrain).toEqual({ terrain: "water", damageMultiplier: 1.5 });
+    // The base move is what puts the puddle there in the first place.
+    expect(waterGun.terrainFill).toEqual({ terrain: "water" });
+  });
+
+  it("Sheeting Spray is the tree's only hitsArea node, and Piercing Jet its only shape setter", () => {
+    const nodes = Object.values(waterGun.tree!);
+    expect(nodes.filter((n) => n.delta.hitsArea !== undefined).map((n) => n.id)).toEqual(["sheeting_spray"]);
+    expect(nodes.filter((n) => n.delta.shape !== undefined).map((n) => n.id)).toEqual(["piercing_jet"]);
+    const respec = applyMoveTree(waterGun, [
+      "knockback_spray",
+      "current_precision",
+      "drink_the_puddle",
+      "bubble_shield",
+      "tidal_guard",
+      "braced_spray",
+      "sheeting_spray",
+    ]);
+    expect(respec.hitsArea).toBe(true);
   });
 });
 
