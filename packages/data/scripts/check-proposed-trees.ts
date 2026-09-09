@@ -95,6 +95,43 @@ function problems(move: ProposedMove): string[] {
     }
   }
 
+  // The Disposition colour pie (MOVES_DESIGN.md): a branch picks two or three
+  // flavours from the palette and builds from those. A branch drawing on one
+  // or two is walking a straight line. Shipped roster averages 3.8.
+  const FLAVOUR: Record<string, string[]> = {
+    "raw damage": ["power", "hits", "critRateStage", "critCooldownReset", "statusSeverity", "weightScaling", "recoilFraction", "lifestealFraction", "p:bulk"],
+    "stealth/ambush": ["situationalBonus", "burrow", "p:unnoticed", "p:unnoticedAura", "p:huntTargetSkip"],
+    "aggressive movement": ["chargeAttack", "forcedMovement", "lockTicks"],
+    "piercing": ["defensePenetration", "resistanceBreaker", "bonusVsType"],
+    "defence": ["p:damageReduction", "p:damageReductionFlat", "p:defenseBoost", "p:thorns", "p:thornsRubble", "p:unshaken", "p:immovable", "p:fireproof"],
+    "environment": ["terrainBurn", "terrainFill", "consumesOwnTerrain", "createsTerrain", "spawnsRain", "fertilityBoost", "fertilityCeilingBoost", "floraRegrowthMultiplier", "floraCompetition"],
+    "wider aoe": ["shape", "hitsArea"],
+    "reposition others": ["positionSwap", "positionSwapPull"],
+    "planted/duration": ["statChangeOnHit", "p:terrainUnhindered", "p:dispersalSpeed", "herdMigrationResistance"],
+    "healing": ["p:healAura", "p:regen", "p:regenFlat", "selfHeal", "herdForageBonus", "gatherBurst"],
+    "no friendly fire": ["excludesAllies"],
+    "rallying": ["rallyCall"],
+    "ally buffing": ["targetsAlly", "allyEffect", "allyEffectOnAttack", "p:herdHaste", "p:aquaticHaste"],
+    "calming": ["p:calmingPresence", "p:nonTerritorial", "statusImmunityAura"],
+  };
+  const flavourOf = new Map<string, string>();
+  for (const [f, ks] of Object.entries(FLAVOUR)) for (const k of ks) flavourOf.set(k, f);
+  for (const branch of ["aggression", "boldness", "sociability"] as const) {
+    const bn = nodes.filter((n) => n.leaning === branch && !bridgeIds.has(n.id));
+    if (!bn.length) continue;
+    const fl = new Set<string>();
+    // NOT `signature()` — that strips background stats for principle 17's
+    // repetition check, and defensePenetration/resistanceBreaker ARE the
+    // piercing flavour. Flavour coverage reads every lever a node pulls.
+    const allLevers = (n: ProposedNode) => [...new Set([
+      ...Object.keys(n.delta ?? {}),
+      ...(n.grantsPassive ? [`p:${n.grantsPassive.kind}`] : []),
+      ...(n.grantsPassives ?? []).map((g) => `p:${g.kind}`),
+    ])];
+    for (const n of bn) for (const k of allLevers(n)) { const f = flavourOf.get(k); if (f) fl.add(f); }
+    if (fl.size < 3) out.push(`${branch} branch: draws on only ${fl.size} flavour(s) [${[...fl].join(", ")}] — the colour pie says pick two or three and build from those (shipped roster averages 3.8)`);
+  }
+
   // A node that is pure downside is a bug, not a design choice (principle 4).
   const DOWNSIDE = new Set(["recoilFraction", "selfCostPerUse", "lockTicks"]);
   for (const n of nodes) {

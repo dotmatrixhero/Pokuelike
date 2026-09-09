@@ -3456,3 +3456,122 @@ different thing from a number going up five times.
 `check-proposed-trees.ts` now fails any branch over 60%, and its
 `--selftest` includes a five-node all-`rallyCall` branch so the rule is
 proven to fire.
+
+## The Disposition colour pie — the flavour palette for every branch
+
+**This is the reference that should have existed before round six was
+designed, and its absence is why those drafts came out narrow.** Direct:
+
+> "Branches need to have multiple Flavors to it, not a linear path. I've
+> talked about the different aspects of like aggression can be stealth, it
+> can be aggressive movement. It can be raw damage. It can be piercing
+> projectiles. [...] Think of it like the colors in magic. Red can be life
+> burn or removal, blue can be hand manipulation or counter spells, etc.
+> Our levers, our mechanics can map in loose ways to fit the fantasy of
+> these branches. All of these types of flavors need to be considered when
+> designing a branch under the fantasy."
+
+What the doc had before this: principle 6 says "widen a branch's *allowed*
+flavor before widening its mechanics," and template v3's rule 1 names three
+flavours **for Aggression only** (raw power / hunting-stealth / clashing),
+with a single worked Boldness example (Earthquake terraforming) and
+**nothing at all for Sociability**. That is a third of a colour pie
+described in prose. Here it is as a real table, with every flavour mapped
+to the levers that actually exist.
+
+An axis is a *colour*, not a mechanic. A branch picks two or three flavours
+from its axis that fit the move's fantasy and builds from those — it does
+not walk one of them in a straight line. Flavours may also be borrowed
+across axes when the fantasy demands it (a shelled pupa's Aggression drawn
+from defensive levers is legitimate); what is not legitimate is a branch
+that never chose.
+
+### Aggression
+
+| Flavour | Levers that serve it |
+|---|---|
+| Raw damage | `power`, `hits`, `critRateStage`, `critCooldownReset`, `statusSeverity`, `weightScaling`, `recoilFraction`, `lifestealFraction` |
+| Stealth / ambush | `situationalBonus` (`concealed`, `night`, `flanking`, `elevation`), `burrow`, proposed `unnoticed` |
+| Aggressive movement | `chargeAttack`, `forcedMovement` (mover: attacker), `lockTicks` as commitment |
+| Piercing projectiles | `defensePenetration`, `resistanceBreaker`, `bonusVsType`, `range`, line/`shape` |
+| Clashing (resource contest) | `herdConflict.ts`-scoped bonuses — **still has no `situationalBonus` condition**, a real flagged gap |
+
+### Boldness
+
+| Flavour | Levers that serve it |
+|---|---|
+| Defence | `damageReduction`, `defenseBoost`, `thorns`, `unshaken`, `immovable`, `fireproof` |
+| Manipulating the environment | `terrainBurn`, `terrainFill`, `consumesOwnTerrain`, `spawnsRain`, `fertilityBoost`, proposed rubble |
+| Wider AoE | `shape` (ring/burst/cone), `hitsArea` — notable/keystone currency only, per principle 14 |
+| Attention-grabbing | **`aggroRedirect` — DOES NOT EXIST.** See below. |
+| Repositioning other units | `forcedMovement` (mover: defender), `positionSwap`, `positionSwapPull` |
+| Planting one's feet / duration | `lockTicks`, `immovable`, `statChangeOnHit`'s `ticks`, `statusSeverity`'s duration, `chargeAttack` |
+
+### Sociability
+
+| Flavour | Levers that serve it |
+|---|---|
+| Healing | `allyEffect.healFraction`, `healAura`, `regen`, `regenFlat`, `selfHeal` |
+| Preventing friendly fire | `excludesAllies` |
+| Rallying | `rallyCall` + `preferMarked`, `allyEffectOnAttack` |
+| Stat boosting | `allyEffect.buff`, `targetsAlly`, `aquaticHaste`, proposed `herdHaste` |
+| Calming auras (reducing others' aggression and clashing) | `calmingPresence`, `nonTerritorial`, `statusImmunityAura` |
+
+### The one flavour with no mechanics at all
+
+**Attention-grabbing has zero engine support.** `aggroRedirect` is named in
+this doc's own lever brainstorm as unbuilt, and **three shipped trees carry
+a source comment saying they wanted it and settled for `damageReduction`
+instead** (moves.ts lines 69, 407, 1182 — Tackle's *Bulwark* among them).
+A whole flavour of Boldness has been quietly unavailable this entire time,
+and the workaround has been shipped three times. With the palette written
+down it is now obviously the highest-value missing primitive on the board:
+it is the difference between a defensive branch that survives and one that
+*protects*, which is the thing "boldness" is supposed to mean.
+
+### Audit: the round-six drafts against this palette
+
+Distinct flavours drawn on per branch, bridges excluded:
+
+| | shipped | round-six drafts |
+|---|---|---|
+| mean flavours per branch | **3.8** | **2.9** |
+| mean distinct levers per branch | **8.3** | **6.9** |
+
+Three of the drafts' fifteen branches draw on exactly one flavour:
+`growth/aggression` (11 nodes, all environment), `growth/boldness` (10
+nodes, all environment), `agility/boldness` (10 nodes, all
+planted-duration). And three flavours are touched by no proposed branch at
+all: aggressive movement, attention-grabbing, and preventing friendly fire.
+
+Direct follow-up while this was being written: "USE MORE LEVERS. Your
+levers are so monotonous." The numbers agree — 6.9 against 8.3 — and the
+unmapped tail is the specific evidence: `jamCooldownTicks`, `statusSpreads`,
+`selfStateBonus`, `drainNeeds`, `gatherBurst`, `selfCostPerUse`,
+`statusChance` and `range` are all real, shipped, and barely appear.
+
+### The widening pass, measured
+
+| | shipped | drafts before | drafts after |
+|---|---|---|---|
+| distinct flavours per branch | 3.8 | 2.9 | **3.7** |
+| distinct levers per branch | 8.3 | 6.9 | **9.4** |
+| top signature lever's share of a branch | 34% | 51% | **42%** |
+| branches drawing on one flavour | 0 | 3 | **0** |
+
+The levers that went in are specifically the ones the audit named as
+sitting unused: `gatherBurst` (4 users in the whole roster) on Growth's
+*Quicker Season*, `drainNeeds` (6 users, never once as a weapon) on *It Was
+All Grass*, `jamCooldownTicks` (16 users, none on a status move) on Harden's
+*Sharp Seams*, `selfStateBonus` (3 users) on Agility's *No Bad Ground*,
+`consumesOwnTerrain` (1 user) on *The Short Way*, plus `range`, `lockTicks`,
+`statusSpreads` and real `shape` changes where a branch had spent none of
+its notable-tier currency.
+
+`check-proposed-trees.ts` now fails any branch drawing on fewer than three
+flavours, with the colour pie encoded as the lever→flavour map. Its
+`--selftest` covers this rule too.
+
+**Still true after the pass, and worth keeping visible:** no proposed
+branch uses `excludesAllies` (preventing friendly fire), and nothing in the
+entire roster can grab attention, because that primitive was never built.
