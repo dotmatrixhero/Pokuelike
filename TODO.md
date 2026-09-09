@@ -6838,3 +6838,27 @@ not something this pathfinding pass itself caused or is positioned to fix.
       Voltorb/Electrode, Koffing/Weezing. Real, arted Gen-1 species — could
       still be added if the "no natural biome" call is wrong; a request to
       revisit is enough to redo it.
+
+## Fixed: predator population per zone hard-capped — see DESIGN.md
+
+- [x] Direct report: "Kabutops are just utterly slaughtering everything...
+      make high level predators like no more than 2 in a zone." Verified
+      first: Kabutops (evolution floor level 40 + PREDATOR_LEVEL_BOOST) was
+      spawning at level 46-51 against level-5 co-spawned prey in the same
+      zone — the real cause is the level gap, population itself was already
+      only 5-7. Added the requested `PREDATOR_POPULATION_CAP = 2` anyway —
+      real and requested, fewer high-level killers doing the damage — a
+      real zone's Kabutops population measured at exactly 2.00 after (was
+      5.3-7.5 before). Caught a real collision with the existing Sanctuary
+      predator-discount test along the way: a flat cap applied AFTER the
+      Sanctuary's own extra discount clamped both the ordinary and
+      Sanctuary case to the same number, erasing the "Sanctuary is even
+      thinner on predators" signal — fixed by capping first, then applying
+      Sanctuary's discount on top of the already-capped number.
+- [ ] **Still open, the deeper cause**: the level gap itself. Kabutops
+      (level 40 floor) is the roster's most extreme case, but Charizard
+      (36), Tentacruel (30), Haunter (25) aren't far behind, all spawning
+      well above most base-form prey's low end. `PREDATOR_LEVEL_BOOST`
+      (`immigration.ts`) already narrows this somewhat but wasn't designed
+      around an evolution floor this high. Not fixed here — a balance
+      call, not decided unilaterally.

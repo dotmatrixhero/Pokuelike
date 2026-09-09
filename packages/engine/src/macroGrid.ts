@@ -701,6 +701,23 @@ const LANDMARK_PREDATOR_POOL_BONUS = 2;
  * presence read as negligible.
  */
 const PREDATOR_POPULATION_DISCOUNT = 0.55;
+/**
+ * A hard ceiling on one predator species' own invented population, on top
+ * of `PREDATOR_POPULATION_DISCOUNT`'s proportional thinning — direct
+ * report: "Kabutops are just utterly slaughtering everything... make high
+ * level predators like no more than 2 in a zone." A real generated zone
+ * measured before this cap: Kabutops (its own real evolution floor, level
+ * 40, plus `immigration.ts`'s `PREDATOR_LEVEL_BOOST`) was spawning at
+ * level 46-51 against co-spawned prey — Shellder/Psyduck/Krabby — rolling
+ * as low as level 5 in the SAME zone, a 40+ level gap; population itself
+ * was already only 5-7 (the existing discount above was already working
+ * as designed). The level gap is the deeper cause and this cap alone
+ * doesn't fix it (even 2 individuals at level 50 among level-5 prey is
+ * still a massacre) — flagged separately, not solved here. This constant
+ * is the real, requested piece: fewer high-level killers doing the
+ * damage, whatever the level gap turns out to be.
+ */
+const PREDATOR_POPULATION_CAP = 2;
 
 /**
  * Direct ask: "make certain zones more hospitable and prey friendly." A
@@ -844,18 +861,29 @@ export function estimateZoneSpecies(zone: MacroZone, roster: readonly Immigratio
   );
   for (const species of pool) {
     const populationMultiplier =
-      (species.isPredator
-        ? PREDATOR_POPULATION_DISCOUNT * (isSanctuary ? SANCTUARY_PREDATOR_POPULATION_DISCOUNT : 1)
-        : isSanctuary
-          ? SANCTUARY_PREY_POPULATION_MULTIPLIER
-          : 1) *
+      (species.isPredator ? PREDATOR_POPULATION_DISCOUNT : isSanctuary ? SANCTUARY_PREY_POPULATION_MULTIPLIER : 1) *
       // See `ImmigrationSpeciesInfo.rarity`'s own doc comment — direct ask:
       // "make arboks less common."
       (species.rarity ?? 1);
+    let population = (SEED_POPULATION_BASE + rng() * SEED_POPULATION_VARIANCE) * multiplier * populationMultiplier;
+    if (species.isPredator) {
+      // `PREDATOR_POPULATION_CAP` applied BEFORE the Sanctuary-specific
+      // extra discount, not composed into one combined multiplier — a flat
+      // ceiling would otherwise clamp an ordinary zone's already-modest
+      // predator population (typically 2.2-7.7 pre-cap) down to the SAME
+      // number a Sanctuary's own further-discounted population lands on,
+      // erasing the real "Sanctuary is even thinner on predators" signal
+      // this function's own Sanctuary test checks for. Capping first, then
+      // discounting the Sanctuary case on top of that already-capped
+      // number, keeps Sanctuary's population strictly lower than an
+      // ordinary zone's, same as every other Sanctuary mechanic here.
+      population = Math.min(PREDATOR_POPULATION_CAP, population);
+      if (isSanctuary) population *= SANCTUARY_PREDATOR_POPULATION_DISCOUNT;
+    }
     estimates.push({
       speciesId: species.id,
       homeLayer: species.homeLayer,
-      population: (SEED_POPULATION_BASE + rng() * SEED_POPULATION_VARIANCE) * multiplier * populationMultiplier,
+      population,
       minLevel: species.minLevel,
       singleStage: species.singleStage,
       isPredator: species.isPredator,

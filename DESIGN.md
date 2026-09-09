@@ -15040,3 +15040,46 @@ Electabuzz, Hitmonlee/Hitmonchan, Mr. Mime, the Magnemite/Voltorb/Koffing
 
 Full engine suite (1262 tests) and data suite (240 tests) green; typechecks
 clean across engine/data/web/runner.
+
+## Fixed: Kabutops (and other high-level predators) capped at 2 per zone
+
+Direct report: "LOL kabutops are just utterly slaughtering everything.
+Maybe make high level predators like... No more than 2 in a zone?"
+
+**Verified first, not assumed.** Generated a real 60x60 grid, sampled 5
+real Beach/Wetland zones' invented species pools: Kabutops (evolves at
+level 40) was spawning at level 46-51 (its own evolution floor +
+`immigration.ts`'s `PREDATOR_LEVEL_BOOST`), while co-spawned prey in the
+SAME zone — Shellder, Psyduck, Krabby — rolled as low as level 5. A 40+
+level gap. Population itself was already only 5-7 individuals — the
+existing `PREDATOR_POPULATION_DISCOUNT` (0.55x) was already doing its job.
+So the real mechanism behind "slaughtering everything" is the level gap,
+not headcount.
+
+**Implemented the requested cap anyway** — real, and it does help (fewer
+level-50 killers doing the damage, even if each one is still dangerous):
+`PREDATOR_POPULATION_CAP = 2` in `macroGrid.ts`, applied in
+`estimateZoneSpecies`. Re-measured: Kabutops population across 5 real
+zones landed at exactly 2.00 (was 5.3-7.5).
+
+**A real collision with an existing test, caught immediately.** A first
+version applied the cap to the ALREADY-Sanctuary-discounted population
+number — for a Sanctuary zone, `Math.min(2, raw * 0.55 * 0.6)` and for an
+ordinary zone `Math.min(2, raw * 0.55)` both frequently landed on the same
+2.0 ceiling, since typical raw predator population before any cap
+(4-14 * 0.55 = 2.2-7.7) almost always exceeds 2 either way — erasing the
+"Sanctuary zones are even thinner on predators" signal `macroGrid.test.ts`
+already checks for (`expected 2 to be less than 2`). Fixed by capping
+FIRST, then applying the Sanctuary's own extra discount on top of the
+already-capped number — `Math.min(2, raw) * (isSanctuary ? 0.6 : 1)` —
+so a Sanctuary's predator population is always strictly below an ordinary
+zone's, same as every other Sanctuary mechanic in this file.
+
+**The deeper cause is still open, flagged rather than fixed unilaterally.**
+Kabutops' level-40 evolution floor is the roster's most extreme, but
+Charizard (36), Tentacruel (30), and Haunter (25) aren't far behind —
+`PREDATOR_LEVEL_BOOST` softens the gap somewhat but wasn't designed around
+a floor this high. Whether to lower specific species' boost, widen prey's
+own upper range further, or leave it as "yes, an ambush-tier predator
+should occasionally roll in strong" is a real balance call, not decided
+here. Full engine suite (1262 tests) green after the fix.
