@@ -3846,3 +3846,153 @@ deliberately stranding one and confirming the report:
 fork deep_reserve/slow_to_shift: the two sides never reconverge — one of them
 is a dead end (deep_reserve -> [nothing], slow_to_shift -> [set_bone])
 ```
+
+### The two-lane branch, finished shape
+
+Three corrections landed on the pilot in sequence, each fixing something real:
+
+1. *"I mean little like path of exile. Like multi paths to same notable."* —
+   filler alternatives stopped being mutually exclusive. 30 `excludes`
+   removed; scarcity of points is what makes a route a decision, not a
+   lockout.
+2. *"x x Y x x / a a B a a ... you can technically go both Y and B
+   'excludes' you just have to invest a Lotta skill in it."* — two parallel
+   lanes, each with its own notable.
+3. *"did you get rid of a deeper notable on each branch? You could have the
+   paths converge to a linear notable, then have another linear single filler
+   and single end capstone to really make it feel complete?"* — **yes, I
+   had.** Collapsing to lanes cut identity nodes per branch from 5 to 3; the
+   deep convergence notable was simply gone.
+
+The finished branch, 12 nodes:
+
+```
+                opener
+        ┌──────────┴──────────┐
+   x → x → [LANE NOTABLE] → x   a → a → [LANE NOTABLE] → a
+        └──────────┬──────────┘
+              [DEEP NOTABLE]        <- both lanes end here
+                    │
+                 filler
+                    │
+               [CAPSTONE]
+```
+
+Four identity nodes per branch, 45 nodes per tree, and every capstone sits
+26 points deep by the cheapest route. Walking one lane costs 16; walking both
+costs 21 — you *can*, it just costs five more points.
+
+**Bridges land deep now, and on one lane each.** They used to drop you at a
+lane's *entry*, which is the shallowest possible landing. Each bridge notable
+is now an alternate route into a **lane notable** — skipping that lane's
+filler grind but never the lane choice itself (principle 12, restated for
+lanes). And per *"I'm okay if the cross links only let you move to one of the
+two soft exclusive branches"*, each bridge reaches **one lane per branch**,
+which gives every bridge a character instead of making it a skeleton key:
+
+| Bridge | joins | character |
+|---|---|---|
+| Blur of Needles | Pincushion (agg) + Never Landed (bold) | tempo dropped into the slow lane |
+| Ambush Hive | High Pass (bold) + Converge (soc) | the two patient, high lanes |
+| Venom Mark | Fourth Needle (agg) + Drone Relay (soc) | venom that holds, on the fast lane |
+
+The Aggression pair was swapped for a reason that started visual and turned
+out to be a design improvement: *"Blur of needles should probably go to
+conserving draw and vice versa just to get it to not get visually
+confusing."* The two shortcut lines were crossing the entire tree to reach
+the far lane. Un-crossing them means each bridge now **complements** its lane
+instead of matching it — a tempo bridge landing in the slow, measured reserve
+lane supplies the tempo that lane otherwise lacks, and the venom bridge lands
+where four needles can each carry venom that holds. Matching a bridge to the
+lane that already shares its identity just deepens a rut.
+
+One adjustment to the literal ask: the landings are on the lane **notables**
+(Pincushion, Fourth Needle), not the fillers past them (Conserving Draw, Thin
+Point). Landing past a notable skips it, and a bridge may skip a lane's grind
+but never its decision — principle 12, restated for lanes.
+
+**Two things the new capstone tier finally bought:**
+
+- *Empty the Sacs* is the **deferred Nx-PP lever**, at last at the tier it
+  belongs: 5 PP in one use for everything the Beedrill has. That idea has sat
+  in this document unbuilt since the PP brainstorm.
+- *The Swarm Decides* uses `excludesAllies` — the one Sociability flavour
+  **no proposed branch touched**, flagged by this document's own colour-pie
+  audit. A hive-wide AoE that no longer stings its own is exactly where it
+  belongs.
+
+Four drafts still use the previous shape. Rolling this out to them is a
+decision, not an oversight — one tree was piloted first on purpose.
+
+## Skill-tree template v4 — the two-lane standard (proposed for all moves)
+
+> "Perhaps we should standardize that for ALL moves. This exact shape of
+> tree?" / "Well they should get a skill point every level right."
+
+### First, the reach check — because depth is only real if agents get there
+
+A capstone 26 points deep needs a level-27 agent to exist. Measured, 3 seeds
+x 4,000 ticks, 67 living agents, plus the existing `validateCapstoneReach`
+over 4 seeds x 8,000 ticks:
+
+| | |
+|---|---|
+| level | min 6 · **p50 25** · p90 34 · p99 46 · max 46 |
+| an 8-point node | reachable by 94% of agents |
+| a 16-point node | 82% |
+| a 21-point node | 72% |
+| **a 26-point node** | **45%** |
+| currently reach a terminal capstone | 33% |
+| **unspent points banked per agent** | **9.81** |
+
+So the two-lane tree's 26-point capstones land at 45% reach — *better* than
+the 33% the current roster manages. And the decisive number is the last one:
+agents are sitting on ~10 unspent points each. **There is real headroom for
+deeper trees**; the roster is currently too shallow for its own progression
+curve, not too deep. Depth is affordable.
+
+(That 9.81 figure is worth its own investigation — points banked and never
+spent is either an AI picking constraint or genuinely nothing worth buying.
+Logged, not chased here.)
+
+### The standard
+
+Per branch, 12 nodes:
+
+```
+                opener
+        ┌──────────┴──────────┐
+   x → x → [LANE NOTABLE] → x   a → a → [LANE NOTABLE] → a
+        └──────────┬──────────┘
+              [DEEP NOTABLE]
+                    │
+                 filler
+                    │
+               [CAPSTONE]
+```
+
+Plus three crosslink bridges (crosslink → filler deepening its own lever →
+cost-2 notable), each landing on **one lane notable per branch** it connects,
+complementing that lane rather than matching it. Nine `prerequisitesAnyOf`:
+six lane notables plus three deep notables.
+
+### The one place this standard must NOT be rigid: node count
+
+**Structure is the standard. 45 nodes is not.** This document already learned
+this once, in the crosslink rollout:
+
+> "dig (29) and leech_seed (31) were deliberately left short. Their honest
+> lever sets are smaller, and inflating them to hit a number is exactly the
+> template failure the rest of this document exists to prevent. Matching the
+> flagships' *structure* was the finding; matching their *node count* was
+> not."
+
+A move with a thin honest lever set gets the same shape with **shorter
+lanes** — two rungs instead of three, 10 nodes per branch instead of 12 —
+not three invented fillers to hit a number. Diglett's Dig does not have 45
+nodes' worth of real ideas in it, and pretending otherwise produces exactly
+the copy-pasted feel the v3 redesign existed to kill.
+
+`check-proposed-trees.ts` therefore enforces the **shape** — two lanes, a
+notable in each, a deep convergence notable, a filler, a capstone, three
+bridges, nine anyOf — and says nothing about how many nodes fill it.

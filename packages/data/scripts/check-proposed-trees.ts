@@ -239,6 +239,35 @@ function problems(move: ProposedMove): string[] {
     out.push(`grants maxPPBonus (${sellers.map((n) => n.id).join(", ")}) but nothing in the tree costs PP — a dead pick, not a choice`);
   }
 
+  // Template v4 shape check: per branch, two lanes each with a notable,
+  // converging on a DEEPER notable, then a filler, then a capstone. Node
+  // COUNT is deliberately not checked — a thin lever set gets shorter lanes,
+  // not invented filler (the dig/leech_seed lesson).
+  for (const branch of ["aggression", "boldness", "sociability"] as const) {
+    const bn = nodes.filter((n) => n.leaning === branch && !bridgeIds.has(n.id));
+    if (!bn.length) continue;
+    const identity = bn.filter((n) => n.cost >= 2);
+    if (identity.length < 4) {
+      out.push(`${branch} branch: ${identity.length} identity nodes — v4 wants 4 (two lane notables, a deep notable, a capstone)`);
+      continue;
+    }
+    // The deep notable is the one both lanes reach; the capstone is terminal.
+    const terminal = identity.filter((n) => !bn.some((o) => (o.prerequisites ?? []).includes(n.id) || (o.prerequisitesAnyOf ?? []).some((s) => s.includes(n.id))));
+    if (terminal.length !== 1) {
+      out.push(`${branch} branch: ${terminal.length} terminal identity nodes (${terminal.map((n) => n.id).join(", ")}) — v4 wants exactly one capstone`);
+    }
+    const deep = identity.find((n) => (n.prerequisitesAnyOf ?? []).length >= 2 && !terminal.includes(n));
+    if (!deep) out.push(`${branch} branch: no deep notable both lanes converge on`);
+    else {
+      // Capstone must sit behind the deep notable via a filler, not directly.
+      const cap = terminal[0];
+      if (cap) {
+        const direct = (cap.prerequisites ?? []).includes(deep.id) || (cap.prerequisitesAnyOf ?? []).some((s) => s.includes(deep.id));
+        if (direct) out.push(`${branch} branch: capstone ${cap.id} hangs straight off the deep notable — v4 wants one filler between them`);
+      }
+    }
+  }
+
   // A node that is pure downside is a bug, not a design choice (principle 4).
   const DOWNSIDE = new Set(["recoilFraction", "selfCostPerUse", "lockTicks"]);
   for (const n of nodes) {
