@@ -50,6 +50,18 @@ ascent. Two things need a ruling before anything is built:
    Presence + Feed only reaches *Tolerant*, layer 1 delivers less than the
    prototype assumed.
 
+## OPEN: the dispersal offer — see CAMPAIGN_DESIGN.md
+
+Proposed explicit text-decision moment at the last trust rung, triggered off
+a real dispersing individual. Four calls open there (who initiates, whether
+resources are involved, frequency, cost of refusal).
+
+**Blocking measurement:** how many dispersal events fire in a layer-1-sized
+region over ~400 turns across several seeds. Trigger 1 is disposition-gated
+(factor 0 for timid+social) and the fallbacks need sustained stretches — if
+this fires near-zero in a real run the whole path is unreachable content.
+Not yet run.
+
 ## DECIDED: items and moves are one system — see MOVES_AND_TOOLS.md
 
 Direction confirmed: *"I'm fairly confident about the items as moves
