@@ -3815,44 +3815,44 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       focusing_lens: {
         id: "focusing_lens",
+        prerequisites: ["gathering_light"],
         name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["gathering_light"],
         leaning: "aggression",
         delta: { cooldownTicks: -1 },
       },
       dominance_footing: {
         id: "dominance_footing",
+        prerequisites: ["gathering_light"],
         name: "+5 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["focusing_lens"], ["rooted_assault"], ["territorial_flare"]],
         leaning: "aggression",
         delta: { accuracy: 5 },
       },
       piercing_ray: {
         id: "piercing_ray",
+        prerequisitesAnyOf: [["sunlit_focus"], ["heliostand"]],
         name: "Piercing Ray",
         cost: 1,
-        prerequisites: ["dominance_footing"],
         leaning: "aggression",
         delta: { defensePenetration: 0.3 },
       },
       widening_beam: {
         id: "widening_beam",
+        prerequisitesAnyOf: [["dominance_footing"], ["sunspot"]],
         name: "+2 Range",
         cost: 1,
         // Reachable the normal way, or via either crosslink bridge that
         // reaches into Aggression (Rooted Assault's and Territorial
         // Flare's own chains).
-        prerequisitesAnyOf: [["piercing_ray"], ["bedrock_beam"], ["dominant_bloom"]],
         leaning: "aggression",
         delta: { range: { max: 7 } },
       },
       withering_glare: {
         id: "withering_glare",
+        prerequisites: ["widening_beam"],
         name: "Withering Glare",
         cost: 1,
-        prerequisites: ["widening_beam"],
         excludes: ["overwhelming_beam"],
         leaning: "aggression",
         // Catches a challenger off guard, before it's even noticed the
@@ -3861,9 +3861,9 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       overwhelming_beam: {
         id: "overwhelming_beam",
+        prerequisites: ["widening_beam"],
         name: "Overwhelming Beam",
         cost: 1,
-        prerequisites: ["widening_beam"],
         excludes: ["withering_glare"],
         leaning: "aggression",
         // An all-in blast that leaves the user briefly exposed after.
@@ -3871,9 +3871,9 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       claim_the_grove: {
         id: "claim_the_grove",
+        prerequisites: ["dominant_bloom"],
         name: "Claim the Grove",
         cost: 2,
-        prerequisitesAnyOf: [["withering_glare"], ["overwhelming_beam"]],
         leaning: "aggression",
         // A rival Grass-type challenger gets punished hardest — a real
         // clash over territory, not a generic type-matchup bonus.
@@ -3881,17 +3881,17 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       dominance_precision: {
         id: "dominance_precision",
+        prerequisites: ["piercing_ray"],
         name: "+5 Accuracy",
         cost: 1,
-        prerequisites: ["claim_the_grove"],
         leaning: "aggression",
         delta: { accuracy: 5 },
       },
       sovereigns_beam: {
         id: "sovereigns_beam",
+        prerequisites: ["claim_the_grove"],
         name: "Sovereign's Beam",
         cost: 2,
-        prerequisites: ["dominance_precision"],
         leaning: "aggression",
         delta: { power: 15, critRateStage: 1 },
       },
@@ -3905,44 +3905,44 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       bulwark_footing: {
         id: "bulwark_footing",
+        prerequisites: ["sunlit_roots"],
         name: "+5 Accuracy",
         cost: 1,
-        prerequisites: ["sunlit_roots"],
         leaning: "boldness",
         delta: { accuracy: 5 },
       },
       bloom_footing: {
         id: "bloom_footing",
+        prerequisites: ["sunlit_roots"],
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["bulwark_footing"], ["rooted_assault"], ["shared_shade"]],
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
       },
       steadfast_bloom: {
         id: "steadfast_bloom",
+        prerequisitesAnyOf: [["bloom_footing"], ["the_canopy"]],
         name: "Steadfast Bloom",
         cost: 1,
-        prerequisites: ["bloom_footing"],
         leaning: "boldness",
         delta: { defensePenetration: 0.2 },
       },
       deepening_roots: {
         id: "deepening_roots",
+        prerequisitesAnyOf: [["bulwark_resolve"], ["guardians_ground"], ["verdant_wall"]],
         name: "+2 Range",
         cost: 1,
         // Reachable the normal way, or via either crosslink bridge that
         // reaches into Boldness (Rooted Assault's and Shared Shade's own
         // chains).
-        prerequisitesAnyOf: [["steadfast_bloom"], ["bedrock_beam"], ["grove_bulwark"]],
         leaning: "boldness",
         delta: { range: { max: 7 } },
       },
       guardians_ground: {
         id: "guardians_ground",
+        prerequisites: ["steadfast_bloom"],
         name: "Guardian's Ground",
         cost: 1,
-        prerequisites: ["deepening_roots"],
         excludes: ["verdant_wall"],
         leaning: "boldness",
         // Holds the high, defensible ground rather than turtling in place.
@@ -3950,9 +3950,9 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       verdant_wall: {
         id: "verdant_wall",
+        prerequisites: ["steadfast_bloom"],
         name: "Verdant Wall",
         cost: 1,
-        prerequisites: ["deepening_roots"],
         excludes: ["guardians_ground"],
         leaning: "boldness",
         // Retaliates against anyone striking while it channels.
@@ -3961,9 +3961,9 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       bulwark_bloom: {
         id: "bulwark_bloom",
+        prerequisites: ["deepening_roots"],
         name: "Bulwark Bloom",
         cost: 2,
-        prerequisitesAnyOf: [["guardians_ground"], ["verdant_wall"]],
         leaning: "boldness",
         // The beam's own recoiling light physically repels whoever it
         // strikes — a defensive push, not just a bigger hit.
@@ -3971,17 +3971,17 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       bulwark_resolve: {
         id: "bulwark_resolve",
+        prerequisites: ["bedrock_beam"],
         name: "+5 Accuracy",
         cost: 1,
-        prerequisites: ["bulwark_bloom"],
         leaning: "boldness",
         delta: { accuracy: 5 },
       },
       ancient_grove: {
         id: "ancient_grove",
+        prerequisites: ["bulwark_bloom"],
         name: "Ancient Grove",
         cost: 2,
-        prerequisites: ["bulwark_resolve"],
         leaning: "boldness",
         // An immovable, ancient guardian that punishes and endures.
         grantsPassives: [
@@ -3999,45 +3999,45 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       grove_footing: {
         id: "grove_footing",
+        prerequisites: ["grove_ward"],
         name: "+5 Accuracy",
         cost: 1,
-        prerequisites: ["grove_ward"],
         leaning: "sociability",
         delta: { accuracy: 5 },
       },
       grove_reach: {
         id: "grove_reach",
+        prerequisites: ["grove_footing"],
         name: "+2 Range",
         cost: 1,
-        prerequisitesAnyOf: [["grove_footing"], ["shared_shade"], ["territorial_flare"]],
         leaning: "sociability",
         delta: { range: { max: 7 } },
       },
       grove_muster: {
         id: "grove_muster",
+        prerequisitesAnyOf: [["grove_reach"], ["sunspot"]],
         name: "Grove Muster",
         cost: 1,
-        prerequisites: ["grove_reach"],
         leaning: "sociability",
         // The grove calls on the herd to converge and defend it together.
         delta: { rallyCall: { ticks: 20 } },
       },
       grove_precision: {
         id: "grove_precision",
+        prerequisites: ["grove_muster"],
         name: "+5 Accuracy",
         cost: 1,
         // Reachable the normal way, or via either crosslink bridge that
         // reaches into Sociability (Shared Shade's and Territorial
         // Flare's own chains).
-        prerequisitesAnyOf: [["grove_muster"], ["grove_bulwark"], ["dominant_bloom"]],
         leaning: "sociability",
         delta: { accuracy: 5 },
       },
       vital_bloom: {
         id: "vital_bloom",
+        prerequisites: ["grove_bulwark"],
         name: "Vital Bloom",
         cost: 1,
-        prerequisites: ["grove_precision"],
         excludes: ["steadfast_bloom_ally"],
         leaning: "sociability",
         // Explicit fork over the same "later node wins" ally-effect
@@ -4047,9 +4047,9 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       steadfast_bloom_ally: {
         id: "steadfast_bloom_ally",
+        prerequisites: ["grove_bulwark"],
         name: "Steadfast Bloom",
         cost: 1,
-        prerequisites: ["grove_precision"],
         excludes: ["vital_bloom"],
         leaning: "sociability",
         // ...or steeling it instead.
@@ -4057,17 +4057,90 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       grove_instinct: {
         id: "grove_instinct",
+        prerequisites: ["the_grove_answers"],
         name: "+5 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["vital_bloom"], ["steadfast_bloom_ally"]],
         leaning: "sociability",
         delta: { cooldownTicks: -2, accuracy: 5 },
       },
+      the_grove_answers: {
+        id: "the_grove_answers",
+        prerequisitesAnyOf: [["grove_precision"], ["vital_bloom"], ["steadfast_bloom_ally"]],
+        name: "The Grove Answers",
+        cost: 2,
+        leaning: "sociability",
+        // DEEP NOTABLE. Both lanes end here: the beam stops being one
+        // guardian's and becomes the grove's answer to being encroached on.
+        grantsPassive: { kind: "healAura", value: 0.01 },
+        delta: { allyEffectOnAttack: true },
+      },
+      sunward_stance: {
+        id: "sunward_stance",
+        prerequisites: ["rooted_assault"],
+        name: "Sunward Stance",
+        cost: 1,
+        leaning: "boldness",
+        // Bridge filler — deepens Rooted Assault's own penetration lever.
+        delta: { defensePenetration: 0.1 },
+      },
+      heliostand: {
+        id: "heliostand",
+        prerequisites: ["sunward_stance"],
+        name: "Heliostand",
+        cost: 2,
+        leaning: "aggression",
+        // BRIDGE NOTABLE. Rooted through the recoil, so the beam goes
+        // through what it is aimed at rather than shoving it.
+        delta: { defensePenetration: 0.2, power: 10 },
+      },
+      deeper_shade: {
+        id: "deeper_shade",
+        prerequisites: ["shared_shade"],
+        name: "Deeper Shade",
+        cost: 1,
+        leaning: "boldness",
+        // Bridge filler — deepens Shared Shade's own recovery lever.
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: {},
+      },
+      the_canopy: {
+        id: "the_canopy",
+        prerequisites: ["deeper_shade"],
+        name: "The Canopy",
+        cost: 2,
+        leaning: "sociability",
+        // BRIDGE NOTABLE. Shade thick enough that standing under it is
+        // itself the recovery.
+        grantsPassives: [
+          { kind: "regenFlat", value: 1.5 },
+          { kind: "healAura", value: 0.008 },
+        ],
+        delta: {},
+      },
+      flare_wider: {
+        id: "flare_wider",
+        prerequisites: ["territorial_flare"],
+        name: "Flare Wider",
+        cost: 1,
+        leaning: "sociability",
+        // Bridge filler — deepens Territorial Flare's own condition lever.
+        delta: { situationalBonus: { condition: "targetLowHp", multiplier: 1.3 } },
+      },
+      sunspot: {
+        id: "sunspot",
+        prerequisites: ["flare_wider"],
+        name: "Sunspot",
+        cost: 2,
+        leaning: "aggression",
+        // BRIDGE NOTABLE. The flare escalated into a held burn on whatever
+        // strayed into the grove's ground.
+        delta: { situationalBonus: { condition: "targetLowHp", multiplier: 1.6 }, critRateStage: 1 },
+      },
       eternal_grove: {
         id: "eternal_grove",
+        prerequisites: ["grove_instinct"],
         name: "Eternal Grove",
         cost: 2,
-        prerequisites: ["grove_instinct"],
         leaning: "sociability",
         grantsPassive: { kind: "regen", value: 0.04 },
         delta: { targetsAlly: true, allyEffect: { healFraction: 0.25, buff: { stat: "spAttack", stage: 1, ticks: 20 } } },
@@ -4076,9 +4149,9 @@ export const MOVES: Record<string, MoveSpec> = {
       // roots feed the beam's focus.
       rooted_assault: {
         id: "rooted_assault",
+        prerequisites: ["gathering_light", "sunlit_roots"],
         name: "Rooted Assault",
         cost: 1,
-        prerequisites: ["gathering_light", "sunlit_roots"],
         leaning: "aggression",
         delta: { defensePenetration: 0.2 },
       },
@@ -4087,9 +4160,9 @@ export const MOVES: Record<string, MoveSpec> = {
       // pre-fork nodes (Widening Beam / Deepening Roots).
       sunlit_focus: {
         id: "sunlit_focus",
+        prerequisites: ["focusing_lens"],
         name: "+0.1 Defense Penetration",
         cost: 1,
-        prerequisites: ["rooted_assault"],
         leaning: "aggression",
         // Deepens Rooted Assault's own lever directly, instead of a
         // generic accuracy bolt-on.
@@ -4097,9 +4170,9 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       bedrock_beam: {
         id: "bedrock_beam",
+        prerequisitesAnyOf: [["canopy_footing"], ["heliostand"]],
         name: "Bedrock Beam",
         cost: 2,
-        prerequisites: ["sunlit_focus"],
         leaning: "boldness",
         // Rooted so firmly it punishes anything that gets close — ties
         // Boldness's own thorns lever (Verdant Wall/Ancient Grove) into
@@ -4111,9 +4184,9 @@ export const MOVES: Record<string, MoveSpec> = {
       // standing guard together.
       shared_shade: {
         id: "shared_shade",
+        prerequisites: ["sunlit_roots", "grove_ward"],
         name: "Shared Shade",
         cost: 1,
-        prerequisites: ["sunlit_roots", "grove_ward"],
         leaning: "boldness",
         grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: {},
@@ -4123,9 +4196,9 @@ export const MOVES: Record<string, MoveSpec> = {
       // Precision).
       canopy_footing: {
         id: "canopy_footing",
+        prerequisites: ["bulwark_footing"],
         name: "+0.75 HP Regen",
         cost: 1,
-        prerequisites: ["shared_shade"],
         leaning: "boldness",
         // Deepens Shared Shade's own shared-vitality lever directly,
         // instead of a generic power bolt-on.
@@ -4134,9 +4207,9 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       grove_bulwark: {
         id: "grove_bulwark",
+        prerequisitesAnyOf: [["territorial_footing"], ["the_canopy"]],
         name: "Grove Bulwark",
         cost: 2,
-        prerequisites: ["canopy_footing"],
         leaning: "sociability",
         // The shared shade becomes real shared armor — ties Boldness's own
         // defenseBoost lever (Sunlit Roots) into the bridge instead of a
@@ -4148,9 +4221,9 @@ export const MOVES: Record<string, MoveSpec> = {
       // lets the dominant beam catch a challenger unaware.
       territorial_flare: {
         id: "territorial_flare",
+        prerequisites: ["grove_ward", "gathering_light"],
         name: "Territorial Flare",
         cost: 1,
-        prerequisites: ["grove_ward", "gathering_light"],
         leaning: "sociability",
         delta: { situationalBonus: { condition: "flanking", multiplier: 1.3 } },
       },
@@ -4158,9 +4231,9 @@ export const MOVES: Record<string, MoveSpec> = {
       // Aggression's own pre-fork nodes (Grove Precision / Widening Beam).
       territorial_footing: {
         id: "territorial_footing",
+        prerequisites: ["grove_ward"],
         name: "+1 Crit Rate Stage",
         cost: 1,
-        prerequisites: ["territorial_flare"],
         leaning: "sociability",
         // Catching a challenger off guard is exactly when a solid hit
         // becomes a great one — ties Dominance's own crit lever (Gathering
@@ -4169,9 +4242,9 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       dominant_bloom: {
         id: "dominant_bloom",
+        prerequisitesAnyOf: [["dominance_precision"], ["withering_glare"], ["overwhelming_beam"]],
         name: "Triple Bloom",
         cost: 2,
-        prerequisites: ["territorial_footing"],
         leaning: "aggression",
         // A real, flashy capstone-tier payoff — the dominance display
         // widens into three simultaneous beams. Solar Beam is deliberately

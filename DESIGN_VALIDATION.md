@@ -67,6 +67,54 @@ rather than the design:
   container name reported two genuinely different nodes as identical. The
   checker keys on the discriminating sub-field instead.
 
+## The tempo formula
+
+> "write down your tempo calculation in the validation documentation too.
+> It's a helpful formula for us later"
+
+**Cooldowns are counted in the agent's own turns**, not world ticks —
+`tickCooldowns` runs inside `tickAgentAction`, which only fires on an action
+tick. So:
+
+```
+usable every (cooldownTicks + 1) actions
+
+                      base + 1
+tempo multiplier =  ─────────────      the DPS gain from cooldown nodes alone
+                     floor + 1
+
+damage per action = power / (cooldownTicks + 1)
+```
+
+`floor` is the cooldown a fully-invested tree reaches:
+`base − (total of every negative cooldownTicks delta)`.
+
+**The cap is 3.0x**, enforced by flooring the cooldown at:
+
+```
+cdFloor  = ceil((base + 1) / 3) − 1
+maxCut   = base − cdFloor          the most reduction a tree may hand out
+```
+
+| base | floor | max reduction | tempo |
+|---|---|---|---|
+| 2 | 0 | −2 | 3.00x |
+| 3 | 1 | −2 | 2.00x |
+| 5 | 1 | −4 | 3.00x |
+| 8 | 2 | −6 | 3.00x |
+| 9 | 3 | −6 | 2.50x |
+| 15 | 5 | −10 | 2.67x |
+
+**Why 3.0x.** Measured against the other levers fully invested: power nodes
+average **2.00x**, multi-hit **2.00x**, tempo was running **2.61x** and hit
+**5.0x** on Hydro Pump. Tempo is the cheapest thing to buy in a tree, so left
+uncapped it dominates. The cap puts it in the same band as everything else
+while still letting a heavy move feel meaningfully faster when specced.
+
+**Corollary worth remembering:** reduction beyond `base` is not merely capped,
+it is *dead* — a node that provably does nothing. That is a separate check
+from the cap and fires on its own.
+
 ## PP economy rules
 
 | Rule | Threshold | Why |
