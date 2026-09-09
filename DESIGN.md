@@ -14940,3 +14940,54 @@ old assertion passing. Full data suite (240 tests) and engine suite (1262
 tests) green; every one of the 10 new/touched species' sprite art confirmed
 present (`ls public/sprites/<key>_*.png`, 4 directional frames each) before
 committing.
+
+## Fixed: thin biomes' zone species pool never actually varied
+
+Direct report, right after the biome-species-round-2 pass: "yeah just dont
+shove them all in a zone. make spawn in different zones, so like i don't
+have to see a million krabby on every single beach zone. maybe some of em
+have seel or whatever and no krabby's."
+
+**Root cause.** `macroGrid.ts`'s `pickZoneSpeciesPool` already had a real
+per-zone randomized subset mechanism (`ZONE_SPECIES_POOL_MIN`/`_MAX`, 4-7,
+picked via a partial Fisher-Yates from a biome's fitting species) — but it
+only ever trims a biome with MORE fitting species than that range. Checked
+directly: Beach has 5 fitting species, Tundra 3, Desert/Snow 5 — all at or
+under the 4-7 floor, so `fitting.length <= poolSize` was true on essentially
+every roll, and `pickZoneSpeciesPool` returned the full fitting list,
+unconditionally, every zone. Measured on a real 60x60 generated grid before
+any fix: 12 of 15 real Beach zones showed the byte-identical 5-species pool
+(`golduck,kingler,krabby,psyduck,shellder`), and Krabby — fitting all 5 —
+appeared in literally every one of the 15.
+
+**Fix.** `lowerBound` now scales down with a thin biome's own
+`fitting.length` (`Math.floor(fitting.length / 2)`, floored at 2) instead of
+always sitting at the fixed `ZONE_SPECIES_POOL_MIN`, so `poolSize` can land
+below `fitting.length` even for a thin biome and real omission gets a real
+chance to fire. A rich biome (Wetland: 26 fitting, Forest: 15) is completely
+unaffected — the halved value is still comfortably above
+`ZONE_SPECIES_POOL_MIN` for those, so `Math.min(MIN, half)` still resolves
+to the same fixed MIN it always did.
+
+Tried a flatter first version (`fitting.length - 1`, i.e. "drop exactly one")
+first — re-measured, Krabby still showed up in 91.5% of 1,218 real Beach
+zones across 5 seeds; dropping only one of five just wasn't a big enough
+perturbation to read as real variety. Halving instead gives:
+
+| biome (fitting count) | species checked | before | after |
+|---|---|---|---|
+| Beach (5) | Krabby | 100% | 72.2% |
+| Tundra (3) | Geodude | 100% | 84.6% |
+| Wetland (26, control) | Krabby | ~22% (unaffected) | ~22% (unaffected) |
+
+**A real regression caught and fixed along the way.** A first implementation
+special-cased `fitting.length <= 2` by skipping the `rng()` draw entirely
+for that case (since there's nothing meaningful to trim) — this shifted
+every OTHER `rng()`-consuming call downstream in the same seeded stream,
+and a real `promoteZone` test caught it: an evolved species' seeded level
+jitter came out at a different value, for a reason that had nothing to do
+with levels at all. Fixed by always drawing exactly one `rng()` call either
+way (matching the function's original unconditional single draw), just with
+`lowerBound` forced up to `fitting.length` itself when `fitting.length <= 2`
+so the draw's outcome is unaffected. Full engine suite (1262 tests) and data
+suite (240 tests) green after the fix.

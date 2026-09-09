@@ -6788,3 +6788,21 @@ not something this pathfinding pass itself caused or is positioned to fix.
       Gen-1-arted species with zero roster entry at all. This pass only
       targeted the 3 new biomes specifically asked about — a broader
       "flesh out the whole roster" pass is a separate, bigger task.
+
+## Fixed: thin biomes always spawned every fitting species, every zone
+
+- [x] Direct report: "make spawn in different zones, so like i don't have
+      to see a million krabby on every single beach zone. maybe some of em
+      have seel or whatever and no krabby's." Confirmed real:
+      `pickZoneSpeciesPool`'s existing `ZONE_SPECIES_POOL_MIN/MAX` (4-7)
+      trimming only ever fires when a biome has MORE fitting species than
+      that — Beach (5 fitting), Tundra (3), Desert/Snow (5) all sit at or
+      under that floor, so every zone got the full fitting list,
+      unconditionally, every time. Measured on a real 60x60 grid: 12/15
+      Beach zones showed the identical 5-species pool, Krabby in all 15.
+      Fixed by scaling the pool's own lower bound down with a thin biome's
+      `fitting.length` (floored at 2) instead of always floating at the
+      fixed MIN — Beach now real-measures at 72% Krabby inclusion (was
+      100%), Tundra 85% (was 100%); a rich biome (Wetland, Forest) is
+      unaffected. See DESIGN.md for the full numbers and the rng-stream
+      regression this caught and fixed along the way.

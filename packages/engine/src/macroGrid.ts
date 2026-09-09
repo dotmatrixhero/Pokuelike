@@ -774,7 +774,47 @@ function pickRandomSubset<T>(list: readonly T[], n: number, rng: () => number): 
  * why the two "special zone" mechanisms don't need to compose.
  */
 function pickZoneSpeciesPool(fitting: readonly ImmigrationSpeciesInfo[], poolBonus: number, isCongregationLandmark: boolean, predatorCapOverride: number | undefined, rng: () => number): ImmigrationSpeciesInfo[] {
-  const poolSize = ZONE_SPECIES_POOL_MIN + poolBonus + Math.floor(rng() * (ZONE_SPECIES_POOL_MAX - ZONE_SPECIES_POOL_MIN + 1));
+  // `ZONE_SPECIES_POOL_MIN`/`_MAX` (4-7) only ever trims a biome with MORE
+  // fitting species than that — a thin biome (this roster's Beach: 5,
+  // Tundra: 3, Desert/Snow: 5) always had `fitting.length <= poolSize`,
+  // so `pickZoneSpeciesPool` returned every fitting species, EVERY zone,
+  // unconditionally. Direct report, confirmed by a real generated 60x60
+  // grid before this fix: 12 of 15 real Beach zones showed the identical
+  // full 5-species pool, and Krabby (fitting every one) appeared in all
+  // 15 — "I don't have to see a million krabby on every single beach
+  // zone... maybe some of em have seel or whatever and no krabby's."
+  // `lowerBound` now scales DOWN with a thin biome's own `fitting.length`
+  // (floored at 2 — omitting down to a single species reads as "empty",
+  // not "a real distinct pocket") instead of always floating at the fixed
+  // `ZONE_SPECIES_POOL_MIN`, so `poolSize` can land below `fitting.length`
+  // even for a thin biome and real omission actually has a chance to fire.
+  // A rich biome (Wetland: 26, Forest: 15, ...) is completely unaffected —
+  // `Math.min(ZONE_SPECIES_POOL_MIN, fitting.length - 1)` still resolves to
+  // the same fixed `ZONE_SPECIES_POOL_MIN` whenever `fitting.length` is
+  // comfortably above it, so this is purely additive for thin biomes.
+  // Scales with HALF of `fitting.length`, not a flat `fitting.length - 1` —
+  // a first attempt at that flat version only ever dropped exactly one
+  // species, which barely moved the needle for a thin biome: re-measured,
+  // Krabby (fitting all 5 real Beach species) still showed up in 91.5% of
+  // 1,218 real generated Beach zones (5 seeds, 60x60 grids) — one dropped
+  // slot out of five just isn't a big enough perturbation to feel like real
+  // variety. Halving instead gives Beach a real 3-5 range (drop 0-2 of 5),
+  // Tundra (3 fitting) a real 2-3 range — a real chance some zones settle
+  // on a genuinely different, smaller pocket, matching the direct ask:
+  // "I don't have to see a million krabby on every single beach zone...
+  // maybe some of em have seel or whatever and no krabby's."
+  // `fitting.length <= 2` forces `lowerBound` up to `fitting.length` itself
+  // (no real trimming possible/desirable at that point — see this
+  // function's own doc comment) while still drawing exactly one `rng()`
+  // call below either way, matching the original unconditional single draw
+  // this function always made — a version that skipped the draw entirely
+  // for this case shifted every OTHER `rng()`-consuming call downstream in
+  // the same seeded stream, a real regression a `promoteZone` test caught
+  // (an evolved species' seeded level jitter came out different for a
+  // reason that had nothing to do with levels at all).
+  const lowerBound = fitting.length <= 2 ? fitting.length : Math.max(2, Math.min(ZONE_SPECIES_POOL_MIN + poolBonus, Math.floor(fitting.length / 2)));
+  const upperBound = Math.min(ZONE_SPECIES_POOL_MAX + poolBonus, fitting.length);
+  const poolSize = lowerBound + Math.floor(rng() * Math.max(0, upperBound - lowerBound + 1));
   if (fitting.length <= poolSize) return [...fitting];
 
   const predators = fitting.filter((s) => s.isPredator);
