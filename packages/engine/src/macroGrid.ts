@@ -503,6 +503,38 @@ export function biasForZone(grid: MacroGrid, row: number, col: number): ZoneGene
   return { elevation, dominantBiome: zone.isOcean ? undefined : zone.biome, landmark: zone.landmark };
 }
 
+/**
+ * Chebyshev (grid-step) distance from (row, col) to the nearest zone carrying
+ * `landmarkType` — `undefined` if the grid has none of that type anywhere.
+ * `0` means this zone itself IS one. Feeds `immigration.ts`'s zone-level
+ * banding: "certain zones (friendlier ones) don't have high levels spawn...
+ * adjacent zones with changing normalized probability curves, median
+ * increasing as you get further away from a particular zone" — this is the
+ * "how far away" half of that; `immigration.ts`'s `zoneLevelCenter` turns
+ * the distance into an actual level.
+ *
+ * A plain full-grid scan, not a BFS flood-fill from the landmark(s) outward —
+ * deliberately: this only ever runs once per zone PROMOTION (`overworld.ts`'s
+ * `promoteZone`, a rare "the observer moved to/booted into a new zone"
+ * event, not a per-tick cost), so even the "hundreds of thousands of zones"
+ * scale `macroGrid.test.ts` exercises is a handful of milliseconds, and a
+ * scan needs no extra state — a flood-fill would either redo the same work
+ * per zone anyway or require caching results across every zone up front,
+ * which promoteZone's "only ever the currently-visited zone" access pattern
+ * has no use for.
+ */
+export function distanceToNearestLandmark(grid: MacroGrid, row: number, col: number, landmarkType: LandmarkType): number | undefined {
+  let best: number | undefined;
+  for (let r = 0; r < grid.rows; r++) {
+    for (let c = 0; c < grid.cols; c++) {
+      if (grid.zones[zoneIndex(grid, r, c)]!.landmark !== landmarkType) continue;
+      const dist = Math.max(Math.abs(r - row), Math.abs(c - col));
+      if (best === undefined || dist < best) best = dist;
+    }
+  }
+  return best;
+}
+
 // ---------------------------------------------------------------------------
 // Cheap per-zone estimates — used ONLY to seed a never-visited zone's
 // abstract-tier aggregate state (overworld.ts) before any real tiles exist to

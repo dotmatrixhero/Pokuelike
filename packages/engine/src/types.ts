@@ -1947,6 +1947,19 @@ export interface World {
    * invented local place name.
    */
   territoryName?: string;
+  /**
+   * Chebyshev grid-step distance from this world's macro zone to the
+   * nearest "sanctuary" landmark, if it was promoted from an overworld grid
+   * (`macroGrid.ts`'s `distanceToNearestLandmark`) — `0` if this zone IS
+   * one, `undefined` if the grid has no Sanctuary at all or this is a
+   * standalone scenario world with no overworld above it. Direct ask:
+   * "certain zones (friendlier ones) don't have high levels spawn... median
+   * increasing as you get further away from a particular zone." Read by
+   * `immigration.ts`'s `zoneLevelCenter` to soften an immigrant's spawn
+   * level upward with distance from safety — see that function's own doc
+   * comment for the actual curve.
+   */
+  sanctuaryDistance?: number;
   biomeSeeds?: BiomeSeedInfo[];
   /**
    * Parallel array to `biomeSeeds` (same index — absent or a shorter array

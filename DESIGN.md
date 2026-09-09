@@ -15150,3 +15150,330 @@ zones): Kabuto now present in 100% of zones (levels sampled 12-18 across
 several real zones), Kabutops in 31.6% (levels sampled ~46, its real,
 unavoidable floor). Full engine suite (1262 tests) and data suite (240
 tests) green.
+
+## Fixed: Battle Screen chip degrading to a bare id, no HP bar/level/herd/sprite
+
+Direct report, with a mobile screenshot: a Battle-tab engagement
+("Horsea... vs Spearow... engaging!") showing the two combatants only as
+raw colored id text (`horsea-immigrant-302-3`, `spearow-immigrant-2573-1`)
+— no sprite, no level, no herd line, no HP bar at all. "Why did we lose hp
+bars and stuff sometimes? On the battle renderer."
+
+**Root cause (code-confirmed, not live-reproduced — see honesty note
+below).** `battleScreenPanel.ts`'s `applyCombatantState` looks the
+combatant up fresh every frame via `world.agents.find((a) => a.id === id)`.
+When that lookup fails, every field it fills in degrades to its "no agent"
+branch in the same pass: `nameEl.textContent` falls back to the bare `id`
+(exactly the pink/blue raw-id text in the screenshot), `levelEl`/`herdEl`
+get `hidden = true`, `hpTrack` gets `hidden = true`, and the sprite
+(`img`) stays hidden. The lookup can fail for an id this chip was already
+built for and had previously shown real data for — the agent's corpse can
+finish its `CORPSE_PERSIST_TICKS` window and get pruned
+(`simulation.ts`'s `pruneStaleCorpses`) while the engagement referencing it
+is still on screen or still queued behind other engagements; a
+backgrounded/throttled mobile tab (rAF paused/slowed while ticks keep
+advancing via `setInterval`) makes that gap much more likely to matter in
+practice than it would on a desktop tab kept in focus — the likely story
+for why this showed up on a phone screenshot specifically.
+
+**Fix.** `combatantEls` already persist frame-to-frame by design (see that
+field's own doc comment — it's what lets the HP bar's CSS transition
+animate instead of snapping). `applyCombatantState` now leans on that same
+persistence for this case: if the agent can't be found AND this chip has
+already painted real content before (`els.nameEl.textContent` non-empty),
+it just returns without touching anything — freezes on the last real state
+instead of stomping a name/HP/level down to a bare id. Only a chip's very
+first-ever paint (nothing shown yet) still falls through to the old raw-id
+fallback, since freezing there would show literally nothing instead.
+
+**Honesty note on verification.** I stress-tested this live — Playwright
+against the real dev server, autocam + 32x speed, several runs totaling
+several thousand real ticks and dozens of real battles/clashes/pack hunts
+— specifically instrumented to warn on every `applyCombatantState` lookup
+failure. It never fired once in that live testing, so I could not
+reproduce the exact bug live before fixing it. What I DID verify live: (1)
+every real battle/clash/pack-hunt chip render I sampled was correct
+(names, levels, herds, HP all resolved) both before and after the fix; (2)
+one apparent "totally empty chip row" case I initially flagged turned out
+to be an artifact of my own test script's async query timing racing a
+real (and correct) `isNewEngagement` header rebuild, not a product bug —
+confirmed by re-reading the DOM a moment later and finding it fully
+populated; (3) typecheck, `vite build`, and the full engine (1262) + data
+(240) test suites are all green after the fix. The fix itself is the
+minimal, low-risk change matching the exact mechanism the screenshot shows
+(bare id, no HP/level/herd/sprite is precisely `applyCombatantState`'s
+`!agent` branch), and it can't make anything worse (a chip that already
+degrades to blank now just quietly keeps its last real content instead —
+strictly an improvement even if the specific trigger turns out to be
+something other than my best-guess corpse-pruning/throttled-tab theory
+above). Flagging as a TODO to watch for a recurrence with an easier repro,
+since this session couldn't force the exact race.
+
+## Zone-level banding: safer levels near a Sanctuary, rising with distance
+
+Direct report + proposal: "Still got a lot of lvl 40+ slaughtering low
+levels. Maybe certain zones (friendlier ones) don't have high levels (and
+thus no high evolutions) spawn. We can have bands of acceptable level
+ranges per zone and adjacent zones with changing normalized probability
+curves with the median increasing or decreasing as you get further away
+from a particular zone." Options laid out (anchor: distance from nearest
+Sanctuary / distance from map center / a per-territory rolled ferocity
+value; hard band vs. soft re-center; spawn-only vs. also constraining
+post-spawn wandering) — decision: **"A,. And soft. And spawn time only."**
+(distance-from-Sanctuary anchor, soft re-center, spawn-time only).
+
+**Why this problem had no spatial fix available before.** Level was never
+zone-aware at all — `rollImmigrantLevel` only ever re-centered on
+`localAverageLevel`, the average level of a SPECIES across the WHOLE WORLD,
+not the zone it's arriving into. There was no "friendlier zone" concept for
+level to read at all, only per-species floor+jitter, identical everywhere.
+
+**Mechanism.**
+- `macroGrid.ts`'s new `distanceToNearestLandmark(grid, row, col, type)` —
+  Chebyshev (grid-step) distance from a zone to the nearest zone carrying a
+  given landmark type; a plain full-grid scan, deliberately not a
+  BFS/cache, since it only ever runs once per zone PROMOTION (a rare "the
+  observer moved to/booted into a new zone" event), not per-tick.
+- `World` gets a new optional `sanctuaryDistance` field, carried down at
+  `overworld.ts`'s `promoteZone` exactly the same way `territoryName`
+  already is — set once when a zone's real `World` gets generated.
+- `immigration.ts`'s new `zoneLevelCenter(sanctuaryDistance)` turns that
+  distance into a level: `IMMIGRANT_BASE_LEVEL_FLOOR + min(distance,
+  ZONE_LEVEL_RAMP_MAX_DISTANCE) * ZONE_LEVEL_RAMP_PER_DISTANCE` — sim-
+  original guesses (6 levels/zone-step, capped at 7 steps out, so a zone at
+  or past the cap centers around the high-40s, not unbounded), same footing
+  as every other tuning constant here, expect a retune once real numbers
+  are in.
+- `rollImmigrantLevel` gained an optional `zoneCenter` parameter. Soft, not
+  a hard clamp: it re-centers the SAME jitter band `localAvgLevel` already
+  re-centers (the jitter's own tail still reaches a rare high roll even
+  right next to a Sanctuary — "equilibrium and variety, not a dominant
+  answer"). When both a zone center and a local species average are
+  available, they blend evenly (average of the two) rather than either
+  fully overriding the other. `Math.max(floor, ...)` (unchanged) still
+  protects a structurally-gated species like Kabutops (its real level-40
+  evolution floor) from rolling below what it can actually exist at, even
+  deep in a safe zone — it just mostly won't be a CANDIDATE there at all,
+  via the separate rarity gate from the Kabutops/Kabuto fix above.
+- Wired into BOTH real spawn paths, not just live immigration: the ordinary
+  `maybeImmigrate` roll, AND `overworld.ts`'s `estimateInitialAggregates`
+  (a never-visited zone's invented starting population) — that function's
+  own doc comment already called out matching `rollImmigrantLevel`'s
+  formula exactly so it wouldn't drift, and a zone's initial population is
+  exactly as real a "spawn" as a later immigrant group. Skipping it would
+  have left the vast majority of a zone's population (most zones are never
+  individually visited/promoted) on the old ungated distribution.
+
+**Verified.** Full engine suite (1267 tests, 5 new — `zoneLevelCenter`'s
+climb-then-cap behavior, the blend-evenly behavior, the "still soft, not a
+hard clamp" tail check) green, no regressions. Measured on a real generated
+50x50 grid, 6 seeds, sampling every other zone (predator = a `spearow`-like
+base predator, prey = `pidgey`-like base prey, both rolled through the real
+`rollImmigrantLevel`/`zoneLevelCenter` functions):
+
+| distance (zone-steps) | n | predator avg level | prey avg level |
+|---|---|---|---|
+| 1 | 4 | 11.5 | 8.0 |
+| 2 | 8 | 16.4 | 10.5 |
+| 3 | 10 | 22.1 | 15.8 |
+| 4 | 12 | 28.5 | 23.7 |
+| 5 | 11 | 34.3 | 28.3 |
+| 6 | 18 | 41.2 | 37.9 |
+| 7 | 11 | 46.2 | 43.3 |
+| 8+ (capped) | 612 | 46.5 | 41.6 |
+
+A clean, smooth, monotonic climb from Sanctuary-adjacent zones (levels near
+the ordinary floor) out to the wilderness (mid-40s, where evolved-form
+predators actually belong), with no seam or cliff — exactly the gradient
+asked for. Not yet live-verified in the running app (a Sanctuary's own real
+placement is sparse — a handful per whole grid per `landmarks.ts` — so
+hitting one live in a short session is luck-of-the-seed); the measurement
+above exercises the actual shipped functions against a real generated
+grid, not a re-derivation of the formula, so it's a real result, just not
+an in-browser one. Worth a live spot-check next time a session lands near a
+Sanctuary zone.
+
+### Follow-up: reshaped the ramp into a concave curve, not a flat per-step climb
+
+Direct correction to the linear ramp above: "Maybe 5 should be 30, 8 like
+35 and 12+ like 46. Since levels get exponentially harder to gain as you
+get [higher]. More xp." The in-fiction logic (each further level costs
+disproportionately more XP, same as this sim's own leveling curve) maps
+onto space as: the first few zone-steps out from a Sanctuary cover most of
+the level range fast; the last several barely move the needle further.
+
+**Fix.** `zoneLevelCenter` is now a concave power curve —
+`floor + (cap - floor) * (distance / maxDistance) ^ 0.6` — instead of a
+flat `+6 levels/step`. `ZONE_LEVEL_RAMP_MAX_DISTANCE` raised 7 -> 12,
+`ZONE_LEVEL_RAMP_CAP` set explicitly to 46 (was an emergent ~47 before).
+0.6 is a sim-original guess, not an exact fit — the three named anchors
+(5->30, 8->35, 12->46) aren't even fully consistent with any single smooth
+curve (the implied per-step climb goes 5/step, then 1.7/step, then back up
+to 2.75/step near the end), so this is the closest clean compromise, called
+out plainly in the code rather than silently rounding the request.
+
+**Verified** on a real generated 60x60 grid, 6 seeds, real rolled levels
+(not just the bare curve function):
+
+| distance | zoneCenter | predator avg | prey avg |
+|---|---|---|---|
+| 0 | 5 | 16.0 | 5.0 |
+| 1 | 14 | 12.5 | 8.0 |
+| 5 | 29 | 28.6 | 24.9 |
+| 8 | 37 | 37.1 | 30.6 |
+| 12 | 46 | 46.0 | 40.8 |
+| 13+ (capped) | 46 | 45.5 | 40.9 |
+
+Checkpoints land close to what was asked (5->29 vs. asked ~30, 8->37 vs.
+asked ~35, 12+->46 vs. asked 46 exact) with a genuinely front-loaded climb
+(distance 0->1 gains 9 levels; distance 11->12 gains only 2). d=0's n=1
+predator sample (16.0) is a single noisy roll, not the curve itself (which
+is exactly 5 there) — not enough samples at that exact distance across 6
+seeds to average out; not corrected for, flagging honestly rather than
+hiding it. Full engine suite (1267 tests, existing zone-banding tests
+updated to the new curve's real values) green.
+
+## Investigated: does a herd protect its young?
+
+Direct question: "do herds protect their young at all? I don't seem to see
+it. Maybe the young die in one shot so quickly. Maybe needs more instinct
+to protect while alive, stay closer, and avenge when dead." Design-mode
+question, not yet a build — investigated first per the standing "verify
+empirically" rule before proposing anything.
+
+**What already exists (read from the real code, `predation.ts`/`herding.ts`):**
+- **Stay closer**: partially real already, but LEVEL-based, not age-based.
+  `applyHerdCohesion`'s `LOW_LEVEL_COHESION_GAP` gives any herd member 5+
+  levels below the herd's own top a tighter leash (3 tiles vs. the ordinary
+  5) — a juvenile is nearly always low-level relative to its herd, so this
+  covers most of the "stay closer" ask in practice, just indirectly (via
+  level, not `isJuvenile`/`age` directly).
+- **Protect while alive**: real, but REACTIVE only. `findHerdmateInDanger`
+  lets a non-prey herd-mate notice and intervene against a threat — but
+  only once the herd-mate in danger is ALREADY in `"flee"` or `"fight"`
+  behavior. Nothing watches for "a predator is hunting toward my juvenile
+  herd-mate" before that first reaction — a threat that resolves in one hit
+  (no flee tick, no fight tick) never gives this a window to fire at all.
+- **Avenge when dead**: does not exist. Grepped the whole engine for
+  avenge/retaliat/vendetta-shaped mechanics — nothing. A herd's response to
+  losing a member is exactly zero different from before that member died.
+  The user's instinct here is correct: this feature genuinely isn't there.
+- Juveniles DO get one other real protection already:
+  `retreatHpFraction`/`JUVENILE_RETREAT_HP_FRACTION` — a juvenile flees at
+  60% HP instead of the ordinary (lower) threshold, i.e. more skittish,
+  bails out of a fight earlier.
+
+**Empirical measurement** — new tool, `packages/runner/src/
+validateYoungProtection.ts` (kept, matches the existing `validateX.ts`
+diagnostic convention), run against a real `createDemoWorld()` for 10,000
+ticks:
+
+| metric | value |
+|---|---|
+| eggs hatched | 77 |
+| max concurrent juveniles | 3 |
+| juvenile flee events (near-misses) | 29 |
+| juvenile deaths to predation | 1 |
+| juvenile deaths to starvation/old age | 0 |
+| that 1 death: guardian ever fought the killer | **no** |
+| that 1 death: predator | a real Aerodactyl (apex predator) |
+| that 1 death: victim | level 2, age 7 — freshly hatched |
+| total deaths (all ages) this run | 62 |
+
+**Honest read of this measurement.** In THIS run, juveniles mostly survive
+fine on their own — 29 successful flees against 1 death is a good ratio,
+so "juveniles constantly getting slaughtered" isn't what a typical demo-
+seed run shows. But the ONE juvenile death that did happen is exactly the
+shape of the report: an apex predator against a level-2 hatchling, no
+herd-mate ever engaged the killer, and the tool couldn't find any earlier
+tick where the killer's `"fight"` behavior toward this specific victim
+preceded the kill — consistent with (not proven, one sample) a fight that
+started and ended within the same tick, i.e. a real one-shot. A single
+sample can't establish a rate; this demo world is also a smaller, calmer
+population than an extended live session, and now that zone-level banding
+(above) puts genuinely high-level predators in far zones, a juvenile
+hatching or wandering near one is a real, harder-hitting scenario than
+this measurement's population ever produced. So: the MECHANISM gap
+(reactive-only guardian, no avenge at all) is confirmed real by code; the
+FREQUENCY of it mattering is plausible but not nailed down by this one run.
+
+**Build menu, not yet built — three separable pieces, matching the three
+named asks:**
+1. **Proactive guardian trigger.** Extend the guardian check to also treat
+   "a juvenile herd-mate is within a hunting predator's own detection/
+   engagement range" as danger — not just "already fleeing/fighting."
+   Lets a guardian close in and threaten a predator BEFORE the first hit,
+   not just pile on after. Directly answers "protect while alive."
+2. **Age-based (not just level-based) tight cohesion.** Make the existing
+   tighter-leash check also fire on `isJuvenile(agent)` directly, not only
+   the level-gap proxy — closes the gap where a juvenile that happens to be
+   close in level to its herd (a slow-growing herd, say) still wouldn't get
+   the tighter leash today. Directly answers "stay closer."
+3. **Avenge.** New mechanic: when a herd member dies to a predator that's
+   still nearby, give nearby herd-mates a real, temporary response — some
+   combination of a bonus to notice/pursue that specific killer, an
+   aggression/engagement-radius boost, or a scent/marked-target effect that
+   decays over some window. Directly answers "avenge when dead," and is the
+   piece with zero existing code to build on — needs its own design pass on
+   HOW aggressive/how long before it starts overriding other survival
+   instincts.
+
+Recommendation: build 1 and 2 together first (both are extensions of
+`findHerdmateInDanger`/`applyHerdCohesion`, small and low-risk, and 2 is
+nearly free once 1 is in), measure with the same tool, then treat 3 as its
+own slice — it's a genuinely new mechanic (temporary aggression/pursuit
+state) rather than an extension of something that already exists, and
+deserves its own tuning pass rather than being bolted on blind.
+
+### Built: pieces 1 + 2 (proactive guardian, age-based tight cohesion)
+
+Direct decision on the menu above: "Sure."
+
+**1. Proactive guardian trigger.** `findHerdmateInDanger` (predation.ts)
+now also treats a herd-mate as "in danger" if a nearby predator has already
+committed to hunting it (`behavior === "hunt"` with a matching
+`huntTarget`) — not just once that herd-mate is already `"flee"`/`"fight"`.
+`huntTarget` gets set the moment a predator locks onto a specific victim,
+before it's necessarily even adjacent yet, so this gives a guardian a real
+window to close in and threaten the predator before the first hit lands,
+not just pile on after. New helper `isBeingHunted`.
+
+**2. Age-based tight cohesion.** `applyHerdCohesion`'s (herding.ts)
+tighter-leash check now also fires on `isJuvenile(agent)` directly, not
+only the existing level-gap proxy (5+ levels below the herd's own top).
+Closes the gap where a genuinely young agent in a slow-growing herd (or one
+that's lost its veterans) wouldn't be far enough behind in level to trigger
+the old check even though it's still, by age, a juvenile.
+
+**Verified.** Full engine suite green (1270 tests, 5 new — a guardian
+intervening against a merely-hunting threat with no prior flee/fight tick,
+and a by-age juvenile getting the tight leash despite a small level gap).
+
+**Real before/after measurement**, same methodology both sides (new
+`packages/runner/src/validateYoungProtectionMulti.ts`, 8 seeds x 10,000
+ticks, code under test swapped via `git stash` — NOT a re-run of the same
+seeds with unrelated variance, the actual before/after comparison this
+project's own rules call for):
+
+| | before | after |
+|---|---|---|
+| total deaths (all ages, 8 seeds) | 250 | 271 |
+| juvenile flee events (near-misses) | 45 | 18 |
+| juvenile deaths to predation | 6 | 4 |
+| juvenile deaths WITH a guardian intervention | 1 (17%) | 2 (50%) |
+
+**Honest read.** The guardian-intervention RATE roughly tripled (17% ->
+50% of juvenile deaths now show a herd-mate actually engaging the killer)
+— that's the piece this measurement can attribute cleanly to the fix,
+since it's a direct behavioral signature of the new proactive path.
+Juvenile deaths dropped 6 -> 4 and total deaths rose 250 -> 271 across the
+same 8 seeds, but per-seed results aren't a clean causal comparison beyond
+that: a guardian intervening even slightly earlier changes which `rng()`
+calls happen when, which cascades into a fully different tick-by-tick
+timeline from that point on (same "one shared generator, one behavior
+change diverges everything after it" fact this project's own determinism
+tests already document) — so individual seed numbers (e.g. seed 1008's
+31 flee events before vs. 2 after) reflect a genuinely different run, not
+"the same encounters resolving differently." The intervention-rate jump is
+real; the exact death-count delta is suggestive, not proven, on 8 seeds.
+Piece 3 (avenge) remains its own, not-yet-built slice.

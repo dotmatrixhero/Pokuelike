@@ -1,6 +1,6 @@
 import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import { stepAway, stepToward } from "./movement.js";
-import { isPreyOfAnything } from "./predation.js";
+import { isPreyOfAnything, isJuvenile } from "./predation.js";
 
 /**
  * How far an idle agent tolerates being from its herd's centroid before
@@ -210,7 +210,16 @@ export function applyHerdCohesion(world: World, agent: Agent, rules?: HuntRules)
   // Pokemon travel together more." Guardians keep their own tighter leash
   // regardless (already the tightest, and level isn't the reason a
   // guardian stays close).
-  const isLowLevel = !isGuardian && herdMaxLevel(world, agent.herdId) - (agent.level ?? 1) >= LOW_LEVEL_COHESION_GAP;
+  //
+  // `isJuvenile(agent)` is checked directly too, not just inferred from the
+  // level gap — direct follow-up ask: "stay closer" (about young
+  // specifically, alongside "protect while alive"/"avenge when dead" — see
+  // predation.ts's `isBeingHunted`/DESIGN.md). A juvenile is nearly always
+  // low-level relative to its herd already, so this mostly overlapped in
+  // practice, but a slow-growing herd (or one that's lost its veterans)
+  // could leave a genuinely young agent NOT 5+ levels behind anyone —
+  // `age`, not just `level`, is the actual thing "young" means here.
+  const isLowLevel = !isGuardian && (isJuvenile(agent) || herdMaxLevel(world, agent.herdId) - (agent.level ?? 1) >= LOW_LEVEL_COHESION_GAP);
   const distance = isGuardian ? GUARDIAN_COHESION_DISTANCE : isLowLevel ? LOW_LEVEL_COHESION_DISTANCE : COHESION_DISTANCE;
   if (!centroid || manhattan(agent.pos, centroid) <= distance) {
     const crowder = nearestCrowdingHerdmate(world, agent);
