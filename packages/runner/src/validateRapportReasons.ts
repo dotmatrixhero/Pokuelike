@@ -115,119 +115,105 @@ function a(label: string | undefined, fallback: string, repeated = false): strin
 }
 
 /**
- * One sentence per reason, **spoken by the agent whose edge this is, about
- * the other one.** Second rewrite: the first was a comma-dump, the second
- * over-corrected into clipped fragments — *"OK you over indexed in like
- * hyper succinct. That's not what I want either. Like watched three die
- * beside them sounds confusing and ominous?"* Both notes were right.
+ * One sentence per reason, spoken by the agent whose edge this is, about the
+ * other one.
  *
- * The brief for this version: *"be a little more poetic and emotion driven?
- * Try to put yourself in the shoes of the Pokémon that lived through that
- * explaining what you've been through together. Take a little creative
- * liberty but not too much."*
+ * **Fourth rewrite, and the notes that got here are worth keeping**, because
+ * every earlier version failed the same way — reaching for literary phrasing
+ * instead of saying the plain thing:
  *
- * So:
- * - **First person, full sentences.** "We brought down a Scyther together",
- *   not "Killed a Scyther together". A relationship is spoken, not tabulated.
- * - **Say who or what**, always. "Three died within sight of us both" fixes
- *   the exact confusion in that note — the old line never said what died.
- * - **One feeling per sentence, carried by the facts.** "and I started most
- *   of it" is a real read of `struck` outweighing `wasStruck`, not a mood
- *   pasted on top.
- * - **Liberty only in the connective tissue.** Every noun, number and event
- *   is real. Nothing invents an event that did not happen — no "never left my
- *   side" on an edge that only knows a count.
+ * 1. *"your phrasing is so stilted and weird"* — a comma-dump of every reason.
+ * 2. *"you over indexed in like hyper succinct"* — clipped fragments.
+ * 3. *"put themselves in front sounds like a euphemism... more specificity"*
+ *    — vague verbs standing in for data I had not bothered to record.
+ * 4. *"Get rid of it was none of herd. Just say foe or friend."* /
+ *    *"And four things besides? Wtf does that mean"* — ornament that carried
+ *    no information at all.
+ *
+ * The spec is the model sentence in that last note:
+ *
+ *   "We defeated a foe Onix together. She has defended me."
+ *
+ * Plain declarative sentences. A `friend`/`foe` label rather than a
+ * circumlocution. Real gendered pronouns — `Agent.sex` is set on essentially
+ * every agent in a real run, so there is no reason to write "they". Nothing
+ * decorative: no "besides", no "had hold of", no "in front of us".
  */
-const CLAUSE: Record<RapportReason, (n: number, subject?: string, kin?: "ours" | "other", again?: boolean) => string> = {
-  rescued: (n) =>
-    n <= 1 ? `I carried them home when they could not walk.` : `I have carried them home ${times(n)}.`,
-  wasRescued: (n) =>
-    n <= 1 ? `They carried me home when I could not walk.` : `They have carried me home ${times(n)}.`,
-  mourned: (n) =>
-    n <= 1 ? `We lost the same friend, and we were both there for it.` : `We have buried the same friends ${times(n)} now.`,
-  defeatedTogether: (n, s, _k, again) =>
+
+/** `Agent.sex` is set on nearly every agent, so use it. Genderless species fall back to they/them. */
+function subj(sex?: "male" | "female"): string {
+  return sex === "female" ? "She" : sex === "male" ? "He" : "They";
+}
+function obj(sex?: "male" | "female"): string {
+  return sex === "female" ? "her" : sex === "male" ? "him" : "them";
+}
+function poss(sex?: "male" | "female"): string {
+  return sex === "female" ? "her" : sex === "male" ? "his" : "their";
+}
+/** Singular "they" takes plural agreement — "They are my mate", never "They is". */
+function isVerb(sex?: "male" | "female"): string {
+  return sex ? "is" : "are";
+}
+function hasVerb(sex?: "male" | "female"): string {
+  return sex ? "has" : "have";
+}
+/** The subject pronoun in mid-sentence position — "she", not "She". */
+function subjLower(sex?: "male" | "female"): string {
+  return subj(sex).toLowerCase();
+}
+/** "a foe Onix" / "a friend Pidgey" — the label the note asked for, in front of the name. */
+function named(label: string | undefined, standing: "friend" | "foe" | undefined, fallback: string): string {
+  const name = nameOf(label, fallback);
+  const word = standing ? `${standing} ${name}` : name;
+  return `${/^[aeiouAEIOU]/.test(word) ? "an" : "a"} ${word}`;
+}
+
+type Ctx = { n: number; label?: string; standing?: "friend" | "foe"; sex?: "male" | "female"; again?: boolean };
+
+const CLAUSE: Record<RapportReason, (c: Ctx) => string> = {
+  bonded: ({ sex }) => `${subj(sex)} ${isVerb(sex)} my mate.`,
+  rescued: ({ n, sex }) =>
+    n <= 1 ? `I carried ${obj(sex)} home when ${subjLower(sex)} could not walk.` : `I have carried ${obj(sex)} home ${times(n)}.`,
+  wasRescued: ({ n, sex }) =>
+    n <= 1 ? `${subj(sex)} carried me home when I could not walk.` : `${subj(sex)} ${hasVerb(sex)} carried me home ${times(n)}.`,
+  mourned: ({ n }) => (n <= 1 ? `We mourned a friend together.` : `We have mourned ${count(n)} friends together.`),
+  defeatedTogether: ({ n, label, standing, again }) =>
     n <= 2
-      ? `We brought down ${a(s, "creature", again)} together.`
-      : `We have brought down ${count(n)} between us, one of them ${a(s, "creature", again)}.`,
-  bonded: () => `We are mates.`,
-  // "Three have died" was ambiguous in the way that mattered: foes or allies?
-  // The subject now carries `kin`, so the sentence can just say.
-  survivedTogether: (n, s, kin, again) =>
-    kin === "ours"
-      ? n <= 1
-        ? again
-          ? `I watched one of our own die in front of us.`
-          : `I watched one of our own die in front of us — ${a(s, "herd-mate")}.`
-        : again
-          ? `${cap(count(n))} of our own have died in front of us.`
-          : `${cap(count(n))} of our own have died in front of us, the last of them ${a(s, "herd-mate")}.`
-      : n <= 1
-        ? again
-          ? `I watched another die in front of us, and it was none of our herd.`
-          : `I watched ${a(s, "creature")} die in front of us, and it was none of our herd.`
-        // "the last another" is nonsense — a naming slot cannot take the
-        // refer-back word, so this drops the name instead of mangling it.
-        : again
-          ? `${cap(count(n))} have died in front of us, and none of them were ours.`
-          : `${cap(count(n))} have died in front of us — none of them ours, the last ${a(s, "creature")}.`,
-  weatheredTogether: (n, s) =>
+      ? `We defeated ${again ? "another" : named(label, standing ?? "foe", "creature")} together.`
+      : `We have defeated ${count(n)} foes together, one of them ${named(label, undefined, "creature")}.`,
+  survivedTogether: ({ n, label, standing, again }) =>
     n <= 1
-      ? `${nameOf(s, "The weather")} drove us off our own ground, and we left together.`
-      : `The world has driven us out together ${times(n)}.`,
-  healed: (n) => (n <= 1 ? `I closed their wounds.` : `I have mended them through ${count(n)} bad stretches.`),
-  wasHealed: (n) => (n <= 1 ? `They closed my wounds.` : `They have mended me through ${count(n)} bad stretches.`),
-  // Was "stood between them and what was coming" / "put themselves in front of
-  // me", which is euphemism — direct note: "put themselves in front sounds
-  // like a euphemism... more specificity please." What the mechanic actually
-  // is: a predator had locked onto a herd-mate, and this agent hit it.
-  // "Something had hold of me" was the euphemism problem all over again —
-  // vague where the note asked for specificity. The predator is now recorded
-  // at the defence site, so the sentence can name it.
-  defended: (n, s, _k, again) =>
-    n <= 1
-      ? `${cap(a(s, "predator", again))} had hold of them, and I hit it until it let go.`
-      : `I have pulled ${a(s, "predator", again)} off them, and ${count(n - 1)} other ${n === 2 ? "thing" : "things"} besides.`,
-  wasDefended: (n, s, _k, again) =>
-    n <= 1
-      ? `${cap(a(s, "predator", again))} had hold of me, and they hit it until it let go.`
-      : `They have pulled ${a(s, "predator", again)} off me, and ${count(n - 1)} other ${n === 2 ? "thing" : "things"} besides.`,
-  sleptSafely: (n) =>
-    n <= 1 ? `I have slept where they could reach me.` : `I have slept beside them ${times(n)}.`,
-  keptWatch: (n) =>
-    n <= 1 ? `I stayed awake while they slept.` : `I have stayed awake through their sleep ${times(n)}.`,
-  // No "and I started most of it" here, however well it read: this clause only
-  // ever sees ONE side's count, so both halves of a mutual rivalry claimed to
-  // have started it — a sentence the data cannot support. Liberty in the
-  // connective tissue, never in the facts.
-  struck: (n) =>
-    n <= 1
-      ? `We both wanted the same water, and I hit them for it.`
-      : `We have wanted the same water ${times(n)}, and ${times(n) === "twice" ? "both times" : "every time"} I hit them for it.`,
-  // Was "come at me", which said nothing about what the fight was over.
-  wasStruck: (n) =>
-    n <= 1 ? `We both wanted the same water, and they hit me for it.` : `They have hit me ${times(n)} over water and feeding-ground we both wanted.`,
-  sharedWater: (n) =>
-    n <= 1
-      ? `We stood over the same water and neither of us started anything.`
-      : `We have stood over the same water ${times(n)} without it coming to blows.`,
-  trainedTogether: (n) =>
-    n <= 1 ? `We practised side by side.` : `We spent whole seasons practising side by side.`,
-  gaveFood: (n) => (n <= 1 ? `I brought them food.` : `I have brought them food ${times(n)}.`),
-  receivedFood: (n) => (n <= 1 ? `They brought me food.` : `They have brought me food ${times(n)}.`),
-  socialized: (n) =>
-    n <= 1 ? `We have sat together.` : `We have spent seasons in each other's company.`,
+      ? `We watched ${again ? "another" : named(label, standing, "creature")} die.`
+      : standing === "friend"
+        ? `We have watched ${count(n)} friends die.`
+        : `We have watched ${count(n)} foes die.`,
+  defended: ({ n, sex }) => (n <= 1 ? `I defended ${obj(sex)}.` : `I have defended ${obj(sex)} ${times(n)}.`),
+  wasDefended: ({ n, sex }) => (n <= 1 ? `${subj(sex)} defended me.` : `${subj(sex)} ${hasVerb(sex)} defended me ${times(n)}.`),
+  healed: ({ n, sex }) => (n <= 1 ? `I healed ${poss(sex)} wounds.` : `I have healed ${obj(sex)} ${times(n)}.`),
+  wasHealed: ({ n, sex }) => (n <= 1 ? `${subj(sex)} healed my wounds.` : `${subj(sex)} ${hasVerb(sex)} healed me ${times(n)}.`),
+  weatheredTogether: ({ n, label }) =>
+    n <= 1 ? `${nameOf(label, "The weather")} drove our herd out, and we left together.` : `We have been driven out together ${times(n)}.`,
+  sleptSafely: ({ n, sex }) => (n <= 1 ? `I slept beside ${obj(sex)}.` : `I have slept beside ${obj(sex)} ${times(n)}.`),
+  keptWatch: ({ n, sex }) => (n <= 1 ? `I watched over ${poss(sex)} sleep.` : `I have watched over ${poss(sex)} sleep ${times(n)}.`),
+  struck: ({ n, sex }) => (n <= 1 ? `I fought ${obj(sex)} over water.` : `I have fought ${obj(sex)} ${times(n)} over water and feeding ground.`),
+  wasStruck: ({ n, sex }) => (n <= 1 ? `${subj(sex)} fought me over water.` : `${subj(sex)} ${hasVerb(sex)} fought me ${times(n)} over water and feeding ground.`),
+  sharedWater: ({ n, sex }) =>
+    n <= 1 ? `We shared the same water without fighting.` : `We have shared the same water ${times(n)} without fighting.`,
+  trainedTogether: ({ n }) => (n <= 1 ? `We trained together.` : `We have trained together for seasons.`),
+  gaveFood: ({ n, sex }) => (n <= 1 ? `I brought ${obj(sex)} food.` : `I have brought ${obj(sex)} food ${times(n)}.`),
+  receivedFood: ({ n, sex }) => (n <= 1 ? `${subj(sex)} brought me food.` : `${subj(sex)} ${hasVerb(sex)} brought me food ${times(n)}.`),
+  socialized: ({ n, sex }) => (n <= 1 ? `We have sat together.` : `We have kept each other company for seasons.`),
 };
 
-/** At most `limit` clauses, most significant first, as one line. */
+/** At most `limit` sentences, most significant first. */
 function describe(
-  memories: { reason: RapportReason; count: number; subject?: { label: string; kin?: "ours" | "other" } }[],
+  memories: { reason: RapportReason; count: number; subject?: { label: string; standing?: "friend" | "foe" } }[],
+  sex: "male" | "female" | undefined,
   limit = 2,
 ): string {
-  // Never name the same creature twice in one breath — "We brought down a
-  // Scyther together. They have pulled a Scyther off me" reads as a stutter,
-  // or as a bug. An earlier attempt at this DROPPED the duplicate clause,
-  // which was worse: it threw away the best line on the edge and fell back to
-  // filler like "We have sat together." Keep the clause, refer back instead.
+  // Never name the same creature twice in one breath. An earlier attempt at
+  // this DROPPED the duplicate clause, which was worse: it threw away the
+  // best line on the edge and fell back to filler. Refer back instead.
   const spoken = new Set<string>();
   return memories
     .slice(0, limit)
@@ -235,7 +221,7 @@ function describe(
       const label = m.subject?.label;
       const again = label !== undefined && spoken.has(label);
       if (label) spoken.add(label);
-      return CLAUSE[m.reason](m.count, label, m.subject?.kin, again);
+      return CLAUSE[m.reason]({ n: m.count, label, standing: m.subject?.standing, sex, again });
     })
     .join(" ");
 }
@@ -297,7 +283,7 @@ for (const seed of seeds) {
             String(memories.length).padStart(2),
             String(events).padStart(4),
             `seed ${seed} · ${agent.species} ${agent.id.slice(0, 8)} → ${other?.species ?? "?"} ${otherId.slice(0, 8)}`,
-            `(${score >= 0 ? "+" : ""}${score.toFixed(2)}) ` + describe(notable as any),
+            `(${score >= 0 ? "+" : ""}${score.toFixed(2)}) ` + describe(notable as any, other?.sex),
           ].join("\t")
         );
       }
