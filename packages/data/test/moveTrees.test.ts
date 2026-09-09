@@ -261,14 +261,16 @@ describe("Peck tree: reach and positional keystones", () => {
   });
 
   it("Snatch and Swap keystone is the roster's first positionSwap + positionSwapPull", () => {
+    // v4 relocated the Ambush Dive / Harrying Wings fork onto the tail of
+    // Boldness's *other* lane ("Nowhere To Go"), behind Relentless Harrier —
+    // so this is the new legal walk to the same keystone. The assertions
+    // below are unchanged.
     const respec = applyMoveTree(peck, [
       "swooping_approach",
-      "wing_conditioning",
-      "dive_strike_footing",
-      "extended_wingspan",
-      "wing_precision",
-      "ambush_dive",
+      "braced_stance",
       "relentless_harrier",
+      "ambush_dive",
+      "nowhere_to_run",
       "diving_precision",
       "snatch_and_swap",
     ]);

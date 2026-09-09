@@ -1679,7 +1679,10 @@ here, not done.
 
 - **Peck** (Flying, point) — Spearow's only move, a solitary crepuscular
   ambush hunter (mismatched with its diurnal Pidgey prey — see
-  `species.ts`'s own comment on that).
+  `species.ts`'s own comment on that). **Superseded** — converted to template
+  v4 (33 -> 45 nodes); see "Peck converted to v4 (Shipped)" at the end of this
+  document for the current tree. Several node mechanics below (Talon Strike,
+  Ambush Dive, Harrier's Charge) no longer match `moves.ts`.
   - **Aggression — "Sharp Strike"**: opener *Needle Point* (+power) →
     filler → filler → notable *Frenzied Pecking* (`hits` 2) → filler →
     **fork**: *Piercing Beak* (`defensePenetration`) vs. *Rapid Volley*
@@ -4810,6 +4813,99 @@ levers; **two were kept on purpose**, in the branch whose own opener wants a
 storm and in the lane that stands in the open holding a spot — those two are
 buying back exactly what the weather takes off them.
 
+### Peck converted to v4 (Shipped) — "the point, not the wing"
+
+33 → 45 nodes, 12 per branch, 9 `anyOf`, 6 fork nodes, 3 real bridges. Every
+v3 fork survives, relocated to a lane tail. Checker findings for this tree:
+**11 → 0**, including both overwrite collisions (see below — those were
+fixable here without engine work, unlike Solar Beam's and Hydro Pump's).
+
+**The fantasy, written before any node**, because the brief for this move was
+specifically "peck must not just be a smaller Wing Attack":
+
+> Peck is one hard point — a beak, a horn, a leek — driven into a single spot
+> with the whole body behind it. Wing Attack is surface area; Peck is
+> pressure. There is no wind-up and nothing to see coming: it happens inside
+> your guard, at arm's length, and it happens again a half-second later in
+> exactly the same place. What kills is not the size of the hole, it is the
+> repetition — the same puncture reopened until something under it gives.
+> What is dangerous *to the pecker* is where it has to stand to do it: range
+> 1, inside the reach of everything, nowhere to be but there.
+
+**The learners settle the "is it a bird move" question, and they say no.**
+Peck is on spearow/fearow (crepuscular canopy predators), doduo/dodrio
+(flightless savanna runners), goldeen/seaking (horned fish), farfetchd (a
+leek), and nidoranm/nidorino (a horn). Only three of the nine can fly.
+`wing_attack` — gusts, scatter, mobbing, `forcedMovement: away` — is the wing.
+Peck is the point. That is the whole separation, and it is what the Boldness
+deep notable inverts on purpose (below).
+
+**Lanes differ in kind, per branch:**
+
+| branch | lane A | lane B | deep notable |
+|---|---|---|---|
+| **The Same Hole** (agg) | *Through the Guard* — severity: armour, then the type chart (`defensePenetration`, `bonusVsType`, new *Stone-Seeker*'s `resistanceBreaker` answering Peck's own printed Rock/Steel resist) | *Again, Same Spot* — rate: `hits` 2, then the preserved deeper-jab-vs-third-jab fork | *Talon Strike*, rebuilt: the talons plant, the body's mass goes in behind the point (`weightScaling`) and the beak takes a piece back out (`lifestealFraction`) |
+| **Where You Have To Stand** (bold) | *Longer Reach* — rewrite the geometry so point-blank stops being point-blank (`shape` line-2 + `range`) | *Nowhere To Go* — accept point-blank and make standing there survivable (new *Braced Stance*'s `lockTicks` commitment, crit-fishing, the preserved fork) | new *Nowhere to Run* |
+| **Ten Beaks, One Hole** (soc) | *Everyone On That One* — the mark: new *Mark the Soft Spot*'s `rallyCall` turns every flock-mate's separately-run threat pick onto the same target | *Keep the Flock Standing* — provisioning and cover, incl. the preserved screen-vs-charge fork | *Preening Recovery*, which stops being a bare passive with an empty delta |
+
+**The best node in the pass is *Nowhere to Run*.** `wing_attack`'s entire
+positional identity is scattering things AWAY on a landed hit. A point weapon
+wants the exact opposite: the beak hooks and the target comes one tile IN,
+back onto the spot the next jab is already aimed at. It is one field
+(`forcedMovement`, mover `defender`, direction `closer`) and it is the
+clearest statement in the roster of what separates these two Flying moves.
+
+***Set the Point*** is the Aggression capstone and answers the move's own
+flaw, per the pattern about a weakness being a branch waiting to happen: Peck
+is range 1, so everything in that branch has to be bought standing on top of
+the target. `chargeAttack` is the only primitive that addresses that directly
+— one tick fixed on a spot (invulnerable, unable to act), then three tiles
+crossed in the leap and the stored commitment driven home, fizzling for
+nothing if the target has moved. Second user of `chargeAttack` in the roster,
+after Body Slam's *Mountainous Impact*.
+
+**Both overwrite collisions were real dead content, not just checker noise.**
+v3 had THREE co-takeable `situationalBonus` setters (`talon_strike`
+targetLowHp, `swooping_approach` elevation, `ambush_dive` flanking).
+`applyMoveTree` overwrites that field, so a build taking two of them was
+paying a skill point for a node that provably did nothing. The tree now
+carries exactly one (`swooping_approach`'s elevation — the fantasy-obvious
+condition for something that drops on things), and the two freed nodes became
+the levers the branches were actually missing.
+
+**A unit check that changed the design, caught by running it.** I assumed
+`jamCooldownTicks` was an overwrite field, since it is not in
+`applyMoveTree`'s documented additive list, and built the Ambush Strike bridge
+as an escalating 1 → 2 → 3 chain on that basis — plus rewrote *Harrier's
+Charge* off the lever to avoid a collision that would not have existed. Then I
+ran a fully-specced respec and read `jamCooldownTicks: 6` off the result. It
+is additive (`moves.ts:773`). The bridge is now +1/+1/+2 for four ticks total,
+*Harrier's Charge* is reverted to its shipped mechanic, and the file carries a
+comment saying the field was verified by running it rather than by reading the
+list. This is the same class of mistake as the cooldown-denominator one.
+
+**Levers deliberately NOT used, with the call site read first:**
+
+- **`drainNeeds`** — a beak that takes a bite off a rival is almost too apt.
+  It requires `utilityMove`, and `pickBestMove` (combat.ts) *excludes* any
+  `utilityMove` from hostile selection. Putting it on a Peck node would have
+  removed Peck from combat entirely. Not a balance judgement — it would have
+  deleted the move.
+- **`positionSwap` as a Sociability node** ("take your flock-mate's place").
+  `positionSwap` swaps attacker and defender; there is no ally-side form. It
+  would have read as cover and done something else.
+- **A second healing passive.** The branch is about focus, not medicine, and
+  the roster's healing budget is already the thing `softCapHealShare` exists
+  to bend.
+
+**Passive discipline: zero net change.** `passive-exposure.ts` output is
+byte-identical before and after. The tree grants exactly the passive budget it
+already granted (`regen 0.03`, `damageReductionFlat` 1.0 per fork side) — the
+Bridge-2 filler *Spread Wing* needed to share its crosslink's lever (principle
+13), and rather than adding a second point of flat mitigation, *Cover Call*'s
+own 1.0 was split 0.5/0.5 across the two nodes. Everywhere else the branch
+wanted armour, the node got a delta instead.
+
 **Balance, with the roster as control:**
 
 | | before | after | roster median |
@@ -4841,3 +4937,36 @@ itself, with controls:
 | base move, standing on water | 9 damage, tile stays `water` | the consume is tree-earned, not baked in |
 | *Sheeting Spray*, two bodies in the line | 34 and **33** damage | base move: 7 and **0** |
 | puddles left per cast | **1** | base move: also 1 — `isPrimaryTarget` |
+
+| distinct levers | 19 | **31** (2nd in the roster) | 23 |
+| colour-pie flavours | 9 | **12** | 9 |
+| tempo | 1.00x (cap 2.00x) | **2.00x** | 2.00x |
+| power | 2.43x | 2.57x | 1.96x |
+| cheapest capstone | 11 pts | 10 pts | 11 pts |
+| checker problems | **11** | **0** | — |
+
+**The one balance number moved, flagged for a decision rather than settled.**
+Peck was the only damaging tree in the roster spending *nothing* on cooldown —
+tempo 1.00x against a 2.00x cap, the lowest reading on the board. Two fillers
+(*+5 Accuracy, -1 Cooldown* in Boldness, *+5 Power, -1 Cooldown* in
+Sociability) now spend the full −2 the cap allows, landing tempo on exactly
+the roster median. That is a control-anchored number, not a taste call, but it
+IS a tuning decision and reverting either node to a plain stat filler is a
+one-line change.
+
+**Verified by running it, not by reading it.** Driving the engine's own
+`maybeAutoRespec` on a real Spearow with points to spend, once per
+disposition: **42 of 45 nodes bought in each case** (the missing three are the
+excluded fork sides), **all three capstones reached from every disposition**,
+and every new lever present on the resulting spec (`chargeAttack`,
+`rallyCall`, `forcedMovement`, `gatherBurst`, `terrainBurn`,
+`resistanceBreaker`, `weightScaling`, `allyEffectOnAttack`).
+
+**And a live-run limit stated plainly, with its control.** In a real
+`createDemoWorld` run — 5 seeds × 8,000 ticks — the tree never fires, because
+the scenario's single Spearow never enters a fight at all: **0 ticks with a
+fight or hunt target, 0 moves used of any kind**. Running the identical world
+with no tree applied gives the same zeros, so this is pre-existing scenario
+population state, not something this pass caused. It is the same finding Rock
+Slide's conversion recorded for its lone Onix, and it is a population problem,
+not a tree problem.

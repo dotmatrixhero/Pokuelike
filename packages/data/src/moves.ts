@@ -2217,12 +2217,35 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("PECK"),
     cooldownTicks: 3,
     range: { min: 0, max: 1 },
-    // v2 full triangle (MOVES_DESIGN.md's "Peck" writeup): the roster's first
-    // positionSwap+positionSwapPull and first critCooldownReset live here,
-    // plus the only tree that changes Peck's own point shape into real reach
-    // mid-build, and a support keystone that slows a target down instead of
-    // healing.
+    // --- Template v4 (45 nodes). THE FANTASY, written before any node:
+    //
+    // Peck is one hard point — a beak, a horn, a leek — driven into a single
+    // spot with the whole body behind it. Wing Attack is surface area; Peck
+    // is pressure. There is no wind-up and nothing to see coming: it happens
+    // inside your guard, at arm's length, and it happens again a half-second
+    // later in exactly the same place. What kills is not the size of the hole,
+    // it is the repetition — the same puncture reopened until something under
+    // it gives. What is dangerous *to the pecker* is where it has to stand to
+    // do it: range 1, inside the reach of everything, nowhere to be but there.
+    //
+    // Its learners are not all birds, and that is the point: Goldeen and
+    // Nidorino peck with a horn, Farfetch'd with a leek, Doduo with two heads
+    // that never leave the ground. Peck is the POINT, not the wing — which is
+    // exactly what keeps it out of `wing_attack`'s lane (gusts, scatter,
+    // mobbing) even though the two share Spearow's sky.
+    //
+    // Aggression answers "where does the point land and what does the hole
+    // become"; Boldness answers "range 1 is the flaw — rewrite the geometry,
+    // or refuse to be moved off the spot"; Sociability answers "ten small
+    // points in the same hole beat one big one, if they all pick the same
+    // target". Keeps every v3 fork, relocated into a lane tail.
     tree: {
+      // ============================================================
+      // AGGRESSION — "The Same Hole"
+      // Flavours: piercing (defensePenetration/resistanceBreaker/bonusVsType),
+      // raw damage (hits/lifesteal/weightScaling), aggressive movement
+      // (chargeAttack), environment (terrainBurn).
+      // ============================================================
       needle_point: {
         id: "needle_point",
         name: "Needle Point",
@@ -2230,6 +2253,8 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { power: 10 },
       },
+      // --- Lane A: "Through the Guard" — severity. One point, past whatever
+      // is in the way: armour first, then the type chart.
       beak_sharpening: {
         id: "beak_sharpening",
         name: "+5 Power",
@@ -2238,35 +2263,64 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { power: 5 },
       },
+      rapid_pecking: {
+        id: "rapid_pecking",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["beak_sharpening"],
+        leaning: "aggression",
+        delta: { accuracy: 5 },
+      },
+      skybreaker: {
+        id: "skybreaker",
+        name: "Skybreaker",
+        cost: 2,
+        // Lane A's notable, reachable either by walking the lane or off the
+        // Ambush Strike bridge (principle 12 — the bridge saves the grind,
+        // never the fork).
+        prerequisitesAnyOf: [["rapid_pecking"], ["never_recovers"]],
+        leaning: "aggression",
+        // Flying beats Grass — a real answer to the roster's own
+        // Bulbasaur/Venusaur line.
+        delta: { bonusVsType: { type: "grass", multiplier: 1.5 } },
+      },
+      stone_seeker: {
+        id: "stone_seeker",
+        name: "Stone-Seeker",
+        cost: 1,
+        prerequisites: ["skybreaker"],
+        leaning: "aggression",
+        // The lane's own logic, finished: Peck is Flying, so Rock and Steel
+        // and Electric all shrug it off. A point does not answer that with
+        // mass — it answers it by going for the seam instead of the plate,
+        // which costs real force (`power: -5`) for the angle.
+        delta: { resistanceBreaker: { multiplier: 1.5 }, power: -5 },
+      },
+      // --- Lane B: "Again, Same Spot" — rate. The point returns before the
+      // wound closes. Differs from Lane A in KIND: volume, not severity.
       sharp_strike_footing: {
         id: "sharp_strike_footing",
         name: "+5 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["beak_sharpening"], ["ambush_strike"], ["war_cry"]],
+        prerequisites: ["needle_point"],
         leaning: "aggression",
         delta: { accuracy: 5 },
       },
       frenzied_pecking: {
         id: "frenzied_pecking",
         name: "Frenzied Pecking",
-        cost: 1,
-        prerequisites: ["sharp_strike_footing"],
+        cost: 2,
+        prerequisitesAnyOf: [["sharp_strike_footing"], ["cornered_beak"]],
         leaning: "aggression",
         delta: { hits: { min: 2, max: 2 } },
       },
-      rapid_pecking: {
-        id: "rapid_pecking",
-        name: "+5 Accuracy",
-        cost: 1,
-        prerequisites: ["frenzied_pecking"],
-        leaning: "aggression",
-        delta: { accuracy: 5 },
-      },
+      // The v3 fork, preserved verbatim and relocated to this lane's tail:
+      // one jab that goes deeper, or a third jab that does not.
       piercing_beak: {
         id: "piercing_beak",
         name: "Piercing Beak",
         cost: 1,
-        prerequisites: ["rapid_pecking"],
+        prerequisites: ["frenzied_pecking"],
         excludes: ["rapid_volley"],
         leaning: "aggression",
         delta: { defensePenetration: 0.3 },
@@ -2275,7 +2329,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "rapid_volley",
         name: "Rapid Volley",
         cost: 1,
-        prerequisites: ["rapid_pecking"],
+        prerequisites: ["frenzied_pecking"],
         excludes: ["piercing_beak"],
         leaning: "aggression",
         delta: { hits: { min: 3, max: 3 }, power: -10 },
@@ -2284,9 +2338,20 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "talon_strike",
         name: "Talon Strike",
         cost: 2,
-        prerequisitesAnyOf: [["piercing_beak"], ["rapid_volley"]],
+        // Deep notable: both lanes end here — Lane A's tail and both tips of
+        // Lane B's fork.
+        prerequisitesAnyOf: [["stone_seeker"], ["piercing_beak"], ["rapid_volley"]],
         leaning: "aggression",
-        delta: { situationalBonus: { condition: "targetLowHp", multiplier: 1.4 } },
+        // v3 had this as `situationalBonus: targetLowHp`, which was one of
+        // THREE co-takeable `situationalBonus` setters in the tree — an
+        // overwrite field, so two of the three were silently dead on any build
+        // that took them together. The tree now carries exactly one
+        // (`swooping_approach`), and this node became the thing the branch was
+        // missing instead: the convergence where opening a hole finally means
+        // FEEDING through it. The talons plant, the whole body's mass goes in
+        // behind the point (`weightScaling`, the fantasy's own sentence), and
+        // the beak takes a piece back out.
+        delta: { weightScaling: { factor: 0.1 }, lifestealFraction: 0.12 },
       },
       keen_eye: {
         id: "keen_eye",
@@ -2294,25 +2359,47 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["talon_strike"],
         leaning: "aggression",
-        delta: { accuracy: 5 },
+        // Same +5 Accuracy it always was, plus the lever its own name was
+        // already promising: what a hunting bird's eye is FOR is finding the
+        // thing in the undergrowth, and `terrainBurn` strips that bush tile's
+        // concealment for good on a landed hit.
+        delta: { accuracy: 5, terrainBurn: true },
       },
-      skybreaker: {
-        id: "skybreaker",
-        name: "Skybreaker",
+      set_the_point: {
+        id: "set_the_point",
+        name: "Set the Point",
         cost: 2,
         prerequisites: ["keen_eye"],
         leaning: "aggression",
-        // Flying beats Grass — a real answer to the roster's own
-        // Bulbasaur/Venusaur line.
-        delta: { bonusVsType: { type: "grass", multiplier: 1.5 } },
+        // Capstone, and the one moment a Peck ever holds still. Peck's real
+        // weakness is its range — everything in this branch has to be bought
+        // standing on top of the target. `chargeAttack` is the only primitive
+        // in the engine that answers that directly: one tick fixed on a spot
+        // (invulnerable, unable to act), then three tiles crossed in the leap
+        // and the whole stored commitment driven home. A genuine risk, not a
+        // guaranteed payoff — if the target is gone when it releases, the
+        // whole thing fizzles. Second user of `chargeAttack` in the roster.
+        delta: { chargeAttack: { ticks: 1, bonusPower: 30, leapTiles: 3 } },
       },
+
+      // ============================================================
+      // BOLDNESS — "Where You Have To Stand"
+      // Peck's flaw IS its range. This branch answers it two ways that are
+      // not degrees of each other: Lane A changes the geometry so point-blank
+      // stops being point-blank; Lane B accepts point-blank and makes staying
+      // there survivable.
+      // Flavours: stealth/ambush, wider aoe (shape), aggressive movement
+      // (lockTicks/forcedMovement), raw damage, reposition others.
+      // ============================================================
       swooping_approach: {
         id: "swooping_approach",
         name: "Swooping Approach",
         cost: 1,
         leaning: "boldness",
+        // The tree's ONLY `situationalBonus` — see `talon_strike`'s comment.
         delta: { situationalBonus: { condition: "elevation", multiplier: 1.3 } },
       },
+      // --- Lane A: "Longer Reach" — stop having to stand there at all.
       wing_conditioning: {
         id: "wing_conditioning",
         name: "+5 Power",
@@ -2323,20 +2410,20 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       dive_strike_footing: {
         id: "dive_strike_footing",
-        name: "+5 Accuracy",
+        name: "+5 Accuracy, -1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["wing_conditioning"], ["ambush_strike"], ["cover_call"]],
+        prerequisites: ["wing_conditioning"],
         leaning: "boldness",
-        delta: { accuracy: 5 },
+        delta: { accuracy: 5, cooldownTicks: -1 },
       },
       extended_wingspan: {
         id: "extended_wingspan",
         name: "Extended Wingspan",
-        cost: 1,
-        prerequisites: ["dive_strike_footing"],
+        cost: 2,
+        prerequisitesAnyOf: [["dive_strike_footing"], ["never_recovers"]],
         leaning: "boldness",
         // Peck actually gains reach for the first time — a 2-tile line
-        // instead of a point-blank stab.
+        // instead of a point-blank stab. The tree's only shape setter.
         delta: { shape: { kind: "line", length: 2 }, range: { max: 2 } },
       },
       wing_precision: {
@@ -2347,39 +2434,74 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { accuracy: 5 },
       },
-      ambush_dive: {
-        id: "ambush_dive",
-        name: "Ambush Dive",
+      // --- Lane B: "Nowhere To Go" — do not fix the range. Fix what happens
+      // when something is already on top of you.
+      braced_stance: {
+        id: "braced_stance",
+        name: "Braced Stance",
         cost: 1,
-        prerequisites: ["wing_precision"],
-        excludes: ["harrying_wings"],
+        prerequisites: ["swooping_approach"],
         leaning: "boldness",
-        delta: { situationalBonus: { condition: "flanking", multiplier: 1.4 } },
-      },
-      harrying_wings: {
-        id: "harrying_wings",
-        name: "Harrying Wings",
-        cost: 1,
-        prerequisites: ["wing_precision"],
-        excludes: ["ambush_dive"],
-        leaning: "boldness",
-        delta: { power: -5, accuracy: 10 },
+        // The whole body behind the point means the body is committed too:
+        // planted feet drive the point straighter past whatever it lands on,
+        // and you are a beat late recovering from it (`lockTicks` locks the
+        // USER, not the target — moves.ts's own doc comment). Benefit and
+        // cost in the same node, per principle 4.
+        delta: { defensePenetration: 0.12, lockTicks: 1 },
       },
       relentless_harrier: {
         id: "relentless_harrier",
         name: "Relentless Harrier",
         cost: 2,
-        prerequisitesAnyOf: [["ambush_dive"], ["harrying_wings"]],
+        prerequisitesAnyOf: [["braced_stance"], ["they_come_with_you"]],
         leaning: "boldness",
-        // A real crit-fisher spec — when the dive lands one, it's ready to
-        // go again immediately instead of just hitting harder.
+        // A real crit-fisher spec — when the point lands one, it is ready to
+        // go again immediately instead of just hitting harder, which is what
+        // "nowhere to go" needs: you never get to step back and reset.
         delta: { power: 10, critRateStage: 1, critCooldownReset: true },
+      },
+      // The v3 fork, preserved, relocated to this lane's tail. Rebuilt off
+      // `situationalBonus` (see `talon_strike`) into the choice this lane was
+      // actually asking: commit everything and wear it, or stay light and
+      // just never miss.
+      ambush_dive: {
+        id: "ambush_dive",
+        name: "All-In Dive",
+        cost: 1,
+        prerequisites: ["relentless_harrier"],
+        excludes: ["harrying_wings"],
+        leaning: "boldness",
+        delta: { power: 5, critRateStage: 1, recoilFraction: 0.08 },
+      },
+      harrying_wings: {
+        id: "harrying_wings",
+        name: "Harrying Wings",
+        cost: 1,
+        prerequisites: ["relentless_harrier"],
+        excludes: ["ambush_dive"],
+        leaning: "boldness",
+        delta: { power: -5, accuracy: 10 },
+      },
+      nowhere_to_run: {
+        id: "nowhere_to_run",
+        name: "Nowhere to Run",
+        cost: 2,
+        prerequisitesAnyOf: [["wing_precision"], ["ambush_dive"], ["harrying_wings"]],
+        leaning: "boldness",
+        // Deep notable, and the deliberate inversion of `wing_attack`: that
+        // move's whole positional identity is scattering things AWAY on a
+        // landed hit. A point weapon wants the opposite — the beak hooks and
+        // the target comes one tile IN, back onto the spot the next jab is
+        // already aimed at. Whichever lane got here, it stops the target
+        // leaving: the reach lane can no longer be walked out of, and the
+        // braced lane no longer has to chase.
+        delta: { forcedMovement: { mover: "defender", direction: "closer", tiles: 1, timing: "onHit" } },
       },
       diving_precision: {
         id: "diving_precision",
         name: "+5 Accuracy",
         cost: 1,
-        prerequisites: ["relentless_harrier"],
+        prerequisites: ["nowhere_to_run"],
         leaning: "boldness",
         delta: { accuracy: 5 },
       },
@@ -2394,6 +2516,15 @@ export const MOVES: Record<string, MoveSpec> = {
         // out of position instead of a same-spot trade.
         delta: { positionSwap: true, positionSwapPull: 2 },
       },
+
+      // ============================================================
+      // SOCIABILITY — "Ten Beaks, One Hole"
+      // A flock of small point-weapons is not a bigger weapon; it is the same
+      // weapon used ten times in the same second on the same target. This
+      // branch is about FOCUS, not healing.
+      // Flavours: ally buffing, rallying, healing, defence, piercing,
+      // planted/duration.
+      // ============================================================
       flock_call: {
         id: "flock_call",
         name: "Flock Call",
@@ -2401,6 +2532,9 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { targetsAlly: true, allyEffect: { buff: { stat: "attack", stage: 1, ticks: 20 } } },
       },
+      // --- Lane A: "Everyone On That One" — the mark. This lane changes what
+      // OTHER agents independently decide to attack, which is a different
+      // kind of thing from Lane B's provisioning, not a bigger version of it.
       flock_footing: {
         id: "flock_footing",
         name: "+5 Accuracy",
@@ -2413,31 +2547,53 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "flock_call_footing",
         name: "+5 Power",
         cost: 1,
-        prerequisitesAnyOf: [["flock_footing"], ["war_cry"], ["cover_call"]],
+        prerequisites: ["flock_footing"],
         leaning: "sociability",
         delta: { power: 5 },
+      },
+      mark_the_soft_spot: {
+        id: "mark_the_soft_spot",
+        name: "Mark the Soft Spot",
+        cost: 2,
+        prerequisitesAnyOf: [["flock_call_footing"], ["they_come_with_you"]],
+        leaning: "sociability",
+        // The branch's actual thesis, which v3 never built: a flock's edge is
+        // that all of it picks the SAME target. `rallyCall` marks the thing
+        // this beak just found the soft spot on, and every nearby flock-mate's
+        // own separately-run threat pick lands on it too.
+        delta: { rallyCall: { ticks: 15 } },
+      },
+      flock_instinct: {
+        id: "flock_instinct",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["mark_the_soft_spot"],
+        leaning: "sociability",
+        delta: { accuracy: 5 },
+      },
+      // --- Lane B: "Keep the Flock Standing" — provisioning and cover.
+      flock_synergy: {
+        id: "flock_synergy",
+        name: "+5 Power, -1 Cooldown",
+        cost: 1,
+        prerequisites: ["flock_call"],
+        leaning: "sociability",
+        delta: { power: 5, cooldownTicks: -1 },
       },
       wingmate_cover: {
         id: "wingmate_cover",
         name: "Wingmate Cover",
-        cost: 1,
-        prerequisites: ["flock_call_footing"],
+        cost: 2,
+        prerequisitesAnyOf: [["flock_synergy"], ["cornered_beak"]],
         leaning: "sociability",
         delta: { targetsAlly: true, allyEffect: { buff: { stat: "defense", stage: 1, ticks: 20 } } },
       },
-      flock_synergy: {
-        id: "flock_synergy",
-        name: "+5 Power",
-        cost: 1,
-        prerequisites: ["wingmate_cover"],
-        leaning: "sociability",
-        delta: { power: 5 },
-      },
+      // The v3 fork, preserved verbatim on this lane's tail.
       screening_wings: {
         id: "screening_wings",
         name: "Screening Wings",
         cost: 1,
-        prerequisites: ["flock_synergy"],
+        prerequisites: ["wingmate_cover"],
         excludes: ["harriers_charge"],
         leaning: "sociability",
         grantsPassive: { kind: "damageReductionFlat", value: 1 },
@@ -2447,7 +2603,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "harriers_charge",
         name: "Harrier's Charge",
         cost: 1,
-        prerequisites: ["flock_synergy"],
+        prerequisites: ["wingmate_cover"],
         excludes: ["screening_wings"],
         leaning: "sociability",
         delta: { power: 10, jamCooldownTicks: 1 },
@@ -2456,30 +2612,54 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "preening_recovery",
         name: "Preening Recovery",
         cost: 2,
-        prerequisitesAnyOf: [["screening_wings"], ["harriers_charge"]],
+        prerequisitesAnyOf: [["flock_instinct"], ["screening_wings"], ["harriers_charge"]],
         leaning: "sociability",
         grantsPassive: { kind: "regen", value: 0.03 },
-        delta: {},
+        // Deep notable. v3 left this a bare passive with an empty delta; it
+        // now also deepens the ally-effect the branch has been building
+        // (restating Wingmate Cover's defense buff so the overwrite loses
+        // nothing, and adding the heal), which is what "preening" is: the
+        // flock putting each other back in order between fights.
+        delta: { allyEffect: { healFraction: 0.08, buff: { stat: "defense", stage: 1, ticks: 20 } } },
       },
-      flock_instinct: {
-        id: "flock_instinct",
-        name: "+5 Accuracy",
+      shake_the_branch: {
+        id: "shake_the_branch",
+        name: "Shake the Branch",
         cost: 1,
         prerequisites: ["preening_recovery"],
         leaning: "sociability",
-        delta: { accuracy: 5 },
+        // The one node in the tree that feeds instead of fights, and the
+        // reason it is reachable rather than decorative: needs.ts's
+        // canopy-harvest path processes a canopy-native crop with an
+        // off-cooldown damage move (`CANOPY_HARVEST_MOVE_BASE_BURST` +
+        // `gatherBurst`), Apple is canopy-native and forest-eligible
+        // (crops.ts), and Spearow/Fearow live in `homeLayer: "canopy"` over
+        // forest. A flock working an apple branch with its beaks.
+        delta: { gatherBurst: 3, accuracy: 5 },
       },
       harrying_flock: {
         id: "harrying_flock",
         name: "Harrying Flock",
         cost: 2,
-        prerequisites: ["flock_instinct"],
+        prerequisites: ["shake_the_branch"],
         leaning: "sociability",
-        // A crowd-control capstone — slows prey down, instead of a heal.
+        // A crowd-control capstone — slows prey down, instead of a heal. The
+        // tree's only `statChangeOnHit`.
         delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -1, ticks: 20 } },
       },
-      // Crosslink: Aggression <-> Boldness — a coordinated snatch that
-      // throws off the target's own rhythm.
+
+      // ============================================================
+      // BRIDGES — three, each crosslink -> filler deepening its own lever ->
+      // notable that is an alternate route into ONE lane per branch it
+      // connects (principles 7, 11, 12, 13).
+      // ============================================================
+      // Bridge 1: Aggression <-> Boldness. A coordinated snatch that throws
+      // off the target's own rhythm. `jamCooldownTicks` is ADDITIVE in
+      // `applyMoveTree` (verified by running it, not by reading the field
+      // list), so this bridge stacks +1/+1/+2 to four ticks of jam — the
+      // roster's deepest, and the reason the bridge exists. It lands in the
+      // two SEVERITY-and-REACH lanes, the two with no tempo of their own: a
+      // bridge complements its landing lane rather than deepening a rut.
       ambush_strike: {
         id: "ambush_strike",
         name: "Ambush Strike",
@@ -2488,19 +2668,65 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { jamCooldownTicks: 1 },
       },
-      // Crosslink: Boldness <-> Sociability — a braced dive shares its own
-      // cover with the flock.
+      broken_rhythm: {
+        id: "broken_rhythm",
+        name: "Broken Rhythm",
+        cost: 1,
+        prerequisites: ["ambush_strike"],
+        leaning: "aggression",
+        delta: { jamCooldownTicks: 1, accuracy: 5 },
+      },
+      never_recovers: {
+        id: "never_recovers",
+        name: "Never Recovers",
+        cost: 2,
+        prerequisites: ["broken_rhythm"],
+        leaning: "aggression",
+        // The bridge's own payoff, deepening its own lever rather than
+        // grabbing a generic stat: four ticks in total added to everything the
+        // target already has winding down. It stops being a jab that
+        // interrupts and starts being a jab it never gets out from under.
+        delta: { jamCooldownTicks: 2 },
+      },
+      // Bridge 2: Boldness <-> Sociability. A braced dive shares its own
+      // cover with the flock. The crosslink's lever IS the flat mitigation,
+      // so the bridge filler deepens exactly that (principle 13) — and the
+      // 1.0 the crosslink used to grant alone is now split across the two,
+      // so the tree's passive budget is unchanged (see passive-exposure.ts).
       cover_call: {
         id: "cover_call",
         name: "Cover Call",
         cost: 1,
         prerequisites: ["swooping_approach", "flock_call"],
         leaning: "boldness",
-        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        grantsPassive: { kind: "damageReductionFlat", value: 0.5 },
         delta: {},
       },
-      // Crosslink: Sociability <-> Aggression — a cornered flock-mate
-      // fights harder.
+      spread_wing: {
+        id: "spread_wing",
+        name: "Spread Wing",
+        cost: 1,
+        prerequisites: ["cover_call"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 0.5 },
+        delta: {},
+      },
+      they_come_with_you: {
+        id: "they_come_with_you",
+        name: "They Come With You",
+        cost: 2,
+        prerequisites: ["spread_wing"],
+        leaning: "sociability",
+        // Cover stops being something you hand out on an idle tick and starts
+        // being automatic: every hostile Peck now also fires the flock-buff on
+        // the nearest hurt flock-mate (`allyEffectOnAttack`, support.ts's
+        // `nearestAllyEffectTarget`). Guaranteed to have something to fire —
+        // Flock Call is this bridge's own prerequisite.
+        delta: { allyEffectOnAttack: true },
+      },
+      // Bridge 3: Sociability <-> Aggression. A cornered flock-mate fights
+      // harder — `selfStateBonus` escalating 1.3 -> 1.5 -> 1.8, the same
+      // overwrite discipline as Bridge 1. Lands on the two VOLUME lanes.
       war_cry: {
         id: "war_cry",
         name: "War Cry",
@@ -2508,6 +2734,26 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["flock_call", "needle_point"],
         leaning: "sociability",
         delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.3 } },
+      },
+      last_of_the_flock: {
+        id: "last_of_the_flock",
+        name: "Last of the Flock",
+        cost: 1,
+        prerequisites: ["war_cry"],
+        leaning: "sociability",
+        delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.5 }, accuracy: 5 },
+      },
+      cornered_beak: {
+        id: "cornered_beak",
+        name: "Cornered Beak",
+        cost: 2,
+        prerequisites: ["last_of_the_flock"],
+        leaning: "sociability",
+        // `selfStateBonus` biases `pickBestMove`'s SCORING, not damage
+        // (moves.ts's own doc comment) — so what this actually buys is a
+        // half-dead bird that reaches for the beak instead of fleeing, and a
+        // point sharp enough past armour to make that the right call.
+        delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.8 }, defensePenetration: 0.15 },
       },
     },
   },
