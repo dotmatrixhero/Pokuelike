@@ -247,9 +247,9 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
       { id: "quicker_draw", name: "Quicker Draw", cost: 1, prerequisites: ["third_needle"], leaning: "aggression", delta: { cooldownTicks: -1 } },
       { id: "barbed", name: "Barbed", cost: 1, prerequisites: ["quicker_draw"], leaning: "aggression", delta: { statusChance: 0.1 } },
       { id: "fourth_needle", name: "Fourth Needle", cost: 2, leaning: "aggression",
-        prerequisitesAnyOf: [["barbed"], ["blur_of_needles"]],
+        prerequisitesAnyOf: [["barbed"], ["venom_mark"]],
         delta: { hits: { min: 3, max: 4 } },
-        note: "LANE P NOTABLE. Four independent poison rolls is a near-certainty — this lane's product is reliability. Two bridges land HERE, at the lane's own notable, skipping its filler grind but never the lane choice itself." },
+        note: "LANE P NOTABLE. Four independent poison rolls is a near-certainty — this lane's product is reliability. A bridge lands HERE, at the lane's own notable — skipping the filler grind, never the lane choice itself." },
       { id: "thin_point", name: "Thin Point", cost: 1, prerequisites: ["fourth_needle"], leaning: "aggression",
         delta: { defensePenetration: 0.15, forcedMovement: { mover: "attacker", direction: "closer", tiles: 2, timing: "beforeHit" } } },
       // --- Lane R: reserve. Fewer, deeper, paid for in PP.
@@ -259,7 +259,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
       { id: "measured_strikes", name: "Measured Strikes", cost: 1, prerequisites: ["venom_sacs"], leaning: "aggression",
         delta: { critRateStage: 1, cooldownTicks: 1 } },
       { id: "pincushion", name: "Pincushion", cost: 2, leaning: "aggression",
-        prerequisitesAnyOf: [["measured_strikes"], ["venom_mark"]],
+        prerequisitesAnyOf: [["measured_strikes"], ["blur_of_needles"]],
         delta: { statusSeverity: 3, statusChance: 0.3, defensePenetration: 0.25, ppCost: 3 }, needsPrimitive: PPC,
         note: "LANE R NOTABLE. Deliberately NOT more needles — that is Lane P's answer. Two strikes that go deep and leave venom that works." },
       { id: "conserving_draw", name: "Conserving Draw", cost: 1, prerequisites: ["pincushion"], leaning: "aggression",
@@ -350,7 +350,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
       { id: "faster_pass", name: "Faster Pass", cost: 1, prerequisites: ["quick_and_many"], leaning: "aggression", delta: { cooldownTicks: -1 } },
       { id: "blur_of_needles", name: "Blur of Needles", cost: 2, prerequisites: ["faster_pass"], leaning: "aggression",
         delta: { cooldownTicks: -1, hits: { min: 3, max: 4 } },
-        note: "BRIDGE NOTABLE. Escalates its own tempo lever, and lands you at ONE lane notable per branch — Fourth Needle in Aggression, Never Landed in Boldness. The tempo bridge joins the two fast, close lanes; taking it commits you to those, which is what gives each bridge a character instead of being a skeleton key." },
+        note: "BRIDGE NOTABLE. Escalates its own tempo lever, and lands you at ONE lane notable per branch — Pincushion in Aggression, Never Landed in Boldness. Note it COMPLEMENTS rather than matches: a tempo bridge dropping into the slow, measured reserve lane is the tempo that lane otherwise lacks. Matching a bridge to the lane that already shares its identity just deepens a rut." },
 
       { id: "called_from_cover", name: "Called from Cover", cost: 1, prerequisites: ["hit_and_gone", "swarm_signal"], leaning: "boldness",
         delta: { situationalBonus: { condition: "concealed", multiplier: 1.25 } },
@@ -367,7 +367,7 @@ export const PROPOSED_TREES: Record<string, ProposedMove> = {
       { id: "deeper_marking", name: "Deeper Marking", cost: 1, prerequisites: ["marked_and_barbed"], leaning: "sociability", delta: { statusChance: 0.15 } },
       { id: "venom_mark", name: "Venom Mark", cost: 2, prerequisites: ["deeper_marking"], leaning: "aggression",
         delta: { statusChance: 0.2, statusSpreads: true },
-        note: "BRIDGE NOTABLE. Its venom-reliability lever escalated until the mark spreads with it. The venom bridge joins the two reserve lanes: Pincushion in Aggression, Drone Relay in Sociability." },
+        note: "BRIDGE NOTABLE. Its venom-reliability lever escalated until the mark spreads with it, and it lands on Fourth Needle — four needles each carrying venom that actually holds. Complement, not match." },
     ]),
   },
 

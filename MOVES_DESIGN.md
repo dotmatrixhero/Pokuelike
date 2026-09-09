@@ -3892,9 +3892,24 @@ which gives every bridge a character instead of making it a skeleton key:
 
 | Bridge | joins | character |
 |---|---|---|
-| Blur of Needles | Fourth Needle (agg) + Never Landed (bold) | the two fast, close lanes |
+| Blur of Needles | Pincushion (agg) + Never Landed (bold) | tempo dropped into the slow lane |
 | Ambush Hive | High Pass (bold) + Converge (soc) | the two patient, high lanes |
-| Venom Mark | Pincushion (agg) + Drone Relay (soc) | the two reserve lanes |
+| Venom Mark | Fourth Needle (agg) + Drone Relay (soc) | venom that holds, on the fast lane |
+
+The Aggression pair was swapped for a reason that started visual and turned
+out to be a design improvement: *"Blur of needles should probably go to
+conserving draw and vice versa just to get it to not get visually
+confusing."* The two shortcut lines were crossing the entire tree to reach
+the far lane. Un-crossing them means each bridge now **complements** its lane
+instead of matching it — a tempo bridge landing in the slow, measured reserve
+lane supplies the tempo that lane otherwise lacks, and the venom bridge lands
+where four needles can each carry venom that holds. Matching a bridge to the
+lane that already shares its identity just deepens a rut.
+
+One adjustment to the literal ask: the landings are on the lane **notables**
+(Pincushion, Fourth Needle), not the fillers past them (Conserving Draw, Thin
+Point). Landing past a notable skips it, and a bridge may skip a lane's grind
+but never its decision — principle 12, restated for lanes.
 
 **Two things the new capstone tier finally bought:**
 
