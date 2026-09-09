@@ -1690,6 +1690,7 @@ export function applyPredationInstincts(
             label: threat.species,
             id: threat.id,
             level: threat.level,
+            standing: "foe",
           });
         } else {
           // stopAdjacent=true — see stepToward's doc comment.

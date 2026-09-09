@@ -718,7 +718,7 @@ describe("rapport: named subjects, rescue, healing and displacement", () => {
     expect(memory).toMatchObject({ reason: "defeatedTogether", subject: { label: "scyther", level: 22 } });
   });
 
-  it("a death records WHOSE it was — a herd-mate of both witnesses is 'ours'", () => {
+  it("a death records friend or foe — a herd-mate of both witnesses is a friend", () => {
     const world = createWorld(20, 20);
     const w1 = agent("w1", { herdId: "h", pos: { x: 5, y: 5 } });
     const w2 = agent("w2", { herdId: "h", pos: { x: 6, y: 5 } });
@@ -729,10 +729,10 @@ describe("rapport: named subjects, rescue, healing and displacement", () => {
     ourDead.diedAtTick = world.tick;
     recordDeathWitnesses(world, () => 0.5);
 
-    expect(rapportMemories(w1, "w2")[0]!.subject).toMatchObject({ label: "pidgey", kin: "ours" });
+    expect(rapportMemories(w1, "w2")[0]!.subject).toMatchObject({ label: "pidgey", standing: "friend" });
   });
 
-  it("...and a stranger's death is 'other', even standing in the same spot", () => {
+  it("...and an outsider's death is a foe, even standing in the same spot", () => {
     const world = createWorld(20, 20);
     const w1 = agent("w1", { herdId: "h", pos: { x: 5, y: 5 } });
     const w2 = agent("w2", { herdId: "h", pos: { x: 6, y: 5 } });
@@ -743,10 +743,10 @@ describe("rapport: named subjects, rescue, healing and displacement", () => {
     outsider.diedAtTick = world.tick;
     recordDeathWitnesses(world, () => 0.5);
 
-    expect(rapportMemories(w1, "w2")[0]!.subject).toMatchObject({ label: "onix", kin: "other" });
+    expect(rapportMemories(w1, "w2")[0]!.subject).toMatchObject({ label: "onix", standing: "foe" });
   });
 
-  it("a herd-mate of only ONE witness is not 'ours' — it is a question about the pair", () => {
+  it("a herd-mate of only ONE witness is not a friend — it is a question about the pair", () => {
     const world = createWorld(20, 20);
     const w1 = agent("w1", { herdId: "h", pos: { x: 5, y: 5 } });
     const stranger = agent("stranger", { herdId: "other-herd", pos: { x: 6, y: 5 } });
@@ -757,7 +757,7 @@ describe("rapport: named subjects, rescue, healing and displacement", () => {
     dead.diedAtTick = world.tick;
     recordDeathWitnesses(world, () => 0.5);
 
-    expect(rapportMemories(w1, "stranger")[0]!.subject).toMatchObject({ kin: "other" });
+    expect(rapportMemories(w1, "stranger")[0]!.subject).toMatchObject({ standing: "foe" });
   });
 
   it("...but only when BOTH were in the fight — one bystander makes it survival again", () => {
