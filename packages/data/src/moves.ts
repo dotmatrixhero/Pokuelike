@@ -4266,27 +4266,50 @@ export const MOVES: Record<string, MoveSpec> = {
     cooldownTicks: 8,
     range: { min: 0, max: 2 },
     hitsArea: true,
-    // v3 redesign (MOVES_DESIGN.md's "start from the fantasy" pass —
-    // Earthquake's own worked example there). THE FANTASY: a self-centered
-    // shockwave that radiates out in every direction — reckless area
-    // denial that doesn't distinguish friend from foe. That's real,
-    // current engine behavior (`resolveAreaHit` has no herd filter by
-    // default), not just flavor text, which is exactly the design space
-    // each branch answers differently:
-    // - Aggression ("Overload"): leans further into scale and
-    //   indiscriminate destruction — loud and obvious, not a stealth/
-    //   ambush fantasy, so it stays power-archetype on purpose (widening
-    //   Aggression's design space doesn't mean every move has to use
-    //   every flavor).
-    // - Boldness ("Fracture"): stops defaulting to flat tankiness and
-    //   reshapes the battlefield instead — the ground itself becomes
-    //   difficult, hazardous terrain (`terrainFill: "mud"`, a real,
-    //   already-shipped slow-terrain kind) wherever the quake lands.
-    // - Sociability ("Herdsafe Ground"): turns the move's own flaw into
-    //   its payoff — the herd learns to read the tremor and doesn't get
-    //   caught in it (`excludesAllies`, the new primitive this redesign
-    //   needed), then turns the aftershock into real support.
+    // THE FANTASY (v3's "start from the fantasy" pass, unchanged by the v4
+    // conversion — see MOVES_DESIGN.md's Earthquake worked example):
+    // Earthquake is not aimed. The user drops its whole weight through its
+    // feet and the fault answers — the ground heaves outward in every
+    // direction at once and everything standing on it goes down together:
+    // the thing it was angry at, the thing beside that, its own herd-mates,
+    // itself. There is no behind. And what is left afterwards is not the
+    // ground that was there before — split, churned, unwalkable. Its danger
+    // and its cost are the same fact: it cannot tell whose feet it is under.
+    // That is real, current engine behavior (`resolveAreaHit` has no herd
+    // filter by default), not flavor text, and it is the design space each
+    // branch answers differently:
+    // - Aggression ("Overload"): answer the blindness by leaning into it —
+    //   heavier, faster, more often, until the quaker is taking damage off
+    //   its own fault line. The one real choice is the footprint: spread the
+    //   collapse or drive it straight down. Ends on a spiral (Cataclysm) in
+    //   which the recoil creates the very condition its own bonus reads.
+    // - Boldness ("Fracture"): the ground is both the weapon and the
+    //   property. Break it (`terrainFill: "mud"` from the opener), refuse to
+    //   be moved on it, shove everyone else off it — then EAT it: Eat the
+    //   Ruin's `consumesOwnTerrain` spends the exact mud this move's own
+    //   opener lays down. Nothing else in the roster makes its own
+    //   consumable terrain and then consumes it; Rock Throw eats boulders it
+    //   did not create.
+    // - Sociability ("Herdsafe Ground"): the flaw, drilled out. A herd that
+    //   has learned to read the fault is not caught in it (`excludesAllies`,
+    //   the primitive this redesign needed), and then the shock becomes a
+    //   provision — bracing, spurring, and literally shaking the canopy down
+    //   onto them (`gatherBurst`; needs.ts's canopy-harvest path takes any
+    //   non-status damage move off cooldown as the harvest move, so this
+    //   fires for real on Earthquake).
+    //
+    // Template v4 (45 nodes): each branch is opener + two parallel lanes
+    // (each with its own lane notable) + a deep notable both lanes converge
+    // on + a filler + a capstone, plus three three-node crosslink bridges.
+    // The lanes are deliberately different in KIND, not degree:
+    //   Aggression  lane A = it doesn't stop (tempo, volume, sustain)
+    //               lane B = one enormous drop (mass, and the footprint fork)
+    //   Boldness    lane A = the quaker's own footing (planted, immovable)
+    //               lane B = everyone else's ground (shoved, broken, eaten)
+    //   Sociability lane A = what the quake GIVES the herd (food, healing)
+    //               lane B = what the herd DOES in it (brace, or surge)
     tree: {
+      // --- Aggression: Overload ------------------------------------------
       fault_trigger: {
         id: "fault_trigger",
         name: "Fault Trigger",
@@ -4295,6 +4318,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // The bigger the mover, the bigger the quake it can trigger.
         delta: { weightScaling: { factor: 0.12 } },
       },
+      // Lane A — "it doesn't stop": tempo, volume, and feeding off the ruin.
       shaking_ground: {
         id: "shaking_ground",
         name: "-1 Cooldown",
@@ -4303,11 +4327,44 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { cooldownTicks: -1 },
       },
+      aftershock_barrage: {
+        id: "aftershock_barrage",
+        name: "Aftershock Barrage",
+        cost: 1,
+        prerequisites: ["shaking_ground"],
+        leaning: "aggression",
+        delta: { hits: { min: 2, max: 2 }, power: -10 },
+      },
+      seismic_feed: {
+        id: "seismic_feed",
+        name: "Seismic Feed",
+        cost: 1,
+        // LANE NOTABLE (lane A). Reachable the normal way, or via Cracking
+        // Momentum's bridge — a lunge dropped into the lane that is already
+        // about not stopping.
+        prerequisitesAnyOf: [["aftershock_barrage"], ["fault_convergence"]],
+        leaning: "aggression",
+        // The lane's whole point in one node: it feeds on what it shakes
+        // loose, and a clean hit rolls it straight back into the next shock
+        // instead of waiting out the cooldown. `critCooldownReset` is the
+        // only lever in the roster that turns a crit into tempo rather than
+        // damage, which is exactly this lane's kind.
+        delta: { lifestealFraction: 0.08, critCooldownReset: true },
+      },
+      overload_precision: {
+        id: "overload_precision",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["seismic_feed"],
+        leaning: "aggression",
+        delta: { accuracy: 5 },
+      },
+      // Lane B — "one enormous drop": mass, and the footprint decision.
       overload_footing: {
         id: "overload_footing",
         name: "Reckless Overload",
         cost: 1,
-        prerequisitesAnyOf: [["shaking_ground"], ["cracking_momentum"], ["coordinated_tremor"]],
+        prerequisites: ["fault_trigger"],
         leaning: "aggression",
         // Fixed a real bug here: this node used to be `recoilFraction: 0.1`
         // alone — a full skill point spent on nothing but self-damage, no
@@ -4317,31 +4374,27 @@ export const MOVES: Record<string, MoveSpec> = {
         // Paired here to match.
         delta: { power: 10, recoilFraction: 0.1 },
       },
-      aftershock_barrage: {
-        id: "aftershock_barrage",
-        name: "Aftershock Barrage",
+      crushing_mass: {
+        id: "crushing_mass",
+        name: "Crushing Mass",
         cost: 1,
-        prerequisites: ["overload_footing"],
+        // LANE NOTABLE (lane B). Reachable the normal way, or via
+        // Coordinated Tremor's bridge — the herd clears, and what is left
+        // gets the whole body dropped on it.
+        prerequisitesAnyOf: [["overload_footing"], ["converged_ruin"]],
         leaning: "aggression",
-        delta: { hits: { min: 2, max: 2 }, power: -10 },
-      },
-      seismic_feed: {
-        id: "seismic_feed",
-        name: "+8% Lifesteal",
-        cost: 1,
-        // Reachable the normal way, or via either of the two crosslink
-        // bridges that reach into Aggression (Coordinated Tremor's and
-        // Cracking Momentum's own chains) — each lands here, one step
-        // before the fork below, same as the normal path.
-        prerequisitesAnyOf: [["aftershock_barrage"], ["converged_ruin"], ["fault_convergence"]],
-        leaning: "aggression",
-        delta: { lifestealFraction: 0.08 },
+        // Doubles down on the opener's own weight scaling (overwrite, and
+        // Fault Trigger is an ancestor on every route) and charges a real
+        // stamina cost for it in the same node — dropping this much mass is
+        // not free. `selfCostPerUse` has exactly one other user in the whole
+        // roster.
+        delta: { weightScaling: { factor: 0.24 }, selfCostPerUse: { need: "energy", amount: 0.05 } },
       },
       total_collapse: {
         id: "total_collapse",
         name: "Total Collapse",
         cost: 1,
-        prerequisites: ["seismic_feed"],
+        prerequisites: ["crushing_mass"],
         excludes: ["focused_rupture"],
         leaning: "aggression",
         // Widens the blast itself — a real AoE-size decision point, not
@@ -4352,7 +4405,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "focused_rupture",
         name: "Focused Rupture",
         cost: 1,
-        prerequisites: ["seismic_feed"],
+        prerequisites: ["crushing_mass"],
         excludes: ["total_collapse"],
         leaning: "aggression",
         // Pulls the blast back in tight and puts everything into what it
@@ -4363,26 +4416,38 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "chain_reaction",
         name: "Chain Reaction",
         cost: 2,
-        prerequisitesAnyOf: [["total_collapse"], ["focused_rupture"]],
+        // DEEP NOTABLE — both lanes end here: lane A's tail and both tips of
+        // lane B's fork.
+        prerequisitesAnyOf: [["overload_precision"], ["total_collapse"], ["focused_rupture"]],
         leaning: "aggression",
-        delta: { critRateStage: 1 },
+        // One fault sets off the next, and anything caught between two
+        // shocks never gets its feet back under it. The tree's only
+        // `statChangeOnHit`, so no build can collide with it.
+        delta: { critRateStage: 1, statChangeOnHit: { target: "defender", stat: "speed", stage: -1, ticks: 20 } },
       },
-      overload_precision: {
-        id: "overload_precision",
-        name: "+5 Accuracy",
+      overload_cadence: {
+        id: "overload_cadence",
+        name: "-1 Cooldown",
         cost: 1,
         prerequisites: ["chain_reaction"],
         leaning: "aggression",
-        delta: { accuracy: 5 },
+        delta: { cooldownTicks: -1 },
       },
       cataclysm: {
         id: "cataclysm",
         name: "Cataclysm",
         cost: 2,
-        prerequisites: ["overload_precision"],
+        prerequisites: ["overload_cadence"],
         leaning: "aggression",
-        delta: { power: 20, recoilFraction: 0.05 },
+        // CAPSTONE. A spiral, not a bigger number: the branch's own recoil
+        // is what CREATES the low-HP state this bonus reads, so an Overload
+        // build gets stronger as it destroys itself. Three shipped moves use
+        // `selfStateBonus` as a standalone "hurt hits harder" bonus; none of
+        // them pairs it with the move's own self-damage, which is the part
+        // that is new here.
+        delta: { power: 20, recoilFraction: 0.05, selfStateBonus: { condition: "selfLowHp", multiplier: 1.5 } },
       },
+      // --- Boldness: Fracture ---------------------------------------------
       fissure_grip: {
         id: "fissure_grip",
         name: "Fissure Grip",
@@ -4390,9 +4455,11 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         // Wherever this lands, the ground cracks into real, treacherous
         // rubble — the terraforming half of the fantasy, live from the
-        // opener, not saved for a keystone.
+        // opener, not saved for a keystone. Also the resource the branch's
+        // capstone later spends.
         delta: { terrainFill: { terrain: "mud" } },
       },
+      // Lane A — "my own footing": the one thing the quake does not move.
       bedrock_footing_2: {
         id: "bedrock_footing_2",
         name: "-1 Cooldown",
@@ -4403,46 +4470,83 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       cracking_footing: {
         id: "cracking_footing",
-        name: "+1 Range",
+        name: "+0.15 Defense Penetration",
         cost: 1,
-        prerequisitesAnyOf: [["bedrock_footing_2"], ["cracking_momentum"], ["fractured_warning"]],
+        prerequisites: ["bedrock_footing_2"],
         leaning: "boldness",
-        delta: { range: { max: 3 } },
+        // Was "+1 Range" (`range: { max: 3 }`), byte-for-byte the same node
+        // as Sociability's Tremor Reach in this same tree — the in-tree
+        // version of the copy-paste failure template v3 exists to stop, and
+        // a real OVERWRITE collision between two co-takeable branches.
+        // Repointed at the lever this lane is actually about: driving the
+        // shock down THROUGH whatever is standing on it.
+        delta: { defensePenetration: 0.15 },
       },
       bedrock_anchor: {
         id: "bedrock_anchor",
         name: "Bedrock Anchor",
         cost: 1,
-        prerequisites: ["cracking_footing"],
+        // LANE NOTABLE (lane A). Reachable the normal way, or via Fractured
+        // Warning's bridge — the warning that throws everyone else's footing
+        // off, landing in the lane that is about never losing your own.
+        prerequisitesAnyOf: [["cracking_footing"], ["warded_convergence"]],
         leaning: "boldness",
+        // Drives itself into the ground: the quake goes deeper because none
+        // of it is spent staying upright, and it is not going anywhere for a
+        // beat afterwards. The lock is the price, in the same node.
         grantsPassive: { kind: "immovable", value: 1 },
-        delta: {},
+        delta: { power: 12, lockTicks: 1 },
       },
+      fracture_precision: {
+        id: "fracture_precision",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["bedrock_anchor"],
+        leaning: "boldness",
+        delta: { accuracy: 5 },
+      },
+      // Lane B — "everyone else's ground": shoved off it, or pinned on it.
       deepening_fissure: {
         id: "deepening_fissure",
         name: "+0.3 Defense Penetration",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Boldness (Cracking Momentum's and Fractured
-        // Warning's own chains).
-        prerequisitesAnyOf: [["bedrock_anchor"], ["fault_convergence"], ["warded_convergence"]],
+        prerequisites: ["fissure_grip"],
         leaning: "boldness",
         delta: { defensePenetration: 0.3 },
+      },
+      rubble_wall: {
+        id: "rubble_wall",
+        name: "Rubble Wall",
+        cost: 1,
+        // LANE NOTABLE (lane B). Reachable the normal way, or via Cracking
+        // Momentum's bridge, whose whole lever is forced movement.
+        prerequisitesAnyOf: [["deepening_fissure"], ["fault_convergence"]],
+        leaning: "boldness",
+        // The rubble itself shoves anyone standing on it away from the
+        // epicenter.
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" } },
       },
       widening_rift: {
         id: "widening_rift",
         name: "Widening Rift",
         cost: 1,
-        prerequisites: ["deepening_fissure"],
+        prerequisites: ["rubble_wall"],
         excludes: ["grounding_brace"],
         leaning: "boldness",
-        delta: { shape: { kind: "burst", radius: 3 } },
+        // Was `shape: { kind: "burst", radius: 3 }` — identical to
+        // Aggression's own Total Collapse in this same tree, and the source
+        // of two real checker failures (a `shape` OVERWRITE collision across
+        // co-takeable branches, and two independently-takeable shape nodes;
+        // a move has one footprint). Repointed to the fork's actual
+        // question: the rift keeps opening, so everything on it slides
+        // further out — against Grounding Brace, which plants on it instead.
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 2, timing: "onHit" } },
       },
       grounding_brace: {
         id: "grounding_brace",
         name: "Grounding Brace",
         cost: 1,
-        prerequisites: ["deepening_fissure"],
+        prerequisites: ["rubble_wall"],
         excludes: ["widening_rift"],
         leaning: "boldness",
         // Braces so hard against its own tremor that it can't immediately
@@ -4450,33 +4554,41 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "damageReductionFlat", value: 2 },
         delta: { lockTicks: 1 },
       },
-      rubble_wall: {
-        id: "rubble_wall",
-        name: "Rubble Wall",
-        cost: 2,
-        prerequisitesAnyOf: [["widening_rift"], ["grounding_brace"]],
-        leaning: "boldness",
-        // The rubble itself shoves anyone standing on it away from the
-        // epicenter.
-        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" } },
-      },
-      fracture_precision: {
-        id: "fracture_precision",
-        name: "+5 Accuracy",
-        cost: 1,
-        prerequisites: ["rubble_wall"],
-        leaning: "boldness",
-        delta: { accuracy: 5 },
-      },
       ruinous_ground: {
         id: "ruinous_ground",
         name: "Ruinous Ground",
         cost: 2,
-        prerequisites: ["fracture_precision"],
+        // DEEP NOTABLE — lane A's tail and both tips of lane B's fork.
+        prerequisitesAnyOf: [["fracture_precision"], ["widening_rift"], ["grounding_brace"]],
         leaning: "boldness",
-        // Fixes Ground's real Grass/Bug resists.
+        // Fixes Ground's real Grass/Bug resists — nothing resists the ground
+        // itself.
         delta: { resistanceBreaker: { multiplier: 2 } },
       },
+      settling_ground: {
+        id: "settling_ground",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["ruinous_ground"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      eat_the_ruin: {
+        id: "eat_the_ruin",
+        name: "Eat the Ruin",
+        cost: 2,
+        prerequisites: ["settling_ground"],
+        leaning: "boldness",
+        // CAPSTONE, and a closed loop the roster does not otherwise have:
+        // Fissure Grip turns the ground this move lands on into mud, and
+        // this spends it. `consumesOwnTerrain` reads the ATTACKER's own tile
+        // (predation.ts) and reverts it to plain floor on use, so the payoff
+        // is self-limiting — a Fracture build has to keep breaking new
+        // ground to keep eating it. Rock Throw consumes boulders, but it
+        // never made them; Leech Seed eats flora it did not plant.
+        delta: { consumesOwnTerrain: { terrain: "mud", damageMultiplier: 2.5 }, defensePenetration: 0.2 },
+      },
+      // --- Sociability: Herdsafe Ground ------------------------------------
       herdsafe_trigger: {
         id: "herdsafe_trigger",
         name: "Herdsafe Trigger",
@@ -4486,6 +4598,50 @@ export const MOVES: Record<string, MoveSpec> = {
         // on this move stops getting caught in its own quake.
         delta: { excludesAllies: true },
       },
+      // Lane A — "what the quake gives the herd": food, then healing.
+      shaken_loose: {
+        id: "shaken_loose",
+        name: "Shaken Loose",
+        cost: 1,
+        prerequisites: ["herdsafe_trigger"],
+        leaning: "sociability",
+        // Was `warning_footing`, "+8% Lifesteal" — byte-for-byte Aggression's
+        // own Seismic Feed in this same tree, and lifesteal has nothing to do
+        // with a herd drill. Replaced with the thing a quake actually does
+        // for a herd: it shakes the canopy down. Real, not flavour —
+        // needs.ts's canopy-harvest path picks any non-status damage move
+        // that is off cooldown as the harvest move and adds its `gatherBurst`
+        // straight to `digTicksAccrued`.
+        delta: { gatherBurst: 2 },
+      },
+      herd_precision: {
+        id: "herd_precision",
+        name: "+5 Accuracy",
+        cost: 1,
+        prerequisites: ["shaken_loose"],
+        leaning: "sociability",
+        delta: { accuracy: 5 },
+      },
+      communal_steadying: {
+        id: "communal_steadying",
+        name: "Communal Steadying",
+        cost: 1,
+        // LANE NOTABLE (lane A). Reachable the normal way, or via Fractured
+        // Warning's bridge.
+        prerequisitesAnyOf: [["herd_precision"], ["warded_convergence"]],
+        leaning: "sociability",
+        grantsPassive: { kind: "regen", value: 0.03 },
+        delta: {},
+      },
+      tremor_reach: {
+        id: "tremor_reach",
+        name: "+1 Range",
+        cost: 1,
+        prerequisites: ["communal_steadying"],
+        leaning: "sociability",
+        delta: { range: { max: 3 } },
+      },
+      // Lane B — "what the herd does in it": brace behind it, or surge on it.
       herdsafe_footing: {
         id: "herdsafe_footing",
         name: "+5 Accuracy",
@@ -4494,39 +4650,22 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { accuracy: 5 },
       },
-      warning_footing: {
-        id: "warning_footing",
-        name: "+8% Lifesteal",
-        cost: 1,
-        prerequisitesAnyOf: [["herdsafe_footing"], ["fractured_warning"], ["coordinated_tremor"]],
-        leaning: "sociability",
-        delta: { lifestealFraction: 0.08 },
-      },
       bracing_call: {
         id: "bracing_call",
         name: "Bracing Call",
         cost: 1,
-        prerequisites: ["warning_footing"],
+        // LANE NOTABLE (lane B). Reachable the normal way, or via
+        // Coordinated Tremor's bridge — the mark that tells the herd where
+        // the shock is going, landing in the lane about what they do next.
+        prerequisitesAnyOf: [["herdsafe_footing"], ["converged_ruin"]],
         leaning: "sociability",
         delta: { targetsAlly: true, allyEffect: { buff: { stat: "defense", stage: 1, ticks: 20 } } },
-      },
-      tremor_reach: {
-        id: "tremor_reach",
-        name: "+1 Range",
-        cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Sociability (Coordinated Tremor's and Fractured
-        // Warning's own chains) — each lands here, one step before the
-        // fork below, same as the normal path.
-        prerequisitesAnyOf: [["bracing_call"], ["converged_ruin"], ["warded_convergence"]],
-        leaning: "sociability",
-        delta: { range: { max: 3 } },
       },
       guardians_ground: {
         id: "guardians_ground",
         name: "Guardian's Ground",
         cost: 1,
-        prerequisites: ["tremor_reach"],
+        prerequisites: ["bracing_call"],
         excludes: ["rally_quake"],
         leaning: "sociability",
         grantsPassive: { kind: "damageReductionFlat", value: 1 },
@@ -4536,42 +4675,48 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "rally_quake",
         name: "Rally Quake",
         cost: 1,
-        prerequisites: ["tremor_reach"],
+        prerequisites: ["bracing_call"],
         excludes: ["guardians_ground"],
         leaning: "sociability",
         // The aftershock keeps helping even mid-fight — no dedicated
         // support use needed to trigger it.
         delta: { allyEffectOnAttack: true, allyEffect: { buff: { stat: "attack", stage: 1, ticks: 20 } } },
       },
-      communal_steadying: {
-        id: "communal_steadying",
-        name: "Communal Steadying",
+      the_herd_reads_it: {
+        id: "the_herd_reads_it",
+        name: "The Herd Reads It",
         cost: 2,
-        prerequisitesAnyOf: [["guardians_ground"], ["rally_quake"]],
+        // DEEP NOTABLE — lane A's tail and both tips of lane B's fork.
+        prerequisitesAnyOf: [["tremor_reach"], ["guardians_ground"], ["rally_quake"]],
         leaning: "sociability",
-        grantsPassive: { kind: "regen", value: 0.03 },
-        delta: {},
+        // Where the two lanes actually meet: the herd has stopped treating
+        // the shaking ground as something to contest. Nobody squares up over
+        // where to stand when the fault goes off, and they close on what it
+        // knocked out of the canopy instead of on each other.
+        grantsPassive: { kind: "nonTerritorial", value: 1 },
+        delta: { gatherBurst: 2 },
       },
-      herd_precision: {
-        id: "herd_precision",
-        name: "+5 Accuracy",
+      herd_cadence: {
+        id: "herd_cadence",
+        name: "-1 Cooldown",
         cost: 1,
-        prerequisites: ["communal_steadying"],
+        prerequisites: ["the_herd_reads_it"],
         leaning: "sociability",
-        delta: { accuracy: 5 },
+        delta: { cooldownTicks: -1 },
       },
       sanctuary_quake: {
         id: "sanctuary_quake",
         name: "Sanctuary Quake",
         cost: 2,
-        prerequisites: ["herd_precision"],
+        prerequisites: ["herd_cadence"],
         leaning: "sociability",
-        // The aftershock settles into a real, ongoing comfort for whoever
-        // stayed close — the ultimate payoff of a quake that heals its own
-        // people instead of scattering them.
+        // CAPSTONE. The aftershock settles into a real, ongoing comfort for
+        // whoever stayed close — the ultimate payoff of a quake that heals
+        // its own people instead of scattering them.
         grantsPassive: { kind: "healAura", value: 0.015 },
         delta: {},
       },
+      // --- Crosslink bridges (3 x crosslink -> filler -> cost-2 notable) ---
       // Crosslink: Aggression <-> Boldness — the user lurches forward into
       // the rubble it just cracked open, real momentum off real terrain.
       cracking_momentum: {
@@ -4582,9 +4727,6 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "onHit" } },
       },
-      // Bridge tail (see MOVES_DESIGN.md's "Crosslinks as bridges"): extends
-      // Cracking Momentum into Aggression's and Boldness's own pre-fork
-      // nodes (Seismic Feed / Deepening Fissure).
       momentum_footing: {
         id: "momentum_footing",
         name: "Deeper Lunge",
@@ -4602,6 +4744,9 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["momentum_footing"],
         leaning: "boldness",
+        // BRIDGE NOTABLE. Alternate route into Aggression's Seismic Feed and
+        // Boldness's Rubble Wall — one lane notable in each branch the
+        // crosslink connects, one step short of either fork.
         // Crashing through that much rubble that fast costs something real
         // — a genuine tradeoff, not a flat power bolt-on with nothing to
         // balance it (see MOVES_DESIGN.md's guide on pure-downside bugs).
@@ -4618,8 +4763,6 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { jamCooldownTicks: 1 },
       },
-      // Bridge tail: extends Fractured Warning into Boldness's and
-      // Sociability's own pre-fork nodes (Deepening Fissure / Tremor Reach).
       tremor_lockstep: {
         id: "tremor_lockstep",
         name: "+1 Jam",
@@ -4636,6 +4779,8 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["tremor_lockstep"],
         leaning: "sociability",
+        // BRIDGE NOTABLE. Alternate route into Boldness's Bedrock Anchor and
+        // Sociability's Communal Steadying — the two patient, planted lanes.
         // The warning becomes real protection — ties into the herd's own
         // bracing instead of a generic jam-again bolt-on.
         grantsPassive: { kind: "damageReduction", value: 0.05 },
@@ -4651,37 +4796,30 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { rallyCall: { ticks: 20 } },
       },
-      // Deeper crosslink, building on Coordinated Tremor's own mark: a real
-      // payoff for following up on it, via the new `"rallyMarked"`
-      // `SituationalCondition` (see moves.ts's own doc comment) — the herd
-      // converging on something is worth more once the quake actually
-      // lands on it too.
       marked_rupture: {
         id: "marked_rupture",
         name: "Marked Rupture",
         cost: 1,
         prerequisites: ["coordinated_tremor"],
         leaning: "aggression",
-        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.3 } },
+        // Bridge filler, and it must deepen its own crosslink's lever rather
+        // than reach for a new one (principle 13) — it used to carry ONLY
+        // the `rallyMarked` bonus, which shared nothing with Coordinated
+        // Tremor's mark and was a real reported failure. It now holds the
+        // mark half again as long AND pays off on it, via the shared
+        // `"rallyMarked"` `SituationalCondition`.
+        delta: { rallyCall: { ticks: 32 }, situationalBonus: { condition: "rallyMarked", multiplier: 1.3 } },
       },
-      // Pilot: a crosslink that's a real bridge, not a dead-end leaf.
-      // Coordinated Tremor -> Marked Rupture -> Converged Ruin is its own
-      // short filler+notable tail. Converged Ruin is wired as a real
-      // alternate route into BOTH branches Coordinated Tremor bridges —
-      // Aggression's `seismic_feed` and Sociability's `tremor_reach` (see
-      // each node's own `prerequisitesAnyOf`) — not just the one branch it
-      // happens to lean toward. Revised after direct feedback on the first
-      // version: landing the shortcut straight on a branch's own fork
-      // ("the choice of 2 nodes") was too much; it now lands one step
-      // *before* each fork instead, same distance-to-decision as the
-      // normal path, and reaches into either side of the crosslink rather
-      // than only Aggression.
       converged_ruin: {
         id: "converged_ruin",
         name: "Converged Ruin",
         cost: 2,
         prerequisites: ["marked_rupture"],
         leaning: "aggression",
+        // BRIDGE NOTABLE. Alternate route into Aggression's Crushing Mass
+        // and Sociability's Bracing Call — reaching into BOTH branches the
+        // crosslink bridges (principle 11), and landing one step short of
+        // each fork rather than on it (principle 12).
         // Deepens Marked Rupture's own rallyMarked payoff further
         // (overwrite, like every other situationalBonus) instead of a flat
         // defensePenetration bolt-on — the ground doesn't just care about
