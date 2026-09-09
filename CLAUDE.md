@@ -168,6 +168,38 @@ argument, and starting to implement mid-discussion reads as not listening.
   precondition that made a test silently vacuous. When a test fails after a change, work out
   which of the two is wrong — the code or the test — and say which.
 
+## Generated prose: say the plain thing
+
+Four rewrites of one feature's output got here, each rejected for the same
+underlying fault. Their notes, in order: *"your phrasing is so stilted and
+weird"* → *"you over indexed in like hyper succinct"* → *"put themselves in
+front sounds like a euphemism... more specificity please"* → *"Get rid of it
+was none of herd. Just say foe or friend"* / *"And four things besides? Wtf
+does that mean"*.
+
+The spec is their own model sentence:
+
+> **"We defeated a foe Onix together. She has defended me."**
+
+- **Plain declarative sentences.** Not fragments, not a comma-dump of every
+  fact. Say the thing.
+- **If a word is vague, the data is missing.** "Something had hold of me",
+  "and four things besides", "it was none of our herd" — each of those was
+  written *around* a hole instead of going and getting the value. The
+  predator was sitting in a local called `threat`; `Agent.sex` is set on
+  essentially every agent. **Go get the data.**
+- **Name things, and say what they are to you.** Friend or foe. Real gendered
+  pronouns. Species as proper nouns.
+- **No ornament.** No "besides", no "in front of us", no literary
+  connectives. If a phrase sounds like writing, cut it.
+- **At most two sentences.** Curation is the point; printing every fact is a
+  table with commas.
+- **Show them real output before claiming it's good.** All four of these were
+  caught by the user, not by me. Run it, paste it, judge it cold.
+
+Do not trust my own read here — this is a demonstrated weak spot. Bias toward
+plainer than feels right.
+
 ## Reporting back
 - Be honest about the limits of what you verified. "I saw X happen live" and "I reasoned this
   should work from the code" are different claims — never blur them together.

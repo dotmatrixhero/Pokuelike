@@ -1,6 +1,6 @@
 import type { Agent, MoveSpec, World } from "@pokuelike/engine";
 import { LEVELING_CONTEXT, SPECIES } from "@pokuelike/data";
-import { rapportScore, speciesDisplayName } from "@pokuelike/engine";
+import { describeRapport, rapportScore, speciesDisplayName } from "@pokuelike/engine";
 import { TYPE_COLOR, rgbToCss } from "./palette.js";
 import { agentDisplayName, herdDisplayName, shortId, LEADER_ICON, TITLE_ICON } from "./notableTitles.js";
 import { buildMoveTreeSvg, describeMoveTreeNode, summarizeBuildEffects } from "./moveTreeSvg.js";
@@ -494,6 +494,18 @@ function renderRapportGroup(agent: Agent, world: World): HTMLElement | undefined
     if (value) value.textContent = edge.score.toFixed(2);
     if (gone && !isEgg) meterRow.style.opacity = "0.6";
     g.appendChild(meterRow);
+
+    // The score says how much; this says WHY. A bar alone can only report an
+    // outcome — see rapportProse.ts, and EMERGENT_SITUATIONS.md for why
+    // causes are the whole point of the memories half of an edge.
+    const said = describeRapport(agent, other, edge.id);
+    if (said) {
+      const line = document.createElement("div");
+      line.className = "inspect-rapport-why";
+      line.textContent = said;
+      if (gone && !isEgg) line.style.opacity = "0.6";
+      g.appendChild(line);
+    }
   }
 
   if (scored.length > shown.length) {
