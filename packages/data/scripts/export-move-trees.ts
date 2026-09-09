@@ -12,6 +12,7 @@
  * how to keep it updated" section for the full, standardized process.
  */
 import { MOVES } from "../src/moves.js";
+import { PROPOSED_TREES } from "./proposed-trees.js";
 
 const out: Record<string, unknown> = {};
 for (const [id, move] of Object.entries(MOVES)) {
@@ -27,6 +28,34 @@ for (const [id, move] of Object.entries(MOVES)) {
     shape: move.shape,
     range: move.range,
     hitsArea: move.hitsArea ?? false,
+    tree: move.tree,
+  };
+}
+
+// Proposed (unbuilt) trees are merged in alongside the shipped ones, each
+// flagged `proposed: true` so the atlas can badge them, filter them, and
+// keep them visually distinct. They live in proposed-trees.ts and are NOT
+// part of `MOVES` — the game never reads them. See MOVES_DESIGN.md's
+// "proposed mode" note and that file's own doc comment.
+for (const [id, move] of Object.entries(PROPOSED_TREES)) {
+  if (out[id]) {
+    console.error(`export-move-trees: "${id}" is both shipped and proposed — the shipped tree wins; drop it from proposed-trees.ts.`);
+    continue;
+  }
+  out[id] = {
+    id: move.id,
+    name: move.name,
+    type: move.type,
+    category: move.category,
+    power: move.power,
+    accuracy: move.accuracy,
+    cooldownTicks: move.cooldownTicks,
+    shape: move.shape,
+    range: move.range,
+    hitsArea: move.hitsArea ?? false,
+    proposed: true,
+    fantasy: move.fantasy,
+    learners: move.learners,
     tree: move.tree,
   };
 }
