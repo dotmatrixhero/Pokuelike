@@ -133,7 +133,15 @@ for (let i = 0; i < count; i++) {
     ["power", `${move.power} → ${built.power}${weightNote}`],
     ["cooldown", `${move.cooldownTicks} → ${built.cooldownTicks} ticks (usable every ${built.cooldownTicks + 1} actions)`],
     ["accuracy", `${move.accuracy} → ${built.accuracy}`],
-    ["damage/action", `${before.toFixed(1)} → ${after.toFixed(1)} (**${(after / before).toFixed(2)}×**)`],
+    // A status move has 0 power, so a ratio here is 0/0 — it printed "NaN×".
+    // Say what the move is instead: these are exactly the trees whose value
+    // is not damage, and a damage line is the wrong question for them.
+    [
+      "damage/action",
+      before === 0 && after === 0
+        ? "_n/a — status move, its value isn't damage_"
+        : `${before.toFixed(1)} → ${after.toFixed(1)} (**${(after / before).toFixed(2)}×**)`,
+    ],
   ];
 
   const { totalCost, deltaLines, passiveLines } = summarizeBuildEffects(move.tree, chosen);
