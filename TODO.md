@@ -8556,3 +8556,65 @@ The `e` key still eats directly (now strictly more capable — ground food
 or a carried berry, whichever applies) since it isn't a button and isn't
 part of the clutter complaint; `o` (offer) has no keyboard shortcut any
 more, Pack-menu only, matching "only available from inventory."
+
+## Round seven: four damaging trees shipped, and what building them turned up
+
+`psybeam`, `surf`, `sludge`, `ice_beam` are live at 45 nodes each. That is
+**26 of 35 moves** with trees; the 9 left are all `utilityMove` status moves,
+which need their own design pass (only three effect fields —`selfHeal`,
+`statChangeOnHit`, `statusImmunityAura` — will make combat spend an action on
+one, and 32 delta fields are dead on them).
+
+### Confirmed defects, verified rather than reported
+
+- **`chargeAttack` silently voids `hitsArea`.** `resolveHit` commits the
+  charge and returns *before* its own `hitsArea` branch; `resolveChargedAttack`
+  then calls `resolveHitAgainstTarget` directly. A move carrying both resolves
+  single-target and the area is lost, with no error, and
+  `check-proposed-trees.ts` cannot see it. Proven with a control in
+  `predation.test.ts` ("chargeAttack silently voids hitsArea"): the same move
+  minus the charge hits the bystander; with the charge it does not.
+  **Exposure: 3 trees** — tackle (`full_tilt`+`tremor_break`), slash
+  (`the_long_moment`+`cleaving_slash`), body_slam (`the_reckoning`+`avalanche`).
+  Peck was also reported and is NOT affected: it carries a charge and a `line`
+  shape, which is reach, not area.
+
+- **Base Surf can never hit an adjacent target.** `ring` is a hollow shell at
+  exactly its radius, resolved around the attacker. Measured through the real
+  `resolveShape`: surf is `ring radius 2` with `range {min: 0, max: 2}`, so at
+  distance 1 it hits zero tiles. Same defect `ember`'s `wide_ring` was already
+  fixed for ("9 damage to a body two tiles out and 0 to the one standing next
+  to the caster"); base Surf never got that pass. NOT fixed — base-data feel
+  call. Options: burst radius 2 (13 tiles, matches the ember precedent),
+  `range.min: 2`, or leave it and let the Aggression capstone be the fix
+  (which taxes 12 points to make the move work as described).
+
+### Reported as a defect, and is NOT one
+
+- **"An AoE only ever statuses its primary target."** True, and deliberate.
+  `resolveHitAgainstTarget`'s own doc comment says so explicitly, and
+  `predation.test.ts:1577` tests it by name. Looked for the decision before
+  calling it a gap — it was there.
+
+### Describer fixes (two agents found the same bug independently)
+
+`describeDelta`'s situational prose pasted every condition after a hardcoded
+"when the target is", so the eight conditions about the WORLD or the USER
+printed nonsense: "×1.4 damage when the target is it's raining", "when the
+target is the user is standing higher up". Replaced with a whole-clause
+builder. Also: the atlas template had never been taught the additive delta
+fields, so **24 of the 40 shipped nodes using one rendered blank**; and
+`combineDeltas` overwrote the additive forms the engine sums, mis-reporting
+`hydro_pump`/`solar_beam` range and `harden`'s stat changes.
+
+### Still open, not acted on
+
+- `rock_slide`'s 6 co-takeable `weightScaling` setters — the roster's only
+  remaining checker PROBLEM. Purchase order decides the outcome.
+- `terrainFill` always calls `waterSoil(tile)` on the assumption only a Water
+  move fills terrain. Sludge's mud and Ice Beam's ice now both fertilise.
+- Surf is at real risk of never being known: a level-50 Blastoise spawned with
+  tackle/water_gun/hydro_pump/aqua_tail and no Surf.
+- Stale comment on `MoveSpec.accuracy` claims stages "are always passed as 0 —
+  no agent carries stages yet." Both `predation.ts` and `herdConflict.ts` pass
+  real stages now.
