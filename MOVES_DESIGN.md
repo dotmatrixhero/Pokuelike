@@ -7225,3 +7225,104 @@ applies to the whole opening stretch of every run, and it broke nine existing
 tests at once — none of them wrong, all of them fighting in the dark at a
 fleeing target without knowing it. Worth remembering before reading any early
 combat numbers: the sim's default condition is night.
+
+---
+
+# Design pass: fight or flight when you are surrounded
+
+*"If a Pokémon gets targeted by multiple attacks they really need to enter
+fight or flight mode."*
+
+## The gap is real, and it is bigger than it sounds
+
+`isBeingHunted` (predation.ts) is a **boolean**. One hunter and five hunters
+are the same value. Nothing anywhere counts how many things are pointed at
+you, and the only flee trigger is `isCriticallyHurt` — so the sim's answer to
+being surrounded is *"keep doing whatever you were doing until you are nearly
+dead."*
+
+Measured, 3 seeds x 4000 ticks, sampled every 20 ticks (15,146 agent-samples):
+
+| attackers on one agent | share |
+|---|---|
+| 0 | 77.53% |
+| 1 | 17.73% |
+| **2** | **4.01%** |
+| **3** | **0.68%** |
+| **4** | **0.05%** |
+
+Most ever on one agent: **4**. So being ganged up on is 4.73% of samples —
+uncommon enough to stay a spike rather than the default, common enough that
+it happens constantly across a whole run. That is a good frequency for a
+dramatic rule.
+
+## Why now, specifically
+
+This was a weaker idea a day ago. Fleeing was close to free and close to
+useless — you ran, and got hit anyway.
+
+It is not any more. **A fleeing agent now takes −5 accuracy per consecutive
+action it spends running, up to −20**, and cover is another −20. So flight is
+a real defence with a real price (actions not spent fighting back), and
+standing is a real commitment. Fight-or-flight is the decision that makes the
+evasion work we just shipped *mean* something — without it, nothing ever
+chooses to run except the nearly-dead.
+
+## The shape I would build
+
+Not a new behaviour state. `"flee"` and `"fight"` both already exist; what is
+missing is the TRIGGER and the CHOICE.
+
+**Trigger:** two or more attackers targeting you (`huntTarget`/`fightTarget`),
+inside the existing `FLEE_DETECT_RADIUS`, evaluated on your own action tick.
+
+**The choice** should read off things that are already true and already
+visible, in the sim's existing idiom:
+
+| leans FIGHT | leans FLIGHT |
+|---|---|
+| high `aggression`/`boldness` disposition | high `sociability` |
+| herd-mates nearby (the mob-fight path already counts these) | alone |
+| healthy | hurt |
+| cornered — nowhere to step away to | open ground behind you |
+| defending an egg (`applyEggDefense` already forces this) | — |
+
+**Commitment matters more than the decision.** The failure mode is thrash:
+flip to flee, take a step, flip to fight, flip back — and the sprint evasion
+we just built actively rewards *not* thrashing, since the streak resets the
+moment you do anything else. So whichever it picks, it should hold for a
+handful of actions unless something big changes (an attacker dies, HP
+collapses).
+
+## What it buys, in this project's terms
+
+- **Narratable.** "Three of them came at once, and it turned to face them" is
+  a story. "It kept eating" is not. The chronicle already logs behaviour
+  changes, so this is a beat for free.
+- **Visible cause.** The trigger is a thing you can see on the map — how many
+  arrows point at one creature.
+- **It makes packs mean something defensively.** Pack hunting already has an
+  accuracy bonus for coordinating; nothing on the prey side ever noticed
+  being coordinated against.
+
+## Where I would push back on myself
+
+The obvious version — "2+ attackers, roll fight or flight" — risks becoming
+the dominant answer for prey: always flee, always get −20, never die. Two
+guards against that, both worth deciding:
+
+- The sprint evasion is already capped (−20) and already costs actions.
+- Fleeing into the open is worse than fleeing into cover, which the
+  concealment rule now makes true for free.
+
+## Questions
+
+1. Trigger at **2 attackers**, or 3? 2 is 4.7% of samples, 3 is 0.73%.
+2. Should the choice be **deterministic** from disposition + HP + allies, or
+   a weighted roll? Deterministic is legible and testable; a roll gives
+   variety and stops one species always doing one thing.
+3. How long is the commitment — **4 actions**? Long enough to build the
+   sprint streak, short enough to react.
+4. Should a **predator** ganged up on by prey (the mob-fight case) use the
+   same rule? Right now it flees only when critically hurt, which is the
+   thing that makes mobbing feel weightless.
