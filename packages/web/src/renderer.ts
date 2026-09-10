@@ -1126,7 +1126,7 @@ function drawAgentGlyph(ctx: CanvasRenderingContext2D, agent: Agent, cx: number,
 
   if (agent.controlledBy === "player") {
     // The player is 👱 in both render styles — see drawAgent's own branch.
-    ctx.font = `${TILE_SIZE * 0.8}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.font = `${TILE_SIZE * 1.0}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
     ctx.fillText("👱", cx, cy);
   } else {
     const letter = agent.species.charAt(0).toUpperCase();
@@ -1224,14 +1224,24 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
     // sprite art, and the letter fallback read as one more glyph among
     // the terrain. Same backing-circle treatment as the egg so it holds up
     // on a light tile and under fog.
+    // Drawn at sprite scale, not tile scale — at 17px on a 20px tile it
+    // read as a smudge next to the oversized Pokémon sprites ("Its still
+    // not visible"). Bottom-anchored like a sprite so the feet sit on the
+    // tile, on a solid dark disc with a white ring so it holds against
+    // any ground and under fog.
+    const cx = px + TILE_SIZE / 2 + jitterX;
+    const cy = py + TILE_SIZE * 0.45 + jitterY;
     ctx.beginPath();
-    ctx.ellipse(px + TILE_SIZE / 2 + jitterX, py + TILE_SIZE / 2 + jitterY, TILE_SIZE * 0.42, TILE_SIZE * 0.42, 0, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
+    ctx.arc(cx, cy, TILE_SIZE * 0.68, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
     ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = `${TILE_SIZE * 0.85}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
-    ctx.fillText("👱", px + TILE_SIZE / 2 + jitterX, py + TILE_SIZE / 2 + jitterY);
+    ctx.font = `${TILE_SIZE * 1.15}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.fillText("👱", cx, cy);
   } else if (sprite) {
     // Bigger than one tile (see SPRITE_SCALE) and bottom-anchored so the
     // sprite's feet sit on its actual tile instead of the whole thing being
