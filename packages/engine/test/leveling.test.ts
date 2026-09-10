@@ -10,6 +10,8 @@ import {
   grantKillExp,
   grantSkillPoint,
   maybeAutoRespec,
+  resolveSpawnEvolution,
+  EVOLUTION_DECLINE_CHANCE,
   KILL_EXP_MULTIPLIER,
   type LevelingContext,
   type LevelingProfile,
@@ -206,7 +208,10 @@ describe("grantExp / level-up", () => {
       stats: { maxHp: 33, attack: 20, defense: 20, spAttack: 24, spDefense: 24, speed: 20 },
     });
 
-    grantExp(world, agent, totalExpForLevel("MEDIUM_SLOW", 16) - agent.exp!, ctx, log);
+    // Forces the evolve roll (EVOLUTION_DECLINE_CHANCE's own doc comment) —
+    // this test is about the swap mechanics, not the decline chance, which
+    // gets its own dedicated tests below.
+    grantExp(world, agent, totalExpForLevel("MEDIUM_SLOW", 16) - agent.exp!, ctx, log, () => 1);
 
     expect(agent.level).toBe(16);
     expect(agent.species).toBe("ivysaur");
@@ -218,6 +223,80 @@ describe("grantExp / level-up", () => {
 
     const evolved = log.events.find((e) => e.kind === "evolved");
     expect(evolved).toMatchObject({ fromSpecies: "bulbasaur", toSpecies: "ivysaur", level: 16 });
+  });
+
+  describe(`evolution decline chance (direct ask: "they do not have to evolve, but it should be relatively rare like 25% chance every level that they choose not to")`, () => {
+    it("a low roll (< EVOLUTION_DECLINE_CHANCE) declines — species and event both unchanged", () => {
+      const world = createWorld(5, 5);
+      const ctx = testCtx();
+      const log = new EventLog();
+      const agent = bulbasaur({ level: 15, exp: totalExpForLevel("MEDIUM_SLOW", 15) });
+
+      grantExp(world, agent, totalExpForLevel("MEDIUM_SLOW", 16) - agent.exp!, ctx, log, () => 0);
+
+      expect(agent.level).toBe(16); // still levels up normally
+      expect(agent.species).toBe("bulbasaur"); // just doesn't evolve
+      expect(log.events.some((e) => e.kind === "evolved")).toBe(false);
+    });
+
+    it("a high roll (>= EVOLUTION_DECLINE_CHANCE) evolves", () => {
+      const world = createWorld(5, 5);
+      const ctx = testCtx();
+      const log = new EventLog();
+      const agent = bulbasaur({ level: 15, exp: totalExpForLevel("MEDIUM_SLOW", 15) });
+
+      grantExp(world, agent, totalExpForLevel("MEDIUM_SLOW", 16) - agent.exp!, ctx, log, () => EVOLUTION_DECLINE_CHANCE);
+
+      expect(agent.species).toBe("ivysaur");
+    });
+
+    it("a decline at one level gets re-rolled at the next, independently — not stuck forever", () => {
+      const world = createWorld(5, 5);
+      const ctx = testCtx();
+      const log = new EventLog();
+      const agent = bulbasaur({ level: 15, exp: totalExpForLevel("MEDIUM_SLOW", 15) });
+
+      // First level-up (15 -> 16, the evolution's own threshold): forced decline.
+      grantExp(world, agent, totalExpForLevel("MEDIUM_SLOW", 16) - agent.exp!, ctx, log, () => 0);
+      expect(agent.species).toBe("bulbasaur");
+
+      // Second level-up (16 -> 17, still eligible): forced evolve — proves the
+      // earlier decline didn't consume the only roll it ever gets.
+      grantExp(world, agent, totalExpForLevel("MEDIUM_SLOW", 17) - agent.exp!, ctx, log, () => 1);
+      expect(agent.species).toBe("ivysaur");
+    });
+  });
+
+  describe("resolveSpawnEvolution (a directly-spawned agent gets the same evolution chance an organically-leveled one does)", () => {
+    it("a species below its own evolution threshold is returned unchanged, regardless of rng", () => {
+      const ctx = testCtx();
+      expect(resolveSpawnEvolution("bulbasaur", 10, ctx, () => 1)).toBe("bulbasaur");
+    });
+
+    it("spawned well past the threshold: an rng that always clears the decline chance evolves it", () => {
+      const ctx = testCtx();
+      expect(resolveSpawnEvolution("bulbasaur", 50, ctx, () => 1)).toBe("ivysaur");
+    });
+
+    it("spawned well past the threshold: an rng that always declines leaves it unevolved — real bug report: \"level 50 weedles and bellsprouts and charmander\"", () => {
+      const ctx = testCtx();
+      expect(resolveSpawnEvolution("bulbasaur", 50, ctx, () => 0)).toBe("bulbasaur");
+    });
+
+    it("rolls per level from the evolution's own threshold up to the spawn level, not once for the whole span — a decline at an early virtual level still gets re-tried at a later one", () => {
+      const ctx = testCtx();
+      let call = 0;
+      // Levels 16 (threshold) through 20 = 5 rolls. Decline the first 4,
+      // clear the 5th (level 20's own roll).
+      const rng = () => (++call < 5 ? 0 : 1);
+      expect(resolveSpawnEvolution("bulbasaur", 20, ctx, rng)).toBe("ivysaur");
+      expect(call).toBe(5); // proves it actually rolled 5 times, not once
+    });
+
+    it("an unknown species (no profile) is returned unchanged rather than throwing", () => {
+      const ctx = testCtx();
+      expect(resolveSpawnEvolution("mystery-species", 50, ctx, () => 1)).toBe("mystery-species");
+    });
   });
 
   it("without a leveling context, exp still accrues but no level-up happens", () => {

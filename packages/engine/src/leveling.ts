@@ -597,6 +597,64 @@ export function ensureCombatProfile(agent: Agent, ctx?: LevelingContext): void {
  */
 export const NOTABLE_XP_MULTIPLIER = 1.5;
 
+/**
+ * Chance a level-eligible evolution DOESN'T happen at any one level — direct
+ * ask: "they do not have to evolve, but it should be relatively rare like
+ * 25% chance every level that they choose not to." Applied both to organic
+ * in-sim leveling (`grantExp` below) and to a freshly-spawned agent that's
+ * already past its evolution's own level (`resolveSpawnEvolution`) — see
+ * that function's own doc comment for why a spawned agent needs the same
+ * roll, not just organic level-ups. A species stuck declining for many
+ * consecutive eligible levels reads as genuinely rare by construction
+ * (`EVOLUTION_DECLINE_CHANCE ** N` for N eligible levels), not a coin flip
+ * re-run once — matching "relatively rare," not "usually."
+ */
+export const EVOLUTION_DECLINE_CHANCE = 0.25;
+
+/**
+ * Walks `speciesId`'s level-gated evolution chain up through `level`,
+ * rolling `EVOLUTION_DECLINE_CHANCE` at every level from each evolution's
+ * own threshold up to `level` (not a single roll for the whole span) — the
+ * exact same per-level chance `grantExp`'s own evolution check applies to
+ * an agent leveling up organically, given to an agent that's instead being
+ * spawned directly at a level (an immigrant, or a never-visited zone's
+ * invented population) rather than climbing there in-sim.
+ *
+ * Direct bug report: "I'm seeing like level 50 weedles and bellsprouts and
+ * charmander... Maybe you are not re-simulating them being prompted to
+ * evolve after the level in which they are initially offered to?" —
+ * exactly right. `grantExp`'s evolution check only ever ran as a side
+ * effect of an organic level-up crossing the threshold; a directly-spawned
+ * high-level base-form agent was never evaluated for evolution AT ALL, not
+ * even once, so it could sit at level 50 as a Weedle indefinitely no
+ * matter how far past its real evolution level it started. Called from
+ * `spawnAgent` (data package) before base stats/moves are resolved, so the
+ * corrected species is what actually gets spawned, not the raw roster pick.
+ *
+ * Loops through MULTIPLE evolution stages in one call (e.g. a level-50
+ * Caterpie roll could resolve all the way to Butterfree) — each stage gets
+ * its own independent walk of per-level rolls from ITS OWN threshold, same
+ * as if the agent had actually leveled there one step at a time.
+ */
+export function resolveSpawnEvolution(speciesId: string, level: number, ctx: LevelingContext, rng: () => number): string {
+  let species = speciesId;
+  for (;;) {
+    const profile = ctx.getProfile(species);
+    if (!profile) return species;
+    const evo = profile.evolutions.find((e) => level >= e.level);
+    if (!evo) return species;
+    let evolved = false;
+    for (let lvl = evo.level; lvl <= level; lvl++) {
+      if (rng() >= EVOLUTION_DECLINE_CHANCE) {
+        evolved = true;
+        break;
+      }
+    }
+    if (!evolved) return species;
+    species = evo.targetSpeciesId;
+  }
+}
+
 export function grantExp(
   world: World,
   agent: Agent,
@@ -671,7 +729,13 @@ export function grantExp(
 
     const levelAfterUp = agent.level;
     const evo = profile.evolutions.find((e) => levelAfterUp >= e.level);
-    if (evo) {
+    // See EVOLUTION_DECLINE_CHANCE's own doc comment — a real, per-level
+    // chance to decline, not a guaranteed evolution the instant it's
+    // eligible. Declining here does nothing else special: the loop simply
+    // continues to the next level (species unchanged), and `evo` gets
+    // re-evaluated fresh next iteration — a fresh independent roll every
+    // level it stays eligible, with no extra state to track.
+    if (evo && rng() >= EVOLUTION_DECLINE_CHANCE) {
       const fromSpecies = agent.species;
       agent.species = evo.targetSpeciesId;
       const newProfile = ctx.getProfile(agent.species);
