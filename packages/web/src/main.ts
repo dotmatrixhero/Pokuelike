@@ -1,4 +1,4 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, type PlayerAction, type Layer } from "@pokuelike/engine";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, type PlayerAction, type Layer } from "@pokuelike/engine";
 import { createCaveScenario, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent } from "./eventText.js";
@@ -385,7 +385,9 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
   }
   gameOverEl.hidden = true;
   playerHudEl.hidden = false;
-  hudMessageEl.textContent = scene === "cave" ? "It is dark. There is light somewhere." : "";
+  document.body.classList.add("player-mode");
+  cancelTravel();
+  hudMessageEl.textContent = scene === "cave" ? "It is dark. There is light somewhere. Tap a tile to walk." : "";
   renderPlayerHud();
   syncModeButtons();
   const url = new URL(location.href);
@@ -402,10 +404,12 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
  * where there is a player to see from.
  */
 function enterWatchMode(seed: number): void {
+  cancelTravel();
   playerMode = false;
   playerDead = false;
   playerHudEl.hidden = true;
   gameOverEl.hidden = true;
+  document.body.classList.remove("player-mode");
   enterOverworldMode(seed, "zone");
   syncModeButtons();
   const url = new URL(location.href);
@@ -531,6 +535,7 @@ window.addEventListener("keydown", (e) => {
   if (!playerMode) return;
   // Typing in the seed box or any input must not walk the player.
   if ((e.target as HTMLElement | null)?.tagName === "INPUT") return;
+  cancelTravel();
   if (playerDead) {
     if (e.key === "r" || e.key === "R") {
       e.preventDefault();
@@ -787,6 +792,78 @@ function refreshSelection(): void {
 }
 
 /**
+ * Tap-to-walk. One step per player turn along the shortest *known* path
+ * (engine `nextTravelStep`: seen-or-remembered tiles only), re-planned each
+ * step, paced so the walk is visible, and stopped early when something new
+ * comes into view — the same rule a roguelike's travel command uses, so the
+ * world cannot ambush you while you are not looking. Any key or tap cancels.
+ */
+const TRAVEL_STEP_MS = 90;
+const TRAVEL_MAX_STEPS = 60;
+let travelTimer: number | undefined;
+
+function cancelTravel(): void {
+  if (travelTimer !== undefined) {
+    window.clearTimeout(travelTimer);
+    travelTimer = undefined;
+  }
+}
+
+function travelTo(target: Vec2): void {
+  cancelTravel();
+  const me = findPlayer(world);
+  if (!me) return;
+  if (target.x === me.pos.x && target.y === me.pos.y) {
+    playerAct({ kind: "wait" });
+    return;
+  }
+  const first = nextTravelStep(world, me, target);
+  if (!first) {
+    hudMessageEl.textContent = "You do not know a way there.";
+    return;
+  }
+  let steps = 0;
+  let seenBefore = visibleAgentIds(world, me);
+  const stepOnce = (): void => {
+    travelTimer = undefined;
+    const player = findPlayer(world);
+    if (!player) return;
+    const step = nextTravelStep(world, player, target);
+    if (!step) {
+      if (player.pos.x !== target.x || player.pos.y !== target.y) hudMessageEl.textContent = "You can go no further.";
+      return;
+    }
+    playerAct(step);
+    steps++;
+    const after = findPlayer(world);
+    if (!after) return;
+    const seenNow = visibleAgentIds(world, after);
+    for (const id of seenNow) {
+      if (!seenBefore.has(id)) {
+        const who = world.agents.find((a) => a.id === id);
+        hudMessageEl.textContent = who ? `You stop. ${examine(world, who, { observer: after, name: (k) => SPECIES[k]?.name ?? k })}` : "You stop.";
+        return;
+      }
+    }
+    seenBefore = seenNow;
+    if ((after.pos.x === target.x && after.pos.y === target.y) || steps >= TRAVEL_MAX_STEPS) return;
+    travelTimer = window.setTimeout(stepOnce, TRAVEL_STEP_MS);
+  };
+  stepOnce();
+}
+
+// The on-screen verbs. `click` is fine here: these buttons are never rebuilt.
+document.querySelectorAll<HTMLButtonElement>("#hud-pad button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (!playerMode || playerDead) return;
+    cancelTravel();
+    const act = btn.dataset.act;
+    if (act === "look") examineNext();
+    else if (act === "wait" || act === "eat" || act === "drink") playerAct({ kind: act });
+  });
+});
+
+/**
  * ROADMAP.md M4's examine: a free action (no tick). Each press selects the
  * next creature you can see, nearest first, and puts its examine line in
  * the HUD; the inspector shows the same line with the numbers under it.
@@ -960,6 +1037,15 @@ canvas.addEventListener("click", (event) => {
   const agent = agentAtCanvasPos(world, x, y, viewLayer());
   if (agent) {
     selectAgent(agent);
+    // Tapping a creature in Play mode is the examine verb (free, no tick).
+    const me = playerMode ? findPlayer(world) : undefined;
+    if (me && agent.id !== me.id) hudMessageEl.textContent = examine(world, agent, { observer: me, name: (id) => SPECIES[id]?.name ?? id });
+    return;
+  }
+  // Play mode: tapping a tile walks there — direct ask: "I can't play at all
+  // on mobile. Can you allow a click based control scheme?" See travelTo.
+  if (playerMode && !playerDead) {
+    travelTo({ x: Math.floor(x / TILE_SIZE), y: Math.floor(y / TILE_SIZE) });
     return;
   }
   // Direct ask: "draw the yellow bounding box anyways on all cool events

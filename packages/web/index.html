@@ -395,6 +395,33 @@
       #player-hud .hud-num { width: 34px; text-align: right; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
       #hud-message { margin-top: 6px; min-height: 15px; color: var(--text); }
       #hud-keys { margin-top: 4px; font-size: 10.5px; opacity: 0.7; }
+      #hud-pad { display: flex; gap: 6px; margin-top: 8px; }
+      #hud-pad button {
+        flex: 1;
+        min-height: 36px;
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text);
+        font-size: 12px;
+        touch-action: manipulation;
+      }
+      #hud-pad button:active { background: var(--accent); color: #06111f; }
+      /* The spectator's play/pause pill has nothing to do in Play mode and
+         sits exactly where a thumb rests on a phone. */
+      body.player-mode #playback-hud { display: none; }
+      @media (max-width: 768px) {
+        /* Bottom of the map, not the top: the map area is short on a phone
+           and the camera centres the player mid-wrap, which on the first
+           mobile run put the player's tile under the HUD — every tap on the
+           map landed on the Drink button. Bottom is also where thumbs are. */
+        #player-hud { width: auto; left: 10px; right: 10px; top: auto; bottom: 10px; padding: 6px 8px; }
+        #player-hud .hud-rows { display: grid; grid-template-columns: 1fr 1fr; column-gap: 10px; }
+        #hud-keys { display: none; }
+        #hud-message { margin-top: 4px; }
+        #hud-pad { margin-top: 6px; }
+        #hud-pad button { min-height: 44px; }
+      }
 
       /* ROADMAP.md M3 — death is a state, not a log line. */
       #game-over {
@@ -932,12 +959,23 @@
                the player's have to be there without clicking — you should
                never be surprised by starving. -->
           <div id="player-hud" hidden>
-            <div class="hud-row"><span class="hud-label">HP</span><span class="hud-bar"><span id="hud-hp" class="hud-fill hp"></span></span><span id="hud-hp-text" class="hud-num"></span></div>
-            <div class="hud-row"><span class="hud-label">Hunger</span><span class="hud-bar"><span id="hud-hunger" class="hud-fill hunger"></span></span><span id="hud-hunger-text" class="hud-num"></span></div>
-            <div class="hud-row"><span class="hud-label">Thirst</span><span class="hud-bar"><span id="hud-thirst" class="hud-fill thirst"></span></span><span id="hud-thirst-text" class="hud-num"></span></div>
-            <div class="hud-row"><span class="hud-label">Energy</span><span class="hud-bar"><span id="hud-energy" class="hud-fill energy"></span></span><span id="hud-energy-text" class="hud-num"></span></div>
+            <div class="hud-rows">
+              <div class="hud-row"><span class="hud-label">HP</span><span class="hud-bar"><span id="hud-hp" class="hud-fill hp"></span></span><span id="hud-hp-text" class="hud-num"></span></div>
+              <div class="hud-row"><span class="hud-label">Hunger</span><span class="hud-bar"><span id="hud-hunger" class="hud-fill hunger"></span></span><span id="hud-hunger-text" class="hud-num"></span></div>
+              <div class="hud-row"><span class="hud-label">Thirst</span><span class="hud-bar"><span id="hud-thirst" class="hud-fill thirst"></span></span><span id="hud-thirst-text" class="hud-num"></span></div>
+              <div class="hud-row"><span class="hud-label">Energy</span><span class="hud-bar"><span id="hud-energy" class="hud-fill energy"></span></span><span id="hud-energy-text" class="hud-num"></span></div>
+            </div>
             <div id="hud-message"></div>
             <div id="hud-keys">move: arrows / hjkl yubn &nbsp; wait: . &nbsp; eat: e &nbsp; drink: q &nbsp; look: x</div>
+            <!-- Tap controls — direct ask: "I can't play at all on mobile.
+                 Can you allow a click based control scheme?" Tapping the map
+                 walks there; these are the verbs that have no tile. -->
+            <div id="hud-pad">
+              <button data-act="wait" title="Wait one turn">Wait</button>
+              <button data-act="eat" title="Eat what you stand on">Eat</button>
+              <button data-act="drink" title="Drink from water beside you">Drink</button>
+              <button data-act="look" title="Look at the next creature you can see">Look</button>
+            </div>
           </div>
 
           <div id="game-over" hidden>
