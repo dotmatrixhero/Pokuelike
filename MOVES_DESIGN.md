@@ -7674,3 +7674,106 @@ branch dead that is not. Corrected, and the same correction retires the
 test's "Harden's Aggression is the one deliberate exception" carve-out:
 *Honed Carapace* sets `statChangesOnHit` (self Defense +2), so that branch
 has been fight-usable since it shipped.
+
+## Safeguard and Withdraw — v4 trees for the last two treeless status moves (Shipped)
+
+45 nodes each, same v4 shape as the rest of the roster (three branches of 12
+= opener, two parallel lanes each ending in a lane notable, a deep
+convergence notable, a filler, a capstone; plus three 3-node bridges). Both
+are `utilityMove`s, so both were written against the narrow surface a utility
+move can actually reach — checked at the call sites, not assumed.
+
+### The fantasies
+
+**Safeguard is a watch, not a shield.** One animal stays awake and draws a
+line around the ones that are asleep, and while it holds, nothing that gets
+carried crosses it. It does nothing for the warden; its whole value is who
+else is standing inside it — which is why Chansey, Clefairy, Lapras and Seel
+are its learners.
+
+- Sociability, *the ring*: WIDTH (the `statusImmunityAura` ladder, 60/4 ->
+  220/8) vs. TENDING (`targetsAlly` heals and Defense buffs for the ones
+  already inside). How many are in it, versus what you do for them.
+- Boldness, *the vigil*: ENDURANCE (`selfHeal`, `regen` — outlast the night)
+  vs. THE POST (`immovable` at the boundary, or walking it far more often).
+  Time versus ground.
+- Aggression, *the warden goes out to meet it*: WEAR IT DOWN (`drainNeeds` —
+  an outsider loitering by a warded herd leaves hungrier than it came) vs.
+  STAND IN FRONT (`thorns`, `unshaken`, flat mitigation). Deny versus absorb.
+
+**Withdraw: a shell is a room you go into, not armour you wear.** The animal
+is still there and the water still carries it; there is simply nothing on the
+outside left to hit.
+
+- Boldness, *nobody is home*: SEALED (the hatch — flat mitigation,
+  `unshaken`, the Defense ladder 1 -> 4) vs. QUIET (not a thicker wall —
+  `damageReduction`, `selfHeal`: the hit lands where the animal is not).
+- Aggression, *the shell keeps moving*: CARRIED (`aquaticHaste`, cooldown —
+  let the water do it) vs. THE KICK (a Speed stage, or coming back out
+  already covered). Drift versus push.
+- Sociability, *there is room in here*: TAKE THEM IN (`targetsAlly` heal +
+  Defense buff) vs. THE NURSERY (`matingRadiusBoost`, `healAura`, shallows —
+  a place, not a rescue).
+
+### How Withdraw is not Harden, stated as a rule the tests hold
+
+Harden already owns "raise your own Defense." Its answer to danger is to
+**stop**: `lockTicks` on four nodes, `immovable`, becoming scenery, shedding
+grit into the ground. Withdraw's answer is to leave **without stopping** — so
+its tree contains **no `lockTicks` at all and no `thorns` at all**, and buys
+Speed stages, `aquaticHaste` and cooldown instead. `moveTrees.test.ts` asserts
+both zeroes with Harden itself as the control (Harden must still spend both),
+so the day the two trees converge, a test says so.
+
+### Verified by running it, not by reading it
+
+`packages/runner/src/validateWardAndShell.ts` — a staged duel in a real
+`createDemoWorld`, driven by the engine's own egg-defence path (nothing calls
+a combat primitive directly). 3 seeds x 600 ticks:
+
+| build | fights | used mid-fight | what landed |
+|---|---|---|---|
+| Safeguard, base (control) | 1526 | 19 | herd-mate ward 59t |
+| Safeguard, Sociability capstone | 1541 | 9 | **herd-mate ward 219t** |
+| Safeguard, Boldness capstone | 1586 | 26 | self Defense +3 |
+| Safeguard, Aggression capstone | 1430 | 20 | self Attack +3, Defense +2 |
+| **CONTROL: ward vs. a foe that can inflict nothing** | 1538 | **0** | nothing, correctly |
+| Withdraw, base (control) | 1306 | 30 | self Defense +1 |
+| Withdraw, Boldness capstone | 1360 | 15 | **self Defense +4** |
+| Withdraw, Aggression capstone | 1785 | 29 | Speed +4, Defense +2 |
+| Withdraw, Sociability capstone | 1301 | 20 | self Defense +3 |
+
+The ward reached **only** herd-mates: a same-species, same-distance bystander
+in another herd read 0 ticks of immunity in every run.
+
+`drainNeeds` is idle-tick only — `maybeUseUtilityMoveInCombat` never drains —
+so it is measured separately, with the fight removed: 5 idle uses took **611%**
+of hunger off the outsiders over the window against **501%** for the same
+tableau running the untreed base move (plain decay). The gap is 5 x 22%, the
+capstone's own drain amount, to the percentage point.
+
+The heal is measured in isolation rather than off the HP bar, because passive
+regen, rests and the harness's own top-up all move that bar on the same tick —
+the untreed base Withdraw scored a 16% "heal" that way. A direct call into the
+real `maybeUseUtilityMoveInCombat` with the rng pinned: base Safeguard +0.0 HP,
+*Does Not Sleep* +45.6 (24% of 190); base Withdraw +0.0, *Nothing to Hit*
++19.8 (30% of 66).
+
+### Two defects in existing code, found on the way
+
+1. **`moveTrees.test.ts` carved out Harden's Aggression branch as "passives
+   only, can never be spent as a fight action" — and that exception was stale
+   and passing for the wrong reason.** The check only looked at the singular
+   `statChangeOnHit`, while Honed Carapace had already been migrated to the
+   appending `statChangesOnHit` form; `resolveStatChangesOnHit` folds both, so
+   that branch has been fight-usable (a +2 self Defense) ever since the
+   migration. Folding the plural form into the check is what surfaced it. The
+   exception is gone; no status branch is exempt now.
+2. **`MoveSpec.matingRadiusBoost.multiplier` is inert.**
+   `reproduction.ts`'s `mateSearchRadius` applies a fixed
+   `MATING_RADIUS_BOOST_MULTIPLIER = 2` whenever the boost is running and
+   never reads the field. Growth's tree ships nodes at 1.6, 2.2 and 3, and the
+   atlas prints "x3 mate-search radius" for a node that delivers x2 — a
+   mislabel of exactly the kind principle 5 was written for. Both new nodes
+   here say 2 so the label is honest. **Not fixed** (it is a balance question,
+   not a typo): either read the field, or drop it from the type.

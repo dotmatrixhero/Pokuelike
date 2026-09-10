@@ -1659,6 +1659,27 @@ const COMBAT_USABLE_FIELDS = [
   "spawnsRain",
 ] as const;
 
+/**
+ * The APPENDING form of a self stat change is the same combat-usable lever as
+ * the singular one — `resolveStatChangesOnHit` (engine/moves.ts) folds both
+ * and `maybeUseUtilityMoveInCombat` reads only that folded result. Keying the
+ * check on the singular name alone reported a branch built entirely out of
+ * `statChangesOnHit` as unable to fire in a fight, which is the opposite of
+ * true; safeguard and withdraw use the plural form throughout precisely
+ * because the singular is an overwrite field.
+ */
+const combatUsableFields = (delta: Record<string, unknown>): string[] =>
+  [
+    ...COMBAT_USABLE_FIELDS.filter((f) => delta[f] !== undefined),
+    ...(Array.isArray(delta.statChangesOnHit) && delta.statChangesOnHit.length ? ["statChangesOnHit"] : []),
+  ];
+
+/** Every self stat change a node declares, in either form. */
+const statChangesOf = (node: MoveTreeNode) => [
+  ...(node.delta.statChangeOnHit ? [node.delta.statChangeOnHit] : []),
+  ...(node.delta.statChangesOnHit ?? []),
+];
+
 const passiveTotal = (move: MoveSpec & { tree: Record<string, MoveTreeNode> }, kind: string) =>
   Object.values(move.tree)
     .flatMap((n) => [...(n.grantsPassive ? [n.grantsPassive] : []), ...(n.grantsPassives ?? [])])
@@ -1666,7 +1687,7 @@ const passiveTotal = (move: MoveSpec & { tree: Record<string, MoveTreeNode> }, k
     .reduce((sum, g) => sum + g.value, 0);
 
 describe("the status trees only pull levers a utilityMove can actually reach", () => {
-  for (const moveId of ["harden", "growth", "agility", "roost", "defense_curl"]) {
+  for (const moveId of ["harden", "growth", "agility", "roost", "defense_curl", "safeguard", "withdraw"]) {
     const move = MOVES[moveId] as MoveSpec & { tree: Record<string, MoveTreeNode> };
 
     it(`${moveId} is flagged utilityMove, so these are the right rules for it`, () => {
@@ -1684,12 +1705,9 @@ describe("the status trees only pull levers a utilityMove can actually reach", (
       expect(offenders).toEqual([]);
     });
 
-    it(`every ${moveId} statChangeOnHit targets self and is positive — the defender side would be dead`, () => {
+    it(`every ${moveId} stat change targets self and is positive — the defender side would be dead`, () => {
       for (const node of Object.values(move.tree)) {
-        for (const change of [
-          ...(node.delta.statChangeOnHit ? [node.delta.statChangeOnHit] : []),
-          ...(node.delta.statChangesOnHit ?? []),
-        ]) {
+        for (const change of statChangesOf(node)) {
           expect(change.target).toBe("self");
           expect(change.stage).toBeGreaterThan(0);
         }
@@ -1700,22 +1718,18 @@ describe("the status trees only pull levers a utilityMove can actually reach", (
       for (const branch of ["aggression", "boldness", "sociability"] as const) {
         const inBranch = Object.values(move.tree).filter((n) => n.leaning === branch);
         expect(inBranch.length).toBeGreaterThan(0);
-        const reaches = inBranch.some((n) =>
-          COMBAT_USABLE_FIELDS.some((f) => (n.delta as Record<string, unknown>)[f] !== undefined)
-        );
-        // Harden's Aggression was recorded here as the one deliberate
-        // exception — a branch whose entire payoff is passives and that
-        // therefore reaches nothing `maybeUseUtilityMoveInCombat` would spend
-        // an action on. That is no longer true and had already stopped being
-        // true before this list was widened: *Honed Carapace* sets
-        // `statChangesOnHit` (self Defense +2), which
-        // `resolveStatChangesOnHit` folds in exactly like the singular form,
-        // so the branch IS fight-usable. The passive assertion it carried is
-        // kept, because the passive payoff is still the branch's identity.
-        if (moveId === "harden" && branch === "aggression") {
-          expect(inBranch.filter((n) => n.grantsPassive || n.grantsPassives).length).toBeGreaterThan(4);
-        }
+        const reaches = inBranch.some((n) => combatUsableFields(n.delta as Record<string, unknown>).length > 0);
+        // Harden's Aggression used to be carved out here as "the one
+        // deliberate exception — passives only, can never be spent as a fight
+        // action." That exception was STALE, and it was passing for the wrong
+        // reason: the check only looked at the singular `statChangeOnHit`,
+        // while Honed Carapace had already migrated to the appending
+        // `statChangesOnHit` form. `resolveStatChangesOnHit` folds both, so
+        // that branch has been fight-usable (a +2 self Defense) ever since.
+        // Two separate rounds found this independently. No branch in any
+        // status tree is exempt now.
         expect(reaches).toBe(true);
+        expect(inBranch.filter((n) => n.grantsPassive || n.grantsPassives).length).toBeGreaterThan(2);
       }
     });
   }
@@ -1782,6 +1796,107 @@ describe("Harden tree: a body clenching until it is a different material", () =>
     // own statChangeOnHit already reaches +4, so a bigger defenseBoost pile
     // would be points spent on nothing.
     expect(passiveTotal(harden, "defenseBoost")).toBeLessThanOrEqual(4);
+  });
+});
+
+describe("Safeguard tree: one animal stays awake and draws a line around the rest", () => {
+  const safeguard = MOVES.safeguard as MoveSpec & { tree: Record<string, MoveTreeNode> };
+  const auraAt = (id: string) =>
+    applyMoveTree(safeguard, [...resolveChosenSetFor(safeguard.tree, id)]).statusImmunityAura;
+
+  it("the ward itself is one ladder on one chain, so no two setters race", () => {
+    // `statusImmunityAura` is an OVERWRITE field: two co-takeable setters
+    // resolve to whichever `applyMoveTree` reaches last. Every setter here is
+    // an ancestor or descendant of every other, so a build holding two is a
+    // deliberate escalation.
+    expect(safeguard.statusImmunityAura).toEqual({ ticks: 60, radius: 4 });
+    expect(auraAt("drawn_ring")).toEqual({ ticks: 90, radius: 5 });
+    expect(auraAt("the_line")).toEqual({ ticks: 120, radius: 6 });
+    expect(auraAt("nothing_crosses")).toEqual({ ticks: 220, radius: 8 });
+    expect(Object.values(safeguard.tree).filter((n) => n.delta.statusImmunityAura).map((n) => n.id).sort())
+      .toEqual(["drawn_ring", "held_line", "nothing_crosses", "the_line"]);
+  });
+
+  it("Aggression's drain is a real, visible hunger transfer and it escalates on one chain", () => {
+    expect(applyMoveTree(safeguard, [...resolveChosenSetFor(safeguard.tree, "no_grazing_here")]).drainNeeds)
+      .toEqual({ need: "hunger", amount: 0.06, radius: 4 });
+    expect(applyMoveTree(safeguard, [...resolveChosenSetFor(safeguard.tree, "not_worth_the_walk")]).drainNeeds)
+      .toEqual({ need: "hunger", amount: 0.22, radius: 6 });
+    expect(safeguard.drainNeeds).toBeUndefined(); // the base move steals nothing
+  });
+
+  it("the warden's own payoff is a heal, which is what makes Boldness spendable in a fight", () => {
+    // `maybeUseUtilityMoveInCombat` spends an action on a `selfHeal` under 60%
+    // HP — without one, a whole branch of a status tree can never fire mid-fight.
+    expect(applyMoveTree(safeguard, [...resolveChosenSetFor(safeguard.tree, "second_wind")]).selfHeal)
+      .toEqual({ fraction: 0.08 });
+    expect(applyMoveTree(safeguard, [...resolveChosenSetFor(safeguard.tree, "the_whole_night")]).selfHeal)
+      .toEqual({ fraction: 0.24 });
+  });
+
+  it("stays inside its per-move passive budgets", () => {
+    expect(passiveTotal(safeguard, "thorns")).toBeLessThanOrEqual(0.5);
+    expect(passiveTotal(safeguard, "damageReduction")).toBeLessThanOrEqual(0.2);
+    // One healing budget across all three kinds, the way status.ts spends it.
+    const heal =
+      passiveTotal(safeguard, "regen") + passiveTotal(safeguard, "healAura") + passiveTotal(safeguard, "regenFlat") / 43;
+    expect(heal).toBeLessThanOrEqual(0.1);
+  });
+});
+
+describe("Withdraw tree: a shell is a room you go into, not armour you wear", () => {
+  const withdraw = MOVES.withdraw as MoveSpec & { tree: Record<string, MoveTreeNode> };
+  const stageAt = (id: string, stat: string) => {
+    const built = applyMoveTree(withdraw, [...resolveChosenSetFor(withdraw.tree, id)]);
+    return resolveStatChangesOnHit(built).find((c) => c.target === "self" && c.stat === stat)?.stage;
+  };
+
+  it("is not Harden: no lockTicks and no thorns anywhere in the tree", () => {
+    // The load-bearing difference. Harden's answer to danger is to stop
+    // acting — `lockTicks` on four of its nodes — and its shell is a surface
+    // that hurts to touch (`thorns` on six). Withdraw pays neither: the shell
+    // is portable, so it costs no tempo, and it has an inside rather than an
+    // edge. If either of these ever becomes non-zero the two trees have
+    // converged and one of them is redundant.
+    const lock = Object.values(withdraw.tree).filter((n) => n.delta.lockTicks !== undefined);
+    expect(lock.map((n) => n.id)).toEqual([]);
+    expect(passiveTotal(withdraw, "thorns")).toBe(0);
+    // The control: Harden really does spend both, so this is a difference
+    // between the trees rather than a lever nothing in the roster uses.
+    const harden = MOVES.harden as MoveSpec & { tree: Record<string, MoveTreeNode> };
+    expect(Object.values(harden.tree).filter((n) => n.delta.lockTicks !== undefined).length).toBeGreaterThan(0);
+    expect(passiveTotal(harden, "thorns")).toBeGreaterThan(0);
+  });
+
+  it("buys Speed while defended — the tempo Harden gives up — without out-running Agility", () => {
+    expect(stageAt("tucked_and_rolling", "speed")).toBe(2);
+    expect(stageAt("the_shell_gets_there_first", "speed")).toBe(4);
+    const agility = MOVES.agility as MoveSpec & { tree: Record<string, MoveTreeNode> };
+    const agilityMax = Math.max(
+      ...Object.values(agility.tree).flatMap((n) =>
+        [...(n.delta.statChangeOnHit ? [n.delta.statChangeOnHit] : []), ...(n.delta.statChangesOnHit ?? [])]
+          .filter((c) => c.stat === "speed")
+          .map((c) => c.stage)
+      )
+    );
+    expect(agilityMax).toBeGreaterThan(4); // the roster's actual speed move still wins
+  });
+
+  it("the Defense ladder climbs 1 -> 2 -> 3 -> 4 and stops at the clamp", () => {
+    expect(withdraw.statChangeOnHit?.stage).toBe(1);
+    expect(stageAt("pulled_in", "defense")).toBe(2);
+    expect(stageAt("nobody_home", "defense")).toBe(3);
+    expect(stageAt("an_empty_shell", "defense")).toBe(4);
+    // Stat stages clamp at +6 (`statStageMultiplier`), and `defenseBoost` is a
+    // permanent stage on top, so the passive pile has to stay small too.
+    expect(passiveTotal(withdraw, "defenseBoost")).toBeLessThanOrEqual(4);
+  });
+
+  it("stays inside its per-move passive budgets", () => {
+    expect(passiveTotal(withdraw, "damageReduction")).toBeLessThanOrEqual(0.2);
+    const heal =
+      passiveTotal(withdraw, "regen") + passiveTotal(withdraw, "healAura") + passiveTotal(withdraw, "regenFlat") / 43;
+    expect(heal).toBeLessThanOrEqual(0.1);
   });
 });
 
