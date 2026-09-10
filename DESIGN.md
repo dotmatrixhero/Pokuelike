@@ -15710,3 +15710,32 @@ screen in a live browser session; that visual check (Playwright against
 the dev server) was not done this round, since forcing a wild human onto
 screen would need a debug-injection hook that doesn't exist yet. Said
 plainly rather than blurred together.
+
+## Synced branch with roguelike-sim and master (two merges, both clean)
+
+Asked "how hard is it to add items/recipes... another agent is adding
+cooking recipes via crafting at a campfire" → "oh just pull actually from
+roguelike-sim" → then "hm try pull master" once roguelike-sim turned out
+not to have the cooking work.
+
+Merged `origin/claude/pokemon-roguelike-sim-5rje5a` (226 files, skill
+trees/move trees/surf/sludge/weather — no crafting content, that branch's
+`crafting.ts` predates the axe/machete work) then `origin/master` (found
+the actual cooking work: deployable campfire, 4 fixed dishes — Roasted
+Apple/Berry Stew/Potato Mash/Vegetable Stew — heal-on-eat, rapport bonus).
+
+Both merges touched every file this session's archetype feature had just
+added to (`types.ts`, `immigration.ts` x2, `overworld.ts`, `crafting.ts`,
+`renderer.ts`). Real conflicts: `TODO.md` twice (trivial — both sides just
+appended new sections) and `needs.ts` once (a real one: two branches
+independently extended the same `support.js` import line — HEAD added
+`applyFerrying`/`maybeStartFerrying`, master added `healFromCookedFood` —
+resolved by keeping both). Everything else, including every file the
+archetype feature touches, auto-merged clean with no markers.
+
+Verified after each merge (not assumed): grepped for `assignHumanArchetype`/
+`itemCatalog`/`archetype?:`/`HUMAN_ARCHETYPE_EMOJI` to confirm the
+archetype feature's own code survived intact, then full typecheck (all 4
+packages) + `vite build` + full test suites both times. Final state:
+engine 1533/1533, data 468/468, `validateHumanArchetypes.ts` still passes
+identically post-merge (same 200-roll distribution).
