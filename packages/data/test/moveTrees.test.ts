@@ -1469,5 +1469,135 @@ describe("additive delta fields: a build that pays twice gets twice", () => {
     expect(applyMoveTree(move, ["b", "a"]).hits).toEqual({ min: 4, max: 4 });
     expect(applyMoveTree(move, ["a", "b"]).rallyCall).toEqual({ ticks: 50 });
     expect(applyMoveTree(move, ["b", "a"]).rallyCall).toEqual({ ticks: 50 });
+
+describe("Wing Attack tree: v4 two-lane — the wing, and everything it moves", () => {
+  const wingAttack = MOVES.wing_attack;
+  const tilesOf = (shape: Parameters<typeof resolveShape>[0]) => resolveShape(shape, { x: 10, y: 10 }, "E").length;
+
+  it("the base move really is an area move, so `shape` on this tree is live content and not another dead cone", () => {
+    // The lesson ember and rock_throw both paid for: `shape` is only ever
+    // read by `resolveShape` inside `resolveAreaHit`, which `resolveHit`
+    // only calls when `hitsArea` is true. Wing Attack ships with it on, so
+    // its one shape node genuinely changes which tiles get hit.
+    expect(wingAttack.hitsArea).toBe(true);
+    expect(wingAttack.shape).toEqual({ kind: "cone", length: 2, width: 2 });
+  });
+
+  it("The Whole Wingspan is asserted in TILES, and it is a trade, not a strict upgrade", () => {
+    // Counted, not inferred from the radius/length constants: cone(2,2) is a
+    // 3-then-5 fan reaching two tiles; cone(3,2) is 1-then-3-then-5 reaching
+    // three. The span narrows at the shoulder and opens at the tip.
+    expect(tilesOf(wingAttack.shape)).toBe(8);
+
+    const capstone = wingAttack.tree!.full_wingspan;
+    expect(tilesOf(capstone.delta.shape!)).toBe(9);
+    const perDepth = (shape: Parameters<typeof resolveShape>[0]) => {
+      const counts: Record<number, number> = {};
+      for (const t of resolveShape(shape, { x: 10, y: 10 }, "E")) counts[t.x - 10] = (counts[t.x - 10] ?? 0) + 1;
+      return counts;
+    };
+    expect(perDepth(wingAttack.shape)).toEqual({ 1: 3, 2: 5 });
+    expect(perDepth(capstone.delta.shape!)).toEqual({ 1: 1, 2: 3, 3: 5 });
+
+    // `range.max` moves with the footprint. A cast range longer than the
+    // shape is how rock_throw's cone managed to whiff on a legal target.
+    expect(capstone.delta.range).toEqual({ max: 3 });
+  });
+
+  it("is the tree's only `shape` setter, and its only `situationalBonus` — both are OVERWRITE fields", () => {
+    const nodes = Object.values(wingAttack.tree!);
+    expect(nodes.filter((n) => n.delta.shape !== undefined).map((n) => n.id)).toEqual(["full_wingspan"]);
+    expect(nodes.filter((n) => n.delta.situationalBonus !== undefined).map((n) => n.id)).toEqual(["storm_wings"]);
+  });
+
+  it("`forcedMovement` is one monotone scatter ladder — the shipped tree had five setters racing each other", () => {
+    const setters = Object.values(wingAttack.tree!).filter((n) => n.delta.forcedMovement !== undefined);
+    expect(setters.map((n) => n.id)).toEqual(["driven_off", "scattering_strike", "harder_scatter"]);
+    // Every one of them shoves the DEFENDER away — the deliberate inversion
+    // of peck's `Nowhere to Run`, which hooks the defender one tile closer.
+    for (const n of setters) {
+      expect(n.delta.forcedMovement!.mover).toBe("defender");
+      expect(n.delta.forcedMovement!.direction).toBe("away");
+    }
+    expect(setters.map((n) => n.delta.forcedMovement!.tiles).sort()).toEqual([1, 2, 3]);
+    expect(MOVES.peck.tree!.nowhere_to_run.delta.forcedMovement).toEqual({
+      mover: "defender",
+      direction: "closer",
+      tiles: 1,
+      timing: "onHit",
+    });
+  });
+
+  it("Scoured Bare leaves real terrain under wherever the gust put them — the only non-water terrainFill in the roster", () => {
+    const capstone = wingAttack.tree!.final_stoop;
+    expect(capstone.delta.terrainFill).toEqual({ terrain: "sand" });
+    // Every other terrainFill in the roster wets the ground; this one takes
+    // it away, and sand is a real 0.75 movement-speed tile (support.ts's
+    // `terrainSpeedMultiplier`), which is what makes a 3-tile shove
+    // survivable for the attacker.
+    const otherFills = Object.values(MOVES)
+      .filter((m) => m.tree && m.id !== "wing_attack")
+      .flatMap((m) => Object.values(m.tree!))
+      .filter((n) => n.delta.terrainFill)
+      .map((n) => n.delta.terrainFill!.terrain);
+    expect(otherFills.length).toBeGreaterThan(0);
+    expect(otherFills).not.toContain("sand");
+  });
+
+  it("Flock's Eye answers the move's own flaw: an eight-tile cone that does not know your flock from theirs", () => {
+    const built = applyMoveTree(wingAttack, [
+      "warning_cry",
+      "quicker_call",
+      "open_ranks",
+      "rousing_call",
+      "lifts_the_flock",
+      "steadfast_call",
+      "flocks_eye",
+    ]);
+    expect(built.excludesAllies).toBe(true);
+    expect(built.rallyCall).toEqual({ ticks: 40 });
+    expect(built.allyEffectOnAttack).toBe(true);
+    // The base move has no such mercy — that is the flaw the branch buys off.
+    expect(wingAttack.excludesAllies).toBeUndefined();
+  });
+
+  it("`weightScaling` is one ladder across the Riding-the-Gust bridge into Aggression's deep notable", () => {
+    const setters = Object.values(wingAttack.tree!).filter((n) => n.delta.weightScaling !== undefined);
+    expect(setters.map((n) => n.id)).toEqual(["everything_behind_it", "riding_the_gust", "gathering_updraft", "stooping_dive"]);
+    expect(setters.map((n) => n.delta.weightScaling!.factor).sort()).toEqual([0.05, 0.08, 0.12, 0.15]);
+    // Principle 4: the deep notable's cost lives in the same node as its benefit.
+    expect(wingAttack.tree!.everything_behind_it.delta.lockTicks).toBe(1);
+  });
+
+  it("Covering Wing shares its crosslink's own lever (principle 13) and the total pull is unchanged from v3", () => {
+    const bridge = ["evasive_flight", "warning_cry", "screening_dive", "covering_wing", "wingmate_shield"];
+    const built = applyMoveTree(wingAttack, bridge);
+    expect(built.positionSwap).toBe(true);
+    // 1 + 1 + 1, additive in `applyMoveTree` — v3 granted 2 from a single
+    // node whose filler shared nothing with its own crosslink.
+    expect(built.positionSwapPull).toBe(3);
+    expect(wingAttack.tree!.screening_dive.delta.positionSwapPull).toBe(1);
+    expect(wingAttack.tree!.covering_wing.delta.positionSwapPull).toBe(1);
+  });
+
+  it("accuracy surplus is spendable rather than dead, because the storm penalty is what the Boldness lane is for", () => {
+    // `rollAccuracy` (combat.ts) multiplies by `stormAccuracyMultiplier`'s
+    // 0.6 inside a storm cell, so the break-even before a point of accuracy
+    // buys literally nothing is 100 / 0.6 = 167. The tree stops short of it.
+    const everything = Object.values(wingAttack.tree!).reduce((sum, n) => sum + (n.delta.accuracy ?? 0), 0);
+    expect(wingAttack.accuracy).toBe(100);
+    expect(wingAttack.accuracy + everything).toBeLessThan(Math.ceil(100 / 0.6));
+  });
+
+  it("crit stage stays inside `rollCritical`'s clamp of 3", () => {
+    const total = Object.values(wingAttack.tree!).reduce((sum, n) => sum + (n.delta.critRateStage ?? 0), 0);
+    expect(total).toBeLessThanOrEqual(3);
+  });
+
+  it("spends no more cooldown than the 3x tempo cap allows on a base of 4", () => {
+    const cut = Object.values(wingAttack.tree!).reduce((sum, n) => sum + Math.max(0, -(n.delta.cooldownTicks ?? 0)), 0);
+    const floor = Math.ceil((wingAttack.cooldownTicks + 1) / 3) - 1;
+    expect(cut).toBeLessThanOrEqual(wingAttack.cooldownTicks - floor);
+    expect(cut).toBe(3); // unchanged from the shipped tree — no headroom was spent
   });
 });

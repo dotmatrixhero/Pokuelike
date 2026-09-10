@@ -6634,3 +6634,236 @@ Three ways to take it, if it is wanted:
 Option 2 is the one that matches how this roster has been fixed so far, and
 it is the one I would take: every conversion is a tree-sized change with its
 own before/after, where the sort is a roster-sized change with none.
+
+### Wing Attack converted to v4 (Shipped) — "the wing, and everything it moves"
+
+Fourteenth structural conversion, and the one designed as the explicit
+counterweight to `peck`, converted immediately before it. Peck's brief was
+"the point, not the wing." This one is the wing.
+
+| | before | after | roster median |
+|---|---|---|---|
+| nodes | 39 | **45** | 45 |
+| checker problems | **6** | **0** | — |
+| distinct levers | 22 | **30** | 28 |
+| colour-pie flavours | 10 | **13** | 12 |
+| tempo | 2.50x (cap 2.50x) | **2.50x** — unchanged | 2.00x |
+| power | 2.25x | **2.42x** | 2.20x |
+| cheapest capstone | 11 pts | **10 pts** | 10 pts |
+| new passive kinds | — | **one** (`immovable`) | — |
+
+**The fantasy, written before a node moved:**
+
+> Wing Attack is displacement, not puncture. A wing is the largest flat
+> surface in the roster and this move is that surface brought down across a
+> whole cone of ground at once — eight tiles already, and it does not check
+> who is standing on them. Nothing about it is precise: it knocks bodies off
+> the tile they chose and out of the line they were holding, and it does
+> exactly that to the flock-mate beside the target. What is dangerous about a
+> bird is never one bird. And the wing doing the pushing is the same wing
+> holding it up, so everything this move buys is bought off the thing keeping
+> it in the air.
+
+**The Peck inversion, in one field.** Peck's deep Boldness notable *Nowhere to
+Run* is `forcedMovement { mover: "defender", direction: "closer", tiles: 1 }`
+— the beak hooks and the target comes back onto the spot the next jab is
+already aimed at. Wing Attack's identity ladder is the same field pointed the
+other way: `away`, 1 → 2 → 3 tiles. The learner lists say the same thing
+independently — Peck's nine learners are mostly flightless (Doduo, Goldeen,
+Farfetch'd, Nidorino), Wing Attack's five are all real fliers (the Pidgey
+line, Golbat, Aerodactyl). The test file asserts both directions in the same
+`it`, so the inversion cannot silently drift.
+
+**Lanes differ in kind, per branch:**
+
+| branch | lane A | lane B | deep notable | capstone |
+|---|---|---|---|---|
+| **Nothing Stands Where It Was** (agg) | *The Downbeat* — where the target ENDS UP (the `forcedMovement` ladder's top rung, *Driven Off* at 3 tiles, then armour penetration) | *The Stoop* — what the bird SPENDS to land it (crit, `critCooldownReset`, and the preserved two-quick-strikes-vs-one-committed-dive fork) | *Everything Behind It* — `weightScaling`, the one node whose value depends on who is swinging, with its own `lockTicks` cost in the same node | ***Scoured Bare*** |
+| **The Air Is Not Neutral** (bold) | *Hold the Line* — survive the hit and keep the air (`damageReductionFlat`, `defenseBoost`) | *Fly the Weather* — the gale that grounds everyone else, incl. the preserved mend-between-gusts-vs-fly-into-it fork | *Nothing to Push Against* — `immovable`, the literal mirror of this tree's own Aggression identity | ***The Whole Wingspan*** |
+| **What One Bird Is Not** (soc) | *The Call* — the mark; changes what OTHER birds decide to attack (`rallyCall` 15 → 25) | *Open Ranks* — the formation; cover and stat support, incl. the preserved rouse-vs-settle fork | *Lifts the Flock* — `allyEffectOnAttack`: the same beat that throws the enemy back pushes air over whoever is behind you | ***Flock's Eye*** |
+
+**The best node in the pass is *Scoured Bare*, and it exists because the
+branch had an honest problem.** Aggression spends eleven points learning to
+throw things three tiles away — from a move that reaches two. A branch that
+gets worse the more you buy is a trap, not a design. So the capstone does not
+reach further; it strips the ground where they land. `terrainFill` resolves
+*after* `forcedMovement` inside the same landed-hit block (predation.ts:1300,
+then :1323), reading the defender's NEW position, so the sand goes down under
+wherever the gust put them, and `terrainSpeedMultiplier` (support.ts) puts
+anything walking on sand at 0.75 speed. They come back slower than they left.
+It is also the only `terrainFill` in the roster that is not water or mud —
+scratch, hydro_pump and earthquake all wet the ground; this one takes it away
+— and the test asserts that, with the other three as its control.
+
+***Final Stoop*'s old mechanic had to go, and the reason is a checker
+finding, not taste.** v3's `situationalBonus: targetLowHp` was one of two
+independently-takeable setters of an OVERWRITE field, racing *Storm Wings*.
+The tree now carries exactly one condition, and the one that survived is
+`storm`, because a storm is the only battlefield condition in the engine that
+is specifically about air. What the node's own v3 comment insisted on —
+"the old capstone widened it into a flock-sized AoE cone, undoing everything
+the branch just built" — was a decision, not a gap, and it still holds: the
+capstone stays single-target and the footprint change lives in Boldness.
+
+**Accuracy surplus is live here, and it is live for a reason the fantasy
+already wanted.** `stormAccuracyMultiplier` (weather.ts) multiplies every
+accuracy roll by **0.6** inside a storm cell, so the break-even past which a
+point of accuracy buys literally nothing is `100 / 0.6` = **167**. The
+fully-invested tree lands on **150**: a specced bird casts at 90% in a gale
+where an unspecced one is at 60%, and the Boldness lane that buys the storm
+DAMAGE bonus is the same lane that buys the accuracy back. That is the
+opposite of ember's dead accuracy fillers, and the test pins the threshold
+rather than the node count.
+
+**Six checker problems, and five of them were one bug wearing five hats.**
+`forcedMovement` is an OVERWRITE field and the shipped tree had **five**
+co-takeable setters with three different intents — the scatter (defender
+away), the approach lunge (attacker closer, *Riding the Gust* / *Gathering
+Updraft*) and the peel-out (attacker away, *Wind Shear*). Any build with two
+of them was paying skill points for whichever the engine reached last. The
+tree now has exactly one ancestral ladder, all `defender`/`away`, threaded
+through the Scattering Strike bridge (1 → 2) into Aggression's own *Driven
+Off* (3). The two rewritten nodes are the honest part:
+
+- ***Riding the Gust* / *Gathering Updraft*** became a `weightScaling` ladder
+  (0.05 → 0.08 → 0.12 at *Stooping Dive*, topped by *Everything Behind It* at
+  0.15). Boldness supplies the height, Aggression supplies the fall — gravity
+  is the only free power source a bird has. **The first draft of this section
+  claimed a species spread this lever does not have, and it was caught by
+  measuring instead of asserting:** at 0.15 and level 30 the bonus is +9.6
+  power on a Pidgey (`maxHp` 64) and +13.2 on an Aerodactyl (88), not the
+  "+5 vs +24" first written down. `maxHp` across this move's five learners at
+  level 30 only spans 64–89, so `weightScaling`'s real axis here is LEVEL,
+  not species — the same Pidgey is +5.6 at level 15. Real, and modest.
+- ***Wind Shear*** lost its peel entirely. This move's forced movement belongs
+  on the thing it hits, not on itself; what is left is the literal aviation
+  reading of its own name.
+
+The sixth problem was principle 13: *Covering Wing* shared no lever with its
+own crosslink. Fixed by splitting the pull — `screening_dive` and
+`covering_wing` grant 1 each (additive) instead of 0 and 2, and
+*Wingmate Shield* adds a third, so the bridge is one ladder end to end and
+the total is a real escalation rather than the v3 number moved sideways.
+
+#### The overwrite ORDER hole, measured on this tree
+
+DESIGN_VALIDATION.md's "known hole" — ancestry is a route, not a purchase
+order — bites hardest on a tree built out of escalating ladders, so it was
+measured rather than assumed. Driving the engine's own `maybeAutoRespec` on a
+real Pidgey, 3 dispositions × 8 rng seeds:
+
+| | reading | |
+|---|---|---|
+| nodes bought | **42 of 45**, every run | the three missing are exactly one side of each fork |
+| capstones reached | **3 of 3**, every run, from every disposition | |
+| final scatter | **3 tiles in 18/24 runs, 2 tiles in 6/24** | *Driven Off* is 3; the bridge's *Harder Scatter* is 2 |
+| final `weightScaling` | **0.15 in 6/24, 0.12 in 18/24** | perfectly anti-correlated with the row above — whichever ladder finished last wins |
+
+So roughly a quarter of builds get the shallower rung of one ladder. That is
+the engine hole, not a tree defect (ember's `shape`, earthquake's
+`forcedMovement` and tackle's `situationalBonus` all drift the same way), and
+it degrades gracefully in both cases — 2 tiles is still a real knockback, 0.12
+is still real mass. It is worth recording because this tree makes the number
+concrete: **the fix is worth about one rung of one ladder to a quarter of
+builds, per ladder.**
+
+#### The engine gate that decides what this move actually is
+
+`resolveHitAgainstTarget` gates `forcedMovement`, `terrainFill`,
+`jamCooldownTicks`, `statChangeOnHit`, `positionSwap`, `rallyCall` and status
+behind `isPrimaryTarget` (predation.ts:1289). **So on this AoE only the
+deliberately-picked target is ever scattered** — everyone else standing in the
+cone just takes the damage. The scatter is aimed; the cone is collateral. That
+is documented, deliberate behaviour (it is the same `isPrimaryTarget` finding
+water_gun's conversion recorded for its puddles), and the tree is written to
+what is real rather than to what the name implies.
+
+#### Levers rejected, each with the call site read first
+
+- **`terrainBurn`** — a downbeat flattening a bush was the most wing-shaped
+  idea in the pass, and it no longer does that. `resolveHitAgainstTarget`
+  now calls `igniteNear` (predation.ts:1321): the node lights a real,
+  persistent, spreading fire. A Flying move is not an ignition source, and
+  ember's own writeup records that it holds the roster's only ignition node.
+- **`gatherBurst`** — genuinely buildable and genuinely apt: Pidgey is
+  `homeLayer: "canopy"`, the canopy-harvest path takes any off-cooldown
+  damage move and scales with `range.max`, and a range-3 cone would be a
+  *better* fruit-shaker than Peck's range-1 beak. Rejected because Peck's
+  *Shake the Branch* is that exact node on that exact path one conversion
+  earlier, and "a flock shakes a tree" twice in a row is the copy-paste
+  failure this template exists to stop.
+- **`statusImmunityAura` / `drainNeeds` / `selfHeal`** — all require
+  `utilityMove`, and `pickBestMove` (combat.ts) *excludes* any `utilityMove`
+  from hostile selection. Putting one on a Wing Attack node would have
+  removed the move from combat. Same finding Peck recorded; still true.
+- **`chargeAttack`** — a stoop is the canonical charge and this branch is
+  literally about commitment. Rejected because Peck's capstone *Set the
+  Point* is `chargeAttack`, shipped one conversion ago.
+- **A wider cone at the Aggression capstone** (cone 3×3 = 15 tiles, counted).
+  It would have reversed a decision this document already records in the
+  node's own source comment. The footprint moved to Boldness instead, where
+  the colour pie puts it anyway.
+- **A third accuracy filler in Boldness**, cut for the same reason Peck's
+  "+8 Accuracy" tail filler was: the surplus is bounded by 167 and the tree
+  should stop well short of it.
+
+#### The one reuse this pass did NOT dodge
+
+*Flock's Eye*, the Sociability capstone, is `excludesAllies` — and that is not
+new: earthquake, ember, scratch, hydro_pump and rock_slide all have it, and
+Earthquake's whole Sociability branch is built on it. A capstone is supposed
+to be something the roster does not already have, so this is a real critique
+and it is recorded rather than dressed up. It is here anyway because it is the
+only lever in the engine that answers this move's actual flaw, and the flaw is
+the branch. The difference from Earthquake's drilled herd is direction:
+Earthquake's blast is centred on itself, so its flock is standing *around* the
+hit; this is the one AoE in the roster you AIM, so the flock is standing
+*behind* it. That is a formation, not a drill.
+
+#### Passive discipline: one new kind, and the honest limit of it
+
+`passive-exposure.ts` before/after differs on exactly one line:
+`aerodactyl`'s `calmingPresence` total **1.05 → 0.85**, because v3 spent both
+its Sociability fork tip AND its capstone on 0.2 of the same passive and the
+capstone now spends `excludesAllies` instead. Both readings are far above
+`MIN_CALMING_MULTIPLIER`'s 0.50 floor, so nothing an agent does changes.
+
+The one addition is `immovable` on *Nothing to Push Against*, chosen because
+it is the exact mirror of this tree's own Aggression identity — the move that
+throws everyone three tiles, on the branch that cannot be thrown anywhere —
+and because it is a **threshold** passive (`status.ts:418` checks `> 0`), so
+unlike `thorns` and `damageReduction` it cannot stack into invulnerability.
+
+**And its measured limit, stated rather than designed around:** every current
+learner also knows a move that already grants `immovable` — tackle for the
+Pidgey line and Golbat, rock_slide for Aerodactyl — so a build that fully
+invests in both trees reads `immovable 2` where 1 was already the whole
+effect. It is live for a wing-attack-only spec, which is the common case at
+the observed p50 level of 25, and the node's `power`/`defensePenetration`
+delta is live for every build regardless.
+
+#### Balance numbers: what moved and what deliberately did not
+
+- **Tempo did not move, and that is the point.** Wing Attack was already at
+  its own cap: base 4, `cdFloor` = 1, three `-1` nodes = the full `-3`,
+  2.50x. It is *above* the 1.80–2.00x roster median and there was no headroom
+  to spend, so none was spent.
+- **Power moved 2.25x → 2.42x** (median 2.20x). Six new nodes originally
+  carried `+5 Power` and pushed it to 2.75x; four were stripped back down
+  after measuring. Reverting either of the remaining two is a one-line change.
+- **Cheapest capstone 11 → 10 points**, landing exactly on the roster median,
+  and every capstone's cheapest route is 100% inside its own branch.
+
+#### The footprint, in tiles
+
+| build | shape | tiles | reach |
+|---|---|---|---|
+| base wing_attack | cone(2,2) | **8** (3 then 5) | 2 |
+| *The Whole Wingspan* (bold capstone) | cone(3,2) | **9** (1 then 3 then 5) | 3 |
+
+Not a strict upgrade, and that is deliberate: the span narrows at the shoulder
+(three tiles down to one at depth 1) and opens at the tip. `range.max` moves
+with it, because a cast range longer than the footprint is exactly how
+rock_throw's cone managed to whiff on a legal target. Both numbers are
+asserted in TILES in `moveTrees.test.ts`, not left implicit in a length/width
+constant.

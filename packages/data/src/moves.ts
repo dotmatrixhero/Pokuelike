@@ -8041,15 +8041,50 @@ export const MOVES: Record<string, MoveSpec> = {
     cooldownTicks: 4,
     range: { min: 0, max: 2 },
     hitsArea: true,
-    // v2 (MOVES_DESIGN.md's own template). Pidgey's real signature move,
-    // spawned every run — a small, fast prey bird whose actual defense is
-    // the flock, not raw toughness. Same three-branch-plus-crosslink-
-    // triangle shape as Tackle/Vine Whip (10 nodes/branch + 3 crosslinks =
-    // 33), every lever already-shipped engine plumbing.
+    // --- Template v4 (45 nodes). THE FANTASY, written before any node:
+    //
+    // Wing Attack is displacement, not puncture. A wing is the largest flat
+    // surface in the roster and this move is that surface brought down
+    // across a whole cone of ground at once — eight tiles already, and it
+    // does not check who is standing on them. Nothing about it is precise:
+    // it knocks bodies off the tile they chose and out of the line they
+    // were holding, and it does exactly that to the flock-mate beside the
+    // target. What is dangerous about a bird is never one bird. And the
+    // wing doing the pushing is the same wing holding it up, so everything
+    // this move buys is bought off the thing keeping it in the air.
+    //
+    // It is the deliberate inverse of `peck`, which was converted against
+    // it: the beak hooks and the target comes one tile IN
+    // (`forcedMovement` mover defender, direction "closer"); the wing
+    // scatters and the target goes three tiles OUT. Peck is pressure on one
+    // hard point; this is surface area, and it is the only move in the
+    // roster whose whole identity is moving other bodies around the map.
+    //
+    // Its learners are all real fliers — pidgey/pidgeotto/pidgeot, golbat,
+    // aerodactyl — unlike Peck's mostly-flightless list, which is the other
+    // half of the separation.
+    //
+    // Aggression answers "the gust IS the weapon: nothing stands where it
+    // was". Boldness answers "the air is not neutral — it is a place this
+    // thing lives and everything else visits". Sociability answers the
+    // move's own flaw: eight tiles of wing do not know your flock from
+    // theirs. Every v3 fork is preserved, relocated to a lane tail.
+    //
+    // MEASURED, not assumed (predation.ts:1289): `forcedMovement`,
+    // `terrainFill`, `jamCooldownTicks` and the rest of the landed-hit
+    // hooks are gated on `isPrimaryTarget`, so on this AoE only the
+    // deliberately-picked target is ever scattered — everyone else in the
+    // cone just takes the damage. The scatter is aimed; the cone is
+    // collateral. That is an engine gate, not something this tree changes.
     tree: {
-      // --- Aggression: "Relentless Dive" — quick, repeated diving strikes,
-      // built around landing a real crit and following up before the
-      // target can recover.
+      // ============================================================
+      // AGGRESSION — "Nothing Stands Where It Was"
+      // The gust used as a weapon: the hit IS the shove. Lane A is where
+      // the target ends up; Lane B is what the bird spends to put it there.
+      // Flavours: aggressive movement (forcedMovement/lockTicks), raw
+      // damage (hits/crit/critCooldownReset/recoil/weightScaling), piercing
+      // (defensePenetration), environment (terrainFill).
+      // ============================================================
       diving_strike: {
         id: "diving_strike",
         name: "Diving Strike",
@@ -8057,6 +8092,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { critRateStage: 1 },
       },
+      // --- Lane A: "The Downbeat" — displacement. Where the target ends up.
       sharpened_talons: {
         id: "sharpened_talons",
         name: "+5 Power",
@@ -8069,108 +8105,151 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "steady_approach",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["sharpened_talons"], ["riding_the_gust"], ["scattering_strike"]],
+        prerequisites: ["sharpened_talons"],
         leaning: "aggression",
         delta: { accuracy: 10 },
+      },
+      driven_off: {
+        id: "driven_off",
+        name: "Driven Off",
+        cost: 2,
+        // LANE A NOTABLE. Reachable by walking the lane or off the
+        // Scattering Strike bridge, which is the same lever three tiles
+        // shallower (principle 12 — the bridge saves the grind, not the
+        // fork).
+        prerequisitesAnyOf: [["steady_approach"], ["broken_formation"]],
+        leaning: "aggression",
+        // The tree's identity, at full magnitude: the beat throws the
+        // target three tiles back. Deliberately the top of the ladder and
+        // not four — on a range-2 move, shoving further than you can reach
+        // is a branch that gets worse the more you buy, and the honest cost
+        // of three is already that you have to close again. `Scoured Bare`
+        // and `The Whole Wingspan` are the two answers the tree offers to
+        // that, in two different branches.
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 3, timing: "onHit" } },
       },
       talon_rake: {
         id: "talon_rake",
         name: "Talon Rake",
         cost: 1,
-        prerequisites: ["steady_approach"],
+        prerequisites: ["driven_off"],
         leaning: "aggression",
         delta: { defensePenetration: 0.12 },
       },
+      // --- Lane B: "The Stoop" — commitment. Differs from Lane A in KIND:
+      // Lane A spends everything on where the target goes, Lane B on what
+      // the bird is willing to spend to land the beat at all.
       quicker_wings: {
         id: "quicker_wings",
-        name: "Quicker Wings",
+        name: "+10 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["talon_rake"], ["stooping_dive"], ["broken_formation"]],
+        prerequisites: ["diving_strike"],
         leaning: "aggression",
+        // Renamed from "Quicker Wings", which stated a tempo this node has
+        // never granted — principle 5, a name that states a magnitude has
+        // to match the real number, and "quicker" on a pure accuracy node
+        // was the same class of mislabel.
         delta: { accuracy: 10 },
       },
+      killing_stoop: {
+        id: "killing_stoop",
+        name: "Killing Stoop",
+        cost: 2,
+        // LANE B NOTABLE, off its own lane or the Stooping Dive bridge.
+        prerequisitesAnyOf: [["quicker_wings"], ["stooping_dive"]],
+        leaning: "aggression",
+        // A landed crit means the wings never actually slow down.
+        delta: { power: 10, critCooldownReset: true },
+      },
+      // The v3 fork, preserved verbatim, relocated to this lane's tail:
+      // two quick lighter strikes, or one committed dive.
       rapid_wingbeats: {
         id: "rapid_wingbeats",
         name: "Rapid Wingbeats",
         cost: 1,
-        prerequisites: ["quicker_wings"],
+        prerequisites: ["killing_stoop"],
         excludes: ["full_talon_dive"],
         leaning: "aggression",
-        // Two quick, lighter strikes instead of one committed dive.
         delta: { hits: { min: 2, max: 2 }, power: -10 },
       },
       full_talon_dive: {
         id: "full_talon_dive",
         name: "Full Talon Dive",
         cost: 1,
-        prerequisites: ["quicker_wings"],
+        prerequisites: ["killing_stoop"],
         excludes: ["rapid_wingbeats"],
         leaning: "aggression",
-        // Commits fully to one reckless dive.
         delta: { power: 15, cooldownTicks: 1, recoilFraction: 0.05 },
       },
-      killing_stoop: {
-        id: "killing_stoop",
-        name: "Killing Stoop",
+      everything_behind_it: {
+        id: "everything_behind_it",
+        name: "Everything Behind It",
         cost: 2,
-        prerequisitesAnyOf: [["rapid_wingbeats"], ["full_talon_dive"]],
+        // DEEP NOTABLE — Lane A's tail and both tips of Lane B's fork.
+        prerequisitesAnyOf: [["talon_rake"], ["rapid_wingbeats"], ["full_talon_dive"]],
         leaning: "aggression",
-        // A landed crit means the wings never actually slow down.
-        delta: { power: 10, critCooldownReset: true },
+        // Where the two lanes actually meet: displacement needs force and
+        // commitment needs mass, and this is the node that supplies both at
+        // once. `weightScaling` reads the attacker's own `maxHp` at the
+        // moment of the hit, so this is the one node in the tree whose value
+        // depends on who is swinging. MEASURED rather than asserted, because
+        // the first draft of this comment overstated it badly: at 0.15 and
+        // level 30 that is +9.6 power on a Pidgey (maxHp 64) and +13.2 on an
+        // Aerodactyl (88) — real, and modest. The bigger axis is LEVEL, not
+        // species: the same Pidgey is +5.6 at level 15. Top of the ladder
+        // the Riding-the-Gust bridge starts (0.05 -> 0.08 -> 0.12 -> 0.15).
+        // The cost is in the same node, per principle 4: the whole body in
+        // the beat means the body is a beat late out of it.
+        delta: { weightScaling: { factor: 0.15 }, lockTicks: 1 },
       },
       diving_momentum: {
         id: "diving_momentum",
         name: "+5 Power",
         cost: 1,
-        prerequisites: ["killing_stoop"],
+        prerequisites: ["everything_behind_it"],
         leaning: "aggression",
         delta: { power: 5 },
       },
       final_stoop: {
         id: "final_stoop",
-        name: "Final Stoop",
+        name: "Scoured Bare",
         cost: 2,
         prerequisites: ["diving_momentum"],
         leaning: "aggression",
-        // Fixes a real self-inflicted contradiction: this branch is one
-        // bird, one committed dive, all the way down (full_talon_dive,
-        // killing_stoop) — the old capstone widened it into a flock-sized
-        // AoE cone, undoing everything the branch just built. This one
-        // stays single-target and finishes what the stoop started: a real
-        // predator's kill shot against something already reeling.
-        delta: { power: 10, situationalBonuses: [{ condition: "targetLowHp", multiplier: 1.5 }] },
+        // CAPSTONE, and the answer to the branch's own honest problem: you
+        // have spent eleven points learning to throw things three tiles
+        // away from a move that reaches two. So the last beat does not
+        // reach further — it strips the ground where they land. `terrainFill`
+        // resolves AFTER `forcedMovement` in the same landed-hit block
+        // (predation.ts:1300 then 1323), reading the defender's NEW
+        // position, so the sand goes down under wherever the gust put them,
+        // and `terrainSpeedMultiplier` (support.ts) puts anything walking on
+        // it at 0.75 speed. They come back slower than they left.
+        //
+        // Single-target on purpose: v3's note on this node — "the old
+        // capstone widened it into a flock-sized AoE cone, undoing
+        // everything the branch just built" — is a decision, not a gap, and
+        // it still holds. The footprint change lives in Boldness instead.
+        //
+        // It is also the only `terrainFill` in the roster that is not water
+        // or mud: scratch/hydro_pump/earthquake all wet the ground, and
+        // this one takes it away. v3's `situationalBonus: targetLowHp` had
+        // to go regardless — it was one of two co-takeable setters of an
+        // OVERWRITE field, racing `storm_wings`, and the tree now carries
+        // exactly one condition.
+        delta: { terrainFill: { terrain: "sand" }, power: 10 },
       },
-      // Crosslink: Aggression <-> Boldness — rides the same current that
-      // keeps it airborne straight into range before the target can react.
-      riding_the_gust: {
-        id: "riding_the_gust",
-        name: "Riding the Gust",
-        cost: 1,
-        prerequisites: ["diving_strike", "evasive_flight"],
-        leaning: "aggression",
-        delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" } },
-      },
-      gathering_updraft: {
-        id: "gathering_updraft",
-        name: "Gathering Updraft",
-        cost: 1,
-        prerequisites: ["riding_the_gust"],
-        leaning: "aggression",
-        // Deepens Riding the Gust's own approach lunge — a longer run-up.
-        delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 2, timing: "beforeHit" } },
-      },
-      stooping_dive: {
-        id: "stooping_dive",
-        name: "Stooping Dive",
-        cost: 2,
-        prerequisites: ["gathering_updraft"],
-        leaning: "boldness",
-        // All that gathered speed lands as a sharper strike, not just a
-        // longer approach.
-        delta: { power: 10, critRateStage: 1 },
-      },
-      // --- Boldness: "Wind Rider" — a bird doesn't tank a hit, it's just
-      // not there when the hit arrives. Air superiority, not raw bulk.
+
+      // ============================================================
+      // BOLDNESS — "The Air Is Not Neutral"
+      // Not bulk. A bird's boldness is that the sky is somewhere it lives
+      // and everything else visits. Lane A survives the hit; Lane B uses
+      // the weather that grounds everyone else — different in kind, not in
+      // degree.
+      // Flavours: defence (damageReductionFlat/defenseBoost/unshaken/
+      // immovable), healing (regenFlat), stealth-ambush (situationalBonus),
+      // piercing (defensePenetration), wider aoe (shape), raw damage.
+      // ============================================================
       evasive_flight: {
         id: "evasive_flight",
         name: "Evasive Flight",
@@ -8179,68 +8258,29 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "damageReductionFlat", value: 1.25 },
         delta: {},
       },
-      riding_thermals: {
-        id: "riding_thermals",
-        name: "+10 Accuracy",
-        cost: 1,
-        prerequisites: ["evasive_flight"],
-        leaning: "boldness",
-        delta: { accuracy: 10 },
-      },
+      // --- Lane A: "Hold the Line" — take the hit and keep the air.
       banking_turn: {
         id: "banking_turn",
         name: "+5 Power",
         cost: 1,
-        prerequisitesAnyOf: [["riding_thermals"], ["riding_the_gust"], ["screening_dive"]],
+        prerequisites: ["evasive_flight"],
         leaning: "boldness",
         delta: { power: 5 },
-      },
-      wind_shear: {
-        id: "wind_shear",
-        name: "Wind Shear",
-        cost: 1,
-        prerequisites: ["banking_turn"],
-        leaning: "boldness",
-        // Strikes, then peels straight back out of range — hit and run,
-        // for real.
-        delta: { forcedMovement: { mover: "attacker", direction: "away", tiles: 1, timing: "onHit" } },
       },
       steadier_wings: {
         id: "steadier_wings",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["wind_shear"], ["stooping_dive"], ["wingmate_shield"]],
+        prerequisites: ["banking_turn"],
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
-      },
-      tailwind_recovery: {
-        id: "tailwind_recovery",
-        name: "Tailwind Recovery",
-        cost: 1,
-        prerequisites: ["steadier_wings"],
-        excludes: ["storm_wings"],
-        leaning: "boldness",
-        grantsPassive: { kind: "regenFlat", value: 2.25 },
-        delta: {},
-      },
-      storm_wings: {
-        id: "storm_wings",
-        name: "Storm Wings",
-        cost: 1,
-        prerequisites: ["steadier_wings"],
-        excludes: ["tailwind_recovery"],
-        leaning: "boldness",
-        // A literal read of its own name instead of another flat
-        // damage-reduction stand-in — this branch's whole point is air
-        // superiority, not raw bulk, and flat mitigation IS raw bulk.
-        // Real turbulence to fly through, not around.
-        delta: { situationalBonuses: [{ condition: "storm", multiplier: 1.4 }], accuracy: -5 },
       },
       sky_dominance: {
         id: "sky_dominance",
         name: "Sky Dominance",
         cost: 2,
-        prerequisitesAnyOf: [["tailwind_recovery"], ["storm_wings"]],
+        // LANE A NOTABLE, off its own lane or the Stooping Dive bridge.
+        prerequisitesAnyOf: [["steadier_wings"], ["stooping_dive"]],
         leaning: "boldness",
         delta: { accuracy: 10 },
         grantsPassive: { kind: "defenseBoost", value: 0.04 },
@@ -8253,52 +8293,138 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         delta: { power: 5 },
       },
+      // --- Lane B: "Fly the Weather" — the gale that should put you in the
+      // ground. `stormAccuracyMultiplier` (weather.ts) multiplies every
+      // accuracy roll by 0.6 inside a storm cell, which is exactly what
+      // this tree's accuracy nodes are for: at 145 accuracy a storm cast
+      // still lands at 87%, where an unspecced bird is at 60%. The surplus
+      // past 100 is NOT dead content on this move — it is storm-and-uphill
+      // insurance, and the storm is where the branch wants to be.
+      riding_thermals: {
+        id: "riding_thermals",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["evasive_flight"],
+        leaning: "boldness",
+        delta: { accuracy: 10 },
+      },
       wind_dancer: {
         id: "wind_dancer",
         name: "Wind Dancer",
         cost: 2,
-        prerequisites: ["surer_wings"],
+        // LANE B NOTABLE, off its own lane or the Wingmate Shield bridge.
+        prerequisitesAnyOf: [["riding_thermals"], ["wingmate_shield"]],
         leaning: "boldness",
         // The wing simply isn't there when the blow lands — once, then it
         // needs a moment before it can pull that off again.
         grantsPassive: { kind: "unshaken", value: 1 },
-        delta: {},
+        delta: { power: 5 },
       },
-      // Crosslink: Boldness <-> Sociability — a real intercept, not another
-      // speed buff (the old version was just `warning_cry` with a shorter
-      // duration under a different name). "Screening" is a real combat
-      // term for interposing between a threat and whoever it's after.
-      screening_dive: {
-        id: "screening_dive",
-        name: "Screening Dive",
+      // The v3 fork, preserved verbatim, relocated to this lane's tail:
+      // ride the gale out and mend between gusts, or fly into it.
+      tailwind_recovery: {
+        id: "tailwind_recovery",
+        name: "Tailwind Recovery",
         cost: 1,
-        prerequisites: ["evasive_flight", "warning_cry"],
-        leaning: "sociability",
-        delta: { positionSwap: true },
-      },
-      covering_wing: {
-        id: "covering_wing",
-        name: "Covering Wing",
-        cost: 1,
-        prerequisites: ["screening_dive"],
-        leaning: "sociability",
-        // Deepens Screening Dive's own intercept — carries the threat further
-        // past the ally it just swapped with.
-        delta: { positionSwapPull: 2 },
-      },
-      wingmate_shield: {
-        id: "wingmate_shield",
-        name: "Wingmate Shield",
-        cost: 2,
-        prerequisites: ["covering_wing"],
+        prerequisites: ["wind_dancer"],
+        excludes: ["storm_wings"],
         leaning: "boldness",
-        // Interposing for real, not just repositioning.
-        grantsPassive: { kind: "damageReduction", value: 0.07 },
+        grantsPassive: { kind: "regenFlat", value: 2.25 },
         delta: {},
       },
-      // --- Sociability: "Flock Signal" — a prey bird's real defense isn't
-      // toughness, it's the flock: a warning cry, then the whole group
-      // converging on whatever's threatening it.
+      storm_wings: {
+        id: "storm_wings",
+        name: "Storm Wings",
+        cost: 1,
+        prerequisites: ["wind_dancer"],
+        excludes: ["tailwind_recovery"],
+        leaning: "boldness",
+        // The tree's ONE `situationalBonus` — an OVERWRITE field, and v3
+        // had two independently-takeable setters racing each other. This is
+        // the one that survived, because a storm is the only battlefield
+        // condition in the engine that is specifically about air.
+        delta: { situationalBonus: { condition: "storm", multiplier: 1.4 }, accuracy: -5 },
+      },
+      nothing_to_push_against: {
+        id: "nothing_to_push_against",
+        name: "Nothing to Push Against",
+        cost: 2,
+        // DEEP NOTABLE — Lane A's tail and both tips of Lane B's fork.
+        prerequisitesAnyOf: [["surer_wings"], ["tailwind_recovery"], ["storm_wings"]],
+        leaning: "boldness",
+        // Both lanes are about not being moved — by a hit, or by weather —
+        // and this is where that becomes literal. `immovable` makes
+        // `applyForcedMovement` (movement.ts, via status.ts:418) refuse to
+        // displace the holder at all, which is the exact mirror of this
+        // tree's own Aggression identity: the move that throws everyone
+        // three tiles, on the branch that cannot be thrown anywhere.
+        //
+        // The one new passive kind in this pass, and chosen partly because
+        // it is a THRESHOLD passive rather than an accumulating one — the
+        // check is `> 0`, so a second point of it anywhere in a species'
+        // movepool buys literally nothing. It cannot stack into the
+        // invulnerability `thorns`/`damageReduction` can.
+        //
+        // MEASURED, and the honest limit of this node: every current learner
+        // also knows a move that already grants `immovable` (tackle for the
+        // pidgey line and golbat, rock_slide for aerodactyl), so a build that
+        // fully invests in BOTH trees gets nothing extra from this point —
+        // `immovable` reads 2 where 1 was already the whole effect. It is
+        // live for a wing-attack-only spec, which is the common case at the
+        // observed p50 level of 25, and the flat delta below is live for
+        // every build regardless. Flagged rather than designed around.
+        grantsPassive: { kind: "immovable", value: 1 },
+        delta: { power: 5, defensePenetration: 0.1 },
+      },
+      wind_shear: {
+        id: "wind_shear",
+        name: "Wind Shear",
+        cost: 1,
+        prerequisites: ["nothing_to_push_against"],
+        leaning: "boldness",
+        // v3 had this as `forcedMovement: { mover: "attacker", ... }` — a
+        // hit-and-run peel. It was one of FIVE co-takeable setters of an
+        // OVERWRITE field in the shipped tree, and the one that made least
+        // sense to keep: this move's forced movement belongs on the thing
+        // it hits, not on itself. What is left is the literal aviation
+        // reading of the name — the hard shear at the leading edge.
+        delta: { defensePenetration: 0.1 },
+      },
+      full_wingspan: {
+        id: "full_wingspan",
+        name: "The Whole Wingspan",
+        cost: 2,
+        prerequisites: ["wind_shear"],
+        leaning: "boldness",
+        // CAPSTONE, and the tree's ONLY `shape` setter — notable/keystone
+        // currency, per principle 14. Wing Attack is one of the few moves
+        // in the roster where `shape` is genuinely live: it ships with
+        // `hitsArea: true`, so `resolveAreaHit` really does call
+        // `resolveShape` on it (unlike ember's and rock_throw's dead cone
+        // nodes, which never covered a tile).
+        //
+        // Counted in TILES, not radius constants: cone(2,2) is 3+5 = 8
+        // tiles reaching two out; cone(3,2) is 1+3+5 = 9 tiles reaching
+        // three. It is NOT a strict upgrade and that is the point — the
+        // span narrows at the shoulder (three tiles to one at depth 1) and
+        // opens at the tip. `range.max` moves with it, because a cast range
+        // longer than the footprint is how rock_throw's cone whiffed on a
+        // legal target.
+        //
+        // And it is the branch's answer to Aggression's own problem: a bird
+        // that throws things three tiles away can now still reach them.
+        delta: { shape: { kind: "cone", length: 3, width: 2 }, range: { max: 3 } },
+      },
+
+      // ============================================================
+      // SOCIABILITY — "What One Bird Is Not"
+      // The move's own flaw is the branch: eight tiles of wing do not know
+      // your flock from theirs. Lane A changes what OTHER birds decide to
+      // attack; Lane B changes what the wing does to your own — different
+      // in kind, not a bigger version of each other.
+      // Flavours: rallying, ally buffing, calming, no friendly fire, raw
+      // damage.
+      // ============================================================
       warning_cry: {
         id: "warning_cry",
         name: "Warning Cry",
@@ -8306,6 +8432,9 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { targetsAlly: true, allyEffect: { buff: { stat: "speed", stage: 1, ticks: 20 } } },
       },
+      // --- Lane A: "The Call" — the mark. This lane does not buff anybody;
+      // it changes which target every nearby flock-mate's own, separately
+      // run threat pick lands on.
       sharper_call: {
         id: "sharper_call",
         name: "+10 Accuracy",
@@ -8314,68 +8443,108 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { accuracy: 10 },
       },
-      quicker_call: {
-        id: "quicker_call",
-        name: "-1 Cooldown",
+      louder_call: {
+        id: "louder_call",
+        name: "+5 Power",
         cost: 1,
-        prerequisitesAnyOf: [["sharper_call"], ["screening_dive"], ["scattering_strike"]],
+        prerequisites: ["sharper_call"],
         leaning: "sociability",
-        delta: { cooldownTicks: -1 },
+        delta: { power: 5 },
       },
       mob_the_threat: {
         id: "mob_the_threat",
         name: "Mob the Threat",
-        cost: 1,
-        prerequisites: ["quicker_call"],
+        cost: 2,
+        // LANE A NOTABLE, off its own lane or the Broken Formation bridge.
+        prerequisitesAnyOf: [["louder_call"], ["broken_formation"]],
         leaning: "sociability",
         // The cry doesn't just warn the flock off — it marks exactly what
         // to converge on.
         delta: { rallyCall: { ticks: 15 } },
       },
-      louder_call: {
-        id: "louder_call",
-        name: "+5 Power",
+      united_front: {
+        id: "united_front",
+        name: "United Front",
         cost: 1,
-        prerequisitesAnyOf: [["mob_the_threat"], ["wingmate_shield"], ["broken_formation"]],
+        prerequisites: ["mob_the_threat"],
         leaning: "sociability",
-        delta: { power: 5 },
+        // `rallyCall` is an overwrite, not additive — this replaces Mob the
+        // Threat's 15-tick mark with a genuinely longer one, not a stack.
+        // 15 ticks is short enough that a flock-mate two tiles away can
+        // fail to arrive before it lapses; 25 is the number that makes the
+        // mark actually converge anybody.
+        delta: { rallyCall: { ticks: 25 }, cooldownTicks: -1 },
       },
+      // --- Lane B: "Open Ranks" — the formation. Cover and stat support,
+      // and eventually the wing learning where its own birds are.
+      quicker_call: {
+        id: "quicker_call",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["warning_cry"],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      open_ranks: {
+        id: "open_ranks",
+        name: "Open Ranks",
+        cost: 2,
+        // LANE B NOTABLE, off its own lane or the Wingmate Shield bridge.
+        prerequisitesAnyOf: [["quicker_call"], ["wingmate_shield"]],
+        leaning: "sociability",
+        // `allyEffect` is an OVERWRITE field, so every setter in this tree
+        // is on one ancestral chain — warning_cry (speed) -> here (defense)
+        // -> rousing_call (attack) — and each one is a deliberate
+        // replacement of the last, not a silent race.
+        delta: { targetsAlly: true, allyEffect: { buff: { stat: "defense", stage: 1, ticks: 20 } } },
+      },
+      // The v3 fork, preserved verbatim, relocated to this lane's tail:
+      // wind the flock up, or settle it down.
       rousing_call: {
         id: "rousing_call",
         name: "Rousing Call",
         cost: 1,
-        prerequisites: ["louder_call"],
+        prerequisites: ["open_ranks"],
         excludes: ["calming_call"],
         leaning: "sociability",
-        // Trades the speed lean for a real Attack buff instead.
         delta: { allyEffect: { buff: { stat: "attack", stage: 1, ticks: 20 } } },
       },
       calming_call: {
         id: "calming_call",
         name: "Calming Call",
         cost: 1,
-        prerequisites: ["louder_call"],
+        prerequisites: ["open_ranks"],
         excludes: ["rousing_call"],
         leaning: "sociability",
-        // Once the threat's named out loud, the flock itself settles.
+        // Once the threat's named out loud, the flock itself settles. Now
+        // the tree's ONLY `calmingPresence` node — v3 also spent the
+        // capstone on a second 0.2 of the same passive, which is the exact
+        // thing "adding a second node of the same kind needs a reason
+        // beyond the branch needing another node" is about.
         grantsPassive: { kind: "calmingPresence", value: 0.2 },
         delta: {},
       },
-      united_front: {
-        id: "united_front",
-        name: "United Front",
+      lifts_the_flock: {
+        id: "lifts_the_flock",
+        name: "Lifts the Flock",
         cost: 2,
-        prerequisitesAnyOf: [["rousing_call"], ["calming_call"]],
+        // DEEP NOTABLE — Lane A's tail and both tips of Lane B's fork.
+        prerequisitesAnyOf: [["united_front"], ["rousing_call"], ["calming_call"]],
         leaning: "sociability",
-        // `rallyCall` is an overwrite, not additive — this replaces Mob the
-        // Threat's 15-tick mark with a genuinely longer one, not a stack.
-        delta: { rallyCall: { ticks: 25 }, cooldownTicks: -1 },
+        // Where the two lanes meet, and the one thing that is true of a
+        // wing and not of a beak: the same beat that throws the enemy
+        // backwards pushes air over whoever is behind you. `allyEffectOnAttack`
+        // (support.ts's `nearestAllyEffectTarget`) fires the flock effect on
+        // the nearest hurt flock-mate on EVERY hostile use, not just on the
+        // idle support tick — and it is guaranteed to have something to
+        // fire, since Warning Cry is this branch's own opener.
+        delta: { allyEffectOnAttack: true },
       },
       steadfast_call: {
         id: "steadfast_call",
         name: "+5 Power",
         cost: 1,
-        prerequisites: ["united_front"],
+        prerequisites: ["lifts_the_flock"],
         leaning: "sociability",
         delta: { power: 5 },
       },
@@ -8385,16 +8554,110 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["steadfast_call"],
         leaning: "sociability",
-        // Collective vigilance, not a flat heal — the flock's real payoff
-        // was always the rally/de-escalation ladder (mob_the_threat ->
-        // united_front), so the capstone deepens that instead of switching
-        // to a generic aura. Distinct from Wind Rider's own unshaken.
-        grantsPassive: { kind: "calmingPresence", value: 0.2 },
-        delta: {},
+        // CAPSTONE. The branch's two threads, finished together: the flock
+        // has learned exactly where the wing goes, so the wing stops finding
+        // them (`excludesAllies` — the one lever `resolveAreaHit`'s target
+        // filter reads, and the reason this branch is worth anything on an
+        // eight-tile cone), and the mark it calls now outlasts the walk any
+        // flock-mate needs to answer it (40 ticks, up the same ancestral
+        // ladder as 15 -> 25).
+        //
+        // Honest note, since a capstone is supposed to be something the
+        // roster does not already have: `excludesAllies` is not new —
+        // earthquake, ember, scratch, hydro_pump and rock_slide all have it.
+        // It is here anyway because it is the only lever in the engine that
+        // answers this move's actual flaw, and the flaw is the branch. The
+        // difference from Earthquake's drilled herd is direction: this is
+        // the one AoE in the roster you AIM, so the flock is not standing
+        // around the blast, it is standing behind it.
+        delta: { excludesAllies: true, rallyCall: { ticks: 40 } },
       },
-      // Crosslink: Sociability <-> Aggression — strikes right as the cry
-      // scatters the rest of the flock clear, knocking the target away from
-      // wherever it would've followed.
+
+      // ============================================================
+      // BRIDGES — three, each crosslink -> filler deepening its own lever ->
+      // notable that is an alternate route into ONE lane notable per branch
+      // it connects (principles 7, 11, 12, 13).
+      // ============================================================
+      // Bridge 1: Aggression <-> Boldness. Boldness supplies the height,
+      // Aggression supplies the fall. `weightScaling` is an OVERWRITE field,
+      // so this is one monotone ladder — 0.05 -> 0.08 -> 0.12 — that
+      // Aggression's own deep notable (`Everything Behind It`, 0.15) sits on
+      // top of. Nobody ever gets two of them racing.
+      riding_the_gust: {
+        id: "riding_the_gust",
+        name: "Riding the Gust",
+        cost: 1,
+        prerequisites: ["diving_strike", "evasive_flight"],
+        leaning: "aggression",
+        // v3 had this as `forcedMovement: { mover: "attacker", direction:
+        // "closer" }`, one of five co-takeable setters of an overwrite
+        // field. The lunge is gone; what replaces it is the reason a bird
+        // climbs at all — gravity is the only free power source it has.
+        delta: { weightScaling: { factor: 0.05 } },
+      },
+      gathering_updraft: {
+        id: "gathering_updraft",
+        name: "Gathering Updraft",
+        cost: 1,
+        prerequisites: ["riding_the_gust"],
+        leaning: "aggression",
+        // Deepens Riding the Gust's own lever (principle 13): a longer
+        // climb is a heavier arrival.
+        delta: { weightScaling: { factor: 0.08 } },
+      },
+      stooping_dive: {
+        id: "stooping_dive",
+        name: "Stooping Dive",
+        cost: 2,
+        prerequisites: ["gathering_updraft"],
+        leaning: "boldness",
+        // All that gathered height lands as mass, not just as a sharper
+        // strike. At level 30 this alone is +10.6 power on an Aerodactyl
+        // (`maxHp` 88) and +7.7 on a Pidgey (64) — same node, same cost,
+        // measured off `calculateStats` rather than guessed.
+        delta: { weightScaling: { factor: 0.12 }, power: 10 },
+      },
+      // Bridge 2: Boldness <-> Sociability. A real intercept — "screening"
+      // is the combat term for interposing between a threat and whoever it
+      // is after. The whole bridge is one `positionSwapPull` ladder
+      // (1 -> 1 -> 1, additive in `applyMoveTree`), which is what fixes the
+      // shipped tree's principle-13 failure: v3's filler shared no lever
+      // with its own crosslink at all.
+      screening_dive: {
+        id: "screening_dive",
+        name: "Screening Dive",
+        cost: 1,
+        prerequisites: ["evasive_flight", "warning_cry"],
+        leaning: "sociability",
+        delta: { positionSwap: true, positionSwapPull: 1 },
+      },
+      covering_wing: {
+        id: "covering_wing",
+        name: "Covering Wing",
+        cost: 1,
+        prerequisites: ["screening_dive"],
+        leaning: "sociability",
+        // Deepens Screening Dive's own intercept — carries the threat
+        // further past the ally it just swapped with. Total pull 2, exactly
+        // what v3 granted; the split is what makes the shared lever real.
+        delta: { positionSwapPull: 1 },
+      },
+      wingmate_shield: {
+        id: "wingmate_shield",
+        name: "Wingmate Shield",
+        cost: 2,
+        prerequisites: ["covering_wing"],
+        leaning: "boldness",
+        // Interposing for real: three tiles of haul off the swap, and the
+        // bird wearing the hit takes less of it.
+        grantsPassive: { kind: "damageReduction", value: 0.07 },
+        delta: { positionSwapPull: 1 },
+      },
+      // Bridge 3: Sociability <-> Aggression. Strikes right as the cry
+      // scatters the rest of the flock clear. This is the shallow end of
+      // the tree's identity ladder — 1 tile, then 2, and Aggression's own
+      // `Driven Off` at 3 — so `forcedMovement` has exactly one ancestral
+      // chain in the whole tree instead of v3's five racing setters.
       scattering_strike: {
         id: "scattering_strike",
         name: "Scattering Strike",
@@ -8418,8 +8681,8 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["harder_scatter"],
         leaning: "sociability",
-        // Knocked out of position AND out of rhythm — the scatter becomes real
-        // tempo denial, deepening what the knockback was already doing.
+        // Knocked out of position AND out of rhythm — the scatter becomes
+        // real tempo denial, deepening what the knockback was already doing.
         delta: { jamCooldownTicks: 1 },
       },
     },
