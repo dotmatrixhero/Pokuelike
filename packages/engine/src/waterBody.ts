@@ -194,6 +194,14 @@ function isLandShoreTile(world: World, layer: Layer, pos: Vec2): boolean {
  *    through).
  *  - Water-type agents (`agent.types?.includes("water")`): always `true`,
  *    everywhere, no restriction at all — a water Pokémon can obviously swim.
+ *  - An agent that knows a `watercraft` move (`ridesWater` — today that is
+ *    Surf, and only Surf): always `true`, for the same reason and by the
+ *    same total exemption. Direct ask: "if it's a non water Pokemon it can
+ *    freely travel around water easily." Note this is the ONLY one of the
+ *    three exemptions that is not a fact about the species — it can be
+ *    gained and lost at runtime (`leveling.ts`'s `forgetMove` drops the spec
+ *    and the exemption with it), which is why it reads `agent.moves` rather
+ *    than a denormalized flag that would then need invalidating.
  *  - A water tile belonging to a body that ISN'T "large"
  *    (`!isLargeWaterBody`) — an ordinary pond/puddle/stream: always `true`
  *    for every type, completely unrestricted. This is deliberately the
@@ -210,11 +218,16 @@ function isLandShoreTile(world: World, layer: Layer, pos: Vec2): boolean {
  *    for every non-water type, no exception — this is the actual "can't
  *    move across large bodies of water" restriction the feature is about.
  */
+export function ridesWater(agent: Agent): boolean {
+  return agent.moves?.some((move) => move.watercraft === true) ?? false;
+}
+
 export function canEnterWater(world: World, agent: Agent, layer: Layer, pos: Vec2): boolean {
   const tile = tileAt(world, layer, pos.x, pos.y);
   if (!tile || tile.terrain !== "water") return true;
   if (agent.types?.includes("flying")) return true;
   if (agent.types?.includes("water")) return true;
+  if (ridesWater(agent)) return true;
 
   const size = waterBodySizeAt(world, pos);
   if (!isLargeWaterBody(size)) return true;

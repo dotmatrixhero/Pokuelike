@@ -303,6 +303,7 @@ function shapeLabel(shape: { kind: string; length?: number; width?: number; radi
   if (shape.kind === "point") return "a point-blank hit";
   if (shape.kind === "line") return `a ${shape.length}-tile line`;
   if (shape.kind === "cone") return `a ${shape.length}-tile cone (width ${shape.width})`;
+  if (shape.kind === "wave") return `a ${shape.length}-tile wave, ${(shape.width ?? 0) * 2 + 1} tiles wide`;
   if (shape.kind === "ring") return `a ring at radius ${shape.radius}`;
   if (shape.kind === "burst") return `a burst of radius ${shape.radius}`;
   return shape.kind;

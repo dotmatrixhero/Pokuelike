@@ -370,7 +370,7 @@ export function rollHitCount(hits: { min: number; max: number } | undefined, rng
 }
 
 /**
- * Derives the old shape-only reach (point=1, line/cone=their length,
+ * Derives the old shape-only reach (point=1, line/cone/wave=their length,
  * ring/burst=1 since they're centered on the caster, not aimed at a target
  * tile) — used only as a fallback for a `MoveSpec` that doesn't set `range`
  * explicitly (older test fixtures, hand-rolled specs). The curated roster in
@@ -383,6 +383,8 @@ function deriveRangeFromShape(move: MoveSpec): number {
     case "line":
       return move.shape.length;
     case "cone":
+      return move.shape.length;
+    case "wave":
       return move.shape.length;
     case "ring":
     case "burst":

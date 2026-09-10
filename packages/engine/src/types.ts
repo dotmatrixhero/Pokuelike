@@ -1246,8 +1246,27 @@ export interface Agent {
   matingRadiusBoostTicksRemaining?: number;
   /** General item slots — simple food units and/or ITEM_DEX entries, each carrying its own weight. Capped by `carryCapacityOf` (support.ts). */
   inventory?: InventoryItem[];
-  /** The id of a fully-fainted ally this agent is currently carrying, if any. Mutually exclusive in practice with `beingCarriedBy` on the same agent. */
+  /**
+   * The id of an ally this agent is currently carrying, if any. Mutually
+   * exclusive in practice with `beingCarriedBy` on the same agent.
+   *
+   * Two kinds of carry share this field, told apart by `ferryLanding`:
+   * absent = the original rescue carry (a fully-FAINTED ally, hauled toward
+   * `homePos` — `applyCarrying`), present = a ferry (a CONSCIOUS herd-mate
+   * being taken across water it cannot cross — `applyFerrying`). One field
+   * on purpose: everything that already has to know an agent is luggage
+   * (`occupancy.ts`, `simulation.ts`, `reproduction.ts`, `needs.ts`'s
+   * action-tick early-out) reads `beingCarriedBy` and is correct for both
+   * without a second concept to keep in sync.
+   */
   carryingId?: string;
+  /**
+   * Where a FERRY is headed: a landing tile the passenger provably cannot
+   * reach on its own (see support.ts's `findFerryLanding`). Present only for
+   * the duration of a ferry, and its presence is what marks `carryingId` as
+   * a ferry rather than a rescue carry.
+   */
+  ferryLanding?: Vec2;
   /** The id of the herd-mate currently carrying this agent, if any. While set, this agent takes no action-tick behavior (see needs.ts) regardless of `fainted`. */
   beingCarriedBy?: string;
   /** The hungry/fainted herd-mate this agent is currently walking a food item to, mid-`deliverFood`. */

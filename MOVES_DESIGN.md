@@ -7455,3 +7455,110 @@ weather. `rallyMarked` had no entry at all and printed the raw key. Both are
 now `conditionClause`, which returns the whole clause. `forcedMovement`'s
 `"toward the other side"` named neither party and now says who is dragged
 toward whom.
+
+---
+
+## Surf v2 — the wave, the ferry, the free crossing
+
+Direct ask, verbatim:
+
+> "Surf should be.. A large wave. Like a moving rectangle of water that does
+> aoe on impact.. It can be aimed. It also allows the unit to carry allies
+> over water and if it's a non water Pokemon it can freely travel around
+> water easily."
+
+Three separable pieces, all shipped together.
+
+### 1. The shape was broken, and that is why the rework was asked for
+
+Surf was `shape: { kind: "ring", radius: 2 }`, `range: { min: 0, max: 2 }`.
+`resolveShape` builds a ring as a **hollow shell at exactly its radius**,
+resolved around the **attacker**. Measured directly through the real
+function from (5,5):
+
+| | old ring r=2 | new wave 3x1 |
+|---|---|---|
+| tiles hit | 16 | **9** |
+| hits the tile directly ahead (1,0) | **no** | yes |
+| hits (1,-1) / (1,1) | **no** | yes |
+| footprint changes with facing | **no** | yes |
+
+A 90-power spread move washed straight over anything standing next to you
+and hit whatever was two tiles behind it instead.
+
+New shape kind `{ kind: "wave", length, width }` (engine/moves.ts): a
+facing-oriented rectangle starting one tile ahead, `2*width+1` across at
+every depth. Not a `cone` — a cone is narrowest where it arrives, which is
+backwards for a wave front. Not a `line` — a line has no width. Surf's base
+is `wave 3 long x 3 across` = 9 tiles, `range.max` 3. `areaBonus` grows a
+wave's LENGTH, matching "make it scalar with range of area".
+
+Handled at every `shape.kind` site: `resolveShape`, `growShape`,
+`deriveRangeFromShape` (combat.ts), `shapeLabel` (web/moveTreeSvg.ts), and
+the atlas template's `shapeLabel`/`shapeTiles`/`shapeReach`.
+
+### 2 and 3. `MoveSpec.watercraft` — knowing Surf makes you a boat
+
+One base-spec flag, not a tree delta and not a `PassiveKind`. The ask states
+both properties as things Surf *is*, alongside its shape — not as something
+a build earns — and a passive would have to be bought before a Surf user
+could swim, which reads backwards. `applyMoveTree` copies the base spec
+wholesale, so it survives every respec with no apply site of its own, and
+`forgetMove` removes it for free.
+
+- **Free crossing:** `canEnterWater` returns true for anyone whose
+  `agent.moves` carries a `watercraft` move (`ridesWater`), alongside the
+  existing Flying and Water exemptions.
+- **Ferry:** `maybeStartFerrying`/`applyFerrying` (support.ts) reuse
+  `carryingId`/`beingCarriedBy`, marked as a ferry by `Agent.ferryLanding`,
+  so every existing "this agent is luggage" consumer is already correct.
+
+### Two real defects found while building the ferry
+
+**(a) Herds are single-species, so a herd-only ferry could never fire.**
+`isSameHerd` checks `a.species === b.species`. Every herd-mate of a
+Water-typed Surf user is itself a Water type and can already swim — every
+candidate would have failed the "does it need a lift?" test, forever. Fixed
+by widening the scan to the engine's existing cross-species ally relation,
+`Agent.followingId` (ROADMAP.md M6's follower door). The herd path stays for
+a land species that knows Surf carrying its own kind.
+
+**(b) The first destination rule caused an infinite shuttle.** Aiming at
+"the nearest tile the passenger could not reach on its own" is a true
+statement about the far bank and a useless goal. Measured in a real ticked
+world: the carrier landed its passenger on the far shore and on the next
+tick found the NEAR shore was now the unreachable one and rowed it straight
+back — two agents crossing a lake forever. Fixed by steering at the
+passenger's own `homePos` (the same anchor the rescue carry uses) and
+requiring each landing to be **strictly closer to home** than the pickup, so
+a chain of ferries converges instead of oscillating. Re-measured: **1 pickup
+in 400 ticks**, where the broken version pinged every ~9.
+
+A third, smaller one: the search happily "landed" a ferry on the far bank's
+wading tile, leaving the passenger standing in the lake. Landings are now
+required to be dry.
+
+### Measured (`packages/runner/src/validateSurf.ts`, 5 seeds)
+
+| | with Surf | CONTROL (same agent, `watercraft` off) |
+|---|---|---|
+| water tiles a Rock-type may enter | **13,696 / 13,696 (100%)** | 1,991 / 13,696 (14.5%) |
+| ferry pickups in 400 ticks | 1 | **0** |
+| passenger moved | (2,5) -> (12,3), 24 ticks carried | never picked up |
+
+The control is not vacuously blocked: it still wades the shore ring to
+drink, exactly as before this feature existed.
+
+### Open, needs a decision — not taken unilaterally
+
+- **No shipped species is a non-Water Surf learner.** Every one of the five
+  (Wartortle, Blastoise, Psyduck, Golduck, Seaking) is a Water type, which
+  already swims. The "non water Pokemon travels around water easily" half of
+  the ask is therefore **real but currently unreachable in a normal run** —
+  it needs Surf on a land species, or a teach path. Flagged, not fixed:
+  adding a learner is a balance call.
+- **A completed ferry grants no rapport**, where a completed rescue carry
+  grants `RAPPORT_RESCUE_DELTA`. A ferry is a favour, not a rescue, so a
+  smaller delta or none both defensible.
+- `FERRY_SEARCH_RADIUS` (10) / `FERRY_SEARCH_LIMIT` (400) are first guesses
+  bounding how far a carrier will look for a landing.
