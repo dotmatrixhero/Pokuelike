@@ -90,7 +90,15 @@ describe("the four-move cap", () => {
     expect(agent.passives?.regen).toBeUndefined();
   });
 
-  it("keeps the deeply-invested move and drops the untouched one, even when the untouched one hits harder", () => {
+  // MEANING CHANGED, deliberately, and narrowed to what the model actually
+  // guarantees. It used to claim any invested move beat an untouched one at
+  // any damage gap. It no longer does, and should not: investment and
+  // potential are two halves of one budget traded node for node, so building
+  // is near score-neutral and a genuinely better move CAN win the slot. What
+  // survives is a cushion — a part-built tree is not displaced by a marginal
+  // upgrade — and that is what this tests now, with the size of the gap as
+  // the variable.
+  it("a part-built move survives a marginal upgrade but not a real one", () => {
     // Failure mode (a): an agent throwing away the build it spent its whole
     // life on. The points come back, but a Solar Beam specialist that drops
     // Solar Beam for a fresh Tackle has thrown away its own story.
@@ -98,27 +106,35 @@ describe("the four-move cap", () => {
       Object.fromEntries(
         Array.from({ length: 10 }, (_, i) => [`${prefix}${i}`, { id: `${prefix}${i}`, name: `${prefix}${i}`, cost: 1, leaning: "aggression" as const }])
       );
-    const tree = treeOf("n");
+    const bigTree = (prefix: string) =>
+      Object.fromEntries(
+        Array.from({ length: 45 }, (_, i) => [`${prefix}${i}`, { id: `${prefix}${i}`, name: `${prefix}${i}`, cost: 1, leaning: "aggression" as const }])
+      );
+    const tree = treeOf("n"); // 10 of 45 bought below — part-built, not finished
     // BOTH moves get a tree of the same size, so investment is the only thing
     // that differs. An earlier version of this test gave a tree to Solar Beam
     // alone, which meant its control was really measuring the tree-potential
     // term and would have passed with the investment term deleted entirely.
     const ctx = ctxOf({
-      SOLAR_BEAM: spec("solar_beam", { type: "grass", power: 60, cooldownTicks: 9, tree } as Partial<MoveSpec>),
-      TACKLE: spec("tackle", { power: 40, cooldownTicks: 1, tree: treeOf("t") } as Partial<MoveSpec>),
+      BUILT: spec("built", { type: "grass", power: 40, cooldownTicks: 3, tree: bigTree("n") } as Partial<MoveSpec>),
+      MARGINAL: spec("marginal", { type: "grass", power: 44, cooldownTicks: 3, tree: bigTree("t") } as Partial<MoveSpec>),
+      REAL_UPGRADE: spec("real_upgrade", { type: "grass", power: 120, cooldownTicks: 1, tree: bigTree("u") } as Partial<MoveSpec>),
     });
-    const agent = agentOf({
-      knownMoves: ["SOLAR_BEAM", "TACKLE"],
-      moveTreeChoices: { SOLAR_BEAM: Object.keys(tree) },
-    });
+    const built = () => ({ BUILT: Object.keys(tree) }); // 10 of 45
 
-    // Tackle alone is worth far more per action (40/2 vs 60/10), so a
-    // pure-damage AI would drop the invested move. Control: with the
-    // investment stripped, it does exactly that — which is what makes the
-    // first assertion mean something.
-    expect(pickMoveToForget(agent, agent.knownMoves!, ctx)).toBe("TACKLE");
-    agent.moveTreeChoices = undefined;
-    expect(pickMoveToForget(agent, agent.knownMoves!, ctx)).toBe("SOLAR_BEAM");
+    // A 4-power edge is noise, and the cushion holds.
+    const vsMarginal = agentOf({ knownMoves: ["BUILT", "MARGINAL"], moveTreeChoices: built() });
+    expect(pickMoveToForget(vsMarginal, vsMarginal.knownMoves!, ctx)).toBe("MARGINAL");
+
+    // Nine times the damage per action is a reason, and the build gives way —
+    // the points come back and fund the new one.
+    const vsReal = agentOf({ knownMoves: ["BUILT", "REAL_UPGRADE"], moveTreeChoices: built() });
+    expect(pickMoveToForget(vsReal, vsReal.knownMoves!, ctx)).toBe("BUILT");
+
+    // Control: strip the investment and even the marginal move wins, so the
+    // first assertion is measuring the cushion and not just the ordering.
+    const bare = agentOf({ knownMoves: ["BUILT", "MARGINAL"] });
+    expect(pickMoveToForget(bare, bare.knownMoves!, ctx)).toBe("BUILT");
   });
 
   it("declines a genuinely worse new move instead of forcing it into a slot", () => {
@@ -253,6 +269,47 @@ describe("the four-move cap", () => {
       moveTreeChoices: { OLD: Object.keys(treeOf("o")).slice(0, 12) },
     });
     expect(pickMoveToForget(settled, settled.knownMoves!, marginal)).toBe("NEW");
+  });
+
+  it("cashes in a FINISHED tree to fund an unfinished one — the reason the refund exists", () => {
+    // Direct: "if they have other things to spend skill points on to build
+    // anew then that's the chance to do it. A reason to get your skill points
+    // back." A maxed tree has nothing left to buy and is sitting on 45 points;
+    // an untouched one is a whole build waiting to be afforded.
+    const treeOf = (p: string) =>
+      Object.fromEntries(
+        Array.from({ length: 45 }, (_, i) => [`${p}${i}`, { id: `${p}${i}`, name: `${p}${i}`, cost: 1, leaning: "aggression" as const }])
+      );
+    const finished = treeOf("f");
+    const ctx = ctxOf({
+      // Identical moves in every respect except how much of each is built,
+      // so nothing but the exhaustion can decide it.
+      FINISHED: spec("finished", { type: "normal", power: 60, cooldownTicks: 3, tree: finished } as Partial<MoveSpec>),
+      FRESH: spec("fresh", { type: "water", power: 60, cooldownTicks: 3, tree: treeOf("n") } as Partial<MoveSpec>),
+    });
+    const agent = agentOf({
+      types: ["normal"], // STAB favours the FINISHED move, so it is given up despite scoring better on damage
+      knownMoves: ["FINISHED", "FRESH"],
+      moveTreeChoices: { FINISHED: Object.keys(finished) },
+      wildcardSkillPoints: 0,
+    });
+
+    expect(pickMoveToForget(agent, agent.knownMoves!, ctx)).toBe("FINISHED");
+
+    const log = new EventLog();
+    forgetMove(agent, "FINISHED", world, ctx, log, "exhausted");
+    // The 45 points are not lost — they are exactly what pays for the new tree.
+    expect(agent.wildcardSkillPoints).toBe(45);
+    expect((log.events as any[])[0].reason).toBe("exhausted");
+
+    // Control: one node short of finished and it stays. The cash-in is a
+    // deliberate cliff at "nothing left to learn", not a slope.
+    const nearlyDone = agentOf({
+      types: ["normal"],
+      knownMoves: ["FINISHED", "FRESH"],
+      moveTreeChoices: { FINISHED: Object.keys(finished).slice(0, 44) },
+    });
+    expect(pickMoveToForget(nearlyDone, nearlyDone.knownMoves!, ctx)).toBe("FRESH");
   });
 
   it("a player-owned agent parks the decision instead of having it made for them", () => {
