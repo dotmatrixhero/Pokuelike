@@ -7912,3 +7912,29 @@ way, not acted on:
   one-line message only.
 - **Eat is one key per bite** (0.4 hunger per press; a patch has ~3 bites).
   Fine for now; a "eat until full" time-spend is the same shape as sleep.
+
+## ROADMAP M4 Read — built (tells + examine); side notes
+
+- **Hearing (SENSORY_LAYER.md's first slice) was not attempted.** The
+  roadmap said "only if cheap; the tells are the priority." Still open.
+- **Never seen in a 3-seed × 2000-tick sample:** "is carrying food to X"
+  (deliverFood — the same unreachable `foodDelivered` finding from the
+  rapport round) and "is eating from a carcass" (scavenge). Both tells
+  exist and are unit-tested; neither fires on a real run. Same
+  unreachable-content stack as fire / healAura / sharedWater.
+- **"Training" is 31% of all reads.** Plain and true, but if a third of
+  everything you look at is training, the read gets dull. Worth asking
+  whether `train` should be visible as *what* is being practised ("is
+  practising Ember at a rock") — the move id is on the agent.
+- **`fleeingFromId` is never cleared**, only overwritten at the next flee.
+  tells.ts reads it only while `behavior === "flee"`, so it cannot leak
+  into a sentence, but it is stale data on the agent between flights.
+- **Examine cycles only among creatures currently visible.** With one in
+  view, `x` repeats it. Fine; noting so nobody reports it as stuck.
+- **Watch / Play switch (direct ask, outside the roadmap).** Watch =
+  `enterOverworldMode(seed, "zone")`, the spectator app as it always was;
+  Play = the cave. URL carries `player=cave` so reload keeps the mode. The
+  HUD's last message survives a switch to Watch (hidden, so harmless).
+- **Play always starts the cave.** M0's surface demo (`?player=1`) is
+  still reachable by URL only. If the surface run should be a real option,
+  it is one more button.

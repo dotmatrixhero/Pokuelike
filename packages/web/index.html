@@ -839,6 +839,16 @@
 
         <div class="divider"></div>
 
+        <!-- Watch the whole simulation, or play a human in it. Direct ask:
+             "I also want to have a mode to just look at the full Sim, too...
+             Separate from player mode." Watch is the spectator app as it
+             always was: no player, no fog, the macro grid available. Play
+             is ROADMAP.md's cave. -->
+        <div class="segmented" role="group" aria-label="Watch or play" id="play-mode-switch">
+          <button id="mode-watch" class="playing" title="Watch the whole simulation — no player, nothing hidden">Watch</button>
+          <button id="mode-play" title="Play a human in the cave — fog of war, hunger, thirst">Play</button>
+        </div>
+
         <div class="segmented" role="group" aria-label="Map mode">
           <button id="map-mode-zone" class="playing" title="The focused zone's detailed tile view">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 5px;"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
@@ -927,7 +937,7 @@
             <div class="hud-row"><span class="hud-label">Thirst</span><span class="hud-bar"><span id="hud-thirst" class="hud-fill thirst"></span></span><span id="hud-thirst-text" class="hud-num"></span></div>
             <div class="hud-row"><span class="hud-label">Energy</span><span class="hud-bar"><span id="hud-energy" class="hud-fill energy"></span></span><span id="hud-energy-text" class="hud-num"></span></div>
             <div id="hud-message"></div>
-            <div id="hud-keys">move: arrows / hjkl yubn &nbsp; wait: . &nbsp; eat: e &nbsp; drink: q</div>
+            <div id="hud-keys">move: arrows / hjkl yubn &nbsp; wait: . &nbsp; eat: e &nbsp; drink: q &nbsp; look: x</div>
           </div>
 
           <div id="game-over" hidden>

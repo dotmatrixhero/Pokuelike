@@ -618,6 +618,14 @@ export interface Agent {
   alive?: boolean;
   /** The agent currently being hunted, if this agent is mid-hunt. Bookkeeping only — re-evaluated each tick. */
   huntTarget?: string;
+  /**
+   * What this agent is running from, while `behavior === "flee"`. Set at
+   * predation.ts's two flee sites so tells.ts can say "running from the
+   * Charmeleon" rather than "running from something" — the observer can
+   * see what it is running from; the sentence should too. Cleared when the
+   * behaviour changes.
+   */
+  fleeingFromId?: string;
   /** Absent = genderless (doesn't seek a mate). */
   sex?: "male" | "female";
   /** Ticks alive. Absent is treated as already mature (for agents spawned directly into a scenario). */

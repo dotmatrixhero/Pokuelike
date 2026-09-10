@@ -256,6 +256,30 @@ Build:
 **Done when:** you can tell a drinking creature from a fleeing one from a
 sleeping one by looking.
 
+**STATUS: DONE (tells + examine; the hearing slice was not attempted).**
+`tells.ts`: `describeBehavior` gives one plain sentence per readable state,
+and where the sim knows the specific thing the sentence says it — "The
+Charmeleon is stalking the Rattata.", "The Rattata is running from the
+Charmeleon." (a new `Agent.fleeingFromId`, set at predation's two flee
+sites, because "running from something" is the vague word that means the
+data is missing), "The Sandshrew is travelling east with its herd.",
+"The Machop is carrying the Rattata." `examine` adds the second sentence:
+"She has seen you." / "He has not noticed you.", using the same
+flee-detection radius and line of sight predation uses, so "has seen you"
+means "will react to you". Dead, down, asleep and egg come before
+behaviour. Examine is free: `x` selects the next creature you can see,
+nearest first, no tick; the inspector opens with a "What you see" group in
+player mode. Sampled on real runs (`runner/validateTells.ts`, 3 seeds ×
+2000 ticks, 1511 reads): wandering 37%, training 31%, foraging 7%, with
+its herd 6%, building a shelter 5%, travelling 3%, looking for water 2%,
+running from X 2%, down 2%, drinking 1%, eating 1%, fighting X 1%. The
+sample caught one bad line, "is wandering nowhere" (explore target on the
+agent's own tile), fixed and tested. Never seen in the sample: carrying
+food (deliverFood — the known unreachable `foodDelivered`) and eating from
+a carcass. Also this round, a direct ask outside the roadmap: a
+**Watch / Play** switch in the header — Watch is the spectator app with
+nothing hidden, Play is the cave.
+
 ### M5 — Make
 
 Search, inventory, crafting, and the torch.

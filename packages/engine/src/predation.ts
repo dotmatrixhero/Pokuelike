@@ -1664,6 +1664,7 @@ export function applyPredationInstincts(
     if (attacker) {
       logBehaviorChange(log, world, agent, "flee");
       agent.behavior = "flee";
+      agent.fleeingFromId = attacker.id; // tells.ts: "running from the Charmeleon", not "from something"
       agent.huntTarget = undefined;
       agent.pos = stepAway(world, agent.layer, agent.pos, attacker.pos, agent);
       return true;
@@ -1789,6 +1790,7 @@ export function applyPredationInstincts(
 
     logBehaviorChange(log, world, agent, "flee");
     agent.behavior = "flee";
+    agent.fleeingFromId = threat.id; // tells.ts reads this only while behavior is "flee"
     agent.huntTarget = undefined;
     agent.fightTarget = undefined;
 

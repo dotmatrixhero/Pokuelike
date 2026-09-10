@@ -1,6 +1,6 @@
 import type { Agent, MoveSpec, World } from "@pokuelike/engine";
 import { LEVELING_CONTEXT, SPECIES } from "@pokuelike/data";
-import { describeRapport, rapportScore, speciesDisplayName } from "@pokuelike/engine";
+import { describeRapport, examine, rapportScore, speciesDisplayName } from "@pokuelike/engine";
 import { TYPE_COLOR, rgbToCss } from "./palette.js";
 import { agentDisplayName, herdDisplayName, shortId, LEADER_ICON, TITLE_ICON } from "./notableTitles.js";
 import { buildMoveTreeSvg, describeMoveTreeNode, summarizeBuildEffects } from "./moveTreeSvg.js";
@@ -26,6 +26,12 @@ export interface InspectorHooks {
   onFocusGroup?: (selection: GroupSelection) => void;
   /** What is currently focused, so the matching row can render as active. */
   focused?: GroupSelection;
+  /**
+   * ROADMAP.md M4: in player mode, the human doing the looking. When set,
+   * the inspector opens with the examine line — what you can see this
+   * creature doing and whether it has noticed you — before any numbers.
+   */
+  observer?: Agent;
 }
 
 function sameSelection(a: GroupSelection | undefined, b: GroupSelection | undefined): boolean {
@@ -551,6 +557,15 @@ export function renderInspector(container: HTMLElement, agent: Agent | undefined
     ? `${TITLE_ICON[agent.notableTitle]} ${agentDisplayName(agent, def)} (${agent.id})`
     : `${leaderMark}${def?.name ?? agent.species} (${agent.id})`;
   container.appendChild(title);
+
+  // --- What you see (player mode) ---------------------------------------
+  // ROADMAP.md M4: the read comes before the numbers. tells.ts owns the
+  // sentence; this only puts it first.
+  if (hooks?.observer && hooks.observer.id !== agent.id) {
+    const seen = group("What you see");
+    seen.appendChild(row("", examine(world, agent, { observer: hooks.observer, name: (id) => SPECIES[id]?.name ?? id }), true));
+    container.appendChild(seen);
+  }
 
   // --- Identity ---------------------------------------------------------
   const identity = group("Identity");

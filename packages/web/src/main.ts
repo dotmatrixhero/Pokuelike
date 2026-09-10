@@ -1,5 +1,5 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, type PlayerAction, type Layer } from "@pokuelike/engine";
-import { createCaveScenario, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, type PlayerAction, type Layer } from "@pokuelike/engine";
+import { createCaveScenario, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
@@ -127,6 +127,8 @@ const minimapOverworldCanvas = document.getElementById("minimap-overworld-canvas
 const minimapMarkerEl = document.getElementById("minimap-marker") as HTMLElement;
 const minimapCaption = document.getElementById("minimap-caption") as HTMLElement;
 const regionBannerEl = document.getElementById("region-banner") as HTMLElement;
+const modeWatchBtn = document.getElementById("mode-watch") as HTMLButtonElement;
+const modePlayBtn = document.getElementById("mode-play") as HTMLButtonElement;
 // ROADMAP.md M3 — the player's needs HUD and the death screen.
 const playerHudEl = document.getElementById("player-hud") as HTMLElement;
 const hudMessageEl = document.getElementById("hud-message") as HTMLElement;
@@ -385,7 +387,46 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
   playerHudEl.hidden = false;
   hudMessageEl.textContent = scene === "cave" ? "It is dark. There is light somewhere." : "";
   renderPlayerHud();
+  syncModeButtons();
+  const url = new URL(location.href);
+  url.searchParams.set("player", scene === "cave" ? "cave" : "1");
+  url.searchParams.set("seed", String(seed));
+  history.replaceState(null, "", url);
 }
+
+/**
+ * Back to the spectator app — direct ask: "a mode to just look at the full
+ * Sim, too... Separate from player mode." Everything player mode put up
+ * (HUD, death screen, the held turn gate) comes down; the world is the
+ * ordinary demo macro world with nothing hidden, since fog only exists
+ * where there is a player to see from.
+ */
+function enterWatchMode(seed: number): void {
+  playerMode = false;
+  playerDead = false;
+  playerHudEl.hidden = true;
+  gameOverEl.hidden = true;
+  enterOverworldMode(seed, "zone");
+  syncModeButtons();
+  const url = new URL(location.href);
+  url.searchParams.delete("player");
+  history.replaceState(null, "", url);
+}
+
+function syncModeButtons(): void {
+  modeWatchBtn.classList.toggle("playing", !playerMode);
+  modePlayBtn.classList.toggle("playing", playerMode);
+}
+
+modeWatchBtn.addEventListener("click", () => {
+  if (!playerMode) return;
+  enterWatchMode(Number(seedInput.value) || SCENARIO_SEED);
+});
+modePlayBtn.addEventListener("click", () => {
+  if (playerMode) return;
+  setPlaying(false);
+  loadPlayerWorld(Number(seedInput.value) || SCENARIO_SEED, "cave");
+});
 
 /**
  * ROADMAP.md M3: needs on screen, always. The inspector renders the same
@@ -495,6 +536,11 @@ window.addEventListener("keydown", (e) => {
       e.preventDefault();
       loadPlayerWorld(playerSeed, playerScene);
     }
+    return;
+  }
+  if (e.key === "x") {
+    e.preventDefault();
+    examineNext();
     return;
   }
   const action = PLAYER_KEYS[e.key];
@@ -737,7 +783,30 @@ function refreshSelection(): void {
   if (!inspectorDirty) return;
   inspectorDirty = false;
   const agent = selectedAgentId ? world.agents.find((a) => a.id === selectedAgentId) : undefined;
-  renderInspector(inspectorEl, agent, world, { onFocusGroup: focusOnGroup, focused: focusedGroup });
+  renderInspector(inspectorEl, agent, world, { onFocusGroup: focusOnGroup, focused: focusedGroup, observer: playerMode ? findPlayer(world) : undefined });
+}
+
+/**
+ * ROADMAP.md M4's examine: a free action (no tick). Each press selects the
+ * next creature you can see, nearest first, and puts its examine line in
+ * the HUD; the inspector shows the same line with the numbers under it.
+ * Clicking a visible creature does the same through the ordinary click
+ * handler — this is the keyboard road to it.
+ */
+function examineNext(): void {
+  const me = findPlayer(world);
+  if (!me?.vision) return;
+  const seen = world.agents
+    .filter((a) => a.id !== me.id && a.layer === me.layer && a.alive !== false && me.vision!.visible.has(a.pos.y * world.width + a.pos.x))
+    .sort((a, b) => Math.hypot(a.pos.x - me.pos.x, a.pos.y - me.pos.y) - Math.hypot(b.pos.x - me.pos.x, b.pos.y - me.pos.y));
+  if (seen.length === 0) {
+    hudMessageEl.textContent = "You see no one.";
+    return;
+  }
+  const i = seen.findIndex((a) => a.id === selectedAgentId);
+  const next = seen[(i + 1) % seen.length]!;
+  selectAgent(next);
+  hudMessageEl.textContent = examine(world, next, { observer: me, name: (id) => SPECIES[id]?.name ?? id });
 }
 
 // --- Unified side panel: Inspector / Battle / Chronicle / Events tabs ------

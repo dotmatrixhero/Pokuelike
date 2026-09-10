@@ -43,6 +43,7 @@ export * from "./witness.js";
 export * from "./rapportProse.js";
 export * from "./player.js";
 export * from "./vision.js";
+export * from "./tells.js";
 export * from "./notables.js";
 export * from "./herdLeadership.js";
 export * from "./directions.js";
