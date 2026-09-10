@@ -7562,3 +7562,115 @@ drink, exactly as before this feature existed.
   smaller delta or none both defensible.
 - `FERRY_SEARCH_RADIUS` (10) / `FERRY_SEARCH_LIMIT` (400) are first guesses
   bounding how far a carrier will look for a landing.
+
+## Roost and Defense Curl — v4 trees for the last two treeless status moves (Shipped)
+
+Both are `utilityMove`-flagged, both were treeless, both now carry 45 nodes
+in the two-lane v4 shape (3 branches x 12, plus 3 three-node bridges).
+`npx tsx packages/data/scripts/check-proposed-trees.ts --shipped` prints
+`45 nodes  ok` for each.
+
+### Roost — the bird comes down, and being down is the price
+
+Roost is the only healing in this roster that has to happen on the ground.
+Every learner — Pidgey, Spearow, Fearow — has `homeLayer: "canopy"`, so
+landing is a real change of place for exactly the species that know it.
+
+- **Boldness — the landing.** Lane D comes down properly (a big `selfHeal`
+  bought in `lockTicks`); lane B is a touch-and-go (no lock at all, a much
+  shorter cooldown, a Speed stage). Magnitude-for-time against
+  frequency-with-no-commitment.
+- **Aggression — a landed bird is not a helpless bird.** Lane T is the feet
+  (`thorns`); lane G refuses to give up the perch (`immovable`, a Defense
+  ladder, flat mitigation).
+- **Sociability — a roost is a place, not a moment.** Lane C is the colony
+  (`targetsAlly`/`allyEffects`, `healAura`); lane U is *under* the roost —
+  a tree a flock sleeps in every night has the richest ground in the zone,
+  which is a real `fertilityBoost` and visible on the map.
+
+**The mainline cost is not representable, and this is what was done
+instead.** Mainline Roost's price is that the bird stops being Flying while
+it is down. Checked at the call site: `canFlyOverObstacle` (movement.ts)
+reads exactly `layer === "canopy"` and `agent.types.includes("flying")`, and
+NOTHING in `MoveSpec` or `MoveTreeNode.delta` writes either — `agent.layer`
+moves only via `burrow` (a flee-only field, not a delta field) and needs.ts's
+own idle return to `homeLayer`; `agent.types` is species data. A "grounded
+for N ticks" node would have been a label over nothing. What IS real is
+`lockTicks`: `useMove` writes `agent.actionLockTicks` and `tickAgentAction`
+refuses the agent an action while it is above zero — on the utility path too,
+since both `maybeUseUtilityMove` and `maybeUseUtilityMoveInCombat` call
+`useMove`. Measured on a real fight: the full Boldness build reaches
+`lockTicks: 14` and `selfHeal: 0.7`, and the lock lands on the agent.
+
+### Defense Curl — a ball has no handles
+
+Harden already owns "raise your own Defense," so Defense Curl had to be a
+different answer rather than a bigger one. Harden's answer is to stop being
+an animal: `immovable`, `lockTicks`, `nonTerritorial` — furniture. **Defense
+Curl's tree contains no `lockTicks` and no `immovable` anywhere, on
+purpose**, and its Aggression branch spends Speed stages on a DEFENSIVE move,
+which nothing else defensive in the roster does. The curl is a wind-up; the
+payoff is that it is already somewhere else. There is a test asserting both
+halves of that, with Harden as the control.
+
+- **Aggression — the roll.** Lane R is momentum (the Speed ladder, a much
+  shorter cooldown); lane W is the weight on the outside (`thorns`). Its
+  filler leaves turned earth behind it (`fertilityBoost`).
+- **Boldness — the tuck.** Lane N is no purchase (`unshaken`, flat
+  mitigation); lane E is everything in (the Defense ladder, `regenFlat`).
+- **Sociability — a heap of them.** Lane P is the pile (`allyEffects`,
+  `healAura`); lane Q is nothing gets in (`statusImmunityAura`,
+  `calmingPresence`, `nonTerritorial`).
+
+### Measured: every branch fires, and the controls stay quiet
+
+`npx tsx packages/runner/src/validateRoostAndDefenseCurl.ts 3000 3` — six
+branch builds, each put in a real fight against a real opponent and driven
+through the real `maybeUseUtilityMoveInCombat` with a real rng:
+
+| build | fired | what landed |
+|---|---|---|
+| roost / boldness | 1x | hp 22 -> 55, `actionLockTicks` 14 |
+| roost / aggression | 1x | hp +13.75, Defense stage 4 |
+| roost / sociability | 1x | status immunity 110 ticks |
+| defense_curl / aggression | 2x | **Speed stage 4** |
+| defense_curl / boldness | 1x | Defense stage 5 |
+| defense_curl / sociability | 2x | status immunity 150 ticks |
+
+Controls: a full-HP Roost heal build fired **0x** in the same 60 action
+opportunities; a Defense Curl aura build against an opponent with no status
+move fired **0x**; and the untreed base moves in the same fight heal +13.75
+with no lock, no Speed stage and no aura.
+
+### Finding: the utility-move trigger is starved for some species
+
+3 seeds x 3000 ticks, learners spawned into a real `createDemoWorld` and
+then just ticked, nothing arranged:
+
+| | Pidgey (roost) | Geodude (defense_curl) |
+|---|---|---|
+| alive-ticks | 33,597 | 50,468 |
+| behaviour = idle | **30 (0.09%)** | 36 (0.07%) |
+| attacker-side hostile actions | **1** | 0 |
+| move uses (idle / in combat) | 0 / 0 | 2 / 1 |
+
+The out-of-combat trigger needs `chooseBehavior(agent.needs) === "idle"`
+(needs.ts:1719) and then a 15% roll; the in-combat one is only ever called on
+the ATTACKER (predation.ts:1302) and then rolls 20%. A species that neither
+idles nor initiates fights can hold **any** utility move and effectively
+never use it. This is roster-wide, not specific to these two trees — the
+shipped `validateUtilityMoves.ts` on the same world logs 3 Agility uses and 1
+Withdraw use across 4000 ticks for the same reason. Flagged, not fixed:
+changing the idle gate or the roll is a balance decision, not a bug fix.
+
+### Finding: `COMBAT_USABLE_FIELDS` was missing the plural form
+
+`packages/data/test/moveTrees.test.ts` listed the fields
+`maybeUseUtilityMoveInCombat` will spend a fight action on as `selfHeal`,
+`statChangeOnHit`, `statusImmunityAura`. It reads
+`resolveStatChangesOnHit(move)`, which folds the APPENDING form
+`statChangesOnHit` in as well — so the singular-only list would have called a
+branch dead that is not. Corrected, and the same correction retires the
+test's "Harden's Aggression is the one deliberate exception" carve-out:
+*Honed Carapace* sets `statChangesOnHit` (self Defense +2), so that branch
+has been fight-usable since it shipped.
