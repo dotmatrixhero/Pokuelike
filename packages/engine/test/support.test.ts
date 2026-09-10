@@ -156,7 +156,7 @@ describe("looting", () => {
       fainted: true,
       hp: 0,
       maxHp: 5,
-      inventory: [{ itemKey: "oran_berry", weight: 1 }],
+      inventory: [{ itemKey: "oran_berry", weight: 1, count: 1 }],
     });
     world.agents.push(looter, fainted);
     const log = new EventLog();
@@ -164,7 +164,7 @@ describe("looting", () => {
     const looted = applyLooting(world, looter, log);
 
     expect(looted).toBe(true);
-    expect(looter.inventory).toEqual([{ itemKey: "oran_berry", weight: 1 }]);
+    expect(looter.inventory).toEqual([{ itemKey: "oran_berry", weight: 1, count: 1 }]);
     expect(fainted.inventory).toEqual([]);
     expect(log.events).toContainEqual(expect.objectContaining({ kind: "looted", looterId: "looter", fromId: "fainted-target" }));
 
@@ -172,7 +172,7 @@ describe("looting", () => {
       id: "corpse",
       pos: { x: 1, y: 1 },
       alive: false,
-      inventory: [{ itemKey: "oran_berry", weight: 1 }],
+      inventory: [{ itemKey: "oran_berry", weight: 1, count: 1 }],
     });
     world.agents.push(corpse);
     const lootedFromCorpse = applyLooting(world, looter, log);
@@ -188,7 +188,7 @@ describe("looting", () => {
       id: "heavy",
       pos: { x: 1, y: 2 },
       alive: false,
-      inventory: [{ itemKey: "heavy_rock", weight: capacity + 100 }],
+      inventory: [{ itemKey: "heavy_rock", weight: capacity + 100, count: 1 }],
     });
     world.agents.push(looter, heavyTarget);
 

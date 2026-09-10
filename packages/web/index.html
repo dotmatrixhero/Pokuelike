@@ -395,6 +395,21 @@
       #player-hud .hud-num { width: 34px; text-align: right; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
       #hud-message { margin-top: 6px; min-height: 15px; color: var(--text); }
       #hud-keys { margin-top: 4px; font-size: 10.5px; opacity: 0.7; }
+      #hud-pack { margin-top: 4px; font-size: 11px; color: var(--text-dim); }
+      #hud-pad { flex-wrap: wrap; }
+      #hud-pad button { flex: 1 1 28%; }
+
+      /* ROADMAP.md M5 — the pack menu. */
+      #pack-menu { position: absolute; inset: 0; z-index: 31; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); }
+      #pack-menu[hidden] { display: none; }
+      .pack-card { background: rgba(23, 28, 36, 0.98); border: 1px solid var(--panel-border); border-radius: 12px; padding: 12px 14px; width: min(420px, calc(100% - 28px)); max-height: 80%; overflow-y: auto; font-size: 12.5px; }
+      .pack-title { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+      .pack-title button { background: none; border: 1px solid var(--panel-border); color: var(--text); border-radius: 6px; min-width: 32px; min-height: 32px; }
+      .pack-heading { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); margin: 10px 0 4px; }
+      .pack-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 7px 8px; border: 1px solid transparent; border-radius: 8px; color: var(--text); background: none; text-align: left; font: inherit; }
+      .pack-row.tappable { border-color: var(--panel-border); background: rgba(255, 255, 255, 0.05); cursor: pointer; min-height: 40px; }
+      .pack-row.tappable:active { background: var(--accent); color: #06111f; }
+      .pack-sub { font-size: 11px; color: var(--text-dim); }
       #hud-pad { display: flex; gap: 6px; margin-top: 8px; }
       #hud-pad button {
         flex: 1;
@@ -819,6 +834,10 @@
       @media (max-width: 900px) {
         main { flex-direction: column; }
         #side-panel { flex: 0 0 auto; max-height: 42vh; }
+        /* Play mode needs the map: on an iPhone the wrap measured 370x220
+           with the panel at 42vh, and the bottom HUD covered half of that
+           — the centred player sat under it and no map tap could land. */
+        body.player-mode #side-panel { max-height: 22vh; }
         #side-panel.panel-collapsed { max-height: 0; }
 
         /* Direct ask: "can you just really limit the ui to two units hp
@@ -966,7 +985,8 @@
               <div class="hud-row"><span class="hud-label">Energy</span><span class="hud-bar"><span id="hud-energy" class="hud-fill energy"></span></span><span id="hud-energy-text" class="hud-num"></span></div>
             </div>
             <div id="hud-message"></div>
-            <div id="hud-keys">move: arrows / hjkl yubn &nbsp; wait: . &nbsp; eat: e &nbsp; drink: q &nbsp; look: x</div>
+            <div id="hud-pack"></div>
+            <div id="hud-keys">move: arrows / hjkl yubn &nbsp; wait: . &nbsp; eat: e &nbsp; drink: q &nbsp; look: x &nbsp; gather: g &nbsp; pack: i</div>
             <!-- Tap controls — direct ask: "I can't play at all on mobile.
                  Can you allow a click based control scheme?" Tapping the map
                  walks there; these are the verbs that have no tile. -->
@@ -975,6 +995,16 @@
               <button data-act="eat" title="Eat what you stand on">Eat</button>
               <button data-act="drink" title="Drink from water beside you">Drink</button>
               <button data-act="look" title="Look at the next creature you can see">Look</button>
+              <button data-act="gather" title="Gather from the tile you stand on">Gather</button>
+              <button data-act="pack" title="What you carry, and what you can make">Pack</button>
+            </div>
+          </div>
+
+          <!-- ROADMAP.md M5: the pack — carrying, holding, making. -->
+          <div id="pack-menu" hidden>
+            <div class="pack-card">
+              <div class="pack-title"><span>Pack</span><button id="pack-menu-close" title="Close">✕</button></div>
+              <div id="pack-menu-body"></div>
             </div>
           </div>
 

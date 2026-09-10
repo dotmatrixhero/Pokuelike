@@ -1,5 +1,5 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, type PlayerAction, type Layer } from "@pokuelike/engine";
-import { createCaveScenario, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES } from "@pokuelike/data";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
+import { createCaveScenario, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
@@ -135,6 +135,10 @@ const hudMessageEl = document.getElementById("hud-message") as HTMLElement;
 const gameOverEl = document.getElementById("game-over") as HTMLElement;
 const gameOverCauseEl = document.getElementById("game-over-cause") as HTMLElement;
 const gameOverStatsEl = document.getElementById("game-over-stats") as HTMLElement;
+const hudPackEl = document.getElementById("hud-pack") as HTMLElement;
+const packMenuEl = document.getElementById("pack-menu") as HTMLElement;
+const packMenuBodyEl = document.getElementById("pack-menu-body") as HTMLElement;
+const packMenuCloseBtn = document.getElementById("pack-menu-close") as HTMLButtonElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -385,6 +389,7 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
   }
   gameOverEl.hidden = true;
   playerHudEl.hidden = false;
+  packMenuEl.hidden = true;
   document.body.classList.add("player-mode");
   cancelTravel();
   hudMessageEl.textContent = scene === "cave" ? "It is dark. There is light somewhere. Tap a tile to walk." : "";
@@ -454,12 +459,24 @@ function renderPlayerHud(): void {
   bar("thirst", player.needs.thirst, `${Math.round(player.needs.thirst * 100)}%`);
   bar("energy", player.needs.energy, `${Math.round(player.needs.energy * 100)}%`);
   const outcome = player.lastActionOutcome;
-  if (outcome && outcome.tick === world.tick) hudMessageEl.textContent = outcomeText(outcome.action.kind, outcome.ok);
+  if (outcome && outcome.tick === world.tick) hudMessageEl.textContent = outcomeText(player, outcome);
+  renderPack(player);
+}
+
+/** The pack line under the bars: "Pack 4/28 · Lichen ×2 · Deadwood ×1 · Torch (held)". */
+function renderPack(player: Agent): void {
+  const items = (player.inventory ?? []).map((i) => {
+    const slot = player.equipment?.held === i.itemKey ? " (held)" : player.equipment?.worn === i.itemKey ? " (worn)" : "";
+    return `${itemName(i.itemKey)}${i.count > 1 ? ` ×${i.count}` : ""}${slot}`;
+  });
+  hudPackEl.textContent = `Pack ${carriedWeight(player)}/${carryCapacityOf(player)}${items.length ? " · " + items.join(" · ") : " · empty"}`;
 }
 
 /** Plain sentences for what the last key did. If the verb failed, say what was missing. */
-function outcomeText(kind: PlayerAction["kind"], ok: boolean): string {
-  switch (kind) {
+function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
+  const { action, ok } = outcome;
+  const here = harvestableAt(world, player.layer, player.pos);
+  switch (action.kind) {
     case "move":
       return ok ? "" : "Something is in the way.";
     case "wait":
@@ -468,8 +485,120 @@ function outcomeText(kind: PlayerAction["kind"], ok: boolean): string {
       return ok ? "You eat." : "Nothing to eat here. Stand on a berry patch.";
     case "drink":
       return ok ? "You drink." : "No water within reach.";
+    case "gather":
+      if (ok) return `You start gathering ${here.map(itemName).join(" and ").toLowerCase()}.`;
+      if (here.length === 0) return "Nothing to gather here.";
+      if (harvestLeft(world, player.layer, player.pos) <= 0) return "This spot is picked clean.";
+      return "Your pack is full.";
+    case "craft":
+      return ok ? `You start making ${itemName(action.recipeId).toLowerCase()}.` : "You cannot make that.";
+    case "continue": {
+      if (outcome.completed === "gather") return outcome.gathered?.length ? `You gather ${outcome.gathered.map((g) => itemName(g.itemKey).toLowerCase()).join(" and ")}.` : "Your pack is full.";
+      if (outcome.completed === "craft") return `You make ${itemName(outcome.crafted ?? "").toLowerCase()}.`;
+      const act = player.activity;
+      return act ? `${act.kind === "gather" ? "Gathering" : "Making"}… ${act.turnsLeft} turn${act.turnsLeft === 1 ? "" : "s"} left.` : "";
+    }
+    case "cancel":
+      return "You stop.";
+    case "equip": {
+      const def = world.items?.[action.itemKey];
+      return ok ? (def?.slot === "worn" ? `You put on the ${itemName(action.itemKey).toLowerCase()}.` : `You hold the ${itemName(action.itemKey).toLowerCase()}.`) : "You cannot equip that.";
+    }
+    case "stow":
+      return ok ? "You put it away." : "Your hands are empty.";
   }
 }
+
+/**
+ * Gather and craft are time-spends: one action starts them, and this loop
+ * spends the following turns automatically, paced like tap-to-walk and
+ * stopped by the same rule — something new in view ends it, turns lost,
+ * materials kept (CRAFTING_LOOP.md). Any key or tap also stops it.
+ */
+function runActivity(): void {
+  cancelTravel();
+  const me = findPlayer(world);
+  if (!me?.activity) return;
+  let seenBefore = visibleAgentIds(world, me);
+  const step = (): void => {
+    travelTimer = undefined;
+    const player = findPlayer(world);
+    if (!player?.activity) return;
+    playerAct({ kind: "continue" });
+    const after = findPlayer(world);
+    if (!after?.activity) return;
+    const seenNow = visibleAgentIds(world, after);
+    for (const id of seenNow) {
+      if (!seenBefore.has(id)) {
+        const who = world.agents.find((a) => a.id === id);
+        playerAct({ kind: "cancel" });
+        hudMessageEl.textContent = who ? `You stop. ${examine(world, who, { observer: after, name: (k) => SPECIES[k]?.name ?? k })}` : "You stop.";
+        return;
+      }
+    }
+    seenBefore = seenNow;
+    travelTimer = window.setTimeout(step, TRAVEL_STEP_MS);
+  };
+  travelTimer = window.setTimeout(step, TRAVEL_STEP_MS);
+}
+
+/**
+ * The pack menu: what you carry (tap a holdable thing to hold or wear it)
+ * and what you can make. Known recipes only; a known recipe you lack the
+ * inputs for stays listed with what is missing — "that's the shopping list
+ * that drives exploration" (CRAFTING_LOOP.md).
+ */
+function openPackMenu(): void {
+  const me = findPlayer(world);
+  if (!me) return;
+  cancelTravel();
+  packMenuBodyEl.replaceChildren();
+  const h = (text: string) => {
+    const el = document.createElement("div");
+    el.className = "pack-heading";
+    el.textContent = text;
+    return el;
+  };
+  const rowEl = (text: string, sub?: string, onTap?: () => void) => {
+    const el = document.createElement(onTap ? "button" : "div");
+    el.className = "pack-row" + (onTap ? " tappable" : "");
+    el.textContent = text;
+    if (sub) {
+      const s = document.createElement("span");
+      s.className = "pack-sub";
+      s.textContent = sub;
+      el.appendChild(s);
+    }
+    if (onTap) el.addEventListener("click", () => { closePackMenu(); onTap(); });
+    return el;
+  };
+  packMenuBodyEl.appendChild(h(`Carrying · ${carriedWeight(me)}/${carryCapacityOf(me)}`));
+  if (!me.inventory?.length) packMenuBodyEl.appendChild(rowEl("Nothing yet. Stand on lichen or deadwood and gather."));
+  for (const item of me.inventory ?? []) {
+    const def = world.items?.[item.itemKey];
+    const held = me.equipment?.held === item.itemKey;
+    const worn = me.equipment?.worn === item.itemKey;
+    const label = `${itemName(item.itemKey)}${item.count > 1 ? ` ×${item.count}` : ""}`;
+    if (def?.slot === "held") packMenuBodyEl.appendChild(rowEl(label, held ? "in hand · tap to put away" : "tap to hold", () => playerAct(held ? { kind: "stow" } : { kind: "equip", itemKey: item.itemKey })));
+    else if (def?.slot === "worn") packMenuBodyEl.appendChild(rowEl(label, worn ? "worn" : "tap to wear", worn ? undefined : () => playerAct({ kind: "equip", itemKey: item.itemKey })));
+    else packMenuBodyEl.appendChild(rowEl(label));
+  }
+  packMenuBodyEl.appendChild(h("Make"));
+  const known = (me.knownRecipes ?? []).map((id) => world.recipes?.[id]).filter((r): r is NonNullable<typeof r> => !!r);
+  if (known.length === 0) packMenuBodyEl.appendChild(rowEl("You know no recipes."));
+  for (const r of known) {
+    const missing = r.inputs.filter((i) => countOf(me, i.itemKey) < i.count).map((i) => `${itemName(i.itemKey).toLowerCase()}${i.count > 1 ? ` ×${i.count}` : ""}`);
+    const inputs = r.inputs.map((i) => `${itemName(i.itemKey).toLowerCase()}${i.count > 1 ? ` ×${i.count}` : ""}`).join(" + ");
+    if (missing.length === 0) packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · ${r.turns} turns · tap to make`, () => { playerAct({ kind: "craft", recipeId: r.id }); runActivity(); }));
+    else packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · you have no ${missing.join(", ")}`));
+  }
+  packMenuEl.hidden = false;
+}
+
+function closePackMenu(): void {
+  packMenuEl.hidden = true;
+}
+packMenuCloseBtn.addEventListener("click", closePackMenu);
 
 /**
  * The death screen. The cause is the last logged event that names the
@@ -543,9 +672,24 @@ window.addEventListener("keydown", (e) => {
     }
     return;
   }
+  if (!packMenuEl.hidden) {
+    if (e.key === "Escape" || e.key === "i") closePackMenu();
+    return;
+  }
   if (e.key === "x") {
     e.preventDefault();
     examineNext();
+    return;
+  }
+  if (e.key === "g") {
+    e.preventDefault();
+    playerAct({ kind: "gather" });
+    runActivity();
+    return;
+  }
+  if (e.key === "i" || e.key === "c") {
+    e.preventDefault();
+    openPackMenu();
     return;
   }
   const action = PLAYER_KEYS[e.key];
@@ -859,6 +1003,10 @@ document.querySelectorAll<HTMLButtonElement>("#hud-pad button").forEach((btn) =>
     cancelTravel();
     const act = btn.dataset.act;
     if (act === "look") examineNext();
+    else if (act === "gather") {
+      playerAct({ kind: "gather" });
+      runActivity();
+    } else if (act === "pack") openPackMenu();
     else if (act === "wait" || act === "eat" || act === "drink") playerAct({ kind: act });
   });
 });

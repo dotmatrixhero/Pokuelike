@@ -131,7 +131,7 @@ export function carryCapacityOf(agent: Agent): number {
 }
 
 function inventoryWeight(agent: Agent): number {
-  return (agent.inventory ?? []).reduce((sum, item) => sum + item.weight, 0);
+  return (agent.inventory ?? []).reduce((sum, item) => sum + item.weight * item.count, 0);
 }
 
 /** Total weight currently occupying `agent`'s carry capacity: its inventory plus any fainted ally it's physically carrying. */
@@ -415,7 +415,7 @@ export function applyLooting(world: World, agent: Agent, log?: EventLog): boolea
   if (!target?.inventory?.length) return false;
 
   const item = target.inventory[0]!;
-  if (used + item.weight > capacity) return false;
+  if (used + item.weight * item.count > capacity) return false;
 
   target.inventory = target.inventory.slice(1);
   agent.inventory = [...(agent.inventory ?? []), item];
@@ -651,7 +651,7 @@ export function applyHerdSupport(world: World, agent: Agent, log?: EventLog, nee
           tile.stock = Math.max(0, tile.stock - CONSUME_STOCK_AMOUNT);
           recordGrazing(tile); // real herd food-delivery grazing event — see flora.ts's "Grazing scars"
         }
-        agent.inventory = [...(agent.inventory ?? []), { itemKey: FOOD_ITEM_KEY, weight: FOOD_ITEM_WEIGHT }];
+        agent.inventory = [...(agent.inventory ?? []), { itemKey: FOOD_ITEM_KEY, weight: FOOD_ITEM_WEIGHT, count: 1 }];
       } else {
         agent.pos = stepToward(world, agent.layer, agent.pos, foodTile, agent, agent);
       }

@@ -304,6 +304,39 @@ Build:
 
 **Done when:** you light a torch and the world doubles in size.
 
+**STATUS: DONE (first-playable cut).** Direct ask: "I do want like gather as
+a verb/move. Inventory and stuff." Built per HANDOFF.md §3, in order:
+`InventoryItem.count` and `inventory.ts` (one stack per key, stable
+order); `harvest.ts` derives materials from terrain already on the map
+(lichen on cave floor within 6 of water, deadwood within 2 of a sunbeam,
+flint on rocky ground or beside a boulder, berries from a food tile,
+herbs from the herbs crop), 3 takes per tile then bare, regrows one take
+per 300 ticks; `packages/data/src/crafting.ts` holds exactly
+CRAFTABLES_V1.md's ten-item cut with the doc's weights and turns, known at
+start = fiber, cordage, bound haft, torch, club, poultice; the scenario
+hands the tables to the world (`World.recipes`/`items`). Gather and craft
+are time-spends through one `Activity` mechanism: start, then `continue`
+per turn, anything else abandons it (turns lost, materials kept, nothing
+consumed until the last turn). Equip: two slots; the torch changes exactly
+one function, `ambientLightAt`. UI: `g` gather, `i`/`c` the pack menu
+(carrying with tap-to-hold, known recipes with what is missing), Gather
+and Pack buttons on the pad, a pack line in the HUD, auto-continue with
+the same stop rule as tap-to-walk.
+**Reachability tests** (`data/test/crafting.test.ts`): inputs resolve, no
+cycles, the whole cut is reachable from bare-hand materials (order: fiber
+→ cordage → haft → knapped flint → torch → knife → club → poultice →
+pouch → cloak), and in the real cave lichen and deadwood are gatherable
+within 60 steps on all 5 seeds (14–35 steps). **Finding: flint and herbs
+exist on no cave seed**, so knapped flint, the knife and the poultice are
+unreachable in the actual cave — recorded in TODO.md with the options.
+**Measured live** (Playwright, seed 20260903): 18 keys to a tile yielding
+both lichen and deadwood, two gathers, fiber, torch, walk back to spawn:
+**69 tiles visible stowed, 149 held** — the world doubles (2.16×).
+`runner/validateTorch.ts` on 5 seeds: 32–58 keys from spawn to a lit
+torch. Fuel is not built (the torch burns forever) pending the ruling
+below. Also found: the chamber's plants grow over the floor between
+planning and arrival, so gather now works on flora and seedling tiles.
+
 Deferred from here, deliberately: items on tiles (dropping, caches — needed
 for the dispersal offer's "one armful", not for the torch), the wider item
 catalogue, tool-granted moves (`MOVES_AND_TOOLS.md`).

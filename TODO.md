@@ -7938,3 +7938,37 @@ way, not acted on:
 - **Play always starts the cave.** M0's surface demo (`?player=1`) is
   still reachable by URL only. If the surface run should be a real option,
   it is one more button.
+
+## ROADMAP M5 Make — built (first-playable cut); side notes and rulings
+
+- **Flint and herbs are unreachable in the real cave.** `crafting.test.ts`
+  scanned 60 walked steps from spawn on 5 seeds: lichen 14–35 steps,
+  deadwood 17–33, berries 19–35, flint none, herbs none. Underground has
+  no `rocky` ground and no boulders near spawn; the herbs crop does not
+  grow in the chamber. So knapped flint, the flint knife and the poultice
+  exist in the data and cannot be made in the cave. Options: (1) floor
+  beside a cave `wall` yields flint (walls are rock; "loose flint — scarce"
+  fits); (2) paint a few boulders and an herbs patch into the chamber in
+  `createCaveScenario`; (3) leave them for M7's deeper layers. I'd do (1)
+  and (2) together; it is a content decision, so it is yours.
+- **Torch fuel is not built.** HANDOFF said ask: 600 ticks (~150 keys) and
+  the torch is consumed, or unlimited until M7? Unlimited today.
+- **Carry cap** is the sim's own `carryCapacityOf` (maxHp × 1.5 = 28.5
+  for the human). No soft encumbrance. The pouch's `capacity: 8` is in
+  the item table and not yet read by anything.
+- **Opening the pack mid-craft abandons the craft.** Any key cancels the
+  auto-continue loop and the next action clears the engine activity. The
+  live script tripped on this. Either the menu should show "Making torch…
+  1 turn left · tap to keep going", or the loop should survive the menu.
+- **A gathered tile that a berry bush grows over now yields berries, not
+  lichen.** Seen on seed 202. Reasonable, but it means the chamber's best
+  gather spots drift as flora spreads.
+- **Nothing narrates gathering or crafting in the event log.** Only the
+  HUD line. When the log gets a player voice, `gathered`/`crafted` events
+  belong there (and add the two formatter cases).
+- **Befriending — direct report: "I can't seem to befriend any Pokémon
+  easily."** Correct, and structural: the human still carries M0's
+  `isPredator: true` stopgap, so prey flee it inside 4 tiles, and no player
+  verb builds rapport yet (Feed and Presence are M6). Nothing the player
+  can do today moves a rapport edge toward them. M6 is next; HANDOFF §4
+  has the plan and the bot that will measure whether it works.

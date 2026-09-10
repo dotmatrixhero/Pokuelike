@@ -196,7 +196,7 @@ describe("rapport: real triggers create/strengthen edges", () => {
       herdId: "herd-a",
       pos: { x: 1, y: 0 },
       deliverTargetId: "receiver",
-      inventory: [{ itemKey: "food", weight: 1 }],
+      inventory: [{ itemKey: "food", weight: 1, count: 1 }],
     });
     const receiver = agent("receiver", { herdId: "herd-a", pos: { x: 0, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
     world.agents.push(carrier, receiver);
@@ -218,7 +218,7 @@ describe("rapport: real triggers create/strengthen edges", () => {
 
     for (let i = 0; i < 5; i++) {
       carrier.deliverTargetId = "receiver";
-      carrier.inventory = [{ itemKey: "food", weight: 1 }];
+      carrier.inventory = [{ itemKey: "food", weight: 1, count: 1 }];
       receiver.needs.hunger = 0.1;
       applyHerdSupport(world, carrier);
     }
@@ -528,7 +528,7 @@ describe("rapport memories: the real triggers tag themselves correctly", () => {
       herdId: "herd-a",
       pos: { x: 1, y: 0 },
       deliverTargetId: "receiver",
-      inventory: [{ itemKey: "food", weight: 1 }],
+      inventory: [{ itemKey: "food", weight: 1, count: 1 }],
     });
     const receiver = agent("receiver", { herdId: "herd-a", pos: { x: 0, y: 0 }, needs: createNeeds({ hunger: 0.1 }) });
     world.agents.push(carrier, receiver);
@@ -549,7 +549,7 @@ describe("rapport memories: the real triggers tag themselves correctly", () => {
 
     for (let i = 0; i < 5; i++) {
       carrier.deliverTargetId = "receiver";
-      carrier.inventory = [{ itemKey: "food", weight: 1 }];
+      carrier.inventory = [{ itemKey: "food", weight: 1, count: 1 }];
       receiver.needs.hunger = 0.1;
       applyHerdSupport(world, carrier);
     }

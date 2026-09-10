@@ -323,6 +323,12 @@ export interface Tile {
   /** "seedling" tiles only: ticks since it took root. Becomes "food" or "flora" once mature — see flora.ts. */
   growth?: number;
   /**
+   * ROADMAP.md M5: how many times this tile has been gathered from since it
+   * last regrew — see harvest.ts (`HARVEST_YIELD_PER_TILE` takes, then bare;
+   * `tickHarvestRegrowth` counts it back down). Absent/0 == untouched.
+   */
+  harvested?: number;
+  /**
    * "fire" tiles only: ticks of fuel left before the fire burns out and the
    * tile reverts to scorched "floor" (fire.ts's `tickFires`). Re-igniting a
    * burning tile refreshes this rather than stacking.
@@ -538,7 +544,18 @@ export type PlayerAction =
   /** ROADMAP.md M3: eat from the food tile you stand on. Fails (and still costs the turn) on anything else. */
   | { kind: "eat" }
   /** ROADMAP.md M3: drink from the water tile you stand on or beside. Fails (and still costs the turn) otherwise. */
-  | { kind: "drink" };
+  | { kind: "drink" }
+  /** ROADMAP.md M5: start gathering from the tile you stand on (harvest.ts says what it yields). A time-spend — see `Activity`. */
+  | { kind: "gather" }
+  /** ROADMAP.md M5: start crafting a known recipe whose inputs you carry. Inputs are consumed on completion only. */
+  | { kind: "craft"; recipeId: string }
+  /** Spend this turn on the activity in progress. Fails (no activity) as a plain wait. */
+  | { kind: "continue" }
+  /** Stop the activity in progress. Turns spent are lost; nothing else is. Costs the turn. */
+  | { kind: "cancel" }
+  /** ROADMAP.md M5: hold or wear an item you carry, or put it away. */
+  | { kind: "equip"; itemKey: string }
+  | { kind: "stow" };
 
 /**
  * What happened when the player's last action was applied — for the UI to
@@ -549,12 +566,67 @@ export interface PlayerActionOutcome {
   action: PlayerAction;
   ok: boolean;
   tick: number;
+  /** `gather` completing: what went into the pack this turn. */
+  gathered?: { itemKey: string; count: number }[];
+  /** `craft` completing: what was made. */
+  crafted?: string;
+  /** An activity finished this turn (as opposed to merely advanced). */
+  completed?: Activity["kind"];
 }
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
 export interface InventoryItem {
   itemKey: string;
+  /** Weight of ONE unit. Total carried is `weight * count` — see inventory.ts. */
   weight: number;
+  /** ROADMAP.md M5: one stack per key. `deliverFood`'s food items are count 1 each. */
+  count: number;
+}
+
+/**
+ * A recipe — ROADMAP.md M5. The tables live in the data package
+ * (`crafting.ts`) and are handed to the engine on `World.recipes` by the
+ * scenario, so the engine can craft without owning content. Inputs are
+ * inventory item keys (materials or other items); nothing is consumed
+ * until the last turn completes.
+ */
+export interface RecipeDef {
+  id: string;
+  name: string;
+  inputs: { itemKey: string; count: number }[];
+  output: { itemKey: string; count: number };
+  /** Player turns to make it. */
+  turns: number;
+  /** "You are a human. These need no discovery." — CRAFTABLES_V1.md */
+  knownAtStart: boolean;
+}
+
+/** An item that can be carried, and maybe held or worn. Effects are read by the engine (a `light` lights you; `threat` feeds M6). */
+export interface ItemDef {
+  key: string;
+  name: string;
+  weight: number;
+  slot?: "held" | "worn";
+  /** Held: full sight radius in the dark — vision.ts `ambientLightAt`. The torch. */
+  light?: boolean;
+  /** Threat-signature term for M6 (positive: a weapon; negative: the cloak). Unused until then. */
+  threat?: number;
+  /** Extra carry capacity while carried (pouch, pack). */
+  capacity?: number;
+}
+
+/**
+ * A multi-turn thing the player is in the middle of — ROADMAP.md M5's
+ * time-spends (gather, craft). Started by one action, advanced one turn
+ * at a time by `continue`, finished when `turnsLeft` reaches 0. Any other
+ * action clears it: turns spent are lost, nothing else is (materials are
+ * only consumed on completion — CRAFTING_LOOP.md's interruption rule).
+ */
+export interface Activity {
+  kind: "gather" | "craft";
+  recipeId?: string;
+  turnsLeft: number;
+  turnsTotal: number;
 }
 
 /**
@@ -605,6 +677,16 @@ export interface Agent {
   vision?: Vision;
   /** Player-controlled agents only: the result of the last applied action. See `PlayerActionOutcome`. */
   lastActionOutcome?: PlayerActionOutcome;
+  /** Player-controlled agents only: the time-spend in progress, if any. See `Activity`. */
+  activity?: Activity;
+  /** Player-controlled agents only: recipe ids this agent can make. Unknown recipes do not exist in the UI (CRAFTING_LOOP.md). */
+  knownRecipes?: string[];
+  /**
+   * ROADMAP.md M5: what is in hand and what is worn. Item keys into the
+   * inventory; the data package's item table says what each does (the
+   * torch lights, a club is a threat). Two slots, per PLAYER_INVENTORY.md.
+   */
+  equipment?: { held?: string; worn?: string };
   /** Agents in the same herd share a home range and will regroup. */
   herdId?: string;
   /**
@@ -1886,6 +1968,10 @@ export interface World {
   tiles: Record<Layer, Tile[]>;
   agents: Agent[];
   tick: number;
+  /** ROADMAP.md M5: the recipe table the scenario handed this world (data package `crafting.ts`). Absent in a world with no crafting. */
+  recipes?: Record<string, RecipeDef>;
+  /** ROADMAP.md M5: the item table, keyed by item key. Materials (harvest.ts) are not here; only made things. */
+  items?: Record<string, ItemDef>;
   /**
    * The seed `rng` below was constructed from — always set by `createWorld`
    * (world.ts), explicit or freshly minted via `rng.ts`'s `randomSeed()`.

@@ -14,6 +14,7 @@ import {
 } from "@pokuelike/engine";
 import { spawnAgent } from "./spawn.js";
 import { SPECIES } from "./species.js";
+import { ITEMS, KNOWN_AT_START, RECIPES } from "./crafting.js";
 
 /**
  * ~90x60 (up from the old hand-authored 24x16) — DESIGN.md's "something like
@@ -292,6 +293,10 @@ export function createCaveScenario(seed: number = SCENARIO_SEED): World {
   };
 
   world.agents.push(...herd, player);
+  // ROADMAP.md M5: the crafting tables and what a human knows on day one.
+  world.recipes = RECIPES;
+  world.items = ITEMS;
+  player.knownRecipes = [...KNOWN_AT_START];
   // The first frame is honest: fog is already down before the first key.
   updatePlayerVision(world, player);
   return world;

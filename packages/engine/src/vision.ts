@@ -3,6 +3,7 @@ import { computeVisible, hasLineOfSight } from "./fov.js";
 import { lightLevel } from "./daynight.js";
 import { stormFovPenalty } from "./weather.js";
 import { tileAt } from "./world.js";
+import { holdsLight } from "./player.js";
 
 /**
  * What the player can see — ROADMAP.md's M2.
@@ -53,7 +54,10 @@ export function isLitTile(world: World, layer: Layer, pos: Vec2): boolean {
  * 0..1 light where an observer stands, in `computeVisible`'s `lightLevel`
  * units. Surface: the day/night clock. Underground: 1 on a lit tile, else 0.
  */
-export function ambientLightAt(world: World, layer: Layer, pos: Vec2, tick: number): number {
+export function ambientLightAt(world: World, layer: Layer, pos: Vec2, tick: number, observer?: Agent): number {
+  // ROADMAP.md M5: a held torch lights *you*, anywhere. This one line is
+  // "the world doubles in size" — the full radius comes back in the dark.
+  if (observer && holdsLight(world, observer)) return 1;
   if (layer === "surface") return lightLevel(tick);
   return isLitTile(world, layer, pos) ? 1 : 0;
 }
@@ -66,7 +70,7 @@ export function ambientLightAt(world: World, layer: Layer, pos: Vec2, tick: numb
  */
 export function playerVisibleTiles(world: World, agent: Agent): Vec2[] {
   const { layer, pos } = agent;
-  const light = ambientLightAt(world, layer, pos, world.tick);
+  const light = ambientLightAt(world, layer, pos, world.tick, agent);
   const storm = stormFovPenalty(world, layer, pos);
   const visible = computeVisible(world, layer, pos, PLAYER_SIGHT_RADIUS, light, storm);
   if (layer === "surface") return visible;

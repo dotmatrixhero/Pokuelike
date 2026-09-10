@@ -21,6 +21,7 @@ import { updateHerdLeadership } from "./herdLeadership.js";
 import { recordDeathWitnesses } from "./witness.js";
 import { applyPlayerAction, findPlayer } from "./player.js";
 import { updatePlayerVision } from "./vision.js";
+import { tickHarvestRegrowth } from "./harvest.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
 import { canFlyOverObstacle } from "./movement.js";
 
@@ -431,6 +432,7 @@ export function tickWorld(
   // here is optional, and a mechanic that quietly stops working when nobody
   // passes a logger is how a test ends up passing for the wrong reason.
   recordDeathWitnesses(world, rng);
+  tickHarvestRegrowth(world);
   growFlora(world, log, rng);
   // Once per tick, not once per agent — same "world-level system, one pass"
   // shape as growFlora above, its Underground counterpart: real crops

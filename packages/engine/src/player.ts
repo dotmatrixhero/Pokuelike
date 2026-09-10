@@ -1,10 +1,13 @@
-import type { Agent, PlayerAction, World } from "./types.js";
+import type { Agent, PlayerAction, PlayerActionOutcome, World } from "./types.js";
 import { canStepTo } from "./movement.js";
 import { consume } from "./needs.js";
 import { tileAt } from "./world.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing } from "./flora.js";
 import { EXP_ON_CONSUME, grantExp, type LevelingContext } from "./leveling.js";
 import type { EventLog } from "./events.js";
+import { GATHER_TURNS, MATERIALS, harvestLeft, harvestableAt, takeHarvest, type MaterialId } from "./harvest.js";
+import { addItem, carriedWeight, countOf, hasAll, removeItem } from "./inventory.js";
+import { carryCapacityOf } from "./support.js";
 
 /**
  * The player-controlled agent — ROADMAP.md's M0.
@@ -39,6 +42,11 @@ export function findPlayer(world: World): Agent | undefined {
  * behaviour tree's seekFood/seekWater arrive at, with the same stock
  * depletion, grazing scar, exp and `consumed` event — the sim does not know
  * a human ate rather than a Sandshrew.
+ *
+ * Gather and craft (ROADMAP.md M5) are time-spends: the first action starts
+ * an `Activity`, `continue` advances it one turn, and anything else clears
+ * it — turns are lost, materials are not, nothing is consumed or produced
+ * until the last turn. The UI owns the loop and the stop rule.
  */
 export function applyPlayerAction(
   world: World,
@@ -48,14 +56,18 @@ export function applyPlayerAction(
   ctx?: LevelingContext,
   rng: () => number = world.rng,
 ): boolean {
-  const ok = apply(world, agent, action, log, ctx, rng);
-  agent.lastActionOutcome = { action, ok, tick: world.tick };
-  return ok;
+  const outcome: PlayerActionOutcome = { action, ok: false, tick: world.tick };
+  // Any action other than continuing the activity abandons it.
+  if (agent.activity && action.kind !== "continue") agent.activity = undefined;
+  outcome.ok = apply(world, agent, action, outcome, log, ctx, rng);
+  agent.lastActionOutcome = outcome;
+  return outcome.ok;
 }
 
-function apply(world: World, agent: Agent, action: PlayerAction, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
+function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActionOutcome, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
   switch (action.kind) {
     case "wait":
+    case "cancel":
       return false;
     case "move": {
       const next = { x: agent.pos.x + action.dx, y: agent.pos.y + action.dy };
@@ -80,7 +92,68 @@ function apply(world: World, agent: Agent, action: PlayerAction, log: EventLog |
       log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "thirst" });
       return true;
     }
+    case "gather": {
+      if (harvestLeft(world, agent.layer, agent.pos) <= 0 || harvestableAt(world, agent.layer, agent.pos).length === 0) return false;
+      if (carriedWeight(agent) >= carryCapacityOf(agent)) return false;
+      agent.activity = { kind: "gather", turnsLeft: GATHER_TURNS, turnsTotal: GATHER_TURNS };
+      return true;
+    }
+    case "craft": {
+      const recipe = world.recipes?.[action.recipeId];
+      if (!recipe || !knowsRecipe(agent, recipe.id) || !hasAll(agent, recipe.inputs)) return false;
+      agent.activity = { kind: "craft", recipeId: recipe.id, turnsLeft: recipe.turns, turnsTotal: recipe.turns };
+      return true;
+    }
+    case "continue": {
+      const act = agent.activity;
+      if (!act) return false;
+      act.turnsLeft--;
+      if (act.turnsLeft > 0) return true;
+      agent.activity = undefined;
+      out.completed = act.kind;
+      if (act.kind === "gather") return finishGather(world, agent, out);
+      return finishCraft(world, agent, act.recipeId!, out);
+    }
+    case "equip": {
+      const def = world.items?.[action.itemKey];
+      if (!def?.slot || countOf(agent, action.itemKey) <= 0) return false;
+      const eq = (agent.equipment ??= {});
+      eq[def.slot] = action.itemKey;
+      return true;
+    }
+    case "stow": {
+      if (!agent.equipment?.held) return false;
+      agent.equipment.held = undefined;
+      return true;
+    }
   }
+}
+
+function finishGather(world: World, agent: Agent, out: PlayerActionOutcome): boolean {
+  const capacity = carryCapacityOf(agent);
+  const taken = takeHarvest(world, agent.layer, agent.pos);
+  const gathered: { itemKey: string; count: number }[] = [];
+  for (const m of taken) {
+    if (carriedWeight(agent) + MATERIALS[m].weight > capacity) continue;
+    addItem(agent, m, 1, MATERIALS[m].weight);
+    gathered.push({ itemKey: m, count: 1 });
+  }
+  out.gathered = gathered;
+  return gathered.length > 0;
+}
+
+function finishCraft(world: World, agent: Agent, recipeId: string, out: PlayerActionOutcome): boolean {
+  const recipe = world.recipes?.[recipeId];
+  if (!recipe || !hasAll(agent, recipe.inputs)) return false;
+  for (const input of recipe.inputs) removeItem(agent, input.itemKey, input.count);
+  const weight = world.items?.[recipe.output.itemKey]?.weight ?? MATERIALS[recipe.output.itemKey as MaterialId]?.weight ?? 1;
+  addItem(agent, recipe.output.itemKey, recipe.output.count, weight);
+  out.crafted = recipe.output.itemKey;
+  return true;
+}
+
+export function knowsRecipe(agent: Agent, recipeId: string): boolean {
+  return agent.knownRecipes?.includes(recipeId) ?? false;
 }
 
 /** Water on the player's own tile or any of the eight around it — you kneel at the edge; you do not have to wade in. */
@@ -97,4 +170,10 @@ export function waterWithinReach(world: World, agent: Agent): boolean {
 export function foodUnderfoot(world: World, agent: Agent): boolean {
   const tile = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
   return tile?.terrain === "food" && (tile.stock ?? 0) > 0;
+}
+
+/** Whether the player holds an item that gives light (the torch) — read by vision.ts. */
+export function holdsLight(world: World, agent: Agent): boolean {
+  const held = agent.equipment?.held;
+  return !!held && world.items?.[held]?.light === true && countOf(agent, held) > 0;
 }
