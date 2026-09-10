@@ -5,6 +5,7 @@ import { tickWorld } from "../src/simulation.js";
 import { EventLog } from "../src/events.js";
 import type { Agent, HuntRules } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
+import { distanceAccuracyPenalty, rollAccuracy } from "../src/combat.js";
 
 /**
  * How a multi-hit move composes with knockback and with crits — three
@@ -90,11 +91,16 @@ describe("accuracy and evasion stages actually reach the hit roll", () => {
     const plain = rolls.filter((r) => fight(moveOf({ accuracy: 100 }), () => r).damageEvents > 0).length;
     const evasive = rolls.filter((r) => fight(moveOf({ accuracy: 100 }), () => r, { evasion: 6 }).damageEvents > 0).length;
 
-    expect(plain).toBe(200); // 100 accuracy, no evasion: never misses
+    // 190, not 200: the fixtures are ADJACENT, and distance now costs 5
+    // accuracy per tile, so a 100-accuracy melee swing lands 95% of the time.
+    // Left as the real number rather than moved to distance 0 — this is the
+    // one assertion in the suite that shows the melee cost actually biting.
+    expect(plain).toBe(190);
     // ~1/3 of rolls, not 0 and not all. Bounded loosely on purpose — this is
     // pinning the SHAPE of the curve, not one exact constant.
     expect(evasive).toBeGreaterThan(200 * 0.25);
     expect(evasive).toBeLessThan(200 * 0.45);
+    expect(evasive).toBeLessThan(plain); // the point of the test, stated plainly
   });
 
   it("the attacker's accuracy stage cancels it out — the roll is the NET of the two", () => {
@@ -175,5 +181,41 @@ describe("multi-hit ordering: damage, knockback and crits", () => {
     const hit = fight(moveOf({ accuracy: 100 }), () => 0.7);
     expect(hit.damageEvents).toBe(1);
     expect(hit.missedEvents).toBe(0);
+  });
+});
+
+describe("accuracy falls off with distance", () => {
+  it("costs 5 accuracy per tile past the first — 5 tiles is -25", () => {
+    // Direct: "accuracy should reduce naturally by like 5 for every tile
+    // you're far away from a target so like at 5 tiles away you are 25 less
+    // accuracy."
+    expect(distanceAccuracyPenalty(0)).toBe(0);
+    // Adjacent costs 5 — the literal reading, and the only one where both
+    // halves of the ask agree. A first free tile would make 5 tiles cost 20.
+    expect(distanceAccuracyPenalty(1)).toBe(5);
+    expect(distanceAccuracyPenalty(2)).toBe(10);
+    expect(distanceAccuracyPenalty(5)).toBe(25);
+  });
+
+  it("is SUBTRACTED from accuracy, so it costs a sniper the same points as everyone else", () => {
+    // A multiplier would scale the penalty with the move's own accuracy,
+    // which reads backwards: the accurate move would lose more.
+    const at = (accuracy: number, distance: number) => {
+      const rolls = Array.from({ length: 200 }, (_, i) => i / 200);
+      return rolls.filter((r) => rollAccuracy({ accuracy }, 0, 0, () => r, 1, distance)).length / 2;
+    };
+    expect(at(100, 0)).toBe(100);
+    expect(at(100, 5)).toBe(75); // exactly the number asked for
+    expect(at(90, 5)).toBe(65); // same 25 points off, not 25% off
+  });
+
+  it("a guaranteed-hit move still ignores distance entirely", () => {
+    expect(rollAccuracy({ accuracy: -1 }, 0, 0, () => 0.99, 1, 20)).toBe(true);
+  });
+
+  it("far enough out, the move simply cannot land — and that is the floor, not a negative", () => {
+    // 100 accuracy at 21 tiles is -100; the clamp must hold at 0 rather than
+    // letting a negative chance wrap into anything strange.
+    expect(rollAccuracy({ accuracy: 100 }, 0, 0, () => 0, 1, 25)).toBe(false);
   });
 });

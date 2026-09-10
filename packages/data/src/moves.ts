@@ -12303,7 +12303,10 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["settling_weight"],
         leaning: "boldness",
-        grantsPassive: { kind: "defenseBoost", value: 1 },
+        // 1 -> 0.5. `defenseBoost` is a permanent stat-stage-equivalent that
+        // sums across every move an agent knows, and a whole point of it on
+        // a one-point filler was the largest single grant in the roster.
+        grantsPassive: { kind: "defenseBoost", value: 0.5 },
         delta: {},
       },
       deadweight: {
@@ -12610,8 +12613,27 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         // LANE C entry. A shell that holds, rather than one that pays for
         // the cut by breaking.
-        grantsPassive: { kind: "defenseBoost", value: 1 },
-        delta: {},
+        //
+        // Ups the stage HARDEN ITSELF grants (base is +1 for 50 ticks)
+        // rather than granting a permanent `defenseBoost` passive. Direct:
+        // "make honed carapace just up stage of the actual harden, not a
+        // perma passive." It matters beyond flavour — a passive was a
+        // permanent, unconditional bonus that also stacked across every move
+        // the agent knew, where a stat stage is temporary, has to be re-cast,
+        // refreshes rather than stacks on re-use (status.ts), and can be
+        // read back off the agent.
+        //
+        // `resolveStatChangesOnHit` takes the STRONGEST entry per
+        // (target, stat), so a value here restates the total rather than
+        // adding to the base — +2 is "one stage better than plain Harden",
+        // and a build that also runs the Boldness ladder (2 -> 3 -> 4) keeps
+        // the bigger of the two rather than compounding them.
+        // The PLURAL form: `statChangeOnHit` is an overwrite field, and this
+        // node is co-takeable with the Boldness ladder in another branch, so
+        // the singular form raced it (checker caught it the moment this
+        // changed). `resolveStatChangesOnHit` folds both forms and keeps the
+        // strongest per (target, stat), which is the intended reading anyway.
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 2, ticks: 50 }] },
       },
       barbed_plates: {
         id: "barbed_plates",

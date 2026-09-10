@@ -377,7 +377,8 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
       getStatStage(defender, "evasion"),
       rng,
       stormAccuracyMultiplier(world, attacker.layer, attacker.pos) *
-        elevationAccuracyMultiplier(attackerElevation, defenderElevation)
+        elevationAccuracyMultiplier(attackerElevation, defenderElevation),
+      distance
     )
   ) {
     log?.record({

@@ -73,15 +73,49 @@ export function accuracyStageMultiplier(accuracyStage: number, evasionStage: num
  * accuracy-affecting effect composes the same way rather than needing its
  * own bespoke parameter.
  */
+/**
+ * Accuracy lost per tile of distance to the target — so a shot across the
+ * map is a real gamble and standing next to something is not. Direct: "I
+ * think accuracy should reduce naturally by like 5 for every tile you're far
+ * away from a target so like at 5 tiles away you are 25 less accuracy."
+ *
+ * SUBTRACTED from the accuracy percentage, not multiplied: at 5 tiles a
+ * 100-accuracy move is 75%, exactly as described, and a 90-accuracy move is
+ * 65%. A multiplier would have scaled the penalty with the move's own
+ * accuracy, which reads backwards — distance should cost a sniper the same
+ * points it costs everyone else.
+ *
+ * Straight `distance x 5`, the literal reading and the only one where both
+ * halves of the ask agree: "5 for every tile" AND "at 5 tiles away you are
+ * 25 less accuracy". A first free tile would make 5 tiles cost 20, not 25.
+ *
+ * That does mean ADJACENT costs 5 — a melee swing at a neighbouring tile is
+ * a 100-accuracy move landing 95% of the time. A real change to every move
+ * in the roster, not just the ranged ones; called out here rather than
+ * smuggled in, and zeroing it is a one-line change below.
+ */
+export const ACCURACY_LOST_PER_TILE = 5;
+
+/** The flat accuracy penalty for firing from `distance` tiles away. */
+export function distanceAccuracyPenalty(distance: number): number {
+  return Math.max(0, Math.floor(distance)) * ACCURACY_LOST_PER_TILE;
+}
+
 export function rollAccuracy(
   move: Pick<MoveSpec, "accuracy">,
   accuracyStage = 0,
   evasionStage = 0,
   rng: () => number = Math.random,
-  extraMultiplier = 1
+  extraMultiplier = 1,
+  /** Tiles between attacker and target — costs `ACCURACY_LOST_PER_TILE` each. Defaults to 0 so every bare-engine caller is unaffected. */
+  distance = 0
 ): boolean {
   if (move.accuracy < 0) return true;
-  const chance = move.accuracy * accuracyStageMultiplier(accuracyStage, evasionStage) * extraMultiplier;
+  // The distance penalty comes off the base accuracy BEFORE the stage and
+  // weather multipliers scale it, so a storm makes a long shot worse
+  // proportionally rather than the two being independent flat cuts.
+  const base = Math.max(0, move.accuracy - distanceAccuracyPenalty(distance));
+  const chance = base * accuracyStageMultiplier(accuracyStage, evasionStage) * extraMultiplier;
   return rng() * 100 < chance;
 }
 

@@ -1283,7 +1283,16 @@ function resolveHitAgainstTarget(
     // worth strictly MORE on a multi-hit build than a single-hit one. Now a
     // flurry can connect partially, and the expected damage of a 3-hit move
     // at 80 accuracy is 2.4 hits rather than "3 hits, 80% of the time".
-    if (!rollAccuracy(move, getStatStage(attacker, "accuracy"), getStatStage(defender, "evasion"), rng, accuracyExtra))
+    if (
+      !rollAccuracy(
+        move,
+        getStatStage(attacker, "accuracy"),
+        getStatStage(defender, "evasion"),
+        rng,
+        accuracyExtra,
+        manhattan(attacker.pos, defender.pos)
+      )
+    )
       continue;
 
     // Fire thaws on the first hit that actually connects, not on the swing.

@@ -1236,7 +1236,13 @@ describe("unshaken: fully negates the next hit, once, then recharges (Agent.unsh
 
 describe("multi-hit wired into real combat (resolveHit)", () => {
   it("strikes exactly hits.min===max times, each its own 'fought' event, until the hit count is used up or the target dies", () => {
-    const FLURRY_MOVE: MoveSpec = { ...TEST_MOVE, id: "flurry-move", hits: { min: 3, max: 3 } };
+    // `accuracy: -1` (the can't-miss convention) so this isolates the HIT
+    // COUNT, which is what it exists to check. Accuracy is rolled per hit
+    // now, and distance costs 5 accuracy per tile, so an ordinary
+    // 100-accuracy melee flurry lands each hit 95% of the time and this read
+    // 2 of 3 on the suite's fixed seed — a real behaviour change, not a
+    // broken loop. Testing both at once would have made it flake forever.
+    const FLURRY_MOVE: MoveSpec = { ...TEST_MOVE, id: "flurry-move", hits: { min: 3, max: 3 }, accuracy: -1 };
     const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100 }); // survives all 3 FALLBACK_DAMAGE (1 each) hits
     const hunter = predator({ x: 6, y: 5 }, undefined, { maxHp: 200, moves: [FLURRY_MOVE] }); // maxHp raised so a maxHp:100 target still qualifies as prey (see isPreyOf/PREY_POWER_RATIO)
@@ -2293,7 +2299,13 @@ describe("pack hunting", () => {
   it("the real mechanical advantage: a pack accuracy bonus turns a would-be miss into a hit", () => {
     // A partial-accuracy move so the roll actually matters — TEST_MOVE's
     // 100 accuracy never misses regardless of any multiplier.
-    const PARTIAL_ACC_MOVE: MoveSpec = { ...TEST_MOVE, id: "partial-acc-move", accuracy: 60 };
+    //
+    // 65, not 60: distance now costs 5 accuracy per tile and these fixtures
+    // are adjacent, so 65 is what arrives at the roll as the 60 the
+    // arithmetic below reasons about. The test's claim and its margins are
+    // unchanged — only the input needed restating once the melee cost
+    // existed.
+    const PARTIAL_ACC_MOVE: MoveSpec = { ...TEST_MOVE, id: "partial-acc-move", accuracy: 65 };
     // 65 < 60 fails a solo roll; 65 < 60 * (1 + PACK_ACCURACY_BONUS_PER_ALLY) = 69 succeeds with exactly 1 committed packmate.
     const fixedRng = () => 0.65;
     // A solo-eligible target (well within PREY_POWER_RATIO) isolates the
