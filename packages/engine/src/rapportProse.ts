@@ -124,6 +124,10 @@ const SENTENCE: Record<RapportReason, (c: Clause) => string> = {
   receivedFood: ({ n, sex }) =>
     n <= 1 ? `${subject(sex)} brought me food.` : `${subject(sex)} ${toHave(sex)} brought me food ${times(n)}.`,
   socialized: ({ n }) => (n <= 1 ? `We have sat together.` : `We have kept each other company for seasons.`),
+  witnessedKindness: ({ n, sex, label, standing, again }) =>
+    n <= 1
+      ? `I watched ${object(sex)} feed ${again ? "another" : named(label, standing, "creature")}.`
+      : `I have watched ${object(sex)} feed ${again ? "another" : named(label, standing, "creature")} ${times(n)}.`,
 };
 
 /** How many sentences a rendered relationship gets. See rule 5. */

@@ -8091,3 +8091,131 @@ after the bot's 25-tile walk away, and by then it had decayed back under
 Lever 1 alone is confirmed to move the number (treats and best-trust both
 up on 4 of 5 seeds) but is not sufficient by itself. See the follow-up
 message for the fuller lever menu, including this proximity-window gap.
+
+## M6 Bond, levers 2–6: gift moment, habituation, spillover, visit accrual
+
+Direct ask, in response to my own recommendation of "just 1 and 2 first":
+*"I think all 6 are really good and necessary to get a nuanced balanced
+thing here."* Built all six from the menu:
+
+1. **Proximity fix.** `FOLLOW_ENTRY_RADIUS` 3 → 6 (`trust.ts`), and
+   `tickFollowers`'s distance check switched from Manhattan to Chebyshev
+   to match `applyFollowing`'s own metric. Root cause (found while
+   diagnosing lever 1): the bot backed off 4 tiles after every offer to
+   stay outside flee range while the treat cooldown ran, which put it
+   outside the old follow radius (3) at exactly the moment trust was
+   highest. Fixed on both sides: radius widened, and the bot's retreat-
+   after-offer step was removed (see lever 2 below — it no longer needs
+   to retreat).
+2. **The gift moment** (`threat.ts`). `GIFT_GRACE_SIGNATURE = 0.1`,
+   `GIFT_GRACE_TICKS = 60`. A successful `offer` sets
+   `Agent.giftGraceUntil = world.tick + 60`; `threatSignatureOf` returns
+   the flat 0.1 instead of the normal 0–2 range while `world.tick` is
+   inside that window. Lets a creature close the last few tiles and eat
+   without the player having to abandon the spot first.
+3. **Habituation** (`needs.ts`). `Agent.timesFedByPlayer` — a plain
+   counter, incremented on every successful treat-eat, never decremented
+   and never touched by rapport pruning/eviction. `TREAT_HABITUATION_STEP
+   = 0.15` per prior feed, capped at 5 (`TREAT_HABITUATION_CAP`), so a
+   6th+ feeding is worth 1 + 0.15×5 = 1.75× the base delta. Survives a
+   full decay-to-prune of the numeric rapport edge — verified directly in
+   `bond.test.ts`.
+4. **Loyalty / anti-dilution.** Deliberately *not* a new sim mechanic —
+   lever 3's per-individual counter plus lever 5's spillover already
+   cover it (repeat-feeding one individual compounds; the rest of the
+   herd isn't left at zero). The real fix was in the bot: `pickTarget()`
+   now runs once and the courting loop keeps the same target for the
+   whole run instead of re-picking "nearest" every iteration, which used
+   to spread feedings across whichever creature happened to be closest.
+5. **Herd spillover** (`needs.ts`'s `applyPlayerFeedingBonus`). A
+   herd-mate within `TREAT_SPILLOVER_RADIUS` (5, Chebyshev), same herd,
+   same layer, gains `TREAT_SPILLOVER_FRACTION` (0.3) of the giver's
+   rapport delta, tagged `witnessedKindness` — a new, dedicated
+   `RapportReason` with its own prose ("I watched him feed a friend
+   Sandshrew.") and its own, lowest-of-the-list significance weight (1)
+   in `RAPPORT_REASON_SIGNIFICANCE`. One-directional: the giver's edge
+   toward the herd-mate doesn't move, since nothing happened on that
+   side. Verified gated correctly (radius, herd, layer) and one-directional
+   in `bond.test.ts`.
+6. **Visit-based accrual** (`needs.ts`). `TREAT_SAME_SITTING_TICKS = 150`
+   → ×0.7 if the last treat to that individual was more recent than that;
+   `TREAT_RETURN_VISIT_TICKS = 500` → ×1.3 if it's been longer. Ordinary
+   cadence in between is ×1. Rewards leaving and coming back over camping
+   beside one creature spamming offers.
+
+All six are unit-tested in isolation (`bond.test.ts`, 19 tests total, up
+from 11): proximity overlap, gift-grace collapse and recovery (and the
+`playerFleeRadius` shrink that follows from it), habituation compounding
+and surviving full decay, spillover's radius/herd/layer gating and
+one-directionality, and the three visit-accrual tiers against the exact
+documented formula.
+
+**Combined empirical result** (`validateBond.ts`, same 5 seeds, bot
+restructured to hold one target and not retreat after offering):
+
+| seed | berries | offers | eaten | timesFed | bestScore | stage | follower | died |
+|---|---|---|---|---|---|---|---|---|
+| 20260903 | 3 | 3 | 2 | 0 | 0.18 | tolerant | false | — |
+| 11 | 3 | 4 | 1 | 0 | 0.18 | tolerant | false | — |
+| 202 | 3 | 5 | 0 | 0 | 0.18 | wary | false | — |
+| 3003 | 3 | 3 | 1 | 1 | 0.10 | tolerant | false | **starved, tick 1808** |
+| 40404 | 3 | 3 | 0 | 3 | 0.21 | wary | false | — |
+
+Still **0/5 "followed out of the chamber"** by the bot's strict acceptance
+test (follower status checked *after* a 25-tile walk away). But seed
+40404's raw log shows `followTick: 2369` — `tickFollowers` actually rolled
+a follow success mid-run, the first one this project has produced. By the
+end of the 25-tile walk, that creature's `stage` reads back as `wary` and
+`followingId` had been cleared: trust peaked above the 0.2 `curious`
+threshold for long enough to win a follow roll (almost certainly right
+after the habituated 3rd feeding, which is the biggest single delta this
+system can produce — base × 1.3 habituation × visit multiplier), then
+decayed back under `curious` before the walk-away test finished, and
+`tickFollowers` stops following once trust drops to `wary`. So the
+mechanism chain now demonstrably *works end to end* — the remaining gap
+is durability: a single good feeding cycle's trust spike doesn't yet
+outlast a ~400-tick walk.
+
+Against lever-1-alone's table (best trust 0.08–0.22, avg ~0.158): this
+run's 0.10–0.21 (avg ~0.17) is a mild improvement, not a clear win — the
+honest read is "comparable, plus one real follow event." Bestscore is less
+erratic than an earlier attempt at this combined run showed (see below).
+
+One seed (3003) starved to death — down from 3/5 in an earlier attempt.
+That earlier, discarded attempt gathered berries one-at-a-time
+("`< 1`" instead of "`< 3`") to force more return-visit gaps for lever 6
+to reward; traced with a throwaway debug script
+(`runner/src/_dbg_bond.ts`, deleted) and found it backfired: one-berry
+gathering exhausts the local food patches around the courting spot
+(`HARVEST_YIELD_PER_TILE = 3` per tile, `HARVEST_REGROW_TICKS = 300`)
+faster than they regrow, so most of the run's budget went to "NO FOOD
+SOURCE FOUND" wandering instead of courting, and three of five seeds
+starved. Reverted to gathering a 3-berry starting stock (a middle ground
+between the original 4 and the failed 1), which is what the table above
+reflects. In that same debug trace, the underlying mechanisms were
+confirmed sound in isolation — score climbed 0.099 → 0.163 → 0.191 as
+`timesFedByPlayer` went 1 → 2 → 3, strictly increasing gains each time,
+exactly as the habituation formula predicts — so the earlier bad run was
+a bot-strategy artifact, not a reward-balance defect.
+
+**Two findings surfaced, not yet acted on:**
+
+- **The player has no energy-recovery verb.** No rest/sleep action exists
+  for the player; `energy` only goes down. The pre-existing exhaustion
+  penalty (below 20% energy, action speed degrades linearly to -20% at 0)
+  applies to the player exactly like any sim agent, and a long courting
+  session runs the player's energy to near-zero within a few dozen turns
+  with no way to recover it. This isn't a bond-lever bug — it's a gap in
+  what the player can do at all, and it compounds with anything that asks
+  the player to spend a long session near one spot (like courting).
+- **Examine/`describeBehavior` prose was deliberately not extended** to
+  say anything about `timesFedByPlayer` or habituation — given the four
+  rejected rewrites that prose went through in an earlier session
+  (CLAUDE.md's "Generated prose: say the plain thing"), touching it wasn't
+  in scope for this lever pass. Flagging as an omission, not an oversight.
+
+Open ruling needed: is "0/5 by the strict walk-away test, but a real
+follow event happened for the first time" good enough to call M6's
+acceptance criterion met, or does the walk-away trust durability need its
+own, seventh lever? My read: this is progress worth showing before
+guessing further at a 7th lever — the honest number is what's above.

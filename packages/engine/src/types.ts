@@ -713,8 +713,32 @@ export interface Agent {
   followingId?: string;
   /** ROADMAP.md M6: the dispersal offer's refusal is permanent per individual (CAMPAIGN_DESIGN.md). Not yet used; reserved. */
   refusedFollow?: boolean;
-  /** ROADMAP.md M6: `World.tick` this agent last took a set-down berry (needs.ts `applyTreatSeeking`'s cooldown). */
+  /**
+   * ROADMAP.md M6: `World.tick` this agent last took a set-down berry
+   * (needs.ts `applyTreatSeeking`'s cooldown). Also the clock lever 6's
+   * visit-based accrual reads: a treat landing soon after this (still the
+   * same sitting) is worth less; one landing long after (a real return
+   * visit) is worth more. See `TREAT_VISIT_MULTIPLIER`.
+   */
   lastTreatTick?: number;
+  /**
+   * ROADMAP.md M6, lever 3 (habituation): how many times THIS individual
+   * has ever taken a berry from the player. Never decremented, never
+   * cleared by rapport pruning — unlike the numeric trust score, this
+   * survives a full decay back to wary, so a creature you've fed before
+   * warms up faster on a second visit even after "forgetting" the exact
+   * number. Read by needs.ts's `applyTreatSeeking` (`TREAT_HABITUATION_*`)
+   * and surfaced in tells.ts's `examine` third sentence.
+   */
+  timesFedByPlayer?: number;
+  /**
+   * ROADMAP.md M6, lever 2 (the gift moment): while `world.tick` is at or
+   * before this, the player's threat signature reads as near-zero
+   * (threat.ts). Set on a successful `offer` action (player.ts) — the
+   * instant you hand something over, the thing you're handing it to has
+   * every reason not to bolt. Player only; ticks out on its own.
+   */
+  giftGraceUntil?: number;
   /** Something that happened to the player between actions (a torch burning out) — the HUD reads and clears it. */
   lastNotice?: { kind: "torchBurnedOut"; tick: number };
   /** Agents in the same herd share a home range and will regroup. */
@@ -1859,7 +1883,16 @@ export type RapportReason =
   /** Closed their wounds — the `healAura` passive, holder's side, counted only when it actually restored HP. */
   | "healed"
   /** Was mended by them — the recipient's side of the same aura. */
-  | "wasHealed";
+  | "wasHealed"
+  /**
+   * ROADMAP.md M6, lever 5 (herd spillover): a herd-mate watched THIS
+   * agent take a berry from the giver and warmed toward the giver a
+   * little too, even though nothing happened between them directly — "the
+   * pack learns you're safe." One-directional: the giver's own edge
+   * toward the herd-mate does not move, since nothing real happened on
+   * that side. See needs.ts's `applyPlayerFeedingBonus`.
+   */
+  | "witnessedKindness";
 
 /**
  * What a `RapportMemory` was *about*, when it was about something — the

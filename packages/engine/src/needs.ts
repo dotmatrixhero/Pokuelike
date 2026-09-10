@@ -6,6 +6,7 @@ import { agentsWithin, applyEggEating, applyPredationInstincts, hasAwakeHerdmate
 import {
   RAPPORT_SLEPT_NEAR_DELTA,
   RAPPORT_OFFERED_FOOD_DELTA,
+  adjustRapport,
   RAPPORT_SOCIALIZE_DELTA,
   RAPPORT_TRAINED_TOGETHER_DELTA,
   rapportScore,
@@ -1329,6 +1330,72 @@ export function treatBlockedReason(world: World, agent: Agent): string | undefin
   return undefined;
 }
 
+/**
+ * Lever 3 (habituation): how much each PRIOR treat from the player adds
+ * to the multiplier on the next one — capped, so the curve softens
+ * rather than compounding forever. A 5th treat from the same individual
+ * is worth `1 + 0.15*4` = 1.6x a first one.
+ */
+export const TREAT_HABITUATION_STEP = 0.15;
+export const TREAT_HABITUATION_CAP = 5;
+
+/**
+ * Lever 6 (visit-based accrual): the player's own cooldown-respecting
+ * cadence still lands well inside `TREAT_SAME_SITTING_TICKS` of the
+ * previous treat (the cooldown itself is 60; camping nearby and
+ * immediately re-offering the moment it clears lands around there) — that
+ * gets a reduced multiplier, so standing still and grinding treats isn't
+ * the efficient strategy. A gap past `TREAT_RETURN_VISIT_TICKS` (a real
+ * gap — left, did something else, came back) gets a bonus instead.
+ * Direct ask, "think outside the box": this is the lever that rewards
+ * *returning*, not *camping*, matching what M6's actual pitch is about.
+ */
+export const TREAT_SAME_SITTING_TICKS = 150;
+export const TREAT_SAME_SITTING_MULTIPLIER = 0.7;
+export const TREAT_RETURN_VISIT_TICKS = 500;
+export const TREAT_RETURN_VISIT_MULTIPLIER = 1.3;
+
+/**
+ * Lever 5 (herd spillover): a herd-mate within this range who witnesses a
+ * treat land gets a fraction of the same rapport gain toward the giver,
+ * even though nothing happened between them directly — "the pack learns
+ * you're safe," not just the one individual holding the berry. Also the
+ * practical fix for "the bot re-targets whichever herd member is nearest
+ * each loop and dilutes its own progress": now every attempt helps the
+ * whole herd a little, not just whichever individual happened to eat.
+ */
+export const TREAT_SPILLOVER_RADIUS = 5;
+export const TREAT_SPILLOVER_FRACTION = 0.3;
+
+/**
+ * The full reward for a wild agent (`eater`) taking a berry the player
+ * (`giver`) set down — shared by both places an offered tile gets eaten:
+ * `applyTreatSeeking`'s dedicated "a calm creature notices it" path below,
+ * and `tickAgentNeeds`'s ordinary hungry-seekFood path (needs.ts, further
+ * down) for the case where the eater just happened to be hungry and the
+ * offering was the nearest food. Levers 3/5/6 all live here so neither
+ * path can drift out of sync with the other.
+ */
+export function applyPlayerFeedingBonus(world: World, eater: Agent, giver: Agent, rng: () => number): void {
+  const priorTreats = eater.timesFedByPlayer ?? 0;
+  const gapTicks = world.tick - (eater.lastTreatTick ?? -Infinity);
+  const habituation = 1 + TREAT_HABITUATION_STEP * Math.min(priorTreats, TREAT_HABITUATION_CAP);
+  const visit = gapTicks < TREAT_SAME_SITTING_TICKS ? TREAT_SAME_SITTING_MULTIPLIER : gapTicks > TREAT_RETURN_VISIT_TICKS ? TREAT_RETURN_VISIT_MULTIPLIER : 1;
+  const delta = RAPPORT_OFFERED_FOOD_DELTA * habituation * visit;
+
+  strengthenRapportMutual(world, eater, giver, delta, "receivedFood", "gaveFood", rng);
+  eater.timesFedByPlayer = priorTreats + 1;
+  eater.lastTreatTick = world.tick;
+
+  if (!eater.herdId) return;
+  for (const mate of world.agents) {
+    if (mate.id === eater.id || mate.id === giver.id || mate.alive === false || mate.controlledBy) continue;
+    if (mate.herdId !== eater.herdId || mate.layer !== eater.layer) continue;
+    if (Math.max(Math.abs(mate.pos.x - eater.pos.x), Math.abs(mate.pos.y - eater.pos.y)) > TREAT_SPILLOVER_RADIUS) continue;
+    adjustRapport(world, mate, giver.id, delta * TREAT_SPILLOVER_FRACTION, "witnessedKindness", rng, { label: eater.species, id: eater.id, standing: "friend" });
+  }
+}
+
 export function applyTreatSeeking(world: World, agent: Agent, log?: EventLog, rng: () => number = Math.random): boolean {
   if (treatBlockedReason(world, agent)) return false;
   const best = nearestTreat(world, agent)!;
@@ -1338,9 +1405,8 @@ export function applyTreatSeeking(world: World, agent: Agent, log?: EventLog, rn
     tile.stock = Math.max(0, (tile.stock ?? 0) - CONSUME_STOCK_AMOUNT);
     recordGrazing(tile);
     const giver = world.agents.find((a) => a.id === tile.offeredBy);
-    if (giver) strengthenRapportMutual(world, agent, giver, RAPPORT_OFFERED_FOOD_DELTA, "receivedFood", "gaveFood", rng);
+    if (giver) applyPlayerFeedingBonus(world, agent, giver, rng);
     tile.offeredBy = undefined;
-    agent.lastTreatTick = world.tick;
     log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
     return true;
   }
@@ -1838,7 +1904,11 @@ export function tickAgentAction(
           // ("She has given me food.") already knows how to say it.
           if (targetTile?.offeredBy) {
             const giver = world.agents.find((a) => a.id === targetTile.offeredBy);
-            if (giver && giver.id !== agent.id) strengthenRapportMutual(world, agent, giver, RAPPORT_OFFERED_FOOD_DELTA, "receivedFood", "gaveFood", rng);
+            // Same reward path as applyTreatSeeking's dedicated "a calm
+            // creature notices it" case — a genuinely hungry agent that
+            // happens onto an offered berry through ordinary seekFood is
+            // still being fed by the player, levers 3/5/6 included.
+            if (giver && giver.id !== agent.id) applyPlayerFeedingBonus(world, agent, giver, rng);
             targetTile.offeredBy = undefined;
           }
           // Herbs' own real hook (CROPS_DESIGN.md): "the humble remedy" — a

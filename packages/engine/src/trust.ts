@@ -35,8 +35,19 @@ export function trustFleeFactor(stage: TrustStage): number {
   return stage === "bonded" ? 0 : stage === "curious" ? 0.25 : stage === "tolerant" ? 0.5 : 1;
 }
 
-/** How far a curious creature will notice the player leaving and decide to come. */
-export const FOLLOW_ENTRY_RADIUS = 3;
+/**
+ * Lever 1: how far a curious creature will notice the player and decide
+ * to come. Was 3 — measured to be structurally wrong, not just tight:
+ * the courting ritual (crouch, offer, back off 4 tiles so the treat
+ * cooldown can run without re-spooking the target) always ends up
+ * *outside* a 3-tile follow check right when trust actually peaks, so
+ * the two windows could never overlap regardless of how much trust the
+ * player earned. 6 comfortably contains that retreat distance. Chebyshev
+ * (max of the two axis deltas), not Manhattan — matches `applyFollowing`'s
+ * own distance metric (needs.ts `FOLLOW_KEEP_DISTANCE`) and reads right
+ * for 8-directional movement: a diagonal step should count as 1, not 2.
+ */
+export const FOLLOW_ENTRY_RADIUS = 6;
 /** Per player turn, for a curious creature within range: chance it starts following. Sim-original. */
 export const FOLLOW_ENTRY_CHANCE = 0.05;
 
@@ -58,7 +69,7 @@ export function tickFollowers(world: World, player: Agent, log?: EventLog, rng: 
     }
     if (other.refusedFollow || other.asleep || other.fainted || other.layer !== player.layer) continue;
     if (stage !== "curious" && stage !== "bonded") continue;
-    if (Math.abs(other.pos.x - player.pos.x) + Math.abs(other.pos.y - player.pos.y) > FOLLOW_ENTRY_RADIUS) continue;
+    if (Math.max(Math.abs(other.pos.x - player.pos.x), Math.abs(other.pos.y - player.pos.y)) > FOLLOW_ENTRY_RADIUS) continue;
     if (rng() >= FOLLOW_ENTRY_CHANCE * (stage === "bonded" ? 2 : 1)) continue;
     other.followingId = player.id;
     log?.record({ kind: "startedFollowing", tick: world.tick, agentId: other.id, species: other.species, targetId: player.id, targetSpecies: player.species });

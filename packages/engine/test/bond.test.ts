@@ -4,9 +4,19 @@ import { createNeeds } from "../src/needs.js";
 import { advancePlayerTurn, tickWorld } from "../src/simulation.js";
 import { applyPlayerAction } from "../src/player.js";
 import { addItem, countOf } from "../src/inventory.js";
-import { threatSignatureOf, playerFleeRadius } from "../src/threat.js";
+import { threatSignatureOf, playerFleeRadius, GIFT_GRACE_SIGNATURE } from "../src/threat.js";
 import { FLEE_DETECT_RADIUS } from "../src/predation.js";
-import { rapportScore } from "../src/rapport.js";
+import { rapportScore, RAPPORT_OFFERED_FOOD_DELTA } from "../src/rapport.js";
+import {
+  applyPlayerFeedingBonus,
+  TREAT_HABITUATION_STEP,
+  TREAT_SAME_SITTING_TICKS,
+  TREAT_SAME_SITTING_MULTIPLIER,
+  TREAT_RETURN_VISIT_TICKS,
+  TREAT_RETURN_VISIT_MULTIPLIER,
+  TREAT_SPILLOVER_RADIUS,
+  TREAT_SPILLOVER_FRACTION,
+} from "../src/needs.js";
 import { FOLLOW_ENTRY_RADIUS, TRUST_CURIOUS, TRUST_TOLERANT, tickFollowers, trustStage } from "../src/trust.js";
 import { examine } from "../src/tells.js";
 import { EventLog } from "../src/events.js";
@@ -253,5 +263,164 @@ describe("trust stages and the follower door", () => {
     tickFollowers(world, me, undefined, () => 0);
     expect(wary.followingId).toBeUndefined();
     expect(far.followingId).toBeUndefined();
+  });
+});
+
+describe("lever 1: the follow radius comfortably contains a courting retreat", () => {
+  it("a curious creature 4-5 tiles off (where the old courting ritual used to retreat to) still gets asked", () => {
+    const world = openWorld();
+    const me = human(10, 10);
+    // 5 tiles off (Chebyshev) — inside the new FOLLOW_ENTRY_RADIUS (6),
+    // outside the old one (3). This is exactly the retreat distance the
+    // pre-lever-2 courting loop used.
+    const s = prey("s", 15, 10, { rapport: { me: { score: TRUST_CURIOUS + 0.05, lastInteractionTick: 0 } } });
+    world.agents.push(me, s);
+    tickFollowers(world, me, undefined, () => 0);
+    expect(s.followingId).toBe("me");
+  });
+});
+
+describe("lever 2: the gift moment collapses threat signature right after offering", () => {
+  it("threatSignatureOf drops to GIFT_GRACE_SIGNATURE the tick an offer lands, and recovers once the grace expires", () => {
+    const world = openWorld();
+    const me = human(10, 10);
+    addItem(me, "food", 1, 1);
+    world.agents.push(me);
+    expect(threatSignatureOf(world, me)).toBe(1); // ordinary, standing still, nothing held
+    expect(applyPlayerAction(world, me, { kind: "offer" })).toBe(true);
+    expect(threatSignatureOf(world, me)).toBe(GIFT_GRACE_SIGNATURE);
+    world.tick = me.giftGraceUntil!;
+    expect(threatSignatureOf(world, me)).toBe(GIFT_GRACE_SIGNATURE); // still within grace
+    world.tick = me.giftGraceUntil! + 1;
+    expect(threatSignatureOf(world, me)).toBe(1); // grace over, back to ordinary
+  });
+
+  it("shrinks the effective flee radius a prey creature applies to the player during the grace window", () => {
+    const world = openWorld();
+    const me = human(10, 10);
+    addItem(me, "food", 1, 1);
+    world.agents.push(me);
+    const before = playerFleeRadius(world, me, FLEE_DETECT_RADIUS);
+    applyPlayerAction(world, me, { kind: "offer" });
+    const during = playerFleeRadius(world, me, FLEE_DETECT_RADIUS);
+    expect(during).toBeLessThan(before);
+    expect(during).toBeCloseTo(FLEE_DETECT_RADIUS * GIFT_GRACE_SIGNATURE, 5);
+  });
+});
+
+describe("lever 3: habituation — repeat treats to the same individual compound, and outlive full decay", () => {
+  it("the counter persists even after the numeric edge fully decays and gets pruned", () => {
+    const world = openWorld();
+    const me = human(0, 0);
+    const s = prey("s", 0, 0);
+    world.agents.push(me, s);
+    applyPlayerFeedingBonus(world, s, me, () => 0.999);
+    expect(s.timesFedByPlayer).toBe(1);
+    expect(s.rapport?.me).toBeDefined();
+
+    // Jump far enough forward that the edge decays under the prune threshold.
+    world.tick += 100000;
+    expect(rapportScore(s, "me", world.tick)).toBe(0);
+    expect(s.rapport?.me).toBeUndefined(); // pruned
+
+    // The habituation counter is untouched — it does not live on the edge.
+    expect(s.timesFedByPlayer).toBe(1);
+  });
+
+  it("a fresh individual (0 prior treats) gets the baseline multiplier; a habituated one gets more, holding the visit gap identical", () => {
+    const worldA = openWorld();
+    const meA = human(0, 0);
+    const fresh = prey("fresh", 0, 0);
+    worldA.agents.push(meA, fresh);
+    worldA.tick = 10000; // a long-settled world so both treats land on a "return visit" gap either way
+    applyPlayerFeedingBonus(worldA, fresh, meA, () => 0.999);
+    const freshScore = rapportScore(fresh, "me", worldA.tick);
+
+    const worldB = openWorld();
+    const meB = human(0, 0);
+    const habituated = prey("hab", 0, 0);
+    worldB.agents.push(meB, habituated);
+    worldB.tick = 10000;
+    // Pre-seed 3 prior treats, long enough ago that this one is ALSO a
+    // return visit — same gap category as `fresh`'s implicit
+    // -Infinity -> 10000 gap, so only habituation differs between them.
+    habituated.timesFedByPlayer = 3;
+    habituated.lastTreatTick = worldB.tick - (TREAT_RETURN_VISIT_TICKS + 100);
+    applyPlayerFeedingBonus(worldB, habituated, meB, () => 0.999);
+    const habituatedScore = rapportScore(habituated, "me", worldB.tick);
+
+    expect(habituatedScore).toBeGreaterThan(freshScore);
+    expect(habituatedScore).toBeCloseTo(freshScore * (1 + TREAT_HABITUATION_STEP * 3), 5);
+  });
+});
+
+describe("lever 5: herd spillover — a witnessed treat lifts herd-mates too, not just the eater", () => {
+  it("a herd-mate within range gains a fraction of the same delta, tagged witnessedKindness; the giver's own edge toward it is untouched", () => {
+    const world = openWorld();
+    const me = human(0, 0);
+    const eater = prey("eater", 0, 0, { herdId: "pack" });
+    const mate = prey("mate", 2, 2, { herdId: "pack" });
+    world.agents.push(me, eater, mate);
+
+    applyPlayerFeedingBonus(world, eater, me, () => 0.999);
+    const eaterDelta = rapportScore(eater, "me", world.tick);
+    const mateDelta = rapportScore(mate, "me", world.tick);
+
+    expect(mateDelta).toBeGreaterThan(0);
+    expect(mateDelta).toBeCloseTo(eaterDelta * TREAT_SPILLOVER_FRACTION, 5);
+    expect(mate.rapport!.me!.memories?.some((m) => m.reason === "witnessedKindness")).toBe(true);
+    // One-directional: nothing moved on the player's own edge toward the herd-mate.
+    expect(me.rapport?.mate).toBeUndefined();
+  });
+
+  it("does not spill to a different herd, a different layer, or beyond TREAT_SPILLOVER_RADIUS", () => {
+    const world = openWorld();
+    const me = human(0, 0);
+    const eater = prey("eater", 0, 0, { herdId: "pack" });
+    const otherHerd = prey("rival", 1, 1, { herdId: "other-pack" });
+    const farMate = prey("far", TREAT_SPILLOVER_RADIUS + 3, 0, { herdId: "pack" });
+    const wrongLayer = prey("under", 0, 0, { herdId: "pack", layer: "underground", homeLayer: "underground" });
+    world.agents.push(me, eater, otherHerd, farMate, wrongLayer);
+
+    applyPlayerFeedingBonus(world, eater, me, () => 0.999);
+    expect(rapportScore(otherHerd, "me", world.tick)).toBe(0);
+    expect(rapportScore(farMate, "me", world.tick)).toBe(0);
+    expect(rapportScore(wrongLayer, "me", world.tick)).toBe(0);
+  });
+});
+
+describe("lever 6: visit-based accrual — camping is worth less than returning", () => {
+  it("a treat landing in the same sitting (short gap) is worth less than one after a real gap; a return visit (long gap) is worth more still", () => {
+    const worldSame = openWorld();
+    const meA = human(0, 0);
+    const campedOn = prey("camped", 0, 0);
+    worldSame.agents.push(meA, campedOn);
+    campedOn.lastTreatTick = 0;
+    worldSame.tick = TREAT_SAME_SITTING_TICKS - 10; // still "same sitting"
+    applyPlayerFeedingBonus(worldSame, campedOn, meA, () => 0.999);
+    const campedScore = rapportScore(campedOn, "me", worldSame.tick);
+
+    const worldOrdinary = openWorld();
+    const meB = human(0, 0);
+    const ordinary = prey("ordinary", 0, 0);
+    worldOrdinary.agents.push(meB, ordinary);
+    ordinary.lastTreatTick = 0;
+    worldOrdinary.tick = (TREAT_SAME_SITTING_TICKS + TREAT_RETURN_VISIT_TICKS) / 2; // the plain middle band
+    applyPlayerFeedingBonus(worldOrdinary, ordinary, meB, () => 0.999);
+    const ordinaryScore = rapportScore(ordinary, "me", worldOrdinary.tick);
+
+    const worldReturn = openWorld();
+    const meC = human(0, 0);
+    const returned = prey("returned", 0, 0);
+    worldReturn.agents.push(meC, returned);
+    returned.lastTreatTick = 0;
+    worldReturn.tick = TREAT_RETURN_VISIT_TICKS + 10; // a real return visit
+    applyPlayerFeedingBonus(worldReturn, returned, meC, () => 0.999);
+    const returnScore = rapportScore(returned, "me", worldReturn.tick);
+
+    expect(campedScore).toBeLessThan(ordinaryScore);
+    expect(ordinaryScore).toBeLessThan(returnScore);
+    expect(campedScore).toBeCloseTo(RAPPORT_OFFERED_FOOD_DELTA * TREAT_SAME_SITTING_MULTIPLIER, 5);
+    expect(returnScore).toBeCloseTo(RAPPORT_OFFERED_FOOD_DELTA * TREAT_RETURN_VISIT_MULTIPLIER, 5);
   });
 });

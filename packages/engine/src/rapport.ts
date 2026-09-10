@@ -327,6 +327,9 @@ export const RAPPORT_REASON_SIGNIFICANCE: Record<RapportReason, number> = {
   socialized: 3,
   gaveFood: 2,
   receivedFood: 2,
+  // A secondhand impression, not a direct transaction — real, but the
+  // lightest thing on this list.
+  witnessedKindness: 1,
 };
 
 /**

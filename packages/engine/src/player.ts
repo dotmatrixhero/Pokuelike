@@ -9,6 +9,7 @@ import { GATHER_TURNS, MATERIALS, harvestLeft, harvestableAt, takeHarvest, type 
 import { addItem, carriedWeight, countOf, hasAll, removeItem } from "./inventory.js";
 import { carryCapacityOf } from "./support.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
+import { GIFT_GRACE_TICKS } from "./threat.js";
 
 /**
  * The player-controlled agent — ROADMAP.md's M0.
@@ -147,6 +148,10 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       tile.flavor = undefined;
       tile.offeredBy = agent.id;
       invalidateResourceIndex(world);
+      // Lever 2, the gift moment (threat.ts): the instant food goes down,
+      // signature collapses for GIFT_GRACE_TICKS — no need to retreat for
+      // the offering to actually get taken.
+      agent.giftGraceUntil = world.tick + GIFT_GRACE_TICKS;
       return true;
     }
   }

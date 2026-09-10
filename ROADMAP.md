@@ -423,6 +423,40 @@ section. Decay was a real, necessary lever; on its own it isn't
 sufficient — the proximity-window gap is a second, independent bug/lever,
 not more of the same one.
 
+**Levers 2–6, pulled together.** Direct ask, overriding my own narrower
+recommendation of "just 1 and 2": *"I think all 6 are really good and
+necessary to get a nuanced balanced thing here."* Built: the proximity fix
+(`FOLLOW_ENTRY_RADIUS` 3→6, Chebyshev not Manhattan), the gift moment
+(threat signature collapses to 0.1 for 60 ticks after a successful offer),
+habituation (`Agent.timesFedByPlayer`, never decayed or pruned, up to a
++75% multiplier at 5+ prior feeds), herd spillover (a witnessed feeding
+lifts nearby herd-mates 30% as much, tagged `witnessedKindness`), and
+visit-based accrual (0.7× within 150 ticks of the last treat, 1.3× after a
+500-tick gap). Loyalty/anti-dilution (the original lever 4) was folded into
+spillover + habituation rather than built as its own mechanic, plus a bot
+fix: court one individual instead of re-targeting "nearest" every loop.
+19/19 unit tests (`bond.test.ts`) confirm each mechanism in isolation.
+
+Combined, same 5-seed bot, best trust 0.10–0.21 (vs. lever-1-alone's
+0.08–0.22) — comparable, not a clear win on the headline number. **But
+seed 40404 crossed into `curious` and a follow roll actually fired
+(`followTick: 2369`) — the first follower this project has ever
+produced.** It didn't survive the bot's 25-tile walk-away test: trust
+decayed back under the `curious` threshold before the walk finished, and
+`tickFollowers` drops a follower once it does. So the proximity/trust
+mechanics now demonstrably *can* connect — the remaining gap is that a
+spike from one good feeding cycle decays faster than the walk-away test
+takes. One seed (3003) starved to death mid-run (down from 3/5 in an
+earlier, since-reverted "gather one berry at a time" bot experiment that
+exhausted local food patches). Full table and root-causing in TODO.md's
+"M6 Bond, levers 2–6" section.
+
+Two findings surfaced along the way, not yet acted on: the player's
+`energy` need has no recovery verb (no rest/sleep for the player), so a
+long courting session runs into the exhaustion speed penalty with no way
+back; and `describeBehavior`/examine prose was deliberately NOT extended
+to mention `timesFedByPlayer`, given that prose's documented fragility.
+
 **This is where the design's open question gets answered.** If a player who
 has never read a design doc can work out that moving slowly, feeding, and
 staying near a sleeping creature earns its trust — from tells alone — the

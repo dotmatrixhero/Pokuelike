@@ -18,9 +18,23 @@ import { trustFleeFactor, trustStage } from "./trust.js";
  *   `threat` · worn item ×(1 + its `threat`) · clamped to 0..2.
  * A cloak is `threat: -0.4` (×0.6); a club `+0.5`; a torch `+0.3` (the
  * "seen from further" cost CRAFTABLES_V1.md names).
+ *
+ * **Lever 2, the gift moment**: overrides all of the above to
+ * `GIFT_GRACE_SIGNATURE` while `agent.giftGraceUntil` (player.ts's
+ * `offer`) hasn't yet passed. Found by measurement, not guessed: lever 1
+ * alone still left two seeds crossing `curious` while the player was
+ * already 4 tiles into the retreat every courting cycle used to avoid
+ * re-spooking the target — the exact moment food goes down is also the
+ * moment signature should collapse, so the creature has a real window to
+ * approach without the player having to abandon the spot at all.
  */
+export const GIFT_GRACE_SIGNATURE = 0.1;
+/** How long a gift moment lasts — long enough for a treat-seeking creature (needs.ts) to walk over from a few tiles out and eat. */
+export const GIFT_GRACE_TICKS = 60;
+
 export function threatSignatureOf(world: World, agent: Agent): number {
   if (agent.controlledBy !== "player") return 0;
+  if (agent.giftGraceUntil !== undefined && world.tick <= agent.giftGraceUntil) return GIFT_GRACE_SIGNATURE;
   let sig = 1;
   if (agent.posture === "crouch") sig *= 0.5;
   if (agent.lastActionOutcome?.action.kind === "move" && agent.lastActionOutcome.ok) sig *= 1.25;

@@ -35,7 +35,7 @@ function cheb(a: { x: number; y: number }, b: { x: number; y: number }): number 
   return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 }
 
-console.log("seed      berries  offers  eaten  bestScore  stage     follower  ticksToFollow  distAfter25");
+console.log("seed      berries  offers  eaten  timesFed  bestScore  stage     follower  ticksToFollow  distAfter25");
 let followed = 0;
 for (const seed of SEEDS) {
   const world = createCaveScenario(seed);
@@ -51,7 +51,13 @@ for (const seed of SEEDS) {
     let n = 0;
     while (n++ < max && cheb(me.pos, target) > stopAt && findPlayer(world)) act(toward(world, dist));
   };
-  // 1. Berries: nearest food tile, gather until 4 berries.
+  // 1. Berries: nearest food tile, gather until 3 berries. A real
+  // starting stock (not the earlier 4-berry batch, not a single-berry
+  // "always restocking" extreme tried and rejected — traced: one at a
+  // time exhausts the LOCAL patches around the courting spot fast enough
+  // that most of a run goes to "NO FOOD SOURCE FOUND" wandering rather
+  // than actually courting. 3 respects lever 6's "camping is worse than
+  // returning" without turning the bot into a full-time forager.
   const nearestFood = () => {
     const dist = walkDistances(world, "underground", me.pos);
     let best: { x: number; y: number; d: number } | undefined;
@@ -61,7 +67,7 @@ for (const seed of SEEDS) {
     }
     return best;
   };
-  while (countOf(me, "food") < 4 && keys < 300) {
+  while (countOf(me, "food") < 3 && keys < 300) {
     const f = nearestFood();
     if (!f) break;
     walkTo(f);
@@ -111,18 +117,28 @@ for (const seed of SEEDS) {
       if (n % 10 === 0) upkeep();
     }
   };
-  // 2. Court the nearest chamber creature — now a random species per
-  // seed (CAVE_STARTER_SPECIES), so this is found by herdId shape, not a
-  // hardcoded species.
+  // 2. Court ONE chamber creature — picked once (nearest at the start)
+  // and kept for the whole run. Levers 3 (habituation) and 6 (visit
+  // accrual) both reward staying with the same individual; the earlier
+  // bot re-picked "nearest" every loop, which is a worse player strategy
+  // now that repeat feeding compounds. Lever 5 (herd spillover) still
+  // lifts the rest of the herd a little regardless.
   let offers = 0;
   let eaten = 0;
   let bestScore = 0;
   let target: Agent | undefined;
   let followTick: number | undefined;
-  while (keys < BUDGET_KEYS && findPlayer(world)) {
+  const pickTarget = (): Agent | undefined => {
     const herd = world.agents.filter((a) => a.herdId?.endsWith("-herd") && a.alive !== false && a.layer === "underground");
-    if (herd.length === 0) break;
-    target = herd.reduce((a, b) => (cheb(a.pos, me.pos) <= cheb(b.pos, me.pos) ? a : b));
+    if (herd.length === 0) return undefined;
+    return herd.reduce((a, b) => (cheb(a.pos, me.pos) <= cheb(b.pos, me.pos) ? a : b));
+  };
+  target = pickTarget();
+  while (keys < BUDGET_KEYS && findPlayer(world) && target) {
+    if (target.alive === false || target.layer !== "underground") {
+      target = pickTarget();
+      if (!target) break;
+    }
     if (target.followingId === me.id) {
       followTick = followTick ?? world.tick;
       break;
@@ -141,14 +157,13 @@ for (const seed of SEEDS) {
       for (let i = 0; i < 4; i++) act({ kind: "wait" });
       continue;
     }
-    if (countOf(me, "food") > 0 && offers < 12) {
+    if (countOf(me, "food") > 0 && offers < 20) {
       act({ kind: "offer" });
       if (me.lastActionOutcome?.ok) offers++;
-      // Set it down and step back: a wary creature will not come within a
-      // standing human's radius. Four tiles off, then wait for it to eat.
-      const back = { x: me.pos.x, y: me.pos.y };
-      for (let i = 0; i < 4; i++) act({ kind: "move", dx: (Math.sign(me.pos.x - target.pos.x) || 1) as -1 | 0 | 1, dy: 0 });
-      void back;
+      // No retreat — lever 2 (the gift moment) collapses the player's
+      // threat signature for a window right after the offer, which is
+      // the whole point: the creature can close the last few tiles and
+      // eat without the player having to abandon the spot first.
       for (let i = 0; i < 30; i++) {
         act({ kind: "wait" });
         if (i % 5 === 4) upkeep();
@@ -162,7 +177,7 @@ for (const seed of SEEDS) {
     const score = rapportScore(target, me.id, world.tick);
     bestScore = Math.max(bestScore, score);
     // Restock if empty and no follower yet.
-    if (countOf(me, "food") === 0 && offers < 12) {
+    if (countOf(me, "food") === 0 && offers < 20) {
       const f = nearestFood();
       if (f && f.d < 30) {
         walkTo(f);
@@ -204,7 +219,7 @@ for (const seed of SEEDS) {
     console.log(`  died: ${about.map((e) => JSON.stringify(e)).join(" | ")}`);
   }
   console.log(
-    `${String(seed).padEnd(9)} ${String(berries).padEnd(8)} ${String(offers).padEnd(7)} ${String(eaten).padEnd(6)} ${bestScore.toFixed(2).padEnd(10)} ${String(stage).padEnd(9)} ${String(follower).padEnd(9)} ${String(followTick ?? "-").padEnd(14)} ${distAfter}  (keys ${keys}, tick ${world.tick}${findPlayer(world) ? "" : ", DIED"})`
+    `${String(seed).padEnd(9)} ${String(berries).padEnd(8)} ${String(offers).padEnd(7)} ${String(eaten).padEnd(6)} ${String(target?.timesFedByPlayer ?? 0).padEnd(9)} ${bestScore.toFixed(2).padEnd(10)} ${String(stage).padEnd(9)} ${String(follower).padEnd(9)} ${String(followTick ?? "-").padEnd(14)} ${distAfter}  (keys ${keys}, tick ${world.tick}${findPlayer(world) ? "" : ", DIED"})`
   );
 }
 console.log(`followed out on ${followed}/${SEEDS.length} seeds`);
